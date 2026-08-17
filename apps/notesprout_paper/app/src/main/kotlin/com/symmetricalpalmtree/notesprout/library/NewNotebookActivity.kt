@@ -27,6 +27,7 @@ import com.symmetricalpalmtree.notesprout.data.soil.SoilObjectEntity
 import com.symmetricalpalmtree.notesprout.data.soil.SoilSchema
 import com.symmetricalpalmtree.notesprout.databinding.ActivityNewNotebookBinding
 import com.symmetricalpalmtree.notesprout.extension.ExtensionCallException
+import com.symmetricalpalmtree.notesprout.extension.ExtensionContract
 import com.symmetricalpalmtree.notesprout.extension.ExtensionRegistry
 import com.symmetricalpalmtree.notesprout.extension.ProviderRef
 import com.symmetricalpalmtree.notesprout.extension.TemplateChoice
@@ -58,7 +59,9 @@ class NewNotebookActivity : AppCompatActivity() {
 
         parentFolderId = intent.getStringExtra(EXTRA_PARENT_FOLDER_ID)
 
-        binding.nameField.setText(defaultName())
+        // A caller-supplied default (the library's namer prefill) is untrusted: used only if it passes
+        // the core's name rule + length cap, else this screen's own default. Extension-agnostic.
+        binding.nameField.setText(acceptDefaultName(intent.getStringExtra(EXTRA_DEFAULT_NAME)) ?: defaultName())
         binding.nameField.selectAll()
 
         binding.btnBack.setOnClickListener { finish() }
@@ -249,6 +252,7 @@ class NewNotebookActivity : AppCompatActivity() {
         private const val TAG = "NewNotebookActivity"
         private const val STATE_TEMPLATE_IDENTITY = "templateIdentity"
         const val EXTRA_PARENT_FOLDER_ID = "parentFolderId"
+        const val EXTRA_DEFAULT_NAME = "defaultName"
         const val EXTRA_NOTEBOOK_ID = "notebookId"
         const val EXTRA_NOTEBOOK_NAME = "notebookName"
 
@@ -261,9 +265,14 @@ class NewNotebookActivity : AppCompatActivity() {
             else -> null
         }
 
-        fun intent(context: Context, parentFolderId: String?): Intent =
+        /** [candidate] if it satisfies [validateName] and is ≤ [ExtensionContract.MAX_NAME_CHARS] chars, else null. */
+        fun acceptDefaultName(candidate: String?): String? =
+            candidate?.takeIf { validateName(it) == null && it.length <= ExtensionContract.MAX_NAME_CHARS }
+
+        fun intent(context: Context, parentFolderId: String?, defaultName: String? = null): Intent =
             Intent(context, NewNotebookActivity::class.java).apply {
                 putExtra(EXTRA_PARENT_FOLDER_ID, parentFolderId)
+                if (defaultName != null) putExtra(EXTRA_DEFAULT_NAME, defaultName)
             }
     }
 }

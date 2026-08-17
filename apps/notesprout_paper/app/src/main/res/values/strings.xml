@@ -71,6 +71,7 @@
 
     <!-- Library actions -->
     <string name="action_rename">Rename</string>
+    <string name="action_naming">Default notebook name…</string>
     <string name="action_move">Move</string>
     <string name="action_delete">Delete</string>
     <string name="action_pin">Pin</string>
@@ -78,6 +79,9 @@
     <string name="new_folder_title">New folder</string>
     <string name="new_folder_hint">Folder name</string>
     <string name="new_folder_duplicate">A folder with that name already exists here</string>
+    <string name="naming_save_failed">Folder created — naming scheme not saved</string>
+    <string name="naming_unavailable">Naming extension didn\'t respond</string>
+    <string name="ok">OK</string>
     <string name="rename_title">Rename</string>
     <string name="rename_hint">Name</string>
     <string name="rename_duplicate_notebook">A notebook named \"%1$s\" already exists here</string>

@@ -44,7 +44,8 @@ only ever written single-threaded. The page indicator (`renderPager`) is drawn *
 
 Tap opens; long-press shows an `ActionSheetDialog`:
 - Notebook: Rename · Move · Delete.
-- Folder: Rename · Move · Delete.
+- Folder: **Default notebook name…** (only while a Naming extension is installed — see §Naming schemes)
+  · Rename · Move · Delete.
 (Pin arrives in Phase 5.)
 
 ## Sort
@@ -56,7 +57,37 @@ current one shows a check icon.
 ## New folder
 
 Alert dialog: name field, validation (same rules as notebook names — `[a-zA-Z0-9_\-. ]`, not `.`/`..`,
-non-empty), duplicate check against the current folder.
+non-empty), duplicate check against the current folder. With a Naming extension installed the dialog
+also carries the scheme field (§Naming schemes) — described by the extension **before** the dialog
+shows; if that call fails the plain dialog opens.
+
+## Naming schemes (arc 2 / N1 — needs the Naming extension)
+
+The core draws **one text field from extension data** and never interprets a scheme; everything
+below is absent when `ExtensionRegistry.notebookNamer` finds nothing (`namerRef`, refreshed on every
+`onResume`; when found, the namer's store is pre-warmed on IO in the same breath so the first
++Notebook tap doesn't pay the cold open). Full contract + client: `docs/extensions.md` §"NotebookNamer — host behaviour".
+
+- **Field** (`library/SchemeDialogs.buildField`): caption (`BodyMedium`, the extension's label) ·
+  bordered `EditText` (hint from the extension) · help line (`BodySmall`). Wording ships in the
+  extension: "Default notebook name" / "e.g. Meeting {date} {n:2}" / "Tokens: {date} {time} {n} {n:3}.
+  Leave empty for the standard name."
+- **New folder** — CREATE: name validated as before → non-blank scheme → `NamerClient.validate`
+  (extension's error text, or "Naming extension didn't respond", as a toast; dialog stays) →
+  `createFolder` → `save(folder.id, scheme)`; a save failure toasts "Folder created — naming scheme
+  not saved" and dismisses (retry from long-press).
+- **Folder long-press → "Default notebook name…"** (Tabler `cursor-text`, before Rename): the field
+  description and the current scheme are fetched first (failure → "Naming extension didn't respond",
+  no dialog); `SchemeDialogs.showSchemeDialog` — titled with the folder name, prefilled + select-all;
+  OK → blank clears, else validate (toast + stay) → save; the extension being unreachable keeps the
+  dialog up so the text isn't lost.
+- **+Notebook** in a folder: the default name is resolved from the extension **before**
+  `NewNotebookActivity` opens (folder UUID + the listing's notebook names cross; ≤ 2 s worst case, no
+  feedback — the tap takes a beat; a second tap during that beat is dropped) and travels as
+  `EXTRA_DEFAULT_NAME`. Root, no scheme, or any failure → the screen opens without the extra.
+- **Store:** the extension keeps `folder:<UUID>` → scheme in its host-owned encrypted store
+  (`Garden/<ext pkg>.db`); it survives disable/uninstall, moves and renames of the folder (keyed by
+  UUID); a deleted folder leaves an orphan row (tolerated in v1).
 
 ## Rename
 
@@ -78,8 +109,9 @@ folder) → toast, stay in picker. Self-into-self guard for folders.
 
 ## New notebook
 
-`NewNotebookActivity`: name field (pre-filled `YYYYMMDD_HHmmss`), an optional **Template** section, CREATE
-button. **The core has no template renderer** — templates come only from discovered, trusted
+`NewNotebookActivity`: name field (pre-filled from `EXTRA_DEFAULT_NAME` when the caller passed one that
+survives `acceptDefaultName` — name rule + ≤ 100 chars — else `YYYYMMDD_HHmmss`; the screen never talks
+to the Naming extension itself), an optional **Template** section, CREATE button. **The core has no template renderer** — templates come only from discovered, trusted
 extension providers (`extension/ExtensionRegistry`; see `docs/extensions.md`).
 
 - On `onCreate` a `lifecycleScope` job runs `ExtensionRegistry.templateProviders` → for each provider

@@ -18,6 +18,7 @@ import com.symmetricalpalmtree.notesprout.R
 import com.symmetricalpalmtree.notesprout.core.ActionSheetDialog
 import com.symmetricalpalmtree.notesprout.core.Dialogs
 import com.symmetricalpalmtree.notesprout.core.IndexGuard
+import com.symmetricalpalmtree.notesprout.core.Slog
 import com.symmetricalpalmtree.notesprout.core.TopGuard
 import com.symmetricalpalmtree.notesprout.crypto.KeyMaterial
 import com.symmetricalpalmtree.notesprout.data.index.IndexRepository
@@ -29,9 +30,15 @@ import com.symmetricalpalmtree.notesprout.data.prefs.RecentsPrefs
 import com.symmetricalpalmtree.notesprout.data.prefs.SortField
 import com.symmetricalpalmtree.notesprout.data.prefs.SortOrder
 import com.symmetricalpalmtree.notesprout.data.prefs.SortPrefs
+import com.symmetricalpalmtree.notesprout.data.extstore.ExtensionStores
 import com.symmetricalpalmtree.notesprout.data.soilFile
 import com.symmetricalpalmtree.notesprout.data.sidecarsOf
 import com.symmetricalpalmtree.notesprout.databinding.ActivityLibraryBinding
+import com.symmetricalpalmtree.notesprout.extension.ExtensionCallException
+import com.symmetricalpalmtree.notesprout.extension.ExtensionRegistry
+import com.symmetricalpalmtree.notesprout.extension.NamerClient
+import com.symmetricalpalmtree.notesprout.extension.ProviderRef
+import com.symmetricalpalmtree.notesprout.extension.SchemeField
 import com.symmetricalpalmtree.notesprout.notebook.NotebookActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -55,6 +62,14 @@ class LibraryActivity : AppCompatActivity() {
     private var grid: LibraryGrid? = null
     private var gridMeasured = false
     private var coldLaunch = false
+    /**
+     * The one trusted notebook namer, refreshed on every resume. Every naming entry point (New-folder
+     * scheme field, folder long-press item, +Notebook prefill) is absent while this is null — nothing
+     * hints at naming schemes without the extension.
+     */
+    private var namerRef: ProviderRef? = null
+    /** +Notebook is resolving a default name from the namer; a second tap during that beat is dropped. */
+    private var resolvingName = false
 
     private val newNotebookLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -107,7 +122,25 @@ class LibraryActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        lifecycleScope.launch { refreshNamer() }
         if (gridMeasured) lifecycleScope.launch { refresh() }
+    }
+
+    private suspend fun refreshNamer() {
+        val ref = try {
+            ExtensionRegistry.notebookNamer(this)
+        } catch (e: Exception) {   // a PackageManager hiccup must not take the screen down
+            Slog.d(TAG) { "namer discovery failed: ${e.message}" }
+            null
+        }
+        namerRef = ref
+        // Pre-warm the namer's store while the library is idle so the first +Notebook tap never pays
+        // the cold raw-key open (or the one-time KDF after a key wipe). Failure is silent — the client
+        // opens it again itself, and that path decides what the user sees.
+        if (ref != null) withContext(Dispatchers.IO) {
+            runCatching { ExtensionStores.open(this@LibraryActivity, ref.packageName) }
+                .onFailure { Slog.d(TAG) { "store pre-warm failed: ${it.message}" } }
+        }
     }
 
     private fun wireBars() {
@@ -122,9 +155,7 @@ class LibraryActivity : AppCompatActivity() {
 
         binding.btnSort.setOnClickListener { showSortSheet() }
         binding.btnNewFolder.setOnClickListener { showNewFolderDialog() }
-        binding.btnNewNotebook.setOnClickListener {
-            newNotebookLauncher.launch(NewNotebookActivity.intent(this, folderId))
-        }
+        binding.btnNewNotebook.setOnClickListener { launchNewNotebook() }
         binding.btnUp.setOnClickListener { navigateUp() }
         binding.btnFirst.setOnClickListener { goToPage(0) }
         binding.btnPrev.setOnClickListener { goToPage(pageIndex - 1) }
@@ -135,6 +166,35 @@ class LibraryActivity : AppCompatActivity() {
                binding.btnNewFolder, binding.btnNewNotebook, binding.btnUp, binding.btnFirst,
                binding.btnPrev, binding.btnNext, binding.btnLast)
             .forEach { TooltipCompat.setTooltipText(it, it.contentDescription) }
+    }
+
+    /**
+     * +Notebook. In a folder with a namer installed, the default name is resolved from the extension
+     * **before** the New-notebook screen opens (≤ 2 s worst case; no feedback — the tap takes a beat).
+     * The folder UUID and the folder's notebook names (already in memory) are all that cross. Null,
+     * failure, or the library root → the screen opens without an extra and uses the core default.
+     */
+    private fun launchNewNotebook() {
+        val ref = namerRef
+        val fid = folderId
+        if (ref == null || fid == null) {
+            newNotebookLauncher.launch(NewNotebookActivity.intent(this, fid))
+            return
+        }
+        if (resolvingName) return
+        resolvingName = true
+        val siblings = items.mapNotNull { (it as? CardItem.Notebook)?.summary?.name }
+        lifecycleScope.launch {
+            val name = try {
+                NamerClient(this@LibraryActivity, ref).defaultName(fid, siblings)
+            } catch (e: ExtensionCallException) {
+                Slog.d(TAG) { "defaultName failed: ${e.message}" }
+                null
+            } finally {
+                resolvingName = false
+            }
+            newNotebookLauncher.launch(NewNotebookActivity.intent(this@LibraryActivity, fid, name))
+        }
     }
 
     private fun setMode(newMode: BrowseMode) {
@@ -371,6 +431,11 @@ class LibraryActivity : AppCompatActivity() {
         when (item) {
             is CardItem.Folder -> ActionSheetDialog(this)
                 .title(s.name)
+                .apply {
+                    if (namerRef != null) {
+                        addAction(R.drawable.ic_cursor_text, getString(R.string.action_naming)) { openSchemeDialog(s) }
+                    }
+                }
                 .addAction(R.drawable.ic_edit, getString(R.string.action_rename)) { showRenameDialog(s) }
                 .addAction(R.drawable.ic_move_page, getString(R.string.action_move)) { showMovePicker(s) }
                 .addAction(R.drawable.ic_trash, getString(R.string.action_delete)) { confirmDeleteFolder(s) }
@@ -397,7 +462,25 @@ class LibraryActivity : AppCompatActivity() {
 
     // ── New folder ───────────────────────────────────────────────────────────
 
+    /**
+     * With a namer installed the scheme field is described **before** the dialog shows (failure →
+     * the plain dialog, no field); without one the dialog is exactly the v0 dialog.
+     */
     private fun showNewFolderDialog() {
+        val ref = namerRef
+        if (ref == null) { showNewFolderDialog(null, null); return }
+        lifecycleScope.launch {
+            val field = try {
+                NamerClient(this@LibraryActivity, ref).describeField()
+            } catch (e: ExtensionCallException) {
+                Slog.d(TAG) { "describeField failed: ${e.message}" }
+                null
+            }
+            showNewFolderDialog(if (field != null) ref else null, field)
+        }
+    }
+
+    private fun showNewFolderDialog(namer: ProviderRef?, field: SchemeField?) {
         val density = resources.displayMetrics.density
         val input = EditText(this).apply {
             hint = getString(R.string.new_folder_hint)
@@ -414,6 +497,9 @@ class LibraryActivity : AppCompatActivity() {
             setPadding(pad, (16 * density).toInt(), pad, 0)
             addView(input)
         }
+        val schemeViews = if (namer != null && field != null) {
+            SchemeDialogs.buildField(this, field, null).also { it.addTo(wrapper) }
+        } else null
         val dialog = AlertDialog.Builder(this)
             .setTitle(getString(R.string.new_folder_title))
             .setView(wrapper)
@@ -429,18 +515,60 @@ class LibraryActivity : AppCompatActivity() {
                     Toast.makeText(this, err, Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
+                val scheme = schemeViews?.input?.text?.toString()?.trim().orEmpty()
+                val client = if (namer != null && scheme.isNotEmpty()) NamerClient(this, namer) else null
                 lifecycleScope.launch {
                     if (repo.nameTaken(folderId, ObjectType.FOLDER, name)) {
                         Toast.makeText(this@LibraryActivity, R.string.new_folder_duplicate, Toast.LENGTH_SHORT).show()
                         return@launch
                     }
-                    repo.createFolder(name, folderId)
+                    if (client != null) {
+                        // Validate before the folder exists so a bad scheme keeps the dialog up.
+                        val err = try {
+                            client.validate(scheme)
+                        } catch (e: ExtensionCallException) {
+                            Slog.d(TAG) { "validate failed: ${e.message}" }
+                            getString(R.string.naming_unavailable)
+                        }
+                        if (err != null) {
+                            Toast.makeText(this@LibraryActivity, err, Toast.LENGTH_SHORT).show()
+                            return@launch
+                        }
+                    }
+                    val folder = repo.createFolder(name, folderId)
+                    if (client != null) {
+                        try {
+                            client.save(folder.id, scheme)
+                        } catch (e: ExtensionCallException) {
+                            // The folder exists either way; the user can retry from long-press.
+                            Slog.d(TAG) { "save scheme failed: ${e.message}" }
+                            Toast.makeText(this@LibraryActivity, R.string.naming_save_failed, Toast.LENGTH_SHORT).show()
+                        }
+                    }
                     dialog.dismiss()
                     refresh()
                 }
             }
         }
         dialog.show()
+    }
+
+    // ── Naming scheme (folder long-press) ────────────────────────────────────
+
+    /** Field description + current scheme are fetched before the dialog shows; failure → toast, no dialog. */
+    private fun openSchemeDialog(s: ObjectSummary) {
+        val ref = namerRef ?: return
+        val client = NamerClient(this, ref)
+        lifecycleScope.launch {
+            val fetched = try {
+                client.describeField() to client.currentScheme(s.id)
+            } catch (e: ExtensionCallException) {
+                Slog.d(TAG) { "scheme dialog open failed: ${e.message}" }
+                Toast.makeText(this@LibraryActivity, R.string.naming_unavailable, Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            SchemeDialogs.showSchemeDialog(this@LibraryActivity, client, s.id, s.name, fetched.first, fetched.second)
+        }
     }
 
     // ── Rename ───────────────────────────────────────────────────────────────
@@ -608,5 +736,9 @@ class LibraryActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         if (::browseState.isInitialized) browseState.folderId = folderId
+    }
+
+    companion object {
+        private const val TAG = "LibraryActivity"
     }
 }

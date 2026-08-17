@@ -32,6 +32,17 @@ object ExtensionRegistry {
         discover(context.applicationContext, ExtensionContract.ACTION_TEMPLATE_PROVIDER)
     }
 
+    /**
+     * The one trusted notebook namer, or null. When several survive the filter the **first** by
+     * (label, package) is used and the rest are dropped with a `Slog.d` — choosing among providers is
+     * Extensions-UI territory.
+     */
+    suspend fun notebookNamer(context: Context): ProviderRef? = withContext(Dispatchers.IO) {
+        val all = discover(context.applicationContext, ExtensionContract.ACTION_NOTEBOOK_NAMER)
+        for (extra in all.drop(1)) Slog.d(TAG) { "ignoring additional namer ${extra.component.flattenToShortString()}" }
+        all.firstOrNull()
+    }
+
     @Suppress("DEPRECATION")
     private fun discover(context: Context, action: String): List<ProviderRef> {
         val pm = context.packageManager

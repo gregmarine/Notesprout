@@ -92,6 +92,14 @@ Opus is fine for N2. Either model follows the phase-start question ritual.
 | Plan / phases | This file, **3 phases**: N0 store · N1 contract + extension + host wiring · N2 hardening/docs freeze. `PAPER_EXTENSIONS_PLAN.md` stays frozen and gains a pointer. |
 | Trust / artifacts / version | Unchanged from arc 1: same-signature only, debug-only APKs, no version bump, no `.soil`/index schema change. `ExtensionContract.API_VERSION` stays **1** (a new point = new action + new AIDL + same meta-data key — arc-1 versioning rule; `IExtensionStore` is a new interface, nothing existing is reordered). |
 
+## Deferred (recorded 2026-08-16, not built in this arc)
+
+- **Store pre-warm for the Templates extension** — revisit when Templates gains image templates kept in
+  *its* store (a later arc): its first call per process will then pay the same cold store open Naming
+  pays, and the same fix applies — at library resume, `ExtensionStores.open` on IO for **every**
+  discovered extension, not only the namer (`LibraryActivity.refreshNamer` is the template). Still no
+  binding held across screens; the extension *process* start stays the platform's business.
+
 ## Non-goals for this arc (do not build, do not scaffold "for later")
 
 No Extensions UI (list / enable / disable / consent / "remove data") · no third-party trust · no
@@ -362,7 +370,7 @@ tests + 2 `SoilFileTest`). `KvDao.keysLike` takes a ready `LIKE … ESCAPE '\\'`
 ---
 
 ### Phase N1 — NotebookNamer contract + `:ext-naming` + host wiring
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (commit — see below)
 
 **Goal:** the Naming extension installs; folders can be given a scheme from the New-folder dialog and
 from long-press; +Notebook in a folder with a scheme opens New-notebook pre-named by it; without the
@@ -372,19 +380,20 @@ extension nothing in the core changes.
 1. Share `CallerCheck` — move the host-package + signature check into `:extension-api` as
    `HostCallerCheck.enforce(context, hostPackage)` and have **both** extensions call it (rec.: yes —
    the one permitted touch to `:ext-templates`; third parties get it for free) / duplicate the file
-   into `:ext-naming` and leave Templates untouched?
+   into `:ext-naming` and leave Templates untouched? **→ Answered 2026-08-16: share via `:extension-api`.**
 2. Long-press item icon — Tabler `cursor-text` (rec.) / `abc` / `signature` / other (new drawable
    `ic_<name>.xml`, 24dp, stroke 2, round caps)? Wording "Default notebook name…" (rec.) / other?
+   **→ Answered: `cursor-text` + "Default notebook name…".**
 3. +Notebook feedback while the name resolves (≤ 2 s worst case, ~0.1–0.5 s typical) — none (rec.;
-   the tap simply takes a beat) / reuse the "Opening…" popup pattern / other?
+   the tap simply takes a beat) / reuse the "Opening…" popup pattern / other? **→ Answered: none.**
 4. `{n}` skeleton matching — date/time positions match as **wildcards** so the counter continues
    across days (rec.: `Meeting {date} {n:2}` → 01, 02 today, 03 tomorrow) / match today's values so
-   the counter restarts each day?
+   the counter restarts each day? **→ Answered: wildcards.**
 5. Field wording (from the extension's `strings.xml`) — label "Default notebook name", hint
    "e.g. Meeting {date} {n:2}", help "Tokens: {date} {time} {n} {n:3}. Leave empty for the standard
-   name." (rec.) / other?
+   name." (rec.) / other? **→ Answered: recommended set.**
 6. Save-failure wording — "Folder created — naming scheme not saved" and "Naming extension didn't
-   respond" (rec.) / other?
+   respond" (rec.) / other? **→ Answered: recommended.**
 
 **Deliverables**
 1. `:extension-api`: `INotebookNamer.aidl`, `SchemeField.aidl` + Kotlin Parcelable,
@@ -441,7 +450,25 @@ extension nothing in the core changes.
 
 **Close-out:** status ✅ + Outcome (timings, any e-ink observation); docs; memory; commit + push.
 
-**Outcome (N1):** —
+**Outcome (N1):** built 2026-08-16. Answers: Q1 shared `HostCallerCheck` in `:extension-api` (Templates
+switched, its private `CallerCheck` deleted) · Q2 `cursor-text` + "Default notebook name…" · Q3 no
+feedback (a `resolvingName` guard drops a second tap during the beat) · Q4 wildcards · Q5/Q6 the
+recommended wording. Structure: `SchemeEngine` returns error **codes** (enum) and the service maps
+them to `strings.xml`, so the engine stays Android-free (18 JVM tests); the service rethrows any store
+failure as `IllegalStateException` (Binder-safe) rather than letting a `RemoteException` kill the
+extension process; the two dialogs share `library/SchemeDialogs.kt` (`LibraryActivity` 735 lines).
+`:ext-naming` mirrors `:ext-templates` exactly (no core-ktx — Templates doesn't use it either).
+JVM: 97 tests green (app 68 · ext-naming 18 · ext-templates 8 · extension-api 3). Installed SNN +
+NA5C + MIP11; shell sanity OK on all three. Claude smoke on MIP11 (LCD): New-folder field drawn,
+`Work` + `Meeting {date} {n:2}` → +Notebook prefills `Meeting 20260816 01`, then `02`; long-press item +
+dialog show the stored scheme; `Bad {foo}` → extension's toast, dialog stays. SNN log: one bind/unbind
+per call, store created once, warm `defaultName` ≈ 50 ms, cold `describeField` ≈ 350 ms, no leaked
+`ServiceConnection`. **Item 14 follow-up (user saw ~1–1.5 s on a cold tap):** measured on SNN with adb
+`input` overhead (~500 ms!) subtracted — warm ≈ 0.26 s total (= no-extension baseline), extension
+process killed +≈ 380 ms, app-cold ≈ 0.85 s, after key wipe + KDF ≈ 1.5–2 s once. Added (user-approved)
+a **store pre-warm at library resume** (`refreshNamer` → `ExtensionStores.open` on IO, silent on
+failure): app-cold tap→bind 125 → 22 ms; total ≈ 0.75 s. Process start is the remaining cold cost and
+is by design (no bindings held across screens). **User checklist 1–14 passed on SNN + NA5C + MIP11 2026-08-16.**
 
 ---
 

@@ -7,6 +7,7 @@ import android.os.Parcel
 import android.os.SharedMemory
 import android.system.OsConstants
 import com.symmetricalpalmtree.notesprout.extension.ExtensionContract
+import com.symmetricalpalmtree.notesprout.extension.HostCallerCheck
 import com.symmetricalpalmtree.notesprout.extension.ITemplateProvider
 import com.symmetricalpalmtree.notesprout.extension.RenderedTemplate
 import com.symmetricalpalmtree.notesprout.extension.TemplateInfo
@@ -38,12 +39,12 @@ class TemplateProviderService : Service() {
         }
 
         override fun listTemplates(): List<TemplateInfo> {
-            CallerCheck.enforce(this@TemplateProviderService)
+            HostCallerCheck.enforce(this@TemplateProviderService, BuildConfig.HOST_PACKAGE)
             return TemplateRenderer.Kind.entries.map { TemplateInfo(it.id, getString(it.nameRes)) }
         }
 
         override fun render(templateId: String, widthPx: Int, heightPx: Int, dpi: Float): RenderedTemplate? {
-            CallerCheck.enforce(this@TemplateProviderService)
+            HostCallerCheck.enforce(this@TemplateProviderService, BuildConfig.HOST_PACKAGE)
             val bytes = TemplateRenderer.renderWebp(templateId, widthPx, heightPx, dpi) ?: return null
             val shared = SharedMemory.create(null, bytes.size)
             val buffer = shared.mapReadWrite()

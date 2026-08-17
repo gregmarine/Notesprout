@@ -38,11 +38,13 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   `com.symmetricalpalmtree.gpaper.core.engine`.
 - **mavenLocal can lag the g-paper checkout** — if a g-paper symbol from `docs/api.md` is unresolved,
   `cd ~/git/g-paper && ./gradlew publishToMavenLocal` before suspecting anything else.
-- **Extensions** (`PAPER_EXTENSIONS_PLAN.md`, `docs/extensions.md`): the project has three modules —
-  `:app` (the core/host), `:extension-api` (the shared contract library), and `:ext-templates` (the
-  first-party Templates extension APK). **`:extension-api` depends on nothing in `:app`, ever** (Gradle
-  enforces `:app → :extension-api` and `:ext-templates → :extension-api`; `:app` and `:ext-templates`
-  never depend on each other). An extension is a separate APK with **no launcher Activity**, bound over
+- **Extensions** (`PAPER_EXTENSIONS_PLAN.md`, `docs/extensions.md`): the project has four modules —
+  `:app` (the core/host), `:extension-api` (the shared contract library), `:ext-templates` (the
+  first-party Templates extension APK) and `:ext-naming` (the Naming extension APK, arc 2).
+  **`:extension-api` depends on nothing in `:app`, ever** (Gradle enforces `:app → :extension-api`,
+  `:ext-templates → :extension-api`, `:ext-naming → :extension-api`; `:app` and the extension modules
+  never depend on each other). Extension-side caller check = `HostCallerCheck.enforce(ctx,
+  BuildConfig.HOST_PACKAGE)` from `:extension-api`, first thing in every stub method. An extension is a separate APK with **no launcher Activity**, bound over
   AIDL; the core trusts it only if `checkSignatures == SIGNATURE_MATCH` (in dev, the shared
   `~/.android/debug.keystore` satisfies this). **Naming + icon convention:** label `NSE · <Name>`
   (debug appends ` Dev`), icon = Tabler `puzzle` black outline; the app's own icon is the bare Tabler
@@ -61,6 +63,16 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   caps `ExtensionContract.STORE_*` (512 chars / 256 KiB / 50 000 keys). Never a key, path, or `File`
   across the boundary. Open the store on IO **before** binding (cold KDF must not sit inside the call
   timeout). The `.db` survives the extension's uninstall.
+- **NotebookNamer** (arc 2 / N1, `docs/extensions.md` §"NotebookNamer — host behaviour"): the second
+  point (`ACTION_NOTEBOOK_NAMER`, `INotebookNamer`, `SchemeField`). `ExtensionRegistry.notebookNamer`
+  returns **the first** trusted namer; `NamerClient` = the Templates client shape + store pre-open,
+  per-bind `ExtensionStoreBinder`, revoke in the unbind `finally`, every call ≤ 2 s. `LibraryActivity`
+  owns the three entry points (New-folder scheme field · folder long-press "Default notebook name…" ·
+  +Notebook prefill resolved **before** `NewNotebookActivity` opens via `EXTRA_DEFAULT_NAME`) and all
+  are **absent when no namer is installed**; `NewNotebookActivity` stays extension-agnostic
+  (`acceptDefaultName` = name rule + `MAX_NAME_CHARS`). Outward payload = folder UUID + sibling
+  notebook names (+ the typed scheme) — the one recorded widening of the boundary rule; the core never
+  interprets a scheme.
 - **Extension boundary (frozen in E2):** nothing but what a call needs crosses outward (templates: id +
   page geometry + dpi — never keys, paths, ids, names, strokes); everything inward is untrusted. Adding
   an extension point follows `docs/extensions.md` §"Rules for adding a future extension point" and adds
@@ -75,15 +87,17 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
 
 ```sh
 cd ~/git/Notesprout/apps/notesprout_paper
-./gradlew assembleDebug                  # all modules → app + ext-templates debug APKs
+./gradlew assembleDebug                  # all modules → app + ext-templates + ext-naming debug APKs
 ./gradlew testDebugUnitTest              # all modules
 adb -s SN078D10012852 install -r app/build/outputs/apk/debug/app-debug.apk   # SNN (Nomad)
 adb -s 92c16533       install -r app/build/outputs/apk/debug/app-debug.apk   # NA5C
 adb -s 5HL21V5007384  install -r app/build/outputs/apk/debug/app-debug.apk   # MIP11
-# The Templates extension (install alongside the app on the same device):
+# The extensions (install alongside the app on the same device):
 adb -s <serial> install -r ext-templates/build/outputs/apk/debug/ext-templates-debug.apk
+adb -s <serial> install -r ext-naming/build/outputs/apk/debug/ext-naming-debug.apk
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.templates.dev  # BOOX sideload trap — BOOX may
-#   re-disable a few seconds AFTER install; re-run enable and confirm with `pm list packages -d`
+adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.naming.dev     #   re-disable a few seconds AFTER
+#   install; re-run enable and confirm with `pm list packages -d`
 ```
 
 Debug launch: `adb -s <serial> shell am start -n com.symmetricalpalmtree.notesprout.dev/com.symmetricalpalmtree.notesprout.bootstrap.BootstrapActivity`

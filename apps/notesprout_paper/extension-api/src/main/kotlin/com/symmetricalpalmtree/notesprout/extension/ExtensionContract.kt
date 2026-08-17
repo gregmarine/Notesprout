@@ -5,9 +5,10 @@ package com.symmetricalpalmtree.notesprout.extension
  * depends on nothing in `:app` and on no library beyond the Kotlin stdlib, so a third party can
  * consume it as a plain artifact.
  *
- * v1 has exactly one extension point: [ACTION_TEMPLATE_PROVIDER] (interface `ITemplateProvider`).
- * `IExtensionStore` (arc 2) is not a point — it is the host-owned store handed *to* an extension as an
- * in-parameter of a call; its caps are the `STORE_*` constants below.
+ * v1 has two extension points: [ACTION_TEMPLATE_PROVIDER] (interface `ITemplateProvider`) and
+ * [ACTION_NOTEBOOK_NAMER] (interface `INotebookNamer`, arc 2). `IExtensionStore` (arc 2) is not a
+ * point — it is the host-owned store handed *to* an extension as an in-parameter of a call; its caps
+ * are the `STORE_*` constants below.
  */
 object ExtensionContract {
 
@@ -17,6 +18,10 @@ object ExtensionContract {
     /** Intent action a template-provider `<service>` declares in its intent-filter. */
     const val ACTION_TEMPLATE_PROVIDER: String =
         "com.symmetricalpalmtree.notesprout.extension.TEMPLATE_PROVIDER"
+
+    /** Intent action a notebook-namer `<service>` declares in its intent-filter (arc 2). */
+    const val ACTION_NOTEBOOK_NAMER: String =
+        "com.symmetricalpalmtree.notesprout.extension.NOTEBOOK_NAMER"
 
     /** `<meta-data>` name (on the `<service>`) carrying the extension's API version. */
     const val META_API_VERSION: String =

@@ -5,6 +5,9 @@
 > **Phase E1** wired the host (`:app`) to discover and call them and removed the core's renderer;
 > **Phase E2** reviewed and hardened both sides and froze this doc as the pattern every later extension
 > point follows (§"Rules for adding a future extension point", §"Boundary audit").
+> **Arc 2** (`PAPER_NAMING_PLAN.md`): **N0** added the host-owned encrypted extension store; **N1**
+> added the second point, **NotebookNamer**, and the Naming extension (§"The Naming extension",
+> §"NotebookNamer — host behaviour").
 
 Notesprout's original design baked too many features into the core. Paper's core is **paper with
 strokes** — a library of notebooks, each a stack of pages you write on. Everything else is added by
@@ -68,7 +71,8 @@ There is **no Extensions UI yet**: extensions are installed and removed by hand 
 `minSdk 29`, AIDL enabled) that **depends on nothing in `:app` and on no library beyond the Kotlin
 stdlib**. Third parties will consume it as a published Maven artifact later; the module boundary keeps
 that true. Dependency direction (Gradle-enforced, never violated): `:app → :extension-api` and
-`:ext-templates → :extension-api`; `:app` and `:ext-templates` never depend on each other.
+`:ext-templates → :extension-api`, `:ext-naming → :extension-api`; `:app` and the extension modules
+never depend on each other.
 
 ### `ExtensionContract`
 
@@ -76,6 +80,7 @@ that true. Dependency direction (Gradle-enforced, never violated): `:app → :ex
 |---|---|
 | `API_VERSION` | `1` |
 | `ACTION_TEMPLATE_PROVIDER` | `"com.symmetricalpalmtree.notesprout.extension.TEMPLATE_PROVIDER"` |
+| `ACTION_NOTEBOOK_NAMER` | `"com.symmetricalpalmtree.notesprout.extension.NOTEBOOK_NAMER"` (arc 2 / N1) |
 | `META_API_VERSION` | `"com.symmetricalpalmtree.notesprout.extension.API_VERSION"` |
 | `MIME_WEBP` | `"image/webp"` |
 | `MAX_RENDER_BYTES` | `16 * 1024 * 1024` (16 MiB — hard cap the host enforces on a render result) |
@@ -112,6 +117,25 @@ interface IExtensionStore {
     List<String> keys(String prefix);
 }
 
+// SchemeField.aidl
+package com.symmetricalpalmtree.notesprout.extension;
+parcelable SchemeField;
+
+// INotebookNamer.aidl — the NOTEBOOK_NAMER point (arc 2 / N1)
+interface INotebookNamer {
+    /** How the host should draw the scheme field (label, hint, one help line). No store needed. */
+    SchemeField describeField();
+    /** The scheme stored for [folderId], or null if none. */
+    String currentScheme(IExtensionStore store, String folderId);
+    /** null if [scheme] is acceptable, else a short user-facing error. Pure — no store. */
+    String validateScheme(String scheme);
+    /** Store [scheme] for [folderId]; "" (or blank) clears it. Throws IllegalArgumentException if invalid. */
+    void saveScheme(IExtensionStore store, String folderId, String scheme);
+    /** The default name for a new notebook in [folderId] given the folder's existing notebook names,
+     *  or null if the folder has no scheme (host then uses its own default). */
+    String defaultName(IExtensionStore store, String folderId, in List<String> siblingNames);
+}
+
 // ITemplateProvider.aidl
 interface ITemplateProvider {
     /** Templates this provider offers, in display order. Ids are stable, ASCII, unique per provider. */
@@ -136,9 +160,23 @@ interface ITemplateProvider {
   `onTransact`'s `finally` via a per-Binder-thread `ThreadLocal`); leaving it to GC leaks one
   descriptor per render until a collection.
 
-Both parcelables carry `@JvmField val CREATOR` and match their `.aidl` declarations.
+- `SchemeField(label: String, hint: String, help: String)` — `writeString ×3` (N1). How the host draws
+  a namer's one text field: caption above, grey hint inside, one help line below. Untrusted on the host
+  side — truncated to 40 / 60 / 200 chars before display.
+
+All parcelables carry `@JvmField val CREATOR` and match their `.aidl` declarations.
 `RenderedTemplate.describeContents()` returns `CONTENTS_FILE_DESCRIPTOR` (it carries the region's fd —
-`Bundle.hasFileDescriptors()` relies on this); `TemplateInfo` returns 0.
+`Bundle.hasFileDescriptors()` relies on this); `TemplateInfo` and `SchemeField` return 0.
+
+### `HostCallerCheck` (N1 — shared extension-side trust gate)
+
+`HostCallerCheck.enforce(context, hostPackage)` lives in `:extension-api` so every extension (first- or
+third-party) gets the belt-and-braces caller check for free: `Binder.getCallingUid()` →
+`getPackagesForUid(uid)` must contain `hostPackage` **and** `checkSignatures(uid, Process.myUid()) ==
+SIGNATURE_MATCH`, else `SecurityException`. Both first-party extensions call it first in **every** stub
+method with `BuildConfig.HOST_PACKAGE` (the per-build-type host id). It replaced the Templates
+extension's private `CallerCheck` (the one permitted N1 touch to `:ext-templates`); it uses only
+`android.*` — the library still depends on nothing.
 
 ### Versioning rules (for the next point / next version)
 
@@ -174,9 +212,8 @@ An Android **application** APK — `applicationId com.symmetricalpalmtree.notesp
   </service>
   ```
 - **`TemplateProviderService`** returns an `ITemplateProvider.Stub`. **Every** stub method first calls
-  `CallerCheck.enforce(context)`: `Binder.getCallingUid()` → `getPackagesForUid(uid)` must contain
-  `BuildConfig.HOST_PACKAGE` **and** `checkSignatures(uid, Process.myUid()) == SIGNATURE_MATCH`, else
-  `SecurityException`. `render` renders into a `SharedMemory` per the handshake above and parks the
+  `HostCallerCheck.enforce(context, BuildConfig.HOST_PACKAGE)` (§`HostCallerCheck`): the caller uid must
+  map to the host package **and** share this extension's signature, else `SecurityException`. `render` renders into a `SharedMemory` per the handshake above and parks the
   region in a `ThreadLocal`; the stub's `onTransact` override closes it in `finally`, after the reply
   (holding a dup of the descriptor) has been written. Binder threads call in — the stub holds no other
   mutable state.
@@ -236,6 +273,36 @@ a passphrase, a path, or a `File`, and cannot open anything itself.
   open-or-create `probe.test`, round-trip through a real `ExtensionStoreBinder`, verify the encrypted
   header, wrong-uid and revoked refusal; toast OK / FAIL.
 
+## The Naming extension (`:ext-naming` — arc 2 / N1)
+
+The second first-party extension and the first that **holds data**. It gives a folder a *naming
+scheme*; a notebook created in that folder is pre-named by it. Folders without a scheme, the library
+root, and every device without the extension keep the core default (`yyyyMMdd_HHmmss`) — the core's
+behaviour without the extension is unchanged.
+
+- **APK:** `applicationId com.symmetricalpalmtree.notesprout.ext.naming` (debug `.dev`), `versionName
+  0.1.0`, Gradle/manifest shape identical to `:ext-templates` (no Activity, `allowBackup="false"`,
+  `BuildConfig.HOST_PACKAGE` per build type, deps `:extension-api` only). Label **"NSE · Naming"**
+  (debug "NSE · Naming Dev"), puzzle icon. One exported `<service android:name=".NotebookNamerService">`
+  with the `NOTEBOOK_NAMER` action + `API_VERSION` meta-data `1`.
+- **`NotebookNamerService`** returns an `INotebookNamer.Stub`; every method first calls
+  `HostCallerCheck.enforce`. Holds no state. **Store key:** `folder:<folder UUID>` → UTF-8 scheme text;
+  `saveScheme` with a blank scheme deletes the key. Any store failure is rethrown as
+  `IllegalStateException` (an exception Binder carries intact) so the host sees a clean
+  `ExtensionCallException` instead of a dead extension process. A stored scheme this version can't parse
+  makes `defaultName` return null (host default) rather than throw.
+- **Scheme language v1 (`SchemeEngine`, pure Kotlin, 18 JVM tests):** literal text + `{date}`
+  (`yyyyMMdd`) + `{time}` (`HHmmss`) + `{n}` / `{n:K}` (K = 1–9; at most once). Literal text must satisfy
+  the core's name rule (`[a-zA-Z0-9_\-. ]`); a literal-only scheme may not be `.`/`..`/blank; the whole
+  scheme ≤ 100 chars; unknown `{…}`, a stray `}`, or an unclosed `{` are errors. Errors are enum codes
+  the service maps to `strings.xml` (`err_*`), returned to the host verbatim for its toast.
+  **`{n}` = 1 + the highest number among sibling names that match the scheme's skeleton** — an
+  anchored regex where literals are quoted, `{date}`/`{time}` are **wildcards** (`\d{8}` / `\d{6}` —
+  the counter runs across days: `Meeting {date} {n:2}` → 01, 02 today, 03 tomorrow) and the counter is
+  `(\d{1,9})`; zero-padded to K, never truncated (`{n:2}` after 99 → `100`).
+- **Field wording** (`SchemeField` from `strings.xml`): label "Default notebook name" · hint
+  "e.g. Meeting {date} {n:2}" · help "Tokens: {date} {time} {n} {n:3}. Leave empty for the standard name."
+
 ## Host behaviour (`:app`, package `extension/`)
 
 - **Manifest:** `<queries><intent><action android:name="…TEMPLATE_PROVIDER"/></intent></queries>` as a
@@ -279,6 +346,53 @@ a passphrase, a path, or a `File`, and cannot open anything itself.
 - **Failure surface:** the core decides what the user sees; the only user-visible failure is the
   render toast on CREATE. Discovery/list failures are silent (log only).
 
+### NotebookNamer — host behaviour (N1)
+
+- **Manifest `<queries>`** gains the `NOTEBOOK_NAMER` action.
+- **`ExtensionRegistry.notebookNamer(context): ProviderRef?`** — same discovery + trust filter as
+  `templateProviders`; **the first by (label, package) is used**, any others are dropped with a `Slog.d`
+  (choosing among providers is Extensions-UI territory).
+- **`NamerClient(context, ref)`** — the `TemplateProviderClient` shape (explicit component, signature
+  re-checked before every bind, `BIND_AUTO_CREATE` on the app context, bind ≤ 3 s, **every call ≤ 2 s**,
+  supervisor scope, unbind in `finally`, every failure → `ExtensionCallException`) plus the store:
+  `call(store = true)` runs `ExtensionStores.open(ctx, ref.packageName)` on IO **before** binding
+  (pre-open rule), mints one `ExtensionStoreBinder(db, extUid)` (`extUid` from
+  `PackageManager.getPackageUid` at bind time) and **revokes it in the same `finally` as the unbind** —
+  a late call on a timed-out transaction fails closed. Methods: `describeField()` (strings truncated to
+  40/60/200), `currentScheme(folderId)` (≤ `MAX_NAME_CHARS`), `validate(scheme)` (error text ≤ 200),
+  `save(folderId, scheme)`, `defaultName(folderId, siblingNames)`. **Outward payload — the recorded
+  widening of audit row 3:** the folder UUID (a random id, the store key) and, for `defaultName`, the
+  names of the folder's existing notebooks; for `save`/`validate` the scheme text the user typed.
+  Nothing else exists in the interface.
+- **`LibraryActivity`** — `namerRef` is refreshed on every `onResume` (IO, a few ms; chrome doesn't
+  depend on it) and, when a namer is found, **its store is pre-warmed** right there
+  (`ExtensionStores.open` on IO, failure logged only) so the first +Notebook tap never pays the cold
+  raw-key open (~125 ms on the Nomad) or the one-time KDF after a key wipe. All three entry points are
+  **absent while `namerRef == null`**:
+  - **+Notebook** in a folder: `NamerClient.defaultName(folderId, names of the listing's notebooks)`
+    is resolved **before** `NewNotebookActivity` opens (no feedback — the tap takes a beat; a second
+    tap during that beat is dropped); result → `EXTRA_DEFAULT_NAME`. Null / failure / root → the screen
+    opens without the extra.
+  - **New folder**: `describeField()` runs before the dialog shows (failure → the plain v0 dialog); the
+    dialog gains caption + `EditText` + help (`SchemeDialogs.buildField`). CREATE: name validated as
+    before → if the scheme is non-blank, `validate` (error, or "Naming extension didn't respond" if
+    unreachable → toast + stay) → `createFolder` → `save(folder.id, scheme)`; a save failure toasts
+    "Folder created — naming scheme not saved" and dismisses (the folder exists; retry from long-press).
+  - **Folder long-press** → **"Default notebook name…"** (Tabler `cursor-text`, before Rename):
+    `describeField()` + `currentScheme(id)` are fetched first (failure → toast, no dialog); the dialog
+    (`SchemeDialogs.showSchemeDialog`, titled with the folder name) prefilled with the current scheme;
+    OK → blank clears via `save(id, "")`, else `validate` (toast + stay) then `save`; unreachable →
+    toast, dialog stays.
+- **`NewNotebookActivity`** — `EXTRA_DEFAULT_NAME`; `acceptDefaultName(candidate)` (JVM-tested) admits
+  it only if `validateName == null && length ≤ MAX_NAME_CHARS`, else the screen's own default. The
+  screen stays extension-agnostic (it never binds the namer).
+- **Verified (N1, SNN log, adb `input` overhead subtracted):** one bind/unbind per call, store opened
+  once per process then cached; +Notebook in a scheme folder — warm: tap→bind 13 ms, call 33 ms,
+  New-notebook displayed ≈ 0.26 s after the tap (same as with no extension); extension process killed:
+  +≈ 380 ms (process start — the one cost that isn't ours without holding a binding across screens,
+  which the design forbids); app fully cold: ≈ 0.75 s with the resume pre-warm (was 0.85 s). No
+  `leaked ServiceConnection`.
+
 **BOOX sideload trap (NA5C):** the launcher/firmware flips a freshly installed sideloaded package to
 DISABLED_USER shortly *after* `install`, so a `pm enable` issued immediately can be overwritten. Enable,
 wait a few seconds, then confirm with `pm list packages -d` (must not list the extension). Discovery
@@ -313,6 +427,10 @@ whenever an extension point is added or a contract field changes.
    boundary audit.
 5. Nothing crosses the boundary that the call doesn't need — never keys, files, index rows.
 
+Followed by NotebookNamer (N1): `NOTEBOOK_NAMER` + `INotebookNamer` + `SchemeField` in
+`:extension-api`; `ExtensionRegistry.notebookNamer` + `NamerClient`; the core owns every toast; the
+one recorded widening of rule 5 is folder UUID + sibling notebook names. Audit rows 10–13 land in N2.
+
 ## Writing an extension
 
 What a third party will do once `:extension-api` is published (today: the same steps, with the module
@@ -341,10 +459,10 @@ consumed in-project — see `:ext-templates` for the reference implementation).
    your handle after the reply is written (`onTransact` `finally`, as `:ext-templates` does). Keep a
    render under 15 s on an e-ink CPU. Note `WEBP_LOSSLESS` is API 30+ — on API 29 use `WEBP` at
    quality 100 (lossless).
-5. **Check the caller in every method** (`CallerCheck.enforce` pattern): `Binder.getCallingUid()` →
-   `getPackagesForUid` must contain the host package (`com.symmetricalpalmtree.notesprout`, or `.dev`
-   for the debug host) **and** `checkSignatures(uid, Process.myUid()) == SIGNATURE_MATCH`; else throw
-   `SecurityException`. In API v1 the host only binds same-signature extensions, so a third-party
+5. **Check the caller in every method** — call `HostCallerCheck.enforce(context, hostPackage)` from
+   `:extension-api` first thing in every stub method (host package = `com.symmetricalpalmtree.notesprout`,
+   or `.dev` for the debug host): the caller uid must map to the host **and** share your signature,
+   else it throws `SecurityException`. In API v1 the host only binds same-signature extensions, so a third-party
    extension is not yet reachable — the trust rule lifts with the Extensions-UI arc's consent step.
 6. **Never** reorder or remove AIDL methods or parcel fields; follow the versioning rules above.
 
@@ -358,11 +476,13 @@ cd ~/git/Notesprout/apps/notesprout_paper
 ./gradlew testDebugUnitTest                   # all modules
 adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk
 adb -s <serial> install -r ext-templates/build/outputs/apk/debug/ext-templates-debug.apk
+adb -s <serial> install -r ext-naming/build/outputs/apk/debug/ext-naming-debug.apk
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.templates.dev          # BOOX sideload trap
+adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.naming.dev
 adb -s <serial> shell pm disable-user --user 0 com.symmetricalpalmtree.notesprout.ext.templates.dev  # simulate "not installed"
 adb -s <serial> uninstall com.symmetricalpalmtree.notesprout.ext.templates.dev
 ```
 
-Both APKs are signed by the same debug keystore (`~/.android/debug.keystore`) — that is what satisfies
+All three APKs are signed by the same debug keystore (`~/.android/debug.keystore`) — that is what satisfies
 the same-signature trust rule in dev. An extension built on another machine will **not** be trusted by
 this Mac's core build (different debug key) — expected, not a bug.

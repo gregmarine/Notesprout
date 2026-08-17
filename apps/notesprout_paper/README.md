@@ -50,17 +50,21 @@ over from Notesprout just because it exists there).
 
 ```sh
 cd apps/notesprout_paper
-./gradlew assembleDebug               # all modules → app-debug.apk + ext-templates-debug.apk
+./gradlew assembleDebug               # all modules → app-debug.apk + ext-templates-debug.apk + ext-naming-debug.apk
 ./gradlew testDebugUnitTest           # all modules
 adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk
 adb -s <serial> install -r ext-templates/build/outputs/apk/debug/ext-templates-debug.apk   # the Templates extension
+adb -s <serial> install -r ext-naming/build/outputs/apk/debug/ext-naming-debug.apk         # the Naming extension
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.templates.dev        # BOOX may land it disabled
+adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.naming.dev
 ```
 
-Two APKs: the core (`:app`) and the Templates extension (`:ext-templates`). Both are debug-signed by
-the same `~/.android/debug.keystore`, which is what satisfies the same-signature trust rule in dev; an
-extension built on another machine is not trusted by this one's core (expected). The extension has no
-launcher icon (it is listed as "NSE · Templates Dev") — remove it via Settings → Apps (or `adb uninstall`).
+Three APKs: the core (`:app`), the Templates extension (`:ext-templates`) and the Naming extension
+(`:ext-naming` — per-folder default-name schemes such as `Meeting {date} {n:2}`, kept in a core-owned
+encrypted store). All are debug-signed by the same `~/.android/debug.keystore`, which is what satisfies
+the same-signature trust rule in dev; an extension built on another machine is not trusted by this
+one's core (expected). Extensions have no launcher icon (listed as "NSE · Templates Dev" / "NSE ·
+Naming Dev") — remove them via Settings → Apps (or `adb uninstall`).
 
 The drawing surface (g-paper) is consumed from **mavenLocal**
 (`com.symmetricalpalmtree.gpaper:gpaper-{core,onyx,ratta}:0.1.0`). If a g-paper symbol is unresolved,
