@@ -434,7 +434,7 @@ from an adb-driven `am start-service`/`bindService` probe — else deferred to M
 ---
 
 ### Phase M1 — Host: shared bind path, RecognizerClient, notebook debug ⋯ + result dialog
-**Status:** ✅ Complete (commit TBD; user-verified SNN + NA5C 2026-08-17 — MIP11 not attached, covered by M2's full re-run)
+**Status:** ✅ Complete (commit 409c180; user-verified SNN + NA5C 2026-08-17 — MIP11 not attached, covered by M2's full re-run)
 
 **Goal:** on a debug build with `NSE · ML Kit` installed, the notebook screen's ⋯ → "Recognize page
 (ML Kit)" downloads the model on first use and then shows the current page's recognized text in a
