@@ -35,13 +35,14 @@ import kotlinx.coroutines.withContext
  * present only while a trusted `HANDWRITING_RECOGNIZER` extension is installed (re-discovered on
  * every sheet open), it hands the current page's ink — bare x/y geometry via [InkPayload] — to the
  * extension through [RecognizerClient] and shows the text in a dialog (selectable, Copy / OK).
- * `status()` first: READY → recognize at once; UNAVAILABLE → toast; otherwise the **one-time model
- * flow** — a "Recognition model needed" dialog (Download / Cancel), then a progress dialog with an
- * elapsed-time counter that polls `status()` until READY and recognizes without another tap
- * (Cancel hides it; the download keeps running in the extension).
+ * `status()` first: READY → recognize at once; UNAVAILABLE → dialog; otherwise the **one-time model
+ * flow** — a "Recognition model needed" dialog (Download / Cancel; nothing downloads before
+ * Download — the extension's `prepare()` is the only thing that starts one), then a progress dialog
+ * with an elapsed-time counter that polls `status()` until READY and recognizes without another tap
+ * (Cancel hides it; a started download keeps running in the extension).
  *
- * Every toast/dialog here is the core's (the extension shows nothing); nothing recognized is stored
- * or logged — the dialog is the only sink.
+ * Every dialog here is the core's (the extension shows nothing; the only toast is "copied"); nothing
+ * recognized is stored or logged — the dialog is the only sink.
  */
 object NotebookDebugMenu {
 
@@ -50,7 +51,18 @@ object NotebookDebugMenu {
     private const val POLL_MS = 2_000L
     private const val DOWNLOAD_CAP_S = 300
     private const val OFFLINE_GIVE_UP_MS = 30_000L
-    private var recognizeBusy = false
+    /** Consecutive failed `status()` polls tolerated before the download is declared failed (M2). */
+    private const val MAX_POLL_FAILURES = 5
+
+    /**
+     * The one-flow-at-a-time guard, **owned by the activity that started the flow** (M2): a flow whose
+     * dialog is torn down with its activity (recreate, finish — no `onCancel` fires) must not leave a
+     * process-lifetime flag stuck. Busy ⇔ the owner is alive.
+     */
+    private var busyOwner: java.lang.ref.WeakReference<AppCompatActivity>? = null
+    private fun busy(): Boolean = busyOwner?.get()?.let { !it.isFinishing && !it.isDestroyed } ?: false
+    private fun claim(activity: AppCompatActivity) { busyOwner = java.lang.ref.WeakReference(activity) }
+    private fun release() { busyOwner = null }
 
     fun install(activity: AppCompatActivity, bar: ViewGroup, provider: () -> RecognizeContext?) {
         // Push the ⋯ to the far end of the row (the row's own buttons stay where they are).
@@ -85,12 +97,12 @@ object NotebookDebugMenu {
     }
 
     private fun recognize(activity: AppCompatActivity, ref: ProviderRef, provider: () -> RecognizeContext?) {
-        if (recognizeBusy) return
+        if (busy()) return
         val ctx = provider() ?: return   // not open yet — nothing to recognize
         if (ctx.strokes.isEmpty()) { problem(activity, R.string.recognize_nothing); return }
-        recognizeBusy = true
+        claim(activity)
         activity.lifecycleScope.launch {
-            var release = true
+            var releaseAfter = true
             try {
                 val client = RecognizerClient(activity, ref)
                 val ink = withContext(Dispatchers.Default) { InkPayload.fromStrokes(ctx.strokes) }
@@ -100,7 +112,7 @@ object NotebookDebugMenu {
                     else -> {
                         // First time on this device (or the model is gone): ask, then show progress. The
                         // busy guard stays up for the whole dialog flow; the flow releases it itself.
-                        release = false
+                        releaseAfter = false
                         promptDownload(activity, client, ink, ctx)
                     }
                 }
@@ -108,7 +120,7 @@ object NotebookDebugMenu {
                 Slog.d(TAG) { "status failed: ${e.javaClass.simpleName}: ${e.message}" }
                 problem(activity, R.string.recognize_failed)
             } finally {
-                if (release) recognizeBusy = false
+                if (releaseAfter) release()
             }
         }
     }
@@ -146,20 +158,20 @@ object NotebookDebugMenu {
 
     /** "Recognition model needed" — Download / Cancel. Cancel releases the busy guard. */
     private fun promptDownload(activity: AppCompatActivity, client: RecognizerClient, ink: List<InkStroke>, ctx: RecognizeContext) {
-        if (activity.isFinishing || activity.isDestroyed) { recognizeBusy = false; return }
+        if (activity.isFinishing || activity.isDestroyed) { release(); return }
         // Pre-flight: ML Kit's downloader hangs rather than fails when offline (M1: no error after a
         // minute on the Nomad), so the core checks first and says so instead of offering Download.
         val online = Connectivity.isOnline(activity)
         val builder = AlertDialog.Builder(activity)
             .setTitle(R.string.recognize_model_needed_title)
-            .setOnCancelListener { recognizeBusy = false }
+            .setOnCancelListener { release() }
         if (online) {
             builder.setMessage(R.string.recognize_model_needed_body)
                 .setPositiveButton(R.string.recognize_download) { _, _ -> downloadThenRecognize(activity, client, ink, ctx) }
-                .setNegativeButton(R.string.cancel) { _, _ -> recognizeBusy = false }
+                .setNegativeButton(R.string.cancel) { _, _ -> release() }
         } else {
             builder.setMessage(R.string.recognize_model_needed_offline_body)
-                .setPositiveButton(R.string.ok) { _, _ -> recognizeBusy = false }
+                .setPositiveButton(R.string.ok) { _, _ -> release() }
         }
         val dialog = builder.create()
         Dialogs.style(dialog)
@@ -192,6 +204,7 @@ object NotebookDebugMenu {
                 progress.show()
                 val t0 = System.currentTimeMillis()
                 var offlineSinceMs = -1L
+                var pollFailures = 0
                 while (!cancelled) {
                     kotlinx.coroutines.delay(POLL_MS)
                     if (cancelled || activity.isFinishing || activity.isDestroyed) break
@@ -209,8 +222,16 @@ object NotebookDebugMenu {
                         continue
                     }
                     offlineSinceMs = -1L
-                    val status = try { client.status() } catch (e: ExtensionCallException) {
-                        Slog.d(TAG) { "status poll failed: ${e.message}" }; RecognizerStatus.DOWNLOADING   // transient — keep waiting
+                    // A failed poll (bind refused / died / timed out) is tolerated as transient a few times;
+                    // an extension that stays unbindable (BOOX re-disabling it, a crash on start) is a
+                    // failure the host knows now — not after the 5-minute cap.
+                    val status = try {
+                        client.status().also { pollFailures = 0 }
+                    } catch (e: ExtensionCallException) {
+                        pollFailures++
+                        Slog.d(TAG) { "status poll failed ($pollFailures): ${e.message}" }
+                        if (pollFailures >= MAX_POLL_FAILURES) { progress.dismiss(); showDownloadFailed(activity); return@launch }
+                        RecognizerStatus.DOWNLOADING
                     }
                     when (status) {
                         RecognizerStatus.READY -> {
@@ -232,7 +253,7 @@ object NotebookDebugMenu {
                 Slog.d(TAG) { "download dialog cancelled — download continues in the extension" }
             } finally {
                 if (progress.isShowing) progress.dismiss()
-                recognizeBusy = false
+                release()
             }
         }
     }
@@ -270,16 +291,8 @@ object NotebookDebugMenu {
      * toast is easy to miss and its absence reads as "broken". Toasts remain only for confirmations
      * of something that already happened ("copied").
      */
-    private fun problem(activity: AppCompatActivity, messageRes: Int) {
-        if (activity.isFinishing || activity.isDestroyed) return
-        Dialogs.style(
-            AlertDialog.Builder(activity)
-                .setTitle(R.string.recognize_problem_title)
-                .setMessage(messageRes)
-                .setPositiveButton(R.string.ok, null)
-                .create()
-        ).show()
-    }
+    private fun problem(activity: AppCompatActivity, messageRes: Int) =
+        Dialogs.problem(activity, R.string.recognize_problem_title, messageRes)
 
     private fun toast(activity: AppCompatActivity, res: Int) {
         if (!activity.isFinishing && !activity.isDestroyed) Toast.makeText(activity, res, Toast.LENGTH_SHORT).show()

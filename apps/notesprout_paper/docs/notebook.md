@@ -36,12 +36,15 @@ provider lambda hands it a `RecognizeContext(paper.getStrokes(), currentPage.wid
 (null until `opened`) — the page's strokes and px size, nothing else. Its one action, "Recognize page
 (ML Kit)", is described in `docs/extensions.md` §"HandwritingRecognizer — host behaviour".
 
-**Toast vs. dialog (settled with the user in arc 3 / M1, applied here and on the New-notebook
-screen):** a toast only confirms something that already happened and needs no reaction ("copied");
-anything that explains why a tap did *not* do what was asked, or that the user must act on, is an
-`AlertDialog` (via `Dialogs.style`) — on e-ink a toast is easy to miss and its absence reads as
-"broken". `NewNotebookActivity`'s taken/invalid-name and template-render failures are dialogs for
-the same reason.
+**Toast vs. dialog (settled with the user in arc 3 / M1, applied here, on the New-notebook screen
+and — M2 — across the library):** a toast only confirms something that already happened and needs no
+reaction ("copied"); anything that explains why a tap did *not* do what was asked, or that the user
+must act on, is an `AlertDialog` — `Dialogs.problem(activity, title, message)` (`core/Dialogs.kt`,
+styled, OK only, no-op if the activity is finishing) is the one helper for it — on e-ink a toast is
+easy to miss and its absence reads as "broken". `NewNotebookActivity`'s taken/invalid-name and
+template-render failures, the library's New-folder / Rename name problems, the Naming extension's
+validation / unavailable / save-failed messages, and `FolderPickerActivity`'s move collisions are all
+`Dialogs.problem` for the same reason (the arc-2 ones were toasts until M2).
 
 ## Open
 

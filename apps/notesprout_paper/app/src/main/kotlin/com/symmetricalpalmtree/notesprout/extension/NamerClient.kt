@@ -93,7 +93,6 @@ class NamerClient(context: Context, private val ref: ProviderRef) {
 
     companion object {
         private const val TAG = "NamerClient"
-        const val BIND_TIMEOUT_MS = ExtensionBinder.BIND_TIMEOUT_MS
         const val CALL_TIMEOUT_MS = 2_000L
         const val MAX_LABEL = 40
         const val MAX_HINT = 60

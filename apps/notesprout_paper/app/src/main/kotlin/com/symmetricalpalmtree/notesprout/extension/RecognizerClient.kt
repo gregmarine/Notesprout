@@ -3,8 +3,8 @@ package com.symmetricalpalmtree.notesprout.extension
 import android.content.Context
 import com.symmetricalpalmtree.notesprout.core.Slog
 
-/** The extension could not become READY within the call (still downloading / loading, or the engine failed). */
-class RecognizerNotReadyException(cause: Throwable) : ExtensionCallException("recognizer not ready", cause)
+/** The extension could not become READY within the call (still downloading / loading, or nothing acquired yet). */
+class RecognizerNotReadyException(cause: Throwable) : ExtensionCallException(ExtensionContract.RECOGNIZER_NOT_READY, cause)
 
 /**
  * Bind-per-operation client for the one handwriting recognizer, over the shared [ExtensionBinder]
@@ -15,9 +15,11 @@ class RecognizerNotReadyException(cause: Throwable) : ExtensionCallException("re
  * malformed strokes, non-positive sizes → [InkTooLargeException] without a bind; `preContext` is cut
  * to its last `MAX_PRECONTEXT_CHARS`. **Inward is untrusted**: a status outside `0..3` is
  * `UNAVAILABLE`, text is `?: ""` and truncated to `MAX_RECOGNIZED_CHARS`; the extension's
- * `IllegalStateException` (could not become ready within the call, or the engine failed) surfaces as
- * [RecognizerNotReadyException]. The recognize calls **wait for readiness inside the extension**
- * (M1) — a caller may go straight to `recognize*` after `status()` says DOWNLOADING.
+ * `IllegalStateException` carrying `ExtensionContract.RECOGNIZER_NOT_READY` (could not become ready
+ * within the call) surfaces as [RecognizerNotReadyException]; any other one is a generic engine
+ * failure. The recognize calls **wait for an in-flight acquisition inside the extension** (M1) but
+ * never start a download (M2) — a caller may go straight to `recognize*` after `status()` says
+ * DOWNLOADING, and must call [prepare] first when it says NEEDS_DOWNLOAD.
  *
  * Logs (tag [TAG]): bind/unbind, counts and durations — **never text**.
  */
@@ -59,16 +61,16 @@ class RecognizerClient(context: Context, private val ref: ProviderRef) {
             try {
                 block(recognizer)
             } catch (e: IllegalStateException) {
-                // Binder-marshalable by contract: "recognizer not ready" (could not become ready within the
-                // call) is typed so the caller can say "still downloading"; any other engine failure is generic.
-                if (e.message?.contains("not ready") == true) throw RecognizerNotReadyException(e)
+                // Binder-marshalable by contract: the contract's RECOGNIZER_NOT_READY message (could not
+                // become ready within the call) is typed so the caller can say "still downloading"; any
+                // other IllegalStateException is an engine failure and stays generic.
+                if (e.message == ExtensionContract.RECOGNIZER_NOT_READY) throw RecognizerNotReadyException(e)
                 throw ExtensionCallException("${e.javaClass.simpleName}: ${e.message}", e)
             }
         }
 
     companion object {
         private const val TAG = "RecognizerClient"
-        const val BIND_TIMEOUT_MS = ExtensionBinder.BIND_TIMEOUT_MS
         const val STATUS_TIMEOUT_MS = 2_000L
         const val INK_TIMEOUT_MS = 10_000L
         /** One ML Kit call per line; the first call after process start also loads the model. */

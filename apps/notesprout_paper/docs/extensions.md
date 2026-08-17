@@ -341,7 +341,7 @@ behaviour without the extension is unchanged.
   (`yyyyMMdd`) + `{time}` (`HHmmss`) + `{n}` / `{n:K}` (K = 1–9; at most once). Literal text must satisfy
   the core's name rule (`[a-zA-Z0-9_\-. ]`); a literal-only scheme may not be `.`/`..`/blank; the whole
   scheme ≤ 100 chars; unknown `{…}`, a stray `}`, or an unclosed `{` are errors. Errors are enum codes
-  the service maps to `strings.xml` (`err_*`), returned to the host verbatim for its toast.
+  the service maps to `strings.xml` (`err_*`), returned to the host verbatim for its problem dialog.
   **`{n}` = 1 + the highest number among sibling names that match the scheme's skeleton** — an
   anchored regex where literals are quoted, `{date}`/`{time}` are **wildcards** (`\d{8}` / `\d{6}` —
   the counter runs across days: `Meeting {date} {n:2}` → 01, 02 today, 03 tomorrow) and the counter is
@@ -354,7 +354,7 @@ behaviour without the extension is unchanged.
 The third point and the first **capability point**: an extension point whose implementation the core
 binds itself and — in a later arc — *lends* to other extensions through a per-bind, uid-bound,
 revocable proxy implementing the same `IHandwritingRecognizer` interface (the `IExtensionStore`
-pattern; see `PAPER_RECOGNITION_PLAN.md` §"The capability pattern"). Extensions never bind each other.
+pattern; see §"The capability pattern" below). Extensions never bind each other.
 Paper's core is "paper with strokes" and never learns what handwriting *says*: recognition results
 are not stored anywhere by the core (no `page_text`, no `.soil` / index change).
 
@@ -365,12 +365,17 @@ are not stored anywhere by the core (no `page_text`, no `.soil` / index change).
   the x/y point arrays (px), plus the writing-area or page size, plus ≤ `MAX_PRECONTEXT_CHARS` of
   pre-context. **Never** stroke ids, notebook/page ids, names, colour, width, style, pressure, tilt,
   timestamps, keys or paths. This is the first point that sends ink to an extension.
-- **Protocol (as amended in M1):** `status()` is fast and **never waits on the engine**
+- **Protocol (as amended in M1, tightened in M2):** `status()` is fast and **never waits on the engine**
   (`DOWNLOADING` covers everything in flight — checking, downloading, loading); `NEEDS_DOWNLOAD` →
-  `prepare()` (returns at once; idempotent, a no-op while `READY` / `DOWNLOADING`). `recognize*` may be
-  called as soon as the extension exists: **if not READY it waits for readiness within the caller's
-  timeout** and throws `IllegalStateException` only if it cannot become ready in time or the engine
-  fails (so a real failure is never mistaken for a blank page). `UNAVAILABLE` means "don't bother".
+  `prepare()` (returns at once; idempotent, a no-op while `READY` / `DOWNLOADING`) — **the only call
+  that may start a download** (M2: the host asks the user first, so nothing may download before it;
+  M1's `onCreate` chain made the consent dialog cosmetic). `recognize*` may be called as soon as the
+  extension exists: **if not READY it waits for an acquisition already in flight within the caller's
+  timeout** — never starting one — and throws `IllegalStateException` with the contract message
+  **`ExtensionContract.RECOGNIZER_NOT_READY`** if it cannot become ready in time (or nothing was
+  prepared); any other `IllegalStateException` is an engine failure or timeout (so a real failure is
+  never mistaken for a blank page). The host compares that message exactly (M2 — no substring
+  sniffing; a third-party recognizer must use the constant). `UNAVAILABLE` means "don't bother".
   *Why the amendment:* M0 had `status()` block ≤ 1.5 s on ML Kit's `isModelDownloaded` and report a
   timeout as `UNAVAILABLE`; on the Nomad the first such check in a fresh process took ~75 s, so the
   first taps said "didn't respond" / "unavailable" for a model that was one 6 s download away. The
@@ -405,39 +410,77 @@ ships; on-device, no Play Services required). **The dependency lives in `:ext-ml
   with the `HANDWRITING_RECOGNIZER` action + `API_VERSION` meta-data `1`.
 - **`HandwritingRecognizerService`** returns an `IHandwritingRecognizer.Stub`; every method first calls
   `HostCallerCheck.enforce`. `status()`/`prepare()` delegate to `ModelManager`; `recognizeInk` /
-  `recognizePage` re-check the `MAX_INK_*` caps + positive sizes (`IllegalArgumentException`), then
-  **wait for readiness** (`ModelManager.awaitReady` — 6 s for ink, 22 s for page, sized under the
-  host's 10 s / 30 s; not ready by then → `IllegalStateException("recognizer not ready")`), then run
-  `MlKitEngine` **synchronously on the Binder thread**
-  (`Tasks.await`; the host's timeout is the ceiling, ML Kit's executor does the work; each ML Kit call
-  is additionally bounded to 10 s so a wedged engine can't pin a Binder thread). Any engine failure →
-  `IllegalStateException` — only Binder-marshalable exceptions leave the stub (arc-2 lesson).
+  `recognizePage` take a **whole-call budget** at entry (M2: `INK_BUDGET_MS` 9.5 s · `PAGE_BUDGET_MS`
+  28 s — just under the host's 10 s / 30 s, so the extension stops at its own deadline instead of
+  grinding on an orphaned Binder thread after the host has unbound), re-check the `MAX_INK_*` caps +
+  positive sizes (`IllegalArgumentException`), then **wait for a chain already in flight**
+  (`ModelManager.awaitReady` — 6 s for ink, 22 s for page; not ready by then →
+  `IllegalStateException(RECOGNIZER_NOT_READY)`), then run `MlKitEngine` **synchronously on the
+  Binder thread** with the deadline (`Tasks.await` per ML Kit call bounded to `min(10 s, time left)`;
+  ML Kit's executor does the work). A timeout (deadline or wedged call) → `IllegalStateException
+  ("recognition timed out")` — **not** an engine failure (M2: a slow first inference must never make
+  the model look gone); any other engine failure → `ModelManager.onEngineFailure()` +
+  `IllegalStateException`. Only Binder-marshalable exceptions leave the stub (arc-2 lesson).
 - **`ModelManager`** (process-lifetime `object`) owns the `en-US` `DigitalInkRecognitionModel` and the
   client, and **one async ensure-ready chain**: `isModelDownloaded` → `download(model,
-  DownloadConditions())` if needed (**any network**, as the original) → build the client. The chain
-  is started by the service's `onCreate` (the host's first bind — the startup analogue of the
-  original's `initModel()`) and by `prepare()`; it is idempotent while in flight and restartable after
-  a failure (logged by class + duration). `status()` **never blocks**: `READY` (client built) ·
-  `DOWNLOADING` (chain in flight) · `NEEDS_DOWNLOAD` (no chain / last chain failed) · `UNAVAILABLE`
-  (no model identifier). `awaitReady(timeoutMs)` starts the chain if needed and `Tasks.await`s it —
-  what the recognize calls use. **Model-present memory:** once the chain has seen the model on disk
-  (present, or just downloaded) a flag is kept in the extension's own `SharedPreferences` (engine
-  state — the same sandbox exception as the model); a fresh process with the flag builds the client
-  at once and is READY without ML Kit's cold `isModelDownloaded` (28 s on the Nomad the first time,
-  ~4.6 s later; without the flag the host would see `DOWNLOADING` and offer a download for a model
-  that is already there). An engine failure on a client built from the flag alone clears the flag
-  and drops the client, so the next `start()` runs the full chain (re-download if needed).
+  DownloadConditions())` if needed (**any network**, as the original) → build the client. **Only
+  `prepare()` starts it** (M2 — consent: the host's "Recognition model needed → Download?" dialog
+  precedes it; in M1 the service's `onCreate` started the whole chain on the host's first `status()`
+  bind, so the download had begun before the dialog and Cancel / the offline pre-check were cosmetic).
+  It is idempotent while in flight and restartable after a failure (logged by class + duration).
+  `status()` **never blocks**: `READY` (client built) · `DOWNLOADING` (chain in flight) ·
+  `NEEDS_DOWNLOAD` (no chain / last chain failed) · `UNAVAILABLE` (no model identifier).
+  `awaitReady(timeoutMs)` `Tasks.await`s a chain **already in flight** (or takes the flag shortcut) —
+  what the recognize calls use; it never starts a download. **Model-present memory:** once the chain
+  has seen the model on disk (present, or just downloaded) a flag is kept in the extension's own
+  `SharedPreferences` (engine state — the same sandbox exception as the model); the service's
+  `onCreate` (`warmUp()`) builds the client at once from the flag and is READY without ML Kit's cold
+  `isModelDownloaded` (28 s on the Nomad the first time, ~4.6 s later). Without the flag the process
+  starts **nothing** and reports `NEEDS_DOWNLOAD` — the host asks, `prepare()` runs the real chain,
+  and a model that is in fact on disk (a build predating the flag, or the flag wiped) is found without
+  a download (the progress dialog then just counts the check). An engine failure on the shortcut
+  client **verifies** first (M2): one async `isModelDownloaded`; only `false` clears the flag and drops
+  the client (`NEEDS_DOWNLOAD` → `prepare()` re-downloads); `true` marks the client verified and
+  leaves it (the failure was transient); a timeout is never treated as an engine failure.
 - **Where the model lives — the recorded exception to "extensions keep data in the host store":** the
   ~20 MB model is downloaded and managed by ML Kit **in the extension's own app storage**. Engine assets
   are not user data (and exceed the 256 KiB store value cap); user data still goes to the host store
   only. Uninstalling the extension removes the model; disable/enable keeps it.
 - **`MlKitEngine`:** `recognizeInk` builds one `Ink` from the x/y arrays (`Ink.Point.create(x, y)` — no
   time channel), `WritingArea(max(w,1), max(h,1))`, `RecognitionContext(preContext = tail ≤ 20 chars)`
-  → top candidate's text or `""`. `recognizePage` = `StrokeSegmenter.segment(strokes)` → for each
-  paragraph, for each line: `recognizeInk(line.strokes, line.bounds.width, layout.medianLineHeight
+  → top candidate's text or `""`; every call takes the absolute deadline and waits
+  `PageText.waitFor(deadline, now, 10 s)`. `recognizePage` = `StrokeSegmenter.segment(strokes)` → for
+  each paragraph, for each line: `recognizeInk(line.strokes, line.bounds.width, layout.medianLineHeight
   (fallback: the line's own height), preContext = the previous recognized line)` → trimmed; a line that
   recognizes to `""` contributes nothing (no "unrecognized" placeholder); lines joined by `\n`,
-  paragraphs by a blank line (`PageText.join`, pure + tested).
+  paragraphs by a blank line (`PageText.join`, pure + tested). **Per-line tolerance (M2, as the
+  original `PageTextRecognizer`):** a line whose ML Kit call fails contributes nothing and the page
+  goes on; only if *every* line failed is the first failure rethrown. Running out of the deadline is
+  *not* tolerated per line — it aborts the page with a timeout (never a silent partial result; the
+  warm retry has the model loaded). **Dots (M2):** `PageText.widenDots` promotes a single-point stroke
+  (a pen tap — a period, an i-dot; g-paper does emit and draw them and `InkPayload` keeps them) to a
+  degenerate two-point stroke before segmenting, because the verbatim segmenter drops `< 2`-point
+  strokes (the original app's views never produced them). **Dot handling (`Dots`, M2 addendum, pure +
+  4 tests):** ML Kit skips a pen-tap period or reads it as a comma (the original app has the same
+  problem — same feed). (1) `Dots.round` — every *tiny* stroke (≤ 15 % of the line height in both
+  directions: periods, i-dots; commas / apostrophes / hyphens are taller or wider — measured on the
+  Nomad: periods 2–4 px, comma tails 10–15 px on a 62 px line) is redrawn as a 12-point circle at its
+  centre before the ML Kit call (`recognizeInk` too, with the area height), instead of the 2–4 px
+  lift-drag ML Kit half-reads as a comma tail or ignores. (2) `Dots.endsWithBaselineDot` +
+  `fixTrailingPeriod` — in `recognizePage`, when a line's right-most stroke (by centre x) is a
+  period-shaped mark that starts no more than 15 % of the line height inside the last letter's right
+  edge (slant), the text is made to end in `.` (`,` → `.`, missing → appended; `. ! ? : ; …`
+  untouched). Period-shaped = **tiny** and below 45 % of the band (an i-dot sits at ~25 %), **or** a
+  **shaky period** — *small* (≤ 15 % wide, ≤ 30 % tall; measured 3 × 10–15 px on the user's 62 px
+  lines, where every real comma was taller or wider than that) with its centre in the bottom 30 % of
+  the band and **no tiny stroke above it** (the other small word-ender is an i-stem, 4 × 16 px on the
+  same page, and an i-stem always has its dot). Descent below the baseline was measured and is *not*
+  a discriminator (shaky periods hang +9/+15 px, clean ones +1..+11). Mid-line periods are not
+  corrected. A debug-only geometry line per recognized line (`MlKitEngine` tag: stroke count, line
+  height, last-stroke box + band position, tiny count, every small stroke's size + position, the
+  last-char *class*, whether the rule fired) — **never the text**. Verified on the user's SNN test
+  page: 12 periods (7 skipped by ML Kit, 2 read as commas) → `.`; 3 real-comma lines and a bare
+  `Hi` untouched.
 - **`StrokeSegmenter`** (pure Kotlin, 8 JVM tests) — a **verbatim port** of the original
   `recognition/StrokeSegmenter` (`RectF` → the tiny pure `Box`, `LiveStroke` → `InkStroke`): vertical
   projection profile → writing bands; each stroke to its (nearest) band; lines ordered left→right;
@@ -530,13 +573,16 @@ ships; on-device, no Play Services required). **The dependency lives in `:ext-ml
   - **New folder**: `describeField()` runs before the dialog shows (failure → the plain v0 dialog); the
     dialog gains caption + `EditText` + help (`SchemeDialogs.buildField`). CREATE: name validated as
     before → if the scheme is non-blank, `validate` (error, or "Naming extension didn't respond" if
-    unreachable → toast + stay) → `createFolder` → `save(folder.id, scheme)`; a save failure toasts
-    "Folder created — naming scheme not saved" and dismisses (the folder exists; retry from long-press).
+    unreachable → problem dialog + stay) → `createFolder` → `save(folder.id, scheme)`; a save failure
+    shows the problem dialog "Folder created — naming scheme not saved" and dismisses (the folder
+    exists; retry from long-press). *(M2: these were toasts in N1 — swept to `Dialogs.problem` under
+    the toast-vs-dialog rule, together with the name-problem toasts of the New-folder / Rename
+    dialogs and the move collisions in `FolderPickerActivity`.)*
   - **Folder long-press** → **"Default notebook name…"** (Tabler `cursor-text`, before Rename):
-    `describeField()` + `currentScheme(id)` are fetched first (failure → toast, no dialog); the dialog
-    (`SchemeDialogs.showSchemeDialog`, titled with the folder name) prefilled with the current scheme;
-    OK → blank clears via `save(id, "")`, else `validate` (toast + stay) then `save`; unreachable →
-    toast, dialog stays.
+    `describeField()` + `currentScheme(id)` are fetched first (failure → problem dialog, no scheme
+    dialog); the dialog (`SchemeDialogs.showSchemeDialog`, titled with the folder name) prefilled with
+    the current scheme; OK → blank clears via `save(id, "")`, else `validate` (problem dialog + stay)
+    then `save`; unreachable → problem dialog, the scheme dialog stays.
 - **`NewNotebookActivity`** — `EXTRA_DEFAULT_NAME`; `acceptDefaultName(candidate)` (JVM-tested) admits
   it only if `validateName == null && length ≤ MAX_NAME_CHARS`, else the screen's own default. The
   screen stays extension-agnostic (it never binds the namer).
@@ -562,9 +608,9 @@ ships; on-device, no Play Services required). **The dependency lives in `:ext-ml
   **without binding**; `preContext` is cut to its last `MAX_PRECONTEXT_CHARS`. **Inward is untrusted**
   (`InkCaps.status` / `InkCaps.text`): a status outside `0..3` → `UNAVAILABLE`; text `?: ""` and
   truncated to `MAX_RECOGNIZED_CHARS`; the extension's `IllegalStateException` → typed
-  `RecognizerNotReadyException` when its message says "not ready" (could not become ready within the
-  call), else a generic `ExtensionCallException` (engine failure). Log tag `RecognizerClient`: bind/unbind,
-  stroke/char counts, durations — **never text**.
+  `RecognizerNotReadyException` when its message **equals** `ExtensionContract.RECOGNIZER_NOT_READY`
+  (could not become ready within the call), else a generic `ExtensionCallException` (engine failure /
+  timeout). Log tag `RecognizerClient`: bind/unbind, stroke/char counts, durations — **never text**.
 - **`InkPayload.fromStrokes(List<Stroke>): List<InkStroke>`** (`notebook/`, pure, JVM-tested) — the
   **one** place page ink is reduced to bare geometry (audit row 14): x/y arrays per stroke; id, colour,
   width, style, pressure, tilt and time never leave; point-less strokes are skipped.
@@ -593,15 +639,19 @@ ships; on-device, no Play Services required). **The dependency lives in `:ext-ml
     Download → `prepare()` → progress dialog **"Downloading recognition model"** whose message carries
     an **elapsed-time counter** (the e-ink-safe indeterminate indicator — no spinner; refreshed every
     2 s) and **Cancel** (hides the dialog only; the download keeps running in the extension). The
-    dialog polls `status()` every 2 s (a bind per poll, ~30 ms): `READY` → dismiss → the READY path
-    above, no further tap · network gone → message *Waiting for a network connection…*, gives up after
-    30 s offline · `NEEDS_DOWNLOAD` after `prepare()` (chain failed) / `UNAVAILABLE` / 5-min cap →
-    dialog **"Download failed"**.
+    dialog polls `status()` every 2 s (a bind per poll, ~30 ms — bind-per-operation, as decided in
+    M1): `READY` → dismiss → the READY path above, no further tap · network gone → message *Waiting for
+    a network connection…*, gives up after 30 s offline · `NEEDS_DOWNLOAD` after `prepare()` (chain
+    failed) / `UNAVAILABLE` / 5-min cap / **5 consecutive failed polls** (M2 — an extension that stays
+    unbindable is a failure now, not after the cap) → dialog **"Download failed"**. Nothing downloads
+    before Download is tapped (M2 — `prepare()` is the only trigger).
   - `InkTooLargeException` → dialog *Page too dense to recognize*; `RecognizerNotReadyException` (READY
     reported, then lost — extension restarted mid-flow) → dialog *Model still downloading — try again
     in a minute*; any other `ExtensionCallException` → dialog *ML Kit extension didn't respond*.
-  - One `recognizeBusy` guard drops a second tap for the whole flow (dialogs included). Nothing
-    recognized is stored or logged — the result dialog is the only sink.
+  - One busy guard drops a second tap for the whole flow (dialogs included); it is **owned by the
+    activity that started the flow** (a `WeakReference`, busy ⇔ owner alive — M2: a dialog torn down
+    with its activity fires no `onCancel`, and a process-lifetime flag would have stayed stuck for
+    every later tap). Nothing recognized is stored or logged — the result dialog is the only sink.
 - **Failure surface:** every dialog/toast above is the core's; the extension shows nothing. Absent
   extension → no sheet item; not ready / timeout / too dense / offline → a dialog; the page, the ink
   and the other extensions are unaffected.
@@ -617,10 +667,19 @@ correctly reports 0 candidates while it is disabled.
 
 ---
 
-## Boundary audit (rows 1–9 E2, rows 10–13 N2 — walked 2026-08-16, all ✅)
+## Boundary audit (rows 1–9 E2, rows 10–13 N2 — walked 2026-08-16; rows 14–17 M2 + rows 1/6/7 re-walked for the shared `ExtensionBinder` 2026-08-17 — all ✅)
 
 What crosses the process boundary, in which direction, and what guards it. Re-walk this table
 whenever an extension point is added or a contract field changes.
+
+**M2 re-walk of rows 1, 6, 7 (one implementation for three clients):** since M1 the "Where it holds"
+column for the bind-time signature check, unbind-in-`finally` and the per-call timeout is
+`ExtensionBinder.call` — `TemplateProviderClient`, `NamerClient` and `RecognizerClient` all go
+through it and none keeps a private bind path. Walked against the code: `checkSignatures` runs
+immediately before `bindService`; `unbindService` + the supervisor scope's cancel sit in the one
+`finally` (bind refused / bind timeout / call timeout / exception / success); every client passes an
+explicit `callTimeoutMs` (there is no default) and the bind wait is `BIND_TIMEOUT_MS` (3 s). The
+namer's per-bind store binder is revoked in the client's own `finally` right after the shared unbind.
 
 | # | Invariant | Where it holds |
 |---|---|---|
@@ -635,8 +694,12 @@ whenever an extension point is added or a contract field changes.
 | 9 | **The core has no renderer and no dependency on the extension.** `:app` depends on `:extension-api` only; the template WEBP is drawn from the `.soil` blob exactly as v0 drew it, so a notebook opens with its template whether or not the extension is installed. | `app/build.gradle.kts`, `NotebookSession.loadTemplateFor` |
 | 10 | **Outward payload of NotebookNamer is exactly folder UUID + sibling notebook names (+ the scheme text the user typed).** `describeField()` and `validateScheme(scheme)` carry nothing else; `currentScheme` / `saveScheme` / `defaultName` carry the folder UUID (a random id — the store key, no content) and `defaultName` alone adds the names of the folder's own notebooks (needed only for `{n}`). No other argument exists in `INotebookNamer` — no passphrase, key, path, index row, other folder, page or stroke can be carried. This is the **recorded widening of row 3** for this point only. | `INotebookNamer.aidl`, `NamerClient` (five methods), `LibraryActivity.launchNewNotebook` (`siblings` = the current listing's `CardItem.Notebook` names) |
 | 11 | **The store binder is uid-bound, per-bind, revocable, capped.** Minted only inside `NamerClient.call(store = true)` — after `ExtensionStores.open` on IO (pre-open rule) and with `extUid = getPackageUid(ref.packageName)` fetched at bind time; `ExtensionStoreGate.check()` requires `getCallingUid() == extUid && !revoked` on **every** method; `revoke()` runs in the same `finally` as the unbind, so a late call from an orphaned (timed-out) transaction fails closed. Caps host-side: key `1..512` chars, value `≤ 256 KiB`, new key at `≥ 50 000` → `IllegalStateException`. The DB is opened only through `SoilCrypto` factories under the global key (`ExtensionStores.open`, the third named create entry point); `IExtensionStore` has no method that could return a key, path, or `File`. | `NamerClient.call`, `ExtensionStoreBinder`, `ExtensionStoreGate` (JVM-tested: uid mismatch, revoked, caps, literal case-sensitive prefix, DAO failure → `IllegalStateException`), `ExtensionStores.open`, `IExtensionStore.aidl` |
-| 12 | **Inward payload is validated.** `SchemeField` strings are truncated (`40 / 60 / 200`) and drawn only as a caption, an `EditText` hint and a help line; a `currentScheme` is capped at `MAX_NAME_CHARS` and shown verbatim only **inside** a text field; a validation error is truncated (`200`) and shown only as a toast; a `defaultName` is accepted only if `NewNotebookActivity.acceptDefaultName` says so (core name rule **and** `≤ MAX_NAME_CHARS`) — else the core default, silently (`Slog.d`, never a toast, never a crash). Any exception, timeout, or null on the way in becomes `ExtensionCallException` at the client and a core-owned outcome at the entry point. | `NamerClient` (`MAX_LABEL/HINT/HELP/ERROR`, `take(MAX_NAME_CHARS)`), `SchemeDialogs.buildField`, `NewNotebookActivity.acceptDefaultName` |
-| 13 | **Failure never changes what the user chose.** +Notebook: namer failure / null / timeout / root → `NewNotebookActivity` opens with the core default (the tap just takes a beat; a second tap during it is dropped). New folder: `describeField` failure → the dialog without the field; the scheme is validated **before** the folder exists (error → toast + stay); the folder is created **before** its scheme is saved and a save failure says so (`naming_save_failed`) while the folder stands. Long-press: fetch failure → `naming_unavailable` toast and no dialog; save/validate failure inside → toast, dialog stays with the text. The extension absent / disabled → all three entry points vanish (`namerRef == null`) and nothing else changes; its store `.db` survives so the schemes return with it. | `LibraryActivity.launchNewNotebook` / `showNewFolderDialog` (both overloads) / `openSchemeDialog`, `SchemeDialogs.showSchemeDialog`, `LibraryActivity.refreshNamer` |
+| 12 | **Inward payload is validated.** `SchemeField` strings are truncated (`40 / 60 / 200`) and drawn only as a caption, an `EditText` hint and a help line; a `currentScheme` is capped at `MAX_NAME_CHARS` and shown verbatim only **inside** a text field; a validation error is truncated (`200`) and shown only as the message of a core-owned problem dialog; a `defaultName` is accepted only if `NewNotebookActivity.acceptDefaultName` says so (core name rule **and** `≤ MAX_NAME_CHARS`) — else the core default, silently (`Slog.d`, never a toast, never a crash). Any exception, timeout, or null on the way in becomes `ExtensionCallException` at the client and a core-owned outcome at the entry point. | `NamerClient` (`MAX_LABEL/HINT/HELP/ERROR`, `take(MAX_NAME_CHARS)`), `SchemeDialogs.buildField`, `NewNotebookActivity.acceptDefaultName` |
+| 13 | **Failure never changes what the user chose.** +Notebook: namer failure / null / timeout / root → `NewNotebookActivity` opens with the core default (the tap just takes a beat; a second tap during it is dropped). New folder: `describeField` failure → the dialog without the field; the scheme is validated **before** the folder exists (error → problem dialog + stay); the folder is created **before** its scheme is saved and a save failure says so (`naming_save_failed`, a problem dialog) while the folder stands. Long-press: fetch failure → `naming_unavailable` problem dialog and no scheme dialog; save/validate failure inside → problem dialog, the scheme dialog stays with the text. (M2: every one of these was a toast in N1; swept to `Dialogs.problem` under the toast-vs-dialog rule.) The extension absent / disabled → all three entry points vanish (`namerRef == null`) and nothing else changes; its store `.db` survives so the schemes return with it. | `LibraryActivity.launchNewNotebook` / `showNewFolderDialog` (both overloads) / `openSchemeDialog`, `SchemeDialogs.showSchemeDialog`, `LibraryActivity.refreshNamer` |
+| 14 | **Outward payload of HandwritingRecognizer is bare geometry only.** `InkStroke` carries two parallel `FloatArray`s (x/y in the caller's px) and nothing else — its parcel form is `int n · float[] x · float[] y`; `InkPayload.fromStrokes` is the **one** reduction site from the paper's `Stroke` (id, colour, width, style, pressure, tilt, time never leave; point-less strokes are skipped). The other arguments are the writing-area / page size and, for `recognizeInk`, ≤ `MAX_PRECONTEXT_CHARS` (20) of pre-context (`InkCaps.preContext` = `takeLast`). No other argument exists in `IHandwritingRecognizer` — no notebook / page id, name, key or path can be carried. Recorded as the explicit widening of row 3: **the first point that receives ink.** The debug menu passes the session's page px size and `paper.getStrokes()` through `RecognizeContext` — no ids, no names, no session. | `IHandwritingRecognizer.aidl`, `InkStroke` (parcel), `InkPayload.fromStrokes` (JVM-tested: id/colour/pressure dropped, x/y preserved), `RecognizeContext`, `RecognizerClient.recognizeInk/recognizePage`, `InkCaps.preContext` |
+| 15 | **Ink is capped before it crosses and re-checked after.** Host side, **without binding**: `InkCaps.check` requires `strokes.size ≤ MAX_INK_STROKES` (2 000), `Σ points ≤ MAX_INK_POINTS` (60 000), every stroke non-empty with equal-length x/y arrays, and `width`/`height` `> 0` (NaN fails the comparison) — any violation is `InkTooLargeException` (an `ExtensionCallException`) thrown before `ExtensionBinder.call`; `InkStroke`'s constructor independently rejects empty / mismatched arrays. Extension side: `InkStroke.CREATOR` re-runs those `require`s at unmarshal time and `HandwritingRecognizerService.checkInk` re-checks the two caps + positive sizes → `IllegalArgumentException` (Binder-marshalable). | `InkCaps.check` (JVM-tested: over strokes / over points / empty stroke / mismatched arrays / non-positive size / preContext truncation), `RecognizerClient`, `InkStroke.init` + `CREATOR`, `HandwritingRecognizerService.checkInk` |
+| 16 | **Inward payload is validated; nothing is stored.** `InkCaps.status` maps anything outside `READY..UNAVAILABLE` (`0..3`) to `UNAVAILABLE`; `InkCaps.text` = `?: ""` then `take(MAX_RECOGNIZED_CHARS)` (20 000). The extension's `IllegalStateException` is typed `RecognizerNotReadyException` only when its message equals `ExtensionContract.RECOGNIZER_NOT_READY`, else a generic `ExtensionCallException` — either way the caller sees a core-owned dialog. The recognized text is shown **only** in the debug result dialog (selectable + Copy to the clipboard, at the user's tap) and is written nowhere: no `page_text`, no `.soil` / index change, no log line on either side (counts + durations only — `RecognizerClient` and the service log `N strokes → M chars in T ms`). | `InkCaps.status/text` (JVM-tested), `RecognizerClient.call`, `NotebookDebugMenu.showResult`, the two log lines in `RecognizerClient` / `HandwritingRecognizerService` |
+| 17 | **Failure changes nothing.** Extension absent / disabled → `ExtensionRegistry.handwritingRecognizer == null` → the debug sheet has no Recognize item and nothing else on the screen changes. Not ready / offline / timeout / too dense / engine failure → a core-owned dialog (`recognize_*` strings) and the flow ends; the page, its ink, the session and every other extension are untouched (the debug menu only *reads* `paper.getStrokes()` and the page size; it holds no `.soil` handle). The model and the model-present flag are the extension's own state (its sandbox, ML Kit-managed): they survive `pm disable-user` / `pm enable` (M1 checklist #9 — no re-download) and `am force-stop` (checklist #8 — auto-create, READY at once via the flag), and are removed only by the extension's uninstall. A `RecognizerNotReadyException` after READY was reported (extension restarted mid-flow) is a dialog, not a retry loop; one activity-owned busy guard drops a second tap for the whole flow. **Nothing downloads without consent:** only `prepare()` starts the chain, and the host calls it only from the Download button. | `ExtensionRegistry.handwritingRecognizer`, `NotebookDebugMenu` (sheet build, `recognizeBusy`, every failure branch), `ModelManager` (prefs flag, `onEngineFailure`), `HandwritingRecognizerService.onCreate` |
 
 ## Rules for adding a future extension point (write-once, follow later)
 
@@ -649,7 +712,7 @@ whenever an extension point is added or a contract field changes.
 5. Nothing crosses the boundary that the call doesn't need — never keys, files, index rows.
 
 Followed by NotebookNamer (N1): `NOTEBOOK_NAMER` + `INotebookNamer` + `SchemeField` in
-`:extension-api`; `ExtensionRegistry.notebookNamer` + `NamerClient`; the core owns every toast; the
+`:extension-api`; `ExtensionRegistry.notebookNamer` + `NamerClient`; the core owns every dialog / toast; the
 one recorded widening of rule 5 is folder UUID + sibling notebook names; audit rows 10–13 (N2).
 
 ### Adding a data-holding point (arc 2 pattern)
@@ -672,6 +735,53 @@ A point whose extension must remember something between calls follows the five r
 11. **Pre-warm at library resume** if the point is on a hot path (`LibraryActivity.refreshNamer` opens
     the namer's store on IO once the ref is known) — deferred: generalise to every discovered
     extension when Templates gains a store (`PAPER_NAMING_PLAN.md` §Deferred).
+
+Followed by HandwritingRecognizer (M0–M2): `HANDWRITING_RECOGNIZER` + `IHandwritingRecognizer` +
+`InkStroke` + `RecognizerStatus` in `:extension-api`; `ExtensionRegistry.handwritingRecognizer` +
+`RecognizerClient` over the shared `ExtensionBinder`; every dialog is the debug menu's; the recorded
+widening of rule 5 is bare x/y geometry + area/page size + ≤ 20 chars of pre-context; audit rows
+14–17 (M2). It is stateless, so rules 6–11 do not apply; it is the first **capability point**, so:
+
+### Adding a capability point (arc 3 pattern)
+
+A point whose implementation the core lends to *other* extensions ("an extension for other
+extensions") follows rules 1–5 **plus**:
+
+12. **The core is the only binder of the provider.** Its client (`RecognizerClient`) is bind-per-
+    operation over `ExtensionBinder` like every other; extensions never discover or bind each other,
+    and the core never exports a service for them.
+13. **The capability's AIDL is the interface both the provider and the core's future proxy implement**
+    — no second contract type. Design the interface so it can be lent as-is: stateless, bare-geometry
+    (or equally bare) arguments, plain results, `status()`/`prepare()` for anything the provider must
+    acquire, and Binder-marshalable exceptions only (`SecurityException`, `IllegalArgumentException`,
+    `IllegalStateException`).
+14. **Caps run on the host before the bind and are re-checked by the provider** (`InkCaps` /
+    `checkInk` — row 15). A consumer's proxy re-applies the same caps inward before forwarding.
+15. **Engine assets may live in the provider's own sandbox** (the model + its "present" flag) — the
+    recorded exception to rule 6: engine assets are not user data and exceed the store cap. User data
+    still goes to the host store only.
+16. **The core stores no result of the capability** (row 16) — a consumer that wants to keep results
+    keeps them in *its* host store, through *its* point.
+17. **Lend it only through the proxy recipe below** — built with the first consumer, never before.
+
+### The capability pattern (recorded in arc 3, built with the first consumer)
+
+A **capability point** is an extension point whose implementation the core lends to *other*
+extensions. The recipe, fixed by arc 3 so a consumer arc can't drift from it:
+
+- The capability's AIDL is the interface both the provider **and** the core's proxy implement.
+- The core is the only binder of the provider (`RecognizerClient`). A consumer point that needs the
+  capability takes it as an **in-parameter** (`IHandwritingRecognizer recognizer`) on the calls that
+  need it — exactly like `IExtensionStore`.
+- The consumer client mints a **`RecognizerProxyBinder(client, extUid)`** per bind, uid-gated and
+  revocable (`ExtensionStoreGate` shape), which re-applies the `MAX_INK_*` caps inward and forwards to
+  `RecognizerClient` (own bind, own timeouts, own signature check) — a proxy call is therefore two
+  hops and must fit inside the consumer call's timeout; the consumer's timeout is sized accordingly.
+- No provider installed → the consumer receives `null` for the parameter (AIDL allows a null
+  interface) and must cope; the core never fakes a recognizer.
+- Shape in detail (from `PAPER_RECOGNITION_PLAN.md` §Deferred): mint in the consumer client's `call`,
+  revoke in the unbind `finally`, gate on `getCallingUid() == extUid && !revoked`, re-apply
+  `MAX_INK_*` inward, then forward through `RecognizerClient` with the same timeouts.
 
 ## Writing an extension
 
@@ -726,6 +836,32 @@ consumed in-project — see `:ext-templates` for the reference implementation).
    - Your data is encrypted at rest under the user's global key, lives in the **host's** files dir,
      and **survives your uninstall** — the user (via a future Extensions UI), not you, decides when it
      is removed. Debug (`.dev`) and release builds of your extension get separate stores.
+8. **Implementing a recognizer** (`HANDWRITING_RECOGNIZER` — `IHandwritingRecognizer`, see
+   `:ext-mlkit` for the reference implementation):
+   - **Bare geometry in, text out.** You receive `List<InkStroke>` (parallel x/y `FloatArray`s in the
+     caller's px space — no ids, no time, no pressure, no colour), a writing-area or page size, and for
+     `recognizeInk` up to 20 chars of pre-context. `recognizeInk` recognizes one writing area (no
+     layout analysis); `recognizePage` receives a whole page and **you** segment it into lines and
+     paragraphs and chain context yourself (the core has no HWR/layout knowledge). Return plain text
+     (`""` if nothing) — lines joined by `\n`, paragraphs by a blank line.
+   - **`status()` / `prepare()` protocol.** `status()` must be fast and never wait on your engine
+     (`READY` / `NEEDS_DOWNLOAD` / `DOWNLOADING` — everything in flight — / `UNAVAILABLE`); `prepare()`
+     starts acquiring what you need (a model download) and returns at once — idempotent. The recognize
+     calls may arrive before you are READY: wait for an acquisition **already in flight** inside the
+     caller's timeout (10 s ink · 30 s page — leave room for the recognition itself, and stop at your
+     own deadline just under it) — never start a download from a recognize call — and throw
+     `IllegalStateException(ExtensionContract.RECOGNIZER_NOT_READY)` (that exact message) if you cannot
+     become ready in time; any other `IllegalStateException` for an engine failure or timeout; over the
+     `MAX_INK_*` caps → `IllegalArgumentException`. Only those two plus `SecurityException` cross
+     Binder intact. `prepare()` is the **only** call that may start a download — the host asks the user
+     first. Handle single-point strokes (pen taps are visible dots).
+   - **Engine assets live in your own sandbox** — the one exception to "extension data goes to the
+     host store": a downloaded model or bundled weights are not user data. Anything the *user* owns
+     still goes to the host store (this point passes none).
+   - **Never log recognized text** — counts and durations only, on your side as on the core's. Every
+     stub method still begins with `HostCallerCheck.enforce`.
+   - You are a **capability provider**: the core binds you and, in a later arc, lends you to consumer
+     extensions through its own proxy — you never see them, and they never bind you.
 
 ---
 

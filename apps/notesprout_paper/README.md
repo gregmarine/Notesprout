@@ -41,9 +41,11 @@ paper notebooks.
   Without it every entry point is absent and names are the standard `yyyyMMdd_HHmmss`. The third is
   **ML Kit** (`:ext-mlkit`): the first implementation of the engine-neutral *handwriting recognizer*
   capability point — bare stroke geometry in, plain text out, the ~20 MB `en-US` model downloaded on
-  first use into the extension's own sandbox. Nothing user-visible calls it yet (a debug-build-only
-  "Recognize page" action arrives in arc 3 / M1; later extensions will consume it *through the core*).
-  The contract lives in `:extension-api`; see `docs/extensions.md`.
+  first use into the extension's own sandbox. Nothing user-visible calls it yet — the only caller is
+  the debug build's notebook ⋯ → "Recognize page (ML Kit)" (result in a dialog, stored nowhere);
+  later extensions will consume it *through the core*, never by binding it themselves. The contract
+  lives in `:extension-api`; see `docs/extensions.md` (§"The capability pattern", boundary-audit rows
+  14–17).
 
 ## What Paper is **not** (v0)
 

@@ -83,6 +83,7 @@
     <string name="new_folder_duplicate">A folder with that name already exists here</string>
     <string name="naming_save_failed">Folder created — naming scheme not saved</string>
     <string name="naming_unavailable">Naming extension didn\'t respond</string>
+    <string name="naming_problem_title">Naming scheme</string>
     <string name="ok">OK</string>
     <string name="rename_title">Rename</string>
     <string name="rename_hint">Name</string>
@@ -101,6 +102,8 @@
     <string name="move_here">Move here</string>
     <string name="move_collision_notebook">A notebook named \"%1$s\" already exists here.</string>
     <string name="move_collision_folder">A folder named \"%1$s\" already exists here.</string>
+    <string name="move_problem_title">Can\'t move here</string>
+    <string name="move_into_self">Cannot move a folder into itself</string>
 
     <!-- Sort -->
     <string name="sort_name_asc">Name ↑</string>

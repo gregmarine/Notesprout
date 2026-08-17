@@ -9,7 +9,7 @@ open class ExtensionCallException(message: String, cause: Throwable? = null) : E
 
 /**
  * Bind-per-operation client for one template provider over the shared [ExtensionBinder]: bind
- * (`BIND_AUTO_CREATE`), await the connection (≤ [BIND_TIMEOUT_MS]), run the AIDL call on IO under a
+ * (`BIND_AUTO_CREATE`), await the connection (≤ `ExtensionBinder.BIND_TIMEOUT_MS`), run the AIDL call on IO under a
  * timeout, **unbind in `finally`**. The core never holds a binding across screens. Every failure — no
  * connection, timeout, `RemoteException`, `SecurityException`, bad payload — surfaces as one
  * [ExtensionCallException]. This class owns the payload rules (mime, byte cap, exact size).
@@ -79,7 +79,6 @@ class TemplateProviderClient(context: Context, private val ref: ProviderRef) {
 
     companion object {
         private const val TAG = "TemplateProviderClient"
-        const val BIND_TIMEOUT_MS = ExtensionBinder.BIND_TIMEOUT_MS
         const val LIST_TIMEOUT_MS = 2_000L
         /** E-ink CPUs: a full-page lossless WEBP encode is the slow part. */
         const val RENDER_TIMEOUT_MS = 15_000L

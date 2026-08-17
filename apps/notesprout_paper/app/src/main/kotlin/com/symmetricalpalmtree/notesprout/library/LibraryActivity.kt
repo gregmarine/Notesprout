@@ -7,7 +7,6 @@ import android.view.View
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -526,7 +525,7 @@ class LibraryActivity : AppCompatActivity() {
                 val name = input.text.toString().trim()
                 val err = NewNotebookActivity.validateName(name)
                 if (err != null) {
-                    Toast.makeText(this, err, Toast.LENGTH_SHORT).show()
+                    Dialogs.problem(this, R.string.new_notebook_name_problem_title, err)
                     return@setOnClickListener
                 }
                 val scheme = schemeViews?.input?.text?.toString()?.trim().orEmpty()
@@ -537,7 +536,7 @@ class LibraryActivity : AppCompatActivity() {
                 lifecycleScope.launch {
                     try {
                         if (repo.nameTaken(folderId, ObjectType.FOLDER, name)) {
-                            Toast.makeText(this@LibraryActivity, R.string.new_folder_duplicate, Toast.LENGTH_SHORT).show()
+                            Dialogs.problem(this@LibraryActivity, R.string.new_notebook_name_problem_title, R.string.new_folder_duplicate)
                             return@launch
                         }
                         if (client != null) {
@@ -549,7 +548,7 @@ class LibraryActivity : AppCompatActivity() {
                                 getString(R.string.naming_unavailable)
                             }
                             if (err != null) {
-                                Toast.makeText(this@LibraryActivity, err, Toast.LENGTH_SHORT).show()
+                                Dialogs.problem(this@LibraryActivity, R.string.naming_problem_title, err)
                                 return@launch
                             }
                         }
@@ -560,7 +559,7 @@ class LibraryActivity : AppCompatActivity() {
                             } catch (e: ExtensionCallException) {
                                 // The folder exists either way; the user can retry from long-press.
                                 Slog.d(TAG) { "save scheme failed: ${e.message}" }
-                                Toast.makeText(this@LibraryActivity, R.string.naming_save_failed, Toast.LENGTH_SHORT).show()
+                                Dialogs.problem(this@LibraryActivity, R.string.naming_problem_title, R.string.naming_save_failed)
                             }
                         }
                         dialog.dismiss()
@@ -576,7 +575,7 @@ class LibraryActivity : AppCompatActivity() {
 
     // ── Naming scheme (folder long-press) ────────────────────────────────────
 
-    /** Field description + current scheme are fetched before the dialog shows; failure → toast, no dialog. */
+    /** Field description + current scheme are fetched before the dialog shows; failure → problem dialog, no scheme dialog. */
     private fun openSchemeDialog(s: ObjectSummary) {
         val ref = namerRef ?: return
         if (namerBusy) return
@@ -587,7 +586,7 @@ class LibraryActivity : AppCompatActivity() {
                 client.describeField() to client.currentScheme(s.id)
             } catch (e: ExtensionCallException) {
                 Slog.d(TAG) { "scheme dialog open failed: ${e.message}" }
-                Toast.makeText(this@LibraryActivity, R.string.naming_unavailable, Toast.LENGTH_SHORT).show()
+                Dialogs.problem(this@LibraryActivity, R.string.naming_problem_title, R.string.naming_unavailable)
                 return@launch
             } finally {
                 namerBusy = false
@@ -631,13 +630,13 @@ class LibraryActivity : AppCompatActivity() {
                 if (name == s.name) { dialog.dismiss(); return@setOnClickListener }
                 val err = NewNotebookActivity.validateName(name)
                 if (err != null) {
-                    Toast.makeText(this, err, Toast.LENGTH_SHORT).show()
+                    Dialogs.problem(this, R.string.new_notebook_name_problem_title, err)
                     return@setOnClickListener
                 }
                 lifecycleScope.launch {
                     if (repo.nameTaken(s.parentId, s.type, name, s.id)) {
                         val msgRes = if (s.type == ObjectType.NOTEBOOK) R.string.rename_duplicate_notebook else R.string.rename_duplicate_folder
-                        Toast.makeText(this@LibraryActivity, getString(msgRes, name), Toast.LENGTH_SHORT).show()
+                        Dialogs.problem(this@LibraryActivity, R.string.new_notebook_name_problem_title, getString(msgRes, name))
                         return@launch
                     }
                     repo.rename(s.id, name)

@@ -9,12 +9,12 @@ import android.view.View
 import android.widget.FrameLayout
 import android.widget.GridLayout
 import android.widget.TextView
-import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.TooltipCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.symmetricalpalmtree.notesprout.R
+import com.symmetricalpalmtree.notesprout.core.Dialogs
 import com.symmetricalpalmtree.notesprout.core.IndexGuard
 import com.symmetricalpalmtree.notesprout.core.TopGuard
 import com.symmetricalpalmtree.notesprout.data.index.IndexRepository
@@ -214,12 +214,12 @@ class FolderPickerActivity : AppCompatActivity() {
             if (repo.nameTaken(currentFolderId, movingType, movingName, movingId)) {
                 val msgRes = if (movingType == ObjectType.NOTEBOOK)
                     R.string.move_collision_notebook else R.string.move_collision_folder
-                Toast.makeText(this@FolderPickerActivity, getString(msgRes, movingName), Toast.LENGTH_SHORT).show()
+                Dialogs.problem(this@FolderPickerActivity, R.string.move_problem_title, getString(msgRes, movingName))
                 return@launch
             }
             if (movingType == ObjectType.FOLDER && currentFolderId != null) {
                 if (repo.isSelfOrDescendant(currentFolderId, movingId)) {
-                    Toast.makeText(this@FolderPickerActivity, "Cannot move a folder into itself", Toast.LENGTH_SHORT).show()
+                    Dialogs.problem(this@FolderPickerActivity, R.string.move_problem_title, R.string.move_into_self)
                     return@launch
                 }
             }

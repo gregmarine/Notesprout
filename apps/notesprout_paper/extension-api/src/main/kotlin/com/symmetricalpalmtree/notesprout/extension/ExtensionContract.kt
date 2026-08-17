@@ -68,6 +68,14 @@ object ExtensionContract {
     /** Host-side cap on the text a recognize call returns (chars); the rest is dropped. */
     const val MAX_RECOGNIZED_CHARS: Int = 20_000
 
+    /**
+     * The exact message of the `IllegalStateException` a recognizer throws from `recognize*` when it
+     * could not become READY within the call (still acquiring its model, or nothing acquired yet). The
+     * host types that one case ("still downloading"); any other `IllegalStateException` is an engine
+     * failure. Recognizers must use this constant — the host compares the message, not a substring.
+     */
+    const val RECOGNIZER_NOT_READY: String = "recognizer not ready"
+
     /** Extension-namespaced template identity: `"<extension package>:<template id>"`. */
     fun templateIdentity(pkg: String, id: String): String = "$pkg:$id"
 

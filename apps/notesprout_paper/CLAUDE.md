@@ -8,10 +8,10 @@ global-index model, global encryption model, and e-ink design philosophy — and
 - **Plans:** `PAPER_PLAN.md` (v0, complete — architecture + locked decisions), then
   `PAPER_EXTENSIONS_PLAN.md` (arc 1, complete + frozen: extension API v1 + Templates extension), then
   `PAPER_NAMING_PLAN.md` (arc 2, complete + frozen: the host-owned encrypted extension store + the
-  Naming extension), then `PAPER_RECOGNITION_PLAN.md` (**arc 3, M0 + M1 ✅ 2026-08-17, M2 ⬜**: the
+  Naming extension), then `PAPER_RECOGNITION_PLAN.md` (arc 3, complete + frozen 2026-08-17: the
   engine-neutral `HANDWRITING_RECOGNIZER` capability point + the ML Kit extension `NSE · ML Kit`,
   debug-only "Recognize page" test surface) — read all four top-to-bottom at the start of every
-  session; the next `⬜` phase is the work
+  session; **no next arc is planned — ask before starting one**
 - **Package / applicationId:** `com.symmetricalpalmtree.notesprout` (debug: `.dev` suffix)
 - **Launcher label:** "Notesprout Paper" (debug: "Notesprout Paper Dev")
 
@@ -87,14 +87,28 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   **`com.google.mlkit:digital-ink-recognition` lives in `:ext-mlkit` only** — never `:app` or
   `:extension-api`. The model lives in the extension's own sandbox (the recorded exception to
   "extension data goes to the host store" — engine assets are not user data). `status()` →
-  `prepare()` → `recognize*` (M1: `status()` never blocks; `recognize*` waits for readiness inside the
-  host's timeout and throws `IllegalStateException` only if it can't). Host side (M1): **one shared
+  `prepare()` → `recognize*` (M1: `status()` never blocks; `recognize*` waits for an acquisition
+  already in flight inside the host's timeout and throws `IllegalStateException` only if it can't —
+  M2: with the exact message `ExtensionContract.RECOGNIZER_NOT_READY`; **only `prepare()` may start a
+  download** — the host asks first; the extension stops at its own budget just under the host's
+  timeout). Host side (M1): **one shared
   bind path `ExtensionBinder.call`** for all three clients; `RecognizerClient` + `InkCaps` (caps before
   the bind); the notebook debug ⋯ owns the model-download dialog flow (offline pre-check via
   `core/Connectivity`). **Recognized text is never logged on either side** — counts + durations only.
+  M2 froze it: boundary-audit rows 14–17 (`docs/extensions.md`), the capability-point rules 12–17 +
+  §"The capability pattern" (the proxy recipe — `RecognizerProxyBinder`, built only with the first
+  consumer point, never before), and the "Writing an extension" recognizer paragraph. **Dots** (M2
+  addendum): the ML Kit extension rounds tiny strokes and forces a trailing baseline dot to `.` — see
+  `docs/extensions.md` §"The ML Kit extension"; it is the extension's heuristic, the core knows
+  nothing of it. **Logging in
+  extension modules:** `Slog` lives in `:app` and is unreachable from `:ext-*`; the recorded
+  equivalent there is `if (BuildConfig.DEBUG) Log.d(...)` (never text — counts + durations).
 - **Toast vs. dialog:** a toast only confirms something that already happened ("copied"); anything
   the user must notice or act on — why a tap did nothing, a failure, a one-time download — is an
-  `AlertDialog` via `Dialogs.style` (e-ink: a toast is easy to miss and reads as "broken").
+  `AlertDialog` (e-ink: a toast is easy to miss and reads as "broken"). The one helper is
+  `Dialogs.problem(activity, title, message)` (`core/Dialogs.kt`) — use it, don't hand-roll; the
+  library, New-notebook, folder-picker and notebook-debug screens all go through it (M2 swept the
+  arc-2 namer / name / move toasts).
 - **Extension boundary (frozen in E2):** nothing but what a call needs crosses outward (templates: id +
   page geometry + dpi — never keys, paths, ids, names, strokes); everything inward is untrusted. Adding
   an extension point follows `docs/extensions.md` §"Rules for adding a future extension point" and adds

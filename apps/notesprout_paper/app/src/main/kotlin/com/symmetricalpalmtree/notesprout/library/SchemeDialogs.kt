@@ -5,7 +5,6 @@ import android.text.InputType
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -66,9 +65,9 @@ object SchemeDialogs {
 
     /**
      * The folder long-press dialog: [field] + the folder's [current] scheme (both fetched by the caller
-     * **before** this shows). OK → blank clears; otherwise validate (error → toast, dialog stays) then
-     * save. Any failure to reach the extension → [R.string.naming_unavailable] toast; the dialog stays
-     * so the text isn't lost.
+     * **before** this shows). OK → blank clears; otherwise validate (error → problem dialog, this dialog
+     * stays) then save. Any failure to reach the extension → [R.string.naming_unavailable] problem
+     * dialog; this dialog stays so the text isn't lost.
      */
     fun showSchemeDialog(
         activity: AppCompatActivity,
@@ -102,14 +101,14 @@ object SchemeDialogs {
                     try {
                         val err = if (scheme.isEmpty()) null else client.validate(scheme)
                         if (err != null) {
-                            Toast.makeText(activity, err, Toast.LENGTH_SHORT).show()
+                            Dialogs.problem(activity, R.string.naming_problem_title, err)
                             return@launch
                         }
                         client.save(folderId, scheme)
                         dialog.dismiss()
                     } catch (e: ExtensionCallException) {
                         Slog.d(TAG) { "scheme dialog: ${e.message}" }
-                        Toast.makeText(activity, R.string.naming_unavailable, Toast.LENGTH_SHORT).show()
+                        Dialogs.problem(activity, R.string.naming_problem_title, R.string.naming_unavailable)
                     } finally {
                         ok.isClickable = true
                     }

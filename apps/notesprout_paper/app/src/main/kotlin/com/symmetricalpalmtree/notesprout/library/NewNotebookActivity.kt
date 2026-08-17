@@ -6,7 +6,6 @@ import android.content.Intent
 import android.os.Bundle
 import android.widget.RadioButton
 import android.widget.TextView
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.TooltipCompat
 import androidx.core.view.isVisible
@@ -144,16 +143,7 @@ class NewNotebookActivity : AppCompatActivity() {
      */
     private fun showNameProblem(message: String) = showProblem(getString(R.string.new_notebook_name_problem_title), message)
 
-    private fun showProblem(title: String, message: String) {
-        if (isFinishing || isDestroyed) return
-        Dialogs.style(
-            AlertDialog.Builder(this)
-                .setTitle(title)
-                .setMessage(message)
-                .setPositiveButton(R.string.ok, null)
-                .create()
-        ).show()
-    }
+    private fun showProblem(title: String, message: String) = Dialogs.problem(this, title, message)
 
     private fun attemptCreate() {
         if (creating) return

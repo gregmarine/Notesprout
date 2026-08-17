@@ -9,7 +9,7 @@
 > store + Naming extension, frozen) and both `CLAUDE.md` files. `docs/extensions.md` is the subsystem
 > reference all three arcs write into.
 >
-> **Status: M0 ✅ (2026-08-17, user-verified SNN + NA5C) · M1 ✅ (2026-08-17, user-verified SNN + NA5C; MIP11 not attached) · M2 ⬜.**
+> **Status: M0 ✅ (2026-08-17, user-verified SNN + NA5C) · M1 ✅ (2026-08-17, user-verified SNN + NA5C; MIP11 not attached) · M2 ✅ (2026-08-17; automated device run SNN + NA5C + MIP11 + user-verified dot handling on SNN). ARC COMPLETE — this file is frozen.**
 
 ## Why
 
@@ -122,9 +122,8 @@ verified security paths); Opus is fine for M2. Either model follows the phase-st
 - **Restart a stale in-flight download on `prepare()`** (M1): a download interrupted mid-way stays
   "in flight" from `ModelManager`'s view until ML Kit fails it; the host's Download button then only
   re-attaches the progress dialog. Fine for the debug surface; revisit if a real feature needs it.
-- **Toast-vs-dialog sweep of arc-2 surfaces** (M1): "Naming extension didn't respond" / "Folder created
-  — naming scheme not saved" in `LibraryActivity` / `SchemeDialogs` are still toasts; the rule settled
-  in M1 (dialog for anything the user must notice) says they should be dialogs. Discuss before M2.
+- ~~**Toast-vs-dialog sweep of arc-2 surfaces**~~ — **done in M2** (`Dialogs.problem`; namer, name and
+  move problems are dialogs across the library).
 
 ## Non-goals for this arc (do not build, do not scaffold "for later")
 
@@ -554,7 +553,7 @@ docs; memory; commit + push.
 ---
 
 ### Phase M2 — Hardening, review, boundary audit, docs freeze
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (commit hash: see the follow-up commit line below; automated device run on SNN + NA5C + MIP11 2026-08-17 + user-verified dot handling on SNN)
 
 **Goal:** the recognizer point + the ML Kit extension are trustworthy enough to be the capability
 every later consumer point brokers, and the shared bind path is the one path.
@@ -595,6 +594,110 @@ every later consumer point brokers, and the shared bind path is the one path.
 v0 regression subset (create/open/write/flip, library create/rename/move/delete, cold-launch reopen).
 
 **Close-out:** status ✅ + Outcome; commit + push `paper`.
+
+**Outcome (2026-08-17):**
+- **Q&A:** Q1 freeze as built · Q2 fixes only **plus the arc-2 toast→dialog sweep** (user's choice).
+- **Toast sweep:** one helper `Dialogs.problem(activity, title, message)` (`core/Dialogs.kt`; the M1
+  helpers in `NewNotebookActivity` / `NotebookDebugMenu` now delegate to it). Converted: New-folder
+  invalid/duplicate name, namer validation error / "didn't respond" / "Folder created — naming scheme
+  not saved", scheme-dialog fetch failure + validate/unavailable, Rename invalid/duplicate name,
+  `FolderPickerActivity` move collision + move-into-self (new strings `naming_problem_title`,
+  `move_problem_title`, `move_into_self`). Left as toasts (confirmations / finishing screens):
+  "copied", `RecoveryKeyActivity` tick-first, `NotebookActivity` open-failed (+ finish), the library
+  debug store self-test result.
+- **`/code-review high 4cdf74e...HEAD`** — 10 findings + cleanups. **Fixed (9):**
+  1. *Download without consent* — M1's `onCreate` chain downloaded on the host's first `status()`
+     bind, before the "Recognition model needed → Download?" dialog (Cancel / offline pre-check were
+     cosmetic). → `ModelManager.warmUp()` (onCreate) builds the client only from the model-present
+     flag; **`prepare()` is the only thing that starts the check→download→build chain**; `awaitReady`
+     waits for a chain in flight (or the flag) and never starts one. AIDL comment updated. UX for a
+     fresh device is unchanged (dialog at once, Download → progress → recognize).
+  2. *`onEngineFailure` wiped the flag on any exception* (a slow first inference's `TimeoutException`
+     made the model look "gone" → a re-download offer for a present model). → timeouts /
+     interruptions are never engine failures; a real failure on the shortcut client **verifies** with
+     one async `isModelDownloaded` and clears the flag only on `false`.
+  3. *Process-lifetime `recognizeBusy` stuck* when the consent/offline dialog died with its activity
+     (no `onCancel`) → every later Recognize tap silently returned. → the guard is a `WeakReference`
+     to the owning activity (busy ⇔ owner alive).
+  4. *A single failed line discarded the whole page* (the original tolerated per-line failures). →
+     per-line tolerance; rethrow only if every line failed; a deadline overrun still aborts (never a
+     silent partial).
+  5. *Unrelated timeout budgets* (22 s ready wait + N × 10 s lines vs. the host's flat 30 s; the
+     orphaned Binder thread ground on). → whole-call budgets `INK_BUDGET_MS` 9.5 s / `PAGE_BUDGET_MS`
+     28 s taken at call entry; every ML Kit wait = `min(10 s, time left)`; out of time → ISE
+     "recognition timed out" (generic host dialog; the warm retry is fast). `PageText.waitFor` tested.
+  6. *Single-point strokes dropped* by the verbatim segmenter (g-paper draws pen taps; the original's
+     views never produced them). → `PageText.widenDots` promotes them to two-point strokes before
+     segmenting/ML Kit (tested, incl. through the segmenter).
+  7. *`status()` = DOWNLOADING during a purely local cold check* (no flag, model present — an M0
+     upgrade / wiped flag) → the host offered a download for a present model. → subsumed by fix 1: no
+     flag → nothing starts → `NEEDS_DOWNLOAD` → consent → `prepare()` finds it present without
+     downloading (the progress dialog counts the check).
+  8. *Poll loop coerced every failed `status()` to DOWNLOADING for the full 5-min cap.* → 5
+     consecutive failed polls → "Download failed".
+  9. *`RecognizerNotReadyException` by substring-matching "not ready".* → the contract constant
+     `ExtensionContract.RECOGNIZER_NOT_READY` (exact message; used by the service, compared by the
+     host; documented for third-party recognizers).
+  **Declined (1):** *hold one binding for the whole download poll loop* — contradicts M1's user
+  decision (bind-per-poll, no binding held across the flow); the download demonstrably survives the
+  unbind (M1) and the LRU-kill scenario is speculative. Recorded here, not in Deferred.
+  **Cleanups taken:** dead `BIND_TIMEOUT_MS` aliases removed from the three clients; the debug-menu
+  KDoc "UNAVAILABLE → toast" corrected; the `Slog`-unreachable-from-`:ext-*` exemption recorded in
+  `CLAUDE.md`. **Not taken:** the ⋯ button block twinned from `DebugMenu` (debug-only, two lines of
+  difference), `ExtensionRegistry` first-of duplication (3 lines each), the segmenter's dead filter /
+  unused `Paragraph.bounds` (verbatim port — left verbatim). Refuted by the reviewer itself:
+  namer revoke-vs-unbind ordering, "too dense" for a 0-size page, `TransactionTooLarge` at the cap,
+  `Connectivity` VALIDATED strictness, manifest comment placement.
+- **Boundary audit:** rows 14–17 written and walked against the code; rows 1/6/7 re-walked for the
+  shared `ExtensionBinder` (note above the table). `docs/extensions.md` gains "Adding a capability
+  point" (rules 12–17) + "The capability pattern" (the proxy recipe, verbatim + the Deferred shape) +
+  the "Writing an extension" recognizer paragraph; `README.md`, `CLAUDE.md`, `docs/library.md`,
+  `docs/notebook.md` updated. `:ext-mlkit` tests 15 → 18; all-module JVM green; `assembleDebug` +
+  `:app:assembleRelease` build.
+- **Installed:** SNN + NA5C + MIP11 (app + all three extensions; NA5C enable dance done — the *app*
+  package was found disabled again at the start of the automated run and re-enabled).
+- **Automated device run (2026-08-17, one Sonnet agent per device over adb + uiautomator dumps;
+  no stylus — items 4/6/11 skipped by the user's decision):**
+  - **SNN:** 1, 2, 3 (7 strokes · 4112 ms first bind), 5, 7 (offline OK), 8 (cold 4132 ms, no download
+    dialog — flag path), 9, **13 (consent path: Cancel → zero `ModelManager` lines; Download → chain
+    start → "model present (4723 ms)" → no `download start` → auto-recognize; flag restored)**, log
+    hygiene (no text, binds = unbinds, no leaked connection), 10, 14 all PASS; 10b/12a–d SKIPPED —
+    the Supernote IME is invisible to uiautomator and swallows every injected key (known trap).
+  - **NA5C:** 1, 2, 3 (12 strokes · 1758 ms), 5 (89 strokes), 7 (55 ms offline), 8 (cold 1749 ms), 9,
+    **13 (same shape: no chain on Cancel; "model present (6691 ms)", no download)**, log hygiene, 10
+    (**both** `TemplateProviderClient` pairs — list on open + render on create — seen), 10b (prefill
+    `Meeting 20260817 01`), **12a–d all PASS with the exact dialog strings** (12d via a controlled
+    same-name pair, cleaned up), 14 all PASS.
+  - **MIP11:** 1, 2, 9, 10, 10b, 12a–d, 14 PASS (typing works; exact strings); 3/5/7/8 **not
+    exercisable** — the device has no ink and no stylus in the loop, so its first-ever consent + real
+    ~20 MB download is the one item left for the user. Trap for the record: MIP11 ships
+    `log.tag=I`, which silently drops every `Log.d` — the agent set `log.tag DEBUG` for the run and
+    restored it.
+  - **MIP11 retest** (after the user wrote a page there): **3 = the real first-ever-use path PASS** —
+    "Recognition model needed" → Cancel → zero `ModelManager` activity → Download → progress counter
+    (2 s … 40 s) → download done at 42–50 s on Wi-Fi → result dialog with no further tap (31 strokes ·
+    193 ms); 7 (offline 125 ms), 8 (cold 1.7 s, no download dialog), 9, log hygiene PASS; 5 fell back
+    to the blank-page check (only one written page on the device). MIP11 trap: `log.tag` reverts to
+    `I` by itself mid-run — re-check `getprop log.tag` right before any log-dependent step.
+  - No crash-buffer entries on any device; every device left in its starting state (Wi-Fi, packages,
+    notebooks/folders, model flag).
+- **Dot handling (M2 addendum, user-requested after the "Hi." tests):** ML Kit skips a pen-tap period
+  or reads it as a comma (seen in the original app too — same x/y feed, same writing area, so it is
+  the model, not the port). Extension-side only, pure + tested (`Dots`, 4 tests): (1) **`round`** —
+  a tiny stroke (≤ 15 % of the line height both ways: periods, i-dots — commas, apostrophes, hyphens
+  are taller/wider) is redrawn as a small 12-point circle at its centre before ML Kit sees it, instead
+  of the 2–4 px lift-drag that reads as a comma tail or as zero-length ink; (2) **trailing period** —
+  if a line's right-most stroke is a tiny dot in the baseline zone (below 45 % of the band; i-dots
+  are high; slant allowance 15 % of the line height into the last letter), the text is made to end
+  in `.` (`,` → `.`, missing → appended; `. ! ? : ; …` untouched). Applied in `recognizePage` per
+  line (`recognizeInk` gets the rounding with the area height). Mid-line periods are not corrected
+  (position is not unambiguous there). **Iterated on the user's SNN page (17 lines, 130 strokes)
+  with a geometry-only debug log:** the tiny rule fixed 7 skipped periods; two *shaky* periods
+  (3 × 15 / 3 × 10 px, comma-height, ML Kit → `,`) needed a second rule — small (≤ 15 % w, ≤ 30 % h;
+  the user's real commas all exceed that), centre in the bottom 30 % of the band, no tiny stroke
+  above (i-stem guard); baseline descent measured and rejected as a discriminator. Result: every
+  written period → `.`, the three real-comma lines and the bare `Hi` untouched (user-confirmed
+  intent). Installed on all three devices; documented in `docs/extensions.md`.
 
 ---
 

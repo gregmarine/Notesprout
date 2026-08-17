@@ -73,15 +73,17 @@ below is absent when `ExtensionRegistry.notebookNamer` finds nothing (`namerRef`
   extension: "Default notebook name" / "e.g. Meeting {date} {n:2}" / "Tokens: {date} {time} {n} {n:3}.
   Leave empty for the standard name."
 - **New folder** — CREATE: name validated as before → non-blank scheme → `NamerClient.validate`
-  (extension's error text, or "Naming extension didn't respond", as a toast; dialog stays) →
-  `createFolder` → `save(folder.id, scheme)`; a save failure toasts "Folder created — naming scheme
-  not saved" and dismisses (retry from long-press). CREATE is disarmed (`isClickable = false`) while
+  (extension's error text, or "Naming extension didn't respond", as a problem dialog — `Dialogs.problem`,
+  title "Naming scheme"; the folder dialog stays) → `createFolder` → `save(folder.id, scheme)`; a save
+  failure shows the problem dialog "Folder created — naming scheme not saved" and dismisses (retry from
+  long-press). An invalid or duplicate folder name is a problem dialog too ("Can't use that name"), as
+  is a Rename problem — swept from toasts in M2 under the toast-vs-dialog rule (`docs/notebook.md`). CREATE is disarmed (`isClickable = false`) while
   that runs — a namer bind takes a beat and a second tap would pass `nameTaken` again (N2).
 - **Folder long-press → "Default notebook name…"** (Tabler `cursor-text`, before Rename): the field
-  description and the current scheme are fetched first (failure → "Naming extension didn't respond",
-  no dialog); `SchemeDialogs.showSchemeDialog` — titled with the folder name, prefilled + select-all;
-  OK → blank clears, else validate (toast + stay) → save; the extension being unreachable keeps the
-  dialog up so the text isn't lost.
+  description and the current scheme are fetched first (failure → "Naming extension didn't respond"
+  problem dialog, no scheme dialog); `SchemeDialogs.showSchemeDialog` — titled with the folder name,
+  prefilled + select-all; OK → blank clears, else validate (problem dialog + stay) → save; the
+  extension being unreachable → problem dialog, and the scheme dialog stays so the text isn't lost.
 - **+Notebook** in a folder: the default name is resolved from the extension **before**
   `NewNotebookActivity` opens (folder UUID + the listing's notebook names cross; ≤ 2 s worst case, no
   feedback — the tap takes a beat; a second tap during that beat is dropped) and travels as
@@ -109,7 +111,8 @@ excluding self.
 
 `FolderPickerActivity`: same grid showing folders only; the item being moved and its own subtree are
 not enterable. Bottom bar: pagination + "Move here". Collision check (name already exists in target
-folder) → toast, stay in picker. Self-into-self guard for folders.
+folder) → problem dialog "Can't move here", stay in picker. Self-into-self guard for folders (same
+dialog). (M2: toasts until then.)
 
 ## New notebook
 

@@ -10,14 +10,18 @@ interface IHandwritingRecognizer {
     int status();
 
     /** Start acquiring what the engine needs (model download). Returns at once; poll status().
-     *  A no-op while READY or already DOWNLOADING. Optional: recognize* start it themselves. */
+     *  A no-op while READY or already DOWNLOADING. The ONLY call that may start a download — the
+     *  host asks the user first; recognize* wait for an acquisition already in flight but never
+     *  start one (NEEDS_DOWNLOAD → call prepare()). */
     void prepare();
 
     /** Recognize one writing area (no layout analysis). [strokes] in the area's px space,
      *  [areaWidth]/[areaHeight] > 0, [preContext] = the text just before this ink ("" if none).
-     *  Returns the top candidate ("" if none). If not READY, waits for the engine to become ready
-     *  within the caller's timeout; throws IllegalStateException only if it cannot (or the engine
-     *  fails), IllegalArgumentException over the MAX_INK_* caps. */
+     *  Returns the top candidate ("" if none). If not READY but an acquisition is in flight, waits
+     *  for it within the caller's timeout; throws IllegalStateException with message
+     *  ExtensionContract.RECOGNIZER_NOT_READY if it cannot become ready (or nothing was prepared),
+     *  any other IllegalStateException on an engine failure / timeout, IllegalArgumentException over
+     *  the MAX_INK_* caps. */
     String recognizeInk(in List<InkStroke> strokes, float areaWidth, float areaHeight, String preContext);
 
     /** Recognize a whole page: the engine finds lines / paragraphs itself and chains context.
