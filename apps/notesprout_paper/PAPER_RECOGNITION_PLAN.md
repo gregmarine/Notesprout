@@ -9,7 +9,7 @@
 > store + Naming extension, frozen) and both `CLAUDE.md` files. `docs/extensions.md` is the subsystem
 > reference all three arcs write into.
 >
-> **Status: M0 ✅ (2026-08-17, user-verified SNN + NA5C) · M1 ⬜ · M2 ⬜.**
+> **Status: M0 ✅ (2026-08-17, user-verified SNN + NA5C) · M1 ✅ (2026-08-17, user-verified SNN + NA5C; MIP11 not attached) · M2 ⬜.**
 
 ## Why
 
@@ -115,6 +115,16 @@ verified security paths); Opus is fine for M2. Either model follows the phase-st
 - **A user-facing recognition feature** (page text, search, "copy page as text") — a later arc; this
   arc's only caller is the debug ⋯.
 - **Store pre-warm generalisation / fewer namer binds** — still deferred from arc 2 (unchanged).
+- **Recognizer warm-up for consumers** (recorded M1): a cold extension process costs ≈ 1.9 s (process
+  + client) **plus** the first inference, which is where ML Kit loads the model (4.5 s Nomad / 1.8 s
+  NA5C). A consumer that wants a snappy first result must bind early **and** the extension would need
+  a warm-up inference at start (a dot stroke after `buildClient`) — not built; the debug ⋯ accepts ~6 s.
+- **Restart a stale in-flight download on `prepare()`** (M1): a download interrupted mid-way stays
+  "in flight" from `ModelManager`'s view until ML Kit fails it; the host's Download button then only
+  re-attaches the progress dialog. Fine for the debug surface; revisit if a real feature needs it.
+- **Toast-vs-dialog sweep of arc-2 surfaces** (M1): "Naming extension didn't respond" / "Folder created
+  — naming scheme not saved" in `LibraryActivity` / `SchemeDialogs` are still toasts; the rule settled
+  in M1 (dialog for anything the user must notice) says they should be dialogs. Discuss before M2.
 
 ## Non-goals for this arc (do not build, do not scaffold "for later")
 
@@ -424,7 +434,7 @@ from an adb-driven `am start-service`/`bindService` probe — else deferred to M
 ---
 
 ### Phase M1 — Host: shared bind path, RecognizerClient, notebook debug ⋯ + result dialog
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (commit TBD; user-verified SNN + NA5C 2026-08-17 — MIP11 not attached, covered by M2's full re-run)
 
 **Goal:** on a debug build with `NSE · ML Kit` installed, the notebook screen's ⋯ → "Recognize page
 (ML Kit)" downloads the model on first use and then shows the current page's recognized text in a
@@ -470,9 +480,10 @@ exactly as before on the shared bind path.
   Naming installed):
   1. Open a notebook: the top bar shows the ⋯ at the end; pen ink never lands under it.
   2. ⋯ → "Recognize page (ML Kit)" on a **blank page** → toast "Nothing to recognize".
-  3. Write one line ("hello world") → ⋯ → Recognize → first time: toast "Downloading recognition
-     model…" (device on Wi-Fi). Wait ~1 min → Recognize again → toast "Recognizing…" → dialog with the
-     text (expect `hello world` or close), Copy works (paste somewhere), OK dismisses.
+  3. Write one line ("hello world") → ⋯ → Recognize → first time (device on Wi-Fi): dialog
+     "Recognition model needed" → **Download** → progress dialog with an elapsed-time counter → closes
+     by itself → "Recognizing…" popup → dialog with the text (expect `hello world` or close), Copy
+     works (paste somewhere), OK dismisses. **No second tap.** (Amended in M1 — see Outcome.)
   4. Write three lines with a blank-line gap before the third → Recognize → three lines, a blank
      line before the third.
   5. Flip to a new page, write a word → Recognize → only that page's word.
@@ -492,6 +503,53 @@ exactly as before on the shared bind path.
 
 **Close-out:** status ✅ + Outcome (timings per device, download-after-unbind finding, e-ink notes);
 docs; memory; commit + push.
+
+---
+
+**Outcome (2026-08-17):**
+- **Q&A:** all five recommended defaults taken at phase start (prepare + toast · title with N strokes
+  · T ms · session page size · all three clients on `ExtensionBinder` with per-client tags · plan
+  wording). **Q1 was then amended twice on the device**, with the user:
+  1. *Finding:* M0's `status()` blocked ≤ 1.5 s on ML Kit's `isModelDownloaded` and reported a timeout
+     as `UNAVAILABLE`; on the Nomad the first such check in a fresh process took **~75 s** (later runs
+     26–28 s; ~4.6 s once the model exists), so the first taps said "didn't respond" / "unavailable"
+     for a model that was one **6 s** download away. → `ModelManager` became **one async ensure-ready
+     chain** (check → download → build) started on the service's `onCreate` and by `prepare()`;
+     `status()` never blocks; the recognize calls **wait for readiness** inside the host's timeout
+     (22 s page / 6 s ink) — the AIDL comment was softened accordingly ("waits, throws only if it
+     cannot become ready in time").
+  2. *UX:* a toast cannot carry a minute-long one-time event ("it feels like the app isn't doing
+     anything"). → the **model dialog flow**: "Recognition model needed" (Download / Cancel; offline
+     pre-check via `Connectivity.isOnline` — ML Kit's downloader hangs offline, no error in >1 min) →
+     progress dialog with an elapsed-time counter (2 s refresh, e-ink-safe indeterminate; Cancel hides
+     it only; "Waiting for a network connection…" + 30 s offline give-up) → auto-recognize on READY.
+     Then **model-present memory** in the extension's own prefs so a fresh process is READY at once
+     (without it, a cold process reported `DOWNLOADING` during the check and the host offered a
+     download for a model already on disk — checklist #8 caught it). Then **"Recognizing…" as an
+     Opening-style popup**, and every "why nothing happened" message as a **dialog** (rule recorded in
+     `docs/notebook.md`; also applied to `NewNotebookActivity`'s taken/invalid-name and template
+     failures — the taken-name toast was missed during checklist #10 and looked like a failed create).
+- **Built (host):** `ExtensionBinder` (all three clients on it, no behaviour change; the namer's store
+  binder is revoked in the client's own `finally` right after the shared unbind), `RecognizerClient` +
+  `RecognizerNotReadyException` + `InkCaps` (9 tests) + `InkTooLargeException`,
+  `ExtensionRegistry.handwritingRecognizer`, manifest query + `ACCESS_NETWORK_STATE`,
+  `notebook/InkPayload` + `RecognizeContext` (4 tests), `core/Connectivity`, `NotebookDebugMenu`
+  (+ release twin), `topBarRow` id, strings. **Extension:** `ModelManager` chain + `awaitReady` +
+  model-present flag + `onEngineFailure`; service `onCreate` warm-up + readiness waits.
+- **Download-after-unbind:** the download **survives** the host's unbind (the extension process stayed
+  cached across every unbind — same pid for minutes; the chain also continues while the progress
+  dialog is cancelled). No mitigation needed.
+- **Timings:** warm page call ≈ 0.5 s (Nomad) / cold extension process ≈ 6 s Nomad, ≈ 4 s NA5C
+  (first inference loads the model); model download 6 s on Wi-Fi; ML Kit's cold `isModelDownloaded`
+  75 s → 28 s → 4.6 s across runs (network-bound the first time).
+- **Device checklist:** items 1–10 pass on SNN and NA5C (BOOX re-disabled the *app* after two of the
+  installs — the standing trap; the enable dance fixed it). Unhappy paths on SNN: offline before
+  Download → offline dialog; offline mid-download → waiting message → "Download failed" at 30 s;
+  Cancel → later Recognize resumes. Log check on both: one bind/unbind per call, counts + durations
+  only, **no recognized text**, no `leaked ServiceConnection`. MIP11 was not attached — M2's full
+  re-run covers it.
+- **Deferred from M1:** see the Deferred list (consumer warm-up, stale-download restart, arc-2
+  toast sweep).
 
 ---
 

@@ -6,13 +6,14 @@ import android.content.Intent
 import android.os.Bundle
 import android.widget.RadioButton
 import android.widget.TextView
-import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.TooltipCompat
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
 import com.symmetricalpalmtree.notesprout.R
 import com.symmetricalpalmtree.notesprout.core.IndexGuard
+import com.symmetricalpalmtree.notesprout.core.Dialogs
 import com.symmetricalpalmtree.notesprout.core.Slog
 import com.symmetricalpalmtree.notesprout.core.TopGuard
 import com.symmetricalpalmtree.notesprout.crypto.KeySession
@@ -137,12 +138,29 @@ class NewNotebookActivity : AppCompatActivity() {
         return binding.templateGroup.findViewById<RadioButton>(id)?.tag as? TemplateChoice
     }
 
+    /**
+     * A name the screen won't accept (rule or duplicate) is a dialog, not a toast: CREATE was tapped
+     * and nothing happened — a toast is easy to miss on e-ink and reads as "creation failed".
+     */
+    private fun showNameProblem(message: String) = showProblem(getString(R.string.new_notebook_name_problem_title), message)
+
+    private fun showProblem(title: String, message: String) {
+        if (isFinishing || isDestroyed) return
+        Dialogs.style(
+            AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(message)
+                .setPositiveButton(R.string.ok, null)
+                .create()
+        ).show()
+    }
+
     private fun attemptCreate() {
         if (creating) return
         val name = binding.nameField.text.toString().trim()
         val err = validateName(name)
         if (err != null) {
-            Toast.makeText(this, err, Toast.LENGTH_SHORT).show()
+            showNameProblem(err)
             return
         }
         creating = true
@@ -152,7 +170,7 @@ class NewNotebookActivity : AppCompatActivity() {
         lifecycleScope.launch {
             if (repo.nameTaken(parentFolderId, ObjectType.NOTEBOOK, name)) {
                 resetCreateButton()
-                Toast.makeText(this@NewNotebookActivity, R.string.new_notebook_duplicate, Toast.LENGTH_SHORT).show()
+                showNameProblem(getString(R.string.new_notebook_duplicate))
                 return@launch
             }
             // Render BEFORE any file is created. On failure stay on the screen — never silently
@@ -168,7 +186,7 @@ class NewNotebookActivity : AppCompatActivity() {
                 }
                 if (webp == null || webp.isEmpty()) {
                     resetCreateButton()
-                    Toast.makeText(this@NewNotebookActivity, R.string.new_notebook_template_failed, Toast.LENGTH_SHORT).show()
+                    showProblem(getString(R.string.new_notebook_template_failed_title), getString(R.string.new_notebook_template_failed))
                     return@launch
                 }
             }

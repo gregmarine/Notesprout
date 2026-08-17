@@ -5,17 +5,19 @@ package com.symmetricalpalmtree.notesprout.extension;
 import com.symmetricalpalmtree.notesprout.extension.InkStroke;
 
 interface IHandwritingRecognizer {
-    /** One of RecognizerStatus.* — READY / NEEDS_DOWNLOAD / DOWNLOADING / UNAVAILABLE. Fast. */
+    /** One of RecognizerStatus.* — READY / NEEDS_DOWNLOAD / DOWNLOADING / UNAVAILABLE. Fast; never
+     *  waits on the engine. DOWNLOADING covers everything in flight (checking, downloading, loading). */
     int status();
 
     /** Start acquiring what the engine needs (model download). Returns at once; poll status().
-     *  A no-op while READY or already DOWNLOADING. */
+     *  A no-op while READY or already DOWNLOADING. Optional: recognize* start it themselves. */
     void prepare();
 
     /** Recognize one writing area (no layout analysis). [strokes] in the area's px space,
      *  [areaWidth]/[areaHeight] > 0, [preContext] = the text just before this ink ("" if none).
-     *  Returns the top candidate ("" if none). Throws IllegalStateException if status() != READY,
-     *  IllegalArgumentException over the MAX_INK_* caps. */
+     *  Returns the top candidate ("" if none). If not READY, waits for the engine to become ready
+     *  within the caller's timeout; throws IllegalStateException only if it cannot (or the engine
+     *  fails), IllegalArgumentException over the MAX_INK_* caps. */
     String recognizeInk(in List<InkStroke> strokes, float areaWidth, float areaHeight, String preContext);
 
     /** Recognize a whole page: the engine finds lines / paragraphs itself and chains context.

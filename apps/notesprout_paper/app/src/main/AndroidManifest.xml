@@ -3,12 +3,18 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Package visibility (API 30+): without this the extension discovery query returns nothing. -->
+    <!-- Online pre-check before the recognizer's one-time model download (normal permission, no prompt). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
     <queries>
         <intent>
             <action android:name="com.symmetricalpalmtree.notesprout.extension.TEMPLATE_PROVIDER" />
         </intent>
         <intent>
             <action android:name="com.symmetricalpalmtree.notesprout.extension.NOTEBOOK_NAMER" />
+        </intent>
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesprout.extension.HANDWRITING_RECOGNIZER" />
         </intent>
     </queries>
 

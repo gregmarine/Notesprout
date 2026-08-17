@@ -28,6 +28,21 @@ the paper view's coordinates, so the stylus can never ink under chrome. A finger
 over either bar calls `releaseRender()` first (palm-gated on `isPenActive`) so an EPD panel shows
 the tap's result — done in `dispatchTouchEvent` because the buttons consume the touch.
 
+**Debug ⋯ (debug builds only, arc 3 / M1):** `NotebookDebugMenu.install(this, binding.topBarRow) { … }`
+adds a ⋯ at the far end of the top bar row (weight-1 spacer + `ToolbarButton`-sized
+`AppCompatImageButton`; a no-op object in `src/release`). It is inside `topBar`, so the existing
+exclusion rect and the chrome `releaseRender()` cover it — `pushExclusions()` needed no change. The
+provider lambda hands it a `RecognizeContext(paper.getStrokes(), currentPage.width, currentPage.height)`
+(null until `opened`) — the page's strokes and px size, nothing else. Its one action, "Recognize page
+(ML Kit)", is described in `docs/extensions.md` §"HandwritingRecognizer — host behaviour".
+
+**Toast vs. dialog (settled with the user in arc 3 / M1, applied here and on the New-notebook
+screen):** a toast only confirms something that already happened and needs no reaction ("copied");
+anything that explains why a tap did *not* do what was asked, or that the user must act on, is an
+`AlertDialog` (via `Dialogs.style`) — on e-ink a toast is easy to miss and its absence reads as
+"broken". `NewNotebookActivity`'s taken/invalid-name and template-render failures are dialogs for
+the same reason.
+
 ## Open
 
 `IndexGuard.ready` → extras (`EXTRA_NOTEBOOK_ID`, `EXTRA_NOTEBOOK_NAME`) → `BrowseState.lastOpenNotebookId

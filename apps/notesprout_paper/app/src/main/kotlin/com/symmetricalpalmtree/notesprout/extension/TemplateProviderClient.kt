@@ -1,32 +1,18 @@
 package com.symmetricalpalmtree.notesprout.extension
 
-import android.content.ComponentName
 import android.content.Context
-import android.content.Intent
-import android.content.ServiceConnection
-import android.content.pm.PackageManager
-import android.os.IBinder
 import android.os.SharedMemory
 import com.symmetricalpalmtree.notesprout.core.Bitmaps
-import com.symmetricalpalmtree.notesprout.core.Slog
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.async
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.withTimeout
 
 /** Every failure of an extension call, whatever the cause. The caller decides what the user sees. */
-class ExtensionCallException(message: String, cause: Throwable? = null) : Exception(message, cause)
+open class ExtensionCallException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 /**
- * Bind-per-operation client for one template provider: bind (`BIND_AUTO_CREATE`), await the
- * connection (≤ [BIND_TIMEOUT_MS]), run the AIDL call on IO under a timeout, **unbind in `finally`**.
- * The core never holds a binding across screens. Every failure — no connection, timeout,
- * `RemoteException`, `SecurityException`, bad payload — surfaces as one [ExtensionCallException].
+ * Bind-per-operation client for one template provider over the shared [ExtensionBinder]: bind
+ * (`BIND_AUTO_CREATE`), await the connection (≤ [BIND_TIMEOUT_MS]), run the AIDL call on IO under a
+ * timeout, **unbind in `finally`**. The core never holds a binding across screens. Every failure — no
+ * connection, timeout, `RemoteException`, `SecurityException`, bad payload — surfaces as one
+ * [ExtensionCallException]. This class owns the payload rules (mime, byte cap, exact size).
  */
 class TemplateProviderClient(context: Context, private val ref: ProviderRef) {
 
@@ -80,70 +66,20 @@ class TemplateProviderClient(context: Context, private val ref: ProviderRef) {
     }
 
     /**
-     * Bind, run [block] on IO under [timeoutMs], unbind. The blocking Binder transaction cannot be
-     * interrupted, so on timeout the caller resumes with [ExtensionCallException] while the orphaned
-     * call finishes on its own IO thread inside a supervisor scope (its result/exception is discarded).
+     * Bind, run [block] on IO under [timeoutMs], unbind — the shared [ExtensionBinder] path
+     * (signature re-check at bind, unbind in `finally`, one [ExtensionCallException] for every failure).
      */
-    suspend fun <T> call(timeoutMs: Long, block: (ITemplateProvider) -> T): T {
-        val connected = CompletableDeferred<IBinder>()
-        val connection = object : ServiceConnection {
-            override fun onServiceConnected(name: ComponentName, service: IBinder) {
-                connected.complete(service)
-            }
-            override fun onServiceDisconnected(name: ComponentName) {
-                connected.completeExceptionally(ExtensionCallException("service disconnected: $name"))
-            }
-            override fun onBindingDied(name: ComponentName) {
-                connected.completeExceptionally(ExtensionCallException("binding died: $name"))
-            }
-            override fun onNullBinding(name: ComponentName) {
-                connected.completeExceptionally(ExtensionCallException("null binding: $name"))
-            }
-        }
-        val intent = Intent(ExtensionContract.ACTION_TEMPLATE_PROVIDER).setComponent(ref.component)
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-        Slog.d(TAG) { "bind ${ref.component.flattenToShortString()}" }
-        try {
-            // Trust is re-checked at bind time, not only at discovery: the package could have been
-            // replaced (same name, different key) while the screen holding this ProviderRef was open.
-            if (appContext.packageManager.checkSignatures(appContext.packageName, ref.packageName)
-                != PackageManager.SIGNATURE_MATCH
-            ) throw ExtensionCallException("signature no longer matches for ${ref.packageName}")
-            val bound = try {
-                appContext.bindService(intent, connection, Context.BIND_AUTO_CREATE)
-            } catch (e: SecurityException) {
-                throw ExtensionCallException("bindService refused: ${e.message}", e)
-            }
-            if (!bound) throw ExtensionCallException("bindService returned false for ${ref.component}")
-            val binder = try {
-                withTimeout(BIND_TIMEOUT_MS) { connected.await() }
-            } catch (e: TimeoutCancellationException) {
-                throw ExtensionCallException("bind timeout after ${BIND_TIMEOUT_MS} ms", e)
-            }
-            val provider = ITemplateProvider.Stub.asInterface(binder)
-                ?: throw ExtensionCallException("binder is not an ITemplateProvider")
-            val deferred = scope.async { block(provider) }
-            return try {
-                withTimeout(timeoutMs) { deferred.await() }
-            } catch (e: TimeoutCancellationException) {
-                throw ExtensionCallException("call timeout after $timeoutMs ms", e)
-            } catch (e: ExtensionCallException) {
-                throw e
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                throw ExtensionCallException("${e.javaClass.simpleName}: ${e.message}", e)
-            }
-        } finally {
-            scope.cancel()
-            runCatching { appContext.unbindService(connection) }
-            Slog.d(TAG) { "unbind ${ref.component.flattenToShortString()}" }
-        }
-    }
+    suspend fun <T> call(timeoutMs: Long, block: (ITemplateProvider) -> T): T =
+        ExtensionBinder.call(
+            appContext, ref, ExtensionContract.ACTION_TEMPLATE_PROVIDER, TAG,
+            asInterface = { ITemplateProvider.Stub.asInterface(it) },
+            callTimeoutMs = timeoutMs,
+            block = block,
+        )
 
     companion object {
         private const val TAG = "TemplateProviderClient"
-        const val BIND_TIMEOUT_MS = 3_000L
+        const val BIND_TIMEOUT_MS = ExtensionBinder.BIND_TIMEOUT_MS
         const val LIST_TIMEOUT_MS = 2_000L
         /** E-ink CPUs: a full-page lossless WEBP encode is the slow part. */
         const val RENDER_TIMEOUT_MS = 15_000L

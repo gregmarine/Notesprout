@@ -106,6 +106,12 @@ class NotebookActivity : AppCompatActivity() {
         ) { close() }
         binding.notebookName.text = name
         binding.pageIndicator.text = ""
+        // Debug builds only (no-op in release): the ⋯ at the end of the top bar. Inside topBar, so the
+        // existing exclusion rect covers it. It sees only the page's strokes + px size — never the session.
+        NotebookDebugMenu.install(this, binding.topBarRow) {
+            if (!opened) null
+            else RecognizeContext(paper.getStrokes(), session.currentPage.width.toFloat(), session.currentPage.height.toFloat())
+        }
 
         pageGestures = PageGestures(
             host = paper.asView(),

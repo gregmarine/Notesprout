@@ -13,7 +13,9 @@ import com.symmetricalpalmtree.notesprout.extension.InkStroke
  * The HANDWRITING_RECOGNIZER extension point, implemented with Google ML Kit Digital Ink
  * Recognition (`en-US`). Bound by the Notesprout Paper core; never launched by a user (no
  * Activity). Every method first proves the caller is the host. Stateless per call; the model and
- * client are process-lifetime ([ModelManager]). AIDL methods run on Binder threads and the
+ * client are process-lifetime ([ModelManager] — its ensure-ready chain starts in [onCreate], i.e.
+ * on the host's first bind, and the recognize calls **wait for it** inside the host's timeout rather
+ * than failing while the model is seconds away). AIDL methods run on Binder threads and the
  * recognition runs synchronously on them — the host's timeout is the ceiling.
  *
  * Exceptions that cross Binder intact are the only ones thrown: `SecurityException` (not the
@@ -41,7 +43,7 @@ class HandwritingRecognizerService : Service() {
             enforce()
             val ink = checkInk(strokes)
             require(areaWidth > 0f && areaHeight > 0f) { "non-positive writing area" }
-            val recognizer = ready()
+            val recognizer = ready(INK_READY_WAIT_MS)
             val t0 = System.currentTimeMillis()
             val text = engine { MlKitEngine.recognizeInk(recognizer, ink, areaWidth, areaHeight, preContext ?: "") }
             if (BuildConfig.DEBUG) Log.d(TAG, "recognizeInk: ${ink.size} strokes → ${text.length} chars in ${System.currentTimeMillis() - t0} ms")
@@ -52,7 +54,7 @@ class HandwritingRecognizerService : Service() {
             enforce()
             val ink = checkInk(strokes)
             require(pageWidth > 0f && pageHeight > 0f) { "non-positive page size" }
-            val recognizer = ready()
+            val recognizer = ready(PAGE_READY_WAIT_MS)
             val t0 = System.currentTimeMillis()
             val text = engine { MlKitEngine.recognizePage(recognizer, ink, pageWidth, pageHeight) }
             if (BuildConfig.DEBUG) Log.d(TAG, "recognizePage: ${ink.size} strokes → ${text.length} chars in ${System.currentTimeMillis() - t0} ms")
@@ -76,7 +78,8 @@ class HandwritingRecognizerService : Service() {
         return strokes
     }
 
-    private fun ready() = ModelManager.recognizer()
+    /** The client, waiting up to [waitMs] for the ensure-ready chain; not ready by then → `IllegalStateException`. */
+    private fun ready(waitMs: Long) = ModelManager.awaitReady(waitMs)
         ?: throw IllegalStateException("recognizer not ready")
 
     /** Runs an engine call; any failure becomes `IllegalStateException` (carried across Binder). */
@@ -87,12 +90,23 @@ class HandwritingRecognizerService : Service() {
             throw e
         } catch (e: Exception) {
             Log.w(TAG, "engine failure: ${e.javaClass.simpleName}")
+            ModelManager.onEngineFailure()
             throw IllegalStateException("recognition failed: ${e.javaClass.simpleName}")
         }
+
+    /** The startup analogue of the original app's `initModel()`: warm the model the moment the host first binds. */
+    override fun onCreate() {
+        super.onCreate()
+        ModelManager.init(this)
+        ModelManager.start()
+    }
 
     override fun onBind(intent: Intent?): IBinder = binder
 
     private companion object {
         const val TAG = "HandwritingRecognizerService"
+        /** Readiness waits sized under the host's per-call timeouts (10 s ink · 30 s page), leaving room for the recognition itself. */
+        const val INK_READY_WAIT_MS = 6_000L
+        const val PAGE_READY_WAIT_MS = 22_000L
     }
 }

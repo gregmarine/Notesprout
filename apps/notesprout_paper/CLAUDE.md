@@ -8,7 +8,7 @@ global-index model, global encryption model, and e-ink design philosophy — and
 - **Plans:** `PAPER_PLAN.md` (v0, complete — architecture + locked decisions), then
   `PAPER_EXTENSIONS_PLAN.md` (arc 1, complete + frozen: extension API v1 + Templates extension), then
   `PAPER_NAMING_PLAN.md` (arc 2, complete + frozen: the host-owned encrypted extension store + the
-  Naming extension), then `PAPER_RECOGNITION_PLAN.md` (**arc 3, M0 ✅ 2026-08-17, M1–M2 ⬜**: the
+  Naming extension), then `PAPER_RECOGNITION_PLAN.md` (**arc 3, M0 + M1 ✅ 2026-08-17, M2 ⬜**: the
   engine-neutral `HANDWRITING_RECOGNIZER` capability point + the ML Kit extension `NSE · ML Kit`,
   debug-only "Recognize page" test surface) — read all four top-to-bottom at the start of every
   session; the next `⬜` phase is the work
@@ -87,8 +87,14 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   **`com.google.mlkit:digital-ink-recognition` lives in `:ext-mlkit` only** — never `:app` or
   `:extension-api`. The model lives in the extension's own sandbox (the recorded exception to
   "extension data goes to the host store" — engine assets are not user data). `status()` →
-  `prepare()` → `recognize*`; not READY throws `IllegalStateException`. **Recognized text is never
-  logged on either side** — counts + durations only.
+  `prepare()` → `recognize*` (M1: `status()` never blocks; `recognize*` waits for readiness inside the
+  host's timeout and throws `IllegalStateException` only if it can't). Host side (M1): **one shared
+  bind path `ExtensionBinder.call`** for all three clients; `RecognizerClient` + `InkCaps` (caps before
+  the bind); the notebook debug ⋯ owns the model-download dialog flow (offline pre-check via
+  `core/Connectivity`). **Recognized text is never logged on either side** — counts + durations only.
+- **Toast vs. dialog:** a toast only confirms something that already happened ("copied"); anything
+  the user must notice or act on — why a tap did nothing, a failure, a one-time download — is an
+  `AlertDialog` via `Dialogs.style` (e-ink: a toast is easy to miss and reads as "broken").
 - **Extension boundary (frozen in E2):** nothing but what a call needs crosses outward (templates: id +
   page geometry + dpi — never keys, paths, ids, names, strokes); everything inward is untrusted. Adding
   an extension point follows `docs/extensions.md` §"Rules for adding a future extension point" and adds
@@ -120,7 +126,8 @@ adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.mlkit.dev
 Debug launch: `adb -s <serial> shell am start -n com.symmetricalpalmtree.notesprout.dev/com.symmetricalpalmtree.notesprout.bootstrap.BootstrapActivity`
 (BootstrapActivity is the launcher and the only thing that opens the index; every other screen
 bounces there via `IndexGuard`.) The debug build's library ⋯ menu has "Show recovery key" and
-"Forget cached key" (kills the process → next launch is the Unlock screen). The app's files are
+"Forget cached key" (kills the process → next launch is the Unlock screen); the notebook screen's
+debug ⋯ has "Recognize page (ML Kit)" (present only with `NSE · ML Kit` installed). The app's files are
 readable from `adb shell` at `/sdcard/Android/data/<appId>/files/` (index + `Garden/`).
 
 BOOX trap: `install -r` can leave the package disabled → `pm enable com.symmetricalpalmtree.notesprout.dev`.

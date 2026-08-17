@@ -365,10 +365,17 @@ are not stored anywhere by the core (no `page_text`, no `.soil` / index change).
   the x/y point arrays (px), plus the writing-area or page size, plus ≤ `MAX_PRECONTEXT_CHARS` of
   pre-context. **Never** stroke ids, notebook/page ids, names, colour, width, style, pressure, tilt,
   timestamps, keys or paths. This is the first point that sends ink to an extension.
-- **Protocol:** `status()` first (fast); `NEEDS_DOWNLOAD` → `prepare()` (returns at once) and poll;
-  `recognize*` only when `READY` — otherwise the extension throws `IllegalStateException` (so a real
-  failure is never mistaken for a blank page). `prepare()` is idempotent (a no-op while `READY` or
-  `DOWNLOADING`).
+- **Protocol (as amended in M1):** `status()` is fast and **never waits on the engine**
+  (`DOWNLOADING` covers everything in flight — checking, downloading, loading); `NEEDS_DOWNLOAD` →
+  `prepare()` (returns at once; idempotent, a no-op while `READY` / `DOWNLOADING`). `recognize*` may be
+  called as soon as the extension exists: **if not READY it waits for readiness within the caller's
+  timeout** and throws `IllegalStateException` only if it cannot become ready in time or the engine
+  fails (so a real failure is never mistaken for a blank page). `UNAVAILABLE` means "don't bother".
+  *Why the amendment:* M0 had `status()` block ≤ 1.5 s on ML Kit's `isModelDownloaded` and report a
+  timeout as `UNAVAILABLE`; on the Nomad the first such check in a fresh process took ~75 s, so the
+  first taps said "didn't respond" / "unavailable" for a model that was one 6 s download away. The
+  original app avoids the whole ladder by running check → download → build once at startup, async;
+  the extension now does the same on its first bind, and the recognize calls join that chain.
 - **Two calls:** `recognizePage(strokes, pageW, pageH)` — the extension segments the page into lines
   and paragraphs itself and chains pre-context line to line (the core gains no HWR/layout knowledge);
   `recognizeInk(strokes, areaW, areaH, preContext)` — one writing area, no segmentation (the primitive a
@@ -398,18 +405,28 @@ ships; on-device, no Play Services required). **The dependency lives in `:ext-ml
   with the `HANDWRITING_RECOGNIZER` action + `API_VERSION` meta-data `1`.
 - **`HandwritingRecognizerService`** returns an `IHandwritingRecognizer.Stub`; every method first calls
   `HostCallerCheck.enforce`. `status()`/`prepare()` delegate to `ModelManager`; `recognizeInk` /
-  `recognizePage` re-check the `MAX_INK_*` caps + positive sizes (`IllegalArgumentException`), require
-  `READY` (`IllegalStateException`), then run `MlKitEngine` **synchronously on the Binder thread**
+  `recognizePage` re-check the `MAX_INK_*` caps + positive sizes (`IllegalArgumentException`), then
+  **wait for readiness** (`ModelManager.awaitReady` — 6 s for ink, 22 s for page, sized under the
+  host's 10 s / 30 s; not ready by then → `IllegalStateException("recognizer not ready")`), then run
+  `MlKitEngine` **synchronously on the Binder thread**
   (`Tasks.await`; the host's timeout is the ceiling, ML Kit's executor does the work; each ML Kit call
   is additionally bounded to 10 s so a wedged engine can't pin a Binder thread). Any engine failure →
   `IllegalStateException` — only Binder-marshalable exceptions leave the stub (arc-2 lesson).
 - **`ModelManager`** (process-lifetime `object`) owns the `en-US` `DigitalInkRecognitionModel` and the
-  client. `status()` = `READY` if the client is built, else `RemoteModelManager.isModelDownloaded`
-  (`Tasks.await` ≤ 1.5 s — inside the host's 2 s) → builds the client and `READY` / `NEEDS_DOWNLOAD` /
-  `DOWNLOADING` (a `prepare()` task in flight) / `UNAVAILABLE` (identifier null, await failure).
-  `prepare()` = `RemoteModelManager.download(model, DownloadConditions())` (**any network**, as the
-  original), once (idempotent while in flight, no-op while `READY`), returns immediately; success builds
-  the client → `READY`; failure logs the exception class and stays retryable (`NEEDS_DOWNLOAD` again).
+  client, and **one async ensure-ready chain**: `isModelDownloaded` → `download(model,
+  DownloadConditions())` if needed (**any network**, as the original) → build the client. The chain
+  is started by the service's `onCreate` (the host's first bind — the startup analogue of the
+  original's `initModel()`) and by `prepare()`; it is idempotent while in flight and restartable after
+  a failure (logged by class + duration). `status()` **never blocks**: `READY` (client built) ·
+  `DOWNLOADING` (chain in flight) · `NEEDS_DOWNLOAD` (no chain / last chain failed) · `UNAVAILABLE`
+  (no model identifier). `awaitReady(timeoutMs)` starts the chain if needed and `Tasks.await`s it —
+  what the recognize calls use. **Model-present memory:** once the chain has seen the model on disk
+  (present, or just downloaded) a flag is kept in the extension's own `SharedPreferences` (engine
+  state — the same sandbox exception as the model); a fresh process with the flag builds the client
+  at once and is READY without ML Kit's cold `isModelDownloaded` (28 s on the Nomad the first time,
+  ~4.6 s later; without the flag the host would see `DOWNLOADING` and offer a download for a model
+  that is already there). An engine failure on a client built from the flag alone clears the flag
+  and drops the client, so the next `start()` runs the full chain (re-download if needed).
 - **Where the model lives — the recorded exception to "extensions keep data in the host store":** the
   ~20 MB model is downloaded and managed by ML Kit **in the extension's own app storage**. Engine assets
   are not user data (and exceed the 256 KiB store value cap); user data still goes to the host store
@@ -440,7 +457,17 @@ ships; on-device, no Play Services required). **The dependency lives in `:ext-ml
   (tag `ExtensionRegistry`). Callers treat discovery itself as fallible (a `PackageManager` failure is
   logged and means "no providers", never a crash). Returns `ProviderRef(component, packageName, label, apiVersion)` sorted by
   label then package. Disabled packages are not returned by the query.
-- **`TemplateProviderClient(context, ref)`** — bind-per-operation. `call(timeoutMs, block)`: explicit
+- **`ExtensionBinder.call(appContext, ref, action, tag, asInterface, callTimeoutMs, bindTimeoutMs = 3 s, block)`**
+  (M1 — **the one bind path**, extracted verbatim from the two verified client bodies; all three
+  clients use it and none keeps a private copy): explicit intent (`action` + `component`),
+  **`checkSignatures` re-run immediately before the bind**, `bindService(BIND_AUTO_CREATE)` on the
+  **application** context, await `onServiceConnected` ≤ `bindTimeoutMs`, `asInterface(binder)` (null →
+  failure), run `block` on IO under `withTimeout(callTimeoutMs)` in a supervisor scope, **unbind in
+  `finally`**; every failure → **one** `ExtensionCallException`, `CancellationException` re-thrown.
+  Bind/unbind `Slog.d` lines go under the **caller's** `tag`, so per-client log tags are unchanged.
+  Payload rules stay in the clients; the namer's store pre-open + per-bind `ExtensionStoreBinder` +
+  revoke wrap *around* the shared call (revoke in the client's own `finally`, right after the unbind).
+- **`TemplateProviderClient(context, ref)`** — bind-per-operation over `ExtensionBinder`. `call(timeoutMs, block)`: explicit
   intent (`action` + `component`), **`checkSignatures` re-run immediately before the bind** (the
   package could have been replaced under a different key while the screen holding the `ProviderRef`
   was open — trust is not a discovery-time-only property), `bindService(BIND_AUTO_CREATE)` on the
@@ -519,6 +546,69 @@ ships; on-device, no Play Services required). **The dependency lives in `:ext-ml
   +≈ 380 ms (process start — the one cost that isn't ours without holding a binding across screens,
   which the design forbids); app fully cold: ≈ 0.75 s with the resume pre-warm (was 0.85 s). No
   `leaked ServiceConnection`.
+
+### HandwritingRecognizer — host behaviour (M1)
+
+- **Manifest `<queries>`** gains the `HANDWRITING_RECOGNIZER` action.
+- **`ExtensionRegistry.handwritingRecognizer(context): ProviderRef?`** — same discovery + trust filter;
+  **the first by (label, package)** is used, others dropped with a `Slog.d` (choosing an engine is
+  Extensions-UI territory).
+- **`RecognizerClient(context, ref)`** — over `ExtensionBinder`, stateless (no store). Timeouts:
+  `status()` / `prepare()` **2 s**, `recognizeInk` **10 s**, `recognizePage` **30 s** (one ML Kit call
+  per line; the first call after the extension's process start also loads the model). **Outward caps
+  run before the bind** — `InkCaps.check(strokes, w, h)` (pure, JVM-tested): `strokes.size ≤
+  MAX_INK_STROKES`, `Σ points ≤ MAX_INK_POINTS`, every stroke non-empty with equal x/y lengths, `w`/`h`
+  `> 0` (NaN fails); violations throw **`InkTooLargeException`** (an `ExtensionCallException` subclass)
+  **without binding**; `preContext` is cut to its last `MAX_PRECONTEXT_CHARS`. **Inward is untrusted**
+  (`InkCaps.status` / `InkCaps.text`): a status outside `0..3` → `UNAVAILABLE`; text `?: ""` and
+  truncated to `MAX_RECOGNIZED_CHARS`; the extension's `IllegalStateException` → typed
+  `RecognizerNotReadyException` when its message says "not ready" (could not become ready within the
+  call), else a generic `ExtensionCallException` (engine failure). Log tag `RecognizerClient`: bind/unbind,
+  stroke/char counts, durations — **never text**.
+- **`InkPayload.fromStrokes(List<Stroke>): List<InkStroke>`** (`notebook/`, pure, JVM-tested) — the
+  **one** place page ink is reduced to bare geometry (audit row 14): x/y arrays per stroke; id, colour,
+  width, style, pressure, tilt and time never leave; point-less strokes are skipped.
+  `RecognizeContext(strokes, pageWidth, pageHeight)` is what the notebook screen exposes to its debug
+  menu — the paper's `getStrokes()` (any thread) and the session's current page px size (the same
+  values passed to `setPageSize`); no ids, no names, no session.
+- **The debug surface** (`src/debug/…/notebook/NotebookDebugMenu.kt`, no-op twin in `src/release`;
+  release builds have no user-visible change): `NotebookActivity` installs a ⋯ (dimen-driven,
+  `bg_toolbar_button`, tooltip = "Debug tools") at the **end** of the top bar row (`topBarRow`, a
+  weight-1 spacer before it) — inside `topBar`, so the existing exclusion rect covers it and
+  `dispatchTouchEvent`'s chrome `releaseRender()` applies. Tap → `ExtensionRegistry.handwritingRecognizer`
+  (IO, refreshed on every open) → `ActionSheetDialog` "Debug tools" with **"Recognize page (ML Kit)"
+  only while a recognizer is installed** (none → the sheet opens with its title only). Flow (as
+  settled with the user in M1 — **dialogs, not toasts**, for anything the user must notice; a toast
+  only for a confirmation of something that already happened):
+  - strokes empty → dialog *Nothing to recognize* · `InkPayload` (Default) → `status()`:
+  - `READY` → **"Recognizing…"** popup (Opening-style: bordered message, no buttons, non-cancelable)
+    → `recognizePage(ink, pageW, pageH)` → result `AlertDialog` titled **"Recognized text (ML Kit ·
+    N strokes · T ms)"**, message = the text, selectable (`""` → *(nothing recognized)*), **Copy**
+    (clip label "Recognized text", toast "copied") + **OK**.
+  - `UNAVAILABLE` → dialog *Recognizer unavailable on this device*.
+  - otherwise (`NEEDS_DOWNLOAD` / `DOWNLOADING`) → the **one-time model flow**: `Connectivity.isOnline`
+    pre-flight (ML Kit's downloader *hangs* rather than fails offline — M1: no error after a minute) —
+    offline → dialog "Recognition model needed" saying the device is offline, OK only; online → the
+    same dialog offering the ~20 MB en-US download (Wi-Fi recommended) with **Download** / **Cancel**.
+    Download → `prepare()` → progress dialog **"Downloading recognition model"** whose message carries
+    an **elapsed-time counter** (the e-ink-safe indeterminate indicator — no spinner; refreshed every
+    2 s) and **Cancel** (hides the dialog only; the download keeps running in the extension). The
+    dialog polls `status()` every 2 s (a bind per poll, ~30 ms): `READY` → dismiss → the READY path
+    above, no further tap · network gone → message *Waiting for a network connection…*, gives up after
+    30 s offline · `NEEDS_DOWNLOAD` after `prepare()` (chain failed) / `UNAVAILABLE` / 5-min cap →
+    dialog **"Download failed"**.
+  - `InkTooLargeException` → dialog *Page too dense to recognize*; `RecognizerNotReadyException` (READY
+    reported, then lost — extension restarted mid-flow) → dialog *Model still downloading — try again
+    in a minute*; any other `ExtensionCallException` → dialog *ML Kit extension didn't respond*.
+  - One `recognizeBusy` guard drops a second tap for the whole flow (dialogs included). Nothing
+    recognized is stored or logged — the result dialog is the only sink.
+- **Failure surface:** every dialog/toast above is the core's; the extension shows nothing. Absent
+  extension → no sheet item; not ready / timeout / too dense / offline → a dialog; the page, the ink
+  and the other extensions are unaffected.
+- **Timings (M1):** warm `recognizePage` of one line ≈ 0.5 s (Nomad) — cold extension process:
+  process start + client build ≈ 1.9 s, then the **first inference loads the model** — 4.5 s on the
+  Nomad, 1.8 s on the NoteAir5C — so ≈ 6 s / 4 s tap-to-dialog cold. A future consumer that wants
+  it faster must bind early (and the extension would need a warm-up inference — deferred).
 
 **BOOX sideload trap (NA5C):** the launcher/firmware flips a freshly installed sideloaded package to
 DISABLED_USER shortly *after* `install`, so a `pm enable` issued immediately can be overwritten. Enable,

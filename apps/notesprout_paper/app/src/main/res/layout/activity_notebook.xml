@@ -23,6 +23,7 @@
         android:background="@color/paperWhite">
 
         <LinearLayout
+            android:id="@+id/topBarRow"
             android:layout_width="match_parent"
             android:layout_height="@dimen/toolbar_bar_thickness"
             android:orientation="horizontal"

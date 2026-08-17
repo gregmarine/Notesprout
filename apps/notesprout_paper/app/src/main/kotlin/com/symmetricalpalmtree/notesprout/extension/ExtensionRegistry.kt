@@ -43,6 +43,17 @@ object ExtensionRegistry {
         all.firstOrNull()
     }
 
+    /**
+     * The one trusted handwriting recognizer, or null. As for the namer: several survive → the
+     * **first** by (label, package) is used, the rest dropped with a `Slog.d` (choosing an engine is
+     * Extensions-UI territory).
+     */
+    suspend fun handwritingRecognizer(context: Context): ProviderRef? = withContext(Dispatchers.IO) {
+        val all = discover(context.applicationContext, ExtensionContract.ACTION_HANDWRITING_RECOGNIZER)
+        for (extra in all.drop(1)) Slog.d(TAG) { "ignoring additional recognizer ${extra.component.flattenToShortString()}" }
+        all.firstOrNull()
+    }
+
     @Suppress("DEPRECATION")
     private fun discover(context: Context, action: String): List<ProviderRef> {
         val pm = context.packageManager
