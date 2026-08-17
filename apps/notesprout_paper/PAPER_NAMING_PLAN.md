@@ -370,7 +370,7 @@ tests + 2 `SoilFileTest`). `KvDao.keysLike` takes a ready `LIKE … ESCAPE '\\'`
 ---
 
 ### Phase N1 — NotebookNamer contract + `:ext-naming` + host wiring
-**Status:** ✅ Complete (commit — see below)
+**Status:** ✅ Complete (commit c339ee3)
 
 **Goal:** the Naming extension installs; folders can be given a scheme from the New-folder dialog and
 from long-press; +Notebook in a folder with a scheme opens New-notebook pre-named by it; without the
