@@ -307,7 +307,7 @@ interface INotebookNamer {
 ## Phases
 
 ### Phase N0 — The extension store (contract + host implementation, no UI)
-**Status:** ✅ Complete (commit — see below)
+**Status:** ✅ Complete (commit 04c5894)
 
 **Goal:** `IExtensionStore` exists in the contract; the core can open-or-create an encrypted
 per-extension store under the global key, mint a uid-bound revocable binder over it, and enforce the
