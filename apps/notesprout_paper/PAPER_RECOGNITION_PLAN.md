@@ -339,7 +339,7 @@ extensions. The recipe, fixed by this arc so a consumer arc can't drift from it:
 ## Phases
 
 ### Phase M0 — Contract + the ML Kit extension (no host change)
-**Status:** ✅ Complete (commit — see below; user-verified SNN + NA5C 2026-08-17)
+**Status:** ✅ Complete (commit 7061255; user-verified SNN + NA5C 2026-08-17)
 
 **Goal:** `IHandwritingRecognizer` exists in the contract; `NSE · ML Kit` installs, is discovered
 by nothing yet, and can be exercised end-to-end from a JVM test (segmenter) and from adb (`dumpsys`
