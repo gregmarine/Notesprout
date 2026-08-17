@@ -7,6 +7,9 @@
 > every session**, after `PAPER_PLAN.md` (v0 — architecture), `PAPER_EXTENSIONS_PLAN.md` (arc 1 —
 > the extension API v1 + Templates extension, frozen; this arc extends it) and both `CLAUDE.md`
 > files. `docs/extensions.md` is the subsystem reference both arcs write into.
+>
+> **Arc 2 is complete (N0 04c5894 · N1 c339ee3 · N2 — see the last commit touching this file) and this
+> file is frozen.** The next arc is not planned — ask the user first.
 
 ## Why
 
@@ -99,6 +102,19 @@ Opus is fine for N2. Either model follows the phase-start question ritual.
   pays, and the same fix applies — at library resume, `ExtensionStores.open` on IO for **every**
   discovered extension, not only the namer (`LibraryActivity.refreshNamer` is the template). Still no
   binding held across screens; the extension *process* start stays the platform's business.
+
+- **One shared bind path for both clients** (N2 review finding, deferred): `NamerClient.call` is a
+  near-verbatim copy of `TemplateProviderClient.call` (ServiceConnection + bind-time signature check +
+  timeouts + catch ladder + unbind-in-finally). Two copies of a security-relevant path can drift (N2
+  fixed one such drift: the store pre-open `catch` lacked the `CancellationException` guard). Extract
+  a `bindAndCall(appContext, action, ref, asInterface, timeout, block)` in `extension/` when a third
+  point arrives — not in this arc (touching Templates' bind path re-opens arc-1 verification).
+- **Fewer binds per long-press / New-folder** (N2 review finding, deferred): `describeField` is three
+  static strings re-bound on every New-folder tap and long-press; `describeField` + `currentScheme` are
+  two bind cycles before the scheme dialog, `validate` + `save` two more on OK. Cheaper: fetch
+  `SchemeField` once alongside `namerRef` in `refreshNamer`, and let `save` alone report the
+  extension's error. Perf only (each cold bind ≈ 200–500 ms on e-ink); a contract-neutral change but not
+  a fix — revisit with the store pre-warm generalisation above.
 
 ## Non-goals for this arc (do not build, do not scaffold "for later")
 
@@ -365,7 +381,7 @@ point accepted. One structural addition beyond the plan's file list: `ExtensionS
 checks/caps with no Android types, because `IExtensionStore.Stub` extends `android.os.Binder` and
 cannot be constructed on the JVM (`ExtensionStoreBinderTest` drives the gate with a fake `KvDao`; 9
 tests + 2 `SoilFileTest`). `KvDao.keysLike` takes a ready `LIKE … ESCAPE '\\'` pattern built by
-`ExtensionStoreGate.likePattern`. Device probe: OK on SNN + NA5C + MIP11 (encrypted `Garden/probe.test.db`); forget-key → unlock → probe OK on MIP11 (cold open 668 ms, warm 0 ms). User regression check passed on all three 2026-08-16.
+`ExtensionStoreGate.likePattern` (**N2: replaced** — `LIKE` is ASCII-case-insensitive per connection; now `KvDao.keysWithPrefix` with a `substr` = prefix predicate, exact and case-sensitive). Device probe: OK on SNN + NA5C + MIP11 (encrypted `Garden/probe.test.db`); forget-key → unlock → probe OK on MIP11 (cold open 668 ms, warm 0 ms). User regression check passed on all three 2026-08-16.
 
 ---
 
@@ -452,7 +468,7 @@ extension nothing in the core changes.
 
 **Outcome (N1):** built 2026-08-16. Answers: Q1 shared `HostCallerCheck` in `:extension-api` (Templates
 switched, its private `CallerCheck` deleted) · Q2 `cursor-text` + "Default notebook name…" · Q3 no
-feedback (a `resolvingName` guard drops a second tap during the beat) · Q4 wildcards · Q5/Q6 the
+feedback (a `resolvingName` guard — N2: generalised to `namerBusy` across all three entry points — drops a second tap during the beat) · Q4 wildcards · Q5/Q6 the
 recommended wording. Structure: `SchemeEngine` returns error **codes** (enum) and the service maps
 them to `strings.xml`, so the engine stays Android-free (18 JVM tests); the service rethrows any store
 failure as `IllegalStateException` (Binder-safe) rather than letting a `RemoteException` kill the
@@ -473,15 +489,15 @@ is by design (no bindings held across screens). **User checklist 1–14 passed o
 ---
 
 ### Phase N2 — Hardening, review, boundary audit, docs freeze
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (commit — see the follow-up hash note)
 
 **Goal:** the store + NotebookNamer are trustworthy enough to be the pattern every data-holding
 extension follows.
 
 **Questions to resolve at phase start** (one at a time):
 1. Anything observed in N1 the user wants changed before freezing (wording, timing, presentation)?
-   (rec.: no — freeze as built)
-2. Confirm scope freeze: fixes only.
+   (rec.: no — freeze as built) **→ Answered 2026-08-16: no — freeze as built.**
+2. Confirm scope freeze: fixes only. **→ Answered: confirmed. Also settled at N2 start: the open N1-close question — per-extension stores (`Garden/<pkg>.db`) stay; a single shared store was rejected (isolation would become a WHERE clause; per-extension "remove data" later is a file delete).**
 
 **Deliverables**
 1. `/code-review high` over the arc's diff (`git diff <N0 base>...HEAD` — the range, not a bare ref;
@@ -511,7 +527,33 @@ regression subset (create/open/write/flip, library create/rename/move/delete, co
 
 **Close-out:** status ✅ + Outcome; commit + push `paper`.
 
-**Outcome (N2):** —
+**Outcome (N2):** started 2026-08-16. Answers: Q1 freeze as built · Q2 fixes only · per-extension
+stores stay. `/code-review high 4fe2ed6...HEAD` → 10 findings; **8 fixed**, 2 deferred (§Deferred:
+shared bind path; fewer binds per dialog). Fixes: (1) New-folder CREATE disarmed while its coroutine
+runs (a namer bind between `nameTaken` and `createFolder` let a second tap create the folder twice);
+(2) `ExtensionStoreGate` wraps every DAO call — a non-marshalable SQLite exception (full / locked /
+I/O) becomes `IllegalStateException` instead of a *silently* failed transaction the extension reads as
+success; (3) `NamerClient` store pre-open rethrows `CancellationException` (was disguised as
+`ExtensionCallException` → a destroyed `LibraryActivity` would `launch` on an unregistered launcher);
+(4) +Notebook drops the tap if the user left the folder / screen during the beat; (5) `keys(prefix)`
+is now `substr(key,1,length(prefix)) = prefix` (`KvDao.keysWithPrefix`) — `LIKE` is
+ASCII-case-insensitive per connection and broke the "starts with" contract (`likePattern` deleted);
+(6) one `namerBusy` guard across +Notebook / New-folder / long-press so a slow extension can't stack
+dialogs; (7) `defaultName` over `MAX_NAME_CHARS` is dropped in `NamerClient` before it rides an Intent
+(`TransactionTooLargeException` guard); (8) `SchemeEngine.parse` also rejects a scheme whose
+*expansion* (`{date}` 6 → 8 chars; counter at its width) would exceed 100 — the host would otherwise
+silently fall back to the core default for a scheme that validated. Boundary audit rows 10–13 walked
+and written; docs/extensions.md gains "Adding a data-holding point" (rules 6–11) + "Using the store";
+README + library.md updated. JVM: 97 tests green (app 68 · ext-naming 18 · ext-templates 8 ·
+extension-api 3). **Device verification — SNN (Nomad), automated by an Opus agent 2026-08-16:** N1 items
+1–12 + new 15a/b (double-tap CREATE → one folder; triple-tap +Folder → one dialog) + E1 a–c + v0
+library subset (create/rename/move/delete, open/reopen, force-stop → cold relaunch reopened into the
+open notebook) **all PASS**; item 13 (passphrase) left to the user; 0 crashes, 0 leaked
+`ServiceConnection`. Timing (adb `input` ≈ 505 ms subtracted): cold ext process ≈ 550 ms tap→screen
+(bind→unbind 388 ms), warm ≈ 205 ms (36–50 ms) — unchanged from N1. **Automation trap:** `adb shell
+input text` / letter keyevents never reach the app on the Nomad (Supernote PinyinIME swallows injected
+keys) — text must be typed by tapping on-screen keyboard keys; dialogs shift 350 px up under the IME;
+the library grid is paginated 6/page. User accepted the Nomad run as closing verification 2026-08-16 (NA5C / MIP11 by eye + item 13 not re-walked). **Arc 2 complete; this file is frozen.**
 
 ---
 

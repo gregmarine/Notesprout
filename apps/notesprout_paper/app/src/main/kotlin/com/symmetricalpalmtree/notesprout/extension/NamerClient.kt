@@ -28,8 +28,9 @@ import kotlinx.coroutines.withTimeout
  * never sits inside the call timeout), mint one uid-bound [ExtensionStoreBinder] for the bind, and
  * revoke it in the same `finally` as the unbind.
  *
- * Everything received is untrusted: [SchemeField] strings are truncated; a `defaultName` is accepted
- * by the caller only after the core's name rule + length cap.
+ * Everything received is untrusted: [SchemeField] strings are truncated; a `defaultName` over
+ * [ExtensionContract.MAX_NAME_CHARS] is dropped here and the rest of the name rule is applied by the
+ * caller (`NewNotebookActivity.acceptDefaultName`).
  */
 class NamerClient(context: Context, private val ref: ProviderRef) {
 
@@ -61,7 +62,9 @@ class NamerClient(context: Context, private val ref: ProviderRef) {
      * scheme. Only the folder UUID and the sibling notebook names cross (the recorded widening).
      */
     suspend fun defaultName(folderId: String, siblingNames: List<String>): String? = call(store = true) { namer, store ->
-        namer.defaultName(store, folderId, siblingNames)
+        // Over-length is rejected here, before the string rides an Intent; the name rule itself is
+        // applied by NewNotebookActivity.acceptDefaultName.
+        namer.defaultName(store, folderId, siblingNames)?.takeIf { it.length <= ExtensionContract.MAX_NAME_CHARS }
     }
 
     /**
@@ -76,6 +79,8 @@ class NamerClient(context: Context, private val ref: ProviderRef) {
         val storeBinder: ExtensionStoreBinder? = if (store) {
             val db = try {
                 withContext(Dispatchers.IO) { ExtensionStores.open(appContext, ref.packageName) }
+            } catch (e: CancellationException) {
+                throw e   // the caller's scope is gone — never disguise that as a namer failure
             } catch (e: Exception) {
                 throw ExtensionCallException("store open failed: ${e.message}", e)
             }

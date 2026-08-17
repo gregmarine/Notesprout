@@ -12,7 +12,7 @@
     <string name="err_counter_twice">{n} may appear only once</string>
     <string name="err_illegal_char">Only letters, numbers, spaces, hyphens, underscores, dots and tokens</string>
     <string name="err_empty">The name would be empty</string>
-    <string name="err_too_long">Scheme is too long (max 100 characters)</string>
+    <string name="err_too_long">Scheme is too long (names must fit 100 characters)</string>
     <string name="err_unclosed">Missing } after {</string>
     <string name="err_store">Naming store unavailable</string>
 </resources>

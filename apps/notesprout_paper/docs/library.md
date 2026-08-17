@@ -75,7 +75,8 @@ below is absent when `ExtensionRegistry.notebookNamer` finds nothing (`namerRef`
 - **New folder** — CREATE: name validated as before → non-blank scheme → `NamerClient.validate`
   (extension's error text, or "Naming extension didn't respond", as a toast; dialog stays) →
   `createFolder` → `save(folder.id, scheme)`; a save failure toasts "Folder created — naming scheme
-  not saved" and dismisses (retry from long-press).
+  not saved" and dismisses (retry from long-press). CREATE is disarmed (`isClickable = false`) while
+  that runs — a namer bind takes a beat and a second tap would pass `nameTaken` again (N2).
 - **Folder long-press → "Default notebook name…"** (Tabler `cursor-text`, before Rename): the field
   description and the current scheme are fetched first (failure → "Naming extension didn't respond",
   no dialog); `SchemeDialogs.showSchemeDialog` — titled with the folder name, prefilled + select-all;
@@ -84,7 +85,10 @@ below is absent when `ExtensionRegistry.notebookNamer` finds nothing (`namerRef`
 - **+Notebook** in a folder: the default name is resolved from the extension **before**
   `NewNotebookActivity` opens (folder UUID + the listing's notebook names cross; ≤ 2 s worst case, no
   feedback — the tap takes a beat; a second tap during that beat is dropped) and travels as
-  `EXTRA_DEFAULT_NAME`. Root, no scheme, or any failure → the screen opens without the extra.
+  `EXTRA_DEFAULT_NAME`. Root, no scheme, or any failure → the screen opens without the extra. If the
+  user has left the folder or the screen during the beat, the tap is dropped rather than creating
+  elsewhere (N2). One `namerBusy` guard covers all three entry points, so a slow extension can never
+  stack two dialogs or two New-notebook screens.
 - **Store:** the extension keeps `folder:<UUID>` → scheme in its host-owned encrypted store
   (`Garden/<ext pkg>.db`); it survives disable/uninstall, moves and renames of the folder (keyed by
   UUID); a deleted folder leaves an orphan row (tolerated in v1).

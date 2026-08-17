@@ -7,8 +7,9 @@ global-index model, global encryption model, and e-ink design philosophy — and
 - **Location:** `apps/notesprout_paper/`
 - **Plans:** `PAPER_PLAN.md` (v0, complete — architecture + locked decisions), then
   `PAPER_EXTENSIONS_PLAN.md` (arc 1, complete + frozen: extension API v1 + Templates extension), then
-  `PAPER_NAMING_PLAN.md` (**active** — arc 2: the host-owned encrypted extension store + the Naming
-  extension) — read all three top-to-bottom at the start of every session
+  `PAPER_NAMING_PLAN.md` (arc 2, complete + frozen: the host-owned encrypted extension store + the
+  Naming extension) — read all three top-to-bottom at the start of every session; **no next arc is
+  planned — ask the user first**
 - **Package / applicationId:** `com.symmetricalpalmtree.notesprout` (debug: `.dev` suffix)
 - **Launcher label:** "Notesprout Paper" (debug: "Notesprout Paper Dev")
 

@@ -9,7 +9,8 @@ import java.util.regex.Pattern
  * The scheme language (v1), pure Kotlin — JVM-tested. A scheme is literal text plus tokens:
  * `{date}` (`yyyyMMdd`), `{time}` (`HHmmss`), `{n}` / `{n:K}` (next number in the folder,
  * zero-padded to K digits; at most once). Literal text must satisfy the core's name rule
- * (`[a-zA-Z0-9_\-. ]`); the whole scheme is capped at [MAX_SCHEME_CHARS].
+ * (`[a-zA-Z0-9_\-. ]`); the whole scheme — and its expansion, counted at the counter's width — is
+ * capped at [MAX_SCHEME_CHARS] (= the host's `MAX_NAME_CHARS`).
  *
  * Errors are codes ([Error]) — the service maps them to user-facing strings; the engine has no
  * Android dependency.
@@ -77,6 +78,17 @@ object SchemeEngine {
         }
         flushLiteral()
         if (parts.isEmpty()) throw SchemeException(Error.EMPTY)
+        // The expanded name must also fit the host's name cap (same 100): {date} grows 6 → 8 chars.
+        // A counter is counted at its width — one that outgrows it is the one thing not knowable here.
+        val minExpanded = parts.sumOf {
+            when (it) {
+                is Part.Literal -> it.text.length
+                Part.Date -> 8
+                Part.Time -> 6
+                is Part.Counter -> it.width
+            }
+        }
+        if (minExpanded > MAX_SCHEME_CHARS) throw SchemeException(Error.TOO_LONG)
         // A literal-only scheme expands to itself: it must not be "." or "..".
         if (parts.all { it is Part.Literal }) {
             val joined = parts.joinToString("") { (it as Part.Literal).text }

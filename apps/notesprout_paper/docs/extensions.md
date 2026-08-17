@@ -258,11 +258,14 @@ a passphrase, a path, or a `File`, and cannot open anything itself.
   Stateless extension side; no reverse discovery, no exported host service.
 - **Caps (host-enforced, `ExtensionContract.STORE_*`):** key `1..512` chars, value `≤ 256 KiB`, a
   `put` of a *new* key when the store already holds `50 000` → `IllegalStateException`; bad
-  arguments → `IllegalArgumentException`. All are in the set AIDL marshals across the boundary; the
-  extension treats **any** exception as "store unavailable". `keys(prefix)` LIKE-escapes `%`, `_`,
-  `\` in the prefix and returns ascending. Methods run synchronously on the host's Binder thread
-  over the blocking DAO — never Main. (`ExtensionStoreGate` holds the checks with no Android types
-  so they are JVM-tested; the `Stub` delegates to it.)
+  arguments → `IllegalArgumentException`; a DAO failure (SQLite full / locked / I/O) is rethrown as
+  `IllegalStateException` (N2 — an exception Binder cannot marshal would fail the transaction
+  *silently*: the extension would read an empty reply and believe its `put` succeeded). All are in
+  the set Binder carries intact; the extension treats **any** exception as "store unavailable".
+  `keys(prefix)` is an exact, case-sensitive "starts with" (`substr(key,1,length(prefix)) = prefix`
+  — not `LIKE`, which is ASCII-case-insensitive; N2) returning ascending. Methods run synchronously
+  on the host's Binder thread over the blocking DAO — never Main. (`ExtensionStoreGate` holds the
+  checks with no Android types so they are JVM-tested; the `Stub` delegates to it.)
 - **Pre-open rule:** the host opens the store on IO **before** binding the extension for any call that
   carries one, so a cold open (KDF ≈ 0.5–1.5 s on e-ink when the raw key isn't cached) is never
   inside the extension call's 2 s timeout window.
@@ -400,7 +403,7 @@ correctly reports 0 candidates while it is disabled.
 
 ---
 
-## Boundary audit (E2 — walked 2026-08-16, all ✅)
+## Boundary audit (rows 1–9 E2, rows 10–13 N2 — walked 2026-08-16, all ✅)
 
 What crosses the process boundary, in which direction, and what guards it. Re-walk this table
 whenever an extension point is added or a contract field changes.
@@ -416,6 +419,10 @@ whenever an extension point is added or a contract field changes.
 | 7 | **Every call has a timeout.** Bind ≤ 3 s, list ≤ 2 s, render ≤ 15 s; an un-interruptible Binder call that outlives its timeout finishes on its own supervisor-scope IO thread and is discarded — the caller never hangs. | `TemplateProviderClient` constants + `call()` |
 | 8 | **Failure never creates a notebook silently different from what the user chose.** Render runs **before** any file exists; a failed / null / empty / undecodable / wrong-size render → toast + stay on the screen; Blank is only ever the user's own selection. No extension → no Template section, and the notebook created is the Blank the user saw. A recreated screen (keyboard attach on Ratta, locale) saves the chosen identity and re-checks that radio once discovery rebuilds the list — Blank is re-checked only if nothing was chosen or the template is no longer offered. | `NewNotebookActivity.attemptCreate` / `onSaveInstanceState`, `docs/library.md` §New notebook |
 | 9 | **The core has no renderer and no dependency on the extension.** `:app` depends on `:extension-api` only; the template WEBP is drawn from the `.soil` blob exactly as v0 drew it, so a notebook opens with its template whether or not the extension is installed. | `app/build.gradle.kts`, `NotebookSession.loadTemplateFor` |
+| 10 | **Outward payload of NotebookNamer is exactly folder UUID + sibling notebook names (+ the scheme text the user typed).** `describeField()` and `validateScheme(scheme)` carry nothing else; `currentScheme` / `saveScheme` / `defaultName` carry the folder UUID (a random id — the store key, no content) and `defaultName` alone adds the names of the folder's own notebooks (needed only for `{n}`). No other argument exists in `INotebookNamer` — no passphrase, key, path, index row, other folder, page or stroke can be carried. This is the **recorded widening of row 3** for this point only. | `INotebookNamer.aidl`, `NamerClient` (five methods), `LibraryActivity.launchNewNotebook` (`siblings` = the current listing's `CardItem.Notebook` names) |
+| 11 | **The store binder is uid-bound, per-bind, revocable, capped.** Minted only inside `NamerClient.call(store = true)` — after `ExtensionStores.open` on IO (pre-open rule) and with `extUid = getPackageUid(ref.packageName)` fetched at bind time; `ExtensionStoreGate.check()` requires `getCallingUid() == extUid && !revoked` on **every** method; `revoke()` runs in the same `finally` as the unbind, so a late call from an orphaned (timed-out) transaction fails closed. Caps host-side: key `1..512` chars, value `≤ 256 KiB`, new key at `≥ 50 000` → `IllegalStateException`. The DB is opened only through `SoilCrypto` factories under the global key (`ExtensionStores.open`, the third named create entry point); `IExtensionStore` has no method that could return a key, path, or `File`. | `NamerClient.call`, `ExtensionStoreBinder`, `ExtensionStoreGate` (JVM-tested: uid mismatch, revoked, caps, literal case-sensitive prefix, DAO failure → `IllegalStateException`), `ExtensionStores.open`, `IExtensionStore.aidl` |
+| 12 | **Inward payload is validated.** `SchemeField` strings are truncated (`40 / 60 / 200`) and drawn only as a caption, an `EditText` hint and a help line; a `currentScheme` is capped at `MAX_NAME_CHARS` and shown verbatim only **inside** a text field; a validation error is truncated (`200`) and shown only as a toast; a `defaultName` is accepted only if `NewNotebookActivity.acceptDefaultName` says so (core name rule **and** `≤ MAX_NAME_CHARS`) — else the core default, silently (`Slog.d`, never a toast, never a crash). Any exception, timeout, or null on the way in becomes `ExtensionCallException` at the client and a core-owned outcome at the entry point. | `NamerClient` (`MAX_LABEL/HINT/HELP/ERROR`, `take(MAX_NAME_CHARS)`), `SchemeDialogs.buildField`, `NewNotebookActivity.acceptDefaultName` |
+| 13 | **Failure never changes what the user chose.** +Notebook: namer failure / null / timeout / root → `NewNotebookActivity` opens with the core default (the tap just takes a beat; a second tap during it is dropped). New folder: `describeField` failure → the dialog without the field; the scheme is validated **before** the folder exists (error → toast + stay); the folder is created **before** its scheme is saved and a save failure says so (`naming_save_failed`) while the folder stands. Long-press: fetch failure → `naming_unavailable` toast and no dialog; save/validate failure inside → toast, dialog stays with the text. The extension absent / disabled → all three entry points vanish (`namerRef == null`) and nothing else changes; its store `.db` survives so the schemes return with it. | `LibraryActivity.launchNewNotebook` / `showNewFolderDialog` (both overloads) / `openSchemeDialog`, `SchemeDialogs.showSchemeDialog`, `LibraryActivity.refreshNamer` |
 
 ## Rules for adding a future extension point (write-once, follow later)
 
@@ -429,7 +436,28 @@ whenever an extension point is added or a contract field changes.
 
 Followed by NotebookNamer (N1): `NOTEBOOK_NAMER` + `INotebookNamer` + `SchemeField` in
 `:extension-api`; `ExtensionRegistry.notebookNamer` + `NamerClient`; the core owns every toast; the
-one recorded widening of rule 5 is folder UUID + sibling notebook names. Audit rows 10–13 land in N2.
+one recorded widening of rule 5 is folder UUID + sibling notebook names; audit rows 10–13 (N2).
+
+### Adding a data-holding point (arc 2 pattern)
+
+A point whose extension must remember something between calls follows the five rules above **plus**:
+
+6. **The extension keeps its data in the host-owned store, never in its own files.** Every AIDL method
+   that may need it takes `IExtensionStore store` as an **in-parameter** — there is no reverse
+   discovery, no exported host service, no store handle kept across calls.
+7. **The client opens the store on IO before it binds** (`ExtensionStores.open(ctx, ref.packageName)`
+   — a cold KDF must never sit inside the call timeout), mints **one** `ExtensionStoreBinder(db,
+   extUid)` for that bind (`extUid` from `PackageManager.getPackageUid` at bind time), hands it to the
+   call, and **revokes it in the same `finally` as the unbind**. Copy `NamerClient.call`.
+8. **Only host-fixed data crosses outward** — the identity the store row hangs off (a UUID) and the
+   minimum the call needs; record any widening of rule 5 in the audit, as row 10 does.
+9. **Everything the extension returns from its store is untrusted on the way back** — cap, validate,
+   and fall back to the core's own behaviour silently (row 12).
+10. **A failure must leave the user's own choice intact** — create the core object first, save the
+    extension's data second, and say so when the second step fails (row 13).
+11. **Pre-warm at library resume** if the point is on a hot path (`LibraryActivity.refreshNamer` opens
+    the namer's store on IO once the ref is known) — deferred: generalise to every discovered
+    extension when Templates gains a store (`PAPER_NAMING_PLAN.md` §Deferred).
 
 ## Writing an extension
 
@@ -465,6 +493,25 @@ consumed in-project — see `:ext-templates` for the reference implementation).
    else it throws `SecurityException`. In API v1 the host only binds same-signature extensions, so a third-party
    extension is not yet reachable — the trust rule lifts with the Extensions-UI arc's consent step.
 6. **Never** reorder or remove AIDL methods or parcel fields; follow the versioning rules above.
+7. **Using the store** (points whose AIDL passes an `IExtensionStore`, e.g. `INotebookNamer`):
+   - The host hands you a **fresh binder per bind**, scoped to your uid and revoked the moment the
+     host unbinds — never cache it in a field, never use it from another thread after the call
+     returns; do your reads/writes inside the method that received it.
+   - It is a key/value store: `get(key): ByteArray?`, `put(key, value)`, `delete(key)` (no-op if
+     absent), `keys(prefix): List<String>` (`""` = all, ascending). Serialise however you like — the
+     Naming extension stores UTF-8 text; there is no schema, no SQL, no namespace.
+   - **Caps** (`ExtensionContract.STORE_*`): key `1..512` chars, value `≤ 256 KiB`, at most `50 000`
+     keys per extension. Over a cap → `IllegalArgumentException` / `IllegalStateException` from the host.
+   - **Treat any exception as "store unavailable"** — `SecurityException` (revoked / wrong uid),
+     `IllegalArgumentException`, `IllegalStateException`, `RemoteException`, and anything else. Catch it
+     and rethrow one of the exceptions Binder carries intact (`IllegalStateException` is what
+     `NotebookNamerService.storeCall` uses) so the host sees a clean failure rather than a dead
+     process; never let it escape uncaught.
+   - **Key naming:** prefix keys by kind (`folder:<uuid>`, `pref:<name>`, …) so `keys("folder:")`
+     stays cheap and a later "remove data for X" is a prefix walk. Keys are opaque to the host.
+   - Your data is encrypted at rest under the user's global key, lives in the **host's** files dir,
+     and **survives your uninstall** — the user (via a future Extensions UI), not you, decides when it
+     is removed. Debug (`.dev`) and release builds of your extension get separate stores.
 
 ---
 

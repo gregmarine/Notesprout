@@ -16,35 +16,19 @@ import java.util.TreeMap
  */
 class ExtensionStoreBinderTest {
 
-    /** In-memory `KvDao`; [keysLike] applies the LIKE-with-`\` semantics the real query has. */
+    /** In-memory `KvDao`; [keysWithPrefix] is an exact, case-sensitive "starts with" like the real query. */
     private class FakeDao : KvDao {
         val rows = TreeMap<String, ByteArray>()
-        var lastPattern: String? = null
-        override fun get(key: String): ByteArray? = rows[key]
-        override fun upsert(row: KvEntity) { rows[row.key] = row.value }
-        override fun delete(key: String) { rows.remove(key) }
-        override fun keysLike(pattern: String): List<String> {
-            lastPattern = pattern
-            val rx = likeToRegex(pattern)
-            return rows.keys.filter { rx.matches(it) }
+        var failNext: RuntimeException? = null
+        override fun get(key: String): ByteArray? { fail(); return rows[key] }
+        override fun upsert(row: KvEntity) { fail(); rows[row.key] = row.value }
+        override fun delete(key: String) { fail(); rows.remove(key) }
+        override fun keysWithPrefix(prefix: String): List<String> {
+            fail()
+            return rows.keys.filter { it.startsWith(prefix) }
         }
         override fun count(): Int = rows.size
-
-        private fun likeToRegex(p: String): Regex {
-            val sb = StringBuilder()
-            var i = 0
-            while (i < p.length) {
-                val c = p[i]
-                when {
-                    c == '\\' && i + 1 < p.length -> { sb.append(Regex.escape(p[i + 1].toString())); i++ }
-                    c == '%' -> sb.append(".*")
-                    c == '_' -> sb.append('.')
-                    else -> sb.append(Regex.escape(c.toString()))
-                }
-                i++
-            }
-            return Regex(sb.toString())
-        }
+        private fun fail() { failNext?.let { failNext = null; throw it } }
     }
 
     private val ext = 10_123
@@ -125,20 +109,25 @@ class ExtensionStoreBinderTest {
     }
 
     @Test
-    fun keys_escapesLikeWildcards() {
-        for (k in listOf("a%b", "axb", "a_b", "a\\b", "ab")) gate.put(k, byteArrayOf(1))
+    fun keys_prefixIsLiteralAndCaseSensitive() {
+        for (k in listOf("a%b", "axb", "a_b", "Folder:1", "folder:2")) gate.put(k, byteArrayOf(1))
         assertEquals(listOf("a%b"), gate.keys("a%"))
-        assertEquals("a\\%%", dao.lastPattern)
         assertEquals(listOf("a_b"), gate.keys("a_"))
-        assertEquals("a\\_%", dao.lastPattern)
-        assertEquals(listOf("a\\b"), gate.keys("a\\"))
-        assertEquals("a\\\\%", dao.lastPattern)
+        assertEquals(listOf("folder:2"), gate.keys("folder:"))
     }
 
     @Test
-    fun likePattern_escapes() {
-        assertEquals("%", ExtensionStoreGate.likePattern(""))
-        assertEquals("abc%", ExtensionStoreGate.likePattern("abc"))
-        assertEquals("100\\%\\_\\\\%", ExtensionStoreGate.likePattern("100%_\\"))
+    fun daoFailure_becomesIllegalState() {
+        // Something Binder cannot marshal (e.g. SQLiteFullException) must surface as IllegalStateException,
+        // never as a silently failed transaction.
+        class DiskFull : RuntimeException("disk full")
+        dao.failNext = DiskFull()
+        assertThrows(IllegalStateException::class.java) { gate.put("a", byteArrayOf(1)) }
+        dao.failNext = DiskFull()
+        assertThrows(IllegalStateException::class.java) { gate.get("a") }
+        dao.failNext = DiskFull()
+        assertThrows(IllegalStateException::class.java) { gate.delete("a") }
+        dao.failNext = DiskFull()
+        assertThrows(IllegalStateException::class.java) { gate.keys("") }
     }
 }

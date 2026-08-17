@@ -13,6 +13,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.TooltipCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import com.symmetricalpalmtree.notesprout.R
 import com.symmetricalpalmtree.notesprout.core.ActionSheetDialog
@@ -68,8 +69,12 @@ class LibraryActivity : AppCompatActivity() {
      * hints at naming schemes without the extension.
      */
     private var namerRef: ProviderRef? = null
-    /** +Notebook is resolving a default name from the namer; a second tap during that beat is dropped. */
-    private var resolvingName = false
+    /**
+     * A namer call is in flight before a screen or dialog opens (+Notebook prefill, New-folder
+     * `describeField`, long-press fetch); a second tap during that beat is dropped so the beat can never
+     * stack two dialogs or two New-notebook screens.
+     */
+    private var namerBusy = false
 
     private val newNotebookLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -181,8 +186,8 @@ class LibraryActivity : AppCompatActivity() {
             newNotebookLauncher.launch(NewNotebookActivity.intent(this, fid))
             return
         }
-        if (resolvingName) return
-        resolvingName = true
+        if (namerBusy) return
+        namerBusy = true
         val siblings = items.mapNotNull { (it as? CardItem.Notebook)?.summary?.name }
         lifecycleScope.launch {
             val name = try {
@@ -191,8 +196,11 @@ class LibraryActivity : AppCompatActivity() {
                 Slog.d(TAG) { "defaultName failed: ${e.message}" }
                 null
             } finally {
-                resolvingName = false
+                namerBusy = false
             }
+            // The beat is normally ~50 ms, but if the user has meanwhile left this folder or this
+            // screen the tap no longer means "here" — drop it rather than create elsewhere.
+            if (folderId != fid || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@launch
             newNotebookLauncher.launch(NewNotebookActivity.intent(this@LibraryActivity, fid, name))
         }
     }
@@ -469,13 +477,18 @@ class LibraryActivity : AppCompatActivity() {
     private fun showNewFolderDialog() {
         val ref = namerRef
         if (ref == null) { showNewFolderDialog(null, null); return }
+        if (namerBusy) return
+        namerBusy = true
         lifecycleScope.launch {
             val field = try {
                 NamerClient(this@LibraryActivity, ref).describeField()
             } catch (e: ExtensionCallException) {
                 Slog.d(TAG) { "describeField failed: ${e.message}" }
                 null
+            } finally {
+                namerBusy = false
             }
+            if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@launch
             showNewFolderDialog(if (field != null) ref else null, field)
         }
     }
@@ -508,7 +521,8 @@ class LibraryActivity : AppCompatActivity() {
             .create()
         Dialogs.style(dialog)
         dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val create = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            create.setOnClickListener {
                 val name = input.text.toString().trim()
                 val err = NewNotebookActivity.validateName(name)
                 if (err != null) {
@@ -517,36 +531,43 @@ class LibraryActivity : AppCompatActivity() {
                 }
                 val scheme = schemeViews?.input?.text?.toString()?.trim().orEmpty()
                 val client = if (namer != null && scheme.isNotEmpty()) NamerClient(this, namer) else null
+                // Disarmed while the coroutine runs: a namer bind can take a beat, and a second tap
+                // would pass nameTaken again and create the folder twice.
+                create.isClickable = false
                 lifecycleScope.launch {
-                    if (repo.nameTaken(folderId, ObjectType.FOLDER, name)) {
-                        Toast.makeText(this@LibraryActivity, R.string.new_folder_duplicate, Toast.LENGTH_SHORT).show()
-                        return@launch
-                    }
-                    if (client != null) {
-                        // Validate before the folder exists so a bad scheme keeps the dialog up.
-                        val err = try {
-                            client.validate(scheme)
-                        } catch (e: ExtensionCallException) {
-                            Slog.d(TAG) { "validate failed: ${e.message}" }
-                            getString(R.string.naming_unavailable)
-                        }
-                        if (err != null) {
-                            Toast.makeText(this@LibraryActivity, err, Toast.LENGTH_SHORT).show()
+                    try {
+                        if (repo.nameTaken(folderId, ObjectType.FOLDER, name)) {
+                            Toast.makeText(this@LibraryActivity, R.string.new_folder_duplicate, Toast.LENGTH_SHORT).show()
                             return@launch
                         }
-                    }
-                    val folder = repo.createFolder(name, folderId)
-                    if (client != null) {
-                        try {
-                            client.save(folder.id, scheme)
-                        } catch (e: ExtensionCallException) {
-                            // The folder exists either way; the user can retry from long-press.
-                            Slog.d(TAG) { "save scheme failed: ${e.message}" }
-                            Toast.makeText(this@LibraryActivity, R.string.naming_save_failed, Toast.LENGTH_SHORT).show()
+                        if (client != null) {
+                            // Validate before the folder exists so a bad scheme keeps the dialog up.
+                            val err = try {
+                                client.validate(scheme)
+                            } catch (e: ExtensionCallException) {
+                                Slog.d(TAG) { "validate failed: ${e.message}" }
+                                getString(R.string.naming_unavailable)
+                            }
+                            if (err != null) {
+                                Toast.makeText(this@LibraryActivity, err, Toast.LENGTH_SHORT).show()
+                                return@launch
+                            }
                         }
+                        val folder = repo.createFolder(name, folderId)
+                        if (client != null) {
+                            try {
+                                client.save(folder.id, scheme)
+                            } catch (e: ExtensionCallException) {
+                                // The folder exists either way; the user can retry from long-press.
+                                Slog.d(TAG) { "save scheme failed: ${e.message}" }
+                                Toast.makeText(this@LibraryActivity, R.string.naming_save_failed, Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        dialog.dismiss()
+                        refresh()
+                    } finally {
+                        create.isClickable = true
                     }
-                    dialog.dismiss()
-                    refresh()
                 }
             }
         }
@@ -558,6 +579,8 @@ class LibraryActivity : AppCompatActivity() {
     /** Field description + current scheme are fetched before the dialog shows; failure → toast, no dialog. */
     private fun openSchemeDialog(s: ObjectSummary) {
         val ref = namerRef ?: return
+        if (namerBusy) return
+        namerBusy = true
         val client = NamerClient(this, ref)
         lifecycleScope.launch {
             val fetched = try {
@@ -566,7 +589,10 @@ class LibraryActivity : AppCompatActivity() {
                 Slog.d(TAG) { "scheme dialog open failed: ${e.message}" }
                 Toast.makeText(this@LibraryActivity, R.string.naming_unavailable, Toast.LENGTH_SHORT).show()
                 return@launch
+            } finally {
+                namerBusy = false
             }
+            if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@launch
             SchemeDialogs.showSchemeDialog(this@LibraryActivity, client, s.id, s.name, fetched.first, fetched.second)
         }
     }

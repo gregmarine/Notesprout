@@ -34,7 +34,12 @@ paper notebooks.
   (`:ext-templates`): it offers Lined / Dotted / Grid on the New-notebook screen and renders the chosen
   one into the WEBP the `.soil` stores. Without it the screen has no Template section and notebooks
   are blank; notebooks created with it keep their template wherever they go, extension or not. The
-  contract lives in `:extension-api`; see `docs/extensions.md`.
+  second is **Naming** (`:ext-naming`): a folder can be given a default-name scheme (`Meeting {date}
+  {n:2}`) from the New-folder dialog or the folder's long-press, and +Notebook in that folder opens
+  pre-named by it; the schemes live in a **core-owned encrypted store** (`Garden/<pkg>.db`, under the
+  global key — the extension never sees a key or a path) that survives the extension's removal.
+  Without it every entry point is absent and names are the standard `yyyyMMdd_HHmmss`. The contract
+  lives in `:extension-api`; see `docs/extensions.md`.
 
 ## What Paper is **not** (v0)
 
@@ -76,10 +81,10 @@ run `./gradlew publishToMavenLocal` in `~/git/g-paper` first. Requires a Temurin
 
 | Concern | Path |
 |---|---|
-| Project memory / plan (read first) | `PAPER_PLAN.md` (v0), `PAPER_EXTENSIONS_PLAN.md` (extensions arc) |
+| Project memory / plan (read first) | `PAPER_PLAN.md` (v0), `PAPER_EXTENSIONS_PLAN.md` (arc 1 — extension API + Templates), `PAPER_NAMING_PLAN.md` (arc 2 — extension store + Naming) |
 | Standing rules + build facts | `CLAUDE.md` |
 | Encryption & launch spine | `docs/crypto.md` |
 | Containers & global index | `docs/data.md` |
 | Library screen | `docs/library.md` |
 | Notebook screen (paper, gestures, pages, undo) | `docs/notebook.md` |
-| Extensions (model, contract v1, Templates extension, boundary audit, writing one) | `docs/extensions.md` |
+| Extensions (model, contract v1, Templates + Naming extensions, the extension store, boundary audit, writing one) | `docs/extensions.md` |

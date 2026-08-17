@@ -68,6 +68,9 @@ class SchemeEngineTest {
     @Test fun `too long`() {
         assertEquals(Error.TOO_LONG, errorOf("a".repeat(101)))
         assertNull(errorOf("a".repeat(100)))
+        // The expansion counts too: {date} is 6 chars of scheme but 8 of name.
+        assertEquals(Error.TOO_LONG, errorOf("a".repeat(93) + "{date}"))
+        assertNull(errorOf("a".repeat(92) + "{date}"))
     }
 
     // ── expand ───────────────────────────────────────────────────────────────

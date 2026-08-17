@@ -9,8 +9,10 @@ import com.symmetricalpalmtree.notesprout.extension.ExtensionContract
  * else `SecurityException`. Caps (`ExtensionContract.STORE_*`): key `1..STORE_MAX_KEY_CHARS`
  * chars, value `≤ STORE_MAX_VALUE_BYTES`, and a `put` of a *new* key when the store already holds
  * `STORE_MAX_KEYS` keys → `IllegalStateException`. Bad arguments → `IllegalArgumentException`.
- * All of these are in the set AIDL marshals across the boundary; the extension treats any of them as
- * "store unavailable".
+ * A DAO failure (SQLite full / locked / I/O) is rethrown as `IllegalStateException` too. All of these
+ * are in the set Binder marshals across the boundary intact — anything else would fail the transaction
+ * silently (`UNKNOWN_TRANSACTION`, empty reply → the extension believes a `put` succeeded). The
+ * extension treats any of them as "store unavailable".
  */
 class ExtensionStoreGate(
     private val dao: KvDao,
@@ -29,7 +31,8 @@ class ExtensionStoreGate(
 
     fun get(key: String?): ByteArray? {
         check()
-        return dao.get(validKey(key))
+        val k = validKey(key)
+        return io { dao.get(k) }
     }
 
     @Synchronized
@@ -40,21 +43,35 @@ class ExtensionStoreGate(
         require(value.size <= ExtensionContract.STORE_MAX_VALUE_BYTES) {
             "value exceeds ${ExtensionContract.STORE_MAX_VALUE_BYTES} bytes"
         }
-        if (dao.get(k) == null && dao.count() >= ExtensionContract.STORE_MAX_KEYS) {
-            throw IllegalStateException("store holds ${ExtensionContract.STORE_MAX_KEYS} keys")
+        io {
+            if (dao.get(k) == null && dao.count() >= ExtensionContract.STORE_MAX_KEYS) {
+                throw IllegalStateException("store holds ${ExtensionContract.STORE_MAX_KEYS} keys")
+            }
+            dao.upsert(KvEntity(k, value, now()))
         }
-        dao.upsert(KvEntity(k, value, now()))
     }
 
     fun delete(key: String?) {
         check()
-        dao.delete(validKey(key))
+        val k = validKey(key)
+        io { dao.delete(k) }
     }
 
     fun keys(prefix: String?): List<String> {
         check()
-        return dao.keysLike(likePattern(prefix ?: ""))
+        val p = prefix ?: ""
+        return io { dao.keysWithPrefix(p) }
     }
+
+    /** Runs a DAO call; a failure that Binder could not carry becomes `IllegalStateException`. */
+    private inline fun <T> io(block: () -> T): T =
+        try {
+            block()
+        } catch (e: IllegalStateException) {
+            throw e
+        } catch (e: Exception) {
+            throw IllegalStateException("store I/O failed: ${e.javaClass.simpleName}", e)
+        }
 
     private fun check() {
         if (revoked) throw SecurityException("store binder revoked")
@@ -68,17 +85,5 @@ class ExtensionStoreGate(
             "key exceeds ${ExtensionContract.STORE_MAX_KEY_CHARS} chars"
         }
         return key
-    }
-
-    companion object {
-        /** `LIKE` pattern matching keys that start with [prefix]: `%`, `_`, `\` escaped with `\`, then `%`. */
-        fun likePattern(prefix: String): String {
-            val sb = StringBuilder(prefix.length + 4)
-            for (c in prefix) {
-                if (c == '%' || c == '_' || c == '\\') sb.append('\\')
-                sb.append(c)
-            }
-            return sb.append('%').toString()
-        }
     }
 }

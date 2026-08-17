@@ -17,9 +17,13 @@ interface KvDao {
     @Query("DELETE FROM kv WHERE `key` = :key")
     fun delete(key: String)
 
-    /** [pattern] is a ready `LIKE` pattern with `\` as the escape char — see [ExtensionStoreGate.likePattern]. */
-    @Query("SELECT `key` FROM kv WHERE `key` LIKE :pattern ESCAPE '\\' ORDER BY `key`")
-    fun keysLike(pattern: String): List<String>
+    /**
+     * Keys starting with [prefix] (`""` = all), ascending. `substr` = exact, case-sensitive
+     * character comparison — SQLite `LIKE` is ASCII-case-insensitive per connection and would break
+     * the "starts with" contract for keys that differ only in case.
+     */
+    @Query("SELECT `key` FROM kv WHERE substr(`key`, 1, length(:prefix)) = :prefix ORDER BY `key`")
+    fun keysWithPrefix(prefix: String): List<String>
 
     @Query("SELECT count(*) FROM kv")
     fun count(): Int
