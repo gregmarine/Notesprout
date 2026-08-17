@@ -553,7 +553,7 @@ docs; memory; commit + push.
 ---
 
 ### Phase M2 — Hardening, review, boundary audit, docs freeze
-**Status:** ✅ Complete (commit hash: see the follow-up commit line below; automated device run on SNN + NA5C + MIP11 2026-08-17 + user-verified dot handling on SNN)
+**Status:** ✅ Complete (commit f33a95d; automated device run on SNN + NA5C + MIP11 2026-08-17 + user-verified dot handling on SNN)
 
 **Goal:** the recognizer point + the ML Kit extension are trustworthy enough to be the capability
 every later consumer point brokers, and the shared bind path is the one path.
