@@ -8,7 +8,7 @@
 > the extension API v1 + Templates extension, frozen; this arc extends it) and both `CLAUDE.md`
 > files. `docs/extensions.md` is the subsystem reference both arcs write into.
 >
-> **Arc 2 is complete (N0 04c5894 · N1 c339ee3 · N2 — see the last commit touching this file) and this
+> **Arc 2 is complete (N0 04c5894 · N1 c339ee3 · N2 56d112b) and this
 > file is frozen.** The next arc is not planned — ask the user first.
 
 ## Why
@@ -489,7 +489,7 @@ is by design (no bindings held across screens). **User checklist 1–14 passed o
 ---
 
 ### Phase N2 — Hardening, review, boundary audit, docs freeze
-**Status:** ✅ Complete (commit — see the follow-up hash note)
+**Status:** ✅ Complete (commit 56d112b)
 
 **Goal:** the store + NotebookNamer are trustworthy enough to be the pattern every data-holding
 extension follows.
