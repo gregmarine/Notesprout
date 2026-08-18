@@ -10,7 +10,7 @@
 > `CLAUDE.md` files. `docs/extensions.md` is the subsystem reference all arcs write into;
 > `docs/notebook.md` and `docs/data.md` gain sections in this arc.
 >
-> **Status: H0 ✅ (8c5361f) · H1 ✅ (62771f3) · H2 ✅ (bf17417) · H3 ✅ (0de688e) · H4 ✅ (f995354) · H5 🧪 — built + reviewed 2026-08-18, awaiting device verification.**
+> **Status: H0 ✅ (8c5361f) · H1 ✅ (62771f3) · H2 ✅ (bf17417) · H3 ✅ (0de688e) · H4 ✅ (f995354) · H5 ✅ (6c5d5c2) — ARC COMPLETE, user-verified SNN + NA5C + MIP11 2026-08-18. This file is frozen.**
 
 ## Why
 
@@ -1012,7 +1012,7 @@ pass for six headings); docs; memory; commit + push.
 ---
 
 ### Phase H5 — Hardening, review, boundary audit, docs freeze
-**Status:** 🧪 Awaiting device verification (built + reviewed 2026-08-18; no device was attached at build time — install SNN + NA5C + MIP11 next session, then the checklist below)
+**Status:** ✅ Complete (commits 81e4b38 · 83264f8 · 439beaa · 71aca63 · 6c5d5c2) — user-verified SNN + NA5C + MIP11 2026-08-18 ("Verified all three"); the arc is closed and this plan is frozen
 
 **Goal:** the object model, the two points, the proxies and the toolbar API are trustworthy enough to
 be the pattern the next object extensions follow.
@@ -1142,6 +1142,14 @@ after providers, primed ~7 s after open; H-tap warm kept as re-warm. Installed a
 better". **Then: the "Recognizing…" popup removed from the heading create** (user wants to see it
 without; a warm create is ~50–300 ms; `busy` guard stays; the debug Recognize page keeps its own popup;
 re-add in `ObjectActions.create` on request).
+
+**Close-out (2026-08-18):** user verified all three devices — H5 ✅, **arc 4 complete**. Final shape
+beyond the plan as written: toolbar / edit dialog / inline render frame present at once (hover is not
+writing); recognizer warm-up at notebook open + H-tap re-warm + ML Kit engine prime; no popup on the
+heading create; the nine review fixes + the two audit-walk fixes; debug scaffolding gone. What the
+next object extension (Text / Shape / Link) follows: `docs/extensions.md` §"Adding an object point"
+(rules 18–23) + audit rows 18–24 + "Writing an extension" items 9–10. Nothing further is planned for
+this arc; the next arc (Extensions UI, or a second object type) is not planned — ask first.
 
 ---
 

@@ -10,12 +10,12 @@ global-index model, global encryption model, and e-ink design philosophy — and
   `PAPER_NAMING_PLAN.md` (arc 2, complete + frozen: the host-owned encrypted extension store + the
   Naming extension), then `PAPER_RECOGNITION_PLAN.md` (arc 3, complete + frozen 2026-08-17: the
   engine-neutral `HANDWRITING_RECOGNIZER` capability point + the ML Kit extension `NSE · ML Kit`,
-  debug-only "Recognize page" test surface), then **`PAPER_OBJECTS_PLAN.md` (arc 4, in progress —
-  H0 ✅ 8c5361f · H1 ✅ 62771f3 · H2 ✅ bf17417 · H3 ✅ 0de688e · H4 ✅ f995354 2026-08-18: content objects in the `.soil` + the selection toolbar with its
+  debug-only "Recognize page" test surface), then `PAPER_OBJECTS_PLAN.md` (arc 4, **complete + frozen 2026-08-18** —
+  H0 8c5361f · H1 62771f3 · H2 bf17417 · H3 0de688e · H4 f995354 · H5 6c5d5c2: content objects in the `.soil` + the selection toolbar with its
   extension-contribution API + the `MARKDOWN_RENDERER` capability point / `NSE · Markdown` + the
-  generic `OBJECT_PROVIDER` point / `NSE · Heading`, the two proxies, g-paper 0.1.1)** — read all
-  five top-to-bottom at the start of every session; **arc 4 is the active plan — start at its next
-  `⬜` phase after the phase-start question ritual**
+  generic `OBJECT_PROVIDER` point / `NSE · Heading`, the two proxies, g-paper 0.1.1) — read all
+  five top-to-bottom at the start of every session; **no arc is active — the next one (Extensions UI,
+  or a second object type) is not planned; ask before starting anything**
 - **Package / applicationId:** `com.symmetricalpalmtree.notesprout` (debug: `.dev` suffix)
 - **Launcher label:** "Notesprout Paper" (debug: "Notesprout Paper Dev")
 
