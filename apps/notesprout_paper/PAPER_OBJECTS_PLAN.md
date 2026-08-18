@@ -10,7 +10,7 @@
 > `CLAUDE.md` files. `docs/extensions.md` is the subsystem reference all arcs write into;
 > `docs/notebook.md` and `docs/data.md` gain sections in this arc.
 >
-> **Status: H0 ✅ (8c5361f) · H1 ✅ (62771f3) · H2 ✅ (bf17417) · H3 ✅ (0de688e) · H4 🧪 · H5 ⬜ — H0 user-verified 2026-08-17.**
+> **Status: H0 ✅ (8c5361f) · H1 ✅ (62771f3) · H2 ✅ (bf17417) · H3 ✅ (0de688e) · H4 ✅ (f995354) · H5 ⬜ — H0 user-verified 2026-08-17.**
 
 ## Why
 
@@ -892,7 +892,7 @@ consent flow is promoted to main. Nothing user-visible in release.
 ---
 
 ### Phase H4 — End-to-end: write → lasso → H → size → heading; edit; re-size; undo; devices
-**Status:** 🧪 Awaiting device verification (built 2026-08-18; Claude-verified on MIP11 end to end, SNN + NA5C launch/provider-load only — lasso is adb-unreachable there) — user by-eye items 1–15 flip this ✅
+**Status:** ✅ Complete (commits e36e434 + f995354) — user-verified SNN + NA5C + MIP11 2026-08-18 (all 15 checklist items; "all three recognize correctly now")
 
 **Outcome so far (2026-08-18):** `ObjectProviderClient.renderAll` (one bind + one Markdown proxy per
 provider, budget 8 s × n, per-item null on failure, `CapabilityRequiredException` ends the batch);
