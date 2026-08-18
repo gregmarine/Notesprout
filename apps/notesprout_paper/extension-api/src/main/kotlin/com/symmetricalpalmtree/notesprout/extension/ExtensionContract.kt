@@ -5,12 +5,13 @@ package com.symmetricalpalmtree.notesprout.extension
  * depends on nothing in `:app` and on no library beyond the Kotlin stdlib, so a third party can
  * consume it as a plain artifact.
  *
- * v1 has three extension points: [ACTION_TEMPLATE_PROVIDER] (interface `ITemplateProvider`),
- * [ACTION_NOTEBOOK_NAMER] (interface `INotebookNamer`, arc 2) and [ACTION_HANDWRITING_RECOGNIZER]
+ * v1 has four extension points: [ACTION_TEMPLATE_PROVIDER] (interface `ITemplateProvider`),
+ * [ACTION_NOTEBOOK_NAMER] (interface `INotebookNamer`, arc 2), [ACTION_HANDWRITING_RECOGNIZER]
  * (interface `IHandwritingRecognizer`, arc 3 — a *capability* point: the host binds it and may lend
- * it to other extensions later). `IExtensionStore` (arc 2) is not a point — it is the host-owned
- * store handed *to* an extension as an in-parameter of a call; its caps are the `STORE_*` constants
- * below.
+ * it to other extensions later) and [ACTION_MARKDOWN_RENDERER] (interface `IMarkdownRenderer`,
+ * arc 4 — a second capability point: markdown in, image out). `IExtensionStore` (arc 2) is not a
+ * point — it is the host-owned store handed *to* an extension as an in-parameter of a call; its caps
+ * are the `STORE_*` constants below.
  */
 object ExtensionContract {
 
@@ -29,6 +30,10 @@ object ExtensionContract {
     const val ACTION_HANDWRITING_RECOGNIZER: String =
         "com.symmetricalpalmtree.notesprout.extension.HANDWRITING_RECOGNIZER"
 
+    /** Intent action a markdown-renderer `<service>` declares in its intent-filter (arc 4). */
+    const val ACTION_MARKDOWN_RENDERER: String =
+        "com.symmetricalpalmtree.notesprout.extension.MARKDOWN_RENDERER"
+
     /** `<meta-data>` name (on the `<service>`) carrying the extension's API version. */
     const val META_API_VERSION: String =
         "com.symmetricalpalmtree.notesprout.extension.API_VERSION"
@@ -36,8 +41,20 @@ object ExtensionContract {
     /** MIME type of the bytes a [RenderedTemplate] carries. */
     const val MIME_WEBP: String = "image/webp"
 
-    /** Hard cap the host enforces on a render result (16 MiB). */
+    /** Hard cap the host enforces on a render result (16 MiB) — a [RenderedTemplate] or a [RenderedImage]. */
     const val MAX_RENDER_BYTES: Int = 16 * 1024 * 1024
+
+    // ── Markdown-renderer caps (`IMarkdownRenderer`, arc 4) ──────
+    // The host truncates / rejects BEFORE the call; the extension re-checks (`IllegalArgumentException`).
+
+    /** Longest markdown source one `render` accepts (chars). */
+    const val MAX_MARKDOWN_CHARS: Int = 20_000
+
+    /** A [RenderedImage] may not exceed this on either side (px) — host and extension both enforce it. */
+    const val MAX_IMAGE_EDGE_PX: Int = 4_096
+
+    /** Most padding (px, all four sides) a markdown render may be asked for. */
+    const val RENDER_PADDING_MAX_PX: Int = 64
 
     // ── Extension store caps (`IExtensionStore`, enforced by the host) ──────
 

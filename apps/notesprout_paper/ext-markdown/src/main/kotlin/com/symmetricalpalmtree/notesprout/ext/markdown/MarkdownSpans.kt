@@ -1,0 +1,254 @@
+package com.symmetricalpalmtree.notesprout.ext.markdown
+
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.TextPaint
+import android.text.style.AbsoluteSizeSpan
+import android.text.style.LeadingMarginSpan
+import android.text.style.QuoteSpan
+import android.text.style.RelativeSizeSpan
+import android.text.style.StrikethroughSpan
+import android.text.style.StyleSpan
+import android.text.style.TypefaceSpan
+import android.text.style.UnderlineSpan
+import android.graphics.Typeface
+import android.text.style.ReplacementSpan
+
+/**
+ * Port of the original Notesprout `core/markdown/MarkdownRenderer.kt` (arc 4 / H0) — the one
+ * Android-text-only class of the extension. Converts a [Block] list from [MarkdownParser] into a
+ * [SpannableStringBuilder] with stock spans, ready for [android.text.StaticLayout]
+ * ([MarkdownBitmap] draws it). Typography is the original's, baked in here — the core knows none of
+ * it: headings bold at [headingSizeMultiplier] × the base size (H1 2.0 · H2 1.75 · H3 1.5 · H4 1.25 ·
+ * H5 1.1 · H6 1.0), 16 dp list indent steps, 3 dp quote stripe + 8 dp gap, 1 dp rule.
+ *
+ * Supported subset: headings (h1-h6), bold, italic, strikethrough, inline code, unordered
+ * lists with nesting, ordered lists (counted from the run's first item — see
+ * [Block.ListItem.displayNumber]), task checkboxes, blockquotes, horizontal rules, and links
+ * (underlined display text, no click).
+ *
+ * Out of scope: code blocks, tables, images, HTML, underline-as-formatting, and the lettered /
+ * roman-numeral ordered lists of Pandoc's `fancy_lists` — standard Markdown has only digits, and a
+ * document that rendered them as lists here would come out as run-together paragraphs everywhere else.
+ *
+ * @param availableWidthPx content width in pixels — used to size [HorizontalRuleSpan].
+ * @param density screen density from [android.util.DisplayMetrics.density] — used for
+ *   dp-to-pixel conversions in list indents, blockquote stripes, and HR height.
+ * @param blockGapPx vertical gap in pixels inserted **between** blocks (a sized blank line).
+ *   Defaults to `0` for compact on-page text objects; the read-only text viewer passes a
+ *   positive value so paragraphs/headings breathe like a document.
+ */
+object MarkdownSpans {
+
+    fun render(
+        blocks: List<Block>,
+        availableWidthPx: Int,
+        paint: TextPaint,
+        density: Float,
+        blockGapPx: Int = 0,
+    ): SpannableStringBuilder {
+        val sb = SpannableStringBuilder()
+        val indentStepPx = (16f * density).toInt()
+
+        for ((index, block) in blocks.withIndex()) {
+            if (blockGapPx > 0 && index > 0) appendBlockGap(sb, blockGapPx)
+            val blockStart = sb.length
+            when (block) {
+                is Block.Heading -> renderHeading(sb, block, blockStart)
+                is Block.Paragraph -> renderParagraph(sb, block)
+                is Block.ListItem -> renderListItem(sb, block, blockStart, indentStepPx)
+                is Block.Blockquote -> renderBlockquote(sb, block, blockStart, density)
+                is Block.HorizontalRule -> renderHorizontalRule(sb, blockStart, availableWidthPx, density)
+            }
+        }
+
+        return sb
+    }
+
+    /**
+     * Appends a blank line whose height is [gapPx], creating visual separation between blocks.
+     * The `\n` sits on its own line; sizing that single character sizes the line it occupies.
+     */
+    private fun appendBlockGap(sb: SpannableStringBuilder, gapPx: Int) {
+        val start = sb.length
+        sb.append('\n')
+        sb.setSpan(AbsoluteSizeSpan(gapPx, false), start, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    }
+
+    // ── Block renderers ───────────────────────────────────────────────────────
+
+    private fun renderHeading(sb: SpannableStringBuilder, block: Block.Heading, blockStart: Int) {
+        val textStart = sb.length
+        appendInlines(sb, block.inlines)
+        val textEnd = sb.length
+        sb.append('\n')
+
+        val mult = headingSizeMultiplier(block.level)
+        sb.setSpan(RelativeSizeSpan(mult), textStart, textEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        sb.setSpan(StyleSpan(Typeface.BOLD), textStart, textEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    }
+
+    private fun renderParagraph(sb: SpannableStringBuilder, block: Block.Paragraph) {
+        appendInlines(sb, block.inlines)
+        sb.append('\n')
+    }
+
+    private fun renderListItem(
+        sb: SpannableStringBuilder,
+        block: Block.ListItem,
+        blockStart: Int,
+        indentStepPx: Int,
+    ) {
+        val indentPx = (block.depth + 1) * indentStepPx
+        val prefix = when {
+            block.isTask && block.checked -> "☑ "   // ☑
+            block.isTask -> "☐ "                    // ☐
+            block.ordered -> "${block.displayNumber}. "
+            else -> bulletGlyph(block.depth)
+        }
+        val textStart = sb.length
+        sb.append(prefix)
+        appendInlines(sb, block.inlines)
+        sb.append('\n')
+        val blockEnd = sb.length
+        // LeadingMarginSpan is a ParagraphStyle; must span to the trailing \n.
+        sb.setSpan(
+            LeadingMarginSpan.Standard(indentPx, indentPx),
+            textStart, blockEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+        )
+    }
+
+    private fun renderBlockquote(
+        sb: SpannableStringBuilder,
+        block: Block.Blockquote,
+        blockStart: Int,
+        density: Float,
+    ) {
+        val textStart = sb.length
+        appendInlines(sb, block.inlines)
+        sb.append('\n')
+        val blockEnd = sb.length
+        val stripeWidth = (3f * density).toInt().coerceAtLeast(2)
+        val gapWidth = (8f * density).toInt()
+        sb.setSpan(
+            QuoteSpan(Color.BLACK, stripeWidth, gapWidth),
+            textStart, blockEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+        )
+    }
+
+    private fun renderHorizontalRule(
+        sb: SpannableStringBuilder,
+        blockStart: Int,
+        availableWidthPx: Int,
+        density: Float,
+    ) {
+        val spanStart = sb.length
+        sb.append('​') // zero-width space as the replacement span anchor
+        val spanEnd = sb.length
+        sb.append('\n')
+        sb.setSpan(
+            HorizontalRuleSpan(availableWidthPx, density),
+            spanStart, spanEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+        )
+    }
+
+    // ── Inline renderer ───────────────────────────────────────────────────────
+
+    internal fun appendInlines(sb: SpannableStringBuilder, inlines: List<Inline>) {
+        for (inline in inlines) {
+            val start = sb.length
+            when (inline) {
+                is Inline.Text -> sb.append(inline.text)
+                is Inline.Bold -> {
+                    appendInlines(sb, inline.children)
+                    sb.setSpan(StyleSpan(Typeface.BOLD), start, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+                is Inline.Italic -> {
+                    appendInlines(sb, inline.children)
+                    sb.setSpan(StyleSpan(Typeface.ITALIC), start, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+                is Inline.Strikethrough -> {
+                    appendInlines(sb, inline.children)
+                    sb.setSpan(StrikethroughSpan(), start, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+                is Inline.Code -> {
+                    sb.append(inline.text)
+                    sb.setSpan(TypefaceSpan("monospace"), start, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+                is Inline.Link -> {
+                    sb.append(inline.displayText)
+                    sb.setSpan(UnderlineSpan(), start, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+            }
+        }
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /** The six heading multipliers (relative to the base size); anything else is body size. */
+    internal fun headingSizeMultiplier(level: Int): Float = when (level) {
+        1 -> 2.0f
+        2 -> 1.75f
+        3 -> 1.5f
+        4 -> 1.25f
+        5 -> 1.1f
+        else -> 1.0f // h6 — same size as body, bold distinguishes it
+    }
+
+    private fun bulletGlyph(depth: Int): String = when (depth % 3) {
+        0 -> "• " // •
+        1 -> "◦ " // ◦
+        else -> "▪ " // ▪
+    }
+}
+
+// ── HorizontalRuleSpan ────────────────────────────────────────────────────────
+
+/**
+ * Replacement span that renders a 1dp inkBlack horizontal line spanning [widthPx].
+ * Inserted as a single zero-width-space character so StaticLayout gives it a full
+ * line of height.
+ */
+private class HorizontalRuleSpan(
+    private val widthPx: Int,
+    private val density: Float,
+) : ReplacementSpan() {
+
+    override fun getSize(
+        paint: Paint,
+        text: CharSequence?,
+        start: Int,
+        end: Int,
+        fm: Paint.FontMetricsInt?,
+    ): Int {
+        fm?.let {
+            val half = (paint.textSize / 2f).toInt().coerceAtLeast(4)
+            it.ascent = -half
+            it.descent = half
+            it.top = it.ascent
+            it.bottom = it.descent
+        }
+        return widthPx
+    }
+
+    override fun draw(
+        canvas: Canvas,
+        text: CharSequence?,
+        start: Int,
+        end: Int,
+        x: Float,
+        top: Int,
+        y: Int,
+        bottom: Int,
+        paint: Paint,
+    ) {
+        val mid = (top + bottom) / 2f
+        val savedWidth = paint.strokeWidth
+        paint.strokeWidth = density.coerceAtLeast(1f)
+        canvas.drawLine(x, mid, x + widthPx, mid, paint)
+        paint.strokeWidth = savedWidth
+    }
+}

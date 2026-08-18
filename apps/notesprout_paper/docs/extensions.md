@@ -11,6 +11,9 @@
 > **Arc 3** (`PAPER_RECOGNITION_PLAN.md`): **M0** added the third point — the engine-neutral
 > **HandwritingRecognizer** *capability* point — and the ML Kit extension (§"HandwritingRecognizer
 > (contract)", §"The ML Kit extension"); the host client + debug test surface come in M1.
+> **Arc 4** (`PAPER_OBJECTS_PLAN.md`): **H0** added the fourth point — the **MarkdownRenderer**
+> *capability* point (markdown in, image out) — and the Markdown extension (§"MarkdownRenderer
+> (contract)", §"The Markdown extension"); nothing in the host binds it yet (H3/H4).
 
 Notesprout's original design baked too many features into the core. Paper's core is **paper with
 strokes** — a library of notebooks, each a stack of pages you write on. Everything else is added by
@@ -85,9 +88,13 @@ and the extension modules never depend on each other.
 | `ACTION_TEMPLATE_PROVIDER` | `"com.symmetricalpalmtree.notesprout.extension.TEMPLATE_PROVIDER"` |
 | `ACTION_NOTEBOOK_NAMER` | `"com.symmetricalpalmtree.notesprout.extension.NOTEBOOK_NAMER"` (arc 2 / N1) |
 | `ACTION_HANDWRITING_RECOGNIZER` | `"com.symmetricalpalmtree.notesprout.extension.HANDWRITING_RECOGNIZER"` (arc 3 / M0) |
+| `ACTION_MARKDOWN_RENDERER` | `"com.symmetricalpalmtree.notesprout.extension.MARKDOWN_RENDERER"` (arc 4 / H0) |
 | `META_API_VERSION` | `"com.symmetricalpalmtree.notesprout.extension.API_VERSION"` |
 | `MIME_WEBP` | `"image/webp"` |
-| `MAX_RENDER_BYTES` | `16 * 1024 * 1024` (16 MiB — hard cap the host enforces on a render result) |
+| `MAX_RENDER_BYTES` | `16 * 1024 * 1024` (16 MiB — hard cap the host enforces on a render result: a `RenderedTemplate` or a `RenderedImage`) |
+| `MAX_MARKDOWN_CHARS` | `20_000` — longest markdown source one `IMarkdownRenderer.render` accepts (host truncates before the call; extension re-checks) (arc 4 / H0) |
+| `MAX_IMAGE_EDGE_PX` | `4_096` — a `RenderedImage` may not exceed this on either side (host + extension) (arc 4 / H0) |
+| `RENDER_PADDING_MAX_PX` | `64` — most padding (px, all four sides) a markdown render may ask for (arc 4 / H0) |
 | `STORE_MAX_KEY_CHARS` | `512` — longest `IExtensionStore` key (the empty key is rejected) |
 | `STORE_MAX_VALUE_BYTES` | `256 * 1024` — largest `IExtensionStore` value |
 | `STORE_MAX_KEYS` | `50_000` — most keys one extension's store may hold |
@@ -175,6 +182,22 @@ interface IHandwritingRecognizer {
      *  paragraphs separated by a blank line ("" if nothing recognizable). Same exceptions. */
     String recognizePage(in List<InkStroke> strokes, float pageWidth, float pageHeight);
 }
+
+// RenderedImage.aidl
+package com.symmetricalpalmtree.notesprout.extension;
+parcelable RenderedImage;
+
+// IMarkdownRenderer.aidl — the MARKDOWN_RENDERER capability point (arc 4 / H0).
+// Markdown in, image out. Stateless. Lent to object providers by the core through a proxy (H3).
+interface IMarkdownRenderer {
+    /** Render [markdown] (≤ MAX_MARKDOWN_CHARS) as black text on a transparent background:
+     *  natural width capped at [maxWidthPx] (> 0), [dpi] the panel density (sp/dp → px), [maxLines]
+     *  0 = unlimited else ellipsize END past that many lines, [paddingPx] 0..RENDER_PADDING_MAX_PX added
+     *  on all four sides. Returns a lossless WEBP with alpha whose declared size equals the encoded
+     *  size, ≤ MAX_IMAGE_EDGE_PX per side; null if the source renders to nothing. Called on a Binder
+     *  thread. IllegalArgumentException over the caps. */
+    RenderedImage render(String markdown, int maxWidthPx, float dpi, int maxLines, int paddingPx);
+}
 ```
 
 `RecognizerStatus` is a Kotlin `object` of `Int` constants (AIDL carries `int` — no parcelable, no
@@ -207,9 +230,22 @@ treats any other value as `UNAVAILABLE`.
   compatible tail (e.g. a time channel) may be appended after `y` later; readers of this version stop
   after `y`.
 
+- `RenderedImage(memory: SharedMemory, byteCount: Int, mimeType: String, widthPx: Int, heightPx: Int)`
+  — `writeParcelable(memory); writeInt(byteCount); writeString(mimeType); writeInt(widthPx);
+  writeInt(heightPx)` (H0). The `IMarkdownRenderer` result: a complete lossless WEBP **with alpha** in
+  `memory[0 until byteCount]` whose decoded size the sender *declares* as `widthPx × heightPx`. Same
+  `SharedMemory` handshake as `RenderedTemplate` (extension creates + writes + `setProtect(PROT_READ)`,
+  closes its handle in `onTransact`'s `finally`; host maps read-only, copies out, unmaps, closes).
+  `RenderedImage.requireValid(byteCount, w, h)` runs in the constructor — `byteCount > 0`, positive
+  size, both edges ≤ `MAX_IMAGE_EDGE_PX` — so a malformed reply is rejected at unmarshal time on the
+  receiving side too (pure, JVM-tested). The host additionally **verifies** the WEBP header size
+  (`Bitmaps.imageSize`) equals the declared size before decoding (H3). A compatible tail may be appended
+  after `heightPx` later.
+
 All parcelables carry `@JvmField val CREATOR` and match their `.aidl` declarations.
-`RenderedTemplate.describeContents()` returns `CONTENTS_FILE_DESCRIPTOR` (it carries the region's fd —
-`Bundle.hasFileDescriptors()` relies on this); `TemplateInfo`, `SchemeField` and `InkStroke` return 0.
+`RenderedTemplate.describeContents()` and `RenderedImage.describeContents()` return
+`CONTENTS_FILE_DESCRIPTOR` (they carry the region's fd — `Bundle.hasFileDescriptors()` relies on this);
+`TemplateInfo`, `SchemeField` and `InkStroke` return 0.
 
 ### `HostCallerCheck` (N1 — shared extension-side trust gate)
 
@@ -489,6 +525,77 @@ ships; on-device, no Play Services required). **The dependency lives in `:ext-ml
   `BAND_COVERAGE_FRAC 0.15` · `FRAGMENT_MAX_STROKES 3` · `MERGE_OVERLAP_FRAC 0.4`. The only
   differences from the original file: no logging (pure), and the AABB is computed once per stroke
   (`Box.of`) since `InkStroke` carries no precomputed box.
+
+## MarkdownRenderer (contract — arc 4 / H0)
+
+The fourth point and the second **capability point**: markdown text in, an image out. Like the
+recognizer, the core binds it itself (H3: `MarkdownClient`) and *lends* it to object providers
+through a per-bind, uid-bound, revocable proxy implementing the same `IMarkdownRenderer`
+(`MarkdownProxyBinder`, H3) — the Heading extension renders its payload through that proxy without
+ever knowing which renderer is installed. Extensions never bind each other. The core has no
+markdown knowledge of its own and never draws text on the page itself; it draws the returned image.
+
+- **Action** `ACTION_MARKDOWN_RENDERER`; interface `IMarkdownRenderer`; parcelable `RenderedImage`.
+  One method: `render(markdown, maxWidthPx, dpi, maxLines, paddingPx)`.
+- **Semantics:** black text on a **transparent** background; the image's *natural* width (the widest
+  line) capped at `maxWidthPx`; `dpi` converts the renderer's sp/dp typography to px (the core knows
+  none of those numbers); `maxLines` `0` = unlimited, else END-ellipsized past that many lines (a
+  heading passes `1`); `paddingPx` (`0..RENDER_PADDING_MAX_PX`) is added on all four sides **inside
+  the image**, so the returned size includes it. **Blank source → `null`** (nothing to draw — no region
+  is created, nothing crosses; H0 Q2). Encoding: **lossless WEBP with alpha** in the `RenderedTemplate`
+  `SharedMemory` handshake (H0 Q1); the declared `widthPx × heightPx` must equal the encoded size.
+- **Outward payload — nothing but the markdown text and the four layout numbers** (audit row 18, H5).
+  Never ids, names, keys, paths, ink.
+- **Caps** (host before the call, extension re-check → `IllegalArgumentException`): source ≤
+  `MAX_MARKDOWN_CHARS`; `maxWidthPx` in `1..MAX_IMAGE_EDGE_PX`; `dpi > 0`; `maxLines ≥ 0`; padding
+  in `0..RENDER_PADDING_MAX_PX`; result edges ≤ `MAX_IMAGE_EDGE_PX`, bytes ≤ `MAX_RENDER_BYTES`.
+- **Stateless, no store**; every call on a Binder thread; **the markdown text is never logged on either
+  side** — sizes, counts and durations only.
+- **Timeouts (host, H3):** bind ≤ 3 s · `render` ≤ 5 s.
+
+## The Markdown extension (`:ext-markdown` — arc 4 / H0)
+
+The first implementation of `MARKDOWN_RENDERER`: a **verbatim port of the original Notesprout's
+`core/markdown/`** pipeline (parser → spans → `StaticLayout`), rasterized into a bitmap instead of
+drawn onto the page. Zero dependencies beyond `:extension-api` (no markdown library, no image
+library).
+
+- **APK:** `applicationId com.symmetricalpalmtree.notesprout.ext.markdown` (debug `.dev`),
+  `versionName 0.1.0`, Gradle/manifest shape identical to `:ext-naming` (no Activity,
+  `allowBackup="false"`, `BuildConfig.HOST_PACKAGE` per build type, deps `:extension-api` + junit).
+  Label **"NSE · Markdown"** (debug "NSE · Markdown Dev"), puzzle icon. One exported `<service
+  android:name=".MarkdownRendererService">` with the `MARKDOWN_RENDERER` action + `API_VERSION`
+  meta-data `1`. ~2.5 MB.
+- **`MarkdownRendererService`** returns an `IMarkdownRenderer.Stub`; `render` calls
+  `HostCallerCheck.enforce` first, re-checks every cap (`MarkdownBitmap.Sizing.checkArgs` →
+  `IllegalArgumentException`), renders, encodes, writes the WEBP into a `SharedMemory` parked in a
+  per-thread `ThreadLocal` and closed in `onTransact`'s `finally` (the Templates pattern, verbatim),
+  and returns `RenderedImage(shared, bytes, MIME_WEBP, bitmap.width, bitmap.height)`. Blank / empty
+  result → `null`. Debug log: sizes + durations, never the text.
+- **`MarkdownParser`** — verbatim port (pure Kotlin): blocks heading 1–6 · paragraph · list item
+  (ordered / unordered / task, depth = two-space indent, ordered runs count from the first item's
+  number) · blockquote · horizontal rule; inlines text · bold · italic · strikethrough · code · link
+  (display text only) · image (alt text as italic). 21 JVM tests (the original's image + ordered-list
+  suites ported, plus levels 1–6, emphasis, unclosed markers, list kinds, quote, rules, paragraph
+  joins, blank source).
+- **`MarkdownSpans`** — port of the original `MarkdownRenderer` (the one Android-text-only class):
+  blocks → `SpannableStringBuilder` with stock spans. **Typography baked in here, not in the core:**
+  headings **bold** at `headingSizeMultiplier` × base — **H1 2.0 · H2 1.75 · H3 1.5 · H4 1.25 · H5 1.1
+  · H6 1.0**; list glyphs `• ◦ ▪` by depth, `☐ ☑` tasks, `n.` ordered, 16 dp indent steps; 3 dp
+  quote stripe + 8 dp gap; 1 dp rule; code monospace; links underlined. `HeadingScaleTest`.
+- **`MarkdownBitmap`** — port of the original `TextObjectRenderer` measure + draw as `render(markdown,
+  maxWidthPx, dpi, maxLines, paddingPx): Bitmap?`: `TextPaint(ANTI_ALIAS)`, black, **base 24 sp**
+  (`textSize = 24 × dpi / 160` px, `density = dpi / 160` for the dp spans); `StaticLayout` at
+  `maxWidthPx − 2·padding`; natural width = the widest line (ceil) capped; height = the layout's;
+  `maxLines > 0` → `setMaxLines + ellipsize END`; the trailing block `\n` trimmed before layout (else
+  a spurious empty line inflates the height); `ARGB_8888`, transparent, text drawn at (padding,
+  padding), clipped to the content box; blank source or empty layout → `null`. `encodeWebp` =
+  `WEBP_LOSSLESS` q100 (API ≥ 30) else `WEBP` q100 (lossless — the E2 guard). The arithmetic is the
+  pure `MarkdownBitmap.Sizing` (`checkArgs`, `contentWidth`, `imageSize` — throws over the edge
+  cap), JVM-tested; only `render` / `encodeWebp` touch Android.
+- **Verified H0 (install + `dumpsys` only — nothing binds it before H3):** SNN + NA5C + MIP11 —
+  `MARKDOWN_RENDERER` resolves to `MarkdownRendererService`, no launcher activity, same debug
+  signature as the app; the app still launches.
 
 ## Host behaviour (`:app`, package `extension/`)
 
@@ -875,13 +982,15 @@ adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk
 adb -s <serial> install -r ext-templates/build/outputs/apk/debug/ext-templates-debug.apk
 adb -s <serial> install -r ext-naming/build/outputs/apk/debug/ext-naming-debug.apk
 adb -s <serial> install -r ext-mlkit/build/outputs/apk/debug/ext-mlkit-debug.apk        # ML Kit model downloads on first prepare() (Wi-Fi once per device)
+adb -s <serial> install -r ext-markdown/build/outputs/apk/debug/ext-markdown-debug.apk  # the Markdown renderer (arc 4)
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.templates.dev          # BOOX sideload trap
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.naming.dev
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.mlkit.dev
+adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.markdown.dev
 adb -s <serial> shell pm disable-user --user 0 com.symmetricalpalmtree.notesprout.ext.templates.dev  # simulate "not installed"
 adb -s <serial> uninstall com.symmetricalpalmtree.notesprout.ext.templates.dev
 ```
 
-All four APKs are signed by the same debug keystore (`~/.android/debug.keystore`) — that is what satisfies
+All five APKs are signed by the same debug keystore (`~/.android/debug.keystore`) — that is what satisfies
 the same-signature trust rule in dev. An extension built on another machine will **not** be trusted by
 this Mac's core build (different debug key) — expected, not a bug.

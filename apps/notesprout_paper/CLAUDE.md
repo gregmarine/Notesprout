@@ -10,8 +10,8 @@ global-index model, global encryption model, and e-ink design philosophy — and
   `PAPER_NAMING_PLAN.md` (arc 2, complete + frozen: the host-owned encrypted extension store + the
   Naming extension), then `PAPER_RECOGNITION_PLAN.md` (arc 3, complete + frozen 2026-08-17: the
   engine-neutral `HANDWRITING_RECOGNIZER` capability point + the ML Kit extension `NSE · ML Kit`,
-  debug-only "Recognize page" test surface), then **`PAPER_OBJECTS_PLAN.md` (arc 4, planned
-  2026-08-17, not started: content objects in the `.soil` + the selection toolbar with its
+  debug-only "Recognize page" test surface), then **`PAPER_OBJECTS_PLAN.md` (arc 4, in progress —
+  H0 ✅ 2026-08-17: content objects in the `.soil` + the selection toolbar with its
   extension-contribution API + the `MARKDOWN_RENDERER` capability point / `NSE · Markdown` + the
   generic `OBJECT_PROVIDER` point / `NSE · Heading`, the two proxies, g-paper 0.1.1)** — read all
   five top-to-bottom at the start of every session; **arc 4 is the active plan — start at its next
@@ -45,13 +45,14 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   `com.symmetricalpalmtree.gpaper.core.engine`.
 - **mavenLocal can lag the g-paper checkout** — if a g-paper symbol from `docs/api.md` is unresolved,
   `cd ~/git/g-paper && ./gradlew publishToMavenLocal` before suspecting anything else.
-- **Extensions** (`PAPER_EXTENSIONS_PLAN.md`, `docs/extensions.md`): the project has five modules —
+- **Extensions** (`PAPER_EXTENSIONS_PLAN.md`, `docs/extensions.md`): the project has six modules —
   `:app` (the core/host), `:extension-api` (the shared contract library), `:ext-templates` (the
-  first-party Templates extension APK), `:ext-naming` (the Naming extension APK, arc 2) and
-  `:ext-mlkit` (the ML Kit handwriting-recognizer extension APK, arc 3).
+  first-party Templates extension APK), `:ext-naming` (the Naming extension APK, arc 2),
+  `:ext-mlkit` (the ML Kit handwriting-recognizer extension APK, arc 3) and `:ext-markdown` (the
+  Markdown renderer extension APK, arc 4 / H0).
   **`:extension-api` depends on nothing in `:app`, ever** (Gradle enforces `:app → :extension-api`,
-  `:ext-templates → :extension-api`, `:ext-naming → :extension-api`, `:ext-mlkit → :extension-api`;
-  `:app` and the extension modules never depend on each other). Extension-side caller check = `HostCallerCheck.enforce(ctx,
+  `:ext-templates → :extension-api`, `:ext-naming → :extension-api`, `:ext-mlkit → :extension-api`,
+  `:ext-markdown → :extension-api`; `:app` and the extension modules never depend on each other). Extension-side caller check = `HostCallerCheck.enforce(ctx,
   BuildConfig.HOST_PACKAGE)` from `:extension-api`, first thing in every stub method. An extension is a separate APK with **no launcher Activity**, bound over
   AIDL; the core trusts it only if `checkSignatures == SIGNATURE_MATCH` (in dev, the shared
   `~/.android/debug.keystore` satisfies this). **Naming + icon convention:** label `NSE · <Name>`
@@ -107,6 +108,15 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   nothing of it. **Logging in
   extension modules:** `Slog` lives in `:app` and is unreachable from `:ext-*`; the recorded
   equivalent there is `if (BuildConfig.DEBUG) Log.d(...)` (never text — counts + durations).
+- **MarkdownRenderer** (arc 4 / H0, `docs/extensions.md` §"MarkdownRenderer (contract)" + §"The
+  Markdown extension"): the fourth point (`ACTION_MARKDOWN_RENDERER`, `IMarkdownRenderer`,
+  `RenderedImage`) is the second **capability point** — markdown in, a transparent lossless-WEBP
+  image out (`RenderedTemplate` handshake + declared `widthPx × heightPx`, verified by the host);
+  blank source → `null`. Caps `MAX_MARKDOWN_CHARS 20 000` / `MAX_IMAGE_EDGE_PX 4 096` /
+  `RENDER_PADDING_MAX_PX 64`. **All typography lives in the extension** (`MarkdownSpans` /
+  `MarkdownBitmap`: base 24 sp, bold headings ×2.0/1.75/1.5/1.25/1.1/1.0) — the core never learns a
+  font size. Nothing in `:app` binds it until H3 (`MarkdownClient` + `MarkdownProxyBinder`). The
+  markdown text is never logged on either side.
 - **Toast vs. dialog:** a toast only confirms something that already happened ("copied"); anything
   the user must notice or act on — why a tap did nothing, a failure, a one-time download — is an
   `AlertDialog` (e-ink: a toast is easy to miss and reads as "broken"). The one helper is
@@ -127,7 +137,7 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
 
 ```sh
 cd ~/git/Notesprout/apps/notesprout_paper
-./gradlew assembleDebug                  # all modules → app + ext-templates + ext-naming + ext-mlkit debug APKs
+./gradlew assembleDebug                  # all modules → app + ext-templates + ext-naming + ext-mlkit + ext-markdown debug APKs
 ./gradlew testDebugUnitTest              # all modules
 adb -s SN078D10012852 install -r app/build/outputs/apk/debug/app-debug.apk   # SNN (Nomad)
 adb -s 92c16533       install -r app/build/outputs/apk/debug/app-debug.apk   # NA5C
@@ -136,9 +146,11 @@ adb -s 5HL21V5007384  install -r app/build/outputs/apk/debug/app-debug.apk   # M
 adb -s <serial> install -r ext-templates/build/outputs/apk/debug/ext-templates-debug.apk
 adb -s <serial> install -r ext-naming/build/outputs/apk/debug/ext-naming-debug.apk
 adb -s <serial> install -r ext-mlkit/build/outputs/apk/debug/ext-mlkit-debug.apk      # ~40 MB; the en-US model (~20 MB) downloads on first prepare() — Wi-Fi once per device
+adb -s <serial> install -r ext-markdown/build/outputs/apk/debug/ext-markdown-debug.apk # ~2.5 MB; the Markdown renderer (arc 4)
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.templates.dev  # BOOX sideload trap — BOOX may
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.naming.dev     #   re-disable a few seconds AFTER
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.mlkit.dev      #   install; re-run enable and confirm with `pm list packages -d`
+adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.markdown.dev
 ```
 
 Debug launch: `adb -s <serial> shell am start -n com.symmetricalpalmtree.notesprout.dev/com.symmetricalpalmtree.notesprout.bootstrap.BootstrapActivity`

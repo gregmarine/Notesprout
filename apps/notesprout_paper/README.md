@@ -45,7 +45,10 @@ paper notebooks.
   the debug build's notebook ⋯ → "Recognize page (ML Kit)" (result in a dialog, stored nowhere);
   later extensions will consume it *through the core*, never by binding it themselves. The contract
   lives in `:extension-api`; see `docs/extensions.md` (§"The capability pattern", boundary-audit rows
-  14–17).
+  14–17). The fourth is **Markdown** (`:ext-markdown`): a second capability point — markdown text in,
+  a transparent lossless-WEBP image out (a verbatim port of the original Notesprout's markdown
+  parser + spans); nothing binds it yet — the Heading extension (arc 4) will render through it via
+  the core's proxy.
 
 ## What Paper is **not** (v0)
 
@@ -61,12 +64,13 @@ over from Notesprout just because it exists there).
 
 ```sh
 cd apps/notesprout_paper
-./gradlew assembleDebug               # all modules → app-debug.apk + ext-templates-debug.apk + ext-naming-debug.apk + ext-mlkit-debug.apk
+./gradlew assembleDebug               # all modules → app-debug.apk + ext-templates-debug.apk + ext-naming-debug.apk + ext-mlkit-debug.apk + ext-markdown-debug.apk
 ./gradlew testDebugUnitTest           # all modules
 adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk
 adb -s <serial> install -r ext-templates/build/outputs/apk/debug/ext-templates-debug.apk   # the Templates extension
 adb -s <serial> install -r ext-naming/build/outputs/apk/debug/ext-naming-debug.apk         # the Naming extension
 adb -s <serial> install -r ext-mlkit/build/outputs/apk/debug/ext-mlkit-debug.apk           # the ML Kit extension (model needs Wi-Fi once)
+adb -s <serial> install -r ext-markdown/build/outputs/apk/debug/ext-markdown-debug.apk     # the Markdown extension
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.templates.dev        # BOOX may land it disabled
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.naming.dev
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.mlkit.dev

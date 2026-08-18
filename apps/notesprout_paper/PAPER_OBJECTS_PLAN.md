@@ -10,7 +10,7 @@
 > `CLAUDE.md` files. `docs/extensions.md` is the subsystem reference all arcs write into;
 > `docs/notebook.md` and `docs/data.md` gain sections in this arc.
 >
-> **Status: H0 ⬜ · H1 ⬜ · H2 ⬜ · H3 ⬜ · H4 ⬜ · H5 ⬜ — planned 2026-08-17, not started.**
+> **Status: H0 🧪 · H1 ⬜ · H2 ⬜ · H3 ⬜ · H4 ⬜ · H5 ⬜ — H0 built + Claude-verified 2026-08-17 (install + dumpsys on SNN/NA5C/MIP11), awaiting the user's 2-item eye check.**
 
 ## Why
 
@@ -518,7 +518,7 @@ in H5 as **"Adding an object point" (rules 18–23)**:
 ## Phases
 
 ### Phase H0 — The Markdown point + `NSE · Markdown` (no host change)
-**Status:** ⬜ Not started
+**Status:** 🧪 Awaiting device verification (built, JVM green, installed on SNN + NA5C + MIP11, shell sanity ✅)
 
 **Goal:** `IMarkdownRenderer` + `RenderedImage` exist in the contract; `NSE · Markdown` installs, is
 discovered by nothing yet, and its parser/renderer are exercised end-to-end from JVM tests (parser,
@@ -535,6 +535,10 @@ it doesn't, so device verification is install + `dumpsys` sanity (like M0). No u
    `apps/notesprout_android/app/src/test/` (check), else write: heading levels 1–6, bold/italic,
    list glyphs, blank source, ellipsize at maxLines 1, size math (`MarkdownBitmap` factored so the
    Android-free parts are testable) — rec.: port + fill gaps.
+
+**Resolved at phase start (2026-08-17):** Q1 lossless WEBP with alpha (Templates handshake) · Q2
+blank source → null · Q3 verbatim parser port · Q4 port the original's `MarkdownParserImageTest` +
+`MarkdownParserOrderedListTest`, then fill the gaps listed.
 
 **Deliverables**
 1. `:extension-api`: `IMarkdownRenderer.aidl`, `RenderedImage.aidl` + Kotlin Parcelable,
@@ -559,6 +563,23 @@ it doesn't, so device verification is install + `dumpsys` sanity (like M0). No u
 
 **Close-out:** status ✅ + Outcome (M0 base commit hash for H5's review range = the commit before
 H0's first commit); docs; memory; commit + push.
+
+**Outcome (2026-08-17):** **H5 review base = `08e0f5b`** (the commit before H0's first commit).
+Built exactly as specified: `:extension-api` + `ACTION_MARKDOWN_RENDERER`, `MAX_MARKDOWN_CHARS`,
+`MAX_IMAGE_EDGE_PX`, `RENDER_PADDING_MAX_PX`, `IMarkdownRenderer.aidl`, `RenderedImage` (+ pure
+`requireValid`, 5 JVM tests); `:ext-markdown` (Gradle/manifest = `:ext-naming` shape, label
+`NSE · Markdown` / ` Dev`, puzzle icon, `MarkdownRendererService` with the Templates `ThreadLocal`
++ `onTransact` finally handshake, `MarkdownParser` verbatim, `MarkdownSpans` = original
+`MarkdownRenderer` port, `MarkdownBitmap` = `TextObjectRenderer` port + pure `Sizing`); 28 JVM
+tests in `:ext-markdown` (two original suites ported + `MarkdownParserTest` 10 + `HeadingScaleTest`
+3 + `MarkdownBitmapSizingTest` 4). `assembleDebug` builds six modules; `:app:assembleRelease`
+compiles; all-module `testDebugUnitTest` green. APK 2.5 MB. Devices: installed on SNN + NA5C +
+MIP11 — `MARKDOWN_RENDERER` resolves to `MarkdownRendererService` on all three, no launcher
+activity, signature `2c85d31` = the app's, NA5C enable dance done (nothing of ours disabled), the
+app launches with no crash lines. Two test-expectation fixes during the run (no code change): the
+parser's unclosed-`**` case is the original's behaviour (a later single `*` still closes an italic),
+and a rendered width can never exceed the edge cap because `maxWidthPx ≤ MAX_IMAGE_EDGE_PX` is
+checked first — only the height can. Nothing binds the point until H3.
 
 ---
 
