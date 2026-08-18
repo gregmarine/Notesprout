@@ -10,7 +10,7 @@
 > `CLAUDE.md` files. `docs/extensions.md` is the subsystem reference all arcs write into;
 > `docs/notebook.md` and `docs/data.md` gain sections in this arc.
 >
-> **Status: H0 🧪 · H1 ⬜ · H2 ⬜ · H3 ⬜ · H4 ⬜ · H5 ⬜ — H0 built + Claude-verified 2026-08-17 (install + dumpsys on SNN/NA5C/MIP11), awaiting the user's 2-item eye check.**
+> **Status: H0 ✅ (8c5361f) · H1 ⬜ · H2 ⬜ · H3 ⬜ · H4 ⬜ · H5 ⬜ — H0 user-verified 2026-08-17.**
 
 ## Why
 
@@ -518,7 +518,7 @@ in H5 as **"Adding an object point" (rules 18–23)**:
 ## Phases
 
 ### Phase H0 — The Markdown point + `NSE · Markdown` (no host change)
-**Status:** 🧪 Awaiting device verification (built, JVM green, installed on SNN + NA5C + MIP11, shell sanity ✅)
+**Status:** ✅ Complete (commit 8c5361f; user-verified SNN + NA5C + MIP11 2026-08-17)
 
 **Goal:** `IMarkdownRenderer` + `RenderedImage` exist in the contract; `NSE · Markdown` installs, is
 discovered by nothing yet, and its parser/renderer are exercised end-to-end from JVM tests (parser,
