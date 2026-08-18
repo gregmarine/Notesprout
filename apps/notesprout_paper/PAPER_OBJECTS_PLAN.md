@@ -10,7 +10,7 @@
 > `CLAUDE.md` files. `docs/extensions.md` is the subsystem reference all arcs write into;
 > `docs/notebook.md` and `docs/data.md` gain sections in this arc.
 >
-> **Status: H0 ✅ (8c5361f) · H1 ✅ (62771f3) · H2 🧪 · H3 ⬜ · H4 ⬜ · H5 ⬜ — H0 user-verified 2026-08-17.**
+> **Status: H0 ✅ (8c5361f) · H1 ✅ (62771f3) · H2 ✅ (bf17417) · H3 ⬜ · H4 ⬜ · H5 ⬜ — H0 user-verified 2026-08-17.**
 
 ## Why
 
@@ -680,10 +680,10 @@ commit + push (Paper) and g-paper commit.
 ---
 
 ### Phase H2 — The selection toolbar + the contribution API + the edit-dialog shell
-**Status:** 🧪 Awaiting device verification (built 2026-08-17; installed on SNN + NA5C + MIP11)
+**Status:** ✅ Complete (commit bf17417) — user-verified SNN + NA5C + MIP11 2026-08-17 (all 8 checklist items)
 
-**Outcome (2026-08-17, MIP11 adb-verified by Fable; SNN + NA5C automated agent runs + user by-eye
-verification pending):** `:extension-api` — `SelectionAction` (+ `.aidl`, `requireValid`, `ID_PATTERN`),
+**Outcome (2026-08-17, user-verified all 8 checklist items on SNN + NA5C + MIP11; SNN logs read over adb —
+leaf taps t1/t2/t3/ink, delete of 6 strokes + 1 object twice around an undo, edit saved, no crash):** `:extension-api` — `SelectionAction` (+ `.aidl`, `requireValid`, `ID_PATTERN`),
 `EditSpec` (+ `.aidl`, `requireValid`), `ActionApplies` / `Requires` (`Int` bit flags with `ALL` masks),
 `IconNames` (13 names + `ALL`), `ExtensionContract.MAX_ACTIONS` / `MAX_SUB_ACTIONS` / `MAX_ACTION_ID_CHARS`
 / `MAX_ACTION_LABEL_CHARS` / `MAX_ACTION_HINT_CHARS` / `MAX_EDIT_TITLE_CHARS` / `MAX_EDIT_HINT_CHARS` /
