@@ -61,7 +61,7 @@ android {
     }
 }
 
-val gpaperVersion = "0.1.0"
+val gpaperVersion = "0.1.1"
 
 dependencies {
     implementation(project(":extension-api"))

@@ -56,6 +56,12 @@ object ExtensionContract {
     /** Most padding (px, all four sides) a markdown render may be asked for. */
     const val RENDER_PADDING_MAX_PX: Int = 64
 
+    // ── Content objects (arc 4 / H1 — the host's `object` rows; `IObjectProvider` arrives in H3) ──────
+
+    /** Longest object payload the host stores in an `object` row / hands to a provider (chars). Opaque
+     *  to the host: never parsed, never logged; truncated to this on the way in and on the way out. */
+    const val MAX_OBJECT_TEXT_CHARS: Int = 20_000
+
     // ── Extension store caps (`IExtensionStore`, enforced by the host) ──────
 
     /** Longest key an extension may store (chars); the empty key is rejected. */

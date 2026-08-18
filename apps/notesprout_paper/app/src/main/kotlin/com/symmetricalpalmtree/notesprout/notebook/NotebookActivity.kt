@@ -36,6 +36,7 @@ import com.symmetricalpalmtree.notesprout.data.prefs.BrowseState
 import com.symmetricalpalmtree.notesprout.data.prefs.RecentsPrefs
 import com.symmetricalpalmtree.notesprout.databinding.ActivityNotebookBinding
 import com.symmetricalpalmtree.notesprout.notebook.UndoRedoStack.Action
+import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -48,7 +49,8 @@ import kotlinx.coroutines.withContext
 /**
  * The notebook screen: full-bleed g-paper surface with the toolbar and page strip overlaying it.
  * Lifecycle, wiring, chrome and exclusion rects live here; the data lives in [NotebookSession] /
- * [StrokeStore]; the cover in [CoverSnapshot]; the buttons in [NotebookToolbar].
+ * [StrokeStore] / [ObjectStore]; the cover in [CoverSnapshot]; the buttons in [NotebookToolbar];
+ * content objects reach the paper through [ObjectRenderer] (arc 4).
  *
  * Immersive (system bars hidden, transient by swipe). The toolbar is TopGuard-padded because on
  * BOOX the status bar still overlays the window top.
@@ -73,6 +75,13 @@ class NotebookActivity : AppCompatActivity() {
     private val pageOps = Mutex()
     /** Strokes currently on the visible page — the "you still have the strokes" mirror an erase needs. */
     private var liveStrokes: MutableMap<String, Stroke> = mutableMapOf()
+    /** Content objects on the visible page (arc 4) — what [ObjectRenderer] draws and a delete captures.
+     *  Insertion-ordered = z-order (loaded in `"order"`; a new object appends). */
+    private var liveObjects: LinkedHashMap<String, PageObject> = LinkedHashMap()
+    /** Rendered object bitmaps for this open notebook only (H1: nobody fills it yet — placeholders). */
+    private val renderCache = ObjectRenderCache()
+    /** The active lasso selection as last reported (bounds follow moves); null when none. */
+    private var currentSelection: Selection? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -100,6 +109,12 @@ class NotebookActivity : AppCompatActivity() {
         paper.smartLassoEnabled = false
         paper.scribbleEraseEnabled = false
         paper.setPaperListener(listener)
+        paper.addContentRenderer(ObjectRenderer(
+            objects = { liveObjects.values },
+            cache = renderCache,
+            renderWidthOf = { o -> if (opened) (session.currentPage.width - o.x).toInt().coerceAtLeast(1) else o.width.toInt() },
+            dpi = { resources.displayMetrics.densityDpi.toFloat() },
+        ))
 
         toolbar = NotebookToolbar(
             binding.topBar, binding.btnBack, binding.btnPen, binding.btnEraser, binding.btnLasso, paper,
@@ -108,10 +123,14 @@ class NotebookActivity : AppCompatActivity() {
         binding.pageIndicator.text = ""
         // Debug builds only (no-op in release): the ⋯ at the end of the top bar. Inside topBar, so the
         // existing exclusion rect covers it. It sees only the page's strokes + px size — never the session.
-        NotebookDebugMenu.install(this, binding.topBarRow) {
-            if (!opened) null
-            else RecognizeContext(paper.getStrokes(), session.currentPage.width.toFloat(), session.currentPage.height.toFloat())
-        }
+        NotebookDebugMenu.install(
+            this, binding.topBarRow,
+            provider = {
+                if (!opened) null
+                else RecognizeContext(paper.getStrokes(), session.currentPage.width.toFloat(), session.currentPage.height.toFloat())
+            },
+            hooks = DebugHooks(insertTestObject = { insertTestObject() }, deleteSelection = { deleteSelection() }),
+        )
 
         pageGestures = PageGestures(
             host = paper.asView(),
@@ -149,9 +168,12 @@ class NotebookActivity : AppCompatActivity() {
         if (isFinishing) { session.seal(); return }
         val page = session.currentPage
         val strokes = session.store.loadPage(page.id)
+        val objects = session.objectStore.loadPage(page.id)
         paper.setPageSize(page.width, page.height)
         paper.setTemplate(session.template)
+        liveObjects = objects.associateByTo(LinkedHashMap()) { it.id }
         paper.loadStrokes(strokes)
+        paper.notifyContentChanged()
         liveStrokes = strokes.associateBy { it.id }.toMutableMap()
         opened = true
         setPageIndicator(session.currentIndex + 1, session.pages.size)
@@ -162,7 +184,7 @@ class NotebookActivity : AppCompatActivity() {
         // that lingers over paper that is already keeping ink would say the opposite of the truth.
         binding.openingOverlay.visibility = View.GONE
         pushExclusions()
-        Slog.d(TAG) { "page ${page.id} loaded: ${strokes.size} strokes, ${page.width}x${page.height}" }
+        Slog.d(TAG) { "page ${page.id} loaded: ${strokes.size} strokes, ${objects.size} objects, ${page.width}x${page.height}" }
     }
 
     private fun failOpen(reason: String) {
@@ -193,12 +215,22 @@ class NotebookActivity : AppCompatActivity() {
             if (!opened) return
             val pageId = session.currentPage.id
             val ids = move.strokeIds.toList()
+            val objectIds = move.contentIds.filter { it in liveObjects }
             session.store.move(ids, move.dx, move.dy)
+            session.objectStore.move(objectIds, move.dx, move.dy)
             for (id in ids) liveStrokes[id]?.let { liveStrokes[id] = it.translated(move.dx, move.dy) }
-            undo.record(Action.Moved(pageId, ids, move.dx, move.dy))
+            for (id in objectIds) liveObjects[id]?.let { liveObjects[id] = it.translated(move.dx, move.dy) }
+            if (objectIds.isNotEmpty()) paper.notifyContentChanged()
+            currentSelection = currentSelection?.let { it.copy(bounds = it.bounds.offset(move.dx, move.dy)) }
+            undo.record(Action.Moved(pageId, ids, move.dx, move.dy, objectIds))
         }
-        override fun onSelectionCreated(selection: Selection) { selectionActive = true }
-        override fun onSelectionDismissed() { selectionActive = false }
+        override fun onSelectionCreated(selection: Selection) { selectionActive = true; currentSelection = selection }
+        override fun onSelectionDismissed() { selectionActive = false; currentSelection = null }
+        /** g-paper 0.1.1: a sub-threshold stylus / finger tap inside the selection box. H1 only logs it;
+         *  H2 opens the tapped object's edit dialog from here. */
+        override fun onSelectionTapped(x: Float, y: Float) {
+            Slog.d(TAG) { "selection tapped ${x.toInt()},${y.toInt()} (objects=${currentSelection?.contentIds?.size ?: 0})" }
+        }
         override fun onToolChanged(tool: Tool) { toolbar.sync(tool) }
     }
 
@@ -229,16 +261,20 @@ class NotebookActivity : AppCompatActivity() {
         }
     }
 
-    /** Swap the visible page: single EPD refresh (hold pixels, then load). */
+    /** Swap the visible page: single EPD refresh (hold pixels, then load). Strokes + objects together. */
     private suspend fun navigateTo(index: Int) {
         val page = session.goTo(index)
         val strokes = session.store.loadPage(page.id)
+        val objects = session.objectStore.loadPage(page.id)
         paper.clearSelection()
         selectionActive = false
+        currentSelection = null
         paper.clearForContentSwap()
         paper.setPageSize(page.width, page.height)
         paper.setTemplate(session.template)
+        liveObjects = objects.associateByTo(LinkedHashMap()) { it.id }
         paper.loadStrokes(strokes)
+        paper.notifyContentChanged()
         liveStrokes = strokes.associateBy { it.id }.toMutableMap()
         setPageIndicator(session.currentIndex + 1, session.pages.size)
         session.saveLastOpened()
@@ -275,28 +311,80 @@ class NotebookActivity : AppCompatActivity() {
         undo.pushUndo(a)
     }
 
+    /** Every replay is store → drain → reload the affected page (strokes + objects), so the DB stays
+     *  the source of truth and the paper never desyncs. */
     private suspend fun revert(a: Action) {
+        val store = session.store; val objects = session.objectStore
         when (a) {
-            is Action.Drew -> { session.store.remove(listOf(a.stroke.id)); session.store.drain(); refreshToPage(a.pageId) }
-            is Action.Erased -> { session.store.restore(a.pageId, a.strokes); session.store.drain(); refreshToPage(a.pageId) }
-            is Action.Moved -> { session.store.move(a.ids, -a.dx, -a.dy); session.store.drain(); refreshToPage(a.pageId) }
+            is Action.Drew -> store.remove(listOf(a.stroke.id))
+            is Action.Erased -> store.restore(a.pageId, a.strokes)
+            is Action.Moved -> { store.move(a.ids, -a.dx, -a.dy); objects.move(a.objectIds, -a.dx, -a.dy) }
+            is Action.ObjectCreated -> { objects.remove(listOf(a.obj.id)); store.restore(a.pageId, a.removedStrokes) }
+            is Action.ObjectsDeleted -> { store.restore(a.pageId, a.strokes); objects.restore(a.pageId, a.objects) }
+            is Action.ObjectEdited -> a.before.let { objects.updatePayloadAndBounds(it.id, it.payload, it.x, it.y, it.width, it.height) }
             is Action.Page -> {
-                session.reconcile(a.snapshot.before, a.snapshot.strokeIds, emptyList(), a.snapshot.beforeCurrentId)
+                session.reconcile(a.snapshot.before, a.snapshot.childIds, emptyList(), a.snapshot.beforeCurrentId)
                 refreshToPage(session.currentPage.id)
+                return
             }
         }
+        session.writer.drain()
+        refreshToPage(a.pageId)
     }
 
     private suspend fun reapply(a: Action) {
+        val store = session.store; val objects = session.objectStore
         when (a) {
-            is Action.Drew -> { session.store.restore(a.pageId, listOf(a.stroke)); session.store.drain(); refreshToPage(a.pageId) }
-            is Action.Erased -> { session.store.remove(a.strokes.map { it.id }); session.store.drain(); refreshToPage(a.pageId) }
-            is Action.Moved -> { session.store.move(a.ids, a.dx, a.dy); session.store.drain(); refreshToPage(a.pageId) }
+            is Action.Drew -> store.restore(a.pageId, listOf(a.stroke))
+            is Action.Erased -> store.remove(a.strokes.map { it.id })
+            is Action.Moved -> { store.move(a.ids, a.dx, a.dy); objects.move(a.objectIds, a.dx, a.dy) }
+            is Action.ObjectCreated -> { objects.restore(a.pageId, listOf(a.obj)); store.remove(a.removedStrokes.map { it.id }) }
+            is Action.ObjectsDeleted -> { store.remove(a.strokes.map { it.id }); objects.remove(a.objects.map { it.id }) }
+            is Action.ObjectEdited -> a.after.let { objects.updatePayloadAndBounds(it.id, it.payload, it.x, it.y, it.width, it.height) }
             is Action.Page -> {
-                session.reconcile(a.snapshot.after, emptyList(), a.snapshot.strokeIds, a.snapshot.afterCurrentId)
+                session.reconcile(a.snapshot.after, emptyList(), a.snapshot.childIds, a.snapshot.afterCurrentId)
                 refreshToPage(session.currentPage.id)
+                return
             }
         }
+        session.writer.drain()
+        refreshToPage(a.pageId)
+    }
+
+    // ── Content objects (arc 4 / H1 — the debug test surface; the selection toolbar arrives in H2) ──
+
+    /** Debug ⋯ "Insert test object": a placeholder-drawn object (`debug:box`, payload `test`) at the
+     *  page centre — no provider exists for it, so it exercises store / render / select / move /
+     *  delete / undo without an extension. One undoable step ([Action.ObjectCreated], no ink consumed). */
+    private fun insertTestObject() = runPageOp {
+        val page = session.currentPage
+        val obj = PageObject(
+            id = UUID.randomUUID().toString(), providerIdentity = TEST_OBJECT_IDENTITY, payload = "test",
+            x = page.width / 2f - TEST_OBJECT_W / 2f, y = page.height / 2f - TEST_OBJECT_H / 2f,
+            width = TEST_OBJECT_W, height = TEST_OBJECT_H,
+            order = (liveObjects.values.maxOfOrNull { it.order } ?: -1) + 1,
+        )
+        session.objectStore.create(page.id, obj)
+        liveObjects[obj.id] = obj
+        undo.record(Action.ObjectCreated(page.id, obj, emptyList()))
+        whenPenIdle { paper.notifyContentChanged() }
+    }
+
+    /** Debug ⋯ "Delete selection": the whole selection — strokes and/or objects — as one undoable step
+     *  ([Action.ObjectsDeleted]); H2 puts the same operation behind the toolbar's Delete. */
+    private fun deleteSelection() = runPageOp {
+        val sel = currentSelection ?: return@runPageOp
+        val pageId = session.currentPage.id
+        val strokes = sel.strokeIds.mapNotNull { liveStrokes.remove(it) }
+        val objects = sel.contentIds.mapNotNull { liveObjects.remove(it) }
+        if (strokes.isEmpty() && objects.isEmpty()) return@runPageOp
+        session.store.erase(strokes.map { it.id })
+        session.objectStore.remove(objects.map { it.id })
+        undo.record(Action.ObjectsDeleted(pageId, strokes, objects))
+        paper.clearSelection()
+        paper.removeStrokes(strokes.map { it.id })   // a data-in call: no erase callback comes back
+        paper.notifyContentChanged()
+        Slog.d(TAG) { "deleted selection: ${strokes.size} strokes, ${objects.size} objects" }
     }
 
     private fun showDeleteSheet() {
@@ -426,6 +514,7 @@ class NotebookActivity : AppCompatActivity() {
     override fun onDestroy() {
         if (IndexGuard.bounced(this)) { super.onDestroy(); return }
         if (::paper.isInitialized) paper.release()
+        renderCache.clear()
         // A destroy that isn't a normal close (e.g. finish() from failOpen after open) still seals.
         if (::session.isInitialized && session.isOpen && !closing) {
             closing = true
@@ -443,6 +532,11 @@ class NotebookActivity : AppCompatActivity() {
         /** Phase-3 decisions: raw px, not dp (matches the reference pen and g-paper's defaults). */
         const val PEN_WIDTH_PX = 3f
         const val ERASER_RADIUS_PX = 15f
+
+        /** The H1 debug test object: an identity no provider owns (draws as the placeholder), 200×100 px. */
+        private const val TEST_OBJECT_IDENTITY = "debug:box"
+        private const val TEST_OBJECT_W = 200f
+        private const val TEST_OBJECT_H = 100f
 
         /** Outlives the Activity so a close in flight always completes its seal. */
         private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)

@@ -15,6 +15,8 @@ import androidx.room.PrimaryKey
  *  - page: [refId] = template row id ("" = blank), [width]/[height] px
  *  - stroke: [color] `#RRGGBB`/`#AARRGGBB`, [strokeWidth] px, [style] g-paper StrokeStyle name,
  *    [blob] = format-B geometry ([com.symmetricalpalmtree.notesprout.core.StrokeCodec])
+ *  - object (arc 4): [style] = provider identity `<pkg>:<typeId>`, [text] = the provider's opaque
+ *    payload, [x]/[y]/[width]/[height] = bounds in page px, [order] = z-order among the page's objects
  */
 @Entity(
     tableName = SoilSchema.TABLE,
@@ -30,6 +32,8 @@ data class SoilObjectEntity(
     val deletedAt: Long? = null,
     val text: String? = null,
     val refId: String? = null,
+    val x: Float? = null,
+    val y: Float? = null,
     val width: Float? = null,
     val height: Float? = null,
     val color: String? = null,

@@ -31,7 +31,9 @@ import kotlinx.coroutines.withContext
 
 /**
  * Debug build only (no-op twin in `src/release`): a ⋯ at the end of the notebook's top bar — the
- * twin of the library `DebugMenu` — with the arc-3 test surface **"Recognize page (ML Kit)"**:
+ * twin of the library `DebugMenu` — with the arc-4 / H1 test surface **"Insert test object"** /
+ * **"Delete selection"** (plain [DebugHooks] callbacks into the screen; gone in H5) and the arc-3
+ * test surface **"Recognize page (ML Kit)"**:
  * present only while a trusted `HANDWRITING_RECOGNIZER` extension is installed (re-discovered on
  * every sheet open), it hands the current page's ink — bare x/y geometry via [InkPayload] — to the
  * extension through [RecognizerClient] and shows the text in a dialog (selectable, Copy / OK).
@@ -64,7 +66,7 @@ object NotebookDebugMenu {
     private fun claim(activity: AppCompatActivity) { busyOwner = java.lang.ref.WeakReference(activity) }
     private fun release() { busyOwner = null }
 
-    fun install(activity: AppCompatActivity, bar: ViewGroup, provider: () -> RecognizeContext?) {
+    fun install(activity: AppCompatActivity, bar: ViewGroup, provider: () -> RecognizeContext?, hooks: DebugHooks) {
         // Push the ⋯ to the far end of the row (the row's own buttons stay where they are).
         bar.addView(View(activity), LinearLayout.LayoutParams(0, 0, 1f))
         val btn = AppCompatImageButton(activity, null, 0).apply {
@@ -79,11 +81,11 @@ object NotebookDebugMenu {
             stateListAnimator = null
         }
         TooltipCompat.setTooltipText(btn, btn.contentDescription)
-        btn.setOnClickListener { showSheet(activity, provider) }
+        btn.setOnClickListener { showSheet(activity, provider, hooks) }
         bar.addView(btn)
     }
 
-    private fun showSheet(activity: AppCompatActivity, provider: () -> RecognizeContext?) {
+    private fun showSheet(activity: AppCompatActivity, provider: () -> RecognizeContext?, hooks: DebugHooks) {
         activity.lifecycleScope.launch {
             val ref = ExtensionRegistry.handwritingRecognizer(activity)   // IO; refreshed per open
             if (activity.isFinishing || activity.isDestroyed) return@launch
@@ -92,6 +94,9 @@ object NotebookDebugMenu {
             if (ref != null) {
                 sheet.addAction(null, activity.getString(R.string.debug_recognize_page)) { recognize(activity, ref, provider) }
             }
+            // Arc 4 / H1 test surface (removed in H5 with the real selection toolbar in place).
+            sheet.addAction(null, activity.getString(R.string.debug_insert_test_object)) { hooks.insertTestObject() }
+            sheet.addAction(null, activity.getString(R.string.debug_delete_selection)) { hooks.deleteSelection() }
             sheet.show()
         }
     }

@@ -11,7 +11,11 @@ delete) and undo/redo arrive in Phase 4.
 |---|---|
 | `NotebookActivity` | lifecycle, wiring, chrome, exclusion rects, immersive mode, `IndexGuard`, the close sequence |
 | `NotebookSession` | the open `SoilDatabase`, `pages: List<PageRef>`, `currentIndex`, decoded template bitmap; `open()`, `saveLastOpened()`, `refreshMeta()`, `seal()` — all IO |
-| `StrokeStore` | g-paper callbacks → `stroke` rows through one serial IO writer (a `Channel` of jobs); `loadPage()`; the debounced index `updatedAt` bump; `drain()` before seal |
+| `SoilWriter` | the notebook's **one** serial IO writer (a `Channel` of jobs, arc 4 / H1 — lifted out of `StrokeStore`): both stores enqueue here; the debounced index `updatedAt` bump; `drain()` before seal / before an undo replay reads rows back |
+| `StrokeStore` | g-paper callbacks → `stroke` rows through the writer; `loadPage()` |
+| `ObjectStore` | `object` rows (arc 4): `loadPage()`, `create`, `updatePayloadAndBounds`, `move`, `remove` / `restore` — same writer, so objects and strokes never race |
+| `PageObject` / `ObjectRows` | the in-memory object + the pure `PageObject ⇄ SoilObjectEntity` mapper (JVM-tested) |
+| `ObjectRenderer` / `ObjectRenderCache` | the g-paper `ContentRenderer` bridge (placeholder or cached bitmap; live-drag pair; `hitTargets`) + the session-only bitmap cache |
 | `StrokeRows` | pure mapper `Stroke ⇄ SoilObjectEntity` (format-B blob, `InkColorCodec`, `StrokeStyle` name; unknown → PEN). JVM-tested |
 | `CoverSnapshot` | `paper.renderToBitmap()` → ≤ 512 px long edge → WEBP q100 → `IndexRepository.setCover` |
 | `NotebookToolbar` | `[←] [pen] [eraser] [lasso]`; selected = `state_selected` bordered look; `sync(tool)` from `onToolChanged`; `releaseRender()` on every tap |
@@ -98,6 +102,41 @@ still queued in the channel.
 - `onDestroy` → `paper.release()`; if the session is still open and no close ran (e.g. finish
   from a failed open), seal it.
 
+## Content objects (arc 4 / H1)
+
+A page holds **objects** next to its strokes — core-owned `object` rows (`docs/data.md` §"Object
+rows"): identity, provider identity, an opaque payload, bounds in page px, z-order. The screen keeps a
+`liveObjects` mirror (`LinkedHashMap`, z-ordered) beside `liveStrokes`, rebuilt on every page load /
+navigate together with the strokes (`objectStore.loadPage` → `paper.notifyContentChanged()`).
+
+**Renderer.** `ObjectRenderer` is registered once with `paper.addContentRenderer` (layer
+`BELOW_STROKES`). For each live object it draws the bitmap from `ObjectRenderCache` when one is cached
+for exactly (payload, render width, dpi), else a **dashed 1 px inkBlack placeholder rect** at the
+object's bounds — the look of an object whose provider is absent, disabled or failing (still
+selectable, movable, deletable). It implements g-paper's live-drag pair (`draw(canvas, excluded)` +
+`drawObject`) so a dragged object rides under the pen instead of ghosting, and `hitTargets()` returns
+every live object's bounds — that is what makes objects lasso-selectable. `ObjectRenderCache` is
+in-memory for the open notebook only (cleared in `onDestroy`); **nothing fills it in H1** — the render
+pass through the object provider arrives in H4.
+
+**Selection.** `onSelectionCreated` / `onSelectionMoved` / `onSelectionDismissed` keep
+`currentSelection` (bounds follow moves). `onSelectionMoved` gains `contentIds`: `objectStore.move` +
+the `liveObjects` update + `notifyContentChanged`, one undo `Moved(pageId, strokeIds, dx, dy,
+objectIds)`. **`onSelectionTapped(x, y)`** (g-paper 0.1.1: a sub-threshold stylus or single-finger tap
+inside the selection box; the finger variant escrowed + palm-gated like tap-to-dismiss; drags
+unchanged) is only logged in H1 (`Slog.d` "selection tapped x,y") — H2 opens the tapped object's edit
+dialog from it.
+
+**Debug ⋯ (H1 test surface, removed in H5):** "Insert test object" creates a `debug:box` object
+(payload `test`, 200×100 px) at the page centre — no provider owns it, so it draws as the placeholder —
+as one undoable `ObjectCreated`; "Delete selection" removes the whole current selection (strokes
+and/or objects) as one undoable `ObjectsDeleted`. Both reach the screen through plain `DebugHooks`
+callbacks; the release twin ignores them.
+
+**Page delete / undo.** `SoilDao.liveChildIds(pageId)` (strokes **and** objects) is what
+`deleteCurrent` soft-deletes and `Structural.childIds` carries; `reconcile` restores / deletes the whole
+set. Objects reload with strokes on every `refreshToPage`.
+
 ## Frame-silence rule
 
 No app frame is presented while `paper.isPenActive` — the strip text only changes through
@@ -144,14 +183,16 @@ over chrome. No haptic feedback (meditative).
 - `insertBlank(after)` — new page row copying the current page's geometry + template ref, renumber
   siblings 0..N-1 in one transaction, mirror `pageCount` + `updatedAt`, land on the new page. Returns
   a `Structural` snapshot.
-- `deleteCurrent()` — soft-delete the page + its strokes, renumber, land on the previous page
+- `deleteCurrent()` — soft-delete the page + its strokes and objects (`liveChildIds`), renumber, land on the previous page
   (`PageMath.indexAfterDelete`). **Deleting the only page creates a fresh blank in its place** so a
   notebook always has ≥ 1 page. Returns a `Structural` snapshot.
-- `reconcile(targetAlive, restoreStrokeIds, deleteStrokeIds, currentId)` — the undo/redo primitive:
+- `reconcile(targetAlive, restoreChildIds, deleteChildIds, currentId)` — the undo/redo primitive:
   makes the live page set exactly `targetAlive` (diff via `PageMath.toRestore` / `toDelete`, using the
-  DAO's `restore` to un-soft-delete), toggles the given strokes, renumbers, lands on `currentId`.
+  DAO's `restore` to un-soft-delete), toggles the given page content (strokes + objects), renumbers,
+  lands on `currentId`.
 
-`SoilDao` gained `restore(ids, at)` (un-soft-delete) and `liveStrokeIds(pageId)` (cheap, no blobs).
+`SoilDao` gained `restore(ids, at)` (un-soft-delete), `liveStrokeIds(pageId)` and — arc 4 —
+`liveChildIds(pageId)` (strokes + objects; cheap, no blobs).
 `PageMath` holds the pure index/set arithmetic (JVM-tested in `PageMathTest`).
 
 ### Undo / redo (`UndoRedoStack`) — notebook-level
@@ -169,12 +210,17 @@ source of truth and paper never desyncs):
 |---|---|---|
 | `Drew(pageId, stroke)` | `store.remove` | `store.restore` |
 | `Erased(pageId, strokes)` | `store.restore` | `store.remove` |
-| `Moved(pageId, ids, dx, dy)` | `store.move(-dx,-dy)` | `store.move(dx,dy)` |
-| `Page(Structural)` | `reconcile(before, strokeIds→restore, …, beforeCurrentId)` | `reconcile(after, …, strokeIds→delete, afterCurrentId)` |
+| `Moved(pageId, ids, dx, dy, objectIds)` | `store.move(-dx,-dy)` + `objectStore.move(-dx,-dy)` | both `move(dx,dy)` |
+| `Page(Structural)` | `reconcile(before, childIds→restore, …, beforeCurrentId)` | `reconcile(after, …, childIds→delete, afterCurrentId)` |
+| `ObjectCreated(pageId, obj, removedStrokes)` (arc 4) | `objectStore.remove([obj])` + `store.restore(removedStrokes)` | `objectStore.restore([obj])` + `store.remove(removedStrokes)` |
+| `ObjectsDeleted(pageId, strokes, objects)` (arc 4) | restore both | remove both |
+| `ObjectEdited(pageId, before, after)` (arc 4) | `updatePayloadAndBounds(before)` | `updatePayloadAndBounds(after)` |
 
 `StrokeStore` gained `remove(ids)` (= soft delete) and `restore(pageId, strokes)` (re-add as live
 rows). `NotebookActivity` keeps `liveStrokes` (a `Map<id,Stroke>` of the visible page) so an erase can
-capture the full `Stroke` objects the undo needs; it is rebuilt on every page load/navigate.
+capture the full `Stroke` objects the undo needs; it is rebuilt on every page load/navigate — as is
+`liveObjects` (arc 4). Every replay drains the shared `SoilWriter` once, then reloads the page (strokes +
+objects) — `revert` / `reapply` are `when` tables over the actions above.
 
 All page/undo operations run under a `Mutex` (`pageOps`) so overlapping gestures can't corrupt the
 page list, and are dropped once `closing`.

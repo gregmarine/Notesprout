@@ -27,7 +27,7 @@ All rules from the root `CLAUDE.md` apply (language, serialization, no new deps,
 runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addition:
 
 - **g-paper** is the drawing surface, consumed from **mavenLocal**
-  (`com.symmetricalpalmtree.gpaper:gpaper-{core,onyx,ratta}:0.1.0`). Read g-paper docs before touching
+  (`com.symmetricalpalmtree.gpaper:gpaper-{core,onyx,ratta}:0.1.1`). Read g-paper docs before touching
   the notebook screen: `~/git/g-paper/docs/api.md`, `host-responsibilities.md`, `integration-guide.md`,
   and `~/git/g-paper/CLAUDE.md`.
 - **No file over ~800 lines** without a written reason.
@@ -39,8 +39,8 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   `docs/data.md` before touching `crypto/` or `data/`.
 - **Notebook screen** (`notebook/`): read `docs/notebook.md` first. The paper is full-bleed and chrome
   overlays it — every chrome rect goes to `setExclusionRects`; no app frame while `paper.isPenActive`
-  (route chrome text changes through `whenPenIdle`); all `.soil` writes go through `StrokeStore`'s
-  serial writer; the file is opened by `NotebookSession.open()` only (exists-guarded — never created
+  (route chrome text changes through `whenPenIdle`); all `.soil` writes go through the session's one
+  serial `SoilWriter` (`StrokeStore` **and** `ObjectStore` enqueue there — arc 4); the file is opened by `NotebookSession.open()` only (exists-guarded — never created
   there) and closed only by the `close()` sequence (cover → lastOpened → meta → seal). `GPaper` is in
   `com.symmetricalpalmtree.gpaper.core.engine`.
 - **mavenLocal can lag the g-paper checkout** — if a g-paper symbol from `docs/api.md` is unresolved,
@@ -117,6 +117,15 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   `MarkdownBitmap`: base 24 sp, bold headings ×2.0/1.75/1.5/1.25/1.1/1.0) — the core never learns a
   font size. Nothing in `:app` binds it until H3 (`MarkdownClient` + `MarkdownProxyBinder`). The
   markdown text is never logged on either side.
+- **Content objects** (arc 4 / H1, `docs/notebook.md` §"Content objects", `docs/data.md` §"Object
+  rows"): `object` rows are core-owned (identity, provider identity in `style`, **opaque** payload in
+  `text` — never parsed, never logged, capped at `MAX_OBJECT_TEXT_CHARS` — bounds `x y width height` in
+  page px, z-order); the `.soil` gained `x`/`y` **without a version bump or migration** (pre-H1 test
+  notebooks fail to open and are deleted by hand). `ObjectRenderer` is the one g-paper
+  `ContentRenderer`: cached bitmap or dashed placeholder, live-drag pair, `hitTargets` = object bounds;
+  `ObjectRenderCache` is session-only (no stored bitmap, ever). Page delete / undo carry objects with
+  strokes (`liveChildIds`); every object action is one undoable step. The debug ⋯ "Insert test object"
+  / "Delete selection" items are the H1 test surface (gone in H5).
 - **Toast vs. dialog:** a toast only confirms something that already happened ("copied"); anything
   the user must notice or act on — why a tap did nothing, a failure, a one-time download — is an
   `AlertDialog` (e-ink: a toast is easy to miss and reads as "broken"). The one helper is
@@ -172,5 +181,6 @@ BOOX trap: `install -r` can leave the package disabled → `pm enable com.symmet
 
 ## g-paper version
 
-Currently pinned: **0.1.0**. If a phase bumps g-paper, update the version in `app/build.gradle.kts`
-and record it in the phase outcome.
+Currently pinned: **0.1.1** (arc 4 / H1: `PaperListener.onSelectionTapped(x, y)` — a sub-threshold
+stylus or single-finger tap inside the active selection box; g-paper commit e76e305). If a phase bumps
+g-paper, update the version in `app/build.gradle.kts` and record it in the phase outcome.

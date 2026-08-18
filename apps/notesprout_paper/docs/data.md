@@ -46,6 +46,12 @@ CREATE INDEX index_objects_parentId_type_deletedAt ON objects(parentId, type, de
 `SoilDatabase` (Room, `user_version` = `SoilSchema.SOIL_VERSION` = 1, WAL, `auto_vacuum=INCREMENTAL`
 set in `onCreate`). One instance per open notebook; opened by the notebook session (Phase 3).
 
+**Arc 4 / H1 — fresh schema, no migration:** the `notebook` table gained `x REAL` and `y REAL` (object
+bounds) with **no version bump and no migration** (phase-start decision: the pre-H1 test notebooks are
+abandoned). A file created before H1 fails Room's identity-hash check on open; the reason surfaces
+through the notebook screen's open-failed toast and the user deletes it from the library — nothing is
+ever deleted or rewritten by the app. Strokes / pages / templates leave `x`/`y` null.
+
 - `SoilDatabase.open(ctx, id, file, passphrase)` — file **must exist** (`SoilLockedException`
   otherwise); raw-key path via `KeyOpener` when cached.
 - `SoilDatabase.create(ctx, id, file, passphrase)` — new-notebook flow only; refuses an existing
@@ -59,7 +65,7 @@ Schema (`SoilSchema` holds the DDL contract Room's entity must match):
 CREATE TABLE notebook (
     id TEXT NOT NULL PRIMARY KEY, parentId TEXT NOT NULL, type TEXT NOT NULL,
     "order" INTEGER NOT NULL DEFAULT 0, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL,
-    deletedAt INTEGER, text TEXT, refId TEXT, width REAL, height REAL, color TEXT,
+    deletedAt INTEGER, text TEXT, refId TEXT, x REAL, y REAL, width REAL, height REAL, color TEXT,
     strokeWidth REAL, style TEXT, flags INTEGER, blob BLOB);
 CREATE INDEX idx_notebook_parent_order ON notebook(parentId, "order", deletedAt);
 CREATE TABLE notebook_meta (id INTEGER PRIMARY KEY CHECK (id = 0), json TEXT NOT NULL);
@@ -67,8 +73,22 @@ CREATE TABLE notebook_meta (id INTEGER PRIMARY KEY CHECK (id = 0), json TEXT NOT
 
 Hierarchy: `notebook` row (`parentId = ''`, `text` = title, `refId` = last-open page) → `page` rows
 (`refId` = template row id, `width`/`height` px, ordered by `"order"`) → `stroke` rows (`color`,
-`strokeWidth`, `style`, `blob` = format B). One `template` row under the notebook row (`text` = template
-identity, `blob` = WEBP q100). **No layers.** `"order"` is always double-quoted in SQL / backticked in Room.
+`strokeWidth`, `style`, `blob` = format B) **and `object` rows** (arc 4, below). One `template` row
+under the notebook row (`text` = template identity, `blob` = WEBP q100). **No layers.** `"order"` is
+always double-quoted in SQL / backticked in Room.
+
+**Object rows** (`SoilSchema.TYPE_OBJECT = "object"`, arc 4 / H1 — `notebook/PageObject`,
+`ObjectRows`, `ObjectStore`): a content object the core stores, positions, selects, moves, deletes and
+undoes but **never interprets**. `parentId` = page id · `style` = the **provider identity**
+`<extension package>:<typeId>` (`ExtensionContract.objectIdentity`, same shape as a template identity)
+· `text` = the provider's **opaque payload** (≤ `ExtensionContract.MAX_OBJECT_TEXT_CHARS` = 20 000,
+capped on the way in and out; for a heading it will be the markdown source) · `x`/`y`/`width`/`height`
+= bounds in **page px** · `"order"` = z-order among the page's objects (`MAX("order")+1` at creation)
+· `refId`, `color`, `strokeWidth`, `flags`, `blob` = null. Soft delete like everything else. **No
+rendered bitmap is ever stored** — objects render live (in-memory cache for the open session only) or
+as a dashed placeholder. `SoilDao`: `objectsOf(pageId)`, `updateObject`, `moveObjects`, and
+`liveChildIds(pageId)` (strokes **and** objects — what a page delete / undo carries). A row with a
+missing bound or no identity is dropped on read; the page still renders.
 
 **Template identity values** (index `objects.templateKind` and the template row's `text` — informational
 labels, nothing reads them yet): `BLANK` (`SoilSchema.TEMPLATE_BLANK`, no template row) ·

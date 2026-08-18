@@ -34,9 +34,25 @@ interface SoilDao {
     @Query("UPDATE notebook SET deletedAt = NULL, updatedAt = :at WHERE id IN (:ids) AND deletedAt IS NOT NULL")
     suspend fun restore(ids: List<String>, at: Long)
 
-    /** Live stroke ids of a page — cheap (no blobs), used when deleting a page. */
+    /** Live stroke ids of a page — cheap (no blobs). */
     @Query("SELECT id FROM notebook WHERE parentId = :pageId AND type = 'stroke' AND deletedAt IS NULL")
     suspend fun liveStrokeIds(pageId: String): List<String>
+
+    /** Live content ids of a page — strokes **and** objects — for a page delete / undo (arc 4 / H1). */
+    @Query("SELECT id FROM notebook WHERE parentId = :pageId AND type IN ('stroke', 'object') AND deletedAt IS NULL")
+    suspend fun liveChildIds(pageId: String): List<String>
+
+    /** Live object rows of a page in z-order (arc 4). */
+    @Query("SELECT * FROM notebook WHERE parentId = :pageId AND type = 'object' AND deletedAt IS NULL ORDER BY `order`")
+    suspend fun objectsOf(pageId: String): List<SoilObjectEntity>
+
+    /** Rewrite an object's payload + bounds (edit / re-render sizing). Live rows only. */
+    @Query("UPDATE notebook SET text = :text, x = :x, y = :y, width = :w, height = :h, updatedAt = :at WHERE id = :id AND deletedAt IS NULL")
+    suspend fun updateObject(id: String, text: String, x: Float, y: Float, w: Float, h: Float, at: Long)
+
+    /** Translate live objects by (dx, dy) — a selection move. */
+    @Query("UPDATE notebook SET x = x + :dx, y = y + :dy, updatedAt = :at WHERE id IN (:ids) AND deletedAt IS NULL")
+    suspend fun moveObjects(ids: List<String>, dx: Float, dy: Float, at: Long)
 
     @Query("UPDATE notebook SET refId = :refId, updatedAt = :at WHERE id = :id")
     suspend fun setRefId(id: String, refId: String?, at: Long)

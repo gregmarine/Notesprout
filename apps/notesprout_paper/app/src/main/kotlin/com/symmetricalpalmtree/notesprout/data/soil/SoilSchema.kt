@@ -12,7 +12,12 @@ package com.symmetricalpalmtree.notesprout.data.soil
  */
 object SoilSchema {
 
-    /** `PRAGMA user_version` of a Paper `.soil`. Bump only with a migration. */
+    /**
+     * `PRAGMA user_version` of a Paper `.soil`. Bump only with a migration. Arc 4 / H1 added the
+     * `x`/`y` columns **without** a bump or a migration (phase-start decision: fresh schema, old test
+     * notebooks abandoned) — a pre-H1 file fails Room's identity-hash check on open and the reason
+     * surfaces through the notebook screen's open-failed toast; nothing is ever deleted or rewritten.
+     */
     const val SOIL_VERSION = 1
 
     const val TABLE = "notebook"
@@ -23,6 +28,9 @@ object SoilSchema {
     const val TYPE_PAGE = "page"
     const val TYPE_TEMPLATE = "template"
     const val TYPE_STROKE = "stroke"
+    /** A content object (arc 4): `style` = provider identity `<pkg>:<typeId>`, `text` = opaque payload,
+     *  `x`/`y`/`width`/`height` = bounds in page px, `"order"` = z-order among the page's objects. */
+    const val TYPE_OBJECT = "object"
 
     /** The notebook meta row's `parentId` (it is the root). */
     const val ROOT_PARENT = ""
@@ -46,6 +54,8 @@ object SoilSchema {
             deletedAt   INTEGER,
             text        TEXT,
             refId       TEXT,
+            x           REAL,
+            y           REAL,
             width       REAL,
             height      REAL,
             color       TEXT,

@@ -10,7 +10,7 @@
 > `CLAUDE.md` files. `docs/extensions.md` is the subsystem reference all arcs write into;
 > `docs/notebook.md` and `docs/data.md` gain sections in this arc.
 >
-> **Status: H0 ✅ (8c5361f) · H1 ⬜ · H2 ⬜ · H3 ⬜ · H4 ⬜ · H5 ⬜ — H0 user-verified 2026-08-17.**
+> **Status: H0 ✅ (8c5361f) · H1 🧪 · H2 ⬜ · H3 ⬜ · H4 ⬜ · H5 ⬜ — H0 user-verified 2026-08-17.**
 
 ## Why
 
@@ -584,7 +584,35 @@ checked first — only the height can. Nothing binds the point until H3.
 ---
 
 ### Phase H1 — Core content objects: fresh schema, store, renderer bridge, undo, g-paper 0.1.1
-**Status:** ⬜ Not started
+**Status:** 🧪 Awaiting device verification (built + installed SNN/NA5C/MIP11 2026-08-17)
+
+**Outcome (2026-08-17, pending the user's checklist):** g-paper **0.1.1 = commit `e76e305`**
+(`PaperListener.onSelectionTapped(x, y)`: `CanvasPaperView.lassoDragFinish(x, y, fromFinger)` fires it in
+the sub-threshold branch — stylus at once, finger via `scheduleEscrowedTap` (`PEN_ACTIVE_TAIL_MS`, dropped
+if the pen turns active or the selection changed); engine-agnostic — the Onyx raw path and Ratta's base
+path both end in `lassoDragFinish`; demo log line; `api.md` + `host-responsibilities.md`; version pins
+in README / integration-guide / consumer-smoke; `publishToMavenLocal`; core JVM tests green). Paper:
+`SOIL_VERSION` **stays 1** (Q1) — `x`/`y` in DDL + entity, `TYPE_OBJECT`, `SoilDao.liveChildIds` /
+`objectsOf` / `updateObject` / `moveObjects`; `ExtensionContract.MAX_OBJECT_TEXT_CHARS = 20 000` (pulled
+forward from the H3 contract list — `ObjectRows` caps with it); `notebook/PageObject`, `ObjectRows`,
+**`SoilWriter`** (the channel + touch discipline lifted out of `StrokeStore`; both stores share it;
+`NotebookSession.writer`), `ObjectStore`, `ObjectRenderer` (placeholder + cache path, live-drag pair,
+`hitTargets`), `ObjectRenderCache`, `DebugHooks`; `UndoRedoStack` `ObjectCreated` / `ObjectsDeleted` /
+`ObjectEdited` / `Moved.objectIds` / `Page.childIds` with `revert` / `reapply` tables; `NotebookActivity`
+`liveObjects` + `currentSelection`, objects loaded with strokes on open / navigate, `onSelectionMoved`
+contentIds, `onSelectionTapped` logged; debug ⋯ "Insert test object" / "Delete selection". JVM:
+`ObjectRowsTest` (7) + `UndoRedoStackTest` (4), whole suite green; `assembleDebug` + `:app:assembleRelease`
+build. MIP11 adb smoke: new notebook → Insert test object → dashed box at the page centre (screencap) →
+`am force-stop` → reopen → "loaded: 0 strokes, 1 objects". Trap re-hit: MIP11 resets `log.tag` to `I`
+by itself — re-set before every log read. Docs: `docs/notebook.md` §"Content objects" + undo rows,
+`docs/data.md` §"Object rows" + the no-migration note, `CLAUDE.md` (content-objects rule, g-paper 0.1.1).
+
+**Phase-start answers (2026-08-17):** Q1 **keep `SOIL_VERSION = 1`** — no bump, no migration; the
+DDL/entity gain `x`/`y` and a v1 file fails to open on Room's identity-hash check (the reason surfaces
+through the existing open-failed toast; the library card is unchanged, the user deletes the notebook
+by hand) · Q2 `liveChildIds` covers strokes + objects (page delete / undo carry both) · Q3 the debug
+"Insert test object" / "Delete selection" items are removed in H5 · Q4 finger tap escrowed + palm-gated,
+stylus tap fires on any selection contents (strokes-only included).
 
 **Goal:** the core can store, load, draw (placeholder + cached bitmap), select, move, delete and undo
 objects on a page — with **no extension involved**. Verified through JVM tests and a **debug-only ⋯

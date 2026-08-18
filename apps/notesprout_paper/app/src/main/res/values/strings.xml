@@ -114,6 +114,8 @@
     <!-- Debug-only notebook ⋯ (arc 3 test surface; strings live here so the release no-op twin compiles) -->
     <string name="debug_tools_title">Debug tools</string>
     <string name="debug_recognize_page">Recognize page (ML Kit)</string>
+    <string name="debug_insert_test_object">Insert test object</string>
+    <string name="debug_delete_selection">Delete selection</string>
     <string name="recognize_problem_title">Recognize page</string>
     <string name="recognize_nothing">Nothing to recognize</string>
     <string name="recognize_model_needed_title">Recognition model needed</string>
