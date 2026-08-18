@@ -121,6 +121,14 @@
     <!-- Selection toolbar + object edit dialog (arc 4 / H2) -->
     <string name="selection_delete_hint">Delete selection</string>
     <string name="objects_edit_save">Save</string>
+    <!-- Object actions (arc 4 / H4) — every failure is a dialog, never a toast -->
+    <string name="objects_problem_title">Couldn\'t apply the action</string>
+    <string name="objects_unreadable_title">Couldn\'t read the handwriting</string>
+    <string name="objects_unreadable_body">Try writing larger or clearer, then lasso the words again.</string>
+    <string name="objects_needs_recognizer">This action needs a handwriting recognizer extension (for example NSE · ML Kit).</string>
+    <string name="objects_needs_markdown">This action needs the NSE · Markdown extension.</string>
+    <string name="objects_provider_failed">The %1$s extension didn\'t respond — try again.</string>
+    <string name="objects_page_full">This page already holds the maximum number of objects.</string>
     <string name="recognize_problem_title">Recognize page</string>
     <string name="recognize_nothing">Nothing to recognize</string>
     <string name="recognize_model_needed_title">Recognition model needed</string>

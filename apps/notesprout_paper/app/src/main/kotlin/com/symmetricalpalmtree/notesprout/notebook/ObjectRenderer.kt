@@ -7,6 +7,7 @@ import android.graphics.Paint
 import com.symmetricalpalmtree.gpaper.core.render.ContentLayer
 import com.symmetricalpalmtree.gpaper.core.render.ContentRenderer
 import com.symmetricalpalmtree.gpaper.core.render.HitTarget
+import com.symmetricalpalmtree.notesprout.extension.ExtensionContract
 
 /**
  * The g-paper [ContentRenderer] bridge for the page's content objects (arc 4 / H1). Draws below the
@@ -23,7 +24,7 @@ import com.symmetricalpalmtree.gpaper.core.render.HitTarget
 class ObjectRenderer(
     private val objects: () -> Collection<PageObject>,
     private val cache: ObjectRenderCache,
-    private val renderWidthOf: (PageObject) -> Int,
+    private val pageWidth: () -> Float,
     private val dpi: () -> Float,
 ) : ContentRenderer {
 
@@ -52,7 +53,7 @@ class ObjectRenderer(
     override fun hitTargets(): List<HitTarget> = objects().map { HitTarget(it.id, it.bounds) }
 
     private fun drawOne(canvas: Canvas, o: PageObject) {
-        val bmp = cache.get(o.id, o.payload, renderWidthOf(o), dpi())
+        val bmp = cache.get(o.id, o.payload, renderWidth(pageWidth(), o), dpi())
         if (bmp != null) {
             canvas.drawBitmap(bmp, o.x, o.y, bitmapPaint)
         } else {
@@ -61,7 +62,12 @@ class ObjectRenderer(
         }
     }
 
-    private companion object {
-        const val DASH_PX = 6f
+    companion object {
+        private const val DASH_PX = 6f
+
+        /** The width an object may render into — the page's right edge minus its x (≥ 1, ≤ the image
+         *  edge cap). The one function both the renderer's cache lookup and the render pass key on. */
+        fun renderWidth(pageWidth: Float, o: PageObject): Int =
+            (pageWidth - o.x).toInt().coerceIn(1, ExtensionContract.MAX_IMAGE_EDGE_PX)
     }
 }

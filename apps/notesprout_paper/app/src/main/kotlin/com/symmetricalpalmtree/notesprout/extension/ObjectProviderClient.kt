@@ -115,6 +115,49 @@ class ObjectProviderClient(
         }
     }
 
+    /** One object to render in a [renderAll] batch: its typeId, payload and the width it may use. */
+    class RenderRequest(val typeId: String, val payload: String, val maxWidthPx: Int)
+
+    /**
+     * Render several objects of this provider in **one bind with one Markdown proxy** (arc 4 / H4 —
+     * the page-load render pass: one provider bind, N renders). Returns one entry per request, in
+     * order: the verified copy, or null when the provider drew nothing **or that render failed**
+     * (logged; the others still run) — except a [CapabilityRequiredException], which ends the batch
+     * (every remaining entry is null too, since it would fail the same way) and is re-thrown. The
+     * budget is [RENDER_TIMEOUT_MS] per request; args are checked before the bind ([RenderCaps]).
+     */
+    suspend fun renderAll(requests: List<RenderRequest>, dpi: Float): List<RenderedImages.Copy?> {
+        if (requests.isEmpty()) return emptyList()
+        for (r in requests) RenderCaps.checkArgs(r.maxWidthPx, dpi, 0, 0)
+        val proxy = markdownRef?.let { MarkdownProxyBinder(MarkdownClient(appContext, it), extUid()) }
+        val t0 = System.currentTimeMillis()
+        val out = arrayOfNulls<RenderedImages.Copy>(requests.size)
+        var rendered = 0
+        try {
+            call(RENDER_TIMEOUT_MS * requests.size) { p ->
+                for ((i, r) in requests.withIndex()) {
+                    try {
+                        val image = p.render(r.typeId, outPayload(r.payload), r.maxWidthPx, dpi, proxy) ?: continue
+                        out[i] = RenderedImages.copyOut(image)
+                        rendered++
+                    } catch (e: IllegalStateException) {
+                        // A missing capability fails every render the same way — stop the batch, typed by call().
+                        if (e.message == ExtensionContract.RECOGNIZER_REQUIRED || e.message == ExtensionContract.MARKDOWN_REQUIRED) throw e
+                        Slog.d(TAG) { "renderAll #$i failed: ${e.javaClass.simpleName}: ${e.message}" }
+                    } catch (e: ExtensionCallException) {
+                        Slog.d(TAG) { "renderAll #$i failed: ${e.message}" }
+                    } catch (e: android.os.RemoteException) {
+                        Slog.d(TAG) { "renderAll #$i failed: ${e.javaClass.simpleName}" }
+                    }
+                }
+            }
+        } finally {
+            proxy?.revoke()
+            Slog.d(TAG) { "renderAll: ${requests.size} requested, $rendered rendered in ${System.currentTimeMillis() - t0} ms" }
+        }
+        return out.toList()
+    }
+
     private fun types(p: IObjectProvider): Set<String> =
         (p.describeTypes()?.filterNotNull() ?: emptyList()).asSequence()
             .filter(ExtensionContract::isTypeId).take(ExtensionContract.MAX_TYPES).toSet()

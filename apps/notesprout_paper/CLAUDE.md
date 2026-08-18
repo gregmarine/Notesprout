@@ -11,7 +11,7 @@ global-index model, global encryption model, and e-ink design philosophy — and
   Naming extension), then `PAPER_RECOGNITION_PLAN.md` (arc 3, complete + frozen 2026-08-17: the
   engine-neutral `HANDWRITING_RECOGNIZER` capability point + the ML Kit extension `NSE · ML Kit`,
   debug-only "Recognize page" test surface), then **`PAPER_OBJECTS_PLAN.md` (arc 4, in progress —
-  H0 ✅ 8c5361f · H1 ✅ 62771f3 · H2 ✅ bf17417 · H3 ✅ 0de688e 2026-08-17: content objects in the `.soil` + the selection toolbar with its
+  H0 ✅ 8c5361f · H1 ✅ 62771f3 · H2 ✅ bf17417 · H3 ✅ 0de688e · H4 🧪 2026-08-18: content objects in the `.soil` + the selection toolbar with its
   extension-contribution API + the `MARKDOWN_RENDERER` capability point / `NSE · Markdown` + the
   generic `OBJECT_PROVIDER` point / `NSE · Heading`, the two proxies, g-paper 0.1.1)** — read all
   five top-to-bottom at the start of every session; **arc 4 is the active plan — start at its next
@@ -142,7 +142,7 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   anchors 8 dp off the drawn selection box (flip / clamp — `ToolbarAnchor`), and its rects join the
   exclusion rects. `ObjectEditDialog` follows the design-system IME pattern (hide via the field's window
   token on Save/Cancel; never earlier — Ratta hardware keyboards). H2 runs on the debug-only
-  `FakeContributions` twin (`src/debug` / `src/release`); H4 puts `ObjectProviderClient` behind it.
+  `FakeContributions` twin (`src/debug` / `src/release`, unwired since H4 — gone in H5).
 - **ObjectProvider + the built proxies** (arc 4 / H3, `docs/extensions.md` §"ObjectProvider
   (contract)", §"The Heading extension", §"MarkdownRenderer / ObjectProvider — host behaviour"): the
   fifth point (`ACTION_OBJECT_PROVIDER`, `IObjectProvider`, `CreatedObject`) is the **generic
@@ -161,7 +161,21 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   provider: `heading` type, parent **H** with `h1`…`h6`, edit `maxChars` 500, single line + 8 dp padding
   asked of the Markdown proxy, the proxy's reply returned as-is. **`RecognizerReadiness`** (main source,
   `extension/`) is the M1/M2 model-consent flow lifted out of the debug menu (which now only calls it);
-  the H action uses it in H4. Debug ⋯ "Probe object providers" is the H3 test surface (gone in H5).
+  the H action uses it. Debug ⋯ "Probe object providers" is the H3 test surface (gone in H5).
+- **Objects end to end** (arc 4 / H4, `docs/notebook.md` §"Objects — actions, edit, render pass"): the
+  screen's three H4 collaborators are `ObjectProviders` (loaded once per open **after** `opened` — its
+  binds never hold the Opening popup; resume compares the discovery signature and reloads on a change),
+  `ObjectActions` (guards recognizer → Markdown → page cap, `RecognizerReadiness`, "Recognizing…" popup,
+  the provider calls, **every failure dialog** — core `objects_*` strings) and `ObjectRenderPass` (objects
+  grouped by provider → **`ObjectProviderClient.renderAll` = one bind + one Markdown proxy per provider**
+  → decode → the screen caches, sizes the object to its image, one pen-idle frame). `NotebookActivity`
+  keeps only the page mutations (`objectListener`: create + erase as one `ObjectCreated`, `ObjectEdited`
+  recorded with the *rendered* bounds, host-initiated `paper.setSelection` sets the selection state
+  itself — no `onSelectionCreated` echo). Rules that bit: the cache entry survives moves that don't hit
+  the right edge (`ObjectRenderCache.get` fit rule); a failed render is not retried until the next page
+  load / provider reload / edit of that object; the background pass never holds `pageOps`, the inline
+  one (create / apply / edit) is awaited under it. OBJECT actions guard `Requires.MARKDOWN` only; edits
+  guard nothing.
 - **Toast vs. dialog:** a toast only confirms something that already happened ("copied"); anything
   the user must notice or act on — why a tap did nothing, a failure, a one-time download — is an
   `AlertDialog` (e-ink: a toast is easy to miss and reads as "broken"). The one helper is

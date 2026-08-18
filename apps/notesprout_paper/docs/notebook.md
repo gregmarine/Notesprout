@@ -22,6 +22,9 @@ delete) and undo/redo arrive in Phase 4.
 | `SelectionToolbar` / `ToolbarAnchor` | the floating selection toolbar + sub-toolbar (arc 4 / H2): core-drawn buttons from `ToolbarItem`s, show/hide/anchor rules, exclusion rects; the pure placement math (JVM-tested) |
 | `SelectionActions` | `ToolbarAction` / `Contribution` / `ToolbarItem` + the pure `shapeOf` / `merge` (Delete first, provider order, INK / OBJECT / mixed filtering; JVM-tested) |
 | `ObjectEditDialog` | the `EditSpec` → `AlertDialog` shell (Save / Cancel, IME rules) |
+| `ObjectProviders` | the loaded provider set for one open (arc 4 / H4): refs by package, recognizer / Markdown refs, `contributions`, the resume `signature`; `load` (IO binds) |
+| `ObjectActions` | the provider-facing flows (H4): `requires` guards, `RecognizerReadiness`, "Recognizing…" popup, `createFromInk` / `applyAction` / `describeEdit` / `applyEdit`, every failure dialog; hands results to the screen's `objectListener` |
+| `ObjectRenderPass` | the cache fill (H4): objects grouped by provider → one `renderAll` bind per provider → decode → `Result`s the screen applies |
 
 ## Layout (`activity_notebook.xml`)
 
@@ -119,16 +122,18 @@ object's bounds — the look of an object whose provider is absent, disabled or 
 selectable, movable, deletable). It implements g-paper's live-drag pair (`draw(canvas, excluded)` +
 `drawObject`) so a dragged object rides under the pen instead of ghosting, and `hitTargets()` returns
 every live object's bounds — that is what makes objects lasso-selectable. `ObjectRenderCache` is
-in-memory for the open notebook only (cleared in `onDestroy`); **nothing fills it in H1** — the render
-pass through the object provider arrives in H4.
+in-memory for the open notebook only (cleared in `onDestroy`); the render pass that fills it is
+§"Objects — actions, edit, render pass" (H4). A cache entry is valid for exactly (payload, dpi) and for
+any render width it still fits — an image rendered narrower than the width it was given is reused after
+a move that doesn't push the object against the page's right edge; a constrained (ellipsized) one is a
+miss whenever the width changes.
 
 **Selection.** `onSelectionCreated` / `onSelectionMoved` / `onSelectionDismissed` keep
 `currentSelection` (bounds follow moves). `onSelectionMoved` gains `contentIds`: `objectStore.move` +
 the `liveObjects` update + `notifyContentChanged`, one undo `Moved(pageId, strokeIds, dx, dy,
 objectIds)`. **`onSelectionTapped(x, y)`** (g-paper 0.1.1: a sub-threshold stylus or single-finger tap
 inside the selection box; the finger variant escrowed + palm-gated like tap-to-dismiss; drags
-unchanged) is only logged in H1 (`Slog.d` "selection tapped x,y") — H2 opens the tapped object's edit
-dialog from it.
+unchanged) opens the tapped object's edit dialog (§"Edit dialog").
 
 **Debug ⋯ (H1 test surface, removed in H5):** "Insert test object" creates a `debug:box` object
 (payload `test`, 200×100 px) at the page centre — no provider owns it, so it draws as the placeholder —
@@ -153,12 +158,14 @@ tap calls `paper.releaseRender()` first (chrome release), like the top bar.
 object, no strokes) / `Mixed` (anything else). `Ink` shows every provider's `INK` actions; `OneObject`
 shows the `OBJECT` actions of the provider whose key (package) and type match; `Mixed` shows Delete
 only. A parent action is filtered through its leaves and dropped when none survive. Contributions are
-fetched once per notebook open (H2: `FakeContributions`; H4: the object providers). Tapping a **parent**
+the object providers' (`ObjectProviders`, loaded once per open, refreshed on resume when the extension set
+changed — §"Objects — actions, edit, render pass"); the H2 `FakeContributions` twin is no longer wired
+(kept in `src/debug` until H5 removes it). Tapping a **parent**
 toggles the sub-toolbar with its leaves (a second tap closes it; another parent replaces it); leaves
 whose id the provider reports as *active* for the selected object are drawn `state_selected`. Tapping a
 **leaf** closes the sub-toolbar and dispatches: Delete → `deleteSelection()` (`ObjectsDeleted`, one
 undo step; `clearSelection` dismisses → the toolbar hides); anything else → `Listener.onAction(providerKey,
-action)` (H2: logged by the fake; H4: `createFromInk` / `applyAction`).
+action)` → `ObjectActions.perform` (`createFromInk` for an ink selection, `applyAction` for one object).
 
 **When it shows (`ToolbarAnchor`, pure, JVM-tested):** `onSelectionCreated` → `showSelectionToolbar`
 through **`whenPenIdle`** (frame-silence rule; a lasso that is dragged at once never flickers chrome;
@@ -177,17 +184,93 @@ toolbar" is only reachable with the lasso tool — a new outline started over th
 ## Edit dialog (arc 4 / H2)
 
 `onSelectionTapped(x, y)` (g-paper 0.1.1) with **exactly one selected object, no strokes, and the tap
-inside the object's bounds** → the object's `EditSpec` (H2: `FakeContributions.editSpec` for the
-`debug:box`; H4: the provider's `describeEdit`; null = not editable → nothing) → `EditCaps.sanitize` →
-`whenPenIdle` → `paper.releaseRender()` → **`ObjectEditDialog`** (`dialog_edit_object.xml`): a styled
+inside the object's bounds** → `ObjectActions.editTapped` → the provider's `describeEdit` (through
+`ObjectProviderClient`, `EditCaps` applied; null = not editable → nothing) → `whenPenIdle` → `paper.releaseRender()` → **`ObjectEditDialog`** (`dialog_edit_object.xml`): a styled
 `AlertDialog` titled from the spec with one bordered `AppCompatEditText` prefilled with the spec's text
 (hint, `LengthFilter(maxChars)`, single-line with IME *Done* = Save, or multi-line 3–8 rows), **Save /
 Cancel**. IME per `docs/design-system.md`: `SOFT_INPUT_STATE_VISIBLE | ADJUST_RESIZE` before `show()`;
 Save and Cancel are real click listeners that hide the keyboard through the **field's** window token
 while the dialog is alive (BOOX doesn't auto-dismiss it; the decor token is the wrong one); nothing
-hides it earlier, so a Ratta hardware keyboard keeps typing. Save hands the raw text to the caller
-(H2: logged by the fake; H4: `applyEdit` → `ObjectEdited`, re-render, re-select); Cancel does nothing.
-A tap with strokes selected, or outside the object, does nothing.
+hides it earlier, so a Ratta hardware keyboard keeps typing. Save hands the raw text to
+`applyEdit` → a new payload → `objectListener.onPayloadChanged` (`ObjectEdited`, re-render, re-select);
+null (blank / unchanged) → nothing. Cancel does nothing. A tap with strokes selected, or outside the
+object, does nothing.
+
+## Objects — actions, edit, render pass (arc 4 / H4)
+
+Three collaborators sit between the toolbar and the page: **`ObjectProviders`** (what is installed),
+**`ObjectActions`** (talking to a provider + every failure dialog) and **`ObjectRenderPass`** (filling
+the cache). `NotebookActivity` keeps only the page mutations (`objectListener`) — rows, undo, paper,
+selection.
+
+**Providers.** `ObjectProviders.load` (IO, launched right after `opened = true` so its binds never hold
+the "Opening…" popup): every trusted `OBJECT_PROVIDER` → `describeTypes` + `describeActions` (a provider
+failing either is skipped with a log line) → `Contribution(providerKey = package, label, typeIds,
+actions)`; plus the one recognizer and the one Markdown renderer the proxies would lend (null when none).
+The toolbar shows Delete only until they arrive; an active selection is re-shown when they do. `onResume`
+compares the cheap discovery `signature` (component list of the three points) and reloads only on a
+change (an extension enabled / disabled / installed while the screen was away) — then clears the
+"failed" set and re-runs the render pass.
+
+**INK leaf** (`ObjectActions.perform`, strokes-only selection): guards in this order — `Requires.RECOGNIZER`
+with no recognizer installed → "This action needs a handwriting recognizer extension…"; `Requires.MARKDOWN`
+with no Markdown renderer → "…needs the NSE · Markdown extension"; `MAX_OBJECTS_PER_PAGE` → "page full".
+Then `RecognizerReadiness.ensureReady` (READY → at once; NEEDS_DOWNLOAD → consent → download → continue
+with no second tap; the same flow as the debug Recognize page, titled "Couldn't apply the action") →
+the **"Recognizing…" popup** (the M1 one, no buttons, up until the object is on the page or a dialog says
+why not) → `InkPayload.fromStrokes` → `ObjectProviderClient.createFromInk(leaf, ink, bounds.w, bounds.h)`
+(15 s, recognizer proxy inside) → **null** → "Couldn't read the handwriting — try writing larger or clearer"
+and the ink is untouched · a `CreatedObject` → `objectListener.onCreated` under `pageOps`: the strokes must
+still be live (erased meanwhile, or the page turned during the consent dialog → dropped) → `PageObject`
+at the lasso box's top-left with the box's size, identity `objectIdentity(pkg, typeId)`, order max+1 →
+`objectStore.create` + `store.erase(strokeIds)` → **one `ObjectCreated(page, obj, strokes)`** →
+`paper.removeStrokes` (dismisses the selection; the placeholder draws at the box) → **inline render
+pass** for the new object (sizes it to the image; persisted) → `selectObject`: `paper.setSelection(∅,
+{id}, bounds)` (host-initiated — no `onSelectionCreated` echo, so `currentSelection` / `selectionActive`
+are set here) → toolbar with the level marked active.
+
+**OBJECT leaf** (one selected object of the provider's type): guards `Requires.MARKDOWN` only (its result
+must render; the recognizer is not involved) → `applyAction(leaf, typeId, payload)` (2 s) → null →
+nothing · a payload → `onPayloadChanged`: `updatePayloadAndBounds` → inline render pass → **one
+`ObjectEdited(page, before, after-with-final-bounds)`** → re-select (new bounds, active ids refreshed —
+`activeIdsCache` per object id + payload spares a bind per re-selection).
+
+**Edit** (`onSelectionTapped` on the one selected object): no guard → `describeEdit` → dialog → Save →
+`applyEdit` → the same `onPayloadChanged` path (with Markdown absent the payload still changes; the box
+re-sizes only when Markdown returns).
+
+**Render pass.** `ObjectRenderPass.render(objects, providers, pageWidth, dpi)` (IO): objects grouped by
+provider identity → **one `ObjectProviderClient.renderAll` per provider** (one bind, one Markdown proxy,
+N renders; a single failed render is null, a `CapabilityRequiredException` ends the batch) → each verified
+WEBP decoded (`Bitmaps.decodeBounded`, edge cap) → `Result(id, payload, maxWidth, dpi, bitmap?)`. The
+screen applies on Main (`applyRenderResults`): skip if the object is gone or its payload moved on; null →
+`renderFailed` (no retry until the next page load, a provider reload, or an edit of that object); else
+`renderCache.put` and, when the image size differs, `width/height` from the image (persisted; anchored
+top-left) → **one `notifyContentChanged` through `whenPenIdle`**. Two entry points: **inline** (`renderNow`,
+awaited under `pageOps` by create / apply / edit) and **background** (`scheduleRenderPass` — page load,
+navigate, undo reload, provider reload, and after a selection move with objects (an object pushed against
+the right edge re-ellipsizes); never holds `pageOps`; a trigger during a pass queues exactly one more).
+Render width = `ObjectRenderer.renderWidth(pageWidth, o)` = page width − x, ≥ 1, ≤ `MAX_IMAGE_EDGE_PX` —
+the one function the cache lookup and the pass both key on.
+
+**Failure table (every one a core dialog; nothing changes on the page):**
+
+| Situation | Dialog |
+|---|---|
+| INK action needs a recognizer, none installed (checked first) | "Couldn't apply the action" / `objects_needs_recognizer` |
+| INK / OBJECT action needs Markdown, none installed | … / `objects_needs_markdown` |
+| Page holds `MAX_OBJECTS_PER_PAGE` objects | … / `objects_page_full` |
+| Recognizer flow: offline / download failed / unavailable / cancelled | the `RecognizerReadiness` dialogs; nothing created |
+| `createFromInk` returned null (nothing usable recognized) | "Couldn't read the handwriting" / `objects_unreadable_body` (ink untouched) |
+| Ink over the caps | … / `recognize_too_dense` |
+| READY, then `RECOGNIZER_NOT_READY` from the proxied call | … / `recognize_still_downloading` |
+| Provider threw `RECOGNIZER_REQUIRED` / `MARKDOWN_REQUIRED` (typed) | the matching "needs …" text |
+| Any other provider failure / timeout | … / `objects_provider_failed` ("The <label> extension didn't respond") |
+| Provider absent / disabled at render time | no dialog — dashed placeholder, still selectable / movable / deletable |
+
+**Undo.** `ObjectCreated` (undo: ink back + object gone), `ObjectEdited` (payload + bounds either way),
+`ObjectsDeleted`, `Moved` with objects — replay stays store → drain → reload the page, which reruns the
+render pass from cache (an undone level is a re-render because the cache holds one image per object).
 
 **Page delete / undo.** `SoilDao.liveChildIds(pageId)` (strokes **and** objects) is what
 `deleteCurrent` soft-deletes and `Structural.childIds` carries; `reconcile` restores / deletes the whole

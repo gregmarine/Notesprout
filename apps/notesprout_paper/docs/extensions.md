@@ -1020,6 +1020,22 @@ core's proxies.
   and the page has ink) a `createFromInk` of the page's ink through the real recognizer proxy (result
   discarded, nothing created); everything to logcat under `NotebookDebugMenu` + the clients' tags, never
   text; a "Probe done" toast at the end.
+- **`ObjectProviderClient.renderAll(requests, dpi): List<Copy?>`** (H4) — several objects of one provider
+  in **one bind with one Markdown proxy** (the page-load render pass: one provider bind, N renders):
+  args checked before the bind, budget `RENDER_TIMEOUT_MS × n`; one entry per request in order — the
+  verified copy, or null when the provider drew nothing or that render failed (logged; the batch goes
+  on) — except a `CapabilityRequiredException`, which ends the batch (rest null) and is re-thrown.
+- **The notebook screen's use of it (H4 — `docs/notebook.md` §"Objects — actions, edit, render pass"):**
+  `ObjectProviders` loads every trusted provider once per open (`describeTypes` + `describeActions`;
+  refreshed on resume when the discovery signature of the three points changed); `ObjectActions` runs
+  the `requires` guards (recognizer named first, then Markdown, then the page cap), `RecognizerReadiness`
+  before `createFromInk`, the "Recognizing…" popup, `applyAction` / `describeEdit` / `applyEdit`, and
+  owns every failure dialog (all core strings — `objects_*` in `strings.xml`); `ObjectRenderPass` groups
+  a page's objects by provider identity → `renderAll` → decode → the screen caches, sizes each object to
+  its image and draws one pen-idle frame. The provider never sees an object id, page id, notebook name,
+  or anything beyond its own payload + geometry + the two proxies. Absent provider / failed render →
+  the dashed placeholder; failed create → the ink is untouched; failed apply / edit → the payload is
+  untouched (rule 23 lived).
 - **Timings (H3, warm extension processes, two hops end to end):** `render` 268 ms (MIP11) / 479 ms
   (SNN) / 403 ms (NA5C) — of which the Markdown extension's own render is 10 / 93 / 28 ms;
   `createFromInk` 1.6 s (MIP11, first inference after process start) / 201 ms (SNN) / 58 ms (NA5C).

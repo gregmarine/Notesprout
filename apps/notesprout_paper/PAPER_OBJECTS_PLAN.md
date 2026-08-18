@@ -10,7 +10,7 @@
 > `CLAUDE.md` files. `docs/extensions.md` is the subsystem reference all arcs write into;
 > `docs/notebook.md` and `docs/data.md` gain sections in this arc.
 >
-> **Status: H0 ✅ (8c5361f) · H1 ✅ (62771f3) · H2 ✅ (bf17417) · H3 ✅ (0de688e) · H4 ⬜ · H5 ⬜ — H0 user-verified 2026-08-17.**
+> **Status: H0 ✅ (8c5361f) · H1 ✅ (62771f3) · H2 ✅ (bf17417) · H3 ✅ (0de688e) · H4 🧪 · H5 ⬜ — H0 user-verified 2026-08-17.**
 
 ## Why
 
@@ -892,12 +892,48 @@ consent flow is promoted to main. Nothing user-visible in release.
 ---
 
 ### Phase H4 — End-to-end: write → lasso → H → size → heading; edit; re-size; undo; devices
-**Status:** ⬜ Not started
+**Status:** 🧪 Awaiting device verification (built 2026-08-18; Claude-verified on MIP11 end to end, SNN + NA5C launch/provider-load only — lasso is adb-unreachable there) — user by-eye items 1–15 flip this ✅
+
+**Outcome so far (2026-08-18):** `ObjectProviderClient.renderAll` (one bind + one Markdown proxy per
+provider, budget 8 s × n, per-item null on failure, `CapabilityRequiredException` ends the batch);
+`notebook/ObjectProviders` (refs by package + recognizer / Markdown refs + `contributions` + resume
+`signature`; `load` on IO **after** `opened`), `notebook/ObjectActions` (guards recognizer → Markdown →
+page cap, `RecognizerReadiness` before `createFromInk`, the M1 "Recognizing…" popup, `applyAction` /
+`describeEdit` / `applyEdit`, every failure dialog; **OBJECT leaves guard `MARKDOWN` only, edits guard
+nothing** — checklist items 9/10), `notebook/ObjectRenderPass` (group by provider → `renderAll` → decode
+→ `Result`), `ObjectRenderer.renderWidth` (the one key function), `ObjectRenderCache.get` **fit rule**
+(an unconstrained image survives moves that don't reach the right edge; a move with objects schedules a
+pass so an edge-hit re-ellipsizes), `NotebookActivity` (796 lines — under the cap): `objectListener`
+(`onCreated`: strokes must still be live → create + erase → `ObjectCreated` → `removeStrokes` → inline
+render → `selectObject` = host `setSelection` + state set here; `onPayloadChanged`: update → inline render
+→ `ObjectEdited` recorded with the **rendered** bounds → re-select), `showSelectionToolbar` fetches
+`activeActionIds` (per-object cache) then presents pen-idle, background `scheduleRenderPass` (page load /
+navigate / undo reload / provider reload / move; never under `pageOps`; one queued re-run), `onResume`
+signature compare → reload. `FakeContributions` unwired (file stays until H5). Strings `objects_*`
+(+ `objects_problem_title` "Couldn't apply the action" — added beyond Appendix A as the dialog title;
+`objects_working` not added — Q2 chose the M1 "Recognizing…"). JVM whole suite green (40 suites);
+`assembleDebug` + `:app:assembleRelease` build. **MIP11 adb run (stylus `motionevent` lasso — a dense
+25-point loop is what registers):** lasso 3 strokes → [🗑][H] → H → H1…H6 → H2 → `createFromInk` 56 ms
+(nested `RecognizerClient` 33 ms) → `renderAll` 173 ms (nested `MarkdownRendererService` 18 ms) → ink
+gone, bold heading at the box's top-left, selected, **H2 marked** · H → H5 → 89×90, re-selected · stylus
+tap → "Edit heading" prefilled without `#`s → `Agenda` → Save → 187×90 re-rendered · close → **library
+cover shows the heading** · reopen → page-load pass 1 bind / 1 render 25 ms · `pm disable-user` Markdown
+→ resume → "extension set changed — reloading providers"; heading-only lasso → H → H5 active → H3 → **"Couldn't
+apply the action / This action needs the NSE · Markdown extension."**, nothing changed · re-enable →
+resume reload · binds = unbinds, no `SecurityException`, no text in any line. SNN (ratta) + NA5C (onyx,
+after the sideload enable dance — the *app* came back disabled this time): open → providers load
+(1 type, 1 action, 6 sub) → no crash. Undo / finger / cover-on-EPD / consent path (12) / airplane (14)
+not reachable from adb — user items.
 
 **Goal:** the user story works on all three devices: lasso ink → **H** → **H1–H6** → the words become a
 heading drawn by the Markdown extension, the ink is gone, the heading is selected; pick another size
 → it re-renders; tap its text → edit the plain words → re-render; move / delete / undo everything;
 extensions absent → placeholders and honest dialogs.
+
+**Phase-start answers (2026-08-17):** Q1 yes — select the new heading (`setSelection`, H with the level
+active) · Q2 "Recognizing…" — the M1 popup reused · Q3 recognizer first · Q4 render pass on page load
+**and** after create / apply / edit (+ after a move with objects), one provider bind per provider
+(`renderAll`).
 
 **Questions to resolve at phase start:**
 1. Selecting the new heading right after creation (rec.: yes, `setSelection`, toolbar shows H with the

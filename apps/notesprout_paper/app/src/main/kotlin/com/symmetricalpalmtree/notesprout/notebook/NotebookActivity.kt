@@ -20,6 +20,7 @@ import com.symmetricalpalmtree.gpaper.core.engine.GPaper
 import com.symmetricalpalmtree.gpaper.core.PaperListener
 import com.symmetricalpalmtree.gpaper.core.PaperView
 import com.symmetricalpalmtree.gpaper.core.Tool
+import com.symmetricalpalmtree.gpaper.core.model.Bounds
 import com.symmetricalpalmtree.gpaper.core.model.Selection
 import com.symmetricalpalmtree.gpaper.core.model.SelectionMove
 import com.symmetricalpalmtree.gpaper.core.model.Stroke
@@ -32,7 +33,9 @@ import com.symmetricalpalmtree.notesprout.core.InkColorCodec
 import com.symmetricalpalmtree.notesprout.core.Slog
 import com.symmetricalpalmtree.notesprout.core.TopGuard
 import com.symmetricalpalmtree.notesprout.extension.ActionApplies
-import com.symmetricalpalmtree.notesprout.extension.EditCaps
+import com.symmetricalpalmtree.notesprout.extension.CreatedObject
+import com.symmetricalpalmtree.notesprout.extension.ExtensionCallException
+import com.symmetricalpalmtree.notesprout.extension.ExtensionContract
 import com.symmetricalpalmtree.notesprout.data.index.IndexRepository
 import com.symmetricalpalmtree.notesprout.data.prefs.BrowseState
 import com.symmetricalpalmtree.notesprout.data.prefs.RecentsPrefs
@@ -41,6 +44,7 @@ import com.symmetricalpalmtree.notesprout.notebook.UndoRedoStack.Action
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -53,7 +57,9 @@ import kotlinx.coroutines.withContext
  * Lifecycle, wiring, chrome and exclusion rects live here; the data lives in [NotebookSession] /
  * [StrokeStore] / [ObjectStore]; the cover in [CoverSnapshot]; the buttons in [NotebookToolbar];
  * content objects reach the paper through [ObjectRenderer] (arc 4); the floating selection toolbar
- * is [SelectionToolbar] (arc 4 / H2 — its contents from [SelectionActions.merge]).
+ * is [SelectionToolbar] (arc 4 / H2 — its contents from [SelectionActions.merge]); the object
+ * providers behind it are [ObjectProviders], the provider-facing flows [ObjectActions], the cache
+ * fill [ObjectRenderPass] (arc 4 / H4) — this screen owns only the page mutations they lead to.
  *
  * Immersive (system bars hidden, transient by swipe). The toolbar is TopGuard-padded because on
  * BOOX the status bar still overlays the window top.
@@ -82,12 +88,21 @@ class NotebookActivity : AppCompatActivity() {
     /** Content objects on the visible page (arc 4) — what [ObjectRenderer] draws and a delete captures.
      *  Insertion-ordered = z-order (loaded in `"order"`; a new object appends). */
     private var liveObjects: LinkedHashMap<String, PageObject> = LinkedHashMap()
-    /** Rendered object bitmaps for this open notebook only (H1: nobody fills it yet — placeholders). */
+    /** Rendered object bitmaps for this open notebook only, filled by [ObjectRenderPass]. */
     private val renderCache = ObjectRenderCache()
+    /** Objects whose render failed on this page load — not retried until the next load or an edit. */
+    private val renderFailed = HashSet<String>()
     /** The active lasso selection as last reported (bounds follow moves); null when none. */
     private var currentSelection: Selection? = null
-    /** Selection-toolbar contributions, fetched once per notebook open (H2: the debug fake; H4: providers). */
-    private var contributions: List<Contribution> = emptyList()
+    /** The object providers + their toolbar contributions, loaded once per open (refreshed on resume if the set changed). */
+    private var providers: ObjectProviders = ObjectProviders.NONE
+    private val renderPass by lazy { ObjectRenderPass(this) }
+    private lateinit var objectActions: ObjectActions
+    /** The background render pass in flight, and whether it must run once more when it ends. */
+    private var renderJob: Job? = null
+    private var renderAgain = false
+    /** A provider's active action ids per object id (for exactly that payload) — spares a bind per re-selection. */
+    private val activeIdsCache = HashMap<String, Pair<String, Set<String>>>()
     /** The core's own toolbar actions: Delete only (locked decision Q5). */
     private val coreActions: List<ToolbarAction> by lazy {
         listOf(ToolbarAction(SelectionActions.CORE_DELETE_ID, "Del", R.drawable.ic_trash, getString(R.string.selection_delete_hint), ActionApplies.ALL, 0))
@@ -122,9 +137,10 @@ class NotebookActivity : AppCompatActivity() {
         paper.addContentRenderer(ObjectRenderer(
             objects = { liveObjects.values },
             cache = renderCache,
-            renderWidthOf = { o -> if (opened) (session.currentPage.width - o.x).toInt().coerceAtLeast(1) else o.width.toInt() },
-            dpi = { resources.displayMetrics.densityDpi.toFloat() },
+            pageWidth = { if (opened) session.currentPage.width.toFloat() else 0f },
+            dpi = { dpi() },
         ))
+        objectActions = ObjectActions(this, { providers }, objectListener)
 
         toolbar = NotebookToolbar(
             binding.topBar, binding.btnBack, binding.btnPen, binding.btnEraser, binding.btnLasso, paper,
@@ -141,8 +157,13 @@ class NotebookActivity : AppCompatActivity() {
             listener = object : SelectionToolbar.Listener {
                 override fun onDelete() { deleteSelection() }
                 override fun onAction(providerKey: String?, action: ToolbarAction) {
-                    // H2: the debug fake logs the leaf; H4 dispatches to the owning provider.
-                    FakeContributions.onLeafTapped(providerKey, action)
+                    val sel = currentSelection ?: return
+                    if (providerKey == null || !opened || closing) return
+                    val strokes = sel.strokeIds.mapNotNull { liveStrokes[it] }
+                    val objects = sel.contentIds.mapNotNull { liveObjects[it] }
+                    val one = if (sel.strokeIds.isEmpty() && objects.size == 1) objects[0] else null
+                    if (one == null && (strokes.isEmpty() || objects.isNotEmpty())) return   // mixed: core actions only
+                    objectActions.perform(providerKey, action, strokes, sel.bounds, one, liveObjects.size)
                 }
             },
         )
@@ -202,7 +223,6 @@ class NotebookActivity : AppCompatActivity() {
         paper.loadStrokes(strokes)
         paper.notifyContentChanged()
         liveStrokes = strokes.associateBy { it.id }.toMutableMap()
-        contributions = FakeContributions.contributions()   // H2: local fake; H4: ExtensionRegistry.objectProviders
         opened = true
         setPageIndicator(session.currentIndex + 1, session.pages.size)
         // The "Opening…" popup (visible from the first frame) comes down only now — the page is on
@@ -213,6 +233,20 @@ class NotebookActivity : AppCompatActivity() {
         binding.openingOverlay.visibility = View.GONE
         pushExclusions()
         Slog.d(TAG) { "page ${page.id} loaded: ${strokes.size} strokes, ${objects.size} objects, ${page.width}x${page.height}" }
+        // Providers after the paper is live: their binds must not hold the "Opening…" popup up. The
+        // toolbar shows Delete only until they arrive; the first render pass follows them.
+        lifecycleScope.launch { loadProviders() }
+    }
+
+    /** Discover + describe the object providers (IO binds), then re-render and re-show whatever waited on them. */
+    private suspend fun loadProviders() {
+        val loaded = ObjectProviders.load(this)
+        if (!opened || closing) return
+        providers = loaded
+        activeIdsCache.clear()
+        renderFailed.clear()
+        scheduleRenderPass()
+        currentSelection?.let { showSelectionToolbar(it) }
     }
 
     private fun failOpen(reason: String) {
@@ -252,6 +286,7 @@ class NotebookActivity : AppCompatActivity() {
             currentSelection = currentSelection?.let { it.copy(bounds = it.bounds.offset(move.dx, move.dy)) }
             undo.record(Action.Moved(pageId, ids, move.dx, move.dy, objectIds))
             currentSelection?.let { showSelectionToolbar(it) }   // re-anchor at the new place
+            if (objectIds.isNotEmpty()) scheduleRenderPass()   // an object pushed against the right edge re-ellipsizes
         }
         override fun onSelectionCreated(selection: Selection) {
             selectionActive = true
@@ -265,20 +300,22 @@ class NotebookActivity : AppCompatActivity() {
             selectionToolbar.hide()
         }
         /** g-paper 0.1.1: a sub-threshold stylus / finger tap inside the selection box. With exactly one
-         *  selected object under the tap → its edit dialog (H2: spec from the debug fake, result logged;
-         *  H4: the provider's `describeEdit` / `applyEdit`). Strokes selected, or a tap outside the
-         *  object → nothing. */
+         *  selected object under the tap → the provider's `describeEdit` → [ObjectEditDialog] (pen-idle,
+         *  dropped if the selection changed meanwhile) → Save → `applyEdit` → [objectListener]. Strokes
+         *  selected, or a tap outside the object → nothing. */
         override fun onSelectionTapped(x: Float, y: Float) {
             Slog.d(TAG) { "selection tapped ${x.toInt()},${y.toInt()} (objects=${currentSelection?.contentIds?.size ?: 0})" }
             val sel = currentSelection ?: return
-            if (sel.strokeIds.isNotEmpty() || sel.contentIds.size != 1) return
+            if (sel.strokeIds.isNotEmpty() || sel.contentIds.size != 1 || !opened || closing) return
             val obj = liveObjects[sel.contentIds.first()] ?: return
             if (!obj.bounds.contains(x, y)) return
-            val spec = FakeContributions.editSpec(obj)?.let(EditCaps::sanitize) ?: return
-            whenPenIdle {
-                if (currentSelection != sel || closing) return@whenPenIdle
-                paper.releaseRender()
-                ObjectEditDialog.show(this@NotebookActivity, spec) { text -> FakeContributions.onEditSaved(obj, text) }
+            val providerKey = ExtensionContract.parseIdentity(obj.providerIdentity)?.first ?: return
+            objectActions.editTapped(providerKey, obj) { spec, onSave ->
+                whenPenIdle {
+                    if (currentSelection != sel || closing) return@whenPenIdle
+                    paper.releaseRender()
+                    ObjectEditDialog.show(this@NotebookActivity, spec, onSave)
+                }
             }
         }
         override fun onToolChanged(tool: Tool) { toolbar.sync(tool) }
@@ -309,12 +346,27 @@ class NotebookActivity : AppCompatActivity() {
      * shape (INK / one OBJECT of a provider's type / mixed → core only); active sub-action ids come
      * from the object's provider. Dropped if the selection changed while the gate was closed.
      */
-    private fun showSelectionToolbar(sel: Selection) = whenPenIdle {
-        if (!opened || closing || currentSelection != sel) return@whenPenIdle
+    private fun showSelectionToolbar(sel: Selection) {
+        if (!opened || closing) return
         val objects = sel.contentIds.mapNotNull { liveObjects[it] }
         val shape = SelectionActions.shapeOf(sel.strokeIds.size, objects.map { it.providerIdentity })
-        val items = SelectionActions.merge(coreActions, contributions, shape)
-        val active = if (shape is SelectionActions.Shape.OneObject) FakeContributions.activeActionIds(objects[0]) else emptySet()
+        val items = SelectionActions.merge(coreActions, providers.contributions, shape)
+        if (shape !is SelectionActions.Shape.OneObject) { presentSelectionToolbar(sel, items, emptySet()); return }
+        val obj = objects[0]
+        activeIdsCache[obj.id]?.takeIf { it.first == obj.payload }?.let { presentSelectionToolbar(sel, items, it.second); return }
+        lifecycleScope.launch {
+            val ids = try {
+                providers.clientFor(this@NotebookActivity, shape.providerKey)?.activeActionIds(shape.typeId, obj.payload) ?: emptySet()
+            } catch (e: ExtensionCallException) {
+                Slog.d(TAG) { "activeActionIds failed: ${e.message}" }; emptySet()
+            }
+            activeIdsCache[obj.id] = obj.payload to ids
+            presentSelectionToolbar(sel, items, ids)
+        }
+    }
+
+    private fun presentSelectionToolbar(sel: Selection, items: List<ToolbarItem>, active: Set<String>) = whenPenIdle {
+        if (!opened || closing || currentSelection != sel) return@whenPenIdle
         selectionToolbar.show(items, active, sel.bounds)
         binding.root.post { pushExclusions() }
     }
@@ -347,6 +399,8 @@ class NotebookActivity : AppCompatActivity() {
         liveStrokes = strokes.associateBy { it.id }.toMutableMap()
         setPageIndicator(session.currentIndex + 1, session.pages.size)
         session.saveLastOpened()
+        renderFailed.clear()
+        scheduleRenderPass()
     }
 
     private suspend fun refreshToPage(pageId: String) {
@@ -456,6 +510,123 @@ class NotebookActivity : AppCompatActivity() {
         Slog.d(TAG) { "deleted selection: ${strokes.size} strokes, ${objects.size} objects" }
     }
 
+    // ── Object actions → page mutations (arc 4 / H4) ─────────────────────────
+
+    /** What [ObjectActions] hands back; every mutation is one undo step under [pageOps]. */
+    private val objectListener = object : ObjectActions.Listener {
+        /** Create at the lasso box's top-left, soft-delete the ink, render (sizes the object to its
+         *  image), then select it — one [Action.ObjectCreated]. Abandoned if the ink is gone meanwhile
+         *  (erased, or the page turned during the consent dialog). */
+        override suspend fun onCreated(providerKey: String, created: CreatedObject, strokes: List<Stroke>, bounds: Bounds) {
+            pageOps.withLock {
+                if (!opened || closing) return
+                val live = strokes.filter { it.id in liveStrokes }
+                if (live.isEmpty()) { Slog.d(TAG) { "created object dropped: its ink is gone" }; return }
+                val page = session.currentPage
+                val obj = PageObject(
+                    id = UUID.randomUUID().toString(),
+                    providerIdentity = ExtensionContract.objectIdentity(providerKey, created.typeId), payload = created.payload,
+                    x = bounds.left, y = bounds.top, width = bounds.width, height = bounds.height,
+                    order = (liveObjects.values.maxOfOrNull { it.order } ?: -1) + 1,
+                )
+                val ids = live.map { it.id }
+                session.objectStore.create(page.id, obj)
+                liveObjects[obj.id] = obj
+                for (id in ids) liveStrokes.remove(id)
+                session.store.erase(ids)
+                undo.record(Action.ObjectCreated(page.id, obj, live))
+                paper.removeStrokes(ids)   // data-in: dismisses the selection (toolbar hides) and redraws — the object as a placeholder until rendered
+                Slog.d(TAG) { "object created (${created.typeId}) from ${ids.size} strokes at ${bounds.left.toInt()},${bounds.top.toInt()}" }
+                renderNow(listOf(obj))
+                selectObject(obj.id)
+            }
+        }
+
+        /** Persist the new payload, re-render (may re-size), record [Action.ObjectEdited] with the final
+         *  bounds, re-select so the toolbar's active ids and anchor follow. Stale (object gone / payload
+         *  moved on) → nothing. */
+        override suspend fun onPayloadChanged(obj: PageObject, payload: String) {
+            pageOps.withLock {
+                if (!opened || closing) return
+                val before = liveObjects[obj.id] ?: return
+                if (before.payload != obj.payload) return
+                val page = session.currentPage
+                val after = before.copy(payload = payload)
+                session.objectStore.updatePayloadAndBounds(after.id, after.payload, after.x, after.y, after.width, after.height)
+                liveObjects[after.id] = after
+                renderFailed.remove(after.id)
+                activeIdsCache.remove(after.id)
+                renderNow(listOf(after))
+                undo.record(Action.ObjectEdited(page.id, before, liveObjects[after.id] ?: after))
+                if (currentSelection?.contentIds == setOf(after.id)) selectObject(after.id)
+                Slog.d(TAG) { "object ${after.id} payload changed (${payload.length} chars)" }
+            }
+        }
+    }
+
+    /** Host-initiated selection of one object (no `onSelectionCreated` echo — the state is set here). */
+    private fun selectObject(id: String) {
+        val obj = liveObjects[id] ?: return
+        paper.setSelection(emptySet(), setOf(id), obj.bounds)
+        selectionActive = true
+        val sel = Selection(emptySet(), setOf(id), obj.bounds)
+        currentSelection = sel
+        showSelectionToolbar(sel)
+    }
+
+    /** Render [objects] inline (IO) and apply — the create / edit path, awaited under [pageOps]. */
+    private suspend fun renderNow(objects: List<PageObject>) {
+        val page = session.currentPage
+        applyRenderResults(renderPass.render(objects, providers, page.width.toFloat(), dpi()))
+    }
+
+    /**
+     * The background cache fill (page load, provider change, a move): every live object without a
+     * cached image for its (payload, width, dpi) that hasn't failed on this load → one pass; a trigger
+     * during a pass queues exactly one more (the page may have changed under it). Never holds
+     * [pageOps]; results for objects no longer on the page are dropped by [applyRenderResults].
+     */
+    private fun scheduleRenderPass() {
+        if (!opened || closing) return
+        if (renderJob?.isActive == true) { renderAgain = true; return }
+        renderJob = lifecycleScope.launch {
+            do {
+                renderAgain = false
+                val page = session.currentPage
+                val d = dpi()
+                val misses = liveObjects.values.filter {
+                    it.id !in renderFailed && renderCache.get(it.id, it.payload, ObjectRenderer.renderWidth(page.width.toFloat(), it), d) == null
+                }
+                if (misses.isEmpty()) break
+                val results = renderPass.render(misses, providers, page.width.toFloat(), d)
+                if (!opened || closing) break
+                applyRenderResults(results)
+            } while (renderAgain)
+        }
+    }
+
+    /** Main: cache the images, size each object to its image (persisted; anchored top-left), one frame pen-idle. */
+    private fun applyRenderResults(results: List<ObjectRenderPass.Result>) {
+        var changed = false
+        for (r in results) {
+            val o = liveObjects[r.id] ?: continue
+            if (o.payload != r.payload) continue   // edited while rendering — the next pass has it
+            val bmp = r.bitmap
+            if (bmp == null) { renderFailed.add(r.id); continue }
+            renderCache.put(r.id, r.payload, r.maxWidth, r.dpi, bmp)
+            changed = true
+            val w = bmp.width.toFloat(); val h = bmp.height.toFloat()
+            if (w != o.width || h != o.height) {
+                val sized = o.copy(width = w, height = h)
+                liveObjects[r.id] = sized
+                session.objectStore.updatePayloadAndBounds(sized.id, sized.payload, sized.x, sized.y, sized.width, sized.height)
+            }
+        }
+        if (changed) whenPenIdle { if (opened && !closing) paper.notifyContentChanged() }
+    }
+
+    private fun dpi(): Float = resources.displayMetrics.densityDpi.toFloat()
+
     private fun showDeleteSheet() {
         if (!opened) return
         paper.releaseRender()
@@ -544,6 +715,11 @@ class NotebookActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (::paper.isInitialized) paper.resumeDrawing()
+        // An extension installed / removed / disabled while the screen was away: cheap discovery compare, reload only on a change.
+        if (opened && !closing) lifecycleScope.launch {
+            val sig = ObjectProviders.signature(this@NotebookActivity)
+            if (opened && !closing && sig != providers.signature) { Slog.d(TAG) { "extension set changed — reloading providers" }; loadProviders() }
+        }
     }
 
     override fun onStop() {
