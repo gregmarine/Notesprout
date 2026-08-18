@@ -922,7 +922,15 @@ cover shows the heading** · reopen → page-load pass 1 bind / 1 render 25 ms �
 apply the action / This action needs the NSE · Markdown extension."**, nothing changed · re-enable →
 resume reload · binds = unbinds, no `SecurityException`, no text in any line. SNN (ratta) + NA5C (onyx,
 after the sideload enable dance — the *app* came back disabled this time): open → providers load
-(1 type, 1 action, 6 sub) → no crash. Undo / finger / cover-on-EPD / consent path (12) / airplane (14)
+(1 type, 1 action, 6 sub) → no crash. **User's first run: "Meeting Notes" unrecognizable on all three
+devices** — root cause: the strokes were handed on in `Selection.strokeIds`' **Set (hash) order**, and an
+online recognizer reads a sequence (the page path sorts each line L→R, the original app used page order);
+worse, `StrokeStore.restore` re-numbers `"order"` in list order, so the undo of that create **persisted**
+the scramble (a re-test on the same ink still read "Mose"). Fix (same day): `liveStrokes` is a
+`LinkedHashMap` = writing order and every stroke capture (INK action, Delete, erase undo) filters it in
+that order; synthetic "HI" that read "H" now reads "HI"; the debug Recognize page on the user's real ink
+reads "Meeting Notes" perfectly (the page path was never affected). Ink undone through the old path stays
+scrambled in its rows — rewrite it. Undo / finger / cover-on-EPD / consent path (12) / airplane (14)
 not reachable from adb — user items.
 
 **Goal:** the user story works on all three devices: lasso ink → **H** → **H1–H6** → the words become a

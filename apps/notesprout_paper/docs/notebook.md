@@ -212,6 +212,14 @@ compares the cheap discovery `signature` (component list of the three points) an
 change (an extension enabled / disabled / installed while the screen was away) — then clears the
 "failed" set and re-runs the render pass.
 
+**Stroke order is writing order — always.** `liveStrokes` is a `LinkedHashMap` (loaded in `"order"`,
+commits append) and every place that hands strokes on — the INK action, Delete, the eraser's undo capture
+— takes them in *that* order, never in `Selection.strokeIds`' set order. `StrokeStore.restore` re-numbers
+`"order"` in list order, so a hash-ordered capture would have **persisted** the scramble on undo; and an
+online recognizer reads strokes as a sequence — a hash-ordered "Meeting Notes" came back as four
+characters on all three devices (H4, fixed the same day). Ink written before that fix and undone through
+the old path stays scrambled in its rows (rewrite it).
+
 **INK leaf** (`ObjectActions.perform`, strokes-only selection): guards in this order — `Requires.RECOGNIZER`
 with no recognizer installed → "This action needs a handwriting recognizer extension…"; `Requires.MARKDOWN`
 with no Markdown renderer → "…needs the NSE · Markdown extension"; `MAX_OBJECTS_PER_PAGE` → "page full".

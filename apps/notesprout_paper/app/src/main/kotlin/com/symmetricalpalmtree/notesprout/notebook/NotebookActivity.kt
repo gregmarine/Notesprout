@@ -83,8 +83,10 @@ class NotebookActivity : AppCompatActivity() {
     private val undo = UndoRedoStack()
     /** Serialises page/undo operations so overlapping gestures can't corrupt the page list. */
     private val pageOps = Mutex()
-    /** Strokes currently on the visible page — the "you still have the strokes" mirror an erase needs. */
-    private var liveStrokes: MutableMap<String, Stroke> = mutableMapOf()
+    /** Strokes currently on the visible page — the "you still have the strokes" mirror an erase needs.
+     *  Insertion-ordered = writing (z) order: loaded in `"order"`, commits append — the order the
+     *  recognizer must see a lasso's strokes in (H4). */
+    private var liveStrokes: LinkedHashMap<String, Stroke> = LinkedHashMap()
     /** Content objects on the visible page (arc 4) — what [ObjectRenderer] draws and a delete captures.
      *  Insertion-ordered = z-order (loaded in `"order"`; a new object appends). */
     private var liveObjects: LinkedHashMap<String, PageObject> = LinkedHashMap()
@@ -159,7 +161,10 @@ class NotebookActivity : AppCompatActivity() {
                 override fun onAction(providerKey: String?, action: ToolbarAction) {
                     val sel = currentSelection ?: return
                     if (providerKey == null || !opened || closing) return
-                    val strokes = sel.strokeIds.mapNotNull { liveStrokes[it] }
+                    // In writing order (liveStrokes is insertion-ordered = commit / z order), NOT the
+                    // selection's Set order — an online recognizer reads strokes as a sequence, and a
+                    // hash-ordered "Meeting Notes" came back as four characters.
+                    val strokes = liveStrokes.values.filter { it.id in sel.strokeIds }
                     val objects = sel.contentIds.mapNotNull { liveObjects[it] }
                     val one = if (sel.strokeIds.isEmpty() && objects.size == 1) objects[0] else null
                     if (one == null && (strokes.isEmpty() || objects.isNotEmpty())) return   // mixed: core actions only
@@ -222,7 +227,7 @@ class NotebookActivity : AppCompatActivity() {
         liveObjects = objects.associateByTo(LinkedHashMap()) { it.id }
         paper.loadStrokes(strokes)
         paper.notifyContentChanged()
-        liveStrokes = strokes.associateBy { it.id }.toMutableMap()
+        liveStrokes = strokes.associateByTo(LinkedHashMap()) { it.id }
         opened = true
         setPageIndicator(session.currentIndex + 1, session.pages.size)
         // The "Opening…" popup (visible from the first frame) comes down only now — the page is on
@@ -269,7 +274,10 @@ class NotebookActivity : AppCompatActivity() {
         override fun onStrokesErased(strokeIds: List<String>) {
             if (!opened) return
             val pageId = session.currentPage.id
-            val captured = strokeIds.mapNotNull { liveStrokes.remove(it) }
+            // Captured in writing order (restore re-numbers `"order"` in list order — the recognizer reads it).
+            val ids = strokeIds.toHashSet()
+            val captured = liveStrokes.values.filter { it.id in ids }
+            for (id in strokeIds) liveStrokes.remove(id)
             session.store.erase(strokeIds)
             if (captured.isNotEmpty()) undo.record(Action.Erased(pageId, captured))
         }
@@ -396,7 +404,7 @@ class NotebookActivity : AppCompatActivity() {
         liveObjects = objects.associateByTo(LinkedHashMap()) { it.id }
         paper.loadStrokes(strokes)
         paper.notifyContentChanged()
-        liveStrokes = strokes.associateBy { it.id }.toMutableMap()
+        liveStrokes = strokes.associateByTo(LinkedHashMap()) { it.id }
         setPageIndicator(session.currentIndex + 1, session.pages.size)
         session.saveLastOpened()
         renderFailed.clear()
@@ -498,7 +506,8 @@ class NotebookActivity : AppCompatActivity() {
     private fun deleteSelection() = runPageOp {
         val sel = currentSelection ?: return@runPageOp
         val pageId = session.currentPage.id
-        val strokes = sel.strokeIds.mapNotNull { liveStrokes.remove(it) }
+        val strokes = liveStrokes.values.filter { it.id in sel.strokeIds }   // writing order (see onStrokesErased)
+        for (s in strokes) liveStrokes.remove(s.id)
         val objects = sel.contentIds.mapNotNull { liveObjects.remove(it) }
         if (strokes.isEmpty() && objects.isEmpty()) return@runPageOp
         session.store.erase(strokes.map { it.id })
