@@ -1103,6 +1103,28 @@ transaction — a process death between them leaves heading **and** ink live (no
 is microseconds). The first review pass had reviewed the plan commit itself (arg `08e0f5b`); its
 plan-vs-code notes are moot for the frozen arc except the timeout margin, folded in above.
 
+**Installed 2026-08-18 on SNN + NA5C + MIP11 (app 81e4b38 + five extensions; NA5C enable dance clean).
+Automated per-device runs (one Sonnet agent per device, ≤ 2 at a time) — no crash, binds == unbinds,
+no `SecurityException`, no text/payload in any log line on any device:**
+- **MIP11** (stylus by adb): H4-1 toolbar present in the dump taken *immediately* after pen-up (Q1 fix);
+  H2 create `createFromInk` 1.6 s (cold ML Kit) / `renderAll` 52 ms; **edit-dialog prefill read exactly
+  `Convert Me`** (recognition + writing order); H5 re-size marked; Agenda edit 409×126 → 187×90;
+  Cancel leaves it; finger tap opens the dialog too; drag / mixed move / Delete; **ellipsis returns after
+  dragging back left** (580 → 189 "Me…" → 580, fix #3); flip away/back `renderAll 3/3`; force-stop
+  reopen; H4-9/10/11 disable cycles incl. the exact dialog texts; cover shows the heading; Debug ⋯ = ML
+  Kit only; zz-agent create/rename/delete. Scribble → ML Kit read "m" and made a heading (the
+  anticipated alternative). **UNREACHABLE by adb: every multi-finger gesture** (undo / redo / two-finger
+  insert — `input` has no multitouch, `sendevent` is SELinux-denied) → all undo/redo items are the
+  user's; the agent could not undo its create, so **MIP11's original "Convert Me" ink is gone** (a
+  hand-drawn block-letter substitute is on the page).
+- **SNN**: provider load `1 type / 1 action (6 sub)`, `ObjectRenderPass` 93 ms; Debug ⋯ = ML Kit only;
+  Recognize page 4.2 s cold / 277 ms warm; H4-9/10/11 disable cycles (placeholders, reload lines);
+  cold-launch reopen; swipe insert / delete page (exact dialog wording); cover shows heading + ink;
+  zz-agent create (Templates + Naming present) / delete. Lasso, edit, drag, undo: user's.
+- **NA5C**: same as SNN, all PASS; Recognize page 1.8 s cold / 85 ms; `input text` works there;
+  render pass 70–383 ms for 2 objects; the two disabled packages on the device are unrelated
+  (`sprout.canvas.lab.dev`, `gpaper.demo`).
+
 ---
 
 ## Appendix A — Constants + strings (this arc)
