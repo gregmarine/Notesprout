@@ -169,7 +169,7 @@ toolbar buttons still see every event). Ported thresholds:
   ≤ `doubleTapSlop` of the first): 2 fingers = undo, 3 = redo. **BOOX sends `ACTION_CANCEL` for
   3-finger touches** → a cancel on an armed, stationary 3-finger gesture counts as the tap.
 - **Delete** (1 finger long-press ≥ `longPressTimeout`, stationary ≤ `touchSlop`): `ActionSheetDialog`
-  "Delete page" → `AlertDialog` "Delete this page? / Its ink cannot be recovered." [Delete] [Cancel].
+  "Delete page" → `AlertDialog` "Delete this page? / Undo (two-finger double-tap) brings it back until you close the notebook." [Delete] [Cancel] (wording fixed in arc 4 / H1 — the Phase-4 text still said the ink could not be recovered, which stopped being true the moment page delete joined undo).
 
 **Gating (every recogniser):** refuse to start / act while `paper.isPenActive`; re-check at the gate;
 tap-actions (undo/redo, long-press) commit after a `PEN_ACTIVE_TAIL_MS` escrow and drop if the gate

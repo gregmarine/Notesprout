@@ -10,7 +10,7 @@
 > `CLAUDE.md` files. `docs/extensions.md` is the subsystem reference all arcs write into;
 > `docs/notebook.md` and `docs/data.md` gain sections in this arc.
 >
-> **Status: H0 ✅ (8c5361f) · H1 🧪 · H2 ⬜ · H3 ⬜ · H4 ⬜ · H5 ⬜ — H0 user-verified 2026-08-17.**
+> **Status: H0 ✅ (8c5361f) · H1 ✅ (see below) · H2 ⬜ · H3 ⬜ · H4 ⬜ · H5 ⬜ — H0 user-verified 2026-08-17.**
 
 ## Why
 
@@ -584,9 +584,9 @@ checked first — only the height can. Nothing binds the point until H3.
 ---
 
 ### Phase H1 — Core content objects: fresh schema, store, renderer bridge, undo, g-paper 0.1.1
-**Status:** 🧪 Awaiting device verification (built + installed SNN/NA5C/MIP11 2026-08-17)
+**Status:** ✅ Complete — user-verified SNN + NA5C + MIP11 2026-08-17 (commit hash recorded in the follow-up commit)
 
-**Outcome (2026-08-17, pending the user's checklist):** g-paper **0.1.1 = commit `e76e305`**
+**Outcome (2026-08-17, user-verified all 9 checklist items on all three devices; items 5/7 read over adb: taps fire on ratta/onyx/generic engines, objects survive `am force-stop`):** g-paper **0.1.1 = commit `e76e305`**
 (`PaperListener.onSelectionTapped(x, y)`: `CanvasPaperView.lassoDragFinish(x, y, fromFinger)` fires it in
 the sub-threshold branch — stylus at once, finger via `scheduleEscrowedTap` (`PEN_ACTIVE_TAIL_MS`, dropped
 if the pen turns active or the selection changed); engine-agnostic — the Onyx raw path and Ratta's base
@@ -604,7 +604,9 @@ contentIds, `onSelectionTapped` logged; debug ⋯ "Insert test object" / "Delete
 `ObjectRowsTest` (7) + `UndoRedoStackTest` (4), whole suite green; `assembleDebug` + `:app:assembleRelease`
 build. MIP11 adb smoke: new notebook → Insert test object → dashed box at the page centre (screencap) →
 `am force-stop` → reopen → "loaded: 0 strokes, 1 objects". Trap re-hit: MIP11 resets `log.tag` to `I`
-by itself — re-set before every log read. Docs: `docs/notebook.md` §"Content objects" + undo rows,
+by itself — re-set before every log read. Close-out fix from the user's verification: the Phase-4 page-delete
+dialog still said "Its ink cannot be recovered" — false since page delete joined undo; now "Undo
+(two-finger double-tap) brings it back until you close the notebook." Docs: `docs/notebook.md` §"Content objects" + undo rows,
 `docs/data.md` §"Object rows" + the no-migration note, `CLAUDE.md` (content-objects rule, g-paper 0.1.1).
 
 **Phase-start answers (2026-08-17):** Q1 **keep `SOIL_VERSION = 1`** — no bump, no migration; the

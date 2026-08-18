@@ -96,7 +96,7 @@
     <string name="delete_confirm">Delete</string>
     <string name="delete_page_action">Delete page</string>
     <string name="delete_page_title">Delete this page?</string>
-    <string name="delete_page_body">Its ink cannot be recovered.</string>
+    <string name="delete_page_body">Undo (two-finger double-tap) brings it back until you close the notebook.</string>
     <string name="cancel">Cancel</string>
     <string name="move_title">Move to…</string>
     <string name="move_here">Move here</string>
