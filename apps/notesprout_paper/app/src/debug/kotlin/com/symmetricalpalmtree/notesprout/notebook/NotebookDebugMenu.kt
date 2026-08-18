@@ -14,16 +14,18 @@ import androidx.appcompat.widget.TooltipCompat
 import androidx.lifecycle.lifecycleScope
 import com.symmetricalpalmtree.notesprout.R
 import com.symmetricalpalmtree.notesprout.core.ActionSheetDialog
-import com.symmetricalpalmtree.notesprout.core.Connectivity
 import com.symmetricalpalmtree.notesprout.core.Dialogs
 import com.symmetricalpalmtree.notesprout.core.Slog
+import com.symmetricalpalmtree.notesprout.extension.CapabilityRequiredException
 import com.symmetricalpalmtree.notesprout.extension.ExtensionCallException
 import com.symmetricalpalmtree.notesprout.extension.ExtensionRegistry
 import com.symmetricalpalmtree.notesprout.extension.InkStroke
 import com.symmetricalpalmtree.notesprout.extension.InkTooLargeException
+import com.symmetricalpalmtree.notesprout.extension.ObjectProviderClient
 import com.symmetricalpalmtree.notesprout.extension.ProviderRef
 import com.symmetricalpalmtree.notesprout.extension.RecognizerClient
 import com.symmetricalpalmtree.notesprout.extension.RecognizerNotReadyException
+import com.symmetricalpalmtree.notesprout.extension.RecognizerReadiness
 import com.symmetricalpalmtree.notesprout.extension.RecognizerStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -37,24 +39,26 @@ import kotlinx.coroutines.withContext
  * present only while a trusted `HANDWRITING_RECOGNIZER` extension is installed (re-discovered on
  * every sheet open), it hands the current page's ink — bare x/y geometry via [InkPayload] — to the
  * extension through [RecognizerClient] and shows the text in a dialog (selectable, Copy / OK).
- * `status()` first: READY → recognize at once; UNAVAILABLE → dialog; otherwise the **one-time model
- * flow** — a "Recognition model needed" dialog (Download / Cancel; nothing downloads before
- * Download — the extension's `prepare()` is the only thing that starts one), then a progress dialog
- * with an elapsed-time counter that polls `status()` until READY and recognizes without another tap
- * (Cancel hides it; a started download keeps running in the extension).
+ * The model-consent flow (READY → recognize at once; UNAVAILABLE → dialog; otherwise the one-time
+ * "Recognition model needed" → Download → progress → recognize without another tap) is
+ * [RecognizerReadiness] since H3 — main source, shared with the heading action; this menu only calls
+ * it.
  *
- * Every dialog here is the core's (the extension shows nothing; the only toast is "copied"); nothing
- * recognized is stored or logged — the dialog is the only sink.
+ * Also the arc-4 / H3 test surface **"Probe object providers"** (gone in H5): binds every trusted
+ * `OBJECT_PROVIDER` through the real [ObjectProviderClient] and logs `describeTypes` /
+ * `describeActions` / a `render` of a fixed payload through the real Markdown proxy (+ a
+ * `createFromInk` of the page's ink through the real recognizer proxy when a recognizer is READY) —
+ * timings + sizes only, never text.
+ *
+ * Every dialog here is the core's (the extension shows nothing; the only toasts are "copied" and the
+ * probe's "done"); nothing recognized is stored or logged — the dialog is the only sink.
  */
 object NotebookDebugMenu {
 
     private const val TAG = "NotebookDebugMenu"
-    /** Progress-dialog poll period (also its e-ink refresh cadence) and the give-up cap. */
-    private const val POLL_MS = 2_000L
-    private const val DOWNLOAD_CAP_S = 300
-    private const val OFFLINE_GIVE_UP_MS = 30_000L
-    /** Consecutive failed `status()` polls tolerated before the download is declared failed (M2). */
-    private const val MAX_POLL_FAILURES = 5
+    /** The probe's fixed render payload — a heading the Heading provider understands (never logged, only its length). */
+    private const val PROBE_PAYLOAD = "## Probe heading"
+    private const val PROBE_MAX_WIDTH_PX = 1_000
 
     /**
      * The one-flow-at-a-time guard, **owned by the activity that started the flow** (M2): a flow whose
@@ -96,6 +100,8 @@ object NotebookDebugMenu {
             }
             // Arc 4 / H1 test surface (removed in H5 with the real object provider in place).
             sheet.addAction(null, activity.getString(R.string.debug_insert_test_object)) { hooks.insertTestObject() }
+            // Arc 4 / H3 test surface (removed in H5): the two-hop proxy paths, logs only.
+            sheet.addAction(null, activity.getString(R.string.debug_probe_object_providers)) { probeObjectProviders(activity, provider) }
             sheet.show()
         }
     }
@@ -106,26 +112,15 @@ object NotebookDebugMenu {
         if (ctx.strokes.isEmpty()) { problem(activity, R.string.recognize_nothing); return }
         claim(activity)
         activity.lifecycleScope.launch {
-            var releaseAfter = true
-            try {
-                val client = RecognizerClient(activity, ref)
-                val ink = withContext(Dispatchers.Default) { InkPayload.fromStrokes(ctx.strokes) }
-                when (client.status()) {
-                    RecognizerStatus.UNAVAILABLE -> problem(activity, R.string.recognize_unavailable)
-                    RecognizerStatus.READY -> runRecognition(activity, client, ink, ctx)
-                    else -> {
-                        // First time on this device (or the model is gone): ask, then show progress. The
-                        // busy guard stays up for the whole dialog flow; the flow releases it itself.
-                        releaseAfter = false
-                        promptDownload(activity, client, ink, ctx)
-                    }
-                }
-            } catch (e: ExtensionCallException) {
-                Slog.d(TAG) { "status failed: ${e.javaClass.simpleName}: ${e.message}" }
-                problem(activity, R.string.recognize_failed)
-            } finally {
-                if (releaseAfter) release()
-            }
+            val client = RecognizerClient(activity, ref)
+            val ink = withContext(Dispatchers.Default) { InkPayload.fromStrokes(ctx.strokes) }
+            // The consent flow is main-source since H3; the busy guard stays up for the whole flow and
+            // is released by whichever exit runs.
+            RecognizerReadiness.ensureReady(
+                activity, client,
+                onReady = { try { runRecognition(activity, client, ink, ctx) } finally { release() } },
+                onGaveUp = { release() },
+            )
         }
     }
 
@@ -160,117 +155,64 @@ object NotebookDebugMenu {
         }
     }
 
-    /** "Recognition model needed" — Download / Cancel. Cancel releases the busy guard. */
-    private fun promptDownload(activity: AppCompatActivity, client: RecognizerClient, ink: List<InkStroke>, ctx: RecognizeContext) {
-        if (activity.isFinishing || activity.isDestroyed) { release(); return }
-        // Pre-flight: ML Kit's downloader hangs rather than fails when offline (M1: no error after a
-        // minute on the Nomad), so the core checks first and says so instead of offering Download.
-        val online = Connectivity.isOnline(activity)
-        val builder = AlertDialog.Builder(activity)
-            .setTitle(R.string.recognize_model_needed_title)
-            .setOnCancelListener { release() }
-        if (online) {
-            builder.setMessage(R.string.recognize_model_needed_body)
-                .setPositiveButton(R.string.recognize_download) { _, _ -> downloadThenRecognize(activity, client, ink, ctx) }
-                .setNegativeButton(R.string.cancel) { _, _ -> release() }
-        } else {
-            builder.setMessage(R.string.recognize_model_needed_offline_body)
-                .setPositiveButton(R.string.ok) { _, _ -> release() }
-        }
-        val dialog = builder.create()
-        Dialogs.style(dialog)
-        dialog.show()
-    }
-
     /**
-     * `prepare()`, then a progress dialog (elapsed-time counter — the e-ink-safe indeterminate
-     * indicator, refreshed every [POLL_MS]) that polls `status()` until READY → recognize; a chain
-     * failure or the cap → "Download failed". Cancel hides the dialog only — the download itself keeps
-     * running in the extension, so the next Recognize finds it further along or done.
+     * H3 probe: for every trusted object provider — one client, `describeTypes` + `describeActions` (2 s
+     * calls), a `render` of [PROBE_PAYLOAD] for the first declared type through the real Markdown proxy
+     * (8 s), and — when a recognizer is installed and READY and the page has ink — a `createFromInk` of
+     * the page's ink through the real recognizer proxy (15 s; the result is discarded, nothing is
+     * created). Everything goes to logcat under the clients' own tags + [TAG]; never text.
      */
-    private fun downloadThenRecognize(activity: AppCompatActivity, client: RecognizerClient, ink: List<InkStroke>, ctx: RecognizeContext) {
+    private fun probeObjectProviders(activity: AppCompatActivity, provider: () -> RecognizeContext?) {
         activity.lifecycleScope.launch {
-            var cancelled = false
-            val progress = AlertDialog.Builder(activity)
-                .setTitle(R.string.recognize_downloading_title)
-                .setMessage(activity.getString(R.string.recognize_downloading_body, 0))
-                .setNegativeButton(R.string.cancel) { _, _ -> cancelled = true }
-                .setOnCancelListener { cancelled = true }
-                .create()
-            Dialogs.style(progress)
-            try {
-                try {
-                    client.prepare()
-                } catch (e: ExtensionCallException) {
-                    Slog.d(TAG) { "prepare failed: ${e.javaClass.simpleName}: ${e.message}" }
-                    showDownloadFailed(activity); return@launch
-                }
-                progress.show()
+            val refs = ExtensionRegistry.objectProviders(activity)
+            val recognizerRef = ExtensionRegistry.handwritingRecognizer(activity)
+            val markdownRef = ExtensionRegistry.markdownRenderer(activity)
+            Slog.d(TAG) { "probe: ${refs.size} object provider(s); recognizer=${recognizerRef?.packageName} markdown=${markdownRef?.packageName}" }
+            val ctx = provider()
+            val dpi = activity.resources.displayMetrics.densityDpi.toFloat()
+            for (ref in refs) {
+                val client = ObjectProviderClient(activity, ref, recognizerRef, markdownRef)
+                val types = probeCall("describeTypes ${ref.packageName}") { client.describeTypes() } ?: continue
+                Slog.d(TAG) { "probe ${ref.packageName}: types=$types" }
+                val actions = probeCall("describeActions ${ref.packageName}") { client.describeActions() }
+                Slog.d(TAG) { "probe ${ref.packageName}: actions=${actions?.size} (${actions?.sumOf { it.subActions.size }} sub) ids=${actions?.map { it.id }}" }
+                val type = types.firstOrNull() ?: continue
+                val active = probeCall("activeActionIds") { client.activeActionIds(type, PROBE_PAYLOAD) }
+                Slog.d(TAG) { "probe ${ref.packageName}: active=$active for the fixed payload" }
                 val t0 = System.currentTimeMillis()
-                var offlineSinceMs = -1L
-                var pollFailures = 0
-                while (!cancelled) {
-                    kotlinx.coroutines.delay(POLL_MS)
-                    if (cancelled || activity.isFinishing || activity.isDestroyed) break
-                    val now = System.currentTimeMillis()
-                    val elapsedS = ((now - t0) / 1000L).toInt()
-                    // The network dropping mid-download: ML Kit does not fail, it waits. Say so, and give
-                    // up after OFFLINE_GIVE_UP_MS offline rather than after the 5-minute cap.
-                    if (!Connectivity.isOnline(activity)) {
-                        if (offlineSinceMs < 0) offlineSinceMs = now
-                        if (now - offlineSinceMs >= OFFLINE_GIVE_UP_MS) {
-                            Slog.d(TAG) { "offline for ${(now - offlineSinceMs) / 1000} s during download — giving up" }
-                            progress.dismiss(); showDownloadFailed(activity); return@launch
-                        }
-                        progress.setMessage(activity.getString(R.string.recognize_downloading_offline_body, elapsedS))
-                        continue
+                val copy = probeCall("render ${ref.packageName}") { client.render(type, PROBE_PAYLOAD, PROBE_MAX_WIDTH_PX, dpi) }
+                Slog.d(TAG) { "probe ${ref.packageName}: render → ${copy?.let { "${it.widthPx}x${it.heightPx} px, ${it.bytes.size} B" } ?: "nothing"} in ${System.currentTimeMillis() - t0} ms (two hops)" }
+                val edit = probeCall("describeEdit") { client.describeEdit(type, PROBE_PAYLOAD) }
+                Slog.d(TAG) { "probe ${ref.packageName}: edit=${edit?.let { "title ${it.title.length} chars, text ${it.text.length} chars, max ${it.maxChars}" }}" }
+                // createFromInk through the recognizer proxy — only when it costs no consent dialog.
+                val leaf = actions?.firstOrNull()?.subActions?.firstOrNull() ?: actions?.firstOrNull()
+                if (leaf != null && recognizerRef != null && ctx != null && ctx.strokes.isNotEmpty()) {
+                    val status = runCatching { RecognizerClient(activity, recognizerRef).status() }.getOrNull()
+                    if (status == RecognizerStatus.READY) {
+                        val ink = withContext(Dispatchers.Default) { InkPayload.fromStrokes(ctx.strokes) }
+                        val t1 = System.currentTimeMillis()
+                        val created = probeCall("createFromInk ${ref.packageName}") { client.createFromInk(leaf.id, ink, ctx.pageWidth, ctx.pageHeight) }
+                        Slog.d(TAG) { "probe ${ref.packageName}: createFromInk ${leaf.id} (${ink.size} strokes) → ${created?.let { "type ${it.typeId}, ${it.payload.length} chars" } ?: "nothing"} in ${System.currentTimeMillis() - t1} ms (two hops; discarded)" }
+                    } else {
+                        Slog.d(TAG) { "probe ${ref.packageName}: createFromInk skipped (recognizer status $status)" }
                     }
-                    offlineSinceMs = -1L
-                    // A failed poll (bind refused / died / timed out) is tolerated as transient a few times;
-                    // an extension that stays unbindable (BOOX re-disabling it, a crash on start) is a
-                    // failure the host knows now — not after the 5-minute cap.
-                    val status = try {
-                        client.status().also { pollFailures = 0 }
-                    } catch (e: ExtensionCallException) {
-                        pollFailures++
-                        Slog.d(TAG) { "status poll failed ($pollFailures): ${e.message}" }
-                        if (pollFailures >= MAX_POLL_FAILURES) { progress.dismiss(); showDownloadFailed(activity); return@launch }
-                        RecognizerStatus.DOWNLOADING
-                    }
-                    when (status) {
-                        RecognizerStatus.READY -> {
-                            Slog.d(TAG) { "model ready after $elapsedS s" }
-                            progress.dismiss()
-                            runRecognition(activity, client, ink, ctx)
-                            return@launch
-                        }
-                        RecognizerStatus.DOWNLOADING -> {
-                            progress.setMessage(activity.getString(R.string.recognize_downloading_body, elapsedS))
-                            if (elapsedS >= DOWNLOAD_CAP_S) { progress.dismiss(); showDownloadFailed(activity); return@launch }
-                        }
-                        else -> {   // NEEDS_DOWNLOAD after prepare() = the chain failed; UNAVAILABLE = engine gone
-                            Slog.d(TAG) { "download failed (status $status) after $elapsedS s" }
-                            progress.dismiss(); showDownloadFailed(activity); return@launch
-                        }
-                    }
+                } else {
+                    Slog.d(TAG) { "probe ${ref.packageName}: createFromInk skipped (leaf=${leaf?.id} recognizer=${recognizerRef != null} ink=${ctx?.strokes?.size ?: 0})" }
                 }
-                Slog.d(TAG) { "download dialog cancelled — download continues in the extension" }
-            } finally {
-                if (progress.isShowing) progress.dismiss()
-                release()
             }
+            toast(activity, activity.getString(R.string.debug_probe_done, refs.size))
         }
     }
 
-    private fun showDownloadFailed(activity: AppCompatActivity) {
-        if (activity.isFinishing || activity.isDestroyed) return
-        Dialogs.style(
-            AlertDialog.Builder(activity)
-                .setTitle(R.string.recognize_download_failed_title)
-                .setMessage(R.string.recognize_download_failed_body)
-                .setPositiveButton(R.string.ok, null)
-                .create()
-        ).show()
+    /** One probe call: the value, or null after logging the failure (typed capability failures named). */
+    private suspend fun <T> probeCall(what: String, block: suspend () -> T): T? = try {
+        block()
+    } catch (e: CapabilityRequiredException) {
+        Slog.d(TAG) { "probe $what: capability required (${e.message}) — typed on the host" }; null
+    } catch (e: RecognizerNotReadyException) {
+        Slog.d(TAG) { "probe $what: recognizer not ready — typed on the host" }; null
+    } catch (e: ExtensionCallException) {
+        Slog.d(TAG) { "probe $what failed: ${e.javaClass.simpleName}: ${e.message}" }; null
     }
 
     private fun showResult(activity: AppCompatActivity, text: String, strokes: Int, ms: Long) {
@@ -298,7 +240,9 @@ object NotebookDebugMenu {
     private fun problem(activity: AppCompatActivity, messageRes: Int) =
         Dialogs.problem(activity, R.string.recognize_problem_title, messageRes)
 
-    private fun toast(activity: AppCompatActivity, res: Int) {
-        if (!activity.isFinishing && !activity.isDestroyed) Toast.makeText(activity, res, Toast.LENGTH_SHORT).show()
+    private fun toast(activity: AppCompatActivity, res: Int) = toast(activity, activity.getString(res))
+
+    private fun toast(activity: AppCompatActivity, text: String) {
+        if (!activity.isFinishing && !activity.isDestroyed) Toast.makeText(activity, text, Toast.LENGTH_SHORT).show()
     }
 }

@@ -77,8 +77,10 @@ There is **no Extensions UI yet**: extensions are installed and removed by hand 
 `minSdk 29`, AIDL enabled) that **depends on nothing in `:app` and on no library beyond the Kotlin
 stdlib**. Third parties will consume it as a published Maven artifact later; the module boundary keeps
 that true. Dependency direction (Gradle-enforced, never violated): `:app → :extension-api` and
-`:ext-templates → :extension-api`, `:ext-naming → :extension-api`, `:ext-mlkit → :extension-api`; `:app`
-and the extension modules never depend on each other.
+`:ext-templates → :extension-api`, `:ext-naming → :extension-api`, `:ext-mlkit → :extension-api`,
+`:ext-markdown → :extension-api`, `:ext-heading → :extension-api`; `:app` and the extension modules never
+depend on each other (`:ext-heading` reaches the recognizer and the Markdown renderer **only through the
+proxies the core hands it as in-parameters**).
 
 ### `ExtensionContract`
 
@@ -89,6 +91,7 @@ and the extension modules never depend on each other.
 | `ACTION_NOTEBOOK_NAMER` | `"com.symmetricalpalmtree.notesprout.extension.NOTEBOOK_NAMER"` (arc 2 / N1) |
 | `ACTION_HANDWRITING_RECOGNIZER` | `"com.symmetricalpalmtree.notesprout.extension.HANDWRITING_RECOGNIZER"` (arc 3 / M0) |
 | `ACTION_MARKDOWN_RENDERER` | `"com.symmetricalpalmtree.notesprout.extension.MARKDOWN_RENDERER"` (arc 4 / H0) |
+| `ACTION_OBJECT_PROVIDER` | `"com.symmetricalpalmtree.notesprout.extension.OBJECT_PROVIDER"` (arc 4 / H3) |
 | `META_API_VERSION` | `"com.symmetricalpalmtree.notesprout.extension.API_VERSION"` |
 | `MIME_WEBP` | `"image/webp"` |
 | `MAX_RENDER_BYTES` | `16 * 1024 * 1024` (16 MiB — hard cap the host enforces on a render result: a `RenderedTemplate` or a `RenderedImage`) |
@@ -99,6 +102,9 @@ and the extension modules never depend on each other.
 | `MAX_ACTIONS` / `MAX_SUB_ACTIONS` | `16` / `16` — top-level `SelectionAction`s per provider / leaves per action (host drops the rest; arc 4 / H2) |
 | `MAX_ACTION_ID_CHARS` / `MAX_ACTION_LABEL_CHARS` / `MAX_ACTION_HINT_CHARS` | `32` / `6` / `40` — action id (`[A-Za-z0-9_.-]+`) / label / the host-composed long-press hint (H2) |
 | `MAX_EDIT_TITLE_CHARS` / `MAX_EDIT_HINT_CHARS` / `MAX_EDIT_TEXT_CHARS` | `40` / `60` / `4_000` — `EditSpec` title / field hint / most characters an edit field accepts (H2) |
+| `MAX_TYPE_ID_CHARS` / `MAX_TYPES` | `32` / `16` — an object `typeId` is `[a-z0-9_-]+` (`isTypeId`) / most `describeTypes()` entries the host keeps per provider (H3) |
+| `MAX_OBJECTS_PER_PAGE` | `200` — host cap on live objects per page (creation refused above it; H3) |
+| `RECOGNIZER_REQUIRED` / `MARKDOWN_REQUIRED` | `"recognizer required"` / `"markdown required"` — the exact `IllegalStateException` messages an object provider throws when the in-parameter it needs is null; typed on the host (`CapabilityRequiredException`) so the dialog can name the missing extension (H3) |
 | `STORE_MAX_KEY_CHARS` | `512` — longest `IExtensionStore` key (the empty key is rejected) |
 | `STORE_MAX_VALUE_BYTES` | `256 * 1024` — largest `IExtensionStore` value |
 | `STORE_MAX_KEYS` | `50_000` — most keys one extension's store may hold |
@@ -108,6 +114,8 @@ and the extension modules never depend on each other.
 | `MAX_PRECONTEXT_CHARS` | `20` — the host truncates `preContext` to its tail before the call |
 | `MAX_RECOGNIZED_CHARS` | `20_000` — host-side cap on the text a recognize call returns (the rest is dropped) |
 | `templateIdentity(pkg, id)` | `"$pkg:$id"` |
+| `objectIdentity(pkg, typeId)` | `"$pkg:$typeId"` — the provider identity stored in an object row's `style` (H3); parsed by `parseIdentity` |
+| `isTypeId(s)` | `[a-z0-9_-]+`, `1..MAX_TYPE_ID_CHARS` (H3) |
 | `parseIdentity(s)` | `Pair<pkg, id>?` — splits at the **first** `:`; null if `:` absent or either side empty. The Blank sentinel is the host's, not the contract's. |
 
 ### AIDL
@@ -202,6 +210,39 @@ interface IMarkdownRenderer {
      *  thread. IllegalArgumentException over the caps. */
     RenderedImage render(String markdown, int maxWidthPx, float dpi, int maxLines, int paddingPx);
 }
+
+// SelectionAction.aidl · EditSpec.aidl · CreatedObject.aidl (H2 / H3)
+package com.symmetricalpalmtree.notesprout.extension;
+parcelable SelectionAction;   parcelable EditSpec;   parcelable CreatedObject;
+
+// IObjectProvider.aidl — the OBJECT_PROVIDER point (arc 4 / H3). A provider owns one or more object
+// types (typeIds). The core stores an opaque payload per object and asks the provider to act on it.
+// Capabilities reach a provider ONLY as in-parameters — the core's proxies, or null when absent.
+interface IObjectProvider {
+    /** The typeIds this provider owns ([a-z0-9_-]+, ≤ MAX_TYPE_ID_CHARS, ≤ MAX_TYPES). Pure. */
+    List<String> describeTypes();
+    /** Selection-toolbar contributions in display order (≤ MAX_ACTIONS; one level of sub-actions). Pure. */
+    List<SelectionAction> describeActions();
+    /** For a selected object: which of this provider's action ids are "active" (drawn selected —
+     *  e.g. the heading's current level). Pure; empty if none. */
+    List<String> activeActionIds(String typeId, String payload);
+    /** Turn a pure-stroke selection into an object. [actionId] = the tapped leaf action; [strokes] in
+     *  page px, [areaWidth]/[areaHeight] = the selection bounds' size; [recognizer] = the core's proxy or
+     *  null when none is installed (throw IllegalStateException(RECOGNIZER_REQUIRED) if it is needed).
+     *  Returns the new object's typeId + payload, or null when nothing usable was recognized. */
+    CreatedObject createFromInk(String actionId, in List<InkStroke> strokes, float areaWidth, float areaHeight,
+                                IHandwritingRecognizer recognizer);
+    /** Apply a leaf action to an existing object. Returns the new payload, or null for "no change". Pure. */
+    String applyAction(String actionId, String typeId, String payload);
+    /** How the core should draw the edit dialog for this object (null = not editable). Pure. */
+    EditSpec describeEdit(String typeId, String payload);
+    /** The payload after the user saved [text] in the edit dialog; null = no change (e.g. blank). Pure. */
+    String applyEdit(String typeId, String payload, String text);
+    /** Render the object: [maxWidthPx] > 0 (page width minus the object's x), [dpi] the panel density,
+     *  [markdown] = the core's proxy or null when none is installed (throw
+     *  IllegalStateException(MARKDOWN_REQUIRED) if it is needed). Returns null if there is nothing to draw. */
+    RenderedImage render(String typeId, String payload, int maxWidthPx, float dpi, IMarkdownRenderer markdown);
+}
 ```
 
 `RecognizerStatus` is a Kotlin `object` of `Int` constants (AIDL carries `int` — no parcelable, no
@@ -263,11 +304,15 @@ treats any other value as `UNAVAILABLE`.
   a field prefilled with `text` (for a heading: the words **without** the `#`s), its `hint`, `maxChars`
   (`1..MAX_EDIT_TEXT_CHARS`, `requireValid` in the constructor with a non-blank title), single- or
   multi-line. Untrusted on the host side (`EditCaps` truncates before display).
+- `CreatedObject(typeId: String, payload: String)` — `writeString ×2` (H3). What `createFromInk` returns:
+  the new object's `typeId` (must be one of the provider's `describeTypes()` — the host checks in the same
+  bind) and its opaque payload (≤ `MAX_OBJECT_TEXT_CHARS`, truncated by the host). `requireValid` in the
+  constructor: well-formed `typeId` (`isTypeId`), non-blank payload (pure, JVM-tested).
 
 All parcelables carry `@JvmField val CREATOR` and match their `.aidl` declarations.
 `RenderedTemplate.describeContents()` and `RenderedImage.describeContents()` return
 `CONTENTS_FILE_DESCRIPTOR` (they carry the region's fd — `Bundle.hasFileDescriptors()` relies on this);
-`TemplateInfo`, `SchemeField`, `InkStroke`, `SelectionAction` and `EditSpec` return 0.
+`TemplateInfo`, `SchemeField`, `InkStroke`, `SelectionAction`, `EditSpec` and `CreatedObject` return 0.
 
 ### `HostCallerCheck` (N1 — shared extension-side trust gate)
 
@@ -653,7 +698,96 @@ selection shows `INK` actions of every provider; exactly one object shows the `O
 provider owning its type; anything mixed shows Delete only.
 
 Verified H2 with a debug-only stand-in (`FakeContributions`, `src/debug` — a no-op twin in
-`src/release`) before any extension is behind it; H3/H4 replace it with `ObjectProviderClient`.
+`src/release`) before any extension is behind it; H3 built `ObjectProviderClient` behind the same
+shapes (H4 wires it into the notebook screen).
+
+## ObjectProvider (contract — arc 4 / H3)
+
+The fifth point and the **generic content-object point**: an extension owns one or more object
+*types*, the core owns the object *rows* (`docs/data.md` §"Object rows" — identity, provider identity
+`<pkg>:<typeId>` in `style`, an **opaque** payload in `text`, bounds, z-order) and asks the provider to
+act on a payload. The heading is the first implementation; a future Text / Shape / Link extension
+implements the same AIDL. Locked shape (Q9): describe actions · create-from-ink · apply an action ·
+describe / apply an edit · render.
+
+- **Action** `ACTION_OBJECT_PROVIDER`; interface `IObjectProvider`; parcelables `SelectionAction`,
+  `EditSpec`, `CreatedObject`, `RenderedImage`, `InkStroke`. Eight methods (AIDL above):
+  `describeTypes()` · `describeActions()` · `activeActionIds(typeId, payload)` ·
+  `createFromInk(actionId, strokes, areaWidth, areaHeight, recognizer)` · `applyAction(actionId, typeId,
+  payload)` · `describeEdit(typeId, payload)` · `applyEdit(typeId, payload, text)` · `render(typeId,
+  payload, maxWidthPx, dpi, markdown)`.
+- **Capabilities arrive only as in-parameters** (rule 23): `createFromInk` gets an
+  `IHandwritingRecognizer` (the core's `RecognizerProxyBinder`) and `render` an `IMarkdownRenderer`
+  (`MarkdownProxyBinder`) — **or null** when nothing is installed; a provider that needs one throws
+  `IllegalStateException(RECOGNIZER_REQUIRED / MARKDOWN_REQUIRED)`, which the host types. A provider
+  says what an action needs through `SelectionAction.requires` so the host can explain *before* binding.
+  Providers never discover or bind the recognizer / renderer themselves (nor each other).
+- **Semantics:** every method but `createFromInk` and `render` is **pure** (no capability, ≤ 2 s).
+  `createFromInk` receives the lasso'd strokes in **page px, exactly as the core holds them**, plus the
+  selection bounds' size as the writing area (H3 Q2 — the original's single-shot path); it returns
+  `CreatedObject(typeId, payload)` or **null** for "nothing usable" (the core then leaves the ink alone).
+  `applyAction` / `applyEdit` return the new payload or **null** for "no change". `describeEdit` null =
+  not editable. `render` returns a `RenderedImage` (the same lossless-WEBP handshake — a provider that
+  forwards to the Markdown proxy may return the proxy's reply **as-is**; the region is the reply) or null
+  for nothing to draw. `activeActionIds` = the leaf ids to draw `state_selected` for a selected object.
+- **Outward payload — the object's own payload + geometry + the two proxies**; `createFromInk` adds
+  bare ink (row 14's widening re-recorded); never ids, names, keys, paths (audit row 19, H5).
+- **Caps** (host before the call, provider re-check → `IllegalArgumentException`): payload ≤
+  `MAX_OBJECT_TEXT_CHARS` both ways; ink `MAX_INK_*` (`InkCaps.check` before the bind, and again inside
+  the recognizer proxy); edit text ≤ `MAX_EDIT_TEXT_CHARS`; render args as for the Markdown point.
+  **Inward** (all untrusted, `ObjectProviderClient`): `describeTypes` filtered to `isTypeId` and capped at
+  `MAX_TYPES`; `describeActions` through `ActionCaps` (icons via `IconCatalog`); `activeActionIds`
+  id-validated; a `CreatedObject`'s `typeId` must be in the provider's own `describeTypes()` (checked
+  in the same bind) and its payload is truncated; `describeEdit` through `EditCaps`; the rendered image
+  through `RenderedImages.copyOut` (mime, byte count, header size == declared, edge cap).
+- **Stateless, no store** (rule 18 — the core stores objects; a provider keeps nothing about a specific
+  object); every call on a Binder thread; **payloads / recognized text are never logged on either
+  side** — counts, sizes and durations only. Binder-marshalable exceptions only (`SecurityException`,
+  `IllegalArgumentException`, `IllegalStateException`).
+- **Timeouts (host):** bind ≤ 3 s · describe / apply / edit ≤ **2 s** · `createFromInk` ≤ **15 s** (one
+  recognizer hop of 10 s inside + margin) · `render` ≤ **8 s** (one markdown hop of 5 s inside + margin).
+
+## The Heading extension (`:ext-heading` — arc 4 / H3)
+
+The reference implementation of `OBJECT_PROVIDER`: the **heading** type. Depends on `:extension-api`
+only — it never sees `:ext-mlkit` or `:ext-markdown`; the recognizer and the renderer reach it as the
+core's proxies.
+
+- **APK:** `applicationId com.symmetricalpalmtree.notesprout.ext.heading` (debug `.dev`), `versionName
+  0.1.0`, Gradle/manifest shape identical to `:ext-markdown` (no Activity, `allowBackup="false"`,
+  `BuildConfig.HOST_PACKAGE` per build type, deps `:extension-api` + junit). Label **"NSE · Heading"**
+  (debug "NSE · Heading Dev"), puzzle icon. One exported `<service android:name=".ObjectProviderService">`
+  with the `OBJECT_PROVIDER` action + `API_VERSION` meta-data `1`. ~2.5 MB.
+- **`ObjectProviderService`** (`IObjectProvider.Stub`, `HostCallerCheck.enforce` first everywhere):
+  `describeTypes()` = `["heading"]` · `describeActions()` = one parent **`heading`** (label `H`, icon
+  `IconNames.HEADING`, `appliesTo = INK | OBJECT`, `requires = RECOGNIZER | MARKDOWN`) with leaves
+  `h1`…`h6` (labels `H1`…`H6`, icons `h-1`…`h-6`, same flags — `HeadingActions`) ·
+  `activeActionIds` = `["h<level>"]` from the payload · **`createFromInk`**: `recognizer == null` →
+  `IllegalStateException(RECOGNIZER_REQUIRED)`; else `recognizer.recognizeInk(strokes, areaWidth,
+  areaHeight, "")` (the lasso box is the writing area, no pre-context), newlines folded to spaces,
+  trimmed; blank → **null**; else `CreatedObject("heading", HeadingText.withLevel(text, level))` ·
+  `applyAction(h<n>)` = re-prefix (same level or blank words → null) · `describeEdit` =
+  `EditSpec("Edit heading", the words without the #s, "Heading text", 500, single-line)` (H3 Q3) ·
+  `applyEdit` = blank → null, else re-prefix with the current level (unchanged → null) · **`render`**:
+  `markdown == null` → `IllegalStateException(MARKDOWN_REQUIRED)`; else `markdown.render(payload,
+  maxWidthPx, dpi, maxLines = 1, paddingPx = round(8 × dpi / 160))` returned **as-is** (the heading
+  never decodes pixels). A `RemoteException` from a proxy becomes `IllegalStateException`. Unknown
+  action / bad args → `IllegalArgumentException`. Debug log: counts + durations, never text.
+- **`HeadingText`** (pure, JVM-tested — the original's `HeadingObject` helpers widened to six levels):
+  `prefix(level)` = `"#" × level + " "` (clamped 1..6) · `strip(payload)` removes `^#{1,6}[ \t]+` ·
+  `withLevel(text, level)` = prefix + strip(fold(text)) · `levelOf(payload)` = the count of leading `#`s
+  (1..6; anything else — including seven `#`s, which markdown does not treat as a heading — is
+  malformed → 1) · `fold(text)` = newlines → spaces, runs of spaces collapsed, trimmed.
+  `HeadingTextTest` (6).
+- **Verified H3 (Claude-side, all three devices):** `OBJECT_PROVIDER` resolves to
+  `ObjectProviderService`, no launcher activity; the debug ⋯ **Probe** binds it and logs
+  `types=[heading]`, `actions=1 (6 sub)`, `active=[h2]` for a `##` payload, `edit=title 12 chars, text
+  13 chars, max 500`, a `render` **through the Markdown proxy** (a `MarkdownRendererService` line inside
+  the `ObjectProviderService` call — 502×126 px @ 280 dpi on MIP11, 538×136 / 539×136 @ 300 dpi on
+  SNN / NA5C) and a `createFromInk` of the page's ink **through the recognizer proxy** (a
+  `HandwritingRecognizerService` line inside); binds = unbinds, no `SecurityException`, no text in any
+  line; with `NSE · Markdown` disabled, `render` fails typed as `CapabilityRequiredException(MARKDOWN)`
+  and nothing crashes.
 
 ## Host behaviour (`:app`, package `extension/`)
 
@@ -797,7 +931,9 @@ Verified H2 with a debug-only stand-in (`FakeContributions`, `src/debug` — a n
     N strokes · T ms)"**, message = the text, selectable (`""` → *(nothing recognized)*), **Copy**
     (clip label "Recognized text", toast "copied") + **OK**.
   - `UNAVAILABLE` → dialog *Recognizer unavailable on this device*.
-  - otherwise (`NEEDS_DOWNLOAD` / `DOWNLOADING`) → the **one-time model flow**: `Connectivity.isOnline`
+  - otherwise (`NEEDS_DOWNLOAD` / `DOWNLOADING`) → the **one-time model flow** (**since H3 this is
+    `RecognizerReadiness.ensureReady` in main source — the debug menu calls it; H3 also sends an already
+    DOWNLOADING status straight to the progress dialog**): `Connectivity.isOnline`
     pre-flight (ML Kit's downloader *hangs* rather than fails offline — M1: no error after a minute) —
     offline → dialog "Recognition model needed" saying the device is offline, OK only; online → the
     same dialog offering the ~20 MB en-US download (Wi-Fi recommended) with **Download** / **Cancel**.
@@ -824,6 +960,69 @@ Verified H2 with a debug-only stand-in (`FakeContributions`, `src/debug` — a n
   process start + client build ≈ 1.9 s, then the **first inference loads the model** — 4.5 s on the
   Nomad, 1.8 s on the NoteAir5C — so ≈ 6 s / 4 s tap-to-dialog cold. A future consumer that wants
   it faster must bind early (and the extension would need a warm-up inference — deferred).
+
+### MarkdownRenderer / ObjectProvider — host behaviour (H3)
+
+- **Manifest `<queries>`** gains the `MARKDOWN_RENDERER` and `OBJECT_PROVIDER` actions.
+- **`ExtensionRegistry.markdownRenderer(context): ProviderRef?`** — first by (label, package), the rest
+  dropped with a `Slog.d`; **`ExtensionRegistry.objectProviders(context): List<ProviderRef>`** — every
+  trusted provider, sorted by (label, package); all of them contribute.
+- **`MarkdownClient(context, ref)`** — over `ExtensionBinder`, stateless. `render(markdown, maxWidthPx,
+  dpi, maxLines, paddingPx): RenderedImages.Copy?` ≤ **5 s**. **Outward caps before the bind**
+  (`RenderCaps`, pure + JVM-tested): the source is truncated to `MAX_MARKDOWN_CHARS`; `maxWidthPx` in
+  `1..MAX_IMAGE_EDGE_PX`, finite `dpi > 0`, `maxLines ≥ 0`, padding in `0..RENDER_PADDING_MAX_PX` else
+  **`RenderArgsException`** without a bind. **Inward** (`RenderedImages.copyOut`): mime == `MIME_WEBP`
+  and `0 < byteCount ≤ min(MAX_RENDER_BYTES, region)`, copy out, unmap, then the WEBP header must decode
+  to **exactly** the declared `widthPx × heightPx` within the edge cap; the region is closed on every
+  path. Null only when the extension returned null. Log tag `MarkdownClient`: sizes + durations, never
+  the text.
+- **`ObjectProviderClient(context, ref, recognizerRef?, markdownRef?)`** — over `ExtensionBinder`,
+  stateless. `describeTypes` / `describeActions` / `activeActionIds` / `applyAction` / `describeEdit` /
+  `applyEdit` ≤ **2 s**; `createFromInk` ≤ **15 s**; `render` ≤ **8 s**. **The two proxies are minted
+  per bind and revoked in the client's own `finally`, right after the shared unbind** (the `NamerClient`
+  store shape): `RecognizerProxyBinder(RecognizerClient(recognizerRef), extUid)` is passed only to
+  `createFromInk`, `MarkdownProxyBinder(MarkdownClient(markdownRef), extUid)` only to `render`; each is
+  **null** when its ref is null. Inward validation as listed under §"ObjectProvider (contract)".
+  Typed failures: the provider's `IllegalStateException` whose message equals `RECOGNIZER_REQUIRED` /
+  `MARKDOWN_REQUIRED` → **`CapabilityRequiredException(requires)`**; `RECOGNIZER_NOT_READY` (a proxied
+  recognizer that could not become ready) → `RecognizerNotReadyException`; anything else → one
+  `ExtensionCallException`. Log tag `ObjectProviderClient`: counts, sizes, durations — **never a payload**.
+- **`ProxyGate(extUid, callingUid)`** (pure, JVM-tested) — the `ExtensionStoreGate` shape without the
+  store: `check()` throws `SecurityException` unless the caller is the extension's uid and the gate is
+  not `revoked`; `revoke()` from the client's `finally`. A late call from an orphaned transaction fails
+  closed.
+- **`RecognizerProxyBinder(client: RecognizerClient, extUid)`** (`IHandwritingRecognizer.Stub` — the
+  arc-3 recipe, built here): every method `gate.check()` first; **`status()` forwards all four values and
+  `prepare()` forwards** (H3 Q4 — user choice: a provider may trigger the acquisition; the core still
+  runs `RecognizerReadiness` before the call); `recognizeInk` / `recognizePage` re-apply
+  `InkCaps.check` + `preContext` truncation inward, then forward. Forwarding = **`runBlocking` on the
+  host's Binder thread** (never Main); the inner `RecognizerClient` call has its own bind, timeout and
+  signature check. Failures → the marshalable set: `RecognizerNotReadyException` →
+  `IllegalStateException(RECOGNIZER_NOT_READY)`, `InkTooLargeException` → `IllegalArgumentException`,
+  other `ExtensionCallException` → `IllegalStateException(<class>)`.
+- **`MarkdownProxyBinder(client: MarkdownClient, extUid)`** (`IMarkdownRenderer.Stub`): same gate;
+  `render` re-applies `RenderCaps.checkArgs` inward (`IllegalArgumentException`), forwards via
+  `runBlocking`, and **re-wraps** the verified bytes into a fresh `RenderedImage` region the proxy owns
+  (`RenderedImages.wrap`: map, write, `PROT_READ`; parked per Binder thread and closed in `onTransact`'s
+  `finally` once the reply is marshalled — the Templates handshake, host-side).
+- **`RecognizerReadiness.ensureReady(activity, client, onReady, onGaveUp, problemTitleRes)`** (main
+  source since H3 — the M1/M2 consent flow moved out of `NotebookDebugMenu`, which now only calls it;
+  the heading action uses it in H4): `status()` → READY → `onReady` · NEEDS_DOWNLOAD → "Recognition
+  model needed" (offline pre-check → offline dialog) → Download → `prepare()` + progress dialog with
+  the elapsed counter (2 s polls; 5 consecutive failed polls / 30 s offline / 5 min → "Download
+  failed"; Cancel hides only) → READY → `onReady` · **DOWNLOADING → straight to the progress dialog**
+  (consent was already given — the one deliberate difference from the debug menu's old else-branch) ·
+  UNAVAILABLE → problem dialog. Exactly one of `onReady` / `onGaveUp` runs; the one-flow-at-a-time
+  guard is the caller's. Strings are the M1 `recognize_*` set in main `strings.xml`.
+- **Debug ⋯ "Probe object providers"** (H3 test surface, `src/debug`, gone in H5): for every trusted
+  provider — `describeTypes` + `describeActions` + `activeActionIds` + a `render` of a fixed `##`
+  payload through the real Markdown proxy + `describeEdit` + (when a recognizer is installed and READY
+  and the page has ink) a `createFromInk` of the page's ink through the real recognizer proxy (result
+  discarded, nothing created); everything to logcat under `NotebookDebugMenu` + the clients' tags, never
+  text; a "Probe done" toast at the end.
+- **Timings (H3, warm extension processes, two hops end to end):** `render` 268 ms (MIP11) / 479 ms
+  (SNN) / 403 ms (NA5C) — of which the Markdown extension's own render is 10 / 93 / 28 ms;
+  `createFromInk` 1.6 s (MIP11, first inference after process start) / 201 ms (SNN) / 58 ms (NA5C).
 
 **BOOX sideload trap (NA5C):** the launcher/firmware flips a freshly installed sideloaded package to
 DISABLED_USER shortly *after* `install`, so a `pm enable` issued immediately can be overwritten. Enable,
@@ -929,10 +1128,11 @@ extensions") follows rules 1–5 **plus**:
     keeps them in *its* host store, through *its* point.
 17. **Lend it only through the proxy recipe below** — built with the first consumer, never before.
 
-### The capability pattern (recorded in arc 3, built with the first consumer)
+### The capability pattern (recorded in arc 3, **built in arc 4 / H3** with the first consumer)
 
 A **capability point** is an extension point whose implementation the core lends to *other*
-extensions. The recipe, fixed by arc 3 so a consumer arc can't drift from it:
+extensions. The recipe, fixed by arc 3 and built as written in H3 (`RecognizerProxyBinder`,
+`MarkdownProxyBinder`, `ProxyGate` — see §"MarkdownRenderer / ObjectProvider — host behaviour"):
 
 - The capability's AIDL is the interface both the provider **and** the core's proxy implement.
 - The core is the only binder of the provider (`RecognizerClient`). A consumer point that needs the
@@ -1041,14 +1241,16 @@ adb -s <serial> install -r ext-templates/build/outputs/apk/debug/ext-templates-d
 adb -s <serial> install -r ext-naming/build/outputs/apk/debug/ext-naming-debug.apk
 adb -s <serial> install -r ext-mlkit/build/outputs/apk/debug/ext-mlkit-debug.apk        # ML Kit model downloads on first prepare() (Wi-Fi once per device)
 adb -s <serial> install -r ext-markdown/build/outputs/apk/debug/ext-markdown-debug.apk  # the Markdown renderer (arc 4)
+adb -s <serial> install -r ext-heading/build/outputs/apk/debug/ext-heading-debug.apk    # the Heading object provider (arc 4 / H3)
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.templates.dev          # BOOX sideload trap
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.naming.dev
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.mlkit.dev
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.markdown.dev
+adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.heading.dev
 adb -s <serial> shell pm disable-user --user 0 com.symmetricalpalmtree.notesprout.ext.templates.dev  # simulate "not installed"
 adb -s <serial> uninstall com.symmetricalpalmtree.notesprout.ext.templates.dev
 ```
 
-All five APKs are signed by the same debug keystore (`~/.android/debug.keystore`) — that is what satisfies
+All six APKs are signed by the same debug keystore (`~/.android/debug.keystore`) — that is what satisfies
 the same-signature trust rule in dev. An extension built on another machine will **not** be trusted by
 this Mac's core build (different debug key) — expected, not a bug.

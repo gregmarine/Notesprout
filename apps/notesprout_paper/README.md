@@ -47,8 +47,12 @@ paper notebooks.
   lives in `:extension-api`; see `docs/extensions.md` (§"The capability pattern", boundary-audit rows
   14–17). The fourth is **Markdown** (`:ext-markdown`): a second capability point — markdown text in,
   a transparent lossless-WEBP image out (a verbatim port of the original Notesprout's markdown
-  parser + spans); nothing binds it yet — the Heading extension (arc 4) will render through it via
-  the core's proxy.
+  parser + spans). The fifth is **Heading** (`:ext-heading`): the reference implementation of the
+  generic *object provider* point — it turns lasso'd ink into a heading (`#`-prefixed markdown, six
+  levels) through the recognizer and draws it through the Markdown renderer, both lent to it by the
+  core as per-bind proxies (it never binds them itself); H3 built the point, the extension and the
+  proxies — the notebook screen wires the user story in H4 (until then the only caller is the debug
+  ⋯ "Probe object providers").
 
 ## What Paper is **not** (v0)
 
@@ -64,28 +68,32 @@ over from Notesprout just because it exists there).
 
 ```sh
 cd apps/notesprout_paper
-./gradlew assembleDebug               # all modules → app-debug.apk + ext-templates-debug.apk + ext-naming-debug.apk + ext-mlkit-debug.apk + ext-markdown-debug.apk
+./gradlew assembleDebug               # all modules → app-debug.apk + ext-templates-debug.apk + ext-naming-debug.apk + ext-mlkit-debug.apk + ext-markdown-debug.apk + ext-heading-debug.apk
 ./gradlew testDebugUnitTest           # all modules
 adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk
 adb -s <serial> install -r ext-templates/build/outputs/apk/debug/ext-templates-debug.apk   # the Templates extension
 adb -s <serial> install -r ext-naming/build/outputs/apk/debug/ext-naming-debug.apk         # the Naming extension
 adb -s <serial> install -r ext-mlkit/build/outputs/apk/debug/ext-mlkit-debug.apk           # the ML Kit extension (model needs Wi-Fi once)
 adb -s <serial> install -r ext-markdown/build/outputs/apk/debug/ext-markdown-debug.apk     # the Markdown extension
+adb -s <serial> install -r ext-heading/build/outputs/apk/debug/ext-heading-debug.apk       # the Heading extension
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.templates.dev        # BOOX may land it disabled
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.naming.dev
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.mlkit.dev
+adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.markdown.dev
+adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.heading.dev
 ```
 
-Four APKs: the core (`:app`), the Templates extension (`:ext-templates`), the Naming extension
+Six APKs: the core (`:app`), the Templates extension (`:ext-templates`), the Naming extension
 (`:ext-naming` — per-folder default-name schemes such as `Meeting {date} {n:2}`, kept in a core-owned
-encrypted store) and the ML Kit extension (`:ext-mlkit` — the handwriting recognizer; the only module
-that depends on ML Kit). All are debug-signed by the same `~/.android/debug.keystore`, which is what satisfies
+encrypted store), the ML Kit extension (`:ext-mlkit` — the handwriting recognizer; the only module
+that depends on ML Kit), the Markdown extension (`:ext-markdown`) and the Heading extension
+(`:ext-heading`). All are debug-signed by the same `~/.android/debug.keystore`, which is what satisfies
 the same-signature trust rule in dev; an extension built on another machine is not trusted by this
 one's core (expected). Extensions have no launcher icon (listed as "NSE · Templates Dev" / "NSE ·
-Naming Dev" / "NSE · ML Kit Dev") — remove them via Settings → Apps (or `adb uninstall`).
+Naming Dev" / "NSE · ML Kit Dev" / "NSE · Markdown Dev" / "NSE · Heading Dev") — remove them via Settings → Apps (or `adb uninstall`).
 
 The drawing surface (g-paper) is consumed from **mavenLocal**
-(`com.symmetricalpalmtree.gpaper:gpaper-{core,onyx,ratta}:0.1.0`). If a g-paper symbol is unresolved,
+(`com.symmetricalpalmtree.gpaper:gpaper-{core,onyx,ratta}:0.1.1`). If a g-paper symbol is unresolved,
 run `./gradlew publishToMavenLocal` in `~/git/g-paper` first. Requires a Temurin-17 JDK (pinned in
 `gradle.properties`), minSdk 29, arm64-v8a. BOOX trap: `install -r` can leave the package disabled →
 `pm enable com.symmetricalpalmtree.notesprout.dev`.

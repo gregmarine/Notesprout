@@ -10,7 +10,7 @@
 > `CLAUDE.md` files. `docs/extensions.md` is the subsystem reference all arcs write into;
 > `docs/notebook.md` and `docs/data.md` gain sections in this arc.
 >
-> **Status: H0 ✅ (8c5361f) · H1 ✅ (62771f3) · H2 ✅ (bf17417) · H3 ⬜ · H4 ⬜ · H5 ⬜ — H0 user-verified 2026-08-17.**
+> **Status: H0 ✅ (8c5361f) · H1 ✅ (62771f3) · H2 ✅ (bf17417) · H3 🧪 · H4 ⬜ · H5 ⬜ — H0 user-verified 2026-08-17.**
 
 ## Why
 
@@ -787,7 +787,55 @@ extension is behind it.
 ---
 
 ### Phase H3 — The `OBJECT_PROVIDER` point, `NSE · Heading`, the two proxies, `RecognizerReadiness`
-**Status:** ⬜ Not started
+**Status:** 🧪 Awaiting device verification (built + Claude-verified SNN + NA5C + MIP11 2026-08-17)
+
+**Outcome (2026-08-17, Claude-side checks passed on all three devices; user checklist items 1–3 pending):**
+`:extension-api` — `IObjectProvider.aidl` (8 methods), `CreatedObject` (+ `.aidl`, `requireValid`),
+`ExtensionContract.ACTION_OBJECT_PROVIDER` / `MAX_TYPE_ID_CHARS` / `MAX_TYPES` (16 — the "≤ 16"
+of `describeTypes`, made a constant) / `MAX_OBJECTS_PER_PAGE` / `RECOGNIZER_REQUIRED` /
+`MARKDOWN_REQUIRED` / `objectIdentity` / `isTypeId`; `CreatedObjectTest` (6). **`:ext-heading`** (settings
+include; Gradle/manifest = `:ext-markdown` shape, label `NSE · Heading` / ` Dev`, puzzle icon, 2.5 MB):
+`HeadingText` (six-level `prefix` / `strip` / `withLevel` / `levelOf` / `fold` — seven `#`s is *not* a
+heading, malformed → 1, as markdown), `HeadingActions` (parent `heading` **H** + leaves `h1`…`h6`),
+`ObjectProviderService` (edit `maxChars` 500, `maxLines 1`, padding `round(8 × dpi / 160)`, the proxy's
+reply returned as-is; `RemoteException` → `IllegalStateException`); `HeadingTextTest` (6). **`:app`** —
+manifest `<queries>` ×2, `ExtensionRegistry.markdownRenderer` (first-of) / `objectProviders` (all),
+`RenderCaps` (+ `RenderArgsException`; `RenderCapsTest` 5), `RenderedImages` (`copyOut` / `wrap` — the
+host side of the handshake, shared by both clients and the proxy), `MarkdownClient` (5 s),
+`ProxyGate` (`ProxyGateTest` 3), `RecognizerProxyBinder` (status + **prepare forward**, ink caps
+re-applied inward, `runBlocking` on the Binder thread, failure map), `MarkdownProxyBinder` (args re-checked,
+reply re-wrapped into a proxy-owned region closed in `onTransact` finally), `ObjectProviderClient`
+(`recognizerRef` / `markdownRef` in the constructor; proxies minted per call, revoked in `finally`;
+`CreatedObject.typeId ∈ describeTypes()` checked in the same bind; `CapabilityRequiredException(requires)`
+typed from `RECOGNIZER_REQUIRED` / `MARKDOWN_REQUIRED`, `RecognizerNotReadyException` from a proxied
+`RECOGNIZER_NOT_READY`; 2 s / 15 s / 8 s), `RecognizerReadiness` (`ensureReady(activity, client, onReady,
+onGaveUp, problemTitleRes)` — the M1/M2 flow verbatim, plus **DOWNLOADING → straight to the progress
+dialog** (the one deliberate difference; consent was already given); the debug menu delegates and keeps
+its busy guard), debug ⋯ **"Probe object providers"** (types / actions / active / render via the Markdown
+proxy / edit / `createFromInk` of the page's ink via the recognizer proxy when READY — logs only, "Probe
+done" toast). JVM whole suite green; `assembleDebug` seven modules; `:app:assembleRelease` compiles.
+**Devices (Claude-side, all three):** installed app + Markdown + Heading; NA5C enable dance (six
+packages, nothing of ours disabled); `OBJECT_PROVIDER` → `ObjectProviderService` and `MARKDOWN_RENDERER` →
+`MarkdownRendererService` resolve, no launcher activity; Probe: `types=[heading]`, `actions=1 (6 sub)`,
+`active=[h2]`, `edit=title 12 / text 13 / max 500`, **`render` two-hop** 268 ms MIP11 (502×126 @ 280 dpi;
+Markdown's own render 10 ms) / 479 ms SNN (538×136 @ 300; 93 ms) / 403 ms NA5C (539×136; 28 ms) with the
+`MarkdownRendererService` line nested inside the `ObjectProviderService` call, **`createFromInk` two-hop**
+1.6 s MIP11 (first inference) / 201 ms SNN / 58 ms NA5C with the `HandwritingRecognizerService` line
+nested; binds = unbinds (9/9), no `leaked ServiceConnection`, no `SecurityException`, no text in any
+line; `pm disable-user` Markdown → Probe → `render` fails typed `CapabilityRequiredException(MARKDOWN)`,
+nothing crashes; re-enabled. Regression: debug ⋯ Recognize page on MIP11 through the promoted flow —
+model present → straight to the result; **`pm clear` of the ML Kit ext → consent dialog → Download →
+progress with the elapsed counter → "model ready after 44 s" → result with no second tap.** Docs:
+`docs/extensions.md` (contract table, AIDL, `CreatedObject`, §"ObjectProvider (contract)", §"The Heading
+extension", §"MarkdownRenderer / ObjectProvider — host behaviour", capability pattern marked built,
+build lines), `README.md`, `CLAUDE.md`. **User by-eye items 1–3 flip this ✅.**
+
+**Phase-start answers (2026-08-17):** Q1 proxies forward via `runBlocking` on the host's Binder thread
+(never Main); two-hop budgets `createFromInk` 15 s / `render` 8 s · Q2 writing area = the selection
+bounds' size, strokes page-absolute as the core hands them, empty pre-context · Q3 heading edit
+`maxChars` 500 · Q4 the proxy forwards all four `status()` values **and forwards `prepare()` too**
+(user choice over the no-op recommendation — a provider may trigger the model acquisition through the
+proxy; the core still runs `RecognizerReadiness` before the call in H4).
 
 **Goal:** `IObjectProvider` exists; `NSE · Heading` installs and answers every call correctly under
 JVM tests (`HeadingText`) and a host-side **debug ⋯ "Probe object providers"** action that binds each

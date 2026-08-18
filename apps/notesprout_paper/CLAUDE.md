@@ -11,7 +11,7 @@ global-index model, global encryption model, and e-ink design philosophy — and
   Naming extension), then `PAPER_RECOGNITION_PLAN.md` (arc 3, complete + frozen 2026-08-17: the
   engine-neutral `HANDWRITING_RECOGNIZER` capability point + the ML Kit extension `NSE · ML Kit`,
   debug-only "Recognize page" test surface), then **`PAPER_OBJECTS_PLAN.md` (arc 4, in progress —
-  H0 ✅ 8c5361f · H1 ✅ 62771f3 · H2 ✅ bf17417 2026-08-17: content objects in the `.soil` + the selection toolbar with its
+  H0 ✅ 8c5361f · H1 ✅ 62771f3 · H2 ✅ bf17417 · H3 🧪 2026-08-17: content objects in the `.soil` + the selection toolbar with its
   extension-contribution API + the `MARKDOWN_RENDERER` capability point / `NSE · Markdown` + the
   generic `OBJECT_PROVIDER` point / `NSE · Heading`, the two proxies, g-paper 0.1.1)** — read all
   five top-to-bottom at the start of every session; **arc 4 is the active plan — start at its next
@@ -45,14 +45,17 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   `com.symmetricalpalmtree.gpaper.core.engine`.
 - **mavenLocal can lag the g-paper checkout** — if a g-paper symbol from `docs/api.md` is unresolved,
   `cd ~/git/g-paper && ./gradlew publishToMavenLocal` before suspecting anything else.
-- **Extensions** (`PAPER_EXTENSIONS_PLAN.md`, `docs/extensions.md`): the project has six modules —
+- **Extensions** (`PAPER_EXTENSIONS_PLAN.md`, `docs/extensions.md`): the project has seven modules —
   `:app` (the core/host), `:extension-api` (the shared contract library), `:ext-templates` (the
   first-party Templates extension APK), `:ext-naming` (the Naming extension APK, arc 2),
-  `:ext-mlkit` (the ML Kit handwriting-recognizer extension APK, arc 3) and `:ext-markdown` (the
-  Markdown renderer extension APK, arc 4 / H0).
+  `:ext-mlkit` (the ML Kit handwriting-recognizer extension APK, arc 3), `:ext-markdown` (the
+  Markdown renderer extension APK, arc 4 / H0) and `:ext-heading` (the Heading object-provider
+  extension APK, arc 4 / H3).
   **`:extension-api` depends on nothing in `:app`, ever** (Gradle enforces `:app → :extension-api`,
   `:ext-templates → :extension-api`, `:ext-naming → :extension-api`, `:ext-mlkit → :extension-api`,
-  `:ext-markdown → :extension-api`; `:app` and the extension modules never depend on each other). Extension-side caller check = `HostCallerCheck.enforce(ctx,
+  `:ext-markdown → :extension-api`, `:ext-heading → :extension-api`; `:app` and the extension modules
+  never depend on each other — `:ext-heading` reaches the recognizer and the renderer only through the
+  proxies the core hands it). Extension-side caller check = `HostCallerCheck.enforce(ctx,
   BuildConfig.HOST_PACKAGE)` from `:extension-api`, first thing in every stub method. An extension is a separate APK with **no launcher Activity**, bound over
   AIDL; the core trusts it only if `checkSignatures == SIGNATURE_MATCH` (in dev, the shared
   `~/.android/debug.keystore` satisfies this). **Naming + icon convention:** label `NSE · <Name>`
@@ -98,8 +101,8 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   download** — the host asks first; the extension stops at its own budget just under the host's
   timeout). Host side (M1): **one shared
   bind path `ExtensionBinder.call`** for all three clients; `RecognizerClient` + `InkCaps` (caps before
-  the bind); the notebook debug ⋯ owns the model-download dialog flow (offline pre-check via
-  `core/Connectivity`). **Recognized text is never logged on either side** — counts + durations only.
+  the bind); the model-download dialog flow (offline pre-check via `core/Connectivity`) is
+  `extension/RecognizerReadiness` in main source since H3 — the notebook debug ⋯ calls it. **Recognized text is never logged on either side** — counts + durations only.
   M2 froze it: boundary-audit rows 14–17 (`docs/extensions.md`), the capability-point rules 12–17 +
   §"The capability pattern" (the proxy recipe — `RecognizerProxyBinder`, built only with the first
   consumer point, never before), and the "Writing an extension" recognizer paragraph. **Dots** (M2
@@ -115,8 +118,9 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   blank source → `null`. Caps `MAX_MARKDOWN_CHARS 20 000` / `MAX_IMAGE_EDGE_PX 4 096` /
   `RENDER_PADDING_MAX_PX 64`. **All typography lives in the extension** (`MarkdownSpans` /
   `MarkdownBitmap`: base 24 sp, bold headings ×2.0/1.75/1.5/1.25/1.1/1.0) — the core never learns a
-  font size. Nothing in `:app` binds it until H3 (`MarkdownClient` + `MarkdownProxyBinder`). The
-  markdown text is never logged on either side.
+  font size. The core binds it through `MarkdownClient` (H3; `RenderCaps` before the bind,
+  `RenderedImages.copyOut` inward — header size == declared, edge cap) and lends it to object
+  providers through `MarkdownProxyBinder`. The markdown text is never logged on either side.
 - **Content objects** (arc 4 / H1, `docs/notebook.md` §"Content objects", `docs/data.md` §"Object
   rows"): `object` rows are core-owned (identity, provider identity in `style`, **opaque** payload in
   `text` — never parsed, never logged, capped at `MAX_OBJECT_TEXT_CHARS` — bounds `x y width height` in
@@ -138,7 +142,26 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   anchors 8 dp off the drawn selection box (flip / clamp — `ToolbarAnchor`), and its rects join the
   exclusion rects. `ObjectEditDialog` follows the design-system IME pattern (hide via the field's window
   token on Save/Cancel; never earlier — Ratta hardware keyboards). H2 runs on the debug-only
-  `FakeContributions` twin (`src/debug` / `src/release`); H3/H4 put `ObjectProviderClient` behind it.
+  `FakeContributions` twin (`src/debug` / `src/release`); H4 puts `ObjectProviderClient` behind it.
+- **ObjectProvider + the built proxies** (arc 4 / H3, `docs/extensions.md` §"ObjectProvider
+  (contract)", §"The Heading extension", §"MarkdownRenderer / ObjectProvider — host behaviour"): the
+  fifth point (`ACTION_OBJECT_PROVIDER`, `IObjectProvider`, `CreatedObject`) is the **generic
+  content-object point** — describe types/actions · `createFromInk` · `applyAction` · `describeEdit` /
+  `applyEdit` · `render`; the core stores the rows, the provider keeps nothing (rule 18), the payload is
+  opaque (rule 19). **Capabilities reach a provider only as in-parameters** (rule 23): `ObjectProviderClient`
+  mints `RecognizerProxyBinder` (for `createFromInk`) / `MarkdownProxyBinder` (for `render`) **per bind,
+  uid-gated by `ProxyGate`, revoked in the client's own `finally` right after the unbind**, or hands
+  **null** when nothing is installed — the core never fakes a capability. Proxies forward through the
+  core's own clients (own bind / timeout / signature check) via **`runBlocking` on the Binder thread**
+  (never Main), re-apply the caps inward, and map failures to the marshalable set; the Markdown proxy
+  re-wraps the reply into a region it owns (closed in `onTransact`'s `finally`). Two-hop budgets:
+  `createFromInk` 15 s, `render` 8 s; pure calls 2 s. A provider's `IllegalStateException(RECOGNIZER_REQUIRED
+  / MARKDOWN_REQUIRED)` is typed on the host as `CapabilityRequiredException`. `NSE · Heading`
+  (`:ext-heading`, `HeadingText` / `HeadingActions` / `ObjectProviderService`) is the reference
+  provider: `heading` type, parent **H** with `h1`…`h6`, edit `maxChars` 500, single line + 8 dp padding
+  asked of the Markdown proxy, the proxy's reply returned as-is. **`RecognizerReadiness`** (main source,
+  `extension/`) is the M1/M2 model-consent flow lifted out of the debug menu (which now only calls it);
+  the H action uses it in H4. Debug ⋯ "Probe object providers" is the H3 test surface (gone in H5).
 - **Toast vs. dialog:** a toast only confirms something that already happened ("copied"); anything
   the user must notice or act on — why a tap did nothing, a failure, a one-time download — is an
   `AlertDialog` (e-ink: a toast is easy to miss and reads as "broken"). The one helper is
@@ -159,7 +182,7 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
 
 ```sh
 cd ~/git/Notesprout/apps/notesprout_paper
-./gradlew assembleDebug                  # all modules → app + ext-templates + ext-naming + ext-mlkit + ext-markdown debug APKs
+./gradlew assembleDebug                  # all modules → app + ext-templates + ext-naming + ext-mlkit + ext-markdown + ext-heading debug APKs
 ./gradlew testDebugUnitTest              # all modules
 adb -s SN078D10012852 install -r app/build/outputs/apk/debug/app-debug.apk   # SNN (Nomad)
 adb -s 92c16533       install -r app/build/outputs/apk/debug/app-debug.apk   # NA5C
@@ -169,17 +192,20 @@ adb -s <serial> install -r ext-templates/build/outputs/apk/debug/ext-templates-d
 adb -s <serial> install -r ext-naming/build/outputs/apk/debug/ext-naming-debug.apk
 adb -s <serial> install -r ext-mlkit/build/outputs/apk/debug/ext-mlkit-debug.apk      # ~40 MB; the en-US model (~20 MB) downloads on first prepare() — Wi-Fi once per device
 adb -s <serial> install -r ext-markdown/build/outputs/apk/debug/ext-markdown-debug.apk # ~2.5 MB; the Markdown renderer (arc 4)
+adb -s <serial> install -r ext-heading/build/outputs/apk/debug/ext-heading-debug.apk   # ~2.5 MB; the Heading object provider (arc 4 / H3)
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.templates.dev  # BOOX sideload trap — BOOX may
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.naming.dev     #   re-disable a few seconds AFTER
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.mlkit.dev      #   install; re-run enable and confirm with `pm list packages -d`
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.markdown.dev
+adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.heading.dev
 ```
 
 Debug launch: `adb -s <serial> shell am start -n com.symmetricalpalmtree.notesprout.dev/com.symmetricalpalmtree.notesprout.bootstrap.BootstrapActivity`
 (BootstrapActivity is the launcher and the only thing that opens the index; every other screen
 bounces there via `IndexGuard`.) The debug build's library ⋯ menu has "Show recovery key" and
 "Forget cached key" (kills the process → next launch is the Unlock screen); the notebook screen's
-debug ⋯ has "Recognize page (ML Kit)" (present only with `NSE · ML Kit` installed). The app's files are
+debug ⋯ has "Recognize page (ML Kit)" (present only with `NSE · ML Kit` installed), "Insert test
+object" (H1) and "Probe object providers" (H3 — logs the two-hop proxy paths). The app's files are
 readable from `adb shell` at `/sdcard/Android/data/<appId>/files/` (index + `Garden/`).
 
 BOOX trap: `install -r` can leave the package disabled → `pm enable com.symmetricalpalmtree.notesprout.dev`.

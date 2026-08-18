@@ -54,6 +54,21 @@ object ExtensionRegistry {
         all.firstOrNull()
     }
 
+    /**
+     * The one trusted markdown renderer, or null (arc 4 / H3). First by (label, package), the rest
+     * dropped with a `Slog.d` — the same first-of rule as the recognizer.
+     */
+    suspend fun markdownRenderer(context: Context): ProviderRef? = withContext(Dispatchers.IO) {
+        val all = discover(context.applicationContext, ExtensionContract.ACTION_MARKDOWN_RENDERER)
+        for (extra in all.drop(1)) Slog.d(TAG) { "ignoring additional markdown renderer ${extra.component.flattenToShortString()}" }
+        all.firstOrNull()
+    }
+
+    /** Every trusted object provider (arc 4 / H3), ordered by label then package name — all of them contribute. */
+    suspend fun objectProviders(context: Context): List<ProviderRef> = withContext(Dispatchers.IO) {
+        discover(context.applicationContext, ExtensionContract.ACTION_OBJECT_PROVIDER)
+    }
+
     @Suppress("DEPRECATION")
     private fun discover(context: Context, action: String): List<ProviderRef> {
         val pm = context.packageManager

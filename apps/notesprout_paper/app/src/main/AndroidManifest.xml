@@ -16,6 +16,12 @@
         <intent>
             <action android:name="com.symmetricalpalmtree.notesprout.extension.HANDWRITING_RECOGNIZER" />
         </intent>
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesprout.extension.MARKDOWN_RENDERER" />
+        </intent>
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesprout.extension.OBJECT_PROVIDER" />
+        </intent>
     </queries>
 
     <application

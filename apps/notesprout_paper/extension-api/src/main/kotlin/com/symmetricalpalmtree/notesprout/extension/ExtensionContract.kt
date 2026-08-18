@@ -5,11 +5,13 @@ package com.symmetricalpalmtree.notesprout.extension
  * depends on nothing in `:app` and on no library beyond the Kotlin stdlib, so a third party can
  * consume it as a plain artifact.
  *
- * v1 has four extension points: [ACTION_TEMPLATE_PROVIDER] (interface `ITemplateProvider`),
+ * v1 has five extension points: [ACTION_TEMPLATE_PROVIDER] (interface `ITemplateProvider`),
  * [ACTION_NOTEBOOK_NAMER] (interface `INotebookNamer`, arc 2), [ACTION_HANDWRITING_RECOGNIZER]
- * (interface `IHandwritingRecognizer`, arc 3 — a *capability* point: the host binds it and may lend
- * it to other extensions later) and [ACTION_MARKDOWN_RENDERER] (interface `IMarkdownRenderer`,
- * arc 4 — a second capability point: markdown in, image out). `IExtensionStore` (arc 2) is not a
+ * (interface `IHandwritingRecognizer`, arc 3 — a *capability* point: the host binds it and lends it
+ * to other extensions through a proxy), [ACTION_MARKDOWN_RENDERER] (interface `IMarkdownRenderer`,
+ * arc 4 — a second capability point: markdown in, image out) and [ACTION_OBJECT_PROVIDER]
+ * (interface `IObjectProvider`, arc 4 — the generic content-object point; the two capabilities reach
+ * a provider only as in-parameters of its calls). `IExtensionStore` (arc 2) is not a
  * point — it is the host-owned store handed *to* an extension as an in-parameter of a call; its caps
  * are the `STORE_*` constants below.
  */
@@ -34,6 +36,10 @@ object ExtensionContract {
     const val ACTION_MARKDOWN_RENDERER: String =
         "com.symmetricalpalmtree.notesprout.extension.MARKDOWN_RENDERER"
 
+    /** Intent action an object-provider `<service>` declares in its intent-filter (arc 4 / H3). */
+    const val ACTION_OBJECT_PROVIDER: String =
+        "com.symmetricalpalmtree.notesprout.extension.OBJECT_PROVIDER"
+
     /** `<meta-data>` name (on the `<service>`) carrying the extension's API version. */
     const val META_API_VERSION: String =
         "com.symmetricalpalmtree.notesprout.extension.API_VERSION"
@@ -56,11 +62,31 @@ object ExtensionContract {
     /** Most padding (px, all four sides) a markdown render may be asked for. */
     const val RENDER_PADDING_MAX_PX: Int = 64
 
-    // ── Content objects (arc 4 / H1 — the host's `object` rows; `IObjectProvider` arrives in H3) ──────
+    // ── Content objects (arc 4 / H1 — the host's `object` rows; `IObjectProvider` — arc 4 / H3) ──────
 
     /** Longest object payload the host stores in an `object` row / hands to a provider (chars). Opaque
      *  to the host: never parsed, never logged; truncated to this on the way in and on the way out. */
     const val MAX_OBJECT_TEXT_CHARS: Int = 20_000
+
+    /** Longest object `typeId` (chars); typeIds are `[a-z0-9_-]+` (see [isTypeId]). */
+    const val MAX_TYPE_ID_CHARS: Int = 32
+
+    /** Most `describeTypes()` entries the host keeps from one provider. */
+    const val MAX_TYPES: Int = 16
+
+    /** Host cap on the number of live objects one page may hold (creation refused above it). */
+    const val MAX_OBJECTS_PER_PAGE: Int = 200
+
+    /**
+     * The exact `IllegalStateException` message an object provider throws from `createFromInk` when
+     * the `recognizer` in-parameter it needs is null (no recognizer installed). The host compares
+     * the message exactly and names the missing extension to the user; it never binds a provider
+     * for an action whose `requires` bit says so, so this is the belt-and-braces path.
+     */
+    const val RECOGNIZER_REQUIRED: String = "recognizer required"
+
+    /** Same for `render` when the `markdown` in-parameter it needs is null. */
+    const val MARKDOWN_REQUIRED: String = "markdown required"
 
     // ── Selection-toolbar contributions + edit dialogs (arc 4 / H2 — `SelectionAction`, `EditSpec`) ──
     // Described by a provider, drawn by the host under its own e-ink rules. The host truncates strings,
@@ -127,6 +153,14 @@ object ExtensionContract {
 
     /** Extension-namespaced template identity: `"<extension package>:<template id>"`. */
     fun templateIdentity(pkg: String, id: String): String = "$pkg:$id"
+
+    /** Provider identity of an object: `"<extension package>:<typeId>"` (parsed by [parseIdentity]). */
+    fun objectIdentity(pkg: String, typeId: String): String = "$pkg:$typeId"
+
+    /** True if [s] is a well-formed object typeId: `[a-z0-9_-]+`, ≤ [MAX_TYPE_ID_CHARS] chars. */
+    fun isTypeId(s: String): Boolean = s.length in 1..MAX_TYPE_ID_CHARS && TYPE_ID_PATTERN.matches(s)
+
+    private val TYPE_ID_PATTERN = Regex("[a-z0-9_-]+")
 
     /**
      * Split a template identity at the FIRST `:` into `(pkg, id)`. Returns null if there is no `:` or
