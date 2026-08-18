@@ -62,6 +62,32 @@ object ExtensionContract {
      *  to the host: never parsed, never logged; truncated to this on the way in and on the way out. */
     const val MAX_OBJECT_TEXT_CHARS: Int = 20_000
 
+    // ── Selection-toolbar contributions + edit dialogs (arc 4 / H2 — `SelectionAction`, `EditSpec`) ──
+    // Described by a provider, drawn by the host under its own e-ink rules. The host truncates strings,
+    // caps lists and drops what it can't draw; the parcelables' own `require`s catch structural misuse.
+
+    /** Most top-level [SelectionAction]s one provider may contribute; the host drops the rest. */
+    const val MAX_ACTIONS: Int = 16
+
+    /** Most sub-actions under one action (one level only — deeper nesting is dropped by the host). */
+    const val MAX_SUB_ACTIONS: Int = 16
+
+    /** Longest action id (chars); ids are `[A-Za-z0-9_.-]+`. */
+    const val MAX_ACTION_ID_CHARS: Int = 32
+
+    /** Longest action label (chars) — drawn as the button text when the icon name is unknown. */
+    const val MAX_ACTION_LABEL_CHARS: Int = 6
+
+    /** Longest long-press hint the host composes for a contributed button (label + provider label). */
+    const val MAX_ACTION_HINT_CHARS: Int = 40
+
+    /** Longest edit-dialog title / field hint (chars); the host truncates. */
+    const val MAX_EDIT_TITLE_CHARS: Int = 40
+    const val MAX_EDIT_HINT_CHARS: Int = 60
+
+    /** Most characters an edit dialog's field accepts (an [EditSpec.maxChars] above this is clamped). */
+    const val MAX_EDIT_TEXT_CHARS: Int = 4_000
+
     // ── Extension store caps (`IExtensionStore`, enforced by the host) ──────
 
     /** Longest key an extension may store (chars); the empty key is rejected. */

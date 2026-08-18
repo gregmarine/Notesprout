@@ -31,8 +31,8 @@ import kotlinx.coroutines.withContext
 
 /**
  * Debug build only (no-op twin in `src/release`): a ⋯ at the end of the notebook's top bar — the
- * twin of the library `DebugMenu` — with the arc-4 / H1 test surface **"Insert test object"** /
- * **"Delete selection"** (plain [DebugHooks] callbacks into the screen; gone in H5) and the arc-3
+ * twin of the library `DebugMenu` — with the arc-4 / H1 test surface **"Insert test object"** (a
+ * plain [DebugHooks] callback into the screen; gone in H5) and the arc-3
  * test surface **"Recognize page (ML Kit)"**:
  * present only while a trusted `HANDWRITING_RECOGNIZER` extension is installed (re-discovered on
  * every sheet open), it hands the current page's ink — bare x/y geometry via [InkPayload] — to the
@@ -94,9 +94,8 @@ object NotebookDebugMenu {
             if (ref != null) {
                 sheet.addAction(null, activity.getString(R.string.debug_recognize_page)) { recognize(activity, ref, provider) }
             }
-            // Arc 4 / H1 test surface (removed in H5 with the real selection toolbar in place).
+            // Arc 4 / H1 test surface (removed in H5 with the real object provider in place).
             sheet.addAction(null, activity.getString(R.string.debug_insert_test_object)) { hooks.insertTestObject() }
-            sheet.addAction(null, activity.getString(R.string.debug_delete_selection)) { hooks.deleteSelection() }
             sheet.show()
         }
     }

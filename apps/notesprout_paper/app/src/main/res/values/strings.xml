@@ -115,7 +115,10 @@
     <string name="debug_tools_title">Debug tools</string>
     <string name="debug_recognize_page">Recognize page (ML Kit)</string>
     <string name="debug_insert_test_object">Insert test object</string>
-    <string name="debug_delete_selection">Delete selection</string>
+
+    <!-- Selection toolbar + object edit dialog (arc 4 / H2) -->
+    <string name="selection_delete_hint">Delete selection</string>
+    <string name="objects_edit_save">Save</string>
     <string name="recognize_problem_title">Recognize page</string>
     <string name="recognize_nothing">Nothing to recognize</string>
     <string name="recognize_model_needed_title">Recognition model needed</string>

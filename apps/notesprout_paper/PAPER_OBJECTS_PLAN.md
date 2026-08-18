@@ -10,7 +10,7 @@
 > `CLAUDE.md` files. `docs/extensions.md` is the subsystem reference all arcs write into;
 > `docs/notebook.md` and `docs/data.md` gain sections in this arc.
 >
-> **Status: H0 ✅ (8c5361f) · H1 ✅ (62771f3) · H2 ⬜ · H3 ⬜ · H4 ⬜ · H5 ⬜ — H0 user-verified 2026-08-17.**
+> **Status: H0 ✅ (8c5361f) · H1 ✅ (62771f3) · H2 🧪 · H3 ⬜ · H4 ⬜ · H5 ⬜ — H0 user-verified 2026-08-17.**
 
 ## Why
 
@@ -680,7 +680,53 @@ commit + push (Paper) and g-paper commit.
 ---
 
 ### Phase H2 — The selection toolbar + the contribution API + the edit-dialog shell
-**Status:** ⬜ Not started
+**Status:** 🧪 Awaiting device verification (built 2026-08-17; installed on SNN + NA5C + MIP11)
+
+**Outcome (2026-08-17, MIP11 adb-verified by Fable; SNN + NA5C automated agent runs + user by-eye
+verification pending):** `:extension-api` — `SelectionAction` (+ `.aidl`, `requireValid`, `ID_PATTERN`),
+`EditSpec` (+ `.aidl`, `requireValid`), `ActionApplies` / `Requires` (`Int` bit flags with `ALL` masks),
+`IconNames` (13 names + `ALL`), `ExtensionContract.MAX_ACTIONS` / `MAX_SUB_ACTIONS` / `MAX_ACTION_ID_CHARS`
+/ `MAX_ACTION_LABEL_CHARS` / `MAX_ACTION_HINT_CHARS` / `MAX_EDIT_TITLE_CHARS` / `MAX_EDIT_HINT_CHARS` /
+`MAX_EDIT_TEXT_CHARS`; `SelectionActionTest` (6). `:app` — `core/IconCatalog` + real Tabler `ic_heading`,
+`ic_h_1`…`ic_h_6` (fetched from tabler-icons `main`, stroke 2 — the original's hand-drawn 1.5-stroke
+copies were not reused); `extension/ActionCaps` + `EditCaps` (`ActionCapsTest` 9); `notebook/SelectionActions`
+(`ToolbarAction` / `Contribution` / `ToolbarItem`, `shapeOf`, `merge` — `SelectionActionsTest` 5),
+`ToolbarAnchor` (pure placement — `ToolbarAnchorTest` 6), `SelectionToolbar` (both rows, buttons built
+in code, text fallback sized relative to the button square, `state_selected` leaves, `rects()` /
+`contains()`), `ObjectEditDialog` + `dialog_edit_object.xml`, `view_selection_toolbar.xml` included
+twice in `activity_notebook.xml`; `NotebookActivity`: `coreActions` (Delete), `contributions` fetched
+in `openSession`, `showSelectionToolbar` via `whenPenIdle`, hide on `onSelectionDragStarted` /
+`onSelectionDismissed` / navigate, re-show on `onSelectionMoved`, `onSelectionTapped` → one object under
+the tap → `EditCaps` → `ObjectEditDialog`, `pushExclusions` + `overChrome` include the toolbar rects,
+Delete wired to `deleteSelection()`; debug "Delete selection" item + `DebugHooks.deleteSelection` removed;
+`FakeContributions` twins (`src/debug`: provider `debug` / type `box`, parent **T** (unknown icon → text)
+with `t1` (h-1) / `t2` (h-2, active for the object) / `t3` (unknown icon → text), ink-only **Ink** (plus),
+object-only **Obj** (edit); `src/release`: no-ops). Strings `selection_delete_hint`, `objects_edit_save`.
+JVM whole suite green; `assembleDebug` + `:app:assembleRelease` build. **Deviation noted:** the toolbar
+anchors 8 dp off the *drawn* selection box (g-paper inflates the tight bounds by 12 px — `SELECTION_BOX_INFLATE_PX`,
+not in g-paper's public API); with the raw bounds the flipped toolbar touched the box. MIP11 adb run
+(stylus `input stylus motionevent` lassos): strokes → [🗑][T][+]; object → [🗑][T][✎] with H2 selected in
+the sub-toolbar; leaf tap logged + sub-toolbar closed; drag hides + re-anchors; bottom lasso flips; edit
+dialog Save logs the text and hides the IME (MIP11 shows the IME only once typing starts — a keyboard-class
+input device is present); Delete on strokes logged. Trap re-hit: MIP11's `log.tag` reverts to `I` within
+seconds — per-tag `setprop log.tag.<TAG> DEBUG` sticks. Docs: `docs/notebook.md` §"Selection toolbar" +
+§"Edit dialog" + collaborators; `docs/extensions.md` contract table + parcelables + §"Selection-toolbar
+contributions (contract)" with the tiered UI rule; `CLAUDE.md`.
+**Agent runs (Sonnet, one per device):** NA5C — items 1–7 UNREACHABLE by adb (the Onyx engine's ink /
+lasso stream comes only from the SDK `RawInputCallback`, never from injected `MotionEvent`s; heavy synthetic
+stylus injection also left `isPenActive` stuck until a relaunch — don't mix synthetic stylus and finger
+tests in one session there), item 8 finger regressions PASS, no crash. SNN — items 1–7 UNREACHABLE (this
+Android-11 `input stylus` sets no stylus tool type — reads as a finger; no root, `sendevent` denied),
+item 8 finger regressions PASS, no crash. **User by-eye verification of items 1–8 on SNN + NA5C (and 5's
+undo + 6's keyboards on MIP11) is what flips this ✅.**
+
+**Phase-start answers (2026-08-17):** Q1 toolbar 8 dp below the selection, centred, flips above the
+selection when it would clip the bottom strip, clamped between the top bar and the bottom strip; the
+sub-toolbar anchors to the **toolbar** (below it, above when flipped, same centring) · Q2 text-fallback
+buttons are the same `toolbar_button_size` square, label centred, ≤ 6 chars · Q3 the toolbar shows via
+`whenPenIdle` and hides during a selection drag (`onSelectionDragStarted`), re-anchored on
+`onSelectionMoved` · Q4 edit dialog follows the design-system IME pattern (IME shown with the dialog,
+Save/Cancel hide it through the field's window token; nothing hides it early on Ratta).
 
 **Goal:** a core-owned floating selection toolbar exists (Delete), it can host contributed actions
 described by `SelectionAction` (with a sub-toolbar and active-state), and the core has the

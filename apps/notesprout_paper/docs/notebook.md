@@ -19,6 +19,9 @@ delete) and undo/redo arrive in Phase 4.
 | `StrokeRows` | pure mapper `Stroke ⇄ SoilObjectEntity` (format-B blob, `InkColorCodec`, `StrokeStyle` name; unknown → PEN). JVM-tested |
 | `CoverSnapshot` | `paper.renderToBitmap()` → ≤ 512 px long edge → WEBP q100 → `IndexRepository.setCover` |
 | `NotebookToolbar` | `[←] [pen] [eraser] [lasso]`; selected = `state_selected` bordered look; `sync(tool)` from `onToolChanged`; `releaseRender()` on every tap |
+| `SelectionToolbar` / `ToolbarAnchor` | the floating selection toolbar + sub-toolbar (arc 4 / H2): core-drawn buttons from `ToolbarItem`s, show/hide/anchor rules, exclusion rects; the pure placement math (JVM-tested) |
+| `SelectionActions` | `ToolbarAction` / `Contribution` / `ToolbarItem` + the pure `shapeOf` / `merge` (Delete first, provider order, INK / OBJECT / mixed filtering; JVM-tested) |
+| `ObjectEditDialog` | the `EditSpec` → `AlertDialog` shell (Save / Cancel, IME rules) |
 
 ## Layout (`activity_notebook.xml`)
 
@@ -129,9 +132,62 @@ dialog from it.
 
 **Debug ⋯ (H1 test surface, removed in H5):** "Insert test object" creates a `debug:box` object
 (payload `test`, 200×100 px) at the page centre — no provider owns it, so it draws as the placeholder —
-as one undoable `ObjectCreated`; "Delete selection" removes the whole current selection (strokes
-and/or objects) as one undoable `ObjectsDeleted`. Both reach the screen through plain `DebugHooks`
-callbacks; the release twin ignores them.
+as one undoable `ObjectCreated`. It reaches the screen through a plain `DebugHooks` callback; the
+release twin ignores it. (H1's "Delete selection" item went away in H2 — Delete is on the selection
+toolbar.)
+
+## Selection toolbar (arc 4 / H2)
+
+A bordered floating row over the paper while a lasso selection is active — `SelectionToolbar`
+(`view_selection_toolbar.xml`, included twice in `activity_notebook.xml`: the toolbar and its
+**sub-toolbar**, both `GONE` until needed, both FrameLayout children of the root placed by margins).
+Everything on it is core-drawn from descriptions (`docs/extensions.md` §"Selection-toolbar
+contributions"): the core's **Delete** (Tabler `trash`, hint "Delete selection") first, then each
+provider's `ToolbarAction`s — icon buttons (`toolbar_button_size` square, `bg_toolbar_button`) or, when
+the icon name is not in `IconCatalog`, the label as bold text in the same square (sized relative to the
+button so it reads as big as the icons on the tablet tier); long-press hint = the action's hint. Every
+tap calls `paper.releaseRender()` first (chrome release), like the top bar.
+
+**Contents** = `SelectionActions.merge(coreActions, contributions, shape)` (pure, JVM-tested):
+`shapeOf(strokeCount, objectIdentities)` → `Ink` (strokes only) / `OneObject(pkg, typeId)` (exactly one
+object, no strokes) / `Mixed` (anything else). `Ink` shows every provider's `INK` actions; `OneObject`
+shows the `OBJECT` actions of the provider whose key (package) and type match; `Mixed` shows Delete
+only. A parent action is filtered through its leaves and dropped when none survive. Contributions are
+fetched once per notebook open (H2: `FakeContributions`; H4: the object providers). Tapping a **parent**
+toggles the sub-toolbar with its leaves (a second tap closes it; another parent replaces it); leaves
+whose id the provider reports as *active* for the selected object are drawn `state_selected`. Tapping a
+**leaf** closes the sub-toolbar and dispatches: Delete → `deleteSelection()` (`ObjectsDeleted`, one
+undo step; `clearSelection` dismisses → the toolbar hides); anything else → `Listener.onAction(providerKey,
+action)` (H2: logged by the fake; H4: `createFromInk` / `applyAction`).
+
+**When it shows (`ToolbarAnchor`, pure, JVM-tested):** `onSelectionCreated` → `showSelectionToolbar`
+through **`whenPenIdle`** (frame-silence rule; a lasso that is dragged at once never flickers chrome;
+dropped if the selection changed while the gate was closed). Anchored **8 dp below the drawn selection
+box** (g-paper inflates the tight bounds by 12 px — `SELECTION_BOX_INFLATE_PX`, kept in step), centred
+on it, **flipped above** when it would cross the bottom strip, and clamped horizontally into the root
+and vertically between the top bar's bottom and the bottom strip's top. The sub-toolbar hangs off the
+**toolbar** (below it; above it when the toolbar flipped; the other side when that would leave the
+band), centred on it. `onSelectionDragStarted` hides it; `onSelectionMoved` re-shows it (pen-idle) at
+the new place; `onSelectionDismissed`, every page navigation and Delete hide it. **Its rects join the
+exclusion rects** (`pushExclusions` appends `selectionToolbar.rects()`) and `overChrome`, so the stylus
+never inks under it and a finger tap on it releases the render. Note that switching to the pen tool
+dismisses the selection (g-paper: tool change → `onSelectionDismissed`), so "writing across the
+toolbar" is only reachable with the lasso tool — a new outline started over the toolbar is excluded.
+
+## Edit dialog (arc 4 / H2)
+
+`onSelectionTapped(x, y)` (g-paper 0.1.1) with **exactly one selected object, no strokes, and the tap
+inside the object's bounds** → the object's `EditSpec` (H2: `FakeContributions.editSpec` for the
+`debug:box`; H4: the provider's `describeEdit`; null = not editable → nothing) → `EditCaps.sanitize` →
+`whenPenIdle` → `paper.releaseRender()` → **`ObjectEditDialog`** (`dialog_edit_object.xml`): a styled
+`AlertDialog` titled from the spec with one bordered `AppCompatEditText` prefilled with the spec's text
+(hint, `LengthFilter(maxChars)`, single-line with IME *Done* = Save, or multi-line 3–8 rows), **Save /
+Cancel**. IME per `docs/design-system.md`: `SOFT_INPUT_STATE_VISIBLE | ADJUST_RESIZE` before `show()`;
+Save and Cancel are real click listeners that hide the keyboard through the **field's** window token
+while the dialog is alive (BOOX doesn't auto-dismiss it; the decor token is the wrong one); nothing
+hides it earlier, so a Ratta hardware keyboard keeps typing. Save hands the raw text to the caller
+(H2: logged by the fake; H4: `applyEdit` → `ObjectEdited`, re-render, re-select); Cancel does nothing.
+A tap with strokes selected, or outside the object, does nothing.
 
 **Page delete / undo.** `SoilDao.liveChildIds(pageId)` (strokes **and** objects) is what
 `deleteCurrent` soft-deletes and `Structural.childIds` carries; `reconcile` restores / deletes the whole

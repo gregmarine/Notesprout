@@ -112,6 +112,23 @@
         </LinearLayout>
     </LinearLayout>
 
+    <!-- Floating selection toolbar + its sub-toolbar (arc 4 / H2): two included rows, GONE until a
+         lasso selection exists; SelectionToolbar fills and anchors them (FrameLayout margins), and
+         their rects join the exclusion rects + overChrome while visible. -->
+    <include
+        android:id="@+id/selectionToolbar"
+        layout="@layout/view_selection_toolbar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start" />
+
+    <include
+        android:id="@+id/selectionSubToolbar"
+        layout="@layout/view_selection_toolbar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start" />
+
     <!-- "Opening…" popup: visible from the first frame until the page's strokes are on the paper
          (NotebookActivity hides it when opened, pen-idle gated). Not chrome — no exclusion rect;
          no scrim (a grey wash is not e-ink friendly). 75% width via the weight. -->

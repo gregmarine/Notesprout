@@ -31,6 +31,8 @@ import com.symmetricalpalmtree.notesprout.core.IndexGuard
 import com.symmetricalpalmtree.notesprout.core.InkColorCodec
 import com.symmetricalpalmtree.notesprout.core.Slog
 import com.symmetricalpalmtree.notesprout.core.TopGuard
+import com.symmetricalpalmtree.notesprout.extension.ActionApplies
+import com.symmetricalpalmtree.notesprout.extension.EditCaps
 import com.symmetricalpalmtree.notesprout.data.index.IndexRepository
 import com.symmetricalpalmtree.notesprout.data.prefs.BrowseState
 import com.symmetricalpalmtree.notesprout.data.prefs.RecentsPrefs
@@ -50,7 +52,8 @@ import kotlinx.coroutines.withContext
  * The notebook screen: full-bleed g-paper surface with the toolbar and page strip overlaying it.
  * Lifecycle, wiring, chrome and exclusion rects live here; the data lives in [NotebookSession] /
  * [StrokeStore] / [ObjectStore]; the cover in [CoverSnapshot]; the buttons in [NotebookToolbar];
- * content objects reach the paper through [ObjectRenderer] (arc 4).
+ * content objects reach the paper through [ObjectRenderer] (arc 4); the floating selection toolbar
+ * is [SelectionToolbar] (arc 4 / H2 — its contents from [SelectionActions.merge]).
  *
  * Immersive (system bars hidden, transient by swipe). The toolbar is TopGuard-padded because on
  * BOOX the status bar still overlays the window top.
@@ -60,6 +63,7 @@ class NotebookActivity : AppCompatActivity() {
     private lateinit var binding: ActivityNotebookBinding
     private lateinit var paper: PaperView
     private lateinit var toolbar: NotebookToolbar
+    private lateinit var selectionToolbar: SelectionToolbar
     private lateinit var session: NotebookSession
     private lateinit var pageGestures: PageGestures
     private val repo by lazy { IndexRepository() }
@@ -82,6 +86,12 @@ class NotebookActivity : AppCompatActivity() {
     private val renderCache = ObjectRenderCache()
     /** The active lasso selection as last reported (bounds follow moves); null when none. */
     private var currentSelection: Selection? = null
+    /** Selection-toolbar contributions, fetched once per notebook open (H2: the debug fake; H4: providers). */
+    private var contributions: List<Contribution> = emptyList()
+    /** The core's own toolbar actions: Delete only (locked decision Q5). */
+    private val coreActions: List<ToolbarAction> by lazy {
+        listOf(ToolbarAction(SelectionActions.CORE_DELETE_ID, "Del", R.drawable.ic_trash, getString(R.string.selection_delete_hint), ActionApplies.ALL, 0))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -119,6 +129,23 @@ class NotebookActivity : AppCompatActivity() {
         toolbar = NotebookToolbar(
             binding.topBar, binding.btnBack, binding.btnPen, binding.btnEraser, binding.btnLasso, paper,
         ) { close() }
+        selectionToolbar = SelectionToolbar(
+            root = binding.root, paperView = paper.asView(),
+            bar = binding.selectionToolbar.root, subBar = binding.selectionSubToolbar.root,
+            band = {
+                val top = NotebookToolbar.rectOf(binding.topBar)?.bottom
+                val bottom = NotebookToolbar.rectOf(binding.bottomStrip)?.top
+                if (top != null && bottom != null && bottom > top) top..bottom else null
+            },
+            releaseRender = { paper.releaseRender() },
+            listener = object : SelectionToolbar.Listener {
+                override fun onDelete() { deleteSelection() }
+                override fun onAction(providerKey: String?, action: ToolbarAction) {
+                    // H2: the debug fake logs the leaf; H4 dispatches to the owning provider.
+                    FakeContributions.onLeafTapped(providerKey, action)
+                }
+            },
+        )
         binding.notebookName.text = name
         binding.pageIndicator.text = ""
         // Debug builds only (no-op in release): the ⋯ at the end of the top bar. Inside topBar, so the
@@ -129,7 +156,7 @@ class NotebookActivity : AppCompatActivity() {
                 if (!opened) null
                 else RecognizeContext(paper.getStrokes(), session.currentPage.width.toFloat(), session.currentPage.height.toFloat())
             },
-            hooks = DebugHooks(insertTestObject = { insertTestObject() }, deleteSelection = { deleteSelection() }),
+            hooks = DebugHooks(insertTestObject = { insertTestObject() }),
         )
 
         pageGestures = PageGestures(
@@ -175,6 +202,7 @@ class NotebookActivity : AppCompatActivity() {
         paper.loadStrokes(strokes)
         paper.notifyContentChanged()
         liveStrokes = strokes.associateBy { it.id }.toMutableMap()
+        contributions = FakeContributions.contributions()   // H2: local fake; H4: ExtensionRegistry.objectProviders
         opened = true
         setPageIndicator(session.currentIndex + 1, session.pages.size)
         // The "Opening…" popup (visible from the first frame) comes down only now — the page is on
@@ -223,13 +251,35 @@ class NotebookActivity : AppCompatActivity() {
             if (objectIds.isNotEmpty()) paper.notifyContentChanged()
             currentSelection = currentSelection?.let { it.copy(bounds = it.bounds.offset(move.dx, move.dy)) }
             undo.record(Action.Moved(pageId, ids, move.dx, move.dy, objectIds))
+            currentSelection?.let { showSelectionToolbar(it) }   // re-anchor at the new place
         }
-        override fun onSelectionCreated(selection: Selection) { selectionActive = true; currentSelection = selection }
-        override fun onSelectionDismissed() { selectionActive = false; currentSelection = null }
-        /** g-paper 0.1.1: a sub-threshold stylus / finger tap inside the selection box. H1 only logs it;
-         *  H2 opens the tapped object's edit dialog from here. */
+        override fun onSelectionCreated(selection: Selection) {
+            selectionActive = true
+            currentSelection = selection
+            showSelectionToolbar(selection)
+        }
+        override fun onSelectionDragStarted() { selectionToolbar.hide() }
+        override fun onSelectionDismissed() {
+            selectionActive = false
+            currentSelection = null
+            selectionToolbar.hide()
+        }
+        /** g-paper 0.1.1: a sub-threshold stylus / finger tap inside the selection box. With exactly one
+         *  selected object under the tap → its edit dialog (H2: spec from the debug fake, result logged;
+         *  H4: the provider's `describeEdit` / `applyEdit`). Strokes selected, or a tap outside the
+         *  object → nothing. */
         override fun onSelectionTapped(x: Float, y: Float) {
             Slog.d(TAG) { "selection tapped ${x.toInt()},${y.toInt()} (objects=${currentSelection?.contentIds?.size ?: 0})" }
+            val sel = currentSelection ?: return
+            if (sel.strokeIds.isNotEmpty() || sel.contentIds.size != 1) return
+            val obj = liveObjects[sel.contentIds.first()] ?: return
+            if (!obj.bounds.contains(x, y)) return
+            val spec = FakeContributions.editSpec(obj)?.let(EditCaps::sanitize) ?: return
+            whenPenIdle {
+                if (currentSelection != sel || closing) return@whenPenIdle
+                paper.releaseRender()
+                ObjectEditDialog.show(this@NotebookActivity, spec) { text -> FakeContributions.onEditSaved(obj, text) }
+            }
         }
         override fun onToolChanged(tool: Tool) { toolbar.sync(tool) }
     }
@@ -251,6 +301,24 @@ class NotebookActivity : AppCompatActivity() {
         override fun onDeleteRequested() { showDeleteSheet() }
     }
 
+    // ── Selection toolbar (arc 4 / H2) ───────────────────────────────────────
+
+    /**
+     * Show the toolbar for [sel] once the pen is idle (frame-silence rule; a lasso that is dragged at
+     * once never flickers chrome). Contents = Delete + the contributions that apply to the selection's
+     * shape (INK / one OBJECT of a provider's type / mixed → core only); active sub-action ids come
+     * from the object's provider. Dropped if the selection changed while the gate was closed.
+     */
+    private fun showSelectionToolbar(sel: Selection) = whenPenIdle {
+        if (!opened || closing || currentSelection != sel) return@whenPenIdle
+        val objects = sel.contentIds.mapNotNull { liveObjects[it] }
+        val shape = SelectionActions.shapeOf(sel.strokeIds.size, objects.map { it.providerIdentity })
+        val items = SelectionActions.merge(coreActions, contributions, shape)
+        val active = if (shape is SelectionActions.Shape.OneObject) FakeContributions.activeActionIds(objects[0]) else emptySet()
+        selectionToolbar.show(items, active, sel.bounds)
+        binding.root.post { pushExclusions() }
+    }
+
     /** Serialise every page/undo mutation; ignore while not open or once a close is under way. */
     private fun runPageOp(block: suspend () -> Unit) {
         if (!opened || closing) return
@@ -269,6 +337,7 @@ class NotebookActivity : AppCompatActivity() {
         paper.clearSelection()
         selectionActive = false
         currentSelection = null
+        selectionToolbar.hide()
         paper.clearForContentSwap()
         paper.setPageSize(page.width, page.height)
         paper.setTemplate(session.template)
@@ -351,7 +420,7 @@ class NotebookActivity : AppCompatActivity() {
         refreshToPage(a.pageId)
     }
 
-    // ── Content objects (arc 4 / H1 — the debug test surface; the selection toolbar arrives in H2) ──
+    // ── Content objects (arc 4 / H1 debug test object; H2 toolbar Delete) ──────
 
     /** Debug ⋯ "Insert test object": a placeholder-drawn object (`debug:box`, payload `test`) at the
      *  page centre — no provider exists for it, so it exercises store / render / select / move /
@@ -370,8 +439,8 @@ class NotebookActivity : AppCompatActivity() {
         whenPenIdle { paper.notifyContentChanged() }
     }
 
-    /** Debug ⋯ "Delete selection": the whole selection — strokes and/or objects — as one undoable step
-     *  ([Action.ObjectsDeleted]); H2 puts the same operation behind the toolbar's Delete. */
+    /** The selection toolbar's Delete: the whole selection — strokes and/or objects — as one undoable
+     *  step ([Action.ObjectsDeleted]). `clearSelection` dismisses → the toolbar hides. */
     private fun deleteSelection() = runPageOp {
         val sel = currentSelection ?: return@runPageOp
         val pageId = session.currentPage.id
@@ -423,14 +492,14 @@ class NotebookActivity : AppCompatActivity() {
      * Exclusion is applied to the hardware pen layer and filtered model-side by g-paper.
      */
     private fun pushExclusions() {
-        if (!::paper.isInitialized) return
+        if (!::paper.isInitialized || !::selectionToolbar.isInitialized) return
         val view = paper.asView()
         if (!opened) {
             paper.setExclusionRects(listOf(Rect(0, 0, maxOf(view.width, 1), maxOf(view.height, 1))))
             return
         }
         val paperLoc = IntArray(2).also { view.getLocationInWindow(it) }
-        val rects = listOfNotNull(NotebookToolbar.rectOf(binding.topBar), NotebookToolbar.rectOf(binding.bottomStrip))
+        val rects = (listOfNotNull(NotebookToolbar.rectOf(binding.topBar), NotebookToolbar.rectOf(binding.bottomStrip)) + selectionToolbar.rects())
             .map { Rect(it.left - paperLoc[0], it.top - paperLoc[1], it.right - paperLoc[0], it.bottom - paperLoc[1]) }
         paper.setExclusionRects(rects)
     }
@@ -466,7 +535,8 @@ class NotebookActivity : AppCompatActivity() {
         val top = NotebookToolbar.rectOf(binding.topBar)
         val bottom = NotebookToolbar.rectOf(binding.bottomStrip)
         val x = ev.x.toInt(); val y = ev.y.toInt()
-        return (top?.contains(x, y) == true) || (bottom?.contains(x, y) == true)
+        return (top?.contains(x, y) == true) || (bottom?.contains(x, y) == true) ||
+            (::selectionToolbar.isInitialized && selectionToolbar.contains(x, y))
     }
 
     // ── Lifecycle ────────────────────────────────────────────────────────────

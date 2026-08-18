@@ -95,6 +95,10 @@ and the extension modules never depend on each other.
 | `MAX_MARKDOWN_CHARS` | `20_000` — longest markdown source one `IMarkdownRenderer.render` accepts (host truncates before the call; extension re-checks) (arc 4 / H0) |
 | `MAX_IMAGE_EDGE_PX` | `4_096` — a `RenderedImage` may not exceed this on either side (host + extension) (arc 4 / H0) |
 | `RENDER_PADDING_MAX_PX` | `64` — most padding (px, all four sides) a markdown render may ask for (arc 4 / H0) |
+| `MAX_OBJECT_TEXT_CHARS` | `20_000` — longest object payload the host stores / hands to a provider (opaque; arc 4 / H1) |
+| `MAX_ACTIONS` / `MAX_SUB_ACTIONS` | `16` / `16` — top-level `SelectionAction`s per provider / leaves per action (host drops the rest; arc 4 / H2) |
+| `MAX_ACTION_ID_CHARS` / `MAX_ACTION_LABEL_CHARS` / `MAX_ACTION_HINT_CHARS` | `32` / `6` / `40` — action id (`[A-Za-z0-9_.-]+`) / label / the host-composed long-press hint (H2) |
+| `MAX_EDIT_TITLE_CHARS` / `MAX_EDIT_HINT_CHARS` / `MAX_EDIT_TEXT_CHARS` | `40` / `60` / `4_000` — `EditSpec` title / field hint / most characters an edit field accepts (H2) |
 | `STORE_MAX_KEY_CHARS` | `512` — longest `IExtensionStore` key (the empty key is rejected) |
 | `STORE_MAX_VALUE_BYTES` | `256 * 1024` — largest `IExtensionStore` value |
 | `STORE_MAX_KEYS` | `50_000` — most keys one extension's store may hold |
@@ -242,10 +246,28 @@ treats any other value as `UNAVAILABLE`.
   (`Bitmaps.imageSize`) equals the declared size before decoding (H3). A compatible tail may be appended
   after `heightPx` later.
 
+- `SelectionAction(id: String, label: String, iconName: String?, appliesTo: Int, requires: Int,
+  subActions: List<SelectionAction>)` — `writeString ×3 (null-safe icon); writeInt ×2;
+  writeTypedList(subActions)` (H2). One selection-toolbar contribution, drawn by the host (see
+  §"Selection-toolbar contributions"). A **leaf** (no sub-actions) is what a provider is asked to
+  perform; a **parent** opens the host's sub-toolbar and is never performed itself; nesting is one level
+  (the host drops deeper). `SelectionAction.requireValid(id, label, appliesTo, requires)` runs in the
+  constructor — id `[A-Za-z0-9_.-]+` ≤ 32, label non-blank ≤ 6, only known `ActionApplies` / `Requires`
+  bits — so a malformed action is rejected at unmarshal time (pure, JVM-tested). Companion `object`s
+  of `Int` bit flags: **`ActionApplies`** `INK = 1` (a pure-stroke selection) · `OBJECT = 2` (exactly one
+  selected object of one of the provider's types); **`Requires`** `RECOGNIZER = 1` · `MARKDOWN = 2`.
+  **`IconNames`** (`String` constants) is the host's icon catalog: `heading` `h-1`…`h-6` `text` `edit`
+  `x` `check` `plus` `trash` — an unknown or null `iconName` draws the label as text.
+- `EditSpec(title: String, text: String, hint: String, maxChars: Int, multiLine: Boolean)` —
+  `writeString ×3; writeInt; writeInt(0/1)` (H2). How the host draws one object's edit dialog: title,
+  a field prefilled with `text` (for a heading: the words **without** the `#`s), its `hint`, `maxChars`
+  (`1..MAX_EDIT_TEXT_CHARS`, `requireValid` in the constructor with a non-blank title), single- or
+  multi-line. Untrusted on the host side (`EditCaps` truncates before display).
+
 All parcelables carry `@JvmField val CREATOR` and match their `.aidl` declarations.
 `RenderedTemplate.describeContents()` and `RenderedImage.describeContents()` return
 `CONTENTS_FILE_DESCRIPTOR` (they carry the region's fd — `Bundle.hasFileDescriptors()` relies on this);
-`TemplateInfo`, `SchemeField` and `InkStroke` return 0.
+`TemplateInfo`, `SchemeField`, `InkStroke`, `SelectionAction` and `EditSpec` return 0.
 
 ### `HostCallerCheck` (N1 — shared extension-side trust gate)
 
@@ -596,6 +618,42 @@ library).
 - **Verified H0 (install + `dumpsys` only — nothing binds it before H3):** SNN + NA5C + MIP11 —
   `MARKDOWN_RENDERER` resolves to `MarkdownRendererService`, no launcher activity, same debug
   signature as the app; the app still launches.
+
+## Selection-toolbar contributions (contract — arc 4 / H2)
+
+An object provider (the `OBJECT_PROVIDER` point, H3) puts buttons on the notebook's **floating
+selection toolbar** — the bordered row that appears under a lasso selection — and describes the
+**edit dialog** for its objects. It does so by *description only*: `SelectionAction` (id, ≤ 6-char
+label, a catalog icon name, `appliesTo` / `requires` bits, one level of sub-actions) and `EditSpec`
+(title, prefilled text, hint, `maxChars`, multi-line). **The core draws every button, sub-toolbar and
+dialog itself**, under its own e-ink rules — tap dimens (`toolbar_button_size` squares), exclusion
+rects, `releaseRender()` on every tap, pen gating (shown only via `whenPenIdle`, hidden during a
+drag), frame silence, no colour, `state_selected` for an active sub-action. Icons come from the
+core's `IconCatalog` by `IconNames` name; unknown → the label is drawn as text in the same square.
+
+**The UI rule (tiered — locked 2026-08-17, Q4):**
+
+1. **Description → core-drawn** is the only way an extension contributes UI *over the paper* — this
+   arc's toolbar buttons, sub-toolbars and edit dialogs. No extension pixels, layouts or code reach the
+   notebook screen.
+2. **Extension-owned screens off the paper** (an Activity the core launches for a result and returns
+   from) are the recorded future escape hatch for richer UI (Extensions-UI arc). Not built.
+3. **Embedded remote UI (`SurfaceControlViewHost`, `RemoteViews`) and in-process extension code over
+   the paper are never allowed.**
+
+**Host caps (everything inward is untrusted; `ActionCaps` / `EditCaps`, pure + JVM-tested):** lists
+capped at `MAX_ACTIONS` / `MAX_SUB_ACTIONS`; ids re-validated (`[A-Za-z0-9_.-]+`, ≤ 32, unique per
+provider — first wins); labels trimmed + truncated to 6 (blank → dropped); `appliesTo` / `requires`
+masked to known bits (`appliesTo == 0` → dropped); icon name → catalog drawable or null (label as
+text); sub-actions of sub-actions dropped; the long-press hint = `"<label> · <provider label>"` ≤ 40
+chars; edit title ≤ 40, hint ≤ 60, `maxChars` clamped to `1..4 000`, prefill truncated to it. Which
+buttons show for a selection is `SelectionActions.merge` (`docs/notebook.md` §"Selection toolbar"):
+core **Delete** first, then providers in registry order, filtered by `appliesTo` — a stroke-only
+selection shows `INK` actions of every provider; exactly one object shows the `OBJECT` actions of the
+provider owning its type; anything mixed shows Delete only.
+
+Verified H2 with a debug-only stand-in (`FakeContributions`, `src/debug` — a no-op twin in
+`src/release`) before any extension is behind it; H3/H4 replace it with `ObjectProviderClient`.
 
 ## Host behaviour (`:app`, package `extension/`)
 

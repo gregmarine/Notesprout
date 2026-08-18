@@ -11,7 +11,7 @@ global-index model, global encryption model, and e-ink design philosophy — and
   Naming extension), then `PAPER_RECOGNITION_PLAN.md` (arc 3, complete + frozen 2026-08-17: the
   engine-neutral `HANDWRITING_RECOGNIZER` capability point + the ML Kit extension `NSE · ML Kit`,
   debug-only "Recognize page" test surface), then **`PAPER_OBJECTS_PLAN.md` (arc 4, in progress —
-  H0 ✅ 8c5361f 2026-08-17: content objects in the `.soil` + the selection toolbar with its
+  H0 ✅ 8c5361f · H1 ✅ 62771f3 · H2 🧪 2026-08-17: content objects in the `.soil` + the selection toolbar with its
   extension-contribution API + the `MARKDOWN_RENDERER` capability point / `NSE · Markdown` + the
   generic `OBJECT_PROVIDER` point / `NSE · Heading`, the two proxies, g-paper 0.1.1)** — read all
   five top-to-bottom at the start of every session; **arc 4 is the active plan — start at its next
@@ -125,7 +125,20 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   `ContentRenderer`: cached bitmap or dashed placeholder, live-drag pair, `hitTargets` = object bounds;
   `ObjectRenderCache` is session-only (no stored bitmap, ever). Page delete / undo carry objects with
   strokes (`liveChildIds`); every object action is one undoable step. The debug ⋯ "Insert test object"
-  / "Delete selection" items are the H1 test surface (gone in H5).
+  item is the H1 test surface (gone in H5; its "Delete selection" twin became the toolbar Delete in H2).
+- **Selection toolbar + contributed UI** (arc 4 / H2, `docs/notebook.md` §"Selection toolbar" +
+  §"Edit dialog", `docs/extensions.md` §"Selection-toolbar contributions"): the floating toolbar over a
+  lasso selection is **core-drawn from descriptions** — `SelectionAction` (id, ≤ 6-char label, catalog
+  icon name, `ActionApplies` / `Requires` bits, one level of sub-actions) and `EditSpec` — through
+  `ActionCaps` / `EditCaps` (untrusted inward), `IconCatalog` (`IconNames` → Tabler drawables; unknown →
+  the label as text) and `SelectionActions.merge` (Delete first, provider order, INK / one-OBJECT /
+  mixed → Delete only). **The UI rule is tiered:** description → core-drawn is the only UI over the
+  paper; extension-owned screens *off* the paper are the recorded future escape hatch; remote UI /
+  in-process extension code over the paper never. Toolbar shows via `whenPenIdle`, hides during a drag,
+  anchors 8 dp off the drawn selection box (flip / clamp — `ToolbarAnchor`), and its rects join the
+  exclusion rects. `ObjectEditDialog` follows the design-system IME pattern (hide via the field's window
+  token on Save/Cancel; never earlier — Ratta hardware keyboards). H2 runs on the debug-only
+  `FakeContributions` twin (`src/debug` / `src/release`); H3/H4 put `ObjectProviderClient` behind it.
 - **Toast vs. dialog:** a toast only confirms something that already happened ("copied"); anything
   the user must notice or act on — why a tap did nothing, a failure, a one-time download — is an
   `AlertDialog` (e-ink: a toast is easy to miss and reads as "broken"). The one helper is
