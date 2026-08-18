@@ -1138,7 +1138,10 @@ three (app + ML Kit ext). **User: "first run still delayed" → measured on NA5C
 start 1.6 s → prime 1.9 s = ~3.5 s cold, but the H → level gap was 1.9 s → the cue was too late. Options
 lasso-time / open-time / leave; **user chose open-time**: `ObjectActions.warmAtOpen()` after
 `loadProviders` (recognizer needed by a contribution + installed) — verified NA5C: process up 18 ms
-after providers, primed ~7 s after open; H-tap warm kept as re-warm. Installed all three.
+after providers, primed ~7 s after open; H-tap warm kept as re-warm. Installed all three. User: "so much
+better". **Then: the "Recognizing…" popup removed from the heading create** (user wants to see it
+without; a warm create is ~50–300 ms; `busy` guard stays; the debug Recognize page keeps its own popup;
+re-add in `ObjectActions.create` on request).
 
 ---
 

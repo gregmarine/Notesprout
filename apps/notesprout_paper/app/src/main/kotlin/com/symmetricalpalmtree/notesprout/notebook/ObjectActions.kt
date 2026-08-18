@@ -142,18 +142,21 @@ class ObjectActions(
         }
     }
 
-    /** READY path: "Recognizing…" popup for the whole call, then the listener puts the object on the page. */
+    /**
+     * READY path: the call, then the listener puts the object on the page. **No "Recognizing…" popup**
+     * (H5, user's call after the warm-up landed: a warm createFromInk is ~50–300 ms, and the popup's
+     * show + dismiss was two chrome frames the eye had to wait through; the debug Recognize page keeps
+     * its own). [busy] still drops a second tap while the call is in flight. Re-add here if it ever
+     * feels wrong: `Dialogs.style(AlertDialog.Builder(activity).setMessage(R.string.recognize_running)…)`.
+     */
     private suspend fun create(providerKey: String, client: ObjectProviderClient, action: ToolbarAction, strokes: List<Stroke>, bounds: Bounds) {
         if (activity.isFinishing || activity.isDestroyed) return
-        val popup = Dialogs.style(AlertDialog.Builder(activity).setMessage(R.string.recognize_running).setCancelable(false).create())
-        popup.show()
         try {
             val ink = withContext(Dispatchers.Default) { InkPayload.fromStrokes(strokes) }
             val t0 = System.currentTimeMillis()
             val created = client.createFromInk(action.id, ink, bounds.width, bounds.height)
             Slog.d(TAG) { "createFromInk ${action.id}: ${ink.size} strokes → ${if (created == null) "nothing" else "type ${created.typeId}"} in ${System.currentTimeMillis() - t0} ms" }
             if (created == null) {
-                popup.dismiss()
                 Dialogs.problem(activity, R.string.objects_unreadable_title, R.string.objects_unreadable_body)
                 return
             }
@@ -164,8 +167,6 @@ class ObjectActions(
             problem(R.string.recognize_still_downloading)
         } catch (e: ExtensionCallException) {
             failed(providerKey, "createFromInk", e)
-        } finally {
-            if (popup.isShowing) popup.dismiss()
         }
     }
 

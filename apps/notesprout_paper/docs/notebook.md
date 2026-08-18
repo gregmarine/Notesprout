@@ -23,7 +23,7 @@ delete) and undo/redo arrive in Phase 4.
 | `SelectionActions` | `ToolbarAction` / `Contribution` / `ToolbarItem` + the pure `shapeOf` / `merge` (Delete first, provider order, INK / OBJECT / mixed filtering; JVM-tested) |
 | `ObjectEditDialog` | the `EditSpec` → `AlertDialog` shell (Save / Cancel, IME rules) |
 | `ObjectProviders` | the loaded provider set for one open (arc 4 / H4): refs by package, recognizer / Markdown refs, `contributions`, the resume `signature`; `load` (IO binds) |
-| `ObjectActions` | the provider-facing flows (H4): `requires` guards, `RecognizerReadiness`, "Recognizing…" popup, `createFromInk` / `applyAction` / `describeEdit` / `applyEdit`, every failure dialog; hands results to the screen's `objectListener` |
+| `ObjectActions` | the provider-facing flows (H4): `requires` guards, `RecognizerReadiness`, `createFromInk` (no popup since H5) / `applyAction` / `describeEdit` / `applyEdit`, every failure dialog; hands results to the screen's `objectListener` |
 | `ObjectRenderPass` | the cache fill (H4): objects grouped by provider → one `renderAll` bind per provider → decode → `Result`s the screen applies |
 
 ## Layout (`activity_notebook.xml`)
@@ -242,8 +242,10 @@ with no recognizer installed → "This action needs a handwriting recognizer ext
 with no Markdown renderer → "…needs the NSE · Markdown extension"; `MAX_OBJECTS_PER_PAGE` → "page full".
 Then `RecognizerReadiness.ensureReady` (READY → at once; NEEDS_DOWNLOAD → consent → download → continue
 with no second tap; the same flow as the debug Recognize page, titled "Couldn't apply the action") →
-the **"Recognizing…" popup** (the M1 one, no buttons, up until the object is on the page or a dialog says
-why not) → `InkPayload.fromStrokes` → `ObjectProviderClient.createFromInk(leaf, ink, bounds.w, bounds.h)`
+**no popup** (H5: the M1 "Recognizing…" popup was here through H4; with the open-time warm-up a create
+is ~50–300 ms and the popup's two chrome frames were the slower part — removed at the user's request, the
+`busy` guard still drops a second tap; re-add in `ObjectActions.create` if it ever feels off) →
+`InkPayload.fromStrokes` → `ObjectProviderClient.createFromInk(leaf, ink, bounds.w, bounds.h)`
 (15 s, recognizer proxy inside) → **null** → "Couldn't read the handwriting — try writing larger or clearer"
 and the ink is untouched · a `CreatedObject` → `objectListener.onCreated` under `pageOps`: the strokes must
 still be live (erased meanwhile, or the page turned during the consent dialog → dropped) → `PageObject`

@@ -167,7 +167,7 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
 - **Objects end to end** (arc 4 / H4, `docs/notebook.md` §"Objects — actions, edit, render pass"): the
   screen's three H4 collaborators are `ObjectProviders` (loaded once per open **after** `opened` — its
   binds never hold the Opening popup; resume compares the discovery signature and reloads on a change),
-  `ObjectActions` (guards recognizer → Markdown → page cap, `RecognizerReadiness`, "Recognizing…" popup,
+  `ObjectActions` (guards recognizer → Markdown → page cap, `RecognizerReadiness`, no popup since H5,
   the provider calls, **every failure dialog** — core `objects_*` strings) and `ObjectRenderPass` (objects
   grouped by provider → **`ObjectProviderClient.renderAll` = one bind + one Markdown proxy per provider**
   → decode → the screen caches, sizes the object to its image, one pen-idle frame). `NotebookActivity`
