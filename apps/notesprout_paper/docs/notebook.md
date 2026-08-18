@@ -227,13 +227,15 @@ position — until H5 it re-numbered them to `MAX+1`, which persisted a scramble
 mid-line run (only a stroke with no row at all is upserted after the last). Ink undone before these
 fixes may still be scrambled in its rows (rewrite it).
 
-**Warm-up cue (H5, user's design):** opening a parent's sub-toolbar (`SelectionToolbar.Listener.
-onParentOpened` — the H tap) calls `ObjectActions.warm(action)`: for an action that declares
-`Requires.RECOGNIZER` with a recognizer installed, one `RecognizerClient.status()` bind (throttled to
-one per 20 s) starts the recognizer's process while the user picks H1–H6; the ML Kit extension primes
-its engine with a throwaway inference as soon as its client is built (`ModelManager.prime`), so the
-first real `createFromInk` no longer pays the lazy model load (1.5–4 s cold on the fleet). Nothing
-crosses but the call, nothing is stored, a failure is a log line.
+**Warm-up (H5, user's design):** a cold recognizer costs ~1.6 s of process start + ~1.9 s of lazy
+model load on the BOOX — measured, and more than the H → level gap can hide — so `ObjectActions.
+warmAtOpen()` runs right after the providers load: if any contribution needs `Requires.RECOGNIZER` and
+a recognizer is installed, one `RecognizerClient.status()` bind (throttled to one per 20 s) starts its
+process while the user is still writing; the ML Kit extension primes its engine with a throwaway
+inference as soon as its client is built (`ModelManager.prime`; NA5C: process up 18 ms after the
+providers, primed ~7 s after open). In practice once per app session — the process stays cached; the H
+tap (`SelectionToolbar.Listener.onParentOpened` → `warm(action)`) re-warms if the system evicted it.
+Nothing crosses but the call, nothing is stored, a failure is a log line.
 
 **INK leaf** (`ObjectActions.perform`, strokes-only selection): guards in this order — `Requires.RECOGNIZER`
 with no recognizer installed → "This action needs a handwriting recognizer extension…"; `Requires.MARKDOWN`

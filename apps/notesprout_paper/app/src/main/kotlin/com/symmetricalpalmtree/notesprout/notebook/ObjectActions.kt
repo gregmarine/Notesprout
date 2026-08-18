@@ -66,6 +66,24 @@ class ObjectActions(
      */
     fun warm(action: ToolbarAction) {
         if (action.requires and Requires.RECOGNIZER == 0) return
+        warmRecognizer()
+    }
+
+    /**
+     * Warm-up at notebook open (H5, user's choice after measuring: cold ML Kit = ~1.6 s process start
+     * + ~1.9 s lazy model load on the BOOX, more than the H → level gap can hide): once the providers
+     * are loaded, if any contribution needs the recognizer, start its process now — while the user is
+     * still writing — so the first heading of the session is warm. In practice once per app session
+     * (the process stays cached); the H-tap cue above re-warms if the system evicted it.
+     */
+    fun warmAtOpen() {
+        val p = providers()
+        val needed = p.contributions.any { c -> c.actions.any { it.requires and Requires.RECOGNIZER != 0 || it.subActions.any { s -> s.requires and Requires.RECOGNIZER != 0 } } }
+        if (!needed) return
+        warmRecognizer()
+    }
+
+    private fun warmRecognizer() {
         val ref = providers().recognizerRef ?: return
         val now = System.currentTimeMillis()
         if (now - lastWarmMs < WARM_INTERVAL_MS) return

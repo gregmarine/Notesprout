@@ -181,9 +181,10 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   is awaited under it — **so a slow provider queues flips / undo behind it** (bounded: bind 3 s +
   render 10 s; accepted in H5, not redesigned). OBJECT actions guard `Requires.MARKDOWN` only; edits
   guard nothing. **Frame at once on the inline render** (`applyRenderResults(atOnce = true)` from
-  `renderNow`; the background pass stays pen-idle) and **warm-up on the H tap**
-  (`SelectionToolbar.Listener.onParentOpened` → `ObjectActions.warm` → one recognizer `status()` bind
-  ≤ 1 / 20 s; the ML Kit ext primes its engine after `buildClient`) — both H5, user-designed. **Undo shapes:** `ObjectCreated` is recorded after the inline render (rendered
+  `renderNow`; the background pass stays pen-idle) and **recognizer warm-up at notebook open**
+  (`ObjectActions.warmAtOpen` after providers load → one `status()` bind ≤ 1 / 20 s; the H tap
+  `onParentOpened` → `warm` re-warms; the ML Kit ext primes its engine after `buildClient` — cold =
+  ~1.6 s process + ~1.9 s model load on the BOOX, measured) — both H5, user-designed. **Undo shapes:** `ObjectCreated` is recorded after the inline render (rendered
   bounds), `ObjectEdited`'s `before` is re-anchored at the final x/y (a drag during the round-trip is
   its own `Moved`); `StrokeStore.restore` un-deletes rows **in place** (writing order survives undo;
   `maxOrder` counts soft-deleted rows so it never ties); `NotebookSession`'s structural ops and

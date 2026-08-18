@@ -1134,7 +1134,11 @@ given: warm at open / leave / keep-alive binds; **user's design: warm on the H t
 opening is the intent cue → `SelectionToolbar.Listener.onParentOpened` → `ObjectActions.warm` (one
 recognizer `status()` bind, ≤ 1 per 20 s, `Requires.RECOGNIZER` actions only) + ML Kit's
 `ModelManager.prime` (throwaway inference after `buildClient`). Built, JVM green, installed on all
-three (app + ML Kit ext).
+three (app + ML Kit ext). **User: "first run still delayed" → measured on NA5C:** H tap → process
+start 1.6 s → prime 1.9 s = ~3.5 s cold, but the H → level gap was 1.9 s → the cue was too late. Options
+lasso-time / open-time / leave; **user chose open-time**: `ObjectActions.warmAtOpen()` after
+`loadProviders` (recognizer needed by a contribution + installed) — verified NA5C: process up 18 ms
+after providers, primed ~7 s after open; H-tap warm kept as re-warm. Installed all three.
 
 ---
 

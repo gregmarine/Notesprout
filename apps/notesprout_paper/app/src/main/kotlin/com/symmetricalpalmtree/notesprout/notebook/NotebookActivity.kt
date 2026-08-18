@@ -252,6 +252,7 @@ class NotebookActivity : AppCompatActivity() {
         renderFailed.clear()
         scheduleRenderPass()
         currentSelection?.let { showSelectionToolbar(it) }
+        objectActions.warmAtOpen()   // the recognizer's process starts + primes while the user is still writing (H5)
     }
 
     private fun failOpen(reason: String) {
