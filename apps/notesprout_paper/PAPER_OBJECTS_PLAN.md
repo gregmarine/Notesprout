@@ -1125,6 +1125,17 @@ no `SecurityException`, no text/payload in any log line on any device:**
   render pass 70–383 ms for 2 objects; the two disabled packages on the device are unrelated
   (`sprout.canvas.lab.dev`, `gpaper.demo`).
 
+**User's second look (2026-08-18) → two more H5 changes:** (1) "render after converting / changing
+the level is sluggish, hover-related" → the inline render frame was `whenPenIdle`-gated like the
+toolbar → `applyRenderResults(atOnce = true)` on the inline path (background pass unchanged); (2) "the
+first conversion is slow — extension load timing?" → not a race: bind-per-operation means the ML Kit
+process (and its lazy first-inference model load) is cold on the first heading of a session. Options
+given: warm at open / leave / keep-alive binds; **user's design: warm on the H tap** — the sub-toolbar
+opening is the intent cue → `SelectionToolbar.Listener.onParentOpened` → `ObjectActions.warm` (one
+recognizer `status()` bind, ≤ 1 per 20 s, `Requires.RECOGNIZER` actions only) + ML Kit's
+`ModelManager.prime` (throwaway inference after `buildClient`). Built, JVM green, installed on all
+three (app + ML Kit ext).
+
 ---
 
 ## Appendix A — Constants + strings (this arc)

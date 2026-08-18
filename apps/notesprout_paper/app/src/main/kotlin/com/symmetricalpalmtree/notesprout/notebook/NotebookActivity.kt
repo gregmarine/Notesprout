@@ -158,6 +158,9 @@ class NotebookActivity : AppCompatActivity() {
             releaseRender = { paper.releaseRender() },
             listener = object : SelectionToolbar.Listener {
                 override fun onDelete() { deleteSelection() }
+                override fun onParentOpened(providerKey: String?, action: ToolbarAction) {
+                    if (providerKey != null && opened && !closing) objectActions.warm(action)
+                }
                 override fun onAction(providerKey: String?, action: ToolbarAction) {
                     val sel = currentSelection ?: return
                     if (providerKey == null || !opened || closing) return
@@ -573,10 +576,13 @@ class NotebookActivity : AppCompatActivity() {
         showSelectionToolbar(sel)
     }
 
-    /** Render [objects] inline (IO) and apply — the create / edit path, awaited under [pageOps]. */
+    /** Render [objects] inline (IO) and apply — the create / apply / edit path, awaited under [pageOps].
+     *  The frame is presented **at once** (H5): the user just tapped a toolbar button or Save — the pen
+     *  is up (hovering), `releaseRender` already ran — so waiting for pen-idle only delayed the heading
+     *  until the pen left hover range. */
     private suspend fun renderNow(objects: List<PageObject>) {
         val page = session.currentPage
-        applyRenderResults(renderPass.render(objects, providers, page.width.toFloat(), dpi()))
+        applyRenderResults(renderPass.render(objects, providers, page.width.toFloat(), dpi()), atOnce = true)
     }
 
     /**
@@ -604,8 +610,9 @@ class NotebookActivity : AppCompatActivity() {
         }
     }
 
-    /** Main: cache the images, size each object to its image (persisted; anchored top-left), one frame pen-idle. */
-    private fun applyRenderResults(results: List<ObjectRenderPass.Result>) {
+    /** Main: cache the images, size each object to its image (persisted; anchored top-left), one frame —
+     *  pen-idle for the background pass (the user may be writing), [atOnce] for the inline path. */
+    private fun applyRenderResults(results: List<ObjectRenderPass.Result>, atOnce: Boolean = false) {
         var changed = false
         for (r in results) {
             val o = liveObjects[r.id] ?: continue
@@ -621,7 +628,9 @@ class NotebookActivity : AppCompatActivity() {
                 session.objectStore.updatePayloadAndBounds(sized.id, sized.payload, sized.x, sized.y, sized.width, sized.height)
             }
         }
-        if (changed) whenPenIdle { if (opened && !closing) paper.notifyContentChanged() }
+        if (!changed) return
+        if (atOnce) { if (opened && !closing) paper.notifyContentChanged() }
+        else whenPenIdle { if (opened && !closing) paper.notifyContentChanged() }
     }
 
     private fun dpi(): Float = resources.displayMetrics.densityDpi.toFloat()

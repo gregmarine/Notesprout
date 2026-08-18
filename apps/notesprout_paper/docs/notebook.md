@@ -227,6 +227,14 @@ position — until H5 it re-numbered them to `MAX+1`, which persisted a scramble
 mid-line run (only a stroke with no row at all is upserted after the last). Ink undone before these
 fixes may still be scrambled in its rows (rewrite it).
 
+**Warm-up cue (H5, user's design):** opening a parent's sub-toolbar (`SelectionToolbar.Listener.
+onParentOpened` — the H tap) calls `ObjectActions.warm(action)`: for an action that declares
+`Requires.RECOGNIZER` with a recognizer installed, one `RecognizerClient.status()` bind (throttled to
+one per 20 s) starts the recognizer's process while the user picks H1–H6; the ML Kit extension primes
+its engine with a throwaway inference as soon as its client is built (`ModelManager.prime`), so the
+first real `createFromInk` no longer pays the lazy model load (1.5–4 s cold on the fleet). Nothing
+crosses but the call, nothing is stored, a failure is a log line.
+
 **INK leaf** (`ObjectActions.perform`, strokes-only selection): guards in this order — `Requires.RECOGNIZER`
 with no recognizer installed → "This action needs a handwriting recognizer extension…"; `Requires.MARKDOWN`
 with no Markdown renderer → "…needs the NSE · Markdown extension"; `MAX_OBJECTS_PER_PAGE` → "page full".
@@ -264,7 +272,8 @@ WEBP decoded (`Bitmaps.decodeBounded`, edge cap) → `Result(id, payload, maxWid
 screen applies on Main (`applyRenderResults`): skip if the object is gone or its payload moved on; null →
 `renderFailed` (no retry until the next page load, a provider reload, or an edit of that object); else
 `renderCache.put` and, when the image size differs, `width/height` from the image (persisted; anchored
-top-left) → **one `notifyContentChanged` through `whenPenIdle`**. Two entry points: **inline** (`renderNow`,
+top-left) → **one `notifyContentChanged`** — through `whenPenIdle` for the background pass, **at once**
+for the inline path (H5). Two entry points: **inline** (`renderNow`,
 awaited under `pageOps` by create / apply / edit — so a slow provider queues page flips / undo behind
 it for at most bind 3 s + render 10 s; known, accepted in H5) and **background** (`scheduleRenderPass` — page load,
 navigate, undo reload, provider reload, and after a selection move with objects (an object pushed against
@@ -299,10 +308,12 @@ set. Objects reload with strokes on every `refreshToPage`.
 
 No app frame is presented while `paper.isPenActive` — the strip text only changes through
 `whenPenIdle {}` (re-polls every `PEN_ACTIVE_TAIL_MS`). Nothing else on the screen repaints
-during writing. **Two deliberate exceptions (H5):** the selection toolbar on `onSelectionCreated` /
-`onSelectionMoved` and the object edit dialog on `onSelectionTapped` show at once — both fire with the
-pen up (and typically hovering), after g-paper has itself presented the selection frame; gating them on
-`isPenActive` made them wait for the pen to leave hover range.
+during writing. **Three deliberate exceptions (H5):** the selection toolbar on `onSelectionCreated` /
+`onSelectionMoved`, the object edit dialog on `onSelectionTapped`, and the **inline render frame**
+(`renderNow` after create / apply / edit — `applyRenderResults(atOnce = true)`) present at once — all
+fire with the pen up (and typically hovering) right after a tap, after `releaseRender` / g-paper's own
+selection frame; gating them on `isPenActive` made the toolbar, the dialog and the freshly rendered
+heading wait for the pen to leave hover range. The *background* pass keeps the gate.
 
 ## Library side
 

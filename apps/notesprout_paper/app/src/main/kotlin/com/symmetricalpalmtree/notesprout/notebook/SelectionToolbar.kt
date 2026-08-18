@@ -45,6 +45,8 @@ class SelectionToolbar(
 ) {
     interface Listener {
         fun onDelete()
+        /** A parent action's sub-toolbar just opened — the user is about to pick a leaf (a warm-up cue). */
+        fun onParentOpened(providerKey: String?, action: ToolbarAction) {}
         fun onAction(providerKey: String?, action: ToolbarAction)
     }
 
@@ -106,7 +108,7 @@ class SelectionToolbar(
         if (action.isParent) {
             // Toggle this parent's sub-toolbar (a second tap closes it; another parent replaces it).
             openParent = if (openParent?.action?.id == action.id) null else item
-            openParent?.let { buildSub(it) }
+            openParent?.let { buildSub(it); listener.onParentOpened(it.providerKey, action) }
             anchor()
             return
         }

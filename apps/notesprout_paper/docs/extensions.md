@@ -501,6 +501,13 @@ are not stored anywhere by the core (no `page_text`, no `.soil` / index change).
 
 ## The ML Kit extension (`:ext-mlkit` — arc 3 / M0)
 
+> **H5 addendum — engine priming.** ML Kit loads the model into the recognizer lazily on the **first**
+> `recognize` (1.5–4 s on the fleet). `ModelManager.buildClient` now runs one throwaway inference on a
+> synthetic two-point stroke on a daemon thread right after the client is built (`prime`) — process
+> start with a remembered model, or the end of the consent chain — so the first real call is warm. The
+> result is discarded and never logged; a prime failure is a `Log.w` and changes no state. The host's
+> cue is the H sub-toolbar opening (`ObjectActions.warm` → one `status()` bind, ≤ 1 per 20 s).
+
 The first implementation of `HANDWRITING_RECOGNIZER`, using **Google ML Kit Digital Ink Recognition**
 (`com.google.mlkit:digital-ink-recognition:19.0.0` — the same artifact + version the original Notesprout
 ships; on-device, no Play Services required). **The dependency lives in `:ext-mlkit` only** — never

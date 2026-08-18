@@ -55,6 +55,30 @@ class ObjectActions(
     }
 
     private var busy = false
+    private var lastWarmMs = 0L
+
+    /**
+     * Warm-up cue (H5, user's design): the H sub-toolbar just opened, so a leaf that needs the
+     * recognizer is likely next — bind the recognizer once for a `status()` so its process starts
+     * (and, on the ML Kit side, primes its engine) while the user is still choosing H1–H6. Throttled
+     * to one bind per [WARM_INTERVAL_MS]; nothing crosses but the call itself, nothing is stored, no
+     * dialog on failure. Only for actions that declare `Requires.RECOGNIZER` with a recognizer installed.
+     */
+    fun warm(action: ToolbarAction) {
+        if (action.requires and Requires.RECOGNIZER == 0) return
+        val ref = providers().recognizerRef ?: return
+        val now = System.currentTimeMillis()
+        if (now - lastWarmMs < WARM_INTERVAL_MS) return
+        lastWarmMs = now
+        activity.lifecycleScope.launch {
+            try {
+                val status = RecognizerClient(activity, ref).status()
+                Slog.d(TAG) { "warm-up: recognizer status $status" }
+            } catch (e: ExtensionCallException) {
+                Slog.d(TAG) { "warm-up failed: ${e.message}" }
+            }
+        }
+    }
 
     /**
      * A leaf action tapped on the toolbar. [strokes] = the selection's strokes (INK shape when
@@ -172,6 +196,8 @@ class ObjectActions(
     private fun problem(messageRes: Int) = Dialogs.problem(activity, R.string.objects_problem_title, messageRes)
 
     private companion object {
+        /** Warm-up binds at most this often (a bind pair per H tap would be waste). */
+        private const val WARM_INTERVAL_MS = 20_000L
         const val TAG = "ObjectActions"
     }
 }

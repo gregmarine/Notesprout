@@ -49,6 +49,10 @@ import java.util.concurrent.TimeUnit
 object ModelManager {
 
     private const val TAG = "ModelManager"
+
+    /** How long the throwaway priming inference may take before it is abandoned (it keeps running; the thread is a daemon). */
+
+    private const val PRIME_AWAIT_MS = 30_000L
     private const val LANGUAGE_TAG = "en-US"
     private const val PREFS = "model"
     private const val KEY_PRESENT = "present:$LANGUAGE_TAG"
@@ -215,10 +219,37 @@ object ModelManager {
     }
 
     private fun buildClient(m: DigitalInkRecognitionModel) {
+        val built: DigitalInkRecognizer
         synchronized(lock) {
             if (recognizer != null) return
-            recognizer = DigitalInkRecognition.getClient(DigitalInkRecognizerOptions.builder(m).build())
+            built = DigitalInkRecognition.getClient(DigitalInkRecognizerOptions.builder(m).build())
+            recognizer = built
             if (BuildConfig.DEBUG) Log.d(TAG, "client built")
         }
+        prime(built)
+    }
+
+    /**
+     * Prime the engine (H5): ML Kit loads the model into the recognizer lazily, on the **first**
+     * `recognize` — 1.5–4 s on the fleet, which the first heading of a session used to pay. One
+     * throwaway inference on a synthetic dot, off the Binder thread, right after the client is built
+     * (process start / consent path), so a real call that follows is warm. Result discarded, never
+     * logged; a failure here is only a log line — `status()` and the real calls are unaffected.
+     */
+    private fun prime(r: DigitalInkRecognizer) {
+        Thread({
+            val t0 = System.currentTimeMillis()
+            try {
+                val stroke = com.google.mlkit.vision.digitalink.recognition.Ink.Stroke.builder()
+                    .addPoint(com.google.mlkit.vision.digitalink.recognition.Ink.Point.create(10f, 10f))
+                    .addPoint(com.google.mlkit.vision.digitalink.recognition.Ink.Point.create(12f, 12f))
+                    .build()
+                val ink = com.google.mlkit.vision.digitalink.recognition.Ink.builder().addStroke(stroke).build()
+                Tasks.await(r.recognize(ink), PRIME_AWAIT_MS, TimeUnit.MILLISECONDS)
+                if (BuildConfig.DEBUG) Log.d(TAG, "engine primed in ${System.currentTimeMillis() - t0} ms")
+            } catch (e: Exception) {
+                Log.w(TAG, "engine prime failed: ${e.javaClass.simpleName}")
+            }
+        }, "mlkit-prime").apply { isDaemon = true }.start()
     }
 }
