@@ -10,7 +10,7 @@
 > `CLAUDE.md` files. `docs/extensions.md` is the subsystem reference all arcs write into;
 > `docs/notebook.md` and `docs/data.md` gain sections in this arc.
 >
-> **Status: H0 ✅ (8c5361f) · H1 ✅ (62771f3) · H2 ✅ (bf17417) · H3 ✅ (0de688e) · H4 ✅ (f995354) · H5 ⬜ — H0 user-verified 2026-08-17.**
+> **Status: H0 ✅ (8c5361f) · H1 ✅ (62771f3) · H2 ✅ (bf17417) · H3 ✅ (0de688e) · H4 ✅ (f995354) · H5 🧪 — built + reviewed 2026-08-18, awaiting device verification.**
 
 ## Why
 
@@ -1012,7 +1012,7 @@ pass for six headings); docs; memory; commit + push.
 ---
 
 ### Phase H5 — Hardening, review, boundary audit, docs freeze
-**Status:** ⬜ Not started
+**Status:** 🧪 Awaiting device verification (built + reviewed 2026-08-18; no device was attached at build time — install SNN + NA5C + MIP11 next session, then the checklist below)
 
 **Goal:** the object model, the two points, the proxies and the toolbar API are trustworthy enough to
 be the pattern the next object extensions follow.
@@ -1022,6 +1022,15 @@ be the pattern the next object extensions follow.
    (rec.: no — freeze as built)
 2. Confirm scope freeze: fixes only; remove the debug "Insert test object" / fake contributions /
    "Probe object providers" (rec.: remove all three).
+
+**Phase-start answers (2026-08-18):** Q1 **one change** — the selection toolbar "sometimes takes a bit
+to appear": diagnosed as the `whenPenIdle` gate (`isPenActive` is true while the pen *hovers*, and the
+pen naturally hovers after a lasso), not extension load; user: "once the selection is made, the toolbar
+should be active" → `presentSelectionToolbar` and the tap-to-edit dialog now show **at once** (g-paper's
+`onSelectionCreated` contract already says the host shows its chrome then; the selection frame is
+already presented, so no frame-silence break); the async `activeActionIds` is still dropped if the
+selection changed. Everything else frozen as built. · Q2 remove all three (Insert test object / Delete
+selection debug items, `FakeContributions` twins, Probe object providers).
 
 **Deliverables**
 1. `/code-review high` over the arc's range (`git diff <H0 base>...HEAD` — the **range**; base
@@ -1054,6 +1063,46 @@ cold-launch reopen).
 
 **Close-out:** status ✅ + Outcome; commit + push `paper`.
 
+**Outcome so far (2026-08-18):** toolbar + edit dialog show at once (Q1); scaffolding removed
+(`DebugHooks.kt`, both `FakeContributions.kt`, the two debug ⋯ items + probe code + their strings;
+`NotebookDebugMenu.install` lost its `hooks` parameter); **fix found on the H5 walk of rows 6/20:** the
+Heading extension returned the Markdown proxy's `RenderedImage` as-is but never closed its own handle
+on the region (left to GC) — `ObjectProviderService` now parks it per Binder thread and closes it in
+`onTransact`'s `finally` (the Templates handshake); g-paper 0.1.1 diff reviewed (no findings — stylus
+fires at pen-up, finger via the tap-to-dismiss escrow, dropped if the selection changed / pen active);
+`docs/extensions.md`: audit rows 18–24 + H5 re-walk of 1/6/7, §"Adding an object point" (rules 18–23),
+"Writing an extension" items 9 (Markdown renderer) + 10 (object provider), Probe bullet removed;
+`docs/notebook.md`, `README.md`, `CLAUDE.md` updated. JVM suite green after the removal.
+
+**Review (`/code-review high 08e0f5b...HEAD`, 2026-08-18) — 10 findings, 9 fixed, 1 accepted:**
+1. `StrokeStore.restore` re-numbered restored strokes to `MAX+1` → an undone erase / Delete / heading
+   create persisted a scramble (the f995354 bug on the undo path) → **un-delete in place** (rows keep
+   `"order"`; only never-written strokes are upserted; `SoilDao.maxOrder` now counts soft-deleted rows so
+   nothing ties; `IN` lists chunked at 500).
+2. `ObjectCreated` recorded before the inline render → redo restored the lasso-box bounds → **recorded
+   after `renderNow` with the rendered object**.
+3. `ObjectRenderCache` fit rule mistook an END-ellipsized image (a few px under its width) for an
+   unconstrained one → a truncated heading dragged back to room kept its ellipsis → **"unconstrained" =
+   stopped > 64 dp short of its render width**.
+4. A drag during the apply/edit round-trip was encoded in both `Moved` and `ObjectEdited` → **`before`
+   re-anchored at the final x/y** (an edit records payload + size only).
+5. Inline render awaited under `pageOps` queues flips / undo behind a slow provider (≤ 3 s + 10 s) —
+   **accepted** as designed (documented in `docs/notebook.md` + `CLAUDE.md`), not redesigned.
+6. `renderAll` per-item catch covered three types only → an IAE / unmarshal failure on one reply emptied
+   the batch → **catch every `Exception` per item** (capability ISE + cancellation still propagate).
+7. A provider whose describe calls failed at load (cold process past the bind timeout) was skipped for
+   the whole open with a signature that never changed → **known-but-undescribed** (objects still render,
+   no contribution) + a *partial* marker in the signature so `onResume` reloads.
+8. `activeIdsCache` stored `emptySet` on a failed call → **filled on success only**.
+9. `ObjectRenderCache` unbounded across pages → **`retain(liveObjects.keys)` on every page load**.
+10. `deleteCurrent` / `insertBlank` / `reconcile` read `liveChildIds` without draining the writer →
+    **`writer.drain()` first** (and in `navigateTo` before the page is read back).
+Plus the two H5-walk fixes above (`RENDER_TIMEOUT_MS` 8 → 10 s; the Heading's region handle). Accepted
+without change: create + erase are two back-to-back jobs on the one serial writer, not one SQL
+transaction — a process death between them leaves heading **and** ink live (non-destructive; window
+is microseconds). The first review pass had reviewed the plan commit itself (arg `08e0f5b`); its
+plan-vs-code notes are moot for the frozen arc except the timeout margin, folded in above.
+
 ---
 
 ## Appendix A — Constants + strings (this arc)
@@ -1069,7 +1118,7 @@ cold-launch reopen).
 | `ActionApplies` | `INK 1` · `OBJECT 2` |
 | `Requires` | `RECOGNIZER 1` · `MARKDOWN 2` |
 | `IconNames` | `heading` `h-1`…`h-6` `text` `edit` `x` `check` `plus` `trash` |
-| Timeouts | bind 3 s · Markdown `render` 5 s · ObjectProvider describe/apply/edit 2 s · `createFromInk` 15 s · `render` 8 s |
+| Timeouts | bind 3 s · Markdown `render` 5 s · ObjectProvider describe/apply/edit 2 s · `createFromInk` 15 s · `render` **10 s** (H5; 8 s until then — zero margin over the inner bind 3 s + call 5 s) |
 | Typography (Markdown ext) | base 24 sp bold; H1 2.0 · H2 1.75 · H3 1.5 · H4 1.25 · H5 1.1 · H6 1.0; heading padding 8 dp; single line, ellipsize END |
 | `.soil` | `SOIL_VERSION 2` (fresh, no migration); `TYPE_OBJECT = "object"`; object identity `<pkg>:<typeId>` in `style`; payload in `text`; bounds `x y width height` |
 | g-paper | 0.1.1 — `PaperListener.onSelectionTapped(x, y)` |

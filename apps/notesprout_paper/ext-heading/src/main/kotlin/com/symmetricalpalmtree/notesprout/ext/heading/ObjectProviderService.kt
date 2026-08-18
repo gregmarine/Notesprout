@@ -3,6 +3,8 @@ package com.symmetricalpalmtree.notesprout.ext.heading
 import android.app.Service
 import android.content.Intent
 import android.os.IBinder
+import android.os.Parcel
+import android.os.SharedMemory
 import android.os.SystemClock
 import android.util.Log
 import com.symmetricalpalmtree.notesprout.extension.CreatedObject
@@ -24,7 +26,9 @@ import com.symmetricalpalmtree.notesprout.extension.SelectionAction
  * The capabilities it needs arrive as in-parameters: `createFromInk` recognizes the lasso'd ink
  * through the core's recognizer proxy (the lasso box is the writing area, no pre-context — the
  * original's single-shot path); `render` hands the payload to the core's Markdown proxy and returns
- * that reply **as-is** (the proxy's region is the reply — the heading never decodes pixels). A
+ * that reply **as-is** (the proxy's region is the reply — the heading never decodes pixels; this
+ * process's own handle on the region is parked per thread and closed in `onTransact`'s `finally`
+ * once the reply — holding a dup of the descriptor — is marshalled, the Templates handshake). A
  * missing capability is `IllegalStateException(RECOGNIZER_REQUIRED / MARKDOWN_REQUIRED)`.
  *
  * Exceptions that cross Binder intact are the only ones thrown (`SecurityException`,
@@ -33,6 +37,18 @@ import com.symmetricalpalmtree.notesprout.extension.SelectionAction
 class ObjectProviderService : Service() {
 
     private val binder = object : IObjectProvider.Stub() {
+
+        /** The region received from the Markdown proxy and returned in this transaction's reply. */
+        private val pending = ThreadLocal<SharedMemory>()
+
+        override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
+            try {
+                return super.onTransact(code, data, reply, flags)
+            } finally {
+                pending.get()?.close()
+                pending.remove()
+            }
+        }
 
         override fun describeTypes(): MutableList<String> {
             enforce()
@@ -111,6 +127,7 @@ class ObjectProviderService : Service() {
                 throw IllegalStateException("markdown call failed: ${e.javaClass.simpleName}")
             }
             if (BuildConfig.DEBUG) Log.d(TAG, "render: ${payload.length} chars → ${image?.widthPx ?: 0}x${image?.heightPx ?: 0} px in ${SystemClock.elapsedRealtime() - t0} ms")
+            image?.let { pending.set(it.memory) }
             return image
         }
     }

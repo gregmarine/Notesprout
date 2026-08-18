@@ -697,9 +697,9 @@ core **Delete** first, then providers in registry order, filtered by `appliesTo`
 selection shows `INK` actions of every provider; exactly one object shows the `OBJECT` actions of the
 provider owning its type; anything mixed shows Delete only.
 
-Verified H2 with a debug-only stand-in (`FakeContributions`, `src/debug` — a no-op twin in
-`src/release`) before any extension is behind it; H3 built `ObjectProviderClient` behind the same
-shapes (H4 wires it into the notebook screen).
+H2 verified the toolbar with a debug-only stand-in (`FakeContributions`, deleted in H5) before any
+extension was behind it; H3 built `ObjectProviderClient` behind the same shapes and H4 wired it into
+the notebook screen — the real Heading provider is the only contributor today.
 
 ## ObjectProvider (contract — arc 4 / H3)
 
@@ -745,7 +745,7 @@ describe / apply an edit · render.
   side** — counts, sizes and durations only. Binder-marshalable exceptions only (`SecurityException`,
   `IllegalArgumentException`, `IllegalStateException`).
 - **Timeouts (host):** bind ≤ 3 s · describe / apply / edit ≤ **2 s** · `createFromInk` ≤ **15 s** (one
-  recognizer hop of 10 s inside + margin) · `render` ≤ **8 s** (one markdown hop of 5 s inside + margin).
+  recognizer hop of 10 s inside + margin) · `render` ≤ **10 s** (one markdown hop — bind 3 s + call 5 s — inside + margin; H5 raised it from 8 s, which left no margin).
 
 ## The Heading extension (`:ext-heading` — arc 4 / H3)
 
@@ -978,7 +978,7 @@ core's proxies.
   the text.
 - **`ObjectProviderClient(context, ref, recognizerRef?, markdownRef?)`** — over `ExtensionBinder`,
   stateless. `describeTypes` / `describeActions` / `activeActionIds` / `applyAction` / `describeEdit` /
-  `applyEdit` ≤ **2 s**; `createFromInk` ≤ **15 s**; `render` ≤ **8 s**. **The two proxies are minted
+  `applyEdit` ≤ **2 s**; `createFromInk` ≤ **15 s**; `render` ≤ **10 s** (H5; was 8). **The two proxies are minted
   per bind and revoked in the client's own `finally`, right after the shared unbind** (the `NamerClient`
   store shape): `RecognizerProxyBinder(RecognizerClient(recognizerRef), extUid)` is passed only to
   `createFromInk`, `MarkdownProxyBinder(MarkdownClient(markdownRef), extUid)` only to `render`; each is
@@ -1014,12 +1014,6 @@ core's proxies.
   (consent was already given — the one deliberate difference from the debug menu's old else-branch) ·
   UNAVAILABLE → problem dialog. Exactly one of `onReady` / `onGaveUp` runs; the one-flow-at-a-time
   guard is the caller's. Strings are the M1 `recognize_*` set in main `strings.xml`.
-- **Debug ⋯ "Probe object providers"** (H3 test surface, `src/debug`, gone in H5): for every trusted
-  provider — `describeTypes` + `describeActions` + `activeActionIds` + a `render` of a fixed `##`
-  payload through the real Markdown proxy + `describeEdit` + (when a recognizer is installed and READY
-  and the page has ink) a `createFromInk` of the page's ink through the real recognizer proxy (result
-  discarded, nothing created); everything to logcat under `NotebookDebugMenu` + the clients' tags, never
-  text; a "Probe done" toast at the end.
 - **`ObjectProviderClient.renderAll(requests, dpi): List<Copy?>`** (H4) — several objects of one provider
   in **one bind with one Markdown proxy** (the page-load render pass: one provider bind, N renders):
   args checked before the bind, budget `RENDER_TIMEOUT_MS × n`; one entry per request in order — the
@@ -1047,7 +1041,7 @@ correctly reports 0 candidates while it is disabled.
 
 ---
 
-## Boundary audit (rows 1–9 E2, rows 10–13 N2 — walked 2026-08-16; rows 14–17 M2 + rows 1/6/7 re-walked for the shared `ExtensionBinder` 2026-08-17 — all ✅)
+## Boundary audit (rows 1–9 E2, rows 10–13 N2 — walked 2026-08-16; rows 14–17 M2 + rows 1/6/7 re-walked for the shared `ExtensionBinder` 2026-08-17; rows 18–24 H5 + rows 1/6/7 re-walked for the two new clients and the proxies' inner calls 2026-08-18 — all ✅)
 
 What crosses the process boundary, in which direction, and what guards it. Re-walk this table
 whenever an extension point is added or a contract field changes.
@@ -1060,6 +1054,19 @@ immediately before `bindService`; `unbindService` + the supervisor scope's cance
 `finally` (bind refused / bind timeout / call timeout / exception / success); every client passes an
 explicit `callTimeoutMs` (there is no default) and the bind wait is `BIND_TIMEOUT_MS` (3 s). The
 namer's per-bind store binder is revoked in the client's own `finally` right after the shared unbind.
+
+**H5 re-walk of rows 1, 6, 7 (two more clients + the proxies' inner calls):** `MarkdownClient.render`
+and every `ObjectProviderClient` method go through the same `ExtensionBinder.call` (signature re-check
+immediately before `bindService`, unbind + scope cancel in the one `finally`, explicit
+`callTimeoutMs` on every call — 5 s / 2 s / 15 s / 10 s / 10 s × n). The two proxies add **no bind path
+of their own**: `RecognizerProxyBinder` forwards through `RecognizerClient` and `MarkdownProxyBinder`
+through `MarkdownClient`, so the inner hop of every proxied call re-runs row 1's signature check, gets
+row 6's `finally` unbind and row 7's timeout on its own — and both proxies are minted after
+`InkCaps.check` / `RenderCaps.checkArgs` and revoked in the consumer client's own `finally`, right after
+the shared unbind (`createFromInk` / `render` / `renderAll`). Regions: `RenderedImages.copyOut` unmaps +
+closes in nested `finally`; the proxy's re-wrapped region and the Markdown extension's own region are
+closed in their `onTransact` `finally`; and (H5 fix) the Heading extension closes *its* handle on the
+proxy's region the same way once its reply is marshalled — before that it was left to GC.
 
 | # | Invariant | Where it holds |
 |---|---|---|
@@ -1080,6 +1087,13 @@ namer's per-bind store binder is revoked in the client's own `finally` right aft
 | 15 | **Ink is capped before it crosses and re-checked after.** Host side, **without binding**: `InkCaps.check` requires `strokes.size ≤ MAX_INK_STROKES` (2 000), `Σ points ≤ MAX_INK_POINTS` (60 000), every stroke non-empty with equal-length x/y arrays, and `width`/`height` `> 0` (NaN fails the comparison) — any violation is `InkTooLargeException` (an `ExtensionCallException`) thrown before `ExtensionBinder.call`; `InkStroke`'s constructor independently rejects empty / mismatched arrays. Extension side: `InkStroke.CREATOR` re-runs those `require`s at unmarshal time and `HandwritingRecognizerService.checkInk` re-checks the two caps + positive sizes → `IllegalArgumentException` (Binder-marshalable). | `InkCaps.check` (JVM-tested: over strokes / over points / empty stroke / mismatched arrays / non-positive size / preContext truncation), `RecognizerClient`, `InkStroke.init` + `CREATOR`, `HandwritingRecognizerService.checkInk` |
 | 16 | **Inward payload is validated; nothing is stored.** `InkCaps.status` maps anything outside `READY..UNAVAILABLE` (`0..3`) to `UNAVAILABLE`; `InkCaps.text` = `?: ""` then `take(MAX_RECOGNIZED_CHARS)` (20 000). The extension's `IllegalStateException` is typed `RecognizerNotReadyException` only when its message equals `ExtensionContract.RECOGNIZER_NOT_READY`, else a generic `ExtensionCallException` — either way the caller sees a core-owned dialog. The recognized text is shown **only** in the debug result dialog (selectable + Copy to the clipboard, at the user's tap) and is written nowhere: no `page_text`, no `.soil` / index change, no log line on either side (counts + durations only — `RecognizerClient` and the service log `N strokes → M chars in T ms`). | `InkCaps.status/text` (JVM-tested), `RecognizerClient.call`, `NotebookDebugMenu.showResult`, the two log lines in `RecognizerClient` / `HandwritingRecognizerService` |
 | 17 | **Failure changes nothing.** Extension absent / disabled → `ExtensionRegistry.handwritingRecognizer == null` → the debug sheet has no Recognize item and nothing else on the screen changes. Not ready / offline / timeout / too dense / engine failure → a core-owned dialog (`recognize_*` strings) and the flow ends; the page, its ink, the session and every other extension are untouched (the debug menu only *reads* `paper.getStrokes()` and the page size; it holds no `.soil` handle). The model and the model-present flag are the extension's own state (its sandbox, ML Kit-managed): they survive `pm disable-user` / `pm enable` (M1 checklist #9 — no re-download) and `am force-stop` (checklist #8 — auto-create, READY at once via the flag), and are removed only by the extension's uninstall. A `RecognizerNotReadyException` after READY was reported (extension restarted mid-flow) is a dialog, not a retry loop; one activity-owned busy guard drops a second tap for the whole flow. **Nothing downloads without consent:** only `prepare()` starts the chain, and the host calls it only from the Download button. | `ExtensionRegistry.handwritingRecognizer`, `NotebookDebugMenu` (sheet build, `recognizeBusy`, every failure branch), `ModelManager` (prefs flag, `onEngineFailure`), `HandwritingRecognizerService.onCreate` |
+| 18 | **Outward payload of `MarkdownRenderer` is markdown text + layout numbers only.** `render(markdown, maxWidthPx, dpi, maxLines, paddingPx)` — the source truncated to `MAX_MARKDOWN_CHARS`, `maxWidthPx` in `1..MAX_IMAGE_EDGE_PX`, finite `dpi > 0`, `maxLines ≥ 0`, padding in `0..RENDER_PADDING_MAX_PX`, all checked **before the bind** (`RenderArgsException` never binds). There is no other argument in `IMarkdownRenderer` — no id, name, key or path can be carried. Today the only source that reaches it is an object payload the Heading extension chose to forward (see row 19); the core itself renders nothing through it. | `IMarkdownRenderer.aidl`, `MarkdownClient.render`, `RenderCaps.markdown/checkArgs` (JVM-tested), `MarkdownProxyBinder.render` (same caps re-applied inward) |
+| 19 | **Outward payload of `ObjectProvider` is the object's own payload + geometry + the two proxies.** Every method carries at most: an action id / typeId **the provider itself declared**, the object's payload (`outPayload` = cut to `MAX_OBJECT_TEXT_CHARS`), edit text (cut to `MAX_EDIT_TEXT_CHARS`), `maxWidthPx` + `dpi`, and — `createFromInk` only — **bare ink** (`InkPayload.fromStrokes`: x/y only, page px, writing order; `InkCaps.check` before the bind) + the selection bounds' size (row 14's widening re-recorded: the second point that receives ink), plus the null-or-proxy `IHandwritingRecognizer` / `IMarkdownRenderer`. `PageObject.id`, page id, notebook id / name, order, the `.soil` path, keys — none has a parameter to travel in; `RenderRequest` is (typeId, payload, maxWidthPx). Host-side logs name object ids (`ObjectStore`) but never cross. | `IObjectProvider.aidl`, `ObjectProviderClient` (every method), `ObjectActions.perform/editTapped`, `ObjectRenderPass` (`RenderRequest`), `InkPayload.fromStrokes` |
+| 20 | **Both proxies are uid-bound, per-bind, revocable, capped.** `ProxyGate(extUid, Binder::getCallingUid)` — `extUid` from `PackageManager.getPackageUid(ref.packageName)` at mint time; every proxied method calls `gate.check()` first (`SecurityException` on another uid or after `revoke()`). Minted inside `createFromInk` / `render` / `renderAll` **after** the outward caps, revoked in that call's `finally` right after the shared unbind — a late transaction from an orphaned reference fails closed. Caps re-applied inward before forwarding: `InkCaps.check` + `preContext` truncation (`RecognizerProxyBinder`), `RenderCaps.checkArgs` + source truncation (`MarkdownProxyBinder` → `MarkdownClient.render`). Forwarding = the core's own clients on the Binder thread (`runBlocking`, never Main) with their own bind / timeout / signature check; the two-hop budget lives inside the consumer call's timeout with margin (15 s ⊃ 3 + 10 s, 10 s ⊃ 3 + 5 s — H5 raised `render` from 8 s, which had none). Failures leave as the marshalable set only. | `ProxyGate` (JVM-tested: uid mismatch, revoked, happy path), `RecognizerProxyBinder`, `MarkdownProxyBinder`, `ObjectProviderClient.createFromInk/render/renderAll` (`finally { proxy?.revoke() }`) |
+| 21 | **Inward payloads are validated.** `describeTypes` → `isTypeId` filter + `MAX_TYPES`; `describeActions` → `ActionCaps.sanitize` (ids re-validated + unique, labels trimmed/truncated, `appliesTo` / `requires` masked, icons only through `IconCatalog` by name, sub-actions capped, one level); `activeActionIds` → id pattern + cap; `CreatedObject` → `requireValid` at unmarshal, **typeId ∈ the same bind's `describeTypes()`**, payload cut to `MAX_OBJECT_TEXT_CHARS`; `applyAction` / `applyEdit` → null/blank = no change, else cut; `describeEdit` → `EditSpec.require`s at unmarshal + `EditCaps.sanitize`; `RenderedImage` → `requireValid` at unmarshal, then `RenderedImages.copyOut`: mime == `MIME_WEBP`, `0 < byteCount ≤ min(MAX_RENDER_BYTES, region)`, **header size == declared** and ≤ `MAX_IMAGE_EDGE_PX` (`RenderCaps.imageProblem`), region always closed; the verified bytes are decoded bounded on the host. The `RenderedImage` a *proxy* hands a provider is re-wrapped from bytes the host already verified, so a provider that returns it as-is cannot smuggle anything the host did not check. | `ObjectProviderClient` (every method), `ActionCaps` / `EditCaps` / `RenderCaps` (JVM-tested), `CreatedObject.requireValid`, `RenderedImage.requireValid`, `RenderedImages.copyOut/wrap`, `ObjectRenderPass` decode |
+| 22 | **The core stores objects, never renders / parses them; nothing but the payload the provider chose is stored.** An object row is identity + `<pkg>:<typeId>` + the opaque `text` + `x y width height` + `order` (`docs/data.md` §Object rows); the core never reads inside `text` (no `#` counting, no markdown), never persists a bitmap (`ObjectRenderCache` is in-memory, per open session, keyed by id + payload + width + dpi), and stores the recognizer's output only *as* the payload the provider returned from `createFromInk` (rule 16 amended: the payload is the object, not a cached capability result). Width/height are the rendered image's after a successful render — geometry, not content. Payloads are never logged on either side (counts / lengths / durations only). | `ObjectStore`, `ObjectRows`, `PageObject`, `ObjectRenderCache`, `ObjectRenderPass`, `ObjectActions` log lines, `ObjectProviderService` / `MarkdownRendererService` log lines |
+| 23 | **Absent provider = placeholder; failure changes nothing.** No provider for an identity, provider disabled, `CapabilityRequiredException` from a render, a failed / null / undecodable render → the object draws as the **dashed placeholder at its bounds**, still selectable / movable / deletable, and re-renders when the provider is back (resume signature → reload → pass). Failed / null `createFromInk` (unreadable, not ready, timeout, capability missing, page cap) → **the ink is untouched and nothing is created**; failed / null `applyAction` / `applyEdit` → the payload is untouched; every failure is a core-owned dialog (`objects_*` strings) or a placeholder — the extension shows nothing. The `requires` guards name the missing capability before any bind; `ObjectActions.busy` drops a second tap for the flow. | `ObjectRenderPass`, `ObjectRenderer` (placeholder), `ObjectActions` (guards, every catch → dialog), `NotebookActivity.objectListener` (strokes must still be live before create + erase), `ObjectProviders.load` (skip on failure) |
+| 24 | **Contributed UI is drawn only by the core.** An extension contributes *descriptions* — `SelectionAction` (id, ≤ 6-char label, catalog icon **name**, sub-actions, applies-to, requires) and `EditSpec` (title, prefill, hint, maxChars, multiLine) — and the core draws every button, sub-toolbar and dialog under its own rules (`SelectionToolbar` + `ToolbarAnchor`, `ObjectEditDialog`, `IconCatalog` Tabler drawables, dimen-driven tap targets, exclusion rects, `releaseRender`, no colour). No extension pixel, layout, `RemoteViews`, `SurfaceControlViewHost` surface or code ever reaches the notebook screen; the only extension-made pixels are the rendered *object image*, which the host verifies (row 21) and draws itself through g-paper's `ContentRenderer`. | `SelectionAction` / `EditSpec` (parcel), `ActionCaps`, `IconCatalog`, `SelectionToolbar`, `ObjectEditDialog`, `ObjectRenderer`, §"Selection-toolbar contributions" tier rule |
 
 ## Rules for adding a future extension point (write-once, follow later)
 
@@ -1143,6 +1157,35 @@ extensions") follows rules 1–5 **plus**:
 16. **The core stores no result of the capability** (row 16) — a consumer that wants to keep results
     keeps them in *its* host store, through *its* point.
 17. **Lend it only through the proxy recipe below** — built with the first consumer, never before.
+
+### Adding an object point (arc 4 pattern)
+
+A point whose extension puts **something that isn't ink on the page** — a content object the core
+stores, positions, selects, moves, deletes and undoes but never interprets — and contributes UI to
+the notebook screen, follows rules 1–5 (and 12–17 for any capability it consumes) **plus**:
+
+18. **The core stores objects; providers never do.** An object is a core row (identity, geometry, an
+    opaque payload) under its page; a provider keeps nothing about a specific object anywhere (its
+    host store, if it has one, is for settings — the Heading has none). Audit row 22.
+19. **The payload is opaque to the core** — never parsed, never logged, capped at
+    `MAX_OBJECT_TEXT_CHARS`, shown only inside a provider-described edit dialog. Rows 19 / 22.
+20. **The core draws every piece of contributed UI** under its own e-ink rules from a description
+    (`SelectionAction`, `EditSpec`, catalog icons by name); no extension pixels, layouts or code over the
+    paper. Extension-owned *screens* are allowed only off the paper (future — the tiered rule under
+    §"Selection-toolbar contributions"). Row 24.
+21. **Absent provider = placeholder, never a broken page.** Rows render as a dashed box, stay
+    selectable / movable / deletable, and come back to life when the provider returns. Row 23.
+22. **Every action is one undoable step**, including the strokes it consumes (`ObjectCreated` carries
+    the removed strokes; `ObjectEdited` the before/after payload + bounds; `ObjectsDeleted` strokes and
+    objects together).
+23. **Capabilities reach a provider only as in-parameters** (`IHandwritingRecognizer`,
+    `IMarkdownRenderer` proxies), null when absent; a provider says what it needs (`requires`) so the
+    core can explain before binding. Rows 20 / 23.
+
+Followed by ObjectProvider (H3/H4): `OBJECT_PROVIDER` + `IObjectProvider` + `CreatedObject` /
+`SelectionAction` / `EditSpec` in `:extension-api`; `ExtensionRegistry.objectProviders` +
+`ObjectProviderClient`; the core owns every dialog and every pixel of chrome; the one recorded widening
+of rule 5 is bare ink into `createFromInk` (row 19); audit rows 18–24 (H5).
 
 ### The capability pattern (recorded in arc 3, **built in arc 4 / H3** with the first consumer)
 
@@ -1241,8 +1284,55 @@ consumed in-project — see `:ext-templates` for the reference implementation).
      still goes to the host store (this point passes none).
    - **Never log recognized text** — counts and durations only, on your side as on the core's. Every
      stub method still begins with `HostCallerCheck.enforce`.
-   - You are a **capability provider**: the core binds you and, in a later arc, lends you to consumer
-     extensions through its own proxy — you never see them, and they never bind you.
+   - You are a **capability provider**: the core binds you and lends you to consumer extensions
+     (object providers, since arc 4) through its own proxy — you never see them, and they never bind you.
+9. **Implementing a Markdown renderer** (`MARKDOWN_RENDERER` — `IMarkdownRenderer`, see
+   `:ext-markdown` for the reference implementation):
+   - **Text + layout numbers in, one image out.** `render(markdown, maxWidthPx, dpi, maxLines,
+     paddingPx)` receives markdown source (≤ `MAX_MARKDOWN_CHARS`) and layout numbers only — never an
+     id, name or path — and returns a `RenderedImage` (lossless WEBP with alpha in a `SharedMemory`
+     region, `PROT_READ`, `byteCount` + declared `widthPx × heightPx` that **must** match the encoded
+     header — the host rejects the image otherwise) or **null** for a source that renders to nothing
+     (blank). Re-check the arguments yourself (`IllegalArgumentException` on a violation); keep every
+     edge ≤ `MAX_IMAGE_EDGE_PX` (ellipsize / clamp), padding is part of the image, `maxLines == 0` means
+     unbounded. Park the region per Binder thread and **close it in `onTransact`'s `finally`** once
+     the reply (a dup of the descriptor) is marshalled — the Templates handshake.
+   - **Typography is yours.** The core knows no font, size or multiplier; a heading's look is entirely
+     the renderer's (Notesprout's: 24 sp bold, H1 2.0 … H6 1.0, sp → px through the `dpi` you are
+     given). Draw only what markdown says — no colour beyond black-on-transparent for an e-ink host.
+   - **Stateless, ≤ 5 s per call** on the host's clock (leave room for encoding on an e-ink CPU),
+     `HostCallerCheck.enforce` first in every method, log sizes + durations only — **never the text**.
+     You are a **capability provider**: object providers reach you only through the core's proxy.
+10. **Implementing an object provider** (`OBJECT_PROVIDER` — `IObjectProvider`, see `:ext-heading` for
+    the reference implementation):
+    - **You own object *types*; the core owns object *rows*.** Declare your typeIds in
+      `describeTypes()` (`[A-Za-z0-9_.-]{1,32}`, ≤ `MAX_TYPES`); the core stores every object as a row
+      with `<yourPackage>:<typeId>` + an **opaque payload** you choose (≤ `MAX_OBJECT_TEXT_CHARS`) +
+      geometry. Keep nothing about a specific object anywhere — every method receives the payload it
+      needs and returns a new one; the core stores it. Never parse anything but your own payload.
+    - **Describe your UI, don't draw it.** `describeActions()` returns `SelectionAction`s (id, ≤ 6-char
+      label, an icon **name** from the core catalog — `IconNames` — or null for a text button, up to
+      one level of sub-actions, `appliesTo` = `INK` / `OBJECT` bits, `requires` = `RECOGNIZER` /
+      `MARKDOWN` bits so the host can explain a missing capability *before* binding you);
+      `activeActionIds(typeId, payload)` names the leaves to draw as selected; `describeEdit` returns an
+      `EditSpec` (title, prefill without your markup, hint, maxChars, multiLine) or null for "not
+      editable". The core draws every button, sub-toolbar and dialog itself; you never see the screen.
+    - **Capabilities arrive as in-parameters, or null.** `createFromInk` gets an `IHandwritingRecognizer`
+      and `render` an `IMarkdownRenderer` — the core's proxies (uid-bound to you, valid for that one
+      call, same caps as the real thing); throw `IllegalStateException(RECOGNIZER_REQUIRED /
+      MARKDOWN_REQUIRED)` when you need one and it is null. Never bind a recognizer or renderer
+      yourself; a proxy call is a second hop, so stay well inside 15 s (`createFromInk`) / 10 s
+      (`render`); the pure methods must answer in ≤ 2 s.
+    - **Return null for "nothing" / "no change".** `createFromInk` null → the core leaves the ink
+      alone (unreadable ink is not an error); `applyAction` / `applyEdit` null → the payload is
+      untouched; `render` null → the object draws as a placeholder. Every success is one undoable step
+      on the core's side — you never see undo.
+    - **Ink in is bare** (x/y in page px, writing order, the selection bounds' size as the writing
+      area); a `render` may return the Markdown proxy's `RenderedImage` **as-is** (the region is the
+      reply) — park your handle per Binder thread and close it in `onTransact`'s `finally` like a
+      renderer does. `HostCallerCheck.enforce` first in every method; only `SecurityException` /
+      `IllegalArgumentException` / `IllegalStateException` cross Binder; log counts + durations —
+      **never a payload or recognized text**.
 
 ---
 

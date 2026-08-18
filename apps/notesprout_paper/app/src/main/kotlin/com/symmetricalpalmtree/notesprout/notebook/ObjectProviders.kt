@@ -26,6 +26,9 @@ class ObjectProviders private constructor(
     val recognizerRef: ProviderRef?,
     val markdownRef: ProviderRef?,
     val contributions: List<Contribution>,
+    /** The discovery signature — or, when a provider's describe calls failed at load (cold process past
+     *  the bind timeout), that signature plus [PARTIAL], which no fresh discovery ever equals, so the
+     *  next `onResume` compare reloads instead of leaving the provider silent for the whole open (H5). */
     val signature: List<String>,
 ) {
     /** A client for the provider whose package is [providerKey], or null when it is not (any longer) known. */
@@ -39,6 +42,7 @@ class ObjectProviders private constructor(
 
         /** Nothing installed (before the first load, and the release-safe fallback). */
         val NONE = ObjectProviders(emptyMap(), null, null, emptyList(), emptyList())
+        private const val PARTIAL = "!partial"
 
         /** Discovery of the three points → the component list [signature] compares (IO). */
         suspend fun signature(context: Context): List<String> {
@@ -60,6 +64,7 @@ class ObjectProviders private constructor(
             val markdown = ExtensionRegistry.markdownRenderer(app)
             val refs = LinkedHashMap<String, ProviderRef>()
             val contributions = ArrayList<Contribution>()
+            var partial = false
             for (ref in objects) {
                 if (refs.containsKey(ref.packageName)) { Slog.d(TAG) { "skip second provider service in ${ref.packageName}" }; continue }
                 val client = ObjectProviderClient(app, ref, recognizer, markdown)
@@ -71,10 +76,15 @@ class ObjectProviders private constructor(
                     contributions += Contribution(ref.packageName, ref.label.toString(), types, actions)
                     Slog.d(TAG) { "${ref.packageName}: ${types.size} type(s), ${actions.size} action(s) (${actions.sumOf { it.subActions.size }} sub)" }
                 } catch (e: ExtensionCallException) {
-                    Slog.d(TAG) { "skip ${ref.packageName}: ${e.javaClass.simpleName}: ${e.message}" }
+                    // Known but undescribed: its objects still go to the render pass (placeholders until it answers),
+                    // no toolbar contribution, and the load is marked partial so resume retries.
+                    Slog.d(TAG) { "${ref.packageName} did not describe itself (${e.javaClass.simpleName}: ${e.message}) — partial load" }
+                    refs[ref.packageName] = ref
+                    partial = true
                 }
             }
-            return ObjectProviders(refs, recognizer, markdown, contributions, signatureOf(objects, recognizer, markdown))
+            val sig = signatureOf(objects, recognizer, markdown)
+            return ObjectProviders(refs, recognizer, markdown, contributions, if (partial) sig + PARTIAL else sig)
         }
     }
 }

@@ -16,49 +16,35 @@ import com.symmetricalpalmtree.notesprout.R
 import com.symmetricalpalmtree.notesprout.core.ActionSheetDialog
 import com.symmetricalpalmtree.notesprout.core.Dialogs
 import com.symmetricalpalmtree.notesprout.core.Slog
-import com.symmetricalpalmtree.notesprout.extension.CapabilityRequiredException
 import com.symmetricalpalmtree.notesprout.extension.ExtensionCallException
 import com.symmetricalpalmtree.notesprout.extension.ExtensionRegistry
 import com.symmetricalpalmtree.notesprout.extension.InkStroke
 import com.symmetricalpalmtree.notesprout.extension.InkTooLargeException
-import com.symmetricalpalmtree.notesprout.extension.ObjectProviderClient
 import com.symmetricalpalmtree.notesprout.extension.ProviderRef
 import com.symmetricalpalmtree.notesprout.extension.RecognizerClient
 import com.symmetricalpalmtree.notesprout.extension.RecognizerNotReadyException
 import com.symmetricalpalmtree.notesprout.extension.RecognizerReadiness
-import com.symmetricalpalmtree.notesprout.extension.RecognizerStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
  * Debug build only (no-op twin in `src/release`): a ⋯ at the end of the notebook's top bar — the
- * twin of the library `DebugMenu` — with the arc-4 / H1 test surface **"Insert test object"** (a
- * plain [DebugHooks] callback into the screen; gone in H5) and the arc-3
- * test surface **"Recognize page (ML Kit)"**:
+ * twin of the library `DebugMenu` — with the arc-3 test surface **"Recognize page (ML Kit)"**:
  * present only while a trusted `HANDWRITING_RECOGNIZER` extension is installed (re-discovered on
  * every sheet open), it hands the current page's ink — bare x/y geometry via [InkPayload] — to the
  * extension through [RecognizerClient] and shows the text in a dialog (selectable, Copy / OK).
  * The model-consent flow (READY → recognize at once; UNAVAILABLE → dialog; otherwise the one-time
  * "Recognition model needed" → Download → progress → recognize without another tap) is
  * [RecognizerReadiness] since H3 — main source, shared with the heading action; this menu only calls
- * it.
+ * it. (The arc-4 test surfaces "Insert test object" / "Probe object providers" were removed in H5.)
  *
- * Also the arc-4 / H3 test surface **"Probe object providers"** (gone in H5): binds every trusted
- * `OBJECT_PROVIDER` through the real [ObjectProviderClient] and logs `describeTypes` /
- * `describeActions` / a `render` of a fixed payload through the real Markdown proxy (+ a
- * `createFromInk` of the page's ink through the real recognizer proxy when a recognizer is READY) —
- * timings + sizes only, never text.
- *
- * Every dialog here is the core's (the extension shows nothing; the only toasts are "copied" and the
- * probe's "done"); nothing recognized is stored or logged — the dialog is the only sink.
+ * Every dialog here is the core's (the extension shows nothing; the only toast is "copied"); nothing
+ * recognized is stored or logged — the dialog is the only sink.
  */
 object NotebookDebugMenu {
 
     private const val TAG = "NotebookDebugMenu"
-    /** The probe's fixed render payload — a heading the Heading provider understands (never logged, only its length). */
-    private const val PROBE_PAYLOAD = "## Probe heading"
-    private const val PROBE_MAX_WIDTH_PX = 1_000
 
     /**
      * The one-flow-at-a-time guard, **owned by the activity that started the flow** (M2): a flow whose
@@ -70,7 +56,7 @@ object NotebookDebugMenu {
     private fun claim(activity: AppCompatActivity) { busyOwner = java.lang.ref.WeakReference(activity) }
     private fun release() { busyOwner = null }
 
-    fun install(activity: AppCompatActivity, bar: ViewGroup, provider: () -> RecognizeContext?, hooks: DebugHooks) {
+    fun install(activity: AppCompatActivity, bar: ViewGroup, provider: () -> RecognizeContext?) {
         // Push the ⋯ to the far end of the row (the row's own buttons stay where they are).
         bar.addView(View(activity), LinearLayout.LayoutParams(0, 0, 1f))
         val btn = AppCompatImageButton(activity, null, 0).apply {
@@ -85,11 +71,11 @@ object NotebookDebugMenu {
             stateListAnimator = null
         }
         TooltipCompat.setTooltipText(btn, btn.contentDescription)
-        btn.setOnClickListener { showSheet(activity, provider, hooks) }
+        btn.setOnClickListener { showSheet(activity, provider) }
         bar.addView(btn)
     }
 
-    private fun showSheet(activity: AppCompatActivity, provider: () -> RecognizeContext?, hooks: DebugHooks) {
+    private fun showSheet(activity: AppCompatActivity, provider: () -> RecognizeContext?) {
         activity.lifecycleScope.launch {
             val ref = ExtensionRegistry.handwritingRecognizer(activity)   // IO; refreshed per open
             if (activity.isFinishing || activity.isDestroyed) return@launch
@@ -98,10 +84,6 @@ object NotebookDebugMenu {
             if (ref != null) {
                 sheet.addAction(null, activity.getString(R.string.debug_recognize_page)) { recognize(activity, ref, provider) }
             }
-            // Arc 4 / H1 test surface (removed in H5 with the real object provider in place).
-            sheet.addAction(null, activity.getString(R.string.debug_insert_test_object)) { hooks.insertTestObject() }
-            // Arc 4 / H3 test surface (removed in H5): the two-hop proxy paths, logs only.
-            sheet.addAction(null, activity.getString(R.string.debug_probe_object_providers)) { probeObjectProviders(activity, provider) }
             sheet.show()
         }
     }
@@ -153,66 +135,6 @@ object NotebookDebugMenu {
         } finally {
             if (busy.isShowing) busy.dismiss()
         }
-    }
-
-    /**
-     * H3 probe: for every trusted object provider — one client, `describeTypes` + `describeActions` (2 s
-     * calls), a `render` of [PROBE_PAYLOAD] for the first declared type through the real Markdown proxy
-     * (8 s), and — when a recognizer is installed and READY and the page has ink — a `createFromInk` of
-     * the page's ink through the real recognizer proxy (15 s; the result is discarded, nothing is
-     * created). Everything goes to logcat under the clients' own tags + [TAG]; never text.
-     */
-    private fun probeObjectProviders(activity: AppCompatActivity, provider: () -> RecognizeContext?) {
-        activity.lifecycleScope.launch {
-            val refs = ExtensionRegistry.objectProviders(activity)
-            val recognizerRef = ExtensionRegistry.handwritingRecognizer(activity)
-            val markdownRef = ExtensionRegistry.markdownRenderer(activity)
-            Slog.d(TAG) { "probe: ${refs.size} object provider(s); recognizer=${recognizerRef?.packageName} markdown=${markdownRef?.packageName}" }
-            val ctx = provider()
-            val dpi = activity.resources.displayMetrics.densityDpi.toFloat()
-            for (ref in refs) {
-                val client = ObjectProviderClient(activity, ref, recognizerRef, markdownRef)
-                val types = probeCall("describeTypes ${ref.packageName}") { client.describeTypes() } ?: continue
-                Slog.d(TAG) { "probe ${ref.packageName}: types=$types" }
-                val actions = probeCall("describeActions ${ref.packageName}") { client.describeActions() }
-                Slog.d(TAG) { "probe ${ref.packageName}: actions=${actions?.size} (${actions?.sumOf { it.subActions.size }} sub) ids=${actions?.map { it.id }}" }
-                val type = types.firstOrNull() ?: continue
-                val active = probeCall("activeActionIds") { client.activeActionIds(type, PROBE_PAYLOAD) }
-                Slog.d(TAG) { "probe ${ref.packageName}: active=$active for the fixed payload" }
-                val t0 = System.currentTimeMillis()
-                val copy = probeCall("render ${ref.packageName}") { client.render(type, PROBE_PAYLOAD, PROBE_MAX_WIDTH_PX, dpi) }
-                Slog.d(TAG) { "probe ${ref.packageName}: render → ${copy?.let { "${it.widthPx}x${it.heightPx} px, ${it.bytes.size} B" } ?: "nothing"} in ${System.currentTimeMillis() - t0} ms (two hops)" }
-                val edit = probeCall("describeEdit") { client.describeEdit(type, PROBE_PAYLOAD) }
-                Slog.d(TAG) { "probe ${ref.packageName}: edit=${edit?.let { "title ${it.title.length} chars, text ${it.text.length} chars, max ${it.maxChars}" }}" }
-                // createFromInk through the recognizer proxy — only when it costs no consent dialog.
-                val leaf = actions?.firstOrNull()?.subActions?.firstOrNull() ?: actions?.firstOrNull()
-                if (leaf != null && recognizerRef != null && ctx != null && ctx.strokes.isNotEmpty()) {
-                    val status = runCatching { RecognizerClient(activity, recognizerRef).status() }.getOrNull()
-                    if (status == RecognizerStatus.READY) {
-                        val ink = withContext(Dispatchers.Default) { InkPayload.fromStrokes(ctx.strokes) }
-                        val t1 = System.currentTimeMillis()
-                        val created = probeCall("createFromInk ${ref.packageName}") { client.createFromInk(leaf.id, ink, ctx.pageWidth, ctx.pageHeight) }
-                        Slog.d(TAG) { "probe ${ref.packageName}: createFromInk ${leaf.id} (${ink.size} strokes) → ${created?.let { "type ${it.typeId}, ${it.payload.length} chars" } ?: "nothing"} in ${System.currentTimeMillis() - t1} ms (two hops; discarded)" }
-                    } else {
-                        Slog.d(TAG) { "probe ${ref.packageName}: createFromInk skipped (recognizer status $status)" }
-                    }
-                } else {
-                    Slog.d(TAG) { "probe ${ref.packageName}: createFromInk skipped (leaf=${leaf?.id} recognizer=${recognizerRef != null} ink=${ctx?.strokes?.size ?: 0})" }
-                }
-            }
-            toast(activity, activity.getString(R.string.debug_probe_done, refs.size))
-        }
-    }
-
-    /** One probe call: the value, or null after logging the failure (typed capability failures named). */
-    private suspend fun <T> probeCall(what: String, block: suspend () -> T): T? = try {
-        block()
-    } catch (e: CapabilityRequiredException) {
-        Slog.d(TAG) { "probe $what: capability required (${e.message}) — typed on the host" }; null
-    } catch (e: RecognizerNotReadyException) {
-        Slog.d(TAG) { "probe $what: recognizer not ready — typed on the host" }; null
-    } catch (e: ExtensionCallException) {
-        Slog.d(TAG) { "probe $what failed: ${e.javaClass.simpleName}: ${e.message}" }; null
     }
 
     private fun showResult(activity: AppCompatActivity, text: String, strokes: Int, ms: Long) {

@@ -121,8 +121,8 @@ class ObjectProviderClient(
     /**
      * Render several objects of this provider in **one bind with one Markdown proxy** (arc 4 / H4 —
      * the page-load render pass: one provider bind, N renders). Returns one entry per request, in
-     * order: the verified copy, or null when the provider drew nothing **or that render failed**
-     * (logged; the others still run) — except a [CapabilityRequiredException], which ends the batch
+     * order: the verified copy, or null when the provider drew nothing **or that render failed** for
+     * any reason (logged; the others still run) — except a [CapabilityRequiredException], which ends the batch
      * (every remaining entry is null too, since it would fail the same way) and is re-thrown. The
      * budget is [RENDER_TIMEOUT_MS] per request; args are checked before the bind ([RenderCaps]).
      */
@@ -144,10 +144,13 @@ class ObjectProviderClient(
                         // A missing capability fails every render the same way — stop the batch, typed by call().
                         if (e.message == ExtensionContract.RECOGNIZER_REQUIRED || e.message == ExtensionContract.MARKDOWN_REQUIRED) throw e
                         Slog.d(TAG) { "renderAll #$i failed: ${e.javaClass.simpleName}: ${e.message}" }
-                    } catch (e: ExtensionCallException) {
-                        Slog.d(TAG) { "renderAll #$i failed: ${e.message}" }
-                    } catch (e: android.os.RemoteException) {
-                        Slog.d(TAG) { "renderAll #$i failed: ${e.javaClass.simpleName}" }
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        // One bad reply (a provider `require`, a `RenderedImage` that fails `requireValid` at unmarshal,
+                        // a RemoteException, a copyOut refusal) is that item's null — the others still run (H5: only
+                        // three types were caught, so anything else emptied the whole batch).
+                        Slog.d(TAG) { "renderAll #$i failed: ${e.javaClass.simpleName}: ${e.message}" }
                     }
                 }
             }
@@ -198,7 +201,9 @@ class ObjectProviderClient(
         const val CALL_TIMEOUT_MS = 2_000L
         /** One recognizer hop inside (`RecognizerClient.INK_TIMEOUT_MS` 10 s) + margin. */
         const val CREATE_TIMEOUT_MS = 15_000L
-        /** One markdown hop inside (`MarkdownClient.RENDER_TIMEOUT_MS` 5 s) + margin. */
-        const val RENDER_TIMEOUT_MS = 8_000L
+        /** One markdown hop inside — `ExtensionBinder.BIND_TIMEOUT_MS` 3 s + `MarkdownClient.RENDER_TIMEOUT_MS`
+         *  5 s = 8 s worst case — plus a 2 s margin (H5: 8 s left zero margin, so a cold Markdown process
+         *  could time the outer call out first while the inner one completed orphaned). */
+        const val RENDER_TIMEOUT_MS = 10_000L
     }
 }

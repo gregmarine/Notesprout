@@ -51,8 +51,9 @@ paper notebooks.
   generic *object provider* point — it turns lasso'd ink into a heading (`#`-prefixed markdown, six
   levels) through the recognizer and draws it through the Markdown renderer, both lent to it by the
   core as per-bind proxies (it never binds them itself); H3 built the point, the extension and the
-  proxies — the notebook screen wires the user story in H4 (until then the only caller is the debug
-  ⋯ "Probe object providers").
+  proxies, H4 wired the user story into the notebook screen (lasso → **H** → H1–H6 → heading; re-size,
+  tap-to-edit, move, delete, undo — all one step each), H5 froze it (`docs/extensions.md` audit rows
+  18–24).
 
 ## What Paper is **not** (v0)
 

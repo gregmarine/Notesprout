@@ -17,14 +17,21 @@ class ObjectRenderCache {
 
     /**
      * The cached bitmap for [objectId] if it was rendered from exactly this payload at this dpi and
-     * is still right for [maxWidth]: rendered at this very width, **or** rendered unconstrained
-     * (narrower than the width it was given) and still narrower than the width asked now — a move
-     * that doesn't push the object against the page's right edge is not a re-render.
+     * is still right for [maxWidth]: rendered at this very width, **or** rendered unconstrained and
+     * still narrower than the width asked now — a move that doesn't push the object against the
+     * page's right edge is not a re-render. "Unconstrained" = the image stopped **more than
+     * [SLACK_DP] short** of the width it was given: an END-ellipsized line also lands a little under
+     * its width (the glyph that didn't fit), so a bare `width < maxWidth` test would keep a truncated
+     * image after the object was dragged back to where the whole text fits (H5). The slack is
+     * generous (wider than any one heading glyph); the cost of guessing wrong on this side is one
+     * identical re-render, on the other side a stale ellipsis.
      */
     fun get(objectId: String, payload: String, maxWidth: Int, dpi: Float): Bitmap? {
         val e = entries[objectId] ?: return null
         if (e.payloadHash != payload.hashCode() || e.dpi != dpi || e.bitmap.isRecycled) return null
-        val fits = e.maxWidth == maxWidth || (e.bitmap.width < e.maxWidth && e.bitmap.width <= maxWidth)
+        val slack = SLACK_DP * dpi / 160f
+        val unconstrained = e.bitmap.width < e.maxWidth - slack
+        val fits = e.maxWidth == maxWidth || (unconstrained && e.bitmap.width <= maxWidth)
         return if (fits) e.bitmap else null
     }
 
@@ -38,6 +45,20 @@ class ObjectRenderCache {
 
     fun remove(objectId: String) {
         entries.remove(objectId)?.bitmap?.recycle()
+    }
+
+    /** Keep only [objectIds] (the page just loaded); everything else is recycled — the cache is bounded by one page. */
+    fun retain(objectIds: Set<String>) {
+        val it = entries.entries.iterator()
+        while (it.hasNext()) {
+            val e = it.next()
+            if (e.key !in objectIds) { e.value.bitmap.recycle(); it.remove() }
+        }
+    }
+
+    private companion object {
+        /** See [get]: how far short of its render width an image must stop to count as unconstrained. */
+        const val SLACK_DP = 64f
     }
 
     /** Drop everything (notebook close). */

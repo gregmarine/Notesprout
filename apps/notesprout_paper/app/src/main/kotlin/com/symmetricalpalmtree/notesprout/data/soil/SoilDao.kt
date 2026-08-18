@@ -70,6 +70,8 @@ interface SoilDao {
     suspend fun byIds(ids: List<String>): List<SoilObjectEntity>
 
     /** Highest live `"order"` among [parentId]'s children of [type], or -1 when there are none. */
-    @Query("SELECT COALESCE(MAX(`order`), -1) FROM notebook WHERE parentId = :parentId AND type = :type AND deletedAt IS NULL")
+    /** Over live **and** soft-deleted children, so `"order"` stays monotonic across erase → restore
+     *  (a stroke un-deleted in place never ties with one committed after its erase — H5). */
+    @Query("SELECT COALESCE(MAX(`order`), -1) FROM notebook WHERE parentId = :parentId AND type = :type")
     suspend fun maxOrder(parentId: String, type: String): Int
 }

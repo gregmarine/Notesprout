@@ -86,7 +86,7 @@ device — same as the reference and g-paper's own defaults). Smart-lasso and sc
 
 | g-paper callback | Row effect (serial IO) |
 |---|---|
-| `onStrokeCommitted(s)` | insert `stroke` row, `"order"` = `MAX("order")+1` among the page's live strokes |
+| `onStrokeCommitted(s)` | insert `stroke` row, `"order"` = `MAX("order")+1` among the page's strokes — live **and** soft-deleted (H5: monotonic across erase → restore, so a stroke un-deleted in place never ties) |
 | `onStrokesErased(ids)` | soft delete (`deletedAt`) |
 | `onSelectionMoved(m)` | read rows → decode → `Stroke.translated(dx,dy)` → re-encode → upsert (createdAt kept) |
 | `onPenLifted` | no-op (writes are already incremental) |
@@ -122,11 +122,14 @@ object's bounds — the look of an object whose provider is absent, disabled or 
 selectable, movable, deletable). It implements g-paper's live-drag pair (`draw(canvas, excluded)` +
 `drawObject`) so a dragged object rides under the pen instead of ghosting, and `hitTargets()` returns
 every live object's bounds — that is what makes objects lasso-selectable. `ObjectRenderCache` is
-in-memory for the open notebook only (cleared in `onDestroy`); the render pass that fills it is
+in-memory for the open notebook only (**bounded to the current page** — `retain(ids)` on every page load
+recycles the rest, H5; cleared in `onDestroy`); the render pass that fills it is
 §"Objects — actions, edit, render pass" (H4). A cache entry is valid for exactly (payload, dpi) and for
-any render width it still fits — an image rendered narrower than the width it was given is reused after
-a move that doesn't push the object against the page's right edge; a constrained (ellipsized) one is a
-miss whenever the width changes.
+any render width it still fits — an image that stopped **more than 64 dp short** of the width it was
+given counts as unconstrained and is reused after a move that doesn't push the object against the page's
+right edge; anything closer to its width (an END-ellipsized line lands a little under it — the glyph that
+didn't fit) is a miss whenever the width changes, so a truncated heading dragged back to room re-renders
+whole (H5; the bare `width < maxWidth` test kept the ellipsis).
 
 **Selection.** `onSelectionCreated` / `onSelectionMoved` / `onSelectionDismissed` keep
 `currentSelection` (bounds follow moves). `onSelectionMoved` gains `contentIds`: `objectStore.move` +
@@ -135,11 +138,8 @@ objectIds)`. **`onSelectionTapped(x, y)`** (g-paper 0.1.1: a sub-threshold stylu
 inside the selection box; the finger variant escrowed + palm-gated like tap-to-dismiss; drags
 unchanged) opens the tapped object's edit dialog (§"Edit dialog").
 
-**Debug ⋯ (H1 test surface, removed in H5):** "Insert test object" creates a `debug:box` object
-(payload `test`, 200×100 px) at the page centre — no provider owns it, so it draws as the placeholder —
-as one undoable `ObjectCreated`. It reaches the screen through a plain `DebugHooks` callback; the
-release twin ignores it. (H1's "Delete selection" item went away in H2 — Delete is on the selection
-toolbar.)
+(The H1 debug ⋯ "Insert test object" item and its `DebugHooks` callback were removed in H5 with the
+real provider in place; H1's "Delete selection" item had already become the toolbar Delete in H2.)
 
 ## Selection toolbar (arc 4 / H2)
 
@@ -168,13 +168,16 @@ undo step; `clearSelection` dismisses → the toolbar hides); anything else → 
 action)` → `ObjectActions.perform` (`createFromInk` for an ink selection, `applyAction` for one object).
 
 **When it shows (`ToolbarAnchor`, pure, JVM-tested):** `onSelectionCreated` → `showSelectionToolbar`
-through **`whenPenIdle`** (frame-silence rule; a lasso that is dragged at once never flickers chrome;
-dropped if the selection changed while the gate was closed). Anchored **8 dp below the drawn selection
+**at once — deliberately not `whenPenIdle`** (H5): a lasso ends with the pen up and, on EMR panels,
+hovering over the page, so `isPenActive` held the toolbar back until the pen left hover range;
+g-paper is already presenting the selection-box frame at that moment, so a chrome frame breaks no
+frame silence. The one async part (a single object's `activeActionIds`) is dropped if the selection
+changed meanwhile. Anchored **8 dp below the drawn selection
 box** (g-paper inflates the tight bounds by 12 px — `SELECTION_BOX_INFLATE_PX`, kept in step), centred
 on it, **flipped above** when it would cross the bottom strip, and clamped horizontally into the root
 and vertically between the top bar's bottom and the bottom strip's top. The sub-toolbar hangs off the
 **toolbar** (below it; above it when the toolbar flipped; the other side when that would leave the
-band), centred on it. `onSelectionDragStarted` hides it; `onSelectionMoved` re-shows it (pen-idle) at
+band), centred on it. `onSelectionDragStarted` hides it; `onSelectionMoved` re-shows it (at once) at
 the new place; `onSelectionDismissed`, every page navigation and Delete hide it. **Its rects join the
 exclusion rects** (`pushExclusions` appends `selectionToolbar.rects()`) and `overChrome`, so the stylus
 never inks under it and a finger tap on it releases the render. Note that switching to the pen tool
@@ -185,7 +188,7 @@ toolbar" is only reachable with the lasso tool — a new outline started over th
 
 `onSelectionTapped(x, y)` (g-paper 0.1.1) with **exactly one selected object, no strokes, and the tap
 inside the object's bounds** → `ObjectActions.editTapped` → the provider's `describeEdit` (through
-`ObjectProviderClient`, `EditCaps` applied; null = not editable → nothing) → `whenPenIdle` → `paper.releaseRender()` → **`ObjectEditDialog`** (`dialog_edit_object.xml`): a styled
+`ObjectProviderClient`, `EditCaps` applied; null = not editable → nothing) → at once (the pen hovers after a tap — same rule as the toolbar) → `paper.releaseRender()` → **`ObjectEditDialog`** (`dialog_edit_object.xml`): a styled
 `AlertDialog` titled from the spec with one bordered `AppCompatEditText` prefilled with the spec's text
 (hint, `LengthFilter(maxChars)`, single-line with IME *Done* = Save, or multi-line 3–8 rows), **Save /
 Cancel**. IME per `docs/design-system.md`: `SOFT_INPUT_STATE_VISIBLE | ADJUST_RESIZE` before `show()`;
@@ -205,20 +208,24 @@ selection.
 
 **Providers.** `ObjectProviders.load` (IO, launched right after `opened = true` so its binds never hold
 the "Opening…" popup): every trusted `OBJECT_PROVIDER` → `describeTypes` + `describeActions` (a provider
-failing either is skipped with a log line) → `Contribution(providerKey = package, label, typeIds,
-actions)`; plus the one recognizer and the one Markdown renderer the proxies would lend (null when none).
-The toolbar shows Delete only until they arrive; an active selection is re-shown when they do. `onResume`
-compares the cheap discovery `signature` (component list of the three points) and reloads only on a
-change (an extension enabled / disabled / installed while the screen was away) — then clears the
-"failed" set and re-runs the render pass.
+failing either — a cold process past the 3 s bind — stays **known but undescribed**: its objects still
+go to the render pass, it contributes nothing to the toolbar, and the load is marked *partial*, H5) →
+`Contribution(providerKey = package, label, typeIds, actions)`; plus the one recognizer and the one
+Markdown renderer the proxies would lend (null when none). The toolbar shows Delete only until they
+arrive; an active selection is re-shown when they do. `onResume` compares the cheap discovery
+`signature` (component list of the three points; a partial load carries a marker no discovery equals) and
+reloads only on a change (an extension enabled / disabled / installed while the screen was away, or a
+partial load to retry) — then clears the "failed" set and re-runs the render pass.
 
 **Stroke order is writing order — always.** `liveStrokes` is a `LinkedHashMap` (loaded in `"order"`,
 commits append) and every place that hands strokes on — the INK action, Delete, the eraser's undo capture
-— takes them in *that* order, never in `Selection.strokeIds`' set order. `StrokeStore.restore` re-numbers
-`"order"` in list order, so a hash-ordered capture would have **persisted** the scramble on undo; and an
-online recognizer reads strokes as a sequence — a hash-ordered "Meeting Notes" came back as four
-characters on all three devices (H4, fixed the same day). Ink written before that fix and undone through
-the old path stays scrambled in its rows (rewrite it).
+— takes them in *that* order, never in `Selection.strokeIds`' set order. An online recognizer reads
+strokes as a sequence — a hash-ordered "Meeting Notes" came back as four characters on all three devices
+(H4, fixed the same day). **`StrokeStore.restore` un-deletes rows in place** (H5): a soft-deleted row keeps
+its `"order"`, so an undone erase / Delete / heading create puts the strokes back at their writing
+position — until H5 it re-numbered them to `MAX+1`, which persisted a scramble on every undo of a
+mid-line run (only a stroke with no row at all is upserted after the last). Ink undone before these
+fixes may still be scrambled in its rows (rewrite it).
 
 **INK leaf** (`ObjectActions.perform`, strokes-only selection): guards in this order — `Requires.RECOGNIZER`
 with no recognizer installed → "This action needs a handwriting recognizer extension…"; `Requires.MARKDOWN`
@@ -240,8 +247,11 @@ are set here) → toolbar with the level marked active.
 **OBJECT leaf** (one selected object of the provider's type): guards `Requires.MARKDOWN` only (its result
 must render; the recognizer is not involved) → `applyAction(leaf, typeId, payload)` (2 s) → null →
 nothing · a payload → `onPayloadChanged`: `updatePayloadAndBounds` → inline render pass → **one
-`ObjectEdited(page, before, after-with-final-bounds)`** → re-select (new bounds, active ids refreshed —
-`activeIdsCache` per object id + payload spares a bind per re-selection).
+`ObjectEdited(page, before-re-anchored-at-the-final-x/y, after-with-final-bounds)`** (a drag of the
+still-selected object during the round-trip is its own `Moved`; an edit records payload + size only — H5)
+→ re-select (new bounds, active ids refreshed — `activeIdsCache` per object id + payload, filled on success
+only, spares a bind per re-selection). `ObjectCreated` is likewise recorded **after** the inline render,
+with the rendered object, so a redo restores the sized row and not the lasso box (H5).
 
 **Edit** (`onSelectionTapped` on the one selected object): no guard → `describeEdit` → dialog → Save →
 `applyEdit` → the same `onPayloadChanged` path (with Markdown absent the payload still changes; the box
@@ -255,7 +265,8 @@ screen applies on Main (`applyRenderResults`): skip if the object is gone or its
 `renderFailed` (no retry until the next page load, a provider reload, or an edit of that object); else
 `renderCache.put` and, when the image size differs, `width/height` from the image (persisted; anchored
 top-left) → **one `notifyContentChanged` through `whenPenIdle`**. Two entry points: **inline** (`renderNow`,
-awaited under `pageOps` by create / apply / edit) and **background** (`scheduleRenderPass` — page load,
+awaited under `pageOps` by create / apply / edit — so a slow provider queues page flips / undo behind
+it for at most bind 3 s + render 10 s; known, accepted in H5) and **background** (`scheduleRenderPass` — page load,
 navigate, undo reload, provider reload, and after a selection move with objects (an object pushed against
 the right edge re-ellipsizes); never holds `pageOps`; a trigger during a pass queues exactly one more).
 Render width = `ObjectRenderer.renderWidth(pageWidth, o)` = page width − x, ≥ 1, ≤ `MAX_IMAGE_EDGE_PX` —
@@ -288,7 +299,10 @@ set. Objects reload with strokes on every `refreshToPage`.
 
 No app frame is presented while `paper.isPenActive` — the strip text only changes through
 `whenPenIdle {}` (re-polls every `PEN_ACTIVE_TAIL_MS`). Nothing else on the screen repaints
-during writing.
+during writing. **Two deliberate exceptions (H5):** the selection toolbar on `onSelectionCreated` /
+`onSelectionMoved` and the object edit dialog on `onSelectionTapped` show at once — both fire with the
+pen up (and typically hovering), after g-paper has itself presented the selection frame; gating them on
+`isPenActive` made them wait for the pen to leave hover range.
 
 ## Library side
 
@@ -330,7 +344,7 @@ over chrome. No haptic feedback (meditative).
 - `insertBlank(after)` — new page row copying the current page's geometry + template ref, renumber
   siblings 0..N-1 in one transaction, mirror `pageCount` + `updatedAt`, land on the new page. Returns
   a `Structural` snapshot.
-- `deleteCurrent()` — soft-delete the page + its strokes and objects (`liveChildIds`), renumber, land on the previous page
+- `deleteCurrent()` — `writer.drain()`, then soft-delete the page + its strokes and objects (`liveChildIds` — read only after every queued create / erase has landed, H5), renumber, land on the previous page
   (`PageMath.indexAfterDelete`). **Deleting the only page creates a fresh blank in its place** so a
   notebook always has ≥ 1 page. Returns a `Structural` snapshot.
 - `reconcile(targetAlive, restoreChildIds, deleteChildIds, currentId)` — the undo/redo primitive:

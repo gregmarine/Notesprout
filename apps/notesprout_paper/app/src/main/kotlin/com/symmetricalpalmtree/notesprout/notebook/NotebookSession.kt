@@ -124,6 +124,7 @@ class NotebookSession(
 
     /** Insert a blank page relative to the current one, navigate to it, mirror pageCount + updatedAt. */
     suspend fun insertBlank(after: Boolean): Structural = withContext(Dispatchers.IO) {
+        writer.drain()   // structural writes see every queued stroke / object write first (H5)
         val cur = currentPage
         val before = pages.map { it.id }
         val now = System.currentTimeMillis()
@@ -151,6 +152,7 @@ class NotebookSession(
      * Deleting the only page creates a fresh blank in its place so a notebook always has ≥ 1 page.
      */
     suspend fun deleteCurrent(): Structural = withContext(Dispatchers.IO) {
+        writer.drain()   // a queued create / erase must land before `liveChildIds` is snapshotted (H5)
         val victim = currentPage
         val before = pages.map { it.id }
         val now = System.currentTimeMillis()
@@ -197,6 +199,7 @@ class NotebookSession(
         deleteChildIds: List<String>,
         currentId: String,
     ) = withContext(Dispatchers.IO) {
+        writer.drain()
         val now = System.currentTimeMillis()
         val alive = db.dao().childrenOfType(notebookId, SoilSchema.TYPE_PAGE).map { it.id }.toSet()
         val restorePages = PageMath.toRestore(alive, targetAlive)

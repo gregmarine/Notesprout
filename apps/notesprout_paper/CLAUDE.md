@@ -128,8 +128,8 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   notebooks fail to open and are deleted by hand). `ObjectRenderer` is the one g-paper
   `ContentRenderer`: cached bitmap or dashed placeholder, live-drag pair, `hitTargets` = object bounds;
   `ObjectRenderCache` is session-only (no stored bitmap, ever). Page delete / undo carry objects with
-  strokes (`liveChildIds`); every object action is one undoable step. The debug ⋯ "Insert test object"
-  item is the H1 test surface (gone in H5; its "Delete selection" twin became the toolbar Delete in H2).
+  strokes (`liveChildIds`); every object action is one undoable step. (The H1 debug ⋯ "Insert test
+  object" item was removed in H5.)
 - **Selection toolbar + contributed UI** (arc 4 / H2, `docs/notebook.md` §"Selection toolbar" +
   §"Edit dialog", `docs/extensions.md` §"Selection-toolbar contributions"): the floating toolbar over a
   lasso selection is **core-drawn from descriptions** — `SelectionAction` (id, ≤ 6-char label, catalog
@@ -141,8 +141,10 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   in-process extension code over the paper never. Toolbar shows via `whenPenIdle`, hides during a drag,
   anchors 8 dp off the drawn selection box (flip / clamp — `ToolbarAnchor`), and its rects join the
   exclusion rects. `ObjectEditDialog` follows the design-system IME pattern (hide via the field's window
-  token on Save/Cancel; never earlier — Ratta hardware keyboards). H2 runs on the debug-only
-  `FakeContributions` twin (`src/debug` / `src/release`, unwired since H4 — gone in H5).
+  token on Save/Cancel; never earlier — Ratta hardware keyboards). **The toolbar and the edit dialog
+  show at once — not `whenPenIdle`** (H5: the pen hovers after a lasso / tap, and `isPenActive` counts
+  hover; g-paper has already presented the selection frame, so no frame-silence break). The H2
+  `FakeContributions` twin was deleted in H5.
 - **ObjectProvider + the built proxies** (arc 4 / H3, `docs/extensions.md` §"ObjectProvider
   (contract)", §"The Heading extension", §"MarkdownRenderer / ObjectProvider — host behaviour"): the
   fifth point (`ACTION_OBJECT_PROVIDER`, `IObjectProvider`, `CreatedObject`) is the **generic
@@ -155,13 +157,13 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   core's own clients (own bind / timeout / signature check) via **`runBlocking` on the Binder thread**
   (never Main), re-apply the caps inward, and map failures to the marshalable set; the Markdown proxy
   re-wraps the reply into a region it owns (closed in `onTransact`'s `finally`). Two-hop budgets:
-  `createFromInk` 15 s, `render` 8 s; pure calls 2 s. A provider's `IllegalStateException(RECOGNIZER_REQUIRED
+  `createFromInk` 15 s, `render` 10 s (H5: was 8 — zero margin over the inner bind 3 s + call 5 s); pure calls 2 s. A provider's `IllegalStateException(RECOGNIZER_REQUIRED
   / MARKDOWN_REQUIRED)` is typed on the host as `CapabilityRequiredException`. `NSE · Heading`
   (`:ext-heading`, `HeadingText` / `HeadingActions` / `ObjectProviderService`) is the reference
   provider: `heading` type, parent **H** with `h1`…`h6`, edit `maxChars` 500, single line + 8 dp padding
   asked of the Markdown proxy, the proxy's reply returned as-is. **`RecognizerReadiness`** (main source,
   `extension/`) is the M1/M2 model-consent flow lifted out of the debug menu (which now only calls it);
-  the H action uses it. Debug ⋯ "Probe object providers" is the H3 test surface (gone in H5).
+  the H action uses it. (The debug ⋯ "Probe object providers" H3 test surface was removed in H5.)
 - **Objects end to end** (arc 4 / H4, `docs/notebook.md` §"Objects — actions, edit, render pass"): the
   screen's three H4 collaborators are `ObjectProviders` (loaded once per open **after** `opened` — its
   binds never hold the Opening popup; resume compares the discovery signature and reloads on a change),
@@ -172,10 +174,23 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   keeps only the page mutations (`objectListener`: create + erase as one `ObjectCreated`, `ObjectEdited`
   recorded with the *rendered* bounds, host-initiated `paper.setSelection` sets the selection state
   itself — no `onSelectionCreated` echo). Rules that bit: the cache entry survives moves that don't hit
-  the right edge (`ObjectRenderCache.get` fit rule); a failed render is not retried until the next page
-  load / provider reload / edit of that object; the background pass never holds `pageOps`, the inline
-  one (create / apply / edit) is awaited under it. OBJECT actions guard `Requires.MARKDOWN` only; edits
-  guard nothing.
+  the right edge (`ObjectRenderCache.get` fit rule — "unconstrained" = stopped > 64 dp short of its
+  width, else an ellipsized line is mistaken for a natural one); the cache is bounded to the current
+  page (`retain` on load); a failed render is not retried until the next page load / provider reload /
+  edit of that object; the background pass never holds `pageOps`, the inline one (create / apply / edit)
+  is awaited under it — **so a slow provider queues flips / undo behind it** (bounded: bind 3 s +
+  render 10 s; accepted in H5, not redesigned). OBJECT actions guard `Requires.MARKDOWN` only; edits
+  guard nothing. **Undo shapes:** `ObjectCreated` is recorded after the inline render (rendered
+  bounds), `ObjectEdited`'s `before` is re-anchored at the final x/y (a drag during the round-trip is
+  its own `Moved`); `StrokeStore.restore` un-deletes rows **in place** (writing order survives undo;
+  `maxOrder` counts soft-deleted rows so it never ties); `NotebookSession`'s structural ops and
+  `navigateTo` `writer.drain()` first. **H5 froze the arc:** boundary-audit rows 18–24 + the re-walk of 1/6/7 for the two
+  new clients and the proxies' inner calls, the object-point rules 18–23 (§"Adding an object point"),
+  and the "Writing an extension" Markdown-renderer + object-provider paragraphs — all in
+  `docs/extensions.md`; a provider that returns the Markdown proxy's `RenderedImage` as-is must close
+  its own handle in `onTransact`'s `finally` (the H5 fix in `ObjectProviderService`). The next object
+  extension (Text / Shape / Link) implements the same AIDL and follows those rules; nothing else
+  is planned.
 - **Toast vs. dialog:** a toast only confirms something that already happened ("copied"); anything
   the user must notice or act on — why a tap did nothing, a failure, a one-time download — is an
   `AlertDialog` (e-ink: a toast is easy to miss and reads as "broken"). The one helper is
@@ -218,8 +233,7 @@ Debug launch: `adb -s <serial> shell am start -n com.symmetricalpalmtree.notespr
 (BootstrapActivity is the launcher and the only thing that opens the index; every other screen
 bounces there via `IndexGuard`.) The debug build's library ⋯ menu has "Show recovery key" and
 "Forget cached key" (kills the process → next launch is the Unlock screen); the notebook screen's
-debug ⋯ has "Recognize page (ML Kit)" (present only with `NSE · ML Kit` installed), "Insert test
-object" (H1) and "Probe object providers" (H3 — logs the two-hop proxy paths). The app's files are
+debug ⋯ has "Recognize page (ML Kit)" (present only with `NSE · ML Kit` installed). The app's files are
 readable from `adb shell` at `/sdcard/Android/data/<appId>/files/` (index + `Garden/`).
 
 BOOX trap: `install -r` can leave the package disabled → `pm enable com.symmetricalpalmtree.notesprout.dev`.

@@ -176,14 +176,10 @@ class NotebookActivity : AppCompatActivity() {
         binding.pageIndicator.text = ""
         // Debug builds only (no-op in release): the ⋯ at the end of the top bar. Inside topBar, so the
         // existing exclusion rect covers it. It sees only the page's strokes + px size — never the session.
-        NotebookDebugMenu.install(
-            this, binding.topBarRow,
-            provider = {
-                if (!opened) null
-                else RecognizeContext(paper.getStrokes(), session.currentPage.width.toFloat(), session.currentPage.height.toFloat())
-            },
-            hooks = DebugHooks(insertTestObject = { insertTestObject() }),
-        )
+        NotebookDebugMenu.install(this, binding.topBarRow) {
+            if (!opened) null
+            else RecognizeContext(paper.getStrokes(), session.currentPage.width.toFloat(), session.currentPage.height.toFloat())
+        }
 
         pageGestures = PageGestures(
             host = paper.asView(),
@@ -225,6 +221,7 @@ class NotebookActivity : AppCompatActivity() {
         paper.setPageSize(page.width, page.height)
         paper.setTemplate(session.template)
         liveObjects = objects.associateByTo(LinkedHashMap()) { it.id }
+        renderCache.retain(liveObjects.keys)   // bitmaps of other pages / removed objects go (H5: the cache was unbounded)
         paper.loadStrokes(strokes)
         paper.notifyContentChanged()
         liveStrokes = strokes.associateByTo(LinkedHashMap()) { it.id }
@@ -308,9 +305,10 @@ class NotebookActivity : AppCompatActivity() {
             selectionToolbar.hide()
         }
         /** g-paper 0.1.1: a sub-threshold stylus / finger tap inside the selection box. With exactly one
-         *  selected object under the tap → the provider's `describeEdit` → [ObjectEditDialog] (pen-idle,
-         *  dropped if the selection changed meanwhile) → Save → `applyEdit` → [objectListener]. Strokes
-         *  selected, or a tap outside the object → nothing. */
+         *  selected object under the tap → the provider's `describeEdit` → [ObjectEditDialog] (at once —
+         *  the pen hovers after a tap, see [showSelectionToolbar]; dropped if the selection changed
+         *  meanwhile) → Save → `applyEdit` → [objectListener]. Strokes selected, or a tap outside the
+         *  object → nothing. */
         override fun onSelectionTapped(x: Float, y: Float) {
             Slog.d(TAG) { "selection tapped ${x.toInt()},${y.toInt()} (objects=${currentSelection?.contentIds?.size ?: 0})" }
             val sel = currentSelection ?: return
@@ -319,11 +317,9 @@ class NotebookActivity : AppCompatActivity() {
             if (!obj.bounds.contains(x, y)) return
             val providerKey = ExtensionContract.parseIdentity(obj.providerIdentity)?.first ?: return
             objectActions.editTapped(providerKey, obj) { spec, onSave ->
-                whenPenIdle {
-                    if (currentSelection != sel || closing) return@whenPenIdle
-                    paper.releaseRender()
-                    ObjectEditDialog.show(this@NotebookActivity, spec, onSave)
-                }
+                if (currentSelection != sel || closing) return@editTapped
+                paper.releaseRender()
+                ObjectEditDialog.show(this@NotebookActivity, spec, onSave)
             }
         }
         override fun onToolChanged(tool: Tool) { toolbar.sync(tool) }
@@ -349,10 +345,13 @@ class NotebookActivity : AppCompatActivity() {
     // ── Selection toolbar (arc 4 / H2) ───────────────────────────────────────
 
     /**
-     * Show the toolbar for [sel] once the pen is idle (frame-silence rule; a lasso that is dragged at
-     * once never flickers chrome). Contents = Delete + the contributions that apply to the selection's
-     * shape (INK / one OBJECT of a provider's type / mixed → core only); active sub-action ids come
-     * from the object's provider. Dropped if the selection changed while the gate was closed.
+     * Show the toolbar for [sel] **at once** — not through [whenPenIdle]: a lasso ends with the pen up
+     * and, on EMR panels, hovering right over the page, so `isPenActive` would hold the toolbar back
+     * until the pen leaves hover range (H5 finding). g-paper is already presenting the selection box
+     * frame at this point, so a chrome frame here breaks no frame silence. Contents = Delete + the
+     * contributions that apply to the selection's shape (INK / one OBJECT of a provider's type / mixed →
+     * core only); active sub-action ids come from the object's provider (async, dropped if the
+     * selection changed meanwhile).
      */
     private fun showSelectionToolbar(sel: Selection) {
         if (!opened || closing) return
@@ -364,17 +363,18 @@ class NotebookActivity : AppCompatActivity() {
         activeIdsCache[obj.id]?.takeIf { it.first == obj.payload }?.let { presentSelectionToolbar(sel, items, it.second); return }
         lifecycleScope.launch {
             val ids = try {
-                providers.clientFor(this@NotebookActivity, shape.providerKey)?.activeActionIds(shape.typeId, obj.payload) ?: emptySet()
+                val got = providers.clientFor(this@NotebookActivity, shape.providerKey)?.activeActionIds(shape.typeId, obj.payload) ?: emptySet()
+                activeIdsCache[obj.id] = obj.payload to got   // cached on success only — a failed call is asked again next time (H5)
+                got
             } catch (e: ExtensionCallException) {
                 Slog.d(TAG) { "activeActionIds failed: ${e.message}" }; emptySet()
             }
-            activeIdsCache[obj.id] = obj.payload to ids
             presentSelectionToolbar(sel, items, ids)
         }
     }
 
-    private fun presentSelectionToolbar(sel: Selection, items: List<ToolbarItem>, active: Set<String>) = whenPenIdle {
-        if (!opened || closing || currentSelection != sel) return@whenPenIdle
+    private fun presentSelectionToolbar(sel: Selection, items: List<ToolbarItem>, active: Set<String>) {
+        if (!opened || closing || currentSelection != sel) return
         selectionToolbar.show(items, active, sel.bounds)
         binding.root.post { pushExclusions() }
     }
@@ -392,6 +392,7 @@ class NotebookActivity : AppCompatActivity() {
     /** Swap the visible page: single EPD refresh (hold pixels, then load). Strokes + objects together. */
     private suspend fun navigateTo(index: Int) {
         val page = session.goTo(index)
+        session.writer.drain()   // queued creates / erases land before the page is read back (H5)
         val strokes = session.store.loadPage(page.id)
         val objects = session.objectStore.loadPage(page.id)
         paper.clearSelection()
@@ -402,6 +403,7 @@ class NotebookActivity : AppCompatActivity() {
         paper.setPageSize(page.width, page.height)
         paper.setTemplate(session.template)
         liveObjects = objects.associateByTo(LinkedHashMap()) { it.id }
+        renderCache.retain(liveObjects.keys)   // bitmaps of other pages / removed objects go (H5: the cache was unbounded)
         paper.loadStrokes(strokes)
         paper.notifyContentChanged()
         liveStrokes = strokes.associateByTo(LinkedHashMap()) { it.id }
@@ -482,24 +484,7 @@ class NotebookActivity : AppCompatActivity() {
         refreshToPage(a.pageId)
     }
 
-    // ── Content objects (arc 4 / H1 debug test object; H2 toolbar Delete) ──────
-
-    /** Debug ⋯ "Insert test object": a placeholder-drawn object (`debug:box`, payload `test`) at the
-     *  page centre — no provider exists for it, so it exercises store / render / select / move /
-     *  delete / undo without an extension. One undoable step ([Action.ObjectCreated], no ink consumed). */
-    private fun insertTestObject() = runPageOp {
-        val page = session.currentPage
-        val obj = PageObject(
-            id = UUID.randomUUID().toString(), providerIdentity = TEST_OBJECT_IDENTITY, payload = "test",
-            x = page.width / 2f - TEST_OBJECT_W / 2f, y = page.height / 2f - TEST_OBJECT_H / 2f,
-            width = TEST_OBJECT_W, height = TEST_OBJECT_H,
-            order = (liveObjects.values.maxOfOrNull { it.order } ?: -1) + 1,
-        )
-        session.objectStore.create(page.id, obj)
-        liveObjects[obj.id] = obj
-        undo.record(Action.ObjectCreated(page.id, obj, emptyList()))
-        whenPenIdle { paper.notifyContentChanged() }
-    }
+    // ── Content objects (arc 4 — H2 toolbar Delete, H4 provider actions) ──────
 
     /** The selection toolbar's Delete: the whole selection — strokes and/or objects — as one undoable
      *  step ([Action.ObjectsDeleted]). `clearSelection` dismisses → the toolbar hides. */
@@ -543,10 +528,12 @@ class NotebookActivity : AppCompatActivity() {
                 liveObjects[obj.id] = obj
                 for (id in ids) liveStrokes.remove(id)
                 session.store.erase(ids)
-                undo.record(Action.ObjectCreated(page.id, obj, live))
                 paper.removeStrokes(ids)   // data-in: dismisses the selection (toolbar hides) and redraws — the object as a placeholder until rendered
                 Slog.d(TAG) { "object created (${created.typeId}) from ${ids.size} strokes at ${bounds.left.toInt()},${bounds.top.toInt()}" }
                 renderNow(listOf(obj))
+                // Recorded with the *rendered* object (H5): a redo restores the row from this, and the
+                // pre-render lasso box would have come back as stale bounds under a still-valid cache entry.
+                undo.record(Action.ObjectCreated(page.id, liveObjects[obj.id] ?: obj, live))
                 selectObject(obj.id)
             }
         }
@@ -566,7 +553,10 @@ class NotebookActivity : AppCompatActivity() {
                 renderFailed.remove(after.id)
                 activeIdsCache.remove(after.id)
                 renderNow(listOf(after))
-                undo.record(Action.ObjectEdited(page.id, before, liveObjects[after.id] ?: after))
+                // `before` re-anchored at the final position (H5): a drag of the still-selected object
+                // during the render round-trip is its own Action.Moved — an edit records payload + size only.
+                val final = liveObjects[after.id] ?: after
+                undo.record(Action.ObjectEdited(page.id, before.copy(x = final.x, y = final.y), final))
                 if (currentSelection?.contentIds == setOf(after.id)) selectObject(after.id)
                 Slog.d(TAG) { "object ${after.id} payload changed (${payload.length} chars)" }
             }
@@ -787,11 +777,6 @@ class NotebookActivity : AppCompatActivity() {
         /** Phase-3 decisions: raw px, not dp (matches the reference pen and g-paper's defaults). */
         const val PEN_WIDTH_PX = 3f
         const val ERASER_RADIUS_PX = 15f
-
-        /** The H1 debug test object: an identity no provider owns (draws as the placeholder), 200×100 px. */
-        private const val TEST_OBJECT_IDENTITY = "debug:box"
-        private const val TEST_OBJECT_W = 200f
-        private const val TEST_OBJECT_H = 100f
 
         /** Outlives the Activity so a close in flight always completes its seal. */
         private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)

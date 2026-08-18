@@ -42,17 +42,29 @@ class StrokeStore(
     /** Soft-delete strokes by id (undo of a draw). Same primitive as [erase], named for the caller. */
     fun remove(ids: List<String>) = erase(ids)
 
-    /** Re-add previously-erased strokes as fresh live rows (undo of an erase, redo of a draw). */
+    /**
+     * Bring erased strokes back (undo of an erase / Delete / heading create, redo of a draw). A
+     * soft-deleted row keeps its geometry **and its `"order"`**, so it is un-deleted **in place** — the
+     * stroke returns to its writing position, not to the end of the page (H5: re-numbering to
+     * `MAX+1` persisted a scramble that the recognizer then read out of order — the f995354 bug on
+     * the undo path). Only a stroke with no row at all (never committed) is upserted, after the last.
+     */
     fun restore(pageId: String, strokes: List<Stroke>) {
         if (strokes.isEmpty()) return
         writer.enqueue {
             val now = System.currentTimeMillis()
+            val known = HashSet<String>()
+            for (chunk in strokes.map { it.id }.chunked(IN_CHUNK)) {
+                dao.byIds(chunk).mapTo(known) { it.id }
+                dao.restore(chunk, now)
+            }
+            val fresh = strokes.filter { it.id !in known }
             var order = dao.maxOrder(pageId, SoilSchema.TYPE_STROKE)
-            for (s in strokes) {
+            for (s in fresh) {
                 order += 1
                 dao.upsert(StrokeRows.toRow(s, pageId, order, now))
             }
-            Slog.d(TAG) { "restore ${strokes.size} to $pageId" }
+            Slog.d(TAG) { "restore ${strokes.size} to $pageId (${fresh.size} fresh)" }
         }
     }
 
@@ -76,5 +88,7 @@ class StrokeStore(
 
     private companion object {
         const val TAG = "StrokeStore"
+        /** SQLite's classic 999-variable ceiling (Android 10 ships 3.28) — `IN (:ids)` lists are chunked under it. */
+        const val IN_CHUNK = 500
     }
 }
