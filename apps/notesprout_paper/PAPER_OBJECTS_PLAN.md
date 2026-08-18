@@ -10,7 +10,7 @@
 > `CLAUDE.md` files. `docs/extensions.md` is the subsystem reference all arcs write into;
 > `docs/notebook.md` and `docs/data.md` gain sections in this arc.
 >
-> **Status: H0 ✅ (8c5361f) · H1 ✅ (62771f3) · H2 ✅ (bf17417) · H3 🧪 · H4 ⬜ · H5 ⬜ — H0 user-verified 2026-08-17.**
+> **Status: H0 ✅ (8c5361f) · H1 ✅ (62771f3) · H2 ✅ (bf17417) · H3 ✅ (0de688e) · H4 ⬜ · H5 ⬜ — H0 user-verified 2026-08-17.**
 
 ## Why
 
@@ -787,9 +787,9 @@ extension is behind it.
 ---
 
 ### Phase H3 — The `OBJECT_PROVIDER` point, `NSE · Heading`, the two proxies, `RecognizerReadiness`
-**Status:** 🧪 Awaiting device verification (built + Claude-verified SNN + NA5C + MIP11 2026-08-17)
+**Status:** ✅ Complete (commit 0de688e) — user-verified SNN + NA5C + MIP11 2026-08-17 (all 3 checklist items)
 
-**Outcome (2026-08-17, Claude-side checks passed on all three devices; user checklist items 1–3 pending):**
+**Outcome (2026-08-17, user-verified all 3 checklist items on SNN + NA5C + MIP11; commit 0de688e):**
 `:extension-api` — `IObjectProvider.aidl` (8 methods), `CreatedObject` (+ `.aidl`, `requireValid`),
 `ExtensionContract.ACTION_OBJECT_PROVIDER` / `MAX_TYPE_ID_CHARS` / `MAX_TYPES` (16 — the "≤ 16"
 of `describeTypes`, made a constant) / `MAX_OBJECTS_PER_PAGE` / `RECOGNIZER_REQUIRED` /
@@ -828,7 +828,7 @@ model present → straight to the result; **`pm clear` of the ML Kit ext → con
 progress with the elapsed counter → "model ready after 44 s" → result with no second tap.** Docs:
 `docs/extensions.md` (contract table, AIDL, `CreatedObject`, §"ObjectProvider (contract)", §"The Heading
 extension", §"MarkdownRenderer / ObjectProvider — host behaviour", capability pattern marked built,
-build lines), `README.md`, `CLAUDE.md`. **User by-eye items 1–3 flip this ✅.**
+build lines), `README.md`, `CLAUDE.md`.
 
 **Phase-start answers (2026-08-17):** Q1 proxies forward via `runBlocking` on the host's Binder thread
 (never Main); two-hop budgets `createFromInk` 15 s / `render` 8 s · Q2 writing area = the selection

@@ -11,7 +11,7 @@ global-index model, global encryption model, and e-ink design philosophy — and
   Naming extension), then `PAPER_RECOGNITION_PLAN.md` (arc 3, complete + frozen 2026-08-17: the
   engine-neutral `HANDWRITING_RECOGNIZER` capability point + the ML Kit extension `NSE · ML Kit`,
   debug-only "Recognize page" test surface), then **`PAPER_OBJECTS_PLAN.md` (arc 4, in progress —
-  H0 ✅ 8c5361f · H1 ✅ 62771f3 · H2 ✅ bf17417 · H3 🧪 2026-08-17: content objects in the `.soil` + the selection toolbar with its
+  H0 ✅ 8c5361f · H1 ✅ 62771f3 · H2 ✅ bf17417 · H3 ✅ 0de688e 2026-08-17: content objects in the `.soil` + the selection toolbar with its
   extension-contribution API + the `MARKDOWN_RENDERER` capability point / `NSE · Markdown` + the
   generic `OBJECT_PROVIDER` point / `NSE · Heading`, the two proxies, g-paper 0.1.1)** — read all
   five top-to-bottom at the start of every session; **arc 4 is the active plan — start at its next
