@@ -21,10 +21,10 @@ global-index model, global encryption model, and e-ink design philosophy — and
   button + one-finger swipe-down), then **`PAPER_SCRATCHPAD_PLAN.md` (arc 6, PLANNED 2026-08-19 —
   the ACTIVE arc: `NSE · Scratch Pad`, an extension-owned off-paper screen (UI-rule tier 2, first
   exercise) + the shared `:paper-screen` module + the `SCRATCH_PAD` point + `IExtensionStore.putLarge /
-  getLarge` (4 MiB values over `SharedMemory`) + the two ink transfers; S0 ✅ 9a96c7a · S1 🧪 · S2 ⬜ · S3 ⬜)**
+  getLarge` (4 MiB values over `SharedMemory`) + the two ink transfers; S0 ✅ 9a96c7a · S1 ✅ 98f58f6 · S2 ⬜ · S3 ⬜)**
   — read all seven top-to-bottom at the start of every session; **S0 ✅ 2026-08-19 (user-verified
-  SNN / NA5C / MIP11); S1 built 2026-08-19 (the screen + the two entry buttons — Claude-verified,
-  user checklist pending); next = S2 (fresh session, the phase-start wizard first).**
+  SNN / NA5C / MIP11); S1 ✅ 98f58f6 2026-08-19 (the screen + the two entry buttons — user-verified SNN /
+  NA5C / MIP11); next = S2 (fresh session, the phase-start wizard first).**
 - **Package / applicationId:** `com.symmetricalpalmtree.notesprout` (debug: `.dev` suffix)
 - **Launcher label:** "Notesprout Paper" (debug: "Notesprout Paper Dev")
 

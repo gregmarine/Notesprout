@@ -11,8 +11,8 @@
 > subsystem reference all arcs write into; `docs/notebook.md` and `docs/library.md` gain sections
 > in this arc; a new `docs/scratchpad.md` is the extension's own reference.
 >
-> **Status: S0 ✅ 9a96c7a (user-verified SNN / NA5C / MIP11 2026-08-19) · S1 🧪 (built 2026-08-19,
-> Claude-verified; user checklist pending) · S2 ⬜ · S3 ⬜.**
+> **Status: S0 ✅ 9a96c7a · S1 ✅ 98f58f6 (both user-verified SNN / NA5C / MIP11 2026-08-19) · S2 ⬜ · S3 ⬜.
+> Next: S2 (fresh session, phase-start wizard first).**
 
 ## Why
 
@@ -661,7 +661,7 @@ its hash here); docs; memory; commit + push.
 ---
 
 ### Phase S1 — The scratch-pad screen + the two entry buttons (no transfers)
-**Status:** 🧪 Awaiting device verification (built 2026-08-19; Claude-verified MIP11 / NA5C / SNN — user checklist pending)
+**Status:** ✅ Complete (commits a7a9923 + 98f58f6; user-verified SNN / NA5C / MIP11 2026-08-19 — all ten checklist items pass)
 
 **Goal:** the user story minus transfers works on all three devices: the notebook's top-bar and the
 library's bottom-bar **notes** buttons exist only with the extension installed; tap → the pad opens
@@ -731,7 +731,7 @@ nothing until S2 (not GONE) · Q5 800 ms debounce + leave / pause / finish, page
 **Close-out:** status ✅ + Outcome (per-device open timings tap → pad drawn; page save sizes; the
 handoff behaviour observed on NA5C / SNN — anything the engines needed); docs; memory; commit + push.
 
-**Outcome (2026-08-19 — built + Claude-verified MIP11 / NA5C / SNN; user checklist pending):**
+**Outcome (2026-08-19 — a7a9923 + 98f58f6; Claude-verified, then user checklist items 1–10 all pass on SNN / NA5C / MIP11, incl. item 1 the EPD handoff by eye):**
 - **`:ext-scratchpad`:** `ScratchPadActivity` (the notebook's shape from `:paper-screen` — `PageGestures`,
   `PaperChrome`, `UndoRedoStack<ScratchUndo.Action>`, `ToolbarAnchor`, `TopGuard`, `Dialogs`,
   `ActionSheetDialog`; caller check first; whole-paper exclusion under "Opening…"; `resumeDrawing` /
@@ -780,6 +780,9 @@ handoff behaviour observed on NA5C / SNN — anything the engines needed); docs;
 - Agent note (NA5C): a second tap at the notebook Back's coordinates after returning to the library
   "exited the app" — not reproduced; at those coordinates the library shows **Go up one folder**, and a
   re-run went notebook → library (folder) → root with the app alive. Not a Scratch Pad path.
+- **Post-commit (98f58f6):** BOOX re-disabled the sideloaded extension after a reinstall → `bindService`
+  false → the `scratch_failed` dialog with the button still up; a failed open now re-runs discovery so the
+  button hides at once. First check on any "didn't respond": `pm list packages -d`.
 
 ---
 
