@@ -10,7 +10,7 @@
 > hold) and both `CLAUDE.md` files. `docs/extensions.md` is the subsystem reference all arcs write
 > into; `docs/notebook.md` gains a section in this arc.
 >
-> **Status: C0 ✅ (cc0558d) · C1 ✅ (c9733c5 + spacer fix) · C2 ⬜ — both user-verified SNN/NA5C/MIP11 2026-08-18; next: C2's phase ritual.**
+> **Status: ARC COMPLETE + FROZEN 2026-08-18 — C0 ✅ (cc0558d) · C1 ✅ (c9733c5 + spacer fix) · C2 ✅ (54b9bf2) — all user-verified SNN/NA5C/MIP11. No active arc; the next is not planned.**
 
 ## Why
 
@@ -600,7 +600,7 @@ so the gap after Back is constant with or without the button. **C1 ✅.**
 ---
 
 ### Phase C2 — Review, boundary audit, docs freeze
-**Status:** 🧪 Awaiting device verification (built 2026-08-18; Claude-side runs in progress)
+**Status:** ✅ Complete (commit 54b9bf2) — user-verified SNN + NA5C + MIP11 2026-08-18. **Arc 5 complete; this file is frozen.**
 
 **Goal:** the appended method, its host handling and the Contents screen are trustworthy and
 recorded as the pattern a second contributing object type follows.
@@ -682,7 +682,7 @@ compile. Installed on SNN + NA5C + MIP11 (app APK only — the extension APKs ar
 `describeOutlineAll` bind, `gather: … candidates=6 sent=6 … truncated=false` (MIP11 23 ms / NA5C 36 ms /
 SNN 59 ms — SNN 8 entries), no label in any log line; row tap navigates; swipe-down reopens; scrim tap
 closes; `pm disable-user` Heading → no button + swipe silent, re-enable → back; flips + Back regress
-clean; no `SecurityException` / `FATAL` / leaked ServiceConnection. **User checklist pending.**
+clean; no `SecurityException` / `FATAL` / leaked ServiceConnection. **User checklist (probe gone · C1 items 1–5, 7–13 · C0 item 2 · v0 regression subset · the hover create-then-delete button case): all pass on all three devices — C2 ✅, arc 5 complete.**
  — Constants + strings (this arc)
 
 | Name | Value |

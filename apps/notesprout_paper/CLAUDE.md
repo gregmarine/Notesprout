@@ -14,12 +14,12 @@ global-index model, global encryption model, and e-ink design philosophy — and
   H0 8c5361f · H1 62771f3 · H2 bf17417 · H3 0de688e · H4 f995354 · H5 6c5d5c2: content objects in the `.soil` + the selection toolbar with its
   extension-contribution API + the `MARKDOWN_RENDERER` capability point / `NSE · Markdown` + the
   generic `OBJECT_PROVIDER` point / `NSE · Heading`, the two proxies, g-paper 0.1.1), then
-  `PAPER_CONTENTS_PLAN.md` (arc 5, **C0 ✅ cc0558d · C1 ✅ c9733c5 · C2 🧪 built + Claude-verified
-  SNN + NA5C + MIP11 2026-08-18 — user checklist pending, then ✅ + frozen**: the
+  `PAPER_CONTENTS_PLAN.md` (arc 5, **complete + frozen 2026-08-18 — C0 ✅ cc0558d · C1 ✅ c9733c5 ·
+  C2 ✅ 54b9bf2**, all user-verified SNN + NA5C + MIP11: the
   Contents — a table of contents from the Heading extension via `IObjectProvider.describeOutline`
   (appended, compatible, `API_VERSION` stays 1) + a core-drawn `ContentsDialog`, top-bar `list`
-  button + one-finger swipe-down) — read all six top-to-bottom at the start of every session; **after
-  C2's user verification no arc is active — the next arc is NOT planned; ask the user first.**
+  button + one-finger swipe-down) — read all six top-to-bottom at the start of every session; **no
+  arc is active — the next arc is NOT planned; ask the user first.**
 - **Package / applicationId:** `com.symmetricalpalmtree.notesprout` (debug: `.dev` suffix)
 - **Launcher label:** "Notesprout Paper" (debug: "Notesprout Paper Dev")
 
