@@ -10,7 +10,7 @@
 > hold) and both `CLAUDE.md` files. `docs/extensions.md` is the subsystem reference all arcs write
 > into; `docs/notebook.md` gains a section in this arc.
 >
-> **Status: C0 ✅ (cc0558d) · C1 🧪 · C2 ⬜ — C0 user-verified SNN/NA5C/MIP11 2026-08-18; C1 built, Claude-verified, awaiting the user's device checklist.**
+> **Status: C0 ✅ (cc0558d) · C1 ✅ (c9733c5 + spacer fix) · C2 ⬜ — both user-verified SNN/NA5C/MIP11 2026-08-18; next: C2's phase ritual.**
 
 ## Why
 
@@ -469,7 +469,7 @@ property, not changed here (C1's checklist uses `pm disable-user` / enable, whic
 ---
 
 ### Phase C1 — The Contents screen, the button, the gesture, navigation — devices
-**Status:** 🧪 Awaiting device verification
+**Status:** ✅ Complete (commits 8cecfc4 · c9733c5 · the spacer fix) — user-verified SNN + NA5C + MIP11 2026-08-18
 
 **Goal:** the user story works on all three devices: tap the top-bar **list** button (or swipe one
 finger down the paper) → the Contents opens (60 % sidebar on every test device; full screen below
@@ -553,7 +553,7 @@ bind + build; sidebar widths); docs; memory; commit + push.
 
 **Outcome (2026-08-18 — built + Claude-verified on all three devices; user checklist pending):**
 Phase-start answers: Q1 whole-paper exclusion **yes** · Q2 the button goes **between Back and the pen**
-(user's call — not after the lasso; the 12 dp spacer now sits between Contents and the pen) · Q3 as
+(user's call — not after the lasso; the old 12 dp spacer after Back was removed on the user's report so all five buttons are evenly spaced) · Q3 as
 recommended (no highlight before the first heading; several on the page → the last) · Q4 as
 recommended (30 % + fling / 50 %, `dy > 0`, busy guard). Built as specified with three deviations from
 the letter, none from the intent: (1) the width rule + rows-per-page + indent math live in a pure
@@ -588,6 +588,9 @@ available` / `refresh()` (pen-idle button visibility + exclusion re-push), calle
 `navigateTo`, an object create and a selection delete; `open()` refuses while unavailable, and an
 empty gather opens nothing. Locked-decisions table updated (Q2). Claude-verified: Test 02 keeps its
 button on all three; a fresh heading-less "Test 03" on MIP11 shows no button and a swipe is silent.
+**User confirmed the change works as expected** (first heading → button appears); one more report — the
+old 12 dp spacer after Back left a gap between Contents and Pen — fixed by removing it (all five
+buttons contiguous). **C1 ✅.**
 
 ---
 

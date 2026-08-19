@@ -35,8 +35,8 @@ delete) and undo/redo arrive in Phase 4.
 Context) → `topBar` overlay (flush at the top edge, `TopGuard.applyRootPadding` so it clears the
 BOOX status bar; 0 on Ratta; 1dp inkBlack bottom border) → `bottomStrip` overlay ("`<name>`
 `n / N`", 1dp top border). Immersive: system bars hidden, transient by swipe. Portrait-locked.
-The top bar row is `[←] [Contents — GONE unless an outline-capable provider is loaded (arc 5 / C1)]
-12 dp [pen] [eraser] [lasso] … [⋯ debug]`.
+The top bar row is `[←] [Contents — GONE unless `ContentsFlow.available` (arc 5 / C1)] [pen] [eraser]
+[lasso] … [⋯ debug]` — evenly spaced, no spacer (the pre-C1 12 dp gap after Back was dropped).
 
 Both bars are pushed to `paper.setExclusionRects` after every root layout pass, translated into
 the paper view's coordinates, so the stylus can never ink under chrome. A finger `ACTION_DOWN`

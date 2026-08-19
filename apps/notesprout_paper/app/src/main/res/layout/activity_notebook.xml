@@ -45,10 +45,6 @@
                 android:contentDescription="@string/cd_contents"
                 android:visibility="gone" />
 
-            <View
-                android:layout_width="12dp"
-                android:layout_height="0dp" />
-
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnPen"
                 style="@style/Widget.Notesprout.ToolbarButton"
