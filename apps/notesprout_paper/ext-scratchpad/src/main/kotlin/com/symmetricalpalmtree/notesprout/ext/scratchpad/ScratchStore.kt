@@ -138,14 +138,6 @@ class ScratchStore(private val store: IExtensionStore) {
         return Received(cur, ids, false, loaded.ids, loaded.currentId)
     }
 
-    /** Debug: every key + the summed byte size of the page blobs (reads each page). */
-    fun sizeSummary(): Pair<Int, Long> = guard {
-        val keys = store.keys("")
-        var bytes = 0L
-        for (k in keys) if (k.startsWith(PAGE_PREFIX)) bytes += readPage(k.removePrefix(PAGE_PREFIX))?.size ?: 0
-        keys.size to bytes
-    }
-
     private fun writeIds(ids: List<String>) {
         store.put(KEY_PAGES, ids.joinToString("\n").toByteArray(Charsets.UTF_8))
     }

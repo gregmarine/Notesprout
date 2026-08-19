@@ -232,9 +232,6 @@ class ScratchDocument(private val store: ScratchStore) {
         loadPage(targetCurrent)
     }
 
-    /** Debug: every key + the summed page-blob bytes. */
-    suspend fun sizeSummary(): Pair<Int, Long> = withContext(Dispatchers.IO) { store.sizeSummary() }
-
     private companion object {
         const val TAG = "ScratchDocument"
     }

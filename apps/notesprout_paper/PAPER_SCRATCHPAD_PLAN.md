@@ -11,8 +11,7 @@
 > subsystem reference all arcs write into; `docs/notebook.md` and `docs/library.md` gain sections
 > in this arc; a new `docs/scratchpad.md` is the extension's own reference.
 >
-> **Status: S0 ✅ 9a96c7a · S1 ✅ 98f58f6 (both user-verified SNN / NA5C / MIP11 2026-08-19) · S2 ✅ 374f17f · S3 ⬜.
-> Next: S3 (fresh session, phase-start wizard first — freeze as built? remove both debug probes?).**
+> **Status: S0 ✅ 9a96c7a · S1 ✅ 98f58f6 (both user-verified SNN / NA5C / MIP11 2026-08-19) · S2 ✅ 374f17f · S3 🔄 In progress.**
 
 ## Why
 
@@ -945,7 +944,25 @@ memory; commit + push.
 ---
 
 ### Phase S3 — Review, boundary audit, docs freeze
-**Status:** ⬜ Not started
+**Status:** 🔄 In progress
+
+**Phase-start answers (2026-08-19):** Q1 three changes before freezing — (a) the notebook top-bar
+Scratch Pad button moves to the far right, **immediately before the debug ⋯ menu**; (b) the pad's
+"send to notebook" controls (top-bar Send and the lasso bar's Send) take the Tabler **`pencil-down`**
+glyph instead of `send`; (c) investigate an intermittent sluggish drag of a just-received / just-pasted
+selection (either direction; dismiss + reselect = smooth again). Q2 remove both debug probes.
+
+**(c) investigated 2026-08-19 — not reproduced, no code-path difference found.** The drag of a
+host-set selection (`setSelection`, paste / receive) and of a lasso-made one run the same g-paper
+state machine (`lassoTryBeginDrag` → `lassoDragMove` → 60 ms-throttled invalidate; committed
+`RenderNode` + translated drag layer), the same host listeners (no per-move host work, no raw-input
+listener), the same engine transients (Onyx `epdRepaintHandoff` / A2 drag mode, Ratta drag
+suppression); the transferred strokes are plain `ArrayList`-backed `Stroke`s, every store / transfer
+call is off-Main. Measured on MIP11 with `dumpsys gfxinfo framestats` (17 pasted strokes, 1.5 s
+stylus drag): pasted-selection drag 23 frames, onDraw 0.3 ms, 7.8 ms/frame; dismissed + re-lassoed
+drag 23 frames, 0.4 ms, 8.1 ms/frame — identical. Left as an open observation: **next time it
+happens, note the device, stylus vs finger, and whether the FIRST drag after the transfer is the
+slow one** — with that, instrument that engine's drag path.
 
 **Goal:** the shared module, the new point, its held bind, the store cap, the transfers and the
 screen are trustworthy and recorded as the pattern a second screen-owning extension follows.

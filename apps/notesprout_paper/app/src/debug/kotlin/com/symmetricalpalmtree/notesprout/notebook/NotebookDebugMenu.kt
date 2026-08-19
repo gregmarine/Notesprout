@@ -2,9 +2,7 @@ package com.symmetricalpalmtree.notesprout.notebook
 
 import android.content.ClipData
 import android.content.ClipboardManager
-import android.view.View
 import android.view.ViewGroup
-import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -24,7 +22,6 @@ import com.symmetricalpalmtree.notesprout.extension.ProviderRef
 import com.symmetricalpalmtree.notesprout.extension.RecognizerClient
 import com.symmetricalpalmtree.notesprout.extension.RecognizerNotReadyException
 import com.symmetricalpalmtree.notesprout.extension.RecognizerReadiness
-import com.symmetricalpalmtree.notesprout.extension.ScratchPadClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -39,11 +36,9 @@ import kotlinx.coroutines.withContext
  * "Recognition model needed" → Download → progress → recognize without another tap) is
  * [RecognizerReadiness] since H3 — main source, shared with the heading action; this menu only calls
  * it. (The arc-4 test surfaces "Insert test object" / "Probe object providers" were removed in H5; the
- * arc-5 / C0 "Probe contents" item was removed in C2 — the Contents screen itself exercises that path.)
- * **"Probe scratch pad"** (arc 6 / S0, removed in S3): present only while a trusted `SCRATCH_PAD`
- * extension is installed — `ScratchPadClient.open` (store pre-open → held bind → `begin(store)`; the
- * extension logs its page count) then `finish` (`end` → unbind → revoke), no screen launched; toast
- * OK / FAIL with the timing. `logcat -s ScratchPadClient ScratchPadService` shows the sequence.
+ * arc-5 / C0 "Probe contents" item was removed in C2 — the Contents screen itself exercises that path;
+ * the arc-6 / S0 "Probe scratch pad" item was removed in S3 — the Scratch Pad screen exercises the held
+ * bind.)
  *
  * Every dialog here is the core's (the extension shows nothing; the only toast is "copied"); nothing
  * recognized is stored or logged — the dialog is the only sink.
@@ -63,8 +58,8 @@ object NotebookDebugMenu {
     private fun release() { busyOwner = null }
 
     fun install(activity: AppCompatActivity, bar: ViewGroup, provider: () -> RecognizeContext?) {
-        // Push the ⋯ to the far end of the row (the row's own buttons stay where they are).
-        bar.addView(View(activity), LinearLayout.LayoutParams(0, 0, 1f))
+        // The row's own flexible gap (layout) already pushes what follows it to the far end: the ⋯ lands
+        // right after the Scratch Pad button (S3: that button sits immediately before the ⋯).
         val btn = AppCompatImageButton(activity, null, 0).apply {
             setImageResource(R.drawable.ic_dots)
             setBackgroundResource(R.drawable.bg_toolbar_button)
@@ -84,38 +79,13 @@ object NotebookDebugMenu {
     private fun showSheet(activity: AppCompatActivity, provider: () -> RecognizeContext?) {
         activity.lifecycleScope.launch {
             val ref = ExtensionRegistry.handwritingRecognizer(activity)   // IO; refreshed per open
-            val padRef = ExtensionRegistry.scratchPad(activity)
             if (activity.isFinishing || activity.isDestroyed) return@launch
             val sheet = ActionSheetDialog(activity).title(activity.getString(R.string.debug_tools_title))
             // No recognizer installed → the item is absent (the sheet opens with its title only).
             if (ref != null) {
                 sheet.addAction(null, activity.getString(R.string.debug_recognize_page)) { recognize(activity, ref, provider) }
             }
-            if (padRef != null) {
-                sheet.addAction(null, "Probe scratch pad") { probeScratchPad(activity, padRef) }
-            }
             sheet.show()
-        }
-    }
-
-    /** S0: hold → begin → end, nothing launched; the extension logs `pages=n` under ScratchPadService. */
-    private fun probeScratchPad(activity: AppCompatActivity, ref: ProviderRef) {
-        if (busy()) return
-        claim(activity)
-        activity.lifecycleScope.launch {
-            val client = ScratchPadClient(activity, ref)
-            val t0 = System.currentTimeMillis()
-            try {
-                val intent = client.open(sendEnabled = false, openReceived = false)
-                val ok = intent != null
-                val openMs = System.currentTimeMillis() - t0
-                client.finish()
-                val ms = System.currentTimeMillis() - t0
-                Slog.d(TAG) { "probe scratch pad: open=$ok ${openMs} ms, total $ms ms" }
-                toast(activity, if (ok) "Scratch pad probe: OK (begin ${openMs} ms, total $ms ms)" else "Scratch pad probe: FAIL (see log)")
-            } finally {
-                release()
-            }
         }
     }
 

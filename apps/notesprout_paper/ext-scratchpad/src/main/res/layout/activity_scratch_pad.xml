@@ -54,7 +54,7 @@
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnSend"
                 style="@style/Widget.Notesprout.ToolbarButton"
-                android:src="@drawable/ic_send"
+                android:src="@drawable/ic_pencil_down"
                 android:contentDescription="@string/cd_scratch_send"
                 android:visibility="gone" />
         </LinearLayout>
@@ -155,7 +155,7 @@
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnSelSend"
             style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_send"
+            android:src="@drawable/ic_pencil_down"
             android:contentDescription="@string/cd_scratch_send"
             android:visibility="gone" />
     </LinearLayout>

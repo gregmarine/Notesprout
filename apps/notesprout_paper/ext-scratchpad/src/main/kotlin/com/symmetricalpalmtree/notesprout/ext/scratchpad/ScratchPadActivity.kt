@@ -136,7 +136,6 @@ class ScratchPadActivity : AppCompatActivity() {
         binding.btnPrev.setOnClickListener { paper.releaseRender(); runPageOp { flip(-1) } }   // inside bottomStrip: exclusion covers it
         binding.btnNext.setOnClickListener { paper.releaseRender(); runPageOp { flip(+1) } }
         binding.pageIndicator.text = ""
-        ScratchDebugMenu.install(this, binding.topBarRow) { document }
 
         chrome = PaperChrome(paper, binding.topBar, binding.bottomStrip, { selectionToolbar.rects() }, { x, y -> selectionToolbar.contains(x, y) }) { !opened }
         pageGestures = PageGestures(

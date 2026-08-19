@@ -65,11 +65,14 @@
                 android:src="@drawable/ic_lasso"
                 android:contentDescription="@string/cd_tool_lasso" />
 
+            <!-- Flexible gap: everything after it sits at the far right of the row. -->
             <View
-                android:layout_width="12dp"
-                android:layout_height="0dp" />
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
 
-            <!-- Scratch Pad (arc 6 / S1): GONE unless NSE · Scratch Pad is installed (S1 Q2: far end, before the debug ⋯). -->
+            <!-- Scratch Pad (arc 6 / S1, slot moved in S3): GONE unless NSE · Scratch Pad is installed; far right,
+                 immediately before the debug ⋯ (debug builds append the ⋯ after this). -->
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnScratchPad"
                 style="@style/Widget.Notesprout.ToolbarButton"
