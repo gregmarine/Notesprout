@@ -1563,7 +1563,11 @@ rules where it keeps data, **plus**:
     `releaseForHandoff()` before the launch **and** before every `finish()` back to the caller,
     `resumeDrawing()` on return on both sides, and the extension registers its own g-paper engines
     in its own `Application` (g-paper `docs/api.md` §Lifecycle; the handoff is symmetric — a miss
-    on either side tears the other's raw session down, seen on NA5C in S2). (Row 31.)
+    on either side tears the other's raw session down, seen on NA5C in S2). The engines' ownership
+    guards are **process-local**, so the departing side's `releaseForHandoff()` must be its *full*
+    teardown and drop the token — a late focus-loss / `release()` teardown from the other process
+    otherwise lands after the caller's reclaim (Ratta: the panel left full-UI-auto → slow-waveform
+    drags, seen on SNN in S3 → g-paper 0.1.2). (Row 31.)
 
 Followed by ScratchPad (arc 6): `SCRATCH_PAD` + `IScratchPad` + `PaperStroke` / `InkBundle` in
 `:extension-api`; `ExtensionRegistry.scratchPad` + `ScratchPadClient` over `ExtensionBinder.hold`;

@@ -960,9 +960,25 @@ listener), the same engine transients (Onyx `epdRepaintHandoff` / A2 drag mode, 
 suppression); the transferred strokes are plain `ArrayList`-backed `Stroke`s, every store / transfer
 call is off-Main. Measured on MIP11 with `dumpsys gfxinfo framestats` (17 pasted strokes, 1.5 s
 stylus drag): pasted-selection drag 23 frames, onDraw 0.3 ms, 7.8 ms/frame; dismissed + re-lassoed
-drag 23 frames, 0.4 ms, 8.1 ms/frame — identical. Left as an open observation: **next time it
-happens, note the device, stylus vs finger, and whether the FIRST drag after the transfer is the
-slow one** — with that, instrument that engine's drag path.
+drag 23 frames, 0.4 ms, 8.1 ms/frame — identical. **ROOT CAUSE FOUND the same day (user reproduced it on SNN after a
+series of sends both ways; the log was captured live): g-paper Ratta.** The engines' ownership guards
+(`inkOwner` / `penOwner`) are **process-local statics**; the pad lives in another process, so after
+its `releaseForHandoff()` the pad's view still believed it owned the session and its focus-loss
+teardown **and** its `onDestroy` → `release()` each re-sent `enableFullUiAuto(false)` + the
+full-screen disable to the device-global daemon — the `release()` one landed ≈ 200 ms **after** the
+notebook's `onResume` reclaim (`firmware ink session claimed` 45.824 → pad `released (release)`
+46.039). The notebook's session stayed live, but the panel had left full-UI-auto: every drag frame
+repainted with the slow waveform until something re-armed it (dismiss → tool change → reselect) —
+exactly the symptom; MIP11 (generic engine, no daemon) could never show it. Onyx already nulls
+`penOwner` + `isSetup` on the handoff (`closeRawDrawingIfOwner`), which is why NA5C showed the
+*other* S2 symptom, not this one. **Fix = g-paper 0.1.2 (345c2a8): `RattaPaperView.releaseForHandoff()`
+is the full teardown (overlay release, full-screen disable, `enableFullUiAuto(false)`) and drops
+`inkOwner`**, so the later teardowns are no-ops (a fall-through launch re-claims on `resumeDrawing()`);
+`docs/api.md` lifecycle row + g-paper `CLAUDE.md` rule. Paper pins 0.1.2 (`paper-screen/build.gradle.kts`);
+rebuilt + reinstalled SNN / NA5C / MIP11; verified in the SNN log: after the pad's `released for
+handoff` no later teardown from the pad process, and the notebook's launch-side focus-loss no longer
+sends a second `enableFullUiAuto(false)` either. Trap for the record: **a fix goes to g-paper, never a
+host workaround** (rule 27 now says the handoff drops ownership).
 
 **Goal:** the shared module, the new point, its held bind, the store cap, the transfers and the
 screen are trustworthy and recorded as the pattern a second screen-owning extension follows.
@@ -1009,7 +1025,7 @@ move / delete, cold-launch reopen).
 
 **Close-out:** status ✅ + Outcome; commit + push `paper`.
 
-**Outcome (2026-08-19 — S3 prep 3900b26 + the review commit; user verification pending):**
+**Outcome (2026-08-19 — S3 prep 3900b26 + review b6daac2 + the g-paper 0.1.2 pin; user verification pending):**
 - **User's three changes (Q1):** (a) the notebook's Scratch Pad button sits at the far right immediately
   before the debug ⋯ (`activity_notebook.xml` weight gap after Lasso; `NotebookDebugMenu` no longer adds
   its own spacer); (b) both pad Send glyphs are Tabler `pencil-down` (`ic_pencil_down` in `:paper-screen`,

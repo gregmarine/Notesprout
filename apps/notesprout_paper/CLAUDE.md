@@ -34,7 +34,7 @@ All rules from the root `CLAUDE.md` apply (language, serialization, no new deps,
 runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addition:
 
 - **g-paper** is the drawing surface, consumed from **mavenLocal**
-  (`com.symmetricalpalmtree.gpaper:gpaper-{core,onyx,ratta}:0.1.1`). Read g-paper docs before touching
+  (`com.symmetricalpalmtree.gpaper:gpaper-{core,onyx,ratta}:0.1.2`). Read g-paper docs before touching
   the notebook screen: `~/git/g-paper/docs/api.md`, `host-responsibilities.md`, `integration-guide.md`,
   and `~/git/g-paper/CLAUDE.md`.
 - **No file over ~800 lines** without a written reason.
@@ -127,9 +127,12 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   notebook's Scratch Pad button moved to the **far right, immediately before the debug ⋯** (layout weight
   gap — the debug menu adds no spacer of its own); the pad's Send glyphs are Tabler **`pencil-down`**
   (`ic_send` gone); both debug probes ("Probe scratch pad", the pad's whole `ScratchDebugMenu` +
-  `sizeSummary`) removed — the pad has no debug ⋯. An intermittent "sluggish first drag of a
-  just-transferred selection" was investigated (S3 plan note): no code-path difference, measured
-  identical on MIP11 — if it recurs, note device / stylus-vs-finger / first-drag-only before digging.
+  `sizeSummary`) removed — the pad has no debug ⋯. The intermittent "sluggish drag of a
+  just-transferred selection" (SNN) was **g-paper Ratta: the ownership guard is a process-local static, so
+  the pad's late focus-loss / `release()` teardowns re-sent `enableFullUiAuto(false)` after the notebook's
+  reclaim → slow-waveform drags** — fixed in g-paper 0.1.2 (the handoff drops the token; Paper pins 0.1.2).
+  **Trap: both engines' ownership guards are per-process — a cross-process handoff must be a full teardown
+  on the departing side; a fix goes to g-paper, never a host workaround.**
 - **Notebook creation:** templates come **only** from `ExtensionRegistry` providers via
   `TemplateProviderClient` (bind-per-operation, signature re-checked at bind, timeouts, unbind in
   `finally`, payload = mime + byte cap + exact requested size); **the core has no renderer**. No
@@ -345,6 +348,7 @@ BOOX trap: `install -r` can leave the package disabled → `pm enable com.symmet
 
 ## g-paper version
 
-Currently pinned: **0.1.1** (arc 4 / H1: `PaperListener.onSelectionTapped(x, y)` — a sub-threshold
-stylus or single-finger tap inside the active selection box; g-paper commit e76e305). If a phase bumps
+Currently pinned: **0.1.2** (arc 6 / S3: Ratta `releaseForHandoff()` drops the process-local ownership
+token + full teardown — the cross-process handoff fix for the "sluggish drag after a transfer" on the
+Nomad; g-paper commit 345c2a8. 0.1.1 = arc 4 / H1: `PaperListener.onSelectionTapped(x, y)`, e76e305). If a phase bumps
 g-paper, update the version in `app/build.gradle.kts` and record it in the phase outcome.
