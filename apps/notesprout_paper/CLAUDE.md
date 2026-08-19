@@ -21,10 +21,11 @@ global-index model, global encryption model, and e-ink design philosophy — and
   button + one-finger swipe-down), then **`PAPER_SCRATCHPAD_PLAN.md` (arc 6, PLANNED 2026-08-19 —
   the ACTIVE arc: `NSE · Scratch Pad`, an extension-owned off-paper screen (UI-rule tier 2, first
   exercise) + the shared `:paper-screen` module + the `SCRATCH_PAD` point + `IExtensionStore.putLarge /
-  getLarge` (4 MiB values over `SharedMemory`) + the two ink transfers; S0 ✅ 9a96c7a · S1 ✅ 98f58f6 · S2 ⬜ · S3 ⬜)**
+  getLarge` (4 MiB values over `SharedMemory`) + the two ink transfers; S0 ✅ 9a96c7a · S1 ✅ 98f58f6 · S2 🧪 · S3 ⬜)**
   — read all seven top-to-bottom at the start of every session; **S0 ✅ 2026-08-19 (user-verified
   SNN / NA5C / MIP11); S1 ✅ 98f58f6 2026-08-19 (the screen + the two entry buttons — user-verified SNN /
-  NA5C / MIP11); next = S2 (fresh session, the phase-start wizard first).**
+  NA5C / MIP11); S2 🧪 2026-08-19 (the two transfers — built, Claude-verified MIP11; the user's S2
+  checklist pending on SNN / NA5C / MIP11); next = S3 (fresh session, the phase-start wizard first).**
 - **Package / applicationId:** `com.symmetricalpalmtree.notesprout` (debug: `.dev` suffix)
 - **Launcher label:** "Notesprout Paper" (debug: "Notesprout Paper Dev")
 
@@ -108,8 +109,18 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   and the library's bottom-bar button after Recents (`library/ScratchPadLaunch`, no send target) — **both
   `GONE` unless a trusted `SCRATCH_PAD` extension is installed, re-discovered on every resume and after
   a failed open** (BOOX re-disables a sideloaded extension: "didn't respond" → check `pm list packages
-  -d` first); the pad's Send buttons show from a notebook but are inert until S2. The notebook's undo
-  replay lives in `NotebookUndo` (`undo` / `redo`). S2 = the transfers, S3 = review / audit rows 28–32 /
+  -d` first). The notebook's undo replay lives in `NotebookUndo` (`undo` / `redo`). **S2 🧪 — the two
+  transfers** (`docs/scratchpad.md` §Transfers, `docs/notebook.md` §"Scratch Pad (arc 6)"): the core
+  `scratch` ("Pad", `appliesTo = INK`, `SelectionActions.CORE_SCRATCH_ID`) selection action exists only
+  while the extension is installed (`ScratchPadFlow.toolbarAction()`; `SelectionActions.merge` filters
+  core actions by `appliesTo`) → placement sheet (New page / Current page) → caps (`MAX_TRANSFER_STROKES`
+  10 000 / `MAX_TRANSFER_POINTS` 400 000) **before any bind** → `ScratchPadClient.open` → `send` (one
+  `receiveInk` per `InkChunks` chunk on the held bind; `SCRATCH_PAGE_FULL` → `ScratchPageFullException`)
+  → launch `openReceived` (the pad opens on the page, strokes selected + one `Pasted` on its stack);
+  the pad's Send (page / selection) → `RESULT_SCRATCH_SEND` → `drainOutgoing` (`TransferCaps.Drain`) →
+  `pasteStrokes` (fresh ids, **coordinates kept 1:1**, one `NotebookUndo.Action.Pasted`, left selected).
+  **Both directions are copies; ink never rides the Intent; no id crosses.** The extension maps with its
+  own `ScratchInk` (`:paper-screen` never sees `:extension-api`). S3 = review / audit rows 28–32 /
   rules 25–27.
 - **Notebook creation:** templates come **only** from `ExtensionRegistry` providers via
   `TemplateProviderClient` (bind-per-operation, signature re-checked at bind, timeouts, unbind in

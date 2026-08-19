@@ -16,5 +16,6 @@
     <string name="scratch_page_full">This page is full — start a new one.</string>
     <string name="scratch_store_unavailable">The scratch pad can\'t reach its storage — close and try again.</string>
     <string name="scratch_opening">Opening…</string>
+    <string name="scratch_nothing_to_send">There\'s no ink here to send.</string>
     <string name="scratch_page_indicator">%1$d / %2$d</string>
 </resources>

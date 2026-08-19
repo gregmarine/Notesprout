@@ -52,6 +52,16 @@ class SelectionActionsTest {
     }
 
     @Test
+    fun coreActionsFilteredByAppliesTo() {   // arc 6 / S2: `scratch` (INK) shows for ink only; Delete (ALL) everywhere
+        val scratch = a(SelectionActions.CORE_SCRATCH_ID, ActionApplies.INK)
+        val core = listOf(delete, scratch)
+        assertEquals(listOf("delete", "scratch", "h", "ink"), SelectionActions.merge(core, listOf(heading, other), Shape.Ink).map { it.action.id })
+        assertEquals(listOf("delete", "obj"), SelectionActions.merge(core, listOf(heading, other), Shape.OneObject("com.x.text", "text")).map { it.action.id })
+        assertEquals(listOf("delete"), SelectionActions.merge(core, listOf(heading, other), Shape.Mixed).map { it.action.id })
+        assertEquals(listOf(null, null, "com.x.heading", "com.x.text"), SelectionActions.merge(core, listOf(heading, other), Shape.Ink).map { it.providerKey })
+    }
+
+    @Test
     fun parentFilteredThroughLeaves() {
         val p = Contribution("k", "K", setOf("t"), listOf(a("p", ActionApplies.ALL, listOf(a("only-obj", ActionApplies.OBJECT)))))
         assertTrue(SelectionActions.merge(emptyList(), listOf(p), Shape.Ink).isEmpty())

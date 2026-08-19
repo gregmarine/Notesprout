@@ -31,6 +31,7 @@ import com.symmetricalpalmtree.notesprout.ext.scratchpad.ScratchUndo.Action
 import com.symmetricalpalmtree.notesprout.ext.scratchpad.databinding.ActivityScratchPadBinding
 import com.symmetricalpalmtree.notesprout.extension.ExtensionContract
 import com.symmetricalpalmtree.notesprout.extension.HostCallerCheck
+import com.symmetricalpalmtree.notesprout.extension.InkChunks
 import com.symmetricalpalmtree.notesprout.notebook.PageGestures
 import com.symmetricalpalmtree.notesprout.notebook.PaperChrome
 import com.symmetricalpalmtree.notesprout.notebook.UndoRedoStack
@@ -61,6 +62,15 @@ import kotlinx.coroutines.suspendCancellableCoroutine
  * flush before finishing — the host's `end()` revokes the store right after the result). A stroke that
  * would push the page past the store's value cap is refused and removed from the paper, said once per
  * page visit ([pageFullWarned]). Any store failure → `scratch_store_unavailable` → finish.
+ *
+ * **Transfers (S2).** Opened with `EXTRA_SCRATCH_OPEN_RECEIVED` right after a `receiveInk`: the
+ * document lands on the placed page (the service made it current) and the placed strokes are
+ * selected ([openReceived] — host-initiated `setSelection`, the toolbar shown) and recorded as one
+ * [Action.Pasted] on the pad's stack (S2 Q5: undo removes what just arrived). **Send** (top bar =
+ * every stroke on the current page; selection bar = the lasso's strokes) flushes the page first (the
+ * pad keeps its ink — send is a copy), parks the strokes chunked in [ScratchSession.outbound] for the
+ * host's `takeOutgoing`, and finishes with `RESULT_SCRATCH_SEND`. Both Send buttons exist only when
+ * [sendEnabled].
  */
 class ScratchPadActivity : AppCompatActivity() {
 
@@ -73,6 +83,7 @@ class ScratchPadActivity : AppCompatActivity() {
     private var document: ScratchDocument? = null
 
     private var sendEnabled = false
+    private var openReceived = false
     private var opened = false
     private var closing = false
     private var selectionActive = false
@@ -94,6 +105,7 @@ class ScratchPadActivity : AppCompatActivity() {
             return
         }
         sendEnabled = intent.getBooleanExtra(ExtensionContract.EXTRA_SCRATCH_SEND_ENABLED, false)
+        openReceived = intent.getBooleanExtra(ExtensionContract.EXTRA_SCRATCH_OPEN_RECEIVED, false)
         binding = ActivityScratchPadBinding.inflate(layoutInflater)
         setContentView(binding.root)
         goImmersive()
@@ -168,6 +180,25 @@ class ScratchPadActivity : AppCompatActivity() {
         binding.openingOverlay.visibility = View.GONE
         pushExclusions()
         Slog.d(TAG) { "opened: page ${doc.currentIndex + 1}/${doc.ids.size}, ${doc.strokes.size} strokes, ${doc.pageBytes} B in ${System.currentTimeMillis() - t0} ms" }
+        if (openReceived) selectReceived(doc)
+    }
+
+    /** Right after a `receiveInk`: the placed strokes land selected (host-initiated — no `onSelectionCreated`
+     *  echo) and as one [Action.Pasted] on the pad's stack. One shot — the session record is consumed. */
+    private fun selectReceived(doc: ScratchDocument) {
+        val received = ScratchSession.received ?: return
+        ScratchSession.received = null
+        if (received.pageId != doc.currentId) return
+        val strokes = received.strokeIds.mapNotNull { doc.strokes[it] }
+        if (strokes.isEmpty()) return
+        undo.record(Action.Pasted(doc.currentId, strokes))
+        val bounds = strokes.map { it.bounds }.reduce { a, b -> a.union(b) }
+        val sel = Selection(strokes.map { it.id }.toSet(), emptySet(), bounds)
+        paper.setSelection(sel.strokeIds, emptySet(), bounds)
+        selectionActive = true
+        currentSelection = sel
+        binding.root.post { showSelectionToolbar(sel) }
+        Slog.d(TAG) { "received ${strokes.size} strokes selected" }
     }
 
     /** Wait until the paper has a size (the page size of a new page is the surface size). */
@@ -263,9 +294,43 @@ class ScratchPadActivity : AppCompatActivity() {
         Slog.d(TAG) { "deleted selection: ${taken.size} strokes" }
     }
 
-    // S1 (user decision Q4): the Send buttons show when opened from a notebook but do nothing yet.
-    private fun sendPage() { Slog.d(TAG) { "send page — S2" } }
-    private fun sendSelection() { Slog.d(TAG) { "send selection — S2" } }
+    // ── Send to notebook (S2) ────────────────────────────────────────────────
+
+    /** The top-bar Send: every stroke on the current page, in writing order. */
+    private fun sendPage() = send { doc -> doc.strokes.values.toList() }
+
+    /** The selection bar's Send: the lasso's strokes, in writing order. */
+    private fun sendSelection() = send { doc ->
+        val sel = currentSelection ?: return@send emptyList()
+        doc.strokes.values.filter { it.id in sel.strokeIds }
+    }
+
+    /** Flush (the pad keeps its ink — send is a copy), park the chunked strokes for `takeOutgoing`, finish with `RESULT_SCRATCH_SEND`. */
+    private fun send(pick: (ScratchDocument) -> List<Stroke>) {
+        if (!sendEnabled || !opened || closing) return
+        val doc = document ?: return
+        val strokes = pick(doc)
+        if (strokes.isEmpty()) {
+            paper.releaseRender()
+            Dialogs.problem(this, R.string.scratch_title, getString(R.string.scratch_nothing_to_send))
+            return
+        }
+        closing = true
+        binding.root.removeCallbacks(saveRunnable)
+        lifecycleScope.launch {
+            pageOps.withLock {
+                try { doc.flush() } catch (e: Exception) { Log.w(TAG, "flush on send failed", e) }
+            }
+            val t0 = System.currentTimeMillis()
+            val chunks = withContext(Dispatchers.Default) { InkChunks.chunk(ScratchInk.toPaperStrokes(strokes)) }
+            ScratchSession.outbound = chunks
+            ScratchSession.outboundPageWidth = doc.pageWidth
+            ScratchSession.outboundPageHeight = doc.pageHeight
+            Slog.d(TAG) { "send: ${strokes.size} strokes in ${chunks.size} chunks, prepared in ${System.currentTimeMillis() - t0} ms" }
+            setResult(ExtensionContract.RESULT_SCRATCH_SEND)
+            if (!isFinishing && !isDestroyed) finish()
+        }
+    }
 
     // ── Page gestures → operations ─────────────────────────────────────────────
 

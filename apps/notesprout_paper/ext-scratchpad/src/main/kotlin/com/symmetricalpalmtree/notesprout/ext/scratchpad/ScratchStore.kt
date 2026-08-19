@@ -104,6 +104,38 @@ class ScratchStore(private val store: IExtensionStore) {
     /** Undo / redo of a page insert or delete (S1): drop one page's ink, keeping its id in the list. */
     fun removePageBlob(id: String) = guard { store.delete(pageKey(id)) }
 
+    /** What [receive] placed: the page it landed on + the ids of the placed strokes (for "open selected"). */
+    class Received(val pageId: String, val strokeIds: List<String>)
+
+    /**
+     * Notebook → pad (S2, the Binder thread): place [strokes] — on a **new page** inserted after the
+     * current one (its size = the bundle's page size; `0 × 0` → the screen's surface size at first
+     * layout) or appended to the **current page** (its own size kept; the bundle's if it has none
+     * yet) — and make that page current, so the next screen launch opens on it. **The full rule:**
+     * a result over `STORE_MAX_VALUE_BYTES` is [PageFullException] — nothing placed, nothing inserted.
+     */
+    fun receive(strokes: List<Stroke>, pageWidth: Float, pageHeight: Float, newPage: Boolean): Received {
+        val loaded = load()
+        val ids = strokes.map { it.id }
+        if (newPage) {
+            val blob = ScratchPageCodec.encode(pageWidth, pageHeight, strokes)
+            if (blob.size > ExtensionContract.STORE_MAX_VALUE_BYTES) throw PageFullException(blob.size)
+            val (_, id) = insertPage(loaded.ids, loaded.currentId)
+            savePage(id, blob)
+            setCurrent(id)
+            return Received(id, ids)
+        }
+        val cur = loaded.currentId
+        val existing = readPage(cur)?.let { ScratchPageCodec.decode(it) }
+        val w = if (existing != null && existing.pageWidth > 0f) existing.pageWidth else pageWidth
+        val h = if (existing != null && existing.pageHeight > 0f) existing.pageHeight else pageHeight
+        val all = (existing?.strokes ?: emptyList()) + strokes
+        val blob = ScratchPageCodec.encode(w, h, all)
+        if (blob.size > ExtensionContract.STORE_MAX_VALUE_BYTES) throw PageFullException(blob.size)
+        savePage(cur, blob)
+        return Received(cur, ids)
+    }
+
     /** Debug: every key + the summed byte size of the page blobs (reads each page). */
     fun sizeSummary(): Pair<Int, Long> = guard {
         val keys = store.keys("")

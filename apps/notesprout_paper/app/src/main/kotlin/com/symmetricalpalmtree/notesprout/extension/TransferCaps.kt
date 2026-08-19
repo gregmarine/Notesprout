@@ -11,14 +11,13 @@ import java.util.UUID
  * Outward (notebook → pad): [withinLimits] is checked **before any bind** (a selection / page above
  * [ExtensionContract.MAX_TRANSFER_STROKES] / [ExtensionContract.MAX_TRANSFER_POINTS] is refused with
  * an honest dialog); [toPaperStrokes] is the one reduction site from the paper's [Stroke] (id and time
- * never leave; point-less strokes are skipped); [chunk] splits greedily at
- * [ExtensionContract.TRANSFER_CHUNK_STROKES] / [ExtensionContract.TRANSFER_CHUNK_POINTS] per Binder
- * call — a single stroke over the point chunk cap is its own chunk (never split).
+ * never leave; point-less strokes are skipped); [chunk] splits per Binder call ([InkChunks]).
  *
  * Inward (pad → notebook): every bundle is already through `InkBundle.requireValid` at unmarshal;
- * [sanitize] then forces what v0 can draw — unknown style → PEN, `width` clamped to
- * [MIN_WIDTH]..[MAX_WIDTH] px, colour forced opaque black — and [toStrokes] mints **fresh ids** on
- * this side (`timeMillis 0`). Nothing else is trusted; no id ever crosses.
+ * [Drain] accumulates the `takeOutgoing` chunks under the summed caps; [sanitize] forces what v0
+ * can draw — unknown style → PEN, `width` clamped to [MIN_WIDTH]..[MAX_WIDTH] px, colour forced
+ * opaque black — and [toStrokes] mints **fresh ids** on this side (`timeMillis 0`). Nothing else is
+ * trusted; no id ever crosses.
  */
 object TransferCaps {
 
@@ -30,21 +29,41 @@ object TransferCaps {
 
     fun pointCount(strokes: List<Stroke>): Int = strokes.sumOf { it.points.size }
 
-    /** Greedy chunking at the per-call caps; every chunk satisfies `InkBundle.requireValid`. */
-    fun chunk(strokes: List<PaperStroke>): List<List<PaperStroke>> {
-        val out = ArrayList<List<PaperStroke>>()
-        var cur = ArrayList<PaperStroke>()
-        var pts = 0
-        for (s in strokes) {
-            val fits = cur.size < ExtensionContract.TRANSFER_CHUNK_STROKES &&
-                pts + s.size <= ExtensionContract.TRANSFER_CHUNK_POINTS
-            if (!fits && cur.isNotEmpty()) {
-                out += cur; cur = ArrayList(); pts = 0
+    /** Greedy chunking at the per-call caps ([InkChunks] — the contract's rule, shared with the extension). */
+    fun chunk(strokes: List<PaperStroke>): List<List<PaperStroke>> = InkChunks.chunk(strokes)
+
+    /**
+     * The inward drain's accumulator (S2): `takeOutgoing` chunks are [add]ed until one is empty, the
+     * summed caps are reached, or [ExtensionContract.TRANSFER_MAX_CHUNKS] chunks are in — whichever
+     * first. A chunk that would cross a cap is cut at the cap and [truncated] is set (the paste says
+     * so); a non-empty chunk past the chunk budget is refused whole, also [truncated] (so the caller
+     * probes one chunk beyond the budget and learns whether anything was left). Every accepted stroke
+     * is [sanitize]d.
+     */
+    class Drain {
+        private val out = ArrayList<PaperStroke>()
+        private var points = 0
+        var chunks = 0
+            private set
+        var truncated = false
+            private set
+        val strokes: List<PaperStroke> get() = out
+
+        /** Add one chunk; false = stop draining (empty chunk, a cap reached, or the chunk budget spent). */
+        fun add(chunk: List<PaperStroke>): Boolean {
+            if (chunk.isEmpty()) return false
+            if (chunks >= ExtensionContract.TRANSFER_MAX_CHUNKS) { truncated = true; return false }
+            chunks++
+            for (s in chunk) {
+                if (out.size >= ExtensionContract.MAX_TRANSFER_STROKES || points + s.size > ExtensionContract.MAX_TRANSFER_POINTS) {
+                    truncated = true
+                    return false
+                }
+                out += sanitize(s)
+                points += s.size
             }
-            cur += s; pts += s.size
+            return true
         }
-        if (cur.isNotEmpty()) out += cur
-        return out
     }
 
     /** The paper's strokes as wire strokes: geometry + width + colour + style name; id and time dropped; empty strokes skipped. */

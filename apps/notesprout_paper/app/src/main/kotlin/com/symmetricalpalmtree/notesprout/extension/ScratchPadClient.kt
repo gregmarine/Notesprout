@@ -10,6 +10,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+/** The pad's target page would cross the store's value cap (`SCRATCH_PAGE_FULL`) — nothing was placed. */
+class ScratchPageFullException(cause: Throwable) : ExtensionCallException(ExtensionContract.SCRATCH_PAGE_FULL, cause)
+
 /**
  * The host's client for the one scratch pad (arc 6 / S0) — the first **held** bind: the operation is
  * the showing of the extension's screen, so the bind brackets it (rule 26). One instance per calling
@@ -28,8 +31,13 @@ import kotlinx.coroutines.withContext
  * [finish]: `end()` ≤ [CALL_TIMEOUT_MS] in a `try`, then unbind + revoke the store binder in
  * `finally` — every path: result, cancel, the caller's death, a failed `begin`.
  *
- * S2 adds `send` (`receiveInk` per chunk) and `drainOutgoing` (`takeOutgoing` until an empty
- * bundle or the caps) on the same held bind. Log tag [TAG] — counts + durations, never a stroke.
+ * [send] (S2): notebook → pad — the chunks through `receiveInk`, one call ≤ [CALL_TIMEOUT_MS] each
+ * on the same held bind, `placement` + `last` on every chunk; the extension's
+ * `IllegalStateException(SCRATCH_PAGE_FULL)` is typed as [ScratchPageFullException]. Called
+ * **between** [open] and the launch, so the pad opens on the received page. [drainOutgoing] (S2):
+ * pad → notebook after `RESULT_SCRATCH_SEND` — `takeOutgoing(i)` until an empty bundle, the summed
+ * caps or the chunk budget ([TransferCaps.Drain]); every chunk is `requireValid` at unmarshal and
+ * sanitized. Log tag [TAG] — counts + durations, never a stroke.
  */
 class ScratchPadClient(context: Context, val ref: ProviderRef) {
 
@@ -83,6 +91,54 @@ class ScratchPadClient(context: Context, val ref: ProviderRef) {
             .setPackage(ref.packageName)
             .putExtra(ExtensionContract.EXTRA_SCRATCH_SEND_ENABLED, sendEnabled)
             .putExtra(ExtensionContract.EXTRA_SCRATCH_OPEN_RECEIVED, openReceived)
+    }
+
+    /**
+     * Notebook → pad: hand [chunks] (from [TransferCaps.chunk], non-empty) to the held extension with
+     * [placement] (`PLACEMENT_NEW_PAGE` / `PLACEMENT_CURRENT_PAGE`) and the page px size they were
+     * authored in. Throws [ScratchPageFullException] (the target page would cross the store cap —
+     * nothing placed) or [ExtensionCallException] (bind dead, timeout, refused).
+     */
+    suspend fun send(chunks: List<List<PaperStroke>>, pageWidth: Float, pageHeight: Float, placement: Int) {
+        val binding = held ?: throw ExtensionCallException("not open")
+        require(chunks.isNotEmpty()) { "nothing to send" }
+        val t0 = System.currentTimeMillis()
+        var strokes = 0
+        for ((i, chunk) in chunks.withIndex()) {
+            val bundle = InkBundle(chunk, pageWidth, pageHeight)
+            val last = i == chunks.lastIndex
+            binding.call(CALL_TIMEOUT_MS) {
+                try {
+                    it.receiveInk(bundle, placement, last)
+                } catch (e: IllegalStateException) {
+                    if (e.message == ExtensionContract.SCRATCH_PAGE_FULL) throw ScratchPageFullException(e)
+                    throw e
+                }
+            }
+            strokes += chunk.size
+        }
+        Slog.d(TAG) { "send: ${chunks.size} chunks, $strokes strokes, placement=$placement in ${System.currentTimeMillis() - t0} ms" }
+    }
+
+    /** What [drainOutgoing] brought back: sanitized wire strokes + the page they were authored on + whether the caps cut it. */
+    class Drained(val strokes: List<PaperStroke>, val pageWidth: Float, val pageHeight: Float, val truncated: Boolean)
+
+    /** Pad → notebook: drain `takeOutgoing` chunk by chunk under [TransferCaps.Drain]. Throws [ExtensionCallException]. */
+    suspend fun drainOutgoing(): Drained {
+        val binding = held ?: throw ExtensionCallException("not open")
+        val t0 = System.currentTimeMillis()
+        val drain = TransferCaps.Drain()
+        var pageWidth = 0f; var pageHeight = 0f
+        var i = 0
+        // One probe past the chunk budget: a non-empty chunk there means something was left behind.
+        while (i <= ExtensionContract.TRANSFER_MAX_CHUNKS) {
+            val bundle = binding.call(CALL_TIMEOUT_MS) { it.takeOutgoing(i) }
+            if (i == 0) { pageWidth = bundle.pageWidth; pageHeight = bundle.pageHeight }
+            if (!drain.add(bundle.strokes)) break
+            i++
+        }
+        Slog.d(TAG) { "drainOutgoing: ${drain.chunks} chunks, ${drain.strokes.size} strokes${if (drain.truncated) " (truncated)" else ""} in ${System.currentTimeMillis() - t0} ms" }
+        return Drained(drain.strokes, pageWidth, pageHeight, drain.truncated)
     }
 
     /** `end()` (best effort, ≤ 2 s), then unbind + revoke in `finally`. Idempotent. */

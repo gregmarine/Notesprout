@@ -27,7 +27,7 @@ delete) and undo/redo arrive in Phase 4.
 | `ObjectRenderPass` | the cache fill (H4): objects grouped by provider → one `renderAll` bind per provider → decode → `Result`s the screen applies |
 | `PaperChrome` (`:paper-screen`; was `NotebookChrome` until arc 6 / S0) | the chrome geometry (arc 5 / C1 — a pure move out of the Activity at its 800-line cap): `pushExclusions()` (whole paper while `blockAll` — not yet open, or the Contents showing — else top bar + bottom strip + the `extraRects` the notebook supplies = its selection toolbar's) and `overChrome(ev)` |
 | `NotebookUndo` | the notebook's undo `Action` set (arc 6 / S0 — lifted out of the now-generic `UndoRedoStack<A>` in `:paper-screen`): Drew / Erased / Moved / Page / ObjectCreated / ObjectsDeleted / ObjectEdited — **and its replay** (S1: `undo` / `redo` → `revert` / `reapply`, store → drain → `refreshToPage`) |
-| `ScratchPadFlow` | the Scratch Pad entry point (arc 6 / S1): the top-bar notes button (present only while the extension is installed — `refresh()` on open + resume), `ScratchPadClient.open` → `releaseForHandoff()` → the `ActivityResultLauncher`, result → `finish`; S2 adds the core `scratch` action + the transfers — see §"Scratch Pad (arc 6)" |
+| `ScratchPadFlow` | the Scratch Pad's notebook side (arc 6 / S1 + S2): the top-bar sketching button **and** the core `scratch` ("Pad") selection action — both present only while the extension is installed (`refresh()` on open + resume); `ScratchPadClient.open` → [`send`] → `releaseForHandoff()` → the `ActivityResultLauncher`; result `RESULT_SCRATCH_SEND` → `drainOutgoing` → the host's `pasteStrokes`; any result → `finish` — see §"Scratch Pad (arc 6)" |
 | `ContentsSource` / `OutlineTree` | the Contents gather (arc 5 / C0 — IO: rows → outline-capable providers → one `describeOutlineAll` bind each → items) and the pure tree / visible rows / highlight / paging math (JVM-tested) |
 | `ContentsFlow` / `ContentsDialog` / `ContentsLayout` | the Contents screen (arc 5 / C1): busy guard → gather → failure dialog or the `Dialog` (one layout, sidebar / full screen by width; pure width + paging rules JVM-tested) — see §"Contents (arc 5)" |
 
@@ -408,9 +408,37 @@ EPD pipeline next; the notebook's pen stays live through the open, which can be 
 store) → `launcher.launch(intent)` (`ActivityResultLauncher`, so the extension's caller check passes).
 The result — any code — runs `ScratchPadClient.finish()` (`end()` → unbind → revoke, in `finally`) on a
 scope that outlives the screen; the notebook's `onResume` re-arms its own paper (`resumeDrawing`).
-`onDestroy` with the pad still up → `close()` → the same finish. S1 shows the pad with its Send buttons
-present but inert; S2 adds the core `scratch` toolbar action, the placement dialog and the two
-transfers (paste selected at the origin, one undoable `Pasted`).
+`onDestroy` with the pad still up → `close()` → the same finish.
+
+**Send to Scratch Pad (S2).** While the extension is installed the core's selection toolbar carries a
+second core action after Delete — `ToolbarAction(CORE_SCRATCH_ID "scratch", "Pad", ic_sketching,
+"Send to Scratch Pad", appliesTo = INK)` (`ScratchPadFlow.toolbarAction()`; `coreActions` is built per
+show). `SelectionActions.merge` now filters **core** actions by `appliesTo` too (Delete carries every
+bit and shows for every shape; `scratch` is INK-only → absent for one object / mixed). Tap →
+`ScratchPadFlow.sendSelection(strokes)` (the strokes in writing order, from `liveStrokes`) → the
+placement sheet **"Send to Scratch Pad" — New page / Current page** (`ActionSheetDialog`; tap outside
+cancels) → `TransferCaps.withinLimits` (10 000 strokes / 400 000 points) else the `scratch_too_large`
+dialog **before any bind** → `ScratchPadClient.open(sendEnabled = true, openReceived = true)` →
+**`send(chunks, pageWidth, pageHeight, placement)`** (`TransferCaps.toPaperStrokes` — id and time
+dropped — chunked by `InkChunks`, each chunk one `receiveInk` ≤ 2 s on the held bind) → the selection
+cleared, toast `scratch_sent` → `releaseForHandoff()` → launch. **Send is a copy**: the notebook keeps
+its ink and records nothing in its undo stack. A `ScratchPageFullException` (the pad's target page
+would cross 4 MiB) → `scratch_page_full_host` dialog, the client finished, nothing launched; any
+other failure → `scratch_failed`. The pad opens on the receiving page with the strokes selected
+(`docs/scratchpad.md` §Transfers).
+
+**Send to Notebook (S2).** The pad's top-bar Send (whole page) or selection-bar Send (the lasso)
+finishes with `RESULT_SCRATCH_SEND`; `onResult` drains `takeOutgoing` on the still-held bind
+(`ScratchPadClient.drainOutgoing` → `TransferCaps.Drain`: until an empty bundle, the summed caps or
+the chunk budget; every stroke sanitized — unknown style → PEN, width 0.5..50 px, opaque black),
+finishes the client, and hands `TransferCaps.toStrokes` (**fresh ids**, `timeMillis 0`) to the host's
+`pasteStrokes` under `pageOps`: `StrokeStore.insert(pageId, strokes)` (fresh rows after the page's last
+order) + `liveStrokes` + `paper.addStrokes` + **one undoable `Action.Pasted(pageId, strokes)`**
+(undo = soft-delete the rows, redo = `restore` in place) + `paper.setSelection(ids, ∅, union bounds)`
+(host-initiated — the selection state is set here, no `onSelectionCreated` echo) + the selection
+toolbar. **The coordinates are kept 1:1** (S2 Q1 — no translation to the origin, no inset; a
+cross-device page is clipped like any other ink). If the drain was cut, the `scratch_truncated` dialog
+names how many came back.
 
 **Undo replay moved.** S1 also moved the notebook's `revert` / `reapply` / `doUndo` / `doRedo` into
 `NotebookUndo` (`undo(session, stack, refreshToPage)` / `redo(...)`) next to the action set — a pure

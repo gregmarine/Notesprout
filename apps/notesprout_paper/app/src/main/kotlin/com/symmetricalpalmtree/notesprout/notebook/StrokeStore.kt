@@ -68,6 +68,21 @@ class StrokeStore(
         }
     }
 
+    /** Fresh rows for a paste (arc 6 / S2 — ink from the scratch pad, ids minted by the core), appended
+     *  after the page's last stroke in list order. Enqueued on the writer like [commit]. */
+    fun insert(pageId: String, strokes: List<Stroke>) {
+        if (strokes.isEmpty()) return
+        writer.enqueue {
+            val now = System.currentTimeMillis()
+            var order = dao.maxOrder(pageId, SoilSchema.TYPE_STROKE)
+            for (s in strokes) {
+                order += 1
+                dao.upsert(StrokeRows.toRow(s, pageId, order, now))
+            }
+            Slog.d(TAG) { "insert ${strokes.size} to $pageId" }
+        }
+    }
+
     /** Rewrite the moved strokes' geometry — the row is the truth, so translate the persisted points. */
     fun move(ids: List<String>, dx: Float, dy: Float) {
         if (ids.isEmpty() || (dx == 0f && dy == 0f)) return

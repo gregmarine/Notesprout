@@ -28,6 +28,16 @@ class NotebookUndoTest {
     }
 
     @Test
+    fun pastedIsOneStepForTheWholePaste() {   // arc 6 / S2
+        val s = UndoRedoStack<Action>()
+        val pasted = Action.Pasted("p", listOf(stroke("n1"), stroke("n2")))
+        s.record(Action.Drew("p", stroke("s1"))); s.record(pasted)
+        assertEquals(pasted, s.popUndo())
+        assertEquals("p", pasted.pageId)
+        assertEquals(listOf("n1", "n2"), pasted.strokes.map { it.id })
+    }
+
+    @Test
     fun movedCarriesObjectIdsAndDefaultsEmpty() {
         val legacy = Action.Moved("p", listOf("s1"), 1f, 2f)
         assertTrue(legacy.objectIds.isEmpty())

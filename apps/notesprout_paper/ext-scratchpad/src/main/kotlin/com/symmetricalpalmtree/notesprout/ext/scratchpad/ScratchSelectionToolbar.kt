@@ -18,7 +18,7 @@ import com.symmetricalpalmtree.notesprout.notebook.ToolbarAnchor
  * [ToolbarAnchor] (8 dp below the drawn selection box, centred, flipped above when it would cross
  * the bottom strip, clamped to the band between the chrome bars); its rect joins the exclusion
  * rects ([rects]) and the over-chrome test ([contains]). Send is present only when the pad was
- * opened from a notebook — a no-op in S1 (user decision S1 Q4), wired in S2.
+ * opened from a notebook — the lasso's strokes to the notebook (S2).
  */
 class ScratchSelectionToolbar(
     private val binding: ActivityScratchPadBinding,

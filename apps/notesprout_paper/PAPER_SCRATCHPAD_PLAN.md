@@ -11,8 +11,8 @@
 > subsystem reference all arcs write into; `docs/notebook.md` and `docs/library.md` gain sections
 > in this arc; a new `docs/scratchpad.md` is the extension's own reference.
 >
-> **Status: S0 ✅ 9a96c7a · S1 ✅ 98f58f6 (both user-verified SNN / NA5C / MIP11 2026-08-19) · S2 ⬜ · S3 ⬜.
-> Next: S2 (fresh session, phase-start wizard first).**
+> **Status: S0 ✅ 9a96c7a · S1 ✅ 98f58f6 (both user-verified SNN / NA5C / MIP11 2026-08-19) · S2 🧪 · S3 ⬜.
+> Now: S2 built, Claude-verified MIP11 — the user's S2 checklist is pending on SNN / NA5C / MIP11.**
 
 ## Why
 
@@ -792,7 +792,7 @@ handoff behaviour observed on NA5C / SNN — anything the engines needed); docs;
 ---
 
 ### Phase S2 — The two transfers
-**Status:** ⬜ Not started
+**Status:** 🧪 Awaiting device verification (built + JVM green + Claude-verified MIP11 2026-08-19; user checklist below pending on SNN / NA5C / MIP11)
 
 **Goal:** *Send to Scratch Pad* (core toolbar action, placement dialog, ink handed through the held
 bind, the pad opens on the page with the strokes selected) and *Send to Notebook* (top-bar whole
@@ -811,6 +811,14 @@ on all three devices; both are copies; caps and failures are honest dialogs.
 5. `Action.Pasted` is undoable in the notebook; on the pad a *received* placement is **also**
    recorded as `Pasted` in the pad's history (rec. — undo on the pad removes what just arrived) —
    confirm.
+
+**Answered 2026-08-19:** **Q1 keep the pad's coordinates** — the paste is 1:1 (the pad page and the
+notebook page are both the device's screen; no translation to (0, 0), no inset — overrides the Q9
+"origin" rule; a cross-device page is clipped by the page like any other ink) · Q2 "Pad" · `sketching`
+(the `notes` glyph was replaced in the S1 follow-up) · after Delete (rec.) · **Q3 higher caps —
+`MAX_TRANSFER_STROKES 10 000` / `MAX_TRANSFER_POINTS 400 000`**, chunks 300 / 20 000 unchanged
+(`TRANSFER_MAX_CHUNKS` = 34), over the cap = refuse before any bind (rec.) · Q4 the pad opens on the
+page with the strokes selected (rec.) · Q5 received ink is `Pasted` on the pad's stack (rec.).
 
 **Deliverables**
 1. `:ext-scratchpad`: `ScratchPadService.receiveInk` / `takeOutgoing` real; `ScratchSession` inbound /
@@ -850,6 +858,63 @@ on all three devices; both are copies; caps and failures are honest dialogs.
 
 **Close-out:** status ✅ + Outcome (per-device transfer timings for ~200 strokes each way); docs;
 memory; commit + push.
+
+**Outcome (2026-08-19 — 🧪; Claude-verified MIP11 by hand, NA5C / SNN installed, user checklist pending):**
+- **Contract:** `MAX_TRANSFER_STROKES` / `MAX_TRANSFER_POINTS` raised to **10 000 / 400 000** (Q3),
+  `TRANSFER_MAX_CHUNKS` 34; new **`InkChunks`** in `:extension-api` — the contract's per-call chunking
+  rule written once for both sides (`TransferCaps.chunk` delegates; the extension's Send uses it
+  directly). Not in the S0 list: the alternative was a second copy of the chunker in the extension.
+- **`:app`:** `TransferCaps.Drain` (the inward accumulator — empty bundle / summed caps / chunk budget
+  + **one probe past the budget** so "truncated" is said only when something was really left;
+  sanitizes on the way in); `ScratchPadClient.send` (one `receiveInk` per chunk ≤ 2 s; `SCRATCH_PAGE_FULL`
+  typed as `ScratchPageFullException`) + `drainOutgoing` → `Drained(strokes, pageWidth, pageHeight,
+  truncated)`; `SelectionActions.merge` filters **core** actions by `appliesTo` (Delete = ALL everywhere;
+  `scratch` = INK → ink only; `CORE_SCRATCH_ID`); `NotebookUndo.Action.Pasted` (undo = `remove`, redo =
+  `restore` in place); `StrokeStore.insert` (fresh rows after `maxOrder`); `ScratchPadFlow` gained
+  `toolbarAction()`, `sendSelection` → the placement **`ActionSheetDialog`** (title "Send to Scratch
+  Pad", `ic_plus` New page · `ic_sketching` Current page; tap outside cancels — the app's sheet idiom
+  rather than an `AlertDialog` item list), `startSend` (caps → `scratch_too_large` before any bind),
+  one `launchPad(r, send?)` for both the plain open and the send-then-open (open → `send` → clear the
+  notebook's selection → toast → `releaseForHandoff` → launch), and the `RESULT_SCRATCH_SEND` branch of
+  `onResult` (drain on the still-held bind → `finish` in `finally` → `toStrokes` → the host's `onPaste`
+  → `scratch_truncated`); `NotebookActivity` (755 → 780 lines): `coreActions` is a getter (Delete +
+  `scratchPadFlow.toolbarAction()`), `onAction(providerKey == null)` routes `CORE_SCRATCH_ID` to
+  `sendSelection(strokes)` for ink-only selections, `pasteStrokes` (insert + `liveStrokes` + `addStrokes`
+  + `Pasted` + host-initiated `setSelection` over the union bounds + the toolbar), the flow's two new
+  lambdas (`pageSize`, `onPaste`). Strings per Appendix A (+ the sheet reuses `scratch_send_title`).
+- **`:ext-scratchpad`:** `ScratchInk` (the extension's own wire ⇄ paper mapping — fresh ids, unknown
+  style → PEN, width 0.5..50; `:paper-screen` can't host a shared one); `ScratchStore.receive(strokes,
+  pageWidth, pageHeight, newPage)` → `Received(pageId, strokeIds)` (new page inserted after the current
+  one with the bundle's size · current page appended keeping its own size; the target made `current`;
+  the full rule refuses the whole placement — nothing inserted); `ScratchSession` (inbound + running
+  points + page size, `outbound` pre-chunked, one-shot `received`); `ScratchPadService.receiveInk`
+  (caps re-checked on the running totals → `IllegalArgumentException`; placed on the Binder thread under
+  the session lock; `PageFullException` → `IllegalStateException(SCRATCH_PAGE_FULL)`, `StoreUnavailable`
+  → `IllegalStateException("store unavailable")`) + `takeOutgoing` (chunk *i*, empty past the end);
+  `ScratchPadActivity`: `EXTRA_SCRATCH_OPEN_RECEIVED` → `selectReceived` after `opened` (the record
+  consumed once; `Pasted` recorded — Q5; host-initiated `setSelection` + the Delete · Send bar), `send`
+  (page / selection; **an empty pick → the new `scratch_nothing_to_send` dialog** — the toast-vs-dialog
+  rule; flush under `pageOps` → `InkChunks.chunk(ScratchInk.toPaperStrokes)` on Default → park →
+  `RESULT_SCRATCH_SEND` → finish).
+- **Paste = keep the pad's coordinates** (Q1 — the plan's "origin" rule overridden; no translation).
+- **JVM green (nine modules), debug + release compile.** New tests: `SelectionActionsTest.coreActionsFilteredByAppliesTo`,
+  `NotebookUndoTest.pastedIsOneStepForTheWholePaste`, `TransferCapsTest.drain_…`, `ScratchInkTest`,
+  `ScratchStoreReceiveTest` (new page / current page / the full rule leaves nothing behind);
+  `PaperStrokeTest.contractConstants` re-pinned to the new caps.
+- **Claude-verified MIP11 by hand** (3 stylus strokes by `input stylus swipe`; a 28-point
+  `input stylus motionevent` lasso): the bar reads **Delete · Pad · H**; Pad → the sheet "Send to
+  Scratch Pad / New page / Current page"; New page → `begin ok 314 ms` (cold) → `receiveInk: placed 3
+  strokes (new page) in 33 ms` → `send … in 40 ms` → the pad `opened: page 2/2, 3 strokes … 93 ms` →
+  `received 3 strokes selected` (the Delete · Send bar anchored under them); the selection bar's Send →
+  `result 1` → `takeOutgoing 0: 3 strokes`, `takeOutgoing 1: 0` → `drainOutgoing … 27 ms` → `paste 3
+  strokes` → `pasted 3 strokes on <page>` → `end` → `unbind (held)` → `insert 3` — the notebook shows the
+  selection bar (Delete · Pad · H) over the paste; the button open + the top-bar Send pasted the whole
+  page the same way (`begin ok 24 ms` warm); Current page → `placed 9 strokes (current page) in 11 ms`,
+  `opened: page 2/2, 12 strokes`, `received 9 strokes selected`; Back → `result 0 (cancelled)` → `end`,
+  nothing pasted; an inserted blank page + Send → "There's no ink here to send."; `dumpsys activity
+  services` shows no scratchpad service after; no FATAL, no `SecurityException`; the library's pad has 0
+  Send buttons; log lines carry counts + durations only. Multi-finger undo / redo (items 4 + 8), the
+  heading / mixed case on device (item 3) and NA5C / SNN are the user's (adb can't lasso there).
 
 ---
 

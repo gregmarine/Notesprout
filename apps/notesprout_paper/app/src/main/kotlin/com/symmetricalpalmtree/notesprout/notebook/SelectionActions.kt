@@ -39,16 +39,19 @@ data class Contribution(
 data class ToolbarItem(val providerKey: String?, val action: ToolbarAction)
 
 /**
- * The pure merge behind the selection toolbar's contents (JVM-tested): **Delete first**, then every
- * provider's actions in registry order, filtered by `appliesTo` — INK when the selection is
+ * The pure merge behind the selection toolbar's contents (JVM-tested): **the core actions first**
+ * (Delete, then the Scratch Pad's `scratch` while installed — each filtered by its own `appliesTo`),
+ * then every provider's actions in registry order, filtered by `appliesTo` — INK when the selection is
  * strokes-only, OBJECT when it is exactly one object of that provider's types; a **mixed** selection
- * (strokes and objects, or several objects) shows core actions only. Parents are filtered through
+ * (strokes and objects, or several objects) shows core actions carrying every bit only (Delete). Parents are filtered through
  * their leaves: a parent whose leaves all fall away is dropped.
  */
 object SelectionActions {
 
     /** The core Delete's id — the toolbar routes it to `Listener.onDelete`. */
     const val CORE_DELETE_ID = "delete"
+    /** The core "Send to Scratch Pad" action's id (arc 6 / S2, `appliesTo = INK`; present only while the extension is installed). */
+    const val CORE_SCRATCH_ID = "scratch"
 
     sealed interface Shape {
         /** A pure-stroke selection. */
@@ -69,7 +72,14 @@ object SelectionActions {
 
     fun merge(core: List<ToolbarAction>, contributions: List<Contribution>, shape: Shape): List<ToolbarItem> {
         val out = ArrayList<ToolbarItem>()
-        for (a in core) out += ToolbarItem(null, a)
+        // Core actions are filtered by `appliesTo` too (arc 6 / S2): Delete carries every bit and shows
+        // for every shape; `scratch` (INK) shows for ink only. A mixed selection needs every bit.
+        val coreMask = when (shape) {
+            Shape.Ink -> ActionApplies.INK
+            is Shape.OneObject -> ActionApplies.OBJECT
+            Shape.Mixed -> ActionApplies.ALL
+        }
+        for (a in core) if (a.appliesTo and coreMask == coreMask) out += ToolbarItem(null, a)
         val bit = when (shape) {
             Shape.Ink -> ActionApplies.INK
             is Shape.OneObject -> ActionApplies.OBJECT

@@ -133,6 +133,16 @@
     <!-- Scratch Pad (arc 6) -->
     <string name="cd_scratch_pad">Scratch Pad</string>
     <string name="scratch_failed">The %1$s extension didn\'t respond — try again.</string>
+    <!-- Arc 6 / S2: the core "Send to Scratch Pad" selection action + the two transfers. -->
+    <string name="scratch_action_label">Pad</string>
+    <string name="scratch_action_hint">Send to Scratch Pad</string>
+    <string name="scratch_send_title">Send to Scratch Pad</string>
+    <string name="scratch_new_page">New page</string>
+    <string name="scratch_current_page">Current page</string>
+    <string name="scratch_sent">Sent to scratch pad</string>
+    <string name="scratch_too_large">That\'s too much ink to send at once (%1$d strokes).</string>
+    <string name="scratch_page_full_host">The scratch pad\'s page is full — send to a new page.</string>
+    <string name="scratch_truncated">Only the first %1$d strokes came back.</string>
     <string name="contents_empty">No headings yet</string>
     <string name="contents_truncated">Showing the first %1$d headings</string>
     <string name="cd_expand">Expand</string>

@@ -25,7 +25,9 @@
 > (values to 4 MiB over `SharedMemory`; §"The extension store") and the `NSE · Scratch Pad` skeleton
 > (`:ext-scratchpad`); **S1** built the screen (`ScratchPadActivity` — `docs/scratchpad.md`) and the two
 > entry buttons (notebook top bar · library bottom bar, present only while the extension is installed);
-> the ink transfers come in S2, the audit rows + rules in S3.
+> **S2** built the two ink transfers (the core `scratch` selection action + `receiveInk`; the pad's Send +
+> `takeOutgoing` → paste selected, one undoable `Pasted`; §"ScratchPad (contract)" S2 state); the audit
+> rows + rules come in S3.
 
 Notesprout's original design baked too many features into the core. Paper's core is **paper with
 strokes** — a library of notebooks, each a stack of pages you write on. Everything else is added by
@@ -152,8 +154,8 @@ it, the five earlier extensions keep their `if (BuildConfig.DEBUG) Log.d` rule.
 | `EXTRA_SCRATCH_SEND_ENABLED` / `EXTRA_SCRATCH_OPEN_RECEIVED` | `"sendEnabled"` / `"openReceived"` — the scratch-pad screen's two boolean launch extras (the only data that rides its Intent; arc 6 / S0) |
 | `RESULT_SCRATCH_SEND` | `1` (= `Activity.RESULT_FIRST_USER`) — the pad has outbound ink for `takeOutgoing` (S0; used in S2) |
 | `PLACEMENT_NEW_PAGE` / `PLACEMENT_CURRENT_PAGE` | `0` / `1` — `receiveInk` placement (S0; used in S2) |
-| `MAX_TRANSFER_STROKES` / `MAX_TRANSFER_POINTS` | `5_000` / `200_000` — most strokes / points (summed) in one scratch-pad ink transfer, either direction; host-enforced outward **before any bind**, re-checked inward on both sides (S0) |
-| `TRANSFER_CHUNK_STROKES` / `TRANSFER_CHUNK_POINTS` / `TRANSFER_MAX_CHUNKS` | `300` / `20_000` / `17` — most strokes / points per Binder call (≈ 320 KB of floats); the host chunks, `InkBundle.requireValid` re-checks; the drain stops at 17 chunks (S0) |
+| `MAX_TRANSFER_STROKES` / `MAX_TRANSFER_POINTS` | `10_000` / `400_000` — most strokes / points (summed) in one scratch-pad ink transfer, either direction; host-enforced outward **before any bind**, re-checked inward on both sides (S0; raised from 5 000 / 200 000 in S2 at the user's call) |
+| `TRANSFER_CHUNK_STROKES` / `TRANSFER_CHUNK_POINTS` / `TRANSFER_MAX_CHUNKS` | `300` / `20_000` / `34` — most strokes / points per Binder call (≈ 320 KB of floats); both sides chunk with the shared `InkChunks` (`:extension-api`), `InkBundle.requireValid` re-checks; the host's drain stops at 34 chunks and probes one more to learn whether anything was left (S0 / S2) |
 | `SCRATCH_PAGE_FULL` | `"scratch page full"` — the exact `IllegalStateException` message the scratch-pad extension throws from `receiveInk` when the target page would exceed `STORE_MAX_VALUE_BYTES` (S0; used in S2) |
 | `templateIdentity(pkg, id)` | `"$pkg:$id"` |
 | `objectIdentity(pkg, typeId)` | `"$pkg:$typeId"` — the provider identity stored in an object row's `style` (H3); parsed by `parseIdentity` |
@@ -1039,8 +1041,28 @@ extension's process, the notebook's chrome shape, `PageGestures` / `UndoRedoStac
 `ScratchStore` — `docs/scratchpad.md`); the host's two entry points (`notebook/ScratchPadFlow` —
 `releaseForHandoff()` immediately before the launch — and `library/ScratchPadLaunch`), both **present
 only while a trusted `SCRATCH_PAD` extension is installed** (re-discovered on every resume). The
-Send buttons show when opened from a notebook but are inert until S2. The transfers (S2) and the audit
-rows 28–32 / rules 25–27 (S3) follow.
+Send buttons show when opened from a notebook but are inert until S2.
+
+**S2 state — the two transfers** (`docs/scratchpad.md` §Transfers, `docs/notebook.md` §"Scratch Pad
+(arc 6)"). *Notebook → pad:* the core's own `scratch` selection action ("Pad", `appliesTo = INK`,
+listed by `ScratchPadFlow.toolbarAction()` only while the extension is installed; `SelectionActions.merge`
+filters core actions by `appliesTo` too) → the placement sheet → `TransferCaps.withinLimits` **before
+any bind** → `ScratchPadClient.open` → **`send(chunks, pageWidth, pageHeight, placement)`** = one
+`receiveInk(bundle, placement, last)` per chunk ≤ 2 s on the held bind, the extension's
+`IllegalStateException(SCRATCH_PAGE_FULL)` typed as `ScratchPageFullException` → launch with
+`openReceived = true`. The extension (`ScratchPadService.receiveInk`) re-checks the running totals,
+mints ids (`ScratchInk` — its own mapping; `:paper-screen` cannot host a shared one), places on the
+Binder thread (`ScratchStore.receive`: a new page after the current one or appended to the current
+page, that page made current; the full rule refuses the whole placement), and records page + ids for
+the screen to open **selected** and as one `Pasted` on its stack. *Pad → notebook:* the pad's Send
+(page / selection) flushes, parks the chunks in `ScratchSession.outbound`, `RESULT_SCRATCH_SEND`; the
+host's `ScratchPadClient.drainOutgoing` = `takeOutgoing(i)` ≤ 2 s each under `TransferCaps.Drain`
+(empty bundle / summed caps / 34 chunks + one probe; every chunk `requireValid` + `sanitize`), then
+`finish`; the notebook pastes with fresh ids (`TransferCaps.toStrokes`) as one `NotebookUndo.Action.Pasted`,
+**coordinates 1:1**, left selected (host-initiated `setSelection`); a cut drain → `scratch_truncated`.
+Outward on `receiveInk` = bare geometry + width + colour + style name + the page px size; inward on
+`takeOutgoing` = the same, untrusted; **no id, page, notebook or name ever crosses** (rows 29–30 are
+walked in S3). Both directions are copies. The audit rows 28–32 / rules 25–27 (S3) follow.
 
 ## Host behaviour (`:app`, package `extension/`)
 

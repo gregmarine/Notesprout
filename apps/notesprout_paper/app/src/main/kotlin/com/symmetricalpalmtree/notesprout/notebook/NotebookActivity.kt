@@ -112,9 +112,11 @@ class NotebookActivity : AppCompatActivity() {
     /** A provider's active action ids per object id (for exactly that payload) — spares a bind per re-selection. */
     private val activeIdsCache = HashMap<String, Pair<String, Set<String>>>()
     /** The core's own toolbar actions: Delete only (locked decision Q5). */
-    private val coreActions: List<ToolbarAction> by lazy {
-        listOf(ToolbarAction(SelectionActions.CORE_DELETE_ID, "Del", R.drawable.ic_trash, getString(R.string.selection_delete_hint), ActionApplies.ALL, 0))
+    private val deleteAction: ToolbarAction by lazy {
+        ToolbarAction(SelectionActions.CORE_DELETE_ID, "Del", R.drawable.ic_trash, getString(R.string.selection_delete_hint), ActionApplies.ALL, 0)
     }
+    /** Delete, then the Scratch Pad's `scratch` while the extension is installed (arc 6 / S2). */
+    private val coreActions: List<ToolbarAction> get() = listOfNotNull(deleteAction, scratchPadFlow.toolbarAction())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -169,12 +171,16 @@ class NotebookActivity : AppCompatActivity() {
                 }
                 override fun onAction(providerKey: String?, action: ToolbarAction) {
                     val sel = currentSelection ?: return
-                    if (providerKey == null || !opened || closing) return
+                    if (!opened || closing) return
                     // In writing order (liveStrokes is insertion-ordered = commit / z order), NOT the
                     // selection's Set order — an online recognizer reads strokes as a sequence, and a
                     // hash-ordered "Meeting Notes" came back as four characters.
                     val strokes = liveStrokes.values.filter { it.id in sel.strokeIds }
                     val objects = sel.contentIds.mapNotNull { liveObjects[it] }
+                    if (providerKey == null) {   // the core `scratch` action (arc 6 / S2) — ink only
+                        if (action.id == SelectionActions.CORE_SCRATCH_ID && objects.isEmpty()) scratchPadFlow.sendSelection(strokes)
+                        return
+                    }
                     val one = if (sel.strokeIds.isEmpty() && objects.size == 1) objects[0] else null
                     if (one == null && (strokes.isEmpty() || objects.isNotEmpty())) return   // mixed: core actions only
                     objectActions.perform(providerKey, action, strokes, sel.bounds, one, liveObjects.size)
@@ -197,7 +203,10 @@ class NotebookActivity : AppCompatActivity() {
             button = binding.btnContents, whenPenIdle = ::whenPenIdle,
         )
         binding.btnContents.setOnClickListener { contentsFlow.open() }.also { TooltipCompat.setTooltipText(binding.btnContents, binding.btnContents.contentDescription) }   // inside topBar: chrome release + exclusion cover it
-        scratchPadFlow = ScratchPadFlow(this, paper, binding.btnScratchPad, { opened && !closing }, ::whenPenIdle) { binding.root.post { pushExclusions() } }   // arc 6 / S1; inside topBar
+        scratchPadFlow = ScratchPadFlow(   // arc 6 / S1 + S2; the button sits inside topBar
+            this, paper, binding.btnScratchPad, { opened && !closing }, ::whenPenIdle, { binding.root.post { pushExclusions() } },
+            pageSize = { session.currentPage.width to session.currentPage.height }, onPaste = { strokes -> runPageOp { pasteStrokes(strokes) } },
+        )
         pageGestures = PageGestures(
             host = paper.asView(),
             isPenActive = { paper.isPenActive },
@@ -454,6 +463,22 @@ class NotebookActivity : AppCompatActivity() {
 
     private suspend fun doUndo() = NotebookUndo.undo(session, undo, ::refreshToPage)
     private suspend fun doRedo() = NotebookUndo.redo(session, undo, ::refreshToPage)
+
+    /** Ink from the scratch pad (arc 6 / S2): fresh rows + on the paper + one undoable [Action.Pasted], left selected (host-initiated). */
+    private suspend fun pasteStrokes(strokes: List<Stroke>) {
+        val pageId = session.currentPage.id
+        session.store.insert(pageId, strokes)
+        for (s in strokes) liveStrokes[s.id] = s
+        paper.addStrokes(strokes)
+        undo.record(Action.Pasted(pageId, strokes))
+        val bounds = strokes.map { it.bounds }.reduce { a, b -> a.union(b) }
+        val sel = Selection(strokes.map { it.id }.toSet(), emptySet(), bounds)
+        paper.setSelection(sel.strokeIds, emptySet(), bounds)
+        selectionActive = true
+        currentSelection = sel
+        showSelectionToolbar(sel)
+        Slog.d(TAG) { "pasted ${strokes.size} strokes on $pageId" }
+    }
 
     // ── Content objects (arc 4 — H2 toolbar Delete, H4 provider actions) ──────
 

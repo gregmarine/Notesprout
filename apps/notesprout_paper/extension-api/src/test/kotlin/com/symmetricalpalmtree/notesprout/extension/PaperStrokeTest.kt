@@ -55,11 +55,11 @@ class PaperStrokeTest {
         assertEquals(1, ExtensionContract.RESULT_SCRATCH_SEND)   // Activity.RESULT_FIRST_USER
         assertEquals(0, ExtensionContract.PLACEMENT_NEW_PAGE)
         assertEquals(1, ExtensionContract.PLACEMENT_CURRENT_PAGE)
-        assertEquals(5_000, ExtensionContract.MAX_TRANSFER_STROKES)
-        assertEquals(200_000, ExtensionContract.MAX_TRANSFER_POINTS)
+        assertEquals(10_000, ExtensionContract.MAX_TRANSFER_STROKES)   // S2: raised at the user's call
+        assertEquals(400_000, ExtensionContract.MAX_TRANSFER_POINTS)
         assertEquals(300, ExtensionContract.TRANSFER_CHUNK_STROKES)
         assertEquals(20_000, ExtensionContract.TRANSFER_CHUNK_POINTS)
-        assertEquals(17, ExtensionContract.TRANSFER_MAX_CHUNKS)
+        assertEquals(34, ExtensionContract.TRANSFER_MAX_CHUNKS)
         assertEquals("scratch page full", ExtensionContract.SCRATCH_PAGE_FULL)
         assertEquals(4 * 1024 * 1024, ExtensionContract.STORE_MAX_VALUE_BYTES)
         assertEquals(512 * 1024, ExtensionContract.STORE_MAX_INLINE_BYTES)

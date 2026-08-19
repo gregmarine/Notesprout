@@ -38,6 +38,7 @@ object NotebookUndo {
             is Action.ObjectCreated -> { objects.remove(listOf(a.obj.id)); store.restore(a.pageId, a.removedStrokes) }
             is Action.ObjectsDeleted -> { store.restore(a.pageId, a.strokes); objects.restore(a.pageId, a.objects) }
             is Action.ObjectEdited -> a.before.let { objects.updatePayloadAndBounds(it.id, it.payload, it.x, it.y, it.width, it.height) }
+            is Action.Pasted -> store.remove(a.strokes.map { it.id })
             is Action.Page -> {
                 session.reconcile(a.snapshot.before, a.snapshot.childIds, emptyList(), a.snapshot.beforeCurrentId)
                 refreshToPage(session.currentPage.id)
@@ -57,6 +58,7 @@ object NotebookUndo {
             is Action.ObjectCreated -> { objects.restore(a.pageId, listOf(a.obj)); store.remove(a.removedStrokes.map { it.id }) }
             is Action.ObjectsDeleted -> { store.remove(a.strokes.map { it.id }); objects.remove(a.objects.map { it.id }) }
             is Action.ObjectEdited -> a.after.let { objects.updatePayloadAndBounds(it.id, it.payload, it.x, it.y, it.width, it.height) }
+            is Action.Pasted -> store.restore(a.pageId, a.strokes)
             is Action.Page -> {
                 session.reconcile(a.snapshot.after, emptyList(), a.snapshot.childIds, a.snapshot.afterCurrentId)
                 refreshToPage(session.currentPage.id)
@@ -95,5 +97,11 @@ object NotebookUndo {
         /** An object's payload and/or bounds changed (edit, action, re-size). [before]/[after] hold the
          *  whole object so either direction is one `updatePayloadAndBounds`. */
         data class ObjectEdited(override val pageId: String, val before: PageObject, val after: PageObject) : Action
+
+        // ── Scratch Pad (arc 6 / S2) ──
+
+        /** Ink pasted from the scratch pad — one step for the whole paste (fresh ids, minted by the
+         *  core). Undo soft-deletes the rows; redo restores them in place. */
+        data class Pasted(override val pageId: String, val strokes: List<Stroke>) : Action
     }
 }

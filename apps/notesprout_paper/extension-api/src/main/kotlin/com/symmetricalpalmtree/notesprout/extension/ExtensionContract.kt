@@ -208,9 +208,9 @@ object ExtensionContract {
     const val PLACEMENT_NEW_PAGE: Int = 0
     const val PLACEMENT_CURRENT_PAGE: Int = 1
 
-    /** Most strokes / points (summed) in one transfer, either direction. */
-    const val MAX_TRANSFER_STROKES: Int = 5_000
-    const val MAX_TRANSFER_POINTS: Int = 200_000
+    /** Most strokes / points (summed) in one transfer, either direction (S2: raised from 5 000 / 200 000 at the user's call). */
+    const val MAX_TRANSFER_STROKES: Int = 10_000
+    const val MAX_TRANSFER_POINTS: Int = 400_000
 
     /** Most strokes / points per Binder call (≈ 320 KB of floats — under the ~1 MB transaction budget
      *  with headroom); the host chunks, the extension re-checks ([InkBundle.requireValid]). */
@@ -218,7 +218,7 @@ object ExtensionContract {
     const val TRANSFER_CHUNK_POINTS: Int = 20_000
 
     /** Most chunks the host drains on `takeOutgoing` (`ceil(MAX_TRANSFER_STROKES / TRANSFER_CHUNK_STROKES)`). */
-    const val TRANSFER_MAX_CHUNKS: Int = 17
+    const val TRANSFER_MAX_CHUNKS: Int = 34
 
     /** The exact `IllegalStateException` message the scratch-pad extension throws from `receiveInk`
      *  when the target page's encoded ink would exceed [STORE_MAX_VALUE_BYTES]. */

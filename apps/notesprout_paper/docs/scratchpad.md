@@ -1,14 +1,14 @@
 # Scratch Pad — `NSE · Scratch Pad` (arc 6)
 
 The scratch pad is Paper's one global, multi-page jotter: reachable from the notebook's top bar and
-the library's bottom bar, persisted across restarts, with (S2) two-way ink transfer to and from the
-notebook it was opened from. It is **an extension that owns a screen** — the first exercise of the
+the library's bottom bar, persisted across restarts, with two-way ink transfer to and from the
+notebook it was opened from (S2). It is **an extension that owns a screen** — the first exercise of the
 UI rule's tier 2 (`docs/extensions.md` §"ScratchPad (contract)"): the core launches
 `ScratchPadActivity` for a result and returns from it; the core grows no second drawing surface.
 This file is the extension's own reference — the screen, its tools, pages, store layout and failures.
 Contract, host clients and the boundary rules live in `docs/extensions.md`; the notebook side in
 `docs/notebook.md` §"Scratch Pad (arc 6)"; the library side in `docs/library.md`. Plan:
-`PAPER_SCRATCHPAD_PLAN.md` (S0 ✅ · S1 ✅ · S2 ⬜ · S3 ⬜).
+`PAPER_SCRATCHPAD_PLAN.md` (S0 ✅ · S1 ✅ · S2 🧪 · S3 ⬜).
 
 ## Module (`:ext-scratchpad`)
 
@@ -21,13 +21,14 @@ never `:app`; no Room / SQLCipher / serialization — **its data lives in the ho
 | File | Role |
 |---|---|
 | `ScratchPadApplication` | `OnyxEngine.register(this)` + `RattaEngine.register()` — the pad's process hosts a paper surface, so it registers g-paper's engines itself (rule 27) |
-| `ScratchPadService` (`IScratchPad.Stub`) | the held bind: `begin(store)` holds the store binder in `ScratchSession` (reads the page list on the Binder thread — first run creates one page; logs `pages=n`), `end()` clears it; `receiveInk` / `takeOutgoing` are S2 (`UnsupportedOperationException` until then). `HostCallerCheck.enforce` first in every method |
-| `ScratchSession` (object) | process-wide: the held store binder, the inbound / outbound ink (S2), the ids to open selected (S2) — the Service and the Activity share the process |
-| `ScratchStore` | the key layout over `IExtensionStore` (below), blocking — called on IO / the Binder thread only |
+| `ScratchPadService` (`IScratchPad.Stub`) | the held bind: `begin(store)` holds the store binder in `ScratchSession` (reads the page list on the Binder thread — first run creates one page; logs `pages=n`), `end()` clears it; `receiveInk` (S2: chunks accumulate, caps re-checked, on `last` placed through `ScratchStore.receive` on the Binder thread) and `takeOutgoing` (S2: chunk *i* of what Send parked, empty past the end). `HostCallerCheck.enforce` first in every method |
+| `ScratchSession` (object) | process-wide: the held store binder, the inbound ink accumulating over chunks, the outbound chunks, the one-shot `received` record (page + stroke ids to open selected) — the Service and the Activity share the process |
+| `ScratchInk` (pure, JVM-tested) | the extension's wire ⇄ paper mappings: inward fresh ids / `timeMillis 0` / unknown style → PEN / width clamped 0.5..50 px; outward geometry + width + colour + style name, id and time dropped (the host's twin is `TransferCaps`; `:paper-screen` cannot host a shared one — it never sees `:extension-api`) |
+| `ScratchStore` | the key layout over `IExtensionStore` (below), blocking — called on IO / the Binder thread only; `receive` = the notebook → pad placement (S2) |
 | `ScratchPageCodec` (pure, JVM-tested) | page blob ⇄ (pageWidth, pageHeight, strokes); `HEADER_BYTES`, `strokeBytes(stroke)` |
 | `ScratchPages` (pure, JVM-tested) | the id-list math (insert after / before, delete, clamp) over the shared `PageMath` |
 | `ScratchDocument` (JVM-tested over a fake store) | the pages in memory + persistence: page list, current page's strokes (writing order), page size, the running encoded size, `load` / `goTo` / `insert` / `deleteCurrent` / `flush`, the mutations `add` / `remove` / `translate`, and the undo replay `revert` / `reapply` |
-| `ScratchUndo` | the pad's action set: `Drew` · `Erased` · `Moved` · `Page` · `Pasted` (S2) |
+| `ScratchUndo` | the pad's action set: `Drew` · `Erased` · `Moved` · `Page` · `Pasted` (S2 — ink that arrived from the notebook; undo removes it) |
 | `ScratchPadActivity` | the screen (below) |
 | `ScratchToolbar` | the top bar over the shared `PaperToolbar` + the Send button's visibility |
 | `ScratchSelectionToolbar` | the floating Delete · [Send] bar, anchored by the shared `ToolbarAnchor` |
@@ -99,9 +100,42 @@ screen removes the stroke from the paper and says `scratch_page_full` once per p
 that lands over the cap (an undo re-adding ink after the page filled) stays in memory and says the
 same — the blob is written again once something is removed.
 
-**Send (S1 Q4).** Both Send buttons (top bar = the page, selection bar = the selection) are **visible
-when opened from a notebook and absent from the library**; in S1 a tap does nothing (`Slog.d` only) —
-S2 wires them to `RESULT_SCRATCH_SEND` + `takeOutgoing`.
+## Transfers (S2)
+
+Both directions are **copies**, cross **only through the held service** (never the Intent, never a
+file — rule 25), carry **no ids** (fresh ids minted on the receiving side), and keep the strokes'
+**coordinates 1:1** (S2 Q1 — the pad page and the notebook page are both the device's screen; a
+cross-device page is clipped by the page like any other ink). Wire form: `InkBundle` chunks of
+`PaperStroke` (`docs/extensions.md` §"ScratchPad (contract)"), chunked per Binder call by the
+shared `InkChunks` (300 strokes / 20 000 points); a whole transfer ≤ `MAX_TRANSFER_STROKES` 10 000 /
+`MAX_TRANSFER_POINTS` 400 000.
+
+**Notebook → pad (`receiveInk`).** The core's `scratch` action ("Pad") on an ink-only lasso → the
+placement sheet (New page / Current page) → caps checked **before any bind** → `open` (store, hold,
+`begin`) → the chunks (`placement` + `last` on each) → toast "Sent to scratch pad" → the screen
+launched with `EXTRA_SCRATCH_OPEN_RECEIVED`. The service re-checks the running totals against the
+caps (over → `IllegalArgumentException`, the inbound dropped), and on `last` mints ids
+(`ScratchInk.toStrokes`) and places them on the Binder thread through **`ScratchStore.receive`**:
+**New page** = a page inserted after the current one (size = the bundle's page size; `0 × 0` → the
+surface size at first layout) · **Current page** = appended to the current page's blob (its own size
+kept; the bundle's if it has none yet); the target page becomes `current`, so the screen opens on it.
+The **full rule** applies to the result: over 4 MiB → `IllegalStateException(SCRATCH_PAGE_FULL)` —
+nothing placed, nothing inserted (the host says "The scratch pad's page is full — send to a new page").
+The record of what landed (`ScratchSession.received` = page id + stroke ids) is consumed **once** by
+the screen: after `opened`, if the record's page is the current one, the strokes are selected
+(host-initiated `setSelection` — no `onSelectionCreated` echo; the Delete · Send bar shows) and
+recorded as one `Pasted` on the pad's stack — **undo on the pad removes what just arrived, redo
+restores it** (S2 Q5).
+
+**Pad → notebook (`takeOutgoing`).** The top-bar **Send** = every stroke on the current page; the
+selection bar's **Send** = the lasso's strokes — both in writing order. An empty pick → the
+`scratch_nothing_to_send` dialog (a tap that did nothing is a dialog, never silence). Otherwise the
+page is **flushed first** (the pad keeps its ink), the strokes are mapped outward and chunked into
+`ScratchSession.outbound`, and the screen finishes with `RESULT_SCRATCH_SEND`. The host then drains
+`takeOutgoing(0..)` on the still-held bind until an empty bundle, the summed caps or the chunk budget
+(`TransferCaps.Drain` — a cut is said with `scratch_truncated`), sanitizes, mints ids and pastes
+(`docs/notebook.md` §"Scratch Pad"); only then `end` → unbind → revoke. Both Send buttons exist
+only when the pad was opened from a notebook (`EXTRA_SCRATCH_SEND_ENABLED`).
 
 ## Store layout (`ScratchStore`, over the host's `IExtensionStore`)
 
@@ -132,6 +166,11 @@ partial stroke, a malformed geometry blob skips that stroke, an unknown version 
 | A stroke that would push the page past 4 MiB | removed from the paper; `scratch_page_full` once per page visit |
 | A replay that lands over the cap | kept in memory, same dialog; written once something is removed |
 | Back | the current page flushed, `RESULT_CANCELED`, the host finishes the bind |
+| Send with no ink on the page / in the selection | `scratch_nothing_to_send` dialog, nothing sent |
+| Send | the page flushed, the strokes parked, `RESULT_SCRATCH_SEND` — the host drains, pastes, then finishes the bind |
+| `receiveInk` over the caps (host-side bug — the host checks first) | `IllegalArgumentException`, inbound dropped; the host says "didn't respond" |
+| `receiveInk` that would cross 4 MiB | `IllegalStateException(SCRATCH_PAGE_FULL)`, nothing placed; the host's `scratch_page_full_host` dialog, the pad not opened |
+| `receiveInk` with the store gone | `IllegalStateException("store unavailable")`; the host says "didn't respond" |
 | Home / screen off | `onPause` flush; the host keeps the bind until its result callback |
 
 ## Entry points (core side — `docs/notebook.md`, `docs/library.md`)

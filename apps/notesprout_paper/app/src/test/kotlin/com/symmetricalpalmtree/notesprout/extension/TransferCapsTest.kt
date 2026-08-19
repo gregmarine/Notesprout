@@ -78,6 +78,47 @@ class TransferCapsTest {
     }
 
     @Test
+    fun drain_stopsOnEmpty_cutsAtCaps_probesPastTheChunkBudget() {   // arc 6 / S2
+        // Plain: two chunks then an empty one.
+        val d = TransferCaps.Drain()
+        assertTrue(d.add(listOf(wire(2), wire(3, style = "NEON"))))
+        assertTrue(d.add(listOf(wire(1))))
+        assertFalse(d.add(emptyList()))
+        assertEquals(3, d.strokes.size)
+        assertEquals("PEN", d.strokes[1].style)   // sanitized on the way in
+        assertEquals(2, d.chunks)
+        assertFalse(d.truncated)
+
+        // The stroke cap cuts inside a chunk.
+        val cap = TransferCaps.Drain()
+        val per = ExtensionContract.TRANSFER_CHUNK_STROKES
+        var n = 0
+        while (cap.add(List(per) { wire(1) })) n++
+        assertTrue(cap.truncated)
+        assertEquals(ExtensionContract.MAX_TRANSFER_STROKES, cap.strokes.size)
+
+        // The point cap cuts too.
+        val pts = TransferCaps.Drain()
+        assertTrue(pts.add(listOf(wire(ExtensionContract.TRANSFER_CHUNK_POINTS))))
+        var i = 1
+        while (pts.add(listOf(wire(ExtensionContract.TRANSFER_CHUNK_POINTS)))) i++
+        assertTrue(pts.truncated)
+        assertTrue(pts.strokes.sumOf { it.size } <= ExtensionContract.MAX_TRANSFER_POINTS)
+
+        // The chunk budget: small chunks never hit a cap; the probe past the budget marks truncated only if non-empty.
+        val budget = TransferCaps.Drain()
+        repeat(ExtensionContract.TRANSFER_MAX_CHUNKS) { assertTrue(budget.add(listOf(wire(1)))) }
+        assertFalse(budget.truncated)
+        assertFalse(budget.add(emptyList()))
+        assertFalse(budget.truncated)
+        val budget2 = TransferCaps.Drain()
+        repeat(ExtensionContract.TRANSFER_MAX_CHUNKS) { budget2.add(listOf(wire(1))) }
+        assertFalse(budget2.add(listOf(wire(1))))
+        assertTrue(budget2.truncated)
+        assertEquals(ExtensionContract.TRANSFER_MAX_CHUNKS, budget2.strokes.size)
+    }
+
+    @Test
     fun inward_mintsFreshIds_zeroTime() {
         var n = 0
         val strokes = TransferCaps.toStrokes(listOf(wire(2, style = "DASH"), wire(3)), newId = { "id${n++}" })
