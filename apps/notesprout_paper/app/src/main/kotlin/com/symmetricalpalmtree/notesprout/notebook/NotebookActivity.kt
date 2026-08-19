@@ -186,7 +186,7 @@ class NotebookActivity : AppCompatActivity() {
         NotebookDebugMenu.install(this, binding.topBarRow, provider = {
             if (!opened) null
             else RecognizeContext(paper.getStrokes(), session.currentPage.width.toFloat(), session.currentPage.height.toFloat())
-        }, contents = { if (!opened || closing) null else ContentsSource.gather(this, session, providers) })   // arc 5 / C0 probe
+        })
 
         chrome = NotebookChrome(paper, binding.topBar, binding.bottomStrip, selectionToolbar) { !opened || contentsFlow.showing }
         contentsFlow = ContentsFlow(

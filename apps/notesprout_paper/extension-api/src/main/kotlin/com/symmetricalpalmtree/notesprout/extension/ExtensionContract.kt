@@ -80,7 +80,7 @@ object ExtensionContract {
     // ── Outline entries (arc 5 / C0 — `IObjectProvider.describeOutline`, `OutlineEntry`) ──────
     // A provider *describes* each object's table-of-contents entry; the core sorts, nests and draws.
 
-    /** Longest outline label a provider may return (chars); the host truncates inward, the provider re-checks. */
+    /** Longest outline label a provider may return (chars) — structural: `OutlineEntry.requireValid` rejects a longer one at unmarshal (the reply "did not answer"); the provider cuts to it. */
     const val MAX_OUTLINE_LABEL_CHARS: Int = 200
 
     /** `OutlineEntry.level` is `0` (not an outline item) or `1..MAX_OUTLINE_LEVEL`. */

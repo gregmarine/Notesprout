@@ -129,6 +129,11 @@ constants and failure texts; anything genuinely undecided is a phase-start quest
 - **A "supports outline" flag in a manifest / describe call** instead of the probe — the probe (one
   blank payload → a one-element reply) is enough while every provider is first-party; revisit with
   third-party trust.
+- **Fold the outline probe into the `describeTypes` bind** (C2 review #8) — saves one bind per provider
+  per load (13–45 ms warm); only if a real notebook's open shows it.
+- **A shared pager bar + immersive helper** (C2 review #9) — `ContentsDialog`'s footer and post-show
+  immersive block duplicate the library pager / `NotebookActivity.goImmersive`; extract when a third
+  consumer appears or the recipe changes.
 
 ## Non-goals for this arc (do not build, do not scaffold "for later")
 
@@ -595,7 +600,7 @@ so the gap after Back is constant with or without the button. **C1 ✅.**
 ---
 
 ### Phase C2 — Review, boundary audit, docs freeze
-**Status:** ⬜ Not started
+**Status:** 🧪 Awaiting device verification (built 2026-08-18; Claude-side runs in progress)
 
 **Goal:** the appended method, its host handling and the Contents screen are trustworthy and
 recorded as the pattern a second contributing object type follows.
@@ -630,9 +635,55 @@ cold-launch reopen).
 
 **Close-out:** status ✅ + Outcome; commit + push `paper`.
 
----
-
-## Appendix A — Constants + strings (this arc)
+**Outcome (2026-08-18):** Phase-start Q1 **no changes — freeze as built** · Q2 **fixes only; the debug
+"Probe contents" item removed** (`NotebookDebugMenu` debug + release twins, the Activity's `contents`
+lambda, two strings). **`/code-review high 146ed72...HEAD` → 10 findings (7 confirmed / 3 plausible);
+6 fixed, 2 doc-only, 2 deferred:**
+1. ✅ *Probe transient failure stuck for the session* — `supportsOutline` now **throws** on a bind /
+   call failure (an empty / wrong-shape reply is still `false`); `ObjectProviders.load` catches it per
+   provider: the provider still loads (types + actions), `outline=false` for now, and the load is
+   marked **partial** so resume re-probes.
+2. 📝 *`OutlineEntry.requireValid` at unmarshal makes `OutlineCaps`' clamp unreachable* — **by design**
+   (the same "malformed parcelable = did not answer" rule as `CreatedObject` / `RenderedImage`, row 21);
+   the "host truncates inward" wording in the contract table / `ExtensionContract` KDoc was wrong and is
+   fixed (structural cap; `OutlineCaps` re-clamps as defence in depth) — audit row 26 says so.
+3. ✅ *Close race — `writer.drain()` / DAO after the seal → uncaught in `lifecycleScope`* —
+   `ContentsSource.available/gather` return early when `!session.isOpen`; `ContentsFlow.refresh/open`
+   catch the IO hop and swallow only while `!alive()` (closing) — anything else still throws.
+4. ✅ *`refresh()` overlap leaves the button disagreeing with `available`* — a generation counter
+   (a stale computation is dropped) and the pen-idle closure reads `available` **when it fires**.
+5. ✅ *Unbounded bind budget (`2 s × chunks`) + every payload shipped before the cap* — the candidate
+   rows are sorted into document order and capped at `MAX_OUTLINE_ENTRIES` **before** the bind
+   (`truncated` = candidates > cap; today candidates = entries since every heading is one), and
+   `describeOutlineAll` caps its budget at `OUTLINE_MAX_CHUNK_BUDGET` 10 chunks (20 s).
+6. 📝 *A two-type provider that throws for a type it doesn't outline fails the whole bind* — the
+   contract now says it: **answer every declared type**, `level 0` for one you don't outline (§ObjectProvider
+   + "Writing an extension" item 10); the Heading's `require(typeId == "heading")` is the unknown-type guard.
+7. ✅ *`available()` = `SELECT *` (payloads) on every flip* — `SoilDao.liveObjectIdentities()`
+   `(parentId, style)` projection (`ObjectIdentityRow`); the recompute-on-navigate stays (undo / redo of
+   a page delete funnel through it).
+8. ⏸ *The probe is a third bind per provider per load* — deferred (13–45 ms warm; folding it into the
+   `describeTypes` bind is a one-liner if a real notebook's open ever shows it; recorded under Deferred).
+9. ⏸ *Pager + immersive block are hand-copies of the library's / `goImmersive`* — deferred (a
+   refactor of user-verified UI is not a C2 fix; recorded under Deferred).
+10. ✅/⏸ *Dead / duplicated code* — `OutlineTree.DOCUMENT_ORDER` is now the one comparator (the gather
+    no longer re-sorts items; `build` sorts), `ContentsDialog` uses `@color/paperWhite`; kept:
+    `ObjectProviders.hasOutline` + `ObjectProviderClient.describeOutline(typeId, payloads)` (named in
+    the contract / this plan; one line each) and `qualifiesVerticalFling` (its own tested rule).
+Docs: `docs/extensions.md` — intro arc-5 line, audit rows **25–27** + the C2 re-walk paragraph for
+rows 1/6/7, rule **24** under §"Adding an object point" (+ the "Followed by" note), item 10's outline
+paragraph, the contract-table / timeout / host-behaviour wording; `docs/notebook.md` §Contents (projection,
+generation, cap-before-bind, two new failure rows); `README.md` (arc-5 paragraph + tables); `CLAUDE.md`
+(plans line → complete + frozen, no active arc; the Contents bullet now carries the appended-method /
+probe / rule-24 facts; probe removed). JVM green (seven modules), `assembleDebug` + `assembleRelease`
+compile. Installed on SNN + NA5C + MIP11 (app APK only — the extension APKs are unchanged in behaviour).
+**Claude-side runs (Sonnet agent per device, all three PASS 8/8):** Contents button between Back and Pen;
+`outline=true`, no probe failure / partial; ⋯ sheet = "Recognize page (ML Kit)" only; open → one
+`describeOutlineAll` bind, `gather: … candidates=6 sent=6 … truncated=false` (MIP11 23 ms / NA5C 36 ms /
+SNN 59 ms — SNN 8 entries), no label in any log line; row tap navigates; swipe-down reopens; scrim tap
+closes; `pm disable-user` Heading → no button + swipe silent, re-enable → back; flips + Back regress
+clean; no `SecurityException` / `FATAL` / leaked ServiceConnection. **User checklist pending.**
+ — Constants + strings (this arc)
 
 | Name | Value |
 |---|---|

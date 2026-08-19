@@ -14,12 +14,12 @@ global-index model, global encryption model, and e-ink design philosophy — and
   H0 8c5361f · H1 62771f3 · H2 bf17417 · H3 0de688e · H4 f995354 · H5 6c5d5c2: content objects in the `.soil` + the selection toolbar with its
   extension-contribution API + the `MARKDOWN_RENDERER` capability point / `NSE · Markdown` + the
   generic `OBJECT_PROVIDER` point / `NSE · Heading`, the two proxies, g-paper 0.1.1), then
-  `PAPER_CONTENTS_PLAN.md` (arc 5, **in progress — C0 ✅ cc0558d · C1 ✅ c9733c5 (both user-verified
-  2026-08-18) · C2 ⬜**: the
+  `PAPER_CONTENTS_PLAN.md` (arc 5, **C0 ✅ cc0558d · C1 ✅ c9733c5 · C2 🧪 built + Claude-verified
+  SNN + NA5C + MIP11 2026-08-18 — user checklist pending, then ✅ + frozen**: the
   Contents — a table of contents from the Heading extension via `IObjectProvider.describeOutline`
   (appended, compatible, `API_VERSION` stays 1) + a core-drawn `ContentsDialog`, top-bar `list`
-  button + one-finger swipe-down) — read all six top-to-bottom at the start of every session; **the
-  active arc is 5 — next: C2's phase ritual (wizard questions in the plan; review range `146ed72...HEAD`)**
+  button + one-finger swipe-down) — read all six top-to-bottom at the start of every session; **after
+  C2's user verification no arc is active — the next arc is NOT planned; ask the user first.**
 - **Package / applicationId:** `com.symmetricalpalmtree.notesprout` (debug: `.dev` suffix)
 - **Launcher label:** "Notesprout Paper" (debug: "Notesprout Paper Dev")
 
@@ -199,16 +199,24 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   its own handle in `onTransact`'s `finally` (the H5 fix in `ObjectProviderService`). The next object
   extension (Text / Shape / Link) implements the same AIDL and follows those rules; nothing else
   is planned.
-- **Contents** (arc 5 / C1, `docs/notebook.md` §"Contents (arc 5)"): the table of contents is
-  core-drawn from `describeOutline` descriptions (`ContentsSource` → `OutlineTree` → `ContentsDialog`,
-  behind `ContentsFlow`); the top-bar `list` button exists **only while `ContentsFlow.available`** — an
-  outline-capable provider loaded **and** an object of one in the notebook (`ContentsSource.available`,
-  refreshed after provider load / page change / object mutation) — and the one-finger swipe-down is
-  silent otherwise; **while the Contents shows the whole paper is
+- **Contents** (arc 5, `docs/notebook.md` §"Contents (arc 5)", `docs/extensions.md` rule 24 + audit
+  rows 25–27): **`describeOutline` is appended LAST to `IObjectProvider`** — the first exercised
+  compatible AIDL change (`API_VERSION` stays 1; never reorder; a further appended method follows the
+  same recipe): the core **probes** each provider at load (`ObjectProviderClient.supportsOutline` — one
+  blank payload, capable ⇔ a one-entry reply; an old provider yields an *empty reply*, not an exception,
+  so the test is the reply's shape) and records `Contribution.outline` outside the resume signature;
+  every real reply goes through `OutlineCaps.sanitize` (exact length or null). **An outline is a
+  description, not a parse** (rule 24): the provider returns (label, level) per payload and the table of
+  contents is core-drawn from those (`ContentsSource` → `OutlineTree` → `ContentsDialog`, behind
+  `ContentsFlow`) — the core still never reads inside a payload. The top-bar `list` button exists **only
+  while `ContentsFlow.available`** — an outline-capable provider loaded **and** an object of one in the
+  notebook (`ContentsSource.available`, refreshed after provider load / page change / object mutation)
+  — and the one-finger swipe-down is silent otherwise; **while the Contents shows the whole paper is
   one exclusion rect** (`NotebookChrome.blockAll`, like the "Opening…" popup); a failing capable
-  provider = an honest dialog, nothing opens. `NotebookActivity`'s chrome geometry now lives in
-  `NotebookChrome` (the file sits just under the 800-line cap — new notebook-screen logic goes in a
-  collaborator, not there).
+  provider = an honest dialog, nothing opens. `NotebookActivity`'s chrome geometry lives in
+  `NotebookChrome` (the file sits at the 800-line cap — new notebook-screen logic goes in a
+  collaborator, not there). The C0 debug ⋯ "Probe contents" item was removed in C2 (the screen itself
+  proves the path).
 - **Toast vs. dialog:** a toast only confirms something that already happened ("copied"); anything
   the user must notice or act on — why a tap did nothing, a failure, a one-time download — is an
   `AlertDialog` (e-ink: a toast is easy to miss and reads as "broken"). The one helper is

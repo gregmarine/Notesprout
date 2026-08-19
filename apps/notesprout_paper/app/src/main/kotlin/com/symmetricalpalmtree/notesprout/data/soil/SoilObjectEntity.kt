@@ -42,3 +42,6 @@ data class SoilObjectEntity(
     val flags: Int? = null,
     @ColumnInfo(typeAffinity = ColumnInfo.BLOB) val blob: ByteArray? = null,
 )
+
+/** Projection of [SoilObjectEntity] for `SoilDao.liveObjectIdentities` — parent page + provider identity only. */
+data class ObjectIdentityRow(val parentId: String, val style: String?)

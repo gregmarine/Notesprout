@@ -95,7 +95,7 @@ class ContentsDialog(
         val widthDp = activity.resources.configuration.screenWidthDp
         val fullScreen = ContentsLayout.fullScreen(widthDp)
         if (fullScreen) {
-            root.setBackgroundColor(Color.WHITE)
+            root.setBackgroundColor(ContextCompat.getColor(activity, R.color.paperWhite))
             panel.layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
             btnBack.visibility = View.VISIBLE
             btnBack.setOnClickListener { dialog.dismiss() }

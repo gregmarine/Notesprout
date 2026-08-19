@@ -53,7 +53,14 @@ paper notebooks.
   core as per-bind proxies (it never binds them itself); H3 built the point, the extension and the
   proxies, H4 wired the user story into the notebook screen (lasso → **H** → H1–H6 → heading; re-size,
   tap-to-edit, move, delete, undo — all one step each), H5 froze it (`docs/extensions.md` audit rows
-  18–24).
+  18–24). **Arc 5 (the Contents)** enhanced the Heading with the original's table of contents:
+  `describeOutline` was *appended* to the object-provider interface (the first exercised compatible
+  AIDL change — `API_VERSION` stays 1; the core probes an installed provider at load and tolerates an
+  older one), the Heading answers it with each heading's words + level, and the core gathers, sorts,
+  nests (H1–H6, orphans attached) and draws the **Contents** itself — a top-bar `list` button (only
+  once the notebook holds a heading) or a one-finger swipe down the paper opens it as a 60 % sidebar
+  (full screen under 480 dp); tap a row to turn to its page (`docs/notebook.md` §"Contents (arc 5)",
+  `docs/extensions.md` audit rows 25–27).
 
 ## What Paper is **not** (v0)
 
@@ -103,10 +110,10 @@ run `./gradlew publishToMavenLocal` in `~/git/g-paper` first. Requires a Temurin
 
 | Concern | Path |
 |---|---|
-| Project memory / plan (read first) | `PAPER_PLAN.md` (v0), `PAPER_EXTENSIONS_PLAN.md` (arc 1 — extension API + Templates), `PAPER_NAMING_PLAN.md` (arc 2 — extension store + Naming), `PAPER_RECOGNITION_PLAN.md` (arc 3 — handwriting-recognizer capability point + ML Kit) |
+| Project memory / plan (read first) | `PAPER_PLAN.md` (v0), `PAPER_EXTENSIONS_PLAN.md` (arc 1 — extension API + Templates), `PAPER_NAMING_PLAN.md` (arc 2 — extension store + Naming), `PAPER_RECOGNITION_PLAN.md` (arc 3 — handwriting-recognizer capability point + ML Kit), `PAPER_OBJECTS_PLAN.md` (arc 4 — content objects, selection toolbar, Markdown + Heading), `PAPER_CONTENTS_PLAN.md` (arc 5 — the Contents) |
 | Standing rules + build facts | `CLAUDE.md` |
 | Encryption & launch spine | `docs/crypto.md` |
 | Containers & global index | `docs/data.md` |
 | Library screen | `docs/library.md` |
 | Notebook screen (paper, gestures, pages, undo) | `docs/notebook.md` |
-| Extensions (model, contract v1, Templates + Naming + ML Kit extensions, the extension store, the recognizer point, boundary audit, writing one) | `docs/extensions.md` |
+| Extensions (model, contract v1, Templates + Naming + ML Kit + Markdown + Heading extensions, the extension store, the capability + object points, the appended `describeOutline`, boundary audit, writing one) | `docs/extensions.md` |

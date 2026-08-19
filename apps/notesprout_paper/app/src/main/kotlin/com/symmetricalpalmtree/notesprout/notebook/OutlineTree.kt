@@ -11,6 +11,9 @@ package com.symmetricalpalmtree.notesprout.notebook
 object OutlineTree {
 
     /** One object's outline item — its page + position (for document order) and its description. */
+    /** Document order — (pageIndex, y, x); the one comparator [build] and the gather's cap share. */
+    val DOCUMENT_ORDER: Comparator<Item> = compareBy<Item> { it.pageIndex }.thenBy { it.y }.thenBy { it.x }
+
     data class Item(val objectId: String, val pageIndex: Int, val x: Float, val y: Float, val label: String, val level: Int)
 
     /** A tree node; [children] in document order; [parent] null for a root. */
@@ -31,7 +34,7 @@ object OutlineTree {
      * is a root; opening a node clears every deeper slot. Parents persist across page boundaries.
      */
     fun build(items: List<Item>): List<Node> {
-        val sorted = items.sortedWith(compareBy<Item> { it.pageIndex }.thenBy { it.y }.thenBy { it.x })
+        val sorted = items.sortedWith(DOCUMENT_ORDER)
         val roots = ArrayList<Node>()
         val open = arrayOfNulls<Node>(MAX_LEVEL + 1)   // index = level (1..MAX_LEVEL); 0 unused
         for (item in sorted) {

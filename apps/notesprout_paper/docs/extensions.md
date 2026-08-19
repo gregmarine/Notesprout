@@ -14,6 +14,10 @@
 > **Arc 4** (`PAPER_OBJECTS_PLAN.md`): **H0** added the fourth point — the **MarkdownRenderer**
 > *capability* point (markdown in, image out) — and the Markdown extension (§"MarkdownRenderer
 > (contract)", §"The Markdown extension"); nothing in the host binds it yet (H3/H4).
+> **Arc 5** (`PAPER_CONTENTS_PLAN.md`, complete): **C0** appended `describeOutline` to `IObjectProvider`
+> — the first exercised *compatible* AIDL change (`API_VERSION` still 1; the load probe + `OutlineCaps`
+> tolerate an older provider); **C1** built the core-drawn Contents screen (`docs/notebook.md`
+> §"Contents (arc 5)"); **C2** walked audit rows 25–27 and rule 24 (§"Adding an object point").
 
 Notesprout's original design baked too many features into the core. Paper's core is **paper with
 strokes** — a library of notebooks, each a stack of pages you write on. Everything else is added by
@@ -104,7 +108,7 @@ proxies the core hands it as in-parameters**).
 | `MAX_EDIT_TITLE_CHARS` / `MAX_EDIT_HINT_CHARS` / `MAX_EDIT_TEXT_CHARS` | `40` / `60` / `4_000` — `EditSpec` title / field hint / most characters an edit field accepts (H2) |
 | `MAX_TYPE_ID_CHARS` / `MAX_TYPES` | `32` / `16` — an object `typeId` is `[a-z0-9_-]+` (`isTypeId`) / most `describeTypes()` entries the host keeps per provider (H3) |
 | `MAX_OBJECTS_PER_PAGE` | `200` — host cap on live objects per page (creation refused above it; H3) |
-| `MAX_OUTLINE_LABEL_CHARS` / `MAX_OUTLINE_LEVEL` | `200` / `6` — an `OutlineEntry`'s label cap (host truncates inward, provider re-checks) / `level` is `0` (not an outline item) or `1..6` (arc 5 / C0) |
+| `MAX_OUTLINE_LABEL_CHARS` / `MAX_OUTLINE_LEVEL` | `200` / `6` — an `OutlineEntry`'s label cap / `level` is `0` (not an outline item) or `1..6`. **Structural** — `OutlineEntry.requireValid` runs at unmarshal, so an over-long label or an out-of-range level rejects the whole reply (that provider "did not answer" this call, like every other malformed parcelable — rows 21 / 26); `OutlineCaps` re-clamps as defence in depth (arc 5 / C0, wording C2) |
 | `MAX_OUTLINE_BATCH` / `MAX_OUTLINE_BATCH_CHARS` | `200` / `100_000` — most payloads / summed payload chars in one `describeOutline` call (the host chunks by both — a payload may be `MAX_OBJECT_TEXT_CHARS`; the provider re-checks) (C0) |
 | `MAX_OUTLINE_ENTRIES` | `2_000` — host cap on a whole notebook's outline (document order; the rest is dropped and the Contents says so) (C0) |
 | `RECOGNIZER_REQUIRED` / `MARKDOWN_REQUIRED` | `"recognizer required"` / `"markdown required"` — the exact `IllegalStateException` messages an object provider throws when the in-parameter it needs is null; typed on the host (`CapabilityRequiredException`) so the dialog can name the missing extension (H3) |
@@ -784,7 +788,7 @@ describe / apply an edit · render.
   side** — counts, sizes and durations only. Binder-marshalable exceptions only (`SecurityException`,
   `IllegalArgumentException`, `IllegalStateException`).
 - **Timeouts (host):** bind ≤ 3 s · describe / apply / edit ≤ **2 s** · `createFromInk` ≤ **15 s** (one
-  recognizer hop of 10 s inside + margin) · `render` ≤ **10 s** (one markdown hop — bind 3 s + call 5 s — inside + margin; H5 raised it from 8 s, which left no margin) · `describeOutline` **2 s × chunks** in one bind · the outline probe 2 s.
+  recognizer hop of 10 s inside + margin) · `render` ≤ **10 s** (one markdown hop — bind 3 s + call 5 s — inside + margin; H5 raised it from 8 s, which left no margin) · `describeOutline` **2 s × chunks, capped at 10 chunks (20 s)** in one bind (`OUTLINE_MAX_CHUNK_BUDGET`, C2) · the outline probe 2 s (its own bind; a *transient* failure marks the load partial so resume re-probes — C2).
 - **`describeOutline(typeId, payloads)` (arc 5 / C0 — appended, compatible, `API_VERSION` stays 1):**
   the *description* behind the Contents (rule 24, C2). Batched per type: the host hands a provider all
   its objects' payloads of one `typeId` (chunked at `MAX_OUTLINE_BATCH` / `MAX_OUTLINE_BATCH_CHARS`
@@ -794,8 +798,13 @@ describe / apply an edit · render.
   Pure, ≤ 2 s per chunk. **Outward:** the provider's own payloads, grouped by type — never ids, page
   numbers, positions, names (the core keeps the geometry and page index). **Inward (`OutlineCaps`):**
   a reply of any other length → the provider "did not answer" (null; the Contents shows the failure
-  dialog and does not open — C0 Q4); labels trimmed and cut to the cap; blank label with level ≥ 1 →
-  level 0; level outside the range → 0. The **load probe** (`supportsOutline`, one blank payload,
+  dialog and does not open — C0 Q4); a label over the cap or a level out of range is rejected **at
+  unmarshal** (`OutlineEntry.requireValid` — the same "malformed reply = did not answer" rule as every
+  parcelable, row 21); `OutlineCaps.sanitize` then trims labels, maps a blank label with level ≥ 1 to
+  level 0 and re-clamps as defence in depth. **A provider must answer `describeOutline` for every type
+  it declares** — `level 0` for a type it does not outline; a thrown `IllegalArgumentException` for one
+  of its own types fails the whole bind (the reference Heading has one type, so its `require(typeId ==
+  "heading")` is the *unknown-type* guard, not a refusal — C2 review). The **load probe** (`supportsOutline`, one blank payload,
   capable ⇔ a one-entry reply) decides `Contribution.outline` / `ObjectProviders.hasOutline` — an old
   provider is "not capable", nothing else changes (§"Versioning rules"). The core builds the tree
   (`OutlineTree`, sort (page, y, x), six levels, orphans attach to the nearest shallower heading), caps
@@ -1093,7 +1102,9 @@ core's proxies.
   untouched (rule 23 lived).
 - **Contents (arc 5 / C1 — `docs/notebook.md` §"Contents (arc 5)"):** the notebook screen's
   `ContentsFlow` → `ContentsSource.gather` (one `describeOutlineAll` bind per outline-capable provider,
-  payloads batched per type and chunked by `OutlineCaps`; drains the writer first) → `OutlineTree` →
+  payloads batched per type and chunked by `OutlineCaps`; drains the writer first; the candidate rows
+  are sorted into document order and capped at `MAX_OUTLINE_ENTRIES` **before** the bind, and the bind
+  is budgeted at ≤ 10 chunks — C2) → `OutlineTree` →
   the core-drawn `ContentsDialog` (sidebar ≥ 480 dp / full screen below). Entry points: the top-bar
   `list` button — **present only while `ObjectProviders.hasOutline` and the notebook holds an object
   of an outline-capable provider** (`ContentsSource.available`, re-evaluated after every provider
@@ -1113,7 +1124,7 @@ correctly reports 0 candidates while it is disabled.
 
 ---
 
-## Boundary audit (rows 1–9 E2, rows 10–13 N2 — walked 2026-08-16; rows 14–17 M2 + rows 1/6/7 re-walked for the shared `ExtensionBinder` 2026-08-17; rows 18–24 H5 + rows 1/6/7 re-walked for the two new clients and the proxies' inner calls 2026-08-18 — all ✅)
+## Boundary audit (rows 1–9 E2, rows 10–13 N2 — walked 2026-08-16; rows 14–17 M2 + rows 1/6/7 re-walked for the shared `ExtensionBinder` 2026-08-17; rows 18–24 H5 + rows 1/6/7 re-walked for the two new clients and the proxies' inner calls 2026-08-18; rows 25–27 C2 + rows 1/6/7 re-walked for the appended `describeOutline` / `supportsOutline` calls 2026-08-18 — all ✅)
 
 What crosses the process boundary, in which direction, and what guards it. Re-walk this table
 whenever an extension point is added or a contract field changes.
@@ -1139,6 +1150,17 @@ the shared unbind (`createFromInk` / `render` / `renderAll`). Regions: `Rendered
 closes in nested `finally`; the proxy's re-wrapped region and the Markdown extension's own region are
 closed in their `onTransact` `finally`; and (H5 fix) the Heading extension closes *its* handle on the
 proxy's region the same way once its reply is marshalled — before that it was left to GC.
+
+**C2 re-walk of rows 1, 6, 7 (the appended method — two more client calls, no new bind path):**
+`ObjectProviderClient.describeOutlineAll` (what the Contents gather calls; `describeOutline` is a
+one-type wrapper over it) and `supportsOutline` (the load probe) both go through the same private
+`call(timeoutMs)` → `ExtensionBinder.call` as every arc-4 method: row 1's `checkSignatures` immediately
+before `bindService`, row 6's unbind + scope cancel in the one `finally`, row 7's explicit timeout —
+`CALL_TIMEOUT_MS` (2 s) for the probe, `2 s × chunks` for the gather (one bind, the chunks called in
+sequence inside it; a chunk that outlives the budget is discarded with the whole bind, never joined).
+Neither call mints a proxy or opens a region — the reply is a typed parcelable list, so there is
+nothing to close. Verified on device across C0 / C1 (three devices): one `describeOutline` bind per
+Contents open, binds = unbinds, no `leaked ServiceConnection`, no `SecurityException`.
 
 | # | Invariant | Where it holds |
 |---|---|---|
@@ -1166,6 +1188,9 @@ proxy's region the same way once its reply is marshalled — before that it was 
 | 22 | **The core stores objects, never renders / parses them; nothing but the payload the provider chose is stored.** An object row is identity + `<pkg>:<typeId>` + the opaque `text` + `x y width height` + `order` (`docs/data.md` §Object rows); the core never reads inside `text` (no `#` counting, no markdown), never persists a bitmap (`ObjectRenderCache` is in-memory, per open session, keyed by id + payload + width + dpi), and stores the recognizer's output only *as* the payload the provider returned from `createFromInk` (rule 16 amended: the payload is the object, not a cached capability result). Width/height are the rendered image's after a successful render — geometry, not content. Payloads are never logged on either side (counts / lengths / durations only). | `ObjectStore`, `ObjectRows`, `PageObject`, `ObjectRenderCache`, `ObjectRenderPass`, `ObjectActions` log lines, `ObjectProviderService` / `MarkdownRendererService` log lines |
 | 23 | **Absent provider = placeholder; failure changes nothing.** No provider for an identity, provider disabled, `CapabilityRequiredException` from a render, a failed / null / undecodable render → the object draws as the **dashed placeholder at its bounds**, still selectable / movable / deletable, and re-renders when the provider is back (resume signature → reload → pass). Failed / null `createFromInk` (unreadable, not ready, timeout, capability missing, page cap) → **the ink is untouched and nothing is created**; failed / null `applyAction` / `applyEdit` → the payload is untouched; every failure is a core-owned dialog (`objects_*` strings) or a placeholder — the extension shows nothing. The `requires` guards name the missing capability before any bind; `ObjectActions.busy` drops a second tap for the flow. | `ObjectRenderPass`, `ObjectRenderer` (placeholder), `ObjectActions` (guards, every catch → dialog), `NotebookActivity.objectListener` (strokes must still be live before create + erase), `ObjectProviders.load` (skip on failure) |
 | 24 | **Contributed UI is drawn only by the core.** An extension contributes *descriptions* — `SelectionAction` (id, ≤ 6-char label, catalog icon **name**, sub-actions, applies-to, requires) and `EditSpec` (title, prefill, hint, maxChars, multiLine) — and the core draws every button, sub-toolbar and dialog under its own rules (`SelectionToolbar` + `ToolbarAnchor`, `ObjectEditDialog`, `IconCatalog` Tabler drawables, dimen-driven tap targets, exclusion rects, `releaseRender`, no colour). No extension pixel, layout, `RemoteViews`, `SurfaceControlViewHost` surface or code ever reaches the notebook screen; the only extension-made pixels are the rendered *object image*, which the host verifies (row 21) and draws itself through g-paper's `ContentRenderer`. | `SelectionAction` / `EditSpec` (parcel), `ActionCaps`, `IconCatalog`, `SelectionToolbar`, `ObjectEditDialog`, `ObjectRenderer`, §"Selection-toolbar contributions" tier rule |
+| 25 | **Outward payload of `describeOutline` is the provider's own payloads, grouped by type, chunked.** `describeOutline(typeId, payloads)` carries a typeId **the provider itself declared** and a list of the opaque payloads it produced (each through the same `outPayload` cut to `MAX_OBJECT_TEXT_CHARS` as every arc-4 method), chunked by `OutlineCaps.chunk` (≤ `MAX_OUTLINE_BATCH` items / ≤ `MAX_OUTLINE_BATCH_CHARS` summed per call). There is no other parameter — object ids, page ids / numbers / count, `x y width height`, `order`, notebook id / name, keys, paths cannot travel: `ContentsSource.gather` keeps `pageIndex` / `x` / `y` beside each row on the host and re-joins them to the reply by list position. The probe sends exactly one blank payload. The provider sees text it wrote and nothing about *where* it lives. | `IObjectProvider.aidl` (`describeOutline`), `ObjectProviderClient.describeOutlineAll` (`plan` = `byType.mapValues { chunk(map(::outPayload)) }`), `OutlineCaps.chunk` (JVM-tested by count + chars + over-long payload), `ContentsSource.gather` (`byProvider` map, `pageIndex` join), `ObjectProviderClient.supportsOutline` (`listOf("")`) |
+| 26 | **Inward outline replies are validated; a pre-method provider is "not capable", never an error.** `OutlineEntry.requireValid` at unmarshal (level `0..MAX_OUTLINE_LEVEL`, label ≤ `MAX_OUTLINE_LABEL_CHARS` — a violation aborts the whole reply at the Binder layer); then `OutlineCaps.sanitize(reply, expected)`: **null / any length ≠ the chunk's input length → null** (this provider does not answer the outline for this call — the whole `describeOutlineAll` becomes null, `ExtensionCallException` inside, logged as counts), else per entry the label is trimmed and cut to the cap, a blank label with level ≥ 1 → level 0, a level outside `0..MAX_OUTLINE_LEVEL` → 0, a null element → level 0. Nothing else is trusted; the host never sorts, nests or draws from anything but these normalised (label, level) pairs and its own row geometry. The load probe (`supportsOutline` — `OutlineCaps.isCapableReply`: exactly one entry) turns the **empty reply an arc-4 provider's `onTransact` produces for the unknown transaction** (not an exception — §"Versioning rules") into `Contribution.outline = false`, logged `outline probe: unsupported`, outside the resume signature; no further outline call is ever made to that provider. Labels are never logged on either side (counts + durations only: `describeOutlineAll: n type(s), n payload(s), n call(s) → n entries in ms`; the extension logs `describeOutline n=<count> in <ms>`). | `OutlineEntry.requireValid` + `CREATOR` (JVM-tested: level 7 / over-long label rejected, round trip), `OutlineCaps.sanitize/isCapableReply` (JVM-tested: wrong length → null, blank → 0, clamp, trim/cut), `ObjectProviderClient.describeOutlineAll/supportsOutline`, `ObjectProviders.load` (`outline=` per provider), verified against the arc-4 Heading APK on MIP11 (C0) |
+| 27 | **The Contents is core-drawn from descriptions; absent / failed provider = its objects are not listed / the screen does not open with an honest dialog; nothing on the page changes.** The Contents screen is a core `Dialog` built by the core from (label, level, pageIndex) triples under its own rules — `OutlineTree` sorts (page, y, x), nests (orphans attach to the nearest shallower heading), pages and highlights; `ContentsDialog` draws every row, toggle, page number, pager and the width rule (`ContentsLayout`) with Tabler icons and dimen-driven tap targets; no extension pixel, layout or code reaches it (rule 20 / row 24 re-lived). Provider absent / disabled / not outline-capable → its objects are simply not listed and neither entry point exists for a notebook whose only objects are its (`ContentsSource.available` = a live object of a *capable* provider on a live page — button `GONE`, swipe silent, `open()` refuses). A **capable** provider whose outline call fails (null / wrong length / timeout / exception) → `Result.Failed(label)` → the core's `objects_provider_failed` dialog under the "Contents" title and **nothing opens** (C0 Q4 — never a half list that looks complete). An empty gather (a race with a delete) opens nothing and re-refreshes availability. In every branch the page, its ink and objects, the session and every other extension are untouched: the gather is read-only (`writer.drain()` + `liveObjectsAll()`), a row tap only calls the host's existing `navigateTo`, the dialog holds no `.soil` handle, and while it shows the whole paper is one exclusion rect (`NotebookChrome.blockAll`) so a stylus cannot ink through it. Rebuilt on every open — nothing is cached or persisted (no prefs, no rows, no store). | `ContentsSource.available/gather` (`Result.Failed` stop, `Result.Ok` cap), `ContentsFlow.open/refresh` (busy guard, `Dialogs.problem(contents_title, objects_provider_failed)`, `showing` → `onShowingChanged`), `ContentsDialog` + `ContentsLayout` (JVM-tested width / rows-per-page / indent), `OutlineTree` (JVM-tested nest / orphan / highlight / paging), `NotebookChrome` (`blockAll`), `NotebookActivity` (`btnContents` visibility via `contentsFlow.refresh()` after `loadProviders` / `navigateTo` / create / delete; `onSwipeDown` → `open()`) |
 
 ## Rules for adding a future extension point (write-once, follow later)
 
@@ -1253,11 +1278,19 @@ the notebook screen, follows rules 1–5 (and 12–17 for any capability it cons
 23. **Capabilities reach a provider only as in-parameters** (`IHandwritingRecognizer`,
     `IMarkdownRenderer` proxies), null when absent; a provider says what it needs (`requires`) so the
     core can explain before binding. Rows 20 / 23.
+24. **An outline is a description, not a parse** (arc 5). The core never derives structure from a
+    payload; a provider *describes* each object's outline entry (`describeOutline` → label + level, or
+    level 0 for none — the same-length, same-order reply) and the core sorts, nests, pages and draws
+    under its own rules (`OutlineTree`, `ContentsDialog`). A provider that predates the method, is
+    absent, or fails, contributes nothing and nothing else changes — and a method appended to a
+    provider interface is *probed* at load, never assumed (§"Versioning rules"). Rows 25–27.
 
 Followed by ObjectProvider (H3/H4): `OBJECT_PROVIDER` + `IObjectProvider` + `CreatedObject` /
 `SelectionAction` / `EditSpec` in `:extension-api`; `ExtensionRegistry.objectProviders` +
 `ObjectProviderClient`; the core owns every dialog and every pixel of chrome; the one recorded widening
-of rule 5 is bare ink into `createFromInk` (row 19); audit rows 18–24 (H5).
+of rule 5 is bare ink into `createFromInk` (row 19); audit rows 18–24 (H5). Extended in arc 5 (C0–C2)
+by the appended `describeOutline` — the first exercised compatible AIDL change (`API_VERSION` still 1),
+the load probe + `OutlineCaps`, and the core-drawn Contents; audit rows 25–27 (C2).
 
 ### The capability pattern (recorded in arc 3, **built in arc 4 / H3** with the first consumer)
 
@@ -1405,6 +1438,20 @@ consumed in-project — see `:ext-templates` for the reference implementation).
       renderer does. `HostCallerCheck.enforce` first in every method; only `SecurityException` /
       `IllegalArgumentException` / `IllegalStateException` cross Binder; log counts + durations —
       **never a payload or recognized text**.
+    - **Contribute to the Contents by describing, not drawing** (arc 5). Implement `describeOutline
+      (typeId, payloads)` — appended after `render`, so an extension built against the arc-4 AIDL simply
+      never receives it and the host treats it as "no outline" — returning **one `OutlineEntry` per
+      payload, same order, same length**: `level 1..MAX_OUTLINE_LEVEL` + a label ≤ `MAX_OUTLINE_LABEL_CHARS`
+      for an outline item, or `OutlineEntry.NONE` (`level 0`, label ignored) for "not listed" — a reply
+      of any other length is discarded whole. Pure and ≤ 2 s per call; the host chunks at
+      `MAX_OUTLINE_BATCH` / `MAX_OUTLINE_BATCH_CHARS` and re-checks nothing you can't (re-check the two
+      caps yourself → `IllegalArgumentException`) — but **answer every type you declare** (`NONE` for a
+      type you don't outline; refusing one of your own types with an exception fails the whole
+      Contents for your objects). **The host probes you at load** with one blank
+      payload and expects a one-entry reply — answer it like any other (the Heading returns `NONE`).
+      You never see page numbers, positions or ids, and you never build the list: the core sorts, nests
+      (H1–H6, orphans attached), highlights and draws the Contents from your labels and levels alone.
+      Log the count + duration — never a label.
 
 ---
 

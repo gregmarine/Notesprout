@@ -83,8 +83,17 @@ class ObjectProviders private constructor(
                     if (types.isEmpty()) { Slog.d(TAG) { "skip ${ref.packageName}: no types" }; continue }
                     refs[ref.packageName] = ref
                     // Arc 5: the outline probe — one blank payload; capable ⇔ a one-entry reply. A provider built
-                    // before `describeOutline` existed fails it (empty reply / exception) and is simply not capable.
-                    val outline = client.supportsOutline(types.first())
+                    // before `describeOutline` existed answers with an empty reply and is simply not capable. A
+                    // *transient* failure (bind / call timeout — its own bind, C2 review) must not stick for the
+                    // whole session: the provider still loads (types + actions), outline=false for now, and the
+                    // load is marked partial so resume re-probes.
+                    val outline = try {
+                        client.supportsOutline(types.first())
+                    } catch (e: ExtensionCallException) {
+                        Slog.d(TAG) { "${ref.packageName}: outline probe failed (${e.javaClass.simpleName}: ${e.message}) — partial load" }
+                        partial = true
+                        false
+                    }
                     contributions += Contribution(ref.packageName, ref.label.toString(), types, actions, outline)
                     Slog.d(TAG) { "${ref.packageName}: ${types.size} type(s), ${actions.size} action(s) (${actions.sumOf { it.subActions.size }} sub), outline=$outline" }
                 } catch (e: ExtensionCallException) {

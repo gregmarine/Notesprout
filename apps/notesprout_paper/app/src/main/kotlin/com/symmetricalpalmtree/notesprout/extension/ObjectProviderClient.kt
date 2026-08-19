@@ -174,7 +174,10 @@ class ObjectProviderClient(
 
     /**
      * The same across **all of the provider's types in one bind** (what the Contents gather calls):
-     * one entry list per input type, or **null** if any type / chunk failed.
+     * one entry list per input type, or **null** if any type / chunk failed. The bind's budget is
+     * `CALL_TIMEOUT_MS × chunks`, **capped at [OUTLINE_MAX_CHUNK_BUDGET] chunks (20 s)** — a provider
+     * that cannot answer a whole notebook inside that fails honestly rather than holding the screen
+     * for minutes (C2 review; the gather also caps what it sends at `MAX_OUTLINE_ENTRIES` rows).
      */
     suspend fun describeOutlineAll(byType: Map<String, List<String>>): Map<String, List<OutlineCaps.Entry>>? {
         if (byType.isEmpty()) return emptyMap()
@@ -183,7 +186,7 @@ class ObjectProviderClient(
         val t0 = System.currentTimeMillis()
         var calls = 0
         return try {
-            val out = call(CALL_TIMEOUT_MS * maxOf(1, chunkCount)) { p ->
+            val out = call(CALL_TIMEOUT_MS * chunkCount.coerceIn(1, OUTLINE_MAX_CHUNK_BUDGET)) { p ->
                 val result = LinkedHashMap<String, List<OutlineCaps.Entry>>()
                 for ((typeId, chunks) in plan) {
                     val entries = ArrayList<OutlineCaps.Entry>()
@@ -208,16 +211,13 @@ class ObjectProviderClient(
 
     /**
      * The load probe (own bind, [CALL_TIMEOUT_MS]): `describeOutline(firstType, [""])` — capable ⇔ a
-     * reply of exactly one entry. An exception, an empty reply (what an old provider's unknown
-     * transaction yields) or any other length → false, logged as `outline probe: unsupported`.
+     * reply of exactly one entry; an empty reply (what an old provider's unknown transaction yields)
+     * or any other length → false, logged as `outline probe: unsupported`. A bind / call failure
+     * (timeout, refused bind — transient) **throws** [ExtensionCallException] so the caller can retry
+     * later instead of recording "not capable" for the session (C2 review).
      */
     suspend fun supportsOutline(firstType: String): Boolean {
-        val capable = try {
-            call(CALL_TIMEOUT_MS) { p -> OutlineCaps.isCapableReply(p.describeOutline(firstType, listOf(""))) }
-        } catch (e: ExtensionCallException) {
-            Slog.d(TAG) { "outline probe: ${e.javaClass.simpleName}: ${e.message}" }
-            false
-        }
+        val capable = call(CALL_TIMEOUT_MS) { p -> OutlineCaps.isCapableReply(p.describeOutline(firstType, listOf(""))) }
         if (!capable) Slog.d(TAG) { "outline probe: unsupported (${ref.packageName})" }
         return capable
     }
@@ -266,5 +266,7 @@ class ObjectProviderClient(
          *  5 s = 8 s worst case — plus a 2 s margin (H5: 8 s left zero margin, so a cold Markdown process
          *  could time the outer call out first while the inner one completed orphaned). */
         const val RENDER_TIMEOUT_MS = 10_000L
+        /** `describeOutlineAll`: the most chunks the one bind is budgeted for (× `CALL_TIMEOUT_MS` = 20 s). */
+        const val OUTLINE_MAX_CHUNK_BUDGET = 10
     }
 }

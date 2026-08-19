@@ -47,15 +47,33 @@ class ContentsFlow(
     var available: Boolean = false
         private set
 
-    /** Recompute [available] (IO, cheap) and show / hide [button] accordingly (pen-idle). */
+    /** Generation of the latest [refresh] — an older computation that finishes late is dropped (C2). */
+    private var refreshGen = 0
+
+    /**
+     * Recompute [available] (IO, cheap) and show / hide [button] accordingly (pen-idle). Overlapping
+     * refreshes: only the newest generation may write [available], and the pen-idle closure reads
+     * [available] **when it fires** rather than carrying a target decided earlier — so the button
+     * always ends in agreement with the gate (C2 review).
+     */
     fun refresh() {
         if (!alive()) return
+        val gen = ++refreshGen
         activity.lifecycleScope.launch {
-            val now = ContentsSource.available(session(), providers())
-            if (!alive()) return@launch
+            val now = try {
+                ContentsSource.available(session(), providers())
+            } catch (e: Exception) {
+                // The screen is closing under us (writer / db sealed on the app scope) — nothing to show.
+                if (alive()) throw e
+                return@launch
+            }
+            if (!alive() || gen != refreshGen) return@launch
             available = now
-            val vis = if (now) View.VISIBLE else View.GONE
-            if (button.visibility != vis) whenPenIdle { if (alive()) { button.visibility = vis; onShowingChanged() } }
+            whenPenIdle {
+                if (!alive()) return@whenPenIdle
+                val vis = if (available) View.VISIBLE else View.GONE
+                if (button.visibility != vis) { button.visibility = vis; onShowingChanged() }
+            }
         }
     }
 
@@ -69,7 +87,13 @@ class ContentsFlow(
         paper.releaseRender()
         val t0 = System.currentTimeMillis()
         activity.lifecycleScope.launch {
-            val result = ContentsSource.gather(activity, session(), providers())
+            val result = try {
+                ContentsSource.gather(activity, session(), providers())
+            } catch (e: Exception) {
+                busy = false
+                if (alive()) throw e   // closing under us → nothing to show; anything else is a bug worth a crash log
+                return@launch
+            }
             if (!alive() || activity.isFinishing || activity.isDestroyed) { busy = false; return@launch }
             when (result) {
                 is ContentsSource.Result.Failed -> {

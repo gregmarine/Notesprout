@@ -2,6 +2,7 @@ package com.symmetricalpalmtree.notesprout.notebook
 
 import android.content.Context
 import com.symmetricalpalmtree.notesprout.core.Slog
+import com.symmetricalpalmtree.notesprout.data.soil.SoilObjectEntity
 import com.symmetricalpalmtree.notesprout.extension.ExtensionContract
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -14,8 +15,9 @@ import kotlinx.coroutines.withContext
  * `ObjectProviderClient.describeOutlineAll` bind (payloads batched per type, chunked by `OutlineCaps`)
  * in [ObjectProviders.contributions] order → a null reply from a provider → [Result.Failed] naming
  * it (**stop** — the flow shows the failure dialog, nothing opens; C0 Q4) → entries with `level ≥ 1`
- * become [OutlineTree.Item]s (`pageIndex` from the session's pages, `x`/`y` from the row) → sorted +
- * capped at `MAX_OUTLINE_ENTRIES` (**truncated**) → [Result.Ok] with the built tree. Objects whose
+ * become [OutlineTree.Item]s (`pageIndex` from the session's pages, `x`/`y` from the row) →
+ * [Result.Ok] with the built tree. The candidate rows are sorted into document order and capped at
+ * `MAX_OUTLINE_ENTRIES` **before** the bind (**truncated** — C2), so the bind's budget is bounded. Objects whose
  * provider is absent / disabled / not outline-capable are simply not listed. Rebuilt on every open —
  * no cache, nothing to invalidate (Q6). Logs counts + durations — never a label or payload.
  */
@@ -41,10 +43,10 @@ object ContentsSource {
      */
     suspend fun available(session: NotebookSession, providers: ObjectProviders): Boolean = withContext(Dispatchers.IO) {
         val capable = providers.outlineProviders
-        if (capable.isEmpty()) return@withContext false
+        if (capable.isEmpty() || !session.isOpen) return@withContext false
         session.writer.drain()
         val pages = session.pages.mapTo(HashSet()) { it.id }
-        session.db.dao().liveObjectsAll().any { row ->
+        session.db.dao().liveObjectIdentities().any { row ->
             row.parentId in pages && ExtensionContract.parseIdentity(row.style ?: "")?.first in capable
         }
     }
@@ -52,22 +54,29 @@ object ContentsSource {
     suspend fun gather(context: Context, session: NotebookSession, providers: ObjectProviders): Result = withContext(Dispatchers.IO) {
         val app = context.applicationContext
         val t0 = System.currentTimeMillis()
+        if (!session.isOpen) return@withContext Result.Ok(emptyList(), 0, false)
         session.writer.drain()
         val pageIndex = HashMap<String, Int>(session.pages.size * 2)
         session.pages.forEachIndexed { i, p -> pageIndex[p.id] = i }
         val rows = session.db.dao().liveObjectsAll()
         val capable = providers.outlineProviders
-        // providerKey → typeId → (row order) — one bind per provider, payloads batched per type.
-        val byProvider = LinkedHashMap<String, LinkedHashMap<String, ArrayList<com.symmetricalpalmtree.notesprout.data.soil.SoilObjectEntity>>>()
-        var kept = 0
-        for (row in rows) {
-            if (row.parentId !in pageIndex) continue
-            val identity = ExtensionContract.parseIdentity(row.style ?: "") ?: continue
-            if (identity.first !in capable) continue
+        // The candidate rows in **document order** (page, y, x), capped at MAX_OUTLINE_ENTRIES *before* the
+        // bind (C2 review): what is sent — and so the bind's budget — is bounded by the cap, not by the
+        // notebook; the footer's "first N" is the first N candidate objects in document order (today
+        // every heading is an entry, so candidates = entries).
+        val candidates = rows.asSequence()
+            .filter { it.parentId in pageIndex }
+            .mapNotNull { row -> ExtensionContract.parseIdentity(row.style ?: "")?.takeIf { it.first in capable }?.let { row to it } }
+            .sortedWith(compareBy<Pair<SoilObjectEntity, Pair<String, String>>> { pageIndex.getValue(it.first.parentId) }.thenBy { it.first.y ?: 0f }.thenBy { it.first.x ?: 0f })
+            .toList()
+        val truncated = candidates.size > ExtensionContract.MAX_OUTLINE_ENTRIES
+        val kept = if (truncated) candidates.subList(0, ExtensionContract.MAX_OUTLINE_ENTRIES) else candidates
+        // providerKey → typeId → (document order) — one bind per provider, payloads batched per type.
+        val byProvider = LinkedHashMap<String, LinkedHashMap<String, ArrayList<SoilObjectEntity>>>()
+        for ((row, identity) in kept) {
             byProvider.getOrPut(identity.first) { LinkedHashMap() }.getOrPut(identity.second) { ArrayList() } += row
-            kept++
         }
-        val items = ArrayList<OutlineTree.Item>(kept)
+        val items = ArrayList<OutlineTree.Item>(kept.size)
         var askedProviders = 0
         for (key in capable) {
             val byType = byProvider[key] ?: continue
@@ -88,11 +97,8 @@ object ContentsSource {
                 }
             }
         }
-        val sorted = items.sortedWith(compareBy<OutlineTree.Item> { it.pageIndex }.thenBy { it.y }.thenBy { it.x })
-        val truncated = sorted.size > ExtensionContract.MAX_OUTLINE_ENTRIES
-        val capped = if (truncated) sorted.subList(0, ExtensionContract.MAX_OUTLINE_ENTRIES) else sorted
-        val roots = OutlineTree.build(capped)
-        Slog.d(TAG) { "gather: objects=${rows.size} kept=$kept providers=$askedProviders entries=${capped.size} roots=${roots.size} truncated=$truncated in ${System.currentTimeMillis() - t0} ms" }
-        Result.Ok(roots, capped.size, truncated)
+        val roots = OutlineTree.build(items)   // sorts by OutlineTree.DOCUMENT_ORDER itself
+        Slog.d(TAG) { "gather: objects=${rows.size} candidates=${candidates.size} sent=${kept.size} providers=$askedProviders entries=${items.size} roots=${roots.size} truncated=$truncated in ${System.currentTimeMillis() - t0} ms" }
+        Result.Ok(roots, items.size, truncated)
     }
 }

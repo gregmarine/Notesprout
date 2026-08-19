@@ -51,6 +51,11 @@ interface SoilDao {
     @Query("SELECT * FROM notebook WHERE type = 'object' AND deletedAt IS NULL")
     suspend fun liveObjectsAll(): List<SoilObjectEntity>
 
+    /** The (parentId, style) of every live object row — the Contents *availability* read (C2: a
+     *  projection so the per-flip check never unmarshals a payload). */
+    @Query("SELECT parentId, style FROM notebook WHERE type = 'object' AND deletedAt IS NULL")
+    suspend fun liveObjectIdentities(): List<ObjectIdentityRow>
+
     /** Rewrite an object's payload + bounds (edit / re-render sizing). Live rows only. */
     @Query("UPDATE notebook SET text = :text, x = :x, y = :y, width = :w, height = :h, updatedAt = :at WHERE id = :id AND deletedAt IS NULL")
     suspend fun updateObject(id: String, text: String, x: Float, y: Float, w: Float, h: Float, at: Long)

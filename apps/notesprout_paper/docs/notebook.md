@@ -326,18 +326,20 @@ pages and draws (rule 24 — never a payload parse).
 **Entry points.** `btnContents` (Tabler `list`, hint "Contents") sits in the top bar between Back and
 the pen — **`GONE` unless `ContentsFlow.available`** = an outline-capable provider is loaded
 (`providers.hasOutline`) **and the notebook holds at least one live object of one** (user's call after
-C1 item 9 — an empty Contents is noise): `ContentsSource.available` (no bind — one blob-free row read
-after a writer drain), recomputed by `ContentsFlow.refresh()` after every `loadProviders` (so an
+C1 item 9 — an empty Contents is noise): `ContentsSource.available` (no bind — one `(parentId, style)`
+projection read after a writer drain; C2), recomputed by `ContentsFlow.refresh()` after every `loadProviders` (so an
 extension enabled / disabled while away shows / hides it on resume), every `navigateTo` (covers page
 ops, undo / redo), an object create and a selection delete; the visibility change is pen-idle and
-re-pushes the exclusion rects. Inside `topBar`, so the exclusion rect and chrome release cover it. And
+re-pushes the exclusion rects (C2: refreshes carry a generation — a stale computation is dropped — and
+the pen-idle closure reads `available` when it fires, so the button never disagrees with the gate). Inside `topBar`, so the exclusion rect and chrome release cover it. And
 the one-finger **swipe down** (above) — silent while not `available`. Both call `ContentsFlow.open()`,
 which also refuses while not `available`, and an empty gather (a race with a delete) opens nothing and
 re-refreshes.
 
 **Flow (`ContentsFlow`).** `busy` guard (a second tap / swipe while gathering or showing is dropped)
 → `paper.releaseRender()` → `ContentsSource.gather` on IO (drains the writer first — a heading created a
-moment ago is in its row) → on Main: screen going away → nothing; `Result.Failed(label)` → the honest
+moment ago is in its row; the candidate rows are put in document order and capped at 2 000 **before**
+the bind, whose budget is ≤ 10 chunks × 2 s — C2) → on Main: screen going away → nothing; `Result.Failed(label)` → the honest
 `objects_provider_failed` dialog under the "Contents" title (nothing opens — a capable provider that
 did not answer never yields a partial list); `Result.Ok` → `ContentsDialog`. **While the dialog is up
 the whole paper is one exclusion rect** (`ContentsFlow.showing` → `NotebookChrome.blockAll`, like the
@@ -378,8 +380,9 @@ re-render the same list page (clamped) — the dialog stays. Expansion state is 
 | A capable provider does not answer the outline | "Contents" dialog: "The NSE · Heading extension didn't respond — try again."; nothing opens |
 | No headings (no object of an outline-capable provider) | no button; swipe down does nothing — the button appears once the first heading is created (`contents_empty` "No headings yet" remains only as the dialog's guard for a race) |
 | Markdown renderer absent | the Contents still lists every heading (the outline needs no renderer) |
-| > 2 000 entries | the first 2 000 in document order + "Showing the first 2000 headings" |
-| Screen closing during the gather | nothing (dropped) |
+| > 2 000 candidate objects | the first 2 000 in document order are asked + "Showing the first 2000 headings" |
+| A capable provider's outline probe times out at load | provider loads (toolbar works), no Contents yet; the load is partial so resume re-probes (C2) |
+| Screen closing during the gather / an availability check | nothing (dropped — a sealed writer / db under the IO hop is swallowed only while closing) |
 
 ## Frame-silence rule
 
