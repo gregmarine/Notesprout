@@ -23,7 +23,9 @@
 > §"ScratchPad (contract)") — the shared **`:paper-screen`** module (the e-ink resources + screen
 > helpers both the notebook and the pad use), the two appended store methods `putLarge` / `getLarge`
 > (values to 4 MiB over `SharedMemory`; §"The extension store") and the `NSE · Scratch Pad` skeleton
-> (`:ext-scratchpad`); the screen comes in S1, the ink transfers in S2, the audit rows + rules in S3.
+> (`:ext-scratchpad`); **S1** built the screen (`ScratchPadActivity` — `docs/scratchpad.md`) and the two
+> entry buttons (notebook top bar · library bottom bar, present only while the extension is installed);
+> the ink transfers come in S2, the audit rows + rules in S3.
 
 Notesprout's original design baked too many features into the core. Paper's core is **paper with
 strokes** — a library of notebooks, each a stack of pages you write on. Everything else is added by
@@ -1029,7 +1031,16 @@ registers the g-paper engines in its own process; `ScratchPadService` with `begi
 format-B strokes; JVM-tested); `ScratchPages` (JVM-tested); a caller-checked placeholder Activity
 showing "Scratch Pad" + Back). The host's debug ⋯ "Probe scratch pad" (removed in S3) exercises hold →
 `begin` → `end` → unbind. Verified S0 on SNN / NA5C / MIP11 — see `PAPER_SCRATCHPAD_PLAN.md` S0
-Outcome. The screen (S1), the transfers (S2) and the audit rows 28–32 / rules 25–27 (S3) follow.
+Outcome.
+
+**S1 state:** the screen is real — `ScratchPadActivity` (caller-checked, full-bleed g-paper in the
+extension's process, the notebook's chrome shape, `PageGestures` / `UndoRedoStack` / `PaperChrome` /
+`ToolbarAnchor` from `:paper-screen`, pages + saves + the full rule through `ScratchDocument` over
+`ScratchStore` — `docs/scratchpad.md`); the host's two entry points (`notebook/ScratchPadFlow` —
+`releaseForHandoff()` immediately before the launch — and `library/ScratchPadLaunch`), both **present
+only while a trusted `SCRATCH_PAD` extension is installed** (re-discovered on every resume). The
+Send buttons show when opened from a notebook but are inert until S2. The transfers (S2) and the audit
+rows 28–32 / rules 25–27 (S3) follow.
 
 ## Host behaviour (`:app`, package `extension/`)
 

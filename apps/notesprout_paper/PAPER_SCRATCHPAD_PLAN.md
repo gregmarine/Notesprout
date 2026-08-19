@@ -11,8 +11,8 @@
 > subsystem reference all arcs write into; `docs/notebook.md` and `docs/library.md` gain sections
 > in this arc; a new `docs/scratchpad.md` is the extension's own reference.
 >
-> **Status: S0 ✅ 9a96c7a (user-verified SNN / NA5C / MIP11 2026-08-19) · S1 ⬜ · S2 ⬜ · S3 ⬜.
-> Next: S1 (fresh session, phase-start wizard first).**
+> **Status: S0 ✅ 9a96c7a (user-verified SNN / NA5C / MIP11 2026-08-19) · S1 🧪 (built 2026-08-19,
+> Claude-verified; user checklist pending) · S2 ⬜ · S3 ⬜.**
 
 ## Why
 
@@ -661,7 +661,7 @@ its hash here); docs; memory; commit + push.
 ---
 
 ### Phase S1 — The scratch-pad screen + the two entry buttons (no transfers)
-**Status:** ⬜ Not started
+**Status:** 🧪 Awaiting device verification (built 2026-08-19; Claude-verified MIP11 / NA5C / SNN — user checklist pending)
 
 **Goal:** the user story minus transfers works on all three devices: the notebook's top-bar and the
 library's bottom-bar **notes** buttons exist only with the extension installed; tap → the pad opens
@@ -680,6 +680,12 @@ whether they are hidden until S2 or shown as no-ops.
 4. Send buttons in S1: `GONE` until S2 wires them (rec. — nothing dead on screen) / visible no-ops?
 5. Save cadence: debounced 800 ms + on page leave / pause / finish (rec.) — confirm; and the "page
    full" rule = refuse the crossing stroke + dialog once per visit (rec.) — confirm.
+
+**Answered 2026-08-19:** Q1 exclusion + "Opening…" overlay (rec.) · **Q2 far end — Back · [Contents]
+· Pen · Eraser · Lasso · Scratch Pad · [⋯]** (not after Contents) · Q3 after Recents, hint "Scratch
+Pad" (rec.) · **Q4 visible no-ops** — both Send buttons show when opened from a notebook, a tap does
+nothing until S2 (not GONE) · Q5 800 ms debounce + leave / pause / finish, page-full = refuse + remove
++ dialog once per visit (rec.).
 
 **Deliverables**
 1. `:ext-scratchpad`: `ScratchPadActivity` + `activity_scratch_pad.xml` + `ScratchToolbar` +
@@ -724,6 +730,56 @@ whether they are hidden until S2 or shown as no-ops.
 
 **Close-out:** status ✅ + Outcome (per-device open timings tap → pad drawn; page save sizes; the
 handoff behaviour observed on NA5C / SNN — anything the engines needed); docs; memory; commit + push.
+
+**Outcome (2026-08-19 — built + Claude-verified MIP11 / NA5C / SNN; user checklist pending):**
+- **`:ext-scratchpad`:** `ScratchPadActivity` (the notebook's shape from `:paper-screen` — `PageGestures`,
+  `PaperChrome`, `UndoRedoStack<ScratchUndo.Action>`, `ToolbarAnchor`, `TopGuard`, `Dialogs`,
+  `ActionSheetDialog`; caller check first; whole-paper exclusion under "Opening…"; `resumeDrawing` /
+  `release`), `ScratchToolbar`, `ScratchSelectionToolbar` (Delete · [Send] — a two-button layout bar, not
+  the core's description-drawn one), `ScratchUndo` (Drew / Erased / Moved / **`Page(before,
+  beforeCurrent, after, afterCurrent, changedId, blob)`** — one shape for insert and delete, the lone
+  page's delete = `before == after` + the ink toggled / Pasted for S2), **`ScratchDocument`** (new
+  collaborator, not in the S0 list: the pages in memory + every store round trip on IO — `load` / `goTo`
+  / `insert` / `deleteCurrent` / `flush` / `add` / `remove` / `translate` / `revert` / `reapply`;
+  JVM-tested over a fake `IExtensionStore` — `ScratchDocumentTest`, 8 cases incl. the full rule and
+  structural undo / redo restoring a deleted page's ink), `ScratchDebugMenu` (debug ⋯ "Store size" +
+  release no-op twin), `ScratchStore.setPages` / `removePageBlob` (the undo path), `ScratchPageCodec.
+  HEADER_BYTES` / `strokeBytes`. Tabler **`send`** (`ic_send`) added to `:paper-screen` for the two Send
+  buttons (the plan named no glyph). `testOptions.unitTests.isReturnDefaultValues = true` in the
+  extension's `build.gradle.kts` (so `Slog` → `Log.d` doesn't throw on the JVM).
+- **The full rule is a running total:** `pageBytes = HEADER_BYTES + Σ strokeBytes`, exact because each
+  stroke is encoded on its own — but the geometry is **zlib-compressed per stroke**, so a move
+  re-measures the moved strokes (`translate` adjusts the total; the first cut assumed "floats re-encode
+  to the same size" and the test caught it). `add` refuses a crossing stroke at commit time (no page
+  encode); the screen removes it from the paper and says `scratch_page_full` once per page visit.
+- **Saves:** 800 ms debounce + flush on page leave / `onPause` / **Back awaits the flush before
+  `finish()`** (the host's `end()` revokes the store right after the result — a save left in flight would
+  hit a revoked binder); a page turn re-flushes until clean (`flushUntilClean` — a stroke committed during
+  a flush's IO hop lands on the page being left and is not dropped); `flush` restores `dirty` on failure.
+- **`:app`:** `NotebookUndo.undo` / `redo` (+ the private `revert` / `reapply`) — the replay moved out of
+  `NotebookActivity` (800 → 755 lines; the wiring added back is 6 lines); `ScratchPadFlow` (button +
+  `refresh()` on open and **every resume** — its own discovery, not tied to `ObjectProviders.signature`;
+  `open` = busy guard → `ScratchPadClient.open` → **`releaseForHandoff()` immediately before the
+  launch**, so the notebook's pen stays live through an open that can take seconds cold → launcher; result
+  / `close()` → `finish` on a process-wide scope); `ScratchPadLaunch` (library, no send target, its own
+  `onDestroy` → `close()` — `LibraryActivity` gained an `onDestroy` behind `IndexGuard.bounced`);
+  `btnScratchPad` in both layouts (notebook: after Lasso, before the debug ⋯ — S1 Q2; library: after
+  Recents — S1 Q3); strings `cd_scratch_pad`, `scratch_failed`.
+- **JVM green (nine modules), debug + release compile.** Per-device (app + ext reinstalled; Sonnet agents
+  on NA5C / SNN, MIP11 by hand incl. stylus ink + a `motionevent` lasso → the Delete · Send bar anchored
+  under the selection → Delete → saved 0 strokes): both buttons present, gone after `pm disable-user` +
+  resume, back after enable; tap → the pad's chrome; finger swipe inserts / flips, arrows flip and no-op
+  at a bound; long-press → sheet → confirm → one page fewer; Back → `result 0` · `end` · `finish: end ok`
+  · `unbind (held)`, `dumpsys activity services` shows the service gone; `am start` of the screen
+  **refused** (`refused caller (none)`); no FATAL, no `SecurityException`. **Timings** (tap → `begin ok` /
+  pad `opened`): MIP11 342 ms cold / 21 ms warm · 131 / 36–55 ms (generic) · NA5C 445–470 ms · 109–122 ms
+  (onyx) · SNN 1.1–1.2 s cold · 313–317 ms (ratta). Page saves: 3 strokes = 644 B in 32 ms (MIP11).
+  Engines: the pad's process reports `engine=onyx` on NA5C and `engine=ratta` on SNN — the pipelines arm
+  in the extension's process without a g-paper change (0.1.1 unchanged); **the handoff by eye (S1 user
+  item 1 — ink lands on the pad, the notebook's pen re-arms on return, no ghosting) is the user's call.**
+- Agent note (NA5C): a second tap at the notebook Back's coordinates after returning to the library
+  "exited the app" — not reproduced; at those coordinates the library shows **Go up one folder**, and a
+  re-run went notebook → library (folder) → root with the app alive. Not a Scratch Pad path.
 
 ---
 

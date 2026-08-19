@@ -84,7 +84,7 @@
             android:textColor="@color/inkBlack" />
     </FrameLayout>
 
-    <!-- Bottom bar: [Pinned] [Recents]  |< < n/n > >|  [Sort] [+Folder] [+Notebook] -->
+    <!-- Bottom bar: [Pinned] [Recents] [Scratch Pad]  |< < n/n > >|  [Sort] [+Folder] [+Notebook] -->
     <LinearLayout
         android:id="@+id/bottomBar"
         android:layout_width="match_parent"
@@ -104,6 +104,14 @@
             style="@style/Widget.Notesprout.ToolbarButton"
             android:src="@drawable/ic_clock"
             android:contentDescription="@string/cd_recents" />
+
+        <!-- Scratch Pad (arc 6 / S1): GONE unless NSE · Scratch Pad is installed. -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnScratchPad"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_notes"
+            android:contentDescription="@string/cd_scratch_pad"
+            android:visibility="gone" />
 
         <LinearLayout
             android:id="@+id/pager"

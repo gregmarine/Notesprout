@@ -64,6 +64,18 @@
                 style="@style/Widget.Notesprout.ToolbarButton"
                 android:src="@drawable/ic_lasso"
                 android:contentDescription="@string/cd_tool_lasso" />
+
+            <View
+                android:layout_width="12dp"
+                android:layout_height="0dp" />
+
+            <!-- Scratch Pad (arc 6 / S1): GONE unless NSE · Scratch Pad is installed (S1 Q2: far end, before the debug ⋯). -->
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnScratchPad"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_notes"
+                android:contentDescription="@string/cd_scratch_pad"
+                android:visibility="gone" />
         </LinearLayout>
 
         <View

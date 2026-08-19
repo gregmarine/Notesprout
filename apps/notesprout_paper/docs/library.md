@@ -14,8 +14,14 @@ The library is Paper's home screen — a paginated card grid of folders and note
 ## LibraryActivity chrome
 
 - **Top bar:** breadcrumb (root → folder chain, each crumb tappable); back arrow when not at root.
-- **Bottom bar (constant):** `[Pinned] [Recents]  |< < n/n > >|  [Sort] [+Folder] [+Notebook]`.
-  Pinned/Recents wired in Phase 5; until then they toast "Later".
+- **Bottom bar (constant):** `[Pinned] [Recents] [Scratch Pad]  |< < n/n > >|  [Sort] [+Folder] [+Notebook]`.
+  Pinned/Recents wired in Phase 5; until then they toast "Later". **Scratch Pad** (arc 6 / S1, Tabler
+  `notes`, hint "Scratch Pad", right after Recents — S1 Q3) is **`GONE` unless `NSE · Scratch Pad` is
+  installed**: `ScratchPadLaunch` re-discovers the extension on every `onResume` (beside the namer) and
+  opens the same pad the notebook opens, with **no send target** (`sendEnabled = false` — the pad's Send
+  buttons are absent); `ScratchPadClient.open` → an `ActivityResultLauncher` → any result → `finish`
+  (`end` → unbind → revoke); the library's `onDestroy` finishes an open client on a scope that outlives
+  it. The library hosts no paper, so there is no EPD handoff. Details: `docs/scratchpad.md`.
 - **Pagination:** cards-per-page measured from the real grid container after layout (`LibraryGrid.measure`).
   Page controls hidden (`INVISIBLE`, not `GONE`) when there is one page.
 - **Back press:** navigates up one folder; exits at root.

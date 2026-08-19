@@ -29,6 +29,13 @@ object ScratchPageCodec {
 
     const val VERSION: Int = 1
 
+    /** `u8 version · f32 w · f32 h · u32 count` — the bytes before the first stroke. */
+    const val HEADER_BYTES: Int = 13
+
+    /** The exact number of bytes [stroke] adds to a page blob (deterministic — the full rule's
+     *  running total: `HEADER_BYTES + Σ strokeBytes` == `encode(...).size`). */
+    fun strokeBytes(stroke: Stroke): Int = encode(0f, 0f, listOf(stroke)).size - HEADER_BYTES
+
     class Page(val pageWidth: Float, val pageHeight: Float, val strokes: List<Stroke>)
 
     fun encode(pageWidth: Float, pageHeight: Float, strokes: List<Stroke>): ByteArray {
@@ -57,7 +64,7 @@ object ScratchPageCodec {
     }
 
     fun decode(blob: ByteArray): Page {
-        require(blob.size >= 13) { "page blob too short (${blob.size})" }
+        require(blob.size >= HEADER_BYTES) { "page blob too short (${blob.size})" }
         val inp = DataInputStream(blob.inputStream())
         val version = inp.readUnsignedByte()
         require(version == VERSION) { "unknown page blob version $version" }

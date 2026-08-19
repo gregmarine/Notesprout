@@ -61,7 +61,8 @@ import kotlinx.coroutines.withContext
  * providers behind it are [ObjectProviders], the provider-facing flows [ObjectActions], the cache
  * fill [ObjectRenderPass] (arc 4 / H4) — this screen owns only the page mutations they lead to. The
  * chrome geometry (exclusion rects, over-chrome test) is [PaperChrome]; the Contents (arc 5 / C1)
- * is [ContentsFlow] behind the top-bar list button and the one-finger swipe-down.
+ * is [ContentsFlow] behind the top-bar list button and the one-finger swipe-down; the Scratch Pad
+ * (arc 6 / S1) is [ScratchPadFlow] behind the top-bar notes button (the extension's own screen).
  *
  * Immersive (system bars hidden, transient by swipe). The toolbar is TopGuard-padded because on
  * BOOX the status bar still overlays the window top.
@@ -76,6 +77,7 @@ class NotebookActivity : AppCompatActivity() {
     private lateinit var pageGestures: PageGestures
     private lateinit var chrome: PaperChrome
     private lateinit var contentsFlow: ContentsFlow
+    private lateinit var scratchPadFlow: ScratchPadFlow
     private val repo by lazy { IndexRepository() }
 
     private var notebookId: String = ""
@@ -195,6 +197,7 @@ class NotebookActivity : AppCompatActivity() {
             button = binding.btnContents, whenPenIdle = ::whenPenIdle,
         )
         binding.btnContents.setOnClickListener { contentsFlow.open() }.also { TooltipCompat.setTooltipText(binding.btnContents, binding.btnContents.contentDescription) }   // inside topBar: chrome release + exclusion cover it
+        scratchPadFlow = ScratchPadFlow(this, paper, binding.btnScratchPad, { opened && !closing }, ::whenPenIdle) { binding.root.post { pushExclusions() } }   // arc 6 / S1; inside topBar
         pageGestures = PageGestures(
             host = paper.asView(),
             isPenActive = { paper.isPenActive },
@@ -252,6 +255,7 @@ class NotebookActivity : AppCompatActivity() {
         // Providers after the paper is live: their binds must not hold the "Opening…" popup up. The
         // toolbar shows Delete only until they arrive; the first render pass follows them.
         lifecycleScope.launch { loadProviders() }
+        scratchPadFlow.refresh()
     }
 
     /** Discover + describe the object providers (IO binds), then re-render and re-show whatever waited on them. */
@@ -448,59 +452,8 @@ class NotebookActivity : AppCompatActivity() {
         navigateTo(session.currentIndex)
     }
 
-    private suspend fun doUndo() {
-        val a = undo.popUndo() ?: return
-        session.store.drain()
-        revert(a)
-        undo.pushRedo(a)
-    }
-
-    private suspend fun doRedo() {
-        val a = undo.popRedo() ?: return
-        session.store.drain()
-        reapply(a)
-        undo.pushUndo(a)
-    }
-
-    /** Every replay is store → drain → reload the affected page (strokes + objects), so the DB stays
-     *  the source of truth and the paper never desyncs. */
-    private suspend fun revert(a: Action) {
-        val store = session.store; val objects = session.objectStore
-        when (a) {
-            is Action.Drew -> store.remove(listOf(a.stroke.id))
-            is Action.Erased -> store.restore(a.pageId, a.strokes)
-            is Action.Moved -> { store.move(a.ids, -a.dx, -a.dy); objects.move(a.objectIds, -a.dx, -a.dy) }
-            is Action.ObjectCreated -> { objects.remove(listOf(a.obj.id)); store.restore(a.pageId, a.removedStrokes) }
-            is Action.ObjectsDeleted -> { store.restore(a.pageId, a.strokes); objects.restore(a.pageId, a.objects) }
-            is Action.ObjectEdited -> a.before.let { objects.updatePayloadAndBounds(it.id, it.payload, it.x, it.y, it.width, it.height) }
-            is Action.Page -> {
-                session.reconcile(a.snapshot.before, a.snapshot.childIds, emptyList(), a.snapshot.beforeCurrentId)
-                refreshToPage(session.currentPage.id)
-                return
-            }
-        }
-        session.writer.drain()
-        refreshToPage(a.pageId)
-    }
-
-    private suspend fun reapply(a: Action) {
-        val store = session.store; val objects = session.objectStore
-        when (a) {
-            is Action.Drew -> store.restore(a.pageId, listOf(a.stroke))
-            is Action.Erased -> store.remove(a.strokes.map { it.id })
-            is Action.Moved -> { store.move(a.ids, a.dx, a.dy); objects.move(a.objectIds, a.dx, a.dy) }
-            is Action.ObjectCreated -> { objects.restore(a.pageId, listOf(a.obj)); store.remove(a.removedStrokes.map { it.id }) }
-            is Action.ObjectsDeleted -> { store.remove(a.strokes.map { it.id }); objects.remove(a.objects.map { it.id }) }
-            is Action.ObjectEdited -> a.after.let { objects.updatePayloadAndBounds(it.id, it.payload, it.x, it.y, it.width, it.height) }
-            is Action.Page -> {
-                session.reconcile(a.snapshot.after, emptyList(), a.snapshot.childIds, a.snapshot.afterCurrentId)
-                refreshToPage(session.currentPage.id)
-                return
-            }
-        }
-        session.writer.drain()
-        refreshToPage(a.pageId)
-    }
+    private suspend fun doUndo() = NotebookUndo.undo(session, undo, ::refreshToPage)
+    private suspend fun doRedo() = NotebookUndo.redo(session, undo, ::refreshToPage)
 
     // ── Content objects (arc 4 — H2 toolbar Delete, H4 provider actions) ──────
 
@@ -724,6 +677,7 @@ class NotebookActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (::paper.isInitialized) paper.resumeDrawing()
+        if (opened && !closing) scratchPadFlow.refresh()   // the pad's button follows the extension's presence (arc 6)
         // An extension installed / removed / disabled while the screen was away: cheap discovery compare, reload only on a change.
         if (opened && !closing) lifecycleScope.launch {
             val sig = ObjectProviders.signature(this@NotebookActivity)
@@ -769,6 +723,7 @@ class NotebookActivity : AppCompatActivity() {
     override fun onDestroy() {
         if (IndexGuard.bounced(this)) { super.onDestroy(); return }
         if (::paper.isInitialized) paper.release()
+        if (::scratchPadFlow.isInitialized) scratchPadFlow.close()
         renderCache.clear()
         // A destroy that isn't a normal close (e.g. finish() from failOpen after open) still seals.
         if (::session.isInitialized && session.isOpen && !closing) {

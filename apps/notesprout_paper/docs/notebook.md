@@ -26,7 +26,8 @@ delete) and undo/redo arrive in Phase 4.
 | `ObjectActions` | the provider-facing flows (H4): `requires` guards, `RecognizerReadiness`, `createFromInk` (no popup since H5) / `applyAction` / `describeEdit` / `applyEdit`, every failure dialog; hands results to the screen's `objectListener` |
 | `ObjectRenderPass` | the cache fill (H4): objects grouped by provider → one `renderAll` bind per provider → decode → `Result`s the screen applies |
 | `PaperChrome` (`:paper-screen`; was `NotebookChrome` until arc 6 / S0) | the chrome geometry (arc 5 / C1 — a pure move out of the Activity at its 800-line cap): `pushExclusions()` (whole paper while `blockAll` — not yet open, or the Contents showing — else top bar + bottom strip + the `extraRects` the notebook supplies = its selection toolbar's) and `overChrome(ev)` |
-| `NotebookUndo` | the notebook's undo `Action` set (arc 6 / S0 — lifted out of the now-generic `UndoRedoStack<A>` in `:paper-screen`): Drew / Erased / Moved / Page / ObjectCreated / ObjectsDeleted / ObjectEdited; replay stays in the Activity until S1 moves it here |
+| `NotebookUndo` | the notebook's undo `Action` set (arc 6 / S0 — lifted out of the now-generic `UndoRedoStack<A>` in `:paper-screen`): Drew / Erased / Moved / Page / ObjectCreated / ObjectsDeleted / ObjectEdited — **and its replay** (S1: `undo` / `redo` → `revert` / `reapply`, store → drain → `refreshToPage`) |
+| `ScratchPadFlow` | the Scratch Pad entry point (arc 6 / S1): the top-bar notes button (present only while the extension is installed — `refresh()` on open + resume), `ScratchPadClient.open` → `releaseForHandoff()` → the `ActivityResultLauncher`, result → `finish`; S2 adds the core `scratch` action + the transfers — see §"Scratch Pad (arc 6)" |
 | `ContentsSource` / `OutlineTree` | the Contents gather (arc 5 / C0 — IO: rows → outline-capable providers → one `describeOutlineAll` bind each → items) and the pure tree / visible rows / highlight / paging math (JVM-tested) |
 | `ContentsFlow` / `ContentsDialog` / `ContentsLayout` | the Contents screen (arc 5 / C1): busy guard → gather → failure dialog or the `Dialog` (one layout, sidebar / full screen by width; pure width + paging rules JVM-tested) — see §"Contents (arc 5)" |
 
@@ -384,6 +385,36 @@ re-render the same list page (clamped) — the dialog stays. Expansion state is 
 | > 2 000 candidate objects | the first 2 000 in document order are asked + "Showing the first 2000 headings" |
 | A capable provider's outline probe times out at load | provider loads (toolbar works), no Contents yet; the load is partial so resume re-probes (C2) |
 | Screen closing during the gather / an availability check | nothing (dropped — a sealed writer / db under the IO hop is swallowed only while closing) |
+
+## Scratch Pad (arc 6)
+
+The scratch pad is **the extension's own screen** (`NSE · Scratch Pad` — `docs/scratchpad.md`; the
+point and the held bind in `docs/extensions.md` §"ScratchPad (contract)"); the notebook only launches
+it and comes back. Everything notebook-side is `ScratchPadFlow` (S1) — the Activity holds the
+construction, a `refresh()` in `openSession` + `onResume`, and `close()` in `onDestroy`.
+
+**Entry point.** `btnScratchPad` (Tabler `notes`, hint "Scratch Pad") sits in the top bar **after Lasso,
+before the debug ⋯** (S1 Q2) — **`GONE` unless a trusted `SCRATCH_PAD` extension is installed**
+(`ExtensionRegistry.scratchPad`), re-discovered by `ScratchPadFlow.refresh()` after the notebook opens
+and on every `onResume` (an extension enabled / disabled while away shows / hides it; newest refresh
+generation wins, the visibility change is pen-idle and re-pushes the exclusion rects). Inside `topBar`,
+so the exclusion rect and the chrome release cover it.
+
+**Showing.** Tap → `busy` guard (a second tap is dropped) → `paper.releaseRender()` →
+`ScratchPadClient.open(sendEnabled = true, openReceived = false)` (store pre-open on IO → held bind →
+`begin(store)`; a null Intent → the `scratch_failed` dialog naming the extension) →
+**`paper.releaseForHandoff()` immediately before the launch** (rule 27 — the pad's process claims the
+EPD pipeline next; the notebook's pen stays live through the open, which can be seconds on a cold
+store) → `launcher.launch(intent)` (`ActivityResultLauncher`, so the extension's caller check passes).
+The result — any code — runs `ScratchPadClient.finish()` (`end()` → unbind → revoke, in `finally`) on a
+scope that outlives the screen; the notebook's `onResume` re-arms its own paper (`resumeDrawing`).
+`onDestroy` with the pad still up → `close()` → the same finish. S1 shows the pad with its Send buttons
+present but inert; S2 adds the core `scratch` toolbar action, the placement dialog and the two
+transfers (paste selected at the origin, one undoable `Pasted`).
+
+**Undo replay moved.** S1 also moved the notebook's `revert` / `reapply` / `doUndo` / `doRedo` into
+`NotebookUndo` (`undo(session, stack, refreshToPage)` / `redo(...)`) next to the action set — a pure
+move; the Activity keeps `refreshToPage` (its `navigateTo`) and stays under the 800-line cap.
 
 ## Frame-silence rule
 

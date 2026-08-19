@@ -98,6 +98,12 @@ class ScratchStore(private val store: IExtensionStore) {
 
     fun setCurrent(id: String) = guard { store.put(KEY_CURRENT, id.toByteArray()) }
 
+    /** Undo / redo of a page insert or delete (S1): write a whole page list as-is. */
+    fun setPages(ids: List<String>) = guard { writeIds(ids) }
+
+    /** Undo / redo of a page insert or delete (S1): drop one page's ink, keeping its id in the list. */
+    fun removePageBlob(id: String) = guard { store.delete(pageKey(id)) }
+
     /** Debug: every key + the summed byte size of the page blobs (reads each page). */
     fun sizeSummary(): Pair<Int, Long> = guard {
         val keys = store.keys("")

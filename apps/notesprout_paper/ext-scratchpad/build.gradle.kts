@@ -36,6 +36,12 @@ android {
         viewBinding = true
     }
 
+    // ScratchDocumentTest drives the document over a fake IExtensionStore; Slog's android.util.Log
+    // must not throw "not mocked" on the JVM.
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+
     // The Onyx SDK (via g-paper) ships libc++_shared.so in three artifacts — same rule as :app.
     packaging {
         jniLibs {

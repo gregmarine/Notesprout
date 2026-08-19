@@ -74,6 +74,8 @@ class LibraryActivity : AppCompatActivity() {
      * stack two dialogs or two New-notebook screens.
      */
     private var namerBusy = false
+    /** The Scratch Pad entry point (arc 6 / S1) — its button exists only while the extension is installed. */
+    private lateinit var scratchPad: ScratchPadLaunch
 
     private val newNotebookLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -104,6 +106,7 @@ class LibraryActivity : AppCompatActivity() {
         coldLaunch = savedInstanceState == null
 
         wireBars()
+        scratchPad = ScratchPadLaunch(this, binding.btnScratchPad)
         DebugMenu.install(this, binding.breadcrumbBar)
 
         binding.gridContainer.viewTreeObserver.addOnGlobalLayoutListener {
@@ -127,7 +130,14 @@ class LibraryActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         lifecycleScope.launch { refreshNamer() }
+        if (::scratchPad.isInitialized) scratchPad.refresh()
         if (gridMeasured) lifecycleScope.launch { refresh() }
+    }
+
+    override fun onDestroy() {
+        if (IndexGuard.bounced(this)) { super.onDestroy(); return }
+        if (::scratchPad.isInitialized) scratchPad.close()
+        super.onDestroy()
     }
 
     private suspend fun refreshNamer() {
