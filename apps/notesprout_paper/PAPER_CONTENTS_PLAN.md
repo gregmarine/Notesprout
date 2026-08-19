@@ -10,7 +10,7 @@
 > hold) and both `CLAUDE.md` files. `docs/extensions.md` is the subsystem reference all arcs write
 > into; `docs/notebook.md` gains a section in this arc.
 >
-> **Status: C0 🧪 · C1 ⬜ · C2 ⬜ — C0 built + Claude-verified SNN/NA5C/MIP11 2026-08-18, awaiting the user's device checklist.**
+> **Status: C0 ✅ (cc0558d) · C1 ⬜ · C2 ⬜ — C0 user-verified SNN/NA5C/MIP11 2026-08-18; next: C1's phase ritual.**
 
 ## Why
 
@@ -377,7 +377,7 @@ point" in C2:
 ## Phases
 
 ### Phase C0 — Contract, the Heading extension, client, rows, tree (no UI)
-**Status:** 🧪 Awaiting device verification (built 2026-08-18; Claude-side checks passed on all three devices)
+**Status:** ✅ Complete (commit cc0558d) — user-verified SNN + NA5C + MIP11 2026-08-18
 
 **Goal:** `OutlineEntry` + `describeOutline` exist in the contract; `NSE · Heading` answers them;
 the host can ask (`ObjectProviderClient.describeOutline` / `describeOutlineAll` / `supportsOutline`),
