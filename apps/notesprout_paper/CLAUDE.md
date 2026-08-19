@@ -18,8 +18,12 @@ global-index model, global encryption model, and e-ink design philosophy — and
   C2 ✅ 54b9bf2**, all user-verified SNN + NA5C + MIP11: the
   Contents — a table of contents from the Heading extension via `IObjectProvider.describeOutline`
   (appended, compatible, `API_VERSION` stays 1) + a core-drawn `ContentsDialog`, top-bar `list`
-  button + one-finger swipe-down) — read all six top-to-bottom at the start of every session; **no
-  arc is active — the next arc is NOT planned; ask the user first.**
+  button + one-finger swipe-down), then **`PAPER_SCRATCHPAD_PLAN.md` (arc 6, PLANNED 2026-08-19 —
+  the ACTIVE arc: `NSE · Scratch Pad`, an extension-owned off-paper screen (UI-rule tier 2, first
+  exercise) + the shared `:paper-screen` module + the `SCRATCH_PAD` point + `IExtensionStore.putLarge /
+  getLarge` (4 MiB values over `SharedMemory`) + the two ink transfers; S0 ⬜ · S1 ⬜ · S2 ⬜ · S3 ⬜)**
+  — read all seven top-to-bottom at the start of every session; **next = S0 (fresh session, the
+  phase-start wizard first).**
 - **Package / applicationId:** `com.symmetricalpalmtree.notesprout` (debug: `.dev` suffix)
 - **Launcher label:** "Notesprout Paper" (debug: "Notesprout Paper Dev")
 
