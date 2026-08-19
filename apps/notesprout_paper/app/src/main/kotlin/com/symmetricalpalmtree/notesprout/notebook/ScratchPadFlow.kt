@@ -86,7 +86,10 @@ class ScratchPadFlow(
             if (intent == null || !alive() || activity.isFinishing || activity.isDestroyed) {
                 client = null; busy = false
                 if (intent != null) c.finish()
-                else if (!activity.isFinishing && !activity.isDestroyed) Dialogs.problem(activity, R.string.cd_scratch_pad, activity.getString(R.string.scratch_failed, r.label))
+                else if (!activity.isFinishing && !activity.isDestroyed) {
+                    Dialogs.problem(activity, R.string.cd_scratch_pad, activity.getString(R.string.scratch_failed, r.label))
+                    refresh()   // a bind that fails because the package was disabled meanwhile (BOOX re-disables sideloads) hides the button now, not at the next resume
+                }
                 return@launch
             }
             Slog.d(TAG) { "launching the pad" }
