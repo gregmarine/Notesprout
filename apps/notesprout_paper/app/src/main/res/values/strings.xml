@@ -93,9 +93,8 @@
     <string name="delete_folder_title">Delete \"%1$s\"?</string>
     <string name="delete_folder_body">This will permanently remove all notebooks and subfolders inside it. This cannot be undone.</string>
     <string name="delete_confirm">Delete</string>
-    <string name="delete_page_action">Delete page</string>
-    <string name="delete_page_title">Delete this page?</string>
-    <string name="delete_page_body">Undo (two-finger double-tap) brings it back until you close the notebook.</string>
+    <string name="delete_page_action">Delete this page</string>
+    <string name="delete_page_confirm">Delete this page and its ink?</string>
     <string name="cancel">Cancel</string>
     <string name="move_title">Move to…</string>
     <string name="move_here">Move here</string>

@@ -655,10 +655,9 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     private fun confirmDeletePage() {
-        val dialog = AlertDialog.Builder(this)
-            .setTitle(R.string.delete_page_title)
-            .setMessage(R.string.delete_page_body)
-            .setPositiveButton(R.string.delete_confirm) { _, _ -> runPageOp { doDelete() } }
+        val dialog = AlertDialog.Builder(this)   // the scratch pad's phrasing (user's call, after S2)
+            .setMessage(R.string.delete_page_confirm)
+            .setPositiveButton(R.string.delete_page_action) { _, _ -> runPageOp { doDelete() } }
             .setNegativeButton(R.string.cancel, null)
             .create()
         Dialogs.style(dialog)

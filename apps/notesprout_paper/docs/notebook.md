@@ -491,7 +491,7 @@ toolbar buttons still see every event). Ported thresholds:
   (silently). Evaluated at `ACTION_UP` beside the flip — one axis dominates, so they never both fire.
   A swipe **up** is reserved and does nothing.
 - **Delete** (1 finger long-press ≥ `longPressTimeout`, stationary ≤ `touchSlop`): `ActionSheetDialog`
-  "Delete page" → `AlertDialog` "Delete this page? / Undo (two-finger double-tap) brings it back until you close the notebook." [Delete] [Cancel] (wording fixed in arc 4 / H1 — the Phase-4 text still said the ink could not be recovered, which stopped being true the moment page delete joined undo).
+  "Delete this page" → `AlertDialog` "Delete this page and its ink?" [Delete this page] [Cancel] — the scratch pad's phrasing, adopted for the notebook after arc 6 / S2 at the user's call (the H1 text "Undo (two-finger double-tap) brings it back until you close the notebook." is gone; undo still does).
 
 **Gating (every recogniser):** refuse to start / act while `paper.isPenActive`; re-check at the gate;
 tap-actions (undo/redo, long-press) commit after a `PEN_ACTIVE_TAIL_MS` escrow and drop if the gate
