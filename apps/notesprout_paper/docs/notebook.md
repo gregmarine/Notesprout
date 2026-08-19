@@ -436,7 +436,10 @@ finishes the client, and hands `TransferCaps.toStrokes` (**fresh ids**, `timeMil
 order) + `liveStrokes` + `paper.addStrokes` + **one undoable `Action.Pasted(pageId, strokes)`**
 (undo = soft-delete the rows, redo = `restore` in place) + `paper.setSelection(ids, ∅, union bounds)`
 (host-initiated — the selection state is set here, no `onSelectionCreated` echo) + the selection
-toolbar. **The coordinates are kept 1:1** (S2 Q1 — no translation to the origin, no inset; a
+toolbar — **on the lasso tool** (switched before `setSelection`, since a tool change dismisses; a
+selection under the pen can't be dragged or dismissed); the tool the user had comes back pen-idle when
+that selection is dismissed (`toolBeforePaste` / `restoreToolAfterPaste` — only if still on the lasso,
+so a tool the user picked meanwhile wins; on the lasso already → stays). **The coordinates are kept 1:1** (S2 Q1 — no translation to the origin, no inset; a
 cross-device page is clipped like any other ink). If the drain was cut, the `scratch_truncated` dialog
 names how many came back.
 

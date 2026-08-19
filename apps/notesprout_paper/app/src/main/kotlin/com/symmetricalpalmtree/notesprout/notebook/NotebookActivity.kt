@@ -332,6 +332,7 @@ class NotebookActivity : AppCompatActivity() {
             selectionActive = false
             currentSelection = null
             selectionToolbar.hide()
+            restoreToolAfterPaste()
         }
         /** g-paper 0.1.1: a sub-threshold stylus / finger tap inside the selection box. With exactly one
          *  selected object under the tap → the provider's `describeEdit` → [ObjectEditDialog] (at once —
@@ -464,7 +465,12 @@ class NotebookActivity : AppCompatActivity() {
     private suspend fun doUndo() = NotebookUndo.undo(session, undo, ::refreshToPage)
     private suspend fun doRedo() = NotebookUndo.redo(session, undo, ::refreshToPage)
 
-    /** Ink from the scratch pad (arc 6 / S2): fresh rows + on the paper + one undoable [Action.Pasted], left selected (host-initiated). */
+    /** The tool to go back to once a pasted selection is dismissed (null = the user was already on the lasso). */
+    private var toolBeforePaste: Tool? = null
+
+    /** Ink from the scratch pad (arc 6 / S2): fresh rows + on the paper + one undoable [Action.Pasted], left selected
+     *  (host-initiated) **on the lasso tool** — a selection under the pen can't be dragged or dismissed; the prior tool
+     *  comes back when the selection is dismissed ([restoreToolAfterPaste]). */
     private suspend fun pasteStrokes(strokes: List<Stroke>) {
         val pageId = session.currentPage.id
         session.store.insert(pageId, strokes)
@@ -473,11 +479,21 @@ class NotebookActivity : AppCompatActivity() {
         undo.record(Action.Pasted(pageId, strokes))
         val bounds = strokes.map { it.bounds }.reduce { a, b -> a.union(b) }
         val sel = Selection(strokes.map { it.id }.toSet(), emptySet(), bounds)
+        toolBeforePaste = paper.tool.takeIf { it != Tool.LASSO }
+        if (paper.tool != Tool.LASSO) { paper.tool = Tool.LASSO; toolbar.sync(Tool.LASSO) }   // before setSelection — a tool change dismisses
         paper.setSelection(sel.strokeIds, emptySet(), bounds)
         selectionActive = true
         currentSelection = sel
         showSelectionToolbar(sel)
         Slog.d(TAG) { "pasted ${strokes.size} strokes on $pageId" }
+    }
+
+    /** After a pasted selection goes away: back to the tool the user had — pen-idle (a pen tap-away dismisses at
+     *  pen-down), and only if they haven't picked another tool meanwhile. */
+    private fun restoreToolAfterPaste() {
+        val t = toolBeforePaste ?: return
+        toolBeforePaste = null
+        whenPenIdle { if (paper.tool == Tool.LASSO && opened && !closing) { paper.tool = t; toolbar.sync(t) } }
     }
 
     // ── Content objects (arc 4 — H2 toolbar Delete, H4 provider actions) ──────

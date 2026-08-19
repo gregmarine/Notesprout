@@ -183,17 +183,26 @@ class ScratchPadActivity : AppCompatActivity() {
         if (openReceived) selectReceived(doc)
     }
 
+    /** The tool to go back to once the received selection is dismissed (null = already on the lasso). */
+    private var toolBeforeReceived: Tool? = null
+
     /** Right after a `receiveInk`: the placed strokes land selected (host-initiated — no `onSelectionCreated`
-     *  echo) and as one [Action.Pasted] on the pad's stack. One shot — the session record is consumed. */
+     *  echo) **on the lasso tool** (a selection under the pen can't be dragged or dismissed; the prior tool comes
+     *  back on dismissal) and as one step on the pad's stack — a **New page** placement as [Action.Page] (undo
+     *  removes the page that came with it; redo brings it back with its ink), a Current-page one as
+     *  [Action.Pasted]. One shot — the session record is consumed. */
     private fun selectReceived(doc: ScratchDocument) {
         val received = ScratchSession.received ?: return
         ScratchSession.received = null
         if (received.pageId != doc.currentId) return
         val strokes = received.strokeIds.mapNotNull { doc.strokes[it] }
         if (strokes.isEmpty()) return
-        undo.record(Action.Pasted(doc.currentId, strokes))
+        if (received.newPage) undo.record(Action.Page(received.pagesBefore, received.currentBefore, doc.ids, doc.currentId, doc.currentId, null))
+        else undo.record(Action.Pasted(doc.currentId, strokes))
         val bounds = strokes.map { it.bounds }.reduce { a, b -> a.union(b) }
         val sel = Selection(strokes.map { it.id }.toSet(), emptySet(), bounds)
+        toolBeforeReceived = paper.tool.takeIf { it != Tool.LASSO }
+        if (paper.tool != Tool.LASSO) { paper.tool = Tool.LASSO; toolbar.sync(Tool.LASSO) }   // before setSelection — a tool change dismisses
         paper.setSelection(sel.strokeIds, emptySet(), bounds)
         selectionActive = true
         currentSelection = sel
@@ -270,6 +279,7 @@ class ScratchPadActivity : AppCompatActivity() {
             currentSelection = null
             selectionToolbar.hide()
             binding.root.post { pushExclusions() }
+            restoreToolAfterReceived()
         }
         override fun onToolChanged(tool: Tool) { toolbar.sync(tool) }
     }
@@ -292,6 +302,13 @@ class ScratchPadActivity : AppCompatActivity() {
         paper.removeStrokes(taken.map { it.id })   // a data-in call: no erase callback comes back
         scheduleSave()
         Slog.d(TAG) { "deleted selection: ${taken.size} strokes" }
+    }
+
+    /** After the received selection goes away: back to the prior tool — pen-idle, only if still on the lasso. */
+    private fun restoreToolAfterReceived() {
+        val t = toolBeforeReceived ?: return
+        toolBeforeReceived = null
+        whenPenIdle { if (paper.tool == Tool.LASSO && opened && !closing) { paper.tool = t; toolbar.sync(t) } }
     }
 
     // ── Send to notebook (S2) ────────────────────────────────────────────────

@@ -122,10 +122,13 @@ kept; the bundle's if it has none yet); the target page becomes `current`, so th
 The **full rule** applies to the result: over 4 MiB → `IllegalStateException(SCRATCH_PAGE_FULL)` —
 nothing placed, nothing inserted (the host says "The scratch pad's page is full — send to a new page").
 The record of what landed (`ScratchSession.received` = page id + stroke ids) is consumed **once** by
-the screen: after `opened`, if the record's page is the current one, the strokes are selected
-(host-initiated `setSelection` — no `onSelectionCreated` echo; the Delete · Send bar shows) and
-recorded as one `Pasted` on the pad's stack — **undo on the pad removes what just arrived, redo
-restores it** (S2 Q5).
+the screen: after `opened`, if the record's page is the current one, the screen switches to the
+**lasso** (a selection under the pen can't be dragged or dismissed; the prior tool comes back pen-idle
+when the selection is dismissed, unless the user picked another tool meanwhile), selects the strokes
+(host-initiated `setSelection` — no `onSelectionCreated` echo; the Delete · Send bar shows) and records
+**one step** on the pad's stack: a **New page** placement as `Action.Page` (undo removes the page that
+came with it — `Received.pagesBefore` / `currentBefore`; redo brings it back with its ink), a
+Current-page one as `Pasted` — **undo on the pad removes what just arrived, redo restores it** (S2 Q5).
 
 **Pad → notebook (`takeOutgoing`).** The top-bar **Send** = every stroke on the current page; the
 selection bar's **Send** = the lasso's strokes — both in writing order. An empty pick → the

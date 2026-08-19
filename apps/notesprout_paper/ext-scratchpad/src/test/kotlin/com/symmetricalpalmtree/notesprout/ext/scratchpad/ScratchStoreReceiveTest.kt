@@ -7,6 +7,7 @@ import com.symmetricalpalmtree.notesprout.extension.ExtensionContract
 import com.symmetricalpalmtree.notesprout.extension.IExtensionStore
 import com.symmetricalpalmtree.notesprout.extension.LargeValue
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -36,6 +37,9 @@ class ScratchStoreReceiveTest {
         store.savePage(first, ScratchPageCodec.encode(100f, 200f, listOf(stroke("old"))))
         val r = store.receive(listOf(stroke("a"), stroke("b")), 800f, 1200f, newPage = true)
         assertEquals(listOf("a", "b"), r.strokeIds)
+        assertTrue(r.newPage)
+        assertEquals(listOf(first), r.pagesBefore)
+        assertEquals(first, r.currentBefore)
         val after = store.load()
         assertEquals(2, after.ids.size)
         assertEquals(listOf(first, r.pageId), after.ids)
@@ -54,6 +58,7 @@ class ScratchStoreReceiveTest {
         // No ink yet → the bundle's size is adopted.
         val r1 = store.receive(listOf(stroke("a")), 800f, 1200f, newPage = false)
         assertEquals(first, r1.pageId)
+        assertFalse(r1.newPage)
         assertEquals(1, store.load().ids.size)
         val p1 = ScratchPageCodec.decode(store.readPage(first)!!)
         assertEquals(800f, p1.pageWidth, 0f)

@@ -104,8 +104,10 @@ class ScratchStore(private val store: IExtensionStore) {
     /** Undo / redo of a page insert or delete (S1): drop one page's ink, keeping its id in the list. */
     fun removePageBlob(id: String) = guard { store.delete(pageKey(id)) }
 
-    /** What [receive] placed: the page it landed on + the ids of the placed strokes (for "open selected"). */
-    class Received(val pageId: String, val strokeIds: List<String>)
+    /** What [receive] placed: the page it landed on + the ids of the placed strokes (for "open selected"), and —
+     *  so the screen can record the placement as one undo step — whether a page was inserted ([newPage]) and the
+     *  page list + current page as they were before. */
+    class Received(val pageId: String, val strokeIds: List<String>, val newPage: Boolean, val pagesBefore: List<String>, val currentBefore: String)
 
     /**
      * Notebook → pad (S2, the Binder thread): place [strokes] — on a **new page** inserted after the
@@ -123,7 +125,7 @@ class ScratchStore(private val store: IExtensionStore) {
             val (_, id) = insertPage(loaded.ids, loaded.currentId)
             savePage(id, blob)
             setCurrent(id)
-            return Received(id, ids)
+            return Received(id, ids, true, loaded.ids, loaded.currentId)
         }
         val cur = loaded.currentId
         val existing = readPage(cur)?.let { ScratchPageCodec.decode(it) }
@@ -133,7 +135,7 @@ class ScratchStore(private val store: IExtensionStore) {
         val blob = ScratchPageCodec.encode(w, h, all)
         if (blob.size > ExtensionContract.STORE_MAX_VALUE_BYTES) throw PageFullException(blob.size)
         savePage(cur, blob)
-        return Received(cur, ids)
+        return Received(cur, ids, false, loaded.ids, loaded.currentId)
     }
 
     /** Debug: every key + the summed byte size of the page blobs (reads each page). */

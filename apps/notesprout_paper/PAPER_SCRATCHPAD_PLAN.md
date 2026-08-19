@@ -915,6 +915,18 @@ memory; commit + push.
   services` shows no scratchpad service after; no FATAL, no `SecurityException`; the library's pad has 0
   Send buttons; log lines carry counts + durations only. Multi-finger undo / redo (items 4 + 8), the
   heading / mixed case on device (item 3) and NA5C / SNN are the user's (adb can't lasso there).
+- **User feedback round 1 (2026-08-19, fixed + reinstalled SNN / NA5C / MIP11):** (1) a pasted /
+  received selection under the **pen** could not be dragged or dismissed → both screens now switch to
+  the **lasso before `setSelection`** (a host tool change dismisses, and host-initiated changes don't
+  echo `onToolChanged`, so the toolbar is synced by hand) and restore the prior tool **pen-idle** when
+  that selection is dismissed, only if still on the lasso (stays lasso if it was lasso; a tool the user
+  picked meanwhile wins) — `toolBeforePaste` / `restoreToolAfterPaste` in the notebook,
+  `toolBeforeReceived` / `restoreToolAfterReceived` on the pad; MIP11-verified by uiautomator
+  (`btnLasso selected` while the paste shows, `btnPen` after tap-away; lasso → lasso stays). (2) undo
+  on the pad after a **New page** placement removed only the strokes → it is now recorded as a
+  structural `Action.Page` (`Received` carries `newPage` + `pagesBefore` + `currentBefore`), so undo
+  removes the page and redo restores it with its ink; Current page stays `Pasted`. `NotebookActivity`
+  796 lines (the cap is 800 — S3 notes it).
 
 ---
 
