@@ -37,7 +37,9 @@ BOOX status bar; 0 on Ratta; 1dp inkBlack bottom border) → `bottomStrip` overl
 `n / N`", 1dp top border). Immersive: system bars hidden, transient by swipe. Portrait-locked.
 The top bar row is `[←] 12 dp [Contents — GONE unless `ContentsFlow.available` (arc 5 / C1)] [pen]
 [eraser] [lasso] … [⋯ debug]` — the 12 dp gap sits right after Back so it is there with or without
-the Contents button (user's call).
+the Contents button, and the row has **no horizontal padding** so Back sits exactly where the
+library's / New-notebook's back button sits (x = 0) — the button must not appear to move between
+screens (both user's calls, C1).
 
 Both bars are pushed to `paper.setExclusionRects` after every root layout pass, translated into
 the paper view's coordinates, so the stylus can never ink under chrome. A finger `ACTION_DOWN`
