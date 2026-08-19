@@ -11,8 +11,8 @@
 > subsystem reference all arcs write into; `docs/notebook.md` and `docs/library.md` gain sections
 > in this arc; a new `docs/scratchpad.md` is the extension's own reference.
 >
-> **Status: S0 ✅ 9a96c7a · S1 ✅ 98f58f6 (both user-verified SNN / NA5C / MIP11 2026-08-19) · S2 🧪 · S3 ⬜.
-> Now: S2 built, Claude-verified MIP11 — the user's S2 checklist is pending on SNN / NA5C / MIP11.**
+> **Status: S0 ✅ 9a96c7a · S1 ✅ 98f58f6 (both user-verified SNN / NA5C / MIP11 2026-08-19) · S2 ✅ 374f17f · S3 ⬜.
+> Next: S3 (fresh session, phase-start wizard first — freeze as built? remove both debug probes?).**
 
 ## Why
 
@@ -792,7 +792,7 @@ handoff behaviour observed on NA5C / SNN — anything the engines needed); docs;
 ---
 
 ### Phase S2 — The two transfers
-**Status:** 🧪 Awaiting device verification (built + JVM green + Claude-verified MIP11 2026-08-19; user checklist below pending on SNN / NA5C / MIP11)
+**Status:** ✅ Complete (commits 16866d9 + 2657481 + 374f17f; user-verified SNN / NA5C / MIP11 2026-08-19 — all nine checklist items pass, incl. the return handoff by eye)
 
 **Goal:** *Send to Scratch Pad* (core toolbar action, placement dialog, ink handed through the held
 bind, the pad opens on the page with the strokes selected) and *Send to Notebook* (top-bar whole
@@ -859,7 +859,7 @@ page with the strokes selected (rec.) · Q5 received ink is `Pasted` on the pad'
 **Close-out:** status ✅ + Outcome (per-device transfer timings for ~200 strokes each way); docs;
 memory; commit + push.
 
-**Outcome (2026-08-19 — 🧪; Claude-verified MIP11 by hand, NA5C / SNN installed, user checklist pending):**
+**Outcome (2026-08-19 — 16866d9 + 2657481 + 374f17f; Claude-verified MIP11 by hand, then the user's checklist items 1–9 all pass on SNN / NA5C / MIP11 incl. the two-finger undo items and the return handoff by eye):**
 - **Contract:** `MAX_TRANSFER_STROKES` / `MAX_TRANSFER_POINTS` raised to **10 000 / 400 000** (Q3),
   `TRANSFER_MAX_CHUNKS` 34; new **`InkChunks`** in `:extension-api` — the contract's per-call chunking
   rule written once for both sides (`TransferCaps.chunk` delegates; the extension's Send uses it
@@ -936,7 +936,7 @@ memory; commit + push.
   dialog), the symmetric of rule 27's release-before-launch; the order is now pad release 45.311 →
   notebook reclaim 45.359. Recorded in g-paper's lifecycle tables (`api.md` / `host-responsibilities.md`
   / `integration-guide.md`, docs-only commit 289b407, no version bump) and in `docs/scratchpad.md`.
-  Live overlay is invisible to screencap — the user confirms by eye (re-run S1 item 1 on NA5C + SNN).
+  Live overlay is invisible to screencap — the user confirmed by eye on NA5C ("That fix it!"), then all S2 items on all three devices.
 
 ---
 

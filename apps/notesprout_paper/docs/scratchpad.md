@@ -8,7 +8,7 @@ UI rule's tier 2 (`docs/extensions.md` §"ScratchPad (contract)"): the core laun
 This file is the extension's own reference — the screen, its tools, pages, store layout and failures.
 Contract, host clients and the boundary rules live in `docs/extensions.md`; the notebook side in
 `docs/notebook.md` §"Scratch Pad (arc 6)"; the library side in `docs/library.md`. Plan:
-`PAPER_SCRATCHPAD_PLAN.md` (S0 ✅ · S1 ✅ · S2 🧪 · S3 ⬜).
+`PAPER_SCRATCHPAD_PLAN.md` (S0 ✅ · S1 ✅ · S2 ✅ · S3 ⬜).
 
 ## Module (`:ext-scratchpad`)
 
