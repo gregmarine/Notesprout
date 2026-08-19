@@ -34,7 +34,7 @@ All rules from the root `CLAUDE.md` apply (language, serialization, no new deps,
 runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addition:
 
 - **g-paper** is the drawing surface, consumed from **mavenLocal**
-  (`com.symmetricalpalmtree.gpaper:gpaper-{core,onyx,ratta}:0.1.2`). Read g-paper docs before touching
+  (`com.symmetricalpalmtree.gpaper:gpaper-{core,onyx,ratta}:0.1.3`). Read g-paper docs before touching
   the notebook screen: `~/git/g-paper/docs/api.md`, `host-responsibilities.md`, `integration-guide.md`,
   and `~/git/g-paper/CLAUDE.md`.
 - **No file over ~800 lines** without a written reason.
@@ -130,9 +130,13 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   `sizeSummary`) removed — the pad has no debug ⋯. The intermittent "sluggish drag of a
   just-transferred selection" (SNN) was **g-paper Ratta: the ownership guard is a process-local static, so
   the pad's late focus-loss / `release()` teardowns re-sent `enableFullUiAuto(false)` after the notebook's
-  reclaim → slow-waveform drags** — fixed in g-paper 0.1.2 (the handoff drops the token; Paper pins 0.1.2).
-  **Trap: both engines' ownership guards are per-process — a cross-process handoff must be a full teardown
-  on the departing side; a fix goes to g-paper, never a host workaround.**
+  reclaim → slow-waveform drags** — fixed in g-paper 0.1.2 (the handoff drops the token). **On NA5C a second mechanism with the same
+  signature: the Onyx app-scope fast-mode pin was PEN-only, and the send flow leaves the notebook on the
+  lasso across the handoff → the reopen never re-pinned → unpinned drag frames until the next PEN arming** —
+  g-paper 0.1.3 pins for any drawing tool (Paper pins 0.1.3). **Generic: no mechanism found; `tools/drag_capture.sh
+  <serial>` within ~10 s of a sluggish drag on the MIP11 is the next step.** **Trap: both engines' ownership
+  guards are per-process — a cross-process handoff must be a full teardown on the departing side; a fix
+  goes to g-paper, never a host workaround.**
 - **Notebook creation:** templates come **only** from `ExtensionRegistry` providers via
   `TemplateProviderClient` (bind-per-operation, signature re-checked at bind, timeouts, unbind in
   `finally`, payload = mime + byte cap + exact requested size); **the core has no renderer**. No
@@ -348,7 +352,9 @@ BOOX trap: `install -r` can leave the package disabled → `pm enable com.symmet
 
 ## g-paper version
 
-Currently pinned: **0.1.2** (arc 6 / S3: Ratta `releaseForHandoff()` drops the process-local ownership
-token + full teardown — the cross-process handoff fix for the "sluggish drag after a transfer" on the
-Nomad; g-paper commit 345c2a8. 0.1.1 = arc 4 / H1: `PaperListener.onSelectionTapped(x, y)`, e76e305). If a phase bumps
+Currently pinned: **0.1.3** (arc 6 / S3 — two "sluggish drag after a transfer" fixes: 0.1.2 Ratta
+`releaseForHandoff()` drops the process-local ownership token + full teardown (345c2a8); 0.1.3 Onyx
+applies the app-scope fast-mode pin for any drawing tool at the open / tool boundary, not PEN only —
+a reopen on the LASSO after a handoff ran drags unpinned (3ac5404). 0.1.1 = arc 4 / H1:
+`PaperListener.onSelectionTapped(x, y)`, e76e305). If a phase bumps
 g-paper, update the version in `app/build.gradle.kts` and record it in the phase outcome.

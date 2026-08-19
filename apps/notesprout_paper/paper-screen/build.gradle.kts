@@ -27,7 +27,7 @@ android {
     }
 }
 
-val gpaperVersion = "0.1.2"
+val gpaperVersion = "0.1.3"
 
 dependencies {
     // :paper-screen depends on g-paper + androidx only — NEVER on :app, :extension-api, Room,

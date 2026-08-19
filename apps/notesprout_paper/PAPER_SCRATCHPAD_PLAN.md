@@ -978,7 +978,20 @@ is the full teardown (overlay release, full-screen disable, `enableFullUiAuto(fa
 rebuilt + reinstalled SNN / NA5C / MIP11; verified in the SNN log: after the pad's `released for
 handoff` no later teardown from the pad process, and the notebook's launch-side focus-loss no longer
 sends a second `enableFullUiAuto(false)` either. Trap for the record: **a fix goes to g-paper, never a
-host workaround** (rule 27 now says the handoff drops ownership).
+host workaround** (rule 27 now says the handoff drops ownership). **Onyx (user: "happens there too
+sometimes") — a second, different mechanism with the same signature, g-paper 0.1.3 (3ac5404):** the
+app-scope handwriting fast-mode pin (`applyHandwritingFastMode`, the first-stroke fix) was applied
+only when **PEN** armed and cleared at every pipeline close; the send flow leaves the notebook **on the
+lasso** across the handoff, so the reopen on return never re-pinned → every drag frame ran unpinned
+(per-frame waveform negotiation) until the next PEN arming (dismiss → `restoreToolAfterPaste` → PEN
+→ reselect = smooth — the exact same "dismiss + reselect" cure). Now `applyToolState` pins for any
+drawing tool (`!= NONE`). **Generic (MIP11): no mechanism found** — there is no pipeline, no waveform,
+no process-global state, no per-move host work, and the S3 framestats measurement was identical; the
+only remaining levers are the main thread (a stall) or input delivery. `tools/drag_capture.sh <serial>`
+dumps the foreground screen's last ~120 frames (UI draw / GPU / total / frame gaps), `top` and the
+paper log lines — **run it within ~10 s of a sluggish drag on the MIP11** and read the summary; that
+decides between a render, a main-thread and an input cause. Paper pins g-paper **0.1.3**; rebuilt +
+reinstalled SNN / NA5C / MIP11.
 
 **Goal:** the shared module, the new point, its held bind, the store cap, the transfers and the
 screen are trustworthy and recorded as the pattern a second screen-owning extension follows.
