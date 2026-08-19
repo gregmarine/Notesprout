@@ -73,7 +73,7 @@
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnScratchPad"
                 style="@style/Widget.Notesprout.ToolbarButton"
-                android:src="@drawable/ic_notes"
+                android:src="@drawable/ic_sketching"
                 android:contentDescription="@string/cd_scratch_pad"
                 android:visibility="gone" />
         </LinearLayout>

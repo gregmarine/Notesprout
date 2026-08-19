@@ -44,9 +44,10 @@ and `EXTRA_SCRATCH_OPEN_RECEIVED` (S2). The store comes from `ScratchSession.sto
 host handed to `begin` on the held bind; absent (no `begin`) → `scratch_store_unavailable` → finish.
 
 **Shape — the notebook's.** Full-bleed g-paper (`GPaper.create`, the pad's own engine in its own
-process), immersive, `TopGuard.applyRootPadding(topBar)`; top bar **Back · Pen · Eraser · Lasso ·
-[Send] · [debug ⋯]**; bottom strip **"Scratch Pad" · `<` · `n / N` · `>`** (the arrows are
-`ToolbarButton`s — never disabled; a no-op at a bound); the floating **Delete · [Send]** bar over a lasso
+process), immersive, `TopGuard.applyRootPadding(topBar)`; top bar **Back · "Scratch Pad" · [Send] ·
+[debug ⋯]**; bottom bar **Pen · Eraser · Lasso … `<` · `n / N` · `>`** (S1 follow-up, user's call: the
+title up, the tools down — the arrows are `ToolbarButton`s, never disabled, a no-op at a bound); the
+floating **Delete · [Send]** bar over a lasso
 selection. Tools fixed: `PEN_WIDTH_PX 3f`, `ERASER_RADIUS_PX 15f`, black, smart lasso / scribble
 erase off. Chrome geometry through the shared `PaperChrome` — the top bar, the bottom strip and the
 selection bar are exclusion rects; **while the "Opening…" popup is up the whole paper is one exclusion
@@ -136,8 +137,8 @@ partial stroke, a malformed geometry blob skips that stroke, an unknown version 
 ## Entry points (core side — `docs/notebook.md`, `docs/library.md`)
 
 Both exist **only while a trusted `SCRATCH_PAD` extension is installed** (re-discovered on every
-resume): the notebook's top-bar **notes** button (after Lasso, before the debug ⋯ — S1 Q2;
+resume): the notebook's top-bar **sketching** button (after Lasso, before the debug ⋯ — S1 Q2;
 `ScratchPadFlow`, Send enabled, `paper.releaseForHandoff()` immediately before the launch) and the
-library's bottom-bar **notes** button after Recents (S1 Q3; `ScratchPadLaunch`, no send target). Both
+library's bottom-bar **sketching** button after Recents (S1 Q3; `ScratchPadLaunch`, no send target). Both
 run `ScratchPadClient.open` (store pre-open → held bind → `begin`) → an `ActivityResultLauncher` →
 on any result `finish` (`end` → unbind → revoke) — `docs/extensions.md` §"ScratchPad (contract)".

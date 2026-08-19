@@ -393,7 +393,7 @@ point and the held bind in `docs/extensions.md` §"ScratchPad (contract)"); the 
 it and comes back. Everything notebook-side is `ScratchPadFlow` (S1) — the Activity holds the
 construction, a `refresh()` in `openSession` + `onResume`, and `close()` in `onDestroy`.
 
-**Entry point.** `btnScratchPad` (Tabler `notes`, hint "Scratch Pad") sits in the top bar **after Lasso,
+**Entry point.** `btnScratchPad` (Tabler `sketching`, hint "Scratch Pad") sits in the top bar **after Lasso,
 before the debug ⋯** (S1 Q2) — **`GONE` unless a trusted `SCRATCH_PAD` extension is installed**
 (`ExtensionRegistry.scratchPad`), re-discovered by `ScratchPadFlow.refresh()` after the notebook opens
 and on every `onResume` (an extension enabled / disabled while away shows / hides it; newest refresh

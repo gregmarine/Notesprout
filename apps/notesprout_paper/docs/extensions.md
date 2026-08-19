@@ -392,7 +392,7 @@ treats any other value as `UNAVAILABLE`.
   selected object of one of the provider's types); **`Requires`** `RECOGNIZER = 1` · `MARKDOWN = 2`.
   **`IconNames`** (`String` constants) is the host's icon catalog: `heading` `h-1`…`h-6` `text` `edit`
   `x` `check` `plus` `trash` `list` (arc 5 — the core's Contents glyph, listed so an extension may
-  reuse it) `notes` (arc 6 — the core's Scratch Pad glyph: the two entry buttons and the core
+  reuse it) `sketching` (arc 6 — the core's Scratch Pad glyph; was `notes` until the S1 follow-up: the two entry buttons and the core
   `scratch` action) — an unknown or null `iconName` draws the label as text.
 - `EditSpec(title: String, text: String, hint: String, maxChars: Int, multiLine: Boolean)` —
   `writeString ×3; writeInt; writeInt(0/1)` (H2). How the host draws one object's edit dialog: title,

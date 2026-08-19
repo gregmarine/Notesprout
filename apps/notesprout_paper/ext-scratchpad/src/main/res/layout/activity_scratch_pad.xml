@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The Scratch Pad screen (arc 6 / S1): the notebook's overlay-chrome shape — full-bleed paper
      (the PaperView is added programmatically as paperContainer's only child), a top bar
-     (Back · Pen · Eraser · Lasso · [Send] · [debug ⋯]) and a bottom strip (title · < n / N >),
+     (Back · "Scratch Pad" · [Send] · [debug ⋯]) and a bottom bar (Pen · Eraser · Lasso … < n / N >),
      both pushed to paper.setExclusionRects after layout; a two-button floating selection toolbar;
      the "Opening…" popup up until the first page is on the paper. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -15,7 +15,8 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- Top toolbar: flush at the top edge, TopGuard-padded (BOOX status bar), 1dp bottom border. -->
+    <!-- Top bar: Back · "Scratch Pad" · [Send] · [debug ⋯] — flush at the top edge, TopGuard-padded
+         (BOOX status bar), 1dp bottom border. (S1 follow-up: the title moved up here, the tools down.) -->
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
@@ -37,9 +38,53 @@
                 android:src="@drawable/ic_arrow_left"
                 android:contentDescription="@string/cd_scratch_back" />
 
-            <View
-                android:layout_width="12dp"
-                android:layout_height="0dp" />
+            <TextView
+                android:id="@+id/title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:text="@string/scratch_title"
+                android:textAppearance="@style/TextAppearance.Notesprout.TitleMedium"
+                android:singleLine="true"
+                android:ellipsize="end" />
+
+            <!-- Send to notebook: shown only when opened from a notebook (EXTRA_SCRATCH_SEND_ENABLED). -->
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnSend"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_send"
+                android:contentDescription="@string/cd_scratch_send"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
+    </LinearLayout>
+
+    <!-- Bottom bar: Pen · Eraser · Lasso  …  < n / N > — 1dp top border; the arrows are never disabled. -->
+    <LinearLayout
+        android:id="@+id/bottomStrip"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:orientation="vertical"
+        android:background="@color/paperWhite">
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
+
+        <LinearLayout
+            android:id="@+id/bottomBarRow"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/toolbar_bar_thickness"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
 
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnPen"
@@ -60,55 +105,9 @@
                 android:contentDescription="@string/cd_scratch_lasso" />
 
             <View
-                android:layout_width="12dp"
-                android:layout_height="0dp" />
-
-            <!-- Send to notebook: shown only when opened from a notebook (EXTRA_SCRATCH_SEND_ENABLED). -->
-            <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnSend"
-                style="@style/Widget.Notesprout.ToolbarButton"
-                android:src="@drawable/ic_send"
-                android:contentDescription="@string/cd_scratch_send"
-                android:visibility="gone" />
-        </LinearLayout>
-
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="@color/inkBlack" />
-    </LinearLayout>
-
-    <!-- Bottom strip: "Scratch Pad"   < n / N >  — 1dp top border; the arrows are never disabled. -->
-    <LinearLayout
-        android:id="@+id/bottomStrip"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom"
-        android:orientation="vertical"
-        android:background="@color/paperWhite">
-
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="@color/inkBlack" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="@dimen/toolbar_bar_thickness"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:paddingStart="12dp"
-            android:paddingEnd="0dp">
-
-            <TextView
-                android:id="@+id/title"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/scratch_title"
-                android:textSize="13sp"
-                android:textColor="@color/inkBlack"
-                android:singleLine="true" />
+                android:layout_height="0dp"
+                android:layout_weight="1" />
 
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnPrev"

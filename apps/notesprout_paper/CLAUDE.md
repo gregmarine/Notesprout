@@ -97,9 +97,20 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   crosses only through the held service, never the Intent**. The store gained `putLarge` / `getLarge`
   (appended; `STORE_MAX_VALUE_BYTES` 4 MiB, `STORE_MAX_INLINE_BYTES` 512 KiB, `LargeValue` over
   `SharedMemory` via `SharedBytes`; `get` of a large stored value throws `STORE_VALUE_LARGE`). S0 ✅ 9a96c7a
-  (contract, module, skeleton, debug "Probe scratch pad" + the extension's once-per-process 4 MiB
-  cross-process probe — both removed in S3); S1 = the screen + the two entry buttons, S2 = the
-  transfers, S3 = review / audit rows 28–32 / rules 25–27.
+  (contract, module, skeleton, debug "Probe scratch pad" — removed in S3). **S1 ✅ 98f58f6 — the screen +
+  the two entry buttons** (`docs/scratchpad.md`): `ScratchPadActivity` = the notebook's shape from
+  `:paper-screen` in the extension's own process (top bar Back · "Scratch Pad" · [Send] · [⋯]; bottom
+  bar Pen · Eraser · Lasso … `<` n / N `>`; pages, saves and the 4 MiB full rule through `ScratchDocument`
+  over `ScratchStore`; debounced 800 ms save + flush on leave / pause / **Back awaits the flush before
+  finishing**, because the host's `end()` revokes the store right after the result); the notebook's
+  top-bar Scratch Pad button (Tabler **`sketching`**, `IconNames.SKETCHING`; after Lasso, before the
+  debug ⋯ — `notebook/ScratchPadFlow`, **`paper.releaseForHandoff()` immediately before the launch**)
+  and the library's bottom-bar button after Recents (`library/ScratchPadLaunch`, no send target) — **both
+  `GONE` unless a trusted `SCRATCH_PAD` extension is installed, re-discovered on every resume and after
+  a failed open** (BOOX re-disables a sideloaded extension: "didn't respond" → check `pm list packages
+  -d` first); the pad's Send buttons show from a notebook but are inert until S2. The notebook's undo
+  replay lives in `NotebookUndo` (`undo` / `redo`). S2 = the transfers, S3 = review / audit rows 28–32 /
+  rules 25–27.
 - **Notebook creation:** templates come **only** from `ExtensionRegistry` providers via
   `TemplateProviderClient` (bind-per-operation, signature re-checked at bind, timeouts, unbind in
   `finally`, payload = mime + byte cap + exact requested size); **the core has no renderer**. No

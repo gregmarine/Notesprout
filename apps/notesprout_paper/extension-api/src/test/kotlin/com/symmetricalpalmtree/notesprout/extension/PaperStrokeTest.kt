@@ -63,7 +63,7 @@ class PaperStrokeTest {
         assertEquals("scratch page full", ExtensionContract.SCRATCH_PAGE_FULL)
         assertEquals(4 * 1024 * 1024, ExtensionContract.STORE_MAX_VALUE_BYTES)
         assertEquals(512 * 1024, ExtensionContract.STORE_MAX_INLINE_BYTES)
-        assertEquals("notes", IconNames.NOTES)
-        assertEquals(IconNames.NOTES, IconNames.ALL.last())
+        assertEquals("sketching", IconNames.SKETCHING)
+        assertEquals(IconNames.SKETCHING, IconNames.ALL.last())
     }
 }

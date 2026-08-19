@@ -1,9 +1,7 @@
 package com.symmetricalpalmtree.notesprout.ext.scratchpad
 
-import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
-import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatImageButton
@@ -24,7 +22,6 @@ object ScratchDebugMenu {
     private const val TAG = "ScratchDebugMenu"
 
     fun install(activity: AppCompatActivity, bar: ViewGroup, document: () -> ScratchDocument?) {
-        bar.addView(View(activity), LinearLayout.LayoutParams(0, 0, 1f))
         val btn = AppCompatImageButton(activity, null, 0).apply {
             setImageResource(R.drawable.ic_dots)
             setBackgroundResource(R.drawable.bg_toolbar_button)
