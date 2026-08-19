@@ -74,7 +74,17 @@ class ScratchPadLaunch(private val activity: AppCompatActivity, private val butt
                 }
                 return@launch
             }
-            launcher.launch(intent)
+            try {
+                launcher.launch(intent)
+            } catch (e: Exception) {   // the screen vanished between the bind and the launch (BOOX freeze, a pad without the exported Activity)
+                Slog.d(TAG) { "launch failed: ${e.javaClass.simpleName}: ${e.message}" }
+                client = null; busy = false
+                c.finish()
+                if (!activity.isFinishing && !activity.isDestroyed) {
+                    Dialogs.problem(activity, R.string.cd_scratch_pad, activity.getString(R.string.scratch_failed, r.label))
+                    refresh()
+                }
+            }
         }
     }
 

@@ -11,7 +11,7 @@
 > subsystem reference all arcs write into; `docs/notebook.md` and `docs/library.md` gain sections
 > in this arc; a new `docs/scratchpad.md` is the extension's own reference.
 >
-> **Status: S0 ✅ 9a96c7a · S1 ✅ 98f58f6 (both user-verified SNN / NA5C / MIP11 2026-08-19) · S2 ✅ 374f17f · S3 🔄 In progress.**
+> **Status: S0 ✅ 9a96c7a · S1 ✅ 98f58f6 (both user-verified SNN / NA5C / MIP11 2026-08-19) · S2 ✅ 374f17f · S3 🧪 Awaiting device verification (code + docs complete, Claude-smoked MIP11; user checklist pending).**
 
 ## Why
 
@@ -944,7 +944,7 @@ memory; commit + push.
 ---
 
 ### Phase S3 — Review, boundary audit, docs freeze
-**Status:** 🔄 In progress
+**Status:** 🧪 Awaiting device verification (code + docs complete, Claude-smoked MIP11 2026-08-19; user checklist pending)
 
 **Phase-start answers (2026-08-19):** Q1 three changes before freezing — (a) the notebook top-bar
 Scratch Pad button moves to the far right, **immediately before the debug ⋯ menu**; (b) the pad's
@@ -1008,6 +1008,67 @@ checklist items 1–5 + v0 regression subset (create / open / write / flip, libr
 move / delete, cold-launch reopen).
 
 **Close-out:** status ✅ + Outcome; commit + push `paper`.
+
+**Outcome (2026-08-19 — S3 prep 3900b26 + the review commit; user verification pending):**
+- **User's three changes (Q1):** (a) the notebook's Scratch Pad button sits at the far right immediately
+  before the debug ⋯ (`activity_notebook.xml` weight gap after Lasso; `NotebookDebugMenu` no longer adds
+  its own spacer); (b) both pad Send glyphs are Tabler `pencil-down` (`ic_pencil_down` in `:paper-screen`,
+  `ic_send` removed); (c) the sluggish-drag observation: investigated + measured, not reproduced (note
+  above) — left open with the "what to note next time" instruction.
+- **Q2:** both probes removed — `NotebookDebugMenu` keeps only "Recognize page"; the pad's whole
+  `ScratchDebugMenu` (debug + release twins), its install call and `ScratchStore/ScratchDocument.sizeSummary`
+  are gone — **the pad has no debug ⋯**.
+- **Review (`/code-review high 8b05f7e...HEAD`; the coordinator's verified report did not surface —
+  its three finder outputs were verified by hand against the code): 6 fixed / 1 accepted.** Fixed:
+  (1) `ScratchPadFlow.onResult` cleared `busy` / `client` before the async drain — a second launch
+  mid-drain would `begin()` a new showing (wiping the pad's parked chunks → silent partial paste) and
+  the old client's `end()` would then tear the new showing's store down; `busy` / `client` now hold until
+  the drain's `finally` (`client === c` guard vs. `close()`). (2) `launcher.launch(intent)` was unguarded
+  in both `ScratchPadFlow` and `ScratchPadLaunch` — `ActivityNotFoundException` / `SecurityException`
+  (the package frozen between the bind and the launch, a pad without the exported Activity) crashed the
+  host **after** `releaseForHandoff()`; now try/catch → `finish`, the `scratch_failed` dialog, `refresh()`,
+  and the notebook takes its pipeline back (`resumeDrawing()`). (3) `ScratchPadFlow.onResult` with
+  `client == null` (host process killed + screen recreated while the pad was up) dropped a
+  `RESULT_SCRATCH_SEND` silently — now the new `scratch_result_lost` dialog (the ink stays on the pad).
+  (4) `ScratchDocument`: a stroke committed during a page turn's `setCurrent` / `readPage` IO hops
+  landed in the old page's map and was discarded by `loadPage` — `loadPage` now flushes the page being
+  left while `dirty && currentId != id && currentId in ids` (a page being removed takes its gap ink with
+  it); and an undecodable blob (newer codec version / truncated value) crashed `open()` — it is now
+  `StoreUnavailable("page … unreadable")` (the honest dialog, the blob untouched — never a blank page
+  saved over it). Two JVM tests (`ScratchDocumentTest`: `inkLandingDuringAPageTurnIsKeptOnThePageLeft`,
+  `anUndecodablePageIsUnreadableNotBlank`; the fake store gained `onNextPageRead`). (5) The last
+  `receiveInk` chunk carries the whole placement (read + decode + re-encode + write of a page up to 4 MiB)
+  under the 2 s call timeout; a Binder call cannot be cancelled, so a timeout reported a failure for ink
+  that then landed anyway — that one call now has `ScratchPadClient.PLACE_TIMEOUT_MS` 10 s.
+  (6) `ExtensionStoreBinder.getLarge` / `putLarge` ran the ashmem step (`SharedBytes`) outside the gate's
+  `IllegalStateException` mapping — an `ErrnoException` (checked, non-marshalable) left an empty reply
+  the extension read as null (a page read as blank → saved over on the next stroke); wrapped (`region {}`),
+  every failure is an `IllegalStateException`. Plus the empty-value hole: `LargeValue.requireValid` is
+  `0..STORE_MAX_VALUE_BYTES` and `SharedBytes.write` rides an empty value on a 1-byte region, so
+  `getLarge` returns any stored size (`InkBundleTest` updated). **Accepted, not changed:** a lone stroke
+  over the chunk point cap is its own chunk up to `MAX_TRANSFER_POINTS` (the S2 contract, JVM-tested) —
+  beyond ≈ 60 000 points (~4 min of uninterrupted contact) such a chunk exceeds the Binder transaction
+  budget and the transfer fails with the "didn't respond" dialog, no loss; recorded here rather than
+  re-cut the contract.
+- **Audit rows 28–32 + rules 25–27 + the tier-2 recipe + §"The Scratch Pad extension" + "Writing an
+  extension" item 11** written and walked (`docs/extensions.md`); `docs/scratchpad.md` frozen;
+  `docs/notebook.md` / `docs/library.md` / `README.md` / `CLAUDE.md` updated; the store caps text
+  (256 KiB) corrected where it was stale.
+- **Built + installed** app + ext on SNN / NA5C / MIP11; JVM green (all modules), debug + release
+  compile. Claude smoke MIP11 (new build): button slot verified in the dump (Scratch Pad at the far
+  right before ⋯; the pad's top bar ends with Send — no ⋯), lasso → Pad → New page → pad opens selected
+  (open 304 ms, send 43 ms) → selection Send → pasted selected (drain 26 ms), binds = unbinds.
+- **Test strokes left behind by the S3 investigation on MIP11:** ~27 strokes on "Test 02" page 2 and
+  two extra pages (6, 7) on the pad — the user may delete them.
+
+**User device checklist (S3 — the plan's test list):** the full S1 checklist (1–10) + the full S2
+checklist (1–9) on SNN / NA5C / MIP11, with: (i) the notebook's Scratch Pad button at the far right
+immediately before the debug ⋯; (ii) the pad's two Send buttons show the pencil-down glyph; (iii) the
+pad has no ⋯ and the notebook's ⋯ has only "Recognize page"; (iv) `pm disable-user` the extension
+**right after** tapping the Scratch Pad button (or during a send) → the `scratch_failed` dialog, never
+a crash, and the notebook's pen still works; plus the C1 checklist items 1–5, 7–13, the H4 checklist
+items 1–5 and the v0 regression subset (create / open / write / flip, library create / rename / move /
+delete, cold-launch reopen).
 
 ---
 

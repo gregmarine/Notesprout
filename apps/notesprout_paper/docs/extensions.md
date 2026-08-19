@@ -18,7 +18,7 @@
 > — the first exercised *compatible* AIDL change (`API_VERSION` still 1; the load probe + `OutlineCaps`
 > tolerate an older provider); **C1** built the core-drawn Contents screen (`docs/notebook.md`
 > §"Contents (arc 5)"); **C2** walked audit rows 25–27 and rule 24 (§"Adding an object point").
-> **Arc 6** (`PAPER_SCRATCHPAD_PLAN.md`, active): **S0** added the sixth point — **ScratchPad**, the
+> **Arc 6** (`PAPER_SCRATCHPAD_PLAN.md`, S3 🧪 — code + docs complete, user verification pending): **S0** added the sixth point — **ScratchPad**, the
 > first *screen-owning* point (an extension-owned off-paper Activity the core launches for a result;
 > §"ScratchPad (contract)") — the shared **`:paper-screen`** module (the e-ink resources + screen
 > helpers both the notebook and the pad use), the two appended store methods `putLarge` / `getLarge`
@@ -26,8 +26,10 @@
 > (`:ext-scratchpad`); **S1** built the screen (`ScratchPadActivity` — `docs/scratchpad.md`) and the two
 > entry buttons (notebook top bar · library bottom bar, present only while the extension is installed);
 > **S2** built the two ink transfers (the core `scratch` selection action + `receiveInk`; the pad's Send +
-> `takeOutgoing` → paste selected, one undoable `Pasted`; §"ScratchPad (contract)" S2 state); the audit
-> rows + rules come in S3.
+> `takeOutgoing` → paste selected, one undoable `Pasted`; §"ScratchPad (contract)" S2 state); **S3**
+> reviewed the range, walked audit rows 28–32 (+ rows 1/6/7 for the held bind), and froze the pattern
+> (§"Extension-owned screens (tier 2)", §"Adding a screen-owning point (arc 6 pattern)" rules 25–27,
+> §"The Scratch Pad extension").
 
 Notesprout's original design baked too many features into the core. Paper's core is **paper with
 strokes** — a library of notebooks, each a stack of pages you write on. Everything else is added by
@@ -420,7 +422,7 @@ All parcelables carry `@JvmField val CREATOR` and match their `.aidl` declaratio
   handshake **in both directions** (the sender creates the region, writes, `setProtect(PROT_READ)`,
   hands it over and closes its own handle once the transaction is marshalled; the receiver maps
   read-only, copies out `byteCount` bytes, unmaps, closes in a `finally`). `requireValid` in the
-  constructor (so at unmarshal): `byteCount in 1..STORE_MAX_VALUE_BYTES` and `≤ memory.size`.
+  constructor (so at unmarshal): `byteCount in 0..STORE_MAX_VALUE_BYTES` and `≤ memory.size` (an empty value rides a 1-byte region with `byteCount 0` — S3).
   `describeContents() = CONTENTS_FILE_DESCRIPTOR`. **`SharedBytes`** (`:extension-api`) writes the
   handshake once for both sides — `write(bytes): LargeValue` (create + map + copy + `PROT_READ`),
   `read(v): ByteArray` (map + copy exactly `byteCount` + unmap), `readAndClose(v)`.
@@ -1064,6 +1066,28 @@ Outward on `receiveInk` = bare geometry + width + colour + style name + the page
 `takeOutgoing` = the same, untrusted; **no id, page, notebook or name ever crosses** (rows 29–30 are
 walked in S3). Both directions are copies. The audit rows 28–32 / rules 25–27 (S3) follow.
 
+## The Scratch Pad extension (`:ext-scratchpad` — arc 6)
+
+`NSE · Scratch Pad` (`com.symmetricalpalmtree.notesprout.ext.scratchpad[.dev]`) — the first extension
+that **owns a screen**: `ScratchPadService` (the `SCRATCH_PAD` point — `begin` / `receiveInk` /
+`takeOutgoing` / `end`, `HostCallerCheck.enforce` first in every method) and `ScratchPadActivity`
+(exported, custom action, no launcher filter, `HostCallerCheck.enforceActivity` first thing in
+`onCreate`), both in the extension's own process; `ScratchPadApplication` registers the g-paper
+engines there. It depends on `:extension-api` **and** `:paper-screen` (the only extension that does —
+its chrome, gestures, undo stack, dialogs and icons are the notebook's), and g-paper arrives
+transitively (≈ 25 MB APK on BOOX because of the Onyx SDK; manifest `tools:replace="android:label,
+android:allowBackup"` + libc++ `pickFirsts`). Its pages live in the host's extension store (`pages` /
+`current` / `page/<id>` — one key per page, ≤ 4 MiB encoded through `ScratchPageCodec`, the large path
+above 512 KiB), held for the showing through the store binder `begin` brought; it has no file, prefs
+or store of its own. The screen (tools, pages, swipe / arrows / two-finger insert, delete confirmation,
+undo / redo, the 800 ms save cadence + leave / pause / finish flush, the page-full rule), the two
+transfers (received ink lands selected on the lasso as one `Pasted` / `Page` step; Send = page or
+selection, a copy, parked for `takeOutgoing`) and the handoff discipline are documented in
+**`docs/scratchpad.md`** (frozen S3); the host's two entry points — notebook top bar (far right, before
+the debug ⋯) and library bottom bar, **present only while the extension is installed**, re-discovered
+on every resume — in `docs/notebook.md` §"Scratch Pad (arc 6)" and `docs/library.md`. Verified S0–S2 on
+SNN / NA5C / MIP11; the S3 review findings are in `PAPER_SCRATCHPAD_PLAN.md` S3 Outcome.
+
 ## Host behaviour (`:app`, package `extension/`)
 
 - **Manifest:** `<queries><intent><action android:name="…TEMPLATE_PROVIDER"/></intent></queries>` as a
@@ -1329,7 +1353,7 @@ correctly reports 0 candidates while it is disabled.
 
 ---
 
-## Boundary audit (rows 1–9 E2, rows 10–13 N2 — walked 2026-08-16; rows 14–17 M2 + rows 1/6/7 re-walked for the shared `ExtensionBinder` 2026-08-17; rows 18–24 H5 + rows 1/6/7 re-walked for the two new clients and the proxies' inner calls 2026-08-18; rows 25–27 C2 + rows 1/6/7 re-walked for the appended `describeOutline` / `supportsOutline` calls 2026-08-18 — all ✅)
+## Boundary audit (rows 1–9 E2, rows 10–13 N2 — walked 2026-08-16; rows 14–17 M2 + rows 1/6/7 re-walked for the shared `ExtensionBinder` 2026-08-17; rows 18–24 H5 + rows 1/6/7 re-walked for the two new clients and the proxies' inner calls 2026-08-18; rows 25–27 C2 + rows 1/6/7 re-walked for the appended `describeOutline` / `supportsOutline` calls 2026-08-18; rows 28–32 S3 + rows 1/6/7 re-walked for `ExtensionBinder.hold` / `HeldBinding.call` and the four `IScratchPad` calls 2026-08-19 — all ✅)
 
 What crosses the process boundary, in which direction, and what guards it. Re-walk this table
 whenever an extension point is added or a contract field changes.
@@ -1367,6 +1391,25 @@ Neither call mints a proxy or opens a region — the reply is a typed parcelable
 nothing to close. Verified on device across C0 / C1 (three devices): one `describeOutline` bind per
 Contents open, binds = unbinds, no `leaked ServiceConnection`, no `SecurityException`.
 
+**S3 re-walk of rows 1, 6, 7 (the first *held* bind — one bind path, four calls):**
+`ExtensionBinder.hold` is `ExtensionBinder.call`'s bind half and nothing else: `checkSignatures`
+immediately before `bindService` (row 1), an explicit `ComponentName` from the `ProviderRef`,
+`BIND_AUTO_CREATE` on the app context, the connection awaited ≤ `BIND_TIMEOUT_MS` (3 s); on every
+failure inside `hold` the attempted bind is released before the `ExtensionCallException` is thrown.
+What differs is *when* the unbind runs — the operation is the showing, so row 6's `finally` is
+`ScratchPadClient.finish` (`end()` in a `try`, `HeldBinding.close()` = supervisor-scope cancel +
+`unbindService`, **and** `ExtensionStoreBinder.revoke()` in the one `finally`), called from every path:
+the launcher's result (any code — `ScratchPadFlow.onResult` / `ScratchPadLaunch`), the launcher's
+cancel, a failed `begin` / `send` inside `open` (before any launch), the caller's `onDestroy` while the
+screen is up (`ScratchPadFlow.close` / `ScratchPadLaunch.close` on `appScope` — `NonCancellable`, outlives
+the Activity), and a `CancellationException` mid-`open`. Row 7: every one of the four calls goes through
+`HeldBinding.call(timeoutMs)` — `begin` / `receiveInk` (per chunk) / `takeOutgoing` (per chunk) / `end`
+each ≤ `CALL_TIMEOUT_MS` (2 s), run on the binding's own IO scope and discarded when they outlive it;
+after `onBindingDied` / `onServiceDisconnected` / `close` every call throws at once (`isDead`), so a
+pad whose process died mid-showing cannot hang the host. Verified on device across S0–S2 (three
+devices): one `hold` / one `unbind (held)` per showing, binds = unbinds, no `leaked ServiceConnection`,
+`am start` of the screen refused.
+
 | # | Invariant | Where it holds |
 |---|---|---|
 | 1 | **Host-side signature check on every discovery — and again at every bind.** No candidate is used unless exported, `META_API_VERSION == API_VERSION`, and `checkSignatures(core, ext) == SIGNATURE_MATCH`. Discovery is the only way a `ProviderRef` is made; every bind uses an explicit `ComponentName` from a `ProviderRef` and re-runs `checkSignatures` first (no TOCTOU window across the screen's lifetime). | `ExtensionRegistry.discover` (each rejection a `Slog.d`); `TemplateProviderClient.call` |
@@ -1379,7 +1422,7 @@ Contents open, binds = unbinds, no `leaked ServiceConnection`, no `SecurityExcep
 | 8 | **Failure never creates a notebook silently different from what the user chose.** Render runs **before** any file exists; a failed / null / empty / undecodable / wrong-size render → toast + stay on the screen; Blank is only ever the user's own selection. No extension → no Template section, and the notebook created is the Blank the user saw. A recreated screen (keyboard attach on Ratta, locale) saves the chosen identity and re-checks that radio once discovery rebuilds the list — Blank is re-checked only if nothing was chosen or the template is no longer offered. | `NewNotebookActivity.attemptCreate` / `onSaveInstanceState`, `docs/library.md` §New notebook |
 | 9 | **The core has no renderer and no dependency on the extension.** `:app` depends on `:extension-api` only; the template WEBP is drawn from the `.soil` blob exactly as v0 drew it, so a notebook opens with its template whether or not the extension is installed. | `app/build.gradle.kts`, `NotebookSession.loadTemplateFor` |
 | 10 | **Outward payload of NotebookNamer is exactly folder UUID + sibling notebook names (+ the scheme text the user typed).** `describeField()` and `validateScheme(scheme)` carry nothing else; `currentScheme` / `saveScheme` / `defaultName` carry the folder UUID (a random id — the store key, no content) and `defaultName` alone adds the names of the folder's own notebooks (needed only for `{n}`). No other argument exists in `INotebookNamer` — no passphrase, key, path, index row, other folder, page or stroke can be carried. This is the **recorded widening of row 3** for this point only. | `INotebookNamer.aidl`, `NamerClient` (five methods), `LibraryActivity.launchNewNotebook` (`siblings` = the current listing's `CardItem.Notebook` names) |
-| 11 | **The store binder is uid-bound, per-bind, revocable, capped.** Minted only inside `NamerClient.call(store = true)` — after `ExtensionStores.open` on IO (pre-open rule) and with `extUid = getPackageUid(ref.packageName)` fetched at bind time; `ExtensionStoreGate.check()` requires `getCallingUid() == extUid && !revoked` on **every** method; `revoke()` runs in the same `finally` as the unbind, so a late call from an orphaned (timed-out) transaction fails closed. Caps host-side: key `1..512` chars, value `≤ 256 KiB`, new key at `≥ 50 000` → `IllegalStateException`. The DB is opened only through `SoilCrypto` factories under the global key (`ExtensionStores.open`, the third named create entry point); `IExtensionStore` has no method that could return a key, path, or `File`. | `NamerClient.call`, `ExtensionStoreBinder`, `ExtensionStoreGate` (JVM-tested: uid mismatch, revoked, caps, literal case-sensitive prefix, DAO failure → `IllegalStateException`), `ExtensionStores.open`, `IExtensionStore.aidl` |
+| 11 | **The store binder is uid-bound, per-bind, revocable, capped.** Minted only inside `NamerClient.call(store = true)` — after `ExtensionStores.open` on IO (pre-open rule) and with `extUid = getPackageUid(ref.packageName)` fetched at bind time; `ExtensionStoreGate.check()` requires `getCallingUid() == extUid && !revoked` on **every** method; `revoke()` runs in the same `finally` as the unbind, so a late call from an orphaned (timed-out) transaction fails closed. Caps host-side: key `1..512` chars, value `≤ 256 KiB` (raised to 4 MiB with the large path in arc 6 — row 32), new key at `≥ 50 000` → `IllegalStateException`. The DB is opened only through `SoilCrypto` factories under the global key (`ExtensionStores.open`, the third named create entry point); `IExtensionStore` has no method that could return a key, path, or `File`. | `NamerClient.call`, `ExtensionStoreBinder`, `ExtensionStoreGate` (JVM-tested: uid mismatch, revoked, caps, literal case-sensitive prefix, DAO failure → `IllegalStateException`), `ExtensionStores.open`, `IExtensionStore.aidl` |
 | 12 | **Inward payload is validated.** `SchemeField` strings are truncated (`40 / 60 / 200`) and drawn only as a caption, an `EditText` hint and a help line; a `currentScheme` is capped at `MAX_NAME_CHARS` and shown verbatim only **inside** a text field; a validation error is truncated (`200`) and shown only as the message of a core-owned problem dialog; a `defaultName` is accepted only if `NewNotebookActivity.acceptDefaultName` says so (core name rule **and** `≤ MAX_NAME_CHARS`) — else the core default, silently (`Slog.d`, never a toast, never a crash). Any exception, timeout, or null on the way in becomes `ExtensionCallException` at the client and a core-owned outcome at the entry point. | `NamerClient` (`MAX_LABEL/HINT/HELP/ERROR`, `take(MAX_NAME_CHARS)`), `SchemeDialogs.buildField`, `NewNotebookActivity.acceptDefaultName` |
 | 13 | **Failure never changes what the user chose.** +Notebook: namer failure / null / timeout / root → `NewNotebookActivity` opens with the core default (the tap just takes a beat; a second tap during it is dropped). New folder: `describeField` failure → the dialog without the field; the scheme is validated **before** the folder exists (error → problem dialog + stay); the folder is created **before** its scheme is saved and a save failure says so (`naming_save_failed`, a problem dialog) while the folder stands. Long-press: fetch failure → `naming_unavailable` problem dialog and no scheme dialog; save/validate failure inside → problem dialog, the scheme dialog stays with the text. (M2: every one of these was a toast in N1; swept to `Dialogs.problem` under the toast-vs-dialog rule.) The extension absent / disabled → all three entry points vanish (`namerRef == null`) and nothing else changes; its store `.db` survives so the schemes return with it. | `LibraryActivity.launchNewNotebook` / `showNewFolderDialog` (both overloads) / `openSchemeDialog`, `SchemeDialogs.showSchemeDialog`, `LibraryActivity.refreshNamer` |
 | 14 | **Outward payload of HandwritingRecognizer is bare geometry only.** `InkStroke` carries two parallel `FloatArray`s (x/y in the caller's px) and nothing else — its parcel form is `int n · float[] x · float[] y`; `InkPayload.fromStrokes` is the **one** reduction site from the paper's `Stroke` (id, colour, width, style, pressure, tilt, time never leave; point-less strokes are skipped). The other arguments are the writing-area / page size and, for `recognizeInk`, ≤ `MAX_PRECONTEXT_CHARS` (20) of pre-context (`InkCaps.preContext` = `takeLast`). No other argument exists in `IHandwritingRecognizer` — no notebook / page id, name, key or path can be carried. Recorded as the explicit widening of row 3: **the first point that receives ink.** The debug menu passes the session's page px size and `paper.getStrokes()` through `RecognizeContext` — no ids, no names, no session. | `IHandwritingRecognizer.aidl`, `InkStroke` (parcel), `InkPayload.fromStrokes` (JVM-tested: id/colour/pressure dropped, x/y preserved), `RecognizeContext`, `RecognizerClient.recognizeInk/recognizePage`, `InkCaps.preContext` |
@@ -1396,6 +1439,11 @@ Contents open, binds = unbinds, no `leaked ServiceConnection`, no `SecurityExcep
 | 25 | **Outward payload of `describeOutline` is the provider's own payloads, grouped by type, chunked.** `describeOutline(typeId, payloads)` carries a typeId **the provider itself declared** and a list of the opaque payloads it produced (each through the same `outPayload` cut to `MAX_OBJECT_TEXT_CHARS` as every arc-4 method), chunked by `OutlineCaps.chunk` (≤ `MAX_OUTLINE_BATCH` items / ≤ `MAX_OUTLINE_BATCH_CHARS` summed per call). There is no other parameter — object ids, page ids / numbers / count, `x y width height`, `order`, notebook id / name, keys, paths cannot travel: `ContentsSource.gather` keeps `pageIndex` / `x` / `y` beside each row on the host and re-joins them to the reply by list position. The probe sends exactly one blank payload. The provider sees text it wrote and nothing about *where* it lives. | `IObjectProvider.aidl` (`describeOutline`), `ObjectProviderClient.describeOutlineAll` (`plan` = `byType.mapValues { chunk(map(::outPayload)) }`), `OutlineCaps.chunk` (JVM-tested by count + chars + over-long payload), `ContentsSource.gather` (`byProvider` map, `pageIndex` join), `ObjectProviderClient.supportsOutline` (`listOf("")`) |
 | 26 | **Inward outline replies are validated; a pre-method provider is "not capable", never an error.** `OutlineEntry.requireValid` at unmarshal (level `0..MAX_OUTLINE_LEVEL`, label ≤ `MAX_OUTLINE_LABEL_CHARS` — a violation aborts the whole reply at the Binder layer); then `OutlineCaps.sanitize(reply, expected)`: **null / any length ≠ the chunk's input length → null** (this provider does not answer the outline for this call — the whole `describeOutlineAll` becomes null, `ExtensionCallException` inside, logged as counts), else per entry the label is trimmed and cut to the cap, a blank label with level ≥ 1 → level 0, a level outside `0..MAX_OUTLINE_LEVEL` → 0, a null element → level 0. Nothing else is trusted; the host never sorts, nests or draws from anything but these normalised (label, level) pairs and its own row geometry. The load probe (`supportsOutline` — `OutlineCaps.isCapableReply`: exactly one entry) turns the **empty reply an arc-4 provider's `onTransact` produces for the unknown transaction** (not an exception — §"Versioning rules") into `Contribution.outline = false`, logged `outline probe: unsupported`, outside the resume signature; no further outline call is ever made to that provider. Labels are never logged on either side (counts + durations only: `describeOutlineAll: n type(s), n payload(s), n call(s) → n entries in ms`; the extension logs `describeOutline n=<count> in <ms>`). | `OutlineEntry.requireValid` + `CREATOR` (JVM-tested: level 7 / over-long label rejected, round trip), `OutlineCaps.sanitize/isCapableReply` (JVM-tested: wrong length → null, blank → 0, clamp, trim/cut), `ObjectProviderClient.describeOutlineAll/supportsOutline`, `ObjectProviders.load` (`outline=` per provider), verified against the arc-4 Heading APK on MIP11 (C0) |
 | 27 | **The Contents is core-drawn from descriptions; absent / failed provider = its objects are not listed / the screen does not open with an honest dialog; nothing on the page changes.** The Contents screen is a core `Dialog` built by the core from (label, level, pageIndex) triples under its own rules — `OutlineTree` sorts (page, y, x), nests (orphans attach to the nearest shallower heading), pages and highlights; `ContentsDialog` draws every row, toggle, page number, pager and the width rule (`ContentsLayout`) with Tabler icons and dimen-driven tap targets; no extension pixel, layout or code reaches it (rule 20 / row 24 re-lived). Provider absent / disabled / not outline-capable → its objects are simply not listed and neither entry point exists for a notebook whose only objects are its (`ContentsSource.available` = a live object of a *capable* provider on a live page — button `GONE`, swipe silent, `open()` refuses). A **capable** provider whose outline call fails (null / wrong length / timeout / exception) → `Result.Failed(label)` → the core's `objects_provider_failed` dialog under the "Contents" title and **nothing opens** (C0 Q4 — never a half list that looks complete). An empty gather (a race with a delete) opens nothing and re-refreshes availability. In every branch the page, its ink and objects, the session and every other extension are untouched: the gather is read-only (`writer.drain()` + `liveObjectsAll()`), a row tap only calls the host's existing `navigateTo`, the dialog holds no `.soil` handle, and while it shows the whole paper is one exclusion rect (`NotebookChrome.blockAll`) so a stylus cannot ink through it. Rebuilt on every open — nothing is cached or persisted (no prefs, no rows, no store). | `ContentsSource.available/gather` (`Result.Failed` stop, `Result.Ok` cap), `ContentsFlow.open/refresh` (busy guard, `Dialogs.problem(contents_title, objects_provider_failed)`, `showing` → `onShowingChanged`), `ContentsDialog` + `ContentsLayout` (JVM-tested width / rows-per-page / indent), `OutlineTree` (JVM-tested nest / orphan / highlight / paging), `NotebookChrome` (`blockAll`), `NotebookActivity` (`btnContents` visibility via `contentsFlow.refresh()` after `loadProviders` / `navigateTo` / create / delete; `onSwipeDown` → `open()`) |
+| 28 | **Outward on `begin` is the uid-bound store binder only.** `begin(store)` is the one argument of the held bind's opening call: the same `ExtensionStoreBinder` as rows 10–13 (minted in `ScratchPadClient.open` **after** `ExtensionStores.open` on IO — pre-open rule — with `extUid = getPackageUid(ref.packageName)` at bind time; `ExtensionStoreGate.check()` on every method; `IExtensionStore` still has no method that could return a key, path or `File`), now **held for a showing** in the extension's `ScratchSession.store` and revoked in the same `finally` as the unbind — every path: result, cancel, caller `onDestroy`, failed `open` (S3 re-walk above). Nothing else reaches the extension at open: the screen Intent carries `ACTION_SCRATCH_PAD_SCREEN` + `setPackage` + the two recorded booleans (`EXTRA_SCRATCH_SEND_ENABLED`, `EXTRA_SCRATCH_OPEN_RECEIVED`) — no key, path, name, notebook / page id. A second `begin` while one is held replaces the binder (the host restarted); `end` clears it; a dead binder (`SecurityException` after revoke / `DeadObjectException` after the host's death) is `StoreUnavailable` → the pad's honest dialog + `finish`. | `ScratchPadClient.open/finish`, `ExtensionBinder.hold` / `HeldBinding`, `ExtensionStoreBinder`, `ExtensionStoreGate` (JVM-tested), `ScratchPadService.begin/end`, `ScratchSession`, `ScratchStore.guard` (→ `StoreUnavailable`), `ScratchPadActivity` (store-unavailable dialog) |
+| 29 | **Outward ink (`receiveInk`) is bare stroke geometry + style + the page px size — capped and chunked before the bind.** `InkBundle(strokes, pageWidth, pageHeight)` with `PaperStroke` = four parallel `FloatArray`s (x / y / pressure / tilt in the authoring page's px) + `width` + `colorArgb` + the `StrokeStyle` **name**; `TransferCaps.toPaperStrokes` is the one reduction site from the paper's `Stroke` (id and time never leave; point-less strokes skipped) and `placement` is one of two recorded ints. No stroke id, page id / number, notebook id / name, selection bounds or position beyond the strokes' own coordinates has a parameter to travel in — `IScratchPad` has no other argument (the third recorded widening of row 3 after rows 14 / 19: the third point that receives ink). Host side, **before any bind**: `TransferCaps.withinLimits` (≤ `MAX_TRANSFER_STROKES` 10 000 / `MAX_TRANSFER_POINTS` 400 000) in `ScratchPadFlow.startSend` → `scratch_too_large`; then `TransferCaps.chunk` = `InkChunks.chunk` (≤ `TRANSFER_CHUNK_STROKES` 300 / `TRANSFER_CHUNK_POINTS` 20 000 per bundle — `InkBundle.requireValid` rejects a bigger one at construction), one `receiveInk(bundle, placement, last)` per chunk ≤ 2 s on the held bind. Extension side: `PaperStroke.requireValid` + `InkBundle.requireValid` re-run at unmarshal (a malformed stroke rejects the whole bundle at the Binder layer), the running totals are re-checked against the two caps under `synchronized(ScratchSession)` (over → inbound dropped, `IllegalArgumentException`), the placement int is checked, fresh ids are minted (`ScratchInk.toStrokes`: unknown style → PEN, width clamped), and the page is written **on the Binder thread** by `ScratchStore.receive` under the page-full rule. | `IScratchPad.aidl` (`receiveInk`), `PaperStroke` / `InkBundle` (parcel + `requireValid`, JVM-tested), `TransferCaps.withinLimits/chunk/toPaperStrokes` (JVM-tested), `InkChunks` (JVM-tested), `ScratchPadFlow.startSend`, `ScratchPadClient.send`, `ScratchPadService.receiveInk`, `ScratchInk.toStrokes` (JVM-tested), `ScratchStore.receive` |
+| 30 | **Inward ink (`takeOutgoing`) is validated; the paste is one undoable step and nothing else on the page changes.** Every reply is an `InkBundle` → `requireValid` at unmarshal (chunk caps, equal channel lengths, finite `width > 0`, finite positive page size), then `TransferCaps.sanitize` (known style or PEN, width in `MIN_WIDTH`..`MAX_WIDTH` — NaN → default, opaque black — **no colour crosses in**) under `TransferCaps.Drain`: stop at the first empty bundle, at the summed caps (`MAX_TRANSFER_STROKES` / `MAX_TRANSFER_POINTS` — the rest dropped, `truncated`), or at `TRANSFER_MAX_CHUNKS` (34) + one probe past the budget (a non-empty chunk there = `truncated` → the core's `scratch_truncated` dialog names the pasted count). Fresh ids minted by the core (`TransferCaps.toStrokes`, `timeMillis 0`); `NotebookActivity.pasteStrokes` inserts the rows after the page's last stroke (`StrokeStore.insert` on the serial writer), adds them to the paper, records **one** `NotebookUndo.Action.Pasted` (undo removes exactly those rows; redo restores them in place), switches to the lasso and leaves them selected **1:1** (host-initiated `setSelection`, no echo) — no other row, object, page or session state is touched; a failed drain → `scratch_failed`, nothing pasted. The pad's side is symmetric: a received placement lands as one `Pasted` (or one `Page` step for a New-page placement) on its own stack. | `IScratchPad.aidl` (`takeOutgoing`), `InkBundle.requireValid` (JVM-tested), `TransferCaps.sanitize/toStrokes/Drain` (JVM-tested: stop on empty / summed caps / chunk budget + probe / NaN width / colour forced), `ScratchPadClient.drainOutgoing`, `ScratchPadFlow.onResult`, `NotebookActivity.pasteStrokes`, `NotebookUndo.Action.Pasted`, `StrokeStore.insert`, `ScratchPadActivity.selectReceived` |
+| 31 | **The screen is the extension's, launched only by the core, caller-checked both ways; data never rides the Intent.** `ScratchPadActivity` is exported with a custom action (`ACTION_SCRATCH_PAD_SCREEN`) and **no launcher filter**; first thing in `onCreate` it calls `HostCallerCheck.enforceActivity` — `callingPackage == HOST_PACKAGE` **and** `checkSignatures(caller, self) == SIGNATURE_MATCH`, else `finish()` before anything is inflated (a plain `am start` has no caller → refused; verified on all three devices S0–S2). The core launches it only through an `ActivityResultLauncher<Intent>` (that is what sets `callingPackage`), with `setPackage(ref.packageName)` from a trusted `ProviderRef`, and only **after** `begin(store)` succeeded on the held bind and `paper.releaseForHandoff()` on a paper-hosting caller. The Intent carries the two recorded booleans and nothing else; the Activity reads only those two `EXTRA_*` and returns only `RESULT_SCRATCH_SEND` / `RESULT_CANCELED` — the ink in both directions goes through the held service (rows 29–30), the pages through the held store binder (row 28). Every exit back to the caller runs `releaseForHandoff()` before `finish()` (`finishWithHandoff`); `onResume` reclaims with `resumeDrawing()` (rule 27). | `ScratchPadActivity.onCreate` (`enforceActivity` first) / `finishWithHandoff` / `onResume`, `HostCallerCheck.enforceActivity`, `:ext-scratchpad` manifest (`exported`, custom action, no `LAUNCHER`), `ScratchPadClient.open` (Intent build), `ScratchPadFlow.launchPad` / `ScratchPadLaunch.open` (`ActivityResultLauncher`, `releaseForHandoff()` immediately before `launch`) |
+| 32 | **The raised store cap changes no rule.** A value is `≤ STORE_MAX_VALUE_BYTES` (4 MiB): **inline** (`put` / `get`) up to `STORE_MAX_INLINE_BYTES` (512 KiB) — a `get` of a stored value above it throws `IllegalStateException(STORE_VALUE_LARGE)` ("use getLarge"), a `put` above it is refused; **large** (`putLarge` / `getLarge`) as a `LargeValue` = a read-only ashmem region + `byteCount` (`LargeValue.requireValid`: `0..STORE_MAX_VALUE_BYTES`, `byteCount ≤ region size`; an empty stored value rides a 1-byte region — `getLarge` returns any stored size) the receiver copies out of and closes in `finally` — host side `SharedBytes.readAndClose` **before** the gate sees bytes (so the cap applies to the copy, never to a live mapping), the ashmem step wrapped so a mapping failure is an `IllegalStateException` like every gate failure (never an empty reply the extension reads as null — S3), the reply region parked per Binder thread and closed in `onTransact`'s `finally`; extension side `readAndClose` in `ScratchStore.readPage`, its own put-region closed in `finally` after `putLarge` returns. Keys still `1..512` chars and `≤ STORE_MAX_KEYS` (50 000 — a *new* key past it refused); every method still uid-bound + revocable through the same `ExtensionStoreGate.check()`; the DB still opened only through `SoilCrypto` under the global key. The two appended methods follow the arc-5 compatible-change recipe (appended **last** in `IExtensionStore`, the arc-2 methods' codes untouched; `API_VERSION` still 1 — the host and its store binder are always the current build, the recipe only keeps an older extension's `put` / `get` working unchanged). **A page over the cap is refused by the extension, never split, never written elsewhere:** `ScratchStore.receive` / `ScratchDocument` measure the exact encoded size (`ScratchPageCodec`) and throw `PageFullException` → `SCRATCH_PAGE_FULL` on `receiveInk` (typed `ScratchPageFullException` → the core's `scratch_page_full_host` dialog, nothing placed) / the pad's own `scratch_page_full` dialog once per visit on a stroke the page cannot take (the stroke removed, nothing written); the pad has no file, prefs or second store of its own. | `ExtensionContract.STORE_*`, `IExtensionStore.aidl` (`putLarge` / `getLarge` appended), `LargeValue` (parcel + `requireValid`, JVM-tested), `SharedBytes.write/read/readAndClose`, `ExtensionStoreBinder.putLarge/getLarge/onTransact`, `ExtensionStoreGate` (JVM-tested: inline cap, large cap, `STORE_VALUE_LARGE`, key count), `ScratchStore.readPage/savePage/receive`, `ScratchDocument` (exact running size, `PageFullException`), `ScratchPadActivity` (page-full dialog once per visit) |
 
 ## Rules for adding a future extension point (write-once, follow later)
 
@@ -1497,6 +1545,59 @@ of rule 5 is bare ink into `createFromInk` (row 19); audit rows 18–24 (H5). Ex
 by the appended `describeOutline` — the first exercised compatible AIDL change (`API_VERSION` still 1),
 the load probe + `OutlineCaps`, and the core-drawn Contents; audit rows 25–27 (C2).
 
+### Adding a screen-owning point (arc 6 pattern)
+
+A point whose extension owns a **screen** — an off-paper Activity the core launches for a result
+(the second tier of the UI rule; the Scratch Pad is the first exercise) — follows rules 1–5, the store
+rules where it keeps data, **plus**:
+
+25. **A screen is the extension's, its data is the host's, the transfer is the point's.** An
+    extension-owned screen holds nothing but what the host lent it for that showing (the store
+    binder, the inbound ink) and hands back only through the point's methods — never through the
+    Intent, never through a file, never through a shared process. (Rows 28–31.)
+26. **A held bind is still bind-per-operation** — the operation is the showing. It is opened before
+    the screen and closed (unbind + revoke) in one `finally` after it, on every path including the
+    caller's death (`ExtensionBinder.hold` → `HeldBinding`; the client's `finish` from the result,
+    the cancel, a failed open and the caller's `onDestroy`). (S3 re-walk of rows 1/6/7.)
+27. **Two paper surfaces never share a process, a view, or the EPD pipeline at once** —
+    `releaseForHandoff()` before the launch **and** before every `finish()` back to the caller,
+    `resumeDrawing()` on return on both sides, and the extension registers its own g-paper engines
+    in its own `Application` (g-paper `docs/api.md` §Lifecycle; the handoff is symmetric — a miss
+    on either side tears the other's raw session down, seen on NA5C in S2). (Row 31.)
+
+Followed by ScratchPad (arc 6): `SCRATCH_PAD` + `IScratchPad` + `PaperStroke` / `InkBundle` in
+`:extension-api`; `ExtensionRegistry.scratchPad` + `ScratchPadClient` over `ExtensionBinder.hold`;
+the recipe below; audit rows 28–32 (S3).
+
+### Extension-owned screens (tier 2) — the recipe
+
+The five steps a later screen-owning extension follows (frozen from §"ScratchPad (contract)"):
+
+1. **Discovery + trust as every point** (`ExtensionRegistry.<point>` — the first trusted service for
+   the action; a second installed one is ignored, like the namer).
+2. **Pre-open the store on IO, hold one bind for the screen's life** (`ExtensionBinder.hold` →
+   `HeldBinding`), call the point's opening method (`begin(store)`, ≤ 2 s), and only then launch the
+   screen with an **`ActivityResultLauncher<Intent>`** — after `paper.releaseForHandoff()` on any
+   paper-hosting caller. Any in-bound payload (ink) goes over the held bind **between** the opening
+   call and the launch, capped and chunked before the bind.
+3. **The screen is an exported Activity with a custom action and no launcher filter**; it verifies its
+   caller **first thing in `onCreate`** (`HostCallerCheck.enforceActivity` — else finished before
+   anything is inflated), reads only the recorded `EXTRA_*` booleans, returns only the recorded
+   `RESULT_*` codes; data never rides the Intent. It registers the g-paper engines in its own
+   `Application`, and every exit back to the caller runs `releaseForHandoff()` before `finish()`.
+4. **On the result (any code), on the launcher's cancel, and in the caller's `onDestroy` while the
+   screen is up:** the out-bound payload is drained on the still-held bind (validated, capped), then
+   `end()` → unbind → revoke the store binder, in one `finally` (the client's `finish`). The extension
+   treats a dead binder / a `SecurityException` from the store as "unavailable" → an honest dialog and
+   `finish()`.
+5. **The core decides what the user sees on every failure** (rule 3): the extension's screen shows
+   dialogs **only about its own state** (page full, store unavailable); the core owns the dialogs
+   around the transfers, and a host-side paste of what came back is **one** undoable step.
+
+Shared UI between the core and such an extension lives in `:paper-screen` (resources + screen
+helpers, g-paper `api`, no contract dependency — §"The extension model"); a fix to shared screen
+logic goes there, never in a consumer.
+
 ### The capability pattern (recorded in arc 3, **built in arc 4 / H3** with the first consumer)
 
 A **capability point** is an extension point whose implementation the core lends to *other*
@@ -1558,8 +1659,11 @@ consumed in-project — see `:ext-templates` for the reference implementation).
    - It is a key/value store: `get(key): ByteArray?`, `put(key, value)`, `delete(key)` (no-op if
      absent), `keys(prefix): List<String>` (`""` = all, ascending). Serialise however you like — the
      Naming extension stores UTF-8 text; there is no schema, no SQL, no namespace.
-   - **Caps** (`ExtensionContract.STORE_*`): key `1..512` chars, value `≤ 256 KiB`, at most `50 000`
-     keys per extension. Over a cap → `IllegalArgumentException` / `IllegalStateException` from the host.
+   - **Caps** (`ExtensionContract.STORE_*`): key `1..512` chars, value `≤ 4 MiB` (`STORE_MAX_VALUE_BYTES`;
+     `put` / `get` carry up to `STORE_MAX_INLINE_BYTES` 512 KiB inline — above that use `putLarge` /
+     `getLarge` with a `LargeValue` region through `SharedBytes`, and a `get` of a large stored value
+     throws `IllegalStateException(STORE_VALUE_LARGE)`), at most `50 000` keys per extension. Over a
+     cap → `IllegalArgumentException` / `IllegalStateException` from the host.
    - **Treat any exception as "store unavailable"** — `SecurityException` (revoked / wrong uid),
      `IllegalArgumentException`, `IllegalStateException`, `RemoteException`, and anything else. Catch it
      and rethrow one of the exceptions Binder carries intact (`IllegalStateException` is what
@@ -1657,6 +1761,32 @@ consumed in-project — see `:ext-templates` for the reference implementation).
       You never see page numbers, positions or ids, and you never build the list: the core sorts, nests
       (H1–H6, orphans attached), highlights and draws the Contents from your labels and levels alone.
       Log the count + duration — never a label.
+11. **Owning a screen** (`SCRATCH_PAD` — `IScratchPad`, see `:ext-scratchpad` for the reference
+    implementation; the tier-2 recipe under §"Extension-owned screens (tier 2)"):
+    - **Your Activity is exported with a custom action and no launcher filter**, and the first line of
+      `onCreate` after `super.onCreate` is `if (!HostCallerCheck.enforceActivity(this, hostPackage)) return` — the host launches
+      you with an `ActivityResultLauncher` (that is what gives you a `callingPackage`); a plain `am start`
+      must be refused. Read only the recorded `EXTRA_*`, return only the recorded `RESULT_*`; **no data
+      rides the Intent** in either direction.
+    - **The service call that opens the showing brings the store; keep it only for the showing.**
+      `begin(store)` runs before your screen is launched — park the binder for the screen's life and
+      drop it on `end()`; after the host unbinds it is revoked, so treat every `SecurityException` /
+      dead binder as "store unavailable": an honest dialog and `finish()`. Values above
+      `STORE_MAX_INLINE_BYTES` go through `putLarge` / `getLarge` (`SharedBytes`); close your region
+      handle in `finally` on both paths. A value over `STORE_MAX_VALUE_BYTES` must be refused, never split.
+    - **Ink arrives and leaves as `InkBundle`s on the service, never on the Activity** — chunked
+      (`TRANSFER_CHUNK_*`), capped (`MAX_TRANSFER_*` — re-check the running totals yourself and throw
+      `IllegalArgumentException`), `requireValid` at unmarshal; mint your own stroke ids, trust nothing
+      but geometry. Place inbound ink **on the Binder thread** before the screen opens; park outbound ink
+      for `takeOutgoing(i)` and answer an empty bundle past the end.
+    - **You host a g-paper surface in another process than the core's.** Register the engines in your
+      own `Application`, call `paper.releaseForHandoff()` **before every `finish()` back to the host**
+      and `resumeDrawing()` in `onResume` — the EPD pen pipeline is process-global and the handoff is
+      symmetric (g-paper `docs/api.md` §Lifecycle).
+    - **Build your chrome from `:paper-screen`** (the e-ink resources, `PaperToolbar` / `PaperChrome` /
+      `PageGestures` / `UndoRedoStack` / `ToolbarAnchor`, `Dialogs`, the Tabler icons) so the screen is
+      the notebook's shape; fix shared screen logic there, never in your copy. `HostCallerCheck.enforce`
+      first in every service method; log counts + durations — never ink.
 
 ---
 

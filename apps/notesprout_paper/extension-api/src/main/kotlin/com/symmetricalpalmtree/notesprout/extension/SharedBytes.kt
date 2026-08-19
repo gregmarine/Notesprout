@@ -16,10 +16,11 @@ import android.system.OsConstants
  */
 object SharedBytes {
 
-    /** Wrap [bytes] (1..STORE_MAX_VALUE_BYTES) in a fresh read-only region. Throws on an empty / oversized input. */
+    /** Wrap [bytes] (0..STORE_MAX_VALUE_BYTES) in a fresh read-only region (an empty value rides a
+     *  1-byte region with `byteCount 0` — ashmem refuses a zero-size region). Throws on an oversized input. */
     fun write(bytes: ByteArray): LargeValue {
-        LargeValue.requireValid(bytes.size, bytes.size)
-        val region = SharedMemory.create(null, bytes.size)
+        LargeValue.requireValid(bytes.size, maxOf(1, bytes.size))
+        val region = SharedMemory.create(null, maxOf(1, bytes.size))
         try {
             val buf = region.mapReadWrite()
             try {

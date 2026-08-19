@@ -31,7 +31,7 @@ class ScratchPageFullException(cause: Throwable) : ExtensionCallException(Extens
  * [finish]: `end()` ≤ [CALL_TIMEOUT_MS] in a `try`, then unbind + revoke the store binder in
  * `finally` — every path: result, cancel, the caller's death, a failed `begin`.
  *
- * [send] (S2): notebook → pad — the chunks through `receiveInk`, one call ≤ [CALL_TIMEOUT_MS] each
+ * [send] (S2): notebook → pad — the chunks through `receiveInk`, one call ≤ [CALL_TIMEOUT_MS] each (the last one, which carries the placement, ≤ [PLACE_TIMEOUT_MS])
  * on the same held bind, `placement` + `last` on every chunk; the extension's
  * `IllegalStateException(SCRATCH_PAGE_FULL)` is typed as [ScratchPageFullException]. Called
  * **between** [open] and the launch, so the pad opens on the received page. [drainOutgoing] (S2):
@@ -107,7 +107,10 @@ class ScratchPadClient(context: Context, val ref: ProviderRef) {
         for ((i, chunk) in chunks.withIndex()) {
             val bundle = InkBundle(chunk, pageWidth, pageHeight)
             val last = i == chunks.lastIndex
-            binding.call(CALL_TIMEOUT_MS) {
+            // The last chunk carries the whole placement (read + decode + re-encode + write of a page up to
+            // 4 MiB on an e-ink CPU) — a Binder call cannot be cancelled, so a budget that is too short
+            // reports a failure for ink that then lands anyway. PLACE_TIMEOUT_MS for that one call.
+            binding.call(if (last) PLACE_TIMEOUT_MS else CALL_TIMEOUT_MS) {
                 try {
                     it.receiveInk(bundle, placement, last)
                 } catch (e: IllegalStateException) {
@@ -163,5 +166,7 @@ class ScratchPadClient(context: Context, val ref: ProviderRef) {
     companion object {
         const val TAG = "ScratchPadClient"
         const val CALL_TIMEOUT_MS = 2_000L
+        /** The last `receiveInk` chunk — the extension places the whole transfer inside this call (S3 review). */
+        const val PLACE_TIMEOUT_MS = 10_000L
     }
 }

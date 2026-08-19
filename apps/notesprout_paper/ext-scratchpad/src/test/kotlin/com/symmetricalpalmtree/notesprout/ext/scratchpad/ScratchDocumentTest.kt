@@ -13,6 +13,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 
 /** [ScratchDocument] over an in-memory store: pages, the full rule, flush, structural undo / redo. */
@@ -22,7 +23,12 @@ class ScratchDocumentTest {
     private class FakeStore : IExtensionStore {
         val map = LinkedHashMap<String, ByteArray>()
         var puts = 0
-        override fun get(key: String): ByteArray? = map[key]
+        /** Runs once, inside the next `get` of a page blob — simulates ink landing on Main during a page turn's read hop (S3). */
+        var onNextPageRead: (() -> Unit)? = null
+        override fun get(key: String): ByteArray? {
+            if (key.startsWith(ScratchStore.PAGE_PREFIX)) onNextPageRead?.let { onNextPageRead = null; it() }
+            return map[key]
+        }
         override fun put(key: String, value: ByteArray) { puts++; map[key] = value }
         override fun delete(key: String) { map.remove(key) }
         override fun keys(prefix: String): List<String> = map.keys.filter { it.startsWith(prefix) }
@@ -212,5 +218,32 @@ class ScratchDocumentTest {
         assertEquals(listOf("a"), d.strokes.keys.toList())
         assertTrue(d.reapply(lone))
         assertTrue(d.strokes.isEmpty())
+    }
+    @Test
+    fun inkLandingDuringAPageTurnIsKeptOnThePageLeft() = runBlocking {
+        val (d, store) = doc()
+        d.load()
+        d.ensurePageSize(1000, 1500)
+        val first = d.currentId
+        d.insert(after = true)
+        val second = d.currentId
+        // Turn back to the first page; while its blob is being read, a stroke lands (on `second`, the page being left).
+        store.onNextPageRead = { assertTrue(d.add(stroke("late"))) }
+        d.goTo(first)
+        assertEquals(first, d.currentId)
+        assertFalse(d.strokes.containsKey("late"))
+        assertFalse(d.dirty)
+        d.goTo(second)
+        assertTrue("the late stroke was written to the page it landed on", d.strokes.containsKey("late"))
+    }
+
+    @Test
+    fun anUndecodablePageIsUnreadableNotBlank() = runBlocking {
+        val (d, store) = doc()
+        d.load()
+        store.map[ScratchStore.PAGE_PREFIX + d.currentId] = byteArrayOf(9, 0, 0)   // unknown version, short
+        val (d2, _) = doc(store)
+        try { d2.load(); fail("expected StoreUnavailable") } catch (e: StoreUnavailable) { }
+        assertEquals(3, store.map[ScratchStore.PAGE_PREFIX + d.currentId]!!.size)   // untouched
     }
 }

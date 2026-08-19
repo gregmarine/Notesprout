@@ -8,7 +8,7 @@ UI rule's tier 2 (`docs/extensions.md` §"ScratchPad (contract)"): the core laun
 This file is the extension's own reference — the screen, its tools, pages, store layout and failures.
 Contract, host clients and the boundary rules live in `docs/extensions.md`; the notebook side in
 `docs/notebook.md` §"Scratch Pad (arc 6)"; the library side in `docs/library.md`. Plan:
-`PAPER_SCRATCHPAD_PLAN.md` (S0 ✅ · S1 ✅ · S2 ✅ · S3 ⬜).
+`PAPER_SCRATCHPAD_PLAN.md` (S0 ✅ · S1 ✅ · S2 ✅ · S3 🧪 awaiting the user's device checklist; **this file is frozen**).
 
 ## Module (`:ext-scratchpad`)
 
@@ -32,7 +32,7 @@ never `:app`; no Room / SQLCipher / serialization — **its data lives in the ho
 | `ScratchPadActivity` | the screen (below) |
 | `ScratchToolbar` | the top bar over the shared `PaperToolbar` + the Send button's visibility |
 | `ScratchSelectionToolbar` | the floating Delete · [Send] bar, anchored by the shared `ToolbarAnchor` |
-| `ScratchDebugMenu` (`src/debug`, no-op twin in `src/release`) | ⋯ → "Store size" (keys + page bytes as a toast; removed in S3) |
+(No debug menu: the S1 "Store size" ⋯ item was removed in S3 with its `sizeSummary` — the pad has no debug tools; the host's notebook ⋯ keeps its own.)
 
 ## The screen (`ScratchPadActivity`)
 
@@ -45,8 +45,8 @@ and `EXTRA_SCRATCH_OPEN_RECEIVED` (S2). The store comes from `ScratchSession.sto
 host handed to `begin` on the held bind; absent (no `begin`) → `scratch_store_unavailable` → finish.
 
 **Shape — the notebook's.** Full-bleed g-paper (`GPaper.create`, the pad's own engine in its own
-process), immersive, `TopGuard.applyRootPadding(topBar)`; top bar **Back · "Scratch Pad" · [Send] ·
-[debug ⋯]**; bottom bar **Pen · Eraser · Lasso … `<` · `n / N` · `>`** (S1 follow-up, user's call: the
+process), immersive, `TopGuard.applyRootPadding(topBar)`; top bar **Back · "Scratch Pad" · [Send]** (the Send glyph is Tabler
+`pencil-down` — S3, user's call; the `send` paper-plane read as "share"); bottom bar **Pen · Eraser · Lasso … `<` · `n / N` · `>`** (S1 follow-up, user's call: the
 title up, the tools down — the arrows are `ToolbarButton`s, never disabled, a no-op at a bound); the
 floating **Delete · [Send]** bar over a lasso
 selection. Tools fixed: `PEN_WIDTH_PX 3f`, `ERASER_RADIUS_PX 15f`, black, smart lasso / scribble
@@ -179,7 +179,7 @@ partial stroke, a malformed geometry blob skips that stroke, an unknown version 
 ## Entry points (core side — `docs/notebook.md`, `docs/library.md`)
 
 Both exist **only while a trusted `SCRATCH_PAD` extension is installed** (re-discovered on every
-resume): the notebook's top-bar **sketching** button (after Lasso, before the debug ⋯ — S1 Q2;
+resume): the notebook's top-bar **sketching** button (at the far right, immediately before the debug ⋯ — S3 Q1;
 `ScratchPadFlow`, Send enabled, `paper.releaseForHandoff()` immediately before the launch) and the
 library's bottom-bar **sketching** button after Recents (S1 Q3; `ScratchPadLaunch`, no send target). Both
 run `ScratchPadClient.open` (store pre-open → held bind → `begin`) → an `ActivityResultLauncher` →

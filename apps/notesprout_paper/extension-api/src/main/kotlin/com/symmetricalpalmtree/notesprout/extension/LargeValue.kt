@@ -14,8 +14,9 @@ import android.os.SharedMemory
  * `finally`). [SharedBytes] writes the handshake once for both sides.
  *
  * Wire form: `SharedMemory · int byteCount` (a compatible tail may be appended later).
- * `requireValid` at construction (so at unmarshal too): `byteCount` in `1..STORE_MAX_VALUE_BYTES`
- * and `≤ memory.size`.
+ * `requireValid` at construction (so at unmarshal too): `byteCount` in `0..STORE_MAX_VALUE_BYTES`
+ * and `≤ memory.size` (an empty value rides a 1-byte region with `byteCount 0` — a value `put` inline
+ * may be empty, and `getLarge` must return any stored size; S3 review).
  */
 class LargeValue(
     val memory: SharedMemory,
@@ -43,8 +44,8 @@ class LargeValue(
     companion object {
         /** The constructor's checks, pure so they are JVM-testable. */
         fun requireValid(byteCount: Int, memorySize: Int) {
-            require(byteCount in 1..ExtensionContract.STORE_MAX_VALUE_BYTES) {
-                "byteCount must be 1..${ExtensionContract.STORE_MAX_VALUE_BYTES} ($byteCount)"
+            require(byteCount in 0..ExtensionContract.STORE_MAX_VALUE_BYTES) {
+                "byteCount must be 0..${ExtensionContract.STORE_MAX_VALUE_BYTES} ($byteCount)"
             }
             require(byteCount <= memorySize) { "byteCount $byteCount exceeds the region ($memorySize)" }
         }

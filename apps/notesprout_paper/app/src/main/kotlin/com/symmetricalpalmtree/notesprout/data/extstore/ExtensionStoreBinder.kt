@@ -47,13 +47,20 @@ class ExtensionStoreBinder(db: ExtensionStoreDatabase, extUid: Int) : IExtension
     override fun putLarge(key: String?, value: LargeValue?) {
         requireNotNull(value) { "value is null" }
         // Copy in, then close OUR handle on the extension's region whatever the gate says.
-        val bytes = SharedBytes.readAndClose(value)
+        val bytes = region { SharedBytes.readAndClose(value) }
         gate.putLarge(key, bytes)
     }
 
+    /** The ashmem step sits outside the gate's `io {}` mapping: a mapping / creation failure
+     *  (`ErrnoException` — checked, not in Binder's marshalable set) would otherwise leave the stub
+     *  with an empty reply the extension reads as null / success. Same rule as the gate: every failure
+     *  is an `IllegalStateException` (S3 review). */
+    private inline fun <T> region(block: () -> T): T =
+        try { block() } catch (e: Exception) { throw IllegalStateException("store region: ${e.javaClass.simpleName}: ${e.message}") }
+
     override fun getLarge(key: String?): LargeValue? {
         val bytes = gate.getLarge(key) ?: return null
-        val v = SharedBytes.write(bytes)
+        val v = region { SharedBytes.write(bytes) }
         pending.set(v.memory)   // closed in onTransact's finally, after the reply is marshalled
         return v
     }

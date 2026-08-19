@@ -60,11 +60,17 @@ paper notebooks.
   nests (H1–H6, orphans attached) and draws the **Contents** itself — a top-bar `list` button (only
   once the notebook holds a heading) or a one-finger swipe down the paper opens it as a 60 % sidebar
   (full screen under 480 dp); tap a row to turn to its page (`docs/notebook.md` §"Contents (arc 5)",
-  `docs/extensions.md` audit rows 25–27).
+  `docs/extensions.md` audit rows 25–27). The sixth is the **Scratch Pad** (`:ext-scratchpad`, arc 6):
+  the first extension that owns a *screen* — one global multi-page jotter (pen / eraser / lasso, swipe
+  and arrow flips, two-finger insert, undo / redo), reachable from the notebook's top bar and the
+  library's bottom bar while it is installed, its pages kept in the host's encrypted extension store
+  (≤ 4 MiB each over `SharedMemory`), with two-way ink transfer — lasso → **Pad** → New / Current page
+  (the pad opens with it selected) and the pad's Send (page or selection) back into the notebook,
+  pasted 1:1 as one undoable step (`docs/scratchpad.md`, `docs/extensions.md` audit rows 28–32).
 
 ## What Paper is **not** (v0)
 
-No search · no handwriting recognition · no export / import / backup / restore · no scratch pad ·
+No search · no handwriting recognition · no export / import / backup / restore ·
 no calendar · tasks · Today screen · no page index · no headings / text / shapes / links / sticky
 notes / documents · no clipboard · no per-notebook keys or passphrase rotation · no template library
 in the core (templates come from the Templates extension) · no Extensions UI yet (install/remove by
@@ -97,7 +103,7 @@ Seven APKs: the core (`:app`), the Templates extension (`:ext-templates`), the N
 (`:ext-naming` — per-folder default-name schemes such as `Meeting {date} {n:2}`, kept in a core-owned
 encrypted store), the ML Kit extension (`:ext-mlkit` — the handwriting recognizer; the only module
 that depends on ML Kit), the Markdown extension (`:ext-markdown`), the Heading extension
-(`:ext-heading`) and the Scratch Pad extension (`:ext-scratchpad` — arc 6, in progress: the first
+(`:ext-heading`) and the Scratch Pad extension (`:ext-scratchpad` — arc 6, complete: the first
 extension that owns a *screen*; it and `:app` share the `:paper-screen` library — the e-ink resources
 and the paper-screen helpers, g-paper as its `api`). All are debug-signed by the same `~/.android/debug.keystore`, which is what satisfies
 the same-signature trust rule in dev; an extension built on another machine is not trusted by this
@@ -114,7 +120,7 @@ run `./gradlew publishToMavenLocal` in `~/git/g-paper` first. Requires a Temurin
 
 | Concern | Path |
 |---|---|
-| Project memory / plan (read first) | `PAPER_PLAN.md` (v0), `PAPER_EXTENSIONS_PLAN.md` (arc 1 — extension API + Templates), `PAPER_NAMING_PLAN.md` (arc 2 — extension store + Naming), `PAPER_RECOGNITION_PLAN.md` (arc 3 — handwriting-recognizer capability point + ML Kit), `PAPER_OBJECTS_PLAN.md` (arc 4 — content objects, selection toolbar, Markdown + Heading), `PAPER_CONTENTS_PLAN.md` (arc 5 — the Contents), `PAPER_SCRATCHPAD_PLAN.md` (arc 6 — the Scratch Pad, active) |
+| Project memory / plan (read first) | `PAPER_PLAN.md` (v0), `PAPER_EXTENSIONS_PLAN.md` (arc 1 — extension API + Templates), `PAPER_NAMING_PLAN.md` (arc 2 — extension store + Naming), `PAPER_RECOGNITION_PLAN.md` (arc 3 — handwriting-recognizer capability point + ML Kit), `PAPER_OBJECTS_PLAN.md` (arc 4 — content objects, selection toolbar, Markdown + Heading), `PAPER_CONTENTS_PLAN.md` (arc 5 — the Contents), `PAPER_SCRATCHPAD_PLAN.md` (arc 6 — the Scratch Pad, complete) |
 | Standing rules + build facts | `CLAUDE.md` |
 | Encryption & launch spine | `docs/crypto.md` |
 | Containers & global index | `docs/data.md` |

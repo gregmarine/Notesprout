@@ -66,8 +66,17 @@ class ScratchDocument(private val store: ScratchStore) {
 
     private suspend fun loadPage(id: String) {
         val page = withContext(Dispatchers.IO) {
-            store.readPage(id)?.let { blob -> ScratchPageCodec.decode(blob) to blob.size }
+            store.readPage(id)?.let { blob ->
+                // An undecodable blob (a newer codec version, a truncated value) is "unreadable", never a
+                // crash and never silently blank — a blank page would be saved over it on the next stroke.
+                val decoded = try { ScratchPageCodec.decode(blob) } catch (e: Exception) { throw StoreUnavailable(IllegalStateException("page $id unreadable: ${e.message}", e)) }
+                decoded to blob.size
+            }
         }
+        // Ink committed on the page being left while that read was in flight landed in `strokes` (the
+        // old page's map): write it to the old page before the swap drops the map — unless that page
+        // is being removed (delete / undo), in which case it goes with the page. Bounded by the drawing rate.
+        while (dirty && currentId != id && currentId in ids) flush()
         currentId = id
         strokes.clear()
         if (page == null) {

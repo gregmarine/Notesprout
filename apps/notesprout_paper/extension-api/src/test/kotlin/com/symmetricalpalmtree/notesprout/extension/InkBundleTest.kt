@@ -51,7 +51,8 @@ class InkBundleTest {
     fun largeValueBounds() {
         LargeValue.requireValid(1, 1)
         LargeValue.requireValid(ExtensionContract.STORE_MAX_VALUE_BYTES, ExtensionContract.STORE_MAX_VALUE_BYTES)
-        assertThrows(IllegalArgumentException::class.java) { LargeValue.requireValid(0, 10) }
+        LargeValue.requireValid(0, 1)   // an empty value: byteCount 0 on a 1-byte region
+        assertThrows(IllegalArgumentException::class.java) { LargeValue.requireValid(-1, 10) }
         assertThrows(IllegalArgumentException::class.java) { LargeValue.requireValid(11, 10) }
         assertThrows(IllegalArgumentException::class.java) {
             LargeValue.requireValid(ExtensionContract.STORE_MAX_VALUE_BYTES + 1, ExtensionContract.STORE_MAX_VALUE_BYTES + 1)

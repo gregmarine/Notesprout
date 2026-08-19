@@ -18,14 +18,11 @@ global-index model, global encryption model, and e-ink design philosophy — and
   C2 ✅ 54b9bf2**, all user-verified SNN + NA5C + MIP11: the
   Contents — a table of contents from the Heading extension via `IObjectProvider.describeOutline`
   (appended, compatible, `API_VERSION` stays 1) + a core-drawn `ContentsDialog`, top-bar `list`
-  button + one-finger swipe-down), then **`PAPER_SCRATCHPAD_PLAN.md` (arc 6, PLANNED 2026-08-19 —
-  the ACTIVE arc: `NSE · Scratch Pad`, an extension-owned off-paper screen (UI-rule tier 2, first
-  exercise) + the shared `:paper-screen` module + the `SCRATCH_PAD` point + `IExtensionStore.putLarge /
-  getLarge` (4 MiB values over `SharedMemory`) + the two ink transfers; S0 ✅ 9a96c7a · S1 ✅ 98f58f6 · S2 ✅ 374f17f · S3 ⬜)**
-  — read all seven top-to-bottom at the start of every session; **S0 ✅ 2026-08-19 (user-verified
-  SNN / NA5C / MIP11); S1 ✅ 98f58f6 2026-08-19 (the screen + the two entry buttons — user-verified SNN /
-  NA5C / MIP11); S2 ✅ 374f17f 2026-08-19 (the two transfers — user-verified SNN / NA5C / MIP11);
-  next = S3 (fresh session, the phase-start wizard first).**
+  button + one-finger swipe-down), then **`PAPER_SCRATCHPAD_PLAN.md` (arc 6 — S0 ✅ 9a96c7a · S1 ✅ 98f58f6 · S2 ✅ 374f17f
+  user-verified SNN / NA5C / MIP11 · S3 🧪 code + docs complete, awaiting the user's device checklist: `NSE · Scratch Pad`, an extension-owned off-paper screen (UI-rule tier 2, first exercise) +
+  the shared `:paper-screen` module + the `SCRATCH_PAD` point + `IExtensionStore.putLarge / getLarge`
+  (4 MiB values over `SharedMemory`) + the two ink transfers)** — read all seven top-to-bottom at the
+  start of every session. **S3 is the last phase; once it is ✅ no arc is active and the next arc is not planned — ask first.**
 - **Package / applicationId:** `com.symmetricalpalmtree.notesprout` (debug: `.dev` suffix)
 - **Launcher label:** "Notesprout Paper" (debug: "Notesprout Paper Dev")
 
@@ -100,12 +97,12 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   `SharedMemory` via `SharedBytes`; `get` of a large stored value throws `STORE_VALUE_LARGE`). S0 ✅ 9a96c7a
   (contract, module, skeleton, debug "Probe scratch pad" — removed in S3). **S1 ✅ 98f58f6 — the screen +
   the two entry buttons** (`docs/scratchpad.md`): `ScratchPadActivity` = the notebook's shape from
-  `:paper-screen` in the extension's own process (top bar Back · "Scratch Pad" · [Send] · [⋯]; bottom
+  `:paper-screen` in the extension's own process (top bar Back · "Scratch Pad" · [Send]; bottom
   bar Pen · Eraser · Lasso … `<` n / N `>`; pages, saves and the 4 MiB full rule through `ScratchDocument`
   over `ScratchStore`; debounced 800 ms save + flush on leave / pause / **Back awaits the flush before
   finishing**, because the host's `end()` revokes the store right after the result); the notebook's
-  top-bar Scratch Pad button (Tabler **`sketching`**, `IconNames.SKETCHING`; after Lasso, before the
-  debug ⋯ — `notebook/ScratchPadFlow`, **`paper.releaseForHandoff()` immediately before the launch** — and
+  top-bar Scratch Pad button (Tabler **`sketching`**, `IconNames.SKETCHING`; far right, immediately
+  before the debug ⋯ since S3 — `notebook/ScratchPadFlow`, **`paper.releaseForHandoff()` immediately before the launch** — and
   the pad **`releaseForHandoff()` before every `finish()` back** (`finishWithHandoff`): the caller's
   `onResume` reclaim runs before the pad window's visibility close, and a late close from the other process
   tears the caller's live session down on BOOX)
@@ -123,8 +120,16 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   the pad's Send (page / selection) → `RESULT_SCRATCH_SEND` → `drainOutgoing` (`TransferCaps.Drain`) →
   `pasteStrokes` (fresh ids, **coordinates kept 1:1**, one `NotebookUndo.Action.Pasted`, left selected).
   **Both directions are copies; ink never rides the Intent; no id crosses.** The extension maps with its
-  own `ScratchInk` (`:paper-screen` never sees `:extension-api`). S3 = review / audit rows 28–32 /
-  rules 25–27.
+  own `ScratchInk` (`:paper-screen` never sees `:extension-api`). **S3 (🧪) froze the arc:** the
+  `/code-review` of the whole range fixed, boundary-audit rows 28–32 + the re-walk of 1/6/7 for the held
+  bind, rules 25–27 (§"Adding a screen-owning point (arc 6 pattern)") and the tier-2 recipe
+  (§"Extension-owned screens (tier 2)") in `docs/extensions.md`, `docs/scratchpad.md` frozen; the
+  notebook's Scratch Pad button moved to the **far right, immediately before the debug ⋯** (layout weight
+  gap — the debug menu adds no spacer of its own); the pad's Send glyphs are Tabler **`pencil-down`**
+  (`ic_send` gone); both debug probes ("Probe scratch pad", the pad's whole `ScratchDebugMenu` +
+  `sizeSummary`) removed — the pad has no debug ⋯. An intermittent "sluggish first drag of a
+  just-transferred selection" was investigated (S3 plan note): no code-path difference, measured
+  identical on MIP11 — if it recurs, note device / stylus-vs-finger / first-drag-only before digging.
 - **Notebook creation:** templates come **only** from `ExtensionRegistry` providers via
   `TemplateProviderClient` (bind-per-operation, signature re-checked at bind, timeouts, unbind in
   `finally`, payload = mime + byte cap + exact requested size); **the core has no renderer**. No
@@ -135,7 +140,7 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   key (raw-key id `ext:<pkg>`), opened only by `ExtensionStores.open` (open-or-create — the **third
   named create entry point**, `docs/crypto.md` audit item 2) and reached by the extension only through
   an `ExtensionStoreBinder` the host mints **per bind, uid-bound, revoked in the unbind `finally`**;
-  caps `ExtensionContract.STORE_*` (512 chars / 256 KiB / 50 000 keys). Never a key, path, or `File`
+  caps `ExtensionContract.STORE_*` (512 chars / 4 MiB per value since arc 6 — inline `put` / `get` ≤ 512 KiB, above that `putLarge` / `getLarge` / 50 000 keys). Never a key, path, or `File`
   across the boundary. Open the store on IO **before** binding (cold KDF must not sit inside the call
   timeout). The `.db` survives the extension's uninstall.
 - **NotebookNamer** (arc 2 / N1, `docs/extensions.md` §"NotebookNamer — host behaviour"): the second

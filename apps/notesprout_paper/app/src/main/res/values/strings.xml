@@ -142,6 +142,7 @@
     <string name="scratch_too_large">That\'s too much ink to send at once (%1$d strokes).</string>
     <string name="scratch_page_full_host">The scratch pad\'s page is full — send to a new page.</string>
     <string name="scratch_truncated">Only the first %1$d strokes came back.</string>
+    <string name="scratch_result_lost">The notebook was restarted while the scratch pad was open — the ink couldn\'t be brought back. It\'s still on the pad.</string>
     <string name="contents_empty">No headings yet</string>
     <string name="contents_truncated">Showing the first %1$d headings</string>
     <string name="cd_expand">Expand</string>

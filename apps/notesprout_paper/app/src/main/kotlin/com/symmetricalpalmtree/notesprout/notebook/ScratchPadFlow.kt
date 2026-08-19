@@ -181,26 +181,49 @@ class ScratchPadFlow(
             }
             Slog.d(TAG) { "launching the pad" + if (send != null) " (received)" else "" }
             paper.releaseForHandoff()   // immediately before launching another paper-hosting screen (g-paper §Lifecycle)
-            launcher.launch(intent)
+            try {
+                launcher.launch(intent)
+            } catch (e: Exception) {   // ActivityNotFound / SecurityException: the screen vanished between the bind and the launch (BOOX freeze, a pad without the exported Activity)
+                Slog.d(TAG) { "launch failed: ${e.javaClass.simpleName}: ${e.message}" }
+                client = null; busy = false
+                paper.resumeDrawing()   // the handoff above released our pipeline — take it back, nothing is coming
+                c.finish()
+                if (!activity.isFinishing && !activity.isDestroyed) {
+                    Dialogs.problem(activity, R.string.cd_scratch_pad, activity.getString(R.string.scratch_failed, r.label))
+                    refresh()
+                }
+            }
         }
     }
 
     private fun onResult(resultCode: Int) {
-        val c = client ?: return
-        client = null
-        busy = false
         Slog.d(TAG) { "result $resultCode" + if (resultCode == Activity.RESULT_CANCELED) " (cancelled)" else "" }
+        val c = client
+        if (c == null) {
+            // The host process was killed and this screen recreated while the pad was up: the launcher
+            // survives, the client did not. A Send has nowhere to land — say so rather than drop it silently
+            // (the pad's ink is still on the pad). Anything else needs nothing.
+            if (resultCode == ExtensionContract.RESULT_SCRATCH_SEND && !activity.isFinishing && !activity.isDestroyed) {
+                Dialogs.problem(activity, R.string.cd_scratch_pad, activity.getString(R.string.scratch_result_lost))
+            }
+            return
+        }
         if (resultCode != ExtensionContract.RESULT_SCRATCH_SEND) {
+            client = null; busy = false
             appScope.launch { withContext(NonCancellable) { c.finish() } }
             return
         }
         // Pad → notebook: drain on the still-held bind, then release it; paste under the host's page-op lock.
+        // `busy` / `client` stay set until the drain is over — a second launch meanwhile would `begin()` a
+        // new showing (wiping the pad's parked chunks mid-drain) and this client's `end()` would then
+        // tear that showing's store down.
         activity.lifecycleScope.launch {
             val drained = try {
                 c.drainOutgoing()
             } catch (e: ExtensionCallException) {
                 Slog.d(TAG) { "drain failed: ${e.message}" }; null
             } finally {
+                if (client === c) { client = null; busy = false }
                 appScope.launch { withContext(NonCancellable) { c.finish() } }
             }
             if (drained == null) {
