@@ -37,7 +37,11 @@
                 android:src="@drawable/ic_arrow_left"
                 android:contentDescription="@string/cd_back" />
 
-            <!-- Contents (arc 5 / C1): GONE until an object provider answers describeOutline. -->
+            <View
+                android:layout_width="12dp"
+                android:layout_height="0dp" />
+
+            <!-- Contents (arc 5 / C1): GONE unless ContentsFlow.available. -->
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnContents"
                 style="@style/Widget.Notesprout.ToolbarButton"
