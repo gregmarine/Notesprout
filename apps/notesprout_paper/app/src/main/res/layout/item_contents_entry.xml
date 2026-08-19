@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Contents row (arc 5 / C1): [+/− toggle] [page number 52dp] [1dp divider] [label], whole row
+     indented (level − 1) × 16dp in code (rowContent paddingStart), min height 68dp (ROW_HEIGHT_DP),
+     1dp separator below. The highlighted row takes bg_contents_active_entry (5dp bar, right edge). -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:id="@+id/rowContent"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="68dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="4dp"
+        android:paddingEnd="12dp">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnToggle"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_plus"
+            android:contentDescription="@string/cd_expand" />
+
+        <TextView
+            android:id="@+id/pageNumber"
+            android:layout_width="52dp"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:textColor="@color/inkBlack"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="36dp"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"
+            android:background="@color/inkBlack" />
+
+        <TextView
+            android:id="@+id/label"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:textColor="@color/inkBlack"
+            android:textSize="20sp"
+            android:singleLine="true"
+            android:ellipsize="end" />
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="24dp"
+        android:background="@color/inkBlack" />
+</LinearLayout>

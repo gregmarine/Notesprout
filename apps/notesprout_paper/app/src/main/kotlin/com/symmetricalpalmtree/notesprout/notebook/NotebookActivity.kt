@@ -2,7 +2,6 @@ package com.symmetricalpalmtree.notesprout.notebook
 
 import android.content.Context
 import android.content.Intent
-import android.graphics.Rect
 import android.os.Bundle
 import android.util.Log
 import android.view.MotionEvent
@@ -12,6 +11,7 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.TooltipCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -59,7 +59,9 @@ import kotlinx.coroutines.withContext
  * content objects reach the paper through [ObjectRenderer] (arc 4); the floating selection toolbar
  * is [SelectionToolbar] (arc 4 / H2 — its contents from [SelectionActions.merge]); the object
  * providers behind it are [ObjectProviders], the provider-facing flows [ObjectActions], the cache
- * fill [ObjectRenderPass] (arc 4 / H4) — this screen owns only the page mutations they lead to.
+ * fill [ObjectRenderPass] (arc 4 / H4) — this screen owns only the page mutations they lead to. The
+ * chrome geometry (exclusion rects, over-chrome test) is [NotebookChrome]; the Contents (arc 5 / C1)
+ * is [ContentsFlow] behind the top-bar list button and the one-finger swipe-down.
  *
  * Immersive (system bars hidden, transient by swipe). The toolbar is TopGuard-padded because on
  * BOOX the status bar still overlays the window top.
@@ -72,6 +74,8 @@ class NotebookActivity : AppCompatActivity() {
     private lateinit var selectionToolbar: SelectionToolbar
     private lateinit var session: NotebookSession
     private lateinit var pageGestures: PageGestures
+    private lateinit var chrome: NotebookChrome
+    private lateinit var contentsFlow: ContentsFlow
     private val repo by lazy { IndexRepository() }
 
     private var notebookId: String = ""
@@ -184,11 +188,19 @@ class NotebookActivity : AppCompatActivity() {
             else RecognizeContext(paper.getStrokes(), session.currentPage.width.toFloat(), session.currentPage.height.toFloat())
         }, contents = { if (!opened || closing) null else ContentsSource.gather(this, session, providers) })   // arc 5 / C0 probe
 
+        chrome = NotebookChrome(paper, binding.topBar, binding.bottomStrip, selectionToolbar) { !opened || contentsFlow.showing }
+        contentsFlow = ContentsFlow(
+            this, paper, { session }, { providers }, { session.currentIndex }, { opened && !closing },
+            onShowingChanged = { pushExclusions() },
+            navigate = { index -> runPageOp { navigateTo(index) } },
+        )
+        binding.btnContents.setOnClickListener { contentsFlow.open() }   // inside topBar: chrome release + exclusion already cover it
+        TooltipCompat.setTooltipText(binding.btnContents, binding.btnContents.contentDescription)
         pageGestures = PageGestures(
             host = paper.asView(),
             isPenActive = { paper.isPenActive },
             selectionActive = { selectionActive },
-            overChrome = { overChrome(it) },
+            overChrome = { chrome.overChrome(it) },
             listener = gestureListener,
         )
 
@@ -250,6 +262,8 @@ class NotebookActivity : AppCompatActivity() {
         providers = loaded
         activeIdsCache.clear()
         renderFailed.clear()
+        val listButton = if (loaded.hasOutline) View.VISIBLE else View.GONE   // arc 5: the Contents entry point exists only with an outline-capable provider
+        whenPenIdle { if (!closing) { binding.btnContents.visibility = listButton; binding.root.post { pushExclusions() } } }
         scheduleRenderPass()
         currentSelection?.let { showSelectionToolbar(it) }
         objectActions.warmAtOpen()   // the recognizer's process starts + primes while the user is still writing (H5)
@@ -344,6 +358,7 @@ class NotebookActivity : AppCompatActivity() {
         override fun onUndo() = runPageOp { doUndo() }
         override fun onRedo() = runPageOp { doRedo() }
         override fun onDeleteRequested() { showDeleteSheet() }
+        override fun onSwipeDown() { if (providers.hasOutline) contentsFlow.open() }   // silent without an outline provider (Q2)
     }
 
     // ── Selection toolbar (arc 4 / H2) ───────────────────────────────────────
@@ -666,22 +681,14 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     /**
-     * Chrome rects the stylus must not ink under. Until the notebook is open ([opened]) the whole
-     * paper is excluded instead: no pen input while the "Opening…" popup is up (ink written before
-     * the page is loaded would be dropped, and the popup promises exactly that nothing is taken yet).
-     * Exclusion is applied to the hardware pen layer and filtered model-side by g-paper.
+     * Chrome rects the stylus must not ink under ([NotebookChrome]). Until the notebook is open
+     * ([opened]) — and while the Contents dialog is up — the whole paper is excluded instead: no pen
+     * input while the "Opening…" popup is up (ink written before the page is loaded would be dropped,
+     * and the popup promises exactly that nothing is taken yet), none under the Contents (the Onyx raw
+     * pen path bypasses the window stack).
      */
     private fun pushExclusions() {
-        if (!::paper.isInitialized || !::selectionToolbar.isInitialized) return
-        val view = paper.asView()
-        if (!opened) {
-            paper.setExclusionRects(listOf(Rect(0, 0, maxOf(view.width, 1), maxOf(view.height, 1))))
-            return
-        }
-        val paperLoc = IntArray(2).also { view.getLocationInWindow(it) }
-        val rects = (listOfNotNull(NotebookToolbar.rectOf(binding.topBar), NotebookToolbar.rectOf(binding.bottomStrip)) + selectionToolbar.rects())
-            .map { Rect(it.left - paperLoc[0], it.top - paperLoc[1], it.right - paperLoc[0], it.bottom - paperLoc[1]) }
-        paper.setExclusionRects(rects)
+        if (::chrome.isInitialized) chrome.pushExclusions()
     }
 
     /**
@@ -701,22 +708,14 @@ class NotebookActivity : AppCompatActivity() {
     /** EPD chrome-release: a finger landing on chrome must release the overlay so the tap's visual
      *  result shows. Done here because the buttons consume the touch. Palm-gated. */
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        if (ev.actionMasked == MotionEvent.ACTION_DOWN && ::paper.isInitialized) {
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN && ::chrome.isInitialized) {
             val tool = ev.getToolType(0)
             val finger = tool != MotionEvent.TOOL_TYPE_STYLUS && tool != MotionEvent.TOOL_TYPE_ERASER
-            if (finger && !paper.isPenActive && overChrome(ev)) paper.releaseRender()
+            if (finger && !paper.isPenActive && chrome.overChrome(ev)) paper.releaseRender()
         }
         // Observer only — never consumes, so pen ink and the toolbar buttons still see every event.
         if (opened && ::pageGestures.isInitialized) pageGestures.onTouchEvent(ev)
         return super.dispatchTouchEvent(ev)
-    }
-
-    private fun overChrome(ev: MotionEvent): Boolean {
-        val top = NotebookToolbar.rectOf(binding.topBar)
-        val bottom = NotebookToolbar.rectOf(binding.bottomStrip)
-        val x = ev.x.toInt(); val y = ev.y.toInt()
-        return (top?.contains(x, y) == true) || (bottom?.contains(x, y) == true) ||
-            (::selectionToolbar.isInitialized && selectionToolbar.contains(x, y))
     }
 
     // ── Lifecycle ────────────────────────────────────────────────────────────

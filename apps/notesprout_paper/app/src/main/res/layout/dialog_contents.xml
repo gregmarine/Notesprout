@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Contents (arc 5 / C1): one layout for both forms — ContentsDialog branches in code on the
+     window width (ContentsLayout.fullScreen): < 480dp the panel fills the window (white, back arrow);
+     ≥ 480dp it is a 60%-wide left sidebar with a 1dp inkBlack right border over a transparent scrim
+     whose tap dismisses. Header + divider · rows (a LinearLayout, paginated) · divider · pager +
+     the truncated line. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/contentsRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/transparent">
+
+    <LinearLayout
+        android:id="@+id/panel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:background="@color/paperWhite"
+        android:clickable="true"
+        android:focusable="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/toolbar_bar_thickness"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnBack"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_arrow_left"
+                android:contentDescription="@string/cd_back" />
+
+            <TextView
+                android:id="@+id/title"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:text="@string/contents_title"
+                android:textColor="@color/inkBlack"
+                android:textSize="20sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <LinearLayout
+                android:id="@+id/rows"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:paddingStart="8dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp" />
+
+            <TextView
+                android:id="@+id/empty"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:text="@string/contents_empty"
+                android:textColor="@color/inkBlack"
+                android:textSize="15sp"
+                android:visibility="gone" />
+        </FrameLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
+
+        <TextView
+            android:id="@+id/truncated"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:paddingTop="4dp"
+            android:textColor="@color/inkBlack"
+            android:textSize="13sp"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:id="@+id/pager"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/toolbar_bar_thickness"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:visibility="invisible">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnFirst"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_page_first"
+                android:contentDescription="@string/cd_first_page" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnPrev"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_page_prev"
+                android:contentDescription="@string/cd_prev_page" />
+
+            <TextView
+                android:id="@+id/pageLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="56dp"
+                android:gravity="center"
+                android:textSize="14sp"
+                android:textColor="@color/inkBlack" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnNext"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_page_next"
+                android:contentDescription="@string/cd_next_page" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnLast"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_page_last"
+                android:contentDescription="@string/cd_last_page" />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

@@ -1091,6 +1091,16 @@ core's proxies.
   or anything beyond its own payload + geometry + the two proxies. Absent provider / failed render →
   the dashed placeholder; failed create → the ink is untouched; failed apply / edit → the payload is
   untouched (rule 23 lived).
+- **Contents (arc 5 / C1 — `docs/notebook.md` §"Contents (arc 5)"):** the notebook screen's
+  `ContentsFlow` → `ContentsSource.gather` (one `describeOutlineAll` bind per outline-capable provider,
+  payloads batched per type and chunked by `OutlineCaps`; drains the writer first) → `OutlineTree` →
+  the core-drawn `ContentsDialog` (sidebar ≥ 480 dp / full screen below). Entry points: the top-bar
+  `list` button — **present only while `ObjectProviders.hasOutline`** (re-evaluated after every
+  provider load, so resume shows / hides it) — and the one-finger swipe-down (silent without a capable
+  provider). A capable provider that fails the outline call → the `objects_provider_failed` dialog
+  names it and nothing opens; an absent / disabled / pre-method provider simply contributes nothing.
+  While the Contents shows the whole paper is excluded from the pen. The provider sees only its own
+  payloads; the core keeps ids, pages, geometry; labels are never logged on either side.
 - **Timings (H3, warm extension processes, two hops end to end):** `render` 268 ms (MIP11) / 479 ms
   (SNN) / 403 ms (NA5C) — of which the Markdown extension's own render is 10 / 93 / 28 ms;
   `createFromInk` 1.6 s (MIP11, first inference after process start) / 201 ms (SNN) / 58 ms (NA5C).

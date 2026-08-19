@@ -25,6 +25,9 @@ delete) and undo/redo arrive in Phase 4.
 | `ObjectProviders` | the loaded provider set for one open (arc 4 / H4): refs by package, recognizer / Markdown refs, `contributions`, the resume `signature`; `load` (IO binds) |
 | `ObjectActions` | the provider-facing flows (H4): `requires` guards, `RecognizerReadiness`, `createFromInk` (no popup since H5) / `applyAction` / `describeEdit` / `applyEdit`, every failure dialog; hands results to the screen's `objectListener` |
 | `ObjectRenderPass` | the cache fill (H4): objects grouped by provider → one `renderAll` bind per provider → decode → `Result`s the screen applies |
+| `NotebookChrome` | the chrome geometry (arc 5 / C1 — a pure move out of the Activity at its 800-line cap): `pushExclusions()` (whole paper while `blockAll` — not yet open, or the Contents showing — else top bar + bottom strip + selection-toolbar rects) and `overChrome(ev)` |
+| `ContentsSource` / `OutlineTree` | the Contents gather (arc 5 / C0 — IO: rows → outline-capable providers → one `describeOutlineAll` bind each → items) and the pure tree / visible rows / highlight / paging math (JVM-tested) |
+| `ContentsFlow` / `ContentsDialog` / `ContentsLayout` | the Contents screen (arc 5 / C1): busy guard → gather → failure dialog or the `Dialog` (one layout, sidebar / full screen by width; pure width + paging rules JVM-tested) — see §"Contents (arc 5)" |
 
 ## Layout (`activity_notebook.xml`)
 
@@ -32,6 +35,8 @@ delete) and undo/redo arrive in Phase 4.
 Context) → `topBar` overlay (flush at the top edge, `TopGuard.applyRootPadding` so it clears the
 BOOX status bar; 0 on Ratta; 1dp inkBlack bottom border) → `bottomStrip` overlay ("`<name>`
 `n / N`", 1dp top border). Immersive: system bars hidden, transient by swipe. Portrait-locked.
+The top bar row is `[←] [Contents — GONE unless an outline-capable provider is loaded (arc 5 / C1)]
+12 dp [pen] [eraser] [lasso] … [⋯ debug]`.
 
 Both bars are pushed to `paper.setExclusionRects` after every root layout pass, translated into
 the paper view's coordinates, so the stylus can never ink under chrome. A finger `ACTION_DOWN`
@@ -308,6 +313,65 @@ render pass from cache (an undone level is a re-render because the cache holds o
 `deleteCurrent` soft-deletes and `Structural.childIds` carries; `reconcile` restores / deletes the whole
 set. Objects reload with strokes on every `refreshToPage`.
 
+## Contents (arc 5)
+
+The table of contents — every heading in the notebook as a collapsible H1–H6 tree with page numbers,
+the current page's entry highlighted, tap = turn to that page. The entries come from the object
+providers (`describeOutline`, `docs/extensions.md` §"ObjectProvider"); the core gathers, sorts, nests,
+pages and draws (rule 24 — never a payload parse).
+
+**Entry points.** `btnContents` (Tabler `list`, hint "Contents") sits in the top bar between Back and
+the pen — **`GONE` unless `providers.hasOutline`**, re-evaluated (pen-idle) at the end of every
+`loadProviders`, so an extension enabled / disabled while the screen was away shows / hides it on
+resume; inside `topBar`, so the existing exclusion rect and chrome release cover it. And the
+one-finger **swipe down** (above). Both call `ContentsFlow.open()`.
+
+**Flow (`ContentsFlow`).** `busy` guard (a second tap / swipe while gathering or showing is dropped)
+→ `paper.releaseRender()` → `ContentsSource.gather` on IO (drains the writer first — a heading created a
+moment ago is in its row) → on Main: screen going away → nothing; `Result.Failed(label)` → the honest
+`objects_provider_failed` dialog under the "Contents" title (nothing opens — a capable provider that
+did not answer never yields a partial list); `Result.Ok` → `ContentsDialog`. **While the dialog is up
+the whole paper is one exclusion rect** (`ContentsFlow.showing` → `NotebookChrome.blockAll`, like the
+"Opening…" popup — the Onyx raw pen path bypasses the window stack, so a stylus would otherwise ink
+under the sidebar); the chrome rects come back on dismiss. A row tap → dismiss → `navigateTo(index)`
+under `pageOps` (the existing path — no-op when already there; nothing is selected).
+
+**Dialog (`ContentsDialog`, `dialog_contents.xml` + `item_contents_entry.xml`).** An
+`android.app.Dialog` in `Theme.Notesprout` (`FEATURE_NO_TITLE`, `MATCH_PARENT²`, transparent window,
+no dim, immersive flags before **and** after `show()` — a Dialog's window resets bar visibility on
+show), root `TopGuard.applyRootPadding`. **Width rule** (`ContentsLayout.fullScreen(widthDp)`, pure):
+`< 480 dp` → the panel fills the window, white, back arrow; `≥ 480 dp` → a **60 % left sidebar**
+(`shape_contents_sidebar`: 1 dp inkBlack right border) over a transparent scrim whose tap dismisses,
+back arrow `GONE`. Every test device is ≥ 480 dp; the full-screen form was checked on MIP11 under
+`wm size 800x1600` (457 dp). Header "Contents" (20 sp bold) + 1 dp divider · body = plain row views in
+a `LinearLayout`, `itemsPerPage = ContentsLayout.itemsPerPage(bodyHeight, density)` measured **once**
+after the first layout (`OnGlobalLayoutListener` — no estimate) · 1 dp divider · optional
+`contents_truncated` line ("Showing the first N headings", only when the 2 000 cap bit) · the library's
+pager (`|<` `<` `n / N` `>` `>|`, `INVISIBLE` with one page; a tap at a bound is a no-op — never a
+disabled look). Empty → "No headings yet" centred, pager invisible. **Row:** `[+/− toggle]` (ToolbarButton
+size, `ic_plus` / `ic_minus`, hint Expand / Collapse, **`INVISIBLE` on a leaf** so columns align)
+`[page number 52 dp, 20 sp bold]` `[1 dp inkBlack divider]` `[label 20 sp, single line, ellipsize end]`,
+whole row indented `(level − 1) × 16 dp`, min height 68 dp, 1 dp separator; the highlighted row takes
+`bg_contents_active_entry` (5 dp inkBlack bar at the right edge). Text size does not vary by level.
+
+**Opening state.** `highlight` = `OutlineTree.highlight(all, currentPageIndex, …)` — the last entry
+whose page ≤ the current page (several on the page → the last; none → no highlight, list page 1); its
+ancestors are pre-expanded, the list opens on the page that holds it; if it is collapsed away later
+its nearest visible ancestor carries the bar. Everything else opens collapsed to the roots. Toggle →
+re-render the same list page (clamped) — the dialog stays. Expansion state is memory only.
+
+**Failure table.**
+
+| Situation | What the user sees |
+|---|---|
+| No outline-capable provider (none installed / disabled / pre-C0 APK) | no button; swipe down does nothing (silent) |
+| Provider disabled while away | resume reloads providers → button hides (pen-idle) |
+| A capable provider does not answer the outline | "Contents" dialog: "The NSE · Heading extension didn't respond — try again."; nothing opens |
+| No headings | the Contents opens with "No headings yet"; no pager |
+| Markdown renderer absent | the Contents still lists every heading (the outline needs no renderer) |
+| > 2 000 entries | the first 2 000 in document order + "Showing the first 2000 headings" |
+| Screen closing during the gather | nothing (dropped) |
+
 ## Frame-silence rule
 
 No app frame is presented while `paper.isPenActive` — the strip text only changes through
@@ -344,6 +408,11 @@ toolbar buttons still see every event). Ported thresholds:
   = centroid ≤ `touchSlop`; each tap ≤ `longPressTimeout`; second tap ≤ `doubleTapTimeout` &
   ≤ `doubleTapSlop` of the first): 2 fingers = undo, 3 = redo. **BOOX sends `ACTION_CANCEL` for
   3-finger touches** → a cancel on an armed, stationary 3-finger gesture counts as the tap.
+- **Contents** (1 finger, **vertical**-dominant, `dy > 0` only, `|dy| ≥ 0.30×height` and `|vy| ≥
+  scaledMinimumFlingVelocity` **or** `|dy| ≥ 0.50×height` — the flip's rule on the height; arc 5 / C1):
+  `Listener.onSwipeDown` → the host opens the Contents when `providers.hasOutline`, else nothing
+  (silently). Evaluated at `ACTION_UP` beside the flip — one axis dominates, so they never both fire.
+  A swipe **up** is reserved and does nothing.
 - **Delete** (1 finger long-press ≥ `longPressTimeout`, stationary ≤ `touchSlop`): `ActionSheetDialog`
   "Delete page" → `AlertDialog` "Delete this page? / Undo (two-finger double-tap) brings it back until you close the notebook." [Delete] [Cancel] (wording fixed in arc 4 / H1 — the Phase-4 text still said the ink could not be recovered, which stopped being true the moment page delete joined undo).
 

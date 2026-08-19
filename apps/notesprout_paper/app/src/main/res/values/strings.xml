@@ -128,6 +128,14 @@
     <string name="objects_needs_markdown">This action needs the NSE · Markdown extension.</string>
     <string name="objects_provider_failed">The %1$s extension didn\'t respond — try again.</string>
     <string name="objects_page_full">This page already holds the maximum number of objects.</string>
+
+    <!-- Contents (arc 5 / C1) — the table of contents from the object providers' outline entries -->
+    <string name="contents_title">Contents</string>
+    <string name="cd_contents">Contents</string>
+    <string name="contents_empty">No headings yet</string>
+    <string name="contents_truncated">Showing the first %1$d headings</string>
+    <string name="cd_expand">Expand</string>
+    <string name="cd_collapse">Collapse</string>
     <string name="recognize_problem_title">Recognize page</string>
     <string name="recognize_nothing">Nothing to recognize</string>
     <string name="recognize_model_needed_title">Recognition model needed</string>

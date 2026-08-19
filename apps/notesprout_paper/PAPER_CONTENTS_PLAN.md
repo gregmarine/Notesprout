@@ -10,7 +10,7 @@
 > hold) and both `CLAUDE.md` files. `docs/extensions.md` is the subsystem reference all arcs write
 > into; `docs/notebook.md` gains a section in this arc.
 >
-> **Status: C0 ✅ (cc0558d) · C1 ⬜ · C2 ⬜ — C0 user-verified SNN/NA5C/MIP11 2026-08-18; next: C1's phase ritual.**
+> **Status: C0 ✅ (cc0558d) · C1 🧪 · C2 ⬜ — C0 user-verified SNN/NA5C/MIP11 2026-08-18; C1 built, Claude-verified, awaiting the user's device checklist.**
 
 ## Why
 
@@ -469,7 +469,7 @@ property, not changed here (C1's checklist uses `pm disable-user` / enable, whic
 ---
 
 ### Phase C1 — The Contents screen, the button, the gesture, navigation — devices
-**Status:** ⬜ Not started
+**Status:** 🧪 Awaiting device verification
 
 **Goal:** the user story works on all three devices: tap the top-bar **list** button (or swipe one
 finger down the paper) → the Contents opens (60 % sidebar on every test device; full screen below
@@ -550,6 +550,34 @@ outline-capable provider there is no button and the swipe does nothing; failures
 
 **Close-out:** status ✅ + Outcome (per-device open timings for a ~30-heading notebook: rows read +
 bind + build; sidebar widths); docs; memory; commit + push.
+
+**Outcome (2026-08-18 — built + Claude-verified on all three devices; user checklist pending):**
+Phase-start answers: Q1 whole-paper exclusion **yes** · Q2 the button goes **between Back and the pen**
+(user's call — not after the lasso; the 12 dp spacer now sits between Contents and the pen) · Q3 as
+recommended (no highlight before the first heading; several on the page → the last) · Q4 as
+recommended (30 % + fling / 50 %, `dy > 0`, busy guard). Built as specified with three deviations from
+the letter, none from the intent: (1) the width rule + rows-per-page + indent math live in a pure
+`ContentsLayout` object (`ContentsLayoutTest`) rather than a companion of `ContentsDialog`; (2)
+`ContentsFlow.navigate` is a plain `(Int) -> Unit` the host binds to `runPageOp { navigateTo(it) }`
+(the page-op lock stays private to the Activity); (3) `NotebookActivity` crossed 800 with the wiring,
+so `pushExclusions` + `overChrome` moved to **`NotebookChrome`** as planned (a pure move; the file is
+now 797 lines) — `blockAll = !opened || contentsFlow.showing` is the one new input. The sidebar panel
+uses a new `shape_contents_sidebar` (1 dp inkBlack right border) — the plan's "1 dp right border". A
+generic exception inside the gather is **not** caught (the client already maps every extension
+failure to a `null` → `Result.Failed`; anything else is a bug worth a crash log). **Claude-side runs
+(all three devices, "Test 02": 6 headings H1–H6 on pages 1–6):** button between Back and Pen; tap /
+swipe-down open the sidebar; one `describeOutline` bind per open (`1 call(s)`), no label in any log
+line, binds = unbinds, no crash / SecurityException; expand / collapse in place, indent +30 px per
+level; row tap → `2 / 6`; reopen on page 2 → H1 pre-expanded, H2 highlighted (`visible=2
+highlight=true`); scrim tap / Back dismiss without moving; swipe up / short swipe do nothing;
+`pm disable-user` Heading + resume → no button, swipe silent (`extension set changed — reloading
+providers`); re-enable → back; Markdown disabled → the Contents still lists (MIP11); the pager
+(`1 / 2`, next / last / first, bound tap = no-op) forced on MIP11 via `wm size 700x800` (4 rows/page);
+the **full-screen form** on MIP11 under `wm size 800x1600` (457 dp): back arrow, panel = window,
+`fullScreen=true` — `wm size reset` afterwards. **Timings (tap → gather done):** MIP11 26 ms (bind
+13 ms) · NA5C 37 ms (24) · SNN 86 ms (45; provider 7 ms). **Sidebar widths:** MIP11 864 px / 823 dp
+window (1440 px) · NA5C 1116 px / 992 dp (the NA5C is 1860 px wide, not the ~749 dp the device table
+guessed) · SNN 842 px / 748 dp. Rows per page 15 / 16 / 12.
 
 ---
 

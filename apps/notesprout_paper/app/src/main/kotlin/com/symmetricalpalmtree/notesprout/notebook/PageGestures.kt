@@ -12,9 +12,10 @@ import kotlin.math.hypot
 
 /**
  * Finger gestures over the paper: single-finger horizontal swipe flips a page (past the last page it
- * inserts a new one), two-finger horizontal swipe inserts before/after, multi-finger stationary
- * double-tap is undo (2 fingers) / redo (3 fingers), and a single-finger long-press asks to delete
- * the page. All are pen-gated: a resting palm produces MotionEvents that a writing stylus does not,
+ * inserts a new one), single-finger **vertical swipe down** opens the Contents (arc 5 / C1 — the
+ * flip's distance / fling rule on the height, `dy > 0` only; a swipe up is reserved and does nothing),
+ * two-finger horizontal swipe inserts before/after, multi-finger stationary double-tap is undo
+ * (2 fingers) / redo (3 fingers), and a single-finger long-press asks to delete the page. All are pen-gated: a resting palm produces MotionEvents that a writing stylus does not,
  * so every recogniser refuses to start (and cancels) while [isPenActive], re-checks the gate at
  * finger-up, and commits tap-actions after a [PaperView.PEN_ACTIVE_TAIL_MS] escrow. The detector
  * stands down entirely while a lasso [selectionActive] (g-paper claims finger input then) and never
@@ -40,6 +41,8 @@ class PageGestures(
         fun onUndo() {}
         fun onRedo() {}
         fun onDeleteRequested() {}
+        /** One-finger swipe down the paper (arc 5 / C1) — the host opens the Contents, or nothing. */
+        fun onSwipeDown() {}
     }
 
     private val vc = ViewConfiguration.get(host.context)
@@ -47,6 +50,7 @@ class PageGestures(
     private val doubleTapSlop = vc.scaledDoubleTapSlop
     private val minFlingVel = ViewConfiguration.get(host.context).scaledMinimumFlingVelocity * PAGE_SWIPE_MIN_VELOCITY_MULT
     private val width get() = host.resources.displayMetrics.widthPixels.toFloat()
+    private val height get() = host.resources.displayMetrics.heightPixels.toFloat()
 
     /** Set on the first down; when true the whole sequence is ignored (stylus, chrome, or gated). */
     private var ignoreSequence = false
@@ -172,7 +176,9 @@ class PageGestures(
                     val tracker = pageTracker
                     if (tracker != null) {
                         tracker.addMovement(ev); tracker.computeCurrentVelocity(1000)
-                        evaluateFlip(tracker.getXVelocity(0), ev.x - pageSwipeStartX, ev.y - pageSwipeStartY)
+                        val dx = ev.x - pageSwipeStartX; val dy = ev.y - pageSwipeStartY
+                        evaluateFlip(tracker.getXVelocity(0), dx, dy)
+                        evaluateSwipeDown(tracker.getYVelocity(0), dx, dy)   // exclusive with the flip: one axis dominates
                     }
                 }
                 clearSwipe(); clearTwoFinger()
@@ -198,6 +204,24 @@ class PageGestures(
         if (!qualifiesFling(vx, dx, dy)) return
         if (!gateOpen()) return
         if (dx < 0) listener.onFlipNext() else listener.onFlipPrevious()
+    }
+
+    /** The flip's rule mirrored onto the vertical axis (Q4 / C1 Q4): vertical-dominant, ≥ 30 % of the
+     *  height + a fling **or** ≥ 50 % of the height, downward only, same pen / selection gate. */
+    private fun qualifiesVerticalFling(vy: Float, dx: Float, dy: Float): Boolean {
+        val absDy = abs(dy)
+        if (absDy <= abs(dx)) return false
+        if (absDy < PAGE_SWIPE_MIN_DISTANCE_FRAC * height) return false
+        val fast = abs(vy) >= minFlingVel
+        val long = absDy >= PAGE_SWIPE_LONG_DISTANCE_FRAC * height
+        return fast || long
+    }
+
+    private fun evaluateSwipeDown(vy: Float, dx: Float, dy: Float) {
+        if (dy <= 0f) return   // a swipe up is reserved
+        if (!qualifiesVerticalFling(vy, dx, dy)) return
+        if (!gateOpen()) return
+        listener.onSwipeDown()
     }
 
     private fun evaluateInsert(vx: Float, dx: Float, dy: Float) {
