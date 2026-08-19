@@ -927,6 +927,16 @@ memory; commit + push.
   structural `Action.Page` (`Received` carries `newPage` + `pagesBefore` + `currentBefore`), so undo
   removes the page and redo restores it with its ink; Current page stays `Pasted`. `NotebookActivity`
   796 lines (the cap is 800 — S3 notes it).
+- **User feedback round 2 (2026-08-19, NA5C — the EPD handoff on the way BACK; fixed + reinstalled all
+  three):** after returning from the pad the notebook's ink / lasso trails were invisible while the pen
+  was down until a tool flip. Logs: the notebook reclaimed the pipeline in `onResume` (`openRawDrawing:
+  pipeline claimed` 10.574) and the pad's own close (`onWindowVisibilityChanged`, the *other* process)
+  landed after it (10.759) — tearing the notebook's fresh session down. Fix: the pad calls
+  **`paper.releaseForHandoff()` before every `finish()`** (`finishWithHandoff` — Back, Send, the store
+  dialog), the symmetric of rule 27's release-before-launch; the order is now pad release 45.311 →
+  notebook reclaim 45.359. Recorded in g-paper's lifecycle tables (`api.md` / `host-responsibilities.md`
+  / `integration-guide.md`, docs-only commit 289b407, no version bump) and in `docs/scratchpad.md`.
+  Live overlay is invisible to screencap — the user confirms by eye (re-run S1 item 1 on NA5C + SNN).
 
 ---
 

@@ -345,8 +345,20 @@ class ScratchPadActivity : AppCompatActivity() {
             ScratchSession.outboundPageHeight = doc.pageHeight
             Slog.d(TAG) { "send: ${strokes.size} strokes in ${chunks.size} chunks, prepared in ${System.currentTimeMillis() - t0} ms" }
             setResult(ExtensionContract.RESULT_SCRATCH_SEND)
-            if (!isFinishing && !isDestroyed) finish()
+            finishWithHandoff()
         }
+    }
+
+    /**
+     * Every exit back to the caller goes through here: **`releaseForHandoff()` before `finish()`** — the
+     * caller is a paper-hosting screen that reclaims the process-global EPD pipeline in its `onResume`,
+     * which runs *before* this window's visibility change would close ours; a close landing after the
+     * caller's reclaim tears the caller's live session down (BOOX: ink and lasso trails invisible until
+     * a tool flip). The symmetric of the caller's release before the launch (rule 27).
+     */
+    private fun finishWithHandoff() {
+        if (::paper.isInitialized) paper.releaseForHandoff()
+        if (!isFinishing && !isDestroyed) finish()
     }
 
     // ── Page gestures → operations ─────────────────────────────────────────────
@@ -463,10 +475,10 @@ class ScratchPadActivity : AppCompatActivity() {
             .setTitle(R.string.scratch_title)
             .setMessage(R.string.scratch_store_unavailable)
             .setCancelable(false)
-            .setPositiveButton(android.R.string.ok) { _, _ -> finish() }
+            .setPositiveButton(android.R.string.ok) { _, _ -> finishWithHandoff() }
             .create()
         Dialogs.style(dialog)
-        if (!isFinishing && !isDestroyed) dialog.show() else finish()
+        if (!isFinishing && !isDestroyed) dialog.show() else finishWithHandoff()
     }
 
     // ── Chrome ───────────────────────────────────────────────────────────────
@@ -522,19 +534,19 @@ class ScratchPadActivity : AppCompatActivity() {
     }
 
     /** Back: flush the current page **before** finishing — the host's `end()` revokes the store right
-     *  after the result arrives. Idempotent. */
+     *  after the result arrives — then [finishWithHandoff]. Idempotent. */
     private fun close() {
         if (closing) return
         closing = true
         binding.root.removeCallbacks(saveRunnable)
         val doc = document
-        if (!opened || doc == null) { setResult(Activity.RESULT_CANCELED); finish(); return }
+        if (!opened || doc == null) { setResult(Activity.RESULT_CANCELED); finishWithHandoff(); return }
         lifecycleScope.launch {
             pageOps.withLock {
                 try { doc.flush() } catch (e: Exception) { Log.w(TAG, "flush on close failed", e) }
             }
             setResult(Activity.RESULT_CANCELED)
-            if (!isFinishing && !isDestroyed) finish()
+            finishWithHandoff()
         }
     }
 

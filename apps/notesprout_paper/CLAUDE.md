@@ -105,7 +105,10 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   over `ScratchStore`; debounced 800 ms save + flush on leave / pause / **Back awaits the flush before
   finishing**, because the host's `end()` revokes the store right after the result); the notebook's
   top-bar Scratch Pad button (Tabler **`sketching`**, `IconNames.SKETCHING`; after Lasso, before the
-  debug ⋯ — `notebook/ScratchPadFlow`, **`paper.releaseForHandoff()` immediately before the launch**)
+  debug ⋯ — `notebook/ScratchPadFlow`, **`paper.releaseForHandoff()` immediately before the launch** — and
+  the pad **`releaseForHandoff()` before every `finish()` back** (`finishWithHandoff`): the caller's
+  `onResume` reclaim runs before the pad window's visibility close, and a late close from the other process
+  tears the caller's live session down on BOOX)
   and the library's bottom-bar button after Recents (`library/ScratchPadLaunch`, no send target) — **both
   `GONE` unless a trusted `SCRATCH_PAD` extension is installed, re-discovered on every resume and after
   a failed open** (BOOX re-disables a sideloaded extension: "didn't respond" → check `pm list packages
