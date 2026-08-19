@@ -32,6 +32,23 @@ object ContentsSource {
         class Failed(val providerLabel: String) : Result()
     }
 
+    /**
+     * Cheap availability (C1, user's call after item 9): does the notebook hold **any** live object of an
+     * outline-capable provider on a live page? No bind — one blob-free row read after a writer drain. The
+     * host shows the Contents button / arms the swipe only while true, and re-asks after every object
+     * mutation and page change. (Counts objects by provider identity, not entries — a provider's
+     * `level 0` objects would count; every heading is an entry, so today it is exact.)
+     */
+    suspend fun available(session: NotebookSession, providers: ObjectProviders): Boolean = withContext(Dispatchers.IO) {
+        val capable = providers.outlineProviders
+        if (capable.isEmpty()) return@withContext false
+        session.writer.drain()
+        val pages = session.pages.mapTo(HashSet()) { it.id }
+        session.db.dao().liveObjectsAll().any { row ->
+            row.parentId in pages && ExtensionContract.parseIdentity(row.style ?: "")?.first in capable
+        }
+    }
+
     suspend fun gather(context: Context, session: NotebookSession, providers: ObjectProviders): Result = withContext(Dispatchers.IO) {
         val app = context.applicationContext
         val t0 = System.currentTimeMillis()

@@ -1095,9 +1095,10 @@ core's proxies.
   `ContentsFlow` → `ContentsSource.gather` (one `describeOutlineAll` bind per outline-capable provider,
   payloads batched per type and chunked by `OutlineCaps`; drains the writer first) → `OutlineTree` →
   the core-drawn `ContentsDialog` (sidebar ≥ 480 dp / full screen below). Entry points: the top-bar
-  `list` button — **present only while `ObjectProviders.hasOutline`** (re-evaluated after every
-  provider load, so resume shows / hides it) — and the one-finger swipe-down (silent without a capable
-  provider). A capable provider that fails the outline call → the `objects_provider_failed` dialog
+  `list` button — **present only while `ObjectProviders.hasOutline` and the notebook holds an object
+  of an outline-capable provider** (`ContentsSource.available`, re-evaluated after every provider
+  load / page change / object mutation, so resume shows / hides it) — and the one-finger swipe-down
+  (silent otherwise). A capable provider that fails the outline call → the `objects_provider_failed` dialog
   names it and nothing opens; an absent / disabled / pre-method provider simply contributes nothing.
   While the Contents shows the whole paper is excluded from the pen. The provider sees only its own
   payloads; the core keeps ids, pages, geometry; labels are never logged on either side.

@@ -191,11 +191,10 @@ class NotebookActivity : AppCompatActivity() {
         chrome = NotebookChrome(paper, binding.topBar, binding.bottomStrip, selectionToolbar) { !opened || contentsFlow.showing }
         contentsFlow = ContentsFlow(
             this, paper, { session }, { providers }, { session.currentIndex }, { opened && !closing },
-            onShowingChanged = { pushExclusions() },
-            navigate = { index -> runPageOp { navigateTo(index) } },
+            onShowingChanged = { binding.root.post { pushExclusions() } }, navigate = { index -> runPageOp { navigateTo(index) } },
+            button = binding.btnContents, whenPenIdle = ::whenPenIdle,
         )
-        binding.btnContents.setOnClickListener { contentsFlow.open() }   // inside topBar: chrome release + exclusion already cover it
-        TooltipCompat.setTooltipText(binding.btnContents, binding.btnContents.contentDescription)
+        binding.btnContents.setOnClickListener { contentsFlow.open() }.also { TooltipCompat.setTooltipText(binding.btnContents, binding.btnContents.contentDescription) }   // inside topBar: chrome release + exclusion cover it
         pageGestures = PageGestures(
             host = paper.asView(),
             isPenActive = { paper.isPenActive },
@@ -262,8 +261,7 @@ class NotebookActivity : AppCompatActivity() {
         providers = loaded
         activeIdsCache.clear()
         renderFailed.clear()
-        val listButton = if (loaded.hasOutline) View.VISIBLE else View.GONE   // arc 5: the Contents entry point exists only with an outline-capable provider
-        whenPenIdle { if (!closing) { binding.btnContents.visibility = listButton; binding.root.post { pushExclusions() } } }
+        contentsFlow.refresh()   // arc 5: the Contents entry points exist only with an outline-capable provider AND a heading in the notebook
         scheduleRenderPass()
         currentSelection?.let { showSelectionToolbar(it) }
         objectActions.warmAtOpen()   // the recognizer's process starts + primes while the user is still writing (H5)
@@ -358,7 +356,7 @@ class NotebookActivity : AppCompatActivity() {
         override fun onUndo() = runPageOp { doUndo() }
         override fun onRedo() = runPageOp { doRedo() }
         override fun onDeleteRequested() { showDeleteSheet() }
-        override fun onSwipeDown() { if (providers.hasOutline) contentsFlow.open() }   // silent without an outline provider (Q2)
+        override fun onSwipeDown() { contentsFlow.open() }   // silent while not `available` (Q2 + item 9)
     }
 
     // ── Selection toolbar (arc 4 / H2) ───────────────────────────────────────
@@ -430,6 +428,7 @@ class NotebookActivity : AppCompatActivity() {
         session.saveLastOpened()
         renderFailed.clear()
         scheduleRenderPass()
+        contentsFlow.refresh()
     }
 
     private suspend fun refreshToPage(pageId: String) {
@@ -521,6 +520,7 @@ class NotebookActivity : AppCompatActivity() {
         paper.removeStrokes(strokes.map { it.id })   // a data-in call: no erase callback comes back
         paper.notifyContentChanged()
         Slog.d(TAG) { "deleted selection: ${strokes.size} strokes, ${objects.size} objects" }
+        if (objects.isNotEmpty()) contentsFlow.refresh()
     }
 
     // ── Object actions → page mutations (arc 4 / H4) ─────────────────────────
@@ -554,6 +554,7 @@ class NotebookActivity : AppCompatActivity() {
                 // pre-render lasso box would have come back as stale bounds under a still-valid cache entry.
                 undo.record(Action.ObjectCreated(page.id, liveObjects[obj.id] ?: obj, live))
                 selectObject(obj.id)
+                contentsFlow.refresh()
             }
         }
 

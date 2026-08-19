@@ -201,8 +201,10 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   is planned.
 - **Contents** (arc 5 / C1, `docs/notebook.md` §"Contents (arc 5)"): the table of contents is
   core-drawn from `describeOutline` descriptions (`ContentsSource` → `OutlineTree` → `ContentsDialog`,
-  behind `ContentsFlow`); the top-bar `list` button exists **only while `ObjectProviders.hasOutline`**
-  and the one-finger swipe-down is silent without it; **while the Contents shows the whole paper is
+  behind `ContentsFlow`); the top-bar `list` button exists **only while `ContentsFlow.available`** — an
+  outline-capable provider loaded **and** an object of one in the notebook (`ContentsSource.available`,
+  refreshed after provider load / page change / object mutation) — and the one-finger swipe-down is
+  silent otherwise; **while the Contents shows the whole paper is
   one exclusion rect** (`NotebookChrome.blockAll`, like the "Opening…" popup); a failing capable
   provider = an honest dialog, nothing opens. `NotebookActivity`'s chrome geometry now lives in
   `NotebookChrome` (the file sits just under the 800-line cap — new notebook-screen logic goes in a

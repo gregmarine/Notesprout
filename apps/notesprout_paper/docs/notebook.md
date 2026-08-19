@@ -321,10 +321,16 @@ providers (`describeOutline`, `docs/extensions.md` §"ObjectProvider"); the core
 pages and draws (rule 24 — never a payload parse).
 
 **Entry points.** `btnContents` (Tabler `list`, hint "Contents") sits in the top bar between Back and
-the pen — **`GONE` unless `providers.hasOutline`**, re-evaluated (pen-idle) at the end of every
-`loadProviders`, so an extension enabled / disabled while the screen was away shows / hides it on
-resume; inside `topBar`, so the existing exclusion rect and chrome release cover it. And the
-one-finger **swipe down** (above). Both call `ContentsFlow.open()`.
+the pen — **`GONE` unless `ContentsFlow.available`** = an outline-capable provider is loaded
+(`providers.hasOutline`) **and the notebook holds at least one live object of one** (user's call after
+C1 item 9 — an empty Contents is noise): `ContentsSource.available` (no bind — one blob-free row read
+after a writer drain), recomputed by `ContentsFlow.refresh()` after every `loadProviders` (so an
+extension enabled / disabled while away shows / hides it on resume), every `navigateTo` (covers page
+ops, undo / redo), an object create and a selection delete; the visibility change is pen-idle and
+re-pushes the exclusion rects. Inside `topBar`, so the exclusion rect and chrome release cover it. And
+the one-finger **swipe down** (above) — silent while not `available`. Both call `ContentsFlow.open()`,
+which also refuses while not `available`, and an empty gather (a race with a delete) opens nothing and
+re-refreshes.
 
 **Flow (`ContentsFlow`).** `busy` guard (a second tap / swipe while gathering or showing is dropped)
 → `paper.releaseRender()` → `ContentsSource.gather` on IO (drains the writer first — a heading created a
@@ -367,7 +373,7 @@ re-render the same list page (clamped) — the dialog stays. Expansion state is 
 | No outline-capable provider (none installed / disabled / pre-C0 APK) | no button; swipe down does nothing (silent) |
 | Provider disabled while away | resume reloads providers → button hides (pen-idle) |
 | A capable provider does not answer the outline | "Contents" dialog: "The NSE · Heading extension didn't respond — try again."; nothing opens |
-| No headings | the Contents opens with "No headings yet"; no pager |
+| No headings (no object of an outline-capable provider) | no button; swipe down does nothing — the button appears once the first heading is created (`contents_empty` "No headings yet" remains only as the dialog's guard for a race) |
 | Markdown renderer absent | the Contents still lists every heading (the outline needs no renderer) |
 | > 2 000 entries | the first 2 000 in document order + "Showing the first 2000 headings" |
 | Screen closing during the gather | nothing (dropped) |

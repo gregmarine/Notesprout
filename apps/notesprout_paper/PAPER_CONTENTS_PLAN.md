@@ -102,7 +102,7 @@ constants and failure texts; anything genuinely undecided is a phase-start quest
 | Area | Decision |
 |---|---|
 | Who produces the entries (Q1) | **`describeOutline` appended to `IObjectProvider`** — a *compatible* AIDL change (method appended at the end; `API_VERSION` stays 1; a provider that doesn't implement it contributes nothing and nothing breaks). Batched per type: the core hands a provider all its objects' payloads of one `typeId` and gets back one `OutlineEntry(label, level)` per payload (`level 0` = not an outline item). The Heading extension returns the stripped words + level 1–6. Generic: any object type can contribute. **The core builds and draws the list** (rule 20). The alternatives — a separate `OUTLINE_PROVIDER` point, or an extension-owned Contents screen through the off-paper escape hatch — were declined; and the core **still never parses a payload** (the "core counts the `#`s itself" shortcut was explained and not taken). |
-| Entry point (Q2) | **Both:** a **top-bar button** (Tabler `list`, the original's `ic_toc` glyph, hint "Contents") **present only while an installed object provider answers `describeOutline`** (like the Naming entry points, absent without a namer) **and** the original's **one-finger swipe-down on the paper** (vertical-dominant, ≥ 30 % of the height + fling, or ≥ 50 %; pen-activity-gated like every finger gesture; stands down while a selection is active). The gesture does nothing — silently — when no provider contributes. |
+| Entry point (Q2) | **Both:** a **top-bar button** (Tabler `list`, the original's `ic_toc` glyph, hint "Contents"; C1: between Back and the pen) **present only while an installed object provider answers `describeOutline` — and, since C1 (user's call after item 9), the notebook holds at least one object of such a provider** (like the Naming entry points, absent without a namer; no Contents for a notebook without headings) **and** the original's **one-finger swipe-down on the paper** (vertical-dominant, ≥ 30 % of the height + fling, or ≥ 50 %; pen-activity-gated like every finger gesture; stands down while a selection is active). The gesture does nothing — silently — when no provider contributes. |
 | Presentation (Q3) | **Exact parity with the original's width rule:** below **480 dp** of window width the Contents is **full screen** (white, back arrow top-left); at ≥ 480 dp it is a **left sidebar 60 % wide** over a transparent scrim that dismisses on tap, no back arrow. **One layout XML** — the width branch is code (`ContentsDialog.fullScreen`), so Paper's one-layout-per-screen rule holds. Header "Contents" (20 sp bold) + 1 dp divider; body = rows; footer = the library's pager (`|<` `<` `n / N` `>` `>|`, `INVISIBLE` with one page); immersive + `TopGuard.applyRootPadding`. Empty → "No headings yet" centred in the body. |
 | Structure (Q4) | **Collapsible tree, six levels, orphans attached — not skipped.** The original's tree (opens collapsed to the roots; +/− toggle per row with children, `INVISIBLE` on leaves so columns align; expansion state in memory only, never persisted) extended to H1–H6 with **one deviation:** a heading with no parent level before it attaches under the nearest *shallower* heading before it (or becomes a root) instead of vanishing — nothing the user wrote is hidden. The current page's entry is highlighted, its ancestors pre-expanded, and the list opens on the page that holds it (the original's `resolveHighlightNodeId` rule: the last entry whose page ≤ the current page; if collapsed away, its nearest visible ancestor). |
 | Tap (Q5) | **Navigate to the page only** (parity): dismiss → `navigateTo(pageIndex)` (no-op when already there); nothing is selected, nothing highlighted on the page. (Navigate + select the heading was declined; recorded under Deferred.) |
@@ -578,6 +578,16 @@ the **full-screen form** on MIP11 under `wm size 800x1600` (457 dp): back arrow,
 13 ms) · NA5C 37 ms (24) · SNN 86 ms (45; provider 7 ms). **Sidebar widths:** MIP11 864 px / 823 dp
 window (1440 px) · NA5C 1116 px / 992 dp (the NA5C is 1860 px wide, not the ~749 dp the device table
 guessed) · SNN 842 px / 748 dp. Rows per page 15 / 16 / 12.
+
+**User verification (2026-08-18):** items 1–5, 7–13 pass on all three devices (item 6 skipped by the
+user). **One change requested after item 9 (built the same day):** no Contents when the notebook has no
+headings — the button hides and the swipe is silent until the first heading exists (`Q2`'s "present
+only while a provider is outline-capable" is now "…and the notebook holds an object of one"):
+`ContentsSource.available` (no bind, one blob-free row read after a writer drain) → `ContentsFlow.
+available` / `refresh()` (pen-idle button visibility + exclusion re-push), called after `loadProviders`,
+`navigateTo`, an object create and a selection delete; `open()` refuses while unavailable, and an
+empty gather opens nothing. Locked-decisions table updated (Q2). Claude-verified: Test 02 keeps its
+button on all three; a fresh heading-less "Test 03" on MIP11 shows no button and a swipe is silent.
 
 ---
 
