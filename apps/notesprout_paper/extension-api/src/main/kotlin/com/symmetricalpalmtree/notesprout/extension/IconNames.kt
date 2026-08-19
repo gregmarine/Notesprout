@@ -22,7 +22,9 @@ object IconNames {
     const val TRASH: String = "trash"
     /** The core's Contents button glyph (arc 5) — listed so an extension may reuse it. */
     const val LIST: String = "list"
+    /** The core's Scratch Pad glyph (arc 6) — the two entry buttons and the core `scratch` action; listed so an extension may reuse it. */
+    const val NOTES: String = "notes"
 
     /** Every name the catalog knows, in declaration order. */
-    val ALL: List<String> = listOf(HEADING, H1, H2, H3, H4, H5, H6, TEXT, EDIT, X, CHECK, PLUS, TRASH, LIST)
+    val ALL: List<String> = listOf(HEADING, H1, H2, H3, H4, H5, H6, TEXT, EDIT, X, CHECK, PLUS, TRASH, LIST, NOTES)
 }

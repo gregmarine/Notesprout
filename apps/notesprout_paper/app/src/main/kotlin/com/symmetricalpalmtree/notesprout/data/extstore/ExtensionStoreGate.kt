@@ -7,8 +7,12 @@ import com.symmetricalpalmtree.notesprout.extension.ExtensionContract
  *
  * Every method first requires the caller's uid to be [extUid] and the gate not to be [revoked] —
  * else `SecurityException`. Caps (`ExtensionContract.STORE_*`): key `1..STORE_MAX_KEY_CHARS`
- * chars, value `≤ STORE_MAX_VALUE_BYTES`, and a `put` of a *new* key when the store already holds
- * `STORE_MAX_KEYS` keys → `IllegalStateException`. Bad arguments → `IllegalArgumentException`.
+ * chars; value `≤ STORE_MAX_INLINE_BYTES` on the `byte[]` path ([put] / [get]) and
+ * `≤ STORE_MAX_VALUE_BYTES` on the large path ([putLarge] / [getLarge] — arc 6 / S0, the bytes
+ * arrive / leave in an ashmem region the binder copies in / out of); [get] of a stored value above
+ * the inline cap → `IllegalStateException(STORE_VALUE_LARGE)` ("use getLarge"); a put of a *new* key
+ * when the store already holds `STORE_MAX_KEYS` keys → `IllegalStateException`. Bad arguments →
+ * `IllegalArgumentException`.
  * A DAO failure (SQLite full / locked / I/O) is rethrown as `IllegalStateException` too. All of these
  * are in the set Binder marshals across the boundary intact — anything else would fail the transaction
  * silently (`UNKNOWN_TRANSACTION`, empty reply → the extension believes a `put` succeeded). The
@@ -29,20 +33,44 @@ class ExtensionStoreGate(
         revoked = true
     }
 
+    /** The inline path: a stored value above [ExtensionContract.STORE_MAX_INLINE_BYTES] is refused with [ExtensionContract.STORE_VALUE_LARGE]. */
     fun get(key: String?): ByteArray? {
+        check()
+        val k = validKey(key)
+        val v = io { dao.get(k) } ?: return null
+        if (v.size > ExtensionContract.STORE_MAX_INLINE_BYTES) throw IllegalStateException(ExtensionContract.STORE_VALUE_LARGE)
+        return v
+    }
+
+    /** The large path: any stored size (the binder wraps it in a region). */
+    fun getLarge(key: String?): ByteArray? {
         check()
         val k = validKey(key)
         return io { dao.get(k) }
     }
 
-    @Synchronized
+    /** The inline path: `value.size ≤ STORE_MAX_INLINE_BYTES`. */
     fun put(key: String?, value: ByteArray?) {
         check()
-        val k = validKey(key)
+        requireNotNull(value) { "value is null" }
+        require(value.size <= ExtensionContract.STORE_MAX_INLINE_BYTES) {
+            "value exceeds ${ExtensionContract.STORE_MAX_INLINE_BYTES} bytes — use putLarge"
+        }
+        upsert(validKey(key), value)
+    }
+
+    /** The large path: `value.size ≤ STORE_MAX_VALUE_BYTES` (the binder has already copied it out of the region). */
+    fun putLarge(key: String?, value: ByteArray?) {
+        check()
         requireNotNull(value) { "value is null" }
         require(value.size <= ExtensionContract.STORE_MAX_VALUE_BYTES) {
             "value exceeds ${ExtensionContract.STORE_MAX_VALUE_BYTES} bytes"
         }
+        upsert(validKey(key), value)
+    }
+
+    @Synchronized
+    private fun upsert(k: String, value: ByteArray) {
         io {
             if (dao.get(k) == null && dao.count() >= ExtensionContract.STORE_MAX_KEYS) {
                 throw IllegalStateException("store holds ${ExtensionContract.STORE_MAX_KEYS} keys")

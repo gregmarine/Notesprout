@@ -21,9 +21,9 @@ global-index model, global encryption model, and e-ink design philosophy — and
   button + one-finger swipe-down), then **`PAPER_SCRATCHPAD_PLAN.md` (arc 6, PLANNED 2026-08-19 —
   the ACTIVE arc: `NSE · Scratch Pad`, an extension-owned off-paper screen (UI-rule tier 2, first
   exercise) + the shared `:paper-screen` module + the `SCRATCH_PAD` point + `IExtensionStore.putLarge /
-  getLarge` (4 MiB values over `SharedMemory`) + the two ink transfers; S0 ⬜ · S1 ⬜ · S2 ⬜ · S3 ⬜)**
-  — read all seven top-to-bottom at the start of every session; **next = S0 (fresh session, the
-  phase-start wizard first).**
+  getLarge` (4 MiB values over `SharedMemory`) + the two ink transfers; S0 🧪 · S1 ⬜ · S2 ⬜ · S3 ⬜)**
+  — read all seven top-to-bottom at the start of every session; **S0 🧪 2026-08-19 (device
+  verification); next = S1 (fresh session, the phase-start wizard first).**
 - **Package / applicationId:** `com.symmetricalpalmtree.notesprout` (debug: `.dev` suffix)
 - **Launcher label:** "Notesprout Paper" (debug: "Notesprout Paper Dev")
 
@@ -53,23 +53,52 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   `com.symmetricalpalmtree.gpaper.core.engine`.
 - **mavenLocal can lag the g-paper checkout** — if a g-paper symbol from `docs/api.md` is unresolved,
   `cd ~/git/g-paper && ./gradlew publishToMavenLocal` before suspecting anything else.
-- **Extensions** (`PAPER_EXTENSIONS_PLAN.md`, `docs/extensions.md`): the project has seven modules —
-  `:app` (the core/host), `:extension-api` (the shared contract library), `:ext-templates` (the
+- **Extensions** (`PAPER_EXTENSIONS_PLAN.md`, `docs/extensions.md`): the project has nine modules —
+  `:app` (the core/host), `:extension-api` (the shared contract library), **`:paper-screen`** (the
+  shared screen library, arc 6 / S0 — below), `:ext-templates` (the
   first-party Templates extension APK), `:ext-naming` (the Naming extension APK, arc 2),
   `:ext-mlkit` (the ML Kit handwriting-recognizer extension APK, arc 3), `:ext-markdown` (the
-  Markdown renderer extension APK, arc 4 / H0) and `:ext-heading` (the Heading object-provider
-  extension APK, arc 4 / H3).
+  Markdown renderer extension APK, arc 4 / H0), `:ext-heading` (the Heading object-provider
+  extension APK, arc 4 / H3) and `:ext-scratchpad` (the Scratch Pad extension APK, arc 6 — the
+  first extension that owns a screen).
   **`:extension-api` depends on nothing in `:app`, ever** (Gradle enforces `:app → :extension-api`,
   `:ext-templates → :extension-api`, `:ext-naming → :extension-api`, `:ext-mlkit → :extension-api`,
-  `:ext-markdown → :extension-api`, `:ext-heading → :extension-api`; `:app` and the extension modules
-  never depend on each other — `:ext-heading` reaches the recognizer and the renderer only through the
-  proxies the core hands it). Extension-side caller check = `HostCallerCheck.enforce(ctx,
+  `:ext-markdown → :extension-api`, `:ext-heading → :extension-api`, `:ext-scratchpad → :extension-api`;
+  `:app` and the extension modules never depend on each other — `:ext-heading` reaches the recognizer
+  and the renderer only through the proxies the core hands it). Extension-side caller check = `HostCallerCheck.enforce(ctx,
   BuildConfig.HOST_PACKAGE)` from `:extension-api`, first thing in every stub method. An extension is a separate APK with **no launcher Activity**, bound over
   AIDL; the core trusts it only if `checkSignatures == SIGNATURE_MATCH` (in dev, the shared
   `~/.android/debug.keystore` satisfies this). **Naming + icon convention:** label `NSE · <Name>`
   (debug appends ` Dev`), icon = Tabler `puzzle` black outline; the app's own icon is the bare Tabler
   `seedling` (both sized like Ratta's icons — Supernote lists every installed package, launcher or not;
   accepted). Details: `docs/extensions.md` §"Naming + icon convention".
+- **`:paper-screen`** (arc 6 / S0, `docs/extensions.md` §"Contract v1" paragraph): the e-ink
+  design-system resources (colors, both dimens tiers, styles, `Theme.Notesprout`, the toolbar / dialog
+  drawables, every Tabler `ic_*`) and the paper-screen helpers (`core/` `Slog` · `Device` · `TopGuard` ·
+  `Dialogs` · `ActionSheetDialog` · `StrokeCodec` · `InkColorCodec` · `Bitmaps`; `notebook/` `PageGestures`
+  · `PageMath` · the generic `UndoRedoStack<A>` · `PaperToolbar` · `PaperChrome` · `ToolbarAnchor`) live
+  there, **packages unchanged** (the app's `R` sees the moved resources via
+  `android.nonTransitiveRClass=false` in `gradle.properties`; the notebook's own undo action set is
+  `notebook/NotebookUndo.kt` in `:app`). It depends on **g-paper (`api`) + androidx only** — never
+  `:app`, `:extension-api`, Room, SQLCipher, serialization; `:app → :paper-screen` and
+  `:ext-scratchpad → :paper-screen` (the five earlier extensions stay `:extension-api`-only). **A fix to
+  shared screen logic goes there, never in a consumer.** `Slog` gates on the library's own
+  `BuildConfig.DEBUG` and is usable from `:ext-scratchpad`; the five earlier extensions keep
+  `if (BuildConfig.DEBUG) Log.d`.
+- **Scratch Pad** (arc 6 — `PAPER_SCRATCHPAD_PLAN.md`, `docs/extensions.md` §"ScratchPad (contract)"):
+  the sixth point `SCRATCH_PAD` (`IScratchPad` — `begin` / `receiveInk` / `takeOutgoing` / `end`,
+  `PaperStroke` / `InkBundle`) is the first **screen-owning** point (UI-rule tier 2): the extension owns
+  `ScratchPadActivity`, the core **holds one bind for the showing** (`ExtensionBinder.hold` →
+  `ScratchPadClient.open` = store pre-open → hold → `begin(store)` → launch with an
+  `ActivityResultLauncher` only; `finish` = `end` → unbind → revoke in `finally`, from the result
+  callback **and** the caller's `onDestroy`), the Activity checks its caller first thing in `onCreate`
+  (`HostCallerCheck.enforceActivity` — `callingPackage` + signature; `am start` is refused), and **ink
+  crosses only through the held service, never the Intent**. The store gained `putLarge` / `getLarge`
+  (appended; `STORE_MAX_VALUE_BYTES` 4 MiB, `STORE_MAX_INLINE_BYTES` 512 KiB, `LargeValue` over
+  `SharedMemory` via `SharedBytes`; `get` of a large stored value throws `STORE_VALUE_LARGE`). S0 done
+  (contract, module, skeleton, debug "Probe scratch pad" + the extension's once-per-process 4 MiB
+  cross-process probe — both removed in S3); S1 = the screen + the two entry buttons, S2 = the
+  transfers, S3 = review / audit rows 28–32 / rules 25–27.
 - **Notebook creation:** templates come **only** from `ExtensionRegistry` providers via
   `TemplateProviderClient` (bind-per-operation, signature re-checked at bind, timeouts, unbind in
   `finally`, payload = mime + byte cap + exact requested size); **the core has no renderer**. No
@@ -117,8 +146,10 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   addendum): the ML Kit extension rounds tiny strokes and forces a trailing baseline dot to `.` — see
   `docs/extensions.md` §"The ML Kit extension"; it is the extension's heuristic, the core knows
   nothing of it. **Logging in
-  extension modules:** `Slog` lives in `:app` and is unreachable from `:ext-*`; the recorded
-  equivalent there is `if (BuildConfig.DEBUG) Log.d(...)` (never text — counts + durations).
+  extension modules:** `Slog` lives in `:paper-screen` (since arc 6 / S0 — before that in `:app`) and
+  is reachable only from its consumers (`:app`, `:ext-scratchpad`); the five `:extension-api`-only
+  extensions keep the recorded equivalent `if (BuildConfig.DEBUG) Log.d(...)` (never text — counts +
+  durations).
 - **MarkdownRenderer** (arc 4 / H0, `docs/extensions.md` §"MarkdownRenderer (contract)" + §"The
   Markdown extension"): the fourth point (`ACTION_MARKDOWN_RENDERER`, `IMarkdownRenderer`,
   `RenderedImage`) is the second **capability point** — markdown in, a transparent lossless-WEBP
@@ -216,15 +247,15 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   while `ContentsFlow.available`** — an outline-capable provider loaded **and** an object of one in the
   notebook (`ContentsSource.available`, refreshed after provider load / page change / object mutation)
   — and the one-finger swipe-down is silent otherwise; **while the Contents shows the whole paper is
-  one exclusion rect** (`NotebookChrome.blockAll`, like the "Opening…" popup); a failing capable
+  one exclusion rect** (`PaperChrome.blockAll`, like the "Opening…" popup); a failing capable
   provider = an honest dialog, nothing opens. `NotebookActivity`'s chrome geometry lives in
-  `NotebookChrome` (the file sits at the 800-line cap — new notebook-screen logic goes in a
+  `PaperChrome` (since arc 6 / S0 in `:paper-screen`; the file sits at the 800-line cap — new notebook-screen logic goes in a
   collaborator, not there). The C0 debug ⋯ "Probe contents" item was removed in C2 (the screen itself
   proves the path).
 - **Toast vs. dialog:** a toast only confirms something that already happened ("copied"); anything
   the user must notice or act on — why a tap did nothing, a failure, a one-time download — is an
   `AlertDialog` (e-ink: a toast is easy to miss and reads as "broken"). The one helper is
-  `Dialogs.problem(activity, title, message)` (`core/Dialogs.kt`) — use it, don't hand-roll; the
+  `Dialogs.problem(activity, title, message)` (`core/Dialogs.kt`, in `:paper-screen` since arc 6 / S0) — use it, don't hand-roll; the
   library, New-notebook, folder-picker and notebook-debug screens all go through it (M2 swept the
   arc-2 namer / name / move toasts).
 - **Extension boundary (frozen in E2):** nothing but what a call needs crosses outward (templates: id +
@@ -241,7 +272,7 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
 
 ```sh
 cd ~/git/Notesprout/apps/notesprout_paper
-./gradlew assembleDebug                  # all modules → app + ext-templates + ext-naming + ext-mlkit + ext-markdown + ext-heading debug APKs
+./gradlew assembleDebug                  # all modules → app + ext-templates + ext-naming + ext-mlkit + ext-markdown + ext-heading + ext-scratchpad debug APKs
 ./gradlew testDebugUnitTest              # all modules
 adb -s SN078D10012852 install -r app/build/outputs/apk/debug/app-debug.apk   # SNN (Nomad)
 adb -s 92c16533       install -r app/build/outputs/apk/debug/app-debug.apk   # NA5C
@@ -252,11 +283,13 @@ adb -s <serial> install -r ext-naming/build/outputs/apk/debug/ext-naming-debug.a
 adb -s <serial> install -r ext-mlkit/build/outputs/apk/debug/ext-mlkit-debug.apk      # ~40 MB; the en-US model (~20 MB) downloads on first prepare() — Wi-Fi once per device
 adb -s <serial> install -r ext-markdown/build/outputs/apk/debug/ext-markdown-debug.apk # ~2.5 MB; the Markdown renderer (arc 4)
 adb -s <serial> install -r ext-heading/build/outputs/apk/debug/ext-heading-debug.apk   # ~2.5 MB; the Heading object provider (arc 4 / H3)
+adb -s <serial> install -r ext-scratchpad/build/outputs/apk/debug/ext-scratchpad-debug.apk  # ~25 MB (g-paper + Onyx SDK); the Scratch Pad (arc 6)
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.templates.dev  # BOOX sideload trap — BOOX may
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.naming.dev     #   re-disable a few seconds AFTER
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.mlkit.dev      #   install; re-run enable and confirm with `pm list packages -d`
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.markdown.dev
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.heading.dev
+adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.scratchpad.dev
 ```
 
 Debug launch: `adb -s <serial> shell am start -n com.symmetricalpalmtree.notesprout.dev/com.symmetricalpalmtree.notesprout.bootstrap.BootstrapActivity`

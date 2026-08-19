@@ -5,15 +5,17 @@ package com.symmetricalpalmtree.notesprout.extension
  * depends on nothing in `:app` and on no library beyond the Kotlin stdlib, so a third party can
  * consume it as a plain artifact.
  *
- * v1 has five extension points: [ACTION_TEMPLATE_PROVIDER] (interface `ITemplateProvider`),
+ * v1 has six extension points: [ACTION_TEMPLATE_PROVIDER] (interface `ITemplateProvider`),
  * [ACTION_NOTEBOOK_NAMER] (interface `INotebookNamer`, arc 2), [ACTION_HANDWRITING_RECOGNIZER]
  * (interface `IHandwritingRecognizer`, arc 3 — a *capability* point: the host binds it and lends it
  * to other extensions through a proxy), [ACTION_MARKDOWN_RENDERER] (interface `IMarkdownRenderer`,
  * arc 4 — a second capability point: markdown in, image out) and [ACTION_OBJECT_PROVIDER]
  * (interface `IObjectProvider`, arc 4 — the generic content-object point; the two capabilities reach
- * a provider only as in-parameters of its calls). `IExtensionStore` (arc 2) is not a
- * point — it is the host-owned store handed *to* an extension as an in-parameter of a call; its caps
- * are the `STORE_*` constants below.
+ * a provider only as in-parameters of its calls) and [ACTION_SCRATCH_PAD] (interface `IScratchPad`,
+ * arc 6 — the first *screen-owning* point: the extension owns an off-paper Activity the host launches
+ * for a result; ink crosses through the bound service, never the Intent). `IExtensionStore` (arc 2)
+ * is not a point — it is the host-owned store handed *to* an extension as an in-parameter of a call;
+ * its caps are the `STORE_*` constants below.
  */
 object ExtensionContract {
 
@@ -39,6 +41,15 @@ object ExtensionContract {
     /** Intent action an object-provider `<service>` declares in its intent-filter (arc 4 / H3). */
     const val ACTION_OBJECT_PROVIDER: String =
         "com.symmetricalpalmtree.notesprout.extension.OBJECT_PROVIDER"
+
+    /** Intent action a scratch-pad `<service>` declares in its intent-filter (arc 6 / S0). */
+    const val ACTION_SCRATCH_PAD: String =
+        "com.symmetricalpalmtree.notesprout.extension.SCRATCH_PAD"
+
+    /** Intent action the scratch-pad extension's exported screen `<activity>` declares; the host
+     *  resolves it with `setPackage(<the discovered service's package>)` and launches it for a result. */
+    const val ACTION_SCRATCH_PAD_SCREEN: String =
+        "com.symmetricalpalmtree.notesprout.extension.SCRATCH_PAD_SCREEN"
 
     /** `<meta-data>` name (on the `<service>`) carrying the extension's API version. */
     const val META_API_VERSION: String =
@@ -138,8 +149,18 @@ object ExtensionContract {
     /** Longest key an extension may store (chars); the empty key is rejected. */
     const val STORE_MAX_KEY_CHARS: Int = 512
 
-    /** Largest value an extension may store (256 KiB). */
-    const val STORE_MAX_VALUE_BYTES: Int = 256 * 1024
+    /** Largest value an extension may store (4 MiB — raised from 256 KiB in arc 6 / S0 for one-key-per-
+     *  scratch-page). A value above [STORE_MAX_INLINE_BYTES] travels only through `putLarge` / `getLarge`
+     *  (a [LargeValue] over `SharedMemory`) — a `byte[]` that size cannot cross a Binder. */
+    const val STORE_MAX_VALUE_BYTES: Int = 4 * 1024 * 1024
+
+    /** Largest value the `byte[]` `put` / `get` path carries (512 KiB — the Binder transaction budget).
+     *  `put` above it → `IllegalArgumentException`; `get` of a stored value above it →
+     *  `IllegalStateException` with the exact message [STORE_VALUE_LARGE]. */
+    const val STORE_MAX_INLINE_BYTES: Int = 512 * 1024
+
+    /** The exact `IllegalStateException` message `get` throws for a stored value above [STORE_MAX_INLINE_BYTES]. */
+    const val STORE_VALUE_LARGE: String = "value is large — use getLarge"
 
     /** Most keys one extension's store may hold. */
     const val STORE_MAX_KEYS: Int = 50_000
@@ -169,6 +190,39 @@ object ExtensionContract {
      * failure. Recognizers must use this constant — the host compares the message, not a substring.
      */
     const val RECOGNIZER_NOT_READY: String = "recognizer not ready"
+
+    // ── Scratch pad (`IScratchPad`, arc 6 / S0) ──────
+    // The screen's launch extras / result code, the ink-transfer caps (host-enforced outward before any
+    // bind, re-checked inward on both sides) and the per-Binder-call chunk sizes.
+
+    /** Boolean launch extra — true when the pad is opened from a notebook (the pad shows its Send buttons). */
+    const val EXTRA_SCRATCH_SEND_ENABLED: String = "sendEnabled"
+
+    /** Boolean launch extra — true right after a `receiveInk` (the pad opens on the received page, strokes selected). */
+    const val EXTRA_SCRATCH_OPEN_RECEIVED: String = "openReceived"
+
+    /** Activity result code: the pad has outbound ink for `takeOutgoing` (= `Activity.RESULT_FIRST_USER`). */
+    const val RESULT_SCRATCH_SEND: Int = 1
+
+    /** `receiveInk` placement: a new page after the pad's current page / the current page itself. */
+    const val PLACEMENT_NEW_PAGE: Int = 0
+    const val PLACEMENT_CURRENT_PAGE: Int = 1
+
+    /** Most strokes / points (summed) in one transfer, either direction. */
+    const val MAX_TRANSFER_STROKES: Int = 5_000
+    const val MAX_TRANSFER_POINTS: Int = 200_000
+
+    /** Most strokes / points per Binder call (≈ 320 KB of floats — under the ~1 MB transaction budget
+     *  with headroom); the host chunks, the extension re-checks ([InkBundle.requireValid]). */
+    const val TRANSFER_CHUNK_STROKES: Int = 300
+    const val TRANSFER_CHUNK_POINTS: Int = 20_000
+
+    /** Most chunks the host drains on `takeOutgoing` (`ceil(MAX_TRANSFER_STROKES / TRANSFER_CHUNK_STROKES)`). */
+    const val TRANSFER_MAX_CHUNKS: Int = 17
+
+    /** The exact `IllegalStateException` message the scratch-pad extension throws from `receiveInk`
+     *  when the target page's encoded ink would exceed [STORE_MAX_VALUE_BYTES]. */
+    const val SCRATCH_PAGE_FULL: String = "scratch page full"
 
     /** Extension-namespaced template identity: `"<extension package>:<template id>"`. */
     fun templateIdentity(pkg: String, id: String): String = "$pkg:$id"

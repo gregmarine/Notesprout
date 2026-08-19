@@ -10,7 +10,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.widget.AppCompatImageView
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.content.ContextCompat
-import com.symmetricalpalmtree.notesprout.R
+import com.symmetricalpalmtree.notesprout.paperscreen.R
 
 class ActionSheetDialog(private val context: Context) {
 

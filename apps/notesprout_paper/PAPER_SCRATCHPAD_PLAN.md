@@ -11,8 +11,8 @@
 > subsystem reference all arcs write into; `docs/notebook.md` and `docs/library.md` gain sections
 > in this arc; a new `docs/scratchpad.md` is the extension's own reference.
 >
-> **Status: PLANNED 2026-08-19 — S0 ⬜ · S1 ⬜ · S2 ⬜ · S3 ⬜. Next: S0 (fresh session, phase-start
-> wizard first).**
+> **Status: S0 🧪 (built + Claude-verified SNN / NA5C / MIP11 2026-08-19; user checklist pending) ·
+> S1 ⬜ · S2 ⬜ · S3 ⬜. Next: the user's S0 checklist → S0 ✅ → S1 (fresh session, wizard first).**
 
 ## Why
 
@@ -534,7 +534,7 @@ Rules 1–5 (point), the store rules (arc 2), 18–23 (object point) apply. Adde
 ## Phases
 
 ### Phase S0 — `:paper-screen` extraction · contract · extension skeleton (discovered, held, no screen)
-**Status:** ⬜ Not started
+**Status:** 🧪 Awaiting device verification (built 2026-08-19; Claude-verified SNN / NA5C / MIP11 — user checklist pending)
 
 **Goal:** the shared module exists and the core is a pure-move consumer of it (every JVM test
 green, the v0 regression subset by eye unchanged on all three devices); the contract has the point,
@@ -554,6 +554,10 @@ S1).
    self-test" gains a 4 MiB `putLarge` / `getLarge` round-trip case (rec.) — confirm.
 4. The S0 debug probe: notebook ⋯ → "Probe scratch pad" (hold → `begin` → the extension logs its
    page count → `end`; removed in S3) — rec. yes; confirm.
+
+**Answered 2026-08-19 (all the recommended defaults):** Q1 `android.nonTransitiveRClass=false` ·
+Q2 `Slog` moves with the module's own `BuildConfig` · Q3 4 MiB + 512 KiB inline + `putLarge` /
+`getLarge` appended + the self-test's 4 MiB case · Q4 the "Probe scratch pad" debug item, yes.
 
 **Deliverables**
 1. `:paper-screen` module (`settings.gradle.kts`, `build.gradle.kts` — Appendix B): the moves listed
@@ -601,6 +605,58 @@ S1).
 
 **Close-out:** status ✅ + Outcome (**S3 review base = the commit before S0's first commit** — write
 its hash here); docs; memory; commit + push.
+
+**Outcome (2026-08-19) — S3 review base = `8b05f7e`** (the arc-6 planning commit; review range
+`8b05f7e...HEAD` in S3).
+- **`:paper-screen`** extracted as a pure move (14 Kotlin files + 4 value files + `values-sw720dp` +
+  38 drawables + the `ok` string; `git mv` throughout). The two renames (`PaperToolbar`, `PaperChrome`
+  with `extraRects` / `extraContains`), the generic `UndoRedoStack<A>`, `NotebookUndo.kt` in `:app`
+  (the Action set — replay still in the Activity until S1), `Slog` on the library's own `BuildConfig`,
+  `Dialogs` / `ActionSheetDialog` on the library's `R`. Moved tests: `StrokeCodecTest`,
+  `InkColorCodecTest`, `PageMathTest`, `ToolbarAnchorTest` (its subject moved — not in the S0 list but
+  the obvious home), `UndoRedoStackTest` (rewritten on a test-local action set; the object-action
+  shapes it pinned moved to a new `NotebookUndoTest` in `:app`). `ic_notes` (Tabler `notes`) added to
+  the library. `android.nonTransitiveRClass=false` (Q1). The five earlier extensions untouched.
+- **Contract:** everything in Appendix A + `LargeValue` + `SharedBytes` + `HostCallerCheck.enforceActivity`
+  (returns `Boolean`, finishes the Activity itself); `IExtensionStore.putLarge` / `getLarge` appended
+  (the `.aidl` needed an explicit `import ...LargeValue;` for the parcelable). Gate / binder split: the
+  gate stays `byte[]`-pure (`put` ≤ inline, `putLarge` ≤ cap, `get` throws `STORE_VALUE_LARGE` above
+  inline, `getLarge` any size; key-count cap on both puts); the binder copies in (`readAndClose`) /
+  out (`SharedBytes.write` parked per Binder thread, closed in `onTransact`'s `finally`). JVM tests:
+  `PaperStrokeTest`, `InkBundleTest` (+ `LargeValue.requireValid`), `ExtensionStoreBinderTest` (+3),
+  `TransferCapsTest`, `ScratchPageCodecTest`, `ScratchPagesTest`, `NotebookUndoTest`.
+- **`ScratchPadClient.open` returns the screen `Intent?`** (null = failure, reason logged) rather
+  than `Boolean` + a separate accessor — one call, the caller launches what it gets. `finish` is
+  idempotent and releases in `finally` on every path incl. cancellation.
+- **`ExtensionBinder.hold`** releases an attempted bind itself on any failure and returns a
+  `HeldBinding` (`call(timeoutMs, block)` with `call`'s exception mapping; `isDead` after
+  `onBindingDied` / `onServiceDisconnected` / `close`; `close` idempotent). No JVM test — it is all
+  Android types; the device probe covers the state machine (hold → begin → end → unbind, binds =
+  unbinds, `dumpsys activity services` shows 0 lingering connections on all three devices).
+- **`:ext-scratchpad`:** the manifest needed `tools:replace="android:label,android:allowBackup"` and
+  the `libc++_shared.so` `pickFirsts` — both because the Onyx SDK arrives through `:paper-screen`'s
+  `api` g-paper; the screen `<activity>` carries `<category DEFAULT>` (implicit-intent resolution
+  requires it). APK ≈ 25 MB (g-paper + the Onyx SDK). `ScratchStore.readPage` tries `get` first and
+  falls to `getLarge` on `STORE_VALUE_LARGE`.
+- **Risk register 3 answered on all three devices:** the in-process self-test's 4 MiB round trip
+  (MIP11 117 ms · NA5C 119 ms · SNN 389 ms) **and** a cross-process one (`putLarge` → `getLarge` →
+  `get` refused with `STORE_VALUE_LARGE` → delete; SharedMemory both ways over a real Binder) run
+  once per extension process from `begin` in debug builds: MIP11 503 ms · NA5C 905 ms · SNN 917 ms —
+  inside the 2 s `begin` budget even on the BOOX. **Removed again after verification** (it would
+  otherwise sit inside every first pad open in S1 and muddy its timings; the host's "Probe scratch
+  pad" stays until S3 as planned). `begin` itself (page list read, first run creates one page): MIP11
+  12–30 ms · NA5C 24 ms · SNN 47 ms; warm `open` (store cached, process alive): MIP11 ≈ 0.8 s cold /
+  NA5C 13–31 ms / SNN 45–60 ms warm; cold `open` end to end (cold store open + process start + the
+  probe): NA5C 2.0 s · SNN 4.0 s (the Nomad's cold KDF is ≈ 2 s — the self-test's `open 1983ms`).
+- **Claude-side per device (Sonnet agents, one per device):** packages present + enabled; the v0
+  regression subset (library chrome, open, flip by finger swipe, Back, New-folder dialog, Sort sheet)
+  unchanged; the probe sequence exact; the store `.db` created **encrypted** (header not
+  `SQLite format 3`); self-test OK; `am start` of the screen **refused** (`refused caller (none)`,
+  nothing shown); no `FATAL`, no `SecurityException`, no lingering bind. The NA5C store file is 4.3 MB
+  after the probe (a deleted 4 MiB row leaves free pages — no vacuum in Paper; recorded under
+  Deferred already).
+- Trap for S1: a wrong blind tap on the **library** debug sheet lands on "Forget cached key" — always
+  dump before tapping (the notebook's and the library's sheets sit at different y).
 
 ---
 

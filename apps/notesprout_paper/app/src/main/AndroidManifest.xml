@@ -22,6 +22,12 @@
         <intent>
             <action android:name="com.symmetricalpalmtree.notesprout.extension.OBJECT_PROVIDER" />
         </intent>
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesprout.extension.SCRATCH_PAD" />
+        </intent>
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesprout.extension.SCRATCH_PAD_SCREEN" />
+        </intent>
     </queries>
 
     <application

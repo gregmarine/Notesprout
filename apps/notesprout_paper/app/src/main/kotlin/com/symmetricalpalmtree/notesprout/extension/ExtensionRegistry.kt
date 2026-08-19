@@ -64,6 +64,16 @@ object ExtensionRegistry {
         all.firstOrNull()
     }
 
+    /**
+     * The one trusted scratch pad (arc 6 / S0 — the first screen-owning point), or null. First by
+     * (label, package), the rest dropped with a `Slog.d` — the same first-of rule as the namer.
+     */
+    suspend fun scratchPad(context: Context): ProviderRef? = withContext(Dispatchers.IO) {
+        val all = discover(context.applicationContext, ExtensionContract.ACTION_SCRATCH_PAD)
+        for (extra in all.drop(1)) Slog.d(TAG) { "ignoring additional scratch pad ${extra.component.flattenToShortString()}" }
+        all.firstOrNull()
+    }
+
     /** Every trusted object provider (arc 4 / H3), ordered by label then package name — all of them contribute. */
     suspend fun objectProviders(context: Context): List<ProviderRef> = withContext(Dispatchers.IO) {
         discover(context.applicationContext, ExtensionContract.ACTION_OBJECT_PROVIDER)

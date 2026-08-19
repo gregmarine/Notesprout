@@ -8,12 +8,14 @@ import com.symmetricalpalmtree.gpaper.core.PaperView
 import com.symmetricalpalmtree.gpaper.core.Tool
 
 /**
- * The three tool buttons + back. Selected tool = the bordered `state_selected` look of
+ * The three tool buttons + back of a paper-hosting screen (arc 6 / S0: `NotebookToolbar` moved to
+ * `:paper-screen` and renamed — the notebook and the Scratch Pad extension both wire their top bars
+ * through it). Selected tool = the bordered `state_selected` look of
  * `bg_toolbar_button` (no colour). [sync] is what `PaperListener.onToolChanged` calls so the
  * buttons stay honest when the component changes tools itself. Every tap calls
  * `releaseRender()` first so an EPD panel actually shows the new state.
  */
-class NotebookToolbar(
+class PaperToolbar(
     private val bar: View,
     private val btnBack: ImageButton,
     private val btnPen: ImageButton,

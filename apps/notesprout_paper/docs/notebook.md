@@ -18,14 +18,15 @@ delete) and undo/redo arrive in Phase 4.
 | `ObjectRenderer` / `ObjectRenderCache` | the g-paper `ContentRenderer` bridge (placeholder or cached bitmap; live-drag pair; `hitTargets`) + the session-only bitmap cache |
 | `StrokeRows` | pure mapper `Stroke ⇄ SoilObjectEntity` (format-B blob, `InkColorCodec`, `StrokeStyle` name; unknown → PEN). JVM-tested |
 | `CoverSnapshot` | `paper.renderToBitmap()` → ≤ 512 px long edge → WEBP q100 → `IndexRepository.setCover` |
-| `NotebookToolbar` | `[←] [pen] [eraser] [lasso]`; selected = `state_selected` bordered look; `sync(tool)` from `onToolChanged`; `releaseRender()` on every tap |
+| `PaperToolbar` (`:paper-screen`; was `NotebookToolbar` until arc 6 / S0) | `[←] [pen] [eraser] [lasso]`; selected = `state_selected` bordered look; `sync(tool)` from `onToolChanged`; `releaseRender()` on every tap |
 | `SelectionToolbar` / `ToolbarAnchor` | the floating selection toolbar + sub-toolbar (arc 4 / H2): core-drawn buttons from `ToolbarItem`s, show/hide/anchor rules, exclusion rects; the pure placement math (JVM-tested) |
 | `SelectionActions` | `ToolbarAction` / `Contribution` / `ToolbarItem` + the pure `shapeOf` / `merge` (Delete first, provider order, INK / OBJECT / mixed filtering; JVM-tested) |
 | `ObjectEditDialog` | the `EditSpec` → `AlertDialog` shell (Save / Cancel, IME rules) |
 | `ObjectProviders` | the loaded provider set for one open (arc 4 / H4): refs by package, recognizer / Markdown refs, `contributions`, the resume `signature`; `load` (IO binds) |
 | `ObjectActions` | the provider-facing flows (H4): `requires` guards, `RecognizerReadiness`, `createFromInk` (no popup since H5) / `applyAction` / `describeEdit` / `applyEdit`, every failure dialog; hands results to the screen's `objectListener` |
 | `ObjectRenderPass` | the cache fill (H4): objects grouped by provider → one `renderAll` bind per provider → decode → `Result`s the screen applies |
-| `NotebookChrome` | the chrome geometry (arc 5 / C1 — a pure move out of the Activity at its 800-line cap): `pushExclusions()` (whole paper while `blockAll` — not yet open, or the Contents showing — else top bar + bottom strip + selection-toolbar rects) and `overChrome(ev)` |
+| `PaperChrome` (`:paper-screen`; was `NotebookChrome` until arc 6 / S0) | the chrome geometry (arc 5 / C1 — a pure move out of the Activity at its 800-line cap): `pushExclusions()` (whole paper while `blockAll` — not yet open, or the Contents showing — else top bar + bottom strip + the `extraRects` the notebook supplies = its selection toolbar's) and `overChrome(ev)` |
+| `NotebookUndo` | the notebook's undo `Action` set (arc 6 / S0 — lifted out of the now-generic `UndoRedoStack<A>` in `:paper-screen`): Drew / Erased / Moved / Page / ObjectCreated / ObjectsDeleted / ObjectEdited; replay stays in the Activity until S1 moves it here |
 | `ContentsSource` / `OutlineTree` | the Contents gather (arc 5 / C0 — IO: rows → outline-capable providers → one `describeOutlineAll` bind each → items) and the pure tree / visible rows / highlight / paging math (JVM-tested) |
 | `ContentsFlow` / `ContentsDialog` / `ContentsLayout` | the Contents screen (arc 5 / C1): busy guard → gather → failure dialog or the `Dialog` (one layout, sidebar / full screen by width; pure width + paging rules JVM-tested) — see §"Contents (arc 5)" |
 
@@ -342,7 +343,7 @@ moment ago is in its row; the candidate rows are put in document order and cappe
 the bind, whose budget is ≤ 10 chunks × 2 s — C2) → on Main: screen going away → nothing; `Result.Failed(label)` → the honest
 `objects_provider_failed` dialog under the "Contents" title (nothing opens — a capable provider that
 did not answer never yields a partial list); `Result.Ok` → `ContentsDialog`. **While the dialog is up
-the whole paper is one exclusion rect** (`ContentsFlow.showing` → `NotebookChrome.blockAll`, like the
+the whole paper is one exclusion rect** (`ContentsFlow.showing` → `PaperChrome.blockAll`, like the
 "Opening…" popup — the Onyx raw pen path bypasses the window stack, so a stylus would otherwise ink
 under the sidebar); the chrome rects come back on dismiss. A row tap → dismiss → `navigateTo(index)`
 under `pageOps` (the existing path — no-op when already there; nothing is selected).
@@ -403,8 +404,10 @@ heading wait for the pen to leave hover range. The *background* pass keeps the g
 ## Pages: flip, insert, delete, undo/redo (Phase 4)
 
 The notebook is a stack of pages on one g-paper surface. `NotebookSession` owns the ordered `pages`
-list + `currentIndex`; `PageGestures` turns finger input into page actions; `UndoRedoStack` is the
-in-memory history.
+list + `currentIndex`; `PageGestures` turns finger input into page actions; `UndoRedoStack<NotebookUndo.Action>`
+is the in-memory history. Since arc 6 / S0 `PageGestures`, `PageMath`, the generic `UndoRedoStack`,
+`PaperToolbar`, `PaperChrome`, `ToolbarAnchor` and the `core/` helpers live in the shared
+`:paper-screen` module (packages unchanged) — a fix to them goes there, never in a consumer.
 
 ### Gestures (`PageGestures`)
 
@@ -452,7 +455,7 @@ over chrome. No haptic feedback (meditative).
 `liveChildIds(pageId)` (strokes + objects; cheap, no blobs).
 `PageMath` holds the pure index/set arithmetic (JVM-tested in `PageMathTest`).
 
-### Undo / redo (`UndoRedoStack`) — notebook-level
+### Undo / redo (`UndoRedoStack<NotebookUndo.Action>`) — notebook-level
 
 **Deviation from the plan's "per-page, cleared on page turn":** because the phase-start answer put
 **page insert/delete inside undo**, and undoing an insert/delete must reverse the page turn it caused,

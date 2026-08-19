@@ -22,7 +22,7 @@ import com.symmetricalpalmtree.notesprout.R
  * Core-drawn from descriptions: every button is either an icon from the core catalog or the action's
  * label as text (same `toolbar_button_size` square, `bg_toolbar_button` — `state_selected` bordered
  * for an active sub-action), with the long-press hint = the action's hint. Every tap calls
- * `releaseRender()` first (EPD chrome release), like [NotebookToolbar].
+ * `releaseRender()` first (EPD chrome release), like [PaperToolbar].
  *
  * Geometry is [ToolbarAnchor]'s: the toolbar sits [GAP_DP] below the selection, centred, flips
  * above when it would cross the bottom strip and is clamped between the top bar and the bottom
@@ -81,8 +81,8 @@ class SelectionToolbar(
 
     /** The visible rows' rects in window coordinates (for `setExclusionRects` / `overChrome`). */
     fun rects(): List<Rect> = listOfNotNull(
-        if (bar.visibility == View.VISIBLE) NotebookToolbar.rectOf(bar) else null,
-        if (subBar.visibility == View.VISIBLE) NotebookToolbar.rectOf(subBar) else null,
+        if (bar.visibility == View.VISIBLE) PaperToolbar.rectOf(bar) else null,
+        if (subBar.visibility == View.VISIBLE) PaperToolbar.rectOf(subBar) else null,
     )
 
     fun contains(x: Int, y: Int): Boolean = rects().any { it.contains(x, y) }

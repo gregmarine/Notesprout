@@ -84,7 +84,6 @@
     <string name="naming_save_failed">Folder created — naming scheme not saved</string>
     <string name="naming_unavailable">Naming extension didn\'t respond</string>
     <string name="naming_problem_title">Naming scheme</string>
-    <string name="ok">OK</string>
     <string name="rename_title">Rename</string>
     <string name="rename_hint">Name</string>
     <string name="rename_duplicate_notebook">A notebook named \"%1$s\" already exists here</string>

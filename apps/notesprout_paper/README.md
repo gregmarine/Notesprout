@@ -76,7 +76,7 @@ over from Notesprout just because it exists there).
 
 ```sh
 cd apps/notesprout_paper
-./gradlew assembleDebug               # all modules → app-debug.apk + ext-templates-debug.apk + ext-naming-debug.apk + ext-mlkit-debug.apk + ext-markdown-debug.apk + ext-heading-debug.apk
+./gradlew assembleDebug               # all modules → app-debug.apk + ext-templates-debug.apk + ext-naming-debug.apk + ext-mlkit-debug.apk + ext-markdown-debug.apk + ext-heading-debug.apk + ext-scratchpad-debug.apk
 ./gradlew testDebugUnitTest           # all modules
 adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk
 adb -s <serial> install -r ext-templates/build/outputs/apk/debug/ext-templates-debug.apk   # the Templates extension
@@ -84,21 +84,25 @@ adb -s <serial> install -r ext-naming/build/outputs/apk/debug/ext-naming-debug.a
 adb -s <serial> install -r ext-mlkit/build/outputs/apk/debug/ext-mlkit-debug.apk           # the ML Kit extension (model needs Wi-Fi once)
 adb -s <serial> install -r ext-markdown/build/outputs/apk/debug/ext-markdown-debug.apk     # the Markdown extension
 adb -s <serial> install -r ext-heading/build/outputs/apk/debug/ext-heading-debug.apk       # the Heading extension
+adb -s <serial> install -r ext-scratchpad/build/outputs/apk/debug/ext-scratchpad-debug.apk # the Scratch Pad extension (arc 6 — owns a screen)
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.templates.dev        # BOOX may land it disabled
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.naming.dev
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.mlkit.dev
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.markdown.dev
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.heading.dev
+adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.scratchpad.dev
 ```
 
-Six APKs: the core (`:app`), the Templates extension (`:ext-templates`), the Naming extension
+Seven APKs: the core (`:app`), the Templates extension (`:ext-templates`), the Naming extension
 (`:ext-naming` — per-folder default-name schemes such as `Meeting {date} {n:2}`, kept in a core-owned
 encrypted store), the ML Kit extension (`:ext-mlkit` — the handwriting recognizer; the only module
-that depends on ML Kit), the Markdown extension (`:ext-markdown`) and the Heading extension
-(`:ext-heading`). All are debug-signed by the same `~/.android/debug.keystore`, which is what satisfies
+that depends on ML Kit), the Markdown extension (`:ext-markdown`), the Heading extension
+(`:ext-heading`) and the Scratch Pad extension (`:ext-scratchpad` — arc 6, in progress: the first
+extension that owns a *screen*; it and `:app` share the `:paper-screen` library — the e-ink resources
+and the paper-screen helpers, g-paper as its `api`). All are debug-signed by the same `~/.android/debug.keystore`, which is what satisfies
 the same-signature trust rule in dev; an extension built on another machine is not trusted by this
 one's core (expected). Extensions have no launcher icon (listed as "NSE · Templates Dev" / "NSE ·
-Naming Dev" / "NSE · ML Kit Dev" / "NSE · Markdown Dev" / "NSE · Heading Dev") — remove them via Settings → Apps (or `adb uninstall`).
+Naming Dev" / "NSE · ML Kit Dev" / "NSE · Markdown Dev" / "NSE · Heading Dev" / "NSE · Scratch Pad Dev") — remove them via Settings → Apps (or `adb uninstall`).
 
 The drawing surface (g-paper) is consumed from **mavenLocal**
 (`com.symmetricalpalmtree.gpaper:gpaper-{core,onyx,ratta}:0.1.1`). If a g-paper symbol is unresolved,
@@ -110,7 +114,7 @@ run `./gradlew publishToMavenLocal` in `~/git/g-paper` first. Requires a Temurin
 
 | Concern | Path |
 |---|---|
-| Project memory / plan (read first) | `PAPER_PLAN.md` (v0), `PAPER_EXTENSIONS_PLAN.md` (arc 1 — extension API + Templates), `PAPER_NAMING_PLAN.md` (arc 2 — extension store + Naming), `PAPER_RECOGNITION_PLAN.md` (arc 3 — handwriting-recognizer capability point + ML Kit), `PAPER_OBJECTS_PLAN.md` (arc 4 — content objects, selection toolbar, Markdown + Heading), `PAPER_CONTENTS_PLAN.md` (arc 5 — the Contents) |
+| Project memory / plan (read first) | `PAPER_PLAN.md` (v0), `PAPER_EXTENSIONS_PLAN.md` (arc 1 — extension API + Templates), `PAPER_NAMING_PLAN.md` (arc 2 — extension store + Naming), `PAPER_RECOGNITION_PLAN.md` (arc 3 — handwriting-recognizer capability point + ML Kit), `PAPER_OBJECTS_PLAN.md` (arc 4 — content objects, selection toolbar, Markdown + Heading), `PAPER_CONTENTS_PLAN.md` (arc 5 — the Contents), `PAPER_SCRATCHPAD_PLAN.md` (arc 6 — the Scratch Pad, active) |
 | Standing rules + build facts | `CLAUDE.md` |
 | Encryption & launch spine | `docs/crypto.md` |
 | Containers & global index | `docs/data.md` |

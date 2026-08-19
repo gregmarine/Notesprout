@@ -14,6 +14,7 @@ import androidx.lifecycle.lifecycleScope
 import com.symmetricalpalmtree.notesprout.R
 import com.symmetricalpalmtree.notesprout.core.ActionSheetDialog
 import com.symmetricalpalmtree.notesprout.core.Dialogs
+import com.symmetricalpalmtree.notesprout.core.Slog
 import com.symmetricalpalmtree.notesprout.crypto.KeyMaterial
 import com.symmetricalpalmtree.notesprout.crypto.KeySession
 import com.symmetricalpalmtree.notesprout.crypto.PassphraseStore
@@ -22,6 +23,8 @@ import com.symmetricalpalmtree.notesprout.crypto.SoilFileKind
 import com.symmetricalpalmtree.notesprout.data.extensionStoreFile
 import com.symmetricalpalmtree.notesprout.data.extstore.ExtensionStoreBinder
 import com.symmetricalpalmtree.notesprout.data.extstore.ExtensionStores
+import com.symmetricalpalmtree.notesprout.extension.ExtensionContract
+import com.symmetricalpalmtree.notesprout.extension.SharedBytes
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -34,7 +37,8 @@ import kotlinx.coroutines.withContext
  *    process; the next launch must land on the Unlock screen with the file intact.
  *  - **Extension store self-test** — open-or-create the store of a fake package `probe.test`
  *    (`Garden/probe.test.db`), round-trip a value through a real [ExtensionStoreBinder] (uid = ours),
- *    check the file is encrypted and that a revoked binder refuses; toast OK / FAIL. Room + SQLCipher
+ *    check the file is encrypted and that a revoked binder refuses — and (arc 6 / S0) a 4 MiB value
+ *    through `putLarge` / `getLarge`; toast OK / FAIL. Room + SQLCipher
  *    can't run on the JVM, so this is the store's only pre-N1 on-device check.
  */
 object DebugMenu {
@@ -69,6 +73,7 @@ object DebugMenu {
         activity.lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) { runCatching { runStoreProbe(activity) } }
             val msg = result.fold({ "Extension store: OK ($it)" }, { "Extension store: FAIL — ${it.message}" })
+            Slog.d("DebugMenu") { msg }
             Toast.makeText(activity, msg, Toast.LENGTH_LONG).show()
         }
     }
@@ -91,12 +96,29 @@ object DebugMenu {
         check(store.keys("zzz").isEmpty()) { "keys(zzz) not empty" }
         store.delete(key)
         check(store.get(key) == null) { "get after delete not null" }
+        // Arc 6 / S0: a 4 MiB value through the large path (SharedMemory both ways), the inline cap,
+        // and `get` refusing a large stored value with the exact STORE_VALUE_LARGE message.
+        val bigKey = "probe:big:" + System.currentTimeMillis()
+        val big = ByteArray(ExtensionContract.STORE_MAX_VALUE_BYTES) { (it % 251).toByte() }
+        val t1 = System.currentTimeMillis()
+        // In-process there is no parcel: the binder receives this very object and closes it itself
+        // (over IPC the sender closes its own handle after the call — the region is dup'd).
+        store.putLarge(bigKey, SharedBytes.write(big))
+        val got = store.getLarge(bigKey) ?: error("getLarge returned null")
+        val back = SharedBytes.readAndClose(got)
+        val bigMs = System.currentTimeMillis() - t1
+        check(back.contentEquals(big)) { "4 MiB round trip mismatch" }
+        check(runCatching { store.get(bigKey) }.exceptionOrNull()?.message == ExtensionContract.STORE_VALUE_LARGE) { "get of a large value not refused" }
+        check(runCatching { store.put("probe:inline", ByteArray(ExtensionContract.STORE_MAX_INLINE_BYTES + 1)) }
+            .exceptionOrNull() is IllegalArgumentException) { "inline cap not enforced" }
+        store.delete(bigKey)
+        check(store.getLarge(bigKey) == null) { "getLarge after delete not null" }
         check(runCatching { store.get("") }.exceptionOrNull() is IllegalArgumentException) { "empty key accepted" }
         val other = ExtensionStoreBinder(db, android.os.Process.myUid() + 1)
         check(runCatching { other.get("x") }.exceptionOrNull() is SecurityException) { "wrong uid accepted" }
         store.revoke()
         check(runCatching { store.get("x") }.exceptionOrNull() is SecurityException) { "revoked binder accepted" }
-        return "open ${openMs}ms, ${file.name}"
+        return "open ${openMs}ms, 4 MiB round trip ${bigMs}ms, ${file.name}"
     }
 
     private fun showKey(activity: AppCompatActivity) {

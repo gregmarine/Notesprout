@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- S0 placeholder: a caller-checked title + Back. The real paper screen arrives in S1. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/paperWhite"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:id="@+id/topBar"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/toolbar_bar_thickness"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnBack"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:contentDescription="@string/cd_scratch_back"
+            android:src="@drawable/ic_arrow_left" />
+
+        <TextView
+            android:id="@+id/title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:text="@string/scratch_title"
+            android:textAppearance="@style/TextAppearance.Notesprout.TitleMedium" />
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+</LinearLayout>

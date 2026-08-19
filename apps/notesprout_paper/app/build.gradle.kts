@@ -61,8 +61,6 @@ android {
     }
 }
 
-val gpaperVersion = "0.1.1"
-
 dependencies {
     implementation(project(":extension-api"))
     implementation("androidx.core:core-ktx:1.13.1")
@@ -77,9 +75,8 @@ dependencies {
     implementation("androidx.sqlite:sqlite:2.4.0")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
-    implementation("com.symmetricalpalmtree.gpaper:gpaper-core:$gpaperVersion")
-    implementation("com.symmetricalpalmtree.gpaper:gpaper-onyx:$gpaperVersion")
-    implementation("com.symmetricalpalmtree.gpaper:gpaper-ratta:$gpaperVersion")
+    // g-paper arrives transitively: :paper-screen declares the three artifacts as `api` (arc 6 / S0).
+    implementation(project(":paper-screen"))
 
     testImplementation("junit:junit:4.13.2")
 }

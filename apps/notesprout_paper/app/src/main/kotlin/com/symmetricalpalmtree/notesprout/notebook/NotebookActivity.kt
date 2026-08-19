@@ -40,7 +40,7 @@ import com.symmetricalpalmtree.notesprout.data.index.IndexRepository
 import com.symmetricalpalmtree.notesprout.data.prefs.BrowseState
 import com.symmetricalpalmtree.notesprout.data.prefs.RecentsPrefs
 import com.symmetricalpalmtree.notesprout.databinding.ActivityNotebookBinding
-import com.symmetricalpalmtree.notesprout.notebook.UndoRedoStack.Action
+import com.symmetricalpalmtree.notesprout.notebook.NotebookUndo.Action
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -55,12 +55,12 @@ import kotlinx.coroutines.withContext
 /**
  * The notebook screen: full-bleed g-paper surface with the toolbar and page strip overlaying it.
  * Lifecycle, wiring, chrome and exclusion rects live here; the data lives in [NotebookSession] /
- * [StrokeStore] / [ObjectStore]; the cover in [CoverSnapshot]; the buttons in [NotebookToolbar];
+ * [StrokeStore] / [ObjectStore]; the cover in [CoverSnapshot]; the buttons in [PaperToolbar];
  * content objects reach the paper through [ObjectRenderer] (arc 4); the floating selection toolbar
  * is [SelectionToolbar] (arc 4 / H2 — its contents from [SelectionActions.merge]); the object
  * providers behind it are [ObjectProviders], the provider-facing flows [ObjectActions], the cache
  * fill [ObjectRenderPass] (arc 4 / H4) — this screen owns only the page mutations they lead to. The
- * chrome geometry (exclusion rects, over-chrome test) is [NotebookChrome]; the Contents (arc 5 / C1)
+ * chrome geometry (exclusion rects, over-chrome test) is [PaperChrome]; the Contents (arc 5 / C1)
  * is [ContentsFlow] behind the top-bar list button and the one-finger swipe-down.
  *
  * Immersive (system bars hidden, transient by swipe). The toolbar is TopGuard-padded because on
@@ -70,11 +70,11 @@ class NotebookActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityNotebookBinding
     private lateinit var paper: PaperView
-    private lateinit var toolbar: NotebookToolbar
+    private lateinit var toolbar: PaperToolbar
     private lateinit var selectionToolbar: SelectionToolbar
     private lateinit var session: NotebookSession
     private lateinit var pageGestures: PageGestures
-    private lateinit var chrome: NotebookChrome
+    private lateinit var chrome: PaperChrome
     private lateinit var contentsFlow: ContentsFlow
     private val repo by lazy { IndexRepository() }
 
@@ -84,7 +84,7 @@ class NotebookActivity : AppCompatActivity() {
     private var selectionActive = false
 
     /** In-memory history (notebook-level, survives page turns; dies with the screen). */
-    private val undo = UndoRedoStack()
+    private val undo = UndoRedoStack<Action>()
     /** Serialises page/undo operations so overlapping gestures can't corrupt the page list. */
     private val pageOps = Mutex()
     /** Strokes currently on the visible page — the "you still have the strokes" mirror an erase needs.
@@ -148,15 +148,15 @@ class NotebookActivity : AppCompatActivity() {
         ))
         objectActions = ObjectActions(this, { providers }, objectListener)
 
-        toolbar = NotebookToolbar(
+        toolbar = PaperToolbar(
             binding.topBar, binding.btnBack, binding.btnPen, binding.btnEraser, binding.btnLasso, paper,
         ) { close() }
         selectionToolbar = SelectionToolbar(
             root = binding.root, paperView = paper.asView(),
             bar = binding.selectionToolbar.root, subBar = binding.selectionSubToolbar.root,
             band = {
-                val top = NotebookToolbar.rectOf(binding.topBar)?.bottom
-                val bottom = NotebookToolbar.rectOf(binding.bottomStrip)?.top
+                val top = PaperToolbar.rectOf(binding.topBar)?.bottom
+                val bottom = PaperToolbar.rectOf(binding.bottomStrip)?.top
                 if (top != null && bottom != null && bottom > top) top..bottom else null
             },
             releaseRender = { paper.releaseRender() },
@@ -188,7 +188,7 @@ class NotebookActivity : AppCompatActivity() {
             else RecognizeContext(paper.getStrokes(), session.currentPage.width.toFloat(), session.currentPage.height.toFloat())
         })
 
-        chrome = NotebookChrome(paper, binding.topBar, binding.bottomStrip, selectionToolbar) { !opened || contentsFlow.showing }
+        chrome = PaperChrome(paper, binding.topBar, binding.bottomStrip, { selectionToolbar.rects() }, { x, y -> selectionToolbar.contains(x, y) }) { !opened || contentsFlow.showing }
         contentsFlow = ContentsFlow(
             this, paper, { session }, { providers }, { session.currentIndex }, { opened && !closing },
             onShowingChanged = { binding.root.post { pushExclusions() } }, navigate = { index -> runPageOp { navigateTo(index) } },
@@ -682,7 +682,7 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     /**
-     * Chrome rects the stylus must not ink under ([NotebookChrome]). Until the notebook is open
+     * Chrome rects the stylus must not ink under ([PaperChrome]). Until the notebook is open
      * ([opened]) — and while the Contents dialog is up — the whole paper is excluded instead: no pen
      * input while the "Opening…" popup is up (ink written before the page is loaded would be dropped,
      * and the popup promises exactly that nothing is taken yet), none under the Contents (the Onyx raw

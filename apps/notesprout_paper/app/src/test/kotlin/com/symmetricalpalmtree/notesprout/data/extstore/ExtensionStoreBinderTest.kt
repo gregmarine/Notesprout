@@ -81,19 +81,54 @@ class ExtensionStoreBinderTest {
     }
 
     @Test
-    fun valueCap() {
-        gate.put("ok", ByteArray(ExtensionContract.STORE_MAX_VALUE_BYTES))
+    fun valueCap_inlinePath() {
+        gate.put("ok", ByteArray(ExtensionContract.STORE_MAX_INLINE_BYTES))
         assertThrows(IllegalArgumentException::class.java) {
-            gate.put("big", ByteArray(ExtensionContract.STORE_MAX_VALUE_BYTES + 1))
+            gate.put("big", ByteArray(ExtensionContract.STORE_MAX_INLINE_BYTES + 1))
         }
         assertThrows(IllegalArgumentException::class.java) { gate.put("nul", null) }
         assertNull(dao.rows["big"])
     }
 
     @Test
+    fun valueCap_largePath() {
+        gate.putLarge("ok", ByteArray(ExtensionContract.STORE_MAX_VALUE_BYTES))
+        assertEquals(ExtensionContract.STORE_MAX_VALUE_BYTES, dao.rows["ok"]!!.size)
+        assertThrows(IllegalArgumentException::class.java) {
+            gate.putLarge("big", ByteArray(ExtensionContract.STORE_MAX_VALUE_BYTES + 1))
+        }
+        assertThrows(IllegalArgumentException::class.java) { gate.putLarge("nul", null) }
+        assertThrows(IllegalArgumentException::class.java) { gate.putLarge("", byteArrayOf(1)) }
+        assertNull(dao.rows["big"])
+    }
+
+    @Test
+    fun get_aboveInlineCap_throwsStoreValueLarge_getLargeAnySize() {
+        val big = ByteArray(ExtensionContract.STORE_MAX_INLINE_BYTES + 1) { 7 }
+        gate.putLarge("big", big)
+        val e = assertThrows(IllegalStateException::class.java) { gate.get("big") }
+        assertEquals(ExtensionContract.STORE_VALUE_LARGE, e.message)
+        assertArrayEquals(big, gate.getLarge("big"))
+        // Small values read on both paths.
+        gate.put("small", byteArrayOf(1, 2))
+        assertArrayEquals(byteArrayOf(1, 2), gate.get("small"))
+        assertArrayEquals(byteArrayOf(1, 2), gate.getLarge("small"))
+        assertNull(gate.getLarge("absent"))
+        // A large put is also gated by uid / revoke / key cap.
+        caller = ext + 1
+        assertThrows(SecurityException::class.java) { gate.putLarge("x", byteArrayOf(1)) }
+        assertThrows(SecurityException::class.java) { gate.getLarge("x") }
+        caller = ext
+        gate.revoke()
+        assertThrows(SecurityException::class.java) { gate.putLarge("x", byteArrayOf(1)) }
+        assertThrows(SecurityException::class.java) { gate.getLarge("x") }
+    }
+
+    @Test
     fun keysCap_rejectsNewKey_butAllowsReplace() {
         for (i in 0 until ExtensionContract.STORE_MAX_KEYS) dao.rows["k$i"] = byteArrayOf(0)
         assertThrows(IllegalStateException::class.java) { gate.put("new", byteArrayOf(1)) }
+        assertThrows(IllegalStateException::class.java) { gate.putLarge("new", byteArrayOf(1)) }
         gate.put("k0", byteArrayOf(7)) // existing key: replace is fine at the cap
         assertArrayEquals(byteArrayOf(7), dao.rows["k0"])
         assertEquals(ExtensionContract.STORE_MAX_KEYS, dao.rows.size)

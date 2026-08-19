@@ -20,4 +20,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "notesprout_paper"
-include(":app", ":extension-api", ":ext-templates", ":ext-naming", ":ext-mlkit", ":ext-markdown", ":ext-heading")
+include(":app", ":extension-api", ":paper-screen", ":ext-templates", ":ext-naming", ":ext-mlkit", ":ext-markdown", ":ext-heading", ":ext-scratchpad")
