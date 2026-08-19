@@ -21,9 +21,9 @@ global-index model, global encryption model, and e-ink design philosophy — and
   button + one-finger swipe-down), then **`PAPER_SCRATCHPAD_PLAN.md` (arc 6, PLANNED 2026-08-19 —
   the ACTIVE arc: `NSE · Scratch Pad`, an extension-owned off-paper screen (UI-rule tier 2, first
   exercise) + the shared `:paper-screen` module + the `SCRATCH_PAD` point + `IExtensionStore.putLarge /
-  getLarge` (4 MiB values over `SharedMemory`) + the two ink transfers; S0 🧪 · S1 ⬜ · S2 ⬜ · S3 ⬜)**
-  — read all seven top-to-bottom at the start of every session; **S0 🧪 2026-08-19 (device
-  verification); next = S1 (fresh session, the phase-start wizard first).**
+  getLarge` (4 MiB values over `SharedMemory`) + the two ink transfers; S0 ✅ 9a96c7a · S1 ⬜ · S2 ⬜ · S3 ⬜)**
+  — read all seven top-to-bottom at the start of every session; **S0 ✅ 2026-08-19 (user-verified
+  SNN / NA5C / MIP11); next = S1 (fresh session, the phase-start wizard first).**
 - **Package / applicationId:** `com.symmetricalpalmtree.notesprout` (debug: `.dev` suffix)
 - **Launcher label:** "Notesprout Paper" (debug: "Notesprout Paper Dev")
 
@@ -95,7 +95,7 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   (`HostCallerCheck.enforceActivity` — `callingPackage` + signature; `am start` is refused), and **ink
   crosses only through the held service, never the Intent**. The store gained `putLarge` / `getLarge`
   (appended; `STORE_MAX_VALUE_BYTES` 4 MiB, `STORE_MAX_INLINE_BYTES` 512 KiB, `LargeValue` over
-  `SharedMemory` via `SharedBytes`; `get` of a large stored value throws `STORE_VALUE_LARGE`). S0 done
+  `SharedMemory` via `SharedBytes`; `get` of a large stored value throws `STORE_VALUE_LARGE`). S0 ✅ 9a96c7a
   (contract, module, skeleton, debug "Probe scratch pad" + the extension's once-per-process 4 MiB
   cross-process probe — both removed in S3); S1 = the screen + the two entry buttons, S2 = the
   transfers, S3 = review / audit rows 28–32 / rules 25–27.

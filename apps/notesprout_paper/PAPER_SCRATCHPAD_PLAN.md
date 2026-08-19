@@ -11,8 +11,8 @@
 > subsystem reference all arcs write into; `docs/notebook.md` and `docs/library.md` gain sections
 > in this arc; a new `docs/scratchpad.md` is the extension's own reference.
 >
-> **Status: S0 🧪 (built + Claude-verified SNN / NA5C / MIP11 2026-08-19; user checklist pending) ·
-> S1 ⬜ · S2 ⬜ · S3 ⬜. Next: the user's S0 checklist → S0 ✅ → S1 (fresh session, wizard first).**
+> **Status: S0 ✅ 9a96c7a (user-verified SNN / NA5C / MIP11 2026-08-19) · S1 ⬜ · S2 ⬜ · S3 ⬜.
+> Next: S1 (fresh session, phase-start wizard first).**
 
 ## Why
 
@@ -534,7 +534,7 @@ Rules 1–5 (point), the store rules (arc 2), 18–23 (object point) apply. Adde
 ## Phases
 
 ### Phase S0 — `:paper-screen` extraction · contract · extension skeleton (discovered, held, no screen)
-**Status:** 🧪 Awaiting device verification (built 2026-08-19; Claude-verified SNN / NA5C / MIP11 — user checklist pending)
+**Status:** ✅ Complete (commit 9a96c7a; user-verified SNN / NA5C / MIP11 2026-08-19 — all five checklist items pass)
 
 **Goal:** the shared module exists and the core is a pure-move consumer of it (every JVM test
 green, the v0 regression subset by eye unchanged on all three devices); the contract has the point,
