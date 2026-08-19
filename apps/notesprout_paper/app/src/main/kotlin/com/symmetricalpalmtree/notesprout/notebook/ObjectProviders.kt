@@ -13,6 +13,9 @@ import com.symmetricalpalmtree.notesprout.extension.ProviderRef
  * IO — `describeTypes` + `describeActions` per provider, a provider that fails either is skipped
  * with a log line), plus the one recognizer and the one Markdown renderer the core would lend
  * through the proxies (null when none is installed — the core never fakes a capability).
+ * Arc 5: after the describes, each provider is **probed** for `describeOutline` (`supportsOutline`,
+ * one blank payload) — [Contribution.outline]; [hasOutline] / [outlineProviders] drive the Contents.
+ * The probe's result does **not** join [signature] (the extension set decides it, not a capability).
  * `providerKey` == the extension's package name — the left half of an object identity
  * `<pkg>:<typeId>` (`ExtensionContract.objectIdentity`), which is how a selected object finds its
  * provider (`SelectionActions.shapeOf`).
@@ -36,6 +39,12 @@ class ObjectProviders private constructor(
         refs[providerKey]?.let { ObjectProviderClient(context, it, recognizerRef, markdownRef) }
 
     fun labelOf(providerKey: String): String = refs[providerKey]?.label?.toString() ?: providerKey
+
+    /** Any loaded provider answers `describeOutline` (arc 5) — the Contents button shows / the swipe acts. */
+    val hasOutline: Boolean get() = contributions.any { it.outline }
+
+    /** The provider keys (packages) that answer `describeOutline`, in [contributions] order. */
+    val outlineProviders: List<String> get() = contributions.filter { it.outline }.map { it.providerKey }
 
     companion object {
         private const val TAG = "ObjectProviders"
@@ -73,8 +82,11 @@ class ObjectProviders private constructor(
                     val actions = client.describeActions()
                     if (types.isEmpty()) { Slog.d(TAG) { "skip ${ref.packageName}: no types" }; continue }
                     refs[ref.packageName] = ref
-                    contributions += Contribution(ref.packageName, ref.label.toString(), types, actions)
-                    Slog.d(TAG) { "${ref.packageName}: ${types.size} type(s), ${actions.size} action(s) (${actions.sumOf { it.subActions.size }} sub)" }
+                    // Arc 5: the outline probe — one blank payload; capable ⇔ a one-entry reply. A provider built
+                    // before `describeOutline` existed fails it (empty reply / exception) and is simply not capable.
+                    val outline = client.supportsOutline(types.first())
+                    contributions += Contribution(ref.packageName, ref.label.toString(), types, actions, outline)
+                    Slog.d(TAG) { "${ref.packageName}: ${types.size} type(s), ${actions.size} action(s) (${actions.sumOf { it.subActions.size }} sub), outline=$outline" }
                 } catch (e: ExtensionCallException) {
                     // Known but undescribed: its objects still go to the render pass (placeholders until it answers),
                     // no toolbar contribution, and the load is marked partial so resume retries.

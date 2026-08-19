@@ -2,6 +2,8 @@ package com.symmetricalpalmtree.notesprout.ext.heading
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import com.symmetricalpalmtree.notesprout.extension.ExtensionContract
+import com.symmetricalpalmtree.notesprout.extension.OutlineEntry
 import org.junit.Test
 
 class HeadingTextTest {
@@ -47,6 +49,22 @@ class HeadingTextTest {
         assertEquals("a b c", HeadingText.fold("a\nb\r\nc"))
         assertEquals("a b", HeadingText.fold("  a    b  "))
         assertEquals("", HeadingText.fold("\n\n  \n"))
+    }
+
+    @Test
+    fun outlineOf() {
+        val e = HeadingText.outlineOf("## Meeting notes")
+        assertEquals("Meeting notes", e.label); assertEquals(2, e.level)
+        assertEquals(0, HeadingText.outlineOf("#").level)                       // # only → NONE
+        assertEquals(0, HeadingText.outlineOf("##   ").level)
+        assertEquals(0, HeadingText.outlineOf("").level)
+        val m = HeadingText.outlineOf("no prefix words")                        // malformed → level 1
+        assertEquals("no prefix words", m.label); assertEquals(1, m.level)
+        val long = HeadingText.outlineOf("### " + "x".repeat(500))              // cut at the cap
+        assertEquals(ExtensionContract.MAX_OUTLINE_LABEL_CHARS, long.label.length); assertEquals(3, long.level)
+        val folded = HeadingText.outlineOf("# a\nb\r\n  c")                     // newlines folded
+        assertEquals("a b c", folded.label); assertEquals(1, folded.level)
+        assertEquals(OutlineEntry.NONE.level, 0)
     }
 
     @Test

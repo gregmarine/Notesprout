@@ -25,6 +25,7 @@ object IconCatalog {
         IconNames.CHECK to R.drawable.ic_check,
         IconNames.PLUS to R.drawable.ic_plus,
         IconNames.TRASH to R.drawable.ic_trash,
+        IconNames.LIST to R.drawable.ic_list,
     )
 
     /** The drawable for [name], or null when the name is null or not in the catalog. */

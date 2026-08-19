@@ -10,6 +10,7 @@ import com.symmetricalpalmtree.notesprout.extension.EditSpec;
 import com.symmetricalpalmtree.notesprout.extension.CreatedObject;
 import com.symmetricalpalmtree.notesprout.extension.RenderedImage;
 import com.symmetricalpalmtree.notesprout.extension.InkStroke;
+import com.symmetricalpalmtree.notesprout.extension.OutlineEntry;
 import com.symmetricalpalmtree.notesprout.extension.IHandwritingRecognizer;
 import com.symmetricalpalmtree.notesprout.extension.IMarkdownRenderer;
 
@@ -44,4 +45,13 @@ interface IObjectProvider {
      *  [markdown] = the core's proxy or null when none is installed (throw
      *  IllegalStateException(MARKDOWN_REQUIRED) if it is needed). Returns null if there is nothing to draw. */
     RenderedImage render(String typeId, String payload, int maxWidthPx, float dpi, IMarkdownRenderer markdown);
+
+    // ── arc 5 / C0 — appended after render(); the eight methods above keep their transaction codes ──
+
+    /** Outline (table-of-contents) entries for [payloads] of one of this provider's types — one
+     *  OutlineEntry per payload, same order, same length: level 1..MAX_OUTLINE_LEVEL with a label
+     *  ≤ MAX_OUTLINE_LABEL_CHARS, or level 0 (label ignored) for "not an outline item". Pure, ≤ 2 s;
+     *  the host chunks at MAX_OUTLINE_BATCH / MAX_OUTLINE_BATCH_CHARS per call. A provider built
+     *  before this method existed simply never receives it (the host tolerates the failure). */
+    List<OutlineEntry> describeOutline(String typeId, in List<String> payloads);
 }

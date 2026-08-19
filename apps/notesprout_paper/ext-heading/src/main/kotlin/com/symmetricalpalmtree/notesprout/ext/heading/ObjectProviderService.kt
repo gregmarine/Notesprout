@@ -15,6 +15,7 @@ import com.symmetricalpalmtree.notesprout.extension.IHandwritingRecognizer
 import com.symmetricalpalmtree.notesprout.extension.IMarkdownRenderer
 import com.symmetricalpalmtree.notesprout.extension.IObjectProvider
 import com.symmetricalpalmtree.notesprout.extension.InkStroke
+import com.symmetricalpalmtree.notesprout.extension.OutlineEntry
 import com.symmetricalpalmtree.notesprout.extension.RenderedImage
 import com.symmetricalpalmtree.notesprout.extension.SelectionAction
 
@@ -129,6 +130,19 @@ class ObjectProviderService : Service() {
             if (BuildConfig.DEBUG) Log.d(TAG, "render: ${payload.length} chars → ${image?.widthPx ?: 0}x${image?.heightPx ?: 0} px in ${SystemClock.elapsedRealtime() - t0} ms")
             image?.let { pending.set(it.memory) }
             return image
+        }
+
+        /** Arc 5 / C0 — one entry per payload, same order (`HeadingText.outlineOf`). Pure; caps re-checked. */
+        override fun describeOutline(typeId: String?, payloads: MutableList<String>?): MutableList<OutlineEntry> {
+            enforce()
+            require(typeId == HeadingActions.TYPE_ID) { "unknown typeId" }
+            requireNotNull(payloads) { "payloads is null" }
+            require(payloads.size <= ExtensionContract.MAX_OUTLINE_BATCH) { "too many payloads" }
+            require(payloads.sumOf { it?.length ?: 0 } <= ExtensionContract.MAX_OUTLINE_BATCH_CHARS) { "payloads too long" }
+            val t0 = SystemClock.elapsedRealtime()
+            val out = payloads.mapTo(ArrayList(payloads.size)) { HeadingText.outlineOf(it ?: "") }
+            if (BuildConfig.DEBUG) Log.d(TAG, "describeOutline n=${out.size} in ${SystemClock.elapsedRealtime() - t0} ms")
+            return out
         }
     }
 

@@ -38,6 +38,8 @@ import kotlinx.coroutines.withContext
  * "Recognition model needed" → Download → progress → recognize without another tap) is
  * [RecognizerReadiness] since H3 — main source, shared with the heading action; this menu only calls
  * it. (The arc-4 test surfaces "Insert test object" / "Probe object providers" were removed in H5.)
+ * Arc 5 / C0 adds **"Probe contents"** (removed in C2): runs the Contents gather ([ContentsSource]
+ * via the [contents] lambda the screen hands in) and logs counts + durations only — never a label.
  *
  * Every dialog here is the core's (the extension shows nothing; the only toast is "copied"); nothing
  * recognized is stored or logged — the dialog is the only sink.
@@ -56,7 +58,7 @@ object NotebookDebugMenu {
     private fun claim(activity: AppCompatActivity) { busyOwner = java.lang.ref.WeakReference(activity) }
     private fun release() { busyOwner = null }
 
-    fun install(activity: AppCompatActivity, bar: ViewGroup, provider: () -> RecognizeContext?) {
+    fun install(activity: AppCompatActivity, bar: ViewGroup, provider: () -> RecognizeContext?, contents: suspend () -> ContentsSource.Result?) {
         // Push the ⋯ to the far end of the row (the row's own buttons stay where they are).
         bar.addView(View(activity), LinearLayout.LayoutParams(0, 0, 1f))
         val btn = AppCompatImageButton(activity, null, 0).apply {
@@ -71,11 +73,11 @@ object NotebookDebugMenu {
             stateListAnimator = null
         }
         TooltipCompat.setTooltipText(btn, btn.contentDescription)
-        btn.setOnClickListener { showSheet(activity, provider) }
+        btn.setOnClickListener { showSheet(activity, provider, contents) }
         bar.addView(btn)
     }
 
-    private fun showSheet(activity: AppCompatActivity, provider: () -> RecognizeContext?) {
+    private fun showSheet(activity: AppCompatActivity, provider: () -> RecognizeContext?, contents: suspend () -> ContentsSource.Result?) {
         activity.lifecycleScope.launch {
             val ref = ExtensionRegistry.handwritingRecognizer(activity)   // IO; refreshed per open
             if (activity.isFinishing || activity.isDestroyed) return@launch
@@ -84,6 +86,7 @@ object NotebookDebugMenu {
             if (ref != null) {
                 sheet.addAction(null, activity.getString(R.string.debug_recognize_page)) { recognize(activity, ref, provider) }
             }
+            sheet.addAction(null, activity.getString(R.string.debug_probe_contents)) { probeContents(activity, contents) }
             sheet.show()
         }
     }
@@ -103,6 +106,25 @@ object NotebookDebugMenu {
                 onReady = { try { runRecognition(activity, client, ink, ctx) } finally { release() } },
                 onGaveUp = { release() },
             )
+        }
+    }
+
+    /** Arc 5 / C0 (removed in C2): the C1 gather path end to end — log counts + durations, toast "Probe done". */
+    private fun probeContents(activity: AppCompatActivity, contents: suspend () -> ContentsSource.Result?) {
+        if (busy()) return
+        claim(activity)
+        activity.lifecycleScope.launch {
+            try {
+                val t0 = System.currentTimeMillis()
+                when (val r = contents()) {
+                    null -> Slog.d(TAG) { "probe contents: not open" }
+                    is ContentsSource.Result.Failed -> Slog.d(TAG) { "probe contents: failed — provider '${r.providerLabel}' did not answer in ${System.currentTimeMillis() - t0} ms" }
+                    is ContentsSource.Result.Ok -> Slog.d(TAG) { "probe contents: entries=${r.count} roots=${r.roots.size} truncated=${r.truncated} in ${System.currentTimeMillis() - t0} ms" }
+                }
+                toast(activity, R.string.debug_probe_contents_done)
+            } finally {
+                release()
+            }
         }
     }
 

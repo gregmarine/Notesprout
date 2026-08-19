@@ -161,6 +161,67 @@ class ObjectProviderClient(
         return out.toList()
     }
 
+    // ── arc 5 / C0 — the appended `describeOutline` (compatible change; old providers tolerated) ──────
+
+    /**
+     * Outline entries for [payloads] of [typeId] — **one bind**, the chunks ([OutlineCaps.chunk])
+     * called in sequence inside it, each reply through [OutlineCaps.sanitize]. Returns one entry per
+     * payload in order, or **null** when any chunk failed (wrong-length reply, exception, timeout —
+     * this provider's objects are absent from the Contents this time). Never logs a payload or label.
+     */
+    suspend fun describeOutline(typeId: String, payloads: List<String>): List<OutlineCaps.Entry>? =
+        describeOutlineAll(mapOf(typeId to payloads))?.get(typeId)
+
+    /**
+     * The same across **all of the provider's types in one bind** (what the Contents gather calls):
+     * one entry list per input type, or **null** if any type / chunk failed.
+     */
+    suspend fun describeOutlineAll(byType: Map<String, List<String>>): Map<String, List<OutlineCaps.Entry>>? {
+        if (byType.isEmpty()) return emptyMap()
+        val plan = byType.mapValues { (_, payloads) -> OutlineCaps.chunk(payloads.map(::outPayload)) }
+        val chunkCount = plan.values.sumOf { it.size }
+        val t0 = System.currentTimeMillis()
+        var calls = 0
+        return try {
+            val out = call(CALL_TIMEOUT_MS * maxOf(1, chunkCount)) { p ->
+                val result = LinkedHashMap<String, List<OutlineCaps.Entry>>()
+                for ((typeId, chunks) in plan) {
+                    val entries = ArrayList<OutlineCaps.Entry>()
+                    for (chunk in chunks) {
+                        calls++
+                        val reply = p.describeOutline(typeId, chunk)
+                        val clean = OutlineCaps.sanitize(reply, chunk.size)
+                            ?: throw ExtensionCallException("describeOutline $typeId: reply of ${reply?.size ?: "null"} for ${chunk.size}")
+                        entries += clean
+                    }
+                    result[typeId] = entries
+                }
+                result
+            }
+            Slog.d(TAG) { "describeOutlineAll: ${byType.size} type(s), ${byType.values.sumOf { it.size }} payload(s), $calls call(s) → ${out.values.sumOf { l -> l.count { it.level > 0 } }} entries in ${System.currentTimeMillis() - t0} ms" }
+            out
+        } catch (e: ExtensionCallException) {
+            Slog.d(TAG) { "describeOutlineAll failed after $calls call(s): ${e.javaClass.simpleName}: ${e.message}" }
+            null
+        }
+    }
+
+    /**
+     * The load probe (own bind, [CALL_TIMEOUT_MS]): `describeOutline(firstType, [""])` — capable ⇔ a
+     * reply of exactly one entry. An exception, an empty reply (what an old provider's unknown
+     * transaction yields) or any other length → false, logged as `outline probe: unsupported`.
+     */
+    suspend fun supportsOutline(firstType: String): Boolean {
+        val capable = try {
+            call(CALL_TIMEOUT_MS) { p -> OutlineCaps.isCapableReply(p.describeOutline(firstType, listOf(""))) }
+        } catch (e: ExtensionCallException) {
+            Slog.d(TAG) { "outline probe: ${e.javaClass.simpleName}: ${e.message}" }
+            false
+        }
+        if (!capable) Slog.d(TAG) { "outline probe: unsupported (${ref.packageName})" }
+        return capable
+    }
+
     private fun types(p: IObjectProvider): Set<String> =
         (p.describeTypes()?.filterNotNull() ?: emptyList()).asSequence()
             .filter(ExtensionContract::isTypeId).take(ExtensionContract.MAX_TYPES).toSet()

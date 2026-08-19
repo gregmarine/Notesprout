@@ -104,6 +104,9 @@ proxies the core hands it as in-parameters**).
 | `MAX_EDIT_TITLE_CHARS` / `MAX_EDIT_HINT_CHARS` / `MAX_EDIT_TEXT_CHARS` | `40` / `60` / `4_000` — `EditSpec` title / field hint / most characters an edit field accepts (H2) |
 | `MAX_TYPE_ID_CHARS` / `MAX_TYPES` | `32` / `16` — an object `typeId` is `[a-z0-9_-]+` (`isTypeId`) / most `describeTypes()` entries the host keeps per provider (H3) |
 | `MAX_OBJECTS_PER_PAGE` | `200` — host cap on live objects per page (creation refused above it; H3) |
+| `MAX_OUTLINE_LABEL_CHARS` / `MAX_OUTLINE_LEVEL` | `200` / `6` — an `OutlineEntry`'s label cap (host truncates inward, provider re-checks) / `level` is `0` (not an outline item) or `1..6` (arc 5 / C0) |
+| `MAX_OUTLINE_BATCH` / `MAX_OUTLINE_BATCH_CHARS` | `200` / `100_000` — most payloads / summed payload chars in one `describeOutline` call (the host chunks by both — a payload may be `MAX_OBJECT_TEXT_CHARS`; the provider re-checks) (C0) |
+| `MAX_OUTLINE_ENTRIES` | `2_000` — host cap on a whole notebook's outline (document order; the rest is dropped and the Contents says so) (C0) |
 | `RECOGNIZER_REQUIRED` / `MARKDOWN_REQUIRED` | `"recognizer required"` / `"markdown required"` — the exact `IllegalStateException` messages an object provider throws when the in-parameter it needs is null; typed on the host (`CapabilityRequiredException`) so the dialog can name the missing extension (H3) |
 | `STORE_MAX_KEY_CHARS` | `512` — longest `IExtensionStore` key (the empty key is rejected) |
 | `STORE_MAX_VALUE_BYTES` | `256 * 1024` — largest `IExtensionStore` value |
@@ -215,6 +218,10 @@ interface IMarkdownRenderer {
 package com.symmetricalpalmtree.notesprout.extension;
 parcelable SelectionAction;   parcelable EditSpec;   parcelable CreatedObject;
 
+// OutlineEntry.aidl (arc 5 / C0)
+package com.symmetricalpalmtree.notesprout.extension;
+parcelable OutlineEntry;
+
 // IObjectProvider.aidl — the OBJECT_PROVIDER point (arc 4 / H3). A provider owns one or more object
 // types (typeIds). The core stores an opaque payload per object and asks the provider to act on it.
 // Capabilities reach a provider ONLY as in-parameters — the core's proxies, or null when absent.
@@ -242,6 +249,14 @@ interface IObjectProvider {
      *  [markdown] = the core's proxy or null when none is installed (throw
      *  IllegalStateException(MARKDOWN_REQUIRED) if it is needed). Returns null if there is nothing to draw. */
     RenderedImage render(String typeId, String payload, int maxWidthPx, float dpi, IMarkdownRenderer markdown);
+
+    // ── arc 5 / C0 — APPENDED after render(); the eight methods above keep their transaction codes ──
+    /** Outline (table-of-contents) entries for [payloads] of one of this provider's types — one
+     *  OutlineEntry per payload, same order, same length: level 1..MAX_OUTLINE_LEVEL with a label
+     *  ≤ MAX_OUTLINE_LABEL_CHARS, or level 0 (label ignored) for "not an outline item". Pure, ≤ 2 s;
+     *  the host chunks at MAX_OUTLINE_BATCH / MAX_OUTLINE_BATCH_CHARS per call. A provider built
+     *  before this method existed simply never receives it (the host tolerates the failure). */
+    List<OutlineEntry> describeOutline(String typeId, in List<String> payloads);
 }
 ```
 
@@ -298,7 +313,8 @@ treats any other value as `UNAVAILABLE`.
   of `Int` bit flags: **`ActionApplies`** `INK = 1` (a pure-stroke selection) · `OBJECT = 2` (exactly one
   selected object of one of the provider's types); **`Requires`** `RECOGNIZER = 1` · `MARKDOWN = 2`.
   **`IconNames`** (`String` constants) is the host's icon catalog: `heading` `h-1`…`h-6` `text` `edit`
-  `x` `check` `plus` `trash` — an unknown or null `iconName` draws the label as text.
+  `x` `check` `plus` `trash` `list` (arc 5 — the core's Contents glyph, listed so an extension may
+  reuse it) — an unknown or null `iconName` draws the label as text.
 - `EditSpec(title: String, text: String, hint: String, maxChars: Int, multiLine: Boolean)` —
   `writeString ×3; writeInt; writeInt(0/1)` (H2). How the host draws one object's edit dialog: title,
   a field prefilled with `text` (for a heading: the words **without** the `#`s), its `hint`, `maxChars`
@@ -312,7 +328,13 @@ treats any other value as `UNAVAILABLE`.
 All parcelables carry `@JvmField val CREATOR` and match their `.aidl` declarations.
 `RenderedTemplate.describeContents()` and `RenderedImage.describeContents()` return
 `CONTENTS_FILE_DESCRIPTOR` (they carry the region's fd — `Bundle.hasFileDescriptors()` relies on this);
-`TemplateInfo`, `SchemeField`, `InkStroke`, `SelectionAction`, `EditSpec` and `CreatedObject` return 0.
+- `OutlineEntry(label: String, level: Int)` — `writeString; writeInt` (arc 5 / C0). One object's outline
+  entry from `describeOutline`: a `label` (≤ `MAX_OUTLINE_LABEL_CHARS`) at `level 1..MAX_OUTLINE_LEVEL`,
+  or `level 0` = "not an outline item" (label ignored; `OutlineEntry.NONE`). `requireValid` in the
+  constructor (level in `0..6`, label within the cap — thrown at unmarshal, which rejects the whole
+  reply on the host). Untrusted on the host (`OutlineCaps`). Tails may be appended later.
+
+`TemplateInfo`, `SchemeField`, `InkStroke`, `SelectionAction`, `EditSpec`, `CreatedObject` and `OutlineEntry` return 0.
 
 ### `HostCallerCheck` (N1 — shared extension-side trust gate)
 
@@ -330,7 +352,16 @@ extension's private `CallerCheck` (the one permitted N1 touch to `:ext-templates
   key on its own `<service>`.
 - A **compatible** change (a method appended at the end of an interface, an optional field appended to a
   parcelable's write order) keeps `API_VERSION`; the host must tolerate old extensions (catch the
-  `RemoteException` from an unimplemented transaction).
+  `RemoteException` from an unimplemented transaction). **First exercised in arc 5 / C0**
+  (`IObjectProvider.describeOutline`, appended after `render`): an old provider's `Binder.onTransact`
+  returns `false` for the unknown code and the generated proxy then reads an **empty reply** — no
+  exception, an empty list — so "the host tolerates it" means **checking the reply's shape, not only
+  catching**. Recipe: the host **probes** at provider load (`ObjectProviderClient.supportsOutline` =
+  `describeOutline(firstType, [""])`, capable ⇔ a reply of exactly one entry; anything else — an
+  exception, an empty reply, another length — is "not capable", logged `outline probe: unsupported`,
+  never an error), records the capability per provider (`Contribution.outline`) **outside** the
+  resume signature, and every real call validates length + content (`OutlineCaps.sanitize`: exact
+  length or null). Verified against the arc-4 Heading APK on MIP11 (`outline=false`, no crash).
 - An **incompatible** change bumps `API_VERSION`; the host then accepts a *range*
   (`MIN_API_VERSION..API_VERSION`) instead of exact equality.
 - **Never** reorder or remove AIDL methods or parcel fields.
@@ -718,7 +749,8 @@ implements the same AIDL. Locked shape (Q9): describe actions · create-from-ink
 describe / apply an edit · render.
 
 - **Action** `ACTION_OBJECT_PROVIDER`; interface `IObjectProvider`; parcelables `SelectionAction`,
-  `EditSpec`, `CreatedObject`, `RenderedImage`, `InkStroke`. Eight methods (AIDL above):
+  `EditSpec`, `CreatedObject`, `RenderedImage`, `InkStroke`, `OutlineEntry` (arc 5). Eight methods
+  (AIDL above) + one appended in arc 5 / C0:
   `describeTypes()` · `describeActions()` · `activeActionIds(typeId, payload)` ·
   `createFromInk(actionId, strokes, areaWidth, areaHeight, recognizer)` · `applyAction(actionId, typeId,
   payload)` · `describeEdit(typeId, payload)` · `applyEdit(typeId, payload, text)` · `render(typeId,
@@ -752,7 +784,23 @@ describe / apply an edit · render.
   side** — counts, sizes and durations only. Binder-marshalable exceptions only (`SecurityException`,
   `IllegalArgumentException`, `IllegalStateException`).
 - **Timeouts (host):** bind ≤ 3 s · describe / apply / edit ≤ **2 s** · `createFromInk` ≤ **15 s** (one
-  recognizer hop of 10 s inside + margin) · `render` ≤ **10 s** (one markdown hop — bind 3 s + call 5 s — inside + margin; H5 raised it from 8 s, which left no margin).
+  recognizer hop of 10 s inside + margin) · `render` ≤ **10 s** (one markdown hop — bind 3 s + call 5 s — inside + margin; H5 raised it from 8 s, which left no margin) · `describeOutline` **2 s × chunks** in one bind · the outline probe 2 s.
+- **`describeOutline(typeId, payloads)` (arc 5 / C0 — appended, compatible, `API_VERSION` stays 1):**
+  the *description* behind the Contents (rule 24, C2). Batched per type: the host hands a provider all
+  its objects' payloads of one `typeId` (chunked at `MAX_OUTLINE_BATCH` / `MAX_OUTLINE_BATCH_CHARS`
+  per call, every chunk inside **one bind** — `ObjectProviderClient.describeOutline` /
+  `describeOutlineAll` across all of a provider's types) and gets back **one `OutlineEntry` per payload,
+  same order, same length**: `level 1..MAX_OUTLINE_LEVEL` + label, or `level 0` = not an outline item.
+  Pure, ≤ 2 s per chunk. **Outward:** the provider's own payloads, grouped by type — never ids, page
+  numbers, positions, names (the core keeps the geometry and page index). **Inward (`OutlineCaps`):**
+  a reply of any other length → the provider "did not answer" (null; the Contents shows the failure
+  dialog and does not open — C0 Q4); labels trimmed and cut to the cap; blank label with level ≥ 1 →
+  level 0; level outside the range → 0. The **load probe** (`supportsOutline`, one blank payload,
+  capable ⇔ a one-entry reply) decides `Contribution.outline` / `ObjectProviders.hasOutline` — an old
+  provider is "not capable", nothing else changes (§"Versioning rules"). The core builds the tree
+  (`OutlineTree`, sort (page, y, x), six levels, orphans attach to the nearest shallower heading), caps
+  at `MAX_OUTLINE_ENTRIES` and draws the Contents itself (C1). Logs on both sides: counts + durations
+  — never a label or payload.
 
 ## The Heading extension (`:ext-heading` — arc 4 / H3)
 
@@ -784,8 +832,14 @@ core's proxies.
   `prefix(level)` = `"#" × level + " "` (clamped 1..6) · `strip(payload)` removes `^#{1,6}[ \t]+` ·
   `withLevel(text, level)` = prefix + strip(fold(text)) · `levelOf(payload)` = the count of leading `#`s
   (1..6; anything else — including seven `#`s, which markdown does not treat as a heading — is
-  malformed → 1) · `fold(text)` = newlines → spaces, runs of spaces collapsed, trimmed.
-  `HeadingTextTest` (6).
+  malformed → 1) · `fold(text)` = newlines → spaces, runs of spaces collapsed, trimmed ·
+  **`outlineOf(payload)`** (arc 5 / C0) = `OutlineEntry(fold(strip(payload)).take(200), levelOf(payload))`,
+  or `OutlineEntry.NONE` when the words are blank or a bare `#`-run (a heading is never level 0
+  otherwise; a malformed payload is level 1). `HeadingTextTest` (7).
+- **`describeOutline(typeId, payloads)`** (C0): `HostCallerCheck.enforce` first; `typeId != "heading"`,
+  a null list, more than `MAX_OUTLINE_BATCH` payloads or more than `MAX_OUTLINE_BATCH_CHARS` summed →
+  `IllegalArgumentException`; else `payloads.map(HeadingText::outlineOf)` — same length, same order.
+  Debug log `describeOutline n=<count> in <ms>` — never a label.
 - **Verified H3 (Claude-side, all three devices):** `OBJECT_PROVIDER` resolves to
   `ObjectProviderService`, no launcher activity; the debug ⋯ **Probe** binds it and logs
   `types=[heading]`, `actions=1 (6 sub)`, `active=[h2]` for a `##` payload, `edit=title 12 chars, text

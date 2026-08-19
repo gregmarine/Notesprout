@@ -31,6 +31,8 @@ data class Contribution(
     val providerLabel: String,
     val typeIds: Set<String>,
     val actions: List<ToolbarAction>,
+    /** Answers `describeOutline` (arc 5 — the load probe passed); false for a provider built before the method. */
+    val outline: Boolean = false,
 )
 
 /** One entry on the toolbar: [providerKey] null = a core action (Delete). */

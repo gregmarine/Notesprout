@@ -10,7 +10,7 @@
 > hold) and both `CLAUDE.md` files. `docs/extensions.md` is the subsystem reference all arcs write
 > into; `docs/notebook.md` gains a section in this arc.
 >
-> **Status: C0 ⬜ · C1 ⬜ · C2 ⬜ — planned 2026-08-18, not started.**
+> **Status: C0 🧪 · C1 ⬜ · C2 ⬜ — C0 built + Claude-verified SNN/NA5C/MIP11 2026-08-18, awaiting the user's device checklist.**
 
 ## Why
 
@@ -377,7 +377,7 @@ point" in C2:
 ## Phases
 
 ### Phase C0 — Contract, the Heading extension, client, rows, tree (no UI)
-**Status:** ⬜ Not started
+**Status:** 🧪 Awaiting device verification (built 2026-08-18; Claude-side checks passed on all three devices)
 
 **Goal:** `OutlineEntry` + `describeOutline` exist in the contract; `NSE · Heading` answers them;
 the host can ask (`ObjectProviderClient.describeOutline` / `describeOutlineAll` / `supportsOutline`),
@@ -445,6 +445,26 @@ user-visible in release.
 
 **Close-out:** status ✅ + Outcome (**C2 review base = the commit before C0's first commit** — write
 its hash here); docs; memory; commit + push.
+
+**Outcome (2026-08-18):** **C2 review base = `146ed72`** (the plan commit; C0's first commit is the
+one after it — review with `/code-review high 146ed72...HEAD`). Phase-start Q1–Q4 all confirmed as
+recommended (level 0 in a same-length list · 200 / 100 000 / 200 · the one-blank-payload probe,
+outside the signature · a failing provider = the Contents does not open, dialog names it). Built
+exactly as specified; three deviations from the letter, none from the intent: (1) `Contribution.outline`
+defaults to `false` (keeps `SelectionActionsTest` compiling); (2) `HeadingText.outlineOf` also treats a
+bare `#`-run (`"#"`, `"##"`) as NONE — the plan's "`#` only → NONE" case, since `strip` leaves a bare
+`#` alone (not a prefix); (3) `OutlineTree.all` + `find` helpers added for the highlight rule / dialog
+lookup (pure, tested). `NotebookActivity` stays at exactly 800 lines (the probe wiring is 4 lines;
+C1 decides on the `NotebookChrome` extraction). **Devices (Claude-side, all three):** `ObjectProviders`
+logs `outline=true` for the Heading; ⋯ Probe contents → one `describeOutline` bind (chunks = 1) with the
+provider's `describeOutline n=<count> in <ms>` line nested (MIP11 6 entries / 7 ms; NA5C 3 / 6 ms; SNN 6
+/ 24 ms — gather 21 / 27 / 90 ms), `entries` = the heading count, roots as expected, no label / payload
+in any line, binds = unbinds. **Old-provider check on MIP11 (arc-4 Heading APK from a `b1d9b37`
+worktree):** `outline probe: unsupported`, `outline=false`, Probe `providers=0 entries=0`, no crash —
+the failure shape is the predicted **empty reply**, not an exception (recorded under §"Versioning
+rules"). **Trap found:** an in-place upgrade of an extension APK is invisible to the resume `signature`
+(same component) — the notebook must be reopened for the new probe result; a pre-existing arc-4
+property, not changed here (C1's checklist uses `pm disable-user` / enable, which the signature does see).
 
 ---
 

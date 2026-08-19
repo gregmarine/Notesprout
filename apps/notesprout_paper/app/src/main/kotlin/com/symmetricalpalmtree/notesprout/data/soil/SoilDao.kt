@@ -46,6 +46,11 @@ interface SoilDao {
     @Query("SELECT * FROM notebook WHERE parentId = :pageId AND type = 'object' AND deletedAt IS NULL ORDER BY `order`")
     suspend fun objectsOf(pageId: String): List<SoilObjectEntity>
 
+    /** Every live object row of the notebook (arc 5 — the Contents gather; objects carry no blob). A page
+     *  delete soft-deletes its children, so this is already the live set; the caller still guards `parentId`. */
+    @Query("SELECT * FROM notebook WHERE type = 'object' AND deletedAt IS NULL")
+    suspend fun liveObjectsAll(): List<SoilObjectEntity>
+
     /** Rewrite an object's payload + bounds (edit / re-render sizing). Live rows only. */
     @Query("UPDATE notebook SET text = :text, x = :x, y = :y, width = :w, height = :h, updatedAt = :at WHERE id = :id AND deletedAt IS NULL")
     suspend fun updateObject(id: String, text: String, x: Float, y: Float, w: Float, h: Float, at: Long)

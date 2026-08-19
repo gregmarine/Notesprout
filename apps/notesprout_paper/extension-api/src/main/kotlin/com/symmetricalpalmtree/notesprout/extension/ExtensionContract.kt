@@ -77,6 +77,25 @@ object ExtensionContract {
     /** Host cap on the number of live objects one page may hold (creation refused above it). */
     const val MAX_OBJECTS_PER_PAGE: Int = 200
 
+    // ── Outline entries (arc 5 / C0 — `IObjectProvider.describeOutline`, `OutlineEntry`) ──────
+    // A provider *describes* each object's table-of-contents entry; the core sorts, nests and draws.
+
+    /** Longest outline label a provider may return (chars); the host truncates inward, the provider re-checks. */
+    const val MAX_OUTLINE_LABEL_CHARS: Int = 200
+
+    /** `OutlineEntry.level` is `0` (not an outline item) or `1..MAX_OUTLINE_LEVEL`. */
+    const val MAX_OUTLINE_LEVEL: Int = 6
+
+    /** Most payloads in one `describeOutline` call (the host chunks; the provider re-checks). */
+    const val MAX_OUTLINE_BATCH: Int = 200
+
+    /** Most payload chars, summed, in one `describeOutline` call (Binder transaction budget — a payload
+     *  may be up to [MAX_OBJECT_TEXT_CHARS], so the host chunks by both count and chars). */
+    const val MAX_OUTLINE_BATCH_CHARS: Int = 100_000
+
+    /** Host cap on a whole notebook's outline (document order; the rest is dropped and the screen says so). */
+    const val MAX_OUTLINE_ENTRIES: Int = 2_000
+
     /**
      * The exact `IllegalStateException` message an object provider throws from `createFromInk` when
      * the `recognizer` in-parameter it needs is null (no recognizer installed). The host compares
