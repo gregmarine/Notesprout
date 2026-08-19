@@ -92,8 +92,12 @@ present.
 | NA5C | BOOX NoteAir5C | `92c16533` | `gpaper-onyx` | 992 dp (1860 px) |
 | MIP11 | Wacom Movink Pad 11 | `5HL21V5007384` | `gpaper-core` | 823 dp (1440 px) |
 
-**Device traps carried forward:** NA5C — re-enable the app **and** every extension after install,
-confirm `pm list packages -d`; lasso / ink unreachable by adb (Onyx raw callback), finger gestures
+**Device traps carried forward:** NA5C — **BOOX "Freeze new apps"** (Settings → Apps → App Freeze) was
+the agent that disabled a freshly installed package: system `ApplicationFreezeHelper` force-stops +
+disables it **on a delay (~8 min after install, not seconds)**, so a `pm enable` right after install is
+racing it; its list shows launcher apps only, so an extension can never be unfrozen by hand (`pm
+enable` over adb is the only way) — **switched OFF on the NA5C 2026-08-19** (turn it back on if wanted);
+still confirm `pm list packages -d` after any install; lasso / ink unreachable by adb (Onyx raw callback), finger gestures
 reachable; **an extension Activity of a disabled package cannot launch** — the entry point
 disappears with discovery, which is the intended behaviour. SNN — `input stylus` reads as a finger
 (Android 11), `input text` swallowed, IME invisible to uiautomator; Ratta's Apps grid caches labels

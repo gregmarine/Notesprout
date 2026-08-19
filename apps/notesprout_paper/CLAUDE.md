@@ -310,6 +310,9 @@ adb -s <serial> install -r ext-mlkit/build/outputs/apk/debug/ext-mlkit-debug.apk
 adb -s <serial> install -r ext-markdown/build/outputs/apk/debug/ext-markdown-debug.apk # ~2.5 MB; the Markdown renderer (arc 4)
 adb -s <serial> install -r ext-heading/build/outputs/apk/debug/ext-heading-debug.apk   # ~2.5 MB; the Heading object provider (arc 4 / H3)
 adb -s <serial> install -r ext-scratchpad/build/outputs/apk/debug/ext-scratchpad-debug.apk  # ~25 MB (g-paper + Onyx SDK); the Scratch Pad (arc 6)
+# NA5C: BOOX "Freeze new apps" (Settings → Apps → App Freeze) disabled a freshly installed package ~8 min AFTER install
+# (system ApplicationFreezeHelper; its list shows launcher apps only, so an extension can't be unfrozen by hand) —
+# switched OFF on the NA5C 2026-08-19. If it is ever on again: pm enable, and expect the delayed re-freeze.
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.templates.dev  # BOOX sideload trap — BOOX may
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.naming.dev     #   re-disable a few seconds AFTER
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.mlkit.dev      #   install; re-run enable and confirm with `pm list packages -d`
