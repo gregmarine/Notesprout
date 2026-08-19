@@ -18,7 +18,7 @@
 > — the first exercised *compatible* AIDL change (`API_VERSION` still 1; the load probe + `OutlineCaps`
 > tolerate an older provider); **C1** built the core-drawn Contents screen (`docs/notebook.md`
 > §"Contents (arc 5)"); **C2** walked audit rows 25–27 and rule 24 (§"Adding an object point").
-> **Arc 6** (`PAPER_SCRATCHPAD_PLAN.md`, S3 🧪 — code + docs complete, user verification pending): **S0** added the sixth point — **ScratchPad**, the
+> **Arc 6** (`PAPER_SCRATCHPAD_PLAN.md`, complete): **S0** added the sixth point — **ScratchPad**, the
 > first *screen-owning* point (an extension-owned off-paper Activity the core launches for a result;
 > §"ScratchPad (contract)") — the shared **`:paper-screen`** module (the e-ink resources + screen
 > helpers both the notebook and the pad use), the two appended store methods `putLarge` / `getLarge`

@@ -18,11 +18,11 @@ global-index model, global encryption model, and e-ink design philosophy — and
   C2 ✅ 54b9bf2**, all user-verified SNN + NA5C + MIP11: the
   Contents — a table of contents from the Heading extension via `IObjectProvider.describeOutline`
   (appended, compatible, `API_VERSION` stays 1) + a core-drawn `ContentsDialog`, top-bar `list`
-  button + one-finger swipe-down), then **`PAPER_SCRATCHPAD_PLAN.md` (arc 6 — S0 ✅ 9a96c7a · S1 ✅ 98f58f6 · S2 ✅ 374f17f
-  user-verified SNN / NA5C / MIP11 · S3 🧪 code + docs complete, awaiting the user's device checklist: `NSE · Scratch Pad`, an extension-owned off-paper screen (UI-rule tier 2, first exercise) +
+  button + one-finger swipe-down), then **`PAPER_SCRATCHPAD_PLAN.md` (arc 6, complete + frozen 2026-08-19 — S0 ✅ 9a96c7a · S1 ✅ 98f58f6 ·
+  S2 ✅ 374f17f · S3 ✅ c92744c, all user-verified SNN / NA5C / MIP11: `NSE · Scratch Pad`, an extension-owned off-paper screen (UI-rule tier 2, first exercise) +
   the shared `:paper-screen` module + the `SCRATCH_PAD` point + `IExtensionStore.putLarge / getLarge`
   (4 MiB values over `SharedMemory`) + the two ink transfers)** — read all seven top-to-bottom at the
-  start of every session. **S3 is the last phase; once it is ✅ no arc is active and the next arc is not planned — ask first.**
+  start of every session. **No arc is active; the next arc is not planned — ask first.**
 - **Package / applicationId:** `com.symmetricalpalmtree.notesprout` (debug: `.dev` suffix)
 - **Launcher label:** "Notesprout Paper" (debug: "Notesprout Paper Dev")
 
@@ -120,7 +120,7 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   the pad's Send (page / selection) → `RESULT_SCRATCH_SEND` → `drainOutgoing` (`TransferCaps.Drain`) →
   `pasteStrokes` (fresh ids, **coordinates kept 1:1**, one `NotebookUndo.Action.Pasted`, left selected).
   **Both directions are copies; ink never rides the Intent; no id crosses.** The extension maps with its
-  own `ScratchInk` (`:paper-screen` never sees `:extension-api`). **S3 (🧪) froze the arc:** the
+  own `ScratchInk` (`:paper-screen` never sees `:extension-api`). **S3 ✅ froze the arc:** the
   `/code-review` of the whole range fixed, boundary-audit rows 28–32 + the re-walk of 1/6/7 for the held
   bind, rules 25–27 (§"Adding a screen-owning point (arc 6 pattern)") and the tier-2 recipe
   (§"Extension-owned screens (tier 2)") in `docs/extensions.md`, `docs/scratchpad.md` frozen; the

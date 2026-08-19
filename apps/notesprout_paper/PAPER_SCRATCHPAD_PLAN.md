@@ -11,7 +11,7 @@
 > subsystem reference all arcs write into; `docs/notebook.md` and `docs/library.md` gain sections
 > in this arc; a new `docs/scratchpad.md` is the extension's own reference.
 >
-> **Status: S0 ✅ 9a96c7a · S1 ✅ 98f58f6 (both user-verified SNN / NA5C / MIP11 2026-08-19) · S2 ✅ 374f17f · S3 🧪 Awaiting device verification (code + docs complete, Claude-smoked MIP11; user checklist pending).**
+> **Status: S0 ✅ 9a96c7a · S1 ✅ 98f58f6 (both user-verified SNN / NA5C / MIP11 2026-08-19) · S2 ✅ 374f17f · S3 ✅ c92744c — ARC COMPLETE, user-verified SNN / NA5C / MIP11 2026-08-19; this file is frozen.**
 
 ## Why
 
@@ -944,7 +944,7 @@ memory; commit + push.
 ---
 
 ### Phase S3 — Review, boundary audit, docs freeze
-**Status:** 🧪 Awaiting device verification (code + docs complete, Claude-smoked MIP11 2026-08-19; user checklist pending)
+**Status:** ✅ Complete (commits 3900b26 + b6daac2 + 320a990 + c92744c; user-verified SNN / NA5C / MIP11 2026-08-19 — "It all looks good")
 
 **Phase-start answers (2026-08-19):** Q1 three changes before freezing — (a) the notebook top-bar
 Scratch Pad button moves to the far right, **immediately before the debug ⋯ menu**; (b) the pad's
@@ -1038,7 +1038,7 @@ move / delete, cold-launch reopen).
 
 **Close-out:** status ✅ + Outcome; commit + push `paper`.
 
-**Outcome (2026-08-19 — S3 prep 3900b26 + review b6daac2 + the g-paper 0.1.2 pin; user verification pending):**
+**Outcome (2026-08-19 — S3 prep 3900b26 + review b6daac2 + g-paper 0.1.2 pin 320a990 + 0.1.3 pin c92744c; user-verified all three devices):**
 - **User's three changes (Q1):** (a) the notebook's Scratch Pad button sits at the far right immediately
   before the debug ⋯ (`activity_notebook.xml` weight gap after Lasso; `NotebookDebugMenu` no longer adds
   its own spacer); (b) both pad Send glyphs are Tabler `pencil-down` (`ic_pencil_down` in `:paper-screen`,
