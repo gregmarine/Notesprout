@@ -19,9 +19,8 @@ global-index model, global encryption model, and e-ink design philosophy — and
   **Active arc: `PAPER_LINKS_PLAN.md` (arc 7 — `NSE · Links`: core-owned link rows in the `.soil`
   wrapping a selection, extension-owned semantics — opaque payload + `resolve`/`chromeOf`, the
   tier-2 picker screen with the `ILinkCatalog` host callback, trail in the extension store,
-  finger-tap follow + swipe-up back). L0 ✅ · L1 ✅ · L2 ✅ · L3 ✅ · L4 🧪 (follow + trail
-  built, device agents green ×3 — user checklist pending) — then L5 (review + freeze) in a fresh
-  session with its phase-start wizard.**
+  finger-tap follow + swipe-up back). L0 ✅ · L1 ✅ · L2 ✅ · L3 ✅ · L4 ✅ (follow + trail) —
+  L5 (review + freeze) next, in a fresh session with its phase-start wizard.**
 - **Package / applicationId:** `com.symmetricalpalmtree.notesprout` (debug: `.dev` suffix)
 - **Launcher label:** "Notesprout Paper" (debug: "Notesprout Paper Dev")
 

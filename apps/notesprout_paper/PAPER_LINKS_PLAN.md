@@ -13,7 +13,7 @@
 > The **original** Notesprout implementation this arc draws on is `docs/links.md` at the monorepo
 > root — inspiration, not a spec; every deviation is recorded here.
 >
-> **Status: L0 ✅ (df2de82) · L1 ✅ (bc944bc) · L2 ✅ (a86214c) · L3 ✅ (6822e44) · L4 🧪 · L5 ⬜**
+> **Status: L0 ✅ (df2de82) · L1 ✅ (bc944bc) · L2 ✅ (a86214c) · L3 ✅ (6822e44) · L4 ✅ (b2e71dd + b9b107f) · L5 ⬜**
 
 ## Why
 
@@ -982,7 +982,27 @@ immediately picked, without leaving the flow; the host validates everything.
 ---
 
 ### Phase L4 — Follow, the trail, and the way back
-**Status:** 🧪 Built + Claude device agents 10/10 PASS ×3 (2026-08-20) — user checklist pending
+**Status:** ✅ Complete (commits b2e71dd + b9b107f; user checklist all 10 items green on SNN/NA5C/MIP11 2026-08-20)
+
+**Outcome (2026-08-20).** Everything delivered; the wizard answers (Q1–Q4, all the
+recommendations), the recorded deviations and the two in-phase catches are in the Build notes
+above — most notably: **both Backs funnel `backPressed()`** (the top-bar Back walking the trail
+was the scope's own rule — the toolbar callback initially still closed straight to the library),
+and the **user-checklist finding on SNN** (a created link presented as a dashed outline until the
+pen left hover — not a crash; fixed by `RenderFlow.buildCompositesNow()` before every page-load's
+at-once frame, commit b9b107f). **Model protocol:** one Sonnet agent wrote `LinkNavTest`
+(17 tests, green first try — no review findings); three Sonnet device agents ran the drivable half
+(**10/10 PASS ×3 — real follows driven on every device** via screenshot-aimed taps on the L1–L3
+test links: cross-notebook seal→relaunch + swipe-up back to the exact origin page on NA5C + SNN,
+same-notebook on MIP11); Fable inline did `PageGestures`, `LinkNav`, the `LinkFlow` follow/trail
+half, the `NotebookActivity` navigation surgery, the finding's diagnosis + fix, and all docs.
+**Q4 settled by data: warm-bind stays unbuilt** — warm tap→resolve 14 ms NA5C / 76 ms SNN /
+19–35 ms MIP11, seal→target ≈ 246/420 ms (the chrome refresh at page load keeps the extension
+process warm in practice). 17 new JVM tests; ten modules green; debug + release compile.
+**User checklist: all ten items green on all three devices (2026-08-20)** — the chain story,
+force-stop persistence, both dead-target dialogs, dead-trail-entry silent skip, pen-vs-finger,
+no-extension honesty, and the full regression pass. **L5 (review + freeze) next, in a fresh
+session with its phase-start wizard; the review base is `0f91ed5` (L0 Outcome).**
 
 **Claude-side device runs (one Sonnet agent per device, 2026-08-20): all 10 checks PASS on SNN,
 NA5C and MIP11** — nothing disabled; fresh-open `clearTrail ok` on all three; empty-trail swipe-up
