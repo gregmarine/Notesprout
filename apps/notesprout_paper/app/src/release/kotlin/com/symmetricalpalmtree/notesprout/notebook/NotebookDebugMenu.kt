@@ -11,5 +11,7 @@ object NotebookDebugMenu {
         bar: ViewGroup,
         provider: () -> RecognizeContext?,
         linkCatalog: () -> LinkCatalogSource? = { null },
+        linkSelection: (() -> Pair<List<com.symmetricalpalmtree.gpaper.core.model.Stroke>, List<PageObject>>?)? = null,
+        createLink: ((List<com.symmetricalpalmtree.gpaper.core.model.Stroke>, List<PageObject>, String, Int) -> Unit)? = null,
     ) = Unit
 }

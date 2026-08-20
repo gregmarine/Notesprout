@@ -45,7 +45,6 @@ import com.symmetricalpalmtree.notesprout.notebook.NotebookUndo.Action
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -97,19 +96,20 @@ class NotebookActivity : AppCompatActivity() {
     /** Content objects on the visible page (arc 4) — what [ObjectRenderer] draws and a delete captures.
      *  Insertion-ordered = z-order (loaded in `"order"`; a new object appends). */
     private var liveObjects: LinkedHashMap<String, PageObject> = LinkedHashMap()
-    /** Rendered object bitmaps for this open notebook only, filled by [ObjectRenderPass]. */
+    /** Links on the visible page (arc 7 / L1) — composites drawn by [ObjectRenderer], atomic under
+     *  lasso / move / delete. Insertion-ordered = z-order. */
+    private var liveLinks: LinkedHashMap<String, PageLink> = LinkedHashMap()
+    /** Rendered object bitmaps + link composites for this open notebook only, filled by [RenderFlow]. */
     private val renderCache = ObjectRenderCache()
-    /** Objects whose render failed on this page load — not retried until the next load or an edit. */
-    private val renderFailed = HashSet<String>()
     /** The active lasso selection as last reported (bounds follow moves); null when none. */
     private var currentSelection: Selection? = null
     /** The object providers + their toolbar contributions, loaded once per open (refreshed on resume if the set changed). */
     private var providers: ObjectProviders = ObjectProviders.NONE
-    private val renderPass by lazy { ObjectRenderPass(this) }
     private lateinit var objectActions: ObjectActions
-    /** The background render pass in flight, and whether it must run once more when it ends. */
-    private var renderJob: Job? = null
-    private var renderAgain = false
+    /** The render-cache fill (arc 7 / L1 — lifted out of this screen at its line cap). */
+    private lateinit var renderFlow: RenderFlow
+    /** The links collaborator (arc 7 / L1): core actions, wrap / unwrap, the session chrome map. */
+    private lateinit var linkFlow: LinkFlow
     /** A provider's active action ids per object id (for exactly that payload) — spares a bind per re-selection. */
     private val activeIdsCache = HashMap<String, Pair<String, Set<String>>>()
     /** The core's own toolbar actions: Delete only (locked decision Q5). */
@@ -147,11 +147,27 @@ class NotebookActivity : AppCompatActivity() {
         paper.setPaperListener(listener)
         paper.addContentRenderer(ObjectRenderer(
             objects = { liveObjects.values },
+            links = { liveLinks.values },
             cache = renderCache,
             pageWidth = { if (opened) session.currentPage.width.toFloat() else 0f },
             dpi = { dpi() },
+            linkChrome = { id -> linkFlow.chromeOf(id) },
         ))
         objectActions = ObjectActions(this, { providers }, objectListener)
+        renderFlow = RenderFlow(
+            this, { opened && !closing }, { session.currentPage }, { liveObjects }, { liveLinks },
+            { providers }, renderCache, { session.objectStore },
+            notify = { atOnce ->
+                if (atOnce) { if (opened && !closing) paper.notifyContentChanged() }
+                else whenPenIdle { if (opened && !closing) paper.notifyContentChanged() }
+            },
+            dpi = { dpi() },
+        )
+        linkFlow = LinkFlow(
+            this, { opened && !closing }, { session }, { liveStrokes }, { liveObjects }, { liveLinks },
+            undo, ::runPageOp, { refreshToPage(session.currentPage.id) }, ::whenPenIdle,
+            notifyContentChanged = { paper.notifyContentChanged() },
+        )
 
         toolbar = PaperToolbar(
             binding.topBar, binding.btnBack, binding.btnPen, binding.btnEraser, binding.btnLasso, paper,
@@ -178,8 +194,16 @@ class NotebookActivity : AppCompatActivity() {
                     // hash-ordered "Meeting Notes" came back as four characters.
                     val strokes = liveStrokes.values.filter { it.id in sel.strokeIds }
                     val objects = sel.contentIds.mapNotNull { liveObjects[it] }
-                    if (providerKey == null) {   // the core `scratch` action (arc 6 / S2) — ink only
-                        if (action.id == SelectionActions.CORE_SCRATCH_ID && objects.isEmpty()) scratchPadFlow.sendSelection(strokes)
+                    val links = sel.contentIds.mapNotNull { liveLinks[it] }
+                    if (providerKey == null) {   // a core action: scratch (arc 6 / S2), the link trio (arc 7)
+                        when (action.id) {
+                            SelectionActions.CORE_SCRATCH_ID -> if (objects.isEmpty() && links.isEmpty()) scratchPadFlow.sendSelection(strokes)
+                            SelectionActions.CORE_LINK_UNLINK_ID -> links.firstOrNull()?.let { linkFlow.unlink(it) }
+                            // Link + Edit open the picker — wired in L2; inert until then (the debug
+                            // "Create test link" is L1's creation path).
+                            SelectionActions.CORE_LINK_ID, SelectionActions.CORE_LINK_EDIT_ID ->
+                                Slog.d(TAG) { "${action.id}: picker flow lands in L2" }
+                        }
                         return
                     }
                     val one = if (sel.strokeIds.isEmpty() && objects.size == 1) objects[0] else null
@@ -198,7 +222,12 @@ class NotebookActivity : AppCompatActivity() {
         }, linkCatalog = {
             if (!opened) null
             else LinkCatalogSource(session.notebookId) { if (opened) session.pages.map { it.id } else null }
-        })
+        }, linkSelection = {
+            val sel = if (opened) currentSelection else null
+            if (sel == null || sel.contentIds.any { it in liveLinks }) null
+            else (liveStrokes.values.filter { it.id in sel.strokeIds } to sel.contentIds.mapNotNull { liveObjects[it] })
+                .takeIf { it.first.isNotEmpty() || it.second.isNotEmpty() }
+        }, createLink = { strokes, objects, payload, chrome -> linkFlow.createFromSelection(strokes, objects, payload, chrome) })
 
         chrome = PaperChrome(paper, binding.topBar, binding.bottomStrip, { selectionToolbar.rects() }, { x, y -> selectionToolbar.contains(x, y) }) { !opened || contentsFlow.showing }
         contentsFlow = ContentsFlow(
@@ -248,10 +277,12 @@ class NotebookActivity : AppCompatActivity() {
         val page = session.currentPage
         val strokes = session.store.loadPage(page.id)
         val objects = session.objectStore.loadPage(page.id)
+        val links = session.linkStore.loadPage(page.id)
         paper.setPageSize(page.width, page.height)
         paper.setTemplate(session.template)
         liveObjects = objects.associateByTo(LinkedHashMap()) { it.id }
-        renderCache.retain(liveObjects.keys)   // bitmaps of other pages / removed objects go (H5: the cache was unbounded)
+        liveLinks = links.associateByTo(LinkedHashMap()) { it.id }
+        renderFlow.retainCurrent()   // bitmaps of other pages / removed objects go (H5: the cache was unbounded)
         paper.loadStrokes(strokes)
         paper.notifyContentChanged()
         liveStrokes = strokes.associateByTo(LinkedHashMap()) { it.id }
@@ -264,11 +295,12 @@ class NotebookActivity : AppCompatActivity() {
         // that lingers over paper that is already keeping ink would say the opposite of the truth.
         binding.openingOverlay.visibility = View.GONE
         pushExclusions()
-        Slog.d(TAG) { "page ${page.id} loaded: ${strokes.size} strokes, ${objects.size} objects, ${page.width}x${page.height}" }
+        Slog.d(TAG) { "page ${page.id} loaded: ${strokes.size} strokes, ${objects.size} objects, ${links.size} links, ${page.width}x${page.height}" }
         // Providers after the paper is live: their binds must not hold the "Opening…" popup up. The
         // toolbar shows Delete only until they arrive; the first render pass follows them.
         lifecycleScope.launch { loadProviders() }
         scratchPadFlow.refresh()
+        linkFlow.refresh()   // discovery seeds the chrome map fetch too (arc 7 / L1)
     }
 
     /** Discover + describe the object providers (IO binds), then re-render and re-show whatever waited on them. */
@@ -277,9 +309,9 @@ class NotebookActivity : AppCompatActivity() {
         if (!opened || closing) return
         providers = loaded
         activeIdsCache.clear()
-        renderFailed.clear()
+        renderFlow.renderFailed.clear()
         contentsFlow.refresh()   // arc 5: the Contents entry points exist only with an outline-capable provider AND a heading in the notebook
-        scheduleRenderPass()
+        renderFlow.scheduleRenderPass()
         currentSelection?.let { showSelectionToolbar(it) }
         objectActions.warmAtOpen()   // the recognizer's process starts + primes while the user is still writing (H5)
     }
@@ -316,15 +348,34 @@ class NotebookActivity : AppCompatActivity() {
             val pageId = session.currentPage.id
             val ids = move.strokeIds.toList()
             val objectIds = move.contentIds.filter { it in liveObjects }
+            val linkIds = move.contentIds.filter { it in liveLinks }
             session.store.move(ids, move.dx, move.dy)
             session.objectStore.move(objectIds, move.dx, move.dy)
+            session.linkStore.move(linkIds, move.dx, move.dy)
             for (id in ids) liveStrokes[id]?.let { liveStrokes[id] = it.translated(move.dx, move.dy) }
             for (id in objectIds) liveObjects[id]?.let { liveObjects[id] = it.translated(move.dx, move.dy) }
-            if (objectIds.isNotEmpty()) paper.notifyContentChanged()
+            for (id in linkIds) liveLinks[id]?.let { liveLinks[id] = it.translated(move.dx, move.dy) }
+            if (objectIds.isNotEmpty() || linkIds.isNotEmpty()) paper.notifyContentChanged()
             currentSelection = currentSelection?.let { it.copy(bounds = it.bounds.offset(move.dx, move.dy)) }
-            undo.record(Action.Moved(pageId, ids, move.dx, move.dy, objectIds))
+            undo.record(Action.Moved(pageId, ids, move.dx, move.dy, objectIds, linkIds))
             currentSelection?.let { showSelectionToolbar(it) }   // re-anchor at the new place
-            if (objectIds.isNotEmpty()) scheduleRenderPass()   // an object pushed against the right edge re-ellipsizes
+            if (objectIds.isNotEmpty()) renderFlow.scheduleRenderPass()   // an object pushed against the right edge re-ellipsizes (a link composite is translation-invariant)
+        }
+        /** g-paper 0.1.4: the eraser swept over content — whole-object erase for objects and links
+         *  alike (L1 Q2, the user's call). One undoable step per callback batch; a deleted link takes
+         *  its wrapped children with it. */
+        override fun onContentErased(contentIds: List<String>) {
+            if (!opened) return
+            val pageId = session.currentPage.id
+            val objects = contentIds.mapNotNull { liveObjects.remove(it) }
+            val links = contentIds.mapNotNull { liveLinks.remove(it) }
+            if (objects.isEmpty() && links.isEmpty()) return
+            session.objectStore.remove(objects.map { it.id })
+            session.linkStore.remove(links)
+            undo.record(Action.ObjectsDeleted(pageId, emptyList(), objects, links))
+            paper.notifyContentChanged()
+            Slog.d(TAG) { "eraser took ${objects.size} object(s), ${links.size} link(s)" }
+            if (objects.isNotEmpty()) contentsFlow.refresh()
         }
         override fun onSelectionCreated(selection: Selection) {
             selectionActive = true
@@ -391,8 +442,9 @@ class NotebookActivity : AppCompatActivity() {
     private fun showSelectionToolbar(sel: Selection) {
         if (!opened || closing) return
         val objects = sel.contentIds.mapNotNull { liveObjects[it] }
-        val shape = SelectionActions.shapeOf(sel.strokeIds.size, objects.map { it.providerIdentity })
-        val items = SelectionActions.merge(coreActions, providers.contributions, shape)
+        val links = sel.contentIds.mapNotNull { liveLinks[it] }
+        val shape = SelectionActions.shapeOf(sel.strokeIds.size, objects.map { it.providerIdentity }, links.map { it.id })
+        val items = SelectionActions.merge(coreActions + linkFlow.coreActions(shape, links.isNotEmpty()), providers.contributions, shape)
         if (shape !is SelectionActions.Shape.OneObject) { presentSelectionToolbar(sel, items, emptySet()); return }
         val obj = objects[0]
         activeIdsCache[obj.id]?.takeIf { it.first == obj.payload }?.let { presentSelectionToolbar(sel, items, it.second); return }
@@ -430,6 +482,7 @@ class NotebookActivity : AppCompatActivity() {
         session.writer.drain()   // queued creates / erases land before the page is read back (H5)
         val strokes = session.store.loadPage(page.id)
         val objects = session.objectStore.loadPage(page.id)
+        val links = session.linkStore.loadPage(page.id)
         paper.clearSelection()
         selectionActive = false
         currentSelection = null
@@ -438,14 +491,16 @@ class NotebookActivity : AppCompatActivity() {
         paper.setPageSize(page.width, page.height)
         paper.setTemplate(session.template)
         liveObjects = objects.associateByTo(LinkedHashMap()) { it.id }
-        renderCache.retain(liveObjects.keys)   // bitmaps of other pages / removed objects go (H5: the cache was unbounded)
+        liveLinks = links.associateByTo(LinkedHashMap()) { it.id }
+        renderFlow.retainCurrent()   // bitmaps of other pages / removed objects go (H5: the cache was unbounded)
         paper.loadStrokes(strokes)
         paper.notifyContentChanged()
         liveStrokes = strokes.associateByTo(LinkedHashMap()) { it.id }
         setPageIndicator(session.currentIndex + 1, session.pages.size)
         session.saveLastOpened()
-        renderFailed.clear()
-        scheduleRenderPass()
+        renderFlow.renderFailed.clear()
+        renderFlow.scheduleRenderPass()
+        linkFlow.refreshChrome()
         contentsFlow.refresh()
     }
 
@@ -510,14 +565,16 @@ class NotebookActivity : AppCompatActivity() {
         val strokes = liveStrokes.values.filter { it.id in sel.strokeIds }   // writing order (see onStrokesErased)
         for (s in strokes) liveStrokes.remove(s.id)
         val objects = sel.contentIds.mapNotNull { liveObjects.remove(it) }
-        if (strokes.isEmpty() && objects.isEmpty()) return@runPageOp
+        val links = sel.contentIds.mapNotNull { liveLinks.remove(it) }   // a deleted link takes its children (arc 7)
+        if (strokes.isEmpty() && objects.isEmpty() && links.isEmpty()) return@runPageOp
         session.store.erase(strokes.map { it.id })
         session.objectStore.remove(objects.map { it.id })
-        undo.record(Action.ObjectsDeleted(pageId, strokes, objects))
+        session.linkStore.remove(links)
+        undo.record(Action.ObjectsDeleted(pageId, strokes, objects, links))
         paper.clearSelection()
         paper.removeStrokes(strokes.map { it.id })   // a data-in call: no erase callback comes back
         paper.notifyContentChanged()
-        Slog.d(TAG) { "deleted selection: ${strokes.size} strokes, ${objects.size} objects" }
+        Slog.d(TAG) { "deleted selection: ${strokes.size} strokes, ${objects.size} objects, ${links.size} links" }
         if (objects.isNotEmpty()) contentsFlow.refresh()
     }
 
@@ -547,7 +604,7 @@ class NotebookActivity : AppCompatActivity() {
                 session.store.erase(ids)
                 paper.removeStrokes(ids)   // data-in: dismisses the selection (toolbar hides) and redraws — the object as a placeholder until rendered
                 Slog.d(TAG) { "object created (${created.typeId}) from ${ids.size} strokes at ${bounds.left.toInt()},${bounds.top.toInt()}" }
-                renderNow(listOf(obj))
+                renderFlow.renderNow(listOf(obj))
                 // Recorded with the *rendered* object (H5): a redo restores the row from this, and the
                 // pre-render lasso box would have come back as stale bounds under a still-valid cache entry.
                 undo.record(Action.ObjectCreated(page.id, liveObjects[obj.id] ?: obj, live))
@@ -568,9 +625,9 @@ class NotebookActivity : AppCompatActivity() {
                 val after = before.copy(payload = payload)
                 session.objectStore.updatePayloadAndBounds(after.id, after.payload, after.x, after.y, after.width, after.height)
                 liveObjects[after.id] = after
-                renderFailed.remove(after.id)
+                renderFlow.renderFailed.remove(after.id)
                 activeIdsCache.remove(after.id)
-                renderNow(listOf(after))
+                renderFlow.renderNow(listOf(after))
                 // `before` re-anchored at the final position (H5): a drag of the still-selected object
                 // during the render round-trip is its own Action.Moved — an edit records payload + size only.
                 val final = liveObjects[after.id] ?: after
@@ -589,63 +646,6 @@ class NotebookActivity : AppCompatActivity() {
         val sel = Selection(emptySet(), setOf(id), obj.bounds)
         currentSelection = sel
         showSelectionToolbar(sel)
-    }
-
-    /** Render [objects] inline (IO) and apply — the create / apply / edit path, awaited under [pageOps].
-     *  The frame is presented **at once** (H5): the user just tapped a toolbar button or Save — the pen
-     *  is up (hovering), `releaseRender` already ran — so waiting for pen-idle only delayed the heading
-     *  until the pen left hover range. */
-    private suspend fun renderNow(objects: List<PageObject>) {
-        val page = session.currentPage
-        applyRenderResults(renderPass.render(objects, providers, page.width.toFloat(), dpi()), atOnce = true)
-    }
-
-    /**
-     * The background cache fill (page load, provider change, a move): every live object without a
-     * cached image for its (payload, width, dpi) that hasn't failed on this load → one pass; a trigger
-     * during a pass queues exactly one more (the page may have changed under it). Never holds
-     * [pageOps]; results for objects no longer on the page are dropped by [applyRenderResults].
-     */
-    private fun scheduleRenderPass() {
-        if (!opened || closing) return
-        if (renderJob?.isActive == true) { renderAgain = true; return }
-        renderJob = lifecycleScope.launch {
-            do {
-                renderAgain = false
-                val page = session.currentPage
-                val d = dpi()
-                val misses = liveObjects.values.filter {
-                    it.id !in renderFailed && renderCache.get(it.id, it.payload, ObjectRenderer.renderWidth(page.width.toFloat(), it), d) == null
-                }
-                if (misses.isEmpty()) break
-                val results = renderPass.render(misses, providers, page.width.toFloat(), d)
-                if (!opened || closing) break
-                applyRenderResults(results)
-            } while (renderAgain)
-        }
-    }
-
-    /** Main: cache the images, size each object to its image (persisted; anchored top-left), one frame —
-     *  pen-idle for the background pass (the user may be writing), [atOnce] for the inline path. */
-    private fun applyRenderResults(results: List<ObjectRenderPass.Result>, atOnce: Boolean = false) {
-        var changed = false
-        for (r in results) {
-            val o = liveObjects[r.id] ?: continue
-            if (o.payload != r.payload) continue   // edited while rendering — the next pass has it
-            val bmp = r.bitmap
-            if (bmp == null) { renderFailed.add(r.id); continue }
-            renderCache.put(r.id, r.payload, r.maxWidth, r.dpi, bmp)
-            changed = true
-            val w = bmp.width.toFloat(); val h = bmp.height.toFloat()
-            if (w != o.width || h != o.height) {
-                val sized = o.copy(width = w, height = h)
-                liveObjects[r.id] = sized
-                session.objectStore.updatePayloadAndBounds(sized.id, sized.payload, sized.x, sized.y, sized.width, sized.height)
-            }
-        }
-        if (!changed) return
-        if (atOnce) { if (opened && !closing) paper.notifyContentChanged() }
-        else whenPenIdle { if (opened && !closing) paper.notifyContentChanged() }
     }
 
     private fun dpi(): Float = resources.displayMetrics.densityDpi.toFloat()
@@ -722,6 +722,7 @@ class NotebookActivity : AppCompatActivity() {
         super.onResume()
         if (::paper.isInitialized) paper.resumeDrawing()
         if (opened && !closing) scratchPadFlow.refresh()   // the pad's button follows the extension's presence (arc 6)
+        if (opened && !closing) linkFlow.refresh()   // the link actions + chrome follow it too (arc 7)
         // An extension installed / removed / disabled while the screen was away: cheap discovery compare, reload only on a change.
         if (opened && !closing) lifecycleScope.launch {
             val sig = ObjectProviders.signature(this@NotebookActivity)

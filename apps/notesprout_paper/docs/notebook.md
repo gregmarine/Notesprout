@@ -30,6 +30,10 @@ delete) and undo/redo arrive in Phase 4.
 | `ScratchPadFlow` | the Scratch Pad's notebook side (arc 6 / S1 + S2): the top-bar sketching button **and** the core `scratch` ("Pad") selection action — both present only while the extension is installed (`refresh()` on open + resume); `ScratchPadClient.open` → [`send`] → `releaseForHandoff()` → the `ActivityResultLauncher`; result `RESULT_SCRATCH_SEND` → `drainOutgoing` → the host's `pasteStrokes`; any result → `finish` — see §"Scratch Pad (arc 6)" |
 | `ContentsSource` / `OutlineTree` | the Contents gather (arc 5 / C0 — IO: rows → outline-capable providers → one `describeOutlineAll` bind each → items) and the pure tree / visible rows / highlight / paging math (JVM-tested) |
 | `ContentsFlow` / `ContentsDialog` / `ContentsLayout` | the Contents screen (arc 5 / C1): busy guard → gather → failure dialog or the `Dialog` (one layout, sidebar / full screen by width; pure width + paging rules JVM-tested) — see §"Contents (arc 5)" |
+| `PageLink` / `LinkRows` / `LinkStore` | links (arc 7 / L1): the in-memory link with its re-parented children + the pure row mapper (JVM-tested) + the `.soil` side over the writer (wrap / unwrap / move / restore, one transaction, id lists chunked) — see §"Link objects" |
+| `LinkFlow` | the links collaborator (arc 7 / L1): the three core selection actions + gating, wrap / unwrap flows, the session chrome map (`chromeOf` batched at load, nothing persisted) |
+| `RenderFlow` | the render-cache fill (arc 7 / L1 — `scheduleRenderPass` / `applyRenderResults` / `renderNow` lifted out of the Activity at its line cap, grown link-aware: wrapped children render too, composites built/invalidated here) |
+| `LinkComposite` | builds a link's composite bitmap: child-object bitmaps + wrapped strokes via g-paper 0.1.4 `StrokeRasterizer`, 1:1 page px, translation-invariant |
 
 ## Layout (`activity_notebook.xml`)
 
@@ -447,6 +451,54 @@ names how many came back.
 **Undo replay moved.** S1 also moved the notebook's `revert` / `reapply` / `doUndo` / `doRedo` into
 `NotebookUndo` (`undo(session, stack, refreshToPage)` / `redo(...)`) next to the action set — a pure
 move; the Activity keeps `refreshToPage` (its `navigateTo`) and stays under the 800-line cap.
+
+## Link objects (arc 7 / L1 — rows, render, parity; picker L2, follow L4)
+
+A **link** wraps a lasso selection (any mix of strokes and objects, never another link) into one
+atomic page citizen — a core `TYPE_LINK` row whose wrapped content is **re-parented child rows**
+(`docs/data.md` §"Link rows"; L1 Q1 — ids and page-absolute coordinates untouched, one
+transaction, no id churn). The core owns the structure end to end; `NSE · Links` owns only the
+payload's meaning (`docs/extensions.md` §"LinkProvider (contract)").
+
+- **Collaborators.** `LinkStore` (rows: `create` / `unlink` / `relink` / `remove` / `restore` /
+  `move` — a move translates the row **and** its children, stroke blobs re-encoded; id lists
+  chunked at 500 inside the transaction) · `LinkFlow` (the three core selection actions with their
+  gating, wrap / unwrap flows, the **session chrome map**) · `RenderFlow` (L1 — the render-cache
+  fill lifted out of `NotebookActivity` at its line cap, grown link-aware) · `LinkComposite` (the
+  composite builder) · `liveLinks` (the screen's z-ordered mirror, rebuilt with strokes + objects
+  on every load).
+- **Wrap / unwrap.** `LinkFlow.createFromSelection` (L1: driven by the debug ⋯ "Create test link"
+  with a fixed payload; L2: the picker's `LinkChoice`): union bounds + 2 dp underline clearance →
+  `LinkStore.create` → one `Action.LinkCreated` → drain + reload the page (the undo-replay
+  discipline — no manual mirror surgery, writing order preserved). `Unlink` mirrors it
+  (`LinkUnlinked`); the content comes back as page children. Both under the page-op lock.
+- **Render.** The composite is built core-side at 1:1 page px (`LinkComposite`): child objects'
+  cached bitmaps (dashed placeholder for an absent provider) below the wrapped strokes, rasterized
+  through **g-paper 0.1.4 `StrokeRasterizer`** — the same internal renderer live ink bakes with,
+  pixel-identical (risk 3; the L1 phase-start finding: no offline raster existed, `CoverSnapshot`
+  needs the live view). Cached in `ObjectRenderCache` under the link id (payload key `""` —
+  content-, not payload-derived; **translation-invariant**, so moves never rebuild; a wrapped
+  child's render landing invalidates it). The **1 dp underline is drawn live** by `ObjectRenderer`
+  from `LinkFlow`'s session chrome map — never baked into the composite, so a chrome change
+  repaints without a rebuild; the map is fed by one batched `chromeOf` at page load (extension
+  missing → empty map → content renders bare, the heading precedent / L0 Q4) and seeded directly
+  at creation so the first frame has its underline without a round trip.
+- **Selection toolbar.** `Shape.OneLink` (exactly one link, nothing else) shows core actions only:
+  Delete · **Edit** (`ic_edit`, extension-gated; tap wired in L2) · **Unlink** (`ic_link_off`,
+  never gated — structural). Every other shape gains **Link** (`ic_link`, `appliesTo = ALL`) while
+  the extension is installed **and** the selection holds no link (no link-inside-link); its tap is
+  wired in L2 too. A link-bearing mixed selection is `Mixed` (core-ALL only). A tap inside a
+  *selected* link is a no-op (L1 Q3 — falls out of the object-edit path's `liveObjects` lookup).
+- **Eraser** (L1 Q2, the user's call — beyond the original): the eraser tool erases **whole
+  links and whole objects** on contact, via g-paper 0.1.4's `onContentErased` (the eraser
+  hit-tests `hitTargets`; per-gesture dedup; scribble-erase stays content-immune and is off in
+  Paper anyway). One `Action.ObjectsDeleted` per callback batch — strokes erased by the same sweep
+  are their own `Erased` steps (g-paper reports them separately; accepted).
+- **Parity.** Links ride lasso selection (`hitTargets`), drag (`Moved` gains `linkIds`; live
+  mirror + children translated), Delete (`ObjectsDeleted` gains `links` — a deleted link takes its
+  children), page delete / undo (`liveDescendantIds` — grandchildren ride the `Structural`
+  snapshot), and reopen (rows are the truth). `LinkEdited` exists for L2. With the extension
+  missing: render (no underline), move, Delete, Unlink all keep working; only Link / Edit hide.
 
 ## Frame-silence rule
 

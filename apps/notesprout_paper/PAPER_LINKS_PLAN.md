@@ -13,7 +13,7 @@
 > The **original** Notesprout implementation this arc draws on is `docs/links.md` at the monorepo
 > root — inspiration, not a spec; every deviation is recorded here.
 >
-> **Status: L0 ✅ (df2de82) · L1 ⬜ · L2 ⬜ · L3 ⬜ · L4 ⬜ · L5 ⬜**
+> **Status: L0 ✅ (df2de82) · L1 🧪 (user checklist pending) · L2 ⬜ · L3 ⬜ · L4 ⬜ · L5 ⬜**
 
 ## Why
 
@@ -110,8 +110,9 @@ from it; anything genuinely undecided is a phase-start question, not an inferenc
 - **Page thumbnails or covers in the picker** — labels only; nothing rendered crosses the boundary.
 - **Outline labels for *other* notebooks' pages** in the picker (would mean opening + outlining
   every browsed notebook); the current notebook's labels may use the outline (L2 question).
-- **Eraser parity with the original** (hardware/scribble eraser deleting a whole link) — Paper's
-  eraser doesn't erase objects today; links behave like objects (L1 question confirms).
+- ~~**Eraser parity with the original** (hardware/scribble eraser deleting a whole link)~~ —
+  **reversed at L1 start (Q2)**: the eraser erases whole links *and* whole objects (headings) via
+  g-paper 0.1.4 `onContentErased`; only scribble-erase stays content-immune (Paper has it off).
 - **Trail entries surviving the extension's uninstall** — the store `.db` survives, so they come
   back with a reinstall; nothing migrates them out.
 - **A "links on this page/notebook" index or search** — nothing lists links anywhere.
@@ -457,21 +458,81 @@ docs; memory; commit + push.
 ---
 
 ### Phase L1 — Core link rows: wrap, unwrap, render, parity (no picker, no follow)
-**Status:** ⬜ Not started
+**Status:** 🧪 Built + Claude-verified (2026-08-19) — user checklist pending
+
+**Claude-side device runs (one Sonnet agent per device, 2026-08-19): all drivable checks PASS on
+SNN, NA5C and MIP11** — packages installed + enabled (BOOX freeze list clean before and after);
+the L1 page-load path live (the `"… N links …"` load log line on all three); the debug ⋯ sheet
+carries "Create test link", whose no-selection guard dialog fires correctly; the L0 "Probe links"
+regression exact on all three (`resolve kind=0`, `chromeOf [1,0,0]`, trail round trip, PROBE DONE
+— warm one-shots 16–22 ms on MIP11); flip / insert-past-last regression clean; crash buffers
+empty. **adb cannot inject stylus/lasso input on any of the three**, so wrap / render / move /
+erase / undo are the user checklist's — the agents verified everything reachable without hands.
+(Agent note for later phases: the probe logs live under tag `NotebookDebugMenu` — include it in
+capture filters.)
+
+**Build notes (recorded during the phase; the Outcome finalises them):**
+- **g-paper 0.1.4** (b3ab42b, published to mavenLocal, Paper pins it): `StrokeRasterizer` (public
+  offline door to the internal `StrokeRenderer` — pixel-identical composite ink) and
+  `PaperListener.onContentErased` (eraser hit-tests `ContentRenderer.hitTargets`, whole-object,
+  per-gesture dedup; `EraseHitTest.hitContentIds` + `Geometry.polylineIntersectsRect`, JVM-tested;
+  scribble-erase stays content-immune). Both L1 needs from wizard Q6.
+- **Recorded deviations from the plan text** (all equivalent-or-better, none semantic):
+  (a) the **underline is drawn live** by `ObjectRenderer` from the session chrome map instead of
+  baked into the composite — a chrome change repaints without a rebuild, and the composite cache
+  key stays content-derived (constant payload key `""`, translation-invariant, explicitly
+  invalidated when a wrapped child's render lands);
+  (b) `LinkStore.create` takes no chrome argument (nothing chrome-shaped is persisted — L0 Q4);
+  the creation seeds `LinkFlow`'s session map directly;
+  (c) `Moved` carries links in their own `linkIds` list (not inside `objectIds`) — the replay must
+  route them to `LinkStore.move`, which translates children too;
+  (d) wrap/unwrap **reload the page** (store → drain → `refreshToPage`, the undo-replay
+  discipline) instead of hand-surgery on the live mirrors — simpler and ordering-correct;
+  (e) `LinkStoreTest` as a dao-level JVM test does not exist (no Room JVM harness in the project —
+  `ObjectStore` has none either): the pure halves are `PageLinkTest` (union bounds, translate,
+  mapper round trip, caps — 14 tests) and the dao halves are device-verified;
+  (f) a wrapped child object's rendered bitmap never resizes its row (bounds frozen by the wrap);
+  (g) the render trio (`scheduleRenderPass` / `applyRenderResults` / `renderNow`) moved out of
+  `NotebookActivity` into the new `RenderFlow` (the line-cap surgery — the Activity closes at
+  exactly 800), which is also where the link-composite maintenance lives;
+  (h) the debug "Create test link" composes its fixed payload in **debug source only**
+  (`NotebookDebugMenu`) — the core never builds a payload, even for a probe; with no eligible
+  selection it shows an honest dialog;
+  (i) strokes and content erased by one eraser sweep are **separate undo steps** (`Erased` +
+  `ObjectsDeleted` — g-paper reports them separately; accepted);
+  (j) Link / Edit toolbar actions are present per the gating but **inert until L2** (a `Slog`
+  no-op — the picker flow is L2's deliverable; Unlink and Delete are fully live).
+- `LinkStore` chunks id lists at 500 **inside** its transactions (SQLite's 999-variable cap —
+  found in Fable's review of the store agent's diff).
 
 **Goal:** a link is a first-class page citizen created from any eligible selection (via a debug
 item with a fixed payload until L2), rendered as its wrapped content + underline, atomic under
 lasso / move / delete, fully undoable, and unlink restores the content — all with the extension
 only consulted for `chromeOf`.
 
-**Questions to resolve at phase start:**
-1. Wrap = **re-parent** children rows (rec.) / deep-copy + soft-delete like the original?
-2. Eraser: links immune like objects (rec.) / the original's erase-whole-link?
-3. Tap inside a **selected** link (`onSelectionTapped`) = no-op (rec. — follow is for unselected
-   links, L4; edit lives on the toolbar) / opens Edit?
-4. The Edit glyph: Tabler `link-plus` / `edit` (look at the catalog + the toolbar row width first).
-5. Debug ⋯ **"Create test link"**: wraps the current selection with a fixed `DEST_PAGE` payload to
-   page 1 (rec. yes; removed in L5).
+**Questions resolved at phase start (wizard, 2026-08-19):**
+1. **Wrap = re-parent** children rows (the recommendation): `parentId` flips page → link id in one
+   transaction, ids and coordinates untouched; unlink flips back; no id churn.
+2. **Eraser: erase-whole, and for headings too** (user's call — beyond both recommendations): the
+   eraser tool erases a whole link **and a whole object** on contact, links and headings behaving
+   the same. g-paper 0.1.3 never touches host content and the BOOX raw pen path is invisible to the
+   host, so this is a **g-paper 0.1.4 feature** (below). Scribble-erase stays content-immune
+   (Paper has it off).
+3. Tap inside a **selected** link = **no-op** (follow is for unselected links, L4; Edit lives on
+   the toolbar).
+4. The Edit glyph: **`ic_edit`** (already in `:paper-screen`; `link-plus` would be a new download
+   and reads as "add").
+5. Debug ⋯ **"Create test link": yes** — wraps the current eligible selection with a fixed
+   `DEST_PAGE` payload to page 1 via the real grammar (`"L1|1|0||<page-1-id>"`), so `chromeOf`
+   round-trips for real; removed in L5.
+6. **(Added — the raster gap)** The plan's "cover-snapshot raster path" does not exist offline:
+   `CoverSnapshot` uses the live view's `renderToBitmap()` and g-paper's `StrokeRenderer` is
+   `internal`. **g-paper bumps to 0.1.4** with both L1 needs: (a) a **public stroke-raster
+   helper** (the same internal code path live ink uses — exact fidelity, per risk 3's "never a
+   host workaround"); (b) the **eraser tool hit-testing `ContentRenderer` hitTargets** with a new
+   `onContentErased(ids)` listener callback (default no-op; whole-object semantics like
+   whole-stroke; one shared implementation across the three engines). Recorded here per the
+   "g-paper stays 0.1.3 unless a phase finds a gap" rule.
 
 **Deliverables**
 1. `data`: `SoilSchema.TYPE_LINK`; `LinkStore` over `SoilWriter` (`create(pageId, payload, chrome,
@@ -499,6 +560,30 @@ only consulted for `chromeOf`.
   Unlink still works, Link/Edit absent.
 - **User device checklist** (numbered, ~8 items: the above by eye on all three devices, incl.
   writing over a link with the pen — ink lands, nothing follows).
+
+**User checklist as issued (2026-08-19 — run on SNN, NA5C and MIP11; adb can't drive the lasso, so
+these are the stylus-dependent halves the agents couldn't reach):**
+1. Write a few strokes + create a heading (lasso ink → H), then lasso both together → debug ⋯ →
+   **Create test link** → the selection becomes one unit rendered exactly as it looked, with a
+   **1 dp underline** along its bottom.
+2. Lasso the link → the toolbar shows **Delete · Edit · Unlink** only (no H, no Pad; Link absent).
+   Lasso the link *plus* extra ink → **Delete only** (the selection contains a link, so Link is
+   gated off — no link-inside-link). Delete of that mixed selection works as one step.
+3. Drag the selected link somewhere else → the whole composite moves as one; undo (2-finger
+   double-tap) puts it back; redo (3-finger) re-moves it.
+4. The chain: create link → move it → **Unlink** → undo ×3 (content re-wraps, move reverts,
+   link dissolves back to loose ink + heading) → redo ×3 — everything lands where it was.
+5. **Eraser over a link** (your L1 Q2 call): one eraser pass erases the whole link; same for a
+   bare heading — whole-object. Undo brings each back.
+6. Write **over** a link with the pen — ink lands on the page, nothing else happens.
+7. Delete the page holding a link (long-press → Delete) → undo → the link (and its underline)
+   comes back intact. Then close + reopen the notebook → the link still renders from its rows.
+8. Disable / uninstall `NSE · Links Dev` (Settings → Apps) → reopen the notebook: the link renders
+   its **content with no underline**, still moves / deletes / **Unlinks**; Link and Edit are gone
+   from every toolbar. Re-enable → underline and buttons return (resume or reopen).
+
+*(Note: the toolbar's Link and Edit buttons are present but inert in L1 — their taps do nothing
+until the L2 picker. Unlink and Delete are fully live.)*
 
 **Close-out:** as L0.
 

@@ -65,6 +65,11 @@ object NotebookDebugMenu {
         bar: ViewGroup,
         provider: () -> RecognizeContext?,
         linkCatalog: () -> LinkCatalogSource? = { null },
+        /** The current lasso selection's (strokes, objects) — null when none, or it contains a link,
+         *  or it is empty (arc 7 / L1 "Create test link"; removed in L5). */
+        linkSelection: (() -> Pair<List<com.symmetricalpalmtree.gpaper.core.model.Stroke>, List<PageObject>>?)? = null,
+        /** `LinkFlow.createFromSelection` — (strokes, objects, payload, chrome). */
+        createLink: ((List<com.symmetricalpalmtree.gpaper.core.model.Stroke>, List<PageObject>, String, Int) -> Unit)? = null,
     ) {
         // The row's own flexible gap (layout) already pushes what follows it to the far end: the ⋯ lands
         // right after the Scratch Pad button (S3: that button sits immediately before the ⋯).
@@ -80,11 +85,17 @@ object NotebookDebugMenu {
             stateListAnimator = null
         }
         TooltipCompat.setTooltipText(btn, btn.contentDescription)
-        btn.setOnClickListener { showSheet(activity, provider, linkCatalog) }
+        btn.setOnClickListener { showSheet(activity, provider, linkCatalog, linkSelection, createLink) }
         bar.addView(btn)
     }
 
-    private fun showSheet(activity: AppCompatActivity, provider: () -> RecognizeContext?, linkCatalog: () -> LinkCatalogSource?) {
+    private fun showSheet(
+        activity: AppCompatActivity,
+        provider: () -> RecognizeContext?,
+        linkCatalog: () -> LinkCatalogSource?,
+        linkSelection: (() -> Pair<List<com.symmetricalpalmtree.gpaper.core.model.Stroke>, List<PageObject>>?)?,
+        createLink: ((List<com.symmetricalpalmtree.gpaper.core.model.Stroke>, List<PageObject>, String, Int) -> Unit)?,
+    ) {
         activity.lifecycleScope.launch {
             val ref = ExtensionRegistry.handwritingRecognizer(activity)   // IO; refreshed per open
             val linkRef = ExtensionRegistry.linkProvider(activity)       // IO; refreshed per open (arc 7 / L0)
@@ -97,6 +108,18 @@ object NotebookDebugMenu {
             // Arc 7 / L0 probe (removed in L5): present only while a trusted LINK_PROVIDER is installed.
             if (linkRef != null) {
                 sheet.addAction(null, activity.getString(R.string.debug_probe_links)) { probeLinks(activity, linkRef, linkCatalog) }
+            }
+            // Arc 7 / L1 "Create test link" (removed in L5): wraps the current eligible selection with
+            // a fixed DEST_PAGE payload to page 1 — the real grammar, so `chromeOf` round-trips for
+            // real. The payload is composed HERE, debug source only: the core never builds one.
+            if (linkRef != null && linkSelection != null && createLink != null) {
+                sheet.addAction(null, activity.getString(R.string.debug_create_test_link)) {
+                    val (strokes, objects) = linkSelection() ?: run {
+                        Dialogs.problem(activity, R.string.debug_tools_title, R.string.debug_test_link_needs_selection); return@addAction
+                    }
+                    val pageOneId = linkCatalog()?.currentPageIds()?.firstOrNull() ?: return@addAction
+                    createLink(strokes, objects, "L1|1|0||$pageOneId", 1 /* LINK_CHROME_UNDERLINE */)
+                }
             }
             sheet.show()
         }

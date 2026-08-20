@@ -69,4 +69,44 @@ class SelectionActionsTest {
         assertEquals(1, obj.size)
         assertEquals(listOf("only-obj"), obj[0].action.subActions.map { it.id })
     }
+
+    // ── Links (arc 7 / L1) ──────────────────────────────────────────────────
+
+    @Test
+    fun shapeOfLinkClassification() {
+        assertEquals(Shape.OneLink("l1"), SelectionActions.shapeOf(0, emptyList(), listOf("l1")))
+        assertEquals(Shape.Mixed, SelectionActions.shapeOf(2, emptyList(), listOf("l1")))
+        assertEquals(Shape.Mixed, SelectionActions.shapeOf(0, listOf("com.x.heading:heading"), listOf("l1")))
+        assertEquals(Shape.Mixed, SelectionActions.shapeOf(0, emptyList(), listOf("l1", "l2")))
+        // The legacy two-arg call (no linkIds) still classifies exactly as before the arc-7 param.
+        assertEquals(Shape.Ink, SelectionActions.shapeOf(3, emptyList()))
+        assertEquals(Shape.OneObject("com.x.heading", "heading"), SelectionActions.shapeOf(0, listOf("com.x.heading:heading")))
+    }
+
+    @Test
+    fun mergeOneLinkShowsCoreAllActionsOnly() {
+        val scratch = a(SelectionActions.CORE_SCRATCH_ID, ActionApplies.INK)
+        val linkEdit = a(SelectionActions.CORE_LINK_EDIT_ID, ActionApplies.ALL)
+        val core = listOf(delete, scratch, linkEdit)
+        val allProvider = Contribution("com.x.all", "All", setOf("t"), listOf(a("everything", ActionApplies.ALL)))
+        val items = SelectionActions.merge(core, listOf(heading, other, allProvider), Shape.OneLink("l1"))
+        assertEquals(listOf("delete", "link_edit"), items.map { it.action.id })
+        assertTrue(items.all { it.providerKey == null })
+    }
+
+    @Test
+    fun mergeMixedFromLinksStillCoreAllOnly() {   // guard-rail: a link-bearing Mixed shape behaves exactly like any other Mixed
+        val scratch = a(SelectionActions.CORE_SCRATCH_ID, ActionApplies.INK)
+        val core = listOf(delete, scratch)
+        val shape = SelectionActions.shapeOf(0, emptyList(), listOf("l1", "l2"))
+        val items = SelectionActions.merge(core, listOf(heading, other), shape)
+        assertEquals(listOf("delete"), items.map { it.action.id })
+    }
+
+    @Test
+    fun linkConstantValues() {   // persisted nowhere but the toolbar switches on these — pin them
+        assertEquals("link", SelectionActions.CORE_LINK_ID)
+        assertEquals("link_edit", SelectionActions.CORE_LINK_EDIT_ID)
+        assertEquals("link_unlink", SelectionActions.CORE_LINK_UNLINK_ID)
+    }
 }

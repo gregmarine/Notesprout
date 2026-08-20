@@ -13,6 +13,11 @@ class NotebookUndoTest {
     private fun stroke(id: String) = Stroke(id = id, points = listOf(StrokePoint(1f, 2f), StrokePoint(3f, 4f)))
     private fun obj(id: String, order: Int = 0) =
         PageObject(id, "debug:box", "test", 0f, 0f, 200f, 100f, order)
+    private fun pageLink(id: String, order: Int = 0) = PageLink(
+        id = id, providerIdentity = "com.example.ext:link", payload = "L1|Page|page|nb|pg",
+        x = 0f, y = 0f, width = 100f, height = 50f, order = order,
+        strokes = listOf(stroke("$id-s1")), objects = listOf(obj("$id-o1")),
+    )
 
     @Test
     fun objectActionsRoundTripThroughTheStack() {
@@ -44,5 +49,42 @@ class NotebookUndoTest {
         val both = Action.Moved("p", listOf("s1"), 1f, 2f, listOf("o1"))
         assertEquals(listOf("o1"), both.objectIds)
         assertEquals("p", both.pageId)
+    }
+
+    // ── Links (arc 7 / L1) ──────────────────────────────────────────────────
+
+    @Test
+    fun linkActionsRoundTripThroughTheStack() {
+        val s = UndoRedoStack<Action>()
+        val link = pageLink("l1")
+        val created = Action.LinkCreated("p", link)
+        val unlinked = Action.LinkUnlinked("p", link)
+        val edited = Action.LinkEdited("p", "l1", beforePayload = "before", afterPayload = "after")
+        s.record(created); s.record(unlinked); s.record(edited)
+        assertEquals(edited, s.popUndo()); s.pushRedo(edited)
+        assertEquals(unlinked, s.popUndo()); s.pushRedo(unlinked)
+        assertEquals(created, s.popUndo()); s.pushRedo(created)
+        assertEquals(created, s.popRedo())
+        assertEquals("p", created.pageId)
+        assertEquals("p", unlinked.pageId)
+        assertEquals("p", edited.pageId)
+    }
+
+    @Test
+    fun movedCarriesLinkIdsAndDefaultsEmpty() {
+        val legacy = Action.Moved("p", listOf("s1"), 1f, 2f)
+        assertTrue(legacy.linkIds.isEmpty())
+        val withLinks = Action.Moved("p", listOf("s1"), 1f, 2f, objectIds = listOf("o1"), linkIds = listOf("l1"))
+        assertEquals(listOf("l1"), withLinks.linkIds)
+        assertEquals("p", withLinks.pageId)
+    }
+
+    @Test
+    fun objectsDeletedCarriesLinksAndDefaultsEmpty() {
+        val legacy = Action.ObjectsDeleted("p", strokes = listOf(stroke("s1")), objects = listOf(obj("o1")))
+        assertTrue(legacy.links.isEmpty())
+        val link = pageLink("l1")
+        val withLink = Action.ObjectsDeleted("p", strokes = emptyList(), objects = emptyList(), links = listOf(link))
+        assertEquals(listOf(link), withLink.links)
     }
 }

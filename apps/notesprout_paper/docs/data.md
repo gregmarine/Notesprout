@@ -90,6 +90,23 @@ as a dashed placeholder. `SoilDao`: `objectsOf(pageId)`, `updateObject`, `moveOb
 `liveChildIds(pageId)` (strokes **and** objects — what a page delete / undo carries). A row with a
 missing bound or no identity is dropped on read; the page still renders.
 
+**Link rows** (`SoilSchema.TYPE_LINK = "link"`, arc 7 / L1 — `notebook/PageLink`, `LinkRows`,
+`LinkStore`): a wrapped selection the core stores, renders (composite), selects, moves, deletes,
+unlinks and undoes but **never interprets**. `parentId` = page id · `style` = the providing
+extension's identity `<pkg>:link` (provenance only — never routed on) · `text` = the extension's
+**opaque payload** (target + chrome, ≤ `MAX_LINK_PAYLOAD_CHARS` = 2 000, capped both ways) ·
+`x`/`y`/`width`/`height` = union bounds of the wrapped content + a 2 dp underline clearance at the
+bottom · `"order"` = z-order among the page's links · `flags` = **null** (nothing extension-derived
+is persisted — the underline flag comes from `chromeOf` at load, session-cached; L0 wizard Q4).
+The wrapped content is the link's **child rows**: the selected stroke + object rows re-parented
+page → link in one transaction (ids and page-absolute coordinates untouched — L1 Q1; unlink flips
+them back; `LinkStore` chunks id lists at 500 inside the transaction for SQLite's 999-variable
+cap). A page's own load path ignores them automatically (their `parentId` is the link) — which is
+also what makes `TYPE_LINK` **additive, no version bump**: a pre-arc-7 build ignores the unknown
+type and never sees its children. Page delete / undo carries links *and* their children via
+`SoilDao.liveDescendantIds(pageId)` (one level deeper than `liveChildIds`). No rendered composite
+is ever stored.
+
 **Template identity values** (index `objects.templateKind` and the template row's `text` — informational
 labels, nothing reads them yet): `BLANK` (`SoilSchema.TEMPLATE_BLANK`, no template row) ·
 `<extension package>:<template id>` (e.g. `com.symmetricalpalmtree.notesprout.ext.templates:lined`,

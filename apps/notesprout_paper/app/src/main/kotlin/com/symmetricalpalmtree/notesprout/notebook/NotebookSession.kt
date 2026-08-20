@@ -43,6 +43,8 @@ class NotebookSession(
         private set
     lateinit var objectStore: ObjectStore
         private set
+    lateinit var linkStore: LinkStore
+        private set
 
     var pages: List<PageRef> = emptyList()
         private set
@@ -79,6 +81,7 @@ class NotebookSession(
         writer = SoilWriter { repo.touch(notebookId) }
         store = StrokeStore(db.dao(), writer)
         objectStore = ObjectStore(db.dao(), writer)
+        linkStore = LinkStore(db, writer)   // takes the db: wrap / unwrap are one transaction (arc 7 / L1)
         val dao = db.dao()
         val root = dao.notebookRow()
         val pageRows = dao.childrenOfType(notebookId, SoilSchema.TYPE_PAGE)
@@ -112,7 +115,8 @@ class NotebookSession(
     /**
      * Snapshot describing one page insert or delete, enough to undo/redo it via [reconcile]:
      * the live page ids before and after (in order), the page ids current before/after, and the
-     * page content — strokes **and** objects (arc 4) — the op soft-deleted (empty for an insert).
+     * page content — strokes, objects (arc 4), links **and the links' re-parented children**
+     * (arc 7 / L1, `liveDescendantIds`) — the op soft-deleted (empty for an insert).
      */
     data class Structural(
         val before: List<String>,
@@ -152,11 +156,13 @@ class NotebookSession(
      * Deleting the only page creates a fresh blank in its place so a notebook always has ≥ 1 page.
      */
     suspend fun deleteCurrent(): Structural = withContext(Dispatchers.IO) {
-        writer.drain()   // a queued create / erase must land before `liveChildIds` is snapshotted (H5)
+        writer.drain()   // a queued create / erase must land before the child snapshot is taken (H5)
         val victim = currentPage
         val before = pages.map { it.id }
         val now = System.currentTimeMillis()
-        val childIds = db.dao().liveChildIds(victim.id)
+        // One level deeper than liveChildIds (arc 7 / L1): links and their re-parented children —
+        // the page's grandchildren — must ride the page delete / undo (risk 6).
+        val childIds = db.dao().liveDescendantIds(victim.id)
         if (pages.size == 1) {
             val newId = java.util.UUID.randomUUID().toString()
             val replacement = SoilObjectEntity(

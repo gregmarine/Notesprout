@@ -31,6 +31,15 @@ object SoilSchema {
     /** A content object (arc 4): `style` = provider identity `<pkg>:<typeId>`, `text` = opaque payload,
      *  `x`/`y`/`width`/`height` = bounds in page px, `"order"` = z-order among the page's objects. */
     const val TYPE_OBJECT = "object"
+    /** A link (arc 7 / L1): wraps a selection into one tappable unit. `parentId` = page id ·
+     *  `text` = the Links extension's **opaque payload** (target + chrome — never parsed by the core) ·
+     *  `style` = the providing extension's identity `<pkg>:link` (provenance only, never routed on) ·
+     *  bounds = union of the wrapped content + underline clearance · `"order"` = z-order · `flags`
+     *  **null** (nothing extension-derived is persisted — chrome comes from `chromeOf` at load, L0 Q4).
+     *  The wrapped content is the link's **child rows** (stroke / object rows re-parented page → link,
+     *  ids and coordinates untouched — L1 Q1), invisible to a page's own load path and to pre-arc-7
+     *  builds (their `parentId` is the link). Additive: no version bump. */
+    const val TYPE_LINK = "link"
 
     /** The notebook meta row's `parentId` (it is the root). */
     const val ROOT_PARENT = ""

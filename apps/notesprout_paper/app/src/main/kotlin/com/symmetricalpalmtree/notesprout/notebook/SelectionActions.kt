@@ -52,18 +52,32 @@ object SelectionActions {
     const val CORE_DELETE_ID = "delete"
     /** The core "Send to Scratch Pad" action's id (arc 6 / S2, `appliesTo = INK`; present only while the extension is installed). */
     const val CORE_SCRATCH_ID = "scratch"
+    /** The core "Link" (wrap the selection) id — arc 7 / L1, `appliesTo = ALL` so it shows for every
+     *  shape; present only while the Links extension is installed **and** the selection contains no
+     *  link (no link-inside-link — the caller gates the list, not the merge). */
+    const val CORE_LINK_ID = "link"
+    /** The core "Edit" (reopen the picker over a selected link) id — [Shape.OneLink] only, extension-gated. */
+    const val CORE_LINK_EDIT_ID = "link_edit"
+    /** The core "Unlink" id — [Shape.OneLink] only, **not** extension-gated (unwrap is structural). */
+    const val CORE_LINK_UNLINK_ID = "link_unlink"
 
     sealed interface Shape {
         /** A pure-stroke selection. */
         data object Ink : Shape
         /** Exactly one object, no strokes: its provider identity split into (pkg, typeId). */
         data class OneObject(val providerKey: String, val typeId: String) : Shape
-        /** Strokes + objects, several objects, or an object with an unparseable identity. */
+        /** Exactly one link, nothing else (arc 7 / L1) — core actions only (Delete · Edit · Unlink). */
+        data class OneLink(val linkId: String) : Shape
+        /** Strokes + objects, several objects, an object with an unparseable identity — or any mix
+         *  containing a link beside anything else (arc 7). */
         data object Mixed : Shape
     }
 
-    /** Classify a selection from what the screen knows: stroke count + the selected objects' identities. */
-    fun shapeOf(strokeCount: Int, objectIdentities: List<String>): Shape = when {
+    /** Classify a selection from what the screen knows: stroke count, the selected objects'
+     *  identities, and the selected link ids (arc 7 / L1). */
+    fun shapeOf(strokeCount: Int, objectIdentities: List<String>, linkIds: List<String> = emptyList()): Shape = when {
+        linkIds.size == 1 && strokeCount == 0 && objectIdentities.isEmpty() -> Shape.OneLink(linkIds[0])
+        linkIds.isNotEmpty() -> Shape.Mixed
         objectIdentities.isEmpty() -> Shape.Ink
         strokeCount == 0 && objectIdentities.size == 1 ->
             ExtensionContract.parseIdentity(objectIdentities[0])?.let { (pkg, type) -> Shape.OneObject(pkg, type) } ?: Shape.Mixed
@@ -73,16 +87,19 @@ object SelectionActions {
     fun merge(core: List<ToolbarAction>, contributions: List<Contribution>, shape: Shape): List<ToolbarItem> {
         val out = ArrayList<ToolbarItem>()
         // Core actions are filtered by `appliesTo` too (arc 6 / S2): Delete carries every bit and shows
-        // for every shape; `scratch` (INK) shows for ink only. A mixed selection needs every bit.
+        // for every shape; `scratch` (INK) shows for ink only. Mixed — and OneLink (arc 7), whose
+        // extra actions the caller adds to `core` for that shape alone — need every bit.
         val coreMask = when (shape) {
             Shape.Ink -> ActionApplies.INK
             is Shape.OneObject -> ActionApplies.OBJECT
+            is Shape.OneLink -> ActionApplies.ALL
             Shape.Mixed -> ActionApplies.ALL
         }
         for (a in core) if (a.appliesTo and coreMask == coreMask) out += ToolbarItem(null, a)
         val bit = when (shape) {
             Shape.Ink -> ActionApplies.INK
             is Shape.OneObject -> ActionApplies.OBJECT
+            is Shape.OneLink -> return out   // links are core-owned: no provider action applies
             Shape.Mixed -> return out
         }
         for (c in contributions) {

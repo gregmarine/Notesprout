@@ -46,6 +46,24 @@ interface SoilDao {
     @Query("SELECT * FROM notebook WHERE parentId = :pageId AND type = 'object' AND deletedAt IS NULL ORDER BY `order`")
     suspend fun objectsOf(pageId: String): List<SoilObjectEntity>
 
+    /** Live link rows of a page in z-order (arc 7 / L1). */
+    @Query("SELECT * FROM notebook WHERE parentId = :pageId AND type = 'link' AND deletedAt IS NULL ORDER BY `order`")
+    suspend fun linksOf(pageId: String): List<SoilObjectEntity>
+
+    /** Re-parent rows (arc 7 / L1 — wrap flips page → link, unlink flips back; ids untouched). */
+    @Query("UPDATE notebook SET parentId = :newParentId, updatedAt = :at WHERE id IN (:ids)")
+    suspend fun reparent(ids: List<String>, newParentId: String, at: Long)
+
+    /** Live content ids of a page **one level deeper than [liveChildIds]** (arc 7 / L1): strokes,
+     *  objects and links of the page, plus the links' own children (the page's grandchildren) — what
+     *  a page delete / undo must carry so a wrapped selection rides its page (risk 6). */
+    @Query(
+        """SELECT id FROM notebook WHERE deletedAt IS NULL AND (
+             (parentId = :pageId AND type IN ('stroke', 'object', 'link'))
+             OR parentId IN (SELECT id FROM notebook WHERE parentId = :pageId AND type = 'link' AND deletedAt IS NULL))"""
+    )
+    suspend fun liveDescendantIds(pageId: String): List<String>
+
     /** Every live object row of the notebook (arc 5 — the Contents gather; objects carry no blob). A page
      *  delete soft-deletes its children, so this is already the live set; the caller still guards `parentId`. */
     @Query("SELECT * FROM notebook WHERE type = 'object' AND deletedAt IS NULL")

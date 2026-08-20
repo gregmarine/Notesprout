@@ -112,8 +112,10 @@
     <!-- Debug-only notebook ⋯ (arc 3 test surface; strings live here so the release no-op twin compiles) -->
     <string name="debug_tools_title">Debug tools</string>
     <string name="debug_recognize_page">Recognize page (ML Kit)</string>
-    <!-- Arc 7 / L0 probe (removed in L5) -->
+    <!-- Arc 7 / L0 probe + L1 test-link creator (removed in L5) -->
     <string name="debug_probe_links">Probe links</string>
+    <string name="debug_create_test_link">Create test link</string>
+    <string name="debug_test_link_needs_selection">Lasso some ink or objects first (no links inside).</string>
 
     <!-- Selection toolbar + object edit dialog (arc 4 / H2) -->
     <string name="selection_delete_hint">Delete selection</string>
@@ -147,6 +149,14 @@
     <string name="scratch_result_lost">The notebook was restarted while the scratch pad was open — the ink couldn\'t be brought back. It\'s still on the pad.</string>
     <string name="contents_empty">No headings yet</string>
     <string name="contents_truncated">Showing the first %1$d headings</string>
+
+    <!-- Links (arc 7 / L1) — the three core selection actions; the dialogs arrive with the picker (L2) and follow (L4). -->
+    <string name="link_action_label">Link</string>
+    <string name="link_action_hint">Create link</string>
+    <string name="link_edit_label">Edit</string>
+    <string name="link_edit_hint">Edit link</string>
+    <string name="link_unlink_label">Unlink</string>
+    <string name="link_unlink_hint">Remove link</string>
     <string name="cd_expand">Expand</string>
     <string name="cd_collapse">Collapse</string>
     <string name="recognize_problem_title">Recognize page</string>
