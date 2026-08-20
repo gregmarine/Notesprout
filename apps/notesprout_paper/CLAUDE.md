@@ -5,24 +5,22 @@ global-index model, global encryption model, and e-ink design philosophy — and
 
 - **Branch:** `paper`
 - **Location:** `apps/notesprout_paper/`
-- **Plans:** `PAPER_PLAN.md` (v0, complete — architecture + locked decisions), then
-  `PAPER_EXTENSIONS_PLAN.md` (arc 1, complete + frozen: extension API v1 + Templates extension), then
-  `PAPER_NAMING_PLAN.md` (arc 2, complete + frozen: the host-owned encrypted extension store + the
-  Naming extension), then `PAPER_RECOGNITION_PLAN.md` (arc 3, complete + frozen 2026-08-17: the
-  engine-neutral `HANDWRITING_RECOGNIZER` capability point + the ML Kit extension `NSE · ML Kit`,
-  debug-only "Recognize page" test surface), then `PAPER_OBJECTS_PLAN.md` (arc 4, **complete + frozen 2026-08-18** —
-  H0 8c5361f · H1 62771f3 · H2 bf17417 · H3 0de688e · H4 f995354 · H5 6c5d5c2: content objects in the `.soil` + the selection toolbar with its
-  extension-contribution API + the `MARKDOWN_RENDERER` capability point / `NSE · Markdown` + the
-  generic `OBJECT_PROVIDER` point / `NSE · Heading`, the two proxies, g-paper 0.1.1), then
-  `PAPER_CONTENTS_PLAN.md` (arc 5, **complete + frozen 2026-08-18 — C0 ✅ cc0558d · C1 ✅ c9733c5 ·
-  C2 ✅ 54b9bf2**, all user-verified SNN + NA5C + MIP11: the
-  Contents — a table of contents from the Heading extension via `IObjectProvider.describeOutline`
-  (appended, compatible, `API_VERSION` stays 1) + a core-drawn `ContentsDialog`, top-bar `list`
-  button + one-finger swipe-down), then **`PAPER_SCRATCHPAD_PLAN.md` (arc 6, complete + frozen 2026-08-19 — S0 ✅ 9a96c7a · S1 ✅ 98f58f6 ·
-  S2 ✅ 374f17f · S3 ✅ c92744c, all user-verified SNN / NA5C / MIP11: `NSE · Scratch Pad`, an extension-owned off-paper screen (UI-rule tier 2, first exercise) +
-  the shared `:paper-screen` module + the `SCRATCH_PAD` point + `IExtensionStore.putLarge / getLarge`
-  (4 MiB values over `SharedMemory`) + the two ink transfers)** — read all seven top-to-bottom at the
-  start of every session. **No arc is active; the next arc is not planned — ask first.**
+- **Plans:** `PAPER_PLAN.md` (v0 — architecture + locked decisions), then the six arc plans:
+  `PAPER_EXTENSIONS_PLAN.md` (arc 1 — extension API v1 + the Templates extension),
+  `PAPER_NAMING_PLAN.md` (arc 2 — the host-owned encrypted extension store + the Naming extension),
+  `PAPER_RECOGNITION_PLAN.md` (arc 3 — the engine-neutral `HANDWRITING_RECOGNIZER` capability point +
+  `NSE · ML Kit`), `PAPER_OBJECTS_PLAN.md` (arc 4 — content objects + the selection toolbar with its
+  extension-contribution API + the `MARKDOWN_RENDERER` / `OBJECT_PROVIDER` points, the two proxies),
+  `PAPER_CONTENTS_PLAN.md` (arc 5 — the Contents via `IObjectProvider.describeOutline` + the
+  core-drawn `ContentsDialog`), `PAPER_SCRATCHPAD_PLAN.md` (arc 6 — `NSE · Scratch Pad`, the shared
+  `:paper-screen` module, the `SCRATCH_PAD` point, `putLarge`/`getLarge`). **All seven are complete +
+  frozen** (phase commit hashes and per-device verification are recorded in each plan) — read all
+  seven top-to-bottom at the start of every session.
+  **Active arc: `PAPER_LINKS_PLAN.md` (arc 7 — `NSE · Links`: core-owned link rows in the `.soil`
+  wrapping a selection, extension-owned semantics — opaque payload + `resolve`/`chromeOf`, the
+  tier-2 picker screen with the `ILinkCatalog` host callback, trail in the extension store,
+  finger-tap follow + swipe-up back). Planned 2026-08-19; phases L0–L5 all ⬜ — L0 next, in a
+  fresh session, starting with the plan's L0 phase-start wizard.**
 - **Package / applicationId:** `com.symmetricalpalmtree.notesprout` (debug: `.dev` suffix)
 - **Launcher label:** "Notesprout Paper" (debug: "Notesprout Paper Dev")
 
@@ -308,30 +306,9 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
 
 ## Build & install
 
-```sh
-cd ~/git/Notesprout/apps/notesprout_paper
-./gradlew assembleDebug                  # all modules → app + ext-templates + ext-naming + ext-mlkit + ext-markdown + ext-heading + ext-scratchpad debug APKs
-./gradlew testDebugUnitTest              # all modules
-adb -s SN078D10012852 install -r app/build/outputs/apk/debug/app-debug.apk   # SNN (Nomad)
-adb -s 92c16533       install -r app/build/outputs/apk/debug/app-debug.apk   # NA5C
-adb -s 5HL21V5007384  install -r app/build/outputs/apk/debug/app-debug.apk   # MIP11
-# The extensions (install alongside the app on the same device):
-adb -s <serial> install -r ext-templates/build/outputs/apk/debug/ext-templates-debug.apk
-adb -s <serial> install -r ext-naming/build/outputs/apk/debug/ext-naming-debug.apk
-adb -s <serial> install -r ext-mlkit/build/outputs/apk/debug/ext-mlkit-debug.apk      # ~40 MB; the en-US model (~20 MB) downloads on first prepare() — Wi-Fi once per device
-adb -s <serial> install -r ext-markdown/build/outputs/apk/debug/ext-markdown-debug.apk # ~2.5 MB; the Markdown renderer (arc 4)
-adb -s <serial> install -r ext-heading/build/outputs/apk/debug/ext-heading-debug.apk   # ~2.5 MB; the Heading object provider (arc 4 / H3)
-adb -s <serial> install -r ext-scratchpad/build/outputs/apk/debug/ext-scratchpad-debug.apk  # ~25 MB (g-paper + Onyx SDK); the Scratch Pad (arc 6)
-# NA5C: BOOX "Freeze new apps" (Settings → Apps → App Freeze) disabled a freshly installed package ~8 min AFTER install
-# (system ApplicationFreezeHelper; its list shows launcher apps only, so an extension can't be unfrozen by hand) —
-# switched OFF on the NA5C 2026-08-19. If it is ever on again: pm enable, and expect the delayed re-freeze.
-adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.templates.dev  # BOOX sideload trap — BOOX may
-adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.naming.dev     #   re-disable a few seconds AFTER
-adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.mlkit.dev      #   install; re-run enable and confirm with `pm list packages -d`
-adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.markdown.dev
-adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.heading.dev
-adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.scratchpad.dev
-```
+Via the `device-build-install` skill (its **Paper** section): build/test commands, the
+per-extension APK install lines, the BOOX freeze / `pm enable` sideload traps, and the three Paper
+test-device serials (SNN `gpaper-ratta` · NA5C `gpaper-onyx` · MIP11 `gpaper-core`) all live there.
 
 Debug launch: `adb -s <serial> shell am start -n com.symmetricalpalmtree.notesprout.dev/com.symmetricalpalmtree.notesprout.bootstrap.BootstrapActivity`
 (BootstrapActivity is the launcher and the only thing that opens the index; every other screen
@@ -339,16 +316,6 @@ bounces there via `IndexGuard`.) The debug build's library ⋯ menu has "Show re
 "Forget cached key" (kills the process → next launch is the Unlock screen); the notebook screen's
 debug ⋯ has "Recognize page (ML Kit)" (present only with `NSE · ML Kit` installed). The app's files are
 readable from `adb shell` at `/sdcard/Android/data/<appId>/files/` (index + `Garden/`).
-
-BOOX trap: `install -r` can leave the package disabled → `pm enable com.symmetricalpalmtree.notesprout.dev`.
-
-## Test devices
-
-| Nickname | Device | Serial | Engine |
-|---|---|---|---|
-| SNN | Supernote Nomad | `SN078D10012852` | `gpaper-ratta` |
-| NA5C | BOOX NoteAir5C | `92c16533` | `gpaper-onyx` |
-| MIP11 | Wacom Movink Pad 11 | `5HL21V5007384` | `gpaper-core` |
 
 ## g-paper version
 
