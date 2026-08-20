@@ -19,11 +19,15 @@ import kotlinx.coroutines.runBlocking
 /**
  * The live-session lens `LinkCatalogBinder` reads the *current* notebook's pages through — the origin
  * notebook's `.soil` is open in the notebook session and is never touched from a second connection.
- * [currentPageIds] returns the page ids in page order, or null while the session isn't ready.
+ * [currentPages] returns (page id, display label) in page order, or null while the session isn't
+ * ready. The labels are composed host-side for the current notebook (L2 Q2 — "Page n", plus the
+ * page's outline heading where the Contents has one) and the *current page is already excluded*
+ * (L2 Q1 — a self-link is a no-op trap; excluding here keeps the "Page n" numbering true). Other
+ * notebooks' pages leave with blank labels — the picker shows "Page n" from position.
  */
 class LinkCatalogSource(
     val currentNotebookId: String,
-    val currentPageIds: () -> List<String>?,
+    val currentPages: () -> List<Pair<String, String>>?,
 )
 
 /**
@@ -80,13 +84,13 @@ class LinkCatalogBinder(
         require(!notebookId.isNullOrBlank()) { "notebookId is blank" }
         return io {
             runBlocking(Dispatchers.IO) {
-                val ids = if (notebookId == source.currentNotebookId) {
-                    source.currentPageIds() ?: throw IllegalStateException("notebook not ready")
+                val pages: List<Pair<String, String>> = if (notebookId == source.currentNotebookId) {
+                    source.currentPages() ?: throw IllegalStateException("notebook not ready")
                 } else {
-                    foreignPageIds(notebookId)
+                    // Blank labels: Paper pages carry no names — the picker shows "Page n" from position.
+                    foreignPageIds(notebookId).map { it to "" }
                 }
-                // Blank labels: Paper pages carry no names — the picker shows "Page n" from position.
-                val entries = gate.cap(ids.map { gate.entry(it, ExtensionContract.CATALOG_PAGE, "") })
+                val entries = gate.cap(pages.map { (id, label) -> gate.entry(id, ExtensionContract.CATALOG_PAGE, label) })
                 Slog.d(TAG) { "listPages: ${entries.size} pages (live=${notebookId == source.currentNotebookId})" }
                 entries.toMutableList()
             }

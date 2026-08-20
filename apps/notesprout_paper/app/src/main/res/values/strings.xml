@@ -157,6 +157,14 @@
     <string name="link_edit_hint">Edit link</string>
     <string name="link_unlink_label">Unlink</string>
     <string name="link_unlink_hint">Remove link</string>
+    <!-- Links (arc 7 / L2) — the picker flow's dialogs + the host-composed page labels (Q2). -->
+    <string name="links_problem_title">Link</string>
+    <string name="links_picker_gone">The NSE · Links extension didn\'t respond — try again.</string>
+    <string name="links_choice_invalid">The NSE · Links extension returned an unusable link.</string>
+    <string name="links_result_lost">The notebook was restarted while the link picker was open — the choice couldn\'t be brought back. Try again.</string>
+    <string name="links_page_full">This page already holds the maximum number of links.</string>
+    <string name="link_page_label">Page %1$d</string>
+    <string name="link_page_heading_label">Page %1$d — %2$s</string>
     <string name="cd_expand">Expand</string>
     <string name="cd_collapse">Collapse</string>
     <string name="recognize_problem_title">Recognize page</string>

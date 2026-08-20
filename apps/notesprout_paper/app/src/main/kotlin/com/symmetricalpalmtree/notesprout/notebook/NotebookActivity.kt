@@ -108,8 +108,10 @@ class NotebookActivity : AppCompatActivity() {
     private lateinit var objectActions: ObjectActions
     /** The render-cache fill (arc 7 / L1 — lifted out of this screen at its line cap). */
     private lateinit var renderFlow: RenderFlow
-    /** The links collaborator (arc 7 / L1): core actions, wrap / unwrap, the session chrome map. */
+    /** The links collaborator (arc 7): core actions, wrap / unwrap / edit, the pick flow, chrome. */
     private lateinit var linkFlow: LinkFlow
+    /** The scratch-pad paste (arc 6 / S2 — lifted out at the line cap in L2). */
+    private lateinit var pasteFlow: PasteFlow
     /** A provider's active action ids per object id (for exactly that payload) — spares a bind per re-selection. */
     private val activeIdsCache = HashMap<String, Pair<String, Set<String>>>()
     /** The core's own toolbar actions: Delete only (locked decision Q5). */
@@ -167,6 +169,11 @@ class NotebookActivity : AppCompatActivity() {
             this, { opened && !closing }, { session }, { liveStrokes }, { liveObjects }, { liveLinks },
             undo, ::runPageOp, { refreshToPage(session.currentPage.id) }, ::whenPenIdle,
             notifyContentChanged = { paper.notifyContentChanged() },
+            providers = { providers }, releaseRender = { paper.releaseRender() },
+        )
+        pasteFlow = PasteFlow(
+            paper, { opened && !closing }, { session }, { liveStrokes }, undo,
+            syncTool = { toolbar.sync(it) }, presentSelection = ::presentSelection, whenPenIdle = ::whenPenIdle,
         )
 
         toolbar = PaperToolbar(
@@ -199,10 +206,8 @@ class NotebookActivity : AppCompatActivity() {
                         when (action.id) {
                             SelectionActions.CORE_SCRATCH_ID -> if (objects.isEmpty() && links.isEmpty()) scratchPadFlow.sendSelection(strokes)
                             SelectionActions.CORE_LINK_UNLINK_ID -> links.firstOrNull()?.let { linkFlow.unlink(it) }
-                            // Link + Edit open the picker — wired in L2; inert until then (the debug
-                            // "Create test link" is L1's creation path).
-                            SelectionActions.CORE_LINK_ID, SelectionActions.CORE_LINK_EDIT_ID ->
-                                Slog.d(TAG) { "${action.id}: picker flow lands in L2" }
+                            SelectionActions.CORE_LINK_ID -> linkFlow.beginCreate(strokes, objects)
+                            SelectionActions.CORE_LINK_EDIT_ID -> links.firstOrNull()?.let { linkFlow.beginEdit(it) }
                         }
                         return
                     }
@@ -221,7 +226,7 @@ class NotebookActivity : AppCompatActivity() {
             else RecognizeContext(paper.getStrokes(), session.currentPage.width.toFloat(), session.currentPage.height.toFloat())
         }, linkCatalog = {
             if (!opened) null
-            else LinkCatalogSource(session.notebookId) { if (opened) session.pages.map { it.id } else null }
+            else LinkCatalogSource(session.notebookId) { if (opened) session.pages.map { it.id to "" } else null }
         }, linkSelection = {
             val sel = if (opened) currentSelection else null
             if (sel == null || sel.contentIds.any { it in liveLinks }) null
@@ -238,7 +243,7 @@ class NotebookActivity : AppCompatActivity() {
         binding.btnContents.setOnClickListener { contentsFlow.open() }.also { TooltipCompat.setTooltipText(binding.btnContents, binding.btnContents.contentDescription) }   // inside topBar: chrome release + exclusion cover it
         scratchPadFlow = ScratchPadFlow(   // arc 6 / S1 + S2; the button sits inside topBar
             this, paper, binding.btnScratchPad, { opened && !closing }, ::whenPenIdle, { binding.root.post { pushExclusions() } },
-            pageSize = { session.currentPage.width to session.currentPage.height }, onPaste = { strokes -> runPageOp { pasteStrokes(strokes) } },
+            pageSize = { session.currentPage.width to session.currentPage.height }, onPaste = { strokes -> runPageOp { pasteFlow.paste(strokes) } },
         )
         pageGestures = PageGestures(
             host = paper.asView(),
@@ -387,7 +392,7 @@ class NotebookActivity : AppCompatActivity() {
             selectionActive = false
             currentSelection = null
             selectionToolbar.hide()
-            restoreToolAfterPaste()
+            pasteFlow.restoreTool()
         }
         /** g-paper 0.1.1: a sub-threshold stylus / finger tap inside the selection box. With exactly one
          *  selected object under the tap → the provider's `describeEdit` → [ObjectEditDialog] (at once —
@@ -524,35 +529,11 @@ class NotebookActivity : AppCompatActivity() {
     private suspend fun doUndo() = NotebookUndo.undo(session, undo, ::refreshToPage)
     private suspend fun doRedo() = NotebookUndo.redo(session, undo, ::refreshToPage)
 
-    /** The tool to go back to once a pasted selection is dismissed (null = the user was already on the lasso). */
-    private var toolBeforePaste: Tool? = null
-
-    /** Ink from the scratch pad (arc 6 / S2): fresh rows + on the paper + one undoable [Action.Pasted], left selected
-     *  (host-initiated) **on the lasso tool** — a selection under the pen can't be dragged or dismissed; the prior tool
-     *  comes back when the selection is dismissed ([restoreToolAfterPaste]). */
-    private suspend fun pasteStrokes(strokes: List<Stroke>) {
-        val pageId = session.currentPage.id
-        session.store.insert(pageId, strokes)
-        for (s in strokes) liveStrokes[s.id] = s
-        paper.addStrokes(strokes)
-        undo.record(Action.Pasted(pageId, strokes))
-        val bounds = strokes.map { it.bounds }.reduce { a, b -> a.union(b) }
-        val sel = Selection(strokes.map { it.id }.toSet(), emptySet(), bounds)
-        toolBeforePaste = paper.tool.takeIf { it != Tool.LASSO }
-        if (paper.tool != Tool.LASSO) { paper.tool = Tool.LASSO; toolbar.sync(Tool.LASSO) }   // before setSelection — a tool change dismisses
-        paper.setSelection(sel.strokeIds, emptySet(), bounds)
+    /** Host-initiated selection: set the state and show the toolbar (no `onSelectionCreated` echo). */
+    private fun presentSelection(sel: Selection) {
         selectionActive = true
         currentSelection = sel
         showSelectionToolbar(sel)
-        Slog.d(TAG) { "pasted ${strokes.size} strokes on $pageId" }
-    }
-
-    /** After a pasted selection goes away: back to the tool the user had — pen-idle (a pen tap-away dismisses at
-     *  pen-down), and only if they haven't picked another tool meanwhile. */
-    private fun restoreToolAfterPaste() {
-        val t = toolBeforePaste ?: return
-        toolBeforePaste = null
-        whenPenIdle { if (paper.tool == Tool.LASSO && opened && !closing) { paper.tool = t; toolbar.sync(t) } }
     }
 
     // ── Content objects (arc 4 — H2 toolbar Delete, H4 provider actions) ──────
@@ -638,14 +619,11 @@ class NotebookActivity : AppCompatActivity() {
         }
     }
 
-    /** Host-initiated selection of one object (no `onSelectionCreated` echo — the state is set here). */
+    /** Host-initiated selection of one object. */
     private fun selectObject(id: String) {
         val obj = liveObjects[id] ?: return
         paper.setSelection(emptySet(), setOf(id), obj.bounds)
-        selectionActive = true
-        val sel = Selection(emptySet(), setOf(id), obj.bounds)
-        currentSelection = sel
-        showSelectionToolbar(sel)
+        presentSelection(Selection(emptySet(), setOf(id), obj.bounds))
     }
 
     private fun dpi(): Float = resources.displayMetrics.densityDpi.toFloat()
@@ -769,6 +747,7 @@ class NotebookActivity : AppCompatActivity() {
         if (IndexGuard.bounced(this)) { super.onDestroy(); return }
         if (::paper.isInitialized) paper.release()
         if (::scratchPadFlow.isInitialized) scratchPadFlow.close()
+        if (::linkFlow.isInitialized) linkFlow.close()
         renderCache.clear()
         // A destroy that isn't a normal close (e.g. finish() from failOpen after open) still seals.
         if (::session.isInitialized && session.isOpen && !closing) {

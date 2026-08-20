@@ -13,7 +13,7 @@
 > The **original** Notesprout implementation this arc draws on is `docs/links.md` at the monorepo
 > root — inspiration, not a spec; every deviation is recorded here.
 >
-> **Status: L0 ✅ (df2de82) · L1 ✅ (bc944bc) · L2 ⬜ · L3 ⬜ · L4 ⬜ · L5 ⬜**
+> **Status: L0 ✅ (df2de82) · L1 ✅ (bc944bc) · L2 🧪 (user checklist pending) · L3 ⬜ · L4 ⬜ · L5 ⬜**
 
 ## Why
 
@@ -109,7 +109,9 @@ from it; anything genuinely undecided is a phase-start question, not an inferenc
 - **File / website / URI targets** — the original also excluded them from its phase 1.
 - **Page thumbnails or covers in the picker** — labels only; nothing rendered crosses the boundary.
 - **Outline labels for *other* notebooks' pages** in the picker (would mean opening + outlining
-  every browsed notebook); the current notebook's labels may use the outline (L2 question).
+  every browsed notebook); the current notebook's pages DO show outline labels (L2 Q2 — accepted).
+- **A search/filter field in the picker's notebook list** (L2 Q3 — deferred; the library itself has
+  no search yet, and it would bring the IME onto the picker before L3 needs it).
 - ~~**Eraser parity with the original** (hardware/scribble eraser deleting a whole link)~~ —
   **reversed at L1 start (Q2)**: the eraser erases whole links *and* whole objects (headings) via
   g-paper 0.1.4 `onContentErased`; only scribble-erase stays content-immune (Paper has it off).
@@ -607,20 +609,94 @@ until the L2 picker. Unlink and Delete are fully live.)*
 ---
 
 ### Phase L2 — The picker: choose an existing target, create + edit end to end
-**Status:** ⬜ Not started
+**Status:** 🧪 Built + Claude-verified on SNN/NA5C/MIP11 (2026-08-19) — user checklist pending
+
+**Claude-side device runs (one Sonnet agent per device, 2026-08-19): all drivable checks PASS on
+SNN, NA5C and MIP11** — app + ext-links installed and enabled (BOOX freeze list clean before and
+after); the page-load regression live ("… 1 links …" on all three); the L0/L1 "Probe links"
+sequence exact on the real-picker build (`beginPick ok` 144 ms SNN / 98 ms NA5C / 46 ms MIP11 warm;
+one-shots 7–23 ms; `chromeOf [1,0,0]`; trail round trip; PROBE DONE); **`am start` of the now-real
+`LinkPickerActivity` refused** (`refused caller (none)`, nothing resident) on all three; binds =
+unbinds after the probe; flip regression clean (MIP11's swipe also exercised insert-past-last,
+1/1 → 2/2); crash buffers empty. The picker's own open is lasso-gated, so the create / edit /
+cancel / kill-mid-showing items are the user checklist's (Build notes, drivable-half correction).
 
 **Goal:** "Link" on an eligible selection opens the extension's picker; choosing a page of this
 notebook / another notebook / a page of another notebook + chrome creates the link (one undo
 step); "Edit" reopens it pre-populated and patches payload + chrome only.
 
-**Questions to resolve at phase start:**
-1. Mode wording + order (rec.: "This notebook" · "Notebook" · "Notebook page" as a three-way
-   toggle, the original's trio) — and the current page is excluded from "This notebook"'s grid?
-   (rec. yes — a link to its own page is a no-op trap).
-2. Page labels: "Page n" everywhere (rec.) / current notebook additionally shows outline labels
-   when the Contents has them?
-3. A filter/search field in the notebook list (rec. defer — recorded under Deferred) / include?
-4. Picker list visuals: rows like the library's folder picker (rec.) / grid?
+**Questions resolved at phase start (wizard, 2026-08-19):**
+1. **Modes "This notebook" · "Notebook" · "Notebook page"** (three-way toggle, that order) — and
+   the **current page is excluded** from "This notebook"'s grid (a self-link is a no-op trap).
+2. **Current notebook pages additionally show outline labels** where the Heading outline has them
+   ("Page n — <label>"); other notebooks stay "Page n" (Deferred item unchanged). The label crosses
+   outward through the catalog (`LinkCatalogSource` grows a labels callback; capped/truncated by
+   `LinkCatalogGate.entry` like every label) — a **recorded outward widening** for the L5 audit:
+   heading-derived text of the *current notebook only*, during a pick showing only.
+3. **No search field — deferred** (recorded under Deferred; keeps L2 IME-free).
+4. **Paged card grid** — the shape Paper's `FolderPickerActivity` already has (measured columns +
+   first/prev/next/last pager). *(Plan correction: the library's folder picker is a card grid, not
+   rows — the original Q4 wording misremembered it.)*
+
+**Build notes (recorded during the phase; the Outcome finalises them):**
+- **`LinkCatalogSource` reshaped** (`currentPageIds` → `currentPages: () -> List<Pair<String,
+  String>>?`): the current notebook's page **labels are composed host-side** ("Page n" /
+  "Page n — heading" via the new `notebook/LinkPickerLabels`, headings from the same
+  `ContentsSource.gather` the Contents uses, best-effort) and the **current page is excluded
+  host-side** — the exclusion must live beside the numbering (`mapIndexedNotNull` over the full
+  page list) or "Page n" would drift from true position. Foreign notebooks keep blank labels
+  (picker shows "Page n" from position). The debug probe/test-link source passes plain unexcluded
+  labels (debug behaviour unchanged from L1).
+- The outline gather for the labels runs in `LinkFlow.buildSource()` **before** `openPick` — its
+  provider binds never sit inside the held bind's 2 s `beginPick` window.
+- **The pick launcher lives in `LinkFlow`** (registered at construction, the `ScratchPadFlow`
+  precedent) rather than in `NotebookActivity` — the Activity gains only the two `onAction` cases,
+  the two `LinkFlow` constructor args and `linkFlow.close()` in `onDestroy`.
+- **`NotebookActivity` line cap**: the arc-6 scratch-pad paste block moved out to the new
+  `notebook/PasteFlow` (with a shared `presentSelection` helper the object-select path reuses) —
+  the Activity closes at **779** lines, headroom for L4's extras + gestures.
+- **The current notebook is hidden in both "Notebook" modes** picker-side (a self-target is the
+  same no-op trap as Q1b's self-page; the original's mode was literally named "Other Notebook").
+- Strings beyond Appendix A: `links_result_lost` (host recreated mid-showing — the scratch
+  `scratch_result_lost` precedent) and `links_page_full` (the pre-flight cap refusal is a dialog
+  in the real UI; `createFromSelection` keeps its log-only race-window re-check).
+- Edit with an unchanged payload is a **no-op** (no store write, no undo step) — chrome rides
+  inside the payload, so payload equality covers both.
+- **Picker (Opus agent) build calls, Fable-reviewed:** pure decisions in `PickerModel` (mode↔kind,
+  prefill, hide-filter, label fallback, OK composition — 27 JVM tests); the hide-current-notebook
+  filter is **kind-scoped** (only `CATALOG_NOTEBOOK` rows match, a folder can never be hidden by an
+  id collision); the Up control is a **text button** (the only left-arrow glyph is already the top
+  bar's Back — two identical arrows would read as one control); only folder cards carry a glyph
+  (`ic_folder` — no notebook/page glyph exists and no new asset is added); selection/toggle
+  inversion reuses `btn_elevated_background` vs `shape_bordered` with padding saved around
+  `setBackgroundResource`; problem-dialog titles use the live screen title ("Edit link" in edit
+  mode); leaving a drilled notebook clears the selection (a page id is meaningless outside its
+  notebook) while popping a folder keeps a chosen notebook; a `loadToken` drops stale catalog
+  replies (risk 4 — slow cold foreign `listPages`); a blank `PickSession.currentNotebookId` yields
+  an empty "This notebook" grid rather than `listPages("")`; `setResult(RESULT_CANCELED)` set in
+  `onCreate` covers every non-OK exit; grid geometry = the folder picker's (3 cols ≥ 480 dp else 2,
+  card height ×1.4).
+- **Fable review fixes on the agent diff:** the chrome row's label "Chrome" → **"Style"** (user
+  wording, not developer jargon); an Edit's prefilled target may sit pages into the grid — `accept`
+  now jumps the pager to the page holding the selected id, or the prefill highlight would read as
+  "nothing selected".
+- **Flagged for L5** (found in the picker agent's report, left as built): the host's
+  `LinkCatalogBinder.io` wrapper rethrows unexpected failures as `IllegalStateException("catalog:
+  <Class>: <msg>")` and that prefix can reach the picker's dialog verbatim; a **host**-process death
+  mid-showing surfaces ext-side as `DeadObjectException` → generic dialog + stay (only a revoke is
+  a plain finish) — both honest, neither pretty.
+- **Drivable-half correction (the L1 trap applies to L2's entry point):** the picker opens only
+  from Link / Edit on a *lasso selection*, which adb cannot make — so the planned Claude-side
+  "create each kind / edit / cancel / kill mid-showing" items move to the **user checklist**; the
+  device agents cover install, the probe regression on the real picker build, the `am start`
+  caller-check, binds=unbinds, flip + crash-buffer regressions. "Revoked binder refuses a late
+  call" is JVM-covered (`LinkCatalogGateTest`) — accepted without a device twin.
+- **APK-size non-finding:** a working-tree `ext-links-debug.apk` measured 35.7 MB against L0's
+  ≈23.6 MiB — zipflinger *incremental-packaging holes* from repeated in-place debug builds, not
+  real growth (identical entry CRCs, central directory ~24.6 MB; a clean package is 24.85 MB ≈
+  HEAD's 24.79 MB + the picker's ~60 KB).
+- JVM totals this phase: 27 (`PickerModelTest`) + 6 (`LinkPickerLabelsTest`) = **33 new tests**;
+  all ten modules green; debug + release compile.
 
 **Deliverables**
 1. `:ext-links` `LinkPickerActivity` real: three modes over `PickSession.catalog` (folder
@@ -644,6 +720,34 @@ step); "Edit" reopens it pre-populated and patches payload + chrome only.
   (log probe).
 - **User device checklist** (~8 items incl. e-ink look of the picker on all three widths, IME
   behaviour n/a — no text input until L3).
+
+**User checklist as issued (2026-08-19 — run on SNN, NA5C and MIP11; the picker only opens from a
+lasso selection, so all of this is yours):**
+1. Lasso some ink → **Link** → the picker opens: top bar Back · "Link to" · OK; the mode toggle
+   (This notebook · Notebook · Notebook page), the Style toggle (Underline · None, Underline
+   pre-selected), and a card grid — everything on-screen at the device's width, e-ink-clean.
+2. **This notebook** shows "Page n" cards with the **current page missing** and the numbering still
+   true to position; a page that has a heading shows "Page n — <heading>". Pick a page → OK → the
+   selection becomes a link with an underline. Undo removes it; redo brings it back.
+3. **Notebook** mode: the browse shows your folders + notebooks (library order), the **current
+   notebook absent**; drill into a folder (header names it, Up returns), pick a notebook (card
+   inverts) → OK → a second link lands (tap does nothing yet — follow is L4).
+4. **Notebook page** mode: a notebook card drills into its pages ("Page n"); pick one → OK.
+5. **Edit**: lasso a link → **Edit** → the picker reopens pre-populated (mode + Style + the target
+   card inverted, the grid opened on the page that shows it; title "Edit link"). Change the target
+   and flip the Style → OK → the underline follows immediately; **one undo** reverts the edit
+   (underline flips back); redo re-applies.
+6. **Edit → OK without changing anything** and **Cancel/Back**: both leave the link exactly as it
+   was (no undo step is added — undo still targets the previous action).
+7. **OK with nothing selected** → an honest "Choose a target first." dialog, picker stays.
+8. With the picker open, kill the extension (Settings → Apps → NSE · Links Dev → Force stop, or ask
+   Claude to `am force-stop` it): the picker vanishes with its process; the notebook underneath is
+   intact, no crash, and the selection still lassoed. (A cancelled-looking return is correct.)
+9. 60-second regression: write over a link (ink lands), eraser takes a whole link, drag / unlink /
+   delete still work, Scratch Pad round trip, Contents swipe-down — unchanged. *(On SNN also give
+   the forward-swipe-past-last-page insert one glance — the device agent's injected swipe didn't
+   visibly insert there while NA5C's did; almost certainly an injection artifact, nothing in L2
+   touched that path.)*
 
 **Close-out:** as L0.
 

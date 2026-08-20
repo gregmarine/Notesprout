@@ -117,7 +117,7 @@ object NotebookDebugMenu {
                     val (strokes, objects) = linkSelection() ?: run {
                         Dialogs.problem(activity, R.string.debug_tools_title, R.string.debug_test_link_needs_selection); return@addAction
                     }
-                    val pageOneId = linkCatalog()?.currentPageIds()?.firstOrNull() ?: return@addAction
+                    val pageOneId = linkCatalog()?.currentPages()?.firstOrNull()?.first ?: return@addAction
                     createLink(strokes, objects, "L1|1|0||$pageOneId", 1 /* LINK_CHROME_UNDERLINE */)
                 }
             }
@@ -150,7 +150,7 @@ object NotebookDebugMenu {
                     Slog.d(TAG) { "probe links: takeChoice → ${if (choice == null) "null (expected)" else "UNEXPECTED choice"}" }
                 }
                 // 2 — the one-shot description calls over fixed payloads.
-                val pageId = source.currentPageIds()?.firstOrNull() ?: "00000000-0000-0000-0000-000000000000"
+                val pageId = source.currentPages()?.firstOrNull()?.first ?: "00000000-0000-0000-0000-000000000000"
                 val underlined = "L1|1|0||$pageId"                        // DEST_PAGE, underline
                 val bare = "L1|0|1|${source.currentNotebookId}|"          // DEST_NOTEBOOK, no chrome
                 val dest = client.resolve(underlined)

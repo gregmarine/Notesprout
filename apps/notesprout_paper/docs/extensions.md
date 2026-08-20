@@ -1215,10 +1215,15 @@ unlink; only follows (an honest dialog) and Link / Edit need it.
   library data, so the host hands `beginPick` a per-showing, uid-gated, revocable lens
   (`LinkCatalogBinder` over `LinkCatalogGate` — the `ExtensionStoreGate` shape) instead of any wider
   door. `listFolder("")` / `listFolder(folderId)` = alive folders + notebooks in library order
-  (the user's own sort; folders first); `listPages(notebookId)` = page ids in page order (blank
-  labels — the picker shows "Page n" from position; the **current** notebook is answered from the
-  live session via `LinkCatalogSource` — the origin's open `.soil` is never touched from a second
-  connection — and any other notebook by a read-only `SoilDatabase.open` sealed in `finally`).
+  (the user's own sort; folders first); `listPages(notebookId)` = page entries in page order. The
+  **current** notebook is answered from the live session via `LinkCatalogSource` (the origin's open
+  `.soil` is never touched from a second connection) with **host-composed labels** — "Page n", plus
+  the page's first outline heading where the Contents has one (L2 Q2, `LinkPickerLabels` — a
+  recorded outward widening: heading-derived text of the current notebook only, during a pick
+  showing only) — and the **current page excluded** (L2 Q1: a self-link is a no-op trap; excluding
+  beside the numbering keeps "Page n" true to position). Any other notebook is answered by a
+  read-only `SoilDatabase.open` sealed in `finally`, labels blank — the picker shows "Page n" from
+  position.
   Outward = names + ids + labels of alive rows only — never keys, paths, covers or blobs. The create
   methods (`createPage` / `createFolder` / `createNotebook`) are `UnsupportedOperationException`
   until L3, where they route through exactly the validation the library's own UI enforces
@@ -1250,6 +1255,66 @@ logs the root count via `listFolder("")` inside `beginPick`, debug builds only) 
 (null) → `endPick`, then `resolve` + `chromeOf` of fixed payloads, then a trail push / pop / clear
 round trip. Link rows, the real picker, create-in-picker and follow + trail wiring are L1–L4;
 boundary-audit rows 33+ and rules 28–31 land in L5.
+
+## The Links extension (`:ext-links` — arc 7; L2 draft, finalised in L5)
+
+`NSE · Links` owns link *meaning* over the core's link *structure*: the payload codec
+(`LinkPayload`, the `"L1|chrome|kind|notebookId|pageId"` grammar above), the trail (`TrailStore`
+over the host store), and — since L2 — the **picker screen** (`LinkPickerActivity`, the second
+tier-2 extension-owned screen after the pad). No launcher Activity; puzzle icon; depends on
+`:extension-api` + `:paper-screen` (the design system — theme, dimens tiers, `Dialogs`, Tabler
+drawables).
+
+The picker (launched only through the host's `ActivityResultLauncher`; caller-checked first thing
+in `onCreate`, `am start` refused; finishes plain if `PickSession.catalog` is null — the process
+was restarted mid-showing):
+
+- **Three modes** (L2 Q1), a three-way toggle: **This notebook** (the current notebook's pages —
+  labels arrive host-composed with the current page already excluded) · **Notebook** (browse
+  folders/notebooks; a notebook tap selects — the target opens on its last-open page) ·
+  **Notebook page** (same browse; a notebook tap drills into its pages). The **current notebook is
+  hidden in both Notebook modes** (a self-target is the Q1 no-op trap). Foreign pages are labelled
+  "Page n" from list position (blank catalog labels). No search field (L2 Q3 — deferred).
+- **Paged card grid** (L2 Q4) — the library folder picker's shape: bordered cards, measured
+  columns, a first/prev/next/last pager; browse header with the location name + Up (GONE at root).
+- **Chrome toggle**: Underline / None, default Underline (L0 Q3) or the edit prefill.
+- **Edit prefill** (`EXTRA_LINK_EDIT`, the only extra): `PickSession.editPayload` decoded via
+  `LinkPayload.decode` → mode + chrome + target preselected (a `DEST_NOTEBOOK_PAGE` prefill drills
+  straight into `listPages(notebookId)`); an undecodable payload behaves as create.
+- Every catalog call runs off Main (`Dispatchers.IO`) behind a "Loading…" state;
+  `SecurityException` (the showing was revoked) → finish plain; a typed refusal → `Dialogs.problem`
+  with the host's message. OK with nothing selected → an honest dialog, never a disabled button.
+- **OK** composes the payload with `LinkPayload.encode`, parks `LinkChoice(payload, chrome)` in
+  `PickSession.result`, returns `RESULT_LINK_PICKED`; anything else = cancelled. The payload never
+  rides the Intent.
+
+### LinkProvider — host behaviour (L2 draft, finalised in L5)
+
+`notebook/LinkFlow` is the screen collaborator (`NotebookActivity` stays at its line cap): the
+three core actions with their gating (L1), the wrap/unwrap/edit mutations, the session chrome map,
+and the **pick flow** — the launcher is registered at the flow's construction (the `ScratchPadFlow`
+precedent):
+
+- **Link** (`beginCreate`) captures the lassoed strokes + objects at tap time; guards run before
+  any bind (page link cap → the `links_page_full` dialog); `LinkClient.openPick(source,
+  editPayload = null)` = store pre-open → `ExtensionStoreBinder` + `LinkCatalogBinder` minted per
+  showing → held bind → `beginPick` → launch. A failed open → `links_picker_gone` + a re-discover
+  (a package disabled meanwhile retracts Link/Edit now, not at resume).
+- The catalog's `LinkCatalogSource` is built per showing (`LinkFlow.buildSource`): the outline
+  headings are gathered **before** `openPick` (their provider binds never sit inside the held
+  bind's 2 s window) and the source's callback composes "Page n [— heading]" labels from the live
+  page list, current page excluded, numbering true to position.
+- **The result** (`onResult` → `LinkClient.takeChoice`, which tears the showing down in its own
+  `finally` — endPick → unbind → both binders revoked): null + cancelled = silent; null despite
+  `RESULT_LINK_PICKED` = `links_choice_invalid`; the host recreated mid-showing (launcher survives,
+  client didn't) = `links_result_lost`. A drained choice applies to what the showing was for:
+  create → `LinkStore.create` (one transaction, one `LinkCreated`, chrome map seeded from
+  `LinkChoice.chrome`, page reloaded); **Edit** → payload-only patch (`LinkStore.updatePayload`,
+  one `LinkEdited`, wrapped content untouched, the underline repainted pen-idle from the re-seeded
+  map — no composite rebuild; an unchanged payload is a no-op, no undo step).
+- The caller's `onDestroy` funnels an open client to `LinkFlow.close()` on a scope that outlives
+  the screen. `LinkEdited` replays as `updatePayload` either way + page reload — the chrome
+  re-derives from the extension at the reload.
 
 ## Host behaviour (`:app`, package `extension/`)
 

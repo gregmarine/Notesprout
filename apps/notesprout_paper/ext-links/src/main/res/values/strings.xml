@@ -2,6 +2,38 @@
 <resources>
     <string name="ext_label">NSE · Links</string>
 
+    <!-- The picker screen (arc 7 / L2). -->
     <string name="links_picker_title">Link to</string>
+    <string name="links_picker_title_edit">Edit link</string>
+    <string name="links_ok">OK</string>
     <string name="cd_links_back">Back</string>
+
+    <!-- The three target modes, in toggle order. -->
+    <string name="links_mode_this">This notebook</string>
+    <string name="links_mode_notebook">Notebook</string>
+    <string name="links_mode_page">Notebook page</string>
+
+    <!-- The chrome toggle: what the link looks like on the page. -->
+    <string name="links_chrome_label">Style</string>
+    <string name="links_chrome_underline">Underline</string>
+    <string name="links_chrome_none">None</string>
+
+    <!-- Browsing. -->
+    <string name="links_up">Up</string>
+    <string name="cd_links_up">Up one level</string>
+    <string name="links_location_root">Library</string>
+    <string name="links_page_n">Page %1$d</string>
+    <string name="links_page_of">%1$d / %2$d</string>
+    <string name="links_loading">Loading…</string>
+    <string name="links_empty">Nothing here</string>
+
+    <!-- Pager. -->
+    <string name="cd_links_first_page">First page</string>
+    <string name="cd_links_prev_page">Previous page</string>
+    <string name="cd_links_next_page">Next page</string>
+    <string name="cd_links_last_page">Last page</string>
+
+    <!-- Problems. -->
+    <string name="links_pick_none">Choose a target first.</string>
+    <string name="links_catalog_failed">The library could not be read.</string>
 </resources>

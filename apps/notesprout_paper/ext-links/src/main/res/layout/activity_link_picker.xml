@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The link picker screen (arc 7 / L0 — a STUB: only the top bar exists; L2 fills the body with the
-     three-mode target chooser and the chrome toggle). Top bar: Back · "Link to", 1dp bottom border. -->
+<!-- The link picker screen (arc 7 / L2). One layout, no width variants: the top bar carries only
+     Back · title · OK, and the two toggle rows sit on their own lines so the narrowest device
+     (MIP11, sw439dp) never pushes a control off the edge.
+
+     Rows: top bar · mode toggle (This notebook / Notebook / Notebook page) · chrome toggle
+     (Underline / None) · browse header (location + Up — GONE in "This notebook") · the paged card
+     grid · the pager bar (first/prev/label/next/last), the library folder-picker's shape. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/root"
     android:layout_width="match_parent"
@@ -32,6 +37,14 @@
             android:textAppearance="@style/TextAppearance.Notesprout.TitleMedium"
             android:singleLine="true"
             android:ellipsize="end" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnOk"
+            style="@style/Widget.Notesprout.ElevatedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
+            android:text="@string/links_ok" />
     </LinearLayout>
 
     <View
@@ -39,10 +52,203 @@
         android:layout_height="1dp"
         android:background="@color/inkBlack" />
 
-    <!-- The picker body lands here at L2. -->
+    <!-- Mode toggle: three-way, in the recorded order. Selected = inverted (inkBlack / paperWhite). -->
+    <LinearLayout
+        android:id="@+id/modeBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:paddingTop="8dp">
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnModeThis"
+            style="@style/Widget.Notesprout.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:text="@string/links_mode_this" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnModeNotebook"
+            style="@style/Widget.Notesprout.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:text="@string/links_mode_notebook" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnModePage"
+            style="@style/Widget.Notesprout.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:text="@string/links_mode_page" />
+    </LinearLayout>
+
+    <!-- Chrome toggle: what the link looks like on the page. -->
+    <LinearLayout
+        android:id="@+id/chromeBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:paddingTop="8dp">
+
+        <TextView
+            android:id="@+id/chromeLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingEnd="8dp"
+            android:text="@string/links_chrome_label"
+            android:textAppearance="@style/TextAppearance.Notesprout.BodyMedium" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnChromeUnderline"
+            style="@style/Widget.Notesprout.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:singleLine="true"
+            android:text="@string/links_chrome_underline" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnChromeNone"
+            style="@style/Widget.Notesprout.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:singleLine="true"
+            android:text="@string/links_chrome_none" />
+    </LinearLayout>
+
+    <!-- Browse header: where we are + one level up. GONE in "This notebook". -->
+    <LinearLayout
+        android:id="@+id/browseBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp">
+
+        <TextView
+            android:id="@+id/location"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:paddingEnd="8dp"
+            android:textAppearance="@style/TextAppearance.Notesprout.BodyMedium"
+            android:singleLine="true"
+            android:ellipsize="end" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnUp"
+            style="@style/Widget.Notesprout.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:singleLine="true"
+            android:text="@string/links_up"
+            android:contentDescription="@string/cd_links_up" />
+    </LinearLayout>
+
     <FrameLayout
-        android:id="@+id/body"
+        android:id="@+id/gridContainer"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1" />
+        android:layout_weight="1"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp">
+
+        <TextView
+            android:id="@+id/loadingState"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:text="@string/links_loading"
+            android:textAppearance="@style/TextAppearance.Notesprout.BodyLarge"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/emptyState"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:text="@string/links_empty"
+            android:textAppearance="@style/TextAppearance.Notesprout.BodyLarge"
+            android:visibility="gone" />
+    </FrameLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/toolbar_bar_thickness"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@drawable/toolbar_background_bottom">
+
+        <LinearLayout
+            android:id="@+id/pager"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:visibility="invisible">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnFirst"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_page_first"
+                android:contentDescription="@string/cd_links_first_page" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnPrev"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_page_prev"
+                android:contentDescription="@string/cd_links_prev_page" />
+
+            <TextView
+                android:id="@+id/pageLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="56dp"
+                android:gravity="center"
+                android:textAppearance="@style/TextAppearance.Notesprout.BodyMedium" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnNext"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_page_next"
+                android:contentDescription="@string/cd_links_next_page" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnLast"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_page_last"
+                android:contentDescription="@string/cd_links_last_page" />
+        </LinearLayout>
+    </LinearLayout>
 </LinearLayout>
