@@ -13,7 +13,7 @@
 > The **original** Notesprout implementation this arc draws on is `docs/links.md` at the monorepo
 > root — inspiration, not a spec; every deviation is recorded here.
 >
-> **Status: L0 ✅ (df2de82) · L1 🧪 (user checklist pending) · L2 ⬜ · L3 ⬜ · L4 ⬜ · L5 ⬜**
+> **Status: L0 ✅ (df2de82) · L1 ✅ (bc944bc) · L2 ⬜ · L3 ⬜ · L4 ⬜ · L5 ⬜**
 
 ## Why
 
@@ -458,7 +458,24 @@ docs; memory; commit + push.
 ---
 
 ### Phase L1 — Core link rows: wrap, unwrap, render, parity (no picker, no follow)
-**Status:** 🧪 Built + Claude-verified (2026-08-19) — user checklist pending
+**Status:** ✅ Complete (commit bc944bc; user checklist all green on SNN/NA5C/MIP11 2026-08-19)
+
+**Outcome (2026-08-19).** Everything delivered; the wizard answers, the g-paper 0.1.4 record and
+the recorded deviations are in the sections above (Build notes (a)–(j) — most notably: underline
+drawn live from the session chrome map rather than baked; `Moved` carries `linkIds` separately;
+wrap/unwrap reload the page instead of mirror surgery; Link/Edit toolbar taps inert until L2; no
+dao-level `LinkStoreTest` — no Room JVM harness exists, pure halves in `PageLinkTest`, dao halves
+device-verified). **Model protocol:** one Opus agent built `LinkStore`/`PageLink`/`LinkRows` +
+`PageLinkTest` (Fable review found one fix: id-list chunking at 500 inside the transactions);
+one Sonnet agent wrote the `SelectionActionsTest`/`NotebookUndoTest` additions; three Sonnet
+device agents ran the drivable checks (all PASS ×3); Fable inline did g-paper 0.1.4, the
+schema/DAO/session/undo/SelectionActions changes, `RenderFlow`/`LinkFlow`/`LinkComposite`/
+`ObjectRenderer`, the `NotebookActivity` surgery (closes at exactly 800) and the debug item.
+28 new JVM tests; ten modules green; debug + release compile. **User checklist: all eight items
+green on all three devices (2026-08-19)** — incl. the disable/enable round trip (8a/8b run per
+device over adb: bare content + no underline + structural ops alive while disabled; underline and
+Link/Edit back on re-enable). **L2 (the picker) next, in a fresh session with its phase-start
+wizard.**
 
 **Claude-side device runs (one Sonnet agent per device, 2026-08-19): all drivable checks PASS on
 SNN, NA5C and MIP11** — packages installed + enabled (BOOX freeze list clean before and after);
