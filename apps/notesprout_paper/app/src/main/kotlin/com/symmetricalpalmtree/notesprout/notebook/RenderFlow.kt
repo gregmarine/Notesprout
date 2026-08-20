@@ -54,6 +54,15 @@ class RenderFlow(
         cache.retain(keep)
     }
 
+    /** Build any missing link composites from what is cached **right now** (Main, cheap blits) —
+     *  called by the page-load paths before their at-once frame, so a link whose children are
+     *  already cached is never presented as a whole dashed box (L4 checklist finding, SNN: the
+     *  built-composite repaint is pen-idle-gated, and a pen *hovering* over the fresh link held it
+     *  back for as long as the user examined it — the lasso that "fixed" it merely lifted the pen).
+     *  Children still missing draw as inner placeholders; the pass invalidates + rebuilds the
+     *  composite when their renders land. */
+    fun buildCompositesNow() { rebuildLinkComposites(dpi()) }
+
     /** Render [objects] inline (IO) and apply — the create / apply / edit path, awaited under the
      *  page-op lock. The frame is presented **at once** (H5): the user just tapped a toolbar button
      *  or Save — the pen is up (hovering), `releaseRender` already ran. */

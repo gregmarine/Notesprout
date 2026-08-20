@@ -307,6 +307,7 @@ class NotebookActivity : AppCompatActivity() {
         liveObjects = objects.associateByTo(LinkedHashMap()) { it.id }
         liveLinks = links.associateByTo(LinkedHashMap()) { it.id }
         renderFlow.retainCurrent()   // bitmaps of other pages / removed objects go (H5: the cache was unbounded)
+        renderFlow.buildCompositesNow()   // link composites into this frame, not a pen-idle later one (L4)
         paper.loadStrokes(strokes)
         paper.notifyContentChanged()
         liveStrokes = strokes.associateByTo(LinkedHashMap()) { it.id }
@@ -519,6 +520,7 @@ class NotebookActivity : AppCompatActivity() {
         liveObjects = objects.associateByTo(LinkedHashMap()) { it.id }
         liveLinks = links.associateByTo(LinkedHashMap()) { it.id }
         renderFlow.retainCurrent()   // bitmaps of other pages / removed objects go (H5: the cache was unbounded)
+        renderFlow.buildCompositesNow()   // link composites into this frame, not a pen-idle later one (L4)
         paper.loadStrokes(strokes)
         paper.notifyContentChanged()
         liveStrokes = strokes.associateByTo(LinkedHashMap()) { it.id }

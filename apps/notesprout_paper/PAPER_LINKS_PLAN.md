@@ -1058,6 +1058,20 @@ too; the trail persists in the extension's store and clears on any fresh open.
   death + recreation in a via-link notebook re-applies `EXTRA_INITIAL_PAGE_ID` (jumping back to
   the followed page even if the user had flipped away before the kill). Same family as the L2/L3
   half-dead-showing edges; L5 reviews together.
+- **User-checklist finding (SNN) → fixed in-phase — "created link showed only a dashed outline;
+  lassoing brought it back."** Not a crash: the SNN's crash buffer was empty and the events buffer
+  showed no extension kill all session (and the composite never involves `NSE · Links` anyway —
+  chrome flag only). Mechanism: the post-create page reload presents its frame **at once** with
+  the composite not yet built (dashed cache-miss placeholder), and the composite-built repaint is
+  `whenPenIdle`-gated — a pen *hovering* over the fresh link (EMR hover counts as active) held
+  that repaint back for as long as the user examined it; the lasso "fixing" it was the pen finally
+  lifting. The H5 failure family (hover held the toolbar back), same fix shape:
+  **`RenderFlow.buildCompositesNow()`** — build missing composites from what is cached (Main,
+  cheap blits) — called by both page-load paths (`openSession` + `navigateTo`) before their
+  at-once frame. A just-created link (children cached by `retainCurrent`) now renders complete in
+  the very first frame; on a first-open page, wrapped ink rasters immediately and only a
+  still-unrendered child object shows an inner placeholder until its render lands (invalidate +
+  rebuild unchanged). Reinstalled mid-checklist (SNN immediately; NA5C/MIP11 when reattached).
 1. `:paper-screen` `PageGestures`: `onFingerTap(x, y)` + `onSwipeUp()` (mirror thresholds of
    `onSwipeDown`; both default no-ops — the Scratch Pad ignores them), + JVM-testable threshold
    logic where the existing tests allow.
