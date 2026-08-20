@@ -13,7 +13,7 @@
 > The **original** Notesprout implementation this arc draws on is `docs/links.md` at the monorepo
 > root — inspiration, not a spec; every deviation is recorded here.
 >
-> **Status: L0 ✅ (df2de82) · L1 ✅ (bc944bc) · L2 ✅ (a86214c) · L3 🧪 (built + device agents PASS ×3 — user checklist pending) · L4 ⬜ · L5 ⬜**
+> **Status: L0 ✅ (df2de82) · L1 ✅ (bc944bc) · L2 ✅ (a86214c) · L3 ✅ (6822e44) · L4 ⬜ · L5 ⬜**
 
 ## Why
 
@@ -782,7 +782,23 @@ lasso selection, so all of this is yours):**
 ---
 
 ### Phase L3 — Creating targets in the picker (new page · new notebook · new folder)
-**Status:** 🧪 Built + Claude device agents PASS ×3 (2026-08-20); user checklist pending
+**Status:** ✅ Complete (commit 6822e44; user checklist all 8 items green on SNN/NA5C/MIP11 2026-08-20)
+
+**Outcome (2026-08-20).** Everything delivered; the wizard answers (Q1–Q4), the settled Q2
+mechanics (the host's real New-notebook screen over `prepareNewNotebook` / `LinkCreateRelay` /
+`ACTION_LINK_NEW_NOTEBOOK_SCREEN` / `takeCreatedNotebook` — nothing on the Intent in either
+direction), the undo-stack-clear consequence and the L5 flags are in the Build notes above.
+**Model protocol:** one Opus agent built the picker half (`PickerModel.createButtons` +
+`CreateDialogs` + the three flows; Fable review — no blocking findings, its extra `loadToken` and
+`performClick` guards kept); one Sonnet agent wrote `LinkCreateRelayTest` (7 tests); three Sonnet
+device agents ran the drivable half (7/7 PASS ×3 — the new `am start` refusal of the exported
+screen, the library's own +Notebook through the caller gate, probe/flip regressions); Fable inline
+did the contract appends, the catalog create half, relay + caller gate, `NewNotebookActivity`
+relay mode, `insertPageAt`, the binder→page-op bridge, and all docs. 12 new JVM tests; ten modules
+green; debug + release compile. **User checklist: all eight items green on all three devices
+(2026-08-20)** — create page (anchored + appended, both notebooks), New folder incl. refusal
+paths, New notebook through the real screen in both browse modes, cancel paths, and the L2/library
+regressions. **L4 (follow + trail) next, in a fresh session with its phase-start wizard.**
 
 **Claude-side device runs (one Sonnet agent per device, 2026-08-20): all 7 checks PASS on SNN,
 NA5C and MIP11** — packages installed + enabled (no BOOX re-disable through the run); **the
