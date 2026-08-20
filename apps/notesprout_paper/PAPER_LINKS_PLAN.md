@@ -13,7 +13,7 @@
 > The **original** Notesprout implementation this arc draws on is `docs/links.md` at the monorepo
 > root — inspiration, not a spec; every deviation is recorded here.
 >
-> **Status: L0 🧪 · L1 ⬜ · L2 ⬜ · L3 ⬜ · L4 ⬜ · L5 ⬜**
+> **Status: L0 ✅ (df2de82) · L1 ⬜ · L2 ⬜ · L3 ⬜ · L4 ⬜ · L5 ⬜**
 
 ## Why
 
@@ -359,7 +359,7 @@ re-walk for `LinkClient`.
 ## Phases
 
 ### Phase L0 — Contract · `:ext-links` skeleton · client (discovered, held, probed)
-**Status:** 🧪 Awaiting user device verification (built + Claude-verified 2026-08-19)
+**Status:** ✅ Complete (commit df2de82; user checklist all green on SNN/NA5C/MIP11 2026-08-19)
 
 **Outcome (2026-08-19).** **The L5 review base is `0f91ed5`** (the commit before L0's first).
 Everything delivered as specified; deviations and findings:
@@ -396,7 +396,7 @@ Everything delivered as specified; deviations and findings:
 - **Docs:** `docs/extensions.md` header + constants table + AIDL + parcelables +
   §"LinkProvider (contract)" (with the L0 state paragraph); paper `CLAUDE.md` ten modules +
   `:ext-links` edges + the Links bullet; the `device-build-install` skill's install lines.
-  User checklist below pending.
+  **User checklist: all four items green on all three devices (2026-08-19).**
 
 **Goal:** the point exists end to end with nothing user-visible: contract compiled into
 `:extension-api`, `NSE · Links` installs and is discovered, `LinkClient` can hold a pick showing
