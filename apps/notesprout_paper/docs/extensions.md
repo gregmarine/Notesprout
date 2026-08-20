@@ -376,6 +376,11 @@ interface ILinkCatalog {
     String createPage(String notebookId, String anchorPageId, boolean before);
     String createFolder(String parentFolderId, String name);
     String createNotebook(String parentFolderId, String name);
+    /** Where notebook [notebookId] lives: its alive folder chain root-first (CATALOG_FOLDER rows),
+     *  then the notebook itself (CATALOG_NOTEBOOK, label = name) LAST. Empty for an unknown / dead /
+     *  non-notebook id — the Edit prefill is best-effort. APPENDED at L2 (the arc-5 append-LAST
+     *  recipe — a DEST_NOTEBOOK target inside a folder was invisible at the root); never reorder. */
+    List<CatalogEntry> pathTo(String notebookId);
 }
 
 // ILinkProvider.aidl — the LINK_PROVIDER point (arc 7 / L0). The core owns link STRUCTURE (rows,
@@ -1224,7 +1229,11 @@ unlink; only follows (an honest dialog) and Link / Edit need it.
   beside the numbering keeps "Page n" true to position). Any other notebook is answered by a
   read-only `SoilDatabase.open` sealed in `finally`, labels blank — the picker shows "Page n" from
   position.
-  Outward = names + ids + labels of alive rows only — never keys, paths, covers or blobs. The create
+  Outward = names + ids + labels of alive rows only — never keys, paths, covers or blobs.
+  `pathTo(notebookId)` (appended at L2, the arc-5 append-LAST recipe) answers a notebook's alive
+  folder chain root-first plus the notebook itself last — the Edit prefill's way of opening the
+  browse where a `DEST_NOTEBOOK` target actually lives; empty for an unknown/dead id (prefill is
+  best-effort, never an error). The create
   methods (`createPage` / `createFolder` / `createNotebook`) are `UnsupportedOperationException`
   until L3, where they route through exactly the validation the library's own UI enforces
   (refusals = typed `IllegalArgumentException`, the message user-honest, shown by the picker).

@@ -113,6 +113,30 @@ class LinkCatalogBinder(
         }
     }
 
+    /** The alive folder chain to a notebook, root-first, ending with the notebook itself (label =
+     *  its name) — the Edit prefill's way of opening the browse where the target actually lives
+     *  (L2 fix: a `DEST_NOTEBOOK` target inside a folder was invisible at the root). Empty for an
+     *  unknown / dead / non-notebook id — prefill is best-effort, never an error. */
+    override fun pathTo(notebookId: String?): MutableList<CatalogEntry> {
+        gate.check()
+        require(!notebookId.isNullOrBlank()) { "notebookId is blank" }
+        return io {
+            runBlocking(Dispatchers.IO) {
+                val repo = IndexRepository()
+                val row = repo.alive(notebookId)
+                if (row == null || row.type != ObjectType.NOTEBOOK) {
+                    Slog.d(TAG) { "pathTo: no alive notebook" }
+                    return@runBlocking mutableListOf()
+                }
+                val folders = repo.ancestry(row.parentId)
+                    .map { gate.entry(it.id, ExtensionContract.CATALOG_FOLDER, it.name) }
+                val entries = gate.cap(folders + gate.entry(row.id, ExtensionContract.CATALOG_NOTEBOOK, row.name))
+                Slog.d(TAG) { "pathTo: ${entries.size} entries" }
+                entries.toMutableList()
+            }
+        }
+    }
+
     // ── The create half (L3) ─────────────────────────────────────────────────
 
     override fun createPage(notebookId: String?, anchorPageId: String?, before: Boolean): String {

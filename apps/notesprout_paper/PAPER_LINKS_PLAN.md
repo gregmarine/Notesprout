@@ -695,8 +695,22 @@ step); "Edit" reopens it pre-populated and patches payload + chrome only.
   ≈23.6 MiB — zipflinger *incremental-packaging holes* from repeated in-place debug builds, not
   real growth (identical entry CRCs, central directory ~24.6 MB; a clean package is 24.85 MB ≈
   HEAD's 24.79 MB + the picker's ~60 KB).
-- JVM totals this phase: 27 (`PickerModelTest`) + 6 (`LinkPickerLabelsTest`) = **33 new tests**;
-  all ten modules green; debug + release compile.
+- **User-checklist finding (item 5, SNN) → fixed in-phase:** an Edit of a `DEST_NOTEBOOK` link
+  pre-selected the notebook but the browse opened at the library root, so a target inside a folder
+  never showed its highlight ("Notebook page" worked — it drills by id). Fix: **`ILinkCatalog`
+  gained an appended sixth method `pathTo(notebookId)`** (the arc-5 append-LAST recipe, recorded in
+  the AIDL + §LinkProvider) answering the alive folder chain root-first + the notebook itself last
+  (label = its name); `LinkCatalogBinder.pathTo` = `IndexRepository.ancestry` behind the same gate
+  caps; the picker seeds its folder stack from it on both notebook-kind prefills — `DEST_NOTEBOOK`
+  opens in the target's own folder with the card inverted, and `DEST_NOTEBOOK_PAGE` gains the real
+  notebook name in its browse header + an Up that lands in the notebook's folder instead of the
+  root. Empty/failed `pathTo` → the old root fallback, no dialog (prefill is cosmetic).
+- **Checklist item 8 (kill mid-showing) verified live on SNN** during the run: force-stop took the
+  picker down with its process; the host saw result 0 → `takeChoice` `service disconnected` → null
+  → silent cancel, clean unbind + revoke, crash buffer empty. Cosmetic L5 tidy: `LinkClient.finish`
+  logs "endPick ok" even when a dead bind made it skip the call.
+- JVM totals this phase: 27 (`PickerModelTest`) + 6 (`LinkPickerLabelsTest`) + the pathTo prefill
+  tests = **33+ new tests**; all ten modules green; debug + release compile.
 
 **Deliverables**
 1. `:ext-links` `LinkPickerActivity` real: three modes over `PickSession.catalog` (folder

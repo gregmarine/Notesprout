@@ -75,6 +75,9 @@ class LinkPickerActivity : AppCompatActivity() {
     /** Bumped by every [load]; a reply from an older token is a navigation the user already left. */
     private var loadToken = 0
 
+    /** The notebook whose folder chain seeds the first browse (Edit prefill); consumed by [firstLoad]. */
+    private var prefillPathId: String? = null
+
     private var grid: GridLayout? = null
     private var pageIndex = 0
     private var pageCount = 1
@@ -119,7 +122,7 @@ class LinkPickerActivity : AppCompatActivity() {
             if (!gridMeasured && binding.gridContainer.width > 0 && binding.gridContainer.height > 0) {
                 gridMeasured = true
                 measureGrid()
-                load()
+                firstLoad()
             }
         }
     }
@@ -133,7 +136,42 @@ class LinkPickerActivity : AppCompatActivity() {
         selectedId = prefill.selectedId
         drillNotebookId = prefill.drillNotebookId
         drillNotebookName = null
+        // Whose folder chain the first load needs: a NOTEBOOK target browses to its parent folder,
+        // a drilled NOTEBOOK_PAGE wants its name + the folder Up should land in.
+        prefillPathId = prefill.drillNotebookId
+            ?: prefill.selectedId.takeIf { prefill.mode == PickerModel.Mode.NOTEBOOK }
         Slog.d(TAG) { "open: edit=$editMode mode=${prefill.mode} chrome=${prefill.chrome} prefilled=${prefill.selectedId != null}" }
+    }
+
+    /**
+     * The first grid fill. An Edit prefill first asks the host where its target notebook lives
+     * (`pathTo`, the appended catalog method) and seeds the browse there — the target's card is then
+     * on screen and inverted instead of hidden behind the library root (the L2 device finding).
+     * Best-effort: an empty or malformed reply, or any failure, just opens the browse at the root as
+     * before — never a dialog. A stale reply (the user already navigated) is dropped by [loadToken].
+     */
+    private fun firstLoad() {
+        val lens = catalog ?: return
+        val target = prefillPathId
+        prefillPathId = null
+        if (target == null) {
+            load()
+            return
+        }
+        val token = loadToken
+        lifecycleScope.launch {
+            val path = withContext(Dispatchers.IO) {
+                runCatching { lens.pathTo(target) }.getOrNull()
+            }?.let { rows -> PickerModel.pathParts(rows.map { PickerModel.Entry(it.id, it.kind, it.label) }) }
+            if (token != loadToken || isFinishing || isDestroyed) return@launch
+            if (path != null) {
+                folderStack.clear()
+                folderStack.addAll(path.folders)
+                if (drillNotebookId != null) drillNotebookName = path.notebookName
+                Slog.d(TAG) { "prefill path: ${path.folders.size} folder(s)" }
+            }
+            load()
+        }
     }
 
     private fun wire() {

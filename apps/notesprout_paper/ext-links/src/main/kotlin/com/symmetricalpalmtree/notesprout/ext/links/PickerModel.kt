@@ -131,4 +131,22 @@ object PickerModel {
      */
     fun afterModeSwitch(mode: Mode, chrome: Int): Prefill =
         Prefill(mode = mode, chrome = chrome, selectedId = null, drillNotebookId = null)
+
+    /** A `pathTo` reply split for the browse state: the folder stack to seed + the notebook's name. */
+    data class Path(val folders: List<Pair<String, String>>, val notebookId: String, val notebookName: String)
+
+    /**
+     * Validate + split a `pathTo` reply (L2 fix — an Edit prefill opens the browse where its target
+     * notebook lives). Well-formed = the notebook itself as the LAST entry (kind `CATALOG_NOTEBOOK`)
+     * with only folders (kind `CATALOG_FOLDER`) before it, root-first. Anything else — empty, no
+     * notebook tail, a stray kind — is null: prefill is cosmetic, so a bad reply means "start at the
+     * root", never an error.
+     */
+    fun pathParts(entries: List<Entry>): Path? {
+        val notebook = entries.lastOrNull() ?: return null
+        if (notebook.kind != ExtensionContract.CATALOG_NOTEBOOK) return null
+        val folders = entries.dropLast(1)
+        if (folders.any { it.kind != ExtensionContract.CATALOG_FOLDER }) return null
+        return Path(folders.map { it.id to it.label }, notebook.id, notebook.label)
+    }
 }

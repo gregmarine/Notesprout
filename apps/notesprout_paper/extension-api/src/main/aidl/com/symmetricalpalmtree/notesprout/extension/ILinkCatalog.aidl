@@ -36,4 +36,11 @@ interface ILinkCatalog {
 
     /** Create a blank notebook named [name] under [parentFolderId] ("" = root) and return its id. (L3) */
     String createNotebook(String parentFolderId, String name);
+
+    /** Where notebook [notebookId] lives: its alive folder chain root-first (kind CATALOG_FOLDER),
+     *  then the notebook itself (kind CATALOG_NOTEBOOK, label = its name) as the LAST entry. Empty
+     *  when the id is unknown, dead, or not a notebook — an Edit prefill is best-effort, so the
+     *  picker falls back to the library root instead of dying on a stale target. (Appended at L2 —
+     *  the arc-5 append-LAST recipe: never reorder, never insert above.) */
+    List<CatalogEntry> pathTo(String notebookId);
 }

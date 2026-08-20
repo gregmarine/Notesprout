@@ -290,4 +290,58 @@ class PickerModelTest {
         val after = PickerModel.afterModeSwitch(PickerModel.Mode.NOTEBOOK, ExtensionContract.LINK_CHROME_UNDERLINE)
         assertNull(PickerModel.compose(after.mode, after.chrome, after.selectedId, after.drillNotebookId))
     }
+
+    // ── pathTo reply splitting (the Edit-prefill browse seed) ────────────────
+
+    @Test
+    fun pathWithNoFoldersIsJustTheNotebook() {
+        val path = PickerModel.pathParts(listOf(notebook(nb, "Recipes")))!!
+        assertEquals(emptyList<Pair<String, String>>(), path.folders)
+        assertEquals(nb, path.notebookId)
+        assertEquals("Recipes", path.notebookName)
+    }
+
+    @Test
+    fun pathWithOneFolderSplitsRootFirst() {
+        val path = PickerModel.pathParts(listOf(folder("f1", "Work"), notebook(nb, "Notes")))!!
+        assertEquals(listOf("f1" to "Work"), path.folders)
+        assertEquals(nb, path.notebookId)
+        assertEquals("Notes", path.notebookName)
+    }
+
+    @Test
+    fun pathWithTwoFoldersKeepsTheirOrder() {
+        val path = PickerModel.pathParts(
+            listOf(folder("f1", "Work"), folder("f2", "2026"), notebook(nb, "Plans")),
+        )!!
+        assertEquals(listOf("f1" to "Work", "f2" to "2026"), path.folders)
+        assertEquals(nb, path.notebookId)
+    }
+
+    @Test
+    fun emptyPathIsNull() {
+        assertNull(PickerModel.pathParts(emptyList()))
+    }
+
+    @Test
+    fun pathWithoutANotebookTailIsNull() {
+        assertNull(PickerModel.pathParts(listOf(folder("f1"), folder("f2"))))
+    }
+
+    @Test
+    fun pathWithAFolderAfterTheNotebookIsNull() {
+        assertNull(PickerModel.pathParts(listOf(notebook(nb), folder("f1"))))
+    }
+
+    @Test
+    fun pathWithAStrayKindBeforeTheNotebookIsNull() {
+        assertNull(PickerModel.pathParts(listOf(page(pg), notebook(nb))))
+        assertNull(PickerModel.pathParts(listOf(notebook(otherNb), notebook(nb))))
+    }
+
+    @Test
+    fun pathOfASingleNonNotebookEntryIsNull() {
+        assertNull(PickerModel.pathParts(listOf(folder("f1"))))
+        assertNull(PickerModel.pathParts(listOf(page(pg))))
+    }
 }
