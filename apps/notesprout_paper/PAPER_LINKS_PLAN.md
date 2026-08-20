@@ -13,7 +13,7 @@
 > The **original** Notesprout implementation this arc draws on is `docs/links.md` at the monorepo
 > root — inspiration, not a spec; every deviation is recorded here.
 >
-> **Status: L0 ✅ (df2de82) · L1 ✅ (bc944bc) · L2 🧪 (user checklist pending) · L3 ⬜ · L4 ⬜ · L5 ⬜**
+> **Status: L0 ✅ (df2de82) · L1 ✅ (bc944bc) · L2 ✅ (a86214c) · L3 ⬜ · L4 ⬜ · L5 ⬜**
 
 ## Why
 
@@ -609,7 +609,21 @@ until the L2 picker. Unlink and Delete are fully live.)*
 ---
 
 ### Phase L2 — The picker: choose an existing target, create + edit end to end
-**Status:** 🧪 Built + Claude-verified on SNN/NA5C/MIP11 (2026-08-19) — user checklist pending
+**Status:** ✅ Complete (commits 0961d04 + a86214c; user checklist all green on SNN/NA5C/MIP11 2026-08-19)
+
+**Outcome (2026-08-19).** Everything delivered; the wizard answers (Q1–Q4), the recorded deviations
+and the review/fix trail are in the Build notes above. **Model protocol:** one Opus agent built the
+picker (`LinkPickerActivity` + pure `PickerModel`, 27 JVM tests) and, as a follow-up, the `pathTo`
+prefill navigation (8 more tests); one Sonnet agent wrote `LinkPickerLabelsTest` (6 tests); three
+Sonnet device agents ran the drivable half (all PASS ×3 — probe on the real-picker build, `am
+start` refused, binds clean); Fable inline did the host pick flow (`LinkFlow`), the
+`LinkCatalogSource` reshape + `LinkPickerLabels`, the `PasteFlow` line-cap extraction, the
+**`ILinkCatalog.pathTo` append** (contract + `LinkCatalogBinder`), the doc drafts, and reviewed
+every agent diff (two review fixes: "Chrome"→"Style"; edit-prefill pager jump). **User checklist:
+all nine items green on all three devices (2026-08-19)** — item 5 surfaced the one real defect
+(`DEST_NOTEBOOK` prefill invisible at the root), fixed in-phase via `pathTo`; item 8 verified live
+on SNN (clean disconnect → silent cancel). 41 new JVM tests total; ten modules green; debug +
+release compile. **L3 (create-in-picker) next, in a fresh session with its phase-start wizard.**
 
 **Claude-side device runs (one Sonnet agent per device, 2026-08-19): all drivable checks PASS on
 SNN, NA5C and MIP11** — app + ext-links installed and enabled (BOOX freeze list clean before and
