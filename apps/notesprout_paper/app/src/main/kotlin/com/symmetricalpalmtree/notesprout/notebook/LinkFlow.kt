@@ -16,6 +16,13 @@ import com.symmetricalpalmtree.notesprout.extension.LinkCatalogSource
 import com.symmetricalpalmtree.notesprout.extension.LinkChoice
 import com.symmetricalpalmtree.notesprout.extension.LinkClient
 import com.symmetricalpalmtree.notesprout.extension.ProviderRef
+import com.symmetricalpalmtree.notesprout.extension.TrailEntry
+import com.symmetricalpalmtree.notesprout.crypto.KeySession
+import com.symmetricalpalmtree.notesprout.data.index.IndexRepository
+import com.symmetricalpalmtree.notesprout.data.index.ObjectType
+import com.symmetricalpalmtree.notesprout.data.soil.SoilDatabase
+import com.symmetricalpalmtree.notesprout.data.soil.SoilSchema
+import com.symmetricalpalmtree.notesprout.data.soilFile
 import java.util.UUID
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -33,7 +40,10 @@ import kotlinx.coroutines.withTimeout
  * behind the Link / Edit taps: the arc-6 held-bind recipe over [LinkClient] ([beginCreate] /
  * [beginEdit] → `openPick` → the extension's picker through [launcher] → [onResult] drains the
  * [LinkChoice] and applies it). The debug ⋯ "Create test link" still drives [createFromSelection]
- * directly with a fixed payload (removed in L5).
+ * directly with a fixed payload (removed in L5). Since L4 it also owns **follow + the trail**:
+ * [followAt] (finger tap → resolve → [LinkNav.planFollow] → validate → push → navigate or seal +
+ * relaunch via [openNotebook]), [walkBack] (swipe-up / via-link Back — pop, skip dead silently,
+ * navigate), and the fresh-open [requestTrailClear].
  *
  * **Wrap** ([createFromSelection]): union bounds + the underline clearance ([PageLink.unionBounds])
  * → one [LinkStore.create] (link row + children re-parented, one transaction) → one undoable
@@ -78,11 +88,16 @@ class LinkFlow(
     /** The picker created a page in THIS notebook (arc 7 / L3): the host refreshes its page
      *  indicator + Contents availability. Called on the picker's return, after the undo clear. */
     private val onPagesChanged: () -> Unit = {},
+    /** Navigate the open notebook to a page index — called inside [runPageOp] only (arc 7 / L4). */
+    private val navigateToPage: suspend (Int) -> Unit = {},
+    /** Seal + relaunch into another notebook with `EXTRA_VIA_LINK` (+ the initial page), arc 7 / L4. */
+    private val openNotebook: (notebookId: String, name: String, initialPageId: String?) -> Unit = { _, _, _ -> },
 ) {
     private var ref: ProviderRef? = null
     private var refreshGen = 0
     private var chromeGen = 0
     private val chrome = HashMap<String, Int>()
+    private val repo = IndexRepository()
 
     /** What the open pick showing is for — applied when the picker's result drains. */
     private sealed class Pending {
@@ -93,6 +108,12 @@ class LinkFlow(
     private var client: LinkClient? = null
     private var pending: Pending? = null
     private var busy = false
+
+    /** A follow / walk-back in flight (arc 7 / L4) — blocks a second tap through the seal. */
+    private var navBusy = false
+    /** A fresh open (no `EXTRA_VIA_LINK`) clears the persisted trail once a provider is
+     *  discovered; kept set until a clear succeeds so a failed one-shot retries at next resume. */
+    private var trailClearPending = false
 
     /** Set when a pick showing's `createPage` inserted into the live session (arc 7 / L3): on the
      *  picker's return — ANY result (Q4) — the undo stack is cleared (older `Structural` snapshots
@@ -110,6 +131,10 @@ class LinkFlow(
     /** The session chrome flag for [linkId] — NONE while unknown (extension missing, fetch pending). */
     fun chromeOf(linkId: String): Int = chrome[linkId] ?: ExtensionContract.LINK_CHROME_NONE
 
+    /** A fresh notebook open (no `EXTRA_VIA_LINK`): the trail is stale history — clear it when
+     *  the extension turns up (L4; the original's `EXTRA_VIA_LINK`-absent rule). */
+    fun requestTrailClear() { trailClearPending = true }
+
     /** Re-discover the extension (IO); on a change the next toolbar show and chrome refresh see it. */
     fun refresh() {
         val gen = ++refreshGen
@@ -119,6 +144,12 @@ class LinkFlow(
             val changed = (found != null) != (ref != null)
             ref = found
             if (changed) refreshChrome()
+            if (found != null && trailClearPending) {
+                try {
+                    LinkClient(activity, found).clearTrail()
+                    trailClearPending = false
+                } catch (e: Exception) { Slog.d(TAG) { "clearTrail failed: ${e.message}" } }
+            }
         }
     }
 
@@ -294,6 +325,132 @@ class LinkFlow(
             })
         }
         return runBlocking { withTimeout(CREATE_PAGE_TIMEOUT_MS) { outcome.await() } }.getOrThrow()
+    }
+
+    // ── Follow + the trail (arc 7 / L4) ───────────────────────────────────────
+
+    /**
+     * The finger tap (escrowed by [PageGestures]): topmost link under the point by z-order
+     * ([liveLinks] is insertion-ordered ascending), else nothing. No extension but a link hit →
+     * the honest `links_required` dialog (the plan's uninstalled consequence). The follow itself:
+     * resolve → classify ([LinkNav.planFollow]) → validate foreign ids (index alive + a read-only
+     * page-row check) → push the origin (Q3 — every follow, best-effort) → navigate.
+     */
+    fun followAt(x: Float, y: Float) {
+        if (navBusy || busy || !alive()) return
+        val link = liveLinks().values.lastOrNull { it.bounds.contains(x, y) } ?: return
+        val r = ref
+        if (r == null) { problem(R.string.links_required); return }
+        navBusy = true
+        activity.lifecycleScope.launch {
+            try { follow(r, link) } finally { navBusy = false }
+        }
+    }
+
+    private suspend fun follow(r: ProviderRef, link: PageLink) {
+        val t0 = System.currentTimeMillis()
+        val dest = try {
+            LinkClient(activity, r).resolve(link.payload)
+        } catch (e: Exception) {
+            Slog.d(TAG) { "follow: resolve failed ${e.message}" }
+            problem(R.string.links_picker_gone)
+            return
+        }
+        Slog.d(TAG) { "follow: tap→resolve ${System.currentTimeMillis() - t0} ms" }   // Q4 metric — warm-bind decided on these
+        if (dest == null || !alive()) { if (dest == null) problem(R.string.links_target_gone); return }
+        when (val plan = LinkNav.planFollow(dest.kind, dest.notebookId, dest.pageId, session().notebookId, session().pages.map { it.id })) {
+            is LinkNav.Plan.SamePage -> {
+                pushTrail(r)
+                runPageOp {
+                    val idx = session().pages.indexOfFirst { it.id == plan.pageId }
+                    if (idx >= 0) navigateToPage(idx)   // re-looked-up under the lock; gone meanwhile = silent
+                }
+            }
+            is LinkNav.Plan.OtherNotebook -> {
+                val row = withContext(Dispatchers.IO) { runCatching { repo.alive(plan.notebookId) }.getOrNull() }
+                if (row == null || row.type != ObjectType.NOTEBOOK) { problem(R.string.links_target_gone); return }
+                if (plan.initialPageId != null && !foreignPageAlive(plan.notebookId, plan.initialPageId)) {
+                    problem(R.string.links_target_gone); return
+                }
+                pushTrail(r)
+                if (alive()) openNotebook(row.id, row.name, plan.initialPageId)
+            }
+            LinkNav.Plan.Dead -> problem(R.string.links_target_gone)
+            LinkNav.Plan.NoOp -> Slog.d(TAG) { "follow: self target, no-op" }
+        }
+    }
+
+    /**
+     * Swipe-up, and the Back button in a via-link notebook: pop entries until a live one navigates,
+     * skipping dead ones silently (Q2), capped at `MAX_TRAIL_ENTRIES` pops; an empty trail (or the
+     * extension gone / not answering) → [onEmpty] — the swipe passes nothing (silent), Back passes
+     * the normal close-to-library.
+     */
+    fun walkBack(onEmpty: () -> Unit = {}) {
+        if (navBusy || busy || !alive()) return
+        val r = ref ?: run { onEmpty(); return }
+        navBusy = true
+        activity.lifecycleScope.launch {
+            try {
+                val c = LinkClient(activity, r)
+                repeat(ExtensionContract.MAX_TRAIL_ENTRIES) {
+                    val entry = try { c.popTrail() } catch (e: Exception) { Slog.d(TAG) { "popTrail failed: ${e.message}" }; null }
+                    if (entry == null || !alive()) { if (entry == null) onEmpty(); return@launch }
+                    when (val step = LinkNav.planBack(entry.notebookId, entry.pageId, session().notebookId, session().pages.map { it.id })) {
+                        is LinkNav.BackStep.SamePage -> {
+                            runPageOp {
+                                val idx = session().pages.indexOfFirst { it.id == step.pageId }
+                                if (idx >= 0) navigateToPage(idx)
+                            }
+                            return@launch
+                        }
+                        is LinkNav.BackStep.OtherNotebook -> {
+                            val row = withContext(Dispatchers.IO) { runCatching { repo.alive(step.notebookId) }.getOrNull() }
+                            if (row != null && row.type == ObjectType.NOTEBOOK && foreignPageAlive(step.notebookId, step.pageId)) {
+                                if (alive()) openNotebook(row.id, row.name, step.pageId)
+                                return@launch
+                            }   // dead notebook or dead page — skip to the next pop (Q2)
+                        }
+                        LinkNav.BackStep.Skip -> Unit   // own page gone — skip silently (Q2)
+                    }
+                }
+                onEmpty()
+            } finally { navBusy = false }
+        }
+    }
+
+    /** Push the origin (this notebook, the page under the tap) — best-effort: a failed push never
+     *  blocks the follow the user asked for (logged; the walk just has one hop fewer). */
+    private suspend fun pushTrail(r: ProviderRef) {
+        val entry = TrailEntry(session().notebookId, session().currentPage.id)
+        try { LinkClient(activity, r).pushTrail(entry) } catch (e: Exception) { Slog.d(TAG) { "pushTrail failed: ${e.message}" } }
+    }
+
+    /** Alive-page check of a notebook that is NOT the open session's — a read-only open sealed in
+     *  `finally` (the `LinkCatalogBinder.foreignPageIds` shape). False on any failure: the caller
+     *  treats it as dead (honest dialog on a follow, silent skip on a walk-back). */
+    private suspend fun foreignPageAlive(notebookId: String, pageId: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val pass = KeySession.get() ?: return@withContext false
+            val file = soilFile(activity.applicationContext, notebookId)
+            if (!file.exists() || file.length() == 0L) return@withContext false
+            val db = SoilDatabase.open(activity.applicationContext, notebookId, file, pass)
+            try {
+                val nb = db.dao().notebookRow() ?: return@withContext false
+                db.dao().childrenOfType(nb.id, SoilSchema.TYPE_PAGE).any { it.id == pageId }
+            } finally {
+                db.seal(file)
+            }
+        } catch (e: Exception) {
+            Slog.d(TAG) { "foreignPageAlive failed: ${e.message}" }
+            false
+        }
+    }
+
+    private fun problem(message: Int) {
+        if (activity.isFinishing || activity.isDestroyed) return
+        releaseRender()
+        Dialogs.problem(activity, R.string.links_problem_title, message)
     }
 
     // ── The mutations ─────────────────────────────────────────────────────────

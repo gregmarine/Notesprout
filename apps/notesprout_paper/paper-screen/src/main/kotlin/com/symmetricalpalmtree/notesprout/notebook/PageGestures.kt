@@ -13,7 +13,8 @@ import kotlin.math.hypot
 /**
  * Finger gestures over the paper: single-finger horizontal swipe flips a page (past the last page it
  * inserts a new one), single-finger **vertical swipe down** opens the Contents (arc 5 / C1 — the
- * flip's distance / fling rule on the height, `dy > 0` only; a swipe up is reserved and does nothing),
+ * flip's distance / fling rule on the height) and **swipe up** walks the link trail (arc 7 / L4,
+ * mirror thresholds), a bare **single-finger tap** follows a link (arc 7 / L4),
  * two-finger horizontal swipe inserts before/after, multi-finger stationary double-tap is undo
  * (2 fingers) / redo (3 fingers), and a single-finger long-press asks to delete the page. All are pen-gated: a resting palm produces MotionEvents that a writing stylus does not,
  * so every recogniser refuses to start (and cancels) while [isPenActive], re-checks the gate at
@@ -43,6 +44,11 @@ class PageGestures(
         fun onDeleteRequested() {}
         /** One-finger swipe down the paper (arc 5 / C1) — the host opens the Contents, or nothing. */
         fun onSwipeDown() {}
+        /** One-finger swipe up the paper (arc 7 / L4) — the host walks the link trail, or nothing. */
+        fun onSwipeUp() {}
+        /** A bare single-finger tap (sub-slop, under the long-press timeout, arc 7 / L4) — the host
+         *  follows a link under it, or nothing. Coordinates are the down point in view px. */
+        fun onFingerTap(x: Float, y: Float) {}
     }
 
     private val vc = ViewConfiguration.get(host.context)
@@ -79,6 +85,12 @@ class PageGestures(
     private var longPressArmed = false
     private var longPressX = 0f
     private var longPressY = 0f
+
+    // ── Single-finger tap → link follow (arc 7 / L4) ────────────────────────────
+    private var tapArmed = false
+    private var tapDownTime = 0L
+    private var tapX = 0f
+    private var tapY = 0f
     private val longPressRunnable = Runnable {
         if (longPressArmed && gateOpen()) {
             longPressArmed = false
@@ -98,6 +110,7 @@ class PageGestures(
         handleSwipe(ev)
         handleMultiTap(ev)
         handleLongPress(ev)
+        handleFingerTap(ev)
     }
 
     private fun gateOpen(): Boolean = !isPenActive() && !selectionActive()
@@ -178,7 +191,7 @@ class PageGestures(
                         tracker.addMovement(ev); tracker.computeCurrentVelocity(1000)
                         val dx = ev.x - pageSwipeStartX; val dy = ev.y - pageSwipeStartY
                         evaluateFlip(tracker.getXVelocity(0), dx, dy)
-                        evaluateSwipeDown(tracker.getYVelocity(0), dx, dy)   // exclusive with the flip: one axis dominates
+                        evaluateVerticalSwipe(tracker.getYVelocity(0), dx, dy)   // exclusive with the flip: one axis dominates
                     }
                 }
                 clearSwipe(); clearTwoFinger()
@@ -207,7 +220,8 @@ class PageGestures(
     }
 
     /** The flip's rule mirrored onto the vertical axis (Q4 / C1 Q4): vertical-dominant, ≥ 30 % of the
-     *  height + a fling **or** ≥ 50 % of the height, downward only, same pen / selection gate. */
+     *  height + a fling **or** ≥ 50 % of the height, same pen / selection gate. Down opens the
+     *  Contents (arc 5); up walks the link trail (arc 7 / L4 — the mirror thresholds). */
     private fun qualifiesVerticalFling(vy: Float, dx: Float, dy: Float): Boolean {
         val absDy = abs(dy)
         if (absDy <= abs(dx)) return false
@@ -217,11 +231,10 @@ class PageGestures(
         return fast || long
     }
 
-    private fun evaluateSwipeDown(vy: Float, dx: Float, dy: Float) {
-        if (dy <= 0f) return   // a swipe up is reserved
+    private fun evaluateVerticalSwipe(vy: Float, dx: Float, dy: Float) {
         if (!qualifiesVerticalFling(vy, dx, dy)) return
         if (!gateOpen()) return
-        listener.onSwipeDown()
+        if (dy > 0f) listener.onSwipeDown() else listener.onSwipeUp()
     }
 
     private fun evaluateInsert(vx: Float, dx: Float, dy: Float) {
@@ -321,10 +334,39 @@ class PageGestures(
         host.removeCallbacks(longPressRunnable)
     }
 
+    // ── Single-finger tap → link follow (arc 7 / L4) ────────────────────────────
+
+    /** Sub-slop, single-finger, released before the long-press timeout — the inverse of every other
+     *  recogniser here, so it can never fire together with a swipe (distance), the delete
+     *  (duration), or undo/redo (a second finger disarms). Committed through the same pen-tail
+     *  escrow as the multi-finger taps. */
+    private fun handleFingerTap(ev: MotionEvent) {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                tapArmed = true
+                tapDownTime = ev.eventTime
+                tapX = ev.x; tapY = ev.y
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> tapArmed = false
+            MotionEvent.ACTION_MOVE -> {
+                if (tapArmed && hypot((ev.x - tapX).toDouble(), (ev.y - tapY).toDouble()) > touchSlop) tapArmed = false
+            }
+            MotionEvent.ACTION_UP -> {
+                if (tapArmed && ev.eventTime - tapDownTime <= ViewConfiguration.getLongPressTimeout() && gateOpen()) {
+                    val x = tapX; val y = tapY
+                    escrow { listener.onFingerTap(x, y) }
+                }
+                tapArmed = false
+            }
+            MotionEvent.ACTION_CANCEL -> tapArmed = false
+        }
+    }
+
     private fun cancelAll() {
         clearSwipe(); clearTwoFinger()
         mfArmed = false; mfMoved = false
         cancelLongPress()
+        tapArmed = false
         Slog.d(TAG) { "gestures stood down" }
     }
 

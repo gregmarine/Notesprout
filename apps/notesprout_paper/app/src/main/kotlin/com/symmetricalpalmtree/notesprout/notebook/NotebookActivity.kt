@@ -84,6 +84,8 @@ class NotebookActivity : AppCompatActivity() {
     private var opened = false
     private var closing = false
     private var selectionActive = false
+    /** Opened by a link follow / walk-back (arc 7 / L4): the trail survives and Back walks it. */
+    private var viaLink = false
 
     /** In-memory history (notebook-level, survives page turns; dies with the screen). */
     private val undo = UndoRedoStack<Action>()
@@ -126,6 +128,7 @@ class NotebookActivity : AppCompatActivity() {
         if (!IndexGuard.ready(this)) return
         notebookId = intent.getStringExtra(EXTRA_NOTEBOOK_ID) ?: run { finish(); return }
         val name = intent.getStringExtra(EXTRA_NOTEBOOK_NAME) ?: ""
+        viaLink = intent.getBooleanExtra(EXTRA_VIA_LINK, false)
 
         binding = ActivityNotebookBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -176,7 +179,12 @@ class NotebookActivity : AppCompatActivity() {
                     contentsFlow.refresh()
                 }
             },
+            navigateToPage = { navigateTo(it) },   // called inside runPageOp (arc 7 / L4)
+            openNotebook = { id, nbName, initialPageId ->   // follow / walk-back out (arc 7 / L4)
+                close { startActivity(intent(this, id, nbName, viaLink = true, initialPageId = initialPageId)) }
+            },
         )
+        if (!viaLink) linkFlow.requestTrailClear()   // a fresh open resets the trail (L4)
         pasteFlow = PasteFlow(
             paper, { opened && !closing }, { session }, { liveStrokes }, undo,
             syncTool = { toolbar.sync(it) }, presentSelection = ::presentSelection, whenPenIdle = ::whenPenIdle,
@@ -184,7 +192,7 @@ class NotebookActivity : AppCompatActivity() {
 
         toolbar = PaperToolbar(
             binding.topBar, binding.btnBack, binding.btnPen, binding.btnEraser, binding.btnLasso, paper,
-        ) { close() }
+        ) { backPressed() }
         selectionToolbar = SelectionToolbar(
             root = binding.root, paperView = paper.asView(),
             bar = binding.selectionToolbar.root, subBar = binding.selectionSubToolbar.root,
@@ -265,7 +273,7 @@ class NotebookActivity : AppCompatActivity() {
         }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() { close() }
+            override fun handleOnBackPressed() { backPressed() }
         })
 
         BrowseState(this).lastOpenNotebookId = notebookId
@@ -285,6 +293,11 @@ class NotebookActivity : AppCompatActivity() {
             NotebookSession.OpenResult.Ok -> Unit
         }
         if (isFinishing) { session.seal(); return }
+        // A follow's target page overrides last-open for this open only (L4); dead = refId silently.
+        intent.getStringExtra(EXTRA_INITIAL_PAGE_ID)?.let { pid ->
+            val idx = session.pages.indexOfFirst { it.id == pid }
+            if (idx >= 0 && idx != session.currentIndex) session.goTo(idx)
+        }
         val page = session.currentPage
         val strokes = session.store.loadPage(page.id)
         val objects = session.objectStore.loadPage(page.id)
@@ -437,6 +450,8 @@ class NotebookActivity : AppCompatActivity() {
         override fun onRedo() = runPageOp { doRedo() }
         override fun onDeleteRequested() { showDeleteSheet() }
         override fun onSwipeDown() { contentsFlow.open() }   // silent while not `available` (Q2 + item 9)
+        override fun onSwipeUp() { linkFlow.walkBack() }     // walks the trail; empty = silent (L4)
+        override fun onFingerTap(x: Float, y: Float) { linkFlow.followAt(x, y) }   // link follow (L4)
     }
 
     // ── Selection toolbar (arc 4 / H2) ───────────────────────────────────────
@@ -727,11 +742,19 @@ class NotebookActivity : AppCompatActivity() {
         }
     }
 
+    /** Both Backs (top-bar button + system) — a via-link notebook's Back walks the trail like
+     *  swipe-up (L4); the trail empty (or no extension, or still opening) → the normal close. */
+    private fun backPressed() {
+        if (viaLink && opened && !closing) linkFlow.walkBack(onEmpty = { close() }) else close()
+    }
+
     /**
      * Normal close: cover → last-open page → meta → drain writes + seal, on an application-scoped
-     * NonCancellable coroutine (each step guarded), then finish. Idempotent.
+     * NonCancellable coroutine (each step guarded), then finish. Idempotent. [andThen] (arc 7 / L4:
+     * the follow-out's `startActivity` into the target notebook) runs strictly AFTER the seal
+     * completes — risk register 2: the target's open never races the origin's checkpoint.
      */
-    private fun close() {
+    private fun close(andThen: (() -> Unit)? = null) {
         if (closing) return
         closing = true
         BrowseState(this).lastOpenNotebookId = null
@@ -745,6 +768,7 @@ class NotebookActivity : AppCompatActivity() {
                 try { s.refreshMeta(versionCode) } catch (e: Exception) { Log.w(TAG, "refreshMeta failed", e) }
                 try { s.seal() } catch (e: Exception) { Log.w(TAG, "seal failed", e) }
             }
+            andThen?.invoke()
             if (!isFinishing && !isDestroyed) finish()
         }
     }
@@ -768,6 +792,10 @@ class NotebookActivity : AppCompatActivity() {
         private const val TAG = "NotebookActivity"
         const val EXTRA_NOTEBOOK_ID = "notebookId"
         const val EXTRA_NOTEBOOK_NAME = "notebookName"
+        /** Host-internal, never on an extension's Intent (arc 7 / L4): present → the trail survives
+         *  and Back walks it; absent → cleared. [EXTRA_INITIAL_PAGE_ID] overrides last-open once. */
+        const val EXTRA_VIA_LINK = "viaLink"
+        const val EXTRA_INITIAL_PAGE_ID = "initialPageId"
 
         /** Phase-3 decisions: raw px, not dp (matches the reference pen and g-paper's defaults). */
         const val PEN_WIDTH_PX = 3f
@@ -776,10 +804,12 @@ class NotebookActivity : AppCompatActivity() {
         /** Outlives the Activity so a close in flight always completes its seal. */
         private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
-        fun intent(context: Context, notebookId: String, name: String): Intent =
+        fun intent(context: Context, notebookId: String, name: String, viaLink: Boolean = false, initialPageId: String? = null): Intent =
             Intent(context, NotebookActivity::class.java).apply {
                 putExtra(EXTRA_NOTEBOOK_ID, notebookId)
                 putExtra(EXTRA_NOTEBOOK_NAME, name)
+                if (viaLink) putExtra(EXTRA_VIA_LINK, true)
+                if (initialPageId != null) putExtra(EXTRA_INITIAL_PAGE_ID, initialPageId)
             }
     }
 }

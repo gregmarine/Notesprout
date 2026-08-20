@@ -452,7 +452,7 @@ names how many came back.
 `NotebookUndo` (`undo(session, stack, refreshToPage)` / `redo(...)`) next to the action set — a pure
 move; the Activity keeps `refreshToPage` (its `navigateTo`) and stays under the 800-line cap.
 
-## Link objects (arc 7 / L1 — rows, render, parity; picker L2, follow L4)
+## Link objects (arc 7 — rows L1 · picker L2 · create-in-picker L3 · follow + trail L4)
 
 A **link** wraps a lasso selection (any mix of strokes and objects, never another link) into one
 atomic page citizen — a core `TYPE_LINK` row whose wrapped content is **re-parented child rows**
@@ -509,6 +509,35 @@ payload's meaning (`docs/extensions.md` §"LinkProvider (contract)").
   one would soft-delete it) and refreshes the page indicator + Contents availability
   (`onPagesChanged`). Folders / notebooks created there never touch this screen (index writes;
   the host's own New-notebook screen).
+- **Follow (arc 7 / L4).** A bare **finger tap** (never stylus — the pen always writes, even over a
+  link; `PageGestures.onFingerTap`, pen-gated + escrowed like every finger gesture, inert while a
+  selection is active or over chrome) hits the topmost link under it by z-order, else nothing.
+  `LinkFlow.followAt`: one-shot `resolve(payload)` → `LinkNav.planFollow` (pure, JVM-tested) →
+  validate → push the origin `{notebook, page}` onto the trail (**every** follow pushes,
+  same-notebook included — L4 Q3; best-effort, a failed push never blocks the follow) → navigate.
+  Same-notebook (`DEST_PAGE`, or a `DEST_NOTEBOOK_PAGE` naming this notebook) = `navigateTo` under
+  the page-op lock; cross-notebook = the **full close sequence, then relaunch**:
+  `close { startActivity(intent(…, viaLink = true, initialPageId)) }` — `startActivity` runs
+  strictly after the seal completes (risk 2), the stack stays Library → Notebook, one live session
+  at a time, and the target's own "Opening…" popup is the only feedback (L4 Q1 — no origin
+  overlay; the follow is `navBusy`-guarded so re-taps in the gap are harmless). Failures are
+  honest dialogs: no extension → `links_required`; unresolvable payload / dead notebook (index
+  `alive`) / dead foreign page (a read-only page-row check **before** leaving, the
+  `foreignPageIds` shape) → `links_target_gone`; extension not answering → `links_picker_gone`.
+  A self-`DEST_NOTEBOOK` (untrusted payload — the picker never makes one) is a silent no-op.
+- **The trail (arc 7 / L4).** Persisted in the extension's host-owned store (key `trail`, cap 50)
+  behind the point's trail one-shots — the core never parses it. **Swipe-up** (and the **Back
+  button in a via-link notebook**) walk it: `LinkFlow.walkBack` pops entries, classifies each
+  (`LinkNav.planBack`), **skips dead ones silently** (L4 Q2 — dead notebook via the index, dead
+  page via the same read-only row check; capped at `MAX_TRAIL_ENTRIES` pops), and navigates the
+  first live one — same-notebook by page-op, cross-notebook by seal + relaunch **keeping
+  `EXTRA_VIA_LINK`**. Empty trail (or no extension): swipe-up is silent, Back does the normal
+  close-to-library. `EXTRA_VIA_LINK` + `EXTRA_INITIAL_PAGE_ID` are **host-internal** — they ride
+  the core's own Intent to its own Activity, never an extension's; the initial page overrides the
+  notebook's `refId` for that open only (validated before launch — a race lands on `refId`
+  silently), and a **fresh open** (no flag — library, recents, launch-restore) sets
+  `LinkFlow.requestTrailClear`, a fire-and-forget `clearTrail` once the provider is discovered
+  (kept pending until one succeeds).
 
 ## Frame-silence rule
 
@@ -552,7 +581,13 @@ toolbar buttons still see every event). Ported thresholds:
   scaledMinimumFlingVelocity` **or** `|dy| ≥ 0.50×height` — the flip's rule on the height; arc 5 / C1):
   `Listener.onSwipeDown` → the host opens the Contents when `providers.hasOutline`, else nothing
   (silently). Evaluated at `ACTION_UP` beside the flip — one axis dominates, so they never both fire.
-  A swipe **up** is reserved and does nothing.
+- **Trail walk-back** (1 finger, vertical-dominant, `dy < 0` — the Contents rule mirrored upward;
+  arc 7 / L4): `Listener.onSwipeUp` → the host pops the link trail (`LinkFlow.walkBack`), silent
+  when it is empty or the extension is gone.
+- **Link follow** (1 finger bare tap — sub-`touchSlop`, released ≤ `longPressTimeout`, a second
+  finger disarms; arc 7 / L4): `Listener.onFingerTap(x, y)` at the down point → the host follows
+  the topmost link under it (`LinkFlow.followAt`), else nothing. The inverse of every other
+  recogniser (distance / duration / finger count), so it can never co-fire with one.
 - **Delete** (1 finger long-press ≥ `longPressTimeout`, stationary ≤ `touchSlop`): `ActionSheetDialog`
   "Delete this page" → `AlertDialog` "Delete this page and its ink?" [Delete this page] [Cancel] — the scratch pad's phrasing, adopted for the notebook after arc 6 / S2 at the user's call (the H1 text "Undo (two-finger double-tap) brings it back until you close the notebook." is gone; undo still does).
 

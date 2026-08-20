@@ -13,7 +13,7 @@
 > The **original** Notesprout implementation this arc draws on is `docs/links.md` at the monorepo
 > root — inspiration, not a spec; every deviation is recorded here.
 >
-> **Status: L0 ✅ (df2de82) · L1 ✅ (bc944bc) · L2 ✅ (a86214c) · L3 ✅ (6822e44) · L4 ⬜ · L5 ⬜**
+> **Status: L0 ✅ (df2de82) · L1 ✅ (bc944bc) · L2 ✅ (a86214c) · L3 ✅ (6822e44) · L4 🧪 · L5 ⬜**
 
 ## Why
 
@@ -982,21 +982,82 @@ immediately picked, without leaving the flow; the host validates everything.
 ---
 
 ### Phase L4 — Follow, the trail, and the way back
-**Status:** ⬜ Not started
+**Status:** 🧪 Built + Claude device agents 10/10 PASS ×3 (2026-08-20) — user checklist pending
+
+**Claude-side device runs (one Sonnet agent per device, 2026-08-20): all 10 checks PASS on SNN,
+NA5C and MIP11** — nothing disabled; fresh-open `clearTrail ok` on all three; empty-trail swipe-up
+silent (`popTrail: empty`); bare tap on empty paper inert; **a real follow driven on every
+device** (the user's L1–L3 test links, located by screenshot): NA5C and SNN each followed a
+`DEST_NOTEBOOK` link cross-notebook — seal → relaunch → target loaded, then **swipe-up walked
+back to the exact origin page** (`popTrail: entry`); MIP11 followed a same-notebook `DEST_PAGE`
+link + walk-back. **Q4 timings (all warm — the chrome refresh at open had started the ext
+process): tap→resolve 14 ms NA5C · 76 ms SNN · 19–35 ms MIP11; seal→target-loaded ≈ 246 ms NA5C ·
+≈ 420 ms SNN. Warm-bind stays deferred — nothing here needs it.** Probe links regression exact
+(beginPick 49/24/16 ms); both `am start` refusals hold; binds = unbinds; crash buffers empty;
+flip regression clean. Notes: the agents' past-last-page swipes appended blank pages (SNN
+"Test 07" 1→3, NA5C "Test 03" 4→5 — the by-design insert, user may delete); the MIP11 agent
+missed the `LinkFlow` log line — the **recorded MIP11 `log.tag` trap** (resets to `I`;
+`setprop log.tag.LinkFlow DEBUG` re-verified the line live, 19 ms, on the final build). The
+Back-funnel fix build was installed on all three AFTER the agent runs; its follow was
+re-smoke-tested live on MIP11. The trail-persistence force-stop, dead-target dialogs,
+pen-vs-finger and no-extension items are the user checklist's (lasso-gated setup).
 
 **Goal:** a finger tap on a link follows it (same page-set navigation, or seal + relaunch into the
 other notebook); swipe-up walks the trail backward; a via-link notebook's Back button walks it
 too; the trail persists in the extension's store and clears on any fresh open.
 
-**Questions to resolve at phase start:**
-1. Tap feedback before a cross-notebook open (the seal takes real time on SNN): rely on the
-   target's "Opening…" popup only (rec.) / an origin-side overlay at tap time?
-2. A popped trail entry whose notebook/page is gone: skip silently to the next (rec.) / dialog?
-3. Same-notebook follows also push the trail (rec. — the original's rule) — confirm.
-4. Warm-bind `NSE · Links` at notebook open when links exist on the opened page (rec. defer —
-   measure tap→resolve first; the recognizer warm-up precedent if needed)?
+**Questions resolved at phase start (wizard, 2026-08-20 — all four the recommendation):**
+1. **Target popup only** — no origin-side overlay; the tap starts the close and the target's
+   existing "Opening…" popup covers from its first frame. The seal-time gap on SNN is accepted
+   (re-taps are harmless — the follow is busy-guarded).
+2. **Skip dead trail entries silently** — pop until a live entry navigates or the trail is empty
+   (then swipe-up is silent / Back closes to the library); capped at `MAX_TRAIL_ENTRIES` pops.
+3. **Every follow pushes the trail, same-notebook included** (the original's rule) — the trail is
+   a true history of follows.
+4. **Warm-bind deferred — measure first**: build follow without it, record tap→resolve per device
+   in the L4 runs; the chrome refresh at page load already starts the extension process in most
+   real sessions.
 
-**Deliverables**
+**Build notes (recorded during the phase; the Outcome finalises them):**
+- **`PageGestures`** (`:paper-screen`): `onFingerTap(x, y)` + `onSwipeUp()` added to the Listener
+  (default no-ops — the Scratch Pad ignores them). The swipe-up is the Contents rule mirrored
+  (`evaluateVerticalSwipe` routes on the `dy` sign — one vertical evaluation, exclusive with the
+  flip). The tap recogniser is the **inverse** of every other one (sub-slop, ≤ long-press timeout,
+  single finger — a second finger / movement / duration disarms), so it can never co-fire; it
+  commits through the same pen-tail escrow as undo/redo, and reports the **down** point.
+- **`LinkNav`** (new, pure, no Android imports — JVM-tested): `planFollow` (SamePage / OtherNotebook
+  / Dead / NoOp) + `planBack` (SamePage / OtherNotebook / Skip). A `DEST_NOTEBOOK_PAGE` naming the
+  **current** notebook is treated as an in-notebook hop; a self-`DEST_NOTEBOOK` is a silent no-op
+  (untrusted payload — the picker never composes one). `Plan.SamePage` carries the page **id**, not
+  an index — the index is re-looked-up under the page-op lock at navigation time.
+- **`LinkFlow`**: `followAt` (topmost link by z-order — `liveLinks` is insertion-ordered, iterate
+  reversed), `walkBack(onEmpty)` (pop loop capped at `MAX_TRAIL_ENTRIES`; dead entries skipped
+  silently per Q2), `pushTrail` best-effort (a failed push logs and never blocks the follow),
+  `requestTrailClear` (flag consumed by the next successful discovery in `refresh()`; kept pending
+  on failure so resume retries), and `foreignPageAlive` — the honest **pre-check** of a
+  `DEST_NOTEBOOK_PAGE` target before leaving (a read-only `SoilDatabase.open` sealed in `finally`,
+  the `LinkCatalogBinder.foreignPageIds` shape; also validates cross-notebook trail entries so a
+  dead page **skips** rather than landing on the wrong page). Arrival-side: a dead
+  `EXTRA_INITIAL_PAGE_ID` falls back to `refId` **silently** (covers races and keeps one arrival
+  semantic; the pre-checks carry the honesty). Failure texts: no extension `links_required`;
+  unresolvable / dead target `links_target_gone`; extension not answering reuses
+  `links_picker_gone` (generic "didn't respond" wording — recorded).
+- **`NotebookActivity`**: `EXTRA_VIA_LINK` + `EXTRA_INITIAL_PAGE_ID` (host-internal; `intent()`
+  gains default params), the initial-page override applied between `open()` and the first page
+  load, **both Backs funnel through one `backPressed()`** — the top-bar Back button AND the system
+  back walk the trail in a via-link notebook (the scope's "returns from its Back button" is the
+  visible top-bar button; caught in-phase — the toolbar callback initially still called `close()`
+  directly), the two gesture delegates, and
+  `close(andThen)` — the follow-out's `startActivity` runs **strictly after the seal** inside the
+  existing NonCancellable close coroutine (risk 2 handled by ordering; no new race surface).
+  **Line cap: the file closes at 815 (written reason):** L2's PasteFlow extraction left 779;
+  L4's additions are exactly the plan's "launcher, extras, delegation lines" (risk 5) — every
+  behaviour lives in `LinkFlow`/`LinkNav`/`PageGestures`; the next extraction candidate if a
+  later phase needs room is the delete-sheet pair or a shared immersive helper.
+- **Recreation edge (recorded, accepted):** Android redelivers the original Intent, so a process
+  death + recreation in a via-link notebook re-applies `EXTRA_INITIAL_PAGE_ID` (jumping back to
+  the followed page even if the user had flipped away before the kill). Same family as the L2/L3
+  half-dead-showing edges; L5 reviews together.
 1. `:paper-screen` `PageGestures`: `onFingerTap(x, y)` + `onSwipeUp()` (mirror thresholds of
    `onSwipeDown`; both default no-ops — the Scratch Pad ignores them), + JVM-testable threshold
    logic where the existing tests allow.
@@ -1020,6 +1081,42 @@ too; the trail persists in the extension's store and clears on any fresh open.
   timings tap→resolve and seal→target-opened recorded per device.
 - **User device checklist** (~9 items: the chain story by eye on all three, incl. EPD cleanliness
   across the two seal+relaunch hops and the pen-vs-finger rule).
+
+**User checklist as issued (2026-08-20 — run on SNN, NA5C and MIP11; link creation is lasso-gated,
+so the chain story is yours):**
+1. **Pen vs finger** (Q4 of the arc): lasso ink → Link → **This notebook** → pick a page → OK.
+   Write **over** the link with the pen — ink lands, nothing follows. Then a bare **finger tap** on
+   it → the notebook flips to the target page. One-finger **swipe up** → back where you started.
+2. **Cross-notebook follow**: create a link in **Notebook** mode → finger-tap it → the origin
+   closes and the target notebook opens on its last-open page. The only feedback during the seal is
+   the target's "Opening…" (L4 Q1 — the tap feels quiet on SNN for a moment; an impatient second
+   tap is harmless).
+3. **The chain**: A → B (Notebook link) → C (**Notebook page** link from B into a third notebook) —
+   then **swipe up twice**: C → B on the exact page you followed from, then B → A likewise. EPD
+   clean across both seal+relaunch hops (no ghosting, "Opening…" each hop).
+4. **Force-stop mid-chain** (the persisted trail): follow A → B again, then ask Claude to
+   `am force-stop` the extension (or Settings → Apps → Force stop) — **swipe up still walks back
+   to A** (the trail lives in the host-owned store; the pop restarts the extension's process).
+5. **Back button**: follow A → B → the **top-bar Back** returns to A (walks the trail, same as
+   swipe-up). In A — trail now empty — Back goes to the **library** (normal close). System back
+   behaves identically.
+6. **Fresh open clears**: after any chain, reopen a notebook **from the library** → swipe up is
+   **silent** (the trail was cleared by the fresh open).
+7. **Dead target**: link to a page of another notebook, then delete that page (open the target
+   notebook, delete it, come back), tap the link → an honest "This link's target no longer
+   exists." dialog, no navigation, no trail entry. Undo in the target brings the page back → the
+   tap follows again.
+8. **Dead trail entry is skipped silently** (L4 Q2, same-notebook variant): on page 1 create a
+   link to page 3 → tap it (lands on 3, trail holds page 1) → flip back to page 1 and **delete the
+   page** → swipe up → **nothing happens** (the dead entry was popped and skipped, trail empty —
+   no dialog).
+9. **No extension**: disable `NSE · Links Dev` → tap a link → "This link needs the NSE · Links
+   extension."; swipe up silent; Back in a via-link notebook → straight to the library. Re-enable →
+   follows work again (resume or reopen).
+10. **60-second regression**: L2/L3 picker flows (Link, Edit prefill, create-in-picker page), the
+    eraser takes a whole link, Contents **swipe-down** still opens (the vertical swipe now splits
+    on direction), multi-finger undo/redo taps and the long-press page delete unaffected by the
+    new tap recogniser, Scratch Pad round trip.
 
 **Close-out:** as L0.
 

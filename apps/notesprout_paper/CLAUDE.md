@@ -19,9 +19,9 @@ global-index model, global encryption model, and e-ink design philosophy — and
   **Active arc: `PAPER_LINKS_PLAN.md` (arc 7 — `NSE · Links`: core-owned link rows in the `.soil`
   wrapping a selection, extension-owned semantics — opaque payload + `resolve`/`chromeOf`, the
   tier-2 picker screen with the `ILinkCatalog` host callback, trail in the extension store,
-  finger-tap follow + swipe-up back). L0 ✅ · L1 ✅ · L2 ✅ · L3 ✅ (create-in-picker) — L4
-  (follow + trail) next, then L5 (review + freeze), each in a fresh session with its phase-start
-  wizard.**
+  finger-tap follow + swipe-up back). L0 ✅ · L1 ✅ · L2 ✅ · L3 ✅ · L4 🧪 (follow + trail
+  built, device agents green ×3 — user checklist pending) — then L5 (review + freeze) in a fresh
+  session with its phase-start wizard.**
 - **Package / applicationId:** `com.symmetricalpalmtree.notesprout` (debug: `.dev` suffix)
 - **Launcher label:** "Notesprout Paper" (debug: "Notesprout Paper Dev")
 
@@ -164,9 +164,15 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   `ActivityResultLauncher` only → `takeChoice` = drain + `endPick` + unbind + **revoke both
   binders** in one `finally` (the revoke also clears the relay). The back-trail lives in the
   extension's host store (key `trail`, cap 50) behind the trail one-shots (store as in-parameter,
-  pre-opened on IO before the bind). **L0 built** contract + skeleton + client + catalog binder + the
+  pre-opened on IO before the bind). **Follow + trail (L4):** a bare finger tap follows the
+  topmost link under it (`PageGestures.onFingerTap`, escrowed; `LinkFlow.followAt` — resolve →
+  pure `LinkNav` classify → validate incl. a read-only foreign page-row pre-check → push origin →
+  navigate; cross-notebook = the full close seal then relaunch with host-internal
+  `EXTRA_VIA_LINK` [+`EXTRA_INITIAL_PAGE_ID`]); one-finger swipe-up and BOTH Backs of a via-link
+  notebook walk the trail (`walkBack` — dead entries skipped silently, cap 50); a fresh open
+  fire-and-forget-clears the trail. **L0 built** contract + skeleton + client + catalog binder + the
   debug ⋯ "Probe links" (removed in L5); **L1** the core link rows, **L2** the picker + pick flow,
-  **L3** create-in-picker; follow + trail wiring is L4.
+  **L3** create-in-picker, **L4** follow + trail.
   `TemplateProviderClient` (bind-per-operation, signature re-checked at bind, timeouts, unbind in
   `finally`, payload = mime + byte cap + exact requested size); **the core has no renderer**. No
   extension → no Template section, blank notebook. A render failure stays on the screen with a toast —
