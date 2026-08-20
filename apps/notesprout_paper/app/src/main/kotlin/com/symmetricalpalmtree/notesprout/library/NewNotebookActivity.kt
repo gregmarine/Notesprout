@@ -27,7 +27,9 @@ import com.symmetricalpalmtree.notesprout.data.soil.SoilObjectEntity
 import com.symmetricalpalmtree.notesprout.data.soil.SoilSchema
 import com.symmetricalpalmtree.notesprout.databinding.ActivityNewNotebookBinding
 import com.symmetricalpalmtree.notesprout.extension.ExtensionCallException
+import com.symmetricalpalmtree.notesprout.extension.ExtensionCallerCheck
 import com.symmetricalpalmtree.notesprout.extension.ExtensionContract
+import com.symmetricalpalmtree.notesprout.extension.LinkCreateRelay
 import com.symmetricalpalmtree.notesprout.extension.ExtensionRegistry
 import com.symmetricalpalmtree.notesprout.extension.ProviderRef
 import com.symmetricalpalmtree.notesprout.extension.TemplateChoice
@@ -46,6 +48,9 @@ class NewNotebookActivity : AppCompatActivity() {
     private lateinit var binding: ActivityNewNotebookBinding
     private val repo by lazy { IndexRepository() }
     private var parentFolderId: String? = null
+    /** Launched by the link picker via ACTION_LINK_NEW_NOTEBOOK_SCREEN (arc 7 / L3): the folder +
+     *  default name come from [LinkCreateRelay] and the created identity goes back through it. */
+    private var relayMode = false
     private var creating = false
     /** Identity of the template checked before a recreation (provider radios are rebuilt async). */
     private var restoreIdentity: String? = null
@@ -53,15 +58,31 @@ class NewNotebookActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (!IndexGuard.ready(this)) return
+        // The screen is exported since L3 (the link picker launches it via
+        // ACTION_LINK_NEW_NOTEBOOK_SCREEN) — every launch must come for-a-result from a
+        // signature-matched caller (the host itself passes trivially); anything else is refused.
+        if (!ExtensionCallerCheck.enforceActivity(this)) return
+        relayMode = intent.action == ExtensionContract.ACTION_LINK_NEW_NOTEBOOK_SCREEN
         binding = ActivityNewNotebookBinding.inflate(layoutInflater)
         setContentView(binding.root)
         TopGuard.applyInsetPadding(binding.root)
 
-        parentFolderId = intent.getStringExtra(EXTRA_PARENT_FOLDER_ID)
+        // Relay mode (arc 7 / L3): nothing rides the Intent — the picker's browsed folder and the
+        // naming-scheme default were parked by ILinkCatalog.prepareNewNotebook. An empty relay
+        // means the pick showing is gone (revoked / host restarted): leave plain.
+        val prepared = if (relayMode) LinkCreateRelay.prepared() else null
+        if (relayMode && prepared == null) {
+            Slog.d(TAG) { "relay mode with nothing armed — showing gone" }
+            finish()
+            return
+        }
+        parentFolderId = if (relayMode) prepared?.parentFolderId else intent.getStringExtra(EXTRA_PARENT_FOLDER_ID)
 
-        // A caller-supplied default (the library's namer prefill) is untrusted: used only if it passes
-        // the core's name rule + length cap, else this screen's own default. Extension-agnostic.
-        binding.nameField.setText(acceptDefaultName(intent.getStringExtra(EXTRA_DEFAULT_NAME)) ?: defaultName())
+        // A caller-supplied default (the library's namer prefill, or the relay's) is untrusted: used
+        // only if it passes the core's name rule + length cap, else this screen's own default.
+        // Extension-agnostic either way — the namer was resolved by the caller.
+        val candidate = if (relayMode) prepared?.defaultName else intent.getStringExtra(EXTRA_DEFAULT_NAME)
+        binding.nameField.setText(acceptDefaultName(candidate) ?: defaultName())
         binding.nameField.selectAll()
 
         binding.btnBack.setOnClickListener { finish() }
@@ -181,10 +202,17 @@ class NewNotebookActivity : AppCompatActivity() {
                 }
             }
             val notebookId = withContext(Dispatchers.IO) { createNotebook(name, choice, webp) }
-            setResult(Activity.RESULT_OK, Intent().apply {
-                putExtra(EXTRA_NOTEBOOK_ID, notebookId)
-                putExtra(EXTRA_NOTEBOOK_NAME, name)
-            })
+            if (relayMode) {
+                // The created identity goes back through the relay + ILinkCatalog.takeCreatedNotebook
+                // — never the result Intent (arc 7 / L3; the pick flow's no-data-on-Intents rule).
+                LinkCreateRelay.setCreated(notebookId, name)
+                setResult(Activity.RESULT_OK)
+            } else {
+                setResult(Activity.RESULT_OK, Intent().apply {
+                    putExtra(EXTRA_NOTEBOOK_ID, notebookId)
+                    putExtra(EXTRA_NOTEBOOK_NAME, name)
+                })
+            }
             finish()
         }
     }

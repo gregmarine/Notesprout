@@ -19,8 +19,8 @@ global-index model, global encryption model, and e-ink design philosophy — and
   **Active arc: `PAPER_LINKS_PLAN.md` (arc 7 — `NSE · Links`: core-owned link rows in the `.soil`
   wrapping a selection, extension-owned semantics — opaque payload + `resolve`/`chromeOf`, the
   tier-2 picker screen with the `ILinkCatalog` host callback, trail in the extension store,
-  finger-tap follow + swipe-up back). Planned 2026-08-19; phases L0–L5 all ⬜ — L0 next, in a
-  fresh session, starting with the plan's L0 phase-start wizard.**
+  finger-tap follow + swipe-up back). L0 ✅ · L1 ✅ · L2 ✅ · L3 🧪 (create-in-picker) — then L4
+  (follow + trail) and L5 (review + freeze), each in a fresh session with its phase-start wizard.**
 - **Package / applicationId:** `com.symmetricalpalmtree.notesprout` (debug: `.dev` suffix)
 - **Launcher label:** "Notesprout Paper" (debug: "Notesprout Paper Dev")
 
@@ -150,13 +150,22 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   (`ACTION_LINK_PICKER_SCREEN`) is the second tier-2 screen (held bind: `LinkClient.openPick` =
   store pre-open → `ExtensionStoreBinder` + **`LinkCatalogBinder`** — the first host-implemented
   multi-method callback, a per-showing uid-gated lens (`LinkCatalogGate`) with `listFolder` /
-  `listPages` real (current notebook via the live-session `LinkCatalogSource`, others by a read-only
-  `SoilDatabase.open` sealed in `finally`) and the create half `UnsupportedOperationException` until
-  L3 — → hold → `beginPick` → launch by `ActivityResultLauncher` only → `takeChoice` = drain +
-  `endPick` + unbind + **revoke both binders** in one `finally`). The back-trail lives in the
+  `listPages` / `pathTo` real (current notebook via the live-session `LinkCatalogSource`, others by
+  a read-only `SoilDatabase.open` sealed in `finally`) and — since L3 — the **create half** live:
+  `createPage` (current notebook through the live session's page-op lock, foreign by
+  open→insert→seal; anchor before/after or append, template inherited; **not undoable** — the host
+  clears the undo stack on the picker's return) and `createFolder` (the library's exact name rules);
+  **notebook creation routes through the host's own `NewNotebookActivity`** instead
+  (`prepareNewNotebook` arms it through the host-process `LinkCreateRelay`, the picker launches
+  `ACTION_LINK_NEW_NOTEBOOK_SCREEN` — the one host-owned screen an extension launches, exported
+  behind `ExtensionCallerCheck` — and drains `takeCreatedNotebook`; nothing rides that Intent;
+  the `createNotebook` slot is superseded and throws forever) — → hold → `beginPick` → launch by
+  `ActivityResultLauncher` only → `takeChoice` = drain + `endPick` + unbind + **revoke both
+  binders** in one `finally` (the revoke also clears the relay). The back-trail lives in the
   extension's host store (key `trail`, cap 50) behind the trail one-shots (store as in-parameter,
   pre-opened on IO before the bind). **L0 built** contract + skeleton + client + catalog binder + the
-  debug ⋯ "Probe links" (removed in L5); the picker UI, link rows, follow + trail wiring are L1–L4.
+  debug ⋯ "Probe links" (removed in L5); **L1** the core link rows, **L2** the picker + pick flow,
+  **L3** create-in-picker; follow + trail wiring is L4.
   `TemplateProviderClient` (bind-per-operation, signature re-checked at bind, timeouts, unbind in
   `finally`, payload = mime + byte cap + exact requested size); **the core has no renderer**. No
   extension → no Template section, blank notebook. A render failure stays on the screen with a toast —

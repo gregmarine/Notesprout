@@ -499,6 +499,16 @@ payload's meaning (`docs/extensions.md` §"LinkProvider (contract)").
   children), page delete / undo (`liveDescendantIds` — grandchildren ride the `Structural`
   snapshot), and reopen (rows are the truth). `LinkEdited` exists for L2. With the extension
   missing: render (no underline), move, Delete, Unlink all keep working; only Link / Edit hide.
+- **Create-in-picker (arc 7 / L3).** The picker can create targets without leaving the flow
+  (`docs/extensions.md` §LinkProvider). A page created in **this** notebook goes through
+  `NotebookSession.insertPageAt` (insert + renumber + `pageCount` mirror **without navigating** —
+  the screen is covered; `currentIndex` re-anchored by id), bridged from the catalog's binder
+  thread into the page-op lock by `LinkFlow.createPageBlocking` (10 s timeout — a dropped op is an
+  honest failure, never a hung picker). **Not undoable**, so on the picker's return — any result —
+  `LinkFlow` clears the undo stack (older `Structural` snapshots predate the new page; replaying
+  one would soft-delete it) and refreshes the page indicator + Contents availability
+  (`onPagesChanged`). Folders / notebooks created there never touch this screen (index writes;
+  the host's own New-notebook screen).
 
 ## Frame-silence rule
 

@@ -147,6 +147,19 @@ extension providers (`extension/ExtensionRegistry`; see `docs/extensions.md`).
   `notebook_meta` → seal → index row (`templateKind` = identity or `SoilSchema.TEMPLATE_BLANK` =
   `"BLANK"`) → open notebook.
 
+### Relay mode (arc 7 / L3)
+
+`NewNotebookActivity` is **exported** since L3: the link picker (`NSE · Links`) launches it for a
+result via `ExtensionContract.ACTION_LINK_NEW_NOTEBOOK_SCREEN` + `setPackage(host)` — the one
+host-owned screen an extension launches. Every launch (the library's included) now passes
+`ExtensionCallerCheck.enforceActivity` first: `callingPackage` non-null (so a plain `startActivity`
+is refused) + `SIGNATURE_MATCH`. In relay mode **nothing rides the Intent**: the parent folder and
+the naming-scheme default come from `LinkCreateRelay` (parked by `ILinkCatalog.prepareNewNotebook`;
+an empty relay = the pick showing is gone → finish plain), and on CREATE the created (id, name)
+goes back through the relay + `ILinkCatalog.takeCreatedNotebook` with a bare `RESULT_OK` — the
+screen creates without opening either way (opening is the caller's move). The Template section
+works unchanged. Details: `docs/extensions.md` §"LinkProvider (contract)".
+
 ## Templates
 
 Rendered by the **Templates extension** (`:ext-templates`, `TemplateRenderer` — the v0 `BuiltInTemplates`

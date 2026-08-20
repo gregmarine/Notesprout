@@ -2,6 +2,15 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- The one host-owned screen the picker launches (arc 7 / L3): the host's New-notebook screen,
+         resolved by action + setPackage(HOST_PACKAGE). The live held bind already grants
+         interaction-based visibility; this makes it explicit. -->
+    <queries>
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesprout.extension.LINK_NEW_NOTEBOOK_SCREEN" />
+        </intent>
+    </queries>
+
     <application
         android:name=".LinksApplication"
         android:allowBackup="false"

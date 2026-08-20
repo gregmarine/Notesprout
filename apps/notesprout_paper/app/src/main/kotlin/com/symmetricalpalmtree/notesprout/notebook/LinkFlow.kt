@@ -17,12 +17,15 @@ import com.symmetricalpalmtree.notesprout.extension.LinkChoice
 import com.symmetricalpalmtree.notesprout.extension.LinkClient
 import com.symmetricalpalmtree.notesprout.extension.ProviderRef
 import java.util.UUID
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 
 /**
  * The notebook's side of link objects (arc 7): the three core selection-toolbar actions with their
@@ -72,6 +75,9 @@ class LinkFlow(
     private val providers: () -> ObjectProviders,
     /** EPD chrome-release before a dialog / the picker launch ([PaperView.releaseRender]). */
     private val releaseRender: () -> Unit,
+    /** The picker created a page in THIS notebook (arc 7 / L3): the host refreshes its page
+     *  indicator + Contents availability. Called on the picker's return, after the undo clear. */
+    private val onPagesChanged: () -> Unit = {},
 ) {
     private var ref: ProviderRef? = null
     private var refreshGen = 0
@@ -87,6 +93,11 @@ class LinkFlow(
     private var client: LinkClient? = null
     private var pending: Pending? = null
     private var busy = false
+
+    /** Set when a pick showing's `createPage` inserted into the live session (arc 7 / L3): on the
+     *  picker's return — ANY result (Q4) — the undo stack is cleared (older `Structural` snapshots
+     *  predate the new page; replaying one would soft-delete it) and the host told to refresh. */
+    private var pagesChanged = false
 
     /** Registered at construction — the host builds the flow in `onCreate`. Launch-for-a-result is
      *  the only way in: the extension's caller check needs `callingPackage` (rule 25). */
@@ -209,6 +220,14 @@ class LinkFlow(
             } finally {
                 if (client === c) { client = null; pending = null; busy = false }
             }
+            // A page created in this notebook survives ANY result (L3 Q4 — creation is an explicit
+            // act, not part of the pick): clear the undo stack (its Structural snapshots predate the
+            // page) and refresh the host's page indicator + Contents before the choice is applied.
+            if (pagesChanged) {
+                pagesChanged = false
+                undo.clear()
+                if (alive()) onPagesChanged()
+            }
             if (choice == null) {
                 // Cancelled is silent; a parked result that wouldn't drain (dead bind, malformed
                 // LinkChoice → the unmarshal rejected it) is an honest dialog.
@@ -245,13 +264,36 @@ class LinkFlow(
         val s = session()
         val headings = LinkPickerLabels.headings(activity, s, providers())
         val currentPageId = s.currentPage.id
-        return LinkCatalogSource(s.notebookId) {
-            if (!alive()) null
-            else session().pages.mapIndexedNotNull { i, page ->
-                if (page.id == currentPageId) null
-                else page.id to LinkPickerLabels.compose(activity, i + 1, headings[page.id])
-            }
+        return LinkCatalogSource(
+            s.notebookId,
+            currentPages = {
+                if (!alive()) null
+                else session().pages.mapIndexedNotNull { i, page ->
+                    if (page.id == currentPageId) null
+                    else page.id to LinkPickerLabels.compose(activity, i + 1, headings[page.id])
+                }
+            },
+            createPage = { anchor, before -> createPageBlocking(anchor, before) },
+        )
+    }
+
+    /**
+     * The binder-thread bridge into the host's page-op lock (arc 7 / L3): schedule the insert
+     * through [runPageOp] and block for its outcome. `runPageOp` silently drops ops while the
+     * screen is closing — the timeout turns a dropped (or wedged) op into an
+     * `IllegalStateException` the catalog wrapper reports honestly instead of hanging the picker.
+     */
+    private fun createPageBlocking(anchorPageId: String?, before: Boolean): String {
+        if (!alive()) throw IllegalStateException("notebook not ready")
+        val outcome = CompletableDeferred<Result<String>>()
+        runPageOp {
+            outcome.complete(runCatching {
+                val id = session().insertPageAt(anchorPageId, before)
+                pagesChanged = true
+                id
+            })
         }
+        return runBlocking { withTimeout(CREATE_PAGE_TIMEOUT_MS) { outcome.await() } }.getOrThrow()
     }
 
     // ── The mutations ─────────────────────────────────────────────────────────
@@ -353,5 +395,7 @@ class LinkFlow(
         const val TAG = "LinkFlow"
         /** Outlives the Activity so `endPick` → unbind → revoke always completes. */
         val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        /** How long the binder thread waits on the page-op lock for a picker page insert (L3). */
+        const val CREATE_PAGE_TIMEOUT_MS = 10_000L
     }
 }

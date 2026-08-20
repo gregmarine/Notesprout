@@ -13,7 +13,7 @@
 > The **original** Notesprout implementation this arc draws on is `docs/links.md` at the monorepo
 > root — inspiration, not a spec; every deviation is recorded here.
 >
-> **Status: L0 ✅ (df2de82) · L1 ✅ (bc944bc) · L2 ✅ (a86214c) · L3 ⬜ · L4 ⬜ · L5 ⬜**
+> **Status: L0 ✅ (df2de82) · L1 ✅ (bc944bc) · L2 ✅ (a86214c) · L3 🧪 (built + device agents PASS ×3 — user checklist pending) · L4 ⬜ · L5 ⬜**
 
 ## Why
 
@@ -782,36 +782,141 @@ lasso selection, so all of this is yours):**
 ---
 
 ### Phase L3 — Creating targets in the picker (new page · new notebook · new folder)
-**Status:** ⬜ Not started
+**Status:** 🧪 Built + Claude device agents PASS ×3 (2026-08-20); user checklist pending
+
+**Claude-side device runs (one Sonnet agent per device, 2026-08-20): all 7 checks PASS on SNN,
+NA5C and MIP11** — packages installed + enabled (no BOOX re-disable through the run); **the
+library's own +Notebook flow works through the new caller gate** on all three (screen appears with
+the prefilled default — the NA5C/SNN folders' "Test N" scheme names prove the namer prefill path
+too — create + open + delete clean); **the NEW `am start` refusal of the exported
+`ACTION_LINK_NEW_NOTEBOOK_SCREEN`** holds on all three (no `callingPackage` → the screen never
+becomes resumed); the L2 picker `am start` refusal intact (`refused caller (none)`); the L0/L1/L2
+"Probe links" sequence exact on the L3 build (beginPick ok 141 ms SNN / 94 ms NA5C / 75 ms MIP11;
+one-shots 8–22 ms; `chromeOf [1,0,0]`; trail round trip; PROBE DONE); binds = unbinds
+(`dumpsys activity services` clean); page-load "… N links …" line + flip regression clean; crash
+buffers empty. The create flows themselves are lasso-gated (the picker only opens from Link/Edit),
+so they are the user checklist's.
 
 **Goal:** the original's create-in-picker parity: from the picker, a new page (this or the other
 notebook, before/after an anchor or appended), a new notebook, or a new folder can be created and
 immediately picked, without leaving the flow; the host validates everything.
 
-**Questions to resolve at phase start:**
-1. New page placement: anchor selected → ActionSheet "Insert before / Insert after"; none →
-   append; template inherited from the anchor (or last page; blank in an empty notebook) —
-   the original's exact rule (rec.) / always append?
-2. New notebook: name prompt only, created blank + unencrypted-scope under the global key like
-   the library's own create path, **no template section** (rec. — the template flow needs the
-   Templates extension UI; recorded under Deferred if declined) / route through the full
-   new-notebook screen?
-3. Name validation: exactly the library's rules incl. duplicate-sibling checks (rec.) — confirm.
-4. Do picker-created pages in the **current** notebook require the notebook screen to reload its
-   page list on return even on Cancel (the original's rule — rec. yes)?
+**Questions resolved at phase start (wizard, 2026-08-19):**
+1. **Anchor rule** (the original's exact rule): a page card selected → ActionSheet "Insert before /
+   Insert after"; nothing selected → append. Template inherited from the anchor (append → the last
+   page; a Paper notebook always has ≥ 1 page, so the "empty notebook" branch can't occur).
+2. **Full new-notebook screen** (user's call — beyond the recommendation): "New notebook" routes
+   through the host's real `NewNotebookActivity` (Template section included). Mechanics settled in
+   session: the picker can't launch a host screen, so `ILinkCatalog` gains two **appended** methods
+   (the arc-5 append-LAST recipe, after L2's `pathTo`) — `requestNewNotebook(parentFolderId)` (the
+   host launches its own screen, on top of the picker, in a host-internal **create-only** mode:
+   create, don't open; naming-scheme prefill resolved for the browsed folder like the library does)
+   and `takeCreatedNotebook(): CatalogEntry?` (the picker drains it on resume; null = cancelled).
+   No id ever rides an Intent; everything crosses through the gated catalog lens. The original
+   `createNotebook(parentFolderId, name)` AIDL slot stays `UnsupportedOperationException` forever,
+   documented as superseded by this answer.
+3. **Library rules exactly** for the picker's New-folder name dialog: charset `[a-zA-Z0-9_\-. ]`,
+   not `.`/`..`, non-empty, duplicate-sibling check — validated host-side in `createFolder`;
+   refusals are typed `IllegalArgumentException`, shown verbatim by the picker. (The library
+   dialog's naming-scheme field is a library nicety — absent in the picker, recorded.)
+4. **Reload on any result** (the original's rule): the notebook screen re-reads its page list from
+   the `.soil` on every picker return — OK or Cancel — recomputing `currentIndex` from the stable
+   current page id.
+
+**Design settled at phase start (the Q2 mechanics + consequences — build notes grow below):**
+- **The new-notebook round trip** (Q2): the picker launches the host's real `NewNotebookActivity`
+  itself via a new contract activity action `ACTION_LINK_NEW_NOTEBOOK_SCREEN` (+ `setPackage
+  (HOST_PACKAGE)` — the mirror of `ACTION_LINK_PICKER_SCREEN`), with an `ActivityResultLauncher`.
+  The screen is exported with a new host-side caller gate (`extension/ExtensionCallerCheck` — the
+  `HostCallerCheck.enforceActivity` mirror: `callingPackage` non-null + `SIGNATURE_MATCH`).
+  **Nothing rides the Intent in either direction:** before launching, the picker calls the appended
+  catalog method `prepareNewNotebook(parentFolderId)` — the host validates the folder, resolves the
+  naming-scheme default for it exactly like the library (`NamerClient.defaultName`, best-effort)
+  and parks `(folderId, defaultName)` in a host-process relay (`LinkCreateRelay`, cleared with the
+  showing's revoke); `NewNotebookActivity` in relay mode (detected by the action) reads the relay,
+  creates without opening (it never opened — the caller does), parks `(id, name)` back and returns
+  a bare `RESULT_OK`; the picker drains it through the appended `takeCreatedNotebook():
+  CatalogEntry?` (null = cancelled). Both methods are appended LAST after `pathTo` (the arc-5
+  recipe). `createNotebook(parentFolderId, name)` (AIDL slot 5) stays
+  `UnsupportedOperationException` forever — superseded by this answer, documented in the AIDL.
+- **`createPage` (slot 3) goes live**, two branches: the **current** notebook through the live
+  session (`LinkCatalogSource` gains a `createPage(anchorPageId?, before)` callback → `LinkFlow`
+  bridges the binder thread to the host's page-op lock with a `CompletableDeferred` → new
+  `NotebookSession.insertPageAt` — inserts + renumbers + mirrors pageCount **without navigating**,
+  `currentIndex` re-anchored by id); a **foreign** notebook by an open → insert → renumber →
+  index `setPageCount`/`touch` → seal-in-`finally` helper. Anchor `""` = append; template
+  inherited from the anchor / last page (Q1).
+- **`createFolder` (slot 4) goes live**: `NewNotebookActivity.validateName` + `MAX_NAME_CHARS` +
+  `nameTaken(parent, FOLDER)` → `IndexRepository.createFolder`; refusals are typed
+  `IllegalArgumentException` with the library's own user-honest texts (Q3).
+- **Undo consequence of a non-undoable page insert (recorded):** the notebook-level undo stack
+  holds `Page(Structural)` snapshots whose page-id lists predate a picker-created page — replaying
+  one would soft-delete the new page (`reconcile` makes the live set exactly `targetAlive`). So a
+  picker page-create in the **current** notebook **clears the undo stack** on picker return
+  (honest: structural truth changed outside the stack; creation is an explicit act). The link
+  created after it is recorded normally.
+- **Q4** lands as: the current-notebook insert mutates the live session directly, and on any picker
+  result `LinkFlow` (when its `pagesChanged` flag is set) clears the undo stack and refreshes the
+  page indicator + Contents availability.
+
+**Build notes (recorded during the phase; the Outcome finalises them):**
+- **Host half landed first (Fable inline), compiles + `:app`/`:extension-api` JVM green:** the two
+  appended AIDL methods + `ACTION_LINK_NEW_NOTEBOOK_SCREEN`; `ic_page_add` + `ic_new_notebook`
+  copied from the original app into `:paper-screen` (the L0 icon precedent — both already
+  `@color/inkBlack`); `ExtensionCallerCheck` + `LinkCreateRelay` (pure — 7 JVM tests, Sonnet agent);
+  `LinkCatalogBinder` create half (`createPage` live-vs-foreign split, `createFolder` with the
+  library's texts, `prepareNewNotebook` resolving the namer default on the binder thread — the
+  proxy precedent for the nested host→ext bind, `takeCreatedNotebook`; `revoke()` also clears the
+  relay); `NewNotebookActivity` relay mode + exported behind the caller gate (every launch — the
+  host itself passes trivially; a plain `startActivity` has no `callingPackage` and is refused);
+  `NotebookSession.insertPageAt` (no navigation, `currentIndex` re-anchored by id);
+  `LinkFlow.createPageBlocking` (`CompletableDeferred` bridge into `runPageOp`, 10 s timeout —
+  `runPageOp` silently drops ops while closing, and a dropped op must be an honest failure, not a
+  hung picker) + `pagesChanged` → undo clear + `onPagesChanged` (indicator + Contents refresh) on
+  any picker result; the debug-menu `LinkCatalogSource` call named its lambda (the new trailing
+  `createPage` param would have captured it).
+- The ext-links manifest gained a `<queries>` for the new action (the held bind already grants
+  interaction-based visibility; explicit is self-documenting).
+- **Edge accepted (recorded):** if the host process dies mid-showing and the user then taps "New
+  notebook", the cold host start bounces through `IndexGuard` (`NEW_TASK|CLEAR_TASK`) and tears the
+  task down — the same half-dead-showing family as the L2 `DeadObjectException` flag; L5 reviews
+  both together.
+- **Picker half (Opus agent), Fable-reviewed — no blocking findings:** `PickerModel.createButtons`
+  (pure; PickerModelTest 35 → 40, module 49) + the three flows in `LinkPickerActivity` (690 lines)
+  + the new `CreateDialogs` collaborator (the insert-position sheet + the name prompt — the one IME
+  in this extension, the `ObjectEditDialog` pattern verbatim; a refused name keeps the prompt and
+  the typed text; Create disarmed while the call is out, and the IME-Done path re-checks
+  `isClickable` because `performClick` fires even on a disarmed button). Good agent calls kept:
+  `createPage` bumps + checks `loadToken` (a mode switch mid-create would otherwise select the new
+  page id under the wrong destination kind); `takeCreatedNotebook` failures route through the
+  existing `failed(e)`; the three buttons are `ic_folder_plus` / `ic_new_notebook` / `ic_page_add`
+  left of OK, absent-never-disabled, with the extra Activity-level hide when the showing has no
+  current notebook.
+- **Flagged for L5 (agent findings, left as built):** the relay's `prepared` slot is deliberately
+  sticky (recreation must re-find it) and empties only on re-prepare/revoke; a mode switch during
+  `prepareNewNotebook`'s IO creates the notebook in the previously browsed folder without showing
+  it (benign — nothing invalid composes); a stale Edit-prefill anchor id passed to `createPage`
+  surfaces as the host's honest "unknown page" dialog (accepted, no pre-check).
+- **Root New notebook from the picker has no scheme prefill** — mirrors the library exactly (the
+  library resolves the namer only inside a folder); the timestamp default fills the name field.
 
 **Deliverables**
-1. `LinkCatalogBinder.createPage` / `createFolder` / `createNotebook` real: same code paths /
-   validation as the library (`IndexRepository`, the page-insert path over the target `.soil`,
-   current notebook via the live session + `writer.drain()`); refusals as typed
-   `IllegalArgumentException` messages.
-2. `LinkPickerActivity`: the mode-dependent create buttons (This notebook → New page; Notebook
-   browse → New folder + New notebook; drilled-in pages → New page), name dialogs (design-system
-   IME pattern — `:paper-screen` `Dialogs`), auto-select the created target per the original's
-   rules (notebook mode auto-picks; page mode drills in).
-3. `NotebookActivity`/`LinkFlow`: page-list reload on picker return (any result) preserving the
-   current page id.
-4. Not undoable (matches the original + the library) — recorded in `docs/links.md`.
+1. Contract: `ILinkCatalog` + `prepareNewNotebook` / `takeCreatedNotebook` (appended);
+   `ACTION_LINK_NEW_NOTEBOOK_SCREEN`; `createPage` / `createFolder` real per above,
+   `createNotebook` documented-superseded.
+2. Host: `LinkCatalogBinder` create half + `LinkCreateRelay` + `ExtensionCallerCheck` +
+   `NewNotebookActivity` relay mode (exported + intent-filter); `NotebookSession.insertPageAt` +
+   the foreign-insert helper; `LinkFlow` createPage bridge + `pagesChanged` → undo clear +
+   indicator/Contents refresh on return.
+3. `LinkPickerActivity`: the mode-dependent create buttons (This notebook → New page; Notebook
+   browse → New folder + New notebook; drilled-in pages → New page — glyphs `ic_page_add` /
+   `ic_folder_plus` / `ic_new_notebook`, the first + last copied from the original app, the L0
+   precedent), the New-folder name dialog (design-system IME pattern), the anchor ActionSheet
+   ("Insert before / Insert after" when a page card is selected, append otherwise — Q1),
+   auto-select the created target (page → selected; folder → navigate into it; notebook →
+   Notebook mode auto-picks / Page mode drills in).
+4. Not undoable (matches the original + the library) + the undo-stack-clear consequence —
+   recorded in `docs/links.md` (L5) and `docs/extensions.md`.
 
 **Tests**
 - JVM: validation refusal paths.
@@ -819,8 +924,42 @@ immediately picked, without leaving the flow; the host validates everything.
   inheritance), new folder + new notebook appear in the library afterwards with correct placement,
   duplicate/invalid names refused with honest messages, cancel-after-create keeps the created page
   (and the notebook screen shows the reloaded list).
-- **User device checklist** (~7 items incl. the IME dance on SNN — hardware-keyboard rule n/a,
-  but the Ratta IME quirks apply to the name dialogs).
+  *(Drivable-half correction, the L1/L2 trap again: every create flow sits behind the lasso-gated
+  picker, so the in-picker items above move to the user checklist. The device agents cover: install
+  + enabled, the library's own +Notebook regression — the screen gained the caller gate and must
+  still open for the host, prefilled default so no typing (SNN swallows `input text`) — the NEW
+  `am start` refusal of the exported `ACTION_LINK_NEW_NOTEBOOK_SCREEN` (no `callingPackage` →
+  finish; key L3 security check), the L2 picker `am start` refusal, the "Probe links" regression,
+  page-load/flip regression, binds = unbinds, crash buffers.)*
+- **User device checklist as issued (2026-08-20 — run on SNN, NA5C and MIP11; every create flow is
+  lasso-gated, so all of this is yours):**
+  1. Lasso ink → **Link** → "This notebook": a **New page** button sits in the top bar left of OK.
+     Tap it with **no page card chosen** → a page appends (the grid grows by one, "Page n"
+     numbering still true to position) and the new card comes back **selected**. OK → the link
+     lands on it.
+  2. Choose a page card first → **New page** → the sheet asks **Insert before / Insert after** →
+     pick one → the page lands on the right side of the anchor, numbering follows, new card
+     selected. Back in the notebook (even after **Cancel**): the pager count includes the created
+     page, flipping reaches it, its template matches the anchor's — and **undo does NOT remove it**
+     (creation is explicit; the undo history is fresh after a picker page-create).
+  3. **Notebook** mode → **New folder** → the name dialog (the picker's first IME — the Ratta IME
+     quirks apply on SNN: field visible above the keyboard, typing works). An invalid name (`..`)
+     and a duplicate sibling both → an honest dialog **with the prompt and your text still there**.
+     A valid name → the browse walks into the new folder.
+  4. **Notebook** mode → **New notebook** → the **real New-notebook screen** opens (Template
+     section with your templates; in a folder with a naming scheme the scheme name is prefilled) →
+     CREATE → back in the picker with the new notebook's card **selected in its folder** → OK →
+     link created. The notebook also shows in the library afterwards, right folder, right template.
+  5. **Notebook page** mode → drill into another notebook → **New page** there (before / after /
+     append) → the new page selectable → OK. Open that notebook afterwards: the inserted page is
+     there, in position, template inherited.
+  6. **Notebook page** mode → **New notebook** (while browsing, not drilled) → CREATE → the picker
+     drills straight into the fresh notebook's one-page grid → pick Page 1 → OK.
+  7. **Cancel paths**: Back out of the New-notebook screen → picker unchanged, nothing created.
+     Cancel the name dialog → nothing created. Cancel the whole picker after a New page → the page
+     stays, no link is created.
+  8. 60-second regression: the library's own +Folder / +Notebook / rename flows unchanged; a quick
+     L2 pass (link to existing targets, Edit prefill, Unlink, eraser-takes-a-link) unchanged.
 
 **Close-out:** as L0.
 

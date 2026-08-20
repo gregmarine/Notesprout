@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The link picker screen (arc 7 / L2). One layout, no width variants: the top bar carries only
-     Back · title · OK, and the two toggle rows sit on their own lines so the narrowest device
-     (MIP11, sw439dp) never pushes a control off the edge.
+<!-- The link picker screen (arc 7 / L2, create buttons L3). One layout, no width variants: the top
+     bar carries only Back · title · at most two create buttons · OK, and the two toggle rows sit on
+     their own lines so the narrowest device (MIP11, sw439dp) never pushes a control off the edge.
 
      Rows: top bar · mode toggle (This notebook / Notebook / Notebook page) · chrome toggle
      (Underline / None) · browse header (location + Up — GONE in "This notebook") · the paged card
@@ -37,6 +37,30 @@
             android:textAppearance="@style/TextAppearance.Notesprout.TitleMedium"
             android:singleLine="true"
             android:ellipsize="end" />
+
+        <!-- The create buttons (arc 7 / L3), LEFT of OK — the original app's placement. Which of the
+             three shows is mode + drill dependent (PickerModel.createButtons); never disabled, only
+             absent (a disabled control is invisible on e-ink). -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnNewFolder"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_folder_plus"
+            android:contentDescription="@string/links_new_folder"
+            android:visibility="gone" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnNewNotebook"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_new_notebook"
+            android:contentDescription="@string/links_new_notebook"
+            android:visibility="gone" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnNewPage"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_page_add"
+            android:contentDescription="@string/links_new_page"
+            android:visibility="gone" />
 
         <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnOk"

@@ -34,7 +34,10 @@ interface ILinkCatalog {
     /** Create a folder named [name] under [parentFolderId] ("" = root) and return its id. (L3) */
     String createFolder(String parentFolderId, String name);
 
-    /** Create a blank notebook named [name] under [parentFolderId] ("" = root) and return its id. (L3) */
+    /** SUPERSEDED (L3 wizard Q2): notebook creation routes through the host's own New-notebook
+     *  screen instead — [prepareNewNotebook] + ACTION_LINK_NEW_NOTEBOOK_SCREEN + [takeCreatedNotebook].
+     *  This slot stays forever (transaction order is fixed) and always throws
+     *  UnsupportedOperationException. */
     String createNotebook(String parentFolderId, String name);
 
     /** Where notebook [notebookId] lives: its alive folder chain root-first (kind CATALOG_FOLDER),
@@ -43,4 +46,17 @@ interface ILinkCatalog {
      *  picker falls back to the library root instead of dying on a stale target. (Appended at L2 —
      *  the arc-5 append-LAST recipe: never reorder, never insert above.) */
     List<CatalogEntry> pathTo(String notebookId);
+
+    /** Arm the host's own New-notebook screen for [parentFolderId] ("" = root): the host validates
+     *  the folder is alive, resolves the naming-scheme default name for it exactly like its own
+     *  library (best-effort), and parks both for the screen the picker is about to launch with
+     *  ACTION_LINK_NEW_NOTEBOOK_SCREEN — so nothing rides that Intent in either direction. Throws
+     *  IllegalArgumentException for a dead/unknown folder. (Appended at L3 — the arc-5 append-LAST
+     *  recipe.) */
+    void prepareNewNotebook(String parentFolderId);
+
+    /** Drain what the armed New-notebook screen created — the notebook as a CATALOG_NOTEBOOK entry
+     *  (id + name), or null when it was cancelled (or nothing was armed). Read-and-clear; the slot
+     *  also dies with the showing's revoke. (Appended at L3.) */
+    CatalogEntry takeCreatedNotebook();
 }

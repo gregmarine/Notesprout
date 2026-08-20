@@ -33,6 +33,18 @@
     <string name="cd_links_next_page">Next page</string>
     <string name="cd_links_last_page">Last page</string>
 
+    <!-- Creating from inside the picker (arc 7 / L3). The three names double as the buttons'
+         content descriptions / long-press hints; "New folder" is also the name prompt's title.
+         (The OK button of a problem dialog comes from :paper-screen's shared `ok`.) -->
+    <string name="links_new_page">New page</string>
+    <string name="links_new_folder">New folder</string>
+    <string name="links_new_notebook">New notebook</string>
+    <string name="links_folder_name_hint">Folder name</string>
+    <string name="links_create">Create</string>
+    <string name="links_cancel">Cancel</string>
+    <string name="links_insert_before">Insert before</string>
+    <string name="links_insert_after">Insert after</string>
+
     <!-- Problems. -->
     <string name="links_pick_none">Choose a target first.</string>
     <string name="links_catalog_failed">The library could not be read.</string>

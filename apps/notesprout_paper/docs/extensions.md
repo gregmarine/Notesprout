@@ -34,7 +34,9 @@
 > (§"LinkProvider (contract)"): the core owns link *structure* (the `.soil` rows, wrap / render /
 > gestures / navigation / undo — L1/L4) and `NSE · Links` owns link *meaning* (an opaque payload it
 > resolves and describes); its picker is the second tier-2 screen (L2), and **`ILinkCatalog`** is the
-> first **host-implemented** callback binder — a per-showing, uid-gated lens over the library.
+> first **host-implemented** callback binder — a per-showing, uid-gated lens over the library, whose
+> create half (L3) also carries the first **host-owned screen an extension launches**
+> (`ACTION_LINK_NEW_NOTEBOOK_SCREEN`, behind `ExtensionCallerCheck`).
 
 Notesprout's original design baked too many features into the core. Paper's core is **paper with
 strokes** — a library of notebooks, each a stack of pages you write on. Everything else is added by
@@ -371,16 +373,31 @@ interface ILinkCatalog {
     List<CatalogEntry> listFolder(String folderId);
     /** The page rows of [notebookId] in page order — blank labels allowed ("Page n" from position). */
     List<CatalogEntry> listPages(String notebookId);
-    // The create half (L3) — UnsupportedOperationException until then; the host validates exactly
-    // as its own library UI would.
+    // The create half (live since L3) — the host validates exactly as its own library UI would;
+    // a refusal is an IllegalArgumentException whose message the picker shows verbatim.
+    /** A blank page in [notebookId] — before/after [anchorPageId], or appended when it is "";
+     *  template + geometry inherited from the anchor (or the last page). → the new page id. */
     String createPage(String notebookId, String anchorPageId, boolean before);
+    /** A folder named [name] under [parentFolderId] ("" = root) — the library's name rules +
+     *  duplicate-sibling check. → the new folder id. */
     String createFolder(String parentFolderId, String name);
+    /** SUPERSEDED (L3 wizard Q2 — notebook creation routes through the host's own New-notebook
+     *  screen: prepareNewNotebook + ACTION_LINK_NEW_NOTEBOOK_SCREEN + takeCreatedNotebook). The
+     *  slot stays forever (transaction order is fixed); always UnsupportedOperationException. */
     String createNotebook(String parentFolderId, String name);
     /** Where notebook [notebookId] lives: its alive folder chain root-first (CATALOG_FOLDER rows),
      *  then the notebook itself (CATALOG_NOTEBOOK, label = name) LAST. Empty for an unknown / dead /
      *  non-notebook id — the Edit prefill is best-effort. APPENDED at L2 (the arc-5 append-LAST
      *  recipe — a DEST_NOTEBOOK target inside a folder was invisible at the root); never reorder. */
     List<CatalogEntry> pathTo(String notebookId);
+    /** Arm the host's own New-notebook screen for [parentFolderId] ("" = root): the host validates
+     *  the folder, resolves the naming-scheme default like its own library (best-effort) and parks
+     *  both for the screen the picker launches next with ACTION_LINK_NEW_NOTEBOOK_SCREEN — nothing
+     *  rides that Intent in either direction. APPENDED at L3. */
+    void prepareNewNotebook(String parentFolderId);
+    /** Drain what the armed screen created (CATALOG_NOTEBOOK, id + name), or null = cancelled.
+     *  Read-and-clear; dies with the showing's revoke. APPENDED at L3. */
+    CatalogEntry takeCreatedNotebook();
 }
 
 // ILinkProvider.aidl — the LINK_PROVIDER point (arc 7 / L0). The core owns link STRUCTURE (rows,
@@ -1233,10 +1250,30 @@ unlink; only follows (an honest dialog) and Link / Edit need it.
   `pathTo(notebookId)` (appended at L2, the arc-5 append-LAST recipe) answers a notebook's alive
   folder chain root-first plus the notebook itself last — the Edit prefill's way of opening the
   browse where a `DEST_NOTEBOOK` target actually lives; empty for an unknown/dead id (prefill is
-  best-effort, never an error). The create
-  methods (`createPage` / `createFolder` / `createNotebook`) are `UnsupportedOperationException`
-  until L3, where they route through exactly the validation the library's own UI enforces
-  (refusals = typed `IllegalArgumentException`, the message user-honest, shown by the picker).
+  best-effort, never an error).
+  **The create half is live since L3** and routes through exactly the validation the library's own
+  UI enforces (refusals = typed `IllegalArgumentException`, the message user-honest, shown by the
+  picker): `createPage(notebookId, anchorPageId, before)` inserts a blank page — before/after the
+  anchor, appended when it is `""`, template + geometry inherited from the anchor or the last page
+  (L3 Q1) — into the **current** notebook through the live session (a `LinkCatalogSource.createPage`
+  callback bridges the binder thread to the screen's page-op lock; the origin's open `.soil` is
+  never touched from a second connection; **not undoable** — the host clears the notebook's undo
+  stack on the picker's return, older structural snapshots predate the new page) or into a
+  **foreign** notebook by an open → insert → renumber → index `pageCount` mirror → seal in
+  `finally`. `createFolder(parentFolderId, name)` applies the library's name rules +
+  duplicate-sibling check (L3 Q3) and returns the new folder's id. **Notebook creation is NOT a
+  catalog write** (L3 Q2 — the full new-notebook screen, templates included):
+  `prepareNewNotebook(parentFolderId)` validates the folder, resolves the naming-scheme default
+  exactly like the library (`NamerClient.defaultName`, best-effort) and parks both in the
+  host-process `LinkCreateRelay`; the picker then launches the **host's own `NewNotebookActivity`**
+  via `ACTION_LINK_NEW_NOTEBOOK_SCREEN` + `setPackage(HOST_PACKAGE)` for a result — the one
+  host-owned screen an extension launches, exported behind `ExtensionCallerCheck` (the
+  `HostCallerCheck.enforceActivity` mirror: `callingPackage` non-null + `SIGNATURE_MATCH`; the
+  screen creates without opening, its normal contract) — and drains the created notebook through
+  `takeCreatedNotebook(): CatalogEntry?` (read-and-clear; the showing's revoke also clears the
+  relay). **Nothing rides that Intent in either direction.** `createNotebook` (slot 5) is
+  superseded and throws forever. Picker-created pages, folders and notebooks are **not undoable**
+  (the library's own rule); the link itself stays undoable.
   Catalog calls run ext→host as nested Binder transactions; the host serves them with `runBlocking`
   off Main and sets no timeout on its own catalog work.
 - **Caps + timeouts (host-enforced):** bind ≤ 3 s; `beginPick` / `takeResult` / `endPick` /
@@ -1262,7 +1299,7 @@ drawables in `:paper-screen` and `IconCatalog`). The debug ⋯ **"Probe links"**
 exercises the whole point: the pick showing (held bind + a live catalog callback — the extension
 logs the root count via `listFolder("")` inside `beginPick`, debug builds only) → `takeResult`
 (null) → `endPick`, then `resolve` + `chromeOf` of fixed payloads, then a trail push / pop / clear
-round trip. Link rows, the real picker, create-in-picker and follow + trail wiring are L1–L4;
+round trip. Link rows landed in L1, the real picker in L2, create-in-picker in L3; follow + trail wiring is L4;
 boundary-audit rows 33+ and rules 28–31 land in L5.
 
 ## The Links extension (`:ext-links` — arc 7; L2 draft, finalised in L5)
@@ -1296,6 +1333,17 @@ was restarted mid-showing):
 - **OK** composes the payload with `LinkPayload.encode`, parks `LinkChoice(payload, chrome)` in
   `PickSession.result`, returns `RESULT_LINK_PICKED`; anything else = cancelled. The payload never
   rides the Intent.
+- **Create-in-picker (L3):** mode-dependent buttons in the top bar left of OK
+  (`PickerModel.createButtons` — pure, JVM-tested): This notebook → **New page** (`ic_page_add`);
+  the Notebook/Notebook-page folder browse → **New folder** (`ic_folder_plus`) + **New notebook**
+  (`ic_new_notebook`); a drilled-in page grid → **New page**. New page: a selected page card
+  anchors an ActionSheet "Insert before / Insert after", nothing selected appends (L3 Q1) —
+  `createPage` → the new page auto-selects (pager jumps to it). New folder: a name dialog
+  (design-system IME pattern) → `createFolder` → a refusal keeps the dialog up with the host's
+  message, success navigates into the new folder. New notebook: `prepareNewNotebook` →
+  `ACTION_LINK_NEW_NOTEBOOK_SCREEN` for a result (no extras) → `takeCreatedNotebook` — Notebook
+  mode auto-selects the created notebook, Notebook-page mode drills into its (one-page) grid.
+  Nothing created in the picker is undoable; a refusal is always a `Dialogs.problem`.
 
 ### LinkProvider — host behaviour (L2 draft, finalised in L5)
 
@@ -1324,6 +1372,18 @@ precedent):
 - The caller's `onDestroy` funnels an open client to `LinkFlow.close()` on a scope that outlives
   the screen. `LinkEdited` replays as `updatePayload` either way + page reload — the chrome
   re-derives from the extension at the reload.
+- **Create-in-picker, host side (L3):** the current-notebook `createPage` reaches the live session
+  through `LinkFlow.createPageBlocking` — a `CompletableDeferred` bridge from the binder thread
+  into the host's page-op lock (`NotebookSession.insertPageAt`: insert + renumber + `pageCount`
+  mirror **without navigating**, `currentIndex` re-anchored by id; a 10 s timeout turns a dropped
+  or wedged op into an honest `IllegalStateException` instead of hanging the picker). The flow's
+  `pagesChanged` flag makes the picker's return — **any** result (L3 Q4) — clear the undo stack
+  (older `Structural` snapshots predate the new page; replaying one would soft-delete it) and
+  refresh the page indicator + Contents availability before a drained choice is applied.
+  `NewNotebookActivity` is exported since L3 behind `ExtensionCallerCheck` (every launch must come
+  for-a-result from a signature-matched caller; the host itself passes trivially) and, in relay
+  mode (`ACTION_LINK_NEW_NOTEBOOK_SCREEN`), reads folder + default name from `LinkCreateRelay`,
+  creates without opening, parks the created (id, name) back and returns a bare `RESULT_OK`.
 
 ## Host behaviour (`:app`, package `extension/`)
 

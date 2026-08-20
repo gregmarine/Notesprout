@@ -6,7 +6,8 @@ import com.symmetricalpalmtree.notesprout.extension.ExtensionContract
  * The link picker's decisions, with no Android in them (arc 7 / L2) — everything
  * [LinkPickerActivity] has to be *right* about, made JVM-testable: which mode a mode is, what an
  * Edit's payload pre-selects, which catalog rows a browse grid may show, how a foreign notebook's
- * unlabelled page is named, and what OK composes (or refuses to).
+ * unlabelled page is named, which create buttons a browse position offers (L3), and what OK composes
+ * (or refuses to).
  *
  * The Activity keeps only the wiring: catalog calls, view inflation, dialogs. Nothing here talks to
  * the host, and nothing here knows a `CatalogEntry` — rows arrive mapped into [Entry] (the
@@ -131,6 +132,27 @@ object PickerModel {
      */
     fun afterModeSwitch(mode: Mode, chrome: Int): Prefill =
         Prefill(mode = mode, chrome = chrome, selectedId = null, drillNotebookId = null)
+
+    /** Which of the top bar's three create buttons this browse position shows (arc 7 / L3). */
+    data class CreateButtons(val newPage: Boolean, val newFolder: Boolean, val newNotebook: Boolean)
+
+    /**
+     * What the user may create from where they are standing (L3). "This notebook" only ever shows a
+     * page in the notebook the link lives in; the two browse modes show the library's own pair
+     * (folder + notebook) — and "Notebook page", once it has drilled into a notebook, is standing in
+     * a page grid, so it offers a page instead.
+     *
+     * The buttons are **absent**, never disabled — a disabled control is invisible on e-ink. The one
+     * extra hide the screen adds on top of this is Activity wiring, not a decision: a showing with no
+     * current notebook has no notebook to add a page to.
+     */
+    fun createButtons(mode: Mode, drilled: Boolean): CreateButtons = when (mode) {
+        Mode.THIS_NOTEBOOK -> CreateButtons(newPage = true, newFolder = false, newNotebook = false)
+        Mode.NOTEBOOK -> CreateButtons(newPage = false, newFolder = true, newNotebook = true)
+        Mode.NOTEBOOK_PAGE ->
+            if (drilled) CreateButtons(newPage = true, newFolder = false, newNotebook = false)
+            else CreateButtons(newPage = false, newFolder = true, newNotebook = true)
+    }
 
     /** A `pathTo` reply split for the browse state: the folder stack to seed + the notebook's name. */
     data class Path(val folders: List<Pair<String, String>>, val notebookId: String, val notebookName: String)

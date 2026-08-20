@@ -152,6 +152,50 @@ class NotebookSession(
     }
 
     /**
+     * Insert a blank page relative to [anchorPageId] — before/after it, or appended after the last
+     * page when the anchor is null — inheriting the anchor's (or last page's) geometry + template,
+     * **without navigating**: the link picker's create path (arc 7 / L3) runs while the notebook
+     * screen is covered, so the current page must stay the current page ([currentIndex] is
+     * re-anchored by id). Deliberately **not undoable** (the L3 rule — the caller clears the undo
+     * stack instead: older `Structural` snapshots predate the new page and replaying one would
+     * soft-delete it). Returns the new page id; `IllegalArgumentException` for an unknown anchor.
+     */
+    suspend fun insertPageAt(anchorPageId: String?, before: Boolean): String = withContext(Dispatchers.IO) {
+        writer.drain()
+        val currentId = currentPage.id
+        val anchorIndex: Int
+        if (anchorPageId == null) {
+            anchorIndex = pages.lastIndex
+        } else {
+            anchorIndex = pages.indexOfFirst { it.id == anchorPageId }
+            require(anchorIndex >= 0) { "unknown page" }
+        }
+        val anchor = pages[anchorIndex]
+        val pos = when {
+            anchorPageId == null -> pages.size
+            before -> anchorIndex
+            else -> anchorIndex + 1
+        }
+        val now = System.currentTimeMillis()
+        val newId = java.util.UUID.randomUUID().toString()
+        val newRow = SoilObjectEntity(
+            id = newId, parentId = notebookId, type = SoilSchema.TYPE_PAGE, order = pos,
+            createdAt = now, updatedAt = now,
+            refId = anchor.templateId, width = anchor.width.toFloat(), height = anchor.height.toFloat(),
+        )
+        val newPages = pages.toMutableList().apply { add(pos, newRow.toPageRef(pos)) }
+        db.withTransaction {
+            db.dao().upsert(newRow)
+            renumber(newPages, now)
+        }
+        pages = newPages.reindexed()
+        currentIndex = pages.indexOfFirst { it.id == currentId }.coerceAtLeast(0)
+        mirror(now)
+        Slog.d(TAG) { "insertPageAt: page ${pos + 1} of ${pages.size} (anchored=${anchorPageId != null}, before=$before)" }
+        newId
+    }
+
+    /**
      * Soft-delete the current page (with its strokes and objects) and navigate to the previous page.
      * Deleting the only page creates a fresh blank in its place so a notebook always has ≥ 1 page.
      */

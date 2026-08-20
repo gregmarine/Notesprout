@@ -170,6 +170,12 @@ class NotebookActivity : AppCompatActivity() {
             undo, ::runPageOp, { refreshToPage(session.currentPage.id) }, ::whenPenIdle,
             notifyContentChanged = { paper.notifyContentChanged() },
             providers = { providers }, releaseRender = { paper.releaseRender() },
+            onPagesChanged = {   // a picker-created page in this notebook (arc 7 / L3)
+                if (opened && !closing) {
+                    setPageIndicator(session.currentIndex + 1, session.pages.size)
+                    contentsFlow.refresh()
+                }
+            },
         )
         pasteFlow = PasteFlow(
             paper, { opened && !closing }, { session }, { liveStrokes }, undo,
@@ -226,7 +232,7 @@ class NotebookActivity : AppCompatActivity() {
             else RecognizeContext(paper.getStrokes(), session.currentPage.width.toFloat(), session.currentPage.height.toFloat())
         }, linkCatalog = {
             if (!opened) null
-            else LinkCatalogSource(session.notebookId) { if (opened) session.pages.map { it.id to "" } else null }
+            else LinkCatalogSource(session.notebookId, currentPages = { if (opened) session.pages.map { it.id to "" } else null })
         }, linkSelection = {
             val sel = if (opened) currentSelection else null
             if (sel == null || sel.contentIds.any { it in liveLinks }) null

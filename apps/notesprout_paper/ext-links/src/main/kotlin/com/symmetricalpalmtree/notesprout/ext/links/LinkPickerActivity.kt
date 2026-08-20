@@ -1,6 +1,8 @@
 package com.symmetricalpalmtree.notesprout.ext.links
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -8,6 +10,7 @@ import android.widget.FrameLayout
 import android.widget.GridLayout
 import android.widget.ImageView
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatButton
 import androidx.appcompat.widget.TooltipCompat
@@ -40,6 +43,13 @@ import kotlinx.coroutines.withContext
  * **The notebook the link lives in is hidden from both browse modes** — a link to its own notebook
  * is a no-op trap — and there is no search field (L2 Q3: the picker stays IME-free until L3).
  *
+ * **Creating from inside the picker** (L3): the top bar carries the mode's own create buttons left of
+ * OK — New page in "This notebook" and inside a drilled notebook, New folder + New notebook while
+ * browsing the library ([PickerModel.createButtons]). A page lands before or after the chosen card
+ * (or appended when nothing is chosen) and comes back selected; a folder is entered as soon as it
+ * exists; a notebook is made by the **host's own New-notebook screen**, armed through the catalog so
+ * nothing rides that Intent in either direction.
+ *
  * Everything on screen comes from [PickSession] — the store/catalog binders the host lent for this
  * showing (rule 25). Every catalog call is a blocking Binder call and runs on IO with a "Loading…"
  * in the grid area; a revoked catalog (the showing is over) finishes the screen, any other failure
@@ -71,6 +81,20 @@ class LinkPickerActivity : AppCompatActivity() {
     private var entries: List<PickerModel.Entry> = emptyList()
     private var showingPages = false
     private var loading = false
+
+    /** One create call at a time (L3) — a second tap on e-ink is a second row, not a no-op. */
+    private var creating = false
+
+    /**
+     * The host's New-notebook screen, launched for a result (L3). Registered as a field so it exists
+     * before `onCreate` returns, the only time `registerForActivityResult` is legal; the Intent it
+     * launches carries nothing — the catalog armed the screen and holds what it made.
+     */
+    private val newNotebookLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            // Any result code: the host parks a created notebook, or nothing, and we drain either way.
+            takeCreatedNotebook()
+        }
 
     /** Bumped by every [load]; a reply from an older token is a navigation the user already left. */
     private var loadToken = 0
@@ -191,9 +215,14 @@ class LinkPickerActivity : AppCompatActivity() {
         binding.btnNext.setOnClickListener { goToPage(pageIndex + 1) }
         binding.btnLast.setOnClickListener { goToPage(pageCount - 1) }
 
+        binding.btnNewPage.setOnClickListener { onNewPage() }
+        binding.btnNewFolder.setOnClickListener { onNewFolder() }
+        binding.btnNewNotebook.setOnClickListener { onNewNotebook() }
+
         listOf(
             binding.btnBack, binding.btnUp,
             binding.btnFirst, binding.btnPrev, binding.btnNext, binding.btnLast,
+            binding.btnNewPage, binding.btnNewFolder, binding.btnNewNotebook,
         ).forEach { TooltipCompat.setTooltipText(it, it.contentDescription) }
     }
 
@@ -281,6 +310,8 @@ class LinkPickerActivity : AppCompatActivity() {
         val ownNotebook = currentNotebookId
         loading = true
         renderBrowseBar()
+        // Drill and folder depth both change through here, and both change what may be created.
+        renderCreateButtons()
         renderGrid()
 
         lifecycleScope.launch {
@@ -331,6 +362,153 @@ class LinkPickerActivity : AppCompatActivity() {
         renderGrid()
     }
 
+    // ── Creating (L3) ────────────────────────────────────────────────────────
+
+    /**
+     * New page. The notebook is whichever one the grid is showing pages of; a chosen page card makes
+     * the insert positional (the sheet asks before / after), otherwise the page is appended. The new
+     * page comes back selected — [accept] already opens the grid on the page holding the selection.
+     */
+    private fun onNewPage() {
+        if (creating) return
+        val notebook = drillNotebookId ?: currentNotebookId
+        if (notebook.isNullOrBlank()) return
+        val anchor = selectedId?.takeIf { showingPages && it.isNotBlank() }
+        if (anchor == null) {
+            createPage(notebook, anchorPageId = "", before = false)
+            return
+        }
+        CreateDialogs.insertPosition(this) { before -> createPage(notebook, anchor, before) }
+    }
+
+    private fun createPage(notebookId: String, anchorPageId: String, before: Boolean) {
+        val lens = catalog ?: return
+        if (creating) return
+        creating = true
+        loading = true
+        // A mode switch mid-create has already started its own load and thrown the target away —
+        // the page is still made, but selecting it would be a page id under the wrong destination.
+        val token = ++loadToken
+        renderGrid()
+        lifecycleScope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching { lens.createPage(notebookId, anchorPageId, before) }
+            }
+            creating = false
+            if (isFinishing || isDestroyed || token != loadToken) return@launch
+            loading = false
+            outcome
+                .onSuccess { id ->
+                    Slog.d(TAG) { "created page (anchored=${anchorPageId.isNotBlank()}, before=$before)" }
+                    selectedId = id
+                    load()
+                }
+                .onFailure { failed(it) }
+        }
+    }
+
+    /**
+     * New folder, in the folder the browse is standing in. A refusal keeps the prompt — and the text
+     * the user typed — on screen behind the problem dialog; only success closes it, and then the
+     * browse walks straight into the folder that now exists.
+     */
+    private fun onNewFolder() {
+        if (creating) return
+        CreateDialogs.folderName(this) { name, prompt -> createFolder(name, prompt) }
+    }
+
+    private fun createFolder(name: String, prompt: CreateDialogs.NamePrompt) {
+        val lens = catalog ?: return
+        if (creating) return
+        creating = true
+        prompt.busy(true)
+        val parent = folderStack.lastOrNull()?.first ?: ""
+        lifecycleScope.launch {
+            val outcome = withContext(Dispatchers.IO) { runCatching { lens.createFolder(parent, name) } }
+            creating = false
+            if (isFinishing || isDestroyed) return@launch
+            prompt.busy(false)
+            outcome
+                .onSuccess { id ->
+                    Slog.d(TAG) { "created folder (depth=${folderStack.size + 1})" }
+                    prompt.close()
+                    folderStack.add(id to name)
+                    pageIndex = 0
+                    load()
+                }
+                .onFailure { failed(it) }
+        }
+    }
+
+    /**
+     * New notebook — the host's own screen, not ours (L3 wizard Q2). `prepareNewNotebook` arms it
+     * with the browsed folder and the naming scheme's default name; the launch carries no extras;
+     * the result is drained back through the catalog. A missing or refused screen is the generic
+     * failure — the host is the only package that can answer that action.
+     */
+    private fun onNewNotebook() {
+        val lens = catalog ?: return
+        if (creating) return
+        creating = true
+        val parent = folderStack.lastOrNull()?.first ?: ""
+        lifecycleScope.launch {
+            val outcome = withContext(Dispatchers.IO) { runCatching { lens.prepareNewNotebook(parent) } }
+            creating = false
+            if (isFinishing || isDestroyed) return@launch
+            outcome
+                .onSuccess { launchNewNotebook() }
+                .onFailure { failed(it) }
+        }
+    }
+
+    private fun launchNewNotebook() {
+        val intent = Intent(ExtensionContract.ACTION_LINK_NEW_NOTEBOOK_SCREEN)
+            .setPackage(BuildConfig.HOST_PACKAGE)
+        try {
+            newNotebookLauncher.launch(intent)
+        } catch (e: ActivityNotFoundException) {
+            Slog.d(TAG) { "new-notebook screen: ${e.javaClass.simpleName}" }
+            Dialogs.problem(this, binding.title.text, getString(R.string.links_catalog_failed))
+        } catch (e: SecurityException) {
+            Slog.d(TAG) { "new-notebook screen: ${e.javaClass.simpleName}" }
+            Dialogs.problem(this, binding.title.text, getString(R.string.links_catalog_failed))
+        }
+    }
+
+    /**
+     * What the host's screen made, or null when the user backed out of it. "Notebook" selects the new
+     * card where it now sits in the browse; "Notebook page" drills into it — a fresh notebook has one
+     * page, so the pick is one tap away.
+     */
+    private fun takeCreatedNotebook() {
+        val lens = catalog ?: return
+        lifecycleScope.launch {
+            val outcome = withContext(Dispatchers.IO) { runCatching { lens.takeCreatedNotebook() } }
+            if (isFinishing || isDestroyed) return@launch
+            outcome
+                .onSuccess { entry ->
+                    if (entry == null) {
+                        Slog.d(TAG) { "new notebook: cancelled" }
+                        return@onSuccess
+                    }
+                    Slog.d(TAG) { "new notebook: created (mode=$mode)" }
+                    when (mode) {
+                        PickerModel.Mode.NOTEBOOK -> selectedId = entry.id
+                        PickerModel.Mode.NOTEBOOK_PAGE -> {
+                            drillNotebookId = entry.id
+                            drillNotebookName = entry.label
+                            selectedId = null
+                        }
+                        // The button does not exist in "This notebook" — nothing to land.
+                        else -> return@onSuccess
+                    }
+                    pageIndex = 0
+                    load()
+                }
+                .onFailure { failed(it) }
+        }
+    }
+
     // ── OK ───────────────────────────────────────────────────────────────────
 
     private fun confirm() {
@@ -369,6 +547,20 @@ class LinkPickerActivity : AppCompatActivity() {
         toggle(binding.btnModeNotebook, mode == PickerModel.Mode.NOTEBOOK)
         toggle(binding.btnModePage, mode == PickerModel.Mode.NOTEBOOK_PAGE)
         renderBrowseBar()
+        renderCreateButtons()
+    }
+
+    /**
+     * The mode's create buttons (L3). The decision is [PickerModel.createButtons]; the one thing on
+     * top of it is the showing's own shape — a link being made outside a notebook (no
+     * `currentNotebookId`) has nowhere to put a page, so "This notebook" shows nothing at all.
+     */
+    private fun renderCreateButtons() {
+        val show = PickerModel.createButtons(mode, drillNotebookId != null)
+        val page = show.newPage && (drillNotebookId != null || !currentNotebookId.isNullOrBlank())
+        binding.btnNewPage.visibility = if (page) View.VISIBLE else View.GONE
+        binding.btnNewFolder.visibility = if (show.newFolder) View.VISIBLE else View.GONE
+        binding.btnNewNotebook.visibility = if (show.newNotebook) View.VISIBLE else View.GONE
     }
 
     private fun renderChrome() {

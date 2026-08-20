@@ -72,11 +72,19 @@
             android:exported="false"
             android:screenOrientation="portrait" />
 
+        <!-- Exported since arc 7 / L3: the link picker launches it for a result via
+             ACTION_LINK_NEW_NOTEBOOK_SCREEN; ExtensionCallerCheck refuses every caller that is not
+             signature-matched and launching for a result (a plain start has no callingPackage). -->
         <activity
             android:name=".library.NewNotebookActivity"
-            android:exported="false"
+            android:exported="true"
             android:screenOrientation="portrait"
-            android:windowSoftInputMode="adjustResize" />
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="com.symmetricalpalmtree.notesprout.extension.LINK_NEW_NOTEBOOK_SCREEN" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
 
         <activity
             android:name=".library.FolderPickerActivity"

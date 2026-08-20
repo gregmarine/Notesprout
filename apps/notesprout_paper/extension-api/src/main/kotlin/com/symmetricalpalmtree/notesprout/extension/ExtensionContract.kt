@@ -63,6 +63,15 @@ object ExtensionContract {
     const val ACTION_LINK_PICKER_SCREEN: String =
         "com.symmetricalpalmtree.notesprout.extension.LINK_PICKER_SCREEN"
 
+    /** Intent action the HOST's own New-notebook screen declares (arc 7 / L3 — the one host-owned
+     *  screen an extension launches): the picker resolves it with `setPackage(HOST_PACKAGE)` and
+     *  launches it for a result after arming it with `ILinkCatalog.prepareNewNotebook`. The screen
+     *  checks its caller's signature; **no extra rides this Intent in either direction** — the
+     *  folder + default name are parked by `prepareNewNotebook`, the created notebook is drained
+     *  through `ILinkCatalog.takeCreatedNotebook`. */
+    const val ACTION_LINK_NEW_NOTEBOOK_SCREEN: String =
+        "com.symmetricalpalmtree.notesprout.extension.LINK_NEW_NOTEBOOK_SCREEN"
+
     /** `<meta-data>` name (on the `<service>`) carrying the extension's API version. */
     const val META_API_VERSION: String =
         "com.symmetricalpalmtree.notesprout.extension.API_VERSION"

@@ -11,7 +11,8 @@ import org.junit.Test
 /**
  * [PickerModel] — every decision the picker screen makes, without a screen: mode ↔ destination-kind
  * mapping, the Edit prefill, the hide-the-current-notebook filter, the "Page n" fallback, what OK
- * composes (and refuses to), and the selection-clearing mode switch.
+ * composes (and refuses to), the selection-clearing mode switch, and which create buttons a browse
+ * position offers.
  */
 class PickerModelTest {
 
@@ -289,6 +290,45 @@ class PickerModelTest {
     fun aClearedSelectionMakesOkRefuse() {
         val after = PickerModel.afterModeSwitch(PickerModel.Mode.NOTEBOOK, ExtensionContract.LINK_CHROME_UNDERLINE)
         assertNull(PickerModel.compose(after.mode, after.chrome, after.selectedId, after.drillNotebookId))
+    }
+
+    // ── Create buttons (L3) ──────────────────────────────────────────────────
+
+    @Test
+    fun thisNotebookOffersOnlyANewPage() {
+        for (drilled in booleanArrayOf(false, true)) {
+            val b = PickerModel.createButtons(PickerModel.Mode.THIS_NOTEBOOK, drilled)
+            assertEquals(PickerModel.CreateButtons(newPage = true, newFolder = false, newNotebook = false), b)
+        }
+    }
+
+    @Test
+    fun notebookOffersTheLibrarysOwnPair() {
+        val b = PickerModel.createButtons(PickerModel.Mode.NOTEBOOK, drilled = false)
+        assertEquals(PickerModel.CreateButtons(newPage = false, newFolder = true, newNotebook = true), b)
+    }
+
+    @Test
+    fun notebookPageOffersTheLibrarysPairWhileBrowsing() {
+        val b = PickerModel.createButtons(PickerModel.Mode.NOTEBOOK_PAGE, drilled = false)
+        assertEquals(PickerModel.CreateButtons(newPage = false, newFolder = true, newNotebook = true), b)
+    }
+
+    @Test
+    fun notebookPageOffersANewPageOnceDrilledIn() {
+        val b = PickerModel.createButtons(PickerModel.Mode.NOTEBOOK_PAGE, drilled = true)
+        assertEquals(PickerModel.CreateButtons(newPage = true, newFolder = false, newNotebook = false), b)
+    }
+
+    @Test
+    fun noModeEverOffersAllThreeAtOnce() {
+        for (mode in PickerModel.MODES) {
+            for (drilled in booleanArrayOf(false, true)) {
+                val b = PickerModel.createButtons(mode, drilled)
+                assertTrue("$mode drilled=$drilled", !(b.newPage && (b.newFolder || b.newNotebook)))
+                assertEquals("$mode drilled=$drilled pair", b.newFolder, b.newNotebook)
+            }
+        }
     }
 
     // ── pathTo reply splitting (the Edit-prefill browse seed) ────────────────
