@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application
+        android:name=".LinksApplication"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/ext_label"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:theme="@style/Theme.Notesprout"
+        tools:replace="android:label,android:allowBackup">
+
+        <!-- The LINK_PROVIDER point: a held bind for one showing of the picker, plus one-shot binds
+             for resolve / chromeOf / the trail. -->
+        <service
+            android:name=".LinkProviderService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.symmetricalpalmtree.notesprout.extension.LINK_PROVIDER" />
+            </intent-filter>
+            <meta-data
+                android:name="com.symmetricalpalmtree.notesprout.extension.API_VERSION"
+                android:value="1" />
+        </service>
+
+        <!-- The extension-owned picker screen (UI-rule tier 2): exported, custom action, NO launcher
+             filter; launched only by the host for a result — it verifies its caller first thing in
+             onCreate. -->
+        <activity
+            android:name=".LinkPickerActivity"
+            android:exported="true"
+            android:screenOrientation="portrait">
+            <intent-filter>
+                <action android:name="com.symmetricalpalmtree.notesprout.extension.LINK_PICKER_SCREEN" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

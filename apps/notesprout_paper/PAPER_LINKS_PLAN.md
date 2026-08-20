@@ -13,7 +13,7 @@
 > The **original** Notesprout implementation this arc draws on is `docs/links.md` at the monorepo
 > root — inspiration, not a spec; every deviation is recorded here.
 >
-> **Status: L0 ⬜ · L1 ⬜ · L2 ⬜ · L3 ⬜ · L4 ⬜ · L5 ⬜**
+> **Status: L0 🧪 · L1 ⬜ · L2 ⬜ · L3 ⬜ · L4 ⬜ · L5 ⬜**
 
 ## Why
 
@@ -134,15 +134,13 @@ no g-paper change unless a phase records one.
 
 ### Module layout (delta)
 
-New module **`:ext-links`** (the seventh extension APK). Dependencies: `:extension-api` +
-`:paper-screen`? — **L0 phase-start question 1**: the picker is a full e-ink screen and wants the
-design system (theme, dimens tiers, `Dialogs`, `ActionSheetDialog`, Tabler drawables), which lives
-in `:paper-screen`; but `:paper-screen` carries g-paper (`api`) and therefore the Onyx SDK
-(~25 MB APK, as `:ext-scratchpad` proved). Recommended: **accept `:paper-screen`** (one visual
-vocabulary, no sibling copies — the module's g-paper surface classes simply go unused); the
-alternative (splitting a `:paper-style` resources-only module out of `:paper-screen`) is recorded
-as the escape hatch if the size ever matters. Gradle enforcement grows the same way as arc 6:
-`:ext-links → :extension-api` (+ `:paper-screen` if Q1 says so), never `:app`.
+New module **`:ext-links`** (the seventh extension APK). Dependencies: `:extension-api` **+
+`:paper-screen`** (L0 wizard Q1 — accepted like the pad: the picker is a full e-ink screen and
+wants the design system — theme, dimens tiers, `Dialogs`, `ActionSheetDialog`, Tabler drawables;
+`:paper-screen` carries g-paper (`api`) and therefore the Onyx SDK, ~25 MB debug APK, and the
+module's g-paper surface classes simply go unused; the `:paper-style` resources-only split stays
+the recorded escape hatch if the size ever matters). Gradle enforcement grows the same way as
+arc 6: `:ext-links → :extension-api` + `:paper-screen`, never `:app`.
 
 ### Contract additions (`:extension-api`) — exact
 
@@ -274,9 +272,10 @@ Two usage modes on one service (both bind-per-operation in the recorded sense):
 - `SoilSchema.TYPE_LINK = "link"`. Link row: `parentId` = page id · `text` = opaque payload ·
   `style` = the providing extension's identity (`<pkg>:link`, provenance only — the core never
   routes on it) · `x/y/width/height` = union bounds of the wrapped content + 2 dp bottom clearance
-  for the underline · `"order"` = z-order (`MAX+1` like objects) · `flags` = chrome cache
-  (`0/1` mirror of the last `chromeOf` answer so a page renders correctly before/without the
-  extension; **L1 question 4** confirms this one non-opaque crumb or drops it).
+  for the underline · `"order"` = z-order (`MAX+1` like objects) · `flags` = **null** (L0 wizard
+  Q4 — the heading precedent: nothing extension-derived is persisted; the chrome comes from
+  `chromeOf` at load, session-cached, and a link with the extension missing renders its content
+  with no underline).
 - **Wrap = re-parent, not copy** (recommended; L1 question 1): the selected stroke + object rows'
   `parentId` flips page → link id in one transaction; coordinates stay page-absolute; unlink flips
   them back. No id churn (the original's UNIQUE-collision family can't happen), and undo of
@@ -360,24 +359,66 @@ re-walk for `LinkClient`.
 ## Phases
 
 ### Phase L0 — Contract · `:ext-links` skeleton · client (discovered, held, probed)
-**Status:** ⬜ Not started
+**Status:** 🧪 Awaiting user device verification (built + Claude-verified 2026-08-19)
+
+**Outcome (2026-08-19).** **The L5 review base is `0f91ed5`** (the commit before L0's first).
+Everything delivered as specified; deviations and findings:
+- **Wizard answers** recorded above (Q1 `:paper-screen` accepted · Q2 grammar confirmed · Q3 probe
+  yes · **Q4 no persisted chrome cache — the heading precedent**, which also rewired L1 deliverable 3
+  to a pure session cache and made "extension missing → content renders with no underline" the
+  recorded behaviour, matching the Why section's original consequence).
+- **Model protocol worked as planned:** Fable inline = contract/AIDL, the four parcelables +
+  constants, `LinkClient`, `LinkCatalogBinder`/`LinkCatalogGate`/`LinkCatalogSource`,
+  `ExtensionRegistry.linkProvider` + `<queries>`, `IconCatalog` + the two Tabler drawables (copied
+  into `:paper-screen` from the original app — they were **not** already there), the debug probe +
+  `NotebookActivity` wiring (4 lines; the file is at 799 — L1 must move logic out before adding).
+  One Opus agent built `:ext-links` (module, manifest, icon, `LinkProviderService`, `LinkPayload`,
+  `TrailStore`, stub `LinkPickerActivity`, 9 JVM tests); one Sonnet agent wrote the four parcelable
+  test files; Fable reviewed both diffs (no findings). 43 new JVM tests total; all ten modules green;
+  debug + release compile; ext-links debug APK ≈ 23.6 MiB.
+- **Small calls recorded:** the picker stub uses `TopGuard.applyInsetPadding` (an ordinary screen
+  with system bars — `applyRootPadding` is for immersive screens; flip it if L2 goes immersive).
+  The extension-side `listFolder("")` probe half lives in `beginPick` under the ext module's own
+  `if (BuildConfig.DEBUG)` (count only) — remove with the probes in L5. `LinkCatalogGate` is its own
+  small gate class (the `ExtensionStoreGate` shape) rather than a `ProxyGate` reuse, so the catalog
+  binder's caps (`entry` label truncation, `cap` at `MAX_CATALOG_ENTRIES`) sit beside the uid check
+  and are JVM-tested together (`LinkCatalogGateTest`).
+- **Claude-side device runs (one Sonnet agent per device): all 9 checks PASS on SNN, NA5C and
+  MIP11** — probe sequence exact (`root has 1/1/2 entries`; cold `beginPick` 3.0 s SNN / 1.0 s NA5C /
+  1.1 s MIP11 — the extension process start; warm one-shots 11–14 ms); binds = unbinds, no leaked
+  connections; `Garden/com.symmetricalpalmtree.notesprout.ext.links.dev.db` created encrypted
+  (header verified non-plaintext) on all three; `am start` of the picker refused
+  (`refused caller (none)`, nothing resident); probe re-run after `am force-stop` of the extension
+  identical from a fresh PID (the trail's data is host-owned — the strict push→kill→pop split isn't
+  drivable with the L0 probe shape; L4's device items cover mid-chain force-stop for real); page
+  flip + crash-buffer regression clean. The BOOX had re-disabled `ext.scratchpad.dev` at install
+  time (the known trap) — re-enabled; `ext.links.dev` stayed enabled through both agent runs.
+- **Docs:** `docs/extensions.md` header + constants table + AIDL + parcelables +
+  §"LinkProvider (contract)" (with the L0 state paragraph); paper `CLAUDE.md` ten modules +
+  `:ext-links` edges + the Links bullet; the `device-build-install` skill's install lines.
+  User checklist below pending.
 
 **Goal:** the point exists end to end with nothing user-visible: contract compiled into
 `:extension-api`, `NSE · Links` installs and is discovered, `LinkClient` can hold a pick showing
 (`beginPick` with a live catalog binder → `takeResult` null → `endPick`) and one-shot `resolve` /
 `chromeOf` / trail calls round-trip, all proven by a debug ⋯ probe.
 
-**Questions to resolve at phase start:**
-1. `:ext-links` depends on `:paper-screen` (rec. — design system + `Dialogs`; ~25 MB debug APK
-   accepted like the pad) / `:extension-api` only + a minimal own style copy?
-2. The payload grammar (`"L1|chrome|kind|notebookId|pageId"` with `|` forbidden in ids — rec.) —
-   confirm, or a different shape?
-3. Debug probe: notebook ⋯ → **"Probe links"** = hold → `beginPick` (store + catalog + null edit)
-   → the extension logs the root folder count via `listFolder("")` → `takeResult` (null) →
-   `endPick`; then `resolve` + `chromeOf` of a fixed payload; then a trail push/pop/clear round
-   trip — logs only, removed in L5 (rec. yes).
-4. `flags` column as the chrome cache on the link row (rec. yes — one int, lets a page render
-   its underlines with the extension missing) / pure `chromeOf` every load?
+**Questions resolved at phase start (wizard, 2026-08-19):**
+1. **`:ext-links` depends on `:paper-screen`** (accepted like the pad — one visual vocabulary,
+   ~25 MB debug APK; the `:paper-style` resources-only split stays the recorded escape hatch).
+2. **Payload grammar confirmed:** `"L1|<chrome>|<kind>|<notebookId>|<pageId>"` — versioned leading
+   tag, `|` separator (forbidden in ids — they are UUIDs), chrome `0|1`, kind `0|1|2`, unused id
+   slots empty. Unknown version → `resolve` null → the core's dead-link dialog.
+3. **Debug ⋯ "Probe links": yes** — hold → `beginPick` (store + catalog + null edit; the extension
+   logs the root count via `listFolder("")`) → `takeResult` (null) → `endPick`; then one-shot
+   `resolve` + `chromeOf` of a fixed payload; then a trail push/pop/clear round trip. Logs only,
+   removed in L5.
+4. **No `flags` chrome cache — the heading precedent** (user's call: "handle this the same way the
+   heading extension does"): nothing extension-derived is persisted; the link row stays 100 %
+   opaque (`flags` null). `chromeOf` is asked at page load (batched, **session cache** — the
+   `ObjectRenderCache` shape) and with the extension missing a link renders its content with **no
+   underline** (the consequence already recorded under Why). `LinkChoice.chrome` still lets the
+   core draw the underline immediately at creation — transient, never persisted.
 
 **Deliverables**
 1. `:extension-api`: `ILinkProvider.aidl`, `ILinkCatalog.aidl` (all five methods; create methods
@@ -445,7 +486,7 @@ only consulted for `chromeOf`.
    `NotebookUndo` gains `LinkCreated` / `LinkUnlinked` (+ `LinkEdited` shape, exercised in L2);
    links join `Moved` / `ObjectsDeleted` / `Page` replay. All new screen logic in collaborators —
    `NotebookActivity` stays under its cap.
-3. `chromeOf` on page load for link rows (batched, session cache, `flags` mirror per L0 Q4).
+3. `chromeOf` on page load for link rows (batched, session cache — **no persisted mirror**, L0 Q4).
 4. Docs: `docs/notebook.md` §"Link objects (arc 7)" started; `docs/data.md` link-row paragraph.
 
 **Tests**

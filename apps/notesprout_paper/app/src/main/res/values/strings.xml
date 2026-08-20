@@ -112,6 +112,8 @@
     <!-- Debug-only notebook ⋯ (arc 3 test surface; strings live here so the release no-op twin compiles) -->
     <string name="debug_tools_title">Debug tools</string>
     <string name="debug_recognize_page">Recognize page (ML Kit)</string>
+    <!-- Arc 7 / L0 probe (removed in L5) -->
+    <string name="debug_probe_links">Probe links</string>
 
     <!-- Selection toolbar + object edit dialog (arc 4 / H2) -->
     <string name="selection_delete_hint">Delete selection</string>

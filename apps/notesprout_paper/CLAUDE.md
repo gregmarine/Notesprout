@@ -50,17 +50,19 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   `com.symmetricalpalmtree.gpaper.core.engine`.
 - **mavenLocal can lag the g-paper checkout** — if a g-paper symbol from `docs/api.md` is unresolved,
   `cd ~/git/g-paper && ./gradlew publishToMavenLocal` before suspecting anything else.
-- **Extensions** (`PAPER_EXTENSIONS_PLAN.md`, `docs/extensions.md`): the project has nine modules —
+- **Extensions** (`PAPER_EXTENSIONS_PLAN.md`, `docs/extensions.md`): the project has ten modules —
   `:app` (the core/host), `:extension-api` (the shared contract library), **`:paper-screen`** (the
   shared screen library, arc 6 / S0 — below), `:ext-templates` (the
   first-party Templates extension APK), `:ext-naming` (the Naming extension APK, arc 2),
   `:ext-mlkit` (the ML Kit handwriting-recognizer extension APK, arc 3), `:ext-markdown` (the
   Markdown renderer extension APK, arc 4 / H0), `:ext-heading` (the Heading object-provider
-  extension APK, arc 4 / H3) and `:ext-scratchpad` (the Scratch Pad extension APK, arc 6 — the
-  first extension that owns a screen).
+  extension APK, arc 4 / H3), `:ext-scratchpad` (the Scratch Pad extension APK, arc 6 — the
+  first extension that owns a screen) and `:ext-links` (the Links extension APK, arc 7 — link
+  *meaning* over core-owned link structure; its picker is the second tier-2 screen).
   **`:extension-api` depends on nothing in `:app`, ever** (Gradle enforces `:app → :extension-api`,
   `:ext-templates → :extension-api`, `:ext-naming → :extension-api`, `:ext-mlkit → :extension-api`,
-  `:ext-markdown → :extension-api`, `:ext-heading → :extension-api`, `:ext-scratchpad → :extension-api`;
+  `:ext-markdown → :extension-api`, `:ext-heading → :extension-api`, `:ext-scratchpad → :extension-api`,
+  `:ext-links → :extension-api`;
   `:app` and the extension modules never depend on each other — `:ext-heading` reaches the recognizer
   and the renderer only through the proxies the core hands it). Extension-side caller check = `HostCallerCheck.enforce(ctx,
   BuildConfig.HOST_PACKAGE)` from `:extension-api`, first thing in every stub method. An extension is a separate APK with **no launcher Activity**, bound over
@@ -77,10 +79,11 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   there, **packages unchanged** (the app's `R` sees the moved resources via
   `android.nonTransitiveRClass=false` in `gradle.properties`; the notebook's own undo action set is
   `notebook/NotebookUndo.kt` in `:app`). It depends on **g-paper (`api`) + androidx only** — never
-  `:app`, `:extension-api`, Room, SQLCipher, serialization; `:app → :paper-screen` and
-  `:ext-scratchpad → :paper-screen` (the five earlier extensions stay `:extension-api`-only). **A fix to
+  `:app`, `:extension-api`, Room, SQLCipher, serialization; `:app → :paper-screen`,
+  `:ext-scratchpad → :paper-screen` and `:ext-links → :paper-screen` (arc 7 / L0 — the picker takes
+  the design system; the five earlier extensions stay `:extension-api`-only). **A fix to
   shared screen logic goes there, never in a consumer.** `Slog` gates on the library's own
-  `BuildConfig.DEBUG` and is usable from `:ext-scratchpad`; the five earlier extensions keep
+  `BuildConfig.DEBUG` and is usable from `:ext-scratchpad` / `:ext-links`; the five earlier extensions keep
   `if (BuildConfig.DEBUG) Log.d`.
 - **Scratch Pad** (arc 6 — `PAPER_SCRATCHPAD_PLAN.md`, `docs/extensions.md` §"ScratchPad (contract)"):
   the sixth point `SCRATCH_PAD` (`IScratchPad` — `begin` / `receiveInk` / `takeOutgoing` / `end`,
@@ -135,7 +138,25 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   <serial>` within ~10 s of a sluggish drag on the MIP11 is the next step.** **Trap: both engines' ownership
   guards are per-process — a cross-process handoff must be a full teardown on the departing side; a fix
   goes to g-paper, never a host workaround.**
-- **Notebook creation:** templates come **only** from `ExtensionRegistry` providers via
+- **Links** (arc 7 — `PAPER_LINKS_PLAN.md`, `docs/extensions.md` §"LinkProvider (contract)"): the
+  seventh point `LINK_PROVIDER` (`ILinkProvider` — the pick showing `beginPick` / `takeResult` /
+  `endPick` + the one-shots `resolve` / `chromeOf` / `pushTrail` / `popTrail` / `clearTrail`;
+  parcelables `LinkChoice` / `LinkDestination` / `CatalogEntry` / `TrailEntry`). **The core owns link
+  structure** (`.soil` `TYPE_LINK` rows wrapping re-parented children, render, gestures, navigation,
+  undo — L1/L4); **`NSE · Links` owns link meaning**: the row's `text` payload is opaque to the core
+  (grammar `"L1|chrome|kind|notebookId|pageId"`, the extension's own `LinkPayload`), resolved into a
+  typed `LinkDestination` at follow time and described by `chromeOf` at load (session cache, nothing
+  extension-derived persisted — the heading precedent, L0 wizard Q4). The picker
+  (`ACTION_LINK_PICKER_SCREEN`) is the second tier-2 screen (held bind: `LinkClient.openPick` =
+  store pre-open → `ExtensionStoreBinder` + **`LinkCatalogBinder`** — the first host-implemented
+  multi-method callback, a per-showing uid-gated lens (`LinkCatalogGate`) with `listFolder` /
+  `listPages` real (current notebook via the live-session `LinkCatalogSource`, others by a read-only
+  `SoilDatabase.open` sealed in `finally`) and the create half `UnsupportedOperationException` until
+  L3 — → hold → `beginPick` → launch by `ActivityResultLauncher` only → `takeChoice` = drain +
+  `endPick` + unbind + **revoke both binders** in one `finally`). The back-trail lives in the
+  extension's host store (key `trail`, cap 50) behind the trail one-shots (store as in-parameter,
+  pre-opened on IO before the bind). **L0 built** contract + skeleton + client + catalog binder + the
+  debug ⋯ "Probe links" (removed in L5); the picker UI, link rows, follow + trail wiring are L1–L4.
   `TemplateProviderClient` (bind-per-operation, signature re-checked at bind, timeouts, unbind in
   `finally`, payload = mime + byte cap + exact requested size); **the core has no renderer**. No
   extension → no Template section, blank notebook. A render failure stays on the screen with a toast —

@@ -36,6 +36,7 @@ import com.symmetricalpalmtree.notesprout.extension.ActionApplies
 import com.symmetricalpalmtree.notesprout.extension.CreatedObject
 import com.symmetricalpalmtree.notesprout.extension.ExtensionCallException
 import com.symmetricalpalmtree.notesprout.extension.ExtensionContract
+import com.symmetricalpalmtree.notesprout.extension.LinkCatalogSource
 import com.symmetricalpalmtree.notesprout.data.index.IndexRepository
 import com.symmetricalpalmtree.notesprout.data.prefs.BrowseState
 import com.symmetricalpalmtree.notesprout.data.prefs.RecentsPrefs
@@ -194,6 +195,9 @@ class NotebookActivity : AppCompatActivity() {
         NotebookDebugMenu.install(this, binding.topBarRow, provider = {
             if (!opened) null
             else RecognizeContext(paper.getStrokes(), session.currentPage.width.toFloat(), session.currentPage.height.toFloat())
+        }, linkCatalog = {
+            if (!opened) null
+            else LinkCatalogSource(session.notebookId) { if (opened) session.pages.map { it.id } else null }
         })
 
         chrome = PaperChrome(paper, binding.topBar, binding.bottomStrip, { selectionToolbar.rects() }, { x, y -> selectionToolbar.contains(x, y) }) { !opened || contentsFlow.showing }

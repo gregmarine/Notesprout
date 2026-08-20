@@ -28,6 +28,12 @@
         <intent>
             <action android:name="com.symmetricalpalmtree.notesprout.extension.SCRATCH_PAD_SCREEN" />
         </intent>
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesprout.extension.LINK_PROVIDER" />
+        </intent>
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesprout.extension.LINK_PICKER_SCREEN" />
+        </intent>
     </queries>
 
     <application

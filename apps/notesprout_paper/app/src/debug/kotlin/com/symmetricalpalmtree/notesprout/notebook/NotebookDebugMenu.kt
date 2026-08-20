@@ -18,7 +18,10 @@ import com.symmetricalpalmtree.notesprout.extension.ExtensionCallException
 import com.symmetricalpalmtree.notesprout.extension.ExtensionRegistry
 import com.symmetricalpalmtree.notesprout.extension.InkStroke
 import com.symmetricalpalmtree.notesprout.extension.InkTooLargeException
+import com.symmetricalpalmtree.notesprout.extension.LinkCatalogSource
+import com.symmetricalpalmtree.notesprout.extension.LinkClient
 import com.symmetricalpalmtree.notesprout.extension.ProviderRef
+import com.symmetricalpalmtree.notesprout.extension.TrailEntry
 import com.symmetricalpalmtree.notesprout.extension.RecognizerClient
 import com.symmetricalpalmtree.notesprout.extension.RecognizerNotReadyException
 import com.symmetricalpalmtree.notesprout.extension.RecognizerReadiness
@@ -57,7 +60,12 @@ object NotebookDebugMenu {
     private fun claim(activity: AppCompatActivity) { busyOwner = java.lang.ref.WeakReference(activity) }
     private fun release() { busyOwner = null }
 
-    fun install(activity: AppCompatActivity, bar: ViewGroup, provider: () -> RecognizeContext?) {
+    fun install(
+        activity: AppCompatActivity,
+        bar: ViewGroup,
+        provider: () -> RecognizeContext?,
+        linkCatalog: () -> LinkCatalogSource? = { null },
+    ) {
         // The row's own flexible gap (layout) already pushes what follows it to the far end: the ⋯ lands
         // right after the Scratch Pad button (S3: that button sits immediately before the ⋯).
         val btn = AppCompatImageButton(activity, null, 0).apply {
@@ -72,20 +80,74 @@ object NotebookDebugMenu {
             stateListAnimator = null
         }
         TooltipCompat.setTooltipText(btn, btn.contentDescription)
-        btn.setOnClickListener { showSheet(activity, provider) }
+        btn.setOnClickListener { showSheet(activity, provider, linkCatalog) }
         bar.addView(btn)
     }
 
-    private fun showSheet(activity: AppCompatActivity, provider: () -> RecognizeContext?) {
+    private fun showSheet(activity: AppCompatActivity, provider: () -> RecognizeContext?, linkCatalog: () -> LinkCatalogSource?) {
         activity.lifecycleScope.launch {
             val ref = ExtensionRegistry.handwritingRecognizer(activity)   // IO; refreshed per open
+            val linkRef = ExtensionRegistry.linkProvider(activity)       // IO; refreshed per open (arc 7 / L0)
             if (activity.isFinishing || activity.isDestroyed) return@launch
             val sheet = ActionSheetDialog(activity).title(activity.getString(R.string.debug_tools_title))
             // No recognizer installed → the item is absent (the sheet opens with its title only).
             if (ref != null) {
                 sheet.addAction(null, activity.getString(R.string.debug_recognize_page)) { recognize(activity, ref, provider) }
             }
+            // Arc 7 / L0 probe (removed in L5): present only while a trusted LINK_PROVIDER is installed.
+            if (linkRef != null) {
+                sheet.addAction(null, activity.getString(R.string.debug_probe_links)) { probeLinks(activity, linkRef, linkCatalog) }
+            }
             sheet.show()
+        }
+    }
+
+    /**
+     * Arc 7 / L0 — "Probe links" (removed in L5): exercises the whole `LINK_PROVIDER` point with
+     * nothing user-visible. (1) The pick showing: `openPick` (store pre-open → held bind →
+     * `beginPick` with a live catalog binder — the extension logs the root count via
+     * `listFolder("")`) → `takeChoice` (null — no screen is launched) → `endPick` → unbind → both
+     * binders revoked. (2) The one-shots: `resolve` + `chromeOf` of fixed payloads. (3) A trail
+     * push / pop / clear round trip (persisted in the extension's store). **Logs only** — tags
+     * `LinkClient` / `LinkProviderService` carry the sequence; payloads are synthetic and only
+     * kinds / counts / lengths are ever logged.
+     */
+    private fun probeLinks(activity: AppCompatActivity, ref: ProviderRef, linkCatalog: () -> LinkCatalogSource?) {
+        if (busy()) return
+        val source = linkCatalog() ?: return   // not open yet — nothing to probe against
+        claim(activity)
+        activity.lifecycleScope.launch {
+            val client = LinkClient(activity, ref)
+            try {
+                // 1 — the pick showing (held bind + catalog callback; the stub screen is NOT launched).
+                val intent = client.openPick(source, editPayload = null)
+                Slog.d(TAG) { "probe links: openPick ${if (intent != null) "ok" else "FAILED"}" }
+                if (intent != null) {
+                    val choice = client.takeChoice()   // drains + endPick + unbind + revoke in finally
+                    Slog.d(TAG) { "probe links: takeChoice → ${if (choice == null) "null (expected)" else "UNEXPECTED choice"}" }
+                }
+                // 2 — the one-shot description calls over fixed payloads.
+                val pageId = source.currentPageIds()?.firstOrNull() ?: "00000000-0000-0000-0000-000000000000"
+                val underlined = "L1|1|0||$pageId"                        // DEST_PAGE, underline
+                val bare = "L1|0|1|${source.currentNotebookId}|"          // DEST_NOTEBOOK, no chrome
+                val dest = client.resolve(underlined)
+                Slog.d(TAG) { "probe links: resolve → ${dest?.let { "kind=${it.kind}" } ?: "null (FAILED)"}" }
+                val chrome = client.chromeOf(listOf(underlined, bare, "not a payload"))
+                Slog.d(TAG) { "probe links: chromeOf → [${chrome.joinToString()}] (want [1, 0, 0])" }
+                // 3 — the trail round trip (persisted in the extension's host-owned store).
+                client.pushTrail(TrailEntry(source.currentNotebookId, pageId))
+                val popped = client.popTrail()
+                val roundTrip = popped != null && popped.notebookId == source.currentNotebookId && popped.pageId == pageId
+                Slog.d(TAG) { "probe links: trail push/pop → ${if (roundTrip) "ok" else "FAILED"}" }
+                client.clearTrail()
+                val emptied = client.popTrail() == null
+                Slog.d(TAG) { "probe links: clearTrail → ${if (emptied) "ok" else "FAILED"} — PROBE DONE" }
+            } catch (e: Exception) {
+                Slog.d(TAG) { "probe links: FAILED ${e.javaClass.simpleName}: ${e.message}" }
+            } finally {
+                client.finish()   // idempotent — releases a half-open showing on any failure path
+                release()
+            }
         }
     }
 

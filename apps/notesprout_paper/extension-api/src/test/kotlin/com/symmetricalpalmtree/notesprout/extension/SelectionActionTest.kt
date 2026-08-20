@@ -59,6 +59,6 @@ class SelectionActionTest {
         assertEquals(4_000, ExtensionContract.MAX_EDIT_TEXT_CHARS)
         assertEquals(1, ActionApplies.INK); assertEquals(2, ActionApplies.OBJECT)
         assertEquals(1, Requires.RECOGNIZER); assertEquals(2, Requires.MARKDOWN)
-        assertEquals(listOf("heading", "h-1", "h-2", "h-3", "h-4", "h-5", "h-6", "text", "edit", "x", "check", "plus", "trash", "list", "sketching"), IconNames.ALL)
+        assertEquals(listOf("heading", "h-1", "h-2", "h-3", "h-4", "h-5", "h-6", "text", "edit", "x", "check", "plus", "trash", "list", "sketching", "link", "link-off"), IconNames.ALL)
     }
 }

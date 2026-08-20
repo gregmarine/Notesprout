@@ -24,7 +24,11 @@ object IconNames {
     const val LIST: String = "list"
     /** The core's Scratch Pad glyph (arc 6; Tabler `sketching` — was `notes` until the S1 follow-up) — the two entry buttons and the core `scratch` action; listed so an extension may reuse it. */
     const val SKETCHING: String = "sketching"
+    /** The core's Link glyph (arc 7; Tabler `link`) — the core `link` action; listed so an extension may reuse it. */
+    const val LINK: String = "link"
+    /** The core's Unlink glyph (arc 7; Tabler `link-off`) — the core `link_unlink` action; listed so an extension may reuse it. */
+    const val LINK_OFF: String = "link-off"
 
     /** Every name the catalog knows, in declaration order. */
-    val ALL: List<String> = listOf(HEADING, H1, H2, H3, H4, H5, H6, TEXT, EDIT, X, CHECK, PLUS, TRASH, LIST, SKETCHING)
+    val ALL: List<String> = listOf(HEADING, H1, H2, H3, H4, H5, H6, TEXT, EDIT, X, CHECK, PLUS, TRASH, LIST, SKETCHING, LINK, LINK_OFF)
 }

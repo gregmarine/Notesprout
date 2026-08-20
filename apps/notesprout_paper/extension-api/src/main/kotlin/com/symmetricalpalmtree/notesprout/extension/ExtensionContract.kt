@@ -5,17 +5,20 @@ package com.symmetricalpalmtree.notesprout.extension
  * depends on nothing in `:app` and on no library beyond the Kotlin stdlib, so a third party can
  * consume it as a plain artifact.
  *
- * v1 has six extension points: [ACTION_TEMPLATE_PROVIDER] (interface `ITemplateProvider`),
+ * v1 has seven extension points: [ACTION_TEMPLATE_PROVIDER] (interface `ITemplateProvider`),
  * [ACTION_NOTEBOOK_NAMER] (interface `INotebookNamer`, arc 2), [ACTION_HANDWRITING_RECOGNIZER]
  * (interface `IHandwritingRecognizer`, arc 3 — a *capability* point: the host binds it and lends it
  * to other extensions through a proxy), [ACTION_MARKDOWN_RENDERER] (interface `IMarkdownRenderer`,
- * arc 4 — a second capability point: markdown in, image out) and [ACTION_OBJECT_PROVIDER]
+ * arc 4 — a second capability point: markdown in, image out), [ACTION_OBJECT_PROVIDER]
  * (interface `IObjectProvider`, arc 4 — the generic content-object point; the two capabilities reach
- * a provider only as in-parameters of its calls) and [ACTION_SCRATCH_PAD] (interface `IScratchPad`,
+ * a provider only as in-parameters of its calls), [ACTION_SCRATCH_PAD] (interface `IScratchPad`,
  * arc 6 — the first *screen-owning* point: the extension owns an off-paper Activity the host launches
- * for a result; ink crosses through the bound service, never the Intent). `IExtensionStore` (arc 2)
- * is not a point — it is the host-owned store handed *to* an extension as an in-parameter of a call;
- * its caps are the `STORE_*` constants below.
+ * for a result; ink crosses through the bound service, never the Intent) and [ACTION_LINK_PROVIDER]
+ * (interface `ILinkProvider`, arc 7 — the core owns link *structure*, the extension owns link
+ * *meaning*: an opaque payload it resolves into typed descriptions; its picker screen is a second
+ * tier-2 screen, and `ILinkCatalog` is the first host-implemented callback binder). `IExtensionStore`
+ * (arc 2) is not a point — it is the host-owned store handed *to* an extension as an in-parameter of
+ * a call; its caps are the `STORE_*` constants below.
  */
 object ExtensionContract {
 
@@ -50,6 +53,15 @@ object ExtensionContract {
      *  resolves it with `setPackage(<the discovered service's package>)` and launches it for a result. */
     const val ACTION_SCRATCH_PAD_SCREEN: String =
         "com.symmetricalpalmtree.notesprout.extension.SCRATCH_PAD_SCREEN"
+
+    /** Intent action a link-provider `<service>` declares in its intent-filter (arc 7 / L0). */
+    const val ACTION_LINK_PROVIDER: String =
+        "com.symmetricalpalmtree.notesprout.extension.LINK_PROVIDER"
+
+    /** Intent action the link extension's exported picker `<activity>` declares; the host resolves
+     *  it with `setPackage(<the discovered service's package>)` and launches it for a result. */
+    const val ACTION_LINK_PICKER_SCREEN: String =
+        "com.symmetricalpalmtree.notesprout.extension.LINK_PICKER_SCREEN"
 
     /** `<meta-data>` name (on the `<service>`) carrying the extension's API version. */
     const val META_API_VERSION: String =
@@ -223,6 +235,49 @@ object ExtensionContract {
     /** The exact `IllegalStateException` message the scratch-pad extension throws from `receiveInk`
      *  when the target page's encoded ink would exceed [STORE_MAX_VALUE_BYTES]. */
     const val SCRATCH_PAGE_FULL: String = "scratch page full"
+
+    // ── Link objects (`ILinkProvider` / `ILinkCatalog`, arc 7 / L0) ──────
+    // The core owns link structure (rows, wrap/unwrap, render, gestures, navigation, undo); the
+    // extension owns the payload (opaque to the core) and its meaning (`resolve` / `chromeOf`).
+
+    /** Boolean launch extra on the picker screen — true when it pre-populates for an Edit. The ONLY
+     *  extra: the payload itself never rides the Intent (it crosses through the held service). */
+    const val EXTRA_LINK_EDIT: String = "editMode"
+
+    /** Activity result code: the picker parked a [LinkChoice] for `takeResult` (= `Activity.RESULT_FIRST_USER`).
+     *  Anything else = cancelled. */
+    const val RESULT_LINK_PICKED: Int = 1
+
+    /** Longest link payload (chars), both ways. The host truncates nothing — an over-cap payload is a
+     *  refused result (`LinkChoice.requireValid` rejects it at unmarshal). */
+    const val MAX_LINK_PAYLOAD_CHARS: Int = 2_000
+
+    /** A link's chrome: nothing, or a 1 dp underline across the bounds' bottom (the default for new links). */
+    const val LINK_CHROME_NONE: Int = 0
+    const val LINK_CHROME_UNDERLINE: Int = 1
+
+    /** [LinkDestination.kind]: a page of the link's own notebook / another notebook (its last-open
+     *  page) / a specific page of another notebook. */
+    const val DEST_PAGE: Int = 0
+    const val DEST_NOTEBOOK: Int = 1
+    const val DEST_NOTEBOOK_PAGE: Int = 2
+
+    /** [CatalogEntry.kind]: a folder / a notebook / a page. */
+    const val CATALOG_FOLDER: Int = 0
+    const val CATALOG_NOTEBOOK: Int = 1
+    const val CATALOG_PAGE: Int = 2
+
+    /** Most entries one `ILinkCatalog` reply carries; the host drops the rest. */
+    const val MAX_CATALOG_ENTRIES: Int = 2_000
+
+    /** Longest [CatalogEntry.label] (chars); blank is legal (a page with no name). */
+    const val MAX_CATALOG_LABEL_CHARS: Int = 200
+
+    /** Longest id in a link parcelable — notebook / page / folder / catalog ids (the host's UUIDs are 36 chars). */
+    const val MAX_LINK_ID_CHARS: Int = 64
+
+    /** Most back-trail entries the trail methods keep; a push past it drops the oldest. */
+    const val MAX_TRAIL_ENTRIES: Int = 50
 
     /** Extension-namespaced template identity: `"<extension package>:<template id>"`. */
     fun templateIdentity(pkg: String, id: String): String = "$pkg:$id"

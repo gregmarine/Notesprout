@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ext_label">NSE · Links</string>
+
+    <string name="links_picker_title">Link to</string>
+    <string name="cd_links_back">Back</string>
+</resources>

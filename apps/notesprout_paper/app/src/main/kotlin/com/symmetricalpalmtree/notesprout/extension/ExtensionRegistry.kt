@@ -74,6 +74,16 @@ object ExtensionRegistry {
         all.firstOrNull()
     }
 
+    /**
+     * The one trusted link provider (arc 7 / L0), or null. First by (label, package), the rest
+     * dropped with a `Slog.d` — the same first-of rule as the namer.
+     */
+    suspend fun linkProvider(context: Context): ProviderRef? = withContext(Dispatchers.IO) {
+        val all = discover(context.applicationContext, ExtensionContract.ACTION_LINK_PROVIDER)
+        for (extra in all.drop(1)) Slog.d(TAG) { "ignoring additional link provider ${extra.component.flattenToShortString()}" }
+        all.firstOrNull()
+    }
+
     /** Every trusted object provider (arc 4 / H3), ordered by label then package name — all of them contribute. */
     suspend fun objectProviders(context: Context): List<ProviderRef> = withContext(Dispatchers.IO) {
         discover(context.applicationContext, ExtensionContract.ACTION_OBJECT_PROVIDER)

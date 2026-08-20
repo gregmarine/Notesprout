@@ -30,6 +30,11 @@
 > reviewed the range, walked audit rows 28–32 (+ rows 1/6/7 for the held bind), and froze the pattern
 > (§"Extension-owned screens (tier 2)", §"Adding a screen-owning point (arc 6 pattern)" rules 25–27,
 > §"The Scratch Pad extension").
+> **Arc 7** (`PAPER_LINKS_PLAN.md`, in progress): **L0** added the seventh point — **LinkProvider**
+> (§"LinkProvider (contract)"): the core owns link *structure* (the `.soil` rows, wrap / render /
+> gestures / navigation / undo — L1/L4) and `NSE · Links` owns link *meaning* (an opaque payload it
+> resolves and describes); its picker is the second tier-2 screen (L2), and **`ILinkCatalog`** is the
+> first **host-implemented** callback binder — a per-showing, uid-gated lens over the library.
 
 Notesprout's original design baked too many features into the core. Paper's core is **paper with
 strokes** — a library of notebooks, each a stack of pages you write on. Everything else is added by
@@ -127,6 +132,8 @@ it, the five earlier extensions keep their `if (BuildConfig.DEBUG) Log.d` rule.
 | `ACTION_OBJECT_PROVIDER` | `"com.symmetricalpalmtree.notesprout.extension.OBJECT_PROVIDER"` (arc 4 / H3) |
 | `ACTION_SCRATCH_PAD` | `"com.symmetricalpalmtree.notesprout.extension.SCRATCH_PAD"` — the `<service>` action of the scratch-pad point (arc 6 / S0) |
 | `ACTION_SCRATCH_PAD_SCREEN` | `"com.symmetricalpalmtree.notesprout.extension.SCRATCH_PAD_SCREEN"` — the `<activity>` action of the extension-owned screen; the core resolves it with `setPackage(ref.packageName)` and launches it for a result (S0) |
+| `ACTION_LINK_PROVIDER` | `"com.symmetricalpalmtree.notesprout.extension.LINK_PROVIDER"` — the `<service>` action of the link point (arc 7 / L0) |
+| `ACTION_LINK_PICKER_SCREEN` | `"com.symmetricalpalmtree.notesprout.extension.LINK_PICKER_SCREEN"` — the `<activity>` action of the extension-owned picker screen, resolved with `setPackage` and launched for a result (arc 7 / L0; the screen itself is L2) |
 | `META_API_VERSION` | `"com.symmetricalpalmtree.notesprout.extension.API_VERSION"` |
 | `MIME_WEBP` | `"image/webp"` |
 | `MAX_RENDER_BYTES` | `16 * 1024 * 1024` (16 MiB — hard cap the host enforces on a render result: a `RenderedTemplate` or a `RenderedImage`) |
@@ -159,6 +166,15 @@ it, the five earlier extensions keep their `if (BuildConfig.DEBUG) Log.d` rule.
 | `MAX_TRANSFER_STROKES` / `MAX_TRANSFER_POINTS` | `10_000` / `400_000` — most strokes / points (summed) in one scratch-pad ink transfer, either direction; host-enforced outward **before any bind**, re-checked inward on both sides (S0; raised from 5 000 / 200 000 in S2 at the user's call) |
 | `TRANSFER_CHUNK_STROKES` / `TRANSFER_CHUNK_POINTS` / `TRANSFER_MAX_CHUNKS` | `300` / `20_000` / `34` — most strokes / points per Binder call (≈ 320 KB of floats); both sides chunk with the shared `InkChunks` (`:extension-api`), `InkBundle.requireValid` re-checks; the host's drain stops at 34 chunks and probes one more to learn whether anything was left (S0 / S2) |
 | `SCRATCH_PAGE_FULL` | `"scratch page full"` — the exact `IllegalStateException` message the scratch-pad extension throws from `receiveInk` when the target page would exceed `STORE_MAX_VALUE_BYTES` (S0; used in S2) |
+| `EXTRA_LINK_EDIT` | `"editMode"` — the link picker screen's ONE boolean launch extra (true = pre-populate for an Edit); the payload itself never rides the Intent (arc 7 / L0) |
+| `RESULT_LINK_PICKED` | `1` (= `Activity.RESULT_FIRST_USER`) — the picker parked a `LinkChoice` for `takeResult`; anything else = cancelled (L0) |
+| `MAX_LINK_PAYLOAD_CHARS` | `2_000` — longest link payload, both ways; the host truncates nothing — an over-cap payload is a refused result (`LinkChoice.requireValid` at unmarshal) (L0) |
+| `LINK_CHROME_NONE` / `LINK_CHROME_UNDERLINE` | `0` / `1` — a link's chrome: nothing, or the 1 dp underline (the default for new links) (L0) |
+| `DEST_PAGE` / `DEST_NOTEBOOK` / `DEST_NOTEBOOK_PAGE` | `0` / `1` / `2` — `LinkDestination.kind`: a page of the link's own notebook / another notebook (last-open page) / a specific page of another notebook (L0) |
+| `CATALOG_FOLDER` / `CATALOG_NOTEBOOK` / `CATALOG_PAGE` | `0` / `1` / `2` — `CatalogEntry.kind` (L0) |
+| `MAX_CATALOG_ENTRIES` / `MAX_CATALOG_LABEL_CHARS` | `2_000` / `200` — most entries one `ILinkCatalog` reply carries (the host drops the rest) / longest entry label (blank is legal — a page with no name) (L0) |
+| `MAX_LINK_ID_CHARS` | `64` — longest id in a link parcelable (notebook / page / folder / catalog ids; the host's UUIDs are 36 chars) (L0) |
+| `MAX_TRAIL_ENTRIES` | `50` — most back-trail entries the trail methods keep; a push past it drops the oldest (L0) |
 | `templateIdentity(pkg, id)` | `"$pkg:$id"` |
 | `objectIdentity(pkg, typeId)` | `"$pkg:$typeId"` — the provider identity stored in an object row's `style` (H3); parsed by `parseIdentity` |
 | `isTypeId(s)` | `[a-z0-9_-]+`, `1..MAX_TYPE_ID_CHARS` (H3) |
@@ -340,6 +356,52 @@ interface IScratchPad {
     /** The screen is over (result / cancel / host stop): drop the store, clear pending ink. */
     void end();
 }
+
+// LinkChoice.aidl · LinkDestination.aidl · CatalogEntry.aidl · TrailEntry.aidl (arc 7 / L0)
+package com.symmetricalpalmtree.notesprout.extension;
+parcelable LinkChoice;   parcelable LinkDestination;   parcelable CatalogEntry;   parcelable TrailEntry;
+
+// ILinkCatalog.aidl — NOT a point: the HOST-implemented catalog callback (arc 7 / L0), handed to the
+// link provider only as the second argument of beginPick and dead outside that showing (revoked with
+// the bind). A per-showing, uid-gated lens over the library: outward = names, ids and labels of
+// alive rows only — never keys, paths, covers or blobs (rule 29). Reads run on the host's Binder
+// thread (runBlocking off Main); refusals are IllegalArgumentException with a user-honest message.
+interface ILinkCatalog {
+    /** Alive folders + notebooks under [folderId] ("" = root), library order (folders first). */
+    List<CatalogEntry> listFolder(String folderId);
+    /** The page rows of [notebookId] in page order — blank labels allowed ("Page n" from position). */
+    List<CatalogEntry> listPages(String notebookId);
+    // The create half (L3) — UnsupportedOperationException until then; the host validates exactly
+    // as its own library UI would.
+    String createPage(String notebookId, String anchorPageId, boolean before);
+    String createFolder(String parentFolderId, String name);
+    String createNotebook(String parentFolderId, String name);
+}
+
+// ILinkProvider.aidl — the LINK_PROVIDER point (arc 7 / L0). The core owns link STRUCTURE (rows,
+// wrap/unwrap, composite render, gestures, navigation, undo); this extension owns link MEANING: the
+// link row's `text` payload is opaque to the core, written by the extension's picker screen and
+// interpreted only here. Two usage modes on one service: the PICK SHOWING (a held bind bracketing
+// the picker screen — beginPick → screen → takeResult → endPick → unbind) and the ONE-SHOT calls
+// (resolve / chromeOf / trail — bind-per-operation). Every method: HostCallerCheck first.
+// Timeouts are the host's (≤ 2 s each; bind ≤ 3 s).
+interface ILinkProvider {
+    /** Hold [store] + [catalog] for the showing; [editPayload] null = create, else pre-populate. */
+    void beginPick(IExtensionStore store, ILinkCatalog catalog,
+                   String currentNotebookId, String editPayload);
+    /** After the picker's result (any code): what was chosen, or null = cancelled. */
+    LinkChoice takeResult();
+    /** The showing is over: drop the store, catalog and result. */
+    void endPick();
+    /** An opaque payload → a typed destination, or null = unusable (the core's dead-link dialog). Pure. */
+    LinkDestination resolve(String payload);
+    /** The chrome flag (LINK_CHROME_*) per payload — same order, same length. Pure. */
+    int[] chromeOf(in List<String> payloads);
+    /** The back-trail in the extension's host store (cap MAX_TRAIL_ENTRIES, oldest dropped). */
+    void pushTrail(IExtensionStore store, in TrailEntry entry);
+    TrailEntry popTrail(IExtensionStore store);
+    void clearTrail(IExtensionStore store);
+}
 ```
 
 `RecognizerStatus` is a Kotlin `object` of `Int` constants (AIDL carries `int` — no parcelable, no
@@ -441,8 +503,30 @@ All parcelables carry `@JvmField val CREATOR` and match their `.aidl` declaratio
   **lone** stroke over the point chunk cap is its own chunk, bounded by `MAX_TRANSFER_POINTS`), sizes
   finite and `≥ 0`. An **empty** bundle is legal — it is how `takeOutgoing` says "done".
 
+- `LinkChoice(payload: String, chrome: Int)` — `writeString; writeInt` (arc 7 / L0). What the picker
+  chose: the opaque payload the core stores in the link row's `text` (never parsed, never logged) and
+  the chrome flag. `requireValid` in the constructor (payload non-blank ≤ `MAX_LINK_PAYLOAD_CHARS`,
+  chrome ∈ {0, 1}) — an over-cap or blank payload rejects the whole reply at unmarshal. The chrome
+  also lives *inside* the payload; it rides here so the core can draw the underline at creation
+  without a `chromeOf` round trip (transient — the core persists only the payload).
+- `LinkDestination(kind: Int, notebookId: String?, pageId: String?)` — `writeInt;
+  writeString ×2 (null-safe)` (arc 7 / L0). `resolve`'s typed reply — a *description* the core
+  validates against live rows and navigates to itself (rule 28). `requireValid` in the constructor:
+  kind ∈ `DEST_*`, and exactly the ids that kind carries (`DEST_PAGE` → pageId only ·
+  `DEST_NOTEBOOK` → notebookId only · `DEST_NOTEBOOK_PAGE` → both), each non-blank ≤
+  `MAX_LINK_ID_CHARS`. Untrusted on the host side.
+- `CatalogEntry(id: String, kind: Int, label: String)` — `writeString; writeInt; writeString`
+  (arc 7 / L0). One catalog row (host → extension): an id the host itself issued, a `CATALOG_*` kind
+  and a display label ≤ `MAX_CATALOG_LABEL_CHARS` (blank legal — a page with no name; the picker
+  shows "Page n" from position). `requireValid` in the constructor.
+- `TrailEntry(notebookId: String, pageId: String)` — `writeString ×2` (arc 7 / L0). One back-trail
+  entry (where a follow left from). `requireValid` in the constructor (both non-blank ≤
+  `MAX_LINK_ID_CHARS`); untrusted on the way back — the core re-validates against live rows before
+  it navigates.
+
 `TemplateInfo`, `SchemeField`, `InkStroke`, `SelectionAction`, `EditSpec`, `CreatedObject`, `OutlineEntry`,
-`PaperStroke` and `InkBundle` return 0 from `describeContents()`; `LargeValue` returns `CONTENTS_FILE_DESCRIPTOR`.
+`PaperStroke`, `InkBundle`, `LinkChoice`, `LinkDestination`, `CatalogEntry` and `TrailEntry` return 0 from
+`describeContents()`; `LargeValue` returns `CONTENTS_FILE_DESCRIPTOR`.
 
 ### `HostCallerCheck` (N1 — shared extension-side trust gate)
 
@@ -1087,6 +1171,85 @@ selection, a copy, parked for `takeOutgoing`) and the handoff discipline are doc
 the debug ⋯) and library bottom bar, **present only while the extension is installed**, re-discovered
 on every resume — in `docs/notebook.md` §"Scratch Pad (arc 6)" and `docs/library.md`. Verified S0–S2 on
 SNN / NA5C / MIP11; the S3 review findings are in `PAPER_SCRATCHPAD_PLAN.md` S3 Outcome.
+
+## LinkProvider (contract — arc 7 / L0)
+
+The seventh point, and a new split of ownership: **the core owns link *structure*** — a link is a
+core `.soil` row type (`TYPE_LINK`, L1) wrapping a selection's re-parented children; the core wraps,
+unwraps, renders the composite, gives it lasso / move / delete / undo parity, detects the follow
+gestures and performs **all navigation** itself — and **`NSE · Links` owns link *meaning***: the link
+row's `text` payload is **opaque to the core** (never parsed, never logged), written by the
+extension's picker screen and interpreted only by the extension. Structure keeps working when the
+extension is gone (rule 30, L5): links still render their content (no chrome), move, delete and
+unlink; only follows (an honest dialog) and Link / Edit need it.
+
+- **Action** `ACTION_LINK_PROVIDER`; interface `ILinkProvider`; picker screen action
+  `ACTION_LINK_PICKER_SCREEN` (the arc-6 tier-2 pattern — L2 builds the screen); parcelables
+  `LinkChoice`, `LinkDestination`, `CatalogEntry`, `TrailEntry`; callback `ILinkCatalog` (below).
+- **Two usage modes on one service.** The **pick showing** (create + edit) is the arc-6 held-bind
+  recipe verbatim: store pre-opened on IO → `ExtensionStoreBinder` **and** `LinkCatalogBinder` minted
+  per showing → `ExtensionBinder.hold` → `beginPick(store, catalog, currentNotebookId, editPayload)`
+  ≤ 2 s → the screen launched with an `ActivityResultLauncher` only (caller-checked
+  `HostCallerCheck.enforceActivity`; `am start` refused) → on any result `takeResult` ≤ 2 s on the
+  still-held bind → `endPick` → unbind → **both binders revoked** in one `finally`
+  (`LinkClient.takeChoice` / `finish` — the result callback and the caller's `onDestroy` both funnel
+  there). The picker is a plain screen (no paper surface) — no `releaseForHandoff()` is needed.
+  The **one-shot calls** (`resolve`, `chromeOf`, the trail methods) are `ExtensionBinder.call` —
+  bind, one call, unbind in `finally`; the trail calls pre-open the store on IO first (a cold KDF
+  must never sit inside the 2 s window).
+- **`resolve(payload): LinkDestination?`** — a *description*, not a navigation: the extension names
+  index ids in a typed parcelable and the core validates them against live rows and navigates itself
+  (rule 28 — no Intent, component, path or URI ever crosses, either direction). Null = the payload is
+  unusable (malformed, an unknown future version) → the core's honest dead-link dialog.
+  **`chromeOf(payloads): int[]`** — same order, same length (anything else fails the call on the
+  host); values outside {0, 1} are masked to `LINK_CHROME_NONE`. Chrome is asked at page load and
+  session-cached — **nothing extension-derived is persisted** (the heading precedent, L0 wizard Q4):
+  with the extension missing a link renders its content with no underline.
+- **The trail** (`pushTrail` / `popTrail` / `clearTrail`) lives in the extension's host-owned store
+  (key `trail`, one inline value, newest-last, cap `MAX_TRAIL_ENTRIES` = 50 drops the oldest —
+  `TrailStore`), touched only through point methods that take `IExtensionStore` as an in-parameter
+  (rules 6–9; rule 31 lands in L5). Every entry is untrusted on the way back — the core validates
+  both ids against live rows before it navigates. A store failure leaves the extension's stub only as
+  a Binder-marshalable `IllegalStateException` (the arc-2 silent-failure lesson).
+- **`ILinkCatalog` — the first host-implemented callback binder** (rule 29, L5): the picker needs
+  library data, so the host hands `beginPick` a per-showing, uid-gated, revocable lens
+  (`LinkCatalogBinder` over `LinkCatalogGate` — the `ExtensionStoreGate` shape) instead of any wider
+  door. `listFolder("")` / `listFolder(folderId)` = alive folders + notebooks in library order
+  (the user's own sort; folders first); `listPages(notebookId)` = page ids in page order (blank
+  labels — the picker shows "Page n" from position; the **current** notebook is answered from the
+  live session via `LinkCatalogSource` — the origin's open `.soil` is never touched from a second
+  connection — and any other notebook by a read-only `SoilDatabase.open` sealed in `finally`).
+  Outward = names + ids + labels of alive rows only — never keys, paths, covers or blobs. The create
+  methods (`createPage` / `createFolder` / `createNotebook`) are `UnsupportedOperationException`
+  until L3, where they route through exactly the validation the library's own UI enforces
+  (refusals = typed `IllegalArgumentException`, the message user-honest, shown by the picker).
+  Catalog calls run ext→host as nested Binder transactions; the host serves them with `runBlocking`
+  off Main and sets no timeout on its own catalog work.
+- **Caps + timeouts (host-enforced):** bind ≤ 3 s; `beginPick` / `takeResult` / `endPick` /
+  `resolve` / `chromeOf` / trail methods ≤ 2 s each. Payload ≤ `MAX_LINK_PAYLOAD_CHARS` (2 000) both
+  ways — never truncated, an over-cap payload is a refused result (`requireValid` at unmarshal);
+  catalog replies ≤ `MAX_CATALOG_ENTRIES` with labels ≤ `MAX_CATALOG_LABEL_CHARS`; ids ≤
+  `MAX_LINK_ID_CHARS`. **Logging (both sides):** counts, kinds and durations only — never a payload,
+  id or label.
+- **The payload grammar is the extension's own** (`LinkPayload`, pure + JVM-tested — no
+  serialization dependency): `"L1|<chrome>|<kind>|<notebookId>|<pageId>"`, a versioned leading tag,
+  `|` forbidden in ids (they are UUIDs), an empty slot for each id the kind does not carry. An
+  unknown version decodes to null → `resolve` null → the dead-link dialog, never a crash. The core
+  knows none of this — it stores and hands back opaque text.
+
+**L0 state:** the contract above (`:extension-api`), the `NSE · Links` skeleton (`:ext-links` —
+manifest + puzzle icon, `LinksApplication`, `LinkProviderService` with every method real over
+`LinkPayload` + `TrailStore` (JVM-tested), and a caller-checked stub `LinkPickerActivity` showing
+only its title + Back; it depends on `:extension-api` + `:paper-screen` like the pad — the picker
+takes the design system, ~24 MB debug APK accepted), and the host side
+(`ExtensionRegistry.linkProvider`, the two `<queries>` actions, `LinkClient`, `LinkCatalogBinder` /
+`LinkCatalogGate` (JVM-tested) / `LinkCatalogSource`, `IconNames.LINK` / `LINK_OFF` + the two Tabler
+drawables in `:paper-screen` and `IconCatalog`). The debug ⋯ **"Probe links"** (removed in L5)
+exercises the whole point: the pick showing (held bind + a live catalog callback — the extension
+logs the root count via `listFolder("")` inside `beginPick`, debug builds only) → `takeResult`
+(null) → `endPick`, then `resolve` + `chromeOf` of fixed payloads, then a trail push / pop / clear
+round trip. Link rows, the real picker, create-in-picker and follow + trail wiring are L1–L4;
+boundary-audit rows 33+ and rules 28–31 land in L5.
 
 ## Host behaviour (`:app`, package `extension/`)
 

@@ -57,7 +57,7 @@ Paper lives in `apps/notesprout_paper/` with its own Gradle project. See `apps/n
 
 ```sh
 cd ~/git/Notesprout/apps/notesprout_paper
-./gradlew assembleDebug                  # all modules → app + the six extension debug APKs
+./gradlew assembleDebug                  # all modules → app + the seven extension debug APKs
 ./gradlew testDebugUnitTest              # all modules
 adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk
 # The extensions (install alongside the app on the same device):
@@ -67,13 +67,14 @@ adb -s <serial> install -r ext-mlkit/build/outputs/apk/debug/ext-mlkit-debug.apk
 adb -s <serial> install -r ext-markdown/build/outputs/apk/debug/ext-markdown-debug.apk # ~2.5 MB; the Markdown renderer (arc 4)
 adb -s <serial> install -r ext-heading/build/outputs/apk/debug/ext-heading-debug.apk   # ~2.5 MB; the Heading object provider (arc 4 / H3)
 adb -s <serial> install -r ext-scratchpad/build/outputs/apk/debug/ext-scratchpad-debug.apk  # ~25 MB (g-paper + Onyx SDK); the Scratch Pad (arc 6)
+adb -s <serial> install -r ext-links/build/outputs/apk/debug/ext-links-debug.apk           # ~24 MB (:paper-screen rides g-paper); the Links provider (arc 7)
 adb -s <serial> shell am start -n com.symmetricalpalmtree.notesprout.dev/com.symmetricalpalmtree.notesprout.bootstrap.BootstrapActivity
 ```
 
 **BOOX sideload traps (Paper app + extensions):** `install -r` can leave a package disabled, and BOOX
 may re-disable it a few seconds AFTER install — re-run `pm enable` and confirm with
 `pm list packages -d`. Packages: `com.symmetricalpalmtree.notesprout.dev` (app) and
-`com.symmetricalpalmtree.notesprout.ext.{templates,naming,mlkit,markdown,heading,scratchpad}.dev`.
+`com.symmetricalpalmtree.notesprout.ext.{templates,naming,mlkit,markdown,heading,scratchpad,links}.dev`.
 Separately, BOOX "Freeze new apps" (Settings → Apps → App Freeze; system ApplicationFreezeHelper)
 disabled a freshly installed package **~8 min after install**, and its list shows launcher apps only,
 so an extension can't be unfrozen by hand — switched OFF on the NA5C 2026-08-19; if it is ever on
