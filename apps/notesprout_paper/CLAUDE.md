@@ -5,7 +5,7 @@ global-index model, global encryption model, and e-ink design philosophy — and
 
 - **Branch:** `paper`
 - **Location:** `apps/notesprout_paper/`
-- **Plans:** `PAPER_PLAN.md` (v0 — architecture + locked decisions), then the six arc plans:
+- **Plans:** `PAPER_PLAN.md` (v0 — architecture + locked decisions), then the seven arc plans:
   `PAPER_EXTENSIONS_PLAN.md` (arc 1 — extension API v1 + the Templates extension),
   `PAPER_NAMING_PLAN.md` (arc 2 — the host-owned encrypted extension store + the Naming extension),
   `PAPER_RECOGNITION_PLAN.md` (arc 3 — the engine-neutral `HANDWRITING_RECOGNIZER` capability point +
@@ -13,14 +13,14 @@ global-index model, global encryption model, and e-ink design philosophy — and
   extension-contribution API + the `MARKDOWN_RENDERER` / `OBJECT_PROVIDER` points, the two proxies),
   `PAPER_CONTENTS_PLAN.md` (arc 5 — the Contents via `IObjectProvider.describeOutline` + the
   core-drawn `ContentsDialog`), `PAPER_SCRATCHPAD_PLAN.md` (arc 6 — `NSE · Scratch Pad`, the shared
-  `:paper-screen` module, the `SCRATCH_PAD` point, `putLarge`/`getLarge`). **All seven are complete +
-  frozen** (phase commit hashes and per-device verification are recorded in each plan) — read all
-  seven top-to-bottom at the start of every session.
-  **Active arc: `PAPER_LINKS_PLAN.md` (arc 7 — `NSE · Links`: core-owned link rows in the `.soil`
-  wrapping a selection, extension-owned semantics — opaque payload + `resolve`/`chromeOf`, the
-  tier-2 picker screen with the `ILinkCatalog` host callback, trail in the extension store,
-  finger-tap follow + swipe-up back). L0 ✅ · L1 ✅ · L2 ✅ · L3 ✅ · L4 ✅ (follow + trail) —
-  L5 (review + freeze) next, in a fresh session with its phase-start wizard.**
+  `:paper-screen` module, the `SCRATCH_PAD` point, `putLarge`/`getLarge`), and
+  `PAPER_LINKS_PLAN.md` (arc 7 — `NSE · Links`: core-owned link rows in the `.soil` wrapping a
+  selection, extension-owned semantics — opaque payload + `resolve`/`chromeOf`, the tier-2 picker
+  screen with the `ILinkCatalog` host callback, trail in the extension store, finger-tap follow +
+  swipe-up back; **`docs/links.md` is the arc's own reference**). **All eight are complete +
+  frozen** (phase commit hashes and per-device verification are recorded in each plan) — read them
+  top-to-bottom at the start of every session. **No active arc — the next one is not planned; ask
+  the user first.**
 - **Package / applicationId:** `com.symmetricalpalmtree.notesprout` (debug: `.dev` suffix)
 - **Launcher label:** "Notesprout Paper" (debug: "Notesprout Paper Dev")
 
@@ -169,9 +169,11 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   navigate; cross-notebook = the full close seal then relaunch with host-internal
   `EXTRA_VIA_LINK` [+`EXTRA_INITIAL_PAGE_ID`]); one-finger swipe-up and BOTH Backs of a via-link
   notebook walk the trail (`walkBack` — dead entries skipped silently, cap 50); a fresh open
-  fire-and-forget-clears the trail. **L0 built** contract + skeleton + client + catalog binder + the
-  debug ⋯ "Probe links" (removed in L5); **L1** the core link rows, **L2** the picker + pick flow,
-  **L3** create-in-picker, **L4** follow + trail.
+  fire-and-forget-clears the trail. L0 built contract + skeleton + client + catalog binder; L1 the
+  core link rows; L2 the picker + pick flow; L3 create-in-picker; L4 follow + trail; **L5 froze the
+  arc** (both debug probes removed — the real flows exercise the point; boundary-audit rows 33–37 +
+  rules 28–31 in `docs/extensions.md`; `docs/links.md` is the failure-matrix / deviations
+  reference).
   `TemplateProviderClient` (bind-per-operation, signature re-checked at bind, timeouts, unbind in
   `finally`, payload = mime + byte cap + exact requested size); **the core has no renderer**. No
   extension → no Template section, blank notebook. A render failure stays on the screen with a toast —

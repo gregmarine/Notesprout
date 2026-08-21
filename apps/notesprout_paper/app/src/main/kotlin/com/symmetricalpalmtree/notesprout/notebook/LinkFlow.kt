@@ -39,8 +39,7 @@ import kotlinx.coroutines.withTimeout
  * gating, the wrap / unwrap mutations, the session chrome map, and — since L2 — the **pick flow**
  * behind the Link / Edit taps: the arc-6 held-bind recipe over [LinkClient] ([beginCreate] /
  * [beginEdit] → `openPick` → the extension's picker through [launcher] → [onResult] drains the
- * [LinkChoice] and applies it). The debug ⋯ "Create test link" still drives [createFromSelection]
- * directly with a fixed payload (removed in L5). Since L4 it also owns **follow + the trail**:
+ * [LinkChoice] and applies it). Since L4 it also owns **follow + the trail**:
  * [followAt] (finger tap → resolve → [LinkNav.planFollow] → validate → push → navigate or seal +
  * relaunch via [openNotebook]), [walkBack] (swipe-up / via-link Back — pop, skip dead silently,
  * navigate), and the fresh-open [requestTrailClear].
@@ -458,7 +457,7 @@ class LinkFlow(
     /**
      * Wrap the given selection into one link (one undoable step, page reloaded on completion). The
      * strokes come in writing order (the host filters `liveStrokes`); [payload] is opaque — the
-     * picker's `LinkChoice` (L2) or the debug item's fixed grammar string (L1, removed in L5).
+     * picker's `LinkChoice` (L2).
      * Refused (logged, nothing changes) when empty, when the selection already holds a link
      * (guarded by the caller's gating too), or when the page is at the link cap.
      */

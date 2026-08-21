@@ -353,9 +353,11 @@ class LinkPickerActivity : AppCompatActivity() {
             finish()
             return
         }
+        // Only a typed refusal carries a user-honest message by contract (IllegalArgumentException —
+        // the host's own validation texts); an IllegalStateException is an internal failure whose
+        // message may be developer-shaped ("catalog: <Class>: <msg>") — generic text instead.
         val message = when (e) {
-            is IllegalArgumentException, is IllegalStateException ->
-                e.message ?: getString(R.string.links_catalog_failed)
+            is IllegalArgumentException -> e.message ?: getString(R.string.links_catalog_failed)
             else -> getString(R.string.links_catalog_failed)
         }
         Dialogs.problem(this, binding.title.text, message)

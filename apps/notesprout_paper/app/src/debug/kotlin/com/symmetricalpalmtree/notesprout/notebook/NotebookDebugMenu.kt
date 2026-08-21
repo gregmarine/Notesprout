@@ -18,10 +18,7 @@ import com.symmetricalpalmtree.notesprout.extension.ExtensionCallException
 import com.symmetricalpalmtree.notesprout.extension.ExtensionRegistry
 import com.symmetricalpalmtree.notesprout.extension.InkStroke
 import com.symmetricalpalmtree.notesprout.extension.InkTooLargeException
-import com.symmetricalpalmtree.notesprout.extension.LinkCatalogSource
-import com.symmetricalpalmtree.notesprout.extension.LinkClient
 import com.symmetricalpalmtree.notesprout.extension.ProviderRef
-import com.symmetricalpalmtree.notesprout.extension.TrailEntry
 import com.symmetricalpalmtree.notesprout.extension.RecognizerClient
 import com.symmetricalpalmtree.notesprout.extension.RecognizerNotReadyException
 import com.symmetricalpalmtree.notesprout.extension.RecognizerReadiness
@@ -41,7 +38,8 @@ import kotlinx.coroutines.withContext
  * it. (The arc-4 test surfaces "Insert test object" / "Probe object providers" were removed in H5; the
  * arc-5 / C0 "Probe contents" item was removed in C2 — the Contents screen itself exercises that path;
  * the arc-6 / S0 "Probe scratch pad" item was removed in S3 — the Scratch Pad screen exercises the held
- * bind.)
+ * bind; the arc-7 / L0 "Probe links" + L1 "Create test link" items were removed in L5 — the real
+ * picker / follow flows exercise the point.)
  *
  * Every dialog here is the core's (the extension shows nothing; the only toast is "copied"); nothing
  * recognized is stored or logged — the dialog is the only sink.
@@ -64,12 +62,6 @@ object NotebookDebugMenu {
         activity: AppCompatActivity,
         bar: ViewGroup,
         provider: () -> RecognizeContext?,
-        linkCatalog: () -> LinkCatalogSource? = { null },
-        /** The current lasso selection's (strokes, objects) — null when none, or it contains a link,
-         *  or it is empty (arc 7 / L1 "Create test link"; removed in L5). */
-        linkSelection: (() -> Pair<List<com.symmetricalpalmtree.gpaper.core.model.Stroke>, List<PageObject>>?)? = null,
-        /** `LinkFlow.createFromSelection` — (strokes, objects, payload, chrome). */
-        createLink: ((List<com.symmetricalpalmtree.gpaper.core.model.Stroke>, List<PageObject>, String, Int) -> Unit)? = null,
     ) {
         // The row's own flexible gap (layout) already pushes what follows it to the far end: the ⋯ lands
         // right after the Scratch Pad button (S3: that button sits immediately before the ⋯).
@@ -85,92 +77,23 @@ object NotebookDebugMenu {
             stateListAnimator = null
         }
         TooltipCompat.setTooltipText(btn, btn.contentDescription)
-        btn.setOnClickListener { showSheet(activity, provider, linkCatalog, linkSelection, createLink) }
+        btn.setOnClickListener { showSheet(activity, provider) }
         bar.addView(btn)
     }
 
     private fun showSheet(
         activity: AppCompatActivity,
         provider: () -> RecognizeContext?,
-        linkCatalog: () -> LinkCatalogSource?,
-        linkSelection: (() -> Pair<List<com.symmetricalpalmtree.gpaper.core.model.Stroke>, List<PageObject>>?)?,
-        createLink: ((List<com.symmetricalpalmtree.gpaper.core.model.Stroke>, List<PageObject>, String, Int) -> Unit)?,
     ) {
         activity.lifecycleScope.launch {
             val ref = ExtensionRegistry.handwritingRecognizer(activity)   // IO; refreshed per open
-            val linkRef = ExtensionRegistry.linkProvider(activity)       // IO; refreshed per open (arc 7 / L0)
             if (activity.isFinishing || activity.isDestroyed) return@launch
             val sheet = ActionSheetDialog(activity).title(activity.getString(R.string.debug_tools_title))
             // No recognizer installed → the item is absent (the sheet opens with its title only).
             if (ref != null) {
                 sheet.addAction(null, activity.getString(R.string.debug_recognize_page)) { recognize(activity, ref, provider) }
             }
-            // Arc 7 / L0 probe (removed in L5): present only while a trusted LINK_PROVIDER is installed.
-            if (linkRef != null) {
-                sheet.addAction(null, activity.getString(R.string.debug_probe_links)) { probeLinks(activity, linkRef, linkCatalog) }
-            }
-            // Arc 7 / L1 "Create test link" (removed in L5): wraps the current eligible selection with
-            // a fixed DEST_PAGE payload to page 1 — the real grammar, so `chromeOf` round-trips for
-            // real. The payload is composed HERE, debug source only: the core never builds one.
-            if (linkRef != null && linkSelection != null && createLink != null) {
-                sheet.addAction(null, activity.getString(R.string.debug_create_test_link)) {
-                    val (strokes, objects) = linkSelection() ?: run {
-                        Dialogs.problem(activity, R.string.debug_tools_title, R.string.debug_test_link_needs_selection); return@addAction
-                    }
-                    val pageOneId = linkCatalog()?.currentPages()?.firstOrNull()?.first ?: return@addAction
-                    createLink(strokes, objects, "L1|1|0||$pageOneId", 1 /* LINK_CHROME_UNDERLINE */)
-                }
-            }
             sheet.show()
-        }
-    }
-
-    /**
-     * Arc 7 / L0 — "Probe links" (removed in L5): exercises the whole `LINK_PROVIDER` point with
-     * nothing user-visible. (1) The pick showing: `openPick` (store pre-open → held bind →
-     * `beginPick` with a live catalog binder — the extension logs the root count via
-     * `listFolder("")`) → `takeChoice` (null — no screen is launched) → `endPick` → unbind → both
-     * binders revoked. (2) The one-shots: `resolve` + `chromeOf` of fixed payloads. (3) A trail
-     * push / pop / clear round trip (persisted in the extension's store). **Logs only** — tags
-     * `LinkClient` / `LinkProviderService` carry the sequence; payloads are synthetic and only
-     * kinds / counts / lengths are ever logged.
-     */
-    private fun probeLinks(activity: AppCompatActivity, ref: ProviderRef, linkCatalog: () -> LinkCatalogSource?) {
-        if (busy()) return
-        val source = linkCatalog() ?: return   // not open yet — nothing to probe against
-        claim(activity)
-        activity.lifecycleScope.launch {
-            val client = LinkClient(activity, ref)
-            try {
-                // 1 — the pick showing (held bind + catalog callback; the stub screen is NOT launched).
-                val intent = client.openPick(source, editPayload = null)
-                Slog.d(TAG) { "probe links: openPick ${if (intent != null) "ok" else "FAILED"}" }
-                if (intent != null) {
-                    val choice = client.takeChoice()   // drains + endPick + unbind + revoke in finally
-                    Slog.d(TAG) { "probe links: takeChoice → ${if (choice == null) "null (expected)" else "UNEXPECTED choice"}" }
-                }
-                // 2 — the one-shot description calls over fixed payloads.
-                val pageId = source.currentPages()?.firstOrNull()?.first ?: "00000000-0000-0000-0000-000000000000"
-                val underlined = "L1|1|0||$pageId"                        // DEST_PAGE, underline
-                val bare = "L1|0|1|${source.currentNotebookId}|"          // DEST_NOTEBOOK, no chrome
-                val dest = client.resolve(underlined)
-                Slog.d(TAG) { "probe links: resolve → ${dest?.let { "kind=${it.kind}" } ?: "null (FAILED)"}" }
-                val chrome = client.chromeOf(listOf(underlined, bare, "not a payload"))
-                Slog.d(TAG) { "probe links: chromeOf → [${chrome.joinToString()}] (want [1, 0, 0])" }
-                // 3 — the trail round trip (persisted in the extension's host-owned store).
-                client.pushTrail(TrailEntry(source.currentNotebookId, pageId))
-                val popped = client.popTrail()
-                val roundTrip = popped != null && popped.notebookId == source.currentNotebookId && popped.pageId == pageId
-                Slog.d(TAG) { "probe links: trail push/pop → ${if (roundTrip) "ok" else "FAILED"}" }
-                client.clearTrail()
-                val emptied = client.popTrail() == null
-                Slog.d(TAG) { "probe links: clearTrail → ${if (emptied) "ok" else "FAILED"} — PROBE DONE" }
-            } catch (e: Exception) {
-                Slog.d(TAG) { "probe links: FAILED ${e.javaClass.simpleName}: ${e.message}" }
-            } finally {
-                client.finish()   // idempotent — releases a half-open showing on any failure path
-                release()
-            }
         }
     }
 

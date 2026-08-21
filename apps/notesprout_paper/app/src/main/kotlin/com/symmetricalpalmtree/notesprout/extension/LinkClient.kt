@@ -120,8 +120,12 @@ class LinkClient(context: Context, val ref: ProviderRef) {
         val catalog = catalogBinder
         catalogBinder = null
         try {
-            if (!binding.isDead) binding.call(CALL_TIMEOUT_MS) { it.endPick() }
-            Slog.d(TAG) { "finish: endPick ok" }
+            if (binding.isDead) {
+                Slog.d(TAG) { "finish: endPick skipped (dead bind)" }
+            } else {
+                binding.call(CALL_TIMEOUT_MS) { it.endPick() }
+                Slog.d(TAG) { "finish: endPick ok" }
+            }
         } catch (e: CancellationException) {
             throw e   // the finally below still releases everything
         } catch (e: ExtensionCallException) {

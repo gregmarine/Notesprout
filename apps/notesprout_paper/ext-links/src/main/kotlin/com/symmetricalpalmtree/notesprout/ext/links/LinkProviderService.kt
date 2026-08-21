@@ -3,7 +3,6 @@ package com.symmetricalpalmtree.notesprout.ext.links
 import android.app.Service
 import android.content.Intent
 import android.os.IBinder
-import android.util.Log
 import com.symmetricalpalmtree.notesprout.core.Slog
 import com.symmetricalpalmtree.notesprout.extension.ExtensionContract
 import com.symmetricalpalmtree.notesprout.extension.HostCallerCheck
@@ -47,16 +46,6 @@ class LinkProviderService : Service() {
             PickSession.currentNotebookId = currentNotebookId
             PickSession.editPayload = editPayload
             Slog.d(TAG) { "beginPick: edit=${editPayload != null}" }
-
-            // L0 probe: exercises the host's catalog callback end to end; removed in L5.
-            if (BuildConfig.DEBUG) {
-                try {
-                    val n = catalog.listFolder("").size
-                    Log.d(TAG, "beginPick: root has $n entries")
-                } catch (e: Exception) {
-                    Log.d(TAG, "beginPick: catalog probe failed: ${e.javaClass.simpleName}")
-                }
-            }
         }
 
         override fun takeResult(): LinkChoice? {

@@ -467,8 +467,8 @@ payload's meaning (`docs/extensions.md` §"LinkProvider (contract)").
   fill lifted out of `NotebookActivity` at its line cap, grown link-aware) · `LinkComposite` (the
   composite builder) · `liveLinks` (the screen's z-ordered mirror, rebuilt with strokes + objects
   on every load).
-- **Wrap / unwrap.** `LinkFlow.createFromSelection` (L1: driven by the debug ⋯ "Create test link"
-  with a fixed payload; L2: the picker's `LinkChoice`): union bounds + 2 dp underline clearance →
+- **Wrap / unwrap.** `LinkFlow.createFromSelection` (driven by the picker's `LinkChoice` since
+  L2; the L1 debug "Create test link" composer was removed in L5): union bounds + 2 dp underline clearance →
   `LinkStore.create` → one `Action.LinkCreated` → drain + reload the page (the undo-replay
   discipline — no manual mirror surgery, writing order preserved). `Unlink` mirrors it
   (`LinkUnlinked`); the content comes back as page children. Both under the page-op lock.
@@ -630,11 +630,14 @@ source of truth and paper never desyncs):
 |---|---|---|
 | `Drew(pageId, stroke)` | `store.remove` | `store.restore` |
 | `Erased(pageId, strokes)` | `store.restore` | `store.remove` |
-| `Moved(pageId, ids, dx, dy, objectIds)` | `store.move(-dx,-dy)` + `objectStore.move(-dx,-dy)` | both `move(dx,dy)` |
+| `Moved(pageId, ids, dx, dy, objectIds, linkIds)` (links arc 7) | `store.move(-dx,-dy)` + `objectStore.move(-dx,-dy)` + `linkStore.move(-dx,-dy)` (children translated too) | all three `move(dx,dy)` |
 | `Page(Structural)` | `reconcile(before, childIds→restore, …, beforeCurrentId)` | `reconcile(after, …, childIds→delete, afterCurrentId)` |
 | `ObjectCreated(pageId, obj, removedStrokes)` (arc 4) | `objectStore.remove([obj])` + `store.restore(removedStrokes)` | `objectStore.restore([obj])` + `store.remove(removedStrokes)` |
-| `ObjectsDeleted(pageId, strokes, objects)` (arc 4) | restore both | remove both |
+| `ObjectsDeleted(pageId, strokes, objects, links)` (arc 4; `links` arc 7) | restore all | remove all |
 | `ObjectEdited(pageId, before, after)` (arc 4) | `updatePayloadAndBounds(before)` | `updatePayloadAndBounds(after)` |
+| `LinkCreated(pageId, link)` (arc 7) | `linkStore.unlink` | `linkStore.relink` |
+| `LinkUnlinked(pageId, link)` (arc 7) | `linkStore.relink` | `linkStore.unlink` |
+| `LinkEdited(pageId, linkId, beforePayload, afterPayload)` (arc 7) | `updatePayload(before)` | `updatePayload(after)` |
 
 `StrokeStore` gained `remove(ids)` (= soft delete) and `restore(pageId, strokes)` (re-add as live
 rows). `NotebookActivity` keeps `liveStrokes` (a `Map<id,Stroke>` of the visible page) so an erase can

@@ -2,7 +2,6 @@ package com.symmetricalpalmtree.notesprout.notebook
 
 import android.view.ViewGroup
 import androidx.appcompat.app.AppCompatActivity
-import com.symmetricalpalmtree.notesprout.extension.LinkCatalogSource
 
 /** Release build: no debug tools exist on the notebook screen. */
 object NotebookDebugMenu {
@@ -10,8 +9,5 @@ object NotebookDebugMenu {
         activity: AppCompatActivity,
         bar: ViewGroup,
         provider: () -> RecognizeContext?,
-        linkCatalog: () -> LinkCatalogSource? = { null },
-        linkSelection: (() -> Pair<List<com.symmetricalpalmtree.gpaper.core.model.Stroke>, List<PageObject>>?)? = null,
-        createLink: ((List<com.symmetricalpalmtree.gpaper.core.model.Stroke>, List<PageObject>, String, Int) -> Unit)? = null,
     ) = Unit
 }

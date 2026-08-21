@@ -13,7 +13,7 @@
 > The **original** Notesprout implementation this arc draws on is `docs/links.md` at the monorepo
 > root — inspiration, not a spec; every deviation is recorded here.
 >
-> **Status: L0 ✅ (df2de82) · L1 ✅ (bc944bc) · L2 ✅ (a86214c) · L3 ✅ (6822e44) · L4 ✅ (b2e71dd + b9b107f) · L5 ⬜**
+> **Status: L0 ✅ (df2de82) · L1 ✅ (bc944bc) · L2 ✅ (a86214c) · L3 ✅ (6822e44) · L4 ✅ (b2e71dd + b9b107f) · L5 🧪**
 
 ## Why
 
@@ -1157,16 +1157,66 @@ so the chain story is yours):**
 ---
 
 ### Phase L5 — Review, boundary audit, docs freeze
-**Status:** ⬜ Not started
+**Status:** 🧪 Built + device-verified (2026-08-20) — the condensed user eye pass pending
 
 **Goal:** the arc is reviewed, audited, documented, probe-free and frozen.
 
-**Questions to resolve at phase start:**
-1. Freeze as built, or is there a follow-up list from L1–L4 to land first?
-2. Remove both debug probes ("Probe links", "Create test link") — confirm.
-3. `/code-review high <L5 review base>...HEAD` — the RANGE (the base hash is in L0's Outcome);
-   confirm scope. (Trap from arc 6: the coordinator's report can fail to surface — read the finder
-   agents via `ListAgents` + `TaskOutput` if so.)
+**Questions resolved at phase start (wizard, 2026-08-20):**
+1. **Freeze as built** — no user follow-ups beyond the flagged items; the review pass judges the
+   L1–L4 flagged list and fixes or explicitly accepts each, recorded in the Outcome.
+2. **Remove both probes** ("Probe links" + "Create test link") and the extension-side `beginPick`
+   `listFolder("")` count log — the arc-6 (S3) precedent.
+3. **No `/code-review` this phase** (user's call — "Let's skip the code-review on this one"):
+   L5 runs Fable's own pass over the flagged items + the boundary audit instead of the
+   multi-agent review; the review base `0f91ed5` stays recorded should a later review want the
+   arc's range.
+
+**Build notes (recorded during the phase; the Outcome finalises them):**
+- **Probes removed** (Opus agent, Fable-reviewed): the debug ⋯ "Probe links" + "Create test link"
+  blocks, `probeLinks` and the three-lambda plumbing gone from both `NotebookDebugMenu` twins and
+  the `NotebookActivity` call; the three debug strings; the ext-side `beginPick` `listFolder("")`
+  count block (+ its now-orphaned `Log` import); two stale "removed in L5" comment references in
+  `LinkFlow` cleaned. Grep sweep: zero probe references left in code (the one remaining hit is
+  the debug menu's own header KDoc naming the removed items, intentional).
+- **Fable's review pass over the L1–L4 flagged items** (walked against the code — verdicts):
+  - **FIXED — the L2 `catalog:` prefix**: `LinkPickerActivity.failed()` showed
+    `IllegalStateException` messages verbatim, so the host's `catalog: <Class>: <msg>` rethrow
+    could reach a user dialog. Per the contract only `IllegalArgumentException` refusals carry
+    user-honest text — the picker now shows IAE verbatim and everything else generic
+    (`links_catalog_failed`).
+  - **FIXED — the L2 cosmetic log**: `LinkClient.finish` logged "endPick ok" even when a dead
+    bind skipped the call; now logs "endPick skipped (dead bind)".
+  - **ACCEPTED** (each honest and by design, recorded in `docs/links.md` §Traps where user-facing):
+    host-process death mid-showing → ext-side `DeadObjectException` → generic dialog + stay (L2);
+    the relay's sticky `prepared` slot (L3 — recreation must re-find it); a mode switch during
+    `prepareNewNotebook`'s IO creates in the previously browsed folder unshown (L3 — benign);
+    a stale Edit-prefill anchor → the honest "unknown page" dialog (L3); host death mid-showing +
+    "New notebook" → IndexGuard bounce tears the task down (L3 — the same half-dead-showing
+    family); Intent redelivery re-applies `EXTRA_INITIAL_PAGE_ID` after a process death in a
+    via-link notebook (L4).
+- **Docs**: `docs/extensions.md` — §LinkProvider / §The Links extension / host behaviour
+  finalised (+ the L4 follow & walk-back paragraphs), rules 28–31 under the new §"Adding a
+  navigation point (arc 7 pattern)", boundary-audit rows 33–37 + the L5 re-walk of rows 1/6/7
+  for `LinkClient`'s two modes and the catalog's nested calls, "Writing an extension" item 12
+  (providing link meaning). **`docs/links.md` written** (ownership split, user surface, failure
+  matrix, deviations-from-original table, traps). `docs/notebook.md`: stale debug-item reference
+  cleaned, undo table gains the three link actions + `linkIds`/`links` on `Moved`/`ObjectsDeleted`.
+  Paper `CLAUDE.md`: all eight plans complete + frozen, no active arc, Links bullet final.
+- JVM green (ten modules) + `:app` debug/release + `:ext-links` debug compile after every change;
+  freeze build installed on SNN / NA5C / MIP11 (both packages re-enabled on the BOOX).
+
+**Claude-side device runs (one Sonnet agent per device, 2026-08-20): all 9 checks PASS ×3 on the
+freeze build** — packages all enabled (BOOX freeze list clean start AND end); the page-load
+"… N links …" line + fresh-open `clearTrail ok` on all three; **the debug ⋯ sheet shows only
+"Recognize page (ML Kit)" — both probe items gone** (screenshot-verified per device); empty-trail
+swipe-up silent (`popTrail: empty`); a **real follow + swipe-up walk-back on every device**
+(SNN: Test 06 → Test 07 cross-notebook and back to the exact origin page, tap→resolve 64 ms ·
+NA5C: Test 03 cross-notebook round trip, 18 ms · MIP11: 23 ms — its only surviving test link is a
+same-page self-link, so the full resolve→push→navigate→pop round trip ran without a visible flip;
+test-data gap, not a regression); both `am start` refusals hold ×3 (picker `refused caller
+(none)`; the new-notebook screen never reaches RESUMED); binds = unbinds; crash buffers empty;
+flip regression clean. Residual test-data drift noted (SNN Test 07's L4 blank pages; the MIP11
+self-link) — user may tidy or ignore.
 
 **Deliverables**
 1. Review findings fixed or explicitly accepted (each recorded here in the Outcome).
@@ -1182,6 +1232,21 @@ so the chain story is yours):**
 
 **Tests:** JVM green; the L1–L4 user checklists' condensed regression subset re-run per device
 (Claude agents + user's eye pass); no probe remnants (`grep` sweep).
+
+**User checklist as issued (2026-08-20 — the condensed eye pass on SNN, NA5C and MIP11; the
+lasso-gated flows the agents can't reach):**
+1. **Probes gone:** notebook ⋯ shows only "Recognize page (ML Kit)" — no "Probe links", no
+   "Create test link".
+2. **The lifecycle in one pass:** lasso some ink → **Link** → pick a page of this notebook → OK
+   (underlined link) → bare **finger tap** follows it → **swipe up** returns → lasso the link →
+   **Edit** → flip Style to None → OK (underline gone, one undo reverts) → **Unlink** dissolves it.
+3. **Cross-notebook + Back:** create a Notebook-mode link → tap → the target opens → **top-bar
+   Back** walks back to the origin page → Back again → the library.
+4. **Eraser** takes a whole link in one pass; undo brings it back.
+5. **Create-in-picker refusal:** picker → Notebook mode → New folder → name `..` → the honest
+   library refusal text, prompt + typed text kept (no `catalog:` developer prefix — the L5 fix).
+6. **60-second regression:** write / flip / multi-finger undo-redo, Contents swipe-down, Scratch
+   Pad round trip, long-press page delete — unchanged.
 
 **Close-out:** status ✅ ARC COMPLETE; commit + push; this file frozen.
 

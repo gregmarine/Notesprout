@@ -1202,7 +1202,7 @@ unwraps, renders the composite, gives it lasso / move / delete / undo parity, de
 gestures and performs **all navigation** itself — and **`NSE · Links` owns link *meaning***: the link
 row's `text` payload is **opaque to the core** (never parsed, never logged), written by the
 extension's picker screen and interpreted only by the extension. Structure keeps working when the
-extension is gone (rule 30, L5): links still render their content (no chrome), move, delete and
+extension is gone (rule 30): links still render their content (no chrome), move, delete and
 unlink; only follows (an honest dialog) and Link / Edit need it.
 
 - **Action** `ACTION_LINK_PROVIDER`; interface `ILinkProvider`; picker screen action
@@ -1230,10 +1230,10 @@ unlink; only follows (an honest dialog) and Link / Edit need it.
 - **The trail** (`pushTrail` / `popTrail` / `clearTrail`) lives in the extension's host-owned store
   (key `trail`, one inline value, newest-last, cap `MAX_TRAIL_ENTRIES` = 50 drops the oldest —
   `TrailStore`), touched only through point methods that take `IExtensionStore` as an in-parameter
-  (rules 6–9; rule 31 lands in L5). Every entry is untrusted on the way back — the core validates
+  (rules 6–9 and rule 31). Every entry is untrusted on the way back — the core validates
   both ids against live rows before it navigates. A store failure leaves the extension's stub only as
   a Binder-marshalable `IllegalStateException` (the arc-2 silent-failure lesson).
-- **`ILinkCatalog` — the first host-implemented callback binder** (rule 29, L5): the picker needs
+- **`ILinkCatalog` — the first host-implemented callback binder** (rule 29): the picker needs
   library data, so the host hands `beginPick` a per-showing, uid-gated, revocable lens
   (`LinkCatalogBinder` over `LinkCatalogGate` — the `ExtensionStoreGate` shape) instead of any wider
   door. `listFolder("")` / `listFolder(folderId)` = alive folders + notebooks in library order
@@ -1288,21 +1288,20 @@ unlink; only follows (an honest dialog) and Link / Edit need it.
   unknown version decodes to null → `resolve` null → the dead-link dialog, never a crash. The core
   knows none of this — it stores and hands back opaque text.
 
-**L0 state:** the contract above (`:extension-api`), the `NSE · Links` skeleton (`:ext-links` —
-manifest + puzzle icon, `LinksApplication`, `LinkProviderService` with every method real over
-`LinkPayload` + `TrailStore` (JVM-tested), and a caller-checked stub `LinkPickerActivity` showing
-only its title + Back; it depends on `:extension-api` + `:paper-screen` like the pad — the picker
-takes the design system, ~24 MB debug APK accepted), and the host side
+**As built (arc complete, L5 2026-08-20):** the contract above (`:extension-api`), the
+`NSE · Links` extension (`:ext-links` — manifest + puzzle icon, `LinksApplication`,
+`LinkProviderService` with every method real over `LinkPayload` + `TrailStore` (JVM-tested), the
+caller-checked `LinkPickerActivity`; it depends on `:extension-api` + `:paper-screen` like the pad
+— the picker takes the design system, ~24 MB debug APK accepted), and the host side
 (`ExtensionRegistry.linkProvider`, the two `<queries>` actions, `LinkClient`, `LinkCatalogBinder` /
-`LinkCatalogGate` (JVM-tested) / `LinkCatalogSource`, `IconNames.LINK` / `LINK_OFF` + the two Tabler
-drawables in `:paper-screen` and `IconCatalog`). The debug ⋯ **"Probe links"** (removed in L5)
-exercises the whole point: the pick showing (held bind + a live catalog callback — the extension
-logs the root count via `listFolder("")` inside `beginPick`, debug builds only) → `takeResult`
-(null) → `endPick`, then `resolve` + `chromeOf` of fixed payloads, then a trail push / pop / clear
-round trip. Link rows landed in L1, the real picker in L2, create-in-picker in L3; follow + trail wiring is L4;
-boundary-audit rows 33+ and rules 28–31 land in L5.
+`LinkCatalogGate` (JVM-tested) / `LinkCatalogSource`, `IconNames.LINK` / `LINK_OFF` + the Tabler
+drawables in `:paper-screen` and `IconCatalog`). Link rows landed in L1, the picker in L2,
+create-in-picker in L3, follow + trail in L4; L5 removed the two debug probes (the real picker /
+follow flows exercise the point), walked boundary-audit rows 33–37 + the rows-1/6/7 re-walk, and
+recorded rules 28–31. **`docs/links.md` is the arc's own reference** (data model, contract recap,
+picker, follow, trail, failure matrix, deviations from the original app).
 
-## The Links extension (`:ext-links` — arc 7; L2 draft, finalised in L5)
+## The Links extension (`:ext-links` — arc 7)
 
 `NSE · Links` owns link *meaning* over the core's link *structure*: the payload codec
 (`LinkPayload`, the `"L1|chrome|kind|notebookId|pageId"` grammar above), the trail (`TrailStore`
@@ -1345,7 +1344,7 @@ was restarted mid-showing):
   mode auto-selects the created notebook, Notebook-page mode drills into its (one-page) grid.
   Nothing created in the picker is undoable; a refusal is always a `Dialogs.problem`.
 
-### LinkProvider — host behaviour (L2 draft, finalised in L5)
+### LinkProvider — host behaviour
 
 `notebook/LinkFlow` is the screen collaborator (`NotebookActivity` stays at its line cap): the
 three core actions with their gating (L1), the wrap/unwrap/edit mutations, the session chrome map,
@@ -1384,6 +1383,28 @@ precedent):
   for-a-result from a signature-matched caller; the host itself passes trivially) and, in relay
   mode (`ACTION_LINK_NEW_NOTEBOOK_SCREEN`), reads folder + default name from `LinkCreateRelay`,
   creates without opening, parks the created (id, name) back and returns a bare `RESULT_OK`.
+- **Follow (L4):** a bare finger tap (`PageGestures.onFingerTap` — sub-slop, under the long-press
+  timeout, single-finger, pen-gated, committed through the same pen-tail escrow as undo/redo)
+  reaches `LinkFlow.followAt`: topmost link under the point by z-order, else inert. No extension
+  but a link hit → `links_required`. Otherwise one one-shot `resolve` → the pure
+  `LinkNav.planFollow` (SamePage / OtherNotebook / Dead / NoOp — a `DEST_NOTEBOOK_PAGE` naming the
+  current notebook is an in-notebook hop; a self-`DEST_NOTEBOOK` is a silent no-op, the payload is
+  untrusted) → the core validates every id **before leaving** (index `alive` for the notebook,
+  `LinkFlow.foreignPageAlive` — a read-only page-row pre-check sealed in `finally`) →
+  `pushTrail(origin)` best-effort (every follow pushes, same-notebook included — L4 Q3; a failed
+  push never blocks the follow) → navigate: same-notebook = `navigateTo` under the page-op lock
+  (the page id re-looked-up there), cross-notebook = the full close seal, then `startActivity`
+  with the **host-internal** `EXTRA_VIA_LINK` (+ `EXTRA_INITIAL_PAGE_ID`) — both extras ride the
+  core's own Intent to its own Activity, never an extension's. A dead `EXTRA_INITIAL_PAGE_ID`
+  falls back to the target's own last-open page silently — the pre-checks carry the honesty.
+- **Walking back (L4):** one-finger swipe-up (`PageGestures.onSwipeUp` — the Contents swipe-down
+  mirrored, one vertical evaluation routed on the `dy` sign) and **both** Backs of a via-link
+  notebook funnel `LinkFlow.walkBack`: pop → `LinkNav.planBack` → dead entries skipped silently
+  (L4 Q2; a cross-notebook entry re-validated with the same read-only pre-check, so a dead page
+  skips rather than landing wrong), capped at `MAX_TRAIL_ENTRIES` pops; empty trail (or no
+  extension) → the swipe is silent and Back runs the normal close-to-library. A fresh open (no
+  `EXTRA_VIA_LINK`) fire-and-forget-clears the trail once a provider is discovered — kept pending
+  until a clear succeeds, so a failed one-shot retries at the next resume.
 
 ## Host behaviour (`:app`, package `extension/`)
 
@@ -1650,7 +1671,7 @@ correctly reports 0 candidates while it is disabled.
 
 ---
 
-## Boundary audit (rows 1–9 E2, rows 10–13 N2 — walked 2026-08-16; rows 14–17 M2 + rows 1/6/7 re-walked for the shared `ExtensionBinder` 2026-08-17; rows 18–24 H5 + rows 1/6/7 re-walked for the two new clients and the proxies' inner calls 2026-08-18; rows 25–27 C2 + rows 1/6/7 re-walked for the appended `describeOutline` / `supportsOutline` calls 2026-08-18; rows 28–32 S3 + rows 1/6/7 re-walked for `ExtensionBinder.hold` / `HeldBinding.call` and the four `IScratchPad` calls 2026-08-19 — all ✅)
+## Boundary audit (rows 1–9 E2, rows 10–13 N2 — walked 2026-08-16; rows 14–17 M2 + rows 1/6/7 re-walked for the shared `ExtensionBinder` 2026-08-17; rows 18–24 H5 + rows 1/6/7 re-walked for the two new clients and the proxies' inner calls 2026-08-18; rows 25–27 C2 + rows 1/6/7 re-walked for the appended `describeOutline` / `supportsOutline` calls 2026-08-18; rows 28–32 S3 + rows 1/6/7 re-walked for `ExtensionBinder.hold` / `HeldBinding.call` and the four `IScratchPad` calls 2026-08-19; rows 33–37 L5 + rows 1/6/7 re-walked for `LinkClient`'s two modes and the catalog's nested calls 2026-08-20 — all ✅)
 
 What crosses the process boundary, in which direction, and what guards it. Re-walk this table
 whenever an extension point is added or a contract field changes.
@@ -1707,6 +1728,26 @@ pad whose process died mid-showing cannot hang the host. Verified on device acro
 devices): one `hold` / one `unbind (held)` per showing, binds = unbinds, no `leaked ServiceConnection`,
 `am start` of the screen refused.
 
+**L5 re-walk of rows 1, 6, 7 (`LinkClient` — a held bind and five one-shots on one service, plus
+the first host-implemented callback lens):** the pick showing is `ExtensionBinder.hold` exactly as
+S3 walked it (row 1's `checkSignatures` immediately before `bindService`, explicit `ComponentName`
+from the `ProviderRef`). Row 6's `finally` is `LinkClient.finish` — `endPick` best-effort ≤ 2 s
+(skipped, and logged as skipped, on a dead bind), then `HeldBinding.close()` + **both** binders
+revoked (`ExtensionStoreBinder` **and** `LinkCatalogBinder`, whose revoke also clears the
+`LinkCreateRelay`) in the one `finally` — reached from every path: `takeChoice`'s own `finally`
+(any result), a failed `beginPick`, a failed launch, a `CancellationException` mid-open, and the
+caller's `onDestroy` (`LinkFlow.close` on an app scope, `NonCancellable`). The one-shots
+(`resolve` / `chromeOf` / the trail methods) are `ExtensionBinder.call` verbatim — rows 1 + 6 per
+call; the trail one-shots pre-open the store on IO and mint + revoke a per-bind store binder
+around the shared call (the `NamerClient` shape). Row 7: every provider call ≤ `CALL_TIMEOUT_MS`
+(2 s), bind ≤ 3 s. The catalog's ext→host calls are **nested** transactions inside the extension's
+own outbound windows — the host serves them with `runBlocking` off Main and sets no timeout on its
+own work; the one long host-side path (a picker page insert into the live session) is bounded by
+`LinkFlow.CREATE_PAGE_TIMEOUT_MS` (10 s), so a page-op dropped by a closing screen is an honest
+`IllegalStateException`, never a hung picker. Verified on device across L0–L4 (three devices):
+binds = unbinds after every probe / pick / follow run, `am start` of both exported screens
+refused, crash buffers clean.
+
 | # | Invariant | Where it holds |
 |---|---|---|
 | 1 | **Host-side signature check on every discovery — and again at every bind.** No candidate is used unless exported, `META_API_VERSION == API_VERSION`, and `checkSignatures(core, ext) == SIGNATURE_MATCH`. Discovery is the only way a `ProviderRef` is made; every bind uses an explicit `ComponentName` from a `ProviderRef` and re-runs `checkSignatures` first (no TOCTOU window across the screen's lifetime). | `ExtensionRegistry.discover` (each rejection a `Slog.d`); `TemplateProviderClient.call` |
@@ -1741,6 +1782,11 @@ devices): one `hold` / one `unbind (held)` per showing, binds = unbinds, no `lea
 | 30 | **Inward ink (`takeOutgoing`) is validated; the paste is one undoable step and nothing else on the page changes.** Every reply is an `InkBundle` → `requireValid` at unmarshal (chunk caps, equal channel lengths, finite `width > 0`, finite positive page size), then `TransferCaps.sanitize` (known style or PEN, width in `MIN_WIDTH`..`MAX_WIDTH` — NaN → default, opaque black — **no colour crosses in**) under `TransferCaps.Drain`: stop at the first empty bundle, at the summed caps (`MAX_TRANSFER_STROKES` / `MAX_TRANSFER_POINTS` — the rest dropped, `truncated`), or at `TRANSFER_MAX_CHUNKS` (34) + one probe past the budget (a non-empty chunk there = `truncated` → the core's `scratch_truncated` dialog names the pasted count). Fresh ids minted by the core (`TransferCaps.toStrokes`, `timeMillis 0`); `NotebookActivity.pasteStrokes` inserts the rows after the page's last stroke (`StrokeStore.insert` on the serial writer), adds them to the paper, records **one** `NotebookUndo.Action.Pasted` (undo removes exactly those rows; redo restores them in place), switches to the lasso and leaves them selected **1:1** (host-initiated `setSelection`, no echo) — no other row, object, page or session state is touched; a failed drain → `scratch_failed`, nothing pasted. The pad's side is symmetric: a received placement lands as one `Pasted` (or one `Page` step for a New-page placement) on its own stack. | `IScratchPad.aidl` (`takeOutgoing`), `InkBundle.requireValid` (JVM-tested), `TransferCaps.sanitize/toStrokes/Drain` (JVM-tested: stop on empty / summed caps / chunk budget + probe / NaN width / colour forced), `ScratchPadClient.drainOutgoing`, `ScratchPadFlow.onResult`, `NotebookActivity.pasteStrokes`, `NotebookUndo.Action.Pasted`, `StrokeStore.insert`, `ScratchPadActivity.selectReceived` |
 | 31 | **The screen is the extension's, launched only by the core, caller-checked both ways; data never rides the Intent.** `ScratchPadActivity` is exported with a custom action (`ACTION_SCRATCH_PAD_SCREEN`) and **no launcher filter**; first thing in `onCreate` it calls `HostCallerCheck.enforceActivity` — `callingPackage == HOST_PACKAGE` **and** `checkSignatures(caller, self) == SIGNATURE_MATCH`, else `finish()` before anything is inflated (a plain `am start` has no caller → refused; verified on all three devices S0–S2). The core launches it only through an `ActivityResultLauncher<Intent>` (that is what sets `callingPackage`), with `setPackage(ref.packageName)` from a trusted `ProviderRef`, and only **after** `begin(store)` succeeded on the held bind and `paper.releaseForHandoff()` on a paper-hosting caller. The Intent carries the two recorded booleans and nothing else; the Activity reads only those two `EXTRA_*` and returns only `RESULT_SCRATCH_SEND` / `RESULT_CANCELED` — the ink in both directions goes through the held service (rows 29–30), the pages through the held store binder (row 28). Every exit back to the caller runs `releaseForHandoff()` before `finish()` (`finishWithHandoff`); `onResume` reclaims with `resumeDrawing()` (rule 27). | `ScratchPadActivity.onCreate` (`enforceActivity` first) / `finishWithHandoff` / `onResume`, `HostCallerCheck.enforceActivity`, `:ext-scratchpad` manifest (`exported`, custom action, no `LAUNCHER`), `ScratchPadClient.open` (Intent build), `ScratchPadFlow.launchPad` / `ScratchPadLaunch.open` (`ActivityResultLauncher`, `releaseForHandoff()` immediately before `launch`) |
 | 32 | **The raised store cap changes no rule.** A value is `≤ STORE_MAX_VALUE_BYTES` (4 MiB): **inline** (`put` / `get`) up to `STORE_MAX_INLINE_BYTES` (512 KiB) — a `get` of a stored value above it throws `IllegalStateException(STORE_VALUE_LARGE)` ("use getLarge"), a `put` above it is refused; **large** (`putLarge` / `getLarge`) as a `LargeValue` = a read-only ashmem region + `byteCount` (`LargeValue.requireValid`: `0..STORE_MAX_VALUE_BYTES`, `byteCount ≤ region size`; an empty stored value rides a 1-byte region — `getLarge` returns any stored size) the receiver copies out of and closes in `finally` — host side `SharedBytes.readAndClose` **before** the gate sees bytes (so the cap applies to the copy, never to a live mapping), the ashmem step wrapped so a mapping failure is an `IllegalStateException` like every gate failure (never an empty reply the extension reads as null — S3), the reply region parked per Binder thread and closed in `onTransact`'s `finally`; extension side `readAndClose` in `ScratchStore.readPage`, its own put-region closed in `finally` after `putLarge` returns. Keys still `1..512` chars and `≤ STORE_MAX_KEYS` (50 000 — a *new* key past it refused); every method still uid-bound + revocable through the same `ExtensionStoreGate.check()`; the DB still opened only through `SoilCrypto` under the global key. The two appended methods follow the arc-5 compatible-change recipe (appended **last** in `IExtensionStore`, the arc-2 methods' codes untouched; `API_VERSION` still 1 — the host and its store binder are always the current build, the recipe only keeps an older extension's `put` / `get` working unchanged). **A page over the cap is refused by the extension, never split, never written elsewhere:** `ScratchStore.receive` / `ScratchDocument` measure the exact encoded size (`ScratchPageCodec`) and throw `PageFullException` → `SCRATCH_PAGE_FULL` on `receiveInk` (typed `ScratchPageFullException` → the core's `scratch_page_full_host` dialog, nothing placed) / the pad's own `scratch_page_full` dialog once per visit on a stroke the page cannot take (the stroke removed, nothing written); the pad has no file, prefs or second store of its own. | `ExtensionContract.STORE_*`, `IExtensionStore.aidl` (`putLarge` / `getLarge` appended), `LargeValue` (parcel + `requireValid`, JVM-tested), `SharedBytes.write/read/readAndClose`, `ExtensionStoreBinder.putLarge/getLarge/onTransact`, `ExtensionStoreGate` (JVM-tested: inline cap, large cap, `STORE_VALUE_LARGE`, key count), `ScratchStore.readPage/savePage/receive`, `ScratchDocument` (exact running size, `PageFullException`), `ScratchPadActivity` (page-full dialog once per visit) |
+| 33 | **Outward on `ILinkProvider` is the two lent binders, opaque payloads the extension itself composed, and trail origin ids — nothing else.** `beginPick(store, catalog, currentNotebookId, editPayload)` carries the per-showing store binder (rows 11 / 28), the per-showing catalog lens (row 34), the current notebook's UUID (the id the picker's self-hiding and live-vs-foreign split hang off) and — Edit only — the link's own payload back to its author (≤ `MAX_LINK_PAYLOAD_CHARS`, checked host-side before the bind). `resolve(payload)` / `chromeOf(payloads)` carry payloads the extension wrote at pick time (the core never composes or edits one — the L1 debug composer was debug source and is gone since L5); `pushTrail(store, entry)` carries the origin notebook + page UUIDs — with `currentNotebookId`, **the recorded widening of rule 5 for this point**: random ids that key index/store rows, no content. No name, key, path, stroke, cover or index row has a parameter to travel in. Payloads are never logged on either side (lengths, kinds, counts, durations only). | `ILinkProvider.aidl`, `LinkClient` (`openPick` length check, `resolve`/`chromeOf` `require`, `pushTrail`), `LinkFlow.pushTrail` (origin = session ids), `LinkFlow.followAt/refreshChrome` (payloads from `liveLinks` rows) |
+| 34 | **The catalog binder is a per-showing lens, not a door** (rule 29). Minted only inside `LinkClient.openPick` beside the store binder, uid-gated on every method (`LinkCatalogGate.check` — caller uid == `extUid` and not revoked, else `SecurityException`), revoked in the same `finally` as the unbind (the revoke also clears `LinkCreateRelay` — nothing armed or created survives the showing). Outward = names + ids + labels of **alive** rows only, in library order, capped (`MAX_CATALOG_ENTRIES` per reply, labels truncated to `MAX_CATALOG_LABEL_CHARS` in `gate.entry`) — never keys, paths, covers or blobs; the current notebook's pages come from the live session (`LinkCatalogSource` — the origin's open `.soil` is never touched from a second connection; labels host-composed, current page excluded), any other notebook by a read-only `SoilDatabase.open` **sealed in `finally`**. The create half enforces exactly the library's own validation (`NewNotebookActivity.validateName`, `MAX_NAME_CHARS`, `nameTaken`, alive-parent checks; refusals = typed `IllegalArgumentException` with the library's user-honest texts — the picker shows only those verbatim, an `IllegalStateException` gets generic text) and the current-notebook page insert crosses the binder→page-op bridge (`LinkFlow.createPageBlocking`, 10 s) — the live session is mutated only under the screen's own lock. Only the Binder-marshalable set leaves the stub (`io` wrapper → `IllegalStateException`). | `LinkCatalogBinder` (every method `gate.check()` first; `foreignPageIds`/`foreignCreatePage` seal in `finally`; `io` wrapper), `LinkCatalogGate` (JVM-tested: uid mismatch, revoked, caps), `LinkClient.openPick/finish` (mint + revoke), `LinkCreateRelay` (JVM-tested), `LinkFlow.buildSource/createPageBlocking`, `LinkPickerActivity.failed` (IAE-only verbatim) |
+| 35 | **Everything inward is untrusted and validated; the core never parses a payload** (rules 28 / 30). The four parcelables run `requireValid` at unmarshal (kind ∈ its set, the id slots the kind requires, ids non-blank ≤ `MAX_LINK_ID_CHARS`, payload ≤ `MAX_LINK_PAYLOAD_CHARS`, chrome ∈ {0,1} — a malformed reply fails the transaction → `ExtensionCallException`, the row-21 rule); `chromeOf` additionally requires same-length and masks unknown values to `NONE` host-side; a drained `LinkChoice` is applied only to what the showing was for (the captured selection / the edited link). A resolved `LinkDestination` is a **description**: the core validates every id against live rows before navigating — same-notebook page ids against the session's page list (re-looked-up under the page-op lock), a foreign notebook against the index (`alive` + type) **and** its page against a read-only page-row pre-check — and a `TrailEntry` walks the same validation on every pop (dead = skipped silently, never followed). Nothing extension-derived is persisted: chrome is a session map that empties when the extension is gone. | `LinkChoice` / `LinkDestination` / `CatalogEntry` / `TrailEntry` `requireValid` + `CREATOR` (JVM-tested), `LinkClient.chromeOf` (length + mask), `LinkFlow.onResult/follow/walkBack/foreignPageAlive/refreshChrome`, `LinkNav.planFollow/planBack` (JVM-tested — 17 tests) |
+| 36 | **Two caller-checked screens, and data never rides either Intent.** The picker (`ACTION_LINK_PICKER_SCREEN`) is the tier-2 rule verbatim (row 31's shape): exported, custom action, no launcher filter, `HostCallerCheck.enforceActivity` first thing in `onCreate` (`am start` refused — verified on all three devices every phase), launched only through `LinkFlow`'s `ActivityResultLauncher` after `beginPick` succeeded; its Intent carries `EXTRA_LINK_EDIT` (one boolean) and nothing else, its result is a bare code — the choice crosses through `takeResult` on the held bind, the prefill through `beginPick`. The reverse direction is new (L3): `NewNotebookActivity` (`ACTION_LINK_NEW_NOTEBOOK_SCREEN`) is **the one host-owned screen an extension launches** — exported behind `ExtensionCallerCheck` (the `enforceActivity` mirror: `callingPackage` non-null + `SIGNATURE_MATCH`; a plain `startActivity` has no caller and is refused), and both directions of its data cross through the host-process `LinkCreateRelay` (armed by `prepareNewNotebook`, drained by `takeCreatedNotebook`, cleared by the showing's revoke) — the Intent carries the action alone, the result a bare `RESULT_OK`. | `LinkPickerActivity.onCreate` (`enforceActivity` first), `:ext-links` manifest, `LinkFlow.launchPick` (launcher-only), `LinkClient.openPick` (Intent build), `NewNotebookActivity` (relay mode), `ExtensionCallerCheck`, `LinkCreateRelay` (JVM-tested), the L0–L4 device runs (`am start` refusals ×3 devices) |
+| 37 | **Navigation is core-owned; structure outlives the extension.** No Intent, component, path or URI ever crosses the boundary in either direction (rule 28): the core performs every navigation itself — in-notebook through its own page-op lock, cross-notebook through its own close seal + `startActivity` of **its own Activity** with the host-internal `EXTRA_VIA_LINK` / `EXTRA_INITIAL_PAGE_ID` (never on an extension's Intent; a dead initial page falls back to `refId` silently — the pre-checks before leaving carry the honesty). The trail is extension data in the host-owned store (rule 31): touched only through point methods taking the store as an in-parameter, one inline key, capped at `MAX_TRAIL_ENTRIES` (oldest dropped), decoded tolerantly on the extension side and re-validated by the core on every pop; a fresh open clears it (pending until a clear succeeds); it survives the extension's force-stop / uninstall in the host's `.db` (recorded). With the extension absent: links render their content (no underline — the session chrome map empties), still lasso / move / delete / **unlink** (structural, core-owned); a follow tap is the honest `links_required` dialog, swipe-up is silent, Back in a via-link notebook closes to the library; Link / Edit are gated off. Nothing else on the page or in the session changes. | `LinkFlow.followAt/walkBack/requestTrailClear` (busy-guarded, `onEmpty`), `NotebookActivity` (`EXTRA_VIA_LINK` / `EXTRA_INITIAL_PAGE_ID` host-internal, `backPressed` funnel, `close(andThen)` — `startActivity` strictly after the seal), `LinkNav` (self-target no-op), `TrailStore` (JVM-tested: order, cap, malformed → tolerant), `SelectionActions` + `LinkFlow.coreActions` (gating), the L4 user checklist (no-extension items, ×3 devices) |
 
 ## Rules for adding a future extension point (write-once, follow later)
 
@@ -1869,6 +1915,40 @@ rules where it keeps data, **plus**:
 Followed by ScratchPad (arc 6): `SCRATCH_PAD` + `IScratchPad` + `PaperStroke` / `InkBundle` in
 `:extension-api`; `ExtensionRegistry.scratchPad` + `ScratchPadClient` over `ExtensionBinder.hold`;
 the recipe below; audit rows 28–32 (S3).
+
+### Adding a navigation point (arc 7 pattern)
+
+A point whose extension gives **meaning** to a core structure that *navigates* — the core owns the
+rows, the render, the gestures and every navigation; the extension owns what a payload means and
+where it points — follows rules 1–5, the store rules (6–9) for its data, and the screen rules
+(25–26) for its picker, **plus**:
+
+28. **A destination is a description.** The extension names index ids in a typed parcelable
+    (`LinkDestination`); the core validates them against the index / the `.soil` — alive checks,
+    and a read-only pre-check of a foreign page **before leaving** — and performs all navigation
+    itself. No Intent, component, path or URI ever crosses the boundary in either direction.
+    (Rows 33 / 35 / 37.)
+29. **A catalog binder is a per-showing lens, not a door.** Host-implemented, uid-gated, revoked
+    with the showing (`LinkCatalogGate`); outward = names + ids + labels of alive rows only —
+    never keys, paths, covers, blobs; its mutation methods enforce exactly the validation the
+    host's own UI enforces, and exist only while a pick showing is open. (Row 34.)
+30. **The payload is the extension's; the structure is the core's.** The core stores, wraps,
+    renders, moves and deletes the link and its children without ever parsing the payload;
+    everything semantic is asked of the extension as a description (`resolve`, `chromeOf`) and is
+    untrusted + validated inward, and nothing extension-derived is persisted (chrome is a session
+    cache — the heading precedent). Structure keeps working when the extension is gone.
+    (Rows 35 / 37.)
+31. **A trail is extension data.** It lives in the host-owned store, is touched only through point
+    methods that take the store as an in-parameter, is capped (`MAX_TRAIL_ENTRIES`, oldest
+    dropped), and every entry is validated on the way back before the core navigates anywhere —
+    a dead entry is skipped, never followed. (Rows 33 / 37.)
+
+Followed by LinkProvider (arc 7): `LINK_PROVIDER` + `ILinkProvider` + `ILinkCatalog` +
+`LinkChoice` / `LinkDestination` / `CatalogEntry` / `TrailEntry` in `:extension-api`;
+`ExtensionRegistry.linkProvider` + `LinkClient` (a held bind for the pick showing, `ExtensionBinder.call`
+one-shots for `resolve` / `chromeOf` / the trail); the recorded widenings of rule 5 are the
+catalog's outward names / ids / labels (plus the current notebook's outline-heading labels,
+during a pick showing only) and the trail's origin ids; audit rows 33–37 (L5).
 
 ### Extension-owned screens (tier 2) — the recipe
 
@@ -2088,6 +2168,36 @@ consumed in-project — see `:ext-templates` for the reference implementation).
       `PageGestures` / `UndoRedoStack` / `ToolbarAnchor`, `Dialogs`, the Tabler icons) so the screen is
       the notebook's shape; fix shared screen logic there, never in your copy. `HostCallerCheck.enforce`
       first in every service method; log counts + durations — never ink.
+12. **Providing link meaning** (`LINK_PROVIDER` — `ILinkProvider`, see `:ext-links` for the
+    reference implementation):
+    - **The core owns the link rows, the composite render, the gestures and all navigation; you
+      own the payload.** Your picker composes an opaque payload (≤ `MAX_LINK_PAYLOAD_CHARS`; the
+      reference grammar is `LinkPayload`'s versioned `"L1|chrome|kind|notebookId|pageId"` — yours
+      can be anything self-contained, but version it so a future you can extend it) and parks it in
+      a `LinkChoice`; at follow time `resolve(payload)` returns a typed `LinkDestination` naming
+      catalog ids — null for anything unusable (malformed, an unknown version), which the core
+      shows as its own dead-link dialog, never a crash. `chromeOf(payloads)` answers one int per
+      payload, **same order, same length**. A destination is a description: never anything
+      Intent-like — the core validates every id and navigates itself.
+    - **The pick showing brackets everything.** `beginPick(store, catalog, currentNotebookId,
+      editPayload)` opens it — park catalog + store + prefill in one session object;
+      the host launches your picker under the tier-2 rules (exported, custom action, no launcher
+      filter, `HostCallerCheck.enforceActivity` first thing in `onCreate`; only the
+      `EXTRA_LINK_EDIT` boolean rides the Intent); your OK parks the `LinkChoice` for
+      `takeResult` and returns `RESULT_LINK_PICKED`; `endPick` ends the showing. The catalog and
+      store binders die with it — treat a `SecurityException` as "showing over" and finish plain.
+    - **Browse only through the `ILinkCatalog` you were handed** — `listFolder` / `listPages` /
+      `pathTo` for ids + labels; the create half is `createPage` / `createFolder` /
+      `prepareNewNotebook` + `takeCreatedNotebook` (never `createNotebook` — superseded, throws
+      forever). The host enforces its own validation and refuses with a user-honest
+      `IllegalArgumentException` message — show that verbatim; anything else gets your generic
+      failure text. Catalog calls block — run them off your Main with progress showing; the host
+      answers nested calls without a timeout of its own.
+    - **The trail is the user's history, in the host's store.** `pushTrail` / `popTrail` /
+      `clearTrail` receive the store as an in-parameter (never cache it); keep the whole trail
+      under one key, cap it at `MAX_TRAIL_ENTRIES` (drop the oldest), and decode tolerantly — a
+      corrupt blob loses entries, never crashes. Store failures leave as `IllegalStateException`;
+      log counts + durations — never a payload, id or label.
 
 ---
 
