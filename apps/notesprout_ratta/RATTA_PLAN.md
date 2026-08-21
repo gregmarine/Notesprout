@@ -238,7 +238,7 @@ above; the agent's delete "failure" was a mis-tap — delete verified working). 
 device (folder `abc` + 6 notebooks); both variants reinstalled current.
 
 ### R3 — Notebook core (write on it)
-**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-21; hash in the follow-up commit)
+**Status:** ✅ Complete (commit d805f1f, Nomad-verified + user all-clear 2026-08-21)
 
 **Eye-check #1 round 1 (2026-08-21) findings & responses:**
 - *Panels should dismiss on a finger tap on the page* → **fixed**: activity-level dismiss on
