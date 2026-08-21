@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ext_label">NSE · Naming</string>
+
+    <!-- The one field the host draws (SchemeField). -->
+    <string name="field_label">Default notebook name</string>
+    <string name="field_hint">e.g. Meeting {date} {n:2}</string>
+    <string name="field_help">Tokens: {date} {time} {n} {n:3}. Leave empty for the standard name.</string>
+
+    <!-- Validation errors (returned to the host, shown as a toast). -->
+    <string name="err_unknown_token">Unknown token %1$s — use {date}, {time}, {n} or {n:3}</string>
+    <string name="err_counter_twice">{n} may appear only once</string>
+    <string name="err_illegal_char">Only letters, numbers, spaces, hyphens, underscores, dots and tokens</string>
+    <string name="err_empty">The name would be empty</string>
+    <string name="err_too_long">Scheme is too long (names must fit 100 characters)</string>
+    <string name="err_unclosed">Missing } after {</string>
+    <string name="err_store">Naming store unavailable</string>
+</resources>

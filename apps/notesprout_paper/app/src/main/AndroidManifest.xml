@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Package visibility (API 30+): without this the extension discovery query returns nothing. -->
+    <!-- Online pre-check before the recognizer's one-time model download (normal permission, no prompt). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <queries>
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesprout.extension.TEMPLATE_PROVIDER" />
+        </intent>
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesprout.extension.NOTEBOOK_NAMER" />
+        </intent>
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesprout.extension.HANDWRITING_RECOGNIZER" />
+        </intent>
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesprout.extension.MARKDOWN_RENDERER" />
+        </intent>
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesprout.extension.OBJECT_PROVIDER" />
+        </intent>
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesprout.extension.SCRATCH_PAD" />
+        </intent>
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesprout.extension.SCRATCH_PAD_SCREEN" />
+        </intent>
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesprout.extension.LINK_PROVIDER" />
+        </intent>
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesprout.extension.LINK_PICKER_SCREEN" />
+        </intent>
+    </queries>
+
+    <application
+        android:name=".PaperApplication"
+        android:label="Notesprout Paper"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:theme="@style/Theme.Notesprout"
+        tools:replace="android:label">
+
+        <!-- Launcher gate: opens the index, forwards, never on the back stack. -->
+        <activity
+            android:name=".bootstrap.BootstrapActivity"
+            android:exported="true"
+            android:noHistory="true"
+            android:screenOrientation="portrait">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".bootstrap.RecoveryKeyActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".bootstrap.UnlockActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".library.LibraryActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
+        <!-- Exported since arc 7 / L3: the link picker launches it for a result via
+             ACTION_LINK_NEW_NOTEBOOK_SCREEN; ExtensionCallerCheck refuses every caller that is not
+             signature-matched and launching for a result (a plain start has no callingPackage). -->
+        <activity
+            android:name=".library.NewNotebookActivity"
+            android:exported="true"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="com.symmetricalpalmtree.notesprout.extension.LINK_NEW_NOTEBOOK_SCREEN" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".library.FolderPickerActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".notebook.NotebookActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+    </application>
+
+</manifest>

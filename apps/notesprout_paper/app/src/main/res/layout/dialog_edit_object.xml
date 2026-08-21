@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The object edit dialog's body (arc 4 / H2): one bordered text field, prefilled from an EditSpec.
+     Title / Save / Cancel are the AlertDialog's own. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="24dp"
+    android:paddingEnd="24dp"
+    android:paddingTop="16dp"
+    android:paddingBottom="0dp">
+
+    <androidx.appcompat.widget.AppCompatEditText
+        android:id="@+id/editText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/shape_bordered"
+        android:padding="12dp"
+        android:textSize="16sp"
+        android:textColor="@color/inkBlack"
+        android:textColorHint="@color/inkLight"
+        android:inputType="text"
+        android:importantForAutofill="no" />
+</LinearLayout>

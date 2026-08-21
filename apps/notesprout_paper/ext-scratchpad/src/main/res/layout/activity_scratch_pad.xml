@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Scratch Pad screen (arc 6 / S1): the notebook's overlay-chrome shape — full-bleed paper
+     (the PaperView is added programmatically as paperContainer's only child), a top bar
+     (Back · "Scratch Pad" · [Send] · [debug ⋯]) and a bottom bar (Pen · Eraser · Lasso … < n / N >),
+     both pushed to paper.setExclusionRects after layout; a two-button floating selection toolbar;
+     the "Opening…" popup up until the first page is on the paper. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/paperWhite">
+
+    <FrameLayout
+        android:id="@+id/paperContainer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- Top bar: Back · "Scratch Pad" · [Send] · [debug ⋯] — flush at the top edge, TopGuard-padded
+         (BOOX status bar), 1dp bottom border. (S1 follow-up: the title moved up here, the tools down.) -->
+    <LinearLayout
+        android:id="@+id/topBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:orientation="vertical"
+        android:background="@color/paperWhite">
+
+        <LinearLayout
+            android:id="@+id/topBarRow"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/toolbar_bar_thickness"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnBack"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_arrow_left"
+                android:contentDescription="@string/cd_scratch_back" />
+
+            <TextView
+                android:id="@+id/title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:text="@string/scratch_title"
+                android:textAppearance="@style/TextAppearance.Notesprout.TitleMedium"
+                android:singleLine="true"
+                android:ellipsize="end" />
+
+            <!-- Send to notebook: shown only when opened from a notebook (EXTRA_SCRATCH_SEND_ENABLED). -->
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnSend"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_pencil_down"
+                android:contentDescription="@string/cd_scratch_send"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
+    </LinearLayout>
+
+    <!-- Bottom bar: Pen · Eraser · Lasso  …  < n / N > — 1dp top border; the arrows are never disabled. -->
+    <LinearLayout
+        android:id="@+id/bottomStrip"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:orientation="vertical"
+        android:background="@color/paperWhite">
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
+
+        <LinearLayout
+            android:id="@+id/bottomBarRow"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/toolbar_bar_thickness"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnPen"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_pen"
+                android:contentDescription="@string/cd_scratch_pen" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnEraser"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_eraser"
+                android:contentDescription="@string/cd_scratch_eraser" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnLasso"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_lasso"
+                android:contentDescription="@string/cd_scratch_lasso" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnPrev"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_page_prev"
+                android:contentDescription="@string/cd_scratch_prev" />
+
+            <TextView
+                android:id="@+id/pageIndicator"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="56dp"
+                android:gravity="center"
+                android:textSize="13sp"
+                android:textColor="@color/inkBlack"
+                android:singleLine="true" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnNext"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_page_next"
+                android:contentDescription="@string/cd_scratch_next" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Floating selection toolbar (Delete · [Send]): GONE until a lasso selection exists;
+         ScratchSelectionToolbar anchors it (FrameLayout margins) and its rect joins the exclusions. -->
+    <LinearLayout
+        android:id="@+id/selectionBar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@drawable/shape_dialog_bordered"
+        android:padding="4dp"
+        android:visibility="gone">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnSelDelete"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_trash"
+            android:contentDescription="@string/cd_scratch_delete_selection" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnSelSend"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_pencil_down"
+            android:contentDescription="@string/cd_scratch_send"
+            android:visibility="gone" />
+    </LinearLayout>
+
+    <!-- "Opening…" popup: visible from the first frame until the page's strokes are on the paper.
+         Not chrome — no exclusion rect (the whole paper is excluded while it is up); no scrim. -->
+    <LinearLayout
+        android:id="@+id/openingOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:weightSum="1">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="0.75"
+            android:background="@drawable/shape_dialog_bordered"
+            android:gravity="center"
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp"
+            android:paddingTop="28dp"
+            android:paddingBottom="28dp"
+            android:text="@string/scratch_opening"
+            android:textAppearance="@style/TextAppearance.Notesprout.TitleMedium" />
+    </LinearLayout>
+</FrameLayout>

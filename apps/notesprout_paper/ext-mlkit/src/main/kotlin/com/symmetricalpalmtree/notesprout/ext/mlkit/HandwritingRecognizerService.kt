@@ -1,0 +1,140 @@
+package com.symmetricalpalmtree.notesprout.ext.mlkit
+
+import android.app.Service
+import android.content.Intent
+import android.os.IBinder
+import android.util.Log
+import com.symmetricalpalmtree.notesprout.extension.ExtensionContract
+import com.symmetricalpalmtree.notesprout.extension.HostCallerCheck
+import com.symmetricalpalmtree.notesprout.extension.IHandwritingRecognizer
+import com.symmetricalpalmtree.notesprout.extension.InkStroke
+import java.util.concurrent.TimeoutException
+
+/**
+ * The HANDWRITING_RECOGNIZER extension point, implemented with Google ML Kit Digital Ink
+ * Recognition (`en-US`). Bound by the Notesprout Paper core; never launched by a user (no
+ * Activity). Every method first proves the caller is the host. Stateless per call; the model and
+ * client are process-lifetime ([ModelManager] — a remembered model is built in [onCreate], i.e. on
+ * the host's first bind; the ensure-ready chain (check → download → build) starts **only** on
+ * `prepare()`, and the recognize calls **wait for a chain in flight** inside the host's timeout
+ * rather than failing while the model is seconds away — but never start a download themselves).
+ * AIDL methods run on Binder threads and the recognition runs synchronously on them, under a
+ * per-call budget just below the host's timeout (`*_BUDGET_MS`).
+ *
+ * Exceptions that cross Binder intact are the only ones thrown: `SecurityException` (not the
+ * host), `IllegalArgumentException` (over the `MAX_INK_*` caps / malformed ink),
+ * `IllegalStateException` (not READY, or any engine failure). Anything else would kill the
+ * transaction silently (the arc-2 lesson). Logs: counts and durations only — never text.
+ */
+class HandwritingRecognizerService : Service() {
+
+    private val binder = object : IHandwritingRecognizer.Stub() {
+
+        override fun status(): Int {
+            enforce()
+            return ModelManager.status()
+        }
+
+        override fun prepare() {
+            enforce()
+            ModelManager.prepare()
+        }
+
+        override fun recognizeInk(
+            strokes: List<InkStroke>?, areaWidth: Float, areaHeight: Float, preContext: String?,
+        ): String {
+            enforce()
+            val t0 = System.currentTimeMillis()
+            val deadline = t0 + INK_BUDGET_MS
+            val ink = checkInk(strokes)
+            require(areaWidth > 0f && areaHeight > 0f) { "non-positive writing area" }
+            val recognizer = ready(INK_READY_WAIT_MS)
+            val text = engine { MlKitEngine.recognizeInk(recognizer, ink, areaWidth, areaHeight, preContext ?: "", deadline) }
+            if (BuildConfig.DEBUG) Log.d(TAG, "recognizeInk: ${ink.size} strokes → ${text.length} chars in ${System.currentTimeMillis() - t0} ms")
+            return text
+        }
+
+        override fun recognizePage(strokes: List<InkStroke>?, pageWidth: Float, pageHeight: Float): String {
+            enforce()
+            val t0 = System.currentTimeMillis()
+            val deadline = t0 + PAGE_BUDGET_MS
+            val ink = checkInk(strokes)
+            require(pageWidth > 0f && pageHeight > 0f) { "non-positive page size" }
+            val recognizer = ready(PAGE_READY_WAIT_MS)
+            val text = engine { MlKitEngine.recognizePage(recognizer, ink, pageWidth, pageHeight, deadline) }
+            if (BuildConfig.DEBUG) Log.d(TAG, "recognizePage: ${ink.size} strokes → ${text.length} chars in ${System.currentTimeMillis() - t0} ms")
+            return text
+        }
+    }
+
+    private fun enforce() = HostCallerCheck.enforce(this, BuildConfig.HOST_PACKAGE)
+
+    /** Re-check the host's caps (belt-and-braces) — `IllegalArgumentException` on violation. */
+    private fun checkInk(strokes: List<InkStroke>?): List<InkStroke> {
+        requireNotNull(strokes) { "strokes is null" }
+        require(strokes.size <= ExtensionContract.MAX_INK_STROKES) { "too many strokes" }
+        var points = 0L
+        for (s in strokes) {
+            requireNotNull(s) { "null stroke" }
+            // InkStroke's own `require`s (equal, non-empty arrays) already ran at unmarshal time.
+            points += s.size
+        }
+        require(points <= ExtensionContract.MAX_INK_POINTS) { "too many points" }
+        return strokes
+    }
+
+    /**
+     * The client, waiting up to [waitMs] for an ensure-ready chain already in flight (never starting
+     * a download); not ready by then → `IllegalStateException(RECOGNIZER_NOT_READY)` — the one message
+     * the host types as "still downloading".
+     */
+    private fun ready(waitMs: Long) = ModelManager.awaitReady(waitMs)
+        ?: throw IllegalStateException(ExtensionContract.RECOGNIZER_NOT_READY)
+
+    /**
+     * Runs an engine call; any failure becomes `IllegalStateException` (carried across Binder). A
+     * timeout (the deadline, or a wedged ML Kit call) is slow-but-alive — it does **not** count as an
+     * engine failure (M2: it must never make the model look "gone").
+     */
+    private inline fun engine(block: () -> String): String =
+        try {
+            block()
+        } catch (e: IllegalStateException) {
+            throw e
+        } catch (e: TimeoutException) {
+            Log.w(TAG, "recognition timed out")
+            throw IllegalStateException("recognition timed out")
+        } catch (e: InterruptedException) {
+            throw IllegalStateException("recognition interrupted")
+        } catch (e: Exception) {
+            Log.w(TAG, "engine failure: ${e.javaClass.simpleName}")
+            ModelManager.onEngineFailure()
+            throw IllegalStateException("recognition failed: ${e.javaClass.simpleName}")
+        }
+
+    /**
+     * The startup analogue of the original app's `initModel()` — but consent-safe (M2): a remembered
+     * model builds the client the moment the host first binds; nothing else starts until `prepare()`.
+     */
+    override fun onCreate() {
+        super.onCreate()
+        ModelManager.init(this)
+        ModelManager.warmUp()
+    }
+
+    override fun onBind(intent: Intent?): IBinder = binder
+
+    private companion object {
+        const val TAG = "HandwritingRecognizerService"
+        /** Readiness waits sized under the host's per-call timeouts (10 s ink · 30 s page), leaving room for the recognition itself. */
+        const val INK_READY_WAIT_MS = 6_000L
+        const val PAGE_READY_WAIT_MS = 22_000L
+        /**
+         * Whole-call budgets (readiness wait + every ML Kit call), sized just under the host's
+         * timeouts (M2): the extension stops at its own deadline instead of grinding on after the host
+         * has given up and unbound.
+         */
+        const val INK_BUDGET_MS = 9_500L
+        const val PAGE_BUDGET_MS = 28_000L
+    }
+}

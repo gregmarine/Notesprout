@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ext_label">NSE · Scratch Pad</string>
+
+    <string name="scratch_title">Scratch Pad</string>
+    <string name="cd_scratch_back">Back</string>
+    <string name="cd_scratch_pen">Pen</string>
+    <string name="cd_scratch_eraser">Eraser</string>
+    <string name="cd_scratch_lasso">Lasso</string>
+    <string name="cd_scratch_send">Send to notebook</string>
+    <string name="cd_scratch_prev">Previous page</string>
+    <string name="cd_scratch_next">Next page</string>
+    <string name="cd_scratch_delete_selection">Delete</string>
+    <string name="scratch_delete_page">Delete this page</string>
+    <string name="scratch_delete_confirm">Delete this page and its ink?</string>
+    <string name="scratch_page_full">This page is full — start a new one.</string>
+    <string name="scratch_store_unavailable">The scratch pad can\'t reach its storage — close and try again.</string>
+    <string name="scratch_opening">Opening…</string>
+    <string name="scratch_nothing_to_send">There\'s no ink here to send.</string>
+    <string name="scratch_page_indicator">%1$d / %2$d</string>
+</resources>

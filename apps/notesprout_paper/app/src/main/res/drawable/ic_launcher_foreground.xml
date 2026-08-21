@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher glyph: the Tabler "seedling", ink-black outline only — the same visual vocabulary as the
+     in-app icons and the native e-ink launchers (Ratta's are Tabler-like bold outlines on bare white).
+     Adaptive-icon 108dp viewport; the glyph is Tabler's 24-unit grid × 3.4 centred at 54, which sizes it
+     like Ratta's own icons — it fills the rounded-square mask (BOOX) and only just brushes a circular
+     one; Ratta does not mask at all. Strokes are in Tabler units (2 per 24) and scale with the group. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="13.2"
+        android:translateY="13.2"
+        android:scaleX="3.4"
+        android:scaleY="3.4">
+        <path
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#000000"
+            android:strokeWidth="2"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M12 10a6 6 0 0 0 -6 -6h-3v2a6 6 0 0 0 6 6h3" />
+        <path
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#000000"
+            android:strokeWidth="2"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M12 14a6 6 0 0 1 6 -6h3v1a6 6 0 0 1 -6 6h-3" />
+        <path
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#000000"
+            android:strokeWidth="2"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M12 20l0 -10" />
+    </group>
+</vector>

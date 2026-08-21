@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="TextAppearance.Notesprout" parent="@android:style/TextAppearance">
+        <item name="android:textColor">@color/inkBlack</item>
+    </style>
+
+    <style name="TextAppearance.Notesprout.HeadlineLarge">
+        <item name="android:textSize">32sp</item>
+        <item name="android:textStyle">normal</item>
+        <item name="android:textColor">@color/inkBlack</item>
+    </style>
+
+    <style name="TextAppearance.Notesprout.TitleLarge">
+        <item name="android:textSize">22sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textColor">@color/inkBlack</item>
+    </style>
+
+    <style name="TextAppearance.Notesprout.TitleMedium">
+        <item name="android:textSize">16sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textColor">@color/inkBlack</item>
+    </style>
+
+    <style name="TextAppearance.Notesprout.BodyLarge">
+        <item name="android:textSize">16sp</item>
+        <item name="android:textStyle">normal</item>
+        <item name="android:textColor">@color/inkBlack</item>
+    </style>
+
+    <style name="TextAppearance.Notesprout.BodyMedium">
+        <item name="android:textSize">14sp</item>
+        <item name="android:textStyle">normal</item>
+        <item name="android:textColor">@color/inkBlack</item>
+    </style>
+
+    <style name="TextAppearance.Notesprout.BodySmall">
+        <item name="android:textSize">12sp</item>
+        <item name="android:textStyle">normal</item>
+        <item name="android:textColor">@color/inkLight</item>
+    </style>
+
+    <style name="Widget.Notesprout.ElevatedButton" parent="Widget.AppCompat.Button">
+        <item name="android:background">@drawable/btn_elevated_background</item>
+        <item name="android:textColor">@color/paperWhite</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:stateListAnimator">@null</item>
+        <item name="android:paddingStart">16dp</item>
+        <item name="android:paddingEnd">16dp</item>
+        <item name="android:paddingTop">8dp</item>
+        <item name="android:paddingBottom">8dp</item>
+    </style>
+
+    <style name="Widget.Notesprout.OutlinedButton" parent="Widget.AppCompat.Button">
+        <item name="android:background">@drawable/shape_bordered</item>
+        <item name="android:textColor">@color/inkBlack</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:stateListAnimator">@null</item>
+        <item name="android:paddingStart">16dp</item>
+        <item name="android:paddingEnd">16dp</item>
+        <item name="android:paddingTop">8dp</item>
+        <item name="android:paddingBottom">8dp</item>
+    </style>
+
+    <style name="Widget.Notesprout.ToolbarButton" parent="">
+        <item name="android:layout_width">@dimen/toolbar_button_size</item>
+        <item name="android:layout_height">@dimen/toolbar_button_size</item>
+        <item name="android:background">@drawable/bg_toolbar_button</item>
+        <item name="android:padding">@dimen/toolbar_button_padding</item>
+        <item name="android:scaleType">fitCenter</item>
+        <item name="android:stateListAnimator">@null</item>
+    </style>
+
+    <style name="Widget.Notesprout.TextButton" parent="Widget.AppCompat.Button">
+        <item name="android:background">@android:color/transparent</item>
+        <item name="android:textColor">@color/inkBlack</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:stateListAnimator">@null</item>
+        <item name="android:paddingStart">8dp</item>
+        <item name="android:paddingEnd">8dp</item>
+        <item name="android:paddingTop">8dp</item>
+        <item name="android:paddingBottom">8dp</item>
+    </style>
+
+    <style name="Widget.Notesprout.DialogButton" parent="Widget.AppCompat.Button.ButtonBar.AlertDialog">
+        <item name="android:textColor">@color/inkBlack</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:stateListAnimator">@null</item>
+        <item name="android:background">@android:color/transparent</item>
+    </style>
+
+    <style name="Widget.Notesprout.RadioButton" parent="Widget.AppCompat.CompoundButton.RadioButton">
+        <item name="android:textColor">@color/inkBlack</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:button">@drawable/radio_selector</item>
+        <item name="android:stateListAnimator">@null</item>
+        <item name="android:padding">8dp</item>
+    </style>
+
+</resources>

@@ -1,0 +1,52 @@
+package com.symmetricalpalmtree.notesprout.notebook
+
+import android.graphics.Bitmap
+import android.util.Log
+import com.symmetricalpalmtree.gpaper.core.PaperView
+import com.symmetricalpalmtree.notesprout.data.index.IndexRepository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
+
+/**
+ * The library card's cover: the current page rendered by g-paper (template + committed ink), scaled
+ * to [LONG_EDGE_PX] on its long side, WEBP q100, stored on the notebook's index row. Only ever the
+ * cover — never any other content — and only in the encrypted index.
+ */
+object CoverSnapshot {
+
+    private const val TAG = "CoverSnapshot"
+    const val LONG_EDGE_PX = 512
+
+    /** Render on the caller's (main) thread, encode + store on IO. Never throws. */
+    suspend fun capture(paper: PaperView, notebookId: String, repo: IndexRepository = IndexRepository()) {
+        val full = try { paper.renderToBitmap() } catch (e: Exception) { Log.w(TAG, "render failed", e); null } ?: return
+        withContext(Dispatchers.IO) {
+            try {
+                val bytes = encode(full)
+                repo.setCover(notebookId, bytes)
+            } catch (e: Exception) {
+                Log.w(TAG, "cover store failed for $notebookId", e)
+            } finally {
+                full.recycle()
+            }
+        }
+    }
+
+    fun encode(full: Bitmap): ByteArray {
+        val scaled = scaleToLongEdge(full, LONG_EDGE_PX)
+        val out = ByteArrayOutputStream()
+        scaled.compress(Bitmap.CompressFormat.WEBP_LOSSY, 100, out)
+        if (scaled !== full) scaled.recycle()
+        return out.toByteArray()
+    }
+
+    private fun scaleToLongEdge(src: Bitmap, edge: Int): Bitmap {
+        val long = maxOf(src.width, src.height)
+        if (long <= edge) return src
+        val f = edge.toFloat() / long
+        val w = (src.width * f).toInt().coerceAtLeast(1)
+        val h = (src.height * f).toInt().coerceAtLeast(1)
+        return Bitmap.createScaledBitmap(src, w, h, true)
+    }
+}

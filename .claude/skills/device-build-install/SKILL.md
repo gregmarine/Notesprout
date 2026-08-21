@@ -46,6 +46,52 @@ Install all requested devices in a single shell block. If the user says devices 
 > 1920×2560, both at density 300. Note also that `Build.MANUFACTURER` is `"Supernote"`, **not**
 > `"ratta"`.
 
+---
+
+## Paper (experimental rebuild)
+
+Paper lives in `apps/notesprout_paper/` with its own Gradle project. See `apps/notesprout_paper/CLAUDE.md`.
+
+- **applicationId:** `com.symmetricalpalmtree.notesprout` (debug: `com.symmetricalpalmtree.notesprout.dev`)
+- **Launcher label:** "Notesprout Paper" (debug: "Notesprout Paper Dev")
+
+```sh
+cd ~/git/Notesprout/apps/notesprout_paper
+./gradlew assembleDebug                  # all modules → app + the seven extension debug APKs
+./gradlew testDebugUnitTest              # all modules
+adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk
+# The extensions (install alongside the app on the same device):
+adb -s <serial> install -r ext-templates/build/outputs/apk/debug/ext-templates-debug.apk
+adb -s <serial> install -r ext-naming/build/outputs/apk/debug/ext-naming-debug.apk
+adb -s <serial> install -r ext-mlkit/build/outputs/apk/debug/ext-mlkit-debug.apk      # ~40 MB; the en-US model (~20 MB) downloads on first prepare() — Wi-Fi once per device
+adb -s <serial> install -r ext-markdown/build/outputs/apk/debug/ext-markdown-debug.apk # ~2.5 MB; the Markdown renderer (arc 4)
+adb -s <serial> install -r ext-heading/build/outputs/apk/debug/ext-heading-debug.apk   # ~2.5 MB; the Heading object provider (arc 4 / H3)
+adb -s <serial> install -r ext-scratchpad/build/outputs/apk/debug/ext-scratchpad-debug.apk  # ~25 MB (g-paper + Onyx SDK); the Scratch Pad (arc 6)
+adb -s <serial> install -r ext-links/build/outputs/apk/debug/ext-links-debug.apk           # ~24 MB (:paper-screen rides g-paper); the Links provider (arc 7)
+adb -s <serial> shell am start -n com.symmetricalpalmtree.notesprout.dev/com.symmetricalpalmtree.notesprout.bootstrap.BootstrapActivity
+```
+
+**BOOX sideload traps (Paper app + extensions):** `install -r` can leave a package disabled, and BOOX
+may re-disable it a few seconds AFTER install — re-run `pm enable` and confirm with
+`pm list packages -d`. Packages: `com.symmetricalpalmtree.notesprout.dev` (app) and
+`com.symmetricalpalmtree.notesprout.ext.{templates,naming,mlkit,markdown,heading,scratchpad,links}.dev`.
+Separately, BOOX "Freeze new apps" (Settings → Apps → App Freeze; system ApplicationFreezeHelper)
+disabled a freshly installed package **~8 min after install**, and its list shows launcher apps only,
+so an extension can't be unfrozen by hand — switched OFF on the NA5C 2026-08-19; if it is ever on
+again: `pm enable`, and expect the delayed re-freeze.
+
+**Paper test devices** (only these three unless told otherwise):
+
+| Nickname | Device | Serial | Engine |
+|---|---|---|---|
+| SNN | Supernote Nomad | `SN078D10012852` | `gpaper-ratta` |
+| NA5C | BOOX NoteAir5C | `92c16533` | `gpaper-onyx` |
+| MIP11 | Wacom Movink Pad 11 | `5HL21V5007384` | `gpaper-core` |
+
+---
+
+## Notesprout (main app) Tiers
+
 Tiers mirror README.md — change them in both places or they drift.
 
 - **Tier 1 (primary, always-tested):** Supernote Manta (**flagship**) & Nomad (RattaNotebookView firmware ink — install **both** for any Ratta work), BOOX Go 10.3 Gen 2, Go 6 Gen II, Note Max, Palma2 Pro, NoteAir5C

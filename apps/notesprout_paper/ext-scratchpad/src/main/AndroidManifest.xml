@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application
+        android:name=".ScratchPadApplication"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/ext_label"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:theme="@style/Theme.Notesprout"
+        tools:replace="android:label,android:allowBackup">
+
+        <!-- The SCRATCH_PAD point: the host holds one bind for the screen's showing. -->
+        <service
+            android:name=".ScratchPadService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.symmetricalpalmtree.notesprout.extension.SCRATCH_PAD" />
+            </intent-filter>
+            <meta-data
+                android:name="com.symmetricalpalmtree.notesprout.extension.API_VERSION"
+                android:value="1" />
+        </service>
+
+        <!-- The extension-owned screen (UI-rule tier 2): exported, custom action, NO launcher filter;
+             launched only by the host for a result — it verifies its caller first thing in onCreate. -->
+        <activity
+            android:name=".ScratchPadActivity"
+            android:exported="true"
+            android:screenOrientation="portrait">
+            <intent-filter>
+                <action android:name="com.symmetricalpalmtree.notesprout.extension.SCRATCH_PAD_SCREEN" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

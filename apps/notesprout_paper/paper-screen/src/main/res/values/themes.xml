@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Notesprout" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="colorPrimary">@color/inkBlack</item>
+        <item name="colorPrimaryDark">@color/inkBlack</item>
+        <item name="colorAccent">@color/inkBlack</item>
+        <item name="android:colorControlHighlight">@android:color/transparent</item>
+        <item name="android:windowBackground">@color/paperWhite</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="alertDialogTheme">@style/Theme.Notesprout.AlertDialog</item>
+        <item name="android:alertDialogTheme">@style/Theme.Notesprout.AlertDialog</item>
+    </style>
+
+    <style name="Theme.Notesprout.AlertDialog" parent="Theme.AppCompat.Light.Dialog.Alert">
+        <item name="colorPrimary">@color/inkBlack</item>
+        <item name="colorAccent">@color/inkBlack</item>
+        <item name="android:windowBackground">@drawable/shape_dialog_bordered</item>
+        <item name="android:windowElevation">0dp</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:colorControlHighlight">@android:color/transparent</item>
+        <item name="android:textColorPrimary">@color/inkBlack</item>
+        <item name="android:textColorSecondary">@color/inkBlack</item>
+        <item name="android:buttonBarPositiveButtonStyle">@style/Widget.Notesprout.DialogButton</item>
+        <item name="android:buttonBarNegativeButtonStyle">@style/Widget.Notesprout.DialogButton</item>
+    </style>
+</resources>

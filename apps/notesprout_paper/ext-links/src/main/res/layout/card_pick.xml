@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One card of the picker's grid — a folder, a notebook or a page (arc 7 / L2). Bordered 1dp
+     inkBlack / 4dp radius by default; the Activity inverts the whole card (filled inkBlack,
+     paperWhite label) when it is the chosen target — a disabled or greyed control is invisible on
+     e-ink, an inverted one is not. Only folders carry a glyph (Tabler `folder`, the one existing
+     icon that fits); notebooks and pages read as their words. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/card"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/shape_bordered"
+    android:gravity="center"
+    android:padding="8dp">
+
+    <ImageView
+        android:id="@+id/cardIcon"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:src="@drawable/ic_folder"
+        android:scaleType="fitCenter"
+        android:layout_marginBottom="8dp"
+        android:contentDescription="@null"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/cardLabel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="14sp"
+        android:textColor="@color/inkBlack"
+        android:gravity="center"
+        android:maxLines="3"
+        android:ellipsize="end"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp" />
+</LinearLayout>

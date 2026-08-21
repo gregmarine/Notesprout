@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Full-bleed paper with chrome overlaying it. The PaperView is added programmatically as
+     paperContainer's only child (GPaper.create needs a Context). Both chrome bars are pushed to
+     paper.setExclusionRects after layout so the stylus can never ink under them. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/paperWhite">
+
+    <FrameLayout
+        android:id="@+id/paperContainer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- Top toolbar: flush at the top edge, TopGuard-padded (BOOX status bar), 1dp bottom border. -->
+    <LinearLayout
+        android:id="@+id/topBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:orientation="vertical"
+        android:background="@color/paperWhite">
+
+        <LinearLayout
+            android:id="@+id/topBarRow"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/toolbar_bar_thickness"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnBack"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_arrow_left"
+                android:contentDescription="@string/cd_back" />
+
+            <View
+                android:layout_width="12dp"
+                android:layout_height="0dp" />
+
+            <!-- Contents (arc 5 / C1): GONE unless ContentsFlow.available. -->
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnContents"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_list"
+                android:contentDescription="@string/cd_contents"
+                android:visibility="gone" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnPen"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_pen"
+                android:contentDescription="@string/cd_tool_pen" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnEraser"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_eraser"
+                android:contentDescription="@string/cd_tool_eraser" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnLasso"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_lasso"
+                android:contentDescription="@string/cd_tool_lasso" />
+
+            <!-- Flexible gap: everything after it sits at the far right of the row. -->
+            <View
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
+            <!-- Scratch Pad (arc 6 / S1, slot moved in S3): GONE unless NSE · Scratch Pad is installed; far right,
+                 immediately before the debug ⋯ (debug builds append the ⋯ after this). -->
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnScratchPad"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_sketching"
+                android:contentDescription="@string/cd_scratch_pad"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
+    </LinearLayout>
+
+    <!-- Bottom strip: "<name>   n / N", static, 1dp top border. -->
+    <LinearLayout
+        android:id="@+id/bottomStrip"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:orientation="vertical"
+        android:background="@color/paperWhite">
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp">
+
+            <TextView
+                android:id="@+id/notebookName"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textSize="13sp"
+                android:textColor="@color/inkBlack"
+                android:singleLine="true"
+                android:ellipsize="end" />
+
+            <TextView
+                android:id="@+id/pageIndicator"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="13sp"
+                android:textColor="@color/inkBlack"
+                android:singleLine="true"
+                android:paddingStart="16dp"
+                android:paddingEnd="0dp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Floating selection toolbar + its sub-toolbar (arc 4 / H2): two included rows, GONE until a
+         lasso selection exists; SelectionToolbar fills and anchors them (FrameLayout margins), and
+         their rects join the exclusion rects + overChrome while visible. -->
+    <include
+        android:id="@+id/selectionToolbar"
+        layout="@layout/view_selection_toolbar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start" />
+
+    <include
+        android:id="@+id/selectionSubToolbar"
+        layout="@layout/view_selection_toolbar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start" />
+
+    <!-- "Opening…" popup: visible from the first frame until the page's strokes are on the paper
+         (NotebookActivity hides it when opened, pen-idle gated). Not chrome — no exclusion rect;
+         no scrim (a grey wash is not e-ink friendly). 75% width via the weight. -->
+    <LinearLayout
+        android:id="@+id/openingOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:weightSum="1">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="0.75"
+            android:background="@drawable/shape_dialog_bordered"
+            android:gravity="center"
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp"
+            android:paddingTop="28dp"
+            android:paddingBottom="28dp"
+            android:text="@string/notebook_opening"
+            android:textAppearance="@style/TextAppearance.Notesprout.TitleMedium" />
+    </LinearLayout>
+</FrameLayout>

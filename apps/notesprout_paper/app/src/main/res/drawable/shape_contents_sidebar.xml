@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Contents sidebar panel (arc 5 / C1, ≥ 480dp form): paperWhite with a 1dp inkBlack border on
+     the right edge only (the other three edges are pushed out of bounds). -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:top="-2dp" android:bottom="-2dp" android:left="-2dp">
+        <shape android:shape="rectangle">
+            <stroke android:width="1dp" android:color="@color/inkBlack" />
+            <solid android:color="@color/paperWhite" />
+        </shape>
+    </item>
+</layer-list>

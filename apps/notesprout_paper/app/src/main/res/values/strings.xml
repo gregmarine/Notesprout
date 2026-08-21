@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Notesprout Paper</string>
+
+    <!-- Bootstrap -->
+    <string name="boot_preparing">Preparing your library…</string>
+    <string name="boot_error_title">Couldn\'t open your library</string>
+    <string name="boot_error_body">Something went wrong while preparing Paper:\n\n%1$s\n\nYour notebooks are untouched. Retry usually resolves a temporary problem (e.g. right after a device restart).</string>
+    <string name="boot_error_foreign">The library index is not a Paper database (it is unencrypted). It was left untouched.</string>
+    <string name="retry">Retry</string>
+    <string name="close_app">Close app</string>
+
+    <!-- Recovery key -->
+    <string name="recovery_title">🌱  Save your recovery key</string>
+    <string name="recovery_body">Your notes are encrypted. This recovery key is the one secret that unlocks them on a new device or after a reinstall. It is the only copy — write it down or save it in a password manager. We can\'t recover it for you.</string>
+    <string name="recovery_copy">Copy</string>
+    <string name="recovery_saved">I\'ve saved it</string>
+    <string name="recovery_continue">Continue</string>
+    <string name="recovery_copied">Recovery key copied</string>
+    <string name="recovery_tick_first">Tick “I\'ve saved it” to continue</string>
+    <string name="recovery_clip_label">Paper recovery key</string>
+
+    <!-- Unlock -->
+    <string name="unlock_title">Unlock Paper</string>
+    <string name="unlock_body">Enter your recovery key to open your library on this device.</string>
+    <string name="unlock_hint">NSPT-…</string>
+    <string name="unlock_button">Unlock</string>
+    <string name="unlock_wrong">That key didn\'t open your library. Try again.</string>
+    <string name="unlock_checking">Checking…</string>
+    <string name="unlock_locked_out">Too many attempts. Try again in %1$s.</string>
+
+    <!-- Library -->
+    <string name="library_root">Notebooks</string>
+    <string name="library_empty">No notebooks yet</string>
+    <string name="library_pinned_title">Pinned</string>
+    <string name="library_recents_title">Recent</string>
+    <string name="library_pinned_empty">No pinned notebooks</string>
+    <string name="library_recents_empty">No recent notebooks</string>
+    <string name="cd_close_mode">Close</string>
+    <string name="recents_parent_root">Notebooks</string>
+    <string name="cd_up_folder">Go up one folder</string>
+    <string name="cd_pinned">Pinned notebooks</string>
+    <string name="cd_recents">Recent notebooks</string>
+    <string name="cd_first_page">First page</string>
+    <string name="cd_prev_page">Previous page</string>
+    <string name="cd_next_page">Next page</string>
+    <string name="cd_last_page">Last page</string>
+    <string name="cd_sort">Sort</string>
+    <string name="cd_new_folder">New folder</string>
+    <string name="cd_new_notebook">New notebook</string>
+    <string name="cd_debug">Debug tools</string>
+    <string name="cd_back">Back</string>
+
+    <!-- New notebook -->
+    <string name="new_notebook_title">New notebook</string>
+    <string name="new_notebook_name_label">Name</string>
+    <string name="new_notebook_template_label">Template</string>
+    <string name="new_notebook_create">Create</string>
+    <string name="new_notebook_creating">Creating…</string>
+    <string name="new_notebook_template_failed_title">Template not available</string>
+    <string name="new_notebook_name_problem_title">Can\'t use that name</string>
+    <string name="new_notebook_duplicate">A notebook with that name already exists here</string>
+    <string name="new_notebook_template_failed">Template extension didn\'t respond — try again or choose Blank</string>
+    <string name="template_blank">Blank</string>
+
+    <!-- Notebook -->
+    <string name="cd_tool_pen">Pen</string>
+    <string name="cd_tool_eraser">Eraser</string>
+    <string name="cd_tool_lasso">Lasso</string>
+    <string name="notebook_page_indicator">%1$d / %2$d</string>
+    <string name="notebook_open_failed">Could not open notebook: %1$s</string>
+    <string name="notebook_opening">Opening…</string>
+
+    <!-- Library actions -->
+    <string name="action_rename">Rename</string>
+    <string name="action_naming">Default notebook name…</string>
+    <string name="action_move">Move</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_pin">Pin</string>
+    <string name="action_unpin">Unpin</string>
+    <string name="new_folder_title">New folder</string>
+    <string name="new_folder_hint">Folder name</string>
+    <string name="new_folder_duplicate">A folder with that name already exists here</string>
+    <string name="naming_save_failed">Folder created — naming scheme not saved</string>
+    <string name="naming_unavailable">Naming extension didn\'t respond</string>
+    <string name="naming_problem_title">Naming scheme</string>
+    <string name="rename_title">Rename</string>
+    <string name="rename_hint">Name</string>
+    <string name="rename_duplicate_notebook">A notebook named \"%1$s\" already exists here</string>
+    <string name="rename_duplicate_folder">A folder named \"%1$s\" already exists here</string>
+    <string name="delete_notebook_title">Delete \"%1$s\"?</string>
+    <string name="delete_notebook_body">This cannot be undone.</string>
+    <string name="delete_folder_title">Delete \"%1$s\"?</string>
+    <string name="delete_folder_body">This will permanently remove all notebooks and subfolders inside it. This cannot be undone.</string>
+    <string name="delete_confirm">Delete</string>
+    <string name="delete_page_action">Delete this page</string>
+    <string name="delete_page_confirm">Delete this page and its ink?</string>
+    <string name="cancel">Cancel</string>
+    <string name="move_title">Move to…</string>
+    <string name="move_here">Move here</string>
+    <string name="move_collision_notebook">A notebook named \"%1$s\" already exists here.</string>
+    <string name="move_collision_folder">A folder named \"%1$s\" already exists here.</string>
+    <string name="move_problem_title">Can\'t move here</string>
+    <string name="move_into_self">Cannot move a folder into itself</string>
+
+    <!-- Sort -->
+    <string name="sort_name_asc">Name ↑</string>
+    <string name="sort_name_desc">Name ↓</string>
+    <string name="sort_modified_asc">Modified ↑</string>
+    <string name="sort_modified_desc">Modified ↓</string>
+
+    <!-- Debug-only notebook ⋯ (arc 3 test surface; strings live here so the release no-op twin compiles) -->
+    <string name="debug_tools_title">Debug tools</string>
+    <string name="debug_recognize_page">Recognize page (ML Kit)</string>
+
+    <!-- Selection toolbar + object edit dialog (arc 4 / H2) -->
+    <string name="selection_delete_hint">Delete selection</string>
+    <string name="objects_edit_save">Save</string>
+    <!-- Object actions (arc 4 / H4) — every failure is a dialog, never a toast -->
+    <string name="objects_problem_title">Couldn\'t apply the action</string>
+    <string name="objects_unreadable_title">Couldn\'t read the handwriting</string>
+    <string name="objects_unreadable_body">Try writing larger or clearer, then lasso the words again.</string>
+    <string name="objects_needs_recognizer">This action needs a handwriting recognizer extension (for example NSE · ML Kit).</string>
+    <string name="objects_needs_markdown">This action needs the NSE · Markdown extension.</string>
+    <string name="objects_provider_failed">The %1$s extension didn\'t respond — try again.</string>
+    <string name="objects_page_full">This page already holds the maximum number of objects.</string>
+
+    <!-- Contents (arc 5 / C1) — the table of contents from the object providers' outline entries -->
+    <string name="contents_title">Contents</string>
+    <string name="cd_contents">Contents</string>
+
+    <!-- Scratch Pad (arc 6) -->
+    <string name="cd_scratch_pad">Scratch Pad</string>
+    <string name="scratch_failed">The %1$s extension didn\'t respond — try again.</string>
+    <!-- Arc 6 / S2: the core "Send to Scratch Pad" selection action + the two transfers. -->
+    <string name="scratch_action_label">Pad</string>
+    <string name="scratch_action_hint">Send to Scratch Pad</string>
+    <string name="scratch_send_title">Send to Scratch Pad</string>
+    <string name="scratch_new_page">New page</string>
+    <string name="scratch_current_page">Current page</string>
+    <string name="scratch_sent">Sent to scratch pad</string>
+    <string name="scratch_too_large">That\'s too much ink to send at once (%1$d strokes).</string>
+    <string name="scratch_page_full_host">The scratch pad\'s page is full — send to a new page.</string>
+    <string name="scratch_truncated">Only the first %1$d strokes came back.</string>
+    <string name="scratch_result_lost">The notebook was restarted while the scratch pad was open — the ink couldn\'t be brought back. It\'s still on the pad.</string>
+    <string name="contents_empty">No headings yet</string>
+    <string name="contents_truncated">Showing the first %1$d headings</string>
+
+    <!-- Links (arc 7 / L1) — the three core selection actions; the dialogs arrive with the picker (L2) and follow (L4). -->
+    <string name="link_action_label">Link</string>
+    <string name="link_action_hint">Create link</string>
+    <string name="link_edit_label">Edit</string>
+    <string name="link_edit_hint">Edit link</string>
+    <string name="link_unlink_label">Unlink</string>
+    <string name="link_unlink_hint">Remove link</string>
+    <!-- Links (arc 7 / L2) — the picker flow's dialogs + the host-composed page labels (Q2). -->
+    <string name="links_problem_title">Link</string>
+    <string name="links_picker_gone">The NSE · Links extension didn\'t respond — try again.</string>
+    <string name="links_choice_invalid">The NSE · Links extension returned an unusable link.</string>
+    <string name="links_result_lost">The notebook was restarted while the link picker was open — the choice couldn\'t be brought back. Try again.</string>
+    <string name="links_page_full">This page already holds the maximum number of links.</string>
+    <string name="links_required">This link needs the NSE · Links extension.</string>
+    <string name="links_target_gone">This link\'s target no longer exists.</string>
+    <string name="link_page_label">Page %1$d</string>
+    <string name="link_page_heading_label">Page %1$d — %2$s</string>
+    <string name="cd_expand">Expand</string>
+    <string name="cd_collapse">Collapse</string>
+    <string name="recognize_problem_title">Recognize page</string>
+    <string name="recognize_nothing">Nothing to recognize</string>
+    <string name="recognize_model_needed_title">Recognition model needed</string>
+    <string name="recognize_model_needed_body">Recognizing handwriting needs a one-time download of the English (en-US) model, about 20 MB. Wi-Fi is recommended.\n\nDownload it now?</string>
+    <string name="recognize_model_needed_offline_body">Recognizing handwriting needs a one-time download of the English (en-US) model, about 20 MB — but this device is offline right now. Connect to Wi-Fi, then try again.</string>
+    <string name="recognize_download">Download</string>
+    <string name="recognize_downloading_title">Downloading recognition model</string>
+    <string name="recognize_downloading_body">This takes a minute or so the first time. Your handwriting will be recognized as soon as it finishes.\n\nElapsed: %1$d s</string>
+    <string name="recognize_downloading_offline_body">Waiting for a network connection… The download resumes when the device is back online.\n\nElapsed: %1$d s</string>
+    <string name="recognize_download_failed_title">Download failed</string>
+    <string name="recognize_download_failed_body">The recognition model couldn\'t be downloaded. Check the Wi-Fi connection and try again.</string>
+    <string name="recognize_still_downloading">Model still downloading — try again in a minute</string>
+    <string name="recognize_unavailable">Recognizer unavailable on this device</string>
+    <string name="recognize_running">Recognizing…</string>
+    <string name="recognize_too_dense">Page too dense to recognize</string>
+    <string name="recognize_failed">ML Kit extension didn\'t respond</string>
+    <string name="recognize_result_title">Recognized text (ML Kit · %1$d strokes · %2$d ms)</string>
+    <string name="recognize_empty_result">(nothing recognized)</string>
+    <string name="recognize_copy">Copy</string>
+    <string name="recognize_clip_label">Recognized text</string>
+    <string name="recognize_copied">Recognized text copied</string>
+</resources>
