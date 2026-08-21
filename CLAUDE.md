@@ -145,13 +145,13 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
 ## Branch Strategy
 
 - `main` — stable release branch **and the current working branch** (v1.0 "Seed" through v1.3
-  "Supernote" shipped; the release merge commits are in git history). Until the next feature branch
-  is cut, work lands here.
-- `paper` — experimental from-scratch rebuild of Notesprout (v0 "Paper"); see
-  `apps/notesprout_paper/PAPER_PLAN.md` and `apps/notesprout_paper/CLAUDE.md`
+  "Supernote" shipped; the release merge commits are in git history). **No active feature branch** —
+  until the next one is cut, work lands here.
 - `germination` — previous post-MVP feature branch (reference, not active)
-- The former feature branches (`seed`, `sprout`, `sapling`, `supernote`) are merged and **deleted**
-  (local + remote) — "on sprout/sapling/supernote" means `main`; history lives under the merge commits.
+- The former feature branches (`seed`, `sprout`, `sapling`, `supernote`, `paper`) are merged and
+  **deleted** (local + remote) — "on sprout/sapling/supernote/paper" means `main`; history lives under
+  the merge commits (`paper` = v0 "Paper" rebuild under `apps/notesprout_paper/`, merged 944d990; see
+  `apps/notesprout_paper/PAPER_PLAN.md` and `apps/notesprout_paper/CLAUDE.md`).
 
 ---
 
