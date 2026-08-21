@@ -113,7 +113,7 @@ tree at commit `87277da`) with zero extension machinery.
 ## Phases — Arc 1 "Ratta Paper"
 
 ### R0 — Scaffold & identity
-**Status:** ✅ Complete (2026-08-20, Nomad-verified; hash in the follow-up plan-status commit)
+**Status:** ✅ Complete (commit cf890a3, Nomad-verified 2026-08-20)
 
 Branch `ratta` (done). Gradle root (wrapper copied from Paper — boilerplate exemption) +
 single `:app`; `gradle.properties` (Temurin-17 home, AndroidX, **no jetifier**);
