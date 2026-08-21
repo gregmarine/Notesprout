@@ -138,7 +138,7 @@ side-by-side (`…notesproutsn.dev` 0.1.0-ratta-dev / `…notesproutsn` 0.1.0-ra
 renders, crash buffer empty. Both apps left installed.
 
 ### R1 — Crypto + data core
-**Status:** ✅ Complete (commit — see status-hash commit; Nomad-verified 2026-08-20)
+**Status:** ✅ Complete (commit 6820112, Nomad-verified 2026-08-20)
 
 `crypto/` stack (GlobalKey, SecurePrefs, PassphraseStore, AttemptLimiter, DerivedKeyStore,
 RawKeyDerivation, KeyMaterial, KeySession, KeyOpener, SoilCrypto), `data/SoilFile.kt`,
