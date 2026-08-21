@@ -107,6 +107,13 @@ tree at commit `87277da`) with zero extension machinery.
   Screenshot-verify only committed content; live ink is the user's eye.
 - Ratta hardware keyboard types only while the IME is shown (matters for Unlock later).
 - Gradle zipflinger holes inflate incremental debug APKs — clean build if APK size looks wrong.
+- **`input keyevent` letters are swallowed too** (R2 finding) — not just `input text`. Typing on
+  the Supernote works only by tapping the on-screen keyboard keys, and the tap coordinates must be
+  measured from a screencap taken **after** the IME is up (the dialog shifts up; the keyboard keys
+  themselves are stable: a≈(145,1567) b≈(840,1683) c≈(562,1683) on the Nomad, dialog field ≈(700,935)
+  pre-IME, dialog buttons ≈y 687 post-IME).
+- **Back at the library root exits the app** (by design). A device agent must never use
+  `input keyevent 4` to dismiss the IME while at the root — it drops to whatever app is underneath.
 
 ---
 
@@ -181,7 +188,7 @@ Deviations: unlock never hides the IME (recorded in the class KDoc); debug choos
 `sn_secure` / `sn_dkeys` (device-local, not format). Both variants left installed on SNN, unlocked.
 
 ### R2 — Library
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (commit pending, Nomad-verified 2026-08-20)
 
 `LibraryActivity` (grid math, breadcrumbs, pagination — non-scrolling, measured against
 the real band), `NewNotebookActivity` (name rules + timestamp default, built-in template
@@ -198,8 +205,33 @@ breadcrumb navigation, relaunch restores browse position.
 **Questions to resolve at phase start:** default notebook-name format; folder nesting
 depth cap (Paper's rule); whether Recents/Pinned are both in arc 1's library chrome from
 day one or land with covers polish in R5.
+**Answered 2026-08-20: all three = Paper v0's rules.** Default name `YYYYMMDD_HHmmss`
+(editable, whitelist `[a-zA-Z0-9_\-. ]`, reject `.`/`..`, non-empty, unique in target
+folder); no nesting depth cap (ancestry walk cycle-guarded at 50 hops); Pinned/Recents
+bottom-bar buttons land now as stubs (toast "Later") + ids-only prefs stores, the modes
+wire up in R5.
 
-**Outcome:** —
+**Outcome:** Opus implemented the whole phase (one background agent); Fable review found **one
+parity fix** — `DOT_RADIUS_MDPI` 1.5→2 (Paper v0's on-device legibility finding; test + doc
+updated) — everything else clean. New: `library/{GridMath,NameRules,SortRules,LibraryGrid,
+NameDialog,NewNotebookActivity,FolderPickerActivity}`, `notebook/NotebookActivity` (stub, entry
+contract fixed: `EXTRA_NOTEBOOK_ID`/`_NAME`), `core/{ActionSheetDialog,Bitmaps}`,
+`data/prefs/{SortPrefs,BrowseState,RecentsPrefs}`, `data/template/{TemplateGeometry,
+BuiltInTemplates}`, `docs/library.md`; `LibraryActivity` rewritten. Creation sequence verified
+field-for-field against Paper v0's (notebook `refId`=first page, template `text`=kind +
+page-size WEBP blob, page `refId`=templateId|"" order 0, meta → seal → index row last).
+**74 JVM tests green** (42 new: grid/pagination, names, sort, template geometry); debug + release
+build. Deliberate deviations: problem **dialogs** (not Paper's toasts) for duplicate/invalid names
+and move collisions (SN's toast-confirms/dialog-explains rule); pager goes **INVISIBLE** not GONE
+(controls never shift); `library_card_min_width` is a tier dimen (140dp base / **200dp sw720dp** —
+literal 140 would give five ~2 cm columns on the Nomad; 200 → 3×2, Paper's density);
+`WEBP_LOSSLESS` API-guarded (minSdk 29); template feature sizes density-scaled (Paper v0
+parity, not the plan's literal px). **Nomad walk: all 15 gate steps pass** — Haiku agent covered
+launch/create/templates/files/stubs/pagination/crash-buffer; Fable hand-drove folder create,
+duplicate dialog, rename, move, breadcrumbs, sort, delete (+file+sidecar purge, count-verified)
+and relaunch-restore-into-folder after the agent could not type (new standing traps recorded
+above; the agent's delete "failure" was a mis-tap — delete verified working). Test data left on
+device (folder `abc` + 6 notebooks); both variants reinstalled current.
 
 ### R3 — Notebook core (write on it)
 **Status:** ⬜ Not started

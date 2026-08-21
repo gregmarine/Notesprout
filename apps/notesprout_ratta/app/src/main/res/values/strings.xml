@@ -32,9 +32,79 @@
     <string name="unlock_checking">Checking…</string>
     <string name="unlock_locked_out">Too many attempts. Try again in %1$s.</string>
 
-    <!-- Library (R1 shell) -->
-    <string name="library_shell_placeholder">Your library arrives in R2.</string>
+    <!-- Library -->
+    <string name="library_root">Notebooks</string>
+    <string name="library_empty">No notebooks yet</string>
+    <string name="library_later">Later</string>
+    <string name="page_indicator">%1$d / %2$d</string>
+
+    <!-- New folder -->
+    <string name="new_folder_title">New folder</string>
+    <string name="new_folder_hint">Folder name</string>
+    <string name="new_folder_duplicate">A folder named \"%1$s\" already exists here.</string>
+
+    <!-- New notebook -->
+    <string name="new_notebook_title">New notebook</string>
+    <string name="new_notebook_name_label">Name</string>
+    <string name="new_notebook_template_label">Template</string>
+    <string name="new_notebook_create">Create</string>
+    <string name="new_notebook_creating">Creating…</string>
+    <string name="new_notebook_duplicate">A notebook named \"%1$s\" already exists here.</string>
+    <string name="new_notebook_failed_title">Couldn\'t create the notebook</string>
+    <string name="new_notebook_failed_body">%1$s\n\nNothing was added to your library.</string>
+    <string name="template_blank">Blank</string>
+    <string name="template_lined">Lined</string>
+    <string name="template_dotted">Dotted</string>
+    <string name="template_grid">Grid</string>
+
+    <!-- Item actions -->
+    <string name="action_rename">Rename</string>
+    <string name="action_move">Move</string>
+    <string name="action_delete">Delete</string>
+    <string name="rename_title">Rename</string>
+    <string name="rename_hint">Name</string>
+    <string name="rename_duplicate_notebook">A notebook named \"%1$s\" already exists here.</string>
+    <string name="rename_duplicate_folder">A folder named \"%1$s\" already exists here.</string>
+    <string name="name_problem_title">That name won\'t work</string>
+    <string name="name_empty">Name cannot be empty</string>
+    <string name="name_reserved">Invalid name</string>
+    <string name="name_charset">Only letters, numbers, spaces, hyphens, underscores, and dots</string>
+    <string name="delete_notebook_title">Delete \"%1$s\"?</string>
+    <string name="delete_notebook_body">This cannot be undone.</string>
+    <string name="delete_folder_title">Delete \"%1$s\"?</string>
+    <string name="delete_folder_body">This will permanently remove all notebooks and subfolders inside it. This cannot be undone.</string>
+    <string name="delete_confirm">Delete</string>
+    <string name="cancel">Cancel</string>
+
+    <!-- Move -->
+    <string name="move_title">Move to…</string>
+    <string name="move_here">Move here</string>
+    <string name="move_no_folders">No folders here</string>
+    <string name="move_collision_title">Already taken</string>
+    <string name="move_collision_notebook">A notebook named \"%1$s\" already exists here.</string>
+    <string name="move_collision_folder">A folder named \"%1$s\" already exists here.</string>
+    <string name="move_into_self">A folder cannot be moved inside itself.</string>
+
+    <!-- Sort -->
+    <string name="sort_name_asc">Name ↑</string>
+    <string name="sort_name_desc">Name ↓</string>
+    <string name="sort_modified_asc">Modified ↑</string>
+    <string name="sort_modified_desc">Modified ↓</string>
+
+    <!-- Notebook (R2 stub — the real surface lands in R3) -->
+    <string name="notebook_stub_body">%1$s\n\nWriting arrives in R3.</string>
 
     <!-- Content descriptions -->
     <string name="cd_debug">Debug tools</string>
+    <string name="cd_back">Back</string>
+    <string name="cd_up_folder">Go up one folder</string>
+    <string name="cd_pinned">Pinned notebooks</string>
+    <string name="cd_recents">Recent notebooks</string>
+    <string name="cd_first_page">First page</string>
+    <string name="cd_prev_page">Previous page</string>
+    <string name="cd_next_page">Next page</string>
+    <string name="cd_last_page">Last page</string>
+    <string name="cd_sort">Sort</string>
+    <string name="cd_new_folder">New folder</string>
+    <string name="cd_new_notebook">New notebook</string>
 </resources>

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/shape_bordered"
+    android:padding="4dp">
+
+    <!-- Cover snapshot when the notebook has one, otherwise a small template-kind placeholder. -->
+    <ImageView
+        android:id="@+id/coverImage"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:scaleType="centerCrop"
+        android:background="@color/paperWhite"
+        android:contentDescription="@null" />
+
+    <TextView
+        android:id="@+id/cardName"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="13sp"
+        android:textColor="@color/inkBlack"
+        android:singleLine="true"
+        android:ellipsize="end"
+        android:paddingTop="4dp"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp" />
+
+    <!-- Secondary information stays inkBlack and gets smaller — inkLight is for text meant NOT
+         to be read, and a last-modified stamp carries information. -->
+    <TextView
+        android:id="@+id/cardDate"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="11sp"
+        android:textColor="@color/inkBlack"
+        android:singleLine="true"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp"
+        android:paddingBottom="4dp" />
+</LinearLayout>

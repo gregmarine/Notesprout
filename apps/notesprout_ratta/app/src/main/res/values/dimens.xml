@@ -3,4 +3,9 @@
     <dimen name="toolbar_button_size">44dp</dimen>
     <dimen name="toolbar_button_padding">10dp</dimen>
     <dimen name="toolbar_bar_thickness">56dp</dimen>
+
+    <!-- Library card grid: the narrowest a card may be. Columns = floor(gridWidth / this),
+         card height = width × 1.4. Tier-driven like every other tap-sized dimen. -->
+    <dimen name="library_card_min_width">140dp</dimen>
+    <dimen name="library_card_gap">8dp</dimen>
 </resources>

@@ -6,7 +6,7 @@
     android:orientation="vertical"
     android:background="@color/paperWhite">
 
-    <!-- Breadcrumb bar. Flush at the top edge: on Ratta the top guard is 0 (no status-bar hazard). -->
+    <!-- "Move to…" + breadcrumb + Cancel -->
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
@@ -22,7 +22,6 @@
             android:visibility="gone" />
 
         <HorizontalScrollView
-            android:id="@+id/breadcrumbScroll"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
@@ -38,8 +37,12 @@
                 android:gravity="center_vertical" />
         </HorizontalScrollView>
 
-        <!-- The debug ⋯ is appended here at runtime by DebugMenu (no-op in release). -->
-
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnCancel"
+            style="@style/Widget.Notesprout.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/cancel" />
     </LinearLayout>
 
     <View
@@ -47,8 +50,6 @@
         android:layout_height="1dp"
         android:background="@color/inkBlack" />
 
-    <!-- Card grid. Cards are added programmatically; emptyState is a sibling that must survive
-         every bind (LibraryGrid removes only the GridLayout it added last). -->
     <FrameLayout
         android:id="@+id/gridContainer"
         android:layout_width="match_parent"
@@ -60,31 +61,17 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center"
-            android:text="@string/library_empty"
+            android:text="@string/move_no_folders"
             android:textSize="16sp"
             android:textColor="@color/inkBlack" />
     </FrameLayout>
 
-    <!-- [Pinned] [Recents]  |< < n/n > >|  [Sort] [+Folder] [+Notebook] -->
     <LinearLayout
-        android:id="@+id/bottomBar"
         android:layout_width="match_parent"
         android:layout_height="@dimen/toolbar_bar_thickness"
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:background="@drawable/toolbar_background_bottom">
-
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnPinned"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_pinned"
-            android:contentDescription="@string/cd_pinned" />
-
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnRecents"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_clock"
-            android:contentDescription="@string/cd_recents" />
 
         <LinearLayout
             android:id="@+id/pager"
@@ -129,24 +116,13 @@
                 android:contentDescription="@string/cd_last_page" />
         </LinearLayout>
 
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnSort"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_sort"
-            android:contentDescription="@string/cd_sort" />
-
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnNewFolder"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_folder_plus"
-            android:contentDescription="@string/cd_new_folder" />
-
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnNewNotebook"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_plus"
-            android:contentDescription="@string/cd_new_notebook" />
-
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnMoveHere"
+            style="@style/Widget.Notesprout.ElevatedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
+            android:text="@string/move_here" />
     </LinearLayout>
 
 </LinearLayout>

@@ -3,4 +3,9 @@
     <dimen name="toolbar_button_size">62dp</dimen>
     <dimen name="toolbar_button_padding">14dp</dimen>
     <dimen name="toolbar_bar_thickness">70dp</dimen>
+
+    <!-- 200dp on the tablet tier: 140dp would give five ~2 cm columns on a 1404 px Supernote
+         panel, far too small to read a cover. 200dp lands on three columns there. -->
+    <dimen name="library_card_min_width">200dp</dimen>
+    <dimen name="library_card_gap">10dp</dimen>
 </resources>
