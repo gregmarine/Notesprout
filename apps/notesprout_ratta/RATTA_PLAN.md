@@ -188,7 +188,7 @@ Deviations: unlock never hides the IME (recorded in the class KDoc); debug choos
 `sn_secure` / `sn_dkeys` (device-local, not format). Both variants left installed on SNN, unlocked.
 
 ### R2 — Library
-**Status:** ✅ Complete (commit pending, Nomad-verified 2026-08-20)
+**Status:** ✅ Complete (commit ca8347d, Nomad-verified 2026-08-20)
 
 `LibraryActivity` (grid math, breadcrumbs, pagination — non-scrolling, measured against
 the real band), `NewNotebookActivity` (name rules + timestamp default, built-in template
