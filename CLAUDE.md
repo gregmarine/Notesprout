@@ -144,9 +144,11 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
 
 ## Branch Strategy
 
-- `main` — stable release branch **and the current working branch** (v1.0 "Seed" through v1.3
-  "Supernote" shipped; the release merge commits are in git history). **No active feature branch** —
-  until the next one is cut, work lands here.
+- `main` — stable release branch (v1.0 "Seed" through v1.3 "Supernote" shipped; the release merge
+  commits are in git history).
+- `ratta` — **the active feature branch** (cut 2026-08-20): Notesprout SN, a from-scratch
+  Supernote-only rebuild under `apps/notesprout_ratta/`. Read `apps/notesprout_ratta/RATTA_PLAN.md`
+  first for any work there.
 - `germination` — previous post-MVP feature branch (reference, not active)
 - The former feature branches (`seed`, `sprout`, `sapling`, `supernote`, `paper`) are merged and
   **deleted** (local + remote) — "on sprout/sapling/supernote/paper" means `main`; history lives under
