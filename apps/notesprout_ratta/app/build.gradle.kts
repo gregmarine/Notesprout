@@ -48,6 +48,12 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    testOptions {
+        // The StrokeStore ordering tests run production code that logs (Slog/Log); on the JVM the
+        // framework stubs return defaults instead of throwing "not mocked".
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {

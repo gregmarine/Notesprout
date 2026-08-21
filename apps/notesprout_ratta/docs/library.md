@@ -15,7 +15,7 @@ deliberate differences are listed at the end.
 | Library | `library/LibraryActivity` | Browse, create, rename, move, delete, sort, page |
 | New notebook | `library/NewNotebookActivity` | Name + template radio + Create |
 | Folder picker | `library/FolderPickerActivity` | The Move destination picker |
-| Notebook | `notebook/NotebookActivity` | **R2 stub** — shows the name; R3 fills it with g-paper |
+| Notebook | `notebook/NotebookActivity` | The drawing surface (R3) — see [`notebook.md`](notebook.md) |
 
 Every one of them opens with `IndexGuard.ready(this)` and takes `TopGuard.applyInsetPadding`.
 TopGuard's *guard* is 0 on Ratta (chrome flush at the top edge); the inset pass is still applied

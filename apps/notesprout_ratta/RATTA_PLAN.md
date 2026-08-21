@@ -114,6 +114,10 @@ tree at commit `87277da`) with zero extension machinery.
   pre-IME, dialog buttons ≈y 687 post-IME).
 - **Back at the library root exits the app** (by design). A device agent must never use
   `input keyevent 4` to dismiss the IME while at the root — it drops to whatever app is underneath.
+- **adb cannot inject stylus ink on the Supernote** (R3 finding): `input stylus swipe` and
+  `input swipe` deliver nothing to the ink path. Committed-ink verification needs the user's pen;
+  agents can still verify chrome, panels, and persistence of strokes the user already wrote.
+  Finger `input tap` works normally.
 
 ---
 
@@ -234,7 +238,26 @@ above; the agent's delete "failure" was a mis-tap — delete verified working). 
 device (folder `abc` + 6 notebooks); both variants reinstalled current.
 
 ### R3 — Notebook core (write on it)
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-21; hash in the follow-up commit)
+
+**Eye-check #1 round 1 (2026-08-21) findings & responses:**
+- *Panels should dismiss on a finger tap on the page* → **fixed**: activity-level dismiss on
+  finger `ACTION_DOWN` not over chrome (panel itself counts as chrome — composing never
+  dismisses); adb-verified on the Nomad. Round-2 addition: **the stylus dismisses too** — at
+  **pen-up**, not pen-idle (round-3 finding: `isPenActive` counts hover, so the idle gate held
+  the panel while the pen floated near the glass). One deliberate frame-silence exception: a
+  single chrome frame at the stroke boundary; a contact racing the posted close falls back to
+  the idle gate.
+- *MARKER changes when baking* → **documented g-paper behaviour** (Ratta has no semi-transparent
+  live style; live = `NEEDLE`, bake = core's true rendering — live is a preview, the bake is the
+  truth). **Deferred out of the ratta arc** per user; recorded in monorepo `BACKLOG.md`.
+- *One stroke lost, once, unreproduced* (showed live, gone on close/reopen) → analysis: commits
+  fire synchronously at pen-up and the seal drains the writer, so a committed stroke can't be
+  lost host-side; the ink was overlay-only (never entered the engine model). Suspects: stale
+  exclusion-rect window around a panel toggle, or a raw-delivery drop (4th-overlay-law family).
+  **Hardening applied**: every toolbar `releaseRender()` is now pen-gated (`releaseRenderIfIdle`
+  — the g-paper API contract; an ungated release in the pen-active window can cost a live
+  stroke). Watch through R4–R6; if it recurs, instrument and fix in g-paper.
 
 `NotebookActivity` + g-paper: `RattaEngine.register()` in the Application class,
 `GPaper.create(this)`, full-bleed `PaperView` with chrome exclusion rects, toolbar
@@ -250,8 +273,32 @@ changes, eraser feel.
 
 **Questions to resolve at phase start:** toolbar layout (Paper v0's shape vs. anything
 Supernote-specific the user wants); default pen width/style; eraser radius options.
+**Answered 2026-08-20:** toolbar keeps Paper v0's bar shape `[←] [pen] [eraser] [lasso]`
+but with **rich panels** — pen button opens a width + style + 16-level greyscale ink panel
+(widths **1·2·3·5·8 px**, all five g-paper styles PEN/FOUNTAIN/MARKER/PENCIL/BRUSH); eraser
+button opens a radius panel **8·15·30·60 px** (default 15). First-ever pen default =
+**PEN · black · 3 px** (Paper v0 parity); panel choices persist per app thereafter.
 
-**Outcome:** —
+**Outcome:** Split per the recipe — Fable wrote the engine seam + data layer (`NotebookSession`,
+`StrokeStore` single-serial writer, `StrokeRows` format mapper, `CoverSnapshot`,
+`NotebookActivity`, the library's cold-launch `reopenLastNotebookIfNeeded` — the R2-reserved
+`lastOpenNotebookId` consumer) and the JVM suites; Opus built `NotebookToolbar` + `ToolPrefs`
+(panels fully programmatic into layout-contract containers); Sonnet the layout/icons/strings.
+All three ran in parallel against a fixed id/behavior contract — integrated green on the first
+build. **90 JVM tests** (16 new), debug + release; `unitTests.isReturnDefaultValues = true` added
+for the store tests. **Nomad walk all 13 steps pass** (Haiku agent; Fable eyeballed the panel
+screencaps), crash buffer clean; cold-restore lands back inside the open notebook; the user's
+eye-check strokes survived kill + reinstall + restore. **Eye check #1: three findings over three
+rounds, all resolved** (block above — page-tap panel dismiss, then stylus dismiss, then pen-up
+instead of pen-idle because `isPenActive` counts hover); user all-clear 2026-08-21. Deliberate
+deviations: rich tool panels + `ToolPrefs` (phase decisions), problem-dialog on failed open,
+pen-gated `releaseRenderIfIdle` everywhere in the toolbar, the **one frame-silence exception**
+(panel close at stylus-up — single chrome frame at a stroke boundary; a contact racing the
+posted close falls back to the idle gate), `CoverSnapshot` WEBP API-guard for minSdk 29.
+Deferred: MARKER live≠baked (g-paper, monorepo `BACKLOG.md`). Watch item: the one-time
+unreproduced lost stroke (overlay-only ink; suspects recorded in `docs/notebook.md` § Known
+issues). Docs: `docs/notebook.md` new, `docs/library.md` row updated. Both variants left
+installed on SNN.
 
 ### R4 — Multi-page + gestures + undo/redo
 **Status:** ⬜ Not started

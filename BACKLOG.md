@@ -749,3 +749,13 @@ MAX in landscape gives roughly 40% of the height to the Notebooks band whether o
 in it, leaving Tasks and Events 3 and 4 rows. A fix means content-dependent band weights or a
 `layout-land/` variant of the wide layout (which must carry an identical id set — see
 `docs/today-dashboard.md`). Portrait on MAX and both orientations on G102 are unaffected.
+
+## g-paper — MARKER live ink differs from its baked appearance on Ratta (deferred from Notesprout SN R3)
+
+Reported in the Notesprout SN R3 eye check (2026-08-21): a MARKER stroke visibly changes when it
+bakes. Documented engine behaviour, not a host bug — `StrokeStyle`'s mapping table gives Ratta no
+semi-transparent live style, so live MARKER draws as `NEEDLE` (plain uniform line) and the baked
+stroke is core's engine-independent semi-transparent flat-cap rendering. Live ink is defined as a
+best-effort preview; the bake is the truth. A better live approximation (if the 0…31 Ratta pen-code
+sweep offers one, e.g. a grey pen code) would be a g-paper change (`~/git/g-paper`, bump + republish)
+— explicitly deferred out of the initial ratta arc by the user.

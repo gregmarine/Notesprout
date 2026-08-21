@@ -39,7 +39,9 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   `setPageSize`/`setTemplate` → `loadStrokes`; undo/redo via `addStrokes`/`removeStrokes`;
   chrome via `setExclusionRects`; lifecycle `resumeDrawing`/`releaseForHandoff`/`release`.
 - **Frame-silence rule:** never present an app frame while `paper.isPenActive` — route
-  chrome text/updates through a pen-idle gate.
+  chrome text/updates through a pen-idle gate. One recorded exception: the tool-panel close at
+  stylus pen-up (`docs/notebook.md`) — `isPenActive` counts hover, so an idle-gated close reads
+  as a stuck panel. Any new exception needs the same written justification.
 - **Toast vs. dialog:** a toast only confirms something that already happened; anything
   explaining why a tap *didn't* work is a problem dialog. On e-ink a missed toast reads
   as "broken".

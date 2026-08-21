@@ -66,6 +66,7 @@ class LibraryActivity : AppCompatActivity() {
     private val coverCache = HashMap<String, ByteArray?>()
     private var grid: LibraryGrid? = null
     private var gridMeasured = false
+    private var coldLaunch = false
 
     private val newNotebookLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -97,6 +98,7 @@ class LibraryActivity : AppCompatActivity() {
         sortPrefs = SortPrefs(this)
         recentsPrefs = RecentsPrefs(this)
         folderId = browseState.folderId
+        coldLaunch = savedInstanceState == null
 
         wireBars()
         DebugMenu.install(this, binding.topBar)
@@ -116,6 +118,7 @@ class LibraryActivity : AppCompatActivity() {
                 repo.ensurePinnedListExists()
                 // A remembered folder may have been deleted since; fall back to the root.
                 folderId?.let { id -> if (repo.alive(id) == null) navigateTo(null, refreshNow = false) }
+                if (coldLaunch) reopenLastNotebookIfNeeded()
                 refresh()
             }
         }
@@ -124,6 +127,23 @@ class LibraryActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (gridMeasured) lifecycleScope.launch { refresh() }
+    }
+
+    /**
+     * A notebook was open when the process died (the id survives in [BrowseState]) — put it back
+     * on top of the library, but only when its index row is still alive **and** its `.soil` exists
+     * (never mint a ghost file). The id is read once and cleared regardless of outcome.
+     */
+    private fun reopenLastNotebookIfNeeded() {
+        val id = browseState.lastOpenNotebookId ?: return
+        browseState.lastOpenNotebookId = null
+        lifecycleScope.launch {
+            val s = repo.alive(id) ?: return@launch
+            if (s.type != ObjectType.NOTEBOOK) return@launch
+            val exists = withContext(Dispatchers.IO) { soilFile(this@LibraryActivity, id).exists() }
+            if (!exists) return@launch
+            startActivity(NotebookActivity.intent(this@LibraryActivity, s.id, s.name))
+        }
     }
 
     override fun onPause() {
