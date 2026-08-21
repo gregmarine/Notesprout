@@ -13,7 +13,8 @@
 > The **original** Notesprout implementation this arc draws on is `docs/links.md` at the monorepo
 > root — inspiration, not a spec; every deviation is recorded here.
 >
-> **Status: L0 ✅ (df2de82) · L1 ✅ (bc944bc) · L2 ✅ (a86214c) · L3 ✅ (6822e44) · L4 ✅ (b2e71dd + b9b107f) · L5 🧪**
+> **Status: L0 ✅ (df2de82) · L1 ✅ (bc944bc) · L2 ✅ (a86214c) · L3 ✅ (6822e44) · L4 ✅ (b2e71dd + b9b107f) · L5 ✅ (c60c754) — ARC COMPLETE + FROZEN 2026-08-20.** This file is the
+> arc's record; `docs/links.md` is the living reference. The next arc is not planned — ask first.
 
 ## Why
 
@@ -1157,7 +1158,19 @@ so the chain story is yours):**
 ---
 
 ### Phase L5 — Review, boundary audit, docs freeze
-**Status:** 🧪 Built + device-verified (2026-08-20) — the condensed user eye pass pending
+**Status:** ✅ Complete (commit c60c754; user checklist all 6 items green on SNN/NA5C/MIP11 2026-08-20) — **ARC COMPLETE + FROZEN**
+
+**Outcome (2026-08-20).** Everything delivered; the wizard answers (Q1 freeze as built · Q2 remove
+both probes · Q3 **no `/code-review`** — the user's call, Fable's own pass instead), the probe
+removal, the review verdicts (2 fixed / 6 accepted), the docs freeze and the device runs are in
+the Build notes above. **Model protocol:** one Opus agent did the mechanical probe removal
+(Fable-reviewed — clean); three Sonnet device agents ran the condensed regression (9/9 PASS ×3,
+probe absence screenshot-verified, real follows 64/18/23 ms); Fable inline did the review pass,
+both fixes, all docs (rules 28–31, audit rows 33–37 + the rows-1/6/7 re-walk, the new
+`docs/links.md`), and the close-out. Ten modules JVM green; debug + release compile.
+**User checklist: all six items green on all three devices (2026-08-20).** The arc is frozen —
+seven phases, commits df2de82 → c60c754; `docs/links.md` + `docs/extensions.md` are the living
+references; the review base `0f91ed5` stays recorded should a later review want the arc's range.
 
 **Goal:** the arc is reviewed, audited, documented, probe-free and frozen.
 
