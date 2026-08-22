@@ -407,7 +407,7 @@ undo/redo, smart lasso, scribble erase, dismissal) — no findings. Test data: `
 left pinned on SNN; both variants reinstalled current.
 
 ### R6 — Hardening, compat proof, review, freeze
-**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-22)
+**Status:** ✅ Complete (commit 7570770, Nomad-verified + user all-clear 2026-08-22)
 
 Code-review pass (findings fixed or explicitly accepted, recorded here); **format-compat
 proof on the Nomad**: same passphrase in both apps, adb-copy a Paper-created `.soil` into
