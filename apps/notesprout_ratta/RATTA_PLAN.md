@@ -676,8 +676,7 @@ gate). No UI/resource/manifest/dependency change; on-device behaviour identical 
 untouched.
 
 ### N2 — Heading objects end to end
-**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-22; commit hash in the follow-up
-status commit)
+**Status:** ✅ Complete (commit afbe89a, Nomad-verified + user all-clear 2026-08-22)
 
 **Eye-check #5 round 1 (2026-08-22) findings & responses — both fixed, build reinstalled:**
 - *H1–H6 must be a sub-toolbar popping up off the bar (og/Paper shape), not a second row growing
