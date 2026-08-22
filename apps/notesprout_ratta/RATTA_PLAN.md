@@ -360,7 +360,7 @@ insert/delete → notebook-level stack bounded 100, cleared on close only.)
 **Outcome:** —
 
 ### R5 — Lasso + polish
-**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-22)
+**Status:** ✅ Complete (commit 4445744, Nomad-verified + user all-clear 2026-08-22)
 
 Lasso select/move (firmware dash trail comes free from g-paper's Ratta engine), selection
 box behavior + drag commit (Moved undo action), smart-lasso/scribble-erase toggles as in
