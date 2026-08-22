@@ -2,7 +2,7 @@
 <!--
   Notebook screen: full-bleed paper with chrome overlaid on top.
   PaperView (g-paper drawing surface) is added into paperContainer programmatically.
-  Both bars (topBar's own bar + bottomStrip) and any open panel (penPanel/eraserPanel)
+  Both bars (topBar's own bar + bottomStrip) and any open panel (penPanel/eraserPanel/lassoPanel)
   are pushed to paper.setExclusionRects after layout so ink never lands under chrome.
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -162,6 +162,40 @@
             <!-- Eraser radius buttons added in code -->
             <LinearLayout
                 android:id="@+id/eraserRadiusRow"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginBottom="12dp"/>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/inkBlack"/>
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/lassoPanel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone"
+            android:background="@color/paperWhite"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="12dp"
+            android:paddingBottom="0dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/panel_label_pen_gestures"
+                android:textSize="12sp"
+                android:textColor="@color/inkBlack"/>
+
+            <!-- Smart-lasso / scribble-erase toggles added in code -->
+            <LinearLayout
+                android:id="@+id/lassoToggleRow"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"

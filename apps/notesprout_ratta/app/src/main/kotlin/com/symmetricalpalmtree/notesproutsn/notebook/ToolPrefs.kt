@@ -41,6 +41,25 @@ class ToolPrefs(context: Context) {
         get() = prefs.getFloat(KEY_ERASER, DEFAULT_ERASER).takeIf { it in ERASER_RADII } ?: DEFAULT_ERASER
         set(value) { prefs.edit().putFloat(KEY_ERASER, value).apply() }
 
+    /**
+     * g-paper's smart-lasso recogniser (`PaperView.smartLassoEnabled`). **On by default** (R5 phase
+     * decision): a quick closed loop around ink selects it instead of committing as a stroke. The
+     * engine evaluates it only while the PEN tool is armed, which is why the toggle is a *behaviour*
+     * preference and not part of the lasso tool's arming.
+     */
+    var smartLasso: Boolean
+        get() = prefs.getBoolean(KEY_SMART_LASSO, DEFAULT_SMART_LASSO)
+        set(value) { prefs.edit().putBoolean(KEY_SMART_LASSO, value).apply() }
+
+    /**
+     * g-paper's scribble-erase recogniser (`PaperView.scribbleEraseEnabled`). **On by default**
+     * (R5 phase decision): a dense zigzag over ink erases it, reported through the ordinary
+     * `onStrokesErased` path, so persistence and undo need no special case.
+     */
+    var scribbleErase: Boolean
+        get() = prefs.getBoolean(KEY_SCRIBBLE_ERASE, DEFAULT_SCRIBBLE_ERASE)
+        set(value) { prefs.edit().putBoolean(KEY_SCRIBBLE_ERASE, value).apply() }
+
     companion object {
         /** The five widths the pen panel offers, thinnest first. */
         val WIDTHS = listOf(1f, 2f, 3f, 5f, 8f)
@@ -51,10 +70,16 @@ class ToolPrefs(context: Context) {
         const val DEFAULT_WIDTH = 3f
         const val DEFAULT_ERASER = 15f
 
+        /** Both recognisers ship on — the R5 phase decision. */
+        const val DEFAULT_SMART_LASSO = true
+        const val DEFAULT_SCRIBBLE_ERASE = true
+
         private const val FILE = "sn_tool"
         private const val KEY_PEN_WIDTH = "penWidth"
         private const val KEY_PEN_STYLE = "penStyle"
         private const val KEY_PEN_INK = "penInk"
         private const val KEY_ERASER = "eraserRadius"
+        private const val KEY_SMART_LASSO = "smartLasso"
+        private const val KEY_SCRIBBLE_ERASE = "scribbleErase"
     }
 }

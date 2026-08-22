@@ -25,9 +25,10 @@ import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityNotebookBinding
 
 /**
- * The notebook's chrome: back, the three tool buttons, and the two slide-down panels that
- * configure the pen and the eraser. It owns every tool decision — the activity hands it the
- * binding, the surface and the prefs, and never touches `paper.penWidth` itself.
+ * The notebook's chrome: back, the three tool buttons, and the three slide-down panels that
+ * configure the pen, the eraser and the two pen-gesture recognisers. It owns every tool decision —
+ * the activity hands it the binding, the surface and the prefs, and never touches
+ * `paper.penWidth` itself.
  *
  * Three rules shape the whole class:
  *  - **Release the render first — but pen-gated.** Every handler calls [releaseRenderIfIdle]
@@ -42,7 +43,8 @@ import com.symmetricalpalmtree.notesproutsn.databinding.ActivityNotebookBinding
  *    in the chrome except the greyscale ink ladder, where the grey *is* the thing being chosen.
  *
  * Panel content is built in code because it is generated content — five widths, five styles,
- * sixteen ink levels, four eraser radii — and the layout only carries the empty rows. Every
+ * sixteen ink levels, four eraser radii, two recogniser latches — and the layout only carries the
+ * empty rows. Every
  * tap-sized child reads `@dimen/toolbar_button_size`; nothing here hardcodes a tap target.
  *
  * Opening or closing a panel changes the top bar's height, which moves the pen-exclusion rect.
@@ -92,13 +94,14 @@ class NotebookToolbar(
             }
             btnPen.setOnClickListener { onToolTap(Tool.PEN, penPanel) }
             btnEraser.setOnClickListener { onToolTap(Tool.ERASER, eraserPanel) }
-            btnLasso.setOnClickListener { onToolTap(Tool.LASSO, null) }
+            btnLasso.setOnClickListener { onToolTap(Tool.LASSO, lassoPanel) }
         }
 
         buildWidthRow()
         buildStyleRow()
         buildInkRows()
         buildEraserRow()
+        buildLassoRow()
 
         sync(paper.tool)
     }
@@ -106,9 +109,8 @@ class NotebookToolbar(
     // ── Tool arming ──────────────────────────────────────────────────────────
 
     /**
-     * Tapping an unarmed tool arms it; tapping the armed one opens (or closes) its panel. Lasso
-     * has nothing to configure, so tapping it a second time is deliberately nothing at all —
-     * better than a panel that exists only to be empty.
+     * Tapping an unarmed tool arms it; tapping the armed one opens (or closes) its panel. All
+     * three tools have one — the lasso's holds the two pen-gesture recognisers (R5).
      */
     private fun onToolTap(tool: Tool, panel: View?) {
         releaseRenderIfIdle()
@@ -134,6 +136,7 @@ class NotebookToolbar(
         val owner = when (openPanel) {
             penPanel -> Tool.PEN
             eraserPanel -> Tool.ERASER
+            lassoPanel -> Tool.LASSO
             else -> null
         }
         if (owner != null && owner != tool) closePanels()
@@ -150,7 +153,14 @@ class NotebookToolbar(
         if (previous != null && previous !== panel) previous.visibility = View.GONE
         panel.visibility = View.VISIBLE
         openPanel = panel
-        Slog.d(TAG) { "panel open: ${if (panel === binding.penPanel) "pen" else "eraser"}" }
+        Slog.d(TAG) {
+            val which = when (panel) {
+                binding.penPanel -> "pen"
+                binding.eraserPanel -> "eraser"
+                else -> "lasso"
+            }
+            "panel open: $which"
+        }
     }
 
     /** Close whatever is open. Public: the activity closes panels on a page tap and on page turns. */
@@ -335,6 +345,49 @@ class NotebookToolbar(
         prefs.eraserRadiusPx = radius
         radii.select(radius)
     }
+
+    // ── Pen-gesture recognisers (the lasso panel) ────────────────────────────
+
+    /**
+     * The lasso panel: two independent on/off rows, not a one-of group — so each keeps its own
+     * `isSelected` (bordered = on, the same `state_selected` look every selectable item here uses).
+     *
+     * They live under the **lasso** button even though the engine evaluates both only while the
+     * *pen* is armed: this is where selection behaviour is configured, and a pen panel that
+     * silently changed what the pen does would be the more surprising home. Both flags are
+     * global to the surface, not per-tool.
+     */
+    private fun buildLassoRow() {
+        val smart = toggleButton(ctx.getString(R.string.lasso_smart_label), prefs.smartLasso) { on ->
+            paper.smartLassoEnabled = on
+            prefs.smartLasso = on
+        }
+        val scribble = toggleButton(ctx.getString(R.string.lasso_scribble_label), prefs.scribbleErase) { on ->
+            paper.scribbleEraseEnabled = on
+            prefs.scribbleErase = on
+        }
+        binding.lassoToggleRow.addView(smart, itemParams(ViewGroup.LayoutParams.WRAP_CONTENT))
+        binding.lassoToggleRow.addView(scribble, itemParams(ViewGroup.LayoutParams.WRAP_CONTENT))
+    }
+
+    /** A latching row: its own selected state is the value, and the tooltip reads it back in words. */
+    private fun toggleButton(label: String, initial: Boolean, onChange: (Boolean) -> Unit): AppCompatButton {
+        val view = textButton(label, describe(label, initial)) {}
+        view.isSelected = initial
+        view.setOnClickListener {
+            releaseRenderIfIdle()
+            val on = !view.isSelected
+            view.isSelected = on
+            view.contentDescription = describe(label, on)
+            TooltipCompat.setTooltipText(view, view.contentDescription)
+            onChange(on)
+            Slog.d(TAG) { "$label = $on" }
+        }
+        return view
+    }
+
+    private fun describe(label: String, on: Boolean): String =
+        ctx.getString(if (on) R.string.cd_toggle_on_fmt else R.string.cd_toggle_off_fmt, label)
 
     // ── Shared view construction ─────────────────────────────────────────────
 

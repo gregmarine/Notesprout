@@ -1,9 +1,9 @@
 # Notebook — Notesprout SN subsystem doc
 
-Phase **R4**. The notebook is a full-bleed g-paper surface with two chrome overlays: the toolbar
-(with its two slide-down tool panels) and the name strip. Everything the paper *draws* comes from
+Phase **R5**. The notebook is a full-bleed g-paper surface with two chrome overlays: the toolbar
+(with its three slide-down tool panels) and the name strip. Everything the paper *draws* comes from
 g-paper 0.1.4 (`~/git/g-paper/docs/api.md`, `host-responsibilities.md`); everything the paper
-*remembers* comes from the `.soil` via the collaborators below. Lasso move/polish arrives in R5.
+*remembers* comes from the `.soil` via the collaborators below.
 
 Fresh code. Paper v0 (`git show 87277da:apps/notesprout_paper/...`) is the shape reference; the
 deliberate differences are listed at the end.
@@ -22,14 +22,14 @@ deliberate differences are listed at the end.
 | `StrokeStore` | the session's single serial `SoilWriter`: g-paper callbacks → `stroke` rows through one serial IO writer (a `Channel` of jobs); `loadPage()`, `remove()`, `restore()`; the debounced index `updatedAt` bump; `drain()` before seal |
 | `StrokeRows` | pure mapper `Stroke ⇄ SoilObjectEntity` (format-B blob, `InkColorCodec`, `StrokeStyle` name; unknown → PEN). JVM-tested |
 | `CoverSnapshot` | `paper.renderToBitmap()` → ≤ 512 px long edge → WEBP q100 → `IndexRepository.setCover` |
-| `NotebookToolbar` | `[←] [pen] [eraser] [lasso]` + the pen/eraser panels; owns every tool decision incl. applying `ToolPrefs` |
-| `ToolPrefs` | `SharedPreferences("sn_tool")` — armed width/style/ink/radius, app-wide, validated on read |
+| `NotebookToolbar` | `[←] [pen] [eraser] [lasso]` + the pen/eraser/lasso panels; owns every tool decision incl. applying `ToolPrefs` |
+| `ToolPrefs` | `SharedPreferences("sn_tool")` — armed width/style/ink/radius + the two recogniser flags, app-wide, validated on read |
 
 ## Layout (`activity_notebook.xml`)
 
 `FrameLayout` root → `paperContainer` (the `PaperView`, added in code — `GPaper.create` needs a
 Context) → `topBar` overlay (flush at the top edge — the top guard is 0 on Ratta; 1dp inkBlack
-bottom border; the two panels are its children, `GONE` until opened, each with its own 1dp bottom
+bottom border; the three panels are its children, `GONE` until opened, each with its own 1dp bottom
 border) → `bottomStrip` overlay ("`<name>` `n / N`", 1dp top border). Immersive: system bars
 hidden, transient by swipe. Portrait-locked.
 
@@ -44,8 +44,8 @@ the tap's result — done in `dispatchTouchEvent` because the buttons consume th
 
 Paper v0's bar shape with **rich panels** — the R3 wizard answers:
 
-- Tapping an **unarmed** tool arms it (and closes any panel). Tapping the **armed** pen or eraser
-  button toggles that tool's panel; the two panels are mutually exclusive. Lasso has no panel.
+- Tapping an **unarmed** tool arms it (and closes any panel). Tapping the **armed** button toggles
+  that tool's panel; the three panels are mutually exclusive. All three tools have one since R5.
 - **Pen panel:** widths **1·2·3·5·8 px** (dots sized to read the width back), all five g-paper
   styles (PEN / FOUNTAIN / MARKER / PENCIL / BRUSH as text buttons — words over glyphs on e-ink),
   and the **16-level greyscale ladder** (level i → grey `i × 17`, black → white, 2 rows of 8).
@@ -53,6 +53,16 @@ Paper v0's bar shape with **rich panels** — the R3 wizard answers:
   Every swatch carries an always-visible 1dp inkBlack ring (a white swatch is otherwise invisible
   on paper).
 - **Eraser panel:** radii **8·15·30·60 px** (raw px, matching g-paper's semantics).
+- **Lasso panel (R5):** the two pen-gesture recognisers as independent latches — **Smart lasso**
+  and **Scribble erase**, both **on by default** (the R5 phase decision), each persisted in
+  `ToolPrefs` (`smartLasso` / `scribbleErase`) and written straight through to
+  `paper.smartLassoEnabled` / `paper.scribbleEraseEnabled`. Not a one-of group: each row keeps its
+  own `state_selected` border (bordered = on) and its tooltip reads the state back in words
+  ("Smart lasso: on"), because a border alone is a thin signal on paper.
+  The flags are **global to the surface, and the engine evaluates both only while the PEN tool is
+  armed** — they live under the *lasso* button because that is where selection behaviour is
+  configured, and a pen panel that silently changed what the pen does would be the more surprising
+  home.
 - Panel choices apply immediately, persist in `ToolPrefs`, and the panel stays open (the user may
   be composing width + style + ink). First-ever defaults: **PEN · black · 3 px**, eraser **15 px**
   (Paper-v0 parity).
@@ -70,7 +80,11 @@ Paper v0's bar shape with **rich panels** — the R3 wizard answers:
   `!paper.isPenActive`**, the API contract: an ungated release inside the pen-active window can
   cost a live stroke. Selected = the `state_selected` bordered look of `bg_toolbar_button`. Button
   state is driven from `PaperListener.onToolChanged` (`toolbar.sync`) — the component
-  arms/restores tools itself (smart lasso, off in R3).
+  arms/restores tools itself. **This is not optional now that smart lasso is on:** the engine
+  switches to `Tool.LASSO` on trigger and restores `Tool.PEN` when the selection lifecycle ends,
+  and **the PEN restore can land *after* `onSelectionDismissed`** (a pen tap-away dismisses at
+  pen-down but restores at pen-up). Never sync the toolbar by re-reading `paper.tool` inside a
+  selection callback — it will be a tool behind.
 
 ### Known issues (R3 eye check)
 
@@ -104,9 +118,10 @@ A failed open is a **problem dialog** (SN's toast-confirms / dialog-explains rul
 | g-paper callback | Row effect (serial IO) |
 |---|---|
 | `onStrokeCommitted(s)` | insert `stroke` row, `"order"` = `MAX("order")+1` among the page's strokes (live **and** deleted — order stays monotonic) |
-| `onStrokesErased(ids)` | soft delete (`deletedAt`) |
-| `onSelectionMoved(m)` | read rows → decode → `Stroke.translated(dx,dy)` → re-encode → upsert (`createdAt` kept) |
-| `onSelectionCreated/Dismissed` | `selectionActive` flag only (the gesture detector stands down on it) |
+| `onStrokesErased(ids)` | soft delete (`deletedAt`) — **also the scribble-erase path**: the engine reports a consumed scribble through this same callback, so persistence and undo needed no change for it |
+| `onSelectionMoved(m)` | read rows → decode → `Stroke.translated(dx,dy)` → re-encode → upsert (`createdAt` kept); `currentSelection`'s bounds shift by the same delta |
+| `onSelectionCreated/Dismissed` | `selectionActive` flag + the `currentSelection` copy |
+| `onSelectionTapped(x,y)` | opens the selection sheet (see below) |
 | `onToolChanged` | toolbar sync only |
 
 The first three also maintain `liveStrokes` (the Activity's map of what is on the visible page —
@@ -117,6 +132,48 @@ Every write schedules a trailing-debounced (2 s) `IndexRepository.touch(notebook
 `updatedAt` discipline: the card's "last modified" follows ink, one UPDATE per burst, flushed on
 close. Ink is durable the moment the row lands (WAL); a process kill loses at most the strokes
 still queued in the channel.
+
+## Selection (R5)
+
+**The engine owns every mechanic.** Outline capture, the hit test, the static dashed selection box
+(the tight bounds inflated 12 px so a thin selection stays grabbable), the drag preview, the
+in-memory translate, dismissal, and the Ratta firmware dash trail all live in g-paper. The host's
+whole job is to mirror the result into rows and history. Lasso in arc 1 is **move + delete** (the
+R5 phase decision).
+
+`currentSelection: Selection?` is the host's copy of what is selected — set in
+`onSelectionCreated`, shifted in place on `onSelectionMoved` (the engine keeps the selection alive
+at its new position), nulled in `onSelectionDismissed` and in `navigateTo`'s `clearSelection`. It
+exists for one reason: a delete needs the stroke ids *after* the tap that asked for it. It is never
+read as "is anything selected" — `selectionActive` is that flag, and it is what the gesture
+detector stands down on.
+
+| Act | What happens |
+|---|---|
+| Draw a lasso outline (or a smart-lasso loop) | engine only — `onSelectionCreated` |
+| Drag inside the box | engine translates + re-renders; `onSelectionMoved` → `store.move` + `liveStrokes` patch + `Action.Moved` |
+| **Tap inside the box** | `onSelectionTapped` → the selection sheet: one row, **Delete strokes** |
+| Tap outside / tool change / any data-in call | `onSelectionDismissed` |
+
+**Delete order matters.** Capture the geometry from `liveStrokes` *first* — it is the only place it
+still exists once the engine drops the strokes — then `paper.removeStrokes(ids)`, then
+`store.erase(ids)`, then drop the ids from `liveStrokes`, then record `Action.Deleted`.
+`removeStrokes` dismisses the selection itself (every data-in call does), so there is no
+`clearSelection` in the delete path; the resulting `onSelectionDismissed` clears the host's copy.
+Nothing captured (which should not happen) still removes and erases, but records no history —
+better no undo entry than one that restores nothing.
+
+**No confirm dialog.** The tap landed inside the box the user had just drawn, the row says exactly
+what it does, and the delete comes straight back with undo — the same reasoning that stripped the
+page-delete confirm's warning body in R4 (eye-check #2). A second dialog would be ceremony.
+
+**Frame silence.** The sheet calls `releaseRender()` ungated and puts a dialog on screen, which is
+an app frame. This is an **extension of the recorded exception family** — the same shape as the
+panel close at stylus pen-up: a single chrome frame at a *stroke boundary*, in direct response to a
+deliberate act, never during writing. It is safe for the same structural reason the delete-page
+long-press is: g-paper escrows this callback past the contact — a stylus tap fires at **pen-up**,
+a finger tap only after the `PEN_ACTIVE_TAIL_MS` palm-gated escrow — so the contact that asked for
+the menu is over before we paint, and a tap inside a selection box is by definition not a stroke.
 
 ## Pages
 
@@ -201,17 +258,27 @@ moment a new edit is recorded, bounded at **100** entries (oldest dropped, becau
 holds the full geometry of every stroke it must put back).
 
 **Notebook-level, not page-level.** Every entry carries the page it happened on, so history
-survives a page turn — and an insert or a delete *is* a page turn, which undoing has to reverse. It
-covers four things: `Drew`, `Erased`, `Moved`, and `Page` (a `Structural` snapshot of an insert or
-delete, replayable in both directions through `reconcile`). The stack is cleared **only when the
-screen closes** — in-memory history dies with the screen.
+survives a page turn — and an insert or a delete *is* a page turn, which undoing has to reverse.
+The stack is cleared **only when the screen closes** — in-memory history dies with the screen.
+
+| Action | Recorded by | Revert | Reapply |
+|---|---|---|---|
+| `Drew` | `onStrokeCommitted` | `store.remove([id])` | `store.restore` |
+| `Erased` | `onStrokesErased` (eraser tool **and** scribble erase) | `store.restore` | `store.remove` |
+| `Deleted` | the selection sheet's Delete strokes | `store.restore` | `store.remove` |
+| `Moved` | `onSelectionMoved` | `store.move(-dx,-dy)` | `store.move(dx,dy)` |
+| `Page` | insert / delete (`Structural` snapshot) | `reconcile(before)` | `reconcile(after)` |
+
+`Deleted` replays exactly like `Erased` and is deliberately kept as its own kind: to the user a
+sweep of the eraser and "delete these" are different acts, and a future undo *label* has to be able
+to say which. Undo of a delete does **not** put the selection back — Paper-v0 parity, and
+`refreshToPage`'s `navigateTo` clears the selection anyway.
 
 **The DB is the source of truth.** Every replay mutates the store first, `drain()`s it, and *then*
 reloads the affected page through `refreshToPage` — so what the paper shows after an undo is
 exactly what a reopen would show. `doUndo`/`doRedo` drain before reverting too: the writes still
-queued are part of the state being reversed. `Drew` reverts with `store.remove`, `Erased` with
-`store.restore` (a REPLACE upsert revives the soft-deleted row live, at the tail of the z-order),
-`Moved` with the negated delta, `Page` with `reconcile(before | after)`.
+queued are part of the state being reversed. `store.restore` is a REPLACE upsert, which revives the
+soft-deleted row live at the tail of the z-order.
 
 Every gesture-driven operation runs through `runPageOp` — a `Mutex` on `lifecycleScope`, a no-op
 while not open or once closing, `runCatching` + `Log.w` on failure — so two overlapping gestures
@@ -246,6 +313,18 @@ No app frame is presented while `paper.isPenActive` — the strip text only chan
 `whenPenIdle {}` (re-polls every `PEN_ACTIVE_TAIL_MS`). Nothing else on the screen repaints
 during writing.
 
+Three recorded exceptions, all the same shape — **one chrome frame at a stroke boundary, in direct
+response to a deliberate act**, never under live ink:
+
+1. the tool-panel close at stylus pen-up (R3 — an idle-gated close reads as a stuck panel, because
+   `isPenActive` counts hover);
+2. the delete-page sheet at long-press (R4 — safe because `PageGestures` never arms while the pen
+   is active and re-checks the gate at fire);
+3. the selection sheet at `onSelectionTapped` (R5 — safe because g-paper escrows the callback to
+   pen-up for a stylus and past the palm-gated `PEN_ACTIVE_TAIL_MS` escrow for a finger).
+
+Any new exception needs the same written justification.
+
 ## JVM tests
 
 `StrokeRowsTest` (round-trip exactness both ways, every style, unknown-style/malformed-blob
@@ -255,12 +334,20 @@ and skips deleted, close drops writes, debounced-vs-flushed touch) — the store
 in-memory `SoilDao` fake; `unitTests.isReturnDefaultValues = true` covers the `Log` calls in
 production paths. Plus `PageMathTest` (delete-landing edges, insert slots, the two diffs, and that
 insert/delete undo↔redo diffs are exact mirrors) and `UndoRedoStackTest` (LIFO order, redo cleared
-by a new edit, the 100-entry bound dropping the *oldest*, `clear`, and each action's `pageId`).
+by a new edit, the 100-entry bound dropping the *oldest*, `clear`, each action's `pageId`, and that
+a `Deleted` rides the stack like any other action while staying distinguishable from an `Erased`).
+`ToolPrefsDefaultsTest` pins the locked default values — both recognisers **on**, PEN 3 px / eraser
+15 px, each on the ladder its panel offers. The `ToolPrefs` *accessors* are not JVM-tested: they
+need real `SharedPreferences`, and the `isReturnDefaultValues` stub returns the type default, so
+such a test would assert the stub rather than the pref.
 
 ## Deliberate differences from Paper v0
 
 - **Rich tool panels** (Paper v0 had fixed 3 px pen / 15 px eraser and no panels) + `ToolPrefs`
-  persistence — the R3 wizard decisions above.
+  persistence — the R3 wizard decisions above; plus the R5 **lasso panel** carrying the two
+  recogniser latches, both defaulting **on**.
+- **A selection sheet.** Paper v0's lasso was move-only with no menu; SN's tap-inside-the-box opens
+  a one-row sheet and adds the `Deleted` undo action.
 - Failed open shows a **problem dialog**, not Paper's toast (SN rule: a toast only confirms).
 - No `TopGuard` padding on the top bar — the guard is 0 on Ratta; chrome sits flush.
 - `CoverSnapshot` API-guards `WEBP_LOSSY` (API 30) with legacy `WEBP` on 29, like

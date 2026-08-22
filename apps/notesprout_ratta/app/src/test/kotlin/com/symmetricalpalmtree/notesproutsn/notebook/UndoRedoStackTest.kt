@@ -118,5 +118,30 @@ class UndoRedoStackTest {
         assertEquals("p1", Action.Drew("p1", stroke("a")).pageId)
         assertEquals("p2", Action.Erased("p2", listOf(stroke("a"))).pageId)
         assertEquals("p3", Action.Moved("p3", listOf("a"), 5f, -5f).pageId)
+        assertEquals("p4", Action.Deleted("p4", listOf(stroke("a"))).pageId)
+    }
+
+    /**
+     * The stack is action-agnostic, so a lasso delete has to queue and pop exactly like anything
+     * else — and it must stay *distinguishable* from an erase, which is the whole reason it is its
+     * own kind rather than a reused [Action.Erased].
+     */
+    @Test
+    fun `a lasso delete rides the stack like any other action`() {
+        val s = UndoRedoStack()
+        val erased = Action.Erased("p", listOf(stroke("a")))
+        val deleted = Action.Deleted("p", listOf(stroke("b"), stroke("c")))
+        s.record(erased)
+        s.record(deleted)
+
+        val first = s.popUndo()!!
+        assertSame(deleted, first)
+        assertTrue(first is Action.Deleted)
+        s.pushRedo(first)
+        assertSame(erased, s.popUndo())
+
+        assertSame(deleted, s.popRedo())
+        // Two carried strokes, both still there: a delete undo is only as good as its geometry.
+        assertEquals(listOf("b", "c"), (deleted as Action.Deleted).strokes.map { it.id })
     }
 }

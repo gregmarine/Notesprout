@@ -19,7 +19,18 @@ import java.util.Date
 /** What a card stands for. Folders and notebooks share the grid but not the card layout. */
 sealed class CardItem(val summary: ObjectSummary) {
     class Folder(s: ObjectSummary) : CardItem(s)
-    class Notebook(s: ObjectSummary) : CardItem(s)
+
+    /**
+     * @param pinned draws the pin badge — the library resolves it once per refresh from the pinned
+     *   list, so no card ever asks the index on its own.
+     * @param subtitle replaces the last-modified line when set. Recents uses it for the parent
+     *   folder name: on that shelf "where is it" is the useful second line, not "when".
+     */
+    class Notebook(
+        s: ObjectSummary,
+        val pinned: Boolean = false,
+        val subtitle: String? = null,
+    ) : CardItem(s)
 }
 
 /**
@@ -117,10 +128,14 @@ class LibraryGrid(
         val s = item.summary
         view.findViewById<TextView>(R.id.cardName).text = s.name
 
-        // App-locale date + time, not a hand-rolled format — the device's own convention.
+        // A subtitle (Recents: the parent folder) takes the second line when there is one;
+        // otherwise the app-locale date + time — the device's own convention, not a hand-rolled
+        // format.
         val d = Date(s.updatedAt)
-        view.findViewById<TextView>(R.id.cardDate).text =
-            "${DateFormat.getMediumDateFormat(context).format(d)} ${DateFormat.getTimeFormat(context).format(d)}"
+        view.findViewById<TextView>(R.id.cardDate).text = item.subtitle
+            ?: "${DateFormat.getMediumDateFormat(context).format(d)} ${DateFormat.getTimeFormat(context).format(d)}"
+
+        view.findViewById<View>(R.id.pinBadge).visibility = if (item.pinned) View.VISIBLE else View.GONE
 
         val cover = view.findViewById<ImageView>(R.id.coverImage)
         val bmp = Bitmaps.decodeBounded(coverBytes, COVER_DECODE_EDGE)

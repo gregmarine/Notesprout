@@ -6,15 +6,35 @@
     android:background="@drawable/shape_bordered"
     android:padding="4dp">
 
-    <!-- Cover snapshot when the notebook has one, otherwise a small template-kind placeholder. -->
-    <ImageView
-        android:id="@+id/coverImage"
+    <!-- Cover snapshot when the notebook has one, otherwise a small template-kind placeholder.
+         The pin badge floats over its top-right corner: a bordered white chip, because a bare
+         glyph over a lined or dotted cover is unreadable on e-ink. -->
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
-        android:scaleType="centerCrop"
-        android:background="@color/paperWhite"
-        android:contentDescription="@null" />
+        android:layout_weight="1">
+
+        <ImageView
+            android:id="@+id/coverImage"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="centerCrop"
+            android:background="@color/paperWhite"
+            android:contentDescription="@null" />
+
+        <ImageView
+            android:id="@+id/pinBadge"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:layout_gravity="top|end"
+            android:layout_margin="4dp"
+            android:padding="2dp"
+            android:background="@drawable/bg_pin_badge"
+            android:src="@drawable/ic_pinned"
+            android:scaleType="fitCenter"
+            android:visibility="gone"
+            android:contentDescription="@string/cd_pinned_badge" />
+    </FrameLayout>
 
     <TextView
         android:id="@+id/cardName"

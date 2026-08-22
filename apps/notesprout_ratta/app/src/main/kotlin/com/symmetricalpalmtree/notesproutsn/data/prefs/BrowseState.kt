@@ -3,8 +3,8 @@ package com.symmetricalpalmtree.notesproutsn.data.prefs
 import android.content.Context
 
 /**
- * Library browse modes. [PINNED] and [RECENTS] are declared now because [BrowseState.mode]
- * persists across the R5 release that wires them up — R2 only ever writes [NORMAL].
+ * Library browse modes: the folder tree ([NORMAL]) or one of the two flat shelves that cut across
+ * it. The mode persists, so the shelf the user left is the shelf they come back to.
  */
 enum class BrowseMode { NORMAL, PINNED, RECENTS }
 
@@ -30,9 +30,9 @@ class BrowseState(context: Context) {
         set(value) { prefs.edit().putString(KEY_MODE, value.name).apply() }
 
     /**
-     * Reserved for R3: the notebook that was open when the app last died, so a cold launch can put
-     * it back on top of the library. R2 neither writes nor reads it — the slot exists so the pref
-     * file's shape does not change under a user when R3 lands.
+     * The notebook that was open when the app last died, so a cold launch can put it back on top of
+     * the library. Set on notebook open, cleared on close; read once and cleared regardless of
+     * outcome (`LibraryActivity.reopenLastNotebookIfNeeded`).
      */
     var lastOpenNotebookId: String?
         get() = prefs.getString(KEY_LAST_OPEN, null)

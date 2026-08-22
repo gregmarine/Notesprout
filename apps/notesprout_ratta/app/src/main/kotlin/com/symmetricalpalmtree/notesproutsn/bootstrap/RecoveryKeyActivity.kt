@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.symmetricalpalmtree.notesproutsn.R
+import com.symmetricalpalmtree.notesproutsn.core.Dialogs
 import com.symmetricalpalmtree.notesproutsn.core.IndexGuard
 import com.symmetricalpalmtree.notesproutsn.core.TopGuard
 import com.symmetricalpalmtree.notesproutsn.crypto.PassphraseStore
@@ -41,7 +42,10 @@ class RecoveryKeyActivity : AppCompatActivity() {
         }
         binding.btnContinue.setOnClickListener {
             if (!binding.checkSaved.isChecked) {
-                Toast.makeText(this, R.string.recovery_tick_first, Toast.LENGTH_SHORT).show()
+                // Dialog, not a toast: this explains why a tap did *nothing*. A toast only ever
+                // confirms something that happened (the Copy button above), and on e-ink a missed
+                // toast reads as a dead button.
+                Dialogs.problem(this, R.string.recovery_tick_title, R.string.recovery_tick_first)
                 return@setOnClickListener
             }
             PassphraseStore.setRecoveryKeyAcknowledged(this)

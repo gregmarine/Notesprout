@@ -360,7 +360,7 @@ insert/delete → notebook-level stack bounded 100, cleared on close only.)
 **Outcome:** —
 
 ### R5 — Lasso + polish
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-22)
 
 Lasso select/move (firmware dash trail comes free from g-paper's Ratta engine), selection
 box behavior + drag commit (Moved undo action), smart-lasso/scribble-erase toggles as in
@@ -373,8 +373,34 @@ trail rendering, drag feel, selection dismiss.
 
 **Questions to resolve at phase start:** lasso action set for arc 1 (move only, or
 move + delete); smart-lasso default on/off.
+**Answered 2026-08-22:** lasso = **move + delete** (Moved + Deleted undo actions);
+**smart-lasso on by default**; follow-up: **scribble-erase also on by default** — both
+toggleable in a new lasso panel, persisted in `ToolPrefs`.
 
-**Outcome:** —
+**Outcome:** Opus implemented the whole phase in one background agent against Fable's contract;
+Fable review clean. Lasso **delete** = tap inside the selection box → `onSelectionTapped` → one-row
+sheet "Delete strokes" (no confirm — undoable, same reasoning as R4's bare page-delete confirm);
+host keeps `currentSelection`, captures geometry from `liveStrokes` *before* `removeStrokes`
+(which itself dismisses the selection), then `store.erase` + `Action.Deleted` (replays like
+`Erased`, kept distinct for a future undo label). **Lasso panel**: second tap on the armed lasso
+button → "Pen gestures" panel with Smart lasso / Scribble erase latches, both **default ON**,
+persisted in `ToolPrefs` (`smartLasso`/`scribbleErase`), written straight to the engine flags.
+**Pinned/Recents modes** on the Paper v0 model (mode title + `ic_x` close, create buttons stand
+down, per-mode empty states, pin = index list edge, pin badge chip `bg_pin_badge`, recents subtitle
+= parent folder, `pruneDeleted` on shelf build) with SN deltas: mode buttons toggle themselves +
+carry `state_selected`; pinned shelf follows the **on-screen sort** (edge `sortOrder` recorded,
+unused). `RecentsAssembly` pure helper (stored order wins). Dialog pass: recovery-tick toast →
+problem dialog; `library_later` + dead `notebook_stub_body` removed; tooltip audit. The selection
+sheet is the **third recorded frame-silence exception** (docs/notebook.md § frame-silence — all
+three: one chrome frame at a stroke boundary from a deliberate act). **122 JVM tests** (9 new:
+RecentsAssembly ×6, ToolPrefs defaults ×2, Deleted-on-stack ×1), debug + release build. **Device
+walk:** the Haiku agent reported pin + lasso-panel failures — **both were its tap aim** (the R2
+delete-"failure" pattern); Fable re-drove by hand with screencap-measured coordinates: pin badge /
+Pinned shelf / Unpin label, **mode persists across force-stop** (cold launch lands back in the
+Pinned shelf), lasso panel + toggle persistence across restart, page-tap panel dismissal, crash
+buffer clean — all pass. **Eye check #3 all-pass 2026-08-22** (trail, drag, delete sheet,
+undo/redo, smart lasso, scribble erase, dismissal) — no findings. Test data: `20260820_231010`
+left pinned on SNN; both variants reinstalled current.
 
 ### R6 — Hardening, compat proof, review, freeze
 **Status:** ⬜ Not started

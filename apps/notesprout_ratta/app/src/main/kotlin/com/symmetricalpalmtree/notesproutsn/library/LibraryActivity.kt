@@ -4,7 +4,6 @@ import android.app.Activity
 import android.os.Bundle
 import android.view.View
 import android.widget.TextView
-import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -21,6 +20,7 @@ import com.symmetricalpalmtree.notesproutsn.crypto.KeyMaterial
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectSummary
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectType
+import com.symmetricalpalmtree.notesproutsn.data.prefs.BrowseMode
 import com.symmetricalpalmtree.notesproutsn.data.prefs.BrowseState
 import com.symmetricalpalmtree.notesproutsn.data.prefs.RecentsPrefs
 import com.symmetricalpalmtree.notesproutsn.data.prefs.SortField
@@ -46,8 +46,10 @@ import kotlinx.coroutines.withContext
  *  - **Covers are lazy, one page at a time.** The DAO listing is blob-free, so entering a folder of
  *    forty notebooks reads forty rows and six covers, not forty covers.
  *
- * `Pinned` and `Recents` are stubs here — the two bottom-bar buttons exist so the chrome is final,
- * but the modes wire up in R5.
+ * On top of that sit the two **modes** (R5): Pinned and Recents. A mode is a flat shelf of
+ * notebooks with no path — the breadcrumbs give way to a title and a close button, and the create
+ * buttons stand down because there is no folder to create into. The mode persists in
+ * [BrowseState], so the shelf the user left is the shelf they come back to.
  */
 class LibraryActivity : AppCompatActivity() {
 
@@ -61,6 +63,9 @@ class LibraryActivity : AppCompatActivity() {
     private var pageIndex = 0
     private var pageCount = 1
     private var items = emptyList<CardItem>()
+
+    /** Which shelf is on screen. Restored from [BrowseState] on launch and written on every change. */
+    private var mode: BrowseMode = BrowseMode.NORMAL
 
     /** Covers already fetched for this listing. Cleared on every [refresh] so an edit is picked up. */
     private val coverCache = HashMap<String, ByteArray?>()
@@ -98,6 +103,7 @@ class LibraryActivity : AppCompatActivity() {
         sortPrefs = SortPrefs(this)
         recentsPrefs = RecentsPrefs(this)
         folderId = browseState.folderId
+        mode = browseState.mode
         coldLaunch = savedInstanceState == null
 
         wireBars()
@@ -154,8 +160,11 @@ class LibraryActivity : AppCompatActivity() {
     // ── Chrome ───────────────────────────────────────────────────────────────
 
     private fun wireBars() = with(binding) {
-        btnPinned.setOnClickListener { later() }
-        btnRecents.setOnClickListener { later() }
+        // A mode button toggles its own shelf: tapping Pinned while pinned is up goes back to the
+        // folder you were in, so the same button is always the way out of what it opened.
+        btnPinned.setOnClickListener { setMode(if (mode == BrowseMode.PINNED) BrowseMode.NORMAL else BrowseMode.PINNED) }
+        btnRecents.setOnClickListener { setMode(if (mode == BrowseMode.RECENTS) BrowseMode.NORMAL else BrowseMode.RECENTS) }
+        btnCloseMode.setOnClickListener { setMode(BrowseMode.NORMAL) }
         btnSort.setOnClickListener { showSortSheet() }
         btnNewFolder.setOnClickListener { showNewFolderDialog() }
         btnNewNotebook.setOnClickListener { newNotebookLauncher.launch(NewNotebookActivity.intent(this@LibraryActivity, folderId)) }
@@ -165,13 +174,45 @@ class LibraryActivity : AppCompatActivity() {
         btnNext.setOnClickListener { goToPage(pageIndex + 1) }
         btnLast.setOnClickListener { goToPage(pageCount - 1) }
 
-        listOf(btnPinned, btnRecents, btnSort, btnNewFolder, btnNewNotebook, btnUp,
+        listOf(btnPinned, btnRecents, btnCloseMode, btnSort, btnNewFolder, btnNewNotebook, btnUp,
                btnFirst, btnPrev, btnNext, btnLast)
             .forEach { TooltipCompat.setTooltipText(it, it.contentDescription) }
     }
 
-    /** Pinned / Recents land in R5. A toast is right here: the tap *did* do something — it answered. */
-    private fun later() = Toast.makeText(this, R.string.library_later, Toast.LENGTH_SHORT).show()
+    /** Switch shelves. A no-op on the mode already showing, so a redundant tap costs no refresh. */
+    private fun setMode(newMode: BrowseMode) {
+        if (mode == newMode) return
+        mode = newMode
+        browseState.mode = newMode
+        pageIndex = 0
+        Slog.d(TAG) { "mode → $newMode" }
+        lifecycleScope.launch { refresh() }
+    }
+
+    /**
+     * The top bar and the create buttons, per mode. In a mode there is no path — the breadcrumbs
+     * give way to the shelf's name and a close button, and New folder / New notebook stand down
+     * because a shelf is not a place to create into.
+     */
+    private fun renderChrome() = with(binding) {
+        val inMode = mode != BrowseMode.NORMAL
+        breadcrumbScroll.visibility = if (inMode) View.GONE else View.VISIBLE
+        modeTitle.visibility = if (inMode) View.VISIBLE else View.GONE
+        btnCloseMode.visibility = if (inMode) View.VISIBLE else View.GONE
+        btnNewFolder.visibility = if (inMode) View.GONE else View.VISIBLE
+        btnNewNotebook.visibility = if (inMode) View.GONE else View.VISIBLE
+        btnPinned.isSelected = mode == BrowseMode.PINNED
+        btnRecents.isSelected = mode == BrowseMode.RECENTS
+
+        if (inMode) {
+            btnUp.visibility = View.GONE
+            modeTitle.setText(
+                if (mode == BrowseMode.PINNED) R.string.mode_title_pinned else R.string.mode_title_recents
+            )
+        } else {
+            renderBreadcrumb()
+        }
+    }
 
     private fun renderBreadcrumb() {
         val ink = ContextCompat.getColor(this, R.color.inkBlack)
@@ -215,17 +256,78 @@ class LibraryActivity : AppCompatActivity() {
     // ── Listing ──────────────────────────────────────────────────────────────
 
     private suspend fun refresh() {
-        renderBreadcrumb()
+        renderChrome()
         coverCache.clear()
-        val all = repo.folders(folderId) + repo.notebooks(folderId)
-        items = SortRules.foldersFirst(all, sortPrefs.field, sortPrefs.order).map {
-            if (it.type == ObjectType.FOLDER) CardItem.Folder(it) else CardItem.Notebook(it)
+        // One read of the pinned list per refresh: every card's badge and the sheet's Pin/Unpin row
+        // come from it, so no card ever asks the index on its own.
+        val pinnedIds = repo.pinnedNotebookIds()
+        items = when (mode) {
+            BrowseMode.NORMAL -> normalItems(pinnedIds.toSet())
+            BrowseMode.PINNED -> pinnedItems(pinnedIds)
+            BrowseMode.RECENTS -> recentItems(pinnedIds.toSet())
         }
 
+        binding.emptyState.setText(
+            when (mode) {
+                BrowseMode.NORMAL -> R.string.library_empty
+                BrowseMode.PINNED -> R.string.library_pinned_empty
+                BrowseMode.RECENTS -> R.string.library_recents_empty
+            }
+        )
         binding.emptyState.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
         pageCount = GridMath.pageCount(items.size, grid?.cardsPerPage ?: 1)
         pageIndex = GridMath.clampPage(pageIndex, pageCount)
         bindCurrentPage()
+    }
+
+    private suspend fun normalItems(pinnedIds: Set<String>): List<CardItem> {
+        val all = repo.folders(folderId) + repo.notebooks(folderId)
+        return SortRules.foldersFirst(all, sortPrefs.field, sortPrefs.order).map {
+            if (it.type == ObjectType.FOLDER) CardItem.Folder(it)
+            else CardItem.Notebook(it, pinned = it.id in pinnedIds)
+        }
+    }
+
+    /**
+     * The pinned shelf, in the **library's current sort**, not pin order. The membership edge does
+     * carry a `sortOrder`, but making it the display order would give the user a second, invisible
+     * arrangement to reason about; a shelf that obeys the sort control on screen is the honest one.
+     */
+    private suspend fun pinnedItems(pinnedIds: List<String>): List<CardItem> {
+        val summaries = pinnedIds.mapNotNull { repo.alive(it) }
+        return SortRules.sort(summaries, sortPrefs.field, sortPrefs.order)
+            .map { CardItem.Notebook(it, pinned = true) }
+    }
+
+    /**
+     * The recents shelf: **stored order, never re-sorted** ([RecentsAssembly]) — this is a history,
+     * and Name ↑ would turn "what I was just working on" into an alphabet. The second line is the
+     * parent folder rather than a date, because "where is it" is the useful thing here; the folder
+     * names are memoised so a run of notebooks from one folder is a single lookup.
+     *
+     * Reading the shelf is also when the store is swept: ids whose rows are gone are pruned out of
+     * the prefs for good, so the list cannot accumulate ghosts.
+     */
+    private suspend fun recentItems(pinnedIds: Set<String>): List<CardItem> {
+        val entries = recentsPrefs.entries()
+        val alive = LinkedHashMap<String, ObjectSummary>(entries.size)
+        for (e in entries) {
+            if (e.notebookId in alive) continue
+            val s = repo.alive(e.notebookId) ?: continue
+            if (s.type != ObjectType.NOTEBOOK) continue
+            alive[e.notebookId] = s
+        }
+        val order = RecentsAssembly.visibleIds(entries, alive.keys)
+        val folderNames = HashMap<String, String>()
+        val cards = order.mapNotNull { id ->
+            val s = alive[id] ?: return@mapNotNull null
+            val parent = s.parentId
+            val subtitle = if (parent == null) getString(R.string.recents_parent_root)
+            else folderNames.getOrPut(parent) { repo.alive(parent)?.name ?: getString(R.string.recents_parent_root) }
+            CardItem.Notebook(s, pinned = id in pinnedIds, subtitle = subtitle)
+        }
+        recentsPrefs.pruneDeleted(alive.keys)
+        return cards
     }
 
     /**
@@ -274,9 +376,12 @@ class LibraryActivity : AppCompatActivity() {
         lifecycleScope.launch { bindCurrentPage() }
     }
 
+    /** Back peels one layer at a time: out of a mode, then up a folder, then out of the app. */
     @Suppress("OVERRIDE_DEPRECATION")
-    override fun onBackPressed() {
-        if (folderId != null) navigateUp() else @Suppress("DEPRECATION") super.onBackPressed()
+    override fun onBackPressed() = when {
+        mode != BrowseMode.NORMAL -> setMode(BrowseMode.NORMAL)
+        folderId != null -> navigateUp()
+        else -> @Suppress("DEPRECATION") super.onBackPressed()
     }
 
     // ── Cards ────────────────────────────────────────────────────────────────
@@ -289,14 +394,32 @@ class LibraryActivity : AppCompatActivity() {
     private fun onCardLongPress(item: CardItem) {
         val s = item.summary
         val isFolder = item is CardItem.Folder
-        ActionSheetDialog(this)
-            .title(s.name)
+        val sheet = ActionSheetDialog(this).title(s.name)
+        // Only notebooks pin — the pinned list is a shelf of things to write in, not of places.
+        // The current state comes from the listing's own pinned read, not a fresh index query.
+        (item as? CardItem.Notebook)?.let { nb ->
+            val label = if (nb.pinned) R.string.action_unpin else R.string.action_pin
+            sheet.addAction(R.drawable.ic_pinned, getString(label)) { togglePin(s.id, nb.pinned) }
+        }
+        sheet
             .addAction(R.drawable.ic_edit, getString(R.string.action_rename)) { showRenameDialog(s) }
             .addAction(R.drawable.ic_move_folder, getString(R.string.action_move)) { showMovePicker(s) }
             .addAction(R.drawable.ic_trash, getString(R.string.action_delete)) {
                 if (isFolder) confirmDeleteFolder(s) else confirmDeleteNotebook(s)
             }
             .show()
+    }
+
+    /**
+     * Pin membership is an index list edge ([IndexRepository.pin] / [IndexRepository.unpin]), not a
+     * pref — it belongs to the library, travels with it, and is scrubbed by a delete. The refresh
+     * is what makes the badge (and this row's own label) agree with it again.
+     */
+    private fun togglePin(notebookId: String, currentlyPinned: Boolean) {
+        lifecycleScope.launch {
+            if (currentlyPinned) repo.unpin(notebookId) else repo.pin(notebookId)
+            refresh()
+        }
     }
 
     // ── New folder / rename ──────────────────────────────────────────────────

@@ -12,9 +12,10 @@ data class RecentEntry(val notebookId: String, val timestamp: Long)
 /**
  * `SharedPreferences("sn_recents")` — the last [MAX] notebooks opened, most-recent first.
  *
- * **The store exists in R2; nothing records into it yet.** Opening a notebook is R3's event, and
- * the Recents *view* is R5. Deletion already prunes through it ([remove]) so the list cannot start
- * life holding dead ids the moment recording is switched on.
+ * Written by `NotebookActivity.onCreate` — opening a notebook is the event — and read by the
+ * library's Recents shelf, **in stored order, never re-sorted** (`library/RecentsAssembly`).
+ * Three things prune it: a notebook delete, a folder delete (each notebook that was inside), and
+ * [pruneDeleted] every time the shelf is built, so it cannot accumulate dead ids.
  *
  * A corrupt or hand-edited blob reads as an empty list rather than throwing — this is a
  * convenience, never a source of truth.

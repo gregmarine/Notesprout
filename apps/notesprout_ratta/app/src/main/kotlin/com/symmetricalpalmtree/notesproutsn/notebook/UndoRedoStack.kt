@@ -11,7 +11,7 @@ import com.symmetricalpalmtree.gpaper.core.model.Stroke
  * survives a page turn (an insert or a delete *is* a page turn, and undoing one has to reverse
  * that turn too). The stack is cleared only when the screen dies — never on a flip. Recording a
  * fresh edit clears the redo side. Bounded at [MAX] entries, oldest dropped: an [Action.Erased]
- * holds the full geometry of every stroke it must be able to put back.
+ * (or [Action.Deleted]) holds the full geometry of every stroke it must be able to put back.
  *
  * Pure ordering only. Applying an action back onto the paper and the store lives in
  * [NotebookActivity], where the paper, the session and the store are all in reach — and where the
@@ -26,6 +26,13 @@ class UndoRedoStack {
         data class Drew(override val pageId: String, val stroke: Stroke) : Action
 
         data class Erased(override val pageId: String, val strokes: List<Stroke>) : Action
+
+        /**
+         * A lasso selection deleted through the selection sheet. Replays exactly like [Erased] —
+         * kept as its own kind because the two are different acts to the user (a sweep of the
+         * eraser vs. "delete these"), and a future undo *label* must be able to say which.
+         */
+        data class Deleted(override val pageId: String, val strokes: List<Stroke>) : Action
 
         data class Moved(
             override val pageId: String,

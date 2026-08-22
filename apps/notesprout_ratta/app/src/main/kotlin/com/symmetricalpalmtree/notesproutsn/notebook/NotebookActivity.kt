@@ -66,6 +66,14 @@ class NotebookActivity : AppCompatActivity() {
     /** True while a lasso selection is up — the gesture detector stands down on it. */
     private var selectionActive = false
 
+    /**
+     * The live selection, kept because a delete needs its stroke ids after the fact. Updated in
+     * place on a move (the engine keeps the selection alive at its new position) and dropped the
+     * moment the engine says it is gone. Never read as "is there a selection" — [selectionActive]
+     * is that flag.
+     */
+    private var currentSelection: Selection? = null
+
     /** In-memory, notebook-level history: it survives page turns and dies with the screen. */
     private val undo = UndoRedoStack()
 
@@ -92,12 +100,15 @@ class NotebookActivity : AppCompatActivity() {
             )
         }
         Slog.d(TAG) { "engine=${paper.engineId}" }
-        paper.smartLassoEnabled = false
-        paper.scribbleEraseEnabled = false
+        // The two pen-gesture recognisers, armed from their remembered state before the listener is
+        // attached (both default on — R5). The lasso panel is what writes them afterwards.
+        val toolPrefs = ToolPrefs(this)
+        paper.smartLassoEnabled = toolPrefs.smartLasso
+        paper.scribbleEraseEnabled = toolPrefs.scribbleErase
         paper.setPaperListener(listener)
 
-        // The toolbar owns all pen/eraser configuration (defaults + persistence via ToolPrefs).
-        toolbar = NotebookToolbar(binding, paper, ToolPrefs(this)) { close() }
+        // The toolbar owns all pen/eraser/recogniser configuration (defaults + ToolPrefs).
+        toolbar = NotebookToolbar(binding, paper, toolPrefs) { close() }
         binding.notebookName.text = name
         binding.pageIndicator.text = ""
 
@@ -187,9 +198,19 @@ class NotebookActivity : AppCompatActivity() {
             session.store.move(ids, move.dx, move.dy)
             for (id in ids) liveStrokes[id]?.let { liveStrokes[id] = it.translated(move.dx, move.dy) }
             undo.record(Action.Moved(pageId, ids, move.dx, move.dy))
+            // The selection survives a move, at its new position — keep our copy honest.
+            currentSelection = currentSelection?.let { it.copy(bounds = it.bounds.offset(move.dx, move.dy)) }
         }
-        override fun onSelectionCreated(selection: Selection) { selectionActive = true }
-        override fun onSelectionDismissed() { selectionActive = false }
+        override fun onSelectionCreated(selection: Selection) {
+            selectionActive = true
+            currentSelection = selection
+        }
+        override fun onSelectionDismissed() {
+            selectionActive = false
+            currentSelection = null
+        }
+        /** A sub-threshold tap inside the selection box — the one place the selection has a menu. */
+        override fun onSelectionTapped(x: Float, y: Float) { showSelectionSheet() }
         override fun onToolChanged(tool: Tool) { toolbar.sync(tool) }
     }
 
@@ -232,6 +253,7 @@ class NotebookActivity : AppCompatActivity() {
         val strokes = session.store.loadPage(page.id)
         paper.clearSelection()
         selectionActive = false
+        currentSelection = null
         paper.clearForContentSwap()
         paper.setPageSize(page.width, page.height)
         paper.setTemplate(session.template)
@@ -281,6 +303,7 @@ class NotebookActivity : AppCompatActivity() {
         when (a) {
             is Action.Drew -> { session.store.remove(listOf(a.stroke.id)); session.store.drain(); refreshToPage(a.pageId) }
             is Action.Erased -> { session.store.restore(a.pageId, a.strokes); session.store.drain(); refreshToPage(a.pageId) }
+            is Action.Deleted -> { session.store.restore(a.pageId, a.strokes); session.store.drain(); refreshToPage(a.pageId) }
             is Action.Moved -> { session.store.move(a.ids, -a.dx, -a.dy); session.store.drain(); refreshToPage(a.pageId) }
             is Action.Page -> {
                 session.reconcile(a.snapshot.before, a.snapshot.strokeIds, emptyList(), a.snapshot.beforeCurrentId)
@@ -293,12 +316,58 @@ class NotebookActivity : AppCompatActivity() {
         when (a) {
             is Action.Drew -> { session.store.restore(a.pageId, listOf(a.stroke)); session.store.drain(); refreshToPage(a.pageId) }
             is Action.Erased -> { session.store.remove(a.strokes.map { it.id }); session.store.drain(); refreshToPage(a.pageId) }
+            is Action.Deleted -> { session.store.remove(a.strokes.map { it.id }); session.store.drain(); refreshToPage(a.pageId) }
             is Action.Moved -> { session.store.move(a.ids, a.dx, a.dy); session.store.drain(); refreshToPage(a.pageId) }
             is Action.Page -> {
                 session.reconcile(a.snapshot.after, emptyList(), a.snapshot.strokeIds, a.snapshot.afterCurrentId)
                 refreshToPage(session.currentPage.id)
             }
         }
+    }
+
+    // ── Selection ────────────────────────────────────────────────────────────
+
+    /**
+     * A tap inside the selection box opens the selection's menu. One row today: delete.
+     *
+     * **No confirm dialog.** The tap landed inside the box the user just drew, the row says exactly
+     * what it does, and the delete comes straight back with undo — the same reasoning that stripped
+     * the page-delete confirm's warning body in R4. A second dialog here would only be ceremony.
+     *
+     * **Frame silence.** [PaperView.releaseRender] is called ungated and a dialog is put on screen,
+     * which is an app frame — the same recorded exception family as the panel close at stylus
+     * pen-up: a single chrome frame at a *stroke boundary*, in direct response to a deliberate act.
+     * g-paper escrows this callback to pen-up for a stylus and past `PEN_ACTIVE_TAIL_MS` for a
+     * finger (palm-gated), so the contact that asked for the menu is already over when we paint.
+     */
+    private fun showSelectionSheet() {
+        if (!opened || closing) return
+        val sel = currentSelection ?: return
+        paper.releaseRender()
+        ActionSheetDialog(this)
+            .addAction(R.drawable.ic_trash, getString(R.string.delete_selection_action)) { deleteSelection(sel) }
+            .show()
+    }
+
+    /**
+     * Delete the selected strokes. Order matters: capture the geometry from [liveStrokes] *first*
+     * (it is the only place it still exists once the engine drops them), then tell the engine, then
+     * the rows. `removeStrokes` dismisses the selection itself — every data-in call does — so there
+     * is no [PaperView.clearSelection] here; `onSelectionDismissed` clears our copy.
+     */
+    private fun deleteSelection(sel: Selection) {
+        if (!opened || closing) return
+        val ids = sel.strokeIds.toList()
+        if (ids.isEmpty()) return
+        val pageId = session.currentPage.id
+        val strokes = ids.mapNotNull { liveStrokes[it] }
+        paper.removeStrokes(ids)
+        session.store.erase(ids)
+        ids.forEach { liveStrokes.remove(it) }
+        // Nothing captured means nothing to put back — record no history rather than a lying entry.
+        if (strokes.isNotEmpty()) undo.record(Action.Deleted(pageId, strokes))
+        else Log.w(TAG, "selection delete: no geometry for ${ids.size} ids — not undoable")
+        Slog.d(TAG) { "selection delete: ${ids.size} strokes" }
     }
 
     /** Long-press asks; it never deletes. Sheet → confirm dialog → the actual op. */

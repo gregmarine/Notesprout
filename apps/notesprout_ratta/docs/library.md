@@ -1,7 +1,8 @@
 # Library — Notesprout SN subsystem doc
 
-Phase **R2**. The library is SN's home screen: a paginated card grid of folders and notebooks that
-**never scrolls**, plus everything that creates, renames, moves and deletes what is on it.
+Phase **R5**. The library is SN's home screen: a paginated card grid of folders and notebooks that
+**never scrolls**, plus everything that creates, renames, moves and deletes what is on it — and the
+two flat shelves (Pinned, Recent) that cut across the folder tree.
 
 Fresh code. Paper v0 (`git show 87277da:apps/notesprout_paper/...`) is the shape reference; the
 deliberate differences are listed at the end.
@@ -31,7 +32,8 @@ passphrase.
 **Top bar** — the breadcrumb *is* the path. `Notebooks` is the root crumb; each ancestor follows,
 separated by ` / `; any crumb jumps straight there. A back arrow appears left of the crumbs once
 you are below the root. The debug ⋯ is appended to this bar at runtime (`DebugMenu.install`,
-no-op in release).
+no-op in release). **In a mode the breadcrumbs give way** to a title (`modeTitle`) and a close
+button (`btnCloseMode`, `ic_x`) — see [Modes](#modes).
 
 **Bottom bar** — constant, seven controls plus the pager:
 
@@ -43,10 +45,53 @@ At the sw720dp tier (62 dp buttons) that is ~614 dp of controls in a 749 dp-wide
 screen — it fits, with the pager taking the slack via `layout_weight`. Every icon button carries a
 `contentDescription` and a `TooltipCompat` long-press hint naming it.
 
-**Pinned / Recents are stubs.** They toast "Later"; the modes land in R5 (`BrowseMode` and
-`RecentsPrefs` already exist so the pref files do not change shape under a user then).
+**Back press** peels one layer at a time: out of a mode, then up one folder, then out of the app.
 
-**Back press** goes up one folder and exits the app at the root.
+---
+
+## Modes
+
+`BrowseMode { NORMAL, PINNED, RECENTS }` (`data/prefs/BrowseState`). A mode is a **flat shelf of
+notebooks with no path** — the folder tree is still there underneath, and closing the mode returns
+to exactly the folder you were in.
+
+`setMode(new)` is a no-op on the mode already showing; otherwise it writes `browseState.mode`,
+resets `pageIndex` to 0 and refreshes. `btnPinned` toggles PINNED ↔ NORMAL, `btnRecents` toggles
+RECENTS ↔ NORMAL, `btnCloseMode` and Back both go to NORMAL. The mode **persists across a
+relaunch**: it is read back in `onCreate` and honoured by the first refresh.
+
+**Chrome in a mode** (`renderChrome`): breadcrumb scroll and `btnUp` hidden, `modeTitle` ("Pinned"
+/ "Recent") and `btnCloseMode` shown; `btnNewFolder` / `btnNewNotebook` hidden — a shelf is not a
+place to create into. Sort stays active. The active mode's bottom-bar button takes
+`isSelected = true`, so `bg_toolbar_button`'s border says which shelf you are on.
+
+**What each shelf holds** — one `repo.pinnedNotebookIds()` read per refresh feeds every card's
+badge *and* the long-press sheet's Pin/Unpin label, so no card ever queries the index on its own:
+
+| Mode | Items | Order |
+|---|---|---|
+| NORMAL | folders + notebooks of the current folder | the current sort, folders first |
+| PINNED | the pinned notebooks, alive only | **the current sort** — the pin edge's `sortOrder` is recorded but deliberately unused for display |
+| RECENTS | `RecentsPrefs.entries()`, alive notebooks only | **stored order, newest first — never re-sorted** |
+
+Pinned uses the on-screen sort rather than pin order on purpose: a second, invisible arrangement
+would be one the user has no control to see. Recents refuses the sort for the opposite reason —
+it is a *history*, and Name ↑ would turn "what I was just working on" into an alphabet. The
+ordering/filtering rule is pure and JVM-tested in `library/RecentsAssembly` so it cannot drift into
+the Activity's sorting code. Reading the Recents shelf is also when the store is swept:
+`RecentsPrefs.pruneDeleted(aliveIds)` runs after the list is built, so dead ids cannot accumulate.
+
+A Recents card's second line is the **parent folder name** (root or unknown → "Notebooks"),
+memoised per refresh, instead of the last-modified stamp: on that shelf "where is it" is the useful
+thing.
+
+**Empty states** are one `TextView` whose text is set per mode before it is shown — "No notebooks
+yet" / "No pinned notebooks" / "No recent notebooks".
+
+**Pin storage is an index list edge**, not a pref: a `list_item` row under the `PINNED_LIST_ID`
+sentinel (`IndexRepository.pin` / `unpin` / `pinnedNotebookIds`). It therefore lives in the
+encrypted index, travels with the library, and is scrubbed by `deleteEdgesTo` on any notebook
+delete. Only notebooks pin — the shelf is of things to write in, not of places.
 
 ---
 
@@ -80,8 +125,12 @@ no folder would ever look empty again once a card had rendered.
 - **Folder** — Tabler folder icon + name, centred.
 - **Notebook** — cover image, name, last-modified. The date line uses
   `android.text.format.DateFormat.getMediumDateFormat` + `getTimeFormat`, so it follows the
-  device's own locale conventions rather than a hand-rolled pattern. Secondary text stays inkBlack
-  and gets *smaller*; `inkLight` is reserved for text meant not to be read.
+  device's own locale conventions rather than a hand-rolled pattern — unless the item carries a
+  `subtitle` (Recents' parent-folder line), which takes that row instead. Secondary text stays
+  inkBlack and gets *smaller*; `inkLight` is reserved for text meant not to be read.
+- **Pin badge** — a 24 dp `ic_pinned` in the cover's top-right corner, `GONE` unless the item is
+  pinned. It sits on `bg_pin_badge`, a solid paperWhite chip with a 1 dp inkBlack outline: a bare
+  glyph over a lined or dotted cover is unreadable on e-ink.
 - **No cover yet** → a small render of the notebook's own template kind
   (`BuiltInTemplates.placeholder`), squeezed to a fixed 12 rows so a 3 cm card still reads as
   "lined" / "dotted" / "grid". A Blank notebook shows a blank card, which is the honest picture.
@@ -95,7 +144,8 @@ Main — the shared map is only ever written single-threaded. The page label is 
 the bind, so "n / N" can never name a page before its cards are on screen.
 
 Tap a folder to enter it, a notebook to open it. Long-press either for the action sheet:
-**Rename · Move · Delete**. (Pin joins it in R5.)
+**Pin/Unpin · Rename · Move · Delete** — the first row is notebooks-only, and its label comes from
+the card's own `pinned` flag (the listing already read the pinned list) rather than a fresh query.
 
 ---
 
@@ -248,13 +298,17 @@ are device-local plaintext; every name in this app lives in the encrypted index.
 | Store | File | Holds |
 |---|---|---|
 | `SortPrefs` | `sn_sort` | `field`, `order` |
-| `BrowseState` | `sn_view_state` | `folderId`, `mode`, `lastOpenNotebookId` (R3 slot) |
+| `BrowseState` | `sn_view_state` | `folderId`, `mode`, `lastOpenNotebookId` |
 | `RecentsPrefs` | `sn_recents` | JSON `List<RecentEntry(notebookId, timestamp)>`, max 20, newest first |
 
-`RecentsPrefs` exists but **nothing records into it yet** — opening a notebook is R3's event and
-the Recents view is R5. Deletion already prunes through it, so the list cannot start life holding
-dead ids the moment recording is switched on. A corrupt blob reads as an empty list rather than
-throwing.
+`RecentsPrefs` is written by **`NotebookActivity.onCreate`** (`record(id)` on every open, R3) and
+read by the Recents shelf (R5). Three things prune it: a notebook delete (`remove`), a folder
+delete (each notebook that was inside), and `pruneDeleted(aliveIds)` every time the shelf is built.
+A corrupt blob reads as an empty list rather than throwing — this is a convenience, never a source
+of truth.
+
+**Pin membership is not here.** It is an index list edge (see [Modes](#modes)); prefs hold only
+device-local browsing state.
 
 **Cold launch** restores `BrowseState.folderId`; if that folder is no longer alive in the index the
 library falls back to the root. Nothing in prefs is trusted as still existing.
@@ -274,9 +328,9 @@ library falls back to the root. Nothing in prefs is trusted as still existing.
 - **`NameDialog` is shared** between new-folder and rename instead of two near-identical copies.
 - **`LibraryGrid` is reused by the folder picker** instead of the picker rolling its own
   `GridLayout` (which is why SN needs no `ids.xml` entry for a picker grid).
-- **No pin badge on cards and no Pin action in the sheet** — R5, per the phase plan.
-- **No cold-launch notebook reopen** — that depends on `NotebookActivity` writing
-  `lastOpenNotebookId`, which is R3. The pref slot is reserved.
+- **Modes toggle from their own button** and are reachable from Back, and the active one's button
+  carries a selected border — Paper v0 had only the close button.
+- **The pinned shelf follows the on-screen sort**, not the pin edge's `sortOrder`.
 
 ## Tests (JVM)
 
@@ -285,4 +339,5 @@ library falls back to the root. Nothing in prefs is trusted as still existing.
 | `library/GridMathTest` | columns/rows/cards-per-page against a real Nomad band, page count rounding, clamp after a delete, page slice ranges, degenerate inputs |
 | `library/NameRulesTest` | whitelist, `.`/`..`, blank/whitespace, control characters, dots that are legal |
 | `library/SortRulesTest` | all four orders, case-insensitivity, folders-first in both directions and on both fields, stability |
+| `library/RecentsAssemblyTest` | stored order survives (anti-alphabetical, anti-chronological fixtures), dead ids dropped, duplicates collapsed to their newest position, empty inputs, and that an alive id never visited is not invented |
 | `data/TemplateGeometryTest` | 8 mm spacing at dpi, density-scaled feature sizes with the 1 px floor, lined top margin, grid symmetry, grid-≠-lined, dot intersections, Nomad-page counts |

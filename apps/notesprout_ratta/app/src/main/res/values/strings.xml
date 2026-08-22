@@ -20,6 +20,7 @@
     <string name="recovery_saved">I\'ve saved it</string>
     <string name="recovery_continue">Continue</string>
     <string name="recovery_copied">Recovery key copied</string>
+    <string name="recovery_tick_title">Recovery key not saved</string>
     <string name="recovery_tick_first">Tick “I\'ve saved it” to continue</string>
     <string name="recovery_clip_label">Notesprout SN recovery key</string>
 
@@ -35,7 +36,11 @@
     <!-- Library -->
     <string name="library_root">Notebooks</string>
     <string name="library_empty">No notebooks yet</string>
-    <string name="library_later">Later</string>
+    <string name="library_pinned_empty">No pinned notebooks</string>
+    <string name="library_recents_empty">No recent notebooks</string>
+    <string name="mode_title_pinned">Pinned</string>
+    <string name="mode_title_recents">Recent</string>
+    <string name="recents_parent_root">Notebooks</string>
     <string name="page_indicator">%1$d / %2$d</string>
 
     <!-- New folder -->
@@ -58,6 +63,8 @@
     <string name="template_grid">Grid</string>
 
     <!-- Item actions -->
+    <string name="action_pin">Pin</string>
+    <string name="action_unpin">Unpin</string>
     <string name="action_rename">Rename</string>
     <string name="action_move">Move</string>
     <string name="action_delete">Delete</string>
@@ -91,15 +98,14 @@
     <string name="sort_modified_asc">Modified ↑</string>
     <string name="sort_modified_desc">Modified ↓</string>
 
-    <!-- Notebook (R2 stub — the real surface lands in R3) -->
-    <string name="notebook_stub_body">%1$s\n\nWriting arrives in R3.</string>
-
     <!-- Content descriptions -->
     <string name="cd_debug">Debug tools</string>
     <string name="cd_back">Back</string>
     <string name="cd_up_folder">Go up one folder</string>
     <string name="cd_pinned">Pinned notebooks</string>
     <string name="cd_recents">Recent notebooks</string>
+    <string name="cd_pinned_badge">Pinned</string>
+    <string name="cd_close_mode">Close</string>
     <string name="cd_first_page">First page</string>
     <string name="cd_prev_page">Previous page</string>
     <string name="cd_next_page">Next page</string>
@@ -116,6 +122,11 @@
     <string name="panel_label_style">Style</string>
     <string name="panel_label_ink">Ink</string>
     <string name="panel_label_eraser">Eraser size</string>
+    <string name="panel_label_pen_gestures">Pen gestures</string>
+    <string name="lasso_smart_label">Smart lasso</string>
+    <string name="lasso_scribble_label">Scribble erase</string>
+    <string name="cd_toggle_on_fmt">%1$s: on</string>
+    <string name="cd_toggle_off_fmt">%1$s: off</string>
     <string name="style_pen">Pen</string>
     <string name="style_fountain">Fountain</string>
     <string name="style_marker">Marker</string>
@@ -129,4 +140,7 @@
     <!-- Notebook pages -->
     <string name="delete_page_action">Delete page</string>
     <string name="delete_page_title">Delete this page?</string>
+
+    <!-- Notebook selection -->
+    <string name="delete_selection_action">Delete strokes</string>
 </resources>
