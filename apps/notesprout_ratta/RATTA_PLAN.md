@@ -640,7 +640,7 @@ dialog appears at **first recognize use only** (debug "Recognize page" now, head
 in N2) — notebook open only ever warms up an already-present model, never shows a dialog.
 
 ### N1 — Markdown engine (core, pure)
-**Status:** ✅ Complete (JVM-only phase — no device gate; 2026-08-22)
+**Status:** ✅ Complete (commit 02e39d6, JVM-only phase — no device gate; 2026-08-22)
 
 `core/markdown/` fresh-coded to the og subset (see locked decisions): `MarkdownParser`
 (blocks + inlines), `MarkdownRenderer` (spans), and a measure/draw utility
