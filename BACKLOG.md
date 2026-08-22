@@ -759,3 +759,27 @@ stroke is core's engine-independent semi-transparent flat-cap rendering. Live in
 best-effort preview; the bake is the truth. A better live approximation (if the 0…31 Ratta pen-code
 sweep offers one, e.g. a grey pen code) would be a g-paper change (`~/git/g-paper`, bump + republish)
 — explicitly deferred out of the initial ratta arc by the user.
+
+## Paper + Notesprout SN — R6 review findings accepted (not fixed) in the SN freeze (2026-08-22)
+
+The Notesprout SN R6 `/code-review high` pass fixed its 10 top correctness findings in SN
+(`apps/notesprout_ratta`, see RATTA_PLAN.md R6 Outcome). The following were **explicitly accepted**
+— most are byte-identical in Paper, so a real fix is a family-wide change:
+
+- **Paper twin of the damaged-index fix (the one worth doing):** `PaperIndex`'s probe-`Invalid`
+  branch (`apps/notesprout_paper/.../PaperIndex.kt` ≈ line 68) still treats an existing-but-damaged
+  `notesprout.db` (e.g. a truncated restore remnant) as a fresh install and creates a new encrypted
+  index over it — the data-loss case SN now refuses with `PrepareOutcome.DAMAGED_FILE`. Port SN's
+  guard when Paper is next unfrozen.
+- StrokeCodec forward-compat/truncation gaps — codec bytes are the frozen family format; any change
+  must land in Paper and SN together with fixture regeneration.
+- `PRAGMA auto_vacuum = INCREMENTAL` in `SoilDatabase.onCreate` is a no-op (Room's onCreate runs
+  after tables exist, so the pragma silently does nothing). Same in Paper; new files simply have
+  auto_vacuum off, matching every existing file. Fix family-wide or drop the pragma.
+- Case-sensitive sibling-name collision check ("Notes" and "notes" can coexist) — Paper parity,
+  cosmetic; UUID filenames mean no filesystem conflict.
+- Library perf niggles (SN): cover WEBP decode on Main in card bind, occasional double refresh on
+  resume, `pinnedNotebookIds`' per-id `alive()` reads pull the full row (cover blob included), and
+  `StrokeStore.commit`'s per-stroke `MAX("order")` query. All small at SN's data sizes.
+- FolderPicker/Library breadcrumb logic duplication; dead API surface (`SoilCrypto.createRaw`
+  unused by SN's create path, unused `SoilDao` methods) — cleanup, not correctness.

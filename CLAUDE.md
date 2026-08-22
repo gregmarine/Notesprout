@@ -147,8 +147,10 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
 - `main` — stable release branch (v1.0 "Seed" through v1.3 "Supernote" shipped; the release merge
   commits are in git history).
 - `ratta` — **the active feature branch** (cut 2026-08-20): Notesprout SN, a from-scratch
-  Supernote-only rebuild under `apps/notesprout_ratta/`. Read `apps/notesprout_ratta/RATTA_PLAN.md`
-  first for any work there.
+  Supernote-only rebuild under `apps/notesprout_ratta/`. **Arc 1 ("Ratta Paper", full Paper-v0
+  parity) is complete and frozen — R0–R6 ✅ 2026-08-22**, format-compat with Paper proven both
+  directions on-device. No next arc is planned — ask the user first. Read
+  `apps/notesprout_ratta/RATTA_PLAN.md` first for any work there.
 - `germination` — previous post-MVP feature branch (reference, not active)
 - The former feature branches (`seed`, `sprout`, `sapling`, `supernote`, `paper`) are merged and
   **deleted** (local + remote) — "on sprout/sapling/supernote/paper" means `main`; history lives under

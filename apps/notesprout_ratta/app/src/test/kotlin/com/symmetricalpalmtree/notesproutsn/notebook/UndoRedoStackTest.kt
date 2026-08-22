@@ -144,4 +144,32 @@ class UndoRedoStackTest {
         // Two carried strokes, both still there: a delete undo is only as good as its geometry.
         assertEquals(listOf("b", "c"), (deleted as Action.Deleted).strokes.map { it.id })
     }
+
+    @Test
+    fun `only record moves the generation`() {
+        val s = UndoRedoStack()
+        val g0 = s.generation
+        s.record(drew("a"))
+        assertTrue(s.generation != g0)
+        // Replay traffic — pop/push — must not move it, or every undo would look like an edit.
+        val g1 = s.generation
+        val a = s.popUndo()!!
+        s.pushRedo(a)
+        s.popRedo()!!.let { s.pushUndo(it) }
+        s.clear()
+        assertEquals(g1, s.generation)
+    }
+
+    @Test
+    fun `the mid-replay protocol drops redo when an edit interleaves`() {
+        // The activity's doUndo: pop, snapshot generation, replay, pushRedo only if unchanged.
+        val s = UndoRedoStack()
+        s.record(drew("a"))
+        val a = s.popUndo()!!
+        val g = s.generation
+        s.record(drew("b"))                       // pen-up landed mid-replay
+        if (s.generation == g) s.pushRedo(a)      // must NOT run
+        assertFalse(s.canRedo())                  // record-clears-redo holds
+        assertTrue(s.canUndo())                   // the fresh edit is still undoable
+    }
 }

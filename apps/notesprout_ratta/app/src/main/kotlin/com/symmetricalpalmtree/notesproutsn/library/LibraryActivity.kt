@@ -79,7 +79,7 @@ class LibraryActivity : AppCompatActivity() {
         if (result.resultCode == Activity.RESULT_OK) {
             val id = result.data?.getStringExtra(NewNotebookActivity.EXTRA_NOTEBOOK_ID)
             val name = result.data?.getStringExtra(NewNotebookActivity.EXTRA_NOTEBOOK_NAME)
-            if (id != null && name != null) startActivity(NotebookActivity.intent(this, id, name))
+            if (id != null && name != null) openNotebook(id, name)
             lifecycleScope.launch { refresh() }
         }
     }
@@ -132,7 +132,23 @@ class LibraryActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        launchingNotebook = false
         if (gridMeasured) lifecycleScope.launch { refresh() }
+    }
+
+    /** True from a notebook launch until the library is back on top — the double-tap latch. */
+    private var launchingNotebook = false
+
+    /**
+     * The one door into [NotebookActivity]. E-ink gives a tap no feedback for hundreds of ms, so
+     * users double-tap; without this latch each tap would stack its own NotebookActivity — two
+     * concurrent SQLCipher writers on one `.soil` (the documented lock-crash family). Reset in
+     * [onResume]: by then the second instance would already exist, so the latch has done its job.
+     */
+    private fun openNotebook(id: String, name: String) {
+        if (launchingNotebook) return
+        launchingNotebook = true
+        startActivity(NotebookActivity.intent(this, id, name))
     }
 
     /**
@@ -148,7 +164,7 @@ class LibraryActivity : AppCompatActivity() {
             if (s.type != ObjectType.NOTEBOOK) return@launch
             val exists = withContext(Dispatchers.IO) { soilFile(this@LibraryActivity, id).exists() }
             if (!exists) return@launch
-            startActivity(NotebookActivity.intent(this@LibraryActivity, s.id, s.name))
+            openNotebook(s.id, s.name)
         }
     }
 
@@ -388,7 +404,7 @@ class LibraryActivity : AppCompatActivity() {
 
     private fun onCardTap(item: CardItem) = when (item) {
         is CardItem.Folder -> navigateTo(item.summary.id)
-        is CardItem.Notebook -> startActivity(NotebookActivity.intent(this, item.summary.id, item.summary.name))
+        is CardItem.Notebook -> openNotebook(item.summary.id, item.summary.name)
     }
 
     private fun onCardLongPress(item: CardItem) {

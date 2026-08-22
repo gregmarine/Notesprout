@@ -29,8 +29,10 @@ import kotlinx.coroutines.withContext
  * single `onCreate` check sufficient.
  *
  * Open state machine (probe the file header, never open to find out):
- *  - `Invalid` (no file / empty) → mint (or reuse) the global key → create encrypted → derive +
- *    cache the raw key → [PrepareOutcome.FIRST_LAUNCH] (the caller shows the recovery key once).
+ *  - `Invalid` + no file (or zero bytes) → mint (or reuse) the global key → create encrypted →
+ *    derive + cache the raw key → [PrepareOutcome.FIRST_LAUNCH] (the caller shows the recovery key
+ *    once). `Invalid` over an existing non-empty file is a damaged index —
+ *    [PrepareOutcome.DAMAGED_FILE], never created over, never deleted.
  *  - `Encrypted` → cached passphrase? → raw key **verified** against the file → open → READY.
  *    No cached passphrase, or the cached one no longer fits → [PrepareOutcome.NEEDS_UNLOCK].
  *  - `Plaintext` → impossible for SN (there is no plaintext mode). Never opened: it would either
@@ -39,7 +41,7 @@ import kotlinx.coroutines.withContext
  */
 object SnIndex {
 
-    enum class PrepareOutcome { READY, FIRST_LAUNCH, NEEDS_UNLOCK, FOREIGN_FILE }
+    enum class PrepareOutcome { READY, FIRST_LAUNCH, NEEDS_UNLOCK, FOREIGN_FILE, DAMAGED_FILE }
 
     private const val TAG = "SnIndex"
 
@@ -64,7 +66,13 @@ object SnIndex {
 
             when (SoilCrypto.probe(file)) {
                 SoilFileKind.Invalid -> {
-                    // Fresh install (or an empty file): create the index encrypted from the start.
+                    // `Invalid` covers missing/empty AND unreadable/truncated. Only a genuinely
+                    // absent (or zero-byte) file is a fresh install; an existing remnant — say an
+                    // interrupted restore's 12 bytes — must never be built over: a create-capable
+                    // open here would initialize a brand-new empty index on top of it (library gone,
+                    // every notebook orphaned), the never-delete-on-corruption rule's whole point.
+                    if (file.exists() && file.length() > 0L) return@withContext PrepareOutcome.DAMAGED_FILE
+                    // Fresh install: create the index encrypted from the start.
                     val pass = GlobalKey.ensure(app)
                     file.parentFile?.mkdirs()
                     val db = build(app, file, SoilCrypto.roomFactory(pass))

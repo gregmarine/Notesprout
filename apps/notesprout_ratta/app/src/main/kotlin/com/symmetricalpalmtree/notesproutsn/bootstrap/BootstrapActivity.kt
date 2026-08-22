@@ -18,6 +18,7 @@ import com.symmetricalpalmtree.notesproutsn.core.Dialogs
 import com.symmetricalpalmtree.notesproutsn.crypto.PassphraseStore
 import com.symmetricalpalmtree.notesproutsn.data.index.SnIndex
 import com.symmetricalpalmtree.notesproutsn.library.LibraryActivity
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 /**
@@ -52,8 +53,13 @@ class BootstrapActivity : AppCompatActivity() {
         lifecycleScope.launch {
             try {
                 boot()
+            } catch (e: CancellationException) {
+                // The activity is going away (Home during the first-boot KDF) — not a boot failure,
+                // and a dialog on a dead window is a BadTokenException. Let cancellation pass.
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "boot failed", e)
+                if (isFinishing || isDestroyed) return@launch
                 root.removeAllViews()
                 Dialogs.style(
                     AlertDialog.Builder(this@BootstrapActivity)
@@ -80,6 +86,7 @@ class BootstrapActivity : AppCompatActivity() {
             }
             SnIndex.PrepareOutcome.NEEDS_UNLOCK -> forward(UnlockActivity::class.java)
             SnIndex.PrepareOutcome.FOREIGN_FILE -> throw IllegalStateException(getString(R.string.boot_error_foreign))
+            SnIndex.PrepareOutcome.DAMAGED_FILE -> throw IllegalStateException(getString(R.string.boot_error_damaged))
         }
     }
 

@@ -118,6 +118,12 @@ tree at commit `87277da`) with zero extension machinery.
   `input swipe` deliver nothing to the ink path. Committed-ink verification needs the user's pen;
   agents can still verify chrome, panels, and persistence of strokes the user already wrote.
   Finger `input tap` works normally.
+- **`adb push` into `/sdcard/Android/data/<pkg>/files/` fails with `remote fchown failed` — and the
+  failed push DELETES the existing target file** (R6 finding: it removed SN dev's live
+  `notesprout.db`; recovered from the local pulled copy). The working method: `adb push` to
+  `/data/local/tmp/`, then `adb shell cp` into place (`rm` the target first if it pre-exists —
+  group `ext_data_rw` can create/delete in the dir but not overwrite an app-owned `-rw-r-----`
+  file), then `rm` the temp. `adb pull` from those dirs works fine.
 - **`monkey -p <pkg> 1` does not reliably bring the target app to the foreground** (R4 finding):
   with Notesprout Paper dev's task frontmost, a monkey launch of SN dev left Paper in front, and an
   entire Haiku device walk silently "passed" against **Paper's** notebook (same features, near-same
@@ -357,8 +363,6 @@ special-case is dropped unless the Nomad shows the same behavior. Flip visual = 
 locked by the phase text, unchanged: swipe-next past the last page inserts; undo covers page
 insert/delete → notebook-level stack bounded 100, cleared on close only.)
 
-**Outcome:** —
-
 ### R5 — Lasso + polish
 **Status:** ✅ Complete (commit 4445744, Nomad-verified + user all-clear 2026-08-22)
 
@@ -403,7 +407,7 @@ undo/redo, smart lasso, scribble erase, dismissal) — no findings. Test data: `
 left pinned on SNN; both variants reinstalled current.
 
 ### R6 — Hardening, compat proof, review, freeze
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-22)
 
 Code-review pass (findings fixed or explicitly accepted, recorded here); **format-compat
 proof on the Nomad**: same passphrase in both apps, adb-copy a Paper-created `.soil` into
@@ -414,8 +418,58 @@ app), memory + root CLAUDE.md updates; version stamp; commit + push.
 
 **Questions to resolve at phase start:** review depth (/code-review level), whether the
 compat proof should also cover an encrypted notebook created before a passphrase rotation.
+**Answered 2026-08-22:** review at **high**. Rotation case **skipped as vacuous** — neither
+app has a rotation (or set-passphrase) flow; in the v0 family the minted `NSPT-` recovery
+key *is* the immutable global passphrase ("future rotation" is only a code comment). The
+user declined the adopted-key substitute (wipe SN dev + push Paper's index — no device data
+wipes). Basic proof mechanics, since "same passphrase in both apps" also has no in-app path:
+copied `.soil`s are re-keyed on the Mac with the stock sqlcipher CLI (`PRAGMA rekey`
+source-app key → destination-app key, keys read from each debug ⋯ "Show recovery key"),
+and the destination index row is inserted the same CLI way (force-stop first; WAL sidecars
+pulled together). Stock-CLI rekey doubles as a stock-SQLCipher-defaults proof.
 
-**Outcome:** —
+**Outcome:** **Review (`/code-review high` over the whole arc):** 36 candidates → 10 confirmed
+correctness findings survived verification — **all ten fixed by Fable** (124 JVM tests + both
+builds green): ① library double-tap opened two concurrent writers on one `.soil` → `openNotebook`
+latch, the one door in, reset in `onResume`; ② Back during the ~1 s KDF open window leaked the
+opened `SoilDatabase` + WAL forever → both layers seal an abandoned open (`NotebookSession.open`
+catch + `sealAbandonedOpen` on appScope, `NonCancellable`); ③ g-paper callbacks read
+`session.currentPage` racing IO page mutations (wrong-page ink, torn-read crash) → Main-only
+`displayedPageId` stamped at the two `loadStrokes` sites; ④ ink before `opened` was silently
+dropped → block-all exclusion rect until the page is loaded; ⑤ `SnIndex` probe-`Invalid` built a
+fresh index over an existing damaged file → `PrepareOutcome.DAMAGED_FILE` + honest Retry/Close
+dialog (never create over, never delete); ⑥ `close()` sealed under a possibly in-flight page
+transaction → every seal/persist path now holds `pageOps`; ⑦ mid-flip `template.recycle()` while
+the engine still paints it → reference-drop only (minSdk 29); ⑧ a failed/interleaved undo replay
+corrupted history → push-back on failure + `generation` counter guarding the redo push (2 new JVM
+tests); ⑨ `deleteFolderRecursive` non-transactional (kill mid-cascade strands alive subtrees,
+never purged) → one Room transaction; ⑩ Bootstrap's catch swallowed `CancellationException` and
+showed a dialog on a dead window → rethrow + `isFinishing`/`isDestroyed` guard; a mid-open crash
+now lands in the failed-open dialog, not an uncaught-scope crash. **Seven findings explicitly
+accepted** (reasons + the Paper twin of ⑤ recorded in monorepo `BACKLOG.md`): StrokeCodec
+forward-compat gaps (frozen family format), `auto_vacuum` no-op, case-sensitive name collisions,
+library perf niggles (Main-thread cover decode, blob-laden `alive()`, per-stroke `MAX(order)`),
+breadcrumb duplication, dead `createRaw`/`SoilDao` surface — all byte-identical-or-parity with
+Paper. **Format-compat proof (both directions, Nomad):** Paper's "Test 04" (1 page, 34 strokes,
+3 object rows, extension-rendered lined template) re-keyed on the Mac with the stock sqlcipher CLI
+4.17.0 (`PRAGMA rekey`, Paper key → SN key — the CLI opening both indexes doubles as the
+stock-SQLCipher-defaults proof) + index row inserted the same CLI way → **opens in SN**: strokes +
+template render, object rows correctly ignored, and SN minted its own cover on close. SN's
+`20260820_231010` (3 pages, 26 strokes, no template row) → **opens in Paper dev at its remembered
+page 3/3** (the notebook row's `refId` honored cross-app). Both imports left on device. Rotation
+leg skipped as vacuous (block above). **Regression:** Haiku walk 10/13 pass; its two "failures"
+(Create button, delete-sheet row) were **tap aim again — the third R2/R5-pattern occurrence** —
+Fable re-drove both by hand: create → opens at 1/1, flip-insert 2/2, flip back, delete sheet →
+bare confirm → 1/1, cold force-stop restore lands back in the notebook, test notebook deleted
+(sheet title verified first), Pinned/Recents modes pass, double-tap guard proves exactly one
+`NotebookActivity`, crash buffer empty. Agent side-effect cleaned: its stray inserted page in
+`20260820_231018` removed (back to 1/1). **New standing trap recorded** (list above): a failed
+`adb push` into `Android/data` *deletes the target*; recovered from the local copy, two-step
+`/data/local/tmp` + `cp` is the method. Docs updated (`notebook.md`, `library.md` — all R6
+behaviours), BACKLOG.md updated, version stamp stays **0.1.0-ratta** for the arc freeze. Both
+variants reinstalled current on SNN. **User eye-check all-pass 2026-08-22** (write-immediately
+after open, ink/eraser feel, lasso trail + drag + delete sheet, flips + two-finger insert +
+undo/redo, the Test 04 import, no findings) → all-clear given; arc 1 frozen at this commit.
 
 ---
 

@@ -12,6 +12,7 @@
     <string name="boot_error_title">Couldn\'t open your library</string>
     <string name="boot_error_body">Something went wrong while preparing Notesprout SN:\n\n%1$s\n\nYour notebooks are untouched. Retry usually resolves a temporary problem (e.g. right after a device restart).</string>
     <string name="boot_error_foreign">The library index is not a Notesprout SN database (it is unencrypted). It was left untouched.</string>
+    <string name="boot_error_damaged">The library index file exists but cannot be read (it may be truncated by an interrupted copy or restore). It was left untouched — nothing was created over it or deleted.</string>
 
     <!-- Recovery key -->
     <string name="recovery_title">🌱  Save your recovery key</string>

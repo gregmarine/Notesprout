@@ -1,5 +1,6 @@
 package com.symmetricalpalmtree.notesproutsn.data.index
 
+import androidx.room.withTransaction
 import com.symmetricalpalmtree.notesproutsn.data.soil.FolderRef
 import com.symmetricalpalmtree.notesproutsn.data.soil.KEY_SCOPE_GLOBAL
 import java.util.UUID
@@ -82,19 +83,24 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
      * inside (so the caller can remove their files + key-cache entries). Cycle-guarded.
      */
     suspend fun deleteFolderRecursive(id: String, now: Long = System.currentTimeMillis()): List<String> {
+        // One transaction for the whole cascade: a process kill mid-walk must never strand an alive
+        // subtree under a dead parent (unreachable in browse, un-deletable again, its .soil files
+        // and cached keys never purged because the caller never learns those notebook ids).
         val notebookIds = mutableListOf<String>()
-        val seen = HashSet<String>()
-        val stack = ArrayDeque<String>().apply { add(id) }
-        while (stack.isNotEmpty()) {
-            val fid = stack.removeLast()
-            if (!seen.add(fid)) continue
-            for (nb in dao.childrenOfType(fid, ObjectType.NOTEBOOK)) {
-                dao.deleteEdgesTo(nb.id)
-                dao.softDelete(nb.id, now)
-                notebookIds += nb.id
+        SnIndex.db().withTransaction {
+            val seen = HashSet<String>()
+            val stack = ArrayDeque<String>().apply { add(id) }
+            while (stack.isNotEmpty()) {
+                val fid = stack.removeLast()
+                if (!seen.add(fid)) continue
+                for (nb in dao.childrenOfType(fid, ObjectType.NOTEBOOK)) {
+                    dao.deleteEdgesTo(nb.id)
+                    dao.softDelete(nb.id, now)
+                    notebookIds += nb.id
+                }
+                for (sub in dao.childrenOfType(fid, ObjectType.FOLDER)) stack.add(sub.id)
+                dao.softDelete(fid, now)
             }
-            for (sub in dao.childrenOfType(fid, ObjectType.FOLDER)) stack.add(sub.id)
-            dao.softDelete(fid, now)
         }
         return notebookIds
     }

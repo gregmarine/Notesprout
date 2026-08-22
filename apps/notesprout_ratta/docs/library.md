@@ -198,7 +198,10 @@ Then, for each removed notebook:
 
 1. `IndexRepository.deleteNotebook` / `deleteFolderRecursive` — **soft** delete of the index rows
    plus a hard delete of the pinned membership edges (`deleteEdgesTo`). `deleteFolderRecursive`
-   returns the ids of every notebook that was inside, which is what drives the rest.
+   returns the ids of every notebook that was inside, which is what drives the rest. The whole
+   cascade runs in **one Room transaction** (R6): a process kill mid-walk must never strand an
+   alive subtree under a dead parent — unreachable in browse, un-deletable again, its `.soil`
+   files and cached keys never purged because the caller never learns those ids.
 2. `RecentsPrefs.remove(id)`.
 3. **Hard** delete of `soilFile(context, id)` and every sidecar from `sidecarsOf` (`-wal`, `-shm`,
    `-journal`) — on IO.
@@ -331,6 +334,18 @@ library falls back to the root. Nothing in prefs is trusted as still existing.
 - **Modes toggle from their own button** and are reachable from Back, and the active one's button
   carries a selected border — Paper v0 had only the close button.
 - **The pinned shelf follows the on-screen sort**, not the pin edge's `sortOrder`.
+- **`openNotebook` is the one door into `NotebookActivity` (R6)** — a `launchingNotebook` latch set
+  on launch and reset in `onResume`. E-ink gives a tap no feedback for hundreds of ms, so users
+  double-tap; without the latch each tap would stack its own `NotebookActivity` — two concurrent
+  SQLCipher writers on one `.soil` (the documented lock-crash family). All three launch sites
+  (card tap, new-notebook result, cold-launch reopen) route through it.
+- **A damaged index file is never built over (R6)** — `SnIndex`'s probe-`Invalid` branch creates a
+  fresh encrypted index only when the file is genuinely absent (or zero bytes). An existing
+  non-empty file that fails the probe (an interrupted copy/restore remnant) is
+  `PrepareOutcome.DAMAGED_FILE`: `BootstrapActivity` shows the Retry/Close problem dialog with an
+  honest body — nothing created over it, nothing deleted (the never-delete-on-corruption family).
+  Bootstrap's boot catch also rethrows `CancellationException` and guards the failure dialog on
+  `isFinishing`/`isDestroyed` (Home during the first-boot KDF is not a boot failure).
 
 ## Tests (JVM)
 

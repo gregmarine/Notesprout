@@ -83,6 +83,16 @@ class NotebookActivity : AppCompatActivity() {
     /** The strokes on the visible page — the "you still have them" mirror an erase undo needs. */
     private var liveStrokes: MutableMap<String, Stroke> = mutableMapOf()
 
+    /**
+     * The page whose strokes are on the paper — written on Main only, at the two places
+     * `loadStrokes` runs. The g-paper callbacks stamp their rows with THIS, never with
+     * `session.currentPage`: the session's `pages`/`currentIndex` mutate on IO mid-flip (`goTo`
+     * advances the index before the swap reaches the paper), so a pen-up racing a flip would
+     * otherwise persist ink to the destination page — and a torn read of the pair can crash.
+     * What the user inked is the page they were looking at.
+     */
+    private var displayedPageId: String = ""
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (!IndexGuard.ready(this)) return
@@ -134,28 +144,50 @@ class NotebookActivity : AppCompatActivity() {
         RecentsPrefs(this).record(notebookId)
 
         session = NotebookSession(this, notebookId, repo)
+        // The surface accepts no ink until the page is truly loaded (pushExclusions blocks it all
+        // while !opened) — set that up before the first layout pass can even happen.
+        pushExclusions()
         lifecycleScope.launch { openSession() }
     }
 
     // ── Open ─────────────────────────────────────────────────────────────────
 
     private suspend fun openSession() {
-        val alive = withContext(Dispatchers.IO) { repo.alive(notebookId) }
-        if (alive == null) { failOpen("not in the library"); return }
-        when (val r = session.open()) {
-            is NotebookSession.OpenResult.Failed -> { failOpen(r.reason); return }
-            NotebookSession.OpenResult.Ok -> Unit
+        try {
+            val alive = withContext(Dispatchers.IO) { repo.alive(notebookId) }
+            if (alive == null) { failOpen("not in the library"); return }
+            when (val r = session.open()) {
+                is NotebookSession.OpenResult.Failed -> { failOpen(r.reason); return }
+                NotebookSession.OpenResult.Ok -> Unit
+            }
+            if (isFinishing || closing) { sealAbandonedOpen(); return }
+            val page = session.currentPage
+            val strokes = session.store.loadPage(page.id)
+            paper.setPageSize(page.width, page.height)
+            paper.setTemplate(session.template)
+            paper.loadStrokes(strokes)
+            liveStrokes = strokes.associateBy { it.id }.toMutableMap()
+            displayedPageId = page.id
+            opened = true
+            pushExclusions()   // swap the block-all rect for the real chrome rects
+            setPageIndicator(session.currentIndex + 1, session.pages.size)
+            Slog.d(TAG) { "page ${page.id} loaded: ${strokes.size} strokes, ${page.width}x${page.height}" }
+        } catch (t: Throwable) {
+            // Back during the open window cancels this scope; the session may have opened its
+            // handle between our suspensions. Nothing else will ever seal it (close() early-exited
+            // on session.isOpen==false, and the onDestroy fallback is disabled by `closing`).
+            if (::session.isInitialized && session.isOpen && !opened) sealAbandonedOpen()
+            if (t is kotlinx.coroutines.CancellationException) throw t
+            // Anything else mid-open is a failed open, not a crash — explain and leave.
+            Log.e(TAG, "open crashed", t)
+            failOpen(t.message ?: t.javaClass.simpleName)
         }
-        if (isFinishing) { session.seal(); return }
-        val page = session.currentPage
-        val strokes = session.store.loadPage(page.id)
-        paper.setPageSize(page.width, page.height)
-        paper.setTemplate(session.template)
-        paper.loadStrokes(strokes)
-        liveStrokes = strokes.associateBy { it.id }.toMutableMap()
-        opened = true
-        setPageIndicator(session.currentIndex + 1, session.pages.size)
-        Slog.d(TAG) { "page ${page.id} loaded: ${strokes.size} strokes, ${page.width}x${page.height}" }
+    }
+
+    /** Seal a session the screen will never use — on [appScope], because our own scope is dying. */
+    private fun sealAbandonedOpen() {
+        val s = session
+        appScope.launch { withContext(NonCancellable) { runCatching { s.seal() } } }
     }
 
     /** A tap that opened nothing must be explained, not toasted (e-ink rule) — dialog, then leave. */
@@ -178,14 +210,14 @@ class NotebookActivity : AppCompatActivity() {
     private val listener = object : PaperListener {
         override fun onStrokeCommitted(stroke: Stroke) {
             if (!opened) return
-            val pageId = session.currentPage.id
+            val pageId = displayedPageId
             session.store.commit(pageId, stroke)
             liveStrokes[stroke.id] = stroke
             undo.record(Action.Drew(pageId, stroke))
         }
         override fun onStrokesErased(strokeIds: List<String>) {
             if (!opened) return
-            val pageId = session.currentPage.id
+            val pageId = displayedPageId
             // The mirror is the only place the geometry still exists once the engine drops it.
             val captured = strokeIds.mapNotNull { liveStrokes.remove(it) }
             session.store.erase(strokeIds)
@@ -193,7 +225,7 @@ class NotebookActivity : AppCompatActivity() {
         }
         override fun onSelectionMoved(move: SelectionMove) {
             if (!opened) return
-            val pageId = session.currentPage.id
+            val pageId = displayedPageId
             val ids = move.strokeIds.toList()
             session.store.move(ids, move.dx, move.dy)
             for (id in ids) liveStrokes[id]?.let { liveStrokes[id] = it.translated(move.dx, move.dy) }
@@ -259,6 +291,7 @@ class NotebookActivity : AppCompatActivity() {
         paper.setTemplate(session.template)
         paper.loadStrokes(strokes)
         liveStrokes = strokes.associateBy { it.id }.toMutableMap()
+        displayedPageId = page.id
         setPageIndicator(session.currentIndex + 1, session.pages.size)
         session.saveLastOpened()
     }
@@ -283,15 +316,31 @@ class NotebookActivity : AppCompatActivity() {
 
     private suspend fun doUndo() {
         val a = undo.popUndo() ?: return
-        session.store.drain()   // the queued writes are part of the state being reversed
-        revert(a)
-        undo.pushRedo(a)
+        val g = undo.generation
+        try {
+            session.store.drain()   // the queued writes are part of the state being reversed
+            revert(a)
+        } catch (t: Throwable) {
+            // Failed (or cancelled) mid-replay: put the entry back so the history never silently
+            // loses a step. The store ops are per-row and reconcile is idempotent, so retrying
+            // converges; the .soil is never left changed with no entry able to reverse it.
+            undo.pushUndo(a)
+            throw t
+        }
+        // A pen-up landing mid-replay recorded a fresh edit, which cleared redo — honour the
+        // record-clears-redo invariant rather than re-populating redo with the undone entry.
+        if (undo.generation == g) undo.pushRedo(a)
     }
 
     private suspend fun doRedo() {
         val a = undo.popRedo() ?: return
-        session.store.drain()
-        reapply(a)
+        try {
+            session.store.drain()
+            reapply(a)
+        } catch (t: Throwable) {
+            undo.pushRedo(a)
+            throw t
+        }
         undo.pushUndo(a)
     }
 
@@ -359,7 +408,7 @@ class NotebookActivity : AppCompatActivity() {
         if (!opened || closing) return
         val ids = sel.strokeIds.toList()
         if (ids.isEmpty()) return
-        val pageId = session.currentPage.id
+        val pageId = displayedPageId
         val strokes = ids.mapNotNull { liveStrokes[it] }
         paper.removeStrokes(ids)
         session.store.erase(ids)
@@ -407,6 +456,13 @@ class NotebookActivity : AppCompatActivity() {
      *  translated into the paper view's coordinates, so the stylus can never ink under chrome. */
     private fun pushExclusions() {
         if (!::paper.isInitialized) return
+        if (!opened) {
+            // The toolbar arms the pen from the first frame, but the page isn't on the paper yet —
+            // a stroke committed now would hit the listener's `opened` guard, never reach the
+            // store, and be silently wiped by loadStrokes. Block the whole surface until then.
+            paper.setExclusionRects(listOf(BLOCK_ALL))
+            return
+        }
         val paperLoc = IntArray(2).also { paper.asView().getLocationInWindow(it) }
         val rects = listOfNotNull(rectOf(binding.topBar), rectOf(binding.bottomStrip))
             .map { Rect(it.left - paperLoc[0], it.top - paperLoc[1], it.right - paperLoc[0], it.bottom - paperLoc[1]) }
@@ -522,8 +578,12 @@ class NotebookActivity : AppCompatActivity() {
         val p = paper; val s = session; val id = notebookId
         appScope.launch {
             try {
-                if (!closing) CoverSnapshot.capture(p, id, repo)
-                if (!closing) s.saveLastOpened()
+                // Under the page-op mutex: saveLastOpened reads currentPage, which a still-running
+                // insert/delete mutates on IO.
+                pageOps.withLock {
+                    if (!closing) CoverSnapshot.capture(p, id, repo)
+                    if (!closing && s.isOpen) s.saveLastOpened()
+                }
             } catch (e: Exception) { Log.w(TAG, "onStop persist failed", e) }
         }
     }
@@ -542,10 +602,16 @@ class NotebookActivity : AppCompatActivity() {
         val versionCode = packageManager.getPackageInfo(packageName, 0).longVersionCode.toInt()
         appScope.launch {
             withContext(NonCancellable) {
-                if (opened) try { CoverSnapshot.capture(p, id, repo) } catch (e: Exception) { Log.w(TAG, "cover failed", e) }
-                try { s.saveLastOpened() } catch (e: Exception) { Log.w(TAG, "saveLastOpened failed", e) }
-                try { s.refreshMeta(versionCode) } catch (e: Exception) { Log.w(TAG, "refreshMeta failed", e) }
-                try { s.seal() } catch (e: Exception) { Log.w(TAG, "seal failed", e) }
+                // The page-op mutex first: an insert/delete that passed the `closing` check before
+                // it flipped may still be inside its transaction — sealing under it would fail the
+                // transaction silently (runPageOp swallows) or split the .soil from its index
+                // mirror. New ops can't start (`closing` is set), so this only waits, never races.
+                pageOps.withLock {
+                    if (opened) try { CoverSnapshot.capture(p, id, repo) } catch (e: Exception) { Log.w(TAG, "cover failed", e) }
+                    try { s.saveLastOpened() } catch (e: Exception) { Log.w(TAG, "saveLastOpened failed", e) }
+                    try { s.refreshMeta(versionCode) } catch (e: Exception) { Log.w(TAG, "refreshMeta failed", e) }
+                    try { s.seal() } catch (e: Exception) { Log.w(TAG, "seal failed", e) }
+                }
             }
             if (!isFinishing && !isDestroyed) finish()
         }
@@ -559,13 +625,19 @@ class NotebookActivity : AppCompatActivity() {
             closing = true
             undo.clear()
             val s = session
-            appScope.launch { withContext(NonCancellable) { try { s.seal() } catch (e: Exception) { Log.w(TAG, "seal failed", e) } } }
+            appScope.launch {
+                withContext(NonCancellable) {
+                    pageOps.withLock { try { s.seal() } catch (e: Exception) { Log.w(TAG, "seal failed", e) } }
+                }
+            }
         }
         super.onDestroy()
     }
 
     companion object {
         private const val TAG = "NotebookActivity"
+        /** Covers any screen; deliberately not MAX_VALUE (engine-side rect math must not overflow). */
+        private val BLOCK_ALL = Rect(0, 0, 100_000, 100_000)
         const val EXTRA_NOTEBOOK_ID = "notebookId"
         const val EXTRA_NOTEBOOK_NAME = "notebookName"
 

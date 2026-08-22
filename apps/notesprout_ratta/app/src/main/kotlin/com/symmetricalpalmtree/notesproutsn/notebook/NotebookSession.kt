@@ -15,6 +15,7 @@ import com.symmetricalpalmtree.notesproutsn.data.soil.SoilObjectEntity
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilSchema
 import com.symmetricalpalmtree.notesproutsn.data.soilFile
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -79,19 +80,28 @@ class NotebookSession(
             return@withContext OpenResult.Failed(e.message ?: "Could not open notebook")
         }
         store = StrokeStore(db.dao()) { repo.touch(notebookId) }
-        val dao = db.dao()
-        val root = dao.notebookRow()
-        val pageRows = dao.childrenOfType(notebookId, SoilSchema.TYPE_PAGE)
-        if (pageRows.isEmpty()) {
-            runCatching { db.seal(file) }
-            return@withContext OpenResult.Failed("Notebook has no pages")
+        try {
+            val dao = db.dao()
+            val root = dao.notebookRow()
+            val pageRows = dao.childrenOfType(notebookId, SoilSchema.TYPE_PAGE)
+            if (pageRows.isEmpty()) {
+                runCatching { withContext(NonCancellable) { seal() } }
+                return@withContext OpenResult.Failed("Notebook has no pages")
+            }
+            pages = pageRows.mapIndexed { i, row -> row.toPageRef(i) }
+            val lastOpen = root?.refId
+            currentIndex = pages.indexOfFirst { it.id == lastOpen }.takeIf { it >= 0 } ?: 0
+            loadTemplateFor(currentPage)
+            Slog.d(TAG) { "opened $notebookId: ${pages.size} pages, at $currentIndex" }
+            OpenResult.Ok
+        } catch (t: Throwable) {
+            // The handle is open but the caller will never see this session — most commonly a back
+            // press during the KDF window cancelling the scope, so the very next suspension throws
+            // CancellationException. Seal here (NonCancellable — we ARE being cancelled) or the
+            // connection + un-checkpointed WAL sidecar outlive the screen for the process lifetime.
+            runCatching { withContext(NonCancellable) { seal() } }
+            throw t
         }
-        pages = pageRows.mapIndexed { i, row -> row.toPageRef(i) }
-        val lastOpen = root?.refId
-        currentIndex = pages.indexOfFirst { it.id == lastOpen }.takeIf { it >= 0 } ?: 0
-        loadTemplateFor(currentPage)
-        Slog.d(TAG) { "opened $notebookId: ${pages.size} pages, at $currentIndex" }
-        OpenResult.Ok
     }
 
     /** Point the notebook row at [pageId] as the last-open page (a reopen restores it). */
@@ -256,7 +266,8 @@ class NotebookSession(
         try { store.drain() } catch (e: Exception) { Log.w(TAG, "drain failed", e) }
         store.close()
         db.seal(file)
-        template?.recycle()
+        // Reference drop only — the paper view can outlive the seal by a frame (recycle() here
+        // would race a final repaint; see loadTemplateFor).
         template = null
         Slog.d(TAG) { "sealed $notebookId" }
     }
@@ -265,7 +276,11 @@ class NotebookSession(
 
     private suspend fun loadTemplateFor(page: PageRef) {
         if (page.templateId == templateIdLoaded) return
-        template?.recycle()
+        // Never recycle() the outgoing bitmap: this runs on IO mid-flip, while the engine keeps
+        // painting the old template into every committed-layer repaint (a stroke commit, a scribble
+        // erase, a cover capture) until the activity's `setTemplate` lands on Main — recycle() in
+        // that window is a "trying to use a recycled bitmap" crash. minSdk 29: bitmaps live on the
+        // Java heap, so dropping the reference IS the release.
         template = null
         templateIdLoaded = page.templateId
         if (page.templateId.isEmpty()) return

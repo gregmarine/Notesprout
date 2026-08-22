@@ -1,6 +1,6 @@
 # Notebook — Notesprout SN subsystem doc
 
-Phase **R5**. The notebook is a full-bleed g-paper surface with two chrome overlays: the toolbar
+Phase **R6**. The notebook is a full-bleed g-paper surface with two chrome overlays: the toolbar
 (with its three slide-down tool panels) and the name strip. Everything the paper *draws* comes from
 g-paper 0.1.4 (`~/git/g-paper/docs/api.md`, `host-responsibilities.md`); everything the paper
 *remembers* comes from the `.soil` via the collaborators below.
@@ -111,7 +111,22 @@ page rows (none → fail) → last-open page from the notebook row's `refId` →
 rect, so ink registration survives a different screen), `setTemplate`, `loadStrokes
 (store.loadPage(id))`, page indicator.
 
-A failed open is a **problem dialog** (SN's toast-confirms / dialog-explains rule), OK → finish.
+A failed open is a **problem dialog** (SN's toast-confirms / dialog-explains rule), OK → finish —
+including a crash *mid*-open (the R6 hardening: `openSession`'s catch turns any non-cancellation
+throw into the same dialog instead of an uncaught-in-scope crash).
+
+**The surface accepts no ink until the page is loaded (R6).** The toolbar arms the pen from the
+first frame, but a stroke committed before `opened` would hit the listener's guard, never reach the
+store, and be silently wiped by `loadStrokes`. So `pushExclusions` pushes one **block-all rect**
+while `!opened` (set up in `onCreate`, before the first layout pass) and swaps to the real chrome
+rects the moment the page lands.
+
+**An abandoned open still seals (R6).** Back during the open window (a cold raw-key miss is ~1 s of
+KDF) cancels `lifecycleScope` while `SoilDatabase.open` may already have completed — and `close()`
+early-exited on `session.isOpen == false`, so nothing else would ever close that handle.
+Both layers clean up: `NotebookSession.open` seals on any throw after the handle opened
+(`NonCancellable` — the scope *is* being cancelled), and `openSession`'s catch seals a session that
+opened but never reached `opened = true`, on `appScope` (`sealAbandonedOpen`).
 
 ## Persistence
 
@@ -127,6 +142,13 @@ A failed open is a **problem dialog** (SN's toast-confirms / dialog-explains rul
 The first three also maintain `liveStrokes` (the Activity's map of what is on the visible page —
 the only place an erased stroke's geometry still exists once the engine drops it) and record the
 matching `UndoRedoStack.Action`.
+
+**Page attribution: `displayedPageId`, never `session.currentPage` (R6).** The callbacks stamp
+their rows with the Activity's `displayedPageId` — written on Main only, at the two places
+`loadStrokes` runs (`openSession`, `navigateTo`). The session's `pages`/`currentIndex` mutate on IO
+mid-flip (`goTo` advances the index *before* the swap reaches the paper), so a pen-up racing a flip
+would otherwise persist ink to the destination page — and a torn read of the pair could crash. What
+the user inked is the page they were looking at.
 
 Every write schedules a trailing-debounced (2 s) `IndexRepository.touch(notebookId)` — the
 `updatedAt` discipline: the card's "last modified" follows ink, one UPDATE per burst, flushed on
@@ -280,6 +302,12 @@ exactly what a reopen would show. `doUndo`/`doRedo` drain before reverting too: 
 queued are part of the state being reversed. `store.restore` is a REPLACE upsert, which revives the
 soft-deleted row live at the tail of the z-order.
 
+**History integrity (R6).** A replay that throws (or is cancelled) pushes the popped entry back on
+its own side — the history never silently loses a step, and because the store ops are per-row and
+`reconcile` is idempotent, retrying converges. And `doUndo` snapshots `undo.generation` (bumped by
+every `record`) before reverting: if a pen-up lands mid-replay and records a fresh edit — which
+clears redo — the undone entry is *not* pushed onto redo afterwards, so record-clears-redo holds.
+
 Every gesture-driven operation runs through `runPageOp` — a `Mutex` on `lifecycleScope`, a no-op
 while not open or once closing, `runCatching` + `Log.w` on failure — so two overlapping gestures
 can never tangle the page list.
@@ -300,6 +328,17 @@ pen is active and re-checks at fire, so we are outside the pen-active window the
   `NonCancellable`: cover → `saveLastOpened` → `refreshMeta` (name + folder path from the index)
   → `seal()` (`flushTouch` → `drain` → `wal_checkpoint(TRUNCATE)` → close) → `finish()`. Each
   step guarded; idempotent (`closing` flag; `onStop` stands down once closing).
+- **Every seal/persist path holds `pageOps` (R6)** — `close()`, `onStop`'s persist, and the
+  `onDestroy` fallback all take the same mutex the gesture ops run under. An insert/delete that
+  passed the `closing` check before the flag flipped may still be inside its transaction; sealing
+  under it would fail the transaction silently (`runPageOp` swallows) or split the `.soil` from its
+  index mirror. New ops can't start once `closing` is set, so the lock only ever waits.
+- **Template bitmaps are never `recycle()`d (R6)** — `loadTemplateFor` and `seal` drop the
+  reference only. The engine keeps painting the old template into committed-layer repaints until
+  the activity's `setTemplate` lands on Main; a recycle in that window is a
+  "trying to use a recycled bitmap" crash (reachable via format-compatible imports whose pages
+  carry different templates). minSdk 29: bitmaps live on the Java heap — dropping the reference is
+  the release.
 - `onDestroy` → `IndexGuard.bounced` first, then `paper.release()`; if the session is still open
   and no close ran (e.g. finish from a failed open), seal it.
 - **Cold-launch restore:** the library's `reopenLastNotebookIfNeeded()` (cold launch only) reads
@@ -335,7 +374,9 @@ in-memory `SoilDao` fake; `unitTests.isReturnDefaultValues = true` covers the `L
 production paths. Plus `PageMathTest` (delete-landing edges, insert slots, the two diffs, and that
 insert/delete undo↔redo diffs are exact mirrors) and `UndoRedoStackTest` (LIFO order, redo cleared
 by a new edit, the 100-entry bound dropping the *oldest*, `clear`, each action's `pageId`, and that
-a `Deleted` rides the stack like any other action while staying distinguishable from an `Erased`).
+a `Deleted` rides the stack like any other action while staying distinguishable from an `Erased`,
+and the R6 `generation` counter: moved only by `record`, and the mid-replay protocol that drops the
+redo push when an edit interleaves).
 `ToolPrefsDefaultsTest` pins the locked default values — both recognisers **on**, PEN 3 px / eraser
 15 px, each on the ladder its panel offers. The `ToolPrefs` *accessors* are not JVM-tested: they
 need real `SharedPreferences`, and the `isReturnDefaultValues` stub returns the type default, so

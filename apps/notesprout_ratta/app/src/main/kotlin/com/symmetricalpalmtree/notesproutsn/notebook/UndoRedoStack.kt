@@ -50,11 +50,20 @@ class UndoRedoStack {
     private val undo = ArrayDeque<Action>()
     private val redo = ArrayDeque<Action>()
 
+    /**
+     * Bumped by every [record]. A replay in flight snapshots it before reverting and compares
+     * after: a change means a fresh edit landed mid-replay (and cleared redo) — the replayer must
+     * not push the undone entry onto redo, or record-clears-redo silently breaks.
+     */
+    var generation: Int = 0
+        private set
+
     /** Record an edit that just happened. Clears the redo history. */
     fun record(action: Action) {
         undo.addLast(action)
         while (undo.size > MAX) undo.removeFirst()
         redo.clear()
+        generation++
     }
 
     fun canUndo(): Boolean = undo.isNotEmpty()
