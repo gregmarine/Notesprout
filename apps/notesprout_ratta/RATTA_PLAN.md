@@ -576,7 +576,7 @@ accordingly (the recognizer point is the only extension surface; no other capabi
   edit dialog via uiautomator dumps and keyboard-tap coordinates only where unavoidable.
 
 ### N0 — Recognizer extension point + NSE · ML Kit + debug recognize
-**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-22)
+**Status:** ✅ Complete (commit 19775ed, Nomad-verified + user all-clear 2026-08-22)
 
 `:extension-api` (fresh, minimal — depends on nothing in `:app`): the recognizer AIDL
 (`status` / `prepare` / `recognize`), hand-written parcelables (strokes in, per-line text
