@@ -773,7 +773,7 @@ empty-save delete, undo/redo of everything, persistence, ink-over-heading) → a
 the eye-check headings.
 
 ### N3 — Hardening, review, docs, freeze
-**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-22 — arc 3 frozen at this commit)
+**Status:** ✅ Complete (commit d84273e, Nomad-verified + user all-clear 2026-08-22 — arc 3 frozen at this commit)
 
 **Outcome:** Debug surface removed per the wizard: both
 `NotebookDebugMenu` twins, the ⋯ button, `recognizeContext()`/`RecognizeContext`, and 10 orphaned
