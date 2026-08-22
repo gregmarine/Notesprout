@@ -476,7 +476,7 @@ undo/redo, the Test 04 import, no findings) → all-clear given; arc 1 frozen at
 ## Phases — Arc 2 "Polish" (user-directed 2026-08-22)
 
 ### P1 — Fixed tools, selection context toolbar, "Opening…" overlay
-**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-22)
+**Status:** ✅ Complete (commit ee7337d, Nomad-verified + user all-clear 2026-08-22)
 
 Three user-requested polish items, converging SN on og-Notesprout/Paper behaviour:
 
