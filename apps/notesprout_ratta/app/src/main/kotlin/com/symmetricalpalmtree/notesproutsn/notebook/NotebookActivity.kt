@@ -44,8 +44,9 @@ import kotlinx.coroutines.withContext
 /**
  * The notebook screen: a full-bleed g-paper surface with the toolbar and the name strip overlaying
  * it. Lifecycle, wiring, chrome and exclusion rects live here; the data lives in [NotebookSession]
- * / [StrokeStore]; the cover in [CoverSnapshot]; the buttons and panels in [NotebookToolbar]; the
- * finger vocabulary in [PageGestures] and the history in [UndoRedoStack].
+ * / [StrokeStore]; the cover in [CoverSnapshot]; the buttons in [NotebookToolbar]; the selection's
+ * floating bar in [SelectionToolbar]; the finger vocabulary in [PageGestures] and the history in
+ * [UndoRedoStack].
  *
  * Immersive (system bars hidden, transient by swipe); chrome sits flush at the top edge — the top
  * guard is 0 on Ratta hardware (`core/TopGuard.kt` holds that decision).
@@ -55,6 +56,7 @@ class NotebookActivity : AppCompatActivity() {
     private lateinit var binding: ActivityNotebookBinding
     private lateinit var paper: PaperView
     private lateinit var toolbar: NotebookToolbar
+    private lateinit var selectionToolbar: SelectionToolbar
     private lateinit var session: NotebookSession
     private lateinit var pageGestures: PageGestures
     private val repo by lazy { IndexRepository() }
@@ -110,30 +112,34 @@ class NotebookActivity : AppCompatActivity() {
             )
         }
         Slog.d(TAG) { "engine=${paper.engineId}" }
-        // The two pen-gesture recognisers, armed from their remembered state before the listener is
-        // attached (both default on — R5). The lasso panel is what writes them afterwards.
-        val toolPrefs = ToolPrefs(this)
-        paper.smartLassoEnabled = toolPrefs.smartLasso
-        paper.scribbleEraseEnabled = toolPrefs.scribbleErase
+        // Both pen-gesture recognisers are simply on (P1) — armed before the listener is attached,
+        // because the engine reads them as it wires itself up. Order is load-bearing.
+        paper.smartLassoEnabled = true
+        paper.scribbleEraseEnabled = true
         paper.setPaperListener(listener)
 
-        // The toolbar owns all pen/eraser/recogniser configuration (defaults + ToolPrefs).
-        toolbar = NotebookToolbar(binding, paper, toolPrefs) { close() }
+        // The toolbar owns all pen/eraser configuration — fixed values, no panels, no prefs.
+        toolbar = NotebookToolbar(binding, paper) { close() }
+        selectionToolbar = SelectionToolbar(
+            root = binding.root,
+            paperView = paper.asView(),
+            bar = binding.selectionToolbar,
+            band = { chromeBand() },
+            releaseRender = { paper.releaseRender() },
+            onDelete = { currentSelection?.let { deleteSelection(it) } },
+        )
         binding.notebookName.text = name
         binding.pageIndicator.text = ""
 
-        // Stand-down is wider than Paper's: a lasso selection *or* an open tool panel takes the
-        // contact away from the page gestures (the panel's own dismiss owns that touch).
         pageGestures = PageGestures(
             host = paper.asView(),
             isPenActive = { paper.isPenActive },
-            standDown = { selectionActive || toolbar.panelOpen },
+            standDown = { selectionActive },
             overChrome = { overChrome(it) },
             listener = gestureListener,
         )
 
-        // Chrome moved/appeared/disappeared (incl. panel toggles — they change topBar's height):
-        // re-push the exclusion rects once the pass settles.
+        // Chrome moved/appeared/disappeared: re-push the exclusion rects once the pass settles.
         binding.root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> binding.root.post { pushExclusions() } }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -170,6 +176,11 @@ class NotebookActivity : AppCompatActivity() {
             displayedPageId = page.id
             opened = true
             pushExclusions()   // swap the block-all rect for the real chrome rects
+            // The page is on the paper — take the "Opening…" box down. Deliberately **not**
+            // pen-idle-gated: `isPenActive` counts hover, and the user's pen is already over the
+            // glass on the way to writing, which would hold the box up over the page they asked for.
+            // This is a boundary frame, not a frame during writing (nothing has been drawn yet).
+            binding.openingOverlay.root.visibility = View.GONE
             setPageIndicator(session.currentIndex + 1, session.pages.size)
             Slog.d(TAG) { "page ${page.id} loaded: ${strokes.size} strokes, ${page.width}x${page.height}" }
         } catch (t: Throwable) {
@@ -193,6 +204,9 @@ class NotebookActivity : AppCompatActivity() {
     /** A tap that opened nothing must be explained, not toasted (e-ink rule) — dialog, then leave. */
     private fun failOpen(reason: String) {
         Log.w(TAG, "open failed: $reason")
+        // The box must come down before the dialog goes up — it shields every touch under it, and
+        // an OK button that cannot be tapped is a dead screen.
+        binding.openingOverlay.root.visibility = View.GONE
         BrowseState(this).lastOpenNotebookId = null
         if (isFinishing || isDestroyed) return
         Dialogs.style(
@@ -232,17 +246,26 @@ class NotebookActivity : AppCompatActivity() {
             undo.record(Action.Moved(pageId, ids, move.dx, move.dy))
             // The selection survives a move, at its new position — keep our copy honest.
             currentSelection = currentSelection?.let { it.copy(bounds = it.bounds.offset(move.dx, move.dy)) }
+            // The drag is over (this fires at lift), so bring the bar back where the box now is.
+            currentSelection?.let { selectionToolbar.show(it.bounds) }
         }
         override fun onSelectionCreated(selection: Selection) {
             selectionActive = true
             currentSelection = selection
+            // Shown immediately, **not** through the pen-idle gate: a lasso ends with the pen still
+            // hovering over the glass (`isPenActive` counts proximity + a 350 ms tail), so an
+            // idle-gated bar would arrive long after the selection it belongs to — the R3 panel
+            // lesson. The engine has already presented the selection box, so this frame is part of
+            // that same presentation, not a repaint during writing.
+            selectionToolbar.show(selection.bounds)
         }
+        /** The pen is dragging the box — the bar would be dragged over, and it never follows live. */
+        override fun onSelectionDragStarted() { selectionToolbar.hide() }
         override fun onSelectionDismissed() {
             selectionActive = false
             currentSelection = null
+            selectionToolbar.hide()
         }
-        /** A sub-threshold tap inside the selection box — the one place the selection has a menu. */
-        override fun onSelectionTapped(x: Float, y: Float) { showSelectionSheet() }
         override fun onToolChanged(tool: Tool) { toolbar.sync(tool) }
     }
 
@@ -286,6 +309,7 @@ class NotebookActivity : AppCompatActivity() {
         paper.clearSelection()
         selectionActive = false
         currentSelection = null
+        selectionToolbar.hide()   // idempotent — clearSelection fires onSelectionDismissed too
         paper.clearForContentSwap()
         paper.setPageSize(page.width, page.height)
         paper.setTemplate(session.template)
@@ -377,28 +401,6 @@ class NotebookActivity : AppCompatActivity() {
     // ── Selection ────────────────────────────────────────────────────────────
 
     /**
-     * A tap inside the selection box opens the selection's menu. One row today: delete.
-     *
-     * **No confirm dialog.** The tap landed inside the box the user just drew, the row says exactly
-     * what it does, and the delete comes straight back with undo — the same reasoning that stripped
-     * the page-delete confirm's warning body in R4. A second dialog here would only be ceremony.
-     *
-     * **Frame silence.** [PaperView.releaseRender] is called ungated and a dialog is put on screen,
-     * which is an app frame — the same recorded exception family as the panel close at stylus
-     * pen-up: a single chrome frame at a *stroke boundary*, in direct response to a deliberate act.
-     * g-paper escrows this callback to pen-up for a stylus and past `PEN_ACTIVE_TAIL_MS` for a
-     * finger (palm-gated), so the contact that asked for the menu is already over when we paint.
-     */
-    private fun showSelectionSheet() {
-        if (!opened || closing) return
-        val sel = currentSelection ?: return
-        paper.releaseRender()
-        ActionSheetDialog(this)
-            .addAction(R.drawable.ic_trash, getString(R.string.delete_selection_action)) { deleteSelection(sel) }
-            .show()
-    }
-
-    /**
      * Delete the selected strokes. Order matters: capture the geometry from [liveStrokes] *first*
      * (it is the only place it still exists once the engine drops them), then tell the engine, then
      * the rows. `removeStrokes` dismisses the selection itself — every data-in call does — so there
@@ -452,8 +454,8 @@ class NotebookActivity : AppCompatActivity() {
         }
     }
 
-    /** Both bars (the top bar's rect grows over any open panel — panels are its children),
-     *  translated into the paper view's coordinates, so the stylus can never ink under chrome. */
+    /** Both bars plus the selection toolbar while it is up, translated into the paper view's
+     *  coordinates, so the stylus can never ink under chrome. */
     private fun pushExclusions() {
         if (!::paper.isInitialized) return
         if (!opened) {
@@ -464,9 +466,20 @@ class NotebookActivity : AppCompatActivity() {
             return
         }
         val paperLoc = IntArray(2).also { paper.asView().getLocationInWindow(it) }
-        val rects = listOfNotNull(rectOf(binding.topBar), rectOf(binding.bottomStrip))
+        val rects = listOfNotNull(rectOf(binding.topBar), rectOf(binding.bottomStrip), selectionToolbar.rect())
             .map { Rect(it.left - paperLoc[0], it.top - paperLoc[1], it.right - paperLoc[0], it.bottom - paperLoc[1]) }
         paper.setExclusionRects(rects)
+    }
+
+    /**
+     * The free band between the two chrome bars, in the root's coordinates — where a floating bar
+     * may be placed. Null until both have been laid out.
+     */
+    private fun chromeBand(): IntRange? {
+        val top = binding.topBar
+        val bottom = binding.bottomStrip
+        if (top.height == 0 || bottom.height == 0) return null
+        return top.bottom..bottom.top
     }
 
     /**
@@ -483,78 +496,27 @@ class NotebookActivity : AppCompatActivity() {
         binding.root.postDelayed({ whenPenIdle(action) }, PaperView.PEN_ACTIVE_TAIL_MS)
     }
 
-    /** True while a stylus contact is on the glass (Ratta delivers stylus MotionEvents alongside
-     *  the firmware ink). Not hover — contact. */
-    private var stylusContactDown = false
-
-    /** A stylus landed on the page with a panel open — close it at that contact's UP. */
-    private var stylusDismissArmed = false
-
     /** EPD chrome-release: a finger landing on chrome must release the overlay so the tap's visual
-     *  result shows. Done here because the buttons consume the touch. Palm-gated. Anything landing
-     *  on the *page* while a tool panel is open dismisses the panel — the paper is the "anywhere
-     *  else" of that panel (a tap on the panel itself is over chrome: the panel is a child of the
-     *  top bar, so [overChrome] already covers it). A finger dismisses immediately. A stylus
-     *  dismisses at its **pen-up**: the stroke is committed synchronously by then, and waiting for
-     *  full pen-idle instead would hold the panel for as long as the pen *hovers* (`isPenActive`
-     *  counts proximity + a 350 ms tail — an eye-check finding: the panel felt stuck). The close
-     *  is posted so the engine's commit for this event runs first; this is the one deliberate
-     *  frame-silence exception — a single chrome frame at a stroke boundary, once per dismissal. */
+     *  result shows. Done here because the buttons consume the touch. Palm-gated. */
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        // Observer only — consumes nothing. Fed *before* the dismiss block below on purpose: a
-        // finger DOWN that is about to close a panel is seen while `panelOpen` is still true, so
-        // the detector stands down and the whole sequence is discarded rather than half-read.
+        // Observer only — consumes nothing.
         if (opened && ::pageGestures.isInitialized) pageGestures.onTouchEvent(ev)
-        if (::paper.isInitialized) {
+        if (::paper.isInitialized && ev.actionMasked == MotionEvent.ACTION_DOWN) {
             val tool = ev.getToolType(0)
             val stylus = tool == MotionEvent.TOOL_TYPE_STYLUS || tool == MotionEvent.TOOL_TYPE_ERASER
-            when (ev.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    if (!stylus && !paper.isPenActive) {
-                        if (overChrome(ev)) {
-                            paper.releaseRender()
-                        } else if (::toolbar.isInitialized && toolbar.panelOpen) {
-                            paper.releaseRender()
-                            toolbar.closePanels()
-                        }
-                    } else if (stylus) {
-                        stylusContactDown = true
-                        if (::toolbar.isInitialized && toolbar.panelOpen && !overChrome(ev)) {
-                            stylusDismissArmed = true
-                        }
-                    }
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (stylus) {
-                    stylusContactDown = false
-                    if (stylusDismissArmed) {
-                        stylusDismissArmed = false
-                        binding.root.post {
-                            // A new contact may have landed before the post ran — never repaint
-                            // chrome under a live stroke; that contact's own UP re-arms nothing,
-                            // so fall back to the idle gate.
-                            if (::toolbar.isInitialized && toolbar.panelOpen) {
-                                if (stylusContactDown) {
-                                    whenPenIdle {
-                                        if (toolbar.panelOpen) { paper.releaseRender(); toolbar.closePanels() }
-                                    }
-                                } else {
-                                    paper.releaseRender()
-                                    toolbar.closePanels()
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            if (!stylus && !paper.isPenActive && overChrome(ev)) paper.releaseRender()
         }
         return super.dispatchTouchEvent(ev)
     }
 
+    /** Both bars and the selection toolbar — the floating bar is chrome like any other. */
     private fun overChrome(ev: MotionEvent): Boolean {
         val top = rectOf(binding.topBar)
         val bottom = rectOf(binding.bottomStrip)
         val x = ev.x.toInt(); val y = ev.y.toInt()
-        return (top?.contains(x, y) == true) || (bottom?.contains(x, y) == true)
+        return (top?.contains(x, y) == true) ||
+            (bottom?.contains(x, y) == true) ||
+            (::selectionToolbar.isInitialized && selectionToolbar.contains(x, y))
     }
 
     private fun rectOf(v: View): Rect? {

@@ -118,24 +118,8 @@
     <string name="cd_tool_eraser">Eraser</string>
     <string name="cd_tool_lasso">Lasso</string>
 
-    <!-- Notebook toolbar panels -->
-    <string name="panel_label_width">Width</string>
-    <string name="panel_label_style">Style</string>
-    <string name="panel_label_ink">Ink</string>
-    <string name="panel_label_eraser">Eraser size</string>
-    <string name="panel_label_pen_gestures">Pen gestures</string>
-    <string name="lasso_smart_label">Smart lasso</string>
-    <string name="lasso_scribble_label">Scribble erase</string>
-    <string name="cd_toggle_on_fmt">%1$s: on</string>
-    <string name="cd_toggle_off_fmt">%1$s: off</string>
-    <string name="style_pen">Pen</string>
-    <string name="style_fountain">Fountain</string>
-    <string name="style_marker">Marker</string>
-    <string name="style_pencil">Pencil</string>
-    <string name="style_brush">Brush</string>
-    <string name="cd_pen_width_fmt">Width %1$d px</string>
-    <string name="cd_ink_fmt">Ink level %1$d</string>
-    <string name="cd_eraser_radius_fmt">Eraser %1$d px</string>
+    <!-- Notebook -->
+    <string name="notebook_opening">Opening…</string>
     <string name="notebook_open_failed_title">Couldn\'t open notebook</string>
 
     <!-- Notebook pages -->

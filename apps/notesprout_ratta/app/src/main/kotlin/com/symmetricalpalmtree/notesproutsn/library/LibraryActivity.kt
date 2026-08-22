@@ -14,6 +14,7 @@ import com.symmetricalpalmtree.notesproutsn.R
 import com.symmetricalpalmtree.notesproutsn.core.ActionSheetDialog
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
 import com.symmetricalpalmtree.notesproutsn.core.IndexGuard
+import com.symmetricalpalmtree.notesproutsn.core.OpeningOverlay
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.core.TopGuard
 import com.symmetricalpalmtree.notesproutsn.crypto.KeyMaterial
@@ -144,11 +145,15 @@ class LibraryActivity : AppCompatActivity() {
      * users double-tap; without this latch each tap would stack its own NotebookActivity — two
      * concurrent SQLCipher writers on one `.soil` (the documented lock-crash family). Reset in
      * [onResume]: by then the second instance would already exist, so the latch has done its job.
+     *
+     * It is also where the wait becomes visible (P1): [OpeningOverlay] puts "Opening…" up *here*,
+     * at tap time, and the launch runs only once that frame has been drawn — the notebook then
+     * carries the same box from its own first frame until the page lands.
      */
     private fun openNotebook(id: String, name: String) {
         if (launchingNotebook) return
         launchingNotebook = true
-        startActivity(NotebookActivity.intent(this, id, name))
+        OpeningOverlay.showThen(this) { startActivity(NotebookActivity.intent(this, id, name)) }
     }
 
     /**

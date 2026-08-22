@@ -473,6 +473,67 @@ undo/redo, the Test 04 import, no findings) → all-clear given; arc 1 frozen at
 
 ---
 
+## Phases — Arc 2 "Polish" (user-directed 2026-08-22)
+
+### P1 — Fixed tools, selection context toolbar, "Opening…" overlay
+**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-22)
+
+Three user-requested polish items, converging SN on og-Notesprout/Paper behaviour:
+
+1. **Fixed tools — all panels removed.** Pen hardwired **PEN · black · 3 px** (og's stored
+   default = Paper's `PEN_WIDTH_PX`); eraser hardwired **15 px radius**; tool buttons are
+   plain arm-only taps (second tap = no-op, Paper style — og's eraser-toggles-back-to-pen
+   declined); smart lasso + scribble erase hardwired **ON** (lasso panel removed too);
+   `ToolPrefs` deleted (stale `sn_tool` prefs file cleaned up once). Existing strokes keep
+   their stored width/style/grey — render-as-authored, no migration.
+2. **Selection context toolbar** replaces the tap-in-box sheet: Delete-only bordered bar
+   anchored to the selection box (centred, 8 dp below, flip above, clamped to the chrome
+   band — Paper's anchor rules; bounds inflated by g-paper's
+   `CanvasPaperView.SELECTION_BOX_INFLATE_PX`), shown at `onSelectionCreated` (not
+   pen-idle-gated — lasso ends hovering; the engine already presented the selection frame),
+   hidden on drag start, re-anchored after a move, in the exclusion rects + `overChrome`.
+   `onSelectionTapped` becomes a no-op; the selection-sheet frame-silence exception is
+   replaced by the toolbar-show exception.
+3. **"Opening…" overlay, og tap-time pattern**: fresh-coded `core/OpeningOverlay.showThen`
+   (pre-draw + post — the Dispatchers.Main async-barrier trap) wrapping the library's single
+   `openNotebook` door, plus a destination overlay in `NotebookActivity` visible from the
+   first frame until `loadStrokes`/`failOpen` (hide not pen-idle-gated — hover trap).
+
+**Wizard answers (2026-08-22):** pen width **3 px** (not og's on-device 2.5); eraser
+**stays armed** on second tap; lasso panel **removed, both toggles fixed ON**; selection
+toolbar = **Delete only**; overlay = **tap-time og style** (not destination-only).
+**Gate:** JVM tests (new `SelectionAnchor` math; ToolPrefs tests removed) green; debug +
+release build; Haiku device walk (no panels on second taps, overlay visible during open,
+crash buffer); **user eye check** (selection toolbar anchor/feel, delete, drag hide/reshow,
+tap-time overlay).
+*Opus implements against Fable's contract; Fable reviews.*
+
+**Outcome:** Opus implemented the whole phase in one background agent; Fable review clean.
+`NotebookToolbar` 453→106 lines (panels, prefs, dismiss machinery gone); new
+`SelectionAnchor` (pure, 9 JVM tests) + `SelectionToolbar` (bordered floating bar, one
+Delete button, placed by margins after an explicit measure; rect in exclusions +
+`overChrome`); new `core/OpeningOverlay` + `overlay_opening.xml` (pre-draw + post, per-
+activity WeakHashMap cache, resume-after-pause auto-hide) wrapping the library's single
+`openNotebook` door, destination overlay VISIBLE from first frame, hidden after
+`opened = true` and at the top of `failOpen` (before the dialog — the shield would eat its
+OK). One deliberate deviation: g-paper's `CanvasPaperView.SELECTION_BOX_INFLATE_PX` is in a
+**private** companion, so the 12f is mirrored in `SelectionToolbar` with a keep-in-step
+comment (Paper's own precedent) rather than bumping the engine mid-phase. Fable follow-ups:
+app `CLAUDE.md` frame-silence list + no-colour line refreshed (docs/notebook.md § frame-
+silence now: delete-page sheet · selection-toolbar show at lasso completion ·
+opening-overlay hide at page land; R3's panel-close exception retired). `SnApplication`
+deletes the orphaned `sn_tool` prefs file once, off-main. **131 JVM tests** (124 − 2
+ToolPrefs + 9 SelectionAnchor), debug + release build. **Haiku walk 7/7 pass on the first
+run** (no tap-aim false failures this time): cold restore into the notebook, ink renders,
+all three tools double-tapped with no panel, library return, crash buffer clean, cold
+restart. The "Opening…" box is not screencap-catchable on cached-key fast opens (it only
+flashes) — it earns its keep on the ~1 s cold-derive path; user saw it live. **User
+eye-check all-pass 2026-08-22** (fixed-tool feel, selection bar anchor/delete/undo, drag
+hide + re-show at drop, dismissal, overlay) → all-clear. Version stays **0.1.0-ratta**
+(P1 is a phase, not an arc freeze). Both variants reinstalled current on SNN.
+
+---
+
 ## Verification (end of arc)
 
 1. All JVM unit tests green (`./gradlew test` in `apps/notesprout_ratta`).

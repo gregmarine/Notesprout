@@ -338,7 +338,18 @@ library falls back to the root. Nothing in prefs is trusted as still existing.
   on launch and reset in `onResume`. E-ink gives a tap no feedback for hundreds of ms, so users
   double-tap; without the latch each tap would stack its own `NotebookActivity` — two concurrent
   SQLCipher writers on one `.soil` (the documented lock-crash family). All three launch sites
-  (card tap, new-notebook result, cold-launch reopen) route through it.
+  (card tap — including the Pinned and Recents shelves — the new-notebook result, and the
+  cold-launch reopen) route through it.
+- **The "Opening…" overlay goes up at tap time (P1)** — that same door is
+  `OpeningOverlay.showThen(this) { startActivity(…) }` (`core/OpeningOverlay`, detail in
+  `docs/notebook.md`). Opening a notebook is the app's one slow navigation, and the destination's
+  own overlay can only appear once *its* first frame is drawn, leaving a dead gap after the tap.
+  The library raises the box first and the launch runs only after that frame is committed — which
+  is why the helper waits for `onPreDraw` and then `post`s: `Dispatchers.Main` is an async Handler,
+  so a coroutine (or a bare `startActivity` here) jumps the traversal's sync barrier and the box
+  never draws at all. It hides itself on the first resume after the pause, so returning from a
+  notebook finds a clean library, and it swallows touches while up — a second guard against the
+  double-tap the latch already covers.
 - **A damaged index file is never built over (R6)** — `SnIndex`'s probe-`Invalid` branch creates a
   fresh encrypted index only when the file is genuinely absent (or zero bytes). An existing
   non-empty file that fails the probe (an interrupted copy/restore remnant) is

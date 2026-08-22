@@ -2,8 +2,10 @@
 <!--
   Notebook screen: full-bleed paper with chrome overlaid on top.
   PaperView (g-paper drawing surface) is added into paperContainer programmatically.
-  Both bars (topBar's own bar + bottomStrip) and any open panel (penPanel/eraserPanel/lassoPanel)
-  are pushed to paper.setExclusionRects after layout so ink never lands under chrome.
+  Both bars (topBar + bottomStrip) and the floating selectionToolbar while it is up are pushed to
+  paper.setExclusionRects after layout so ink never lands under chrome.
+  The openingOverlay is the LAST child (topmost) and starts VISIBLE — the notebook covers its own
+  first frame, so there is no gap after the library's tap-time overlay.
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/root"
@@ -68,146 +70,6 @@
             android:layout_height="1dp"
             android:background="@color/inkBlack"/>
 
-        <LinearLayout
-            android:id="@+id/penPanel"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:visibility="gone"
-            android:background="@color/paperWhite"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
-            android:paddingTop="12dp"
-            android:paddingBottom="0dp">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/panel_label_width"
-                android:textSize="12sp"
-                android:textColor="@color/inkBlack"/>
-
-            <!-- Width buttons added in code -->
-            <LinearLayout
-                android:id="@+id/penWidthRow"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginBottom="8dp"/>
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/panel_label_style"
-                android:textSize="12sp"
-                android:textColor="@color/inkBlack"/>
-
-            <!-- Style buttons added in code -->
-            <LinearLayout
-                android:id="@+id/penStyleRow"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginBottom="8dp"/>
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/panel_label_ink"
-                android:textSize="12sp"
-                android:textColor="@color/inkBlack"/>
-
-            <!-- Ink swatches (row 1 of 2) added in code -->
-            <LinearLayout
-                android:id="@+id/inkRow1"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"/>
-
-            <!-- Ink swatches (row 2 of 2) added in code -->
-            <LinearLayout
-                android:id="@+id/inkRow2"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginBottom="12dp"/>
-
-            <!-- Panel's own bottom border -->
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:background="@color/inkBlack"/>
-
-        </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/eraserPanel"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:visibility="gone"
-            android:background="@color/paperWhite"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
-            android:paddingTop="12dp"
-            android:paddingBottom="0dp">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/panel_label_eraser"
-                android:textSize="12sp"
-                android:textColor="@color/inkBlack"/>
-
-            <!-- Eraser radius buttons added in code -->
-            <LinearLayout
-                android:id="@+id/eraserRadiusRow"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginBottom="12dp"/>
-
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:background="@color/inkBlack"/>
-
-        </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/lassoPanel"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:visibility="gone"
-            android:background="@color/paperWhite"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
-            android:paddingTop="12dp"
-            android:paddingBottom="0dp">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/panel_label_pen_gestures"
-                android:textSize="12sp"
-                android:textColor="@color/inkBlack"/>
-
-            <!-- Smart-lasso / scribble-erase toggles added in code -->
-            <LinearLayout
-                android:id="@+id/lassoToggleRow"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginBottom="12dp"/>
-
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:background="@color/inkBlack"/>
-
-        </LinearLayout>
-
     </LinearLayout>
 
     <LinearLayout
@@ -256,5 +118,23 @@
         </LinearLayout>
 
     </LinearLayout>
+
+    <!-- The selection's context toolbar — floats over the paper while a lasso selection is up.
+         Positioned by margins (SelectionAnchor); its buttons are added in code. -->
+    <LinearLayout
+        android:id="@+id/selectionToolbar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:orientation="horizontal"
+        android:visibility="gone"
+        android:background="@drawable/shape_dialog_bordered"
+        android:padding="4dp"/>
+
+    <include
+        android:id="@+id/openingOverlay"
+        layout="@layout/overlay_opening"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"/>
 
 </FrameLayout>

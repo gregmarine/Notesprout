@@ -40,15 +40,16 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   chrome via `setExclusionRects`; lifecycle `resumeDrawing`/`releaseForHandoff`/`release`.
 - **Frame-silence rule:** never present an app frame while `paper.isPenActive` — route
   chrome text/updates through a pen-idle gate. Three recorded exceptions (listed with their
-  justifications in `docs/notebook.md` § frame-silence): the tool-panel close at stylus pen-up,
-  the delete-page sheet at long-press, the selection sheet at tap-in-box — all one chrome frame
-  at a stroke boundary in direct response to a deliberate act. Any new exception needs the same
-  written justification.
+  justifications in `docs/notebook.md` § frame-silence): the delete-page sheet at long-press,
+  the selection toolbar's show at lasso completion, the "Opening…" overlay's hide when the
+  page lands — all one chrome frame at a deliberate act or a boundary, never under live ink
+  (R3's tool-panel-close exception retired with the panels in P1). Any new exception needs
+  the same written justification.
 - **Toast vs. dialog:** a toast only confirms something that already happened; anything
   explaining why a tap *didn't* work is a problem dialog. On e-ink a missed toast reads
   as "broken".
-- Portrait-locked everywhere · one layout per screen · no colour in chrome (ink only,
-  via the greyscale/ink panel) · TopGuard is 0 on Ratta — chrome sits flush at the top
+- Portrait-locked everywhere · one layout per screen · no colour in chrome (ink is fixed
+  black — P1 removed the tool panels) · TopGuard is 0 on Ratta — chrome sits flush at the top
   edge · notebook writes go through the session's single serial `SoilWriter` · undo/redo
   replays through the store then reloads the page (DB is the source of truth) · no file
   over ~800 lines without a written reason.

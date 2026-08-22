@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  "Opening…" — a centred bordered box over whatever is on screen. Raised by the library at tap time
+  (core/OpeningOverlay) and by the notebook from its own first frame until the page lands, so the
+  slowest navigation in the app is never a tap with no answer.
+
+  The root is full-screen but transparent, clickable and focusable: it exists to swallow the second
+  tap a slow e-ink refresh invites, while leaving the screen underneath visible — only the box's
+  region repaints.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:clickable="true"
+    android:focusable="true"
+    android:background="@android:color/transparent">
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:orientation="vertical"
+        android:background="@drawable/shape_dialog_bordered"
+        android:padding="24dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/notebook_opening"
+            android:textColor="@color/inkBlack"
+            android:textSize="16sp"/>
+
+    </LinearLayout>
+
+</FrameLayout>
