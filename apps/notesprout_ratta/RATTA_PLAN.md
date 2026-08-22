@@ -309,7 +309,7 @@ issues). Docs: `docs/notebook.md` new, `docs/library.md` row updated. Both varia
 installed on SNN.
 
 ### R4 — Multi-page + gestures + undo/redo
-**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-22)
+**Status:** ✅ Complete (commit 72afc92, Nomad-verified + user all-clear 2026-08-22)
 
 `NotebookSession` paging (`goTo`, `insertBlank`, `deleteCurrent`, reconcile),
 `PageGestures` observer fed from `dispatchTouchEvent` (1-finger horizontal swipe = flip,
