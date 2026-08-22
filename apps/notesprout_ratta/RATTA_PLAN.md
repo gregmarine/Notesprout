@@ -640,7 +640,7 @@ dialog appears at **first recognize use only** (debug "Recognize page" now, head
 in N2) — notebook open only ever warms up an already-present model, never shows a dialog.
 
 ### N1 — Markdown engine (core, pure)
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (JVM-only phase — no device gate; 2026-08-22)
 
 `core/markdown/` fresh-coded to the og subset (see locked decisions): `MarkdownParser`
 (blocks + inlines), `MarkdownRenderer` (spans), and a measure/draw utility
@@ -652,7 +652,28 @@ fresh test code) + heading-typography measure tests; debug + release build.
 safety, seven-`#`s-is-not-a-heading).*
 
 **Questions to resolve at phase start:** none expected — scope fully locked above; ask
-only if og-vs-SN semantic conflicts surface mid-port.
+only if og-vs-SN semantic conflicts surface mid-port. **None surfaced.**
+
+**Outcome:** Opus implemented the whole phase in one background agent; Fable review clean
+(every og semantic verified line-against-line: honoured ordered-list start numbers +
+per-depth counters, seven-`#`s-falls-to-paragraph, `-*-`-is-not-a-rule, task-before-bullet,
+image-before-link with empty-alt-renders-nothing, unclosed-markers-stay-literal, literal
+coalescing, blockquote space-join, trailing-`\n` trim before StaticLayout). New
+`core/markdown/`: `MarkdownParser` (pure Kotlin, `^`-anchored per-line regexes + index-scan
+inlines — no DOT_MATCHES_ALL anywhere), `MarkdownRenderer` (og span set incl.
+`HorizontalRuleSpan`, `blockGapPx` param), `MarkdownDraw` (StaticLayout measure/draw, og's
+`TextObjectRenderer` minus the TextRender dependency; `singleLine` END-ellipsize flag for
+headings), `HeadingTypography` (pure: `BASE_SP` 24 bold, `PADDING_DP` 8, ×2.0/1.75/1.5/
+1.25/1.1/1.0). **Two deliberate deviations:** ① the renderer's heading scale delegates to
+`HeadingTypography.scaleFor` (one table; observable delta only for out-of-1..6 levels —
+unreachable from `parse()`, and clamping is what N2's stored `flags` wants); ② the shared
+test `flatten` resolves Code/Strikethrough to visible text (og's returned `""`; no ported
+assertion touches either). **42 new JVM tests** (both og parser suites ported case-for-case
++ block/inline/typography coverage; none against the android.text classes —
+returnDefaultValues would lie about StaticLayout; renderer/draw are exercised on-device in
+N2), suite now app 184 · api 6 · ext 29; debug + release build green (Fable re-ran the
+gate). No UI/resource/manifest/dependency change; on-device behaviour identical — devices
+untouched.
 
 ### N2 — Heading objects end to end
 **Status:** ⬜ Not started
