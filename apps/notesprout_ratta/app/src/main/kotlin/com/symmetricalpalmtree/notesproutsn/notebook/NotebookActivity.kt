@@ -23,6 +23,7 @@ import com.symmetricalpalmtree.gpaper.core.model.Selection
 import com.symmetricalpalmtree.gpaper.core.model.SelectionMove
 import com.symmetricalpalmtree.gpaper.core.model.Stroke
 import com.symmetricalpalmtree.notesproutsn.R
+import com.symmetricalpalmtree.notesproutsn.core.ActionSheetDialog
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
 import com.symmetricalpalmtree.notesproutsn.core.IndexGuard
 import com.symmetricalpalmtree.notesproutsn.core.Slog
@@ -30,18 +31,21 @@ import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.prefs.BrowseState
 import com.symmetricalpalmtree.notesproutsn.data.prefs.RecentsPrefs
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityNotebookBinding
+import com.symmetricalpalmtree.notesproutsn.notebook.UndoRedoStack.Action
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
  * The notebook screen: a full-bleed g-paper surface with the toolbar and the name strip overlaying
  * it. Lifecycle, wiring, chrome and exclusion rects live here; the data lives in [NotebookSession]
- * / [StrokeStore]; the cover in [CoverSnapshot]; the buttons and panels in [NotebookToolbar].
- * Page gestures and undo/redo land in R4.
+ * / [StrokeStore]; the cover in [CoverSnapshot]; the buttons and panels in [NotebookToolbar]; the
+ * finger vocabulary in [PageGestures] and the history in [UndoRedoStack].
  *
  * Immersive (system bars hidden, transient by swipe); chrome sits flush at the top edge — the top
  * guard is 0 on Ratta hardware (`core/TopGuard.kt` holds that decision).
@@ -52,14 +56,24 @@ class NotebookActivity : AppCompatActivity() {
     private lateinit var paper: PaperView
     private lateinit var toolbar: NotebookToolbar
     private lateinit var session: NotebookSession
+    private lateinit var pageGestures: PageGestures
     private val repo by lazy { IndexRepository() }
 
     private var notebookId: String = ""
     private var opened = false
     private var closing = false
 
-    /** True while a lasso selection is up — R4's gesture detector stands down on it. */
+    /** True while a lasso selection is up — the gesture detector stands down on it. */
     private var selectionActive = false
+
+    /** In-memory, notebook-level history: it survives page turns and dies with the screen. */
+    private val undo = UndoRedoStack()
+
+    /** Serialises page/undo operations so two overlapping gestures can't tangle the page list. */
+    private val pageOps = Mutex()
+
+    /** The strokes on the visible page — the "you still have them" mirror an erase undo needs. */
+    private var liveStrokes: MutableMap<String, Stroke> = mutableMapOf()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -86,6 +100,16 @@ class NotebookActivity : AppCompatActivity() {
         toolbar = NotebookToolbar(binding, paper, ToolPrefs(this)) { close() }
         binding.notebookName.text = name
         binding.pageIndicator.text = ""
+
+        // Stand-down is wider than Paper's: a lasso selection *or* an open tool panel takes the
+        // contact away from the page gestures (the panel's own dismiss owns that touch).
+        pageGestures = PageGestures(
+            host = paper.asView(),
+            isPenActive = { paper.isPenActive },
+            standDown = { selectionActive || toolbar.panelOpen },
+            overChrome = { overChrome(it) },
+            listener = gestureListener,
+        )
 
         // Chrome moved/appeared/disappeared (incl. panel toggles — they change topBar's height):
         // re-push the exclusion rects once the pass settles.
@@ -117,6 +141,7 @@ class NotebookActivity : AppCompatActivity() {
         paper.setPageSize(page.width, page.height)
         paper.setTemplate(session.template)
         paper.loadStrokes(strokes)
+        liveStrokes = strokes.associateBy { it.id }.toMutableMap()
         opened = true
         setPageIndicator(session.currentIndex + 1, session.pages.size)
         Slog.d(TAG) { "page ${page.id} loaded: ${strokes.size} strokes, ${page.width}x${page.height}" }
@@ -142,19 +167,161 @@ class NotebookActivity : AppCompatActivity() {
     private val listener = object : PaperListener {
         override fun onStrokeCommitted(stroke: Stroke) {
             if (!opened) return
-            session.store.commit(session.currentPage.id, stroke)
+            val pageId = session.currentPage.id
+            session.store.commit(pageId, stroke)
+            liveStrokes[stroke.id] = stroke
+            undo.record(Action.Drew(pageId, stroke))
         }
         override fun onStrokesErased(strokeIds: List<String>) {
             if (!opened) return
+            val pageId = session.currentPage.id
+            // The mirror is the only place the geometry still exists once the engine drops it.
+            val captured = strokeIds.mapNotNull { liveStrokes.remove(it) }
             session.store.erase(strokeIds)
+            if (captured.isNotEmpty()) undo.record(Action.Erased(pageId, captured))
         }
         override fun onSelectionMoved(move: SelectionMove) {
             if (!opened) return
-            session.store.move(move.strokeIds.toList(), move.dx, move.dy)
+            val pageId = session.currentPage.id
+            val ids = move.strokeIds.toList()
+            session.store.move(ids, move.dx, move.dy)
+            for (id in ids) liveStrokes[id]?.let { liveStrokes[id] = it.translated(move.dx, move.dy) }
+            undo.record(Action.Moved(pageId, ids, move.dx, move.dy))
         }
         override fun onSelectionCreated(selection: Selection) { selectionActive = true }
         override fun onSelectionDismissed() { selectionActive = false }
         override fun onToolChanged(tool: Tool) { toolbar.sync(tool) }
+    }
+
+    // ── Page gestures → operations ───────────────────────────────────────────
+
+    private val gestureListener = object : PageGestures.Listener {
+        override fun onFlipNext() = runPageOp {
+            // Swiping past the last page makes one — the notebook grows where you write.
+            if (session.currentIndex < session.pages.lastIndex) navigateTo(session.currentIndex + 1)
+            else doInsert(after = true)
+        }
+        override fun onFlipPrevious() = runPageOp {
+            if (session.currentIndex > 0) navigateTo(session.currentIndex - 1)
+        }
+        override fun onInsertAfter() = runPageOp { doInsert(after = true) }
+        override fun onInsertBefore() = runPageOp { doInsert(after = false) }
+        override fun onUndo() = runPageOp { doUndo() }
+        override fun onRedo() = runPageOp { doRedo() }
+        override fun onDeleteRequested() { showDeleteSheet() }
+    }
+
+    /** Serialise every page/undo mutation; ignore anything while not open or once closing. */
+    private fun runPageOp(block: suspend () -> Unit) {
+        if (!opened || closing) return
+        lifecycleScope.launch {
+            pageOps.withLock {
+                if (opened && !closing) runCatching { block() }.onFailure { Log.w(TAG, "page op failed", it) }
+            }
+        }
+    }
+
+    /**
+     * Swap the visible page. The order is the host-responsibilities page-swap law:
+     * `clearForContentSwap` (pixels hold — no blank flash on e-ink) → `setPageSize`/`setTemplate` →
+     * `loadStrokes`, which is a single EPD refresh. Any selection goes first, because a data-in
+     * call would dismiss it anyway and it belongs to the page we are leaving.
+     */
+    private suspend fun navigateTo(index: Int) {
+        val page = session.goTo(index)
+        val strokes = session.store.loadPage(page.id)
+        paper.clearSelection()
+        selectionActive = false
+        paper.clearForContentSwap()
+        paper.setPageSize(page.width, page.height)
+        paper.setTemplate(session.template)
+        paper.loadStrokes(strokes)
+        liveStrokes = strokes.associateBy { it.id }.toMutableMap()
+        setPageIndicator(session.currentIndex + 1, session.pages.size)
+        session.saveLastOpened()
+    }
+
+    /** Show whatever the rows now say about [pageId] — the replay path's only way back to the paper. */
+    private suspend fun refreshToPage(pageId: String) {
+        val idx = session.pages.indexOfFirst { it.id == pageId }
+        if (idx >= 0) navigateTo(idx)
+    }
+
+    private suspend fun doInsert(after: Boolean) {
+        val snap = session.insertBlank(after)
+        undo.record(Action.Page(snap))
+        navigateTo(session.currentIndex)   // put the freshly-inserted blank page on the paper
+    }
+
+    private suspend fun doDelete() {
+        val snap = session.deleteCurrent()
+        undo.record(Action.Page(snap))
+        navigateTo(session.currentIndex)
+    }
+
+    private suspend fun doUndo() {
+        val a = undo.popUndo() ?: return
+        session.store.drain()   // the queued writes are part of the state being reversed
+        revert(a)
+        undo.pushRedo(a)
+    }
+
+    private suspend fun doRedo() {
+        val a = undo.popRedo() ?: return
+        session.store.drain()
+        reapply(a)
+        undo.pushUndo(a)
+    }
+
+    /**
+     * Every replay mutates the store first and *then* reloads the affected page: the `.soil` is the
+     * source of truth, so what the paper shows after an undo is what a reopen would show.
+     */
+    private suspend fun revert(a: Action) {
+        when (a) {
+            is Action.Drew -> { session.store.remove(listOf(a.stroke.id)); session.store.drain(); refreshToPage(a.pageId) }
+            is Action.Erased -> { session.store.restore(a.pageId, a.strokes); session.store.drain(); refreshToPage(a.pageId) }
+            is Action.Moved -> { session.store.move(a.ids, -a.dx, -a.dy); session.store.drain(); refreshToPage(a.pageId) }
+            is Action.Page -> {
+                session.reconcile(a.snapshot.before, a.snapshot.strokeIds, emptyList(), a.snapshot.beforeCurrentId)
+                refreshToPage(session.currentPage.id)
+            }
+        }
+    }
+
+    private suspend fun reapply(a: Action) {
+        when (a) {
+            is Action.Drew -> { session.store.restore(a.pageId, listOf(a.stroke)); session.store.drain(); refreshToPage(a.pageId) }
+            is Action.Erased -> { session.store.remove(a.strokes.map { it.id }); session.store.drain(); refreshToPage(a.pageId) }
+            is Action.Moved -> { session.store.move(a.ids, a.dx, a.dy); session.store.drain(); refreshToPage(a.pageId) }
+            is Action.Page -> {
+                session.reconcile(a.snapshot.after, emptyList(), a.snapshot.strokeIds, a.snapshot.afterCurrentId)
+                refreshToPage(session.currentPage.id)
+            }
+        }
+    }
+
+    /** Long-press asks; it never deletes. Sheet → confirm dialog → the actual op. */
+    private fun showDeleteSheet() {
+        if (!opened) return
+        // Ungated releaseRender() is safe here only because the long-press fired through
+        // PageGestures' own gate: it never arms while the pen is active and re-checks at fire, so
+        // we are outside the pen-active window the R3 rule protects (a release inside it can cost
+        // a live stroke).
+        paper.releaseRender()
+        ActionSheetDialog(this)
+            .addAction(R.drawable.ic_trash, getString(R.string.delete_page_action)) { confirmDeletePage() }
+            .show()
+    }
+
+    private fun confirmDeletePage() {
+        Dialogs.style(
+            AlertDialog.Builder(this)
+                .setTitle(R.string.delete_page_title)
+                .setPositiveButton(R.string.delete_confirm) { _, _ -> runPageOp { doDelete() } }
+                .setNegativeButton(R.string.cancel, null)
+                .create()
+        ).show()
     }
 
     // ── Chrome ───────────────────────────────────────────────────────────────
@@ -209,6 +376,10 @@ class NotebookActivity : AppCompatActivity() {
      *  is posted so the engine's commit for this event runs first; this is the one deliberate
      *  frame-silence exception — a single chrome frame at a stroke boundary, once per dismissal. */
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        // Observer only — consumes nothing. Fed *before* the dismiss block below on purpose: a
+        // finger DOWN that is about to close a panel is seen while `panelOpen` is still true, so
+        // the detector stands down and the whole sequence is discarded rather than half-read.
+        if (opened && ::pageGestures.isInitialized) pageGestures.onTouchEvent(ev)
         if (::paper.isInitialized) {
             val tool = ev.getToolType(0)
             val stylus = tool == MotionEvent.TOOL_TYPE_STYLUS || tool == MotionEvent.TOOL_TYPE_ERASER
@@ -295,6 +466,7 @@ class NotebookActivity : AppCompatActivity() {
     private fun close() {
         if (closing) return
         closing = true
+        undo.clear()   // in-memory history dies with the screen
         BrowseState(this).lastOpenNotebookId = null
         if (!::session.isInitialized || !session.isOpen) { finish(); return }
         val p = paper; val s = session; val id = notebookId
@@ -316,6 +488,7 @@ class NotebookActivity : AppCompatActivity() {
         // A destroy that isn't a normal close (e.g. finish() out of failOpen) still seals.
         if (::session.isInitialized && session.isOpen && !closing) {
             closing = true
+            undo.clear()
             val s = session
             appScope.launch { withContext(NonCancellable) { try { s.seal() } catch (e: Exception) { Log.w(TAG, "seal failed", e) } } }
         }

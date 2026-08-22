@@ -1,0 +1,122 @@
+package com.symmetricalpalmtree.notesproutsn.notebook
+
+import com.symmetricalpalmtree.gpaper.core.model.Stroke
+import com.symmetricalpalmtree.gpaper.core.model.StrokePoint
+import com.symmetricalpalmtree.notesproutsn.notebook.UndoRedoStack.Action
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/**
+ * History ordering only — the stack never touches the paper or the rows. What matters here is that
+ * undo is strict LIFO, that a fresh edit invalidates the redo side, and that the bound drops the
+ * *oldest* entry rather than refusing the new one.
+ */
+class UndoRedoStackTest {
+
+    private fun stroke(id: String) = Stroke(
+        id = id,
+        points = listOf(StrokePoint(1f, 2f), StrokePoint(3f, 4f)),
+    )
+
+    private fun drew(id: String, page: String = "p") = Action.Drew(page, stroke(id))
+
+    @Test
+    fun `a fresh stack can do neither`() {
+        val s = UndoRedoStack()
+        assertFalse(s.canUndo())
+        assertFalse(s.canRedo())
+        assertNull(s.popUndo())
+        assertNull(s.popRedo())
+    }
+
+    @Test
+    fun `recording makes undo available`() {
+        val s = UndoRedoStack()
+        s.record(drew("a"))
+        assertTrue(s.canUndo())
+        assertFalse(s.canRedo())
+    }
+
+    @Test
+    fun `undo pops newest first`() {
+        val s = UndoRedoStack()
+        val a = drew("a"); val b = drew("b"); val c = drew("c")
+        s.record(a); s.record(b); s.record(c)
+        assertSame(c, s.popUndo())
+        assertSame(b, s.popUndo())
+        assertSame(a, s.popUndo())
+        assertFalse(s.canUndo())
+    }
+
+    @Test
+    fun `undo then redo round-trips in the original order`() {
+        val s = UndoRedoStack()
+        val a = drew("a"); val b = drew("b")
+        s.record(a); s.record(b)
+        // Undo both, moving each to the redo side as the caller does.
+        s.popUndo()!!.let { s.pushRedo(it) }
+        s.popUndo()!!.let { s.pushRedo(it) }
+        assertFalse(s.canUndo())
+        assertTrue(s.canRedo())
+        // Redo pops them back in the order they were originally performed.
+        assertSame(a, s.popRedo()!!.also { s.pushUndo(it) })
+        assertSame(b, s.popRedo()!!.also { s.pushUndo(it) })
+        assertFalse(s.canRedo())
+        assertSame(b, s.popUndo())
+    }
+
+    @Test
+    fun `a new edit clears the redo side`() {
+        val s = UndoRedoStack()
+        s.record(drew("a"))
+        s.pushRedo(drew("stale"))
+        assertTrue(s.canRedo())
+        s.record(drew("b"))
+        assertFalse(s.canRedo())
+        assertNull(s.popRedo())
+    }
+
+    @Test
+    fun `the bound drops the oldest entry`() {
+        val s = UndoRedoStack()
+        repeat(120) { s.record(drew("s$it")) }
+        val popped = generateSequence { s.popUndo() }.toList()
+        assertEquals(100, popped.size)
+        // Newest first, and the oldest 20 are gone: s119 down to s20.
+        assertEquals("s119", (popped.first() as Action.Drew).stroke.id)
+        assertEquals("s20", (popped.last() as Action.Drew).stroke.id)
+    }
+
+    @Test
+    fun `clear empties both sides`() {
+        val s = UndoRedoStack()
+        s.record(drew("a"))
+        s.pushRedo(drew("b"))
+        s.clear()
+        assertFalse(s.canUndo())
+        assertFalse(s.canRedo())
+    }
+
+    @Test
+    fun `a page action's pageId is where the op landed`() {
+        val snap = NotebookSession.Structural(
+            before = listOf("A", "B"),
+            after = listOf("A", "N", "B"),
+            strokeIds = emptyList(),
+            beforeCurrentId = "A",
+            afterCurrentId = "N",
+        )
+        assertEquals("N", Action.Page(snap).pageId)
+    }
+
+    @Test
+    fun `every action kind reports its own page`() {
+        assertEquals("p1", Action.Drew("p1", stroke("a")).pageId)
+        assertEquals("p2", Action.Erased("p2", listOf(stroke("a"))).pageId)
+        assertEquals("p3", Action.Moved("p3", listOf("a"), 5f, -5f).pageId)
+    }
+}

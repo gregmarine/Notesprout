@@ -58,12 +58,34 @@ class StrokeStore(
         Slog.d(TAG) { "commit ${stroke.id} (${stroke.points.size} pts) order=$order" }
     }
 
-    /** Erased ink: soft delete — the rows stay for undo (R4) and the family's soft-delete rule. */
+    /** Erased ink: soft delete — the rows stay for undo and the family's soft-delete rule. */
     fun erase(ids: List<String>) {
         if (ids.isEmpty()) return
         enqueue {
             dao.softDelete(ids, System.currentTimeMillis())
             Slog.d(TAG) { "erase ${ids.size}" }
+        }
+    }
+
+    /** Undo of a draw: the same soft delete as [erase], named for the caller that means it. */
+    fun remove(ids: List<String>) = erase(ids)
+
+    /**
+     * Undo of an erase (and redo of a draw): put the strokes back as live rows at the tail of the
+     * page's z-order. The upsert is REPLACE, so a soft-deleted row is revived in place with
+     * `deletedAt` cleared — and because [SoilDao.maxOrder] counts deleted rows too, the revived
+     * stroke can never tie with one committed after the erase.
+     */
+    fun restore(pageId: String, strokes: List<Stroke>) {
+        if (strokes.isEmpty()) return
+        enqueue {
+            val now = System.currentTimeMillis()
+            var order = dao.maxOrder(pageId, SoilSchema.TYPE_STROKE)
+            for (s in strokes) {
+                order += 1
+                dao.upsert(StrokeRows.toRow(s, pageId, order, now))
+            }
+            Slog.d(TAG) { "restore ${strokes.size} to $pageId" }
         }
     }
 

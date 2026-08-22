@@ -118,6 +118,14 @@ tree at commit `87277da`) with zero extension machinery.
   `input swipe` deliver nothing to the ink path. Committed-ink verification needs the user's pen;
   agents can still verify chrome, panels, and persistence of strokes the user already wrote.
   Finger `input tap` works normally.
+- **`monkey -p <pkg> 1` does not reliably bring the target app to the foreground** (R4 finding):
+  with Notesprout Paper dev's task frontmost, a monkey launch of SN dev left Paper in front, and an
+  entire Haiku device walk silently "passed" against **Paper's** notebook (same features, near-same
+  UI — only the dialog wording gave it away). Device agents must launch with
+  `am start -n <pkg>/<fully.qualified.Activity>` and **verify `dumpsys activity activities |
+  grep mResumedActivity` shows the target package before every screencap-based conclusion.**
+  Note: finger `input swipe` (page-flip gestures) works fine — the R3 ink limitation is the stylus
+  path only.
 
 ---
 
@@ -301,7 +309,7 @@ issues). Docs: `docs/notebook.md` new, `docs/library.md` row updated. Both varia
 installed on SNN.
 
 ### R4 — Multi-page + gestures + undo/redo
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-22)
 
 `NotebookSession` paging (`goTo`, `insertBlank`, `deleteCurrent`, reconcile),
 `PageGestures` observer fed from `dispatchTouchEvent` (1-finger horizontal swipe = flip,
@@ -316,9 +324,38 @@ persistence across relaunch. **User eye check #2:** gesture feel, flip cleanline
 stale overlay ink crossing pages).
 *Opus implements; Fable reviews the gesture/EPD interplay.*
 
+**Outcome:** Opus implemented the whole phase in one background agent (`PageMath`, `UndoRedoStack`,
+`PageGestures`, session `insertBlank`/`deleteCurrent`/`reconcile` each in one transaction with
+dense 0..N-1 renumber + index mirrors, store `remove`/`restore`, full activity wiring); Fable
+review clean — the SN deltas are all deliberate: gesture **stand-down widened to
+`selectionActive || toolbar.panelOpen`** and the detector is fed *before* the panel-dismiss block
+(so the closing tap can't half-arm a gesture), the BOOX 3-finger `ACTION_CANCEL` case dropped, the
+delete-sheet `releaseRender()` documented as safe-because-gate-checked. **113 JVM tests** (23 new:
+PageMath, UndoRedoStack), debug + release build. **Device walk: the first Haiku run was invalid —
+it silently tested Notesprout Paper dev** (the monkey-launch trap recorded above; only the dialog
+wording exposed it, chased through the APK's arsc/dex to `mResumedActivity`). Fable re-drove the
+full walk by hand against the verified-foreground SN build: all steps pass (insert-past-last
+1/1→3/3, flips both ways, first-page hold, sub-threshold swipe ignored, sheet → confirm → delete
+1/2, cold restart restores into the notebook at 1/2, crash buffer empty). Cleanup note: the
+misfired agent left a junk 2-page notebook **"Test 08" in Paper dev's library** (agent-created;
+user to remove at leisure). **Eye check #2 all-pass 2026-08-22, one wording fix:** the delete
+confirm's body "Its ink cannot be recovered." was **false** (soft delete + `reconcile` means undo
+restores the page *and* its ink) — dialog reduced to the bare "Delete this page?"
+(`delete_page_body` removed; decision recorded in `docs/notebook.md`). Test data left on device:
+SN notebook `20260821_004817` (2 blank pages). Both variants reinstalled current on SNN.
+
 **Questions to resolve at phase start:** adopt Paper's exact gesture thresholds
 (PAPER_PLAN.md architecture section) or retune for Nomad; page-flip visual (instant swap
 vs. any indicator).
+**Answered 2026-08-21:** Paper v0's **exact thresholds, verbatim** (flip: horizontal-dominant,
+`|dx| ≥ 0.30 × screenWidth`, fling velocity **or** `|dx| ≥ 0.50 × screenWidth`; insert: same
+gates on the 2-finger centroid; undo/redo: 2/3-finger stationary double-tap on
+touchSlop/longPressTimeout/doubleTapTimeout gates; delete: 1-finger long-press → sheet →
+confirm) — retune only if eye-check #2 flags a gesture; the BOOX 3-finger `ACTION_CANCEL`
+special-case is dropped unless the Nomad shows the same behavior. Flip visual = Paper's:
+**instant swap + persistent "n / N" indicator** in chrome, updates pen-idle-gated. (Already
+locked by the phase text, unchanged: swipe-next past the last page inserts; undo covers page
+insert/delete → notebook-level stack bounded 100, cleared on close only.)
 
 **Outcome:** —
 
