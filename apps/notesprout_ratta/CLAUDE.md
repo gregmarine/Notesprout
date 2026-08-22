@@ -49,12 +49,14 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   `setPageSize`/`setTemplate` → `loadStrokes`; undo/redo via `addStrokes`/`removeStrokes`;
   chrome via `setExclusionRects`; lifecycle `resumeDrawing`/`releaseForHandoff`/`release`.
 - **Frame-silence rule:** never present an app frame while `paper.isPenActive` — route
-  chrome text/updates through a pen-idle gate. Three recorded exceptions (listed with their
+  chrome text/updates through a pen-idle gate. Five recorded exceptions (listed with their
   justifications in `docs/notebook.md` § frame-silence): the delete-page sheet at long-press,
   the selection toolbar's show at lasso completion, the "Opening…" overlay's hide when the
-  page lands — all one chrome frame at a deliberate act or a boundary, never under live ink
-  (R3's tool-panel-close exception retired with the panels in P1). Any new exception needs
-  the same written justification.
+  page lands, the "Recognizing…" overlay around a heading convert, and the selection
+  toolbar's own-tap re-shows (H toggle / level pick / post-edit re-anchor) — all one chrome
+  frame at a deliberate act or a boundary, never under live ink (R3's tool-panel-close
+  exception retired with the panels in P1). Any new exception needs the same written
+  justification.
 - **Toast vs. dialog:** a toast only confirms something that already happened; anything
   explaining why a tap *didn't* work is a problem dialog. On e-ink a missed toast reads
   as "broken".

@@ -676,7 +676,40 @@ gate). No UI/resource/manifest/dependency change; on-device behaviour identical 
 untouched.
 
 ### N2 — Heading objects end to end
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-22; commit hash in the follow-up
+status commit)
+
+**Eye-check #5 round 1 (2026-08-22) findings & responses — both fixed, build reinstalled:**
+- *H1–H6 must be a sub-toolbar popping up off the bar (og/Paper shape), not a second row growing
+  the bar* → **fixed**: `selectionSubToolbar` is its own floating bar hung off the main bar by
+  `SelectionAnchor.placeSub` (Paper's `ToolbarAnchor` math ported verbatim — below the bar, above
+  when the bar flipped, band-clamped; the main bar never moves when it opens); both bars join the
+  exclusion rects and `overChrome`; 6 new JVM tests.
+- *Convert recognition garbage ("Heading" → "Go"/"o") while debug Recognize page is excellent* →
+  **root cause: writing area.** The page pipeline recognizes per line with the LINE box, and
+  Paper's H action passes the **selection bounds** — SN's convert passed the whole page, which
+  ML Kit reads as the writing's scale. Fix: `recognizeInk` now gets `sel.bounds.width/height`
+  (`HeadingConvert` params renamed `areaWidth/areaHeight` with the why in the KDoc).
+
+**Eye-check #5 round 3 (2026-08-22) finding & decision — no code change:**
+- *A doodle always converts into something ("o", junk)* → **accepted as designed** (user's call,
+  wizard-asked): ML Kit is a forced-choice recognizer — it essentially never returns blank, and
+  candidate scores are only comparable within one result, so a confidence gate would false-reject
+  real writing. og/Paper behave identically (Paper rejects only a truly blank result). Recovery is
+  already one gesture: the junk heading lands selected → Delete or undo; the problem dialog stays
+  for the rare truly-blank result. Do not re-raise a doodle-rejection heuristic.
+
+**Eye-check #5 round 2 (2026-08-22) finding & response — fixed, build reinstalled:**
+- *Smart-lasso convert: the pen tool re-arms while the new heading is still selected, and the
+  selection can't be dragged/tapped; PEN must not return until the selection is dismissed* →
+  **root cause + fix:** the conversion's `removeStrokes` dismisses the smart-lasso selection, and
+  the engine's `maybeEndSmartLassoSession` restored PEN before the host re-selected the heading.
+  But `clearSelection` fires `onSelectionDismissed` *before* that check, and the check skips the
+  restore when a successor selection exists — so the heading selection is now injected **inside
+  the dismissal callback** (`pendingSelection` handoff in `NotebookActivity`): the smart-lasso
+  session survives the conversion, LASSO stays armed over the selected heading (drag + tap-to-edit
+  work), and the engine itself restores PEN + fires `onToolChanged` when the heading's selection
+  is eventually dismissed. No host-side tool bookkeeping.
 
 `SoilSchema.TYPE_HEADING` + heading store (`HeadingRows`/`HeadingStore` on the session's
 single serial `SoilWriter`, z-order `MAX("order")+1`, soft delete); prefix helpers
@@ -704,6 +737,41 @@ Sonnet layouts/icons/strings.*
 below strokes — adopt?); sub-row anchor behaviour (swap the bar in place vs. second row);
 edit-dialog box growth rule (clamp to page width?); whether CHANGE mode's sub-row also
 offers Delete or stays level-only.
+**Answered 2026-08-22:** **headings below ink** (og parity — strokes draw on top);
+H1–H6 sub-row = **second row below the main bar** (Delete/H bar stays visible above it) —
+**superseded by eye-check round 1: the og/Paper floating sub-toolbar hung off the bar**;
+heading box = **free growth** (measured text width even past the page edge — no clamp,
+overhang simply not visible); CHANGE-mode sub-row = **level-only** (Delete stays on the
+main bar).
+
+**Outcome:** Split per the recipe — Fable wrote the data/undo/renderer layer + all
+`NotebookActivity` wiring (`TYPE_HEADING`, `HeadingPrefix`, `Heading`/`HeadingRows`,
+**`SoilWriter` extracted from `StrokeStore`** so stroke + heading writes share the one serial
+queue, `HeadingStore` — in-place restores, `StrokeStore.revive` for the writing-order trap —
+`HeadingRenderer` (BELOW_STROKES, live-drag pair, free-growth measure via the N1 engine, covers
+free through the shared render path), undo actions `HeadingCreated`/`HeadingDeleted`/
+`HeadingTextEdited`/`HeadingLevelChanged` + `Moved`/`Deleted` carrying heading ids, page
+delete/reconcile carrying heading rows via `liveContentIds` and `Structural.objectIds`); Opus the
+SelectionToolbar/H flows/`HeadingConvert`/`HeadingEditDialog`/`RecognizingOverlay`; Sonnet
+icons (og `ic_heading`, Paper's `ic_h_1..6`) + strings. **Deliberate deviations:** `HeadingMoved`
+folded into `Moved` (one gesture = one undo step); eraser sweep = `onContentErased` →
+`HeadingDeleted`; unconditional `notifyContentChanged` after conversion/delete `removeStrokes`
+(it skips its re-record on stale ids). **Eye-check #5 ran three rounds** (blocks above): ① sub-row
+→ og/Paper floating sub-toolbar (`SelectionAnchor.placeSub`, Paper's `ToolbarAnchor` math; main
+bar never moves) + **recognition writing-area root cause** (selection bounds, not page —
+"Heading"→"o" fixed); ② smart-lasso PEN restored mid-selection → successor selection injected
+**inside `onSelectionDismissed`** (`pendingSelection` handoff — the engine keeps the session,
+restores PEN at the heading selection's own dismissal); ③ doodle-always-converts **accepted as
+designed** (decision block above — do not re-raise). **247 JVM tests** (28 new: HeadingPrefix 8,
+HeadingRows 6, HeadingStore 7, revive 1, placeSub/flipped 6; shared `FakeSoilDao` extracted),
+debug + release build. **Device:** Haiku smoke walk 6/7 + the fifth tap-aim false failure (⋯ —
+hand-verified working: Recognize page 28 strokes · 0.5 s); crash buffer clean throughout.
+**User eye check #5 all-pass 2026-08-22** (convert per level incl. smart-lasso session survival,
+render fidelity, floating level popup, drag-as-real-text, mixed lasso, eraser, edit dialog +
+empty-save delete, undo/redo of everything, persistence, ink-over-heading) → all-clear. Docs:
+`docs/notebook.md` frame-silence ledger → five exceptions (+ app CLAUDE.md). Version stays
+**0.1.0-ratta** (N3 decides the stamp). Both variants reinstalled current on SNN; Test 04 carries
+the eye-check headings.
 
 ### N3 — Hardening, review, docs, freeze
 **Status:** ⬜ Not started

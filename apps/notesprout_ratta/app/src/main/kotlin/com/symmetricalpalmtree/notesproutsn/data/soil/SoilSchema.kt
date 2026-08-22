@@ -28,6 +28,16 @@ object SoilSchema {
     const val TYPE_TEMPLATE = "template"
     const val TYPE_STROKE = "stroke"
 
+    /**
+     * Heading object (arc 3) — SN's one additive row type on the family shape, og's model:
+     * `parentId` = page id · `text` = hash-prefixed markdown (`"## Title"`), always non-null ·
+     * `flags` = level 1–6 (**authoritative** — the prefix is only ever written from it) ·
+     * `x`/`y`/`width`/`height` = bounds in page px · `"order"` = z-order among the page's
+     * headings. No version bump, no migration; Paper ignores the rows (the proven-safe additive
+     * pattern — the mirror of SN ignoring Paper's `object` rows in R6).
+     */
+    const val TYPE_HEADING = "heading"
+
     /** The notebook meta row's `parentId` (it is the root). */
     const val ROOT_PARENT = ""
 

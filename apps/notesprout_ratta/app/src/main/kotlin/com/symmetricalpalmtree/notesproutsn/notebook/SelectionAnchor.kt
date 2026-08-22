@@ -1,24 +1,29 @@
 package com.symmetricalpalmtree.notesproutsn.notebook
 
 /**
- * Where the floating [SelectionToolbar] goes — pure arithmetic, JVM-tested. Every value is px in
- * the notebook root's coordinate space.
+ * Where the floating [SelectionToolbar] and its level sub-toolbar go — pure arithmetic, JVM-tested
+ * (Paper's `ToolbarAnchor` semantics). Every value is px in the notebook root's coordinate space.
  *
- * The bar sits [gap] below the selection box, horizontally centred on it. When that would push it
- * past [bandBottom] (the bottom strip's top edge) it flips to [gap] *above* the box instead — the
- * user's hand is below the selection when they finish a lasso, so below-then-flip is the order that
- * keeps the bar out from under it. Either way the result is clamped inside `[0, rootWidth]` ×
- * `[bandTop, bandBottom]` (the top bar's bottom edge to the bottom strip's top): a selection drawn
- * against a screen edge still gets a fully reachable bar, and the bar never lands under chrome,
- * where its own taps would be eaten.
+ * The bar sits [place]'s [gap] below the selection box, horizontally centred on it. When that would
+ * push it past [bandBottom] (the bottom strip's top edge) it flips to [gap] *above* the box instead
+ * — the user's hand is below the selection when they finish a lasso, so below-then-flip is the
+ * order that keeps the bar out from under it. Either way the result is clamped inside
+ * `[0, rootWidth]` × `[bandTop, bandBottom]` (the top bar's bottom edge to the bottom strip's top):
+ * a selection drawn against a screen edge still gets a fully reachable bar, and the bar never lands
+ * under chrome, where its own taps would be eaten.
+ *
+ * The **sub-toolbar hangs off the bar** ([placeSub]) — below it, or above it when the bar itself
+ * flipped (and the other way round when that would leave the band), centred on the bar, clamped the
+ * same way — so opening it never moves the bar the user just aimed at, and the two rows never
+ * overlap chrome or each other.
  *
  * There is no dependency on Android here on purpose — the geometry is the part worth testing, and
  * the view work ([SelectionToolbar]) is the part that cannot be.
  */
 object SelectionAnchor {
 
-    /** Top-left of the bar, in root coordinates. */
-    data class Placement(val x: Int, val y: Int)
+    /** Top-left of a row, in root coordinates; [flipped] = it went above instead of below. */
+    data class Placement(val x: Int, val y: Int, val flipped: Boolean = false)
 
     fun place(
         selLeft: Int,
@@ -34,11 +39,40 @@ object SelectionAnchor {
     ): Placement {
         val x = clamp((selLeft + selRight) / 2 - toolbarW / 2, 0, maxOf(0, rootWidth - toolbarW))
         var y = selBottom + gap
-        if (y + toolbarH > bandBottom) y = selTop - gap - toolbarH
+        var flipped = false
+        if (y + toolbarH > bandBottom) { y = selTop - gap - toolbarH; flipped = true }
         // A selection taller than the band leaves neither side room; the clamp lands it at the top
         // of the band rather than off-screen, which is still a reachable bar.
         y = clamp(y, bandTop, maxOf(bandTop, bandBottom - toolbarH))
-        return Placement(x, y)
+        return Placement(x, y, flipped)
+    }
+
+    /** The level sub-toolbar, hung off the placed [bar] (which never moves for it). */
+    fun placeSub(
+        bar: Placement,
+        barW: Int,
+        barH: Int,
+        w: Int,
+        h: Int,
+        gap: Int,
+        rootWidth: Int,
+        bandTop: Int,
+        bandBottom: Int,
+    ): Placement {
+        val x = clamp(bar.x + barW / 2 - w / 2, 0, maxOf(0, rootWidth - w))
+        val below = bar.y + barH + gap
+        val above = bar.y - gap - h
+        var y: Int
+        var flipped: Boolean
+        if (!bar.flipped) {
+            y = below; flipped = false
+            if (y + h > bandBottom) { y = above; flipped = true }
+        } else {
+            y = above; flipped = true
+            if (y < bandTop) { y = below; flipped = false }
+        }
+        y = clamp(y, bandTop, maxOf(bandTop, bandBottom - h))
+        return Placement(x, y, flipped)
     }
 
     private fun clamp(v: Int, lo: Int, hi: Int): Int = if (v < lo) lo else if (v > hi) hi else v

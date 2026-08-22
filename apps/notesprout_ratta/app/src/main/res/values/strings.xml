@@ -157,4 +157,12 @@
     <!-- Debug tools -->
     <string name="debug_tools_title">Debug tools</string>
     <string name="debug_recognize_page">Recognize page</string>
+
+    <!-- Headings (N2) -->
+    <string name="heading_action">Heading</string>
+    <string name="heading_level_hint">Heading %1$d</string>
+    <string name="heading_recognizing">Recognizing…</string>
+    <string name="heading_nothing_recognized">No text could be read from the selected ink. The ink was left unchanged.</string>
+    <string name="heading_edit_title">Edit heading</string>
+    <string name="heading_edit_save">Save</string>
 </resources>

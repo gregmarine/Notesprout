@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  "Recognizing…" — the twin of overlay_opening, raised by core/RecognizingOverlay while a heading
+  convert is out at the recognizer extension. A box and not a dialog: the wait is the tail of the
+  level tap the user just made, not a new question, and on e-ink a dialog is a full repaint the
+  result would immediately have to undo.
+
+  The root is full-screen but transparent, clickable and focusable: it swallows the second tap a
+  slow e-ink refresh invites — the call can run for seconds when the extension process is cold —
+  while leaving the page underneath visible; only the box's region repaints.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:clickable="true"
+    android:focusable="true"
+    android:background="@android:color/transparent">
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:orientation="vertical"
+        android:background="@drawable/shape_dialog_bordered"
+        android:padding="24dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/heading_recognizing"
+            android:textColor="@color/inkBlack"
+            android:textSize="16sp"/>
+
+    </LinearLayout>
+
+</FrameLayout>

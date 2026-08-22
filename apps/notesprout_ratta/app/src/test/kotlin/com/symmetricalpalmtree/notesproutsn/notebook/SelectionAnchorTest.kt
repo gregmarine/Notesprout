@@ -82,4 +82,60 @@ class SelectionAnchorTest {
         assertEquals(700 + gap, p.y)
         assertEquals(700 - w / 2, p.x)
     }
+
+    @Test
+    fun `flipped is reported honestly both ways`() {
+        assertEquals(false, place(600, 500, 800, 700).flipped)
+        assertEquals(true, place(600, 1400, 800, 1700).flipped)
+    }
+
+    // ── placeSub — the level sub-toolbar hangs off the bar, which never moves for it ──
+
+    /** A six-button sub-row (6 × 62 + padding ≈ 428 × 70). */
+    private val subW = 428
+    private val subH = 70
+
+    private fun sub(bar: SelectionAnchor.Placement) =
+        SelectionAnchor.placeSub(bar, w, h, subW, subH, gap, rootWidth, bandTop, bandBottom)
+
+    @Test
+    fun `sub hangs below an unflipped bar, centred on it`() {
+        val bar = SelectionAnchor.Placement(600, 800, flipped = false)
+        val q = sub(bar)
+        assertEquals(800 + h + gap, q.y)
+        assertEquals(600 + w / 2 - subW / 2, q.x)
+        assertEquals(false, q.flipped)
+    }
+
+    @Test
+    fun `sub goes above a flipped bar`() {
+        val bar = SelectionAnchor.Placement(600, 800, flipped = true)
+        val q = sub(bar)
+        assertEquals(800 - gap - subH, q.y)
+        assertEquals(true, q.flipped)
+    }
+
+    @Test
+    fun `sub below flips above when it would cross the band's bottom`() {
+        val bar = SelectionAnchor.Placement(600, bandBottom - h, flipped = false)
+        val q = sub(bar)
+        assertEquals(bandBottom - h - gap - subH, q.y)
+        assertEquals(true, q.flipped)
+    }
+
+    @Test
+    fun `sub above falls back below when it would leave the band's top`() {
+        val bar = SelectionAnchor.Placement(600, bandTop, flipped = true)
+        val q = sub(bar)
+        assertEquals(bandTop + h + gap, q.y)
+        assertEquals(false, q.flipped)
+    }
+
+    @Test
+    fun `sub x clamps inside the root`() {
+        val left = sub(SelectionAnchor.Placement(0, 800))
+        assertEquals(0, left.x)
+        val right = sub(SelectionAnchor.Placement(rootWidth - w, 800))
+        assertEquals(rootWidth - subW, right.x)
+    }
 }

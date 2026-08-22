@@ -41,6 +41,18 @@ interface SoilDao {
     @Query("SELECT id FROM notebook WHERE parentId = :pageId AND type = 'stroke' AND deletedAt IS NULL")
     suspend fun liveStrokeIds(pageId: String): List<String>
 
+    /** Live stroke + heading ids of a page — what a page delete soft-deletes along with it. */
+    @Query("SELECT id FROM notebook WHERE parentId = :pageId AND type IN ('stroke','heading') AND deletedAt IS NULL")
+    suspend fun liveContentIds(pageId: String): List<String>
+
+    /** Reposition an object (a heading drag) — geometry only, size untouched. */
+    @Query("UPDATE notebook SET x = :x, y = :y, updatedAt = :at WHERE id = :id")
+    suspend fun setPosition(id: String, x: Float, y: Float, at: Long)
+
+    /** Rewrite a heading's content: text + authoritative level + the re-measured box size. */
+    @Query("UPDATE notebook SET text = :text, flags = :flags, width = :width, height = :height, updatedAt = :at WHERE id = :id")
+    suspend fun setHeadingContent(id: String, text: String, flags: Int, width: Float, height: Float, at: Long)
+
     @Query("UPDATE notebook SET refId = :refId, updatedAt = :at WHERE id = :id")
     suspend fun setRefId(id: String, refId: String?, at: Long)
 

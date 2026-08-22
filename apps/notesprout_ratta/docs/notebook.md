@@ -416,7 +416,7 @@ No app frame is presented while `paper.isPenActive` — the strip text only chan
 `whenPenIdle {}` (re-polls every `PEN_ACTIVE_TAIL_MS`). Nothing else on the screen repaints
 during writing.
 
-Three recorded exceptions, all the same shape — **one chrome frame at a deliberate act or a
+Five recorded exceptions, all the same shape — **one chrome frame at a deliberate act or a
 boundary**, never under live ink:
 
 1. the **delete-page sheet at long-press** (R4 — safe because `PageGestures` never arms while the
@@ -427,7 +427,13 @@ boundary**, never under live ink:
    this same boundary — the bar is part of that presentation);
 3. the **"Opening…" overlay's hide when the page lands** (P1 — also not idle-gated, and for the
    same hover reason: the pen is on its way to the paper. Nothing has been drawn yet, so this is a
-   screen boundary rather than a repaint during writing).
+   screen boundary rather than a repaint during writing);
+4. the **"Recognizing…" overlay's show/hide around a heading convert** (N2 — the show follows a
+   level tap on chrome, the hide is the call's boundary; the box repaints only its own region and
+   the pen has just left a chrome button, not the paper);
+5. the **selection toolbar's re-show / sub-row toggle on its own taps** (N2 — the H toggle, a level
+   pick and the post-edit re-anchor are all responses to a deliberate chrome tap, the same
+   justification as its original show; each tap goes through `releaseRender()` first).
 
 R3's exception — the tool-panel close at stylus pen-up — is **retired**: P1 removed the panels.
 

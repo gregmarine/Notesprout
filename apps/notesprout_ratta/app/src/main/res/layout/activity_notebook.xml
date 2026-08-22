@@ -123,9 +123,21 @@
     </LinearLayout>
 
     <!-- The selection's context toolbar — floats over the paper while a lasso selection is up.
-         Positioned by margins (SelectionAnchor); its buttons are added in code. -->
+         Positioned by margins (SelectionAnchor.place); buttons (Delete + H) are built in code. -->
     <LinearLayout
         android:id="@+id/selectionToolbar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:orientation="horizontal"
+        android:visibility="gone"
+        android:background="@drawable/shape_dialog_bordered"
+        android:padding="4dp"/>
+
+    <!-- The H1…H6 level sub-toolbar — its own floating bar, hung off the main bar by
+         SelectionAnchor.placeSub when H is tapped (the main bar never moves for it). -->
+    <LinearLayout
+        android:id="@+id/selectionSubToolbar"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="top|start"

@@ -43,7 +43,13 @@ class NotebookSession(
 
     lateinit var db: SoilDatabase
         private set
+
+    /** The single serial write queue both stores share — see [SoilWriter]. */
+    lateinit var writer: SoilWriter
+        private set
     lateinit var store: StrokeStore
+        private set
+    lateinit var headings: HeadingStore
         private set
 
     var pages: List<PageRef> = emptyList()
@@ -79,7 +85,9 @@ class NotebookSession(
             Log.e(TAG, "open failed for $notebookId", e)
             return@withContext OpenResult.Failed(e.message ?: "Could not open notebook")
         }
-        store = StrokeStore(db.dao()) { repo.touch(notebookId) }
+        writer = SoilWriter { repo.touch(notebookId) }
+        store = StrokeStore(db.dao(), writer)
+        headings = HeadingStore(db.dao(), writer)
         try {
             val dao = db.dao()
             val root = dao.notebookRow()
@@ -122,12 +130,13 @@ class NotebookSession(
     /**
      * One page insert or delete, described well enough to replay in either direction through
      * [reconcile]: the live page ids [before] and [after] (in order), the page the notebook was on
-     * either side, and the stroke ids the operation soft-deleted (empty for an insert).
+     * either side, and the content ids — strokes **and headings** (N2) — the operation
+     * soft-deleted (empty for an insert). Restore/delete by id is type-agnostic, so one list.
      */
     data class Structural(
         val before: List<String>,
         val after: List<String>,
-        val strokeIds: List<String>,
+        val objectIds: List<String>,
         val beforeCurrentId: String,
         val afterCurrentId: String,
     )
@@ -161,15 +170,16 @@ class NotebookSession(
     }
 
     /**
-     * Soft-delete the current page and its live strokes, then land on the previous page. Deleting
-     * the **only** page puts a fresh blank in its place instead — a notebook always has ≥ 1 page,
-     * and an empty one would have nothing to draw on and nothing to open next time.
+     * Soft-delete the current page and its live content (strokes + headings), then land on the
+     * previous page. Deleting the **only** page puts a fresh blank in its place instead — a
+     * notebook always has ≥ 1 page, and an empty one would have nothing to draw on and nothing to
+     * open next time.
      */
     suspend fun deleteCurrent(): Structural = withContext(Dispatchers.IO) {
         val victim = currentPage
         val before = pages.map { it.id }
         val now = System.currentTimeMillis()
-        val strokeIds = db.dao().liveStrokeIds(victim.id)
+        val contentIds = db.dao().liveContentIds(victim.id)
         if (pages.size == 1) {
             val newId = java.util.UUID.randomUUID().toString()
             val replacement = SoilObjectEntity(
@@ -180,27 +190,27 @@ class NotebookSession(
             db.withTransaction {
                 db.dao().upsert(replacement)
                 db.dao().softDelete(listOf(victim.id), now)
-                if (strokeIds.isNotEmpty()) db.dao().softDelete(strokeIds, now)
+                if (contentIds.isNotEmpty()) db.dao().softDelete(contentIds, now)
             }
             pages = listOf(replacement.toPageRef(0))
             currentIndex = 0
             loadTemplateFor(currentPage)
             mirror(now)
             Slog.d(TAG) { "deleted the only page ${victim.id}, replaced with $newId" }
-            return@withContext Structural(before, listOf(newId), strokeIds, victim.id, newId)
+            return@withContext Structural(before, listOf(newId), contentIds, victim.id, newId)
         }
         val remaining = pages.filter { it.id != victim.id }
         db.withTransaction {
             db.dao().softDelete(listOf(victim.id), now)
-            if (strokeIds.isNotEmpty()) db.dao().softDelete(strokeIds, now)
+            if (contentIds.isNotEmpty()) db.dao().softDelete(contentIds, now)
             renumber(remaining, now)
         }
         pages = remaining.reindexed()
         currentIndex = PageMath.indexAfterDelete(before.indexOf(victim.id), before.size)
         loadTemplateFor(currentPage)
         mirror(now)
-        Slog.d(TAG) { "deleted ${victim.id} + ${strokeIds.size} strokes (${pages.size} pages)" }
-        Structural(before, pages.map { it.id }, strokeIds, victim.id, currentPage.id)
+        Slog.d(TAG) { "deleted ${victim.id} + ${contentIds.size} objects (${pages.size} pages)" }
+        Structural(before, pages.map { it.id }, contentIds, victim.id, currentPage.id)
     }
 
     /**
@@ -211,8 +221,8 @@ class NotebookSession(
      */
     suspend fun reconcile(
         targetAlive: List<String>,
-        restoreStrokeIds: List<String>,
-        deleteStrokeIds: List<String>,
+        restoreObjectIds: List<String>,
+        deleteObjectIds: List<String>,
         currentId: String,
     ) = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
@@ -222,8 +232,8 @@ class NotebookSession(
         db.withTransaction {
             if (restorePages.isNotEmpty()) db.dao().restore(restorePages, now)
             if (deletePages.isNotEmpty()) db.dao().softDelete(deletePages, now)
-            if (restoreStrokeIds.isNotEmpty()) db.dao().restore(restoreStrokeIds, now)
-            if (deleteStrokeIds.isNotEmpty()) db.dao().softDelete(deleteStrokeIds, now)
+            if (restoreObjectIds.isNotEmpty()) db.dao().restore(restoreObjectIds, now)
+            if (deleteObjectIds.isNotEmpty()) db.dao().softDelete(deleteObjectIds, now)
             targetAlive.forEachIndexed { i, id -> db.dao().setOrder(id, i, now) }
         }
         val rows = db.dao().byIds(targetAlive).associateBy { it.id }
@@ -259,12 +269,12 @@ class NotebookSession(
         ))
     }
 
-    /** Wait for queued stroke writes, then checkpoint + close. Idempotent; never throws. */
+    /** Wait for queued writes (both stores), then checkpoint + close. Idempotent; never throws. */
     suspend fun seal() = withContext(Dispatchers.IO) {
         if (!isOpen) return@withContext
-        try { store.flushTouch() } catch (e: Exception) { Log.w(TAG, "flushTouch failed", e) }
-        try { store.drain() } catch (e: Exception) { Log.w(TAG, "drain failed", e) }
-        store.close()
+        try { writer.flushTouch() } catch (e: Exception) { Log.w(TAG, "flushTouch failed", e) }
+        try { writer.drain() } catch (e: Exception) { Log.w(TAG, "drain failed", e) }
+        writer.close()
         db.seal(file)
         // Reference drop only — the paper view can outlive the seal by a frame (recycle() here
         // would race a final repaint; see loadTemplateFor).

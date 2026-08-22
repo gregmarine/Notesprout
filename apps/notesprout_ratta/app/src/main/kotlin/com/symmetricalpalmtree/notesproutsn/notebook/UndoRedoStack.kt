@@ -28,17 +28,62 @@ class UndoRedoStack {
         data class Erased(override val pageId: String, val strokes: List<Stroke>) : Action
 
         /**
-         * A lasso selection deleted through the selection sheet. Replays exactly like [Erased] —
-         * kept as its own kind because the two are different acts to the user (a sweep of the
-         * eraser vs. "delete these"), and a future undo *label* must be able to say which.
+         * A lasso selection deleted through the selection toolbar. The strokes replay exactly like
+         * [Erased] — kept as its own kind because the two are different acts to the user (a sweep
+         * of the eraser vs. "delete these"), and a future undo *label* must be able to say which.
+         * [headingIds] (N2) are the selected headings deleted in the same tap — ids only, because
+         * heading rows are revived in place with their geometry intact. One gesture, one entry.
          */
-        data class Deleted(override val pageId: String, val strokes: List<Stroke>) : Action
+        data class Deleted(
+            override val pageId: String,
+            val strokes: List<Stroke>,
+            val headingIds: List<String> = emptyList(),
+        ) : Action
 
+        /**
+         * One selection drag. [headingIds] (N2) are the headings that rode along — a mixed lasso
+         * moves strokes and headings in one gesture, and one gesture must stay one undo step
+         * (this is the plan's `HeadingMoved`, folded in rather than split).
+         */
         data class Moved(
             override val pageId: String,
             val ids: List<String>,
             val dx: Float,
             val dy: Float,
+            val headingIds: List<String> = emptyList(),
+        ) : Action
+
+        /**
+         * A heading conversion: the new heading plus the ink it consumed. Undo deletes the heading
+         * row and **revives the strokes in place** (writing order is load-bearing — the arc-3
+         * trap); redo revives the heading row and re-deletes the strokes. Ids suffice on the
+         * stroke side because every row survives soft-deleted with its geometry.
+         */
+        data class HeadingCreated(
+            override val pageId: String,
+            val heading: Heading,
+            val strokeIds: List<String>,
+        ) : Action
+
+        /** Headings deleted without strokes in the act: an eraser sweep over a heading
+         *  (`onContentErased`) or an edit dialog's empty Save. Rows revive in place. */
+        data class HeadingDeleted(override val pageId: String, val headingIds: List<String>) : Action
+
+        /** An edit-dialog Save that changed the text. Both sides carry the full [Heading]
+         *  (text, level, re-measured box) — replay writes one side's content over the row. */
+        data class HeadingTextEdited(
+            override val pageId: String,
+            val before: Heading,
+            val after: Heading,
+        ) : Action
+
+        /** A level pick on an existing heading. Same replay as [HeadingTextEdited]; kept as its
+         *  own kind for the same reason [Deleted] is not [Erased] — the label must be able to
+         *  say which act it reverses. */
+        data class HeadingLevelChanged(
+            override val pageId: String,
+            val before: Heading,
+            val after: Heading,
         ) : Action
 
         /** A page insert or delete, replayable both ways through [NotebookSession.reconcile]. */

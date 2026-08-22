@@ -19,6 +19,7 @@ import com.symmetricalpalmtree.gpaper.core.PaperListener
 import com.symmetricalpalmtree.gpaper.core.PaperView
 import com.symmetricalpalmtree.gpaper.core.Tool
 import com.symmetricalpalmtree.gpaper.core.engine.GPaper
+import com.symmetricalpalmtree.gpaper.core.model.Bounds
 import com.symmetricalpalmtree.gpaper.core.model.Selection
 import com.symmetricalpalmtree.gpaper.core.model.SelectionMove
 import com.symmetricalpalmtree.gpaper.core.model.Stroke
@@ -31,6 +32,7 @@ import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.prefs.BrowseState
 import com.symmetricalpalmtree.notesproutsn.data.prefs.RecentsPrefs
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityNotebookBinding
+import com.symmetricalpalmtree.notesproutsn.core.markdown.HeadingPrefix
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionCallException
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionRegistry
 import com.symmetricalpalmtree.notesproutsn.extension.RecognizerClient
@@ -79,6 +81,14 @@ class NotebookActivity : AppCompatActivity() {
      */
     private var currentSelection: Selection? = null
 
+    /**
+     * A just-converted heading waiting to be selected as the *successor* of the selection its
+     * conversion is about to dismiss. Set immediately before the conversion's `removeStrokes`,
+     * consumed inside `onSelectionDismissed` (see the note there for why the timing is
+     * load-bearing), and drained defensively right after in case no dismissal fired.
+     */
+    private var pendingSelection: Heading? = null
+
     /** In-memory, notebook-level history: it survives page turns and dies with the screen. */
     private val undo = UndoRedoStack()
 
@@ -87,6 +97,12 @@ class NotebookActivity : AppCompatActivity() {
 
     /** The strokes on the visible page — the "you still have them" mirror an erase undo needs. */
     private var liveStrokes: MutableMap<String, Stroke> = mutableMapOf()
+
+    /** The headings on the visible page — the working copy [headingRenderer] paints from. */
+    private var liveHeadings: MutableMap<String, Heading> = linkedMapOf()
+
+    /** Draws [liveHeadings] into the committed layer, below the ink (N2). */
+    private lateinit var headingRenderer: HeadingRenderer
 
     /**
      * The page whose strokes are on the paper — written on Main only, at the two places
@@ -121,15 +137,23 @@ class NotebookActivity : AppCompatActivity() {
         paper.scribbleEraseEnabled = true
         paper.setPaperListener(listener)
 
+        // The page's headings live in g-paper's committed layer via this renderer — registered
+        // before any load so the first re-record already knows about them.
+        val dm = resources.displayMetrics
+        headingRenderer = HeadingRenderer(dm.density, dm.scaledDensity)
+        paper.addContentRenderer(headingRenderer)
+
         // The toolbar owns all pen/eraser configuration — fixed values, no panels, no prefs.
         toolbar = NotebookToolbar(binding, paper) { close() }
         selectionToolbar = SelectionToolbar(
             root = binding.root,
             paperView = paper.asView(),
             bar = binding.selectionToolbar,
+            subBar = binding.selectionSubToolbar,
             band = { chromeBand() },
             releaseRender = { paper.releaseRender() },
             onDelete = { currentSelection?.let { deleteSelection(it) } },
+            onLevelPicked = { onLevelPicked(it) },
         )
         binding.notebookName.text = name
         binding.pageIndicator.text = ""
@@ -178,8 +202,12 @@ class NotebookActivity : AppCompatActivity() {
             if (isFinishing || closing) { sealAbandonedOpen(); return }
             val page = session.currentPage
             val strokes = session.store.loadPage(page.id)
+            val headings = session.headings.loadPage(page.id)
             paper.setPageSize(page.width, page.height)
             paper.setTemplate(session.template)
+            // Renderer before loadStrokes: the load's re-record is the frame that paints them.
+            liveHeadings = headings.associateByTo(linkedMapOf()) { it.id }
+            headingRenderer.headings = headings
             paper.loadStrokes(strokes)
             liveStrokes = strokes.associateBy { it.id }.toMutableMap()
             displayedPageId = page.id
@@ -292,11 +320,20 @@ class NotebookActivity : AppCompatActivity() {
             val ids = move.strokeIds.toList()
             session.store.move(ids, move.dx, move.dy)
             for (id in ids) liveStrokes[id]?.let { liveStrokes[id] = it.translated(move.dx, move.dy) }
-            undo.record(Action.Moved(pageId, ids, move.dx, move.dy))
+            // Headings that rode the same drag: reposition rows + working copy, then tell the
+            // engine to re-record — the component only ghosted/live-dragged them; the host owns
+            // where they actually are now (the ContentRenderer contract).
+            val headingIds = move.contentIds.filter { liveHeadings.containsKey(it) }
+            if (headingIds.isNotEmpty()) {
+                session.headings.move(headingIds, move.dx, move.dy)
+                for (id in headingIds) liveHeadings[id]?.let { liveHeadings[id] = it.translated(move.dx, move.dy) }
+                syncHeadingRenderer()
+            }
+            undo.record(Action.Moved(pageId, ids, move.dx, move.dy, headingIds))
             // The selection survives a move, at its new position — keep our copy honest.
             currentSelection = currentSelection?.let { it.copy(bounds = it.bounds.offset(move.dx, move.dy)) }
             // The drag is over (this fires at lift), so bring the bar back where the box now is.
-            currentSelection?.let { selectionToolbar.show(it.bounds) }
+            currentSelection?.let { showSelectionToolbar(it) }
         }
         override fun onSelectionCreated(selection: Selection) {
             selectionActive = true
@@ -306,7 +343,34 @@ class NotebookActivity : AppCompatActivity() {
             // idle-gated bar would arrive long after the selection it belongs to — the R3 panel
             // lesson. The engine has already presented the selection box, so this frame is part of
             // that same presentation, not a repaint during writing.
-            selectionToolbar.show(selection.bounds)
+            showSelectionToolbar(selection)
+        }
+        /**
+         * A sub-threshold tap inside the selection box: on a selected heading it opens the edit
+         * dialog (the one tap-to-edit path). The engine already palm-gated and escrowed the tap.
+         */
+        override fun onSelectionTapped(x: Float, y: Float) {
+            if (!opened) return
+            val sel = currentSelection ?: return
+            val h = sel.contentIds.asSequence().mapNotNull { liveHeadings[it] }
+                .firstOrNull { it.bounds.contains(x, y) } ?: return
+            // Ungated for the SelectionToolbar-button reason: the tap has to show its result and
+            // the dialog repaints over the page; there is no live stroke at a tap's pen-up.
+            paper.releaseRender()
+            HeadingEditDialog.show(this@NotebookActivity, h) { raw -> applyHeadingEdit(h.id, raw) }
+        }
+        /** The eraser tool swept a heading whole (0.1.4): the host deletes — nothing vanishes by
+         *  itself. One batched call per gesture; scribble erase never reports content. */
+        override fun onContentErased(contentIds: List<String>) {
+            if (!opened) return
+            val pageId = displayedPageId
+            val present = contentIds.filter { liveHeadings.containsKey(it) }
+            if (present.isEmpty()) return
+            session.headings.erase(present)
+            present.forEach { liveHeadings.remove(it) }
+            syncHeadingRenderer()
+            undo.record(Action.HeadingDeleted(pageId, present))
+            Slog.d(TAG) { "eraser removed ${present.size} headings" }
         }
         /** The pen is dragging the box — the bar would be dragged over, and it never follows live. */
         override fun onSelectionDragStarted() { selectionToolbar.hide() }
@@ -314,6 +378,16 @@ class NotebookActivity : AppCompatActivity() {
             selectionActive = false
             currentSelection = null
             selectionToolbar.hide()
+            // A conversion's successor selection must be injected HERE, inside the engine's
+            // `clearSelection` — it checks for a successor *after* this callback, and only ends a
+            // smart-lasso session (restoring PEN) when there is none. Injected any later, the
+            // restore has already fired and the new heading sits selected under a PEN tool that
+            // can neither drag nor tap it (eye-check #5 round-2 finding). The engine then owns the
+            // PEN restore at this selection's own dismissal, exactly like any smart-lasso session.
+            pendingSelection?.let { h ->
+                pendingSelection = null
+                selectAsHeading(h)
+            }
         }
         override fun onToolChanged(tool: Tool) { toolbar.sync(tool) }
     }
@@ -355,6 +429,7 @@ class NotebookActivity : AppCompatActivity() {
     private suspend fun navigateTo(index: Int) {
         val page = session.goTo(index)
         val strokes = session.store.loadPage(page.id)
+        val headings = session.headings.loadPage(page.id)
         paper.clearSelection()
         selectionActive = false
         currentSelection = null
@@ -362,6 +437,9 @@ class NotebookActivity : AppCompatActivity() {
         paper.clearForContentSwap()
         paper.setPageSize(page.width, page.height)
         paper.setTemplate(session.template)
+        // Renderer before loadStrokes: the swap's single re-record paints the new page's headings.
+        liveHeadings = headings.associateByTo(linkedMapOf()) { it.id }
+        headingRenderer.headings = headings
         paper.loadStrokes(strokes)
         liveStrokes = strokes.associateBy { it.id }.toMutableMap()
         displayedPageId = page.id
@@ -425,10 +503,28 @@ class NotebookActivity : AppCompatActivity() {
         when (a) {
             is Action.Drew -> { session.store.remove(listOf(a.stroke.id)); session.store.drain(); refreshToPage(a.pageId) }
             is Action.Erased -> { session.store.restore(a.pageId, a.strokes); session.store.drain(); refreshToPage(a.pageId) }
-            is Action.Deleted -> { session.store.restore(a.pageId, a.strokes); session.store.drain(); refreshToPage(a.pageId) }
-            is Action.Moved -> { session.store.move(a.ids, -a.dx, -a.dy); session.store.drain(); refreshToPage(a.pageId) }
+            is Action.Deleted -> {
+                session.store.restore(a.pageId, a.strokes)
+                session.headings.restore(a.headingIds)
+                session.store.drain(); refreshToPage(a.pageId)
+            }
+            is Action.Moved -> {
+                session.store.move(a.ids, -a.dx, -a.dy)
+                session.headings.move(a.headingIds, -a.dx, -a.dy)
+                session.store.drain(); refreshToPage(a.pageId)
+            }
+            is Action.HeadingCreated -> {
+                // Reverse the conversion whole: heading row down, the consumed ink back — revived
+                // IN PLACE so its writing order survives (a later re-recognize reads a sequence).
+                session.headings.erase(listOf(a.heading.id))
+                session.store.revive(a.strokeIds)
+                session.store.drain(); refreshToPage(a.pageId)
+            }
+            is Action.HeadingDeleted -> { session.headings.restore(a.headingIds); session.store.drain(); refreshToPage(a.pageId) }
+            is Action.HeadingTextEdited -> { session.headings.updateContent(a.before); session.store.drain(); refreshToPage(a.pageId) }
+            is Action.HeadingLevelChanged -> { session.headings.updateContent(a.before); session.store.drain(); refreshToPage(a.pageId) }
             is Action.Page -> {
-                session.reconcile(a.snapshot.before, a.snapshot.strokeIds, emptyList(), a.snapshot.beforeCurrentId)
+                session.reconcile(a.snapshot.before, a.snapshot.objectIds, emptyList(), a.snapshot.beforeCurrentId)
                 refreshToPage(session.currentPage.id)
             }
         }
@@ -438,10 +534,26 @@ class NotebookActivity : AppCompatActivity() {
         when (a) {
             is Action.Drew -> { session.store.restore(a.pageId, listOf(a.stroke)); session.store.drain(); refreshToPage(a.pageId) }
             is Action.Erased -> { session.store.remove(a.strokes.map { it.id }); session.store.drain(); refreshToPage(a.pageId) }
-            is Action.Deleted -> { session.store.remove(a.strokes.map { it.id }); session.store.drain(); refreshToPage(a.pageId) }
-            is Action.Moved -> { session.store.move(a.ids, a.dx, a.dy); session.store.drain(); refreshToPage(a.pageId) }
+            is Action.Deleted -> {
+                session.store.remove(a.strokes.map { it.id })
+                session.headings.erase(a.headingIds)
+                session.store.drain(); refreshToPage(a.pageId)
+            }
+            is Action.Moved -> {
+                session.store.move(a.ids, a.dx, a.dy)
+                session.headings.move(a.headingIds, a.dx, a.dy)
+                session.store.drain(); refreshToPage(a.pageId)
+            }
+            is Action.HeadingCreated -> {
+                session.headings.restore(listOf(a.heading.id))
+                session.store.remove(a.strokeIds)
+                session.store.drain(); refreshToPage(a.pageId)
+            }
+            is Action.HeadingDeleted -> { session.headings.erase(a.headingIds); session.store.drain(); refreshToPage(a.pageId) }
+            is Action.HeadingTextEdited -> { session.headings.updateContent(a.after); session.store.drain(); refreshToPage(a.pageId) }
+            is Action.HeadingLevelChanged -> { session.headings.updateContent(a.after); session.store.drain(); refreshToPage(a.pageId) }
             is Action.Page -> {
-                session.reconcile(a.snapshot.after, emptyList(), a.snapshot.strokeIds, a.snapshot.afterCurrentId)
+                session.reconcile(a.snapshot.after, emptyList(), a.snapshot.objectIds, a.snapshot.afterCurrentId)
                 refreshToPage(session.currentPage.id)
             }
         }
@@ -450,24 +562,196 @@ class NotebookActivity : AppCompatActivity() {
     // ── Selection ────────────────────────────────────────────────────────────
 
     /**
-     * Delete the selected strokes. Order matters: capture the geometry from [liveStrokes] *first*
-     * (it is the only place it still exists once the engine drops them), then tell the engine, then
-     * the rows. `removeStrokes` dismisses the selection itself — every data-in call does — so there
-     * is no [PaperView.clearSelection] here; `onSelectionDismissed` clears our copy.
+     * Delete the selection's strokes **and headings** in one tap = one undo entry. Order matters:
+     * capture stroke geometry from [liveStrokes] *first* (it is the only place it still exists once
+     * the engine drops them), update the heading working copy *before* `removeStrokes` (its
+     * re-record is the frame that drops both), then the rows. `removeStrokes` dismisses the
+     * selection itself — every data-in call does — so [PaperView.clearSelection] is only needed on
+     * a heading-only delete; `onSelectionDismissed` clears our copy either way.
      */
     private fun deleteSelection(sel: Selection) {
         if (!opened || closing) return
-        val ids = sel.strokeIds.toList()
-        if (ids.isEmpty()) return
         val pageId = displayedPageId
+        val ids = sel.strokeIds.toList()
+        val headingIds = sel.contentIds.filter { liveHeadings.containsKey(it) }
+        if (ids.isEmpty() && headingIds.isEmpty()) return
         val strokes = ids.mapNotNull { liveStrokes[it] }
-        paper.removeStrokes(ids)
-        session.store.erase(ids)
-        ids.forEach { liveStrokes.remove(it) }
+        if (headingIds.isNotEmpty()) {
+            session.headings.erase(headingIds)
+            headingIds.forEach { liveHeadings.remove(it) }
+            headingRenderer.headings = liveHeadings.values.toList()
+        }
+        if (ids.isNotEmpty()) {
+            paper.removeStrokes(ids)
+            session.store.erase(ids)
+            ids.forEach { liveStrokes.remove(it) }
+        } else {
+            paper.clearSelection()
+        }
+        // Unconditional: removeStrokes only re-records when it actually dropped a stroke, so the
+        // heading removal must not ride on it. Both calls land in one Main block → one frame.
+        if (headingIds.isNotEmpty()) paper.notifyContentChanged()
         // Nothing captured means nothing to put back — record no history rather than a lying entry.
-        if (strokes.isNotEmpty()) undo.record(Action.Deleted(pageId, strokes))
+        if (strokes.isNotEmpty() || headingIds.isNotEmpty()) undo.record(Action.Deleted(pageId, strokes, headingIds))
         else Log.w(TAG, "selection delete: no geometry for ${ids.size} ids — not undoable")
-        Slog.d(TAG) { "selection delete: ${ids.size} strokes" }
+        Slog.d(TAG) { "selection delete: ${strokes.size} strokes, ${headingIds.size} headings" }
+    }
+
+    // ── Headings (N2) ────────────────────────────────────────────────────────
+
+    /** Re-hand the working copy to the renderer and ask for one re-record. */
+    private fun syncHeadingRenderer() {
+        headingRenderer.headings = liveHeadings.values.toList()
+        paper.notifyContentChanged()
+    }
+
+    /** The bar with the right mode: pure strokes → CONVERT's H, one heading alone → CHANGE's H
+     *  with its level lit, anything mixed → Delete only. */
+    private fun showSelectionToolbar(sel: Selection) {
+        val loneHeading =
+            if (sel.strokeIds.isEmpty() && sel.contentIds.size == 1) liveHeadings[sel.contentIds.first()] else null
+        val mode = when {
+            loneHeading != null -> SelectionMode.HEADING
+            sel.contentIds.isEmpty() && sel.strokeIds.isNotEmpty() -> SelectionMode.STROKES
+            else -> SelectionMode.MIXED
+        }
+        selectionToolbar.show(sel.bounds, mode, loneHeading?.level)
+    }
+
+    /** An H1–H6 tap in the sub-row: CONVERT on a pure-stroke selection, CHANGE on a lone heading. */
+    private fun onLevelPicked(level: Int) {
+        if (!opened || closing) return
+        val sel = currentSelection ?: return
+        val loneHeading =
+            if (sel.strokeIds.isEmpty() && sel.contentIds.size == 1) liveHeadings[sel.contentIds.first()] else null
+        when {
+            loneHeading != null -> changeHeadingLevel(loneHeading.id, level)
+            sel.contentIds.isEmpty() && sel.strokeIds.isNotEmpty() -> startConvert(sel, level)
+        }
+    }
+
+    /**
+     * CONVERT: recognize the lassoed ink, then bake it into a heading. Everything the creation
+     * needs is captured NOW — the recognition runs async and the selection may die (tap-away, a
+     * flip) before it answers; the captured strokes are what the user pointed at. The stroke list
+     * comes from [liveStrokes] filtered by the selection's id set, which preserves **writing
+     * order** (a LinkedHashMap filled by load then by commit) — never iterate the Set itself.
+     */
+    private fun startConvert(sel: Selection, level: Int) {
+        val pageId = displayedPageId
+        val strokes = liveStrokes.values.filter { it.id in sel.strokeIds }
+        if (strokes.isEmpty()) return
+        val bounds = sel.bounds
+        // The writing area is the SELECTION box, not the page — Paper's proven recipe (its H action
+        // passes `bounds.width/height`, and its page pipeline recognizes per line with the line's
+        // box). ML Kit reads the area as the scale of the writing; a page-sized area under a
+        // one-line title made it guess fragments ("Heading" → "o" — eye-check #5 finding).
+        HeadingConvert.run(
+            this, strokes, bounds.width, bounds.height,
+            onRecognized = { title ->
+                createHeadingFromConversion(pageId, strokes.map { it.id }, bounds, level, title)
+            },
+        )
+    }
+
+    /**
+     * The success half of CONVERT: one heading row up, the consumed ink soft-deleted — recorded as
+     * **one undo step** ([Action.HeadingCreated]). The box anchors at the lassoed ink's top-left
+     * and takes the measured size (free growth — never clamped to the page). On failure this is
+     * simply never called: the ink stays untouched (the locked failure path).
+     */
+    private fun createHeadingFromConversion(
+        pageId: String,
+        strokeIds: List<String>,
+        inkBounds: Bounds,
+        level: Int,
+        title: String,
+    ) {
+        if (!opened || closing) return
+        val dm = resources.displayMetrics
+        val text = HeadingPrefix.applyLevel(title, level)
+        val (w, h) = HeadingRenderer.measure(text, dm.density, dm.scaledDensity)
+        val heading = Heading(
+            id = java.util.UUID.randomUUID().toString(), text = text, level = level,
+            x = inkBounds.left, y = inkBounds.top, width = w, height = h, order = 0,
+        )
+        session.store.erase(strokeIds)
+        session.headings.create(pageId, heading)
+        undo.record(Action.HeadingCreated(pageId, heading, strokeIds))
+        Slog.d(TAG) { "converted ${strokeIds.size} strokes → heading level $level" }
+        if (pageId != displayedPageId) return   // the user flipped away mid-recognize; rows are right
+        strokeIds.forEach { liveStrokes.remove(it) }
+        liveHeadings[heading.id] = heading
+        headingRenderer.headings = liveHeadings.values.toList()
+        // The successor selection rides the dismissal `removeStrokes` is about to perform — see
+        // `onSelectionDismissed`. Injecting it there keeps a smart-lasso session alive across the
+        // conversion, so the engine restores PEN when the *heading's* selection is dismissed, not
+        // in the middle of it.
+        pendingSelection = heading
+        paper.removeStrokes(strokeIds)
+        // No dismissal fired (the selection had already died mid-recognize) — select directly.
+        pendingSelection?.let { pendingSelection = null; selectAsHeading(it) }
+        // removeStrokes only re-records when it dropped something; if the captured ids went stale
+        // mid-recognize (scribble-erased under the overlay) the heading still has to paint. Both
+        // calls land in one Main block → one frame.
+        paper.notifyContentChanged()
+    }
+
+    /** CHANGE: re-prefix + re-measure, top-left kept — a heading grows from its anchor. */
+    private fun changeHeadingLevel(id: String, level: Int) {
+        val before = liveHeadings[id] ?: return
+        if (before.level == level) return
+        val dm = resources.displayMetrics
+        val text = HeadingPrefix.applyLevel(before.text, level)
+        val (w, h) = HeadingRenderer.measure(text, dm.density, dm.scaledDensity)
+        val after = before.copy(text = text, level = level, width = w, height = h)
+        session.headings.updateContent(after)
+        liveHeadings[id] = after
+        syncHeadingRenderer()
+        undo.record(Action.HeadingLevelChanged(displayedPageId, before, after))
+        selectAsHeading(after)
+    }
+
+    /**
+     * Save from the edit dialog. [raw] is the hash-free field text, trimmed by the dialog: empty
+     * means **delete** (the locked decision — the dialog never second-guesses it); anything else is
+     * re-prefixed at the heading's current level and re-measured in place.
+     */
+    private fun applyHeadingEdit(id: String, raw: String) {
+        if (!opened || closing) return
+        val before = liveHeadings[id] ?: return
+        val pageId = displayedPageId
+        if (raw.isEmpty()) {
+            session.headings.erase(listOf(id))
+            liveHeadings.remove(id)
+            paper.clearSelection()
+            syncHeadingRenderer()
+            undo.record(Action.HeadingDeleted(pageId, listOf(id)))
+            Slog.d(TAG) { "empty save deleted heading" }
+            return
+        }
+        val text = HeadingPrefix.applyLevel(raw, before.level)
+        if (text == before.text) return
+        val dm = resources.displayMetrics
+        val (w, h) = HeadingRenderer.measure(text, dm.density, dm.scaledDensity)
+        val after = before.copy(text = text, width = w, height = h)
+        session.headings.updateContent(after)
+        liveHeadings[id] = after
+        syncHeadingRenderer()
+        undo.record(Action.HeadingTextEdited(pageId, before, after))
+        selectAsHeading(after)
+    }
+
+    /**
+     * Land the selection on [h] after a create/edit/level change — its box moved or resized, so the
+     * old selection frame is stale. `setSelection` is host-initiated (no `onSelectionCreated` echo),
+     * so the flags and the bar are set here by hand.
+     */
+    private fun selectAsHeading(h: Heading) {
+        paper.setSelection(emptySet(), setOf(h.id), h.bounds)
+        selectionActive = true
+        currentSelection = Selection(emptySet(), setOf(h.id), h.bounds)
+        selectionToolbar.show(h.bounds, SelectionMode.HEADING, h.level)
     }
 
     /** Long-press asks; it never deletes. Sheet → confirm dialog → the actual op. */
@@ -515,7 +799,7 @@ class NotebookActivity : AppCompatActivity() {
             return
         }
         val paperLoc = IntArray(2).also { paper.asView().getLocationInWindow(it) }
-        val rects = listOfNotNull(rectOf(binding.topBar), rectOf(binding.bottomStrip), selectionToolbar.rect())
+        val rects = (listOfNotNull(rectOf(binding.topBar), rectOf(binding.bottomStrip)) + selectionToolbar.rects())
             .map { Rect(it.left - paperLoc[0], it.top - paperLoc[1], it.right - paperLoc[0], it.bottom - paperLoc[1]) }
         paper.setExclusionRects(rects)
     }

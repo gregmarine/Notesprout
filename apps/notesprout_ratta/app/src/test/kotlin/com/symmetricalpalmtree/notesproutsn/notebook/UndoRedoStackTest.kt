@@ -106,7 +106,7 @@ class UndoRedoStackTest {
         val snap = NotebookSession.Structural(
             before = listOf("A", "B"),
             after = listOf("A", "N", "B"),
-            strokeIds = emptyList(),
+            objectIds = emptyList(),
             beforeCurrentId = "A",
             afterCurrentId = "N",
         )
@@ -115,10 +115,15 @@ class UndoRedoStackTest {
 
     @Test
     fun `every action kind reports its own page`() {
+        val h = Heading("h", "# T", 1, 0f, 0f, 10f, 10f, 0)
         assertEquals("p1", Action.Drew("p1", stroke("a")).pageId)
         assertEquals("p2", Action.Erased("p2", listOf(stroke("a"))).pageId)
         assertEquals("p3", Action.Moved("p3", listOf("a"), 5f, -5f).pageId)
         assertEquals("p4", Action.Deleted("p4", listOf(stroke("a"))).pageId)
+        assertEquals("p5", Action.HeadingCreated("p5", h, listOf("a")).pageId)
+        assertEquals("p6", Action.HeadingDeleted("p6", listOf("h")).pageId)
+        assertEquals("p7", Action.HeadingTextEdited("p7", h, h.copy(text = "# U")).pageId)
+        assertEquals("p8", Action.HeadingLevelChanged("p8", h, h.copy(level = 2)).pageId)
     }
 
     /**
