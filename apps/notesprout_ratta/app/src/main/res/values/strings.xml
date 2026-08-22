@@ -128,4 +128,33 @@
 
     <!-- Notebook selection -->
     <string name="delete_selection_action">Delete strokes</string>
+
+    <!-- Handwriting recognition (the one extension point) -->
+    <string name="recognize_problem_title">Recognize page</string>
+    <string name="recognize_nothing">There is nothing written on this page yet.</string>
+    <string name="recognize_no_extension">No recognizer extension is installed on this device.</string>
+    <string name="recognize_model_needed_title">Recognition model needed</string>
+    <string name="recognize_model_needed_body">Recognizing handwriting needs a one-time download of the English (en-US) model, about 20 MB. Wi-Fi is recommended.\n\nDownload it now?</string>
+    <string name="recognize_model_needed_offline_body">Recognizing handwriting needs a one-time download of the English (en-US) model, about 20 MB — but this device is offline right now. Connect to Wi-Fi, then try again.</string>
+    <string name="recognize_download">Download</string>
+    <string name="recognize_downloading_title">Downloading recognition model</string>
+    <string name="recognize_downloading_body">This takes a minute or so the first time. Your handwriting will be recognized as soon as it finishes.\n\nElapsed: %1$d s</string>
+    <string name="recognize_downloading_offline_body">Waiting for a network connection… The download resumes when the device is back online.\n\nElapsed: %1$d s</string>
+    <string name="recognize_download_failed_title">Download failed</string>
+    <string name="recognize_download_failed_body">The recognition model couldn\'t be downloaded. Check the Wi-Fi connection and try again.</string>
+    <string name="recognize_still_downloading">Model still downloading — try again in a minute.</string>
+    <string name="recognize_unavailable">Recognizer unavailable on this device.</string>
+    <string name="recognize_running">Recognizing…</string>
+    <string name="recognize_too_dense">Page too dense to recognize.</string>
+    <string name="recognize_failed">The recognizer extension didn\'t respond.</string>
+    <string name="recognize_result_title">Recognized text</string>
+    <string name="recognize_result_timing">%1$d strokes → %2$d chars · %3$s s</string>
+    <string name="recognize_empty_result">(nothing recognized)</string>
+    <string name="recognize_copy">Copy</string>
+    <string name="recognize_clip_label">Recognized text</string>
+    <string name="recognize_copied">Recognized text copied</string>
+
+    <!-- Debug tools -->
+    <string name="debug_tools_title">Debug tools</string>
+    <string name="debug_recognize_page">Recognize page</string>
 </resources>

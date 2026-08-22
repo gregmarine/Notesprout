@@ -17,9 +17,19 @@ All root `CLAUDE.md` rules apply (Kotlin/17, kotlinx-serialization only, no new 
 deps without discussion, no Material Components, no `runBlocking` on main, `Slog.d` not
 `Log.d`, e-ink design system, Tabler icons only). Plus, for this app:
 
-- **Single `:app` module, own Gradle root.** No extension machinery of any kind — no AIDL,
-  no `<queries>`, no extension stores. Formats stay family-compatible so future arcs can
-  add extensions.
+- **Three modules, own Gradle root:** `:app` (the host), `:extension-api` (the contract
+  library — depends on nothing in `:app`, stdlib only), `:ext-mlkit` (the **NSE · ML Kit**
+  extension APK). **The recognizer point is SN's ONE extension surface** (arc-3 amendment to
+  the arc-1 no-extensions rule): `ACTION_HANDWRITING_RECOGNIZER` / `IHandwritingRecognizer`
+  exists solely so other HWR engines can slot in later — headings and the markdown engine are
+  core, and **no other capability point may be added** without a new user decision. No
+  extension stores. The action strings are SN-namespaced (`…notesproutsn.extension.*`) so
+  Paper's extensions on the same device are never discovered; trust is same-signature both
+  ways (`ExtensionRegistry` at discovery + bind-time re-check, `HostCallerCheck` first thing
+  in every stub method), the ML Kit dependency lives in `:ext-mlkit` only, **only `prepare()`
+  may start a model download** (host consent dialog first — and never at notebook open, which
+  only warms an already-present model), and recognized text is never logged on either side
+  (counts + durations only).
 - **Data model is Paper's, byte-for-byte format-compatible** — `notesprout.db` `objects`
   table (user_version 1) + `Garden/<uuid>.soil` universal `notebook` table v1 +
   `notebook_meta`, StrokeCodec format B, encrypt-by-default global key, SQLCipher stock

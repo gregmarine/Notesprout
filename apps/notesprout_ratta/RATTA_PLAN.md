@@ -576,7 +576,7 @@ accordingly (the recognizer point is the only extension surface; no other capabi
   edit dialog via uiautomator dumps and keyboard-tap coordinates only where unavoidable.
 
 ### N0 — Recognizer extension point + NSE · ML Kit + debug recognize
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-22)
 
 `:extension-api` (fresh, minimal — depends on nothing in `:app`): the recognizer AIDL
 (`status` / `prepare` / `recognize`), hand-written parcelables (strokes in, per-line text
@@ -597,10 +597,47 @@ recognize a handwritten page, offline behaviour).
 *Fable writes the AIDL contract + trust seam; Opus the extension + readiness flow; Sonnet
 module scaffolds/resources.*
 
+**Outcome:** Split per the recipe. Fable wrote the contract +
+trust seam (`:extension-api`: SN-namespaced AIDL `IHandwritingRecognizer` + `InkStroke.aidl`,
+hand-written `InkStroke` parcelable, `RecognizerStatus`, recognizer-scoped `ExtensionContract`,
+`HostCallerCheck`; host: `ExtensionRegistry`/`ExtensionBinder`/`ExtensionCallException`/`InkCaps`/
+`RecognizerClient`, `core/Connectivity`, manifest `<queries>` + `ACCESS_NETWORK_STATE`; both module
+build files incl. `:ext-mlkit`'s per-variant `HOST_PACKAGE`) and amended the app `CLAUDE.md`
+extension rule. Opus wrote `:ext-mlkit` (service with 9.5 s/28 s budgets + marshalable-only
+exceptions, `ModelManager` with prepare-only downloads + model-present flag + prime,
+`MlKitEngine`/`PageText`, projection-profile `StrokeSegmenter`, `Dots` incl. the shaky-period rule,
+`Box`) + host `RecognizerReadiness`, open-time warm-up (one fire-and-forget `status()` bind after
+the page lands — never a dialog), `InkPayload`/`RecognizeContext`, and the debug ⋯ (`NotebookDebugMenu`
+debug + release-no-op twins, weight-spacer at the row's end). Sonnet built the NSE · ML Kit
+resources (Tabler puzzle at the family's ×3.1 ext-icon scale, `NSE · ML Kit`/`… Dev` labels).
+**Key deltas, all deliberate:** SN-namespaced action strings so Paper's extensions on the same
+Nomad are never discovered (pinned by test); `recognizeContext()` resolves the page via
+`displayedPageId`, not `session.currentPage` (mid-flip safety); discovery at the tap (a one-item
+chooser can't hide its only row); result dialog = text + timing line (wizard). **179 JVM tests**
+(app 142 · api 6 · ext 29 + 2 contract-pin), debug + release of all three modules. **Device walk
+(Nomad):** the Haiku agent produced the **fourth** tap-aim false failure ("dialogs don't render" —
+it had dumped the Debug-tools AlertDialog itself one step earlier); Fable re-drove by hand: consent
+dialog exact wording → Download → elapsed-counter progress (~25 s on Wi-Fi) → auto-continue →
+**"No headings" recognized verbatim** (11 strokes → 11 chars · 0.4 s); warm re-run 0.3 s with no
+consent; force-stop both processes → cold restore lands in the notebook, warm-up log
+`model remembered as present` → `status=0`, engine primed 4.1 s (Paper's Nomad number), post-restart
+recognize 0.4 s; crash buffer clean. Model + present-flag live in the ext sandbox; ext APK ~40 MB
+(the ML Kit dep — expected). Both dev APKs left installed on SNN, Test 04 unmodified.
+**User eye check #4 all-pass 2026-08-22, no findings** (recognition quality on real writing +
+timing line, trailing-period rule, blank-page dialog, and — after a `pm clear` of the ext to
+re-arm the one-time consent — the offline notice with Wi-Fi off, then consent → download →
+auto-continue live). Model re-downloaded during the check; the ext ends the phase READY on SNN.
+
 **Questions to resolve at phase start:** recognition language/model (en-US only vs. a
 setting); debug result-dialog contents (text only vs. text + timing); extension versionName
 scheme; where the consent dialog first appears (debug recognize vs. also pre-armed at
 notebook open).
+**Answered 2026-08-22:** **en-US only** (hardcoded model; a setting can come later with no
+format impact); debug result dialog = **text + timing** (recognized lines + a small
+duration line — bind/recognize ms); extension versionName = **host lockstep**
+(`0.1.0-ratta`, `-dev` suffixed in debug, bumped with the host at arc freezes); consent
+dialog appears at **first recognize use only** (debug "Recognize page" now, heading-convert
+in N2) — notebook open only ever warms up an already-present model, never shows a dialog.
 
 ### N1 — Markdown engine (core, pure)
 **Status:** ⬜ Not started

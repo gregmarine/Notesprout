@@ -26,7 +26,10 @@
         android:orientation="vertical"
         android:background="@color/paperWhite">
 
+        <!-- The button row. Debug builds append a weight-1 spacer and a ⋯ button to its end
+             (NotebookDebugMenu); release builds leave it exactly as declared here. -->
         <LinearLayout
+            android:id="@+id/topBarRow"
             android:layout_width="match_parent"
             android:layout_height="@dimen/toolbar_bar_thickness"
             android:orientation="horizontal"

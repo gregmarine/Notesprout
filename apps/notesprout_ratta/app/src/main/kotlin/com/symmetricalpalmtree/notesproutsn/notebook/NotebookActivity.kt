@@ -31,6 +31,9 @@ import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.prefs.BrowseState
 import com.symmetricalpalmtree.notesproutsn.data.prefs.RecentsPrefs
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityNotebookBinding
+import com.symmetricalpalmtree.notesproutsn.extension.ExtensionCallException
+import com.symmetricalpalmtree.notesproutsn.extension.ExtensionRegistry
+import com.symmetricalpalmtree.notesproutsn.extension.RecognizerClient
 import com.symmetricalpalmtree.notesproutsn.notebook.UndoRedoStack.Action
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -131,6 +134,12 @@ class NotebookActivity : AppCompatActivity() {
         binding.notebookName.text = name
         binding.pageIndicator.text = ""
 
+        // Debug builds only (the release twin installs nothing): the ⋯ at the end of the button row.
+        // The provider hands it the visible page and nothing else — and the strokes go over in
+        // WRITING ORDER, which is what `liveStrokes` (a LinkedHashMap filled by load then by commit)
+        // preserves. A recognizer reads ink as a sequence; a hashed order is nonsense to it.
+        NotebookDebugMenu.install(this, binding.topBarRow, provider = { recognizeContext() })
+
         pageGestures = PageGestures(
             host = paper.asView(),
             isPenActive = { paper.isPenActive },
@@ -183,6 +192,7 @@ class NotebookActivity : AppCompatActivity() {
             binding.openingOverlay.root.visibility = View.GONE
             setPageIndicator(session.currentIndex + 1, session.pages.size)
             Slog.d(TAG) { "page ${page.id} loaded: ${strokes.size} strokes, ${page.width}x${page.height}" }
+            warmUpRecognizer()
         } catch (t: Throwable) {
             // Back during the open window cancels this scope; the session may have opened its
             // handle between our suspensions. Nothing else will ever seal it (close() early-exited
@@ -193,6 +203,45 @@ class NotebookActivity : AppCompatActivity() {
             Log.e(TAG, "open crashed", t)
             failOpen(t.message ?: t.javaClass.simpleName)
         }
+    }
+
+    /**
+     * Warm the recognizer extension once the page has landed — fire-and-forget, never in the open's
+     * critical path (this is launched after the overlay is down, and nothing waits on it).
+     *
+     * One `status()` bind is the whole job: it starts the extension's process, whose `onCreate`
+     * builds the client from an **already-present** model and primes the engine off the Binder
+     * thread, so the session's first real recognition doesn't pay ML Kit's lazy model load. It can
+     * never trigger a download — only `prepare()` may, and that lives behind the consent dialog —
+     * so opening a notebook never asks the user for anything. No recognizer installed, or an
+     * extension that doesn't answer, is a non-event: nothing is shown, ever.
+     */
+    private fun warmUpRecognizer() {
+        lifecycleScope.launch {
+            try {
+                val ref = ExtensionRegistry.handwritingRecognizer(this@NotebookActivity) ?: return@launch
+                val status = RecognizerClient(this@NotebookActivity, ref).status()
+                Slog.d(TAG) { "recognizer warm-up: ${ref.packageName} status=$status" }
+            } catch (e: ExtensionCallException) {
+                Slog.d(TAG) { "recognizer warm-up skipped: ${e.javaClass.simpleName}: ${e.message}" }
+            }
+        }
+    }
+
+    /**
+     * What is on the paper right now, for a recognize call: the visible page's size and its strokes.
+     * The size comes from the page matching [displayedPageId], not from `session.currentPage` — the
+     * session's index advances on IO before a flip reaches the paper, so `currentPage` can already
+     * be the destination (or, mid-mutation, out of range of `pages`).
+     *
+     * The strokes are `liveStrokes.values` — a LinkedHashMap filled by the page load and then by
+     * each commit, so its order **is** writing order. A recognizer reads ink as a sequence, and a
+     * hashed order would be nonsense to it; never source this from a set.
+     */
+    private fun recognizeContext(): RecognizeContext? {
+        if (!opened || !::session.isInitialized) return null
+        val page = session.pages.firstOrNull { it.id == displayedPageId } ?: return null
+        return RecognizeContext(liveStrokes.values.toList(), page.width.toFloat(), page.height.toFloat())
     }
 
     /** Seal a session the screen will never use — on [appScope], because our own scope is dying. */
