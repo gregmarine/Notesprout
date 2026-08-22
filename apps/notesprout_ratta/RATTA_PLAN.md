@@ -534,6 +534,134 @@ hide + re-show at drop, dismissal, overlay) → all-clear. Version stays **0.1.0
 
 ---
 
+## Phases — Arc 3 "Headings" (planned 2026-08-22, wizard complete)
+
+Heading objects baked into the core, og-Notesprout style, using Paper's lessons — plus the
+one sanctioned extension: **ML Kit handwriting recognition**. The extension mechanism exists
+*solely* so other HWR engines can slot in later; headings and the markdown engine are core.
+This amends the arc-1 "no extensions" rule — N0 updates `apps/notesprout_ratta/CLAUDE.md`
+accordingly (the recognizer point is the only extension surface; no other capability points).
+
+### Locked decisions (arc-3 wizard 2026-08-22 — do not re-ask)
+
+| Decision | Answer |
+|---|---|
+| Extension strategy | **Fresh SN extension.** New minimal `:extension-api` + `:ext-mlkit` modules in SN's own Gradle root; fresh-written AIDL scoped to the recognizer point only. Paper's arcs 1/3 (`PAPER_EXTENSIONS_PLAN.md`, `PAPER_RECOGNITION_PLAN.md`, `:extension-api`, `:ext-mlkit`) are reading references — no code copied. Separate model download from Paper's ext accepted. |
+| Extension identity | Label **"NSE · ML Kit"** (+" Dev" in debug) — Paper's shared prefix, side-by-side ambiguity with Paper's ext on the Nomad accepted. Package `com.symmetricalpalmtree.notesproutsn.ext.mlkit` (+`.dev`), Tabler puzzle icon, **no launcher activity** (Supernote shows it anyway — accepted), same-signature trust both directions. |
+| New Gradle dependency | `com.google.mlkit:digital-ink-recognition:19.0.0` in `:ext-mlkit` **only** (approved in this wizard — the root-CLAUDE.md discussion requirement is satisfied). |
+| Heading storage | **Additive row type `TYPE_HEADING = "heading"`** in the universal table (og model on the family shape): `parentId` = page id · `text` = **hash-prefixed markdown** (`"## Title"`), **always non-null** · `flags` = level 1–6 (**authoritative** — the prefix is only ever written from it) · `x/y/width/height` = bounds in page px · `"order"` = z-order among the page's headings · everything else null. No version bump, no migration; Paper ignores the rows (proven-safe additive pattern, same as SN ignoring Paper's `object` rows in R6). |
+| Recognition-failure path | **Paper's way**: problem dialog, lassoed ink untouched, retry or give up. A heading ALWAYS has recognized text — the og null-text stroke-fallback state and heading stroke-children **never exist in SN**. |
+| Markdown engine | **Full og parser/renderer subset fresh-coded into core** (`core/markdown/`, pure Kotlin): h1–h6, bold/italic/strike, links + `![alt]` as italic caption, un/ordered lists (start-number honoured, **no lettered/roman**), task checkboxes, blockquotes, horizontal rules; the WYSIWYG regex-safety rules (`[^*\n]` classes, no DOT_MATCHES_ALL). og's two parser test suites are the reference. Only the heading path is exercised on-page this arc. |
+| Heading typography | og/Paper's: 24 sp bold, per-level scale ×2.0 / 1.75 / 1.5 / 1.25 / 1.1 / 1.0, single line ellipsized, 8 dp padding. |
+| Level-pick UI | Selection toolbar gains an **H button** → the bar swaps to an **H1–H6 sub-row** (Tabler `h-1`…`h-6`). CONVERT mode: pure-stroke selection (`contentIds.isEmpty()`) → pick level → recognize → create. CHANGE mode: single-heading selection → sub-row opens with the current level highlighted (1 dp inkBlack border). |
+| Ops in scope | Create + render + **tap-to-edit** (hash-free dialog: prefill `stripHeadingPrefix`, Save re-applies `applyLevel` + re-measures, **empty Save = delete**) + **change level** + first-class lasso move/delete with undo. No un-heading/revert command (og parity). |
+| HWR flow | **Paper's M-arc flow verbatim, fresh-coded**: only `prepare()` downloads (consent dialog precedes), `Connectivity.isOnline` pre-check (ML Kit's download hangs silently offline), model + present-flag in the extension's sandbox, `warmUp()` from the flag only, warm-up at notebook open once the model exists, "Recognizing…" as an Opening-style overlay, exact `RECOGNIZER_NOT_READY` contract message, extension whole-call budgets just under host timeouts, **never log recognized text** (counts/durations only). |
+| Debug trigger | Debug-only **⋯ button at the notebook toolbar's end** → styled chooser with "Recognize page" (whole-page ink in writing order → recognized text in a styled dialog). The recognize-page row is **removed in N3** (user chose not to keep it); the ⋯ button stays only if other debug items remain. |
+
+### Arc-3 standing traps (inherited from Paper's M/H arcs — assume they apply)
+
+- **ML Kit needs writing order**: strokes must be handed over in commit order (LinkedHashMap
+  `liveStrokes` order), never a `Selection.strokeIds` Set's hash order — Paper's H4
+  "Meeting Notes" bug. Any restore path must also preserve `"order"`.
+- Only Binder-marshalable exceptions leave an AIDL stub (`SecurityException`,
+  `IllegalArgumentException`, `IllegalStateException`) — anything else kills the
+  transaction silently.
+- ML Kit's cold `isModelDownloaded` is network-bound and SLOW (75 s worst) — never block a
+  `status()` call on it; the present-flag is the fast source. The download survives the
+  host's unbind (extension process stays cached). Cold first inference loads the model
+  (~1.9 s) — hence warm-up at notebook open.
+- Ratta's Apps grid caches label/icon rows — after `adb install -r` it can show stale
+  identity; Settings → Apps → My Apps is fresh. Cosmetic only.
+- Typing on the Supernote is the user's job (IME swallow trap) — device agents verify the
+  edit dialog via uiautomator dumps and keyboard-tap coordinates only where unavoidable.
+
+### N0 — Recognizer extension point + NSE · ML Kit + debug recognize
+**Status:** ⬜ Not started
+
+`:extension-api` (fresh, minimal — depends on nothing in `:app`): the recognizer AIDL
+(`status` / `prepare` / `recognize`), hand-written parcelables (strokes in, per-line text
+out — Binder 1 MB cap in mind), capability + contract constants (timeouts, budgets, exact
+`RECOGNIZER_NOT_READY` message), same-signature trust check used by both sides.
+`:ext-mlkit`: bound service, ML Kit dep, `prepare()`-only download, model-present flag,
+whole-call budgets, marshalable-exceptions-only stubs. Host: manifest `<queries>`,
+discovery + `RecognizerClient` (bind on app context, supervisor-scope async, unbind in
+finally), `RecognizerReadiness` (consent dialog → online pre-check → progress dialog →
+ready), warm-up at notebook open, debug ⋯ chooser + "Recognize page" → whole-page strokes
+in writing order → styled result dialog. `apps/notesprout_ratta/CLAUDE.md` extension rule
+amended.
+**Gate:** JVM tests (parcelable round-trips, contract constants, trust-check logic where
+pure); debug + release build of all three modules; Haiku device walk on the Nomad
+(install host + ext, discovery, consent → download → ready on user-written ink, result
+dialog via uiautomator dump, crash buffer); **user eye check** (consent flow feel,
+recognize a handwritten page, offline behaviour).
+*Fable writes the AIDL contract + trust seam; Opus the extension + readiness flow; Sonnet
+module scaffolds/resources.*
+
+**Questions to resolve at phase start:** recognition language/model (en-US only vs. a
+setting); debug result-dialog contents (text only vs. text + timing); extension versionName
+scheme; where the consent dialog first appears (debug recognize vs. also pre-armed at
+notebook open).
+
+### N1 — Markdown engine (core, pure)
+**Status:** ⬜ Not started
+
+`core/markdown/` fresh-coded to the og subset (see locked decisions): `MarkdownParser`
+(blocks + inlines), `MarkdownRenderer` (spans), and a measure/draw utility
+(StaticLayout-based) sized for heading rendering and reusable by future text surfaces.
+No UI change, no on-device behaviour change — this phase is JVM-only.
+**Gate:** JVM suite ported from og's two parser test suites (as behaviour reference —
+fresh test code) + heading-typography measure tests; debug + release build.
+*Opus implements; Fable reviews against og's parser semantics (list start numbers, regex
+safety, seven-`#`s-is-not-a-heading).*
+
+**Questions to resolve at phase start:** none expected — scope fully locked above; ask
+only if og-vs-SN semantic conflicts surface mid-port.
+
+### N2 — Heading objects end to end
+**Status:** ⬜ Not started
+
+`SoilSchema.TYPE_HEADING` + heading store (`HeadingRows`/`HeadingStore` on the session's
+single serial `SoilWriter`, z-order `MAX("order")+1`, soft delete); prefix helpers
+(`headingPrefix` / `stripHeadingPrefix` / `applyLevel` — **never hardcode `"# "`**; level
+is authoritative, no derive-from-text); g-paper `ContentRenderer` (canvas text via the N1
+engine, `hitTargets()`, the live-drag pair `draw(canvas, excluded)` + `drawObject` so
+drags don't ghost, `notifyContentChanged` per batch); selection toolbar H button +
+H1–H6 sub-row (CONVERT + CHANGE modes per locked decisions); create flow = "Recognizing…"
+overlay → recognize (writing order) → success: heading row + stroke soft-delete in **one
+undo step**, `setSelection` on the new heading / failure: problem dialog, ink untouched;
+tap-to-edit via `onSelectionTapped` hit-test (hash-free dialog, Ratta IME rule — never
+hide the IME while the field has focus; empty Save = delete); change level (re-prefix +
+re-measure, keep top-left); undo actions (HeadingCreated / HeadingMoved / HeadingDeleted /
+HeadingTextEdited / HeadingLevelChanged) replayed through the store then page reload;
+page delete/undo carries heading rows; `CoverSnapshot` + page reconcile include headings.
+**Gate:** JVM tests (prefix helpers, level↔flags mapping, measure math, store ordering,
+undo actions); Haiku device walk (headings persist across close/reopen + cold restart,
+move/delete via finger where injectable, crash buffer); **user eye check** (convert a
+handwritten title per level, render fidelity, drag feel, edit dialog, level change,
+undo/redo of everything).
+*Fable writes the store + renderer seam + undo contracts; Opus the toolbar/dialog/flows;
+Sonnet layouts/icons/strings.*
+
+**Questions to resolve at phase start:** heading z-order vs. ink (og renders headings
+below strokes — adopt?); sub-row anchor behaviour (swap the bar in place vs. second row);
+edit-dialog box growth rule (clamp to page width?); whether CHANGE mode's sub-row also
+offers Delete or stays level-only.
+
+### N3 — Hardening, review, docs, freeze
+**Status:** ⬜ Not started
+
+`/code-review` over the arc range (level asked at phase start); remove the debug
+"Recognize page" row (+ the ⋯ button if empty); docs (`docs/extensions.md` new,
+`docs/notebook.md` headings + recognition sections, `docs/library.md` if touched);
+root + app CLAUDE.md and memory updates; version stamp decision; full regression
+(Haiku walk + short user checklist); commit + push; arc freeze.
+**Gate:** everything above green or explicitly accepted; user all-clear.
+
+**Questions to resolve at phase start:** review level; version stamp (stay 0.1.0-ratta
+vs. 0.2.0-ratta for a feature arc); keep-or-remove the ⋯ debug button.
+
+---
+
 ## Verification (end of arc)
 
 1. All JVM unit tests green (`./gradlew test` in `apps/notesprout_ratta`).

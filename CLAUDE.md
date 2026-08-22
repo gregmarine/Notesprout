@@ -151,9 +151,10 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   parity) is complete and frozen — R0–R6 ✅ 2026-08-22**, format-compat with Paper proven both
   directions on-device. **Arc 2 ("Polish"): P1 ✅ 2026-08-22** — fixed tools (no panels;
   PEN·black·3px, eraser 15px, smart-lasso/scribble-erase hardwired on), Delete-only selection
-  context toolbar replacing the tap sheet, tap-time "Opening…" overlay. No further phase is
-  planned — ask the user first. Read `apps/notesprout_ratta/RATTA_PLAN.md` first for any work
-  there.
+  context toolbar replacing the tap sheet, tap-time "Opening…" overlay. **Arc 3 ("Headings")
+  planned 2026-08-22, N0–N3 ⬜**: baked-in heading objects + core markdown engine + the one
+  sanctioned extension (NSE · ML Kit recognizer point — HWR engines only). Read
+  `apps/notesprout_ratta/RATTA_PLAN.md` first for any work there.
 - `germination` — previous post-MVP feature branch (reference, not active)
 - The former feature branches (`seed`, `sprout`, `sapling`, `supernote`, `paper`) are merged and
   **deleted** (local + remote) — "on sprout/sapling/supernote/paper" means `main`; history lives under
