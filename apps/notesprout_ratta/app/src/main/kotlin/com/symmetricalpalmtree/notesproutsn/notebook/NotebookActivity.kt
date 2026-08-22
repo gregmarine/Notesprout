@@ -55,6 +55,13 @@ import kotlinx.coroutines.withContext
  *
  * Immersive (system bars hidden, transient by swipe); chrome sits flush at the top edge — the top
  * guard is 0 on Ratta hardware (`core/TopGuard.kt` holds that decision).
+ *
+ * **Over the ~800-line rule, with reason (N3):** this file is the single integration seam between
+ * the engine's callbacks, the selection/heading flows, undo replay and the lifecycle — all of
+ * which share tightly-coupled Main-thread state (`liveStrokes`/`liveHeadings`/`displayedPageId`/
+ * `loadingCommits`/`selectionActive`). Everything separable already lives in collaborators
+ * (session, stores, renderer, toolbars, gestures, dialogs); splitting what remains would scatter
+ * that shared state behind accessors without reducing the coupling that makes it delicate.
  */
 class NotebookActivity : AppCompatActivity() {
 
@@ -114,6 +121,14 @@ class NotebookActivity : AppCompatActivity() {
      */
     private var displayedPageId: String = ""
 
+    /**
+     * Armed (on Main) for the duration of `navigateTo`'s suspending loads: target page id plus a
+     * buffer `onStrokeCommitted` adds to when a pen-up for that page lands mid-load. The rebuild
+     * merges the buffer so the fresh stroke survives `loadStrokes` instead of vanishing until the
+     * next flip. Null whenever no load is in flight.
+     */
+    private var loadingCommits: Pair<String, MutableList<Stroke>>? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (!IndexGuard.ready(this)) return
@@ -158,12 +173,6 @@ class NotebookActivity : AppCompatActivity() {
         binding.notebookName.text = name
         binding.pageIndicator.text = ""
 
-        // Debug builds only (the release twin installs nothing): the ⋯ at the end of the button row.
-        // The provider hands it the visible page and nothing else — and the strokes go over in
-        // WRITING ORDER, which is what `liveStrokes` (a LinkedHashMap filled by load then by commit)
-        // preserves. A recognizer reads ink as a sequence; a hashed order is nonsense to it.
-        NotebookDebugMenu.install(this, binding.topBarRow, provider = { recognizeContext() })
-
         pageGestures = PageGestures(
             host = paper.asView(),
             isPenActive = { paper.isPenActive },
@@ -202,7 +211,7 @@ class NotebookActivity : AppCompatActivity() {
             if (isFinishing || closing) { sealAbandonedOpen(); return }
             val page = session.currentPage
             val strokes = session.store.loadPage(page.id)
-            val headings = session.headings.loadPage(page.id)
+            val headings = remeasureForDevice(session.headings.loadPage(page.id))
             paper.setPageSize(page.width, page.height)
             paper.setTemplate(session.template)
             // Renderer before loadStrokes: the load's re-record is the frame that paints them.
@@ -256,22 +265,6 @@ class NotebookActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * What is on the paper right now, for a recognize call: the visible page's size and its strokes.
-     * The size comes from the page matching [displayedPageId], not from `session.currentPage` — the
-     * session's index advances on IO before a flip reaches the paper, so `currentPage` can already
-     * be the destination (or, mid-mutation, out of range of `pages`).
-     *
-     * The strokes are `liveStrokes.values` — a LinkedHashMap filled by the page load and then by
-     * each commit, so its order **is** writing order. A recognizer reads ink as a sequence, and a
-     * hashed order would be nonsense to it; never source this from a set.
-     */
-    private fun recognizeContext(): RecognizeContext? {
-        if (!opened || !::session.isInitialized) return null
-        val page = session.pages.firstOrNull { it.id == displayedPageId } ?: return null
-        return RecognizeContext(liveStrokes.values.toList(), page.width.toFloat(), page.height.toFloat())
-    }
-
     /** Seal a session the screen will never use — on [appScope], because our own scope is dying. */
     private fun sealAbandonedOpen() {
         val s = session
@@ -304,6 +297,12 @@ class NotebookActivity : AppCompatActivity() {
             val pageId = displayedPageId
             session.store.commit(pageId, stroke)
             liveStrokes[stroke.id] = stroke
+            // A navigateTo to this same page may be mid-load (an undo replay's refresh): its row
+            // read can miss this commit, and its loadStrokes would wipe the stroke off the glass.
+            // The buffer hands it to the rebuild instead of losing it until the next flip.
+            loadingCommits?.let { (loadingPageId, buffer) ->
+                if (loadingPageId == pageId) buffer.add(stroke)
+            }
             undo.record(Action.Drew(pageId, stroke))
         }
         override fun onStrokesErased(strokeIds: List<String>) {
@@ -427,9 +426,25 @@ class NotebookActivity : AppCompatActivity() {
      * call would dismiss it anyway and it belongs to the page we are leaving.
      */
     private suspend fun navigateTo(index: Int) {
-        val page = session.goTo(index)
-        val strokes = session.store.loadPage(page.id)
-        val headings = session.headings.loadPage(page.id)
+        // goTo and the loads suspend, and a pen-up can land in those windows (everything runs on
+        // Main, but every suspension frees the thread). A commit for the TARGET page made mid-load
+        // (only possible when the target is the displayed page — an undo replay's refresh) is
+        // persisted yet absent from the read, and loadStrokes would silently take it off the glass
+        // until the next flip. onStrokeCommitted buffers such commits; they merge into the rebuild.
+        val targetId = session.pages[index.coerceIn(0, session.pages.lastIndex)].id
+        val lateCommits = mutableListOf<Stroke>()
+        loadingCommits = targetId to lateCommits
+        val page: PageRef
+        val strokes: List<Stroke>
+        val headings: List<Heading>
+        try {
+            page = session.goTo(index)
+            strokes = session.store.loadPage(page.id)
+            headings = remeasureForDevice(session.headings.loadPage(page.id))
+        } finally {
+            loadingCommits = null
+        }
+        val allStrokes = strokes + lateCommits.filter { late -> strokes.none { it.id == late.id } }
         paper.clearSelection()
         selectionActive = false
         currentSelection = null
@@ -440,8 +455,8 @@ class NotebookActivity : AppCompatActivity() {
         // Renderer before loadStrokes: the swap's single re-record paints the new page's headings.
         liveHeadings = headings.associateByTo(linkedMapOf()) { it.id }
         headingRenderer.headings = headings
-        paper.loadStrokes(strokes)
-        liveStrokes = strokes.associateBy { it.id }.toMutableMap()
+        paper.loadStrokes(allStrokes)
+        liveStrokes = allStrokes.associateBy { it.id }.toMutableMap()
         displayedPageId = page.id
         setPageIndicator(session.currentIndex + 1, session.pages.size)
         session.saveLastOpened()
@@ -460,6 +475,10 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     private suspend fun doDelete() {
+        // Drain first: a stroke commit still queued on the writer would otherwise land AFTER the
+        // delete's liveContentIds snapshot and transaction — a permanently live orphan row under a
+        // soft-deleted page, invisible to the recorded snapshot and to redo's reconcile.
+        session.store.drain()
         val snap = session.deleteCurrent()
         undo.record(Action.Page(snap))
         navigateTo(session.currentIndex)
@@ -502,9 +521,12 @@ class NotebookActivity : AppCompatActivity() {
     private suspend fun revert(a: Action) {
         when (a) {
             is Action.Drew -> { session.store.remove(listOf(a.stroke.id)); session.store.drain(); refreshToPage(a.pageId) }
-            is Action.Erased -> { session.store.restore(a.pageId, a.strokes); session.store.drain(); refreshToPage(a.pageId) }
+            // revive, not a tail-append: the rows still hold their geometry, and putting them back
+            // IN PLACE preserves both the pre-erase z-order and the page's writing order — which a
+            // later lasso-convert reads as a sequence (the arc-3 ML Kit trap).
+            is Action.Erased -> { session.store.revive(a.strokes.map { it.id }); session.store.drain(); refreshToPage(a.pageId) }
             is Action.Deleted -> {
-                session.store.restore(a.pageId, a.strokes)
+                session.store.revive(a.strokes.map { it.id })
                 session.headings.restore(a.headingIds)
                 session.store.drain(); refreshToPage(a.pageId)
             }
@@ -532,7 +554,7 @@ class NotebookActivity : AppCompatActivity() {
 
     private suspend fun reapply(a: Action) {
         when (a) {
-            is Action.Drew -> { session.store.restore(a.pageId, listOf(a.stroke)); session.store.drain(); refreshToPage(a.pageId) }
+            is Action.Drew -> { session.store.revive(listOf(a.stroke.id)); session.store.drain(); refreshToPage(a.pageId) }
             is Action.Erased -> { session.store.remove(a.strokes.map { it.id }); session.store.drain(); refreshToPage(a.pageId) }
             is Action.Deleted -> {
                 session.store.remove(a.strokes.map { it.id })
@@ -603,6 +625,23 @@ class NotebookActivity : AppCompatActivity() {
     private fun syncHeadingRenderer() {
         headingRenderer.headings = liveHeadings.values.toList()
         paper.notifyContentChanged()
+    }
+
+    /**
+     * Boxes were measured with the WRITING device's text metrics and stored in page px — a font
+     * scale change or a different-density device (the `.soil` is portable: Nomad ↔ Manta) makes the
+     * stored size disagree with what this device draws, which would ellipsize every heading and
+     * leave stale hit/selection bounds. Re-measure at load, in memory only: position is authored
+     * (kept), size is derived (recomputed). Rows are corrected whenever the heading is next
+     * written anyway.
+     */
+    private fun remeasureForDevice(headings: List<Heading>): List<Heading> {
+        if (headings.isEmpty()) return headings
+        val dm = resources.displayMetrics
+        return headings.map { h ->
+            val (w, hh) = HeadingRenderer.measure(h.text, dm.density, dm.scaledDensity)
+            if (w == h.width && hh == h.height) h else h.copy(width = w, height = hh)
+        }
     }
 
     /** The bar with the right mode: pure strokes → CONVERT's H, one heading alone → CHANGE's H

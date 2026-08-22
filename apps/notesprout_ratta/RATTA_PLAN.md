@@ -773,7 +773,48 @@ empty-save delete, undo/redo of everything, persistence, ink-over-heading) → a
 the eye-check headings.
 
 ### N3 — Hardening, review, docs, freeze
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-22 — arc 3 frozen at this commit)
+
+**Outcome:** Debug surface removed per the wizard: both
+`NotebookDebugMenu` twins, the ⋯ button, `recognizeContext()`/`RecognizeContext`, and 10 orphaned
+strings deleted; two wording fixes fell out (`recognize_problem_title` "Recognize page" → 
+"Recognition" — it titles the heading-convert problem dialogs and named a removed action; 
+"Page too dense…" → "Too much ink to recognize at once." — it fires on selections). **Review
+(`/code-review high` over `1b9362b..HEAD`):** 10 confirmed correctness findings — **8 fixed by
+Fable**: ① `RecognizingOverlay`'s `WeakHashMap<Activity, View>` cache leaked every Activity for
+the process lifetime (the cached View strongly refs its Activity via `View.context` — value→key
+defeats the weak key) → replaced with a view-tag lookup in the activity's own tree; **the same
+defect existed in P1's `OpeningOverlay`** (out of range) — fixed identically; ② undo of
+`Erased`/`Deleted` (and redo of `Drew`) used the tail-append `restore`, scrambling the persisted
+writing order N2 declared load-bearing → all three now `revive` (in place); `StrokeStore.restore`
+deleted as dead; ③ `doDelete` never drained the writer, so a queued commit could land after the
+page delete's snapshot/transaction as a permanently live orphan row → drains first; ④ the ext's
+`recognizeInk` scaled `Dots`' tiny-stroke threshold from the whole selection height (a two-line
+lasso doubled it, eating real punctuation) → the stub derives a line height from the ink via the
+segmenter (`dotLineHeight` param; page path unchanged); ⑤ the download poll's offline branch
+skipped the purely-local `status()` bind, falsely failing a model that finished as connectivity
+dropped → status polled every iteration, offline included; ⑥ heading boxes measured with the
+writing device's `scaledDensity` but stored in page px ellipsized every heading on a font-scale or
+density change (portable `.soil`, Nomad ↔ Manta) → `remeasureForDevice` at both page-load sites
+(in-memory; position authored, size derived); ⑨ a zero-area (single-dot) selection threw the
+absurd "Too much ink" dialog host-side → `RecognizerClient` floors zero to 1 px (negative/NaN
+still rejected); ⑩ a pen-up landing in `navigateTo`'s suspending-load window was persisted but
+wiped off the glass until the next flip → `loadingCommits` buffer merged into the rebuild.
+**2 accepted** (reasons + below-cap cleanup notes in monorepo `BACKLOG.md`): ⑦ the segmenter's
+fragment-merge guard (affects only `recognizePage`, which has no consumer in the shipped app);
+⑧ any-`N.` paragraph interruption in `MarkdownParser` (**og's parser is identical** — og parity is
+the locked reference; fix in og first). `NotebookActivity`'s >800-line written reason added to its
+KDoc. **Docs:** `docs/extensions.md` new (the recognizer point end to end);
+`docs/notebook.md` rewritten for N2/N3 (headings section, stale P1 claims corrected, review-fix
+behaviours). **247 JVM tests** (app 212 · api 6 · ext 29), debug + release of all three modules;
+release hand-signed; app debug + signed release + ext-mlkit dev reinstalled on SNN. **Haiku
+regression walk 10/10 pass on the first run** (no tap-aim false failures): cold restore into
+Test 04, toolbar has **no ⋯**, heading + strokes render, warm-up `status=0`, flips 1/2⇄2/2,
+delete sheet up/dismissed, back to library, crash buffer clean, cold-restore to library.
+Version stays **0.1.0-ratta** (wizard). **User eye check all-pass 2026-08-22, no findings**
+(heading render fidelity, punctuation surviving a convert, single-dot convert without the
+"Too much ink" dialog, erase-undo restoring strokes in place, general feel pass) → all-clear;
+arc 3 frozen.
 
 `/code-review` over the arc range (level asked at phase start); remove the debug
 "Recognize page" row (+ the ⋯ button if empty); docs (`docs/extensions.md` new,
@@ -784,6 +825,10 @@ root + app CLAUDE.md and memory updates; version stamp decision; full regression
 
 **Questions to resolve at phase start:** review level; version stamp (stay 0.1.0-ratta
 vs. 0.2.0-ratta for a feature arc); keep-or-remove the ⋯ debug button.
+**Answered 2026-08-22:** review at **high** (R6 precedent); version **stays 0.1.0-ratta**;
+the ⋯ button is **removed entirely** (Recognize page was its only row — the
+`NotebookDebugMenu` twins, button, and strings all go; a future debug need re-adds the
+known pattern).
 
 ---
 

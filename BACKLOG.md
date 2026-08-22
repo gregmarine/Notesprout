@@ -783,3 +783,31 @@ The Notesprout SN R6 `/code-review high` pass fixed its 10 top correctness findi
   `StrokeStore.commit`'s per-stroke `MAX("order")` query. All small at SN's data sizes.
 - FolderPicker/Library breadcrumb logic duplication; dead API surface (`SoilCrypto.createRaw`
   unused by SN's create path, unused `SoilDao` methods) — cleanup, not correctness.
+
+## Notesprout SN — N3 (arc 3) review findings accepted (not fixed) in the headings freeze (2026-08-22)
+
+The arc-3 `/code-review high` pass (N0–N2 range) fixed 8 of its 10 confirmed correctness findings
+in SN (see RATTA_PLAN.md N3 Outcome). Two were **explicitly accepted**:
+
+- **`StrokeSegmenter` fragment-merge guard can fold a genuine short line into an adjacent full
+  line** (`apps/notesprout_ratta/ext-mlkit/.../StrokeSegmenter.kt` ≈ line 129): the
+  `minOf(sizes) <= 3` guard has no x-range/gap check, so a 1–3-stroke cursive line whose box
+  overlaps a descender-inflated neighbour >40 % merges and interleaves both lines' ink. Affects
+  `recognizePage` only, which has **no consumer in the shipped app** since N3 removed the debug
+  "Recognize page" row (the heading flow uses `recognizeInk`). Tuning it blind risks regressing the
+  real fragment cases it exists for — revisit with device data when `recognizePage` gains a
+  consumer (page-text pipeline, documents).
+- **`MarkdownParser` lets any `N. text` line interrupt a paragraph** (CommonMark restricts
+  paragraph interruption to `1.`): `"…came out in\n1986. It sold well."` becomes a numbered list
+  item. **og's parser behaves identically** (`isBlockStart` uses the same unrestricted
+  `orderedItemRegex`), and og's two test suites are SN's locked behaviour reference — fixing SN
+  alone would render the same document differently across the family. Fix in og first, then port.
+
+Below-cap cleanup notes from the same review, recorded so they aren't re-found: host
+`RecognizerClient.recognizePage` is now dead surface (kept — the AIDL contract retains the call for
+future engines, same acceptance shape as R6's `createRaw`); `NotebookActivity` exceeds the
+~800-line rule (written reason added to its class KDoc in N3); `ext-mlkit` logs via
+`if (BuildConfig.DEBUG) Log.d` (module has no Slog; the gate satisfies the rule's zero-release-cost
+intent); `Dialogs.problem` duplication in `RecognizerReadiness.showDownloadFailed`, dead
+`problemTitleRes` default, `SelectionToolbar`/`NameDialog`-family duplication, per-draw markdown
+parse in `HeadingRenderer`, mirrored `SELECTION_BOX_INFLATE_PX` constant (deliberate, commented).

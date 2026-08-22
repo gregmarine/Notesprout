@@ -5,7 +5,6 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import com.symmetricalpalmtree.notesproutsn.R
-import java.util.WeakHashMap
 
 /**
  * The "Recognizing…" box shown while a heading convert is out at the recognizer extension (N2) —
@@ -25,11 +24,15 @@ import java.util.WeakHashMap
  * justification as the selection toolbar's own show — never a frame under live ink.
  *
  * The caller owns the pairing and always hides in a `finally`; both calls are idempotent, and the
- * view is cached per activity so a second convert reuses it rather than stacking shields.
+ * view is cached per activity so a second convert reuses it rather than stacking shields. The cache
+ * is a **tag lookup in the activity's own view tree**, never a map keyed on the Activity: a
+ * `WeakHashMap<Activity, View>` here would leak every Activity for the process lifetime, because the
+ * cached View strongly references its Activity through `View.context` — value → key defeats the
+ * weak key entirely.
  */
 object RecognizingOverlay {
 
-    private val overlays = WeakHashMap<Activity, View>()
+    private val TAG_KEY = "notesproutsn.recognizingOverlay"
 
     fun show(activity: Activity) {
         if (activity.isFinishing || activity.isDestroyed) return
@@ -39,15 +42,16 @@ object RecognizingOverlay {
     }
 
     fun hide(activity: Activity) {
-        overlays[activity]?.visibility = View.GONE
+        activity.findViewById<ViewGroup>(android.R.id.content)
+            ?.findViewWithTag<View>(TAG_KEY)?.visibility = View.GONE
     }
 
     private fun obtain(activity: Activity): View? {
-        overlays[activity]?.let { return it }
         val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return null
+        content.findViewWithTag<View>(TAG_KEY)?.let { return it }
         val overlay = LayoutInflater.from(activity).inflate(R.layout.overlay_recognizing, content, false)
+        overlay.tag = TAG_KEY
         content.addView(overlay)
-        overlays[activity] = overlay
         return overlay
     }
 }

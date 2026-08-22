@@ -27,7 +27,11 @@ internal object MlKitEngine {
 
     /**
      * One writing area, no layout analysis. [deadlineMs] is an absolute `System.currentTimeMillis`
-     * bound shared by every call in the same host request.
+     * bound shared by every call in the same host request. [dotLineHeight] is the height [Dots]
+     * scales its tiny-stroke threshold from — a **line** height, never a multi-line area's: the
+     * page path passes its per-line height (the default keeps that behaviour), and the direct
+     * host path derives one from the ink, because a selection spanning two written lines would
+     * double the threshold and swallow real punctuation into dot circles.
      */
     fun recognizeInk(
         recognizer: DigitalInkRecognizer,
@@ -36,12 +40,13 @@ internal object MlKitEngine {
         areaHeight: Float,
         preContext: String,
         deadlineMs: Long,
+        dotLineHeight: Float = areaHeight,
     ): String {
         val wait = PageText.waitFor(deadlineMs, System.currentTimeMillis(), CALL_AWAIT_MS)
         if (wait <= 0L) throw TimeoutException("deadline passed before recognizeInk")
 
         val builder = Ink.builder()
-        for (s in Dots.round(PageText.widenDots(strokes), areaHeight)) {
+        for (s in Dots.round(PageText.widenDots(strokes), dotLineHeight)) {
             val sb = Ink.Stroke.builder()
             for (i in 0 until s.size) sb.addPoint(Ink.Point.create(s.x[i], s.y[i]))   // no time channel travels
             builder.addStroke(sb.build())

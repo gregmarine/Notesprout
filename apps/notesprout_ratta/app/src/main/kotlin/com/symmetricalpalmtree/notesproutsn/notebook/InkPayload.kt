@@ -31,14 +31,3 @@ object InkPayload {
         return out
     }
 }
-
-/**
- * What the notebook screen exposes for a recognize call: the visible page's strokes **in writing
- * order** and the page's px size — the same values that were handed to `setPageSize`. Nothing else
- * leaves the screen: no ids, no notebook name, no session.
- */
-class RecognizeContext(
-    val strokes: List<Stroke>,
-    val pageWidth: Float,
-    val pageHeight: Float,
-)

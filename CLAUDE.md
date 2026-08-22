@@ -151,11 +151,13 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   parity) is complete and frozen — R0–R6 ✅ 2026-08-22**, format-compat with Paper proven both
   directions on-device. **Arc 2 ("Polish"): P1 ✅ 2026-08-22** — fixed tools (no panels;
   PEN·black·3px, eraser 15px, smart-lasso/scribble-erase hardwired on), Delete-only selection
-  context toolbar replacing the tap sheet, tap-time "Opening…" overlay. **Arc 3 ("Headings"):
-  N0 ✅ 2026-08-22** (recognizer extension point + NSE · ML Kit + debug recognize — the one
-  sanctioned extension surface, SN-namespaced), **N1–N3 ⬜**: core markdown engine + baked-in
-  heading objects + hardening/freeze. Read `apps/notesprout_ratta/RATTA_PLAN.md` first for any
-  work there.
+  context toolbar replacing the tap sheet, tap-time "Opening…" overlay. **Arc 3 ("Headings") is
+  complete and frozen — N0–N3 ✅ 2026-08-22**: recognizer extension point + NSE · ML Kit (the one
+  sanctioned extension surface, SN-namespaced), core markdown engine, heading objects end to end,
+  N3 hardening (arc-range `/code-review high`: 8 findings fixed incl. the overlay Activity-leak
+  pair and in-place `revive` restores, 2 accepted → `BACKLOG.md`; debug "Recognize page" ⋯
+  removed; `docs/extensions.md` new, `docs/notebook.md` current). Read
+  `apps/notesprout_ratta/RATTA_PLAN.md` first for any work there.
 - `germination` — previous post-MVP feature branch (reference, not active)
 - The former feature branches (`seed`, `sprout`, `sapling`, `supernote`, `paper`) are merged and
   **deleted** (local + remote) — "on sprout/sapling/supernote/paper" means `main`; history lives under

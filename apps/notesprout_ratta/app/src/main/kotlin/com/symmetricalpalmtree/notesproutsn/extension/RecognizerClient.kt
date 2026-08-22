@@ -35,22 +35,32 @@ class RecognizerClient(context: Context, private val ref: ProviderRef) {
 
     /** Recognize one writing area; the top candidate or "". */
     suspend fun recognizeInk(strokes: List<InkStroke>, areaWidth: Float, areaHeight: Float, preContext: String): String {
-        InkCaps.check(strokes, areaWidth, areaHeight)
+        // A single dot committed as a one-point stroke has zero-size tight bounds — degenerate but
+        // real ink, not a caller bug. Floor to 1 px so the contract's positive-size requirement
+        // holds on both sides; a genuinely negative/NaN size still fails InkCaps below.
+        val w = floorArea(areaWidth)
+        val h = floorArea(areaHeight)
+        InkCaps.check(strokes, w, h)
         val pre = InkCaps.preContext(preContext)
         val t0 = System.currentTimeMillis()
-        val text = call(INK_TIMEOUT_MS) { InkCaps.text(it.recognizeInk(strokes, areaWidth, areaHeight, pre)) }
+        val text = call(INK_TIMEOUT_MS) { InkCaps.text(it.recognizeInk(strokes, w, h, pre)) }
         Slog.d(TAG) { "recognizeInk: ${strokes.size} strokes → ${text.length} chars in ${System.currentTimeMillis() - t0} ms" }
         return text
     }
 
     /** Recognize a whole page (the extension segments); lines joined by '\n', paragraphs by a blank line, or "". */
     suspend fun recognizePage(strokes: List<InkStroke>, pageWidth: Float, pageHeight: Float): String {
-        InkCaps.check(strokes, pageWidth, pageHeight)
+        val w = floorArea(pageWidth)
+        val h = floorArea(pageHeight)
+        InkCaps.check(strokes, w, h)
         val t0 = System.currentTimeMillis()
-        val text = call(PAGE_TIMEOUT_MS) { InkCaps.text(it.recognizePage(strokes, pageWidth, pageHeight)) }
+        val text = call(PAGE_TIMEOUT_MS) { InkCaps.text(it.recognizePage(strokes, w, h)) }
         Slog.d(TAG) { "recognizePage: ${strokes.size} strokes → ${text.length} chars in ${System.currentTimeMillis() - t0} ms" }
         return text
     }
+
+    /** Zero → 1 px (degenerate-but-valid); anything negative or NaN passes through for InkCaps to reject. */
+    private fun floorArea(v: Float): Float = if (v >= 0f && v < 1f) 1f else v
 
     private suspend fun <T> call(timeoutMs: Long, block: (IHandwritingRecognizer) -> T): T =
         ExtensionBinder.call(

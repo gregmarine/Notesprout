@@ -158,8 +158,27 @@ object RecognizerReadiness {
                     val now = System.currentTimeMillis()
                     val elapsedS = ((now - t0) / 1000L).toInt()
 
-                    // The network dropping mid-download does not fail ML Kit, it makes it wait. Say
-                    // so on the dialog, and give up on the offline clock rather than the 5-minute cap.
+                    // status() is a purely LOCAL service bind — it works with no network, so poll
+                    // it every iteration, offline included: a model that finished downloading just
+                    // as connectivity dropped must still be seen as READY, not falsely failed on
+                    // the offline clock.
+                    val status = try {
+                        client.status().also { pollFailures = 0 }
+                    } catch (e: ExtensionCallException) {
+                        pollFailures++
+                        Slog.d(TAG) { "status poll failed ($pollFailures): ${e.message}" }
+                        if (pollFailures >= MAX_POLL_FAILURES) { fail(); return@launch }
+                        RecognizerStatus.DOWNLOADING
+                    }
+                    if (status == RecognizerStatus.READY) {
+                        Slog.d(TAG) { "model ready after $elapsedS s" }
+                        succeed(); return@launch
+                    }
+
+                    // Not ready and offline: the network dropping mid-download does not fail
+                    // ML Kit, it makes it wait. Say so on the dialog, give up on the offline clock
+                    // rather than the 5-minute cap, and don't read anything else into the status
+                    // while the downloader is stalled.
                     if (!Connectivity.isOnline(activity)) {
                         if (offlineSinceMs < 0) offlineSinceMs = now
                         if (now - offlineSinceMs >= OFFLINE_GIVE_UP_MS) {
@@ -171,19 +190,7 @@ object RecognizerReadiness {
                     }
                     offlineSinceMs = -1L
 
-                    val status = try {
-                        client.status().also { pollFailures = 0 }
-                    } catch (e: ExtensionCallException) {
-                        pollFailures++
-                        Slog.d(TAG) { "status poll failed ($pollFailures): ${e.message}" }
-                        if (pollFailures >= MAX_POLL_FAILURES) { fail(); return@launch }
-                        RecognizerStatus.DOWNLOADING
-                    }
                     when (status) {
-                        RecognizerStatus.READY -> {
-                            Slog.d(TAG) { "model ready after $elapsedS s" }
-                            succeed(); return@launch
-                        }
                         RecognizerStatus.DOWNLOADING -> {
                             progress.setMessage(activity.getString(R.string.recognize_downloading_body, elapsedS))
                             if (elapsedS >= DOWNLOAD_CAP_S) { fail(); return@launch }

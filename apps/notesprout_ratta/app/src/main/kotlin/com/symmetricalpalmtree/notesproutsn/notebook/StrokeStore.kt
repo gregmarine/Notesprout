@@ -45,29 +45,11 @@ class StrokeStore(
     fun remove(ids: List<String>) = erase(ids)
 
     /**
-     * Undo of an erase (and redo of a draw): put the strokes back as live rows at the tail of the
-     * page's z-order. The upsert is REPLACE, so a soft-deleted row is revived in place with
-     * `deletedAt` cleared — and because [SoilDao.maxOrder] counts deleted rows too, the revived
-     * stroke can never tie with one committed after the erase.
-     */
-    fun restore(pageId: String, strokes: List<Stroke>) {
-        if (strokes.isEmpty()) return
-        writer.enqueue {
-            val now = System.currentTimeMillis()
-            var order = dao.maxOrder(pageId, SoilSchema.TYPE_STROKE)
-            for (s in strokes) {
-                order += 1
-                dao.upsert(StrokeRows.toRow(s, pageId, order, now))
-            }
-            Slog.d(TAG) { "restore ${strokes.size} to $pageId" }
-        }
-    }
-
-    /**
-     * Un-soft-delete rows **in place** — `"order"`, geometry and `createdAt` all survive. This is
-     * the undo of a heading conversion: the converted ink must come back in its original *writing
-     * order* (the arc-3 ML Kit trap — a re-recognize after the undo reads the strokes as a
-     * sequence), which the tail-append [restore] would destroy.
+     * Un-soft-delete rows **in place** — `"order"`, geometry and `createdAt` all survive. Since N3
+     * this is the ONLY way strokes come back (undo of an erase/delete/conversion, redo of a draw):
+     * the page must return to exactly what it was, and the page's writing order is load-bearing —
+     * a later lasso-convert reads the strokes as a sequence (the arc-3 ML Kit trap), which a
+     * tail-append restore would scramble. The rows still hold their geometry, so ids are enough.
      */
     fun revive(ids: List<String>) {
         if (ids.isEmpty()) return

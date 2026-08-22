@@ -31,7 +31,12 @@ import java.util.WeakHashMap
  */
 object OpeningOverlay {
 
-    private val overlays = WeakHashMap<Activity, View>()
+    // The per-activity overlay is cached as a TAG LOOKUP in the activity's own view tree, never a
+    // map keyed on the Activity: a WeakHashMap<Activity, View> would leak every Activity for the
+    // process lifetime (the cached View strongly references its Activity through View.context —
+    // value → key defeats the weak key). autoHideArmed stays a map because its Boolean value holds
+    // no reference back to the key.
+    private val TAG_KEY = "notesproutsn.openingOverlay"
     private val autoHideArmed = WeakHashMap<Activity, Boolean>()
 
     /** Show the overlay, wait for its frame to be drawn, then run [then] (the launch). */
@@ -52,15 +57,16 @@ object OpeningOverlay {
 
     /** Hide the overlay — for a launch that never happened (target gone, dialog instead). */
     fun hide(activity: Activity) {
-        overlays[activity]?.visibility = View.GONE
+        activity.findViewById<ViewGroup>(android.R.id.content)
+            ?.findViewWithTag<View>(TAG_KEY)?.visibility = View.GONE
     }
 
     private fun obtain(activity: Activity): View {
-        overlays[activity]?.let { return it }
         val content = activity.findViewById<ViewGroup>(android.R.id.content)
+        content.findViewWithTag<View>(TAG_KEY)?.let { return it }
         val overlay = LayoutInflater.from(activity).inflate(R.layout.overlay_opening, content, false)
+        overlay.tag = TAG_KEY
         content.addView(overlay)
-        overlays[activity] = overlay
         return overlay
     }
 
