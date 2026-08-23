@@ -1277,7 +1277,7 @@ only if a conflict surfaces.
 staleness machinery); heading labels apply to every page card (no conflict surfaced).
 
 ### K3 — Create-in-picker (+ naming schemes)
-**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-23)
+**Status:** ✅ Complete (commit f116d38, Nomad-verified + user all-clear 2026-08-23)
 
 **Outcome:** Opus implemented against Fable's written contract (the recipe's K3 split); Fable
 reviewed the diff — no blocking findings, all three of the agent's flagged concerns resolved
