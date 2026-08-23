@@ -870,8 +870,8 @@ recognizer extension surface untouched.
   created a moment ago must appear in the gather.
 
 ### C1 — Core + dialog + entry points
-**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-22 — "it all feels, looks, and
-works good", no findings)
+**Status:** ✅ Complete (commit 063b7e3, Nomad-verified + user all-clear 2026-08-22 — "it all
+feels, looks, and works good", no findings)
 
 **Outcome:** Split per the recipe — Fable wrote the pure core (`OutlineTree` with the local
 `MAX_LEVEL = 6`, `ContentsLayout`, `ContentsSource` incl. the pure `items()` pass that drops
