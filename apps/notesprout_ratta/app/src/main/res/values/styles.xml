@@ -64,6 +64,23 @@
         <item name="android:paddingBottom">8dp</item>
     </style>
 
+    <!-- A word-labelled latch: exactly one of a row is down, and "down" is a thicker border. Used
+         by the link picker's mode trio and its Style pair — words read better than glyphs on
+         e-ink, and there is no icon for "this notebook" worth learning. -->
+    <style name="Widget.Notesprout.LatchButton" parent="Widget.AppCompat.Button">
+        <item name="android:background">@drawable/bg_selectable_card</item>
+        <item name="android:textColor">@color/inkBlack</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:singleLine">true</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:stateListAnimator">@null</item>
+        <item name="android:paddingStart">8dp</item>
+        <item name="android:paddingEnd">8dp</item>
+        <item name="android:paddingTop">8dp</item>
+        <item name="android:paddingBottom">8dp</item>
+    </style>
+
     <style name="Widget.Notesprout.RadioButton" parent="Widget.AppCompat.CompoundButton.RadioButton">
         <item name="android:textColor">@color/inkBlack</item>
         <item name="android:textSize">16sp</item>

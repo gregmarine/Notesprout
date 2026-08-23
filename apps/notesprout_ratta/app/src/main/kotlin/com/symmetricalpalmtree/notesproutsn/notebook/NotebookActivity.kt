@@ -71,6 +71,7 @@ class NotebookActivity : AppCompatActivity() {
     private lateinit var session: NotebookSession
     private lateinit var pageGestures: PageGestures
     private lateinit var contentsFlow: ContentsFlow
+    private lateinit var linkPickFlow: LinkPickFlow
     private val repo by lazy { IndexRepository() }
 
     private var notebookId: String = ""
@@ -172,6 +173,15 @@ class NotebookActivity : AppCompatActivity() {
 
         // The toolbar owns all pen/eraser configuration — fixed values, no panels, no prefs.
         toolbar = NotebookToolbar(binding, paper) { close() }
+        // Must exist before RESUMED (it registers an ActivityResult launcher); the lambdas it
+        // holds only fire from the toolbar, which the `opened` flag already gates.
+        linkPickFlow = LinkPickFlow(
+            activity = this,
+            session = { session },
+            displayedPageId = { displayedPageId },
+            applyCreate = { sel, payload -> createLinkFromSelection(sel, payload) },
+            applyEdit = { linkId, before, after -> applyLinkEdit(linkId, before, after) },
+        )
         selectionToolbar = SelectionToolbar(
             root = binding.root,
             paperView = paper.asView(),
@@ -181,10 +191,8 @@ class NotebookActivity : AppCompatActivity() {
             releaseRender = { paper.releaseRender() },
             onDelete = { currentSelection?.let { deleteSelection(it) } },
             onLevelPicked = { onLevelPicked(it) },
-            // Both wait on the picker (K2) — the buttons ship now so the bar's shape, its
-            // measurement and its exclusion rect are settled before the flow arrives.
-            onLink = { Slog.d(TAG) { "link picker in K2" } },
-            onEditLink = { Slog.d(TAG) { "link picker in K2" } },
+            onLink = { beginLinkPick() },
+            onEditLink = { beginLinkEdit() },
             onUnlink = { unlinkSelection() },
             // Release builds get no flask at all — the button is not built when this is null.
             onDebugCreateLink = if (BuildConfig.DEBUG) ({ debugCreateTestLink() }) else null,
@@ -918,13 +926,49 @@ class NotebookActivity : AppCompatActivity() {
         selectionToolbar.show(h.bounds, SelectionMode.HEADING, h.level)
     }
 
-    // ── Links (K1) ───────────────────────────────────────────────────────────
-    //
-    // There is deliberately no `syncLinkRenderer` counterpart to [syncHeadingRenderer]: every K1
-    // link mutation either changes headings/strokes in the same act (so both working copies are
-    // handed over and ONE `notifyContentChanged` covers the frame) or is replayed through a page
-    // reload. A link-only sync arrives with K2's payload edit, which is the first change that
-    // touches nothing else.
+    // ── Links (K1/K2) ────────────────────────────────────────────────────────
+
+    /** Re-hand the working copy to the renderer and ask for one re-record — K2's payload edit is
+     *  the one link mutation that touches nothing else (K1 changes share their frame or reload). */
+    private fun syncLinkRenderer() {
+        linkRenderer.update(liveLinks.values.toList())
+        paper.notifyContentChanged()
+    }
+
+    /** Link on the selection toolbar: capture the selection NOW (it may not survive the picker
+     *  round trip) and hand it to the flow. Eligibility was the bar's call; use-time re-checks
+     *  live in [createLinkFromSelection]. */
+    private fun beginLinkPick() {
+        if (!opened || closing) return
+        val sel = currentSelection ?: return
+        linkPickFlow.beginCreate(sel)
+    }
+
+    /** Edit on a lone selected link: the flow captures the link and prefills the picker. */
+    private fun beginLinkEdit() {
+        if (!opened || closing) return
+        val link = loneSelectedLink() ?: return
+        linkPickFlow.beginEdit(link)
+    }
+
+    /**
+     * The picker's Edit result: rewrite the payload — row, working copy, chrome — and record one
+     * [Action.LinkEdited]. Bounds and children are untouched (the composite is reused; only the
+     * live-drawn chrome can change), so this is the pure `syncLinkRenderer` frame. The caller
+     * already dropped an unchanged payload. Re-selecting the link re-anchors the bar — a recorded
+     * frame-silence exception (the post-edit re-anchor).
+     */
+    private fun applyLinkEdit(linkId: String, before: String, after: String) {
+        if (!opened || closing) return
+        val cur = liveLinks[linkId] ?: return   // page changed under a lost result — nothing to edit
+        session.links.updatePayload(linkId, after)
+        val updated = cur.copy(payload = after, chrome = LinkPayload.chromeOf(after))
+        liveLinks[linkId] = updated
+        syncLinkRenderer()
+        undo.record(Action.LinkEdited(displayedPageId, linkId, before, after))
+        selectAsLink(updated)
+        Slog.d(TAG) { "link $linkId payload edited" }
+    }
 
     /**
      * Wrap [sel] in a link to [payload]'s target — one link row up, its content **re-parented**
@@ -1170,6 +1214,8 @@ class NotebookActivity : AppCompatActivity() {
         undo.clear()   // in-memory history dies with the screen
         // A Dialog outliving its finishing Activity is a window leak — take the Contents down now.
         if (::contentsFlow.isInitialized) contentsFlow.dismissIfShowing()
+        // The relay's source closes over the session about to be sealed — drop it with the screen.
+        if (::linkPickFlow.isInitialized) linkPickFlow.close()
         BrowseState(this).lastOpenNotebookId = null
         if (!::session.isInitialized || !session.isOpen) { finish(); return }
         val p = paper; val s = session; val id = notebookId
@@ -1196,6 +1242,7 @@ class NotebookActivity : AppCompatActivity() {
         // A destroy that bypassed close() (config-change recreate, "don't keep activities") would
         // otherwise leak the Contents dialog's window — the exact hazard close() documents.
         if (::contentsFlow.isInitialized) contentsFlow.dismissIfShowing()
+        if (::linkPickFlow.isInitialized) linkPickFlow.close()
         if (::paper.isInitialized) paper.release()
         // A destroy that isn't a normal close (e.g. finish() out of failOpen) still seals.
         if (::session.isInitialized && session.isOpen && !closing) {

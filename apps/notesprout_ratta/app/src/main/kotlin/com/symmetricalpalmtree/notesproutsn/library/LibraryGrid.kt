@@ -76,8 +76,18 @@ class LibraryGrid(
      * Draw the [pageIndex] slice of [items]. [covers] supplies a notebook's cover blob by id; the
      * host fetches covers for the visible page only, so a missing entry just means "not fetched"
      * and the card falls back to its template-kind placeholder.
+     *
+     * [selectedId] marks one card as chosen — a thicker border, the card background's own
+     * `state_selected` (never a colour, never a grey). It exists for the link picker, where
+     * browsing *is* choosing; the library and the move picker pass nothing and every card stays
+     * unselected exactly as before.
      */
-    fun bind(items: List<CardItem>, pageIndex: Int, covers: Map<String, ByteArray?>) {
+    fun bind(
+        items: List<CardItem>,
+        pageIndex: Int,
+        covers: Map<String, ByteArray?>,
+        selectedId: String? = null,
+    ) {
         currentGrid?.let { container.removeView(it) }
         currentGrid = null
         val range = GridMath.pageRange(pageIndex, cardsPerPage, items.size)
@@ -105,6 +115,7 @@ class LibraryGrid(
                 height = cardHeight
                 setMargins(half, half, half, half)
             }
+            view.isSelected = selectedId != null && item.summary.id == selectedId
             view.setOnClickListener { onTap(item) }
             onLongPress?.let { handler -> view.setOnLongClickListener { handler(item); true } }
             grid.addView(view)

@@ -1210,7 +1210,49 @@ rule); debug create-test-link targets the **next page** in this notebook (insert
 the notebook has a single page — a real, followable page-kind target for K4).
 
 ### K2 — Picker (existing targets) + previews + heading page names
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (commit TBD, Nomad-verified + user all-clear 2026-08-23)
+
+**Outcome:** Split per the recipe, with Sonnet's share folded into Opus (one screen, resources
+inseparable — recorded deviation). Fable wrote the support seam + host wiring: `PageLabels`
+(topmost-by-`(y,x)` bare title; **loose headings only** — a wrapped heading names nothing, the K1
+Contents rule applied to labels), `PreviewMath` (page aspect clamped 0.5–3 against untrusted
+foreign dims, 1024 px render cap), `PageReads`/`PickerPage`/`PageContent` (one read-only gather
+over any `SoilDao`, wrapped content inside its `PageLink`), `PagePreview` (StrokeRasterizer + the
+shared `drawHeading` recipe, off-Main-safe), `PickerPageSource` + `LinkPickerRelay` (the
+transfer-singleton hand-off — the live session serves the current notebook, **its `.soil` is never
+opened twice**; nothing but the edit-prefill ids rides the Intent), `ForeignPageSource` (lazy
+read-only `SoilDatabase.open` under the global key, `sealAsync` on a process-scoped NonCancellable
+IO job — a destroy-time seal always completes), `LinkPickFlow` (launcher + one-door latch released
+at the **top** of the result callback — the S2 trap; capture-at-launch for create and edit;
+unchanged-payload edit = no-op; honest `link_result_lost` dialog when a host rebuild lost the
+capture), and the `NotebookActivity` wiring (`beginLinkPick`/`beginLinkEdit`, `applyLinkEdit` =
+store + working copy + the K1-promised `syncLinkRenderer` + `Action.LinkEdited` + re-select).
+Opus built the screen: `LinkPickerActivity` + pure `LinkPickerModel` (mode↔kind, `chromeFor`,
+**exclusion-beside-numbering** `pageCards`, `gridPageOf` pager jump, `composeOk` incl. the
+self-target refusal) + `PageCardGrid` (LibraryGrid's geometry for page cards) + layout/strings.
+**Deliberate deviations, all reviewed clean:** `bg_selectable_card` selector (1 dp → 3 dp border on
+`state_selected`; unselected byte-identical to `shape_bordered`, so library/move-picker cards are
+unchanged) + `LibraryGrid.bind` optional `selectedId`; `Widget.Notesprout.LatchButton` for the mode
+trio + Style pair; the per-showing preview cache holds `(bitmap, title)` and is **bounded** (~3
+grid pages' worth, dropped whole — not an LRU) and cleared on drill-exit; browse cards keep pin
+badges; a style-only Edit of a link whose target page has died correctly **keeps the dead target**
+(the honest dialog is K4's follow, per the locked dead-target rule); picker `exported="false"`, so
+an external `am start` is refused by Android before the relay-null guard. **384 JVM tests** (app
+349 · api 6 · ext 29 — 40 new: LinkPickerModel 24, PageLabels 5, PreviewMath 5, PageReads 3,
+LinkComposite 3), debug + release build. **Haiku walk 7/7 on the first run** (verified-foreground
+launch, flips 1/2↔2/2, picker `am start` refused + no crash, cold restore, back-to-library, crash
+buffer clean). **Drivable-half correction (Paper L2's wall, now recorded):** the picker opens only
+from a lasso selection, which adb cannot inject — the picker walk itself is the user's eye check;
+agents cover install/regression/the refusal probe. **Eye check #7: two findings, both fixed +
+screencap-diff-verified on device:** ① the preview band's bordered background was overpainted by
+the fit-centred page bitmap (read as top/bottom "clipping") → the 1 px border is now drawn **on the
+preview bitmap** and the band has no background; ② the K1 composite sheared wrapped strokes at the
+link bounds — g-paper's `Stroke.bounds` is **point-tight** (no stroke width), so rendered ink
+overhangs by width/2 + cap → `LinkComposite.padOf/sizeOf` render a stroke-width margin and
+`LinkRenderer` draws at `(x − pad, y − pad)`; existing rows heal with no bounds/hit-target/
+underline change (pixel diff: 59 px of ink restored, 0 removed, across every stroke edge). User
+all-clear 2026-08-23. Test data: links live on "August Sun 1" (folder `Journal`). Both variants
+reinstalled current on SNN.
 
 `LinkPickerActivity` (in-app, `IndexGuard`, portrait, e-ink chrome): mode trio, Style toggle
 (underline/none), paged card grids on `GridMath`, current-page/current-notebook exclusions,
@@ -1229,6 +1271,10 @@ Sonnet layouts/icons/strings.*
 width?); preview cache lifetime (per-showing vs. per-session); whether the This-notebook
 grid also labels the (excluded) current page's neighbours by heading — trivially yes, ask
 only if a conflict surfaces.
+**Answered 2026-08-23:** preview cards keep the **real page aspect at grid-cell width**
+(undistorted, library-card footprint, `GridMath` unchanged); preview cache is
+**per-showing** (lives while the picker is open, dropped on finish — always fresh, no
+staleness machinery); heading labels apply to every page card (no conflict surfaced).
 
 ### K3 — Create-in-picker (+ naming schemes)
 **Status:** ⬜ Not started

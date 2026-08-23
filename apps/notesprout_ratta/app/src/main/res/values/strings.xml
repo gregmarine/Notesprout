@@ -183,4 +183,24 @@
     <string name="link_edit_action">Edit link</string>
     <string name="link_unlink_action">Unlink</string>
     <string name="debug_create_test_link">Create test link</string>
+    <string name="link_result_lost_title">Couldn\'t apply the link</string>
+    <string name="link_result_lost_body">This screen was rebuilt while the picker was open, so the choice was lost. Please try again.</string>
+
+    <!-- Link picker (K2) -->
+    <string name="link_picker_title">Link to…</string>
+    <string name="link_mode_this_notebook">This notebook</string>
+    <string name="link_mode_notebook">Notebook</string>
+    <string name="link_mode_notebook_page">Notebook page</string>
+    <string name="link_style_label">Style</string>
+    <string name="link_style_underline">Underline</string>
+    <string name="link_style_none">None</string>
+    <string name="link_page_label">Page %1$d</string>
+    <string name="link_page_label_titled">%1$d · %2$s</string>
+    <string name="link_picker_no_pages">No other pages in this notebook</string>
+    <string name="link_picker_no_foreign_pages">No pages in this notebook</string>
+    <string name="link_picker_no_notebooks">No other notebooks here</string>
+    <string name="link_pick_none_title">Choose a target first</string>
+    <string name="link_pick_none_page">Tap the page this link should open.</string>
+    <string name="link_pick_none_notebook">Tap the notebook this link should open.</string>
+    <string name="link_pick_none_notebook_page">Open a notebook, then tap the page this link should open.</string>
 </resources>

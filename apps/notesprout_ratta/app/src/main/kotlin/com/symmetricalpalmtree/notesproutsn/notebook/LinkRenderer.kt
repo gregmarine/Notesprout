@@ -64,8 +64,9 @@ class LinkRenderer(
         composites.keys.retainAll(wanted.keys)
         for (l in links) {
             val cached = composites[l.id]
-            val w = kotlin.math.ceil(l.width).toInt().coerceAtMost(LinkComposite.MAX_EDGE_PX)
-            val h = kotlin.math.ceil(l.height).toInt().coerceAtMost(LinkComposite.MAX_EDGE_PX)
+            // The expected size is the PADDED one (LinkComposite.sizeOf — bounds + the stroke-width
+            // margin), or a stale unpadded bitmap would be "reused" forever at the wrong offset.
+            val (w, h) = LinkComposite.sizeOf(l)
             if (cached != null && cached.width == w && cached.height == h) continue
             val built = LinkComposite.build(l, density, textPaint)
             if (built != null) composites[l.id] = built else composites.remove(l.id)
@@ -92,7 +93,10 @@ class LinkRenderer(
     private fun drawLink(canvas: Canvas, l: PageLink) {
         val bmp = composites[l.id]
         if (bmp != null && !bmp.isRecycled) {
-            canvas.drawBitmap(bmp, l.x, l.y, bitmapPaint)
+            // The composite is padOf() larger than the bounds on every side (stroke ink overhangs
+            // its point-bounds) — offset back so the content lands page-exact.
+            val pad = LinkComposite.padOf(l).toFloat()
+            canvas.drawBitmap(bmp, l.x - pad, l.y - pad, bitmapPaint)
         } else {
             // Inset by half the stroke so the 1 px dash sits inside the bounds (and the hit rect).
             canvas.drawRect(l.x + 0.5f, l.y + 0.5f, l.x + l.width - 0.5f, l.y + l.height - 0.5f, placeholder)

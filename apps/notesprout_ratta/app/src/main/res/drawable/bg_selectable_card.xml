@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A card or latch button that can be "the chosen one". Selection reads as a THICKER border, not
+     a colour and never a grey: on e-ink borderGray is invisible and a disabled/tinted look says
+     "broken". Unselected is byte-identical to shape_bordered, so a grid that never selects
+     anything (the library, the move picker) looks exactly as it always did. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_selected="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/paperWhite" />
+            <stroke android:width="3dp" android:color="@color/inkBlack" />
+            <corners android:radius="4dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/paperWhite" />
+            <stroke android:width="1dp" android:color="@color/inkBlack" />
+            <corners android:radius="4dp" />
+        </shape>
+    </item>
+</selector>

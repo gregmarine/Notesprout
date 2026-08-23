@@ -22,11 +22,32 @@ import kotlin.math.ceil
  */
 object LinkComposite {
 
+    /**
+     * The margin the composite renders beyond the link's bounds, on every side: a `Stroke.bounds`
+     * is the tight bounds of its **points** (`Bounds.of(points)` — no width), but the rasterized
+     * ink overhangs them by half the stroke width plus its round cap, so a bitmap cut exactly at
+     * the union bounds shears the outermost strokes (eye-check #7: the "L"'s foot). Zero for a
+     * heading-only link — a heading's box already includes its padding.
+     */
+    fun padOf(link: PageLink): Int {
+        val maxWidth = link.strokes.maxOfOrNull { it.width } ?: return 0
+        return ceil(maxWidth / 2f).toInt() + 1   // +1: anti-aliasing slop
+    }
+
+    /** The bitmap size [build] will produce for [link] — bounds plus [padOf] on each side, capped.
+     *  The renderer's cache-reuse check compares against THIS, never the raw bounds. */
+    fun sizeOf(link: PageLink): Pair<Int, Int> {
+        val pad = padOf(link)
+        return ceil(link.width).toInt().plus(2 * pad).coerceAtMost(MAX_EDGE_PX) to
+            ceil(link.height).toInt().plus(2 * pad).coerceAtMost(MAX_EDGE_PX)
+    }
+
     /** Build the composite, or null when the link has no drawable size or the allocation failed
-     *  (the caller draws the dashed placeholder instead and does not retry until the next update). */
+     *  (the caller draws the dashed placeholder instead and does not retry until the next update).
+     *  The bitmap is [padOf] larger than the bounds on every side — draw it at
+     *  `(x - pad, y - pad)`, which [LinkRenderer.drawLink] does. */
     fun build(link: PageLink, density: Float, paint: TextPaint): Bitmap? {
-        val w = ceil(link.width).toInt().coerceAtMost(MAX_EDGE_PX)
-        val h = ceil(link.height).toInt().coerceAtMost(MAX_EDGE_PX)
+        val (w, h) = sizeOf(link)
         if (w < 1 || h < 1) return null
         val bmp = try {
             Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
@@ -34,8 +55,9 @@ object LinkComposite {
             Log.w(TAG, "composite ${w}x$h allocation failed for ${link.id}")
             return null
         }
+        val pad = padOf(link)
         val canvas = Canvas(bmp)
-        canvas.translate(-link.x, -link.y)
+        canvas.translate(pad - link.x, pad - link.y)
         for (heading in link.headings) HeadingRenderer.drawHeading(canvas, heading, density, paint)
         StrokeRasterizer.draw(canvas, link.strokes)
         return bmp
