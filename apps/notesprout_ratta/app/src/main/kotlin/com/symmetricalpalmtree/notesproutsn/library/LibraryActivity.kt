@@ -160,10 +160,10 @@ class LibraryActivity : AppCompatActivity() {
      * at tap time, and the launch runs only once that frame has been drawn — the notebook then
      * carries the same box from its own first frame until the page lands.
      */
-    private fun openNotebook(id: String, name: String) {
+    private fun openNotebook(id: String, name: String, viaLink: Boolean = false) {
         if (launching) return
         launching = true
-        OpeningOverlay.showThen(this) { startActivity(NotebookActivity.intent(this, id, name)) }
+        OpeningOverlay.showThen(this) { startActivity(NotebookActivity.intent(this, id, name, viaLink)) }
     }
 
     /**
@@ -219,12 +219,15 @@ class LibraryActivity : AppCompatActivity() {
     private fun reopenLastNotebookIfNeeded() {
         val id = browseState.lastOpenNotebookId ?: return
         browseState.lastOpenNotebookId = null
+        // Reopen the way it was open (K4): a via-link notebook restored without the flag would
+        // read as a fresh open, clear the persisted trail, and lose the mid-chain walk-back.
+        val viaLink = browseState.lastOpenViaLink
         lifecycleScope.launch {
             val s = repo.alive(id) ?: return@launch
             if (s.type != ObjectType.NOTEBOOK) return@launch
             val exists = withContext(Dispatchers.IO) { soilFile(this@LibraryActivity, id).exists() }
             if (!exists) return@launch
-            openNotebook(s.id, s.name)
+            openNotebook(s.id, s.name, viaLink)
         }
     }
 

@@ -212,4 +212,10 @@
     <string name="link_insert_after">Insert after</string>
     <string name="link_new_page_failed_title">Couldn\'t add the page</string>
     <string name="link_new_page_failed_body">The notebook may have changed while the picker was open. Close the picker and try again.</string>
+
+    <!-- Follow (K4). The dead-target dialog offers link_edit_action above as its other button. -->
+    <string name="link_target_gone_title">Can\'t follow this link</string>
+    <string name="link_target_notebook_gone_body">The notebook this link points to no longer exists.</string>
+    <string name="link_target_page_gone_body">The page this link points to no longer exists.</string>
+    <string name="link_target_unreadable_body">This link was made by a newer or different version of Notesprout, so where it points can\'t be read here.</string>
 </resources>

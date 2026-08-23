@@ -29,6 +29,7 @@ import com.symmetricalpalmtree.notesproutsn.core.IndexGuard
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.prefs.BrowseState
+import com.symmetricalpalmtree.notesproutsn.data.prefs.LinkTrail
 import com.symmetricalpalmtree.notesproutsn.data.prefs.RecentsPrefs
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityNotebookBinding
 import com.symmetricalpalmtree.notesproutsn.core.markdown.HeadingPrefix
@@ -72,11 +73,25 @@ class NotebookActivity : AppCompatActivity() {
     private lateinit var pageGestures: PageGestures
     private lateinit var contentsFlow: ContentsFlow
     private lateinit var linkPickFlow: LinkPickFlow
+    private lateinit var followFlow: LinkFollowFlow
     private val repo by lazy { IndexRepository() }
 
     private var notebookId: String = ""
     private var opened = false
     private var closing = false
+
+    /** Arrived by following a link (K4): the persisted trail survives and both Backs walk it. */
+    private var viaLink = false
+
+    /**
+     * The follow's target page, overriding the notebook's remembered `refId` for this open only —
+     * read from the Intent **only on a fresh create** (locked K4): Android redelivers the original
+     * Intent on a recreate, and re-applying the override would land a rebuilt via-link notebook on
+     * the link's target instead of where the user actually was (the Paper quirk, fixed here).
+     * Consumed by [openSession]; a dead target falls back to `refId` silently — the honest dialog
+     * was the tapping side's job.
+     */
+    private var initialPageId: String? = null
 
     /** True while a lasso selection is up — the gesture detector stands down on it. */
     private var selectionActive = false
@@ -143,6 +158,8 @@ class NotebookActivity : AppCompatActivity() {
         if (!IndexGuard.ready(this)) return
         notebookId = intent.getStringExtra(EXTRA_NOTEBOOK_ID) ?: run { finish(); return }
         val name = intent.getStringExtra(EXTRA_NOTEBOOK_NAME) ?: ""
+        viaLink = intent.getBooleanExtra(EXTRA_VIA_LINK, false)
+        if (savedInstanceState == null) initialPageId = intent.getStringExtra(EXTRA_INITIAL_PAGE_ID)
 
         binding = ActivityNotebookBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -172,7 +189,9 @@ class NotebookActivity : AppCompatActivity() {
         paper.addContentRenderer(linkRenderer)
 
         // The toolbar owns all pen/eraser configuration — fixed values, no panels, no prefs.
-        toolbar = NotebookToolbar(binding, paper) { close() }
+        // Its Back goes through backPressed(), never straight to close(): in a via-link notebook
+        // BOTH Backs walk the trail (the Paper L4 funnel — its top-bar Back initially didn't).
+        toolbar = NotebookToolbar(binding, paper) { backPressed() }
         // Must exist before RESUMED (it registers an ActivityResult launcher); the lambdas it
         // holds only fire from the toolbar, which the `opened` flag already gates.
         linkPickFlow = LinkPickFlow(
@@ -236,12 +255,30 @@ class NotebookActivity : AppCompatActivity() {
         // Chrome moved/appeared/disappeared: re-push the exclusion rects once the pass settles.
         binding.root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> binding.root.post { pushExclusions() } }
 
+        followFlow = LinkFollowFlow(
+            activity = this,
+            session = { session },
+            displayedPageId = { displayedPageId },
+            liveLinks = { liveLinks.values },
+            alive = { opened && !closing },
+            navigateToPage = { pageId -> runPageOp { refreshToPage(pageId) } },
+            closeAndLaunch = { target -> close { startActivity(target) } },
+            editLink = { link -> linkPickFlow.beginEdit(link) },
+        )
+
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() { close() }
+            override fun handleOnBackPressed() { backPressed() }
         })
 
-        BrowseState(this).lastOpenNotebookId = notebookId
+        BrowseState(this).let {
+            it.lastOpenNotebookId = notebookId
+            // A cold restore must reopen this notebook the same way it was open — losing the
+            // via-link flag would clear the persisted trail and take the walk-back with it.
+            it.lastOpenViaLink = viaLink
+        }
         RecentsPrefs(this).record(notebookId)
+        // Any fresh, non-via-link open starts a new story: the old trail would walk back into it.
+        if (!viaLink) LinkTrail(this).clear()
 
         session = NotebookSession(this, notebookId, repo)
         // The surface accepts no ink until the page is truly loaded (pushExclusions blocks it all
@@ -261,6 +298,14 @@ class NotebookActivity : AppCompatActivity() {
                 NotebookSession.OpenResult.Ok -> Unit
             }
             if (isFinishing || closing) { sealAbandonedOpen(); return }
+            // The follow's target page overrides the remembered one — once. A target that died in
+            // the race falls back to refId silently (one arrival semantic; the pre-checks on the
+            // tapping side carry the honesty).
+            initialPageId?.let { want ->
+                initialPageId = null
+                val idx = session.pages.indexOfFirst { it.id == want }
+                if (idx >= 0 && idx != session.currentIndex) session.goTo(idx)
+            }
             val page = session.currentPage
             val strokes = session.store.loadPage(page.id)
             val headings = remeasureForDevice(session.headings.loadPage(page.id))
@@ -496,6 +541,18 @@ class NotebookActivity : AppCompatActivity() {
         override fun onRedo() = runPageOp { doRedo() }
         override fun onDeleteRequested() { showDeleteSheet() }
         override fun onSwipeDown() { contentsFlow.open() }   // silently a no-op while unavailable
+        override fun onSwipeUp() { followFlow.walkBack(onEmpty = {}) }   // empty trail: silent
+        override fun onFingerTap(x: Float, y: Float) {
+            // Gesture coordinates are the window's; link bounds are page px = paper-view px.
+            val loc = IntArray(2).also { paper.asView().getLocationInWindow(it) }
+            followFlow.followAt(x - loc[0], y - loc[1])
+        }
+    }
+
+    /** Both Backs — the toolbar button and the system back — funnel here: in a via-link notebook
+     *  they walk the trail (Paper L4's rule); otherwise, or with the trail empty, they close. */
+    private fun backPressed() {
+        if (viaLink) followFlow.walkBack(onEmpty = { close() }) else close()
     }
 
     /** Serialise every page/undo mutation; ignore anything while not open or once closing. */
@@ -1232,8 +1289,13 @@ class NotebookActivity : AppCompatActivity() {
     /**
      * Normal close: cover → last-open page → meta → drain writes + seal, on an application-scoped
      * NonCancellable coroutine (each step guarded), then finish. Idempotent.
+     *
+     * [andThen] is the follow-out's launch (K4): it runs **strictly after the seal** — one live
+     * session per `.soil` family-wide, and the target may be this very notebook's neighbour — and
+     * before [finish], so the stack stays Library → Notebook with no gap. The fast A→B→swipe-up
+     * seal/reopen race is closed by this ordering (the arc's standing trap).
      */
-    private fun close() {
+    private fun close(andThen: (() -> Unit)? = null) {
         if (closing) return
         closing = true
         undo.clear()   // in-memory history dies with the screen
@@ -1242,7 +1304,7 @@ class NotebookActivity : AppCompatActivity() {
         // The relay's source closes over the session about to be sealed — drop it with the screen.
         if (::linkPickFlow.isInitialized) linkPickFlow.close()
         BrowseState(this).lastOpenNotebookId = null
-        if (!::session.isInitialized || !session.isOpen) { finish(); return }
+        if (!::session.isInitialized || !session.isOpen) { andThen?.invoke(); finish(); return }
         val p = paper; val s = session; val id = notebookId
         val versionCode = packageManager.getPackageInfo(packageName, 0).longVersionCode.toInt()
         appScope.launch {
@@ -1258,6 +1320,7 @@ class NotebookActivity : AppCompatActivity() {
                     try { s.seal() } catch (e: Exception) { Log.w(TAG, "seal failed", e) }
                 }
             }
+            andThen?.invoke()
             if (!isFinishing && !isDestroyed) finish()
         }
     }
@@ -1290,12 +1353,28 @@ class NotebookActivity : AppCompatActivity() {
         const val EXTRA_NOTEBOOK_ID = "notebookId"
         const val EXTRA_NOTEBOOK_NAME = "notebookName"
 
+        /** Host-internal (K4): set only by a follow / walk-back — the trail survives and both
+         *  Backs walk it. Never crosses to any other component. */
+        const val EXTRA_VIA_LINK = "viaLink"
+
+        /** Host-internal (K4): the follow's target page, overriding the notebook's own `refId`
+         *  for this open only. Applied once — see [initialPageId]. */
+        const val EXTRA_INITIAL_PAGE_ID = "initialPageId"
+
         /** Outlives the Activity so a close in flight always completes its seal. */
         private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
-        fun intent(context: Context, notebookId: String, notebookName: String): Intent =
+        fun intent(
+            context: Context,
+            notebookId: String,
+            notebookName: String,
+            viaLink: Boolean = false,
+            initialPageId: String? = null,
+        ): Intent =
             Intent(context, NotebookActivity::class.java)
                 .putExtra(EXTRA_NOTEBOOK_ID, notebookId)
                 .putExtra(EXTRA_NOTEBOOK_NAME, notebookName)
+                .putExtra(EXTRA_VIA_LINK, viaLink)
+                .putExtra(EXTRA_INITIAL_PAGE_ID, initialPageId)
     }
 }

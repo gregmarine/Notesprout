@@ -38,10 +38,21 @@ class BrowseState(context: Context) {
         get() = prefs.getString(KEY_LAST_OPEN, null)
         set(value) { prefs.edit().putString(KEY_LAST_OPEN, value).apply() }
 
+    /**
+     * Whether [lastOpenNotebookId] was open **via a link follow** (arc 6 / K4). A cold restore
+     * must reopen it the same way: relaunching without the flag would count as a fresh open,
+     * clear the persisted trail, and take the mid-chain walk-back with it. Meaningless while
+     * [lastOpenNotebookId] is null.
+     */
+    var lastOpenViaLink: Boolean
+        get() = prefs.getBoolean(KEY_LAST_VIA_LINK, false)
+        set(value) { prefs.edit().putBoolean(KEY_LAST_VIA_LINK, value).apply() }
+
     private companion object {
         const val FILE = "sn_view_state"
         const val KEY_FOLDER = "folderId"
         const val KEY_MODE = "mode"
         const val KEY_LAST_OPEN = "lastOpenNotebookId"
+        const val KEY_LAST_VIA_LINK = "lastOpenViaLink"
     }
 }

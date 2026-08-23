@@ -1333,7 +1333,38 @@ prenaming correctness incl. `{n}`, link to each created target).
 locked above; ask only if `NewNotebookActivity`'s result contract needs widening.
 
 ### K4 — Follow + trail
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-23; commit hash recorded in the follow-up status commit)
+
+**Outcome:** Split per the recipe — Fable wrote `PageGestures` tap (inverse
+recogniser: sub-slop, under the long-press timeout, single-finger, pen-tail escrow, reports the
+down point) + swipe-up (one sign-routed vertical evaluation — exclusive with the Contents
+swipe-down by construction), pure `LinkNav`, and the `NotebookActivity` surgery (`EXTRA_VIA_LINK`
+/ `EXTRA_INITIAL_PAGE_ID` with the **consumed-once** recreate fix — the initial page is read only
+when `savedInstanceState == null`; both Backs funnel through `backPressed()`; `close(andThen)`
+launches strictly after the seal; fresh non-via-link open clears the trail) plus
+`BrowseState.lastOpenViaLink` so a cold restore reopens a via-link notebook *as* via-link (the
+trail survives a mid-chain force-stop — without it the restore would read as a fresh open and
+clear it). Opus (one background agent) wrote `LinkTrail`/`TrailCodec` (prefs `sn_trail`, ids only,
+cap 50 enforced on read too — untrusted input), `LinkFollowFlow` (topmost-last hit-test; validate
+before navigating incl. a one-shot read-only `foreignPageAlive` pre-check sealed in `finally`;
+every follow pushes the origin; walk-back skips dead entries silently, loop bounded by the cap;
+busy door kept set forever on a leave-the-screen hop; dead-target dialog = two buttons, "Edit
+link" opens the picker prefilled to retarget, link row untouched) + 4 strings + 18 JVM tests.
+Agent deviations, all accepted: reused the existing `link_edit_action` "Edit link" (3 call sites);
+`notebookSummary` additionally requires `type == NOTEBOOK` (a folder id in an untrusted payload
+must not launch a notebook screen). No new frame-silence exception: both entry points are finger
+gestures behind `PageGestures`' pen gate. **421 JVM tests** (app 386 — LinkNav 10 + TrailCodec 8
+new), debug + release built + installed on SNN. **Device walk: the Haiku agent stalled on the
+recorded tap-aim pattern** (reported the Journal folder missing; it was on the root's first grid
+page) — **Fable re-drove the full walk by hand, all pass**: cross-notebook follow off "August Sun
+1" p3 → "Links 1" p2/2 (seal → relaunch), swipe-up back to the exact origin, toolbar-Back walks
+the trail too, follow → `am force-stop` → relaunch restores into Links 1 at its remembered page
+(no Intent re-application) **and** swipe-up still walks back (trail + via-link flag survived),
+empty-trail Back closes to the library, fresh open clears (swipe-up silent), flips + Contents
+swipe-down regression clean, crash buffer empty. **User eye check #9 all-pass 2026-08-23, no
+findings** (pen-over-link never follows + finger tap does, same-notebook follow + return, the
+A→B→C chain with swipe-up twice + tap-time "Opening…", no accidental follows while writing,
+dead-target dialog + Edit-link retarget on the spot, dead trail entry skipped silently).
 
 `PageGestures.onFingerTap` (escrowed inverse recogniser, finger-only) + `onSwipeUp` (the
 flip's constants against screen height, `dy < 0`, judged at the same `ACTION_UP` — mutually
@@ -1355,6 +1386,11 @@ store + dialogs + wiring; Sonnet strings.*
 **Questions to resolve at phase start:** trail-push granularity on repeated follows of the
 same link (Paper: every follow pushes — recommend same); whether `EXTRA_INITIAL_PAGE_ID`
 Intent-redelivery on recreate is handled or recorded (Paper accepted it).
+**Answered 2026-08-23:** **every follow pushes** (Paper's rule — the trail is a
+pop-on-walk-back stack, so back-and-repeat can never stack duplicates; loop chains like
+A→B→A→B are real history and belong on the trail); Intent-redelivery is **handled in K4**
+(consume `EXTRA_INITIAL_PAGE_ID` once — a rebuilt via-link notebook lands on the remembered
+page, not the link target; Paper's accepted quirk is fixed here, not inherited).
 
 ### K5 — Review + hardening + docs + freeze
 **Status:** ⬜ Not started

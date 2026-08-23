@@ -15,8 +15,10 @@ import kotlin.math.hypot
  *
  * | Gesture | Action |
  * |---|---|
+ * | 1-finger bare tap | follow a link under it (arc 6) |
  * | 1-finger horizontal swipe | flip previous / next (past the last page: insert one) |
- * | 1-finger vertical swipe down | open the Contents (arc 4; up-swipe is nothing) |
+ * | 1-finger vertical swipe down | open the Contents (arc 4) |
+ * | 1-finger vertical swipe up | walk the link trail back (arc 6) |
  * | 2-finger horizontal swipe | insert a page before / after this one |
  * | 2-finger stationary double-tap | undo |
  * | 3-finger stationary double-tap | redo |
@@ -58,8 +60,17 @@ class PageGestures(
         fun onUndo() {}
         fun onRedo() {}
         fun onDeleteRequested() {}
-        /** A qualifying one-finger swipe DOWN (arc 4 — the Contents). Never fired for an up-swipe. */
+        /** A qualifying one-finger swipe DOWN (arc 4 — the Contents). */
         fun onSwipeDown() {}
+        /** A qualifying one-finger swipe UP (arc 6 — the trail walk-back). One vertical
+         *  evaluation routes on the `dy` sign, so this and [onSwipeDown] are exclusive. */
+        fun onSwipeUp() {}
+        /**
+         * A bare one-finger tap (arc 6 — link follow): sub-slop, under the long-press timeout,
+         * single finger throughout, committed through the pen-tail escrow. Reports the **down**
+         * point in the host view's coordinates — the finger may creep before the lift.
+         */
+        fun onFingerTap(x: Float, y: Float) {}
     }
 
     private val vc = ViewConfiguration.get(host.context)
@@ -92,6 +103,12 @@ class PageGestures(
     private var twoTapTime = 0L; private var twoTapX = 0f; private var twoTapY = 0f
     private var threeTapTime = 0L; private var threeTapX = 0f; private var threeTapY = 0f
 
+    // ── 1-finger bare tap → follow ──────────────────────────────────────────────
+    private var tapArmed = false
+    private var tapX = 0f
+    private var tapY = 0f
+    private var tapDownTime = 0L
+
     // ── 1-finger long-press → delete ────────────────────────────────────────────
     private var longPressArmed = false
     private var longPressX = 0f
@@ -122,6 +139,7 @@ class PageGestures(
         handleSwipe(ev)
         handleMultiTap(ev)
         handleLongPress(ev)
+        handleFingerTap(ev)
     }
 
     private fun gateOpen(): Boolean = !isPenActive() && !standDown()
@@ -162,7 +180,7 @@ class PageGestures(
                     }
                     if (tracker != null && verticalQualifies(dx, dy)) {
                         tracker.addMovement(ev); tracker.computeCurrentVelocity(1000)
-                        evaluateSwipeDown(tracker.getYVelocity(0), dx, dy)
+                        evaluateVerticalSwipe(tracker.getYVelocity(0), dx, dy)
                         clearSwipe(); return
                     }
                 }
@@ -215,7 +233,7 @@ class PageGestures(
                         // Axis-exclusive by dominance: qualifiesFling wants |dx| > |dy|, the
                         // vertical rule |dy| > |dx| — at most one of these fires.
                         evaluateFlip(tracker.getXVelocity(0), dx, dy)
-                        evaluateSwipeDown(tracker.getYVelocity(0), dx, dy)
+                        evaluateVerticalSwipe(tracker.getYVelocity(0), dx, dy)
                     }
                 }
                 clearSwipe(); clearTwoFinger()
@@ -267,11 +285,12 @@ class PageGestures(
         return fast || long
     }
 
-    /** Direction from displacement, never velocity; only DOWN acts — an up-swipe is silently nothing. */
-    private fun evaluateSwipeDown(vy: Float, dx: Float, dy: Float) {
+    /** Direction from displacement, never velocity — one evaluation, routed on the `dy` sign, so
+     *  the Contents swipe-down and the trail swipe-up (arc 6) can never both fire. */
+    private fun evaluateVerticalSwipe(vy: Float, dx: Float, dy: Float) {
         if (!qualifiesVerticalSwipe(vy, dx, dy)) return
         if (!gateOpen()) return
-        if (dy > 0) listener.onSwipeDown()
+        if (dy > 0) listener.onSwipeDown() else listener.onSwipeUp()
     }
 
     private fun clearSwipe() {
@@ -339,6 +358,41 @@ class PageGestures(
         }
     }
 
+    // ── 1-finger bare tap → follow (arc 6) ──────────────────────────────────────
+
+    /**
+     * The **inverse** of every other recogniser — it fires only when nothing else could have:
+     * sub-slop (no swipe), under the long-press timeout (the long-press fires *at* the timeout and
+     * stands the sequence down, so the two can never both act), single finger throughout (a second
+     * finger disarms — the multi-taps own those). Commits through the same pen-tail [escrow] as
+     * undo/redo, reporting the down point.
+     */
+    private fun handleFingerTap(ev: MotionEvent) {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                if (gateOpen()) {
+                    tapArmed = true
+                    tapX = ev.x; tapY = ev.y
+                    tapDownTime = ev.eventTime
+                }
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> tapArmed = false
+            MotionEvent.ACTION_MOVE -> {
+                if (tapArmed && hypot((ev.x - tapX).toDouble(), (ev.y - tapY).toDouble()) > touchSlop) {
+                    tapArmed = false
+                }
+            }
+            MotionEvent.ACTION_UP -> {
+                if (tapArmed && ev.eventTime - tapDownTime <= ViewConfiguration.getLongPressTimeout()) {
+                    val x = tapX; val y = tapY
+                    escrow { listener.onFingerTap(x, y) }
+                }
+                tapArmed = false
+            }
+            MotionEvent.ACTION_CANCEL -> tapArmed = false
+        }
+    }
+
     // ── 1-finger long-press → delete ────────────────────────────────────────────
 
     private fun handleLongPress(ev: MotionEvent) {
@@ -369,6 +423,7 @@ class PageGestures(
     private fun cancelAll() {
         clearSwipe(); clearTwoFinger()
         mfArmed = false; mfMoved = false
+        tapArmed = false
         cancelLongPress()
         Slog.d(TAG) { "gestures stood down" }
     }
