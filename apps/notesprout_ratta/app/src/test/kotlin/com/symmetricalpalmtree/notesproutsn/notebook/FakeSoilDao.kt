@@ -40,6 +40,33 @@ class FakeSoilDao : SoilDao {
     override suspend fun liveContentIds(pageId: String) =
         rows.values.filter { it.parentId == pageId && (it.type == "stroke" || it.type == "heading") && it.deletedAt == null }
             .map { it.id }
+    override suspend fun linksOf(pageId: String) =
+        rows.values.filter { it.parentId == pageId && it.type == "link" && it.deletedAt == null }
+            .sortedBy { it.order }
+    override suspend fun reparent(ids: List<String>, newParentId: String, at: Long) {
+        for (id in ids) rows[id]?.let { rows[id] = it.copy(parentId = newParentId, updatedAt = at) }
+        events += "reparent:${ids.joinToString(",")}->$newParentId"
+    }
+    override suspend fun liveDescendantIds(pageId: String): List<String> {
+        val linkIds = rows.values
+            .filter { it.parentId == pageId && it.type == "link" && it.deletedAt == null }
+            .map { it.id }
+            .toSet()
+        return rows.values.filter {
+            it.deletedAt == null && (
+                (it.parentId == pageId && (it.type == "stroke" || it.type == "heading" || it.type == "link")) ||
+                    it.parentId in linkIds
+                )
+        }.map { it.id }
+    }
+    override suspend fun moveBy(ids: List<String>, dx: Float, dy: Float, at: Long) {
+        for (id in ids) rows[id]?.let {
+            if (it.deletedAt == null) {
+                rows[id] = it.copy(x = (it.x ?: 0f) + dx, y = (it.y ?: 0f) + dy, updatedAt = at)
+            }
+        }
+        events += "moveBy:${ids.joinToString(",")}"
+    }
     override suspend fun liveHeadingsAll() =
         rows.values.filter { it.type == "heading" && it.deletedAt == null }
     override suspend fun anyLiveHeadingOnLivePage() =

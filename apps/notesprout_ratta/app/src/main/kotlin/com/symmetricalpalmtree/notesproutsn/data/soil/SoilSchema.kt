@@ -38,6 +38,18 @@ object SoilSchema {
      */
     const val TYPE_HEADING = "heading"
 
+    /**
+     * Link object (arc 6) — the second additive row type, Paper's L1 shape: `parentId` = page id ·
+     * `text` = the v1 payload (`LinkPayload` — Paper's exact grammar, so link rows stay
+     * family-compatible) · `x`/`y`/`width`/`height` = union bounds of the wrapped content plus the
+     * underline clearance, in page px · `"order"` = z-order among the page's links · `style` and
+     * `flags` **null** (Paper wrote its provider id into `style` — read leniently, never required;
+     * chrome is parsed from the payload, never cached in `flags`). The wrapped children are the
+     * page's former stroke/heading rows with `parentId` flipped to the link id (re-parent, not
+     * copy). No version bump, no migration.
+     */
+    const val TYPE_LINK = "link"
+
     /** The notebook meta row's `parentId` (it is the root). */
     const val ROOT_PARENT = ""
 

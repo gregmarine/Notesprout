@@ -17,10 +17,16 @@ import com.symmetricalpalmtree.notesproutsn.R
  * renders the classification.
  *
  * [STROKES] ink alone (convertible) · [HEADING] exactly one heading and nothing else (re-levelable,
- * so its current level is the selected button) · [MIXED] anything else — ink plus a heading, or more
- * than one heading. Mixed has no single sensible level to write, so it gets Delete and nothing more.
+ * so its current level is the selected button) · [LINK] exactly one link and nothing else (the only
+ * mode that offers Edit / Unlink) · [MIXED] ink plus headings, or more than one heading — no single
+ * sensible level to write, but still wrappable · [MIXED_WITH_LINK] a selection containing a link
+ * alongside anything else.
+ *
+ * The two link-bearing modes are what enforces the arc-6 **no-nesting** rule: Link is offered on
+ * every link-free selection and on none that already holds one (K1 locked decision — a link never
+ * wraps a link).
  */
-enum class SelectionMode { STROKES, HEADING, MIXED }
+enum class SelectionMode { STROKES, HEADING, LINK, MIXED, MIXED_WITH_LINK }
 
 /**
  * The selection's context toolbar: a small bordered bar that floats over the paper for as long as a
@@ -32,11 +38,14 @@ enum class SelectionMode { STROKES, HEADING, MIXED }
  * the lasso the user had *just* drawn, and on e-ink a dialog is a full repaint; the bar is already
  * there when the selection appears, and its rect is chrome the pen cannot ink through.
  *
- * **Main bar**: Delete, always; and **H**, hidden only in [SelectionMode.MIXED]. **Sub-toolbar**:
- * H1…H6, shown by an H tap and hung off the *bar* by [SelectionAnchor.placeSub] — below it, above
- * when the bar itself flipped — so opening it never moves the Delete the user just aimed at. Every
- * [show] closes it: a fresh selection (or a re-anchor after a move) is a new decision and should
- * not inherit the last one's open drawer.
+ * **Main bar**, in order: Delete (always) · **H** (a level is only writable on ink or on one
+ * heading) · **Link** (any link-free selection — K1) · **Edit** and **Unlink** (a lone link, the
+ * only selection with one payload to act on) · and, in debug builds only, the flask that wraps the
+ * selection without a picker (K1's scaffold — removed in K5, and absent entirely when the host
+ * passes no [onDebugCreateLink]). **Sub-toolbar**: H1…H6, shown by an H tap and hung off the *bar*
+ * by [SelectionAnchor.placeSub] — below it, above when the bar itself flipped — so opening it never
+ * moves the Delete the user just aimed at. Every [show] closes it: a fresh selection (or a
+ * re-anchor after a move) is a new decision and should not inherit the last one's open drawer.
  *
  * Geometry is [SelectionAnchor]'s, in the notebook root's coordinates: [Bounds] arrive in **paper**
  * coordinates (paper-view pixels), get grown by [SELECTION_BOX_INFLATE_PX] so the gap is measured
@@ -63,11 +72,23 @@ class SelectionToolbar(
     private val onDelete: () -> Unit,
     /** A level 1..6 was tapped in the sub-row. The bars stay up — the screen decides what follows. */
     private val onLevelPicked: (Int) -> Unit,
+    /** Wrap this selection in a link — inert until K2 gives it a picker to name a target with. */
+    private val onLink: () -> Unit,
+    /** Retarget the selected link — inert until K2 for the same reason. */
+    private val onEditLink: () -> Unit,
+    /** Unwrap the selected link, keeping its content on the page. */
+    private val onUnlink: () -> Unit,
+    /** Debug-only wrap with a canned target; **null in release**, where the button is never built. */
+    private val onDebugCreateLink: (() -> Unit)? = null,
 ) {
 
     private val density = root.resources.displayMetrics.density
 
     private val headingButton: AppCompatImageButton
+    private val linkButton: AppCompatImageButton
+    private val editButton: AppCompatImageButton
+    private val unlinkButton: AppCompatImageButton
+    private val debugButton: AppCompatImageButton?
     /** Index 0 is H1 — `levelButtons[n - 1]` is level `n`. */
     private val levelButtons: List<AppCompatImageButton>
 
@@ -93,6 +114,29 @@ class SelectionToolbar(
         }
         bar.addView(headingButton)
 
+        linkButton = button(R.drawable.ic_link, ctx.getString(R.string.link_action)) {
+            releaseRender()
+            onLink()
+        }
+        bar.addView(linkButton)
+        editButton = button(R.drawable.ic_edit, ctx.getString(R.string.link_edit_action)) {
+            releaseRender()
+            onEditLink()
+        }
+        bar.addView(editButton)
+        unlinkButton = button(R.drawable.ic_link_off, ctx.getString(R.string.link_unlink_action)) {
+            releaseRender()
+            onUnlink()
+        }
+        bar.addView(unlinkButton)
+        // Last in the row so the shipping buttons never move when the scaffold goes away (K5).
+        debugButton = onDebugCreateLink?.let { create ->
+            button(R.drawable.ic_flask, ctx.getString(R.string.debug_create_test_link)) {
+                releaseRender()
+                create()
+            }.also { bar.addView(it) }
+        }
+
         levelButtons = (1..LEVELS).map { level ->
             button(LEVEL_ICONS[level - 1], ctx.getString(R.string.heading_level_hint, level)) {
                 releaseRender()
@@ -102,13 +146,23 @@ class SelectionToolbar(
     }
 
     /**
-     * Show (or re-place) the bar for [bounds]. [mode] decides whether H is offered at all, and in
+     * Show (or re-place) the bar for [bounds]. [mode] decides which buttons are offered, and in
      * [SelectionMode.HEADING] [currentLevel] is the level drawn as selected. Any open sub-toolbar
      * closes. A no-op before the root has been laid out.
+     *
+     * Every visibility change lands **before** the measure below — the anchor centres and flips on
+     * the bar's real width, and a bar measured with the wrong buttons in it is placed off-centre.
      */
     fun show(bounds: Bounds, mode: SelectionMode, currentLevel: Int?) {
         val band = band() ?: return
-        headingButton.visibility = if (mode == SelectionMode.MIXED) View.GONE else View.VISIBLE
+        val levelable = mode == SelectionMode.STROKES || mode == SelectionMode.HEADING
+        val wrappable = levelable || mode == SelectionMode.MIXED
+        headingButton.visibility = if (levelable) View.VISIBLE else View.GONE
+        linkButton.visibility = if (wrappable) View.VISIBLE else View.GONE
+        debugButton?.visibility = if (wrappable) View.VISIBLE else View.GONE
+        val lone = if (mode == SelectionMode.LINK) View.VISIBLE else View.GONE
+        editButton.visibility = lone
+        unlinkButton.visibility = lone
         subBar.visibility = View.GONE
         // Only an existing heading has a level to report; converting ink picks one from scratch.
         val selected = if (mode == SelectionMode.HEADING) currentLevel else null

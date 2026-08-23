@@ -177,4 +177,10 @@
     <string name="contents_truncated">Showing the first %1$d headings</string>
     <string name="cd_expand">Expand</string>
     <string name="cd_collapse">Collapse</string>
+
+    <!-- Links (arc 6) -->
+    <string name="link_action">Link</string>
+    <string name="link_edit_action">Edit link</string>
+    <string name="link_unlink_action">Unlink</string>
+    <string name="debug_create_test_link">Create test link</string>
 </resources>

@@ -51,6 +51,8 @@ class NotebookSession(
         private set
     lateinit var headings: HeadingStore
         private set
+    lateinit var links: LinkStore
+        private set
 
     // @Volatile: the Contents gather reads this on an IO thread outside the page-op mutex — the
     // list itself is immutable and swapped whole, but without the fence its publication to that
@@ -92,6 +94,7 @@ class NotebookSession(
         writer = SoilWriter { repo.touch(notebookId) }
         store = StrokeStore(db.dao(), writer)
         headings = HeadingStore(db.dao(), writer)
+        links = LinkStore(db.dao(), writer) { block -> db.withTransaction { block() } }
         try {
             val dao = db.dao()
             val root = dao.notebookRow()
@@ -134,8 +137,9 @@ class NotebookSession(
     /**
      * One page insert or delete, described well enough to replay in either direction through
      * [reconcile]: the live page ids [before] and [after] (in order), the page the notebook was on
-     * either side, and the content ids — strokes **and headings** (N2) — the operation
-     * soft-deleted (empty for an insert). Restore/delete by id is type-agnostic, so one list.
+     * either side, and the content ids — strokes, headings (N2), links and the links' wrapped
+     * children (K1) — the operation soft-deleted (empty for an insert). Restore/delete by id is
+     * type-agnostic, so one list.
      */
     data class Structural(
         val before: List<String>,
@@ -183,7 +187,9 @@ class NotebookSession(
         val victim = currentPage
         val before = pages.map { it.id }
         val now = System.currentTimeMillis()
-        val contentIds = db.dao().liveContentIds(victim.id)
+        // Deep since K1: the page's strokes, headings AND links, plus the links' wrapped children
+        // (grandchildren) — a wrapped selection rides its page through delete and undo.
+        val contentIds = db.dao().liveDescendantIds(victim.id)
         if (pages.size == 1) {
             val newId = java.util.UUID.randomUUID().toString()
             val replacement = SoilObjectEntity(

@@ -38,6 +38,12 @@ class UndoRedoStack {
             override val pageId: String,
             val strokes: List<Stroke>,
             val headingIds: List<String> = emptyList(),
+            /**
+             * Links deleted in the same act (K1) — full [PageLink] snapshots, because restoring a
+             * link means re-upserting its row *and* reviving its wrapped children
+             * (`LinkStore.restore`); ids alone couldn't rebuild a row the writer never saw.
+             */
+            val links: List<PageLink> = emptyList(),
         ) : Action
 
         /**
@@ -51,6 +57,9 @@ class UndoRedoStack {
             val dx: Float,
             val dy: Float,
             val headingIds: List<String> = emptyList(),
+            /** Links that rode the same drag (K1) — ids only: `LinkStore.move` shifts a link row
+             *  and its wrapped children from ids, in either direction. */
+            val linkIds: List<String> = emptyList(),
         ) : Action
 
         /**
@@ -84,6 +93,28 @@ class UndoRedoStack {
             override val pageId: String,
             val before: Heading,
             val after: Heading,
+        ) : Action
+
+        /**
+         * A wrap (arc 6 / K1): the new link with its wrapped-children snapshots. Undo is exactly
+         * an unlink (`LinkStore.unlink` — children re-parent back to the page, row soft-deleted);
+         * redo is a `relink`. One act, one entry.
+         */
+        data class LinkCreated(override val pageId: String, val link: PageLink) : Action
+
+        /** An Unlink from the selection toolbar. Undo re-wraps (`relink`); redo unlinks again. */
+        data class LinkUnlinked(override val pageId: String, val link: PageLink) : Action
+
+        /**
+         * A payload edit (K2's Edit — the contract lands with K1, exercised when the picker
+         * exists). Both sides carry the payload string; replay writes one side over the row
+         * (`LinkStore.updatePayload`) — bounds and children are untouched by an edit.
+         */
+        data class LinkEdited(
+            override val pageId: String,
+            val linkId: String,
+            val before: String,
+            val after: String,
         ) : Action
 
         /** A page insert or delete, replayable both ways through [NotebookSession.reconcile]. */

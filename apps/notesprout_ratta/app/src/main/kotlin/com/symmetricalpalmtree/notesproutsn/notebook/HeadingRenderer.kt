@@ -57,20 +57,28 @@ class HeadingRenderer(
 
     override fun hitTargets(): List<HitTarget> = headings.map { HitTarget(it.id, it.bounds) }
 
-    private fun drawHeading(canvas: Canvas, h: Heading) {
-        val pad = HeadingTypography.paddingPx(density)
-        val contentWidth = (h.width - 2 * pad).roundToInt()
-        if (contentWidth <= 0) return
-        MarkdownDraw.draw(
-            canvas, h.text,
-            x = h.x + pad, y = h.y + pad,
-            widthPx = contentWidth,
-            paint = paint, density = density,
-            maxLines = 1,
-        )
-    }
+    private fun drawHeading(canvas: Canvas, h: Heading) = drawHeading(canvas, h, density, paint)
 
     companion object {
+
+        /**
+         * Draw one heading at its stored bounds — the single draw recipe, shared with
+         * [LinkComposite] (a wrapped heading must look exactly like it did before the wrap).
+         * [paint] comes from [basePaint]; thread-safe off a live view (StaticLayout only), so a
+         * composite may build off Main.
+         */
+        fun drawHeading(canvas: Canvas, h: Heading, density: Float, paint: TextPaint) {
+            val pad = HeadingTypography.paddingPx(density)
+            val contentWidth = (h.width - 2 * pad).roundToInt()
+            if (contentWidth <= 0) return
+            MarkdownDraw.draw(
+                canvas, h.text,
+                x = h.x + pad, y = h.y + pad,
+                widthPx = contentWidth,
+                paint = paint, density = density,
+                maxLines = 1,
+            )
+        }
 
         /**
          * The box for [text] (hash-prefixed) — natural single-line size plus the padding on every
@@ -87,7 +95,7 @@ class HeadingRenderer(
             return (w + 2 * pad) to (h + 2 * pad)
         }
 
-        private fun basePaint(scaledDensity: Float) = TextPaint(TextPaint.ANTI_ALIAS_FLAG).apply {
+        fun basePaint(scaledDensity: Float) = TextPaint(TextPaint.ANTI_ALIAS_FLAG).apply {
             color = Color.BLACK
             textSize = HeadingTypography.BASE_SP * scaledDensity
         }

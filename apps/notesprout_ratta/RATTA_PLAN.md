@@ -1138,7 +1138,49 @@ are fixed in g-paper per the standing rule.
 - zipflinger inflates incremental debug APKs — clean build before chasing size.
 
 ### K1 — Core link rows + render + ops
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-23)
+
+**Outcome:** Split per the recipe. Fable wrote the data/render/undo layer: `LinkPayload` in core
+(Paper's v1 grammar **byte-verified** against `PAPER_LINKS_PLAN.md` + its extension's codec — the
+JVM fixtures pin the exact strings; decode-never-throws, cap 2000, `chromeOf` degrades unusable →
+NONE), `PageLink`/`LinkRows` (locked deltas: `style` written null + read leniently — a
+Paper-provider identity decodes fine; chrome parsed from the payload at load, held on the object,
+`flags` stays null), `LinkStore` (re-parent wrap/unlink/relink/remove/restore/move on the shared
+serial `SoilWriter`, each multi-row op in one Room transaction via an **injected `transact`
+lambda** so the store JVM-tests against `FakeSoilDao`; stroke children re-encode on move, heading
+children + link row shift via the new `SoilDao.moveBy`), DAO additions
+(`linksOf`/`reparent`/`liveDescendantIds` — Paper's grandchild query with `'heading'` for
+`'object'` — `moveBy`), `TYPE_LINK` schema doc, session `links` store +
+`deleteCurrent`/reconcile carrying **deep** descendants, undo actions
+`LinkCreated`/`LinkUnlinked`/`LinkEdited` (+`Deleted.links` snapshots / `Moved.linkIds`) with all
+replay arms, and `LinkComposite`/`LinkRenderer` (composite bitmap per link — strokes via g-paper's
+`StrokeRasterizer`, headings via the shared `HeadingRenderer.drawHeading` recipe; cache reused
+when the drawable size is unchanged so a **move never rebuilds**; 1 dp underline drawn live, never
+baked; `update()` runs **before `loadStrokes`** at both page-load sites — the hover-repaint trap).
+Opus wired the screen: `SelectionMode` → five modes (LINK / MIXED_WITH_LINK enforce no-nesting),
+bar order Delete · H · Link · Edit · Unlink · flask (Link/Edit inert until K2, visibility set
+before the measure), `createLinkFromSelection` (capture discipline from the heading convert,
+no-nesting re-check at use time, one frame, `pendingSelection` **generalized from `Heading?` to a
+select-successor lambda** so the smart-lasso session survives a wrap exactly as it does a
+conversion), `selectAsLink`, `unlinkSelection` (store → record → drain → `refreshToPage` — the
+reload is the sync), eraser `onContentErased` splitting headings/links (**one
+`Action.Deleted` covering both when a link is involved**; heading-only keeps `HeadingDeleted`),
+`deleteSelection`/`onSelectionMoved` extended, and `debugCreateTestLink` (insert-without-navigate
+when on the last page: `insertBlank` + `Action.Page` + `goTo(here)`, never `navigateTo`). Sonnet:
+`ic_link`/`ic_link_off`/`ic_flask` + 4 strings. **Deliberate deviations:** no `syncLinkRenderer`
+helper (every K1 link mutation shares its frame with other content or replays through a reload —
+recorded in the code; K2's payload edit adds it); the debug flask lives **on the selection
+toolbar** (it acts on a selection — the N3-retired ⋯ pattern would have to re-arm one) and is not
+built at all in release; wrapped headings are **not** `remeasureForDevice`d (baked in the
+composite at authored size — KDoc'd) and leave the Contents while wrapped (their parent is the
+link). **344 JVM tests** (app 309 · api 6 · ext 29 — 31 new: LinkPayload 13 incl. Paper-grammar
+fixtures, LinkRows/unionBounds 9, LinkStore 9), debug + release build. **Haiku walk 8/8 on the
+first run** (launch/restore/flip/Contents-gating/cold-restore/crash-buffer; its "diamond/comment"
+toolbar description was the usual icon misread — Fable re-verified the chrome by hand screencap:
+back · pen · eraser · lasso, correct). **User eye check #6 all-pass 2026-08-23, no findings**
+(wrap ink + heading + mixed, pixel-identical re-render + underline, no-nesting bar, live drag,
+unlink + undo re-wrap, whole-link erase with scribble-immunity, delete + undo, persistence across
+close/reopen + cold restore, ink-over-link on top). Both variants reinstalled current on SNN.
 
 `SoilSchema.TYPE_LINK` + payload codec (Paper's v1 grammar, byte-verified against
 `PAPER_LINKS_PLAN.md`), `PageLink`/`LinkRows`, `LinkStore` on the session's shared serial
@@ -1162,6 +1204,10 @@ NotebookActivity wiring; Sonnet icons/strings.*
 **Questions to resolve at phase start:** link z-order confirmation (below strokes, og order —
 or above?); whether a link may wrap another link (Paper: selection containing a link hides
 the Link action — recommend the same); debug create-test-link's target (next page vs. fixed).
+**Answered 2026-08-23:** links composite **below top-level strokes** (og order, headings'
+slot); **no nesting** — a selection containing any link hides the Link action (Paper's
+rule); debug create-test-link targets the **next page** in this notebook (inserting one when
+the notebook has a single page — a real, followable page-kind target for K4).
 
 ### K2 — Picker (existing targets) + previews + heading page names
 **Status:** ⬜ Not started

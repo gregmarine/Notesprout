@@ -41,9 +41,35 @@ interface SoilDao {
     @Query("SELECT id FROM notebook WHERE parentId = :pageId AND type = 'stroke' AND deletedAt IS NULL")
     suspend fun liveStrokeIds(pageId: String): List<String>
 
-    /** Live stroke + heading ids of a page — what a page delete soft-deletes along with it. */
+    /** Live stroke + heading ids of a page — what a page delete soft-deletes along with it.
+     *  Superseded by [liveDescendantIds] for page delete since arc 6 (links wrap grandchildren);
+     *  still the right call for anything that wants the page's own loose content only. */
     @Query("SELECT id FROM notebook WHERE parentId = :pageId AND type IN ('stroke','heading') AND deletedAt IS NULL")
     suspend fun liveContentIds(pageId: String): List<String>
+
+    /** Live link rows of a page in z-order (arc 6 / K1). */
+    @Query("SELECT * FROM notebook WHERE parentId = :pageId AND type = 'link' AND deletedAt IS NULL ORDER BY `order`")
+    suspend fun linksOf(pageId: String): List<SoilObjectEntity>
+
+    /** Re-parent rows (arc 6 / K1 — a wrap flips page → link, an unlink flips back; ids untouched). */
+    @Query("UPDATE notebook SET parentId = :newParentId, updatedAt = :at WHERE id IN (:ids)")
+    suspend fun reparent(ids: List<String>, newParentId: String, at: Long)
+
+    /** Live content ids of a page **one level deeper than [liveContentIds]** (arc 6 / K1): strokes,
+     *  headings and links of the page, plus the links' own children (the page's grandchildren) —
+     *  what a page delete / undo must carry so a wrapped selection rides its page. Paper's
+     *  `liveDescendantIds` with `'heading'` in place of `'object'` (the SN child types). */
+    @Query(
+        """SELECT id FROM notebook WHERE deletedAt IS NULL AND (
+             (parentId = :pageId AND type IN ('stroke', 'heading', 'link'))
+             OR parentId IN (SELECT id FROM notebook WHERE parentId = :pageId AND type = 'link' AND deletedAt IS NULL))""",
+    )
+    suspend fun liveDescendantIds(pageId: String): List<String>
+
+    /** Shift live rows by a delta — a link drag's row + heading children (stroke geometry lives in
+     *  the blob, so strokes go through their codec instead; see `LinkStore.move`). */
+    @Query("UPDATE notebook SET x = x + :dx, y = y + :dy, updatedAt = :at WHERE id IN (:ids) AND deletedAt IS NULL")
+    suspend fun moveBy(ids: List<String>, dx: Float, dy: Float, at: Long)
 
     /** Every live heading row in the notebook — the Contents gather (arc 4), the one cross-page
      *  read. Blob-free in effect (heading writes never set `blob`), and full-entity deliberately:

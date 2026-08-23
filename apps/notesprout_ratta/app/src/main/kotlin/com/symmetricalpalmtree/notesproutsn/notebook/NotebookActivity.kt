@@ -20,6 +20,7 @@ import com.symmetricalpalmtree.gpaper.core.model.Bounds
 import com.symmetricalpalmtree.gpaper.core.model.Selection
 import com.symmetricalpalmtree.gpaper.core.model.SelectionMove
 import com.symmetricalpalmtree.gpaper.core.model.Stroke
+import com.symmetricalpalmtree.notesproutsn.BuildConfig
 import com.symmetricalpalmtree.notesproutsn.R
 import com.symmetricalpalmtree.notesproutsn.core.ActionSheetDialog
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
@@ -55,11 +56,11 @@ import kotlinx.coroutines.withContext
  * guard is 0 on Ratta hardware (`core/TopGuard.kt` holds that decision).
  *
  * **Over the ~800-line rule, with reason (N3):** this file is the single integration seam between
- * the engine's callbacks, the selection/heading flows, undo replay and the lifecycle — all of
- * which share tightly-coupled Main-thread state (`liveStrokes`/`liveHeadings`/`displayedPageId`/
- * `loadingCommits`/`selectionActive`). Everything separable already lives in collaborators
- * (session, stores, renderer, toolbars, gestures, dialogs); splitting what remains would scatter
- * that shared state behind accessors without reducing the coupling that makes it delicate.
+ * the engine's callbacks, the selection/heading/link flows, undo replay and the lifecycle — all of
+ * which share tightly-coupled Main-thread state (`liveStrokes`/`liveHeadings`/`liveLinks`/
+ * `displayedPageId`/`loadingCommits`/`selectionActive`). Everything separable already lives in
+ * collaborators (session, stores, renderers, toolbars, gestures, dialogs); splitting what remains
+ * would scatter that shared state behind accessors without reducing the coupling that makes it delicate.
  */
 class NotebookActivity : AppCompatActivity() {
 
@@ -88,12 +89,13 @@ class NotebookActivity : AppCompatActivity() {
     private var currentSelection: Selection? = null
 
     /**
-     * A just-converted heading waiting to be selected as the *successor* of the selection its
-     * conversion is about to dismiss. Set immediately before the conversion's `removeStrokes`,
-     * consumed inside `onSelectionDismissed` (see the note there for why the timing is
-     * load-bearing), and drained defensively right after in case no dismissal fired.
+     * The selection a just-created object (a converted heading, a wrapped link) wants as the
+     * *successor* of the selection its creation is about to dismiss — held as the action rather
+     * than the object, because the two kinds land on different bars. Set immediately before the
+     * creation's `removeStrokes`, consumed inside `onSelectionDismissed` (see the note there for
+     * why the timing is load-bearing), and drained defensively right after in case none fired.
      */
-    private var pendingSelection: Heading? = null
+    private var pendingSelection: (() -> Unit)? = null
 
     /** In-memory, notebook-level history: it survives page turns and dies with the screen. */
     private val undo = UndoRedoStack()
@@ -107,8 +109,15 @@ class NotebookActivity : AppCompatActivity() {
     /** The headings on the visible page — the working copy [headingRenderer] paints from. */
     private var liveHeadings: MutableMap<String, Heading> = linkedMapOf()
 
+    /** The links on the visible page — the working copy [linkRenderer] paints from (K1). Each one
+     *  carries the content it wraps, which is why it is the only place a wrapped stroke exists. */
+    private var liveLinks: MutableMap<String, PageLink> = linkedMapOf()
+
     /** Draws [liveHeadings] into the committed layer, below the ink (N2). */
     private lateinit var headingRenderer: HeadingRenderer
+
+    /** Draws [liveLinks] — composites plus chrome — below the ink and below the headings (K1). */
+    private lateinit var linkRenderer: LinkRenderer
 
     /**
      * The page whose strokes are on the paper — written on Main only, at the two places
@@ -156,6 +165,10 @@ class NotebookActivity : AppCompatActivity() {
         val dm = resources.displayMetrics
         headingRenderer = HeadingRenderer(dm.density, dm.scaledDensity)
         paper.addContentRenderer(headingRenderer)
+        // The links go in after the headings: same layer, and a link's composite already holds the
+        // headings it wrapped — registration order is what puts a link's own chrome on top of them.
+        linkRenderer = LinkRenderer(dm.density, dm.scaledDensity)
+        paper.addContentRenderer(linkRenderer)
 
         // The toolbar owns all pen/eraser configuration — fixed values, no panels, no prefs.
         toolbar = NotebookToolbar(binding, paper) { close() }
@@ -168,6 +181,13 @@ class NotebookActivity : AppCompatActivity() {
             releaseRender = { paper.releaseRender() },
             onDelete = { currentSelection?.let { deleteSelection(it) } },
             onLevelPicked = { onLevelPicked(it) },
+            // Both wait on the picker (K2) — the buttons ship now so the bar's shape, its
+            // measurement and its exclusion rect are settled before the flow arrives.
+            onLink = { Slog.d(TAG) { "link picker in K2" } },
+            onEditLink = { Slog.d(TAG) { "link picker in K2" } },
+            onUnlink = { unlinkSelection() },
+            // Release builds get no flask at all — the button is not built when this is null.
+            onDebugCreateLink = if (BuildConfig.DEBUG) ({ debugCreateTestLink() }) else null,
         )
         binding.notebookName.text = name
         binding.pageIndicator.text = ""
@@ -228,11 +248,16 @@ class NotebookActivity : AppCompatActivity() {
             val page = session.currentPage
             val strokes = session.store.loadPage(page.id)
             val headings = remeasureForDevice(session.headings.loadPage(page.id))
+            val links = session.links.loadPage(page.id)
             paper.setPageSize(page.width, page.height)
             paper.setTemplate(session.template)
-            // Renderer before loadStrokes: the load's re-record is the frame that paints them.
+            // Renderers before loadStrokes: the load's re-record is the frame that paints them, and
+            // a link's composite must exist by then — building it later, behind a pen-idle gate, is
+            // the arc's standing hover-repaint trap (chrome invisible while the pen hovers).
             liveHeadings = headings.associateByTo(linkedMapOf()) { it.id }
             headingRenderer.headings = headings
+            liveLinks = links.associateByTo(linkedMapOf()) { it.id }
+            linkRenderer.update(links)
             paper.loadStrokes(strokes)
             liveStrokes = strokes.associateBy { it.id }.toMutableMap()
             displayedPageId = page.id
@@ -340,12 +365,22 @@ class NotebookActivity : AppCompatActivity() {
             // engine to re-record — the component only ghosted/live-dragged them; the host owns
             // where they actually are now (the ContentRenderer contract).
             val headingIds = move.contentIds.filter { liveHeadings.containsKey(it) }
+            val linkIds = move.contentIds.filter { liveLinks.containsKey(it) }
             if (headingIds.isNotEmpty()) {
                 session.headings.move(headingIds, move.dx, move.dy)
                 for (id in headingIds) liveHeadings[id]?.let { liveHeadings[id] = it.translated(move.dx, move.dy) }
-                syncHeadingRenderer()
+                headingRenderer.headings = liveHeadings.values.toList()
             }
-            undo.record(Action.Moved(pageId, ids, move.dx, move.dy, headingIds))
+            if (linkIds.isNotEmpty()) {
+                // The store shifts the row AND its wrapped children; the working copy's `translated`
+                // does the same in memory, so the composite (translation-invariant) is reused as-is.
+                session.links.move(linkIds, move.dx, move.dy)
+                for (id in linkIds) liveLinks[id]?.let { liveLinks[id] = it.translated(move.dx, move.dy) }
+                linkRenderer.update(liveLinks.values.toList())
+            }
+            // One drag is one re-record, whatever kinds rode along.
+            if (headingIds.isNotEmpty() || linkIds.isNotEmpty()) paper.notifyContentChanged()
+            undo.record(Action.Moved(pageId, ids, move.dx, move.dy, headingIds, linkIds))
             // The selection survives a move, at its new position — keep our copy honest.
             currentSelection = currentSelection?.let { it.copy(bounds = it.bounds.offset(move.dx, move.dy)) }
             // The drag is over (this fires at lift), so bring the bar back where the box now is.
@@ -375,19 +410,38 @@ class NotebookActivity : AppCompatActivity() {
             paper.releaseRender()
             HeadingEditDialog.show(this@NotebookActivity, h) { raw -> applyHeadingEdit(h.id, raw) }
         }
-        /** The eraser tool swept a heading whole (0.1.4): the host deletes — nothing vanishes by
-         *  itself. One batched call per gesture; scribble erase never reports content. */
+        /**
+         * The eraser tool swept a heading or a link whole (0.1.4): the host deletes — nothing
+         * vanishes by itself. One batched call per gesture; scribble erase never reports content.
+         * A link erases **whole**, wrapped content and all (the locked K1 model) — the eraser can
+         * never reach inside one.
+         */
         override fun onContentErased(contentIds: List<String>) {
             if (!opened) return
             val pageId = displayedPageId
-            val present = contentIds.filter { liveHeadings.containsKey(it) }
-            if (present.isEmpty()) return
-            session.headings.erase(present)
-            present.forEach { liveHeadings.remove(it) }
-            syncHeadingRenderer()
-            undo.record(Action.HeadingDeleted(pageId, present))
-            contentsFlow.refresh()
-            Slog.d(TAG) { "eraser removed ${present.size} headings" }
+            val headingIds = contentIds.filter { liveHeadings.containsKey(it) }
+            val links = contentIds.mapNotNull { liveLinks[it] }
+            if (headingIds.isEmpty() && links.isEmpty()) return
+            if (headingIds.isNotEmpty()) {
+                session.headings.erase(headingIds)
+                headingIds.forEach { liveHeadings.remove(it) }
+                headingRenderer.headings = liveHeadings.values.toList()
+            }
+            if (links.isNotEmpty()) {
+                session.links.remove(links)
+                links.forEach { liveLinks.remove(it.id) }
+                linkRenderer.update(liveLinks.values.toList())
+            }
+            paper.notifyContentChanged()
+            // One sweep is one entry. A link's restore needs its full snapshot (row + wrapped
+            // children), so anything with a link in it is recorded as a Deleted covering both
+            // kinds rather than two entries the user would have to undo twice.
+            if (links.isNotEmpty()) undo.record(Action.Deleted(pageId, emptyList(), headingIds, links))
+            else undo.record(Action.HeadingDeleted(pageId, headingIds))
+            // Wrapped headings are out of the outline while wrapped (their parent is the link, not
+            // the page), so erasing a link that holds one changes the Contents just as a loose one does.
+            if (headingIds.isNotEmpty() || links.any { it.headings.isNotEmpty() }) contentsFlow.refresh()
+            Slog.d(TAG) { "eraser removed ${headingIds.size} headings, ${links.size} links" }
         }
         /** The pen is dragging the box — the bar would be dragged over, and it never follows live. */
         override fun onSelectionDragStarted() { selectionToolbar.hide() }
@@ -401,9 +455,9 @@ class NotebookActivity : AppCompatActivity() {
             // restore has already fired and the new heading sits selected under a PEN tool that
             // can neither drag nor tap it (eye-check #5 round-2 finding). The engine then owns the
             // PEN restore at this selection's own dismissal, exactly like any smart-lasso session.
-            pendingSelection?.let { h ->
+            pendingSelection?.let { select ->
                 pendingSelection = null
-                selectAsHeading(h)
+                select()
             }
         }
         override fun onToolChanged(tool: Tool) { toolbar.sync(tool) }
@@ -456,10 +510,12 @@ class NotebookActivity : AppCompatActivity() {
         val page: PageRef
         val strokes: List<Stroke>
         val headings: List<Heading>
+        val links: List<PageLink>
         try {
             page = session.goTo(index)
             strokes = session.store.loadPage(page.id)
             headings = remeasureForDevice(session.headings.loadPage(page.id))
+            links = session.links.loadPage(page.id)
         } finally {
             loadingCommits = null
         }
@@ -471,9 +527,12 @@ class NotebookActivity : AppCompatActivity() {
         paper.clearForContentSwap()
         paper.setPageSize(page.width, page.height)
         paper.setTemplate(session.template)
-        // Renderer before loadStrokes: the swap's single re-record paints the new page's headings.
+        // Renderers before loadStrokes: the swap's single re-record paints the new page's headings
+        // and links — the composites have to be built by then (the hover-repaint trap).
         liveHeadings = headings.associateByTo(linkedMapOf()) { it.id }
         headingRenderer.headings = headings
+        liveLinks = links.associateByTo(linkedMapOf()) { it.id }
+        linkRenderer.update(links)
         paper.loadStrokes(allStrokes)
         liveStrokes = allStrokes.associateBy { it.id }.toMutableMap()
         displayedPageId = page.id
@@ -550,11 +609,13 @@ class NotebookActivity : AppCompatActivity() {
             is Action.Deleted -> {
                 session.store.revive(a.strokes.map { it.id })
                 session.headings.restore(a.headingIds)
+                session.links.restore(a.pageId, a.links)
                 session.store.drain(); refreshToPage(a.pageId)
             }
             is Action.Moved -> {
                 session.store.move(a.ids, -a.dx, -a.dy)
                 session.headings.move(a.headingIds, -a.dx, -a.dy)
+                session.links.move(a.linkIds, -a.dx, -a.dy)
                 session.store.drain(); refreshToPage(a.pageId)
             }
             is Action.HeadingCreated -> {
@@ -567,6 +628,10 @@ class NotebookActivity : AppCompatActivity() {
             is Action.HeadingDeleted -> { session.headings.restore(a.headingIds); session.store.drain(); refreshToPage(a.pageId) }
             is Action.HeadingTextEdited -> { session.headings.updateContent(a.before); session.store.drain(); refreshToPage(a.pageId) }
             is Action.HeadingLevelChanged -> { session.headings.updateContent(a.before); session.store.drain(); refreshToPage(a.pageId) }
+            // Undo of a wrap IS an unlink; undo of an unlink is a re-wrap in place (K1).
+            is Action.LinkCreated -> { session.links.unlink(a.pageId, a.link); session.store.drain(); refreshToPage(a.pageId) }
+            is Action.LinkUnlinked -> { session.links.relink(a.pageId, a.link); session.store.drain(); refreshToPage(a.pageId) }
+            is Action.LinkEdited -> { session.links.updatePayload(a.linkId, a.before); session.store.drain(); refreshToPage(a.pageId) }
             is Action.Page -> {
                 session.reconcile(a.snapshot.before, a.snapshot.objectIds, emptyList(), a.snapshot.beforeCurrentId)
                 refreshToPage(session.currentPage.id)
@@ -581,11 +646,13 @@ class NotebookActivity : AppCompatActivity() {
             is Action.Deleted -> {
                 session.store.remove(a.strokes.map { it.id })
                 session.headings.erase(a.headingIds)
+                session.links.remove(a.links)
                 session.store.drain(); refreshToPage(a.pageId)
             }
             is Action.Moved -> {
                 session.store.move(a.ids, a.dx, a.dy)
                 session.headings.move(a.headingIds, a.dx, a.dy)
+                session.links.move(a.linkIds, a.dx, a.dy)
                 session.store.drain(); refreshToPage(a.pageId)
             }
             is Action.HeadingCreated -> {
@@ -596,6 +663,9 @@ class NotebookActivity : AppCompatActivity() {
             is Action.HeadingDeleted -> { session.headings.erase(a.headingIds); session.store.drain(); refreshToPage(a.pageId) }
             is Action.HeadingTextEdited -> { session.headings.updateContent(a.after); session.store.drain(); refreshToPage(a.pageId) }
             is Action.HeadingLevelChanged -> { session.headings.updateContent(a.after); session.store.drain(); refreshToPage(a.pageId) }
+            is Action.LinkCreated -> { session.links.relink(a.pageId, a.link); session.store.drain(); refreshToPage(a.pageId) }
+            is Action.LinkUnlinked -> { session.links.unlink(a.pageId, a.link); session.store.drain(); refreshToPage(a.pageId) }
+            is Action.LinkEdited -> { session.links.updatePayload(a.linkId, a.after); session.store.drain(); refreshToPage(a.pageId) }
             is Action.Page -> {
                 session.reconcile(a.snapshot.after, emptyList(), a.snapshot.objectIds, a.snapshot.afterCurrentId)
                 refreshToPage(session.currentPage.id)
@@ -606,24 +676,32 @@ class NotebookActivity : AppCompatActivity() {
     // ── Selection ────────────────────────────────────────────────────────────
 
     /**
-     * Delete the selection's strokes **and headings** in one tap = one undo entry. Order matters:
-     * capture stroke geometry from [liveStrokes] *first* (it is the only place it still exists once
-     * the engine drops them), update the heading working copy *before* `removeStrokes` (its
-     * re-record is the frame that drops both), then the rows. `removeStrokes` dismisses the
-     * selection itself — every data-in call does — so [PaperView.clearSelection] is only needed on
-     * a heading-only delete; `onSelectionDismissed` clears our copy either way.
+     * Delete the selection's strokes, headings **and links** in one tap = one undo entry. Order
+     * matters: capture stroke geometry from [liveStrokes] *first* (it is the only place it still
+     * exists once the engine drops them), update the content working copies *before*
+     * `removeStrokes` (its re-record is the frame that drops them all), then the rows. A link is
+     * captured whole — the [PageLink] carries the children whose rows go down with it, and is the
+     * only thing that can put them back. `removeStrokes` dismisses the selection itself — every
+     * data-in call does — so [PaperView.clearSelection] is only needed when no stroke was in the
+     * selection; `onSelectionDismissed` clears our copy either way.
      */
     private fun deleteSelection(sel: Selection) {
         if (!opened || closing) return
         val pageId = displayedPageId
         val ids = sel.strokeIds.toList()
         val headingIds = sel.contentIds.filter { liveHeadings.containsKey(it) }
-        if (ids.isEmpty() && headingIds.isEmpty()) return
+        val links = sel.contentIds.mapNotNull { liveLinks[it] }
+        if (ids.isEmpty() && headingIds.isEmpty() && links.isEmpty()) return
         val strokes = ids.mapNotNull { liveStrokes[it] }
         if (headingIds.isNotEmpty()) {
             session.headings.erase(headingIds)
             headingIds.forEach { liveHeadings.remove(it) }
             headingRenderer.headings = liveHeadings.values.toList()
+        }
+        if (links.isNotEmpty()) {
+            session.links.remove(links)
+            links.forEach { liveLinks.remove(it.id) }
+            linkRenderer.update(liveLinks.values.toList())
         }
         if (ids.isNotEmpty()) {
             paper.removeStrokes(ids)
@@ -633,13 +711,16 @@ class NotebookActivity : AppCompatActivity() {
             paper.clearSelection()
         }
         // Unconditional: removeStrokes only re-records when it actually dropped a stroke, so the
-        // heading removal must not ride on it. Both calls land in one Main block → one frame.
-        if (headingIds.isNotEmpty()) paper.notifyContentChanged()
+        // content removals must not ride on it. Both calls land in one Main block → one frame.
+        if (headingIds.isNotEmpty() || links.isNotEmpty()) paper.notifyContentChanged()
         // Nothing captured means nothing to put back — record no history rather than a lying entry.
-        if (strokes.isNotEmpty() || headingIds.isNotEmpty()) undo.record(Action.Deleted(pageId, strokes, headingIds))
-        else Log.w(TAG, "selection delete: no geometry for ${ids.size} ids — not undoable")
-        if (headingIds.isNotEmpty()) contentsFlow.refresh()
-        Slog.d(TAG) { "selection delete: ${strokes.size} strokes, ${headingIds.size} headings" }
+        if (strokes.isNotEmpty() || headingIds.isNotEmpty() || links.isNotEmpty()) {
+            undo.record(Action.Deleted(pageId, strokes, headingIds, links))
+        } else Log.w(TAG, "selection delete: no geometry for ${ids.size} ids — not undoable")
+        if (headingIds.isNotEmpty() || links.any { it.headings.isNotEmpty() }) contentsFlow.refresh()
+        Slog.d(TAG) {
+            "selection delete: ${strokes.size} strokes, ${headingIds.size} headings, ${links.size} links"
+        }
     }
 
     // ── Headings (N2) ────────────────────────────────────────────────────────
@@ -657,6 +738,10 @@ class NotebookActivity : AppCompatActivity() {
      * leave stale hit/selection bounds. Re-measure at load, in memory only: position is authored
      * (kept), size is derived (recomputed). Rows are corrected whenever the heading is next
      * written anyway.
+     *
+     * Loose page headings only — a **wrapped** heading never comes through here (it is a child of
+     * its link, not of the page) and is deliberately left at its stored size: it is baked into the
+     * link's composite, whose pixels have to match the bounds the link was wrapped at (K1).
      */
     private fun remeasureForDevice(headings: List<Heading>): List<Heading> {
         if (headings.isEmpty()) return headings
@@ -667,17 +752,32 @@ class NotebookActivity : AppCompatActivity() {
         }
     }
 
-    /** The bar with the right mode: pure strokes → CONVERT's H, one heading alone → CHANGE's H
-     *  with its level lit, anything mixed → Delete only. */
+    /**
+     * The bar with the right mode: pure strokes → CONVERT's H + Link, one heading alone → CHANGE's H
+     * with its level lit + Link, one link alone → Edit + Unlink, anything mixed → Delete plus Link
+     * while no link is in it. A link anywhere in a mixed selection takes Link away — the no-nesting
+     * rule (K1), read off the working copy rather than trusted from the engine's id set.
+     */
     private fun showSelectionToolbar(sel: Selection) {
-        val loneHeading =
-            if (sel.strokeIds.isEmpty() && sel.contentIds.size == 1) liveHeadings[sel.contentIds.first()] else null
+        val lone = sel.strokeIds.isEmpty() && sel.contentIds.size == 1
+        val loneHeading = if (lone) liveHeadings[sel.contentIds.first()] else null
+        val hasLink = sel.contentIds.any { liveLinks.containsKey(it) }
         val mode = when {
             loneHeading != null -> SelectionMode.HEADING
+            lone && hasLink -> SelectionMode.LINK
+            hasLink -> SelectionMode.MIXED_WITH_LINK
             sel.contentIds.isEmpty() && sel.strokeIds.isNotEmpty() -> SelectionMode.STROKES
             else -> SelectionMode.MIXED
         }
         selectionToolbar.show(sel.bounds, mode, loneHeading?.level)
+    }
+
+    /** The single selected link, or null — resolved at tap time, never captured into a callback
+     *  (the selection can move, die or change kind between the bar going up and a button landing). */
+    private fun loneSelectedLink(): PageLink? {
+        val sel = currentSelection ?: return null
+        if (sel.strokeIds.isNotEmpty() || sel.contentIds.size != 1) return null
+        return liveLinks[sel.contentIds.first()]
     }
 
     /** An H1–H6 tap in the sub-row: CONVERT on a pure-stroke selection, CHANGE on a lone heading. */
@@ -750,10 +850,10 @@ class NotebookActivity : AppCompatActivity() {
         // `onSelectionDismissed`. Injecting it there keeps a smart-lasso session alive across the
         // conversion, so the engine restores PEN when the *heading's* selection is dismissed, not
         // in the middle of it.
-        pendingSelection = heading
+        pendingSelection = { selectAsHeading(heading) }
         paper.removeStrokes(strokeIds)
         // No dismissal fired (the selection had already died mid-recognize) — select directly.
-        pendingSelection?.let { pendingSelection = null; selectAsHeading(it) }
+        pendingSelection?.let { pendingSelection = null; it() }
         // removeStrokes only re-records when it dropped something; if the captured ids went stale
         // mid-recognize (scribble-erased under the overlay) the heading still has to paint. Both
         // calls land in one Main block → one frame.
@@ -816,6 +916,117 @@ class NotebookActivity : AppCompatActivity() {
         selectionActive = true
         currentSelection = Selection(emptySet(), setOf(h.id), h.bounds)
         selectionToolbar.show(h.bounds, SelectionMode.HEADING, h.level)
+    }
+
+    // ── Links (K1) ───────────────────────────────────────────────────────────
+    //
+    // There is deliberately no `syncLinkRenderer` counterpart to [syncHeadingRenderer]: every K1
+    // link mutation either changes headings/strokes in the same act (so both working copies are
+    // handed over and ONE `notifyContentChanged` covers the frame) or is replayed through a page
+    // reload. A link-only sync arrives with K2's payload edit, which is the first change that
+    // touches nothing else.
+
+    /**
+     * Wrap [sel] in a link to [payload]'s target — one link row up, its content **re-parented**
+     * page → link. Nothing is copied and no id changes: the wrapped strokes and headings keep their
+     * page-absolute geometry, which is why undo is simply an unlink and why the composite is
+     * pixel-identical to what was there before.
+     *
+     * Everything is taken from the captured [sel] rather than the live selection: the caller may
+     * have suspended (the debug path inserts a page first) and the selection can die in that window
+     * — the same capture discipline the heading convert follows. The stroke list comes from
+     * [liveStrokes] filtered by the id set, which preserves **writing order** — never iterate the
+     * Set itself.
+     */
+    private fun createLinkFromSelection(sel: Selection, payload: String) {
+        if (!opened || closing) return
+        // No nesting (locked K1): the bar already hides Link on such a selection, but a captured
+        // Selection is not the bar's — it is re-checked against the working copy at use time.
+        if (sel.contentIds.any { liveLinks.containsKey(it) }) return
+        val pageId = displayedPageId
+        val strokes = liveStrokes.values.filter { it.id in sel.strokeIds }
+        val headings = sel.contentIds.mapNotNull { liveHeadings[it] }
+        val bounds = PageLink.unionBounds(
+            strokes, headings, PageLink.UNDERLINE_CLEARANCE_DP * resources.displayMetrics.density,
+        ) ?: return   // nothing of the captured selection is still on the page
+        val link = PageLink(
+            id = java.util.UUID.randomUUID().toString(),
+            payload = payload, chrome = LinkPayload.chromeOf(payload),
+            x = bounds.left, y = bounds.top, width = bounds.width, height = bounds.height,
+            order = 0,   // the store lands it at MAX(order)+1 among the page's links
+            strokes = strokes, headings = headings,
+        )
+        session.links.create(pageId, link)
+        undo.record(Action.LinkCreated(pageId, link))
+        contentsFlow.refresh()   // a wrapped heading leaves the outline with its new parent
+        val strokeIds = strokes.map { it.id }
+        strokeIds.forEach { liveStrokes.remove(it) }
+        headings.forEach { liveHeadings.remove(it.id) }
+        liveLinks[link.id] = link
+        headingRenderer.headings = liveHeadings.values.toList()
+        linkRenderer.update(liveLinks.values.toList())
+        // The successor selection rides the dismissal `removeStrokes` is about to perform — see
+        // `onSelectionDismissed`. Injecting it there keeps the smart-lasso session alive across the
+        // wrap, so the engine restores PEN when the *link's* selection is dismissed, not mid-wrap.
+        pendingSelection = { selectAsLink(link) }
+        if (strokeIds.isNotEmpty()) paper.removeStrokes(strokeIds) else paper.clearSelection()
+        // No dismissal fired — select directly.
+        pendingSelection?.let { pendingSelection = null; it() }
+        // Unconditional, for the conversion's reason: removeStrokes only re-records when it dropped
+        // something, and a heading-only wrap still has to paint. One Main block → one frame.
+        paper.notifyContentChanged()
+        Slog.d(TAG) { "wrapped ${strokeIds.size} strokes + ${headings.size} headings → link" }
+    }
+
+    /** Land the selection on a freshly wrapped [l] — the link is what the user now has in hand.
+     *  `setSelection` is host-initiated (no `onSelectionCreated` echo), so flags and bar are set here. */
+    private fun selectAsLink(l: PageLink) {
+        paper.setSelection(emptySet(), setOf(l.id), l.bounds)
+        selectionActive = true
+        currentSelection = Selection(emptySet(), setOf(l.id), l.bounds)
+        selectionToolbar.show(l.bounds, SelectionMode.LINK, null)
+    }
+
+    /**
+     * Unwrap the selected link: its content goes back to being page content, the row is
+     * soft-deleted. The reload **is** the sync — the `.soil` is the source of truth (the SN replay
+     * rule), and it also dismisses the selection, which is what lets the engine restore PEN.
+     */
+    private fun unlinkSelection() {
+        val link = loneSelectedLink() ?: return
+        val pageId = displayedPageId
+        runPageOp {
+            session.links.unlink(pageId, link)
+            undo.record(Action.LinkUnlinked(pageId, link))
+            session.store.drain()
+            refreshToPage(pageId)
+        }
+    }
+
+    /**
+     * **Debug scaffold (K1, removed in K5):** wrap the selection in a link to the **next page** of
+     * this notebook, inserting one when the current page is the last — a real, followable
+     * page-kind target to exercise wrap / render / move / erase / undo with before the picker
+     * exists (K2). The selection is captured before the page op, because `insertBlank` suspends.
+     */
+    private fun debugCreateTestLink() {
+        val sel = currentSelection ?: return
+        runPageOp {
+            if (session.currentIndex == session.pages.lastIndex) {
+                val here = session.currentIndex
+                val snap = session.insertBlank(after = true)
+                undo.record(Action.Page(snap))
+                // The paper never swapped — only the session moved, so put it back on the page the
+                // user is looking at. `navigateTo` would flip away from the selection being wrapped.
+                session.goTo(here)
+                setPageIndicator(session.currentIndex + 1, session.pages.size)
+            }
+            val targetId = session.pages[session.currentIndex + 1].id
+            createLinkFromSelection(
+                sel,
+                LinkPayload.encode(LinkPayload.CHROME_UNDERLINE, LinkPayload.KIND_PAGE, null, targetId),
+            )
+        }
     }
 
     /** Long-press asks; it never deletes. Sheet → confirm dialog → the actual op. */
