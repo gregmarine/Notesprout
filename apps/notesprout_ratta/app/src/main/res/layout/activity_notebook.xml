@@ -46,6 +46,14 @@
                 android:layout_width="12dp"
                 android:layout_height="0dp"/>
 
+            <!-- The Contents (arc 4). GONE until the notebook holds a heading — ContentsFlow owns it. -->
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnContents"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_list"
+                android:visibility="gone"
+                android:contentDescription="@string/cd_contents"/>
+
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnPen"
                 style="@style/Widget.Notesprout.ToolbarButton"

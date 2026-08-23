@@ -153,4 +153,12 @@
     <string name="heading_nothing_recognized">No text could be read from the selected ink. The ink was left unchanged.</string>
     <string name="heading_edit_title">Edit heading</string>
     <string name="heading_edit_save">Save</string>
+
+    <!-- Contents (table of contents, from the heading extension's recognized text) -->
+    <string name="contents_title">Contents</string>
+    <string name="cd_contents">Contents</string>
+    <string name="contents_empty">No headings yet</string>
+    <string name="contents_truncated">Showing the first %1$d headings</string>
+    <string name="cd_expand">Expand</string>
+    <string name="cd_collapse">Collapse</string>
 </resources>

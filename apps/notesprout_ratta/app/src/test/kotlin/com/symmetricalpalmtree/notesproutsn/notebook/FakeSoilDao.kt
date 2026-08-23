@@ -40,6 +40,8 @@ class FakeSoilDao : SoilDao {
     override suspend fun liveContentIds(pageId: String) =
         rows.values.filter { it.parentId == pageId && (it.type == "stroke" || it.type == "heading") && it.deletedAt == null }
             .map { it.id }
+    override suspend fun liveHeadingsAll() =
+        rows.values.filter { it.type == "heading" && it.deletedAt == null }
     override suspend fun setRefId(id: String, refId: String?, at: Long) {
         rows[id]?.let { rows[id] = it.copy(refId = refId, updatedAt = at) }
     }

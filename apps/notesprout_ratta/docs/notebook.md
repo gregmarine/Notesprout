@@ -39,6 +39,11 @@ deliberate differences are listed at the end.
 | `SelectionToolbar` | the floating bar over a live lasso selection: Delete (always) + H (hidden only in `MIXED` mode), plus (N2) the H1–H6 level sub-toolbar it can open |
 | `SelectionAnchor` | pure placement arithmetic for the bar (centre / gap / flip / clamp) and (N2) `placeSub` — the sub-toolbar hung off the bar the same way. JVM-tested |
 | `core/OpeningOverlay` | the source-side "Opening…" box and its pre-draw + post launch sequencing |
+| `OutlineTree` (C1) | pure Contents tree: items → nested H1–H6 nodes (orphans attach to the nearest shallower heading or become roots — never dropped), `visible`/`all`/`highlight`/`ancestorsOf` and the paging math. JVM-tested |
+| `ContentsLayout` (C1) | pure Contents layout rules: the 480 dp sidebar/full-screen branch, 60 % sidebar width, 68 dp rows, `(level−1)×16 dp` indent, `itemsPerPage`. JVM-tested |
+| `ContentsSource` (C1) | the gather (IO): writer drain → `liveHeadingsAll()` → the pure `items()` pass (live-page filter, `stripHeadingPrefix` label, `flags` level, document order, the 2000 cap) → `OutlineTree.build`. No cache — rebuilt every open |
+| `ContentsFlow` (C1) | what both entry points call: busy guard, the `available` gate + generation-counted `refresh()`, pen-gated `releaseRender`, gather → `ContentsDialog`, `showing` (drives the host's BLOCK_ALL), `dismissIfShowing()` for the close path. Owns `btnContents` outright |
+| `ContentsDialog` (C1) | the Contents screen: one layout, two forms (sidebar/full-screen), paginated rows, collapsible tree, active-entry highlight, tap = navigate |
 
 ## Layout (`activity_notebook.xml`)
 
@@ -520,6 +525,74 @@ cases (hangs below the bar, flips above when the bar itself flipped, clamps insi
 reverse-flip-back case when flipping would leave the band). A shared `FakeSoilDao` was extracted so
 `HeadingStoreTest` and `StrokeStoreTest` exercise the same in-memory fake.
 
+## Contents (arc 4)
+
+A table of contents over the notebook's `heading` rows — Paper's arc-5 design (the improved og)
+**baked into core**: SN headings are core rows, so Paper's whole extension layer (`describeOutline`
+AIDL, capability probe, `OutlineCaps` sanitize, provider-failure dialog) does not exist here. The
+feature is **read-only over existing rows**: no schema change, no `user_version` bump, format
+compat with Paper untouched, and the recognizer point stays SN's only extension surface.
+
+**Entry points, both gated the same way:** the top-bar `btnContents` (Tabler `list`, between Back
+and the pen) and a one-finger swipe-down on the paper. Both exist only while the notebook holds
+≥ 1 live heading on a live page (`ContentsSource.available` — exact, one blob-free row read after a
+writer drain). No headings → the button is `GONE` and the swipe is silent (no toast — an
+unavailable gesture is a non-event). `ContentsFlow.refresh()` re-asks after the open, at the end of
+every `navigateTo` (which covers every flip, insert, delete and every undo/redo replay — they all
+end in `refreshToPage → navigateTo`), and after each heading mutation that doesn't navigate: a
+convert, a selection delete, an eraser sweep (`onContentErased`), and the edit dialog's empty-Save
+delete. The button's visibility flips through `whenPenIdle`, and the flip triggers the root's
+layout listener, which re-pushes the exclusion rects.
+
+**Opening:** `ContentsFlow.open()` = busy guard → pen-gated `releaseRender` → gather on IO →
+`ContentsDialog`. An empty gather (the last heading died between the gate and the read) opens
+nothing and re-refreshes. The gather is rebuilt from scratch on every open — no cache, nothing to
+invalidate; the dialog is a modal snapshot. Entries are the live headings in **document order**
+(`pageIndex`, `y`, `x`), label = `stripHeadingPrefix(text)`, level = the row's authoritative
+`flags`; blank-stripping or malformed rows are dropped, never crashed on; a cap of
+`ContentsSource.MAX_ENTRIES` (2000) bounds a pathological imported file, with the honest
+"Showing the first N headings" footer.
+
+**The tree** (`OutlineTree`, pure): H1–H6 by a per-level "last open node" stack — parents persist
+across page boundaries, and an **orphan attaches to the nearest shallower heading before it or
+becomes a root, never dropped** (nothing the user wrote is hidden). Opens collapsed to the roots
+except the highlighted entry's ancestors; the highlight is the last entry with
+`pageIndex ≤ currentPageIndex` (its nearest *visible* ancestor when collapsed away), where the
+current page derives from `displayedPageId` — the R6 torn-read rule applied to the highlight.
+
+**The screen** (`ContentsDialog`): one layout, two forms by `ContentsLayout.fullScreen` at 480 dp —
+both real devices take the **60 % left sidebar** (Nomad 749 dp / Manta 1024 dp at density 1.875)
+over a transparent scrim (tap dismisses; the panel eats its own taps); the full-screen white form
+with a back arrow is the below-480 dp branch (JVM-tested; provable via `wm size 800x1600`). Rows
+are `[+/− toggle | page number 52 dp 20 sp bold | 1 dp divider | label 20 sp ellipsized]`, the
+whole row indented `(level−1)×16 dp`, 68 dp min height; the toggle is `INVISIBLE` on leaves so the
+columns align; the highlight row takes the 5 dp inkBlack right-edge bar. Pagination, not scrolling:
+`itemsPerPage` measured once from the real body height, the library-shape pager footer `INVISIBLE`
+at one page with bound taps as no-ops (never a disabled look). Expansion state is in-memory only —
+every open starts collapsed again. A row tap dismisses and navigates to the page (under the
+page-op lock; a no-op when already there); **nothing is selected on arrival** (og/Paper parity —
+navigate + select stays deferred).
+
+**BLOCK_ALL while showing:** the Ratta ink daemon draws firmware ink beneath any Android window, so
+while `ContentsFlow.showing` the host's `pushExclusions()` pushes the whole-paper rect (the
+`!opened` shield's trick) — up **before** the dialog's first frame (`onShowingChanged` fires before
+`show()`), back to the chrome rects on dismiss. Exclusion rects fence only the ink path, not touch
+dispatch, so finger taps on the dialog still land. **Deliberate asymmetry:** the small transient
+dialogs (`HeadingEditDialog`, the delete sheet/confirm, problem dialogs) do *not* block-all — they
+are brief, user-summoned, and mid-interaction; the Contents is a persistent full-height panel a pen
+plausibly lands on. Don't "fix" the small dialogs to match.
+
+The dialog's show/hide is **frame-silence exception 6** (see the ledger below). `close()` calls
+`ContentsFlow.dismissIfShowing()` — a Dialog outliving its finishing Activity is a window leak.
+
+### JVM tests specific to the Contents
+
+`OutlineTreeTest` (document-order build, both orphan rules, deeper-slot clearing, cross-page
+parents, level clamp, `visible`/`all`/`highlight`/`ancestorsOf`, paging edges, `find`),
+`ContentsLayoutTest` (the 480 dp branch, sidebar width rounding, `itemsPerPage` floor + ≥ 1,
+indent math), and `ContentsSourceTest` (the pure `items()` pass: prefix strip + `flags` level via
+`HeadingRows`, dead-page and malformed and blank-label drops, document order, the 2000 cap + bit).
+
 ## Pages
 
 A notebook is an ordered list of `page` rows under the notebook row; `"order"` is kept **dense,
@@ -563,6 +636,7 @@ paper is full-bleed and the chrome is two thin bars.
 |---|---|
 | 1-finger horizontal swipe ← | flip next — **past the last page, insert one** (the notebook grows where you write) |
 | 1-finger horizontal swipe → | flip previous (no-op on the first page) |
+| 1-finger vertical swipe ↓ | open the Contents (C1 — silent while the notebook has no heading; an up-swipe is nothing) |
 | 2-finger horizontal swipe ← / → | insert a page after / before this one |
 | 2-finger stationary double-tap | undo |
 | 3-finger stationary double-tap | redo |
@@ -578,7 +652,10 @@ Thresholds (Paper-v0 parity — the numbers are the feel):
 
 A swipe must be **horizontal-dominant** (`|dx| > |dy|`) and qualify on *velocity or* length;
 **direction comes from the sign of `dx`, never velocity**, because a decelerating finger can flip
-the velocity sign at the end of the drag. The two-finger swipe measures the two-finger centroid and
+the velocity sign at the end of the drag. The Contents swipe (C1) is the same rule rotated 90° —
+vertical-dominant, the same three constants against the screen *height*, judged at the same
+`ACTION_UP` right after the flip evaluation (the two dominance tests are mutually exclusive), and
+only `dy > 0` acts. The two-finger swipe measures the two-finger centroid and
 commits at `POINTER_UP` back to 2→1 fingers; a third finger landing mid-swipe commits a qualifying
 insert before it dies, and a second finger landing on an already-qualifying one-finger swipe
 commits the flip for the same reason.
@@ -694,7 +771,7 @@ No app frame is presented while `paper.isPenActive` — the strip text only chan
 `whenPenIdle {}` (re-polls every `PEN_ACTIVE_TAIL_MS`). Nothing else on the screen repaints
 during writing.
 
-Five recorded exceptions, all the same shape — **one chrome frame at a deliberate act or a
+Six recorded exceptions, all the same shape — **one chrome frame at a deliberate act or a
 boundary**, never under live ink:
 
 1. the **delete-page sheet at long-press** (R4 — safe because `PageGestures` never arms while the
@@ -711,7 +788,13 @@ boundary**, never under live ink:
    the pen has just left a chrome button, not the paper);
 5. the **selection toolbar's re-show / sub-row toggle on its own taps** (N2 — the H toggle, a level
    pick and the post-edit re-anchor are all responses to a deliberate chrome tap, the same
-   justification as its original show; each tap goes through `releaseRender()` first).
+   justification as its original show; each tap goes through `releaseRender()` first);
+6. the **Contents dialog's show/hide** (C1 — the show follows a deliberate act that already passed
+   a pen gate: a chrome tap on `btnContents`, or a swipe committed through `PageGestures`'
+   `gateOpen()`; the hide is a deliberate row / scrim / back tap. Both are screen boundaries, never
+   a repaint under live ink, and `ContentsFlow` pen-gates its `releaseRender` first. Deliberately
+   *not* idle-gated — `isPenActive` counts hover, and a hovering pen would hold the screen hostage,
+   the same reason as exceptions 2 and 3).
 
 R3's exception — the tool-panel close at stylus pen-up — is **retired**: P1 removed the panels.
 

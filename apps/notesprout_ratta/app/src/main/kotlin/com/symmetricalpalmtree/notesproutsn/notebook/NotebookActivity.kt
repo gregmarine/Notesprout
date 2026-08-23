@@ -71,6 +71,7 @@ class NotebookActivity : AppCompatActivity() {
     private lateinit var selectionToolbar: SelectionToolbar
     private lateinit var session: NotebookSession
     private lateinit var pageGestures: PageGestures
+    private lateinit var contentsFlow: ContentsFlow
     private val repo by lazy { IndexRepository() }
 
     private var notebookId: String = ""
@@ -181,6 +182,20 @@ class NotebookActivity : AppCompatActivity() {
             listener = gestureListener,
         )
 
+        contentsFlow = ContentsFlow(
+            activity = this,
+            paper = paper,
+            session = { session },
+            // displayedPageId, never session.currentIndex — the R6 torn-read rule applied to the
+            // highlight: what the user sees is the page whose strokes are on the paper.
+            currentPageIndex = { session.pages.indexOfFirst { it.id == displayedPageId }.coerceAtLeast(0) },
+            alive = { opened && !closing },
+            onShowingChanged = { pushExclusions() },
+            navigate = { idx -> runPageOp { navigateTo(idx) } },
+            button = binding.btnContents,
+            whenPenIdle = ::whenPenIdle,
+        )
+
         // Chrome moved/appeared/disappeared: re-push the exclusion rects once the pass settles.
         binding.root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> binding.root.post { pushExclusions() } }
 
@@ -228,6 +243,7 @@ class NotebookActivity : AppCompatActivity() {
             // This is a boundary frame, not a frame during writing (nothing has been drawn yet).
             binding.openingOverlay.root.visibility = View.GONE
             setPageIndicator(session.currentIndex + 1, session.pages.size)
+            contentsFlow.refresh()
             Slog.d(TAG) { "page ${page.id} loaded: ${strokes.size} strokes, ${page.width}x${page.height}" }
             warmUpRecognizer()
         } catch (t: Throwable) {
@@ -369,6 +385,7 @@ class NotebookActivity : AppCompatActivity() {
             present.forEach { liveHeadings.remove(it) }
             syncHeadingRenderer()
             undo.record(Action.HeadingDeleted(pageId, present))
+            contentsFlow.refresh()
             Slog.d(TAG) { "eraser removed ${present.size} headings" }
         }
         /** The pen is dragging the box — the bar would be dragged over, and it never follows live. */
@@ -407,6 +424,7 @@ class NotebookActivity : AppCompatActivity() {
         override fun onUndo() = runPageOp { doUndo() }
         override fun onRedo() = runPageOp { doRedo() }
         override fun onDeleteRequested() { showDeleteSheet() }
+        override fun onSwipeDown() { contentsFlow.open() }   // silently a no-op while unavailable
     }
 
     /** Serialise every page/undo mutation; ignore anything while not open or once closing. */
@@ -460,6 +478,9 @@ class NotebookActivity : AppCompatActivity() {
         displayedPageId = page.id
         setPageIndicator(session.currentIndex + 1, session.pages.size)
         session.saveLastOpened()
+        // One line covers every flip, insert, delete AND every undo/redo replay (they all end in
+        // refreshToPage → here) — the Contents gate stays honest without a per-action sprinkle.
+        contentsFlow.refresh()
     }
 
     /** Show whatever the rows now say about [pageId] — the replay path's only way back to the paper. */
@@ -616,6 +637,7 @@ class NotebookActivity : AppCompatActivity() {
         // Nothing captured means nothing to put back — record no history rather than a lying entry.
         if (strokes.isNotEmpty() || headingIds.isNotEmpty()) undo.record(Action.Deleted(pageId, strokes, headingIds))
         else Log.w(TAG, "selection delete: no geometry for ${ids.size} ids — not undoable")
+        if (headingIds.isNotEmpty()) contentsFlow.refresh()
         Slog.d(TAG) { "selection delete: ${strokes.size} strokes, ${headingIds.size} headings" }
     }
 
@@ -717,6 +739,7 @@ class NotebookActivity : AppCompatActivity() {
         session.store.erase(strokeIds)
         session.headings.create(pageId, heading)
         undo.record(Action.HeadingCreated(pageId, heading, strokeIds))
+        contentsFlow.refresh()   // before the flipped-away return — the rows changed either way
         Slog.d(TAG) { "converted ${strokeIds.size} strokes → heading level $level" }
         if (pageId != displayedPageId) return   // the user flipped away mid-recognize; rows are right
         strokeIds.forEach { liveStrokes.remove(it) }
@@ -766,6 +789,7 @@ class NotebookActivity : AppCompatActivity() {
             paper.clearSelection()
             syncHeadingRenderer()
             undo.record(Action.HeadingDeleted(pageId, listOf(id)))
+            contentsFlow.refresh()
             Slog.d(TAG) { "empty save deleted heading" }
             return
         }
@@ -834,6 +858,14 @@ class NotebookActivity : AppCompatActivity() {
             // The toolbar arms the pen from the first frame, but the page isn't on the paper yet —
             // a stroke committed now would hit the listener's `opened` guard, never reach the
             // store, and be silently wiped by loadStrokes. Block the whole surface until then.
+            paper.setExclusionRects(listOf(BLOCK_ALL))
+            return
+        }
+        if (::contentsFlow.isInitialized && contentsFlow.showing) {
+            // The Contents dialog is up: the Ratta ink daemon draws firmware ink beneath any
+            // Android window, so the whole paper is one exclusion rect until it dismisses.
+            // (The small transient dialogs deliberately don't do this — a persistent full-height
+            // panel is where a pen plausibly lands.)
             paper.setExclusionRects(listOf(BLOCK_ALL))
             return
         }
@@ -930,6 +962,8 @@ class NotebookActivity : AppCompatActivity() {
         if (closing) return
         closing = true
         undo.clear()   // in-memory history dies with the screen
+        // A Dialog outliving its finishing Activity is a window leak — take the Contents down now.
+        if (::contentsFlow.isInitialized) contentsFlow.dismissIfShowing()
         BrowseState(this).lastOpenNotebookId = null
         if (!::session.isInitialized || !session.isOpen) { finish(); return }
         val p = paper; val s = session; val id = notebookId

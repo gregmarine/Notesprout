@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Contents: the highlighted (current-page) row — a 5dp inkBlack bar at the row's right edge. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:gravity="right"
+        android:width="5dp">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/inkBlack" />
+        </shape>
+    </item>
+</layer-list>

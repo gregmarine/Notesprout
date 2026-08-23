@@ -16,6 +16,7 @@ import kotlin.math.hypot
  * | Gesture | Action |
  * |---|---|
  * | 1-finger horizontal swipe | flip previous / next (past the last page: insert one) |
+ * | 1-finger vertical swipe down | open the Contents (arc 4; up-swipe is nothing) |
  * | 2-finger horizontal swipe | insert a page before / after this one |
  * | 2-finger stationary double-tap | undo |
  * | 3-finger stationary double-tap | redo |
@@ -57,6 +58,8 @@ class PageGestures(
         fun onUndo() {}
         fun onRedo() {}
         fun onDeleteRequested() {}
+        /** A qualifying one-finger swipe DOWN (arc 4 — the Contents). Never fired for an up-swipe. */
+        fun onSwipeDown() {}
     }
 
     private val vc = ViewConfiguration.get(host.context)
@@ -64,6 +67,7 @@ class PageGestures(
     private val doubleTapSlop = vc.scaledDoubleTapSlop
     private val minFlingVel = vc.scaledMinimumFlingVelocity * PAGE_SWIPE_MIN_VELOCITY_MULT
     private val width get() = host.resources.displayMetrics.widthPixels.toFloat()
+    private val height get() = host.resources.displayMetrics.heightPixels.toFloat()
 
     /** Set at the first down; while true the rest of the sequence is dropped on the floor. */
     private var ignoreSequence = false
@@ -193,7 +197,12 @@ class PageGestures(
                     val tracker = swipeTracker
                     if (tracker != null) {
                         tracker.addMovement(ev); tracker.computeCurrentVelocity(1000)
-                        evaluateFlip(tracker.getXVelocity(0), ev.x - swipeStartX, ev.y - swipeStartY)
+                        val dx = ev.x - swipeStartX
+                        val dy = ev.y - swipeStartY
+                        // Axis-exclusive by dominance: qualifiesFling wants |dx| > |dy|, the
+                        // vertical rule |dy| > |dx| — at most one of these fires.
+                        evaluateFlip(tracker.getXVelocity(0), dx, dy)
+                        evaluateSwipeDown(tracker.getYVelocity(0), dx, dy)
                     }
                 }
                 clearSwipe(); clearTwoFinger()
@@ -229,6 +238,23 @@ class PageGestures(
         if (!qualifiesFling(vx, dx, dy)) return
         if (!gateOpen()) return
         if (dx < 0) listener.onInsertAfter() else listener.onInsertBefore()
+    }
+
+    /** The flip's rule rotated 90° — vertical-dominant, far enough, fast or simply long enough. */
+    private fun qualifiesVerticalSwipe(vy: Float, dx: Float, dy: Float): Boolean {
+        val absDy = abs(dy)
+        if (absDy <= abs(dx)) return false
+        if (absDy < PAGE_SWIPE_MIN_DISTANCE_FRAC * height) return false
+        val fast = abs(vy) >= minFlingVel
+        val long = absDy >= PAGE_SWIPE_LONG_DISTANCE_FRAC * height
+        return fast || long
+    }
+
+    /** Direction from displacement, never velocity; only DOWN acts — an up-swipe is silently nothing. */
+    private fun evaluateSwipeDown(vy: Float, dx: Float, dy: Float) {
+        if (!qualifiesVerticalSwipe(vy, dx, dy)) return
+        if (!gateOpen()) return
+        if (dy > 0) listener.onSwipeDown()
     }
 
     private fun clearSwipe() {

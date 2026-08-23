@@ -832,6 +832,105 @@ known pattern).
 
 ---
 
+## Phases — Arc 4 "Contents" (planned 2026-08-22, wizard complete)
+
+A table of contents over the notebook's core `heading` rows — the og/Paper Contents feature,
+**baked into `:app` like og** (SN headings are core rows, so Paper's whole extension layer —
+`describeOutline` AIDL, capability probe, `OutlineCaps` sanitize, provider-failure dialog —
+does not exist here), **designed like Paper's arc 5** (the improved og). Read-only over
+existing rows: no schema change, no `user_version` bump, format compat untouched, the
+recognizer extension surface untouched.
+
+### Locked decisions (arc-4 wizard 2026-08-22 — do not re-ask)
+
+| Decision | Answer |
+|---|---|
+| Entry points | **Both, Paper style**: a top-bar Contents button (Tabler `list`, between Back and the pen) **and** a one-finger swipe-down on the canvas. `PageGestures.Listener` gains `onSwipeDown()` (the flip's constants reused: vertical-dominant, ≥0.30×height + fling or ≥0.50×height, `dy > 0` only, same DOWN-time/mid-sequence/fire-time gates, no escrow). |
+| Availability | **Hidden when empty (Paper)**: button GONE and swipe silent (no toast) unless ≥1 live heading sits on a live page. Recomputed after open, `navigateTo` (covers flips/inserts/deletes/undo-redo — all replays end there), heading convert, selection delete, eraser sweep (`onContentErased`), and the edit dialog's empty-Save delete. |
+| Row tap | **Navigate only (og/Paper parity)**: dismiss → jump to the page (no-op if current); nothing selected on arrival. Navigate + select stays deferred (Paper's backlog note stands). |
+| Tree design | Paper's: H1–H6, document order `(pageIndex, y, x)`, parents persist across pages, **orphans attach to the nearest shallower heading or become roots — never dropped**, opens collapsed-to-roots with the active entry's ancestors pre-expanded, highlight = last entry with `pageIndex ≤ current` (nearest **visible** ancestor when collapsed away), in-memory-only expansion, rebuild on every open (no cache, modal snapshot), 2000-entry cap kept as a memory/UI bound on imported files ("Showing the first N headings" footer). |
+| Screen | Paper's one-layout-two-forms `Dialog`: ≥480 dp → 60 % left sidebar over a transparent scrim (both real devices: Nomad 749 dp / Manta 1024 dp at density 1.875); <480 dp → full-screen with a back arrow (JVM-tested; provable via `wm size 800x1600`). Row `[+/− toggle | page # 52 dp 20 sp bold | 1 dp divider | label 20 sp ellipsized]`, indent `(level−1)×16 dp`, 68 dp rows, highlight = 5 dp inkBlack bar at the row's right edge, library-shape pager footer (`INVISIBLE` at one page, bound taps no-ops). |
+| Core deltas from Paper | Label = `HeadingPrefix.stripHeadingPrefix(row.text)` at gather; level = `flags` via `HeadingRows.toHeading` (tested clamp); availability is exact ("≥1 live heading on a live page"), not a provider approximation; page index from a `session.pages` snapshot; current page derives from `displayedPageId` (R6 rule), never `session.currentIndex`; no `Failed` result — a gather over own rows cannot "not answer". |
+| Arc shape | Two phases: **C1** core + dialog + entry points, device-walked · **C2** hardening (`/code-review`), docs, arc freeze. |
+
+### Arc-4 standing traps
+
+- **The Ratta ink daemon draws firmware ink beneath any Android window** — while the
+  Contents shows, `pushExclusions()` must push `BLOCK_ALL` (the `!opened` shield's trick),
+  and it must be up **before** the dialog's first frame. Exclusion rects fence only the ink
+  path, not touch dispatch — dialog taps still work. The small transient dialogs
+  (`HeadingEditDialog`, ActionSheet, delete confirm) deliberately do **not** block-all;
+  record the asymmetry in docs so a review doesn't "fix" them.
+- Dialog show/hide = **frame-silence exception #6** (deliberate act through a pen gate;
+  pen-gated `releaseRender` precedes the show). Do not idle-gate the show — a hovering pen
+  would hold the dialog hostage (the R3/P1 hover lesson).
+- Immersive flags before **and** after `Dialog.show()` or the system bars flash (Paper's
+  recorded note).
+- One `writer.drain()` covers strokes and headings (the shared `SoilWriter`) — a heading
+  created a moment ago must appear in the gather.
+
+### C1 — Core + dialog + entry points
+**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-22 — "it all feels, looks, and
+works good", no findings)
+
+**Outcome:** Split per the recipe — Fable wrote the pure core (`OutlineTree` with the local
+`MAX_LEVEL = 6`, `ContentsLayout`, `ContentsSource` incl. the pure `items()` pass that drops
+dead-page/malformed/blank-label rows), `SoilDao.liveHeadingsAll()` + the `FakeSoilDao` twin,
+`PageGestures`' vertical rule (the flip's three constants against the screen height, judged at the
+same `ACTION_UP`, `dy > 0` only), `ContentsFlow` (busy/available/showing, generation-counted
+`refresh()`, pen-gated `releaseRender`, empty-gather self-refresh, `dismissIfShowing()`), and all
+`NotebookActivity` wiring (construction off `displayedPageId`, the `pushExclusions` showing-branch
+BLOCK_ALL, six refresh sites — `navigateTo`'s one line covers every flip/insert/delete/undo-redo —
+and the `close()` dismiss). Opus wrote `ContentsDialog` + the three test suites (36 new tests);
+Sonnet the resources (`ic_list`, `ic_minus`, both Contents layouts, active-entry/sidebar drawables,
+strings — `ic_plus` reused for the toggle). Docs already updated: `docs/notebook.md` §Contents +
+collaborators + gestures + **frame-silence exception #6**, app `CLAUDE.md` at six. **283 JVM tests**
+(app 248 · api 6 · ext 29), debug + release build, debug installed on SNN. **Haiku walk 11/11 on
+the first run, no tap-aim failures:** button gated by headings (present in Test 04, absent in
+"abc"), swipe-down + button both open the 842 px sidebar, scrim dismiss, row-tap navigation
+(4/4 → 1/4), toggle expand/collapse, flips unaffected, no-headings swipe silent, crash buffer
+clean, cold restore clean. Gather 12–20 ms for 6 headings.
+
+Pure core (`OutlineTree`, `ContentsLayout`, `ContentsSource.items`) + one cross-page DAO
+query (`liveHeadingsAll()`, blob-free in effect — heading rows never set `blob`) +
+`ContentsFlow` (busy/available/showing, generation-counted `refresh()`, pen-gated
+`releaseRender`, empty-gather self-refresh race guard, `dismissIfShowing()` for `close()`)
++ `ContentsDialog` (the screen per the locked decisions) + `PageGestures.onSwipeDown` +
+`btnContents` in `topBarRow` (`ContentsFlow` owns it — `NotebookToolbar`'s arming-only
+charter untouched) + ~35 lines of `NotebookActivity` wiring (construction, gesture hook,
+`pushExclusions` showing-branch, the refresh call sites, close hygiene).
+**Gate:** JVM tests (~280 total: OutlineTree build/visible/highlight/ancestors/paging,
+ContentsLayout width/items-per-page/indent, ContentsSource mapping/order/cap); debug +
+release build; Haiku device walk on the Nomad (button gated by headings, swipe opens,
+sidebar form, toggle expand/collapse, row-tap navigation, scrim dismiss, no-headings
+silence, flips still work, crash buffer, cold restore); **user eye check** (swipe feel vs.
+flip misfires, pen over the open Contents does not ink beneath while finger taps still
+land, EPD render quality/ghosting, button appears/disappears with the last heading,
+arrival page writes immediately, collapsed-open feel).
+*Fable writes the pure core + DAO + gesture + wiring; Opus `ContentsFlow`/`ContentsDialog`
++ the JVM tests; Sonnet layouts/drawables/strings.*
+
+**Questions to resolve at phase start:** all answered in the 2026-08-22 wizard (the locked
+decisions above).
+
+### C2 — Hardening, review, docs, freeze
+**Status:** ⬜ Not started
+
+`/code-review` over the arc range (level asked at phase start; N3 precedent high).
+Pre-check list: the `refresh()` generation race; `showing` → `pushExclusions` ordering
+(BLOCK_ALL before the first dialog frame); dialog leak on activity destroy; `itemsPerPage`
+measured before the first render; a gather racing `close()`; a stale `session.pages`
+snapshot vs. a mid-gather page op. Fix or explicitly accept each finding (accepted →
+monorepo `BACKLOG.md`). Docs: `docs/notebook.md` §Contents (+ collaborators table, gestures
+table, frame-silence ledger → six) with the deliberate-differences and the block-all
+asymmetry note; app `CLAUDE.md` frame-silence count; this file's outcomes. Version stamp
+decision; full regression (Haiku walk + short user checklist); commit + push; arc freeze.
+**Gate:** everything green or explicitly accepted; user all-clear.
+
+**Questions to resolve at phase start:** review level; version stamp.
+
+---
+
 ## Verification (end of arc)
 
 1. All JVM unit tests green (`./gradlew test` in `apps/notesprout_ratta`).

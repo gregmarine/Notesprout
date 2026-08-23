@@ -45,6 +45,13 @@ interface SoilDao {
     @Query("SELECT id FROM notebook WHERE parentId = :pageId AND type IN ('stroke','heading') AND deletedAt IS NULL")
     suspend fun liveContentIds(pageId: String): List<String>
 
+    /** Every live heading row in the notebook — the Contents gather (arc 4), the one cross-page
+     *  read. Blob-free in effect (heading writes never set `blob`), and full-entity deliberately:
+     *  `HeadingRows.toHeading` — the tested mapper — takes the entity, and a projection would buy
+     *  nothing for a contractually-null column. */
+    @Query("SELECT * FROM notebook WHERE type = 'heading' AND deletedAt IS NULL")
+    suspend fun liveHeadingsAll(): List<SoilObjectEntity>
+
     /** Reposition an object (a heading drag) — geometry only, size untouched. */
     @Query("UPDATE notebook SET x = :x, y = :y, updatedAt = :at WHERE id = :id")
     suspend fun setPosition(id: String, x: Float, y: Float, at: Long)
