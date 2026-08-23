@@ -80,7 +80,11 @@ class NewNotebookActivity : AppCompatActivity() {
 
         parentFolderId = intent.getStringExtra(EXTRA_PARENT_FOLDER_ID)
 
-        binding.nameField.setText(defaultName())
+        // The library resolves the folder's naming scheme before it launches this screen and hands
+        // the expanded name in. This screen stays naming-agnostic: it is a prefill like any other,
+        // still fully editable, and the Create-time duplicate check already covers a collision.
+        val prefill = intent.getStringExtra(EXTRA_DEFAULT_NAME)?.trim()
+        binding.nameField.setText(if (!prefill.isNullOrBlank()) prefill else defaultName())
         binding.nameField.selectAll()
 
         binding.btnBack.setOnClickListener { finish() }
@@ -207,8 +211,12 @@ class NewNotebookActivity : AppCompatActivity() {
         const val EXTRA_NOTEBOOK_ID = "notebookId"
         const val EXTRA_NOTEBOOK_NAME = "notebookName"
 
-        fun intent(context: Context, parentFolderId: String?): Intent =
+        /** The name field's prefill, already expanded from the folder's scheme. Null = timestamp. */
+        const val EXTRA_DEFAULT_NAME = "defaultName"
+
+        fun intent(context: Context, parentFolderId: String?, defaultName: String? = null): Intent =
             Intent(context, NewNotebookActivity::class.java)
                 .putExtra(EXTRA_PARENT_FOLDER_ID, parentFolderId)
+                .putExtra(EXTRA_DEFAULT_NAME, defaultName)
     }
 }

@@ -72,4 +72,17 @@ interface ObjectDao {
 
     @Query("DELETE FROM objects WHERE type = 'list_item' AND refId = :memberId")
     suspend fun deleteEdgesTo(memberId: String)
+
+    // ── Naming schemes ───────────────────────────────────────────────────────
+
+    /**
+     * The naming row for [parentId] (NULL = the library root) **including a soft-deleted one** —
+     * clearing a scheme soft-deletes the row, and setting one again must revive that same row
+     * rather than leave a second one behind it.
+     */
+    @Query(
+        "SELECT * FROM objects WHERE type = 'naming' AND " +
+        "((:parentId IS NULL AND parentId IS NULL) OR parentId = :parentId) LIMIT 1"
+    )
+    suspend fun namingRowAny(parentId: String?): ObjectEntity?
 }

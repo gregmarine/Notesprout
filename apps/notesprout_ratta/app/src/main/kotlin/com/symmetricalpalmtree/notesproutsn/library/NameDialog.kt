@@ -18,6 +18,11 @@ import com.symmetricalpalmtree.notesproutsn.core.Dialogs
  * user's typing away every time they hit an invalid character. [onAccept] therefore decides when to
  * close, and gets a `dismiss` callback to do it with — the duplicate-name check is a database
  * round-trip, so only the caller knows when the name is really good.
+ *
+ * New folder also carries a **second, optional field** (arc 5): the folder's default-notebook-name
+ * scheme, built by [SchemeDialog.buildField] so it reads identically to the standalone dialog. It is
+ * absent unless [schemeCaptionRes] is given, and [onAccept]'s `scheme` is then always `""` — rename
+ * has nothing to say about naming schemes and shows no extra field.
  */
 object NameDialog {
 
@@ -27,7 +32,10 @@ object NameDialog {
         confirmRes: Int,
         initial: String = "",
         hintRes: Int = R.string.rename_hint,
-        onAccept: (name: String, dismiss: () -> Unit) -> Unit,
+        schemeCaptionRes: Int = 0,
+        schemeHintRes: Int = 0,
+        schemeHelpRes: Int = 0,
+        onAccept: (name: String, scheme: String, dismiss: () -> Unit) -> Unit,
     ) {
         if (activity.isFinishing || activity.isDestroyed) return
         val d = activity.resources.displayMetrics.density
@@ -51,6 +59,14 @@ object NameDialog {
             setPadding(side, (16 * d).toInt(), side, 0)
             addView(input)
         }
+        val schemeViews = if (schemeCaptionRes != 0) {
+            SchemeDialog.buildField(
+                activity,
+                schemeCaptionRes,
+                if (schemeHintRes != 0) schemeHintRes else R.string.scheme_hint,
+                if (schemeHelpRes != 0) schemeHelpRes else R.string.scheme_help,
+            ).also { it.addTo(wrapper) }
+        } else null
 
         val dialog = Dialogs.style(
             AlertDialog.Builder(activity)
@@ -62,7 +78,10 @@ object NameDialog {
         )
         dialog.show()
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-            onAccept(input.text.toString().trim()) { dialog.dismiss() }
+            onAccept(
+                input.text.toString().trim(),
+                schemeViews?.text().orEmpty(),
+            ) { dialog.dismiss() }
         }
     }
 

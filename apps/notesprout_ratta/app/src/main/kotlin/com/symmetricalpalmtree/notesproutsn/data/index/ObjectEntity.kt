@@ -11,6 +11,13 @@ object ObjectType {
     const val NOTEBOOK = "notebook"
     const val LIST = "list"
     const val LIST_ITEM = "list_item"
+
+    /**
+     * A folder's default-notebook-name scheme (arc 5). An **additive row type**, not a schema
+     * change: it reuses the universal row shape, so the Room identity hash — the format contract
+     * with Paper — is untouched, and a Paper index simply never lists these rows.
+     */
+    const val NAMING = "naming"
 }
 
 /** Notebook `flags` bits. */
@@ -28,6 +35,7 @@ object NotebookFlags {
  *    [templateKind], [blob] = cover (WEBP q100)
  *  - list: sentinel id ([ListIds]), [name]
  *  - list_item: [parentId] = list id, [refId] = member id, [sortOrder]
+ *  - naming: [parentId] = folder id, or null = the library root; [name] = the scheme text
  *
  * [updatedAt] is bumped ONLY by real edits (name, ink, page insert/delete, move) — it is the
  * "Last modified" the library sorts by. Soft deletes only ([deletedAt]); membership edges are the

@@ -2,6 +2,7 @@ package com.symmetricalpalmtree.notesproutsn.library
 
 import android.app.Activity
 import android.os.Bundle
+import android.util.Log
 import android.view.View
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
@@ -134,11 +135,15 @@ class LibraryActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         launchingNotebook = false
+        launchingNewNotebook = false
         if (gridMeasured) lifecycleScope.launch { refresh() }
     }
 
     /** True from a notebook launch until the library is back on top — the double-tap latch. */
     private var launchingNotebook = false
+
+    /** The same latch for +Notebook, which now resolves a naming scheme before it launches. */
+    private var launchingNewNotebook = false
 
     /**
      * The one door into [NotebookActivity]. E-ink gives a tap no feedback for hundreds of ms, so
@@ -154,6 +159,54 @@ class LibraryActivity : AppCompatActivity() {
         if (launchingNotebook) return
         launchingNotebook = true
         OpeningOverlay.showThen(this) { startActivity(NotebookActivity.intent(this, id, name)) }
+    }
+
+    /**
+     * +Notebook. The folder's naming scheme is resolved and expanded **before** the New-notebook
+     * screen opens (two cheap index reads; no feedback — the tap takes a beat), and the result rides
+     * in as a prefill. Latched like [openNotebook], because the resolve puts a gap between the tap
+     * and the screen and a second tap in that gap would launch twice.
+     *
+     * Naming never blocks what the user asked for: no scheme, an unparseable one, or any failure at
+     * all means the screen opens with its own timestamp default.
+     */
+    private fun launchNewNotebook() {
+        if (launchingNewNotebook) return
+        launchingNewNotebook = true
+        val fid = folderId
+        lifecycleScope.launch {
+            val prefill = resolveAndExpand(fid)
+            // The beat is normally a few ms, but if the user has meanwhile left this folder the tap
+            // no longer means "here" — drop it rather than create somewhere else.
+            if (folderId != fid || isFinishing || isDestroyed) {
+                launchingNewNotebook = false
+                return@launch
+            }
+            newNotebookLauncher.launch(NewNotebookActivity.intent(this@LibraryActivity, fid, prefill))
+        }
+    }
+
+    /**
+     * The scheme governing [fid] (nearest ancestor, then the root), expanded against the folder's
+     * live notebook names so `{n}` counts the right siblings. Null when there is no scheme — or
+     * when anything at all goes wrong: this runs in `lifecycleScope`, which has no handler, and a
+     * naming scheme is never worth a crash.
+     */
+    private suspend fun resolveAndExpand(fid: String?): String? = try {
+        val scheme = repo.resolveScheme(fid)
+        if (scheme == null) null else {
+            val siblings = repo.notebooks(fid).map { it.name }
+            val expanded = SchemeEngine.expand(scheme, System.currentTimeMillis(), siblings)
+            // Belt and braces: the engine's literal charset is the core name rule, so this cannot
+            // normally fail — but a name the library would refuse must never be handed to it.
+            if (NameRules.isValid(expanded)) expanded else {
+                Log.w(TAG, "scheme expanded to an unusable name — using the default")
+                null
+            }
+        }
+    } catch (e: Exception) {
+        Log.w(TAG, "scheme resolve failed — using the default", e)
+        null
     }
 
     /**
@@ -188,7 +241,7 @@ class LibraryActivity : AppCompatActivity() {
         btnCloseMode.setOnClickListener { setMode(BrowseMode.NORMAL) }
         btnSort.setOnClickListener { showSortSheet() }
         btnNewFolder.setOnClickListener { showNewFolderDialog() }
-        btnNewNotebook.setOnClickListener { newNotebookLauncher.launch(NewNotebookActivity.intent(this@LibraryActivity, folderId)) }
+        btnNewNotebook.setOnClickListener { launchNewNotebook() }
         btnUp.setOnClickListener { navigateUp() }
         btnFirst.setOnClickListener { goToPage(0) }
         btnPrev.setOnClickListener { goToPage(pageIndex - 1) }
@@ -240,18 +293,27 @@ class LibraryActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val ancestry = repo.ancestry(folderId)
             val container = binding.breadcrumbContainer
+            val rootLabel = getString(R.string.library_root)
             container.removeAllViews()
-            container.addView(crumb(getString(R.string.library_root), ink) { navigateTo(null) })
+            // Long-press any crumb — the root included — to set that folder's default notebook name.
+            // The root has no card to long-press, so this is its only way in.
+            container.addView(
+                crumb(rootLabel, ink, onClick = { navigateTo(null) },
+                    onLongClick = { openSchemeDialog(null, rootLabel) })
+            )
             for (ref in ancestry) {
                 container.addView(separator(ink))
-                container.addView(crumb(ref.name, ink) { navigateTo(ref.id) })
+                container.addView(
+                    crumb(ref.name, ink, onClick = { navigateTo(ref.id) },
+                        onLongClick = { openSchemeDialog(ref.id, ref.name) })
+                )
             }
             binding.breadcrumbScroll.post { binding.breadcrumbScroll.fullScroll(View.FOCUS_RIGHT) }
         }
         binding.btnUp.visibility = if (folderId == null) View.GONE else View.VISIBLE
     }
 
-    private fun crumb(label: String, color: Int, onClick: () -> Unit): TextView {
+    private fun crumb(label: String, color: Int, onClick: () -> Unit, onLongClick: () -> Unit): TextView {
         val d = resources.displayMetrics.density
         return TextView(this).apply {
             text = label
@@ -259,8 +321,14 @@ class LibraryActivity : AppCompatActivity() {
             setTextColor(color)
             setPadding((6 * d).toInt(), (8 * d).toInt(), (6 * d).toInt(), (8 * d).toInt())
             setOnClickListener { onClick() }
+            // true: a long-press that already did its work must not also navigate on release.
+            setOnLongClickListener { onLongClick(); true }
         }
     }
+
+    /** The scheme editor, for a folder card, a breadcrumb, or the root ([folderId] null). */
+    private fun openSchemeDialog(folderId: String?, folderName: String) =
+        SchemeDialog.open(this, repo, folderId, folderName)
 
     private fun separator(color: Int): TextView = TextView(this).apply {
         text = " / "
@@ -422,6 +490,12 @@ class LibraryActivity : AppCompatActivity() {
             val label = if (nb.pinned) R.string.action_unpin else R.string.action_pin
             sheet.addAction(R.drawable.ic_pinned, getString(label)) { togglePin(s.id, nb.pinned) }
         }
+        // Only folders hold a naming scheme — it is a rule about what is created *inside* something.
+        if (isFolder) {
+            sheet.addAction(R.drawable.ic_cursor_text, getString(R.string.action_naming)) {
+                openSchemeDialog(s.id, s.name)
+            }
+        }
         sheet
             .addAction(R.drawable.ic_edit, getString(R.string.action_rename)) { showRenameDialog(s) }
             .addAction(R.drawable.ic_move_folder, getString(R.string.action_move)) { showMovePicker(s) }
@@ -445,23 +519,51 @@ class LibraryActivity : AppCompatActivity() {
 
     // ── New folder / rename ──────────────────────────────────────────────────
 
+    /**
+     * New folder, with its default-notebook-name scheme in the same dialog — naming a folder and
+     * saying what goes in it is one thought.
+     *
+     * The order is deliberate: name rule → **scheme** → duplicate check → create → save the scheme.
+     * The scheme is validated *before* the folder exists, so a mistyped token keeps the dialog (and
+     * everything typed in it) rather than leaving a folder behind. Once the folder is created it
+     * stands: a scheme that then fails to save is explained, not rolled back — the user asked for a
+     * folder and got one, and the scheme can be set again from its long-press.
+     */
     private fun showNewFolderDialog() = NameDialog.show(
         this,
         titleRes = R.string.new_folder_title,
         confirmRes = R.string.new_notebook_create,
         hintRes = R.string.new_folder_hint,
-    ) { name, dismiss ->
+        schemeCaptionRes = R.string.scheme_caption,
+        schemeHintRes = R.string.scheme_hint,
+        schemeHelpRes = R.string.scheme_help,
+    ) { name, scheme, dismiss ->
         val problem = NameRules.validate(name)
         if (problem != null) {
             Dialogs.problem(this, R.string.name_problem_title, NameDialog.problemMessage(this, problem))
             return@show
+        }
+        if (scheme.isNotEmpty()) {
+            val bad = SchemeEngine.validate(scheme)
+            if (bad != null) {
+                Dialogs.problem(this, R.string.naming_problem_title, SchemeDialog.message(this, bad))
+                return@show
+            }
         }
         lifecycleScope.launch {
             if (repo.nameTaken(folderId, ObjectType.FOLDER, name)) {
                 Dialogs.problem(this@LibraryActivity, R.string.name_problem_title, getString(R.string.new_folder_duplicate, name))
                 return@launch
             }
-            repo.createFolder(name, folderId)
+            val folder = repo.createFolder(name, folderId)
+            if (scheme.isNotEmpty()) {
+                try {
+                    repo.setScheme(folder.id, scheme)
+                } catch (e: Exception) {
+                    Log.w(TAG, "new folder: scheme save failed", e)
+                    Dialogs.problem(this@LibraryActivity, R.string.naming_problem_title, getString(R.string.naming_save_failed))
+                }
+            }
             dismiss()
             refresh()
         }
@@ -472,7 +574,7 @@ class LibraryActivity : AppCompatActivity() {
         titleRes = R.string.rename_title,
         confirmRes = R.string.action_rename,
         initial = s.name,
-    ) { name, dismiss ->
+    ) { name, _, dismiss ->
         if (name == s.name) { dismiss(); return@show }
         val problem = NameRules.validate(name)
         if (problem != null) {

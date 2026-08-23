@@ -84,6 +84,22 @@
     <string name="delete_confirm">Delete</string>
     <string name="cancel">Cancel</string>
 
+    <!-- Naming schemes (default notebook name) -->
+    <string name="action_naming">Default notebook name…</string>
+    <string name="scheme_caption">Default notebook name</string>
+    <string name="scheme_hint">e.g. Meeting {date} {n:2}</string>
+    <string name="scheme_help">Tokens: {date} {time} {year} {month} {day} {monthname} {mon} {weekday} {wd} {n} {n:3}. Leave empty for the standard name.</string>
+    <string name="naming_problem_title">Naming scheme</string>
+    <string name="err_scheme_unknown_token">%1$s isn\'t a token Notesprout knows.</string>
+    <string name="err_scheme_unclosed_brace">A { was never closed with a }.</string>
+    <string name="err_scheme_counter_twice">Only one {n} per scheme.</string>
+    <string name="err_scheme_illegal_char">Only letters, numbers, spaces, hyphens, underscores, and dots — plus the tokens.</string>
+    <string name="err_scheme_empty">The scheme has to make a name.</string>
+    <string name="err_scheme_too_long">The name this makes would be too long (limit %1$d characters).</string>
+    <string name="naming_save_failed">The folder was created, but its naming scheme could not be saved.</string>
+    <string name="naming_load_failed">The naming scheme couldn\'t be read. Try again.</string>
+    <string name="scheme_save_failed">The naming scheme couldn\'t be saved. Try again.</string>
+
     <!-- Move -->
     <string name="move_title">Move to…</string>
     <string name="move_here">Move here</string>

@@ -99,10 +99,63 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
                     notebookIds += nb.id
                 }
                 for (sub in dao.childrenOfType(fid, ObjectType.FOLDER)) stack.add(sub.id)
+                // The folder's naming scheme goes with it, in the same transaction: a stranded
+                // alive naming row under a dead folder would be invisible, un-clearable, and would
+                // come back to life if that folder id were ever reused.
+                dao.namingRowAny(fid)?.let { if (it.deletedAt == null) dao.softDelete(it.id, now) }
                 dao.softDelete(fid, now)
             }
         }
         return notebookIds
+    }
+
+    // ── Naming schemes ───────────────────────────────────────────────────────
+
+    /**
+     * The scheme stored **on** [folderId] itself (null = the library root), or null if it has none.
+     * No inheritance — that is [resolveScheme]'s job; this is what the edit dialog shows.
+     */
+    suspend fun scheme(folderId: String?): String? =
+        dao.namingRowAny(folderId)?.takeIf { it.deletedAt == null }?.name
+
+    /**
+     * Store [scheme] on [folderId] — an upsert **in place**: the existing row keeps its id and
+     * `createdAt`, and a soft-deleted one is revived (`deletedAt = null`) rather than replaced, so
+     * a folder never accumulates naming rows however often its scheme is set and cleared.
+     */
+    suspend fun setScheme(folderId: String?, scheme: String, now: Long = System.currentTimeMillis()) {
+        val existing = dao.namingRowAny(folderId)
+        dao.upsert(
+            ObjectEntity(
+                id = existing?.id ?: UUID.randomUUID().toString(),
+                type = ObjectType.NAMING,
+                name = scheme,
+                parentId = folderId,
+                createdAt = existing?.createdAt ?: now,
+                updatedAt = now,
+                deletedAt = null,
+            )
+        )
+    }
+
+    /** Clear [folderId]'s scheme by soft-deleting its naming row. A no-op when there is none. */
+    suspend fun clearScheme(folderId: String?, now: Long = System.currentTimeMillis()) {
+        val existing = dao.namingRowAny(folderId) ?: return
+        if (existing.deletedAt == null) dao.softDelete(existing.id, now)
+    }
+
+    /**
+     * The scheme that governs new notebooks created in [folderId]: **nearest ancestor wins**. The
+     * folder itself is asked first, then each folder up the chain, and finally the library root
+     * (the `parentId = null` row) — the first alive scheme is the answer, null if there is none.
+     *
+     * The walk rides [ancestry], which is already cycle-guarded and hop-capped, so a corrupt parent
+     * chain costs a bounded number of reads rather than a hang.
+     */
+    suspend fun resolveScheme(folderId: String?): String? {
+        // ancestry() is root-first and includes folderId; nearest-first is that list reversed.
+        for (ref in ancestry(folderId).asReversed()) scheme(ref.id)?.let { return it }
+        return scheme(null)
     }
 
     // ── Ancestry ─────────────────────────────────────────────────────────────

@@ -976,6 +976,79 @@ decision; full regression (Haiku walk + short user checklist); commit + push; ar
 
 ---
 
+## Phases — Arc 5 "Naming" (planned 2026-08-22, wizard complete)
+
+Custom notebook name schemes as a **first-class core feature** — Paper's arc-2 Naming extension
+(`PAPER_NAMING_PLAN.md`, `docs/extensions.md` §"The Naming extension" + §"NotebookNamer — host
+behaviour") baked into `:app`, the arc-4 precedent: the extension's whole provider layer (AIDL,
+store, NamerClient, discovery) vanishes; the scheme language and the library UX carry over.
+Reading references only — no code copied. Two phases (user-directed): S1 implementation, S2 review.
+
+### Locked decisions (arc-5 wizard 2026-08-22 — do not re-ask)
+
+| Decision | Answer |
+|---|---|
+| Storage | **Additive index row type `TYPE_NAMING = "naming"`** in the `objects` table — no schema change, no Room-hash change (the proven additive-row pattern; Paper filters listings by type so the rows are invisible to it). One row per folder: `parentId` = folder id (**null = the library root**), `name` = the scheme text, everything else defaulted. Set = upsert in place (same row id, `deletedAt` cleared); clear (blank save) = soft delete. `deleteFolderRecursive` soft-deletes each folder's naming row in the same transaction. |
+| Root scheme | **Yes** — the root can hold a scheme (the `parentId = null` naming row). |
+| Scheme language | **v2 = Paper's v1 + date-part/name tokens.** v1 verbatim: literal text (core name charset), `{date}` `yyyyMMdd`, `{time}` `HHmmss`, `{n}` / `{n:K}` (K 1–9, at most once), 100-char cap incl. worst-case expansion, `{n}` = 1 + highest sibling match against the scheme's anchored skeleton regex (date/time positions are wildcards — the counter runs across days; zero-padded to K, never truncated). **New tokens:** `{year}` (`yyyy`) · `{month}` (`MM`) · `{day}` (`dd`) · `{monthname}` (August) · `{weekday}` (Saturday) · `{mon}` (Aug) · `{wd}` (Sat) — English/`Locale.ROOT`, charset-safe; skeleton wildcards = fixed digit widths / alternations of the 12 or 7 names. Time parts (`{hour}` etc.) **declined**. |
+| Entry points | All three of Paper's, plus one: ① the New-folder dialog gains the scheme field (validated **before** the folder exists; folder created → then scheme saved); ② folder long-press sheet gains "Default notebook name…"; ③ +Notebook opens pre-named via `EXTRA_DEFAULT_NAME` (still editable, timestamp default when no scheme resolves); ④ **breadcrumb long-press** (any crumb **including the root**) opens the same scheme dialog for that crumb's folder — the root's only entry point. |
+| Inheritance | **Nearest-ancestor fallback**: creation folder → … → root, first folder with a scheme wins; none → core timestamp default. `{n}` always counts siblings (alive notebook names) in the **creation folder**, never the scheme-holding ancestor's. |
+| Failure rule | Paper's: naming never blocks what the user chose. An unresolvable or unparseable stored scheme → core default silently (`Log.w`, C2's degrade-not-throw rule); scheme validation/save failures → problem dialogs that keep the user's text (dialog-explains rule). |
+
+### S1 — Scheme engine + storage + library UX (end to end)
+**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-22)
+
+`library/SchemeEngine.kt` (pure Kotlin, fresh-coded — Paper's `SchemeEngine` + its 18 tests are
+the reference, extended with the v2 tokens), `ObjectType.NAMING` + DAO queries + `IndexRepository`
+scheme methods (`schemeFor` / `resolveScheme` ancestor walk on the existing cycle-guarded
+`ancestry` / `setScheme` upsert-in-place / `clearScheme` soft delete + the `deleteFolderRecursive`
+sweep), `SchemeDialog` (one text field, prefill, token help line, blank save = clear),
+`LibraryActivity` wiring (New-folder dialog field, folder sheet row, breadcrumb long-press incl.
+root, +Notebook resolve-then-launch), `NewNotebookActivity.EXTRA_DEFAULT_NAME`.
+**Gate:** JVM tests green (SchemeEngine ported case-for-case + v2-token cases); debug + release
+build; Haiku device walk (dialogs/fields present via uiautomator, no-scheme prefill = timestamp,
+crash buffer — typed-scheme flows are the user's, IME swallow trap); **user eye check** (set a
+scheme, create pre-named notebooks, {n} counting, inheritance, root scheme, clear).
+*Opus implements against Fable's contract; Fable reviews.*
+
+**Questions to resolve at phase start:** none — wizard above complete.
+
+**Outcome:** Opus implemented the whole phase in one background agent against Fable's contract;
+Fable review clean. New: `library/SchemeEngine.kt` (v2 language, 11 `Part` kinds, expansion-counted
+100 cap, anchored-skeleton `{n}` with non-capturing name alternations so the counter stays group 1),
+`library/SchemeDialog.kt` (`buildField` shared with the New-folder dialog; `open` reads then shows —
+a read failure explains itself and opens nothing; blank save = clear; positive button wired after
+`show()`), `ic_cursor_text`, 29 JVM tests. Changed: `ObjectType.NAMING` + `namingRowAny` (includes
+soft-deleted — set revives the same row, never a second) + repository `scheme`/`setScheme`/
+`clearScheme`/`resolveScheme` (nearest-ancestor over reversed `ancestry`, then the root) +
+`deleteFolderRecursive` naming-row sweep in the same transaction; `LibraryActivity` (sheet row,
+breadcrumb long-press incl. root, latched `launchNewNotebook` with a stale-folder drop,
+name→scheme→duplicate→create→save-scheme order in the New-folder accept); `NameDialog` optional
+second field; `NewNotebookActivity.EXTRA_DEFAULT_NAME`. **Three deliberate deviations:**
+① **`Locale.US`, not `Locale.ROOT`, for formatting** — CLDR's root locale renders `MMMM`/`EEEE` as
+the abbreviated forms, so `{monthname}` would equal `{mon}` (the tests caught it; reason KDoc'd on
+`FORMAT_LOCALE`); ② three failure strings, not one (folder-created-but-scheme-not,
+standalone save, standalone read — one wording would read wrongly in two of the three places);
+③ `SchemeDialog.open` does its own current-scheme read so all three entry points share one call
+site. **312 JVM tests** (283 + 29), debug + release build, Room identity hash confirmed unchanged
+(`cd6b2701…`). **Haiku walk 8/8 on the first run, zero tap-aim false failures** (sheet row, both
+scheme dialogs incl. the root crumb's, timestamp prefill with no scheme, New-folder scheme section,
+crash buffer clean). **User eye check all-pass 2026-08-22** (set/reopen scheme, `{n}` counting,
+v2 tokens, inheritance, root scheme, create-with-scheme, bad-scheme dialog keeps text, clear) →
+all-clear. Version stays 0.1.0-ratta. Both variants reinstalled current on SNN.
+
+### S2 — Review + hardening + docs
+**Status:** ⬜ Not started
+
+Arc-range `/code-review` (level asked at phase start), findings fixed or explicitly accepted →
+`BACKLOG.md`; docs (`docs/library.md` §Naming section); app `CLAUDE.md` touch-ups if any; memory +
+this file's outcomes; version-stamp decision; regression (Haiku walk + short user checklist);
+commit + push; arc freeze.
+
+**Questions to resolve at phase start:** review level; version stamp.
+
+---
+
 ## Verification (end of arc)
 
 1. All JVM unit tests green (`./gradlew test` in `apps/notesprout_ratta`).
