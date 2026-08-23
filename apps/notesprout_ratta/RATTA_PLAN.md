@@ -1393,9 +1393,10 @@ A→B→A→B are real history and belong on the trail); Intent-redelivery is **
 page, not the link target; Paper's accepted quirk is fixed here, not inherited).
 
 ### K5 — Review + hardening + docs + freeze
-**Status:** 🟨 Code/docs/regression complete 2026-08-23 — awaiting user eye check for the freeze
+**Status:** ✅ Complete (commit 05c5d5e, Nomad-verified + user all-clear 2026-08-23 —
+**ARC 6 "Links" COMPLETE + FROZEN**, version stays 0.1.0-ratta)
 
-**Outcome (so far):** Phase-start answers: review level **high** (every arc's level), version stamp
+**Outcome:** Phase-start answers: review level **high** (every arc's level), version stamp
 **stays 0.1.0-ratta** (user's call). K1 debug scaffold removed whole (flask button + string +
 `ic_flask` + `debugCreateTestLink` + the `SelectionToolbar` hook). Arc-range `/code-review high`
 (`5c383b0..HEAD`): **10 findings — 7 confirmed correctness + 3 cleanups; 9 fixed, 1 partially
@@ -1429,7 +1430,10 @@ passed) — **Fable re-drove by hand: follows, walk-backs, fresh-open trail clea
 swipe-down, flips all pass, crash buffer clean**. Note: the on-device test data has changed since
 K4 — every current link is in-notebook, so the **cross-notebook chain (seal → relaunch,
 `readOnce` pre-check, force-stop restore) is the user's eye check to re-prove**, along with the
-K5 fixes only a pen can reach.
+K5 fixes only a pen can reach. **User eye check (#10) all-pass 2026-08-23, no findings** —
+cross-notebook create + follow + swipe-up return, Back cancels a slow open, overlap tap resolves
+to the newer link after undo/redo, picker re-drill + create clean, deep-folder crumbs
+end-scrolled, writing-over-links and flip feel unchanged. Arc frozen.
 
 Remove the K1 debug create-test-link (+ its strings); arc-range `/code-review` (level asked
 at phase start), findings fixed or explicitly accepted → `BACKLOG.md`; docs

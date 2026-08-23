@@ -168,7 +168,14 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   10 findings, 9 fixed + 1 accepted → `BACKLOG.md` — incl. the New-folder OK re-entry
   guard, the counter-overflow cap backstop, and hand-list month/weekday names so CLDR
   drift can't stall `{n}`; plus the user-caught create-then-open latch regression).
-  Read `apps/notesprout_ratta/RATTA_PLAN.md` first for any work there.
+  **Arc 6 ("Links") is complete and frozen — K1–K5 ✅ 2026-08-23**: link objects baked into
+  the core (Paper-v1 payload grammar byte-compatible, re-parent wrap model, no nesting),
+  picker with page previews + heading page names + create-in-picker (naming schemes shared
+  with the library), finger-tap follow + persisted walk-back trail (swipe-up, both Backs in
+  via-link notebooks), K5 hardening (arc-range `/code-review high`: 10 findings, 9 fixed —
+  incl. the cross-instance `.soil` seal race, the dead-Back opening window, and the
+  z-order-rewriting revive — + 1 accepted → `BACKLOG.md`; `docs/links.md` new; 423 JVM
+  tests). Read `apps/notesprout_ratta/RATTA_PLAN.md` first for any work there.
 - `germination` — previous post-MVP feature branch (reference, not active)
 - The former feature branches (`seed`, `sprout`, `sapling`, `supernote`, `paper`) are merged and
   **deleted** (local + remote) — "on sprout/sapling/supernote/paper" means `main`; history lives under
