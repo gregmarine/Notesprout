@@ -996,7 +996,7 @@ Reading references only — no code copied. Two phases (user-directed): S1 imple
 | Failure rule | Paper's: naming never blocks what the user chose. An unresolvable or unparseable stored scheme → core default silently (`Log.w`, C2's degrade-not-throw rule); scheme validation/save failures → problem dialogs that keep the user's text (dialog-explains rule). |
 
 ### S1 — Scheme engine + storage + library UX (end to end)
-**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-22)
+**Status:** ✅ Complete (commit f475b66, Nomad-verified + user all-clear 2026-08-22)
 
 `library/SchemeEngine.kt` (pure Kotlin, fresh-coded — Paper's `SchemeEngine` + its 18 tests are
 the reference, extended with the v2 tokens), `ObjectType.NAMING` + DAO queries + `IndexRepository`
