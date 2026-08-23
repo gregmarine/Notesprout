@@ -147,35 +147,10 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
 - `main` — stable release branch (v1.0 "Seed" through v1.3 "Supernote" shipped; the release merge
   commits are in git history).
 - `ratta` — **the active feature branch** (cut 2026-08-20): Notesprout SN, a from-scratch
-  Supernote-only rebuild under `apps/notesprout_ratta/`. **Arc 1 ("Ratta Paper", full Paper-v0
-  parity) is complete and frozen — R0–R6 ✅ 2026-08-22**, format-compat with Paper proven both
-  directions on-device. **Arc 2 ("Polish"): P1 ✅ 2026-08-22** — fixed tools (no panels;
-  PEN·black·3px, eraser 15px, smart-lasso/scribble-erase hardwired on), Delete-only selection
-  context toolbar replacing the tap sheet, tap-time "Opening…" overlay. **Arc 3 ("Headings") is
-  complete and frozen — N0–N3 ✅ 2026-08-22**: recognizer extension point + NSE · ML Kit (the one
-  sanctioned extension surface, SN-namespaced), core markdown engine, heading objects end to end,
-  N3 hardening (arc-range `/code-review high`: 8 findings fixed incl. the overlay Activity-leak
-  pair and in-place `revive` restores, 2 accepted → `BACKLOG.md`; debug "Recognize page" ⋯
-  removed; `docs/extensions.md` new, `docs/notebook.md` current). **Arc 4 ("Contents") is
-  complete and frozen — C1–C2 ✅ 2026-08-22**: TOC over the core heading rows (no provider
-  layer — Paper's arc-5 design baked into `:app`), both entry points (top-bar button +
-  one-finger swipe-down), C2 hardening (arc-range `/code-review high`: 10 findings, all
-  fixed — incl. the long-press sequence stand-down, ContentsFlow degrade-not-crash, and
-  navigate-by-page-id). **Arc 5 ("Naming") is complete and frozen — S1–S2 ✅ 2026-08-23**:
-  folder naming schemes as a core feature (v2 token language incl. date-part/name tokens,
-  additive `naming` index rows, nearest-ancestor resolution, four entry points incl.
-  breadcrumb long-press for the root), S2 hardening (arc-range `/code-review high`:
-  10 findings, 9 fixed + 1 accepted → `BACKLOG.md` — incl. the New-folder OK re-entry
-  guard, the counter-overflow cap backstop, and hand-list month/weekday names so CLDR
-  drift can't stall `{n}`; plus the user-caught create-then-open latch regression).
-  **Arc 6 ("Links") is complete and frozen — K1–K5 ✅ 2026-08-23**: link objects baked into
-  the core (Paper-v1 payload grammar byte-compatible, re-parent wrap model, no nesting),
-  picker with page previews + heading page names + create-in-picker (naming schemes shared
-  with the library), finger-tap follow + persisted walk-back trail (swipe-up, both Backs in
-  via-link notebooks), K5 hardening (arc-range `/code-review high`: 10 findings, 9 fixed —
-  incl. the cross-instance `.soil` seal race, the dead-Back opening window, and the
-  z-order-rewriting revive — + 1 accepted → `BACKLOG.md`; `docs/links.md` new; 423 JVM
-  tests). Read `apps/notesprout_ratta/RATTA_PLAN.md` first for any work there.
+  Supernote-only rebuild under `apps/notesprout_ratta/`. Arcs 1–6 complete and frozen —
+  Ratta Paper · Polish · Headings · Contents · Naming · Links, through K5 ✅ 2026-08-23.
+  **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for any work there** — it holds the
+  per-arc status, locked decisions, working protocol, and model recipe.
 - `germination` — previous post-MVP feature branch (reference, not active)
 - The former feature branches (`seed`, `sprout`, `sapling`, `supernote`, `paper`) are merged and
   **deleted** (local + remote) — "on sprout/sapling/supernote/paper" means `main`; history lives under
