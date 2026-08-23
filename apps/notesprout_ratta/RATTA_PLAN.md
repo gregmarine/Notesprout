@@ -1210,7 +1210,7 @@ rule); debug create-test-link targets the **next page** in this notebook (insert
 the notebook has a single page — a real, followable page-kind target for K4).
 
 ### K2 — Picker (existing targets) + previews + heading page names
-**Status:** ✅ Complete (commit TBD, Nomad-verified + user all-clear 2026-08-23)
+**Status:** ✅ Complete (commit 8a55461, Nomad-verified + user all-clear 2026-08-23)
 
 **Outcome:** Split per the recipe, with Sonnet's share folded into Opus (one screen, resources
 inseparable — recorded deviation). Fable wrote the support seam + host wiring: `PageLabels`
