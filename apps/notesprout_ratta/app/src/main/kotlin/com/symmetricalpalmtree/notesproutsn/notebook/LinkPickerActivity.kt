@@ -273,7 +273,7 @@ class LinkPickerActivity : AppCompatActivity() {
         btnPrev.setOnClickListener { goToPage(pageIndex - 1) }
         btnNext.setOnClickListener { goToPage(pageIndex + 1) }
         btnLast.setOnClickListener { goToPage(pageCount - 1) }
-        listOf(btnUp, btnFirst, btnPrev, btnNext, btnLast)
+        listOf(btnUp, btnFirst, btnPrev, btnNext, btnLast, btnNewPage, btnNewNotebook, btnNewFolder)
             .forEach { TooltipCompat.setTooltipText(it, it.contentDescription) }
     }
 

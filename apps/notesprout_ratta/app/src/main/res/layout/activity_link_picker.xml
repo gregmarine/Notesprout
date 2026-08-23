@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The link target picker. Four bands under one another, all of them fixed: title + path on top,
-     the mode trio, the card grid (paginated, never scrolling — the library's rule), then Style and
-     the pager + OK. Nothing here scrolls except the breadcrumb, which is a path, not content. -->
+<!-- The link target picker. Four bands under one another, all of them fixed: title + path + the
+     Cancel/OK pair on top, the mode trio, the card grid (paginated, never scrolling — the library's
+     rule), then Style and the pager. Nothing here scrolls except the breadcrumb, a path, not content. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/root"
     android:layout_width="match_parent"
@@ -9,7 +9,7 @@
     android:orientation="vertical"
     android:background="@color/paperWhite">
 
-    <!-- "Link to…" / "Edit link" + the browse path + Cancel -->
+    <!-- "Link to…" / "Edit link" + the browse path + Cancel, then OK -->
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
@@ -47,6 +47,15 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/cancel" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnOk"
+            style="@style/Widget.Notesprout.ElevatedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="8dp"
+            android:text="@string/ok" />
     </LinearLayout>
 
     <View
@@ -120,28 +129,25 @@
         android:paddingTop="6dp"
         android:paddingBottom="6dp">
 
-        <androidx.appcompat.widget.AppCompatButton
+        <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnNewPage"
-            style="@style/Widget.Notesprout.TextButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/link_new_page"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_plus"
+            android:contentDescription="@string/link_new_page"
             android:visibility="gone" />
 
-        <androidx.appcompat.widget.AppCompatButton
+        <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnNewNotebook"
-            style="@style/Widget.Notesprout.TextButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/link_new_notebook"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_plus"
+            android:contentDescription="@string/link_new_notebook"
             android:visibility="gone" />
 
-        <androidx.appcompat.widget.AppCompatButton
+        <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnNewFolder"
-            style="@style/Widget.Notesprout.TextButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/link_new_folder"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_folder_plus"
+            android:contentDescription="@string/link_new_folder"
             android:visibility="gone" />
 
         <Space
@@ -222,14 +228,6 @@
                 android:src="@drawable/ic_page_last"
                 android:contentDescription="@string/cd_last_page" />
         </LinearLayout>
-
-        <androidx.appcompat.widget.AppCompatButton
-            android:id="@+id/btnOk"
-            style="@style/Widget.Notesprout.ElevatedButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginEnd="8dp"
-            android:text="@string/ok" />
     </LinearLayout>
 
 </LinearLayout>
