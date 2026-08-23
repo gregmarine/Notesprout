@@ -181,6 +181,14 @@ class NotebookActivity : AppCompatActivity() {
             displayedPageId = { displayedPageId },
             applyCreate = { sel, payload -> createLinkFromSelection(sel, payload) },
             applyEdit = { linkId, before, after -> applyLinkEdit(linkId, before, after) },
+            createPage = { anchorId, before -> pickerCreatePage(anchorId, before) },
+            // A page created from the picker invalidates every Structural snapshot in the stack
+            // (they name a page list that no longer exists), so the history goes rather than lie.
+            onPagesChanged = {
+                undo.clear()
+                setPageIndicator(session.currentIndex + 1, session.pages.size)
+                contentsFlow.refresh()
+            },
         )
         selectionToolbar = SelectionToolbar(
             root = binding.root,
@@ -949,6 +957,23 @@ class NotebookActivity : AppCompatActivity() {
         if (!opened || closing) return
         val link = loneSelectedLink() ?: return
         linkPickFlow.beginEdit(link)
+    }
+
+    /**
+     * The picker's New page, in **this** notebook (K3): under the page-op lock like every other
+     * structural edit, refused once the screen is leaving. The paper never moves — the user is still
+     * looking at the page they were writing on ([NotebookSession.insertAt]) — and no undo entry is
+     * recorded: picker creations are not undoable (the og rule), and the stack is cleared wholesale
+     * on the picker's return instead. Null is the picker's cue to explain.
+     */
+    private suspend fun pickerCreatePage(anchorId: String?, before: Boolean): PageRef? {
+        if (!opened || closing) return null
+        return pageOps.withLock {
+            if (!opened || closing) null
+            else runCatching { session.insertAt(anchorId, before) }
+                .onFailure { Log.w(TAG, "picker page create failed", it) }
+                .getOrNull()
+        }
     }
 
     /**

@@ -24,6 +24,11 @@ import kotlinx.coroutines.launch
  * edited link — is captured **here at launch**: the selection may not survive the round trip, and
  * the captured copy is what the user pointed at (the heading-convert discipline).
  *
+ * K3 adds one thing crossing the other way: the picker may **create** a page in the current
+ * notebook, which it cannot do itself (the `.soil` is open here). The relay carries a creator armed
+ * with [createPage], run under the host's page-op lock; a page that lands makes every `Structural`
+ * undo snapshot describe a page list that no longer exists, so the return calls [onPagesChanged].
+ *
  * One door in ([busy]) — released at the **top** of the result callback, which runs before
  * `onResume` (the S2 latch trap). A host process death while the picker showed loses the pending
  * capture with the process; the redelivered result then finds nothing to apply and says so
@@ -37,16 +42,31 @@ class LinkPickFlow(
     private val applyCreate: (Selection, String) -> Unit,
     /** Apply an edit: link id, payload before, payload after (already known unequal). */
     private val applyEdit: (String, String, String) -> Unit,
+    /** K3: create a page in the current notebook, host-side, under its page-op lock. */
+    private val createPage: suspend (anchorPageId: String?, before: Boolean) -> PageRef?,
+    /**
+     * K3: the current notebook's page structure changed while the picker was up. The host clears
+     * its undo stack — every `Structural` snapshot in it describes a page list that no longer
+     * exists — and refreshes the page indicator and the Contents gate.
+     */
+    private val onPagesChanged: () -> Unit,
 ) {
 
     private var busy = false
     private var pendingCreate: Selection? = null
     private var pendingEdit: PageLink? = null
 
+    /** Set by the armed creator when a page really landed in the current notebook; the *only*
+     *  thing that decides whether [onPagesChanged] fires on the way back. */
+    private var pagesChanged = false
+
     private val launcher: ActivityResultLauncher<android.content.Intent> =
         activity.registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             busy = false                       // before anything can bail — the S2 trap
             LinkPickerRelay.showing = null
+            // Before the RESULT_OK check, so a cancel clears the stale snapshots too, and before
+            // applyCreate, so the new link's LinkCreated survives the clear and stays undoable.
+            if (pagesChanged) { pagesChanged = false; onPagesChanged() }
             val create = pendingCreate.also { pendingCreate = null }
             val edit = pendingEdit.also { pendingEdit = null }
             val payload = result.data?.getStringExtra(LinkPickerActivity.EXTRA_RESULT_PAYLOAD)
@@ -85,13 +105,26 @@ class LinkPickFlow(
             runCatching { s.store.drain() }
             pendingCreate = selection
             pendingEdit = edit
+            pagesChanged = false
             LinkPickerRelay.showing = LinkPickerRelay.Showing(
                 notebookId = s.notebookId,
                 currentPageId = displayedPageId(),
                 source = sessionSource(s),
+                createPage = ::createCurrentPage,
             )
             launcher.launch(LinkPickerActivity.intent(activity, edit?.payload))
         }
+    }
+
+    /**
+     * The picker's New page in the current notebook (K3), as the relay hands it out: the host does
+     * the insert under its page-op lock, and a page that really landed arms [pagesChanged] so the
+     * return clears the host's now-stale `Structural` undo snapshots.
+     */
+    private suspend fun createCurrentPage(anchorPageId: String?, before: Boolean): PickerPage? {
+        val page = createPage(anchorPageId, before) ?: return null
+        pagesChanged = true
+        return PickerPage(page.id, page.width, page.height)
     }
 
     /** The current notebook through its live session — never a second open of its `.soil`. */

@@ -203,4 +203,13 @@
     <string name="link_pick_none_page">Tap the page this link should open.</string>
     <string name="link_pick_none_notebook">Tap the notebook this link should open.</string>
     <string name="link_pick_none_notebook_page">Open a notebook, then tap the page this link should open.</string>
+
+    <!-- Create-in-picker (K3). The New-folder dialog reuses the library's own strings. -->
+    <string name="link_new_page">New page</string>
+    <string name="link_new_notebook">New notebook</string>
+    <string name="link_new_folder">New folder</string>
+    <string name="link_insert_before">Insert before</string>
+    <string name="link_insert_after">Insert after</string>
+    <string name="link_new_page_failed_title">Couldn\'t add the page</string>
+    <string name="link_new_page_failed_body">The notebook may have changed while the picker was open. Close the picker and try again.</string>
 </resources>

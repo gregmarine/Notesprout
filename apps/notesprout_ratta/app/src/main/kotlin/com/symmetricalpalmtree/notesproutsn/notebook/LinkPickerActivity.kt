@@ -5,14 +5,17 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.os.Bundle
+import android.util.Log
 import android.view.View
 import android.widget.ImageView
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.TooltipCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.symmetricalpalmtree.notesproutsn.R
+import com.symmetricalpalmtree.notesproutsn.core.ActionSheetDialog
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
 import com.symmetricalpalmtree.notesproutsn.core.IndexGuard
 import com.symmetricalpalmtree.notesproutsn.core.Slog
@@ -25,6 +28,9 @@ import com.symmetricalpalmtree.notesproutsn.databinding.ActivityLinkPickerBindin
 import com.symmetricalpalmtree.notesproutsn.library.CardItem
 import com.symmetricalpalmtree.notesproutsn.library.GridMath
 import com.symmetricalpalmtree.notesproutsn.library.LibraryGrid
+import com.symmetricalpalmtree.notesproutsn.library.NewFolderFlow
+import com.symmetricalpalmtree.notesproutsn.library.NewNotebookActivity
+import com.symmetricalpalmtree.notesproutsn.library.SchemePrefill
 import com.symmetricalpalmtree.notesproutsn.library.SortRules
 import com.symmetricalpalmtree.notesproutsn.notebook.LinkPickerModel.PickMode
 import kotlinx.coroutines.Dispatchers
@@ -52,6 +58,12 @@ import kotlinx.coroutines.withContext
  *    current notebook's `.soil`: it is already open, and one file never has two connections.
  *  - **Heading page names** (the og rule): a page's card reads "4 · Meeting notes" when it has a
  *    topmost heading, plain "Page 4" when it does not ([PageLabels]).
+ *
+ * K3 adds the other half of "where does this point": the target may not exist yet. Whichever grid is
+ * on screen carries its own create — **New page** on a page grid, **New notebook** and **New
+ * folder** on a browse ([LinkPickerModel.createButtons]) — and the created thing becomes the
+ * selection, so a create and a pick are one gesture. Picker creations are deliberately **not
+ * undoable** (the og rule); the notebook screen clears its own undo stack when a page landed in it.
  *
  * Nothing on this screen is ever disabled or greyed — on e-ink both are invisible. Every control
  * stays live; an OK with nothing chosen **explains** ([Dialogs.problem]) rather than doing nothing.
@@ -108,6 +120,46 @@ class LinkPickerActivity : AppCompatActivity() {
 
     private var density = 1f
     private var scaledDensity = 1f
+
+    /** One create at a time. E-ink gives a tap no feedback for hundreds of ms, so a second tap in
+     *  that gap would insert a second page nobody asked for. Released in `finally`. */
+    private var creatingPage = false
+
+    /**
+     * The New-notebook door's latch — the library's `launching` shape. The scheme resolve puts a
+     * beat between the tap and the screen, and a second tap in it would stack two New-notebook
+     * screens. Released at the TOP of the result callback, which runs before `onResume` (S2), and
+     * on the stale-folder drop.
+     */
+    private var launchingCreate = false
+
+    private val newNotebookLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        launchingCreate = false        // before anything can bail — the S2 trap
+        if (result.resultCode != Activity.RESULT_OK) return@registerForActivityResult
+        val id = result.data?.getStringExtra(NewNotebookActivity.EXTRA_NOTEBOOK_ID)
+            ?: return@registerForActivityResult
+        lifecycleScope.launch {
+            // The row is written before the result comes back; a miss means it went away again
+            // under us — degrade silently, the browse below is still correct.
+            val summary = repo.alive(id) ?: return@launch
+            when (mode) {
+                PickMode.NOTEBOOK -> {
+                    selectedNotebookId = id
+                    refresh(jumpToSelection = true)
+                }
+                PickMode.NOTEBOOK_PAGE -> {
+                    // A brand-new notebook has exactly one page: drilling straight in makes the
+                    // whole target one more tap, not a browse plus a drill plus a tap.
+                    openDrill(summary)
+                    pageIndex = 0
+                    refresh()
+                }
+                PickMode.THIS_NOTEBOOK -> Unit   // the button is not on screen in this mode
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -214,6 +266,9 @@ class LinkPickerActivity : AppCompatActivity() {
         btnModeNotebookPage.setOnClickListener { setMode(PickMode.NOTEBOOK_PAGE) }
         btnStyleUnderline.setOnClickListener { setChrome(LinkPayload.CHROME_UNDERLINE) }
         btnStyleNone.setOnClickListener { setChrome(LinkPayload.CHROME_NONE) }
+        btnNewPage.setOnClickListener { onNewPage() }
+        btnNewNotebook.setOnClickListener { onNewNotebook() }
+        btnNewFolder.setOnClickListener { onNewFolder() }
         btnFirst.setOnClickListener { goToPage(0) }
         btnPrev.setOnClickListener { goToPage(pageIndex - 1) }
         btnNext.setOnClickListener { goToPage(pageIndex + 1) }
@@ -229,6 +284,14 @@ class LinkPickerActivity : AppCompatActivity() {
         btnModeNotebook.isSelected = mode == PickMode.NOTEBOOK
         btnModeNotebookPage.isSelected = mode == PickMode.NOTEBOOK_PAGE
         renderStyle()
+
+        // GONE, never disabled — a disabled control is invisible on e-ink, so a button that cannot
+        // apply to the grid on screen leaves the row entirely.
+        val creates = LinkPickerModel.createButtons(mode, drilledNotebookId != null)
+        btnNewPage.visibility = if (creates.newPage) View.VISIBLE else View.GONE
+        val browseCreates = if (creates.newNotebookAndFolder) View.VISIBLE else View.GONE
+        btnNewNotebook.visibility = browseCreates
+        btnNewFolder.visibility = browseCreates
 
         val ink = ContextCompat.getColor(this@LinkPickerActivity, R.color.inkBlack)
         breadcrumbContainer.removeAllViews()
@@ -547,6 +610,89 @@ class LinkPickerActivity : AppCompatActivity() {
             mode != PickMode.THIS_NOTEBOOK && browseFolderId != null -> goUp()
             else -> @Suppress("DEPRECATION") super.onBackPressed()
         }
+    }
+
+    // ── Create (K3) ──────────────────────────────────────────────────────────
+
+    /**
+     * New page, in whichever notebook's grid is on screen. A selected card is the **anchor** — the
+     * sheet then asks which side of it — and nothing selected simply appends, because there is no
+     * "before or after" question to ask about a page nobody named. The anchor may sit on another
+     * grid page: it is a selection, not a position on screen.
+     */
+    private fun onNewPage() {
+        val anchor = selectedPageId
+        if (anchor == null) { createPage(null, before = false); return }
+        ActionSheetDialog(this)
+            .addAction(null, getString(R.string.link_insert_before)) { createPage(anchor, before = true) }
+            .addAction(null, getString(R.string.link_insert_after)) { createPage(anchor, before = false) }
+            .show()
+    }
+
+    /**
+     * Run the create against the grid's own creator — the live session for the current notebook (its
+     * `.soil` is never opened twice), the drilled notebook's single open otherwise — and make the
+     * new page the target: it is what the user was reaching for.
+     */
+    private fun createPage(anchorId: String?, before: Boolean) {
+        if (creatingPage) return
+        creatingPage = true
+        lifecycleScope.launch {
+            try {
+                val created = when {
+                    mode == PickMode.THIS_NOTEBOOK -> showing.createPage(anchorId, before)
+                    else -> foreign?.createPage(anchorId, before)
+                }
+                if (created == null) {
+                    Dialogs.problem(
+                        this@LinkPickerActivity,
+                        R.string.link_new_page_failed_title,
+                        R.string.link_new_page_failed_body,
+                    )
+                    return@launch
+                }
+                Slog.d(TAG) { "created page ${created.id} (before=$before, anchored=${anchorId != null})" }
+                selectedPageId = created.id
+                refresh(jumpToSelection = true)
+            } finally {
+                creatingPage = false
+            }
+        }
+    }
+
+    /**
+     * New notebook — the real New-notebook screen, prefilled from the browse folder's naming scheme
+     * exactly as the library's +Notebook is ([SchemePrefill]), so a folder means the same thing
+     * whichever door a notebook is created through.
+     */
+    private fun onNewNotebook() {
+        if (launchingCreate) return
+        launchingCreate = true
+        val fid = browseFolderId
+        lifecycleScope.launch {
+            val prefill = try {
+                SchemePrefill.expand(repo.resolveScheme(fid), System.currentTimeMillis()) {
+                    repo.notebooks(fid).map { it.name }
+                }
+            } catch (e: Exception) {
+                // Naming never blocks the create: the screen falls back to its timestamp default.
+                Log.w(TAG, "scheme resolve failed — using the default", e)
+                null
+            }
+            // The resolve is a beat: if the browse has moved on meanwhile, the tap no longer means
+            // "here" — drop it rather than create somewhere else (the library's stale-folder rule).
+            if (browseFolderId != fid || isFinishing || isDestroyed) {
+                launchingCreate = false
+                return@launch
+            }
+            newNotebookLauncher.launch(NewNotebookActivity.intent(this@LinkPickerActivity, fid, prefill))
+        }
+    }
+
+    /** New folder — the library's own dialog ([NewFolderFlow]: name + scheme, one validation order),
+     *  then navigate into it, because a folder is a place to keep looking, never a target. */
+    private fun onNewFolder() = NewFolderFlow.show(this, repo, browseFolderId) { folder ->
+        navigateTo(folder.id)
     }
 
     // ── OK ───────────────────────────────────────────────────────────────────

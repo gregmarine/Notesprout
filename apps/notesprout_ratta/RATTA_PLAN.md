@@ -1277,7 +1277,43 @@ only if a conflict surfaces.
 staleness machinery); heading labels apply to every page card (no conflict surfaced).
 
 ### K3 — Create-in-picker (+ naming schemes)
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-23)
+
+**Outcome:** Opus implemented against Fable's written contract (the recipe's K3 split); Fable
+reviewed the diff — no blocking findings, all three of the agent's flagged concerns resolved
+(the >800-line reason already lives in `NotebookActivity`'s KDoc per N3; index-mirror-after-
+transaction and the foreign WAL-on-process-death both match `insertBlank`/seal-contract shapes).
+No phase-start questions: `NewNotebookActivity`'s existing result contract fit unchanged.
+Shape: **`SchemePrefill`** (new, pure — the scheme→prefill rules extracted from the library's
+`resolveAndExpand`, lazy sibling fetch only when the scheme holds a counter, null for anything
+the library would refuse; shared verbatim by +Notebook and the picker) and **`NewFolderFlow`**
+(the whole New-folder dialog extracted — name + scheme fields, identical validation order,
+same `accepting` guard; library delegates with `{ refresh() }`, picker with navigate-in).
+`LinkPickerModel` gains the pure placement trio (`insertIndexFor` — vanished anchor appends,
+never redirects to its old slot; `inheritIndexFor` — anchor else last; `createButtons` — page
+grid ⇄ browse, never both). `NotebookSession.insertAt` inserts **without navigating**
+(`currentIndex` re-anchored **by id**, no template load, no undo entry); the relay's `Showing`
+carries a `createPage` lambda armed by `LinkPickFlow`, which runs the host's
+`pickerCreatePage` under the page-op lock and flags `pagesChanged` — the result callback fires
+`onPagesChanged` (host: `undo.clear()` + indicator + Contents refresh) **before the RESULT_OK
+check and before `applyCreate`**, so a cancel still clears the stale `Structural` snapshots
+and the new link's `LinkCreated` survives the clear. `ForeignPageSource.createPage` is that
+open's **one sanctioned write** (inside the `withDb` seal lock, one transaction, index
+mirrored; KDoc amended to "near-read-only"). Picker screen: three `TextButton`s at the left of
+the style row, visibility from `createButtons` (GONE, never disabled); anchor →
+"Insert before / Insert after" `ActionSheetDialog`, else silent append; created page
+auto-selected + grid jump; New notebook = the real screen, prefill via `SchemePrefill` with
+the library's stale-folder drop, latch released at the TOP of the result callback (S2), result
+auto-selects (Notebook mode) or drills in (Page mode); New folder navigates in. **403 JVM
+tests** (app 368 · api 6 · ext 29 — 19 new: LinkPickerModel 11, SchemePrefill 8), debug +
+release build, both variants reinstalled on SNN. **Haiku walk 10/10 first run** (launch,
+Journal folder, +Notebook prefilled **"August Sun 3"** — the scheme resolving live through
+`SchemePrefill`, New-folder two-field dialog with token help, notebook open, flips, picker
+`am start` refusal, cold restore, crash buffer clean; zero tap-aim failures). **User eye
+check #8 all-pass 2026-08-23, no findings** (anchored + appended page creates in both grids,
+undo-stack clear with the link still undoable, scheme-prenamed notebook in both browse modes,
+drill-in on Page-mode create, folder create + navigate-in + scheme pickup, cancel keeps the
+created page, foreign create verified in the target notebook).
 
 New page in both page grids (anchor → Insert before/after `ActionSheetDialog`, else append;
 template inherited from anchor/last page; auto-selected; current-notebook insert without

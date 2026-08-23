@@ -31,6 +31,13 @@ object LinkPickerRelay {
         val currentPageId: String,
         /** The current notebook's pages, served by the live session. */
         val source: PickerPageSource,
+        /**
+         * K3: create a page in the current notebook **through the live session** — its `.soil` is
+         * already open and must never be opened twice, so the picker cannot do this itself. Armed
+         * by [LinkPickFlow], which runs it under the notebook screen's page-op lock; a null result
+         * means the create was refused or failed and the picker explains.
+         */
+        val createPage: suspend (anchorPageId: String?, before: Boolean) -> PickerPage?,
     )
 
     @Volatile

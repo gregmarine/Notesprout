@@ -178,6 +178,48 @@ class NotebookSession(
     }
 
     /**
+     * Insert a blank page **without moving the notebook off the page on screen** (arc 6 / K3) — the
+     * link picker creating the page a link will point at, while the user is still looking at the
+     * page they are writing on.
+     *
+     * [anchorPageId] is the page card the picker had selected: the new page goes before or after it
+     * ([LinkPickerModel.insertIndexFor]), and inherits its template and authored size
+     * ([LinkPickerModel.inheritIndexFor]) so the notebook stays one consistent paper. A null or
+     * vanished anchor appends and inherits from the last page.
+     *
+     * Everything else is [insertBlank]'s shape — one transaction (upsert + renumber), the page list
+     * swapped whole, the index mirrored — with two deliberate differences: [currentIndex] is
+     * re-anchored **by id** (the page on the paper does not change, but its index may have shifted
+     * under it), and neither the loaded template nor the paper is touched. Records no undo entry:
+     * picker creations are not undoable (the og rule), and the host clears its stack on return.
+     */
+    suspend fun insertAt(anchorPageId: String?, before: Boolean): PageRef = withContext(Dispatchers.IO) {
+        val ids = pages.map { it.id }
+        val pos = LinkPickerModel.insertIndexFor(ids, anchorPageId, before)
+        // -1 is the empty-notebook case, which open() already refuses — never fabricate a size.
+        val inherit = pages.getOrNull(LinkPickerModel.inheritIndexFor(ids, anchorPageId))
+            ?: error("insertAt on a notebook with no pages")
+        val keptId = currentPage.id
+        val now = System.currentTimeMillis()
+        val newId = java.util.UUID.randomUUID().toString()
+        val newRow = SoilObjectEntity(
+            id = newId, parentId = notebookId, type = SoilSchema.TYPE_PAGE, order = pos,
+            createdAt = now, updatedAt = now,
+            refId = inherit.templateId, width = inherit.width.toFloat(), height = inherit.height.toFloat(),
+        )
+        val newPages = pages.toMutableList().apply { add(pos, newRow.toPageRef(pos)) }
+        db.withTransaction {
+            db.dao().upsert(newRow)
+            renumber(newPages, now)
+        }
+        pages = newPages.reindexed()
+        currentIndex = pages.indexOfFirst { it.id == keptId }.coerceAtLeast(0)
+        mirror(now)
+        Slog.d(TAG) { "picker inserted $newId at $pos (${pages.size} pages, still on $keptId)" }
+        pages[pos]
+    }
+
+    /**
      * Soft-delete the current page and its live content (strokes + headings), then land on the
      * previous page. Deleting the **only** page puts a fresh blank in its place instead — a
      * notebook always has ≥ 1 page, and an empty one would have nothing to draw on and nothing to

@@ -48,6 +48,50 @@ object LinkPickerModel {
     fun gridPageOf(itemIndex: Int, cardsPerPage: Int): Int =
         if (itemIndex < 0 || cardsPerPage <= 0) 0 else itemIndex / cardsPerPage
 
+    // ── Create-in-picker (K3) ────────────────────────────────────────────────
+
+    /**
+     * Where a picker-created page lands in [pageIds]: **at** the anchor for `before`, one past it
+     * otherwise. A null anchor — nothing selected — appends, and so does an anchor that is no
+     * longer in the list: a page deleted underneath the picker must not silently redirect the
+     * insert to whatever now sits at its old index.
+     */
+    fun insertIndexFor(pageIds: List<String>, anchorId: String?, before: Boolean): Int {
+        val at = anchorId?.let { pageIds.indexOf(it) } ?: -1
+        if (at < 0) return pageIds.size
+        return if (before) at else at + 1
+    }
+
+    /**
+     * Index of the page a created page inherits its paper — template and authored size — from: the
+     * anchor when it is still there, else the last page, so an appended page continues the paper the
+     * notebook already has. `-1` only for an empty list, which the caller refuses: a notebook always
+     * has at least one page, and a blank page with no size is not a page.
+     */
+    fun inheritIndexFor(pageIds: List<String>, anchorId: String?): Int {
+        val at = anchorId?.let { pageIds.indexOf(it) } ?: -1
+        return if (at >= 0) at else pageIds.lastIndex
+    }
+
+    /**
+     * Which create buttons a picker state shows. Never "disabled" — a disabled control is invisible
+     * on e-ink, so a button that cannot apply here is simply not on screen.
+     */
+    data class CreateButtons(val newPage: Boolean, val newNotebookAndFolder: Boolean)
+
+    /**
+     * A page grid offers New page; a browse offers New notebook and New folder. The two never
+     * overlap, because they are the two things one grid can be: [PickMode.NOTEBOOK_PAGE] is a
+     * browse until a notebook is [drilled] into, and then it is a page grid.
+     */
+    fun createButtons(mode: PickMode, drilled: Boolean): CreateButtons = when (mode) {
+        PickMode.THIS_NOTEBOOK -> CreateButtons(newPage = true, newNotebookAndFolder = false)
+        PickMode.NOTEBOOK -> CreateButtons(newPage = false, newNotebookAndFolder = true)
+        PickMode.NOTEBOOK_PAGE ->
+            if (drilled) CreateButtons(newPage = true, newNotebookAndFolder = false)
+            else CreateButtons(newPage = false, newNotebookAndFolder = true)
+    }
+
     /**
      * The payload OK would return, or **null when there is nothing to compose**: no target picked
      * yet, a mode whose second half is still missing (a notebook drilled but no page chosen), or

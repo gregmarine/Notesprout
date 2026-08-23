@@ -193,30 +193,20 @@ class LibraryActivity : AppCompatActivity() {
 
     /**
      * The scheme governing [fid] (nearest ancestor, then the root), expanded against the folder's
-     * live notebook names so `{n}` counts the right siblings — which are fetched only when the
-     * scheme actually holds a counter; nothing else in the expansion reads them. Null when there
-     * is no scheme — or when anything at all goes wrong: this runs in `lifecycleScope`, which has
-     * no handler, and a naming scheme is never worth a crash.
+     * live notebook names so `{n}` counts the right siblings — which [SchemePrefill] fetches only
+     * when the scheme actually holds a counter; nothing else in the expansion reads them. Null when
+     * there is no scheme, or when anything at all goes wrong: a naming scheme is never worth a
+     * crash, and this runs in `lifecycleScope`, which has no handler.
+     *
+     * Only the two index reads live here — the rules are [SchemePrefill]'s, shared with the link
+     * picker's New notebook (K3) so a scheme cannot mean two different things.
      */
     private suspend fun resolveAndExpand(fid: String?): String? = try {
-        val scheme = repo.resolveScheme(fid)
-        if (scheme == null) null else {
-            val parts = SchemeEngine.parse(scheme)
-            val siblings =
-                if (SchemeEngine.hasCounter(parts)) repo.notebooks(fid).map { it.name }
-                else emptyList()
-            val expanded = SchemeEngine.expand(parts, System.currentTimeMillis(), siblings)
-            // Belt and braces: a name the library would refuse must never be handed to it — and a
-            // counter that outgrew its declared width can push the expansion past the 100-char cap
-            // (never truncated, so over-cap falls back to the default instead).
-            if (NameRules.isValid(expanded) && expanded.length <= SchemeEngine.MAX_SCHEME_CHARS) {
-                expanded
-            } else {
-                Log.w(TAG, "scheme expanded to an unusable name — using the default")
-                null
-            }
+        SchemePrefill.expand(repo.resolveScheme(fid), System.currentTimeMillis()) {
+            repo.notebooks(fid).map { it.name }
         }
     } catch (e: Exception) {
+        // The resolve is the caller's own read, so its failure is caught here rather than inside.
         Log.w(TAG, "scheme resolve failed — using the default", e)
         null
     }
@@ -532,68 +522,11 @@ class LibraryActivity : AppCompatActivity() {
     // ── New folder / rename ──────────────────────────────────────────────────
 
     /**
-     * New folder, with its default-notebook-name scheme in the same dialog — naming a folder and
-     * saying what goes in it is one thought.
-     *
-     * The order is deliberate: name rule → **scheme** → duplicate check → create → save the scheme.
-     * The scheme is validated *before* the folder exists, so a mistyped token keeps the dialog (and
-     * everything typed in it) rather than leaving a folder behind. Once the folder is created it
-     * stands: a scheme that then fails to save is explained, not rolled back — the user asked for a
-     * folder and got one, and the scheme can be set again from its long-press.
-     *
-     * `accepting` is the OK button's re-entry guard (S2 review finding): the accept path crosses a
-     * coroutine, and an e-ink double-tap landing in that window would run two creates whose
-     * duplicate checks both read before either insert — two identically named folders. Armed only
-     * once the checks that keep the dialog open have passed; released when the coroutine ends.
+     * New folder — the dialog, its validation order and its words all live in [NewFolderFlow],
+     * shared with the link picker (K3). The library's own half is what happens afterwards: the new
+     * folder is a card in the listing on screen, so the grid is rebuilt.
      */
-    private fun showNewFolderDialog() {
-        val schemeField = SchemeDialog.buildField(this)
-        var accepting = false
-        NameDialog.show(
-            this,
-            titleRes = R.string.new_folder_title,
-            confirmRes = R.string.new_notebook_create,
-            hintRes = R.string.new_folder_hint,
-            extraField = schemeField,
-        ) { name, dismiss ->
-            if (accepting) return@show
-            val scheme = schemeField.text()
-            val problem = NameRules.validate(name)
-            if (problem != null) {
-                Dialogs.problem(this, R.string.name_problem_title, NameDialog.problemMessage(this, problem))
-                return@show
-            }
-            if (scheme.isNotEmpty()) {
-                val bad = SchemeEngine.validate(scheme)
-                if (bad != null) {
-                    Dialogs.problem(this, R.string.naming_problem_title, SchemeDialog.message(this, bad))
-                    return@show
-                }
-            }
-            accepting = true
-            lifecycleScope.launch {
-                try {
-                    if (repo.nameTaken(folderId, ObjectType.FOLDER, name)) {
-                        Dialogs.problem(this@LibraryActivity, R.string.name_problem_title, getString(R.string.new_folder_duplicate, name))
-                        return@launch
-                    }
-                    val folder = repo.createFolder(name, folderId)
-                    if (scheme.isNotEmpty()) {
-                        try {
-                            repo.setScheme(folder.id, scheme)
-                        } catch (e: Exception) {
-                            Log.w(TAG, "new folder: scheme save failed", e)
-                            Dialogs.problem(this@LibraryActivity, R.string.naming_problem_title, getString(R.string.naming_save_failed))
-                        }
-                    }
-                    dismiss()
-                    refresh()
-                } finally {
-                    accepting = false
-                }
-            }
-        }
-    }
+    private fun showNewFolderDialog() = NewFolderFlow.show(this, repo, folderId) { refresh() }
 
     private fun showRenameDialog(s: ObjectSummary) {
         // Same re-entry guard as the New-folder accept — a double-fired rename is harmless today

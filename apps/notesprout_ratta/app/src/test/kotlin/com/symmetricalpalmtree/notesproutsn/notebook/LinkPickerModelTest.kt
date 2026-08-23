@@ -115,6 +115,104 @@ class LinkPickerModelTest {
         assertEquals(0, LinkPickerModel.gridPageOf(5, 0))
     }
 
+    // ── insertIndexFor (K3) ──────────────────────────────────────────────────
+
+    private val three = listOf("a", "b", "c")
+
+    @Test
+    fun `insert before an anchor takes its place`() {
+        assertEquals(0, LinkPickerModel.insertIndexFor(three, "a", before = true))
+        assertEquals(1, LinkPickerModel.insertIndexFor(three, "b", before = true))
+        assertEquals(2, LinkPickerModel.insertIndexFor(three, "c", before = true))
+    }
+
+    @Test
+    fun `insert after an anchor takes the next slot`() {
+        assertEquals(1, LinkPickerModel.insertIndexFor(three, "a", before = false))
+        assertEquals(2, LinkPickerModel.insertIndexFor(three, "b", before = false))
+        assertEquals(3, LinkPickerModel.insertIndexFor(three, "c", before = false))
+    }
+
+    @Test
+    fun `no anchor appends, whichever side was asked for`() {
+        assertEquals(3, LinkPickerModel.insertIndexFor(three, null, before = true))
+        assertEquals(3, LinkPickerModel.insertIndexFor(three, null, before = false))
+    }
+
+    @Test
+    fun `an anchor that vanished appends rather than guessing its old slot`() {
+        assertEquals(3, LinkPickerModel.insertIndexFor(three, "gone", before = true))
+        assertEquals(3, LinkPickerModel.insertIndexFor(three, "gone", before = false))
+    }
+
+    @Test
+    fun `an empty list can only be appended to`() {
+        assertEquals(0, LinkPickerModel.insertIndexFor(emptyList(), null, before = false))
+        assertEquals(0, LinkPickerModel.insertIndexFor(emptyList(), "a", before = true))
+    }
+
+    // ── inheritIndexFor (K3) ─────────────────────────────────────────────────
+
+    @Test
+    fun `a page inherits its paper from the anchor`() {
+        assertEquals(0, LinkPickerModel.inheritIndexFor(three, "a"))
+        assertEquals(1, LinkPickerModel.inheritIndexFor(three, "b"))
+        assertEquals(2, LinkPickerModel.inheritIndexFor(three, "c"))
+    }
+
+    @Test
+    fun `no anchor or a vanished one inherits from the last page`() {
+        assertEquals(2, LinkPickerModel.inheritIndexFor(three, null))
+        assertEquals(2, LinkPickerModel.inheritIndexFor(three, "gone"))
+    }
+
+    @Test
+    fun `an empty list has nothing to inherit from`() {
+        // -1 is the caller's cue to refuse: a notebook always has at least one page.
+        assertEquals(-1, LinkPickerModel.inheritIndexFor(emptyList(), null))
+        assertEquals(-1, LinkPickerModel.inheritIndexFor(emptyList(), "a"))
+    }
+
+    // ── createButtons (K3) ───────────────────────────────────────────────────
+
+    @Test
+    fun `a page grid offers only New page`() {
+        assertEquals(
+            LinkPickerModel.CreateButtons(newPage = true, newNotebookAndFolder = false),
+            LinkPickerModel.createButtons(PickMode.THIS_NOTEBOOK, drilled = false),
+        )
+        // The This-notebook grid is a page grid whether or not a drill is remembered from another
+        // mode — its browse is not on screen.
+        assertEquals(
+            LinkPickerModel.CreateButtons(newPage = true, newNotebookAndFolder = false),
+            LinkPickerModel.createButtons(PickMode.THIS_NOTEBOOK, drilled = true),
+        )
+        assertEquals(
+            LinkPickerModel.CreateButtons(newPage = true, newNotebookAndFolder = false),
+            LinkPickerModel.createButtons(PickMode.NOTEBOOK_PAGE, drilled = true),
+        )
+    }
+
+    @Test
+    fun `a browse offers New notebook and New folder`() {
+        assertEquals(
+            LinkPickerModel.CreateButtons(newPage = false, newNotebookAndFolder = true),
+            LinkPickerModel.createButtons(PickMode.NOTEBOOK, drilled = false),
+        )
+        assertEquals(
+            LinkPickerModel.CreateButtons(newPage = false, newNotebookAndFolder = true),
+            LinkPickerModel.createButtons(PickMode.NOTEBOOK_PAGE, drilled = false),
+        )
+    }
+
+    @Test
+    fun `the two sets never share a state`() {
+        for (m in PickMode.entries) for (drilled in listOf(false, true)) {
+            val buttons = LinkPickerModel.createButtons(m, drilled)
+            assertEquals("$m drilled=$drilled", true, buttons.newPage != buttons.newNotebookAndFolder)
+        }
+    }
+
     // ── composeOk ────────────────────────────────────────────────────────────
 
     @Test

@@ -106,16 +106,47 @@
             android:visibility="gone" />
     </FrameLayout>
 
-    <!-- Style: how the link marks itself on the page. Underline or nothing — the locked pair. -->
+    <!-- Left: make the thing you want to link to, without leaving the picker (K3) — only ever the
+         set that applies to the grid on screen, the rest GONE (never disabled: invisible on e-ink).
+         Right, past the spacer: Style — how the link marks itself. Underline or nothing. -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingStart="12dp"
+        android:paddingStart="4dp"
         android:paddingEnd="8dp"
         android:paddingTop="6dp"
         android:paddingBottom="6dp">
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnNewPage"
+            style="@style/Widget.Notesprout.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/link_new_page"
+            android:visibility="gone" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnNewNotebook"
+            style="@style/Widget.Notesprout.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/link_new_notebook"
+            android:visibility="gone" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnNewFolder"
+            style="@style/Widget.Notesprout.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/link_new_folder"
+            android:visibility="gone" />
+
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
 
         <TextView
             android:layout_width="wrap_content"
