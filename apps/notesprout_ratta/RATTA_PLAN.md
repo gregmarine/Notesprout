@@ -1333,7 +1333,7 @@ prenaming correctness incl. `{n}`, link to each created target).
 locked above; ask only if `NewNotebookActivity`'s result contract needs widening.
 
 ### K4 — Follow + trail
-**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-23; commit hash recorded in the follow-up status commit)
+**Status:** ✅ Complete (commit aff9390, Nomad-verified + user all-clear 2026-08-23)
 
 **Outcome:** Split per the recipe — Fable wrote `PageGestures` tap (inverse
 recogniser: sub-slop, under the long-press timeout, single-finger, pen-tail escrow, reports the
