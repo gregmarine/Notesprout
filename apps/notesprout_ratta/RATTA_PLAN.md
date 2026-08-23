@@ -914,7 +914,7 @@ arrival page writes immediately, collapsed-open feel).
 decisions above).
 
 ### C2 — Hardening, review, docs, freeze
-**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-22 — arc 4 frozen at this commit)
+**Status:** ✅ Complete (commit f4d2d8d, Nomad-verified + user all-clear 2026-08-22 — arc 4 frozen at this commit)
 
 **Outcome:** **Review (`/code-review high` over `d84273e..HEAD`):**
 8 finder angles → 24 candidates → 12 verified → 9 CONFIRMED + 1 PLAUSIBLE (2 refuted as unreachable:
