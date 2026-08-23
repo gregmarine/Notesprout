@@ -1038,7 +1038,7 @@ v2 tokens, inheritance, root scheme, create-with-scheme, bad-scheme dialog keeps
 all-clear. Version stays 0.1.0-ratta. Both variants reinstalled current on SNN.
 
 ### S2 — Review + hardening + docs
-**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-23)
+**Status:** ✅ Complete (commit 2fc5635, Nomad-verified + user all-clear 2026-08-23)
 
 Arc-range `/code-review` (level asked at phase start), findings fixed or explicitly accepted →
 `BACKLOG.md`; docs (`docs/library.md` §Naming section); app `CLAUDE.md` touch-ups if any; memory +
