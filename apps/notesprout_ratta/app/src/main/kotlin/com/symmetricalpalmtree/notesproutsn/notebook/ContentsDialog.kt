@@ -15,12 +15,11 @@ import android.widget.TextView
 import androidx.appcompat.widget.AppCompatImageButton
 import androidx.appcompat.widget.TooltipCompat
 import androidx.core.content.ContextCompat
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import com.symmetricalpalmtree.notesproutsn.R
+import com.symmetricalpalmtree.notesproutsn.core.Immersive
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.core.TopGuard
+import com.symmetricalpalmtree.notesproutsn.library.GridMath
 
 /**
  * The Contents screen (arc 4 / C1): a full-window `Dialog` over the notebook drawing the outline
@@ -44,7 +43,9 @@ class ContentsDialog(
     private val outline: ContentsSource.Outline,
     private val currentPageIndex: Int,
     private val onDismissed: () -> Unit,
-    private val onPageSelected: (pageIndex: Int) -> Unit,
+    /** The tapped entry's **page id** — the host resolves it at tap time; a snapshot index would
+     *  go stale under a page op that committed while the dialog was up (see [ContentsFlow]). */
+    private val onPageSelected: (pageId: String) -> Unit,
 ) {
     private val dialog = Dialog(activity, R.style.Theme_Notesprout)
     private val roots = outline.roots
@@ -130,10 +131,13 @@ class ContentsDialog(
         btnNext.setOnClickListener { goToListPage(listPage + 1) }
         btnLast.setOnClickListener { goToListPage(OutlineTree.pageCount(visible.size, itemsPerPage) - 1) }
 
-        // Opening state: the highlight is taken over the fully-expanded tree (so the real entry is
-        // found, not a visible stand-in) and its ancestors open.
-        val target = OutlineTree.highlight(all, currentPageIndex, all.map { it.id }.toSet())
-        target?.let { id -> OutlineTree.find(all, id)?.let { expanded += OutlineTree.ancestorsOf(it) } }
+        // Opening state: the target is the last entry (document order) at or before the current
+        // page, taken over the fully-expanded tree so the real entry is found, not a visible
+        // stand-in; pre-expanding its ancestors makes it visible by construction. (The
+        // ancestor-fallback walk — OutlineTree.highlight — is only needed in render(), after the
+        // user collapses something away.)
+        val target = all.lastOrNull { it.pageIndex <= currentPageIndex }
+        target?.let { expanded += OutlineTree.ancestorsOf(it) }
         visible = OutlineTree.visible(roots, expanded)
 
         // itemsPerPage from the real body height, measured once after the first layout — no estimate.
@@ -143,33 +147,26 @@ class ContentsDialog(
                 itemsPerPage = ContentsLayout.itemsPerPage(
                     rows.height - rows.paddingTop - rows.paddingBottom, metrics.density,
                 )
-                val hl = OutlineTree.highlight(all, currentPageIndex, expanded)
-                listPage = OutlineTree.pageOf(visible.indexOfFirst { it.id == hl }, itemsPerPage)
+                listPage = OutlineTree.pageOf(visible.indexOfFirst { it.id == target?.id }, itemsPerPage)
                 render()
                 Slog.d(TAG) {
                     "shown: fullScreen=$fullScreen widthDp=$widthDp panel=${panel.width}px " +
                         "rows/page=$itemsPerPage entries=${outline.count} visible=${visible.size} " +
-                        "highlight=${hl != null}"
+                        "highlight=${target != null}"
                 }
             }
         })
 
         dialog.show()
 
-        dialog.window?.let { w ->
-            WindowCompat.setDecorFitsSystemWindows(w, false)
-            WindowInsetsControllerCompat(w, w.decorView).apply {
-                hide(WindowInsetsCompat.Type.systemBars())
-                systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            }
-        }
+        dialog.window?.let { w -> Immersive.apply(w, w.decorView) }
     }
 
     /** Safe when nothing is showing — the host's close hygiene calls it unconditionally. */
     fun dismiss() { if (dialog.isShowing) dialog.dismiss() }
 
     private fun goToListPage(page: Int) {
-        val clamped = page.coerceIn(0, OutlineTree.pageCount(visible.size, itemsPerPage) - 1)
+        val clamped = GridMath.clampPage(page, OutlineTree.pageCount(visible.size, itemsPerPage))
         if (clamped == listPage) return   // a tap at a bound is a no-op (never a disabled look on e-ink)
         listPage = clamped
         render()
@@ -178,7 +175,7 @@ class ContentsDialog(
     private fun toggle(id: String) {
         if (!expanded.remove(id)) expanded += id
         visible = OutlineTree.visible(roots, expanded)
-        listPage = listPage.coerceIn(0, OutlineTree.pageCount(visible.size, itemsPerPage) - 1)
+        listPage = GridMath.clampPage(listPage, OutlineTree.pageCount(visible.size, itemsPerPage))
         render()
     }
 
@@ -192,7 +189,7 @@ class ContentsDialog(
         }
         empty.visibility = View.GONE
         val pageCount = OutlineTree.pageCount(visible.size, itemsPerPage)
-        listPage = listPage.coerceIn(0, pageCount - 1)
+        listPage = GridMath.clampPage(listPage, pageCount)
         val start = listPage * itemsPerPage
         val end = minOf(start + itemsPerPage, visible.size)
         val highlightId = OutlineTree.highlight(all, currentPageIndex, expanded)
@@ -228,11 +225,11 @@ class ContentsDialog(
             }
             row.setOnClickListener {
                 dialog.dismiss()
-                onPageSelected(node.pageIndex)
+                onPageSelected(node.pageId)
             }
             rows.addView(row)
         }
-        pageLabel.text = "${listPage + 1} / $pageCount"
+        pageLabel.text = activity.getString(R.string.page_indicator, listPage + 1, pageCount)
         pager.visibility = if (pageCount > 1) View.VISIBLE else View.INVISIBLE
     }
 

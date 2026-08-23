@@ -52,6 +52,15 @@ interface SoilDao {
     @Query("SELECT * FROM notebook WHERE type = 'heading' AND deletedAt IS NULL")
     suspend fun liveHeadingsAll(): List<SoilObjectEntity>
 
+    /** Does **any** live heading sit on a live page? — the Contents availability gate (arc 4),
+     *  asked on every page flip: EXISTS over ids only, so nothing is materialized and the scan
+     *  stops at the first hit. */
+    @Query(
+        "SELECT EXISTS(SELECT 1 FROM notebook h WHERE h.type = 'heading' AND h.deletedAt IS NULL " +
+            "AND h.parentId IN (SELECT p.id FROM notebook p WHERE p.type = 'page' AND p.deletedAt IS NULL))",
+    )
+    suspend fun anyLiveHeadingOnLivePage(): Boolean
+
     /** Reposition an object (a heading drag) — geometry only, size untouched. */
     @Query("UPDATE notebook SET x = :x, y = :y, updatedAt = :at WHERE id = :id")
     suspend fun setPosition(id: String, x: Float, y: Float, at: Long)

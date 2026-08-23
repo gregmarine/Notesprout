@@ -1,5 +1,6 @@
 package com.symmetricalpalmtree.notesproutsn.notebook
 
+import android.util.Log
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.TooltipCompat
@@ -16,8 +17,11 @@ import kotlinx.coroutines.launch
  * **While the dialog is up the whole paper is one exclusion rect** ([showing] — the host's
  * `pushExclusions` reads it and pushes its BLOCK_ALL, the `!opened` shield's trick: the Ratta ink
  * daemon draws firmware ink beneath any Android window) and the chrome rects come back on dismiss.
- * A row tap → dismiss → [navigate] with the page index (the host's `navigateTo` under its page-op
- * lock; a no-op when already there — nothing is selected on arrival, the locked decision).
+ * A row tap → dismiss → [navigate] with the entry's **page id** — never an index, because a page op
+ * that committed under the gather (an escrowed undo, a queued insert) reindexes `session.pages` and
+ * a snapshot index would land one page away. The host resolves the id at tap time (its
+ * `refreshToPage` under the page-op lock; gone → no-op, current → no-op — nothing is selected on
+ * arrival, the locked decision).
  *
  * The dialog's show/hide is **frame-silence exception #6**: both are one chrome frame at a
  * deliberate act that already passed a pen gate (a chrome tap, or a swipe committed through
@@ -45,7 +49,7 @@ class ContentsFlow(
     private val alive: () -> Boolean,
     /** Called when [showing] or the button's visibility flips — the host swaps the exclusion rects. */
     private val onShowingChanged: () -> Unit,
-    private val navigate: (pageIndex: Int) -> Unit,
+    private val navigate: (pageId: String) -> Unit,
     /** The top-bar list button — owned here: shown / hidden by [refresh], tap wired to [open]. */
     private val button: View,
     private val whenPenIdle: (() -> Unit) -> Unit,
@@ -78,8 +82,11 @@ class ContentsFlow(
             val now = try {
                 ContentsSource.available(session())
             } catch (e: Exception) {
-                // The screen is closing under us (writer / db sealed on the app scope) — nothing to show.
-                if (alive()) throw e
+                // Closing under us (writer / db sealed on the app scope) — or a transient read
+                // fault (disk pressure, WAL contention) on a live screen. This runs on every flip
+                // and every neighbouring DB path degrades with a log (`runPageOp`, the writer, the
+                // seal); a crash is never worth a button, so keep the last answer.
+                if (alive()) Log.w(TAG, "refresh failed — keeping last answer", e)
                 return@launch
             }
             if (!alive() || gen != refreshGen) return@launch
@@ -104,8 +111,10 @@ class ContentsFlow(
             val outline = try {
                 ContentsSource.gather(session())
             } catch (e: Exception) {
+                // Same degrade-with-a-log rule as refresh(): closing under us, or a transient
+                // read fault — nothing opens, the next tap retries.
                 busy = false
-                if (alive()) throw e   // closing under us → nothing to show; anything else is a bug worth a crash log
+                if (alive()) Log.w(TAG, "gather failed — nothing shown", e)
                 return@launch
             }
             if (!alive() || activity.isFinishing || activity.isDestroyed) { busy = false; return@launch }
@@ -130,8 +139,8 @@ class ContentsFlow(
                     showing = false; busy = false
                     onShowingChanged()
                 },
-                onPageSelected = { index ->
-                    if (index != currentPageIndex() && alive()) { Slog.d(TAG) { "navigate → $index" }; navigate(index) }
+                onPageSelected = { pageId ->
+                    if (alive()) { Slog.d(TAG) { "navigate → page $pageId" }; navigate(pageId) }
                 },
             ).also { it.show() }
         }

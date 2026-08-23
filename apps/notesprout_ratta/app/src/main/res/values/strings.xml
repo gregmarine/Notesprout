@@ -154,7 +154,7 @@
     <string name="heading_edit_title">Edit heading</string>
     <string name="heading_edit_save">Save</string>
 
-    <!-- Contents (table of contents, from the heading extension's recognized text) -->
+    <!-- Contents (table of contents over the notebook's core heading rows) -->
     <string name="contents_title">Contents</string>
     <string name="cd_contents">Contents</string>
     <string name="contents_empty">No headings yet</string>

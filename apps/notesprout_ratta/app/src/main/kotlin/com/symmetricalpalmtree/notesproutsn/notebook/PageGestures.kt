@@ -99,6 +99,12 @@ class PageGestures(
     private val longPressRunnable = Runnable {
         if (longPressArmed && gateOpen()) {
             longPressArmed = false
+            // The delete sheet is about to own the screen — stand the rest of this touch sequence
+            // down. The finger is still on the glass, and its continued drag would otherwise be
+            // judged at ACTION_UP as a flip or swipe-down *under the sheet*: the page changes, and
+            // the pending confirm then deletes the wrong page.
+            cancelAll()
+            ignoreSequence = true
             listener.onDeleteRequested()
         }
     }
@@ -142,7 +148,9 @@ class PageGestures(
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
                 // A second finger landing on an already-qualifying one-finger swipe is a late
-                // arrival, not a two-finger gesture: commit the flip before it is lost.
+                // arrival, not a two-finger gesture: commit the flip — or its vertical twin, the
+                // swipe-down — before it is lost (a trailing palm is likeliest on exactly the
+                // downward drag). Dominance makes the two checks mutually exclusive.
                 if (swipeActive) {
                     val dx = ev.getX(0) - swipeStartX
                     val dy = ev.getY(0) - swipeStartY
@@ -150,6 +158,11 @@ class PageGestures(
                     if (tracker != null && horizontalQualifies(dx, dy)) {
                         tracker.addMovement(ev); tracker.computeCurrentVelocity(1000)
                         evaluateFlip(tracker.getXVelocity(0), dx, dy)
+                        clearSwipe(); return
+                    }
+                    if (tracker != null && verticalQualifies(dx, dy)) {
+                        tracker.addMovement(ev); tracker.computeCurrentVelocity(1000)
+                        evaluateSwipeDown(tracker.getYVelocity(0), dx, dy)
                         clearSwipe(); return
                     }
                 }
@@ -216,6 +229,10 @@ class PageGestures(
 
     private fun horizontalQualifies(dx: Float, dy: Float): Boolean =
         abs(dx) > abs(dy) && abs(dx) >= PAGE_SWIPE_MIN_DISTANCE_FRAC * width
+
+    /** [horizontalQualifies] rotated 90° — the POINTER_DOWN commit's distance-only vertical gate. */
+    private fun verticalQualifies(dx: Float, dy: Float): Boolean =
+        abs(dy) > abs(dx) && abs(dy) >= PAGE_SWIPE_MIN_DISTANCE_FRAC * height
 
     /** Horizontal-dominant, far enough, and either fast enough or simply long enough. */
     private fun qualifiesFling(vx: Float, dx: Float, dy: Float): Boolean {

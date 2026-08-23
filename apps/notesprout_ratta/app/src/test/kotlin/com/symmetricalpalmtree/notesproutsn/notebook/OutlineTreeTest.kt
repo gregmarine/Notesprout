@@ -14,9 +14,11 @@ import org.junit.Test
 class OutlineTreeTest {
 
     private fun item(id: String, page: Int, level: Int, y: Float = 0f, x: Float = 0f) =
-        Item(objectId = id, pageIndex = page, x = x, y = y, label = id, level = level)
+        Item(objectId = id, pageId = "pg$page", pageIndex = page, x = x, y = y, label = id, level = level)
 
     private fun ids(nodes: List<OutlineTree.Node>) = nodes.map { it.id }
+
+    private fun find(all: List<OutlineTree.Node>, id: String) = all.first { it.id == id }
 
     // ---- build: order ------------------------------------------------------------------------
 
@@ -182,7 +184,7 @@ class OutlineTreeTest {
         assertEquals("h1", OutlineTree.highlight(all, 0, setOf("h1")))
     }
 
-    // ---- ancestors / find --------------------------------------------------------------------
+    // ---- ancestors ---------------------------------------------------------------------------
 
     @Test
     fun `ancestorsOf is root first and empty for a root`() {
@@ -190,16 +192,16 @@ class OutlineTreeTest {
             listOf(item("h1", 0, 1, y = 0f), item("h2", 0, 2, y = 10f), item("h3", 0, 3, y = 20f)),
         )
         val all = OutlineTree.all(roots)
-        assertEquals(listOf("h1", "h2"), OutlineTree.ancestorsOf(OutlineTree.find(all, "h3")!!))
-        assertEquals(listOf("h1"), OutlineTree.ancestorsOf(OutlineTree.find(all, "h2")!!))
+        assertEquals(listOf("h1", "h2"), OutlineTree.ancestorsOf(find(all, "h3")))
+        assertEquals(listOf("h1"), OutlineTree.ancestorsOf(find(all, "h2")))
         assertTrue(OutlineTree.ancestorsOf(roots[0]).isEmpty())
     }
 
     @Test
-    fun `find returns the node or null`() {
-        val all = OutlineTree.all(OutlineTree.build(listOf(item("h1", 0, 1), item("h2", 1, 2))))
-        assertEquals("h2", OutlineTree.find(all, "h2")?.id)
-        assertNull(OutlineTree.find(all, "nope"))
+    fun `a node carries its page id for navigation`() {
+        val roots = OutlineTree.build(listOf(item("h1", 0, 1), item("h2", 3, 2)))
+        assertEquals("pg0", roots[0].pageId)
+        assertEquals("pg3", roots[0].children[0].pageId)
     }
 
     // ---- paging ------------------------------------------------------------------------------

@@ -52,6 +52,10 @@ class NotebookSession(
     lateinit var headings: HeadingStore
         private set
 
+    // @Volatile: the Contents gather reads this on an IO thread outside the page-op mutex — the
+    // list itself is immutable and swapped whole, but without the fence its publication to that
+    // reader is a JMM data race (unsafe publication, not just staleness).
+    @Volatile
     var pages: List<PageRef> = emptyList()
         private set
     var currentIndex: Int = 0

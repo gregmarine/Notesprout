@@ -38,6 +38,7 @@ class ContentsSourceTest {
         assertEquals(1, items.size)
         val item = items[0]
         assertEquals("a", item.objectId)
+        assertEquals("p1", item.pageId)
         assertEquals("Meeting notes", item.label)
         assertEquals(3, item.level)
         assertEquals(1, item.pageIndex)

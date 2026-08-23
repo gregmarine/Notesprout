@@ -11,9 +11,6 @@ import android.widget.FrameLayout
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import com.symmetricalpalmtree.gpaper.core.PaperListener
 import com.symmetricalpalmtree.gpaper.core.PaperView
@@ -26,6 +23,7 @@ import com.symmetricalpalmtree.gpaper.core.model.Stroke
 import com.symmetricalpalmtree.notesproutsn.R
 import com.symmetricalpalmtree.notesproutsn.core.ActionSheetDialog
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
+import com.symmetricalpalmtree.notesproutsn.core.Immersive
 import com.symmetricalpalmtree.notesproutsn.core.IndexGuard
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
@@ -191,7 +189,10 @@ class NotebookActivity : AppCompatActivity() {
             currentPageIndex = { session.pages.indexOfFirst { it.id == displayedPageId }.coerceAtLeast(0) },
             alive = { opened && !closing },
             onShowingChanged = { pushExclusions() },
-            navigate = { idx -> runPageOp { navigateTo(idx) } },
+            // By page id, resolved at tap time under the page-op lock (refreshToPage no-ops if the
+            // page died while the dialog was up); a snapshot index would go stale under a page op
+            // that committed mid-gather. Current page → no reload.
+            navigate = { pageId -> if (pageId != displayedPageId) runPageOp { refreshToPage(pageId) } },
             button = binding.btnContents,
             whenPenIdle = ::whenPenIdle,
         )
@@ -842,13 +843,7 @@ class NotebookActivity : AppCompatActivity() {
 
     // ── Chrome ───────────────────────────────────────────────────────────────
 
-    private fun goImmersive() {
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        WindowInsetsControllerCompat(window, binding.root).apply {
-            hide(WindowInsetsCompat.Type.systemBars())
-            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        }
-    }
+    private fun goImmersive() = Immersive.apply(window, binding.root)
 
     /** Both bars plus the selection toolbar while it is up, translated into the paper view's
      *  coordinates, so the stylus can never ink under chrome. */
@@ -987,6 +982,9 @@ class NotebookActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         if (IndexGuard.bounced(this)) { super.onDestroy(); return }
+        // A destroy that bypassed close() (config-change recreate, "don't keep activities") would
+        // otherwise leak the Contents dialog's window — the exact hazard close() documents.
+        if (::contentsFlow.isInitialized) contentsFlow.dismissIfShowing()
         if (::paper.isInitialized) paper.release()
         // A destroy that isn't a normal close (e.g. finish() out of failOpen) still seals.
         if (::session.isInitialized && session.isOpen && !closing) {

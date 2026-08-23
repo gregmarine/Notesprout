@@ -535,8 +535,10 @@ compat with Paper untouched, and the recognizer point stays SN's only extension 
 
 **Entry points, both gated the same way:** the top-bar `btnContents` (Tabler `list`, between Back
 and the pen) and a one-finger swipe-down on the paper. Both exist only while the notebook holds
-≥ 1 live heading on a live page (`ContentsSource.available` — exact, one blob-free row read after a
-writer drain). No headings → the button is `GONE` and the swipe is silent (no toast — an
+≥ 1 live heading on a live page (`ContentsSource.available` — exact: one id-only EXISTS query
+(`SoilDao.anyLiveHeadingOnLivePage`) after a writer drain, because it runs at the tail of every
+`navigateTo` and a full-entity scan would tax every flip — a C2 review fix). No headings → the
+button is `GONE` and the swipe is silent (no toast — an
 unavailable gesture is a non-event). `ContentsFlow.refresh()` re-asks after the open, at the end of
 every `navigateTo` (which covers every flip, insert, delete and every undo/redo replay — they all
 end in `refreshToPage → navigateTo`), and after each heading mutation that doesn't navigate: a
@@ -569,9 +571,12 @@ whole row indented `(level−1)×16 dp`, 68 dp min height; the toggle is `INVISI
 columns align; the highlight row takes the 5 dp inkBlack right-edge bar. Pagination, not scrolling:
 `itemsPerPage` measured once from the real body height, the library-shape pager footer `INVISIBLE`
 at one page with bound taps as no-ops (never a disabled look). Expansion state is in-memory only —
-every open starts collapsed again. A row tap dismisses and navigates to the page (under the
-page-op lock; a no-op when already there); **nothing is selected on arrival** (og/Paper parity —
-navigate + select stays deferred).
+every open starts collapsed again. A row tap dismisses and navigates **by the entry's page id**,
+resolved at tap time under the page-op lock (`refreshToPage` — gone → no-op, current → no reload):
+a snapshot *index* would go stale under a page op that committed mid-gather (an escrowed undo, a
+queued insert — C2 review fix). The displayed page *numbers* are still the gather snapshot's — a
+razor-thin-window skew the modal-snapshot design accepts (display-only; navigation is immune).
+**Nothing is selected on arrival** (og/Paper parity — navigate + select stays deferred).
 
 **BLOCK_ALL while showing:** the Ratta ink daemon draws firmware ink beneath any Android window, so
 while `ContentsFlow.showing` the host's `pushExclusions()` pushes the whole-paper rect (the
@@ -582,13 +587,35 @@ dialogs (`HeadingEditDialog`, the delete sheet/confirm, problem dialogs) do *not
 are brief, user-summoned, and mid-interaction; the Contents is a persistent full-height panel a pen
 plausibly lands on. Don't "fix" the small dialogs to match.
 
-The dialog's show/hide is **frame-silence exception 6** (see the ledger below). `close()` calls
-`ContentsFlow.dismissIfShowing()` — a Dialog outliving its finishing Activity is a window leak.
+The dialog's show/hide is **frame-silence exception 6** (see the ledger below); repaints *inside*
+the open dialog (toggle, pager) need no exception of their own — BLOCK_ALL means no live ink can be
+under them. `close()` **and the `onDestroy` fallback** (a config-change recreate, "don't keep
+activities" — destroys that bypass `close()`) both call `ContentsFlow.dismissIfShowing()` — a
+Dialog outliving its finishing Activity is a window leak (C2 review fix for the fallback path).
+
+**C2 hardening (the `/code-review high` fixes, beyond the ones above):** `ContentsFlow`'s
+`refresh()`/`open()` **degrade with a `Log.w`** on any gather/availability failure instead of
+rethrowing into `lifecycleScope` — a transient SQLite read fault on a routine flip must never be a
+process crash when every neighbouring DB path (`runPageOp`, the writer, the seal) logs and
+survives; `refresh()` keeps the last answer, `open()` opens nothing and the next tap retries.
+`NotebookSession.pages` is `@Volatile` — the gather reads it on IO outside the page-op mutex, and
+without the fence the swap is unsafe publication under the JMM, not just staleness. A fired
+**long-press stands the whole touch sequence down** (`PageGestures` sets `ignoreSequence` +
+`cancelAll` before `onDeleteRequested`) — the finger is still on the glass, and its continued drag
+would otherwise be judged at UP as a flip or swipe-down *under the delete sheet*, making the
+pending confirm delete the wrong page. The POINTER_DOWN late-arrival commit got its **vertical
+twin**: a second finger landing on an already-qualifying swipe-down commits it the way a
+qualifying flip is committed (a trailing palm is likeliest on exactly the downward drag). The
+dialog's pager reuses `R.string.page_indicator` + the library's `GridMath.pageCount`/`clampPage`
+(one copy of the ≥ 1-page/clamp contract; `GridMath` deliberately stays in `library/` — an
+in-module import, not worth a package move), the opening highlight is one `lastOrNull` over the
+expanded tree (`OutlineTree.find` deleted with its only caller), and both windows' immersive
+recipe is the one `core/Immersive.apply`.
 
 ### JVM tests specific to the Contents
 
 `OutlineTreeTest` (document-order build, both orphan rules, deeper-slot clearing, cross-page
-parents, level clamp, `visible`/`all`/`highlight`/`ancestorsOf`, paging edges, `find`),
+parents, level clamp, `visible`/`all`/`highlight`/`ancestorsOf`, paging edges, the carried page id),
 `ContentsLayoutTest` (the 480 dp branch, sidebar width rounding, `itemsPerPage` floor + ≥ 1,
 indent math), and `ContentsSourceTest` (the pure `items()` pass: prefix strip + `flags` level via
 `HeadingRows`, dead-page and malformed and blank-label drops, document order, the 2000 cap + bit).

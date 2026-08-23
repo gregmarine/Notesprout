@@ -914,7 +914,51 @@ arrival page writes immediately, collapsed-open feel).
 decisions above).
 
 ### C2 — Hardening, review, docs, freeze
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-22 — arc 4 frozen at this commit)
+
+**Outcome:** **Review (`/code-review high` over `d84273e..HEAD`):**
+8 finder angles → 24 candidates → 12 verified → 9 CONFIRMED + 1 PLAUSIBLE (2 refuted as unreachable:
+the `showing`-mirror stuck-BLOCK_ALL and the `.also{}` stale-dialog-field candidates) — **all ten
+fixed by Fable, none accepted**: ① a fired long-press never stood the touch sequence down, so the
+continued drag's UP could fire a flip/swipe-down *under the delete sheet* and the pending confirm
+would delete the wrong page → `cancelAll()` + `ignoreSequence` before `onDeleteRequested`;
+② `ContentsFlow.refresh()`/`open()` rethrew any live-screen `Exception` into `lifecycleScope`
+(no handler anywhere) — a transient SQLite fault on a routine flip became a process crash →
+degrade with `Log.w` (refresh keeps the last answer; open shows nothing, next tap retries);
+③ the gather runs outside `pageOps` and a mid-gather page op (escrowed undo, queued insert)
+reindexes `session.pages`, so the row tap's snapshot *index* could land one page away → navigate
+**by page id**, resolved at tap time under the lock via `refreshToPage` (`OutlineTree.Item`/`Node`
+carry `pageId`; displayed numbers stay the modal snapshot's — display-only skew, documented);
+④ the `onDestroy` fallback never dismissed the Contents dialog (config-change recreate, "don't
+keep activities" → `WindowLeaked`) → `dismissIfShowing()` added — the pre-check gap, found
+independently by Fable and two review angles; ⑤ `ACTION_POINTER_DOWN` committed an
+already-qualifying flip but silently discarded an already-qualifying swipe-down (a trailing palm
+is likeliest on exactly the downward drag) → symmetric vertical commit (`verticalQualifies`);
+⑥ [PLAUSIBLE] `session.pages` had no happens-before edge to the mutex-bypassing IO readers
+(unsafe publication under the JMM, not just staleness) → `@Volatile`; ⑦ `available()` was a
+full-table `SELECT *` + full materialization on every flip → id-only `EXISTS` query
+(`SoilDao.anyLiveHeadingOnLivePage`), exactness unchanged; ⑧ the dialog's third hand-rolled pager
+→ `R.string.page_indicator` + `GridMath.pageCount`/`clampPage` (`OutlineTree.pageCount` delegates;
+`GridMath` deliberately stays in `library/` — in-module import, not worth a package move);
+⑨ the opening-highlight computation was degenerate (all-ids Set → vacuous `isVisible`, `find()`
+re-scan, identical recompute at layout) → one `lastOrNull` + ancestor pre-expansion
+(`OutlineTree.find` deleted with its only caller); ⑩ the dialog's post-show immersive block was a
+line-for-line copy of `goImmersive()` → both windows through new `core/Immersive.apply`. Also
+fixed in passing: the stale "heading extension" strings.xml comment (SN headings are core rows).
+**283 JVM tests** (the `find` test replaced by a carried-page-id test; `FakeSoilDao` grew the
+EXISTS twin), debug + release build, release hand-signed. **Docs:** `docs/notebook.md` §Contents
+updated (EXISTS availability, id navigation + snapshot-skew note, onDestroy hygiene,
+BLOCK_ALL-covers-in-dialog-repaints, a C2-hardening block); app `CLAUDE.md` unchanged (still six
+frame-silence exceptions). **Regression (Nomad):** Haiku walk 14/16 pass; its two "failures" were
+both false — the row-tap "failure" was **tap aim, the seventh occurrence of the R2 pattern**
+(Fable re-drove by hand: Contents → "Working" row → lands 3/4 with the heading rendered), and the
+long-press-guard step was an **invalid test by design** (`input swipe` moves from the first
+millisecond, so the long-press correctly cancels on touch-slop — the hold-then-drag scenario is
+uninjectable via adb and goes to the user eye check). Crash buffer clean throughout; cold restart
+clean; both variants reinstalled current on SNN (0.1.0-ratta / 0.1.0-ratta-dev). Version stays
+**0.1.0-ratta** (wizard). **User eye check all-pass 2026-08-22** (hold-then-drag guard, Contents
+end-to-end, palm-graze swipe-down, write-after-jump general pass — "All is well", no findings) →
+all-clear; arc 4 frozen.
 
 `/code-review` over the arc range (level asked at phase start; N3 precedent high).
 Pre-check list: the `refresh()` generation race; `showing` → `pushExclusions` ordering
@@ -928,6 +972,7 @@ decision; full regression (Haiku walk + short user checklist); commit + push; ar
 **Gate:** everything green or explicitly accepted; user all-clear.
 
 **Questions to resolve at phase start:** review level; version stamp.
+**Answered 2026-08-22:** review at **high** (R6/N3 precedent); version **stays 0.1.0-ratta**.
 
 ---
 

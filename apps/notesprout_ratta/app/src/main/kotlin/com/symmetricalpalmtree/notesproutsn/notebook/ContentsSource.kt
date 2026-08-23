@@ -35,15 +35,16 @@ object ContentsSource {
 
     /**
      * Cheap availability — does the notebook hold **any** live heading on a live page? One
-     * blob-free row read after a writer drain; exact, unlike Paper's provider-identity
-     * approximation. The host shows the Contents button / arms the swipe only while true, and
-     * re-asks after every heading mutation and page change.
+     * EXISTS query after a writer drain (id-only, no entity materialization — this runs at the
+     * tail of every `navigateTo`, so every flip pays it); exact, unlike Paper's provider-identity
+     * approximation, with page-liveness answered by the same rows `session.pages` reconciles
+     * from. The host shows the Contents button / arms the swipe only while true, and re-asks
+     * after every heading mutation and page change.
      */
     suspend fun available(session: NotebookSession): Boolean = withContext(Dispatchers.IO) {
         if (!session.isOpen) return@withContext false
         session.writer.drain()
-        val pages = session.pages.mapTo(HashSet()) { it.id }
-        session.db.dao().liveHeadingsAll().any { it.parentId in pages }
+        session.db.dao().anyLiveHeadingOnLivePage()
     }
 
     suspend fun gather(session: NotebookSession): Outline = withContext(Dispatchers.IO) {
@@ -82,7 +83,7 @@ object ContentsSource {
                 val h = HeadingRows.toHeading(row) ?: return@mapNotNull null
                 val label = HeadingPrefix.stripHeadingPrefix(h.text).trim()
                 if (label.isEmpty()) return@mapNotNull null
-                OutlineTree.Item(h.id, pageIndex, h.x, h.y, label, h.level)
+                OutlineTree.Item(h.id, row.parentId, pageIndex, h.x, h.y, label, h.level)
             }
             .sortedWith(OutlineTree.DOCUMENT_ORDER)
             .toList()
