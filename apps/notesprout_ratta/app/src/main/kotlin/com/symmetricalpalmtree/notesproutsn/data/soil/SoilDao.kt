@@ -27,6 +27,18 @@ interface SoilDao {
     @Query("SELECT * FROM notebook WHERE type = 'notebook' AND parentId = '' LIMIT 1")
     suspend fun notebookRow(): SoilObjectEntity?
 
+    /**
+     * This notebook's live templates, **blob-free** (arc 7 / B2): the columns a cross-notebook
+     * paste needs to shortlist a dedupe candidate. `length(blob)` is a cheap discriminator that
+     * SQLite answers without materialising the WEBP, so only the rows that could actually match are
+     * loaded whole for the byte compare — the `ClipHeader` discipline applied one level down.
+     */
+    @Query(
+        """SELECT id, text, width, height, length(blob) AS blobLength FROM notebook
+           WHERE type = 'template' AND parentId = :notebookId AND deletedAt IS NULL"""
+    )
+    suspend fun templateDigests(notebookId: String): List<TemplateDigest>
+
     @Query("SELECT count(*) FROM notebook WHERE type = 'page' AND deletedAt IS NULL")
     suspend fun livePageCount(): Int
 
@@ -113,3 +125,12 @@ interface SoilDao {
     @Query("SELECT COALESCE(MAX(`order`), -1) FROM notebook WHERE parentId = :parentId AND type = :type")
     suspend fun maxOrder(parentId: String, type: String): Int
 }
+
+/** A template row without its pixels — [SoilDao.templateDigests]. */
+data class TemplateDigest(
+    val id: String,
+    val text: String?,
+    val width: Float?,
+    val height: Float?,
+    val blobLength: Int?,
+)

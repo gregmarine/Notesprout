@@ -2,6 +2,7 @@ package com.symmetricalpalmtree.notesproutsn.notebook
 
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilDao
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilObjectEntity
+import com.symmetricalpalmtree.notesproutsn.data.soil.TemplateDigest
 import kotlinx.coroutines.delay
 
 /**
@@ -26,6 +27,9 @@ class FakeSoilDao : SoilDao {
         rows.values.filter { it.parentId == parentId && it.type == type && it.deletedAt == null }
             .sortedBy { it.order }
     override suspend fun notebookRow() = rows.values.firstOrNull { it.type == "notebook" }
+    override suspend fun templateDigests(notebookId: String) = rows.values
+        .filter { it.type == "template" && it.parentId == notebookId && it.deletedAt == null }
+        .map { TemplateDigest(it.id, it.text, it.width, it.height, it.blob?.size) }
     override suspend fun livePageCount() = rows.values.count { it.type == "page" && it.deletedAt == null }
     override suspend fun softDelete(ids: List<String>, at: Long) {
         for (id in ids) rows[id]?.let { if (it.deletedAt == null) rows[id] = it.copy(deletedAt = at, updatedAt = at) }

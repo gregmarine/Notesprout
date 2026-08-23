@@ -21,6 +21,9 @@ import com.symmetricalpalmtree.notesproutsn.data.soil.SoilSchema
  *  - **`"order"` is preserved verbatim.** Writing order is load-bearing (recognition reads it as a
  *    sequence, the composite raster paints in it) — the M-arc / N3 lesson. Only the page row's own
  *    order is rewritten, to the slot it is being inserted at.
+ *
+ * The one row it reads *meaning* out of is a link's payload, and only across notebooks (B2): an
+ * own-notebook link means a different thing once the page is in another file — see [rewriteLink].
  */
 object PageClip {
 
@@ -30,8 +33,9 @@ object PageClip {
         /** The page had no template (a blank page): the pasted page's `refId` is `""`. */
         data object None : Template
 
-        /** A template row with this id already lives in the destination — point at it, insert
-         *  nothing. Always the answer for a same-notebook paste, and the first dedupe rule. */
+        /** A template row in the destination is this page's paper — point at it, insert nothing.
+         *  Always the answer for a same-notebook paste; across notebooks it is reached either by
+         *  id (a previous paste brought the row in) or by content ([matchTemplate]). */
         data class Reuse(val id: String) : Template
 
         /** Bring the payload's template row in under [id]. */
@@ -113,14 +117,81 @@ object PageClip {
         }
         rows += pageRow.toRow(newPageId, notebookId, pageOrder, now).copy(refId = refId)
 
+        val crossNotebook = env.sourceNotebookId.isNotBlank() && env.sourceNotebookId != notebookId
         val contentIds = ArrayList<String>(content.size)
         for (row in content) {
             val parentId = idMap[row.parentId] ?: continue
             val id = idMap.getValue(row.id)
-            rows += row.toRow(id, parentId, row.order, now)
+            var out = row.toRow(id, parentId, row.order, now)
+            if (crossNotebook && row.type == SoilSchema.TYPE_LINK) {
+                out = out.copy(text = rewriteLink(row.text, env.sourceNotebookId, pageRow.id, newPageId))
+            }
+            rows += out
             contentIds += id
         }
         return Plan(newPageId, rows, contentIds)
+    }
+
+    /**
+     * What a link's payload must say once its page lives in **another** notebook (B2).
+     *
+     * [LinkPayload.KIND_PAGE] carries no notebook id — it means "a page of my own notebook", which
+     * is a *different* page once the row has moved. So it is re-pointed at the notebook it was
+     * copied from, explicitly: `KIND_PAGE` → [LinkPayload.KIND_NOTEBOOK_PAGE] with
+     * [sourceNotebookId]. The link keeps working, and it keeps meaning what it meant.
+     *
+     * One exception: a link whose target **is the page being pasted** re-points at the new copy and
+     * stays own-notebook, so a page that links to itself still does after the trip.
+     *
+     * `KIND_NOTEBOOK` and `KIND_NOTEBOOK_PAGE` already name their notebook and travel unchanged —
+     * including one that names the source page explicitly: it was written to mean *that* page in
+     * *that* notebook, and the original is still there.
+     *
+     * A payload that does not decode (foreign, future, corrupt) travels **verbatim**: rewriting
+     * what we cannot read would be inventing a target, and a follow already lands in the
+     * dead-target dialog. A same-notebook paste never reaches here at all — it is verbatim by
+     * definition.
+     */
+    private fun rewriteLink(
+        text: String?,
+        sourceNotebookId: String,
+        sourcePageId: String,
+        newPageId: String,
+    ): String? {
+        val decoded = LinkPayload.decode(text ?: return null) ?: return text
+        if (decoded.kind != LinkPayload.KIND_PAGE) return text
+        val target = decoded.pageId ?: return text
+        return runCatching {
+            if (target == sourcePageId) {
+                LinkPayload.encode(decoded.chrome, LinkPayload.KIND_PAGE, null, newPageId)
+            } else {
+                LinkPayload.encode(decoded.chrome, LinkPayload.KIND_NOTEBOOK_PAGE, sourceNotebookId, target)
+            }
+        }.getOrDefault(text)
+    }
+
+    /**
+     * The id of a destination template row that is **the same paper** as the payload's [payload]
+     * template, or null when the destination has none (B2's dedupe rule).
+     *
+     * "The same paper" is the kind label, the page size it was rendered for, and byte-identical
+     * pixels — a WEBP the same renderer produced from the same inputs. Anything less strict would
+     * silently re-paper a pasted page; anything stricter than identity is guesswork. The caller
+     * shortlists candidates blob-free and loads only those, so the byte compare is over a handful
+     * of rows at most.
+     *
+     * Without this, a page pasted into a notebook that already has an identical template inserts a
+     * second copy of the same WEBP under a different id — every notebook pair stacking its own.
+     */
+    fun matchTemplate(payload: ClipRow?, candidates: List<SoilObjectEntity>): String? {
+        if (payload == null) return null
+        val bytes = payload.blobBytes() ?: return null
+        return candidates.firstOrNull {
+            it.text == payload.text &&
+                it.width == payload.width &&
+                it.height == payload.height &&
+                it.blob != null && it.blob.contentEquals(bytes)
+        }?.id
     }
 
     private fun SoilObjectEntity.toClipRow() = ClipRow(

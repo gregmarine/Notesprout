@@ -1576,7 +1576,7 @@ Shape as built:
 stationary double-taps, which `input` cannot inject.
 
 ### B2 — Cross-notebook paste
-**Status:** ⬜ Not started
+**Status:** ✅ Complete
 
 Template dedupe against the destination's template rows (content match, else fresh insert);
 the `KIND_PAGE` → `KIND_NOTEBOOK_PAGE` link rewrite with the self-link exception; page-size
@@ -1590,9 +1590,55 @@ A → open B → paste, page count in both, force-stop between copy and paste, `
 after repeated pastes = dedupe working); **user eye check** (a real page with ink + heading +
 link copied A→B, the rewritten link followed back into A, cut A → paste B as a move).
 
-**Questions to resolve at phase start:** whether the Manta leg is in scope (needs the second
-device — Nomad-only is the standing rule) or the size-mismatch case is proven by a
-hand-built page; whether a cross-notebook paste should toast the source notebook's name.
+**Phase-start answers (2026-08-23):** **Nomad only** — the size-mismatch case is proven by JVM
+tests over a hand-built payload, not by a Manta leg. The paste toast is **unchanged across
+notebooks** ("Pasted after page 3"): the source notebook is something you already know, and its
+name would put an unbounded string in an e-ink toast.
+
+**Outcome (2026-08-23, user all-clear):** built as planned. **466 JVM tests** green (app 431 ·
+api 6 · ext 29, +11); debug + release built and signed; debug installed on the Nomad.
+
+Shape as built:
+- **Template dedupe by content.** `resolveTemplate` now tries three things: the row is already here
+  under that id (same-notebook, or a repeat paste — `Insert` brings it in under its *source* id) →
+  the same paper under a **different** id → insert. "The same paper" is kind label + size +
+  byte-identical pixels (`PageClip.matchTemplate`, pure). The read is blob-free first — new
+  `SoilDao.templateDigests` projects `id/text/width/height/length(blob)` and only rows that could
+  match are loaded whole (`ClipHeader` discipline, one level down). Two notebooks made from the same
+  built-in template hold the same WEBP under different UUIDs, so without this every notebook pair
+  stacks its own copy.
+- **The `KIND_PAGE` link rewrite** (`PageClip.rewriteLink`, pure): own-notebook → `KIND_NOTEBOOK_PAGE`
+  naming the source notebook · a link to **the page being pasted** → the new copy, still
+  `KIND_PAGE` · `KIND_NOTEBOOK`/`KIND_NOTEBOOK_PAGE` and anything that does not decode → verbatim ·
+  same-notebook paste and a blank `sourceNotebookId` → verbatim. Rewriting an unreadable payload
+  would be inventing a target.
+- **Foreign-envelope rejection moved into `doPaste`**: no envelope / wrong kind / a payload
+  *claiming* a page it does not carry all clear the header and raise the problem dialog. Left to
+  `pasteAt`'s `error()`, `runPageOp`'s `runCatching` would have made it a silent no-op — the one
+  thing the sheet must never do. Older-build payloads were already covered (`decode` accepts
+  `1..VERSION`, `ignoreUnknownKeys`).
+- Source notebook deleted/renamed between copy and paste needed **no code**: the payload is
+  self-contained and the source `.soil` is never reopened; only a rewritten link target resolves
+  dead, into K4's dialog.
+- Docs: `docs/clipboard.md` (status, three-try template table + the same-paper rule, a new
+  cross-notebook link table, the foreign-payload guard, four new traps), `docs/notebook.md`
+  (`pasteAt` row).
+
+**Nomad walk, all-pass** (driven by hand over adb, no device agent): cross-notebook copy A → paste
+after in B (3/3, ink identical) · two fresh **lined** notebooks → copy a blank page C → D: log shows
+`paste reuses matching template`, `.soil` **stays 163840 bytes across three pastes** (1→4 pages) =
+dedupe working · force-stop between copy and paste, clipboard survives · **cut in D → paste in C** =
+a cross-notebook move (template content-matched to C's own row, a different id again) · scratch
+notebooks deleted, the user's notebook restored to 2 pages. `logcat -b crash` empty.
+
+**Not verifiable by adb (eye check):** every link case — links are made by lasso, which `input`
+cannot drive. The rewrite table is JVM-tested instead; the user's eye check was a real page with
+ink + heading + link copied A → B and the rewritten link followed back into A — **all-pass
+2026-08-23, no findings.**
+
+*New trap recorded:* a page sheet that is up has `releaseRender()`'d the surface, so a screencap
+taken while it shows can be **missing committed ink that is plainly there once it closes** — cost
+one false data-loss scare mid-walk.
 
 ### B3 — Review + hardening + docs + freeze
 **Status:** ⬜ Not started

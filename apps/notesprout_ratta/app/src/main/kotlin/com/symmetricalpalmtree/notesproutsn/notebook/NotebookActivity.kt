@@ -30,6 +30,7 @@ import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.core.SnClipboard
 import com.symmetricalpalmtree.notesproutsn.data.clip.ClipEnvelope
 import com.symmetricalpalmtree.notesproutsn.data.clip.ClipStore
+import com.symmetricalpalmtree.notesproutsn.data.soil.SoilSchema
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.prefs.BrowseState
 import com.symmetricalpalmtree.notesproutsn.data.prefs.LinkTrail
@@ -1228,8 +1229,12 @@ class NotebookActivity : AppCompatActivity() {
     /** Paste the clipboard's page beside this one and land on it. */
     private suspend fun doPaste(before: Boolean) {
         val env = withContext(Dispatchers.IO) { clipStore.readEnvelope() }
-        if (env == null || env.kind != ClipEnvelope.KIND_PAGE) {
-            // The row is gone or unusable — stop advertising a Paste that cannot work.
+        if (env == null || env.kind != ClipEnvelope.KIND_PAGE ||
+            env.rows.none { it.type == SoilSchema.TYPE_PAGE }
+        ) {
+            // The row is gone, foreign, or claims a page it does not carry — stop advertising a
+            // Paste that cannot work. Checked here rather than left to `pasteAt`, whose throw is a
+            // caller-bug assertion and would be swallowed by `runPageOp` into a silent no-op.
             SnClipboard.set(null)
             Dialogs.problem(this, R.string.clip_failed_title, R.string.clip_paste_failed)
             return

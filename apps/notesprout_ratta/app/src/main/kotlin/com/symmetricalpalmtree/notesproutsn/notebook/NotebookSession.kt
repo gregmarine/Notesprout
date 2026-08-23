@@ -275,20 +275,37 @@ class NotebookSession(
     }
 
     /**
-     * How this file should reach the payload's template. Same-notebook: the row is already here, so
-     * reuse it verbatim. Otherwise bring the carried row in **under its own id**, which is free
-     * here — so a second paste of the same source page finds it and reuses, and repeated pastes
-     * never stack identical WEBPs. (B2 adds the content-match rule for a template that is the same
-     * paper under a different id.)
+     * How this file should reach the payload's template, in three tries:
+     *
+     *  1. **The row is already here under that id** — always so for a same-notebook paste, and for
+     *     a repeat paste of the same source page (an [PageClip.Template.Insert] brings the row in
+     *     under its *source* id, which is free here, so the next one finds it).
+     *  2. **The same paper under a different id** — the destination was created with the same
+     *     built-in template, so its WEBP is byte-identical under its own UUID
+     *     ([PageClip.matchTemplate]). Without this every notebook pair would stack its own copy of
+     *     the same pixels.
+     *  3. Otherwise bring the carried row in; and if the payload names a template it does not
+     *     carry, the page pastes blank rather than pointing at nothing.
      */
     private suspend fun resolveTemplate(env: ClipEnvelope): PageClip.Template {
         val pageRow = env.rows.firstOrNull { it.type == SoilSchema.TYPE_PAGE }
         val wanted = pageRow?.refId?.takeIf { it.isNotEmpty() } ?: return PageClip.Template.None
         if (db.dao().byId(wanted) != null) return PageClip.Template.Reuse(wanted)
-        if (env.rows.any { it.type == SoilSchema.TYPE_TEMPLATE && it.id == wanted }) {
-            return PageClip.Template.Insert(wanted)
+        val carried = env.rows.firstOrNull { it.type == SoilSchema.TYPE_TEMPLATE && it.id == wanted }
+            ?: return PageClip.Template.None
+        // Shortlist blob-free, then load only the rows whose pixels could match at all.
+        val size = carried.blobBytes()?.size
+        val shortlist = db.dao().templateDigests(notebookId)
+            .filter { it.text == carried.text && it.width == carried.width && it.height == carried.height && it.blobLength == size }
+            .map { it.id }
+        for (chunk in shortlist.chunked(ID_CHUNK)) {
+            val hit = PageClip.matchTemplate(carried, db.dao().byIds(chunk))
+            if (hit != null) {
+                Slog.d(TAG) { "paste reuses matching template $hit" }
+                return PageClip.Template.Reuse(hit)
+            }
         }
-        return PageClip.Template.None
+        return PageClip.Template.Insert(wanted)
     }
 
     /**

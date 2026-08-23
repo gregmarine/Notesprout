@@ -4,10 +4,9 @@ Whole-page **copy / cut / paste**, on a global clipboard that lives in the index
 survives a force-stop and travels between notebooks. Entry point is the notebook's one-finger
 long-press sheet.
 
-**Status: B1 (core + same-notebook) landed.** B2 adds the cross-notebook rules — template dedupe by
-content and the `KIND_PAGE` → `KIND_NOTEBOOK_PAGE` link rewrite. A cross-notebook paste *works*
-today (the template travels, ids remap, page size is verbatim); what B2 adds is the link rewrite,
-so a copied page's own-notebook links keep pointing home.
+**Status: B1 (core + same-notebook) and B2 (cross-notebook) landed.** B2 added the two rules a page
+needs once it lands in a *different* file: the template is deduped **by content** as well as by id,
+and an own-notebook link is rewritten to name the notebook it was copied from.
 
 ## Where it lives
 
@@ -18,8 +17,9 @@ so a copied page's own-notebook links keep pointing home.
 | `data/clip/ClipEnvelope.kt` | `ClipEnvelope` + `ClipRow` + `ClipHeader` — the payload grammar and its codec |
 | `data/clip/ClipStore.kt` | the one index row, read and written |
 | `core/SnClipboard.kt` | the process-wide in-memory **header** mirror |
-| `notebook/PageClip.kt` | pure capture → envelope, and envelope → the rows a paste writes |
-| `NotebookSession.capturePage()` / `pasteAt()` | the `.soil` side |
+| `notebook/PageClip.kt` | pure capture → envelope, envelope → the rows a paste writes, the cross-notebook link rewrite, and the template content-match rule |
+| `NotebookSession.capturePage()` / `pasteAt()` / `resolveTemplate()` | the `.soil` side |
+| `SoilDao.templateDigests` | the blob-free shortlist behind the template dedupe |
 | `NotebookActivity` | the sheet, the flows, the toasts, `Action.PagePasted` |
 
 **No new index table.** `notesprout.db` is Room-validated and format-compatible with Paper: a new
@@ -99,23 +99,56 @@ page row, a template row, and zero content rows.
   payload is untrusted input like any file, and an orphaned link child re-appearing loose on the page
   would be a silent corruption rather than a visible absence.
 - The payload is deliberately **row-level, not object-level**: `PageClip` understands only the page
-  row (where the template reference lives). Anything a later arc adds to the family table copies
-  without this file learning a single content type.
+  row (where the template reference lives) and, across notebooks, a link row's payload. Anything a
+  later arc adds to the family table copies without this file learning a single content type.
 
 ### Templates
 
 The caller decides, because only it can see what the destination `.soil` already holds
-(`NotebookSession.resolveTemplate`):
+(`NotebookSession.resolveTemplate`), in three tries:
 
 | Choice | When | Effect |
 |---|---|---|
-| `Reuse(id)` | a row with that id is already in this file — **always** for a same-notebook paste | point at it, insert nothing |
-| `Insert(id)` | the payload carries the template and the id is free here | bring the row in **under its own id** |
+| `Reuse(id)` | a row with that id is already in this file — **always** for a same-notebook paste, and for a repeat paste of the same source page | point at it, insert nothing |
+| `Reuse(other)` | **B2**: a row here is the same paper under a different id (`PageClip.matchTemplate`) | point at that one, insert nothing |
+| `Insert(id)` | the payload carries the template and nothing here matches | bring the row in **under its source id** |
 | `None` | the page had no template, or the payload names one it doesn't carry | `refId = ""` |
 
-Inserting under the *source* id is what makes dedupe fall out for free: a second paste of the same
-source page finds the row and reuses it, so repeated pastes never stack identical WEBPs. B2 adds the
-content-match rule for a template that is the same paper under a different id.
+Inserting under the *source* id is what makes the first dedupe fall out for free: a second paste of
+the same source page finds the row and reuses it.
+
+**The same paper (B2)** is the kind label, the page size it was rendered for, and byte-identical
+pixels — the same renderer from the same inputs. Anything looser would silently re-paper a pasted
+page; anything tighter than identity is guesswork. It matters because two notebooks created with the
+same built-in template hold the *same WEBP under different UUIDs*: without the content rule every
+notebook pair would stack its own copy. Proven on the Nomad — three pastes of a lined page into a
+lined notebook left the `.soil` at exactly its original size.
+
+The read is blob-free first: `SoilDao.templateDigests` projects `id / text / width / height /
+length(blob)` so SQLite never materialises a WEBP, and only the rows that could match at all are
+loaded whole for the byte compare (the `ClipHeader` discipline, one level down).
+
+### Links across notebooks (B2)
+
+`LinkPayload.KIND_PAGE` carries no notebook id — it means "a page of my own notebook", which is a
+*different* page once the row has moved. So on a cross-notebook paste it is re-pointed explicitly:
+
+| Payload | Cross-notebook paste | Why |
+|---|---|---|
+| `KIND_PAGE` → some other page | → `KIND_NOTEBOOK_PAGE` naming the **source** notebook | the link keeps working *and* keeps meaning what it meant |
+| `KIND_PAGE` → **the page being pasted** | stays `KIND_PAGE`, re-pointed at the **new copy** | a page that links to itself still does after the trip |
+| `KIND_NOTEBOOK` / `KIND_NOTEBOOK_PAGE` | unchanged | they already name their notebook — including one naming the source page: it meant *that* page in *that* notebook, and the original is still there |
+| anything that does not decode | **verbatim** | rewriting what we cannot read would be inventing a target; a follow already lands in K4's dead-target dialog |
+
+A **same-notebook** paste is verbatim throughout — including a self-link, which keeps pointing at the
+original page because the original is still right there. (The asymmetry is deliberate: the rewrite
+only fires where leaving the payload alone would change what it resolves to.)
+
+An envelope with a **blank** `sourceNotebookId` also leaves own-notebook links alone — there is no
+notebook id to name.
+
+The source notebook being **deleted or renamed** between copy and paste changes nothing: the payload
+is self-contained, and only a rewritten link target resolves dead — into K4's dialog.
 
 ## Undo
 
@@ -147,9 +180,15 @@ has since been closed. Paste again.
   sheet's frame-silence exception rather than opening a new one — it is raised by a tap on a row of a
   dialog that is already up, so the pen is demonstrably idle.
 - Toast-confirms / dialog-explains: Copy → "Page copied", Cut → "Page cut", Paste → "Pasted after
-  page 3" (the placement is what you might have mis-tapped, so the toast names it). Anything that
-  *didn't* work — an unreadable page, an over-cap payload, an unusable clipboard — is a problem
-  dialog.
+  page 3" (the placement is what you might have mis-tapped, so the toast names it). The toast is the
+  same across notebooks — the source notebook is something you already know, and its name would put
+  an unbounded string in an e-ink toast. Anything that *didn't* work — an unreadable page, an
+  over-cap payload, an unusable clipboard — is a problem dialog.
+- `doPaste` rejects a foreign payload itself — no envelope, a kind that isn't `page`, or one
+  *claiming* a page it does not carry — and clears the header so the row stops being advertised.
+  `pasteAt`'s throw for a page-less payload is a caller-bug assertion, and `runPageOp`'s
+  `runCatching` would turn it into a **silent** no-op, which is the one thing the sheet must never
+  do.
 - Icons are Tabler `copy` / `cut` / `clipboard`.
 - A paste lands you **on** the pasted page.
 
@@ -170,6 +209,14 @@ whole notebook — afterwards changes nothing about what pastes.
 - `ObjectEntity.name` is non-null — the kind label fills it.
 - Content is **two levels deep** since arc 6: `liveDescendantIds`, not `liveContentIds`.
 - One `.soil` never has two connections: a paste writes through the **open session**, never a second
-  open of the destination file.
+  open of the destination file. Everything a cross-notebook paste needs is in the payload — the
+  source file is never reopened, which is also why deleting it changes nothing.
+- Match a template on **content**, never on the kind label alone: two notebooks can carry the same
+  label at different page sizes.
 - adb can drive the whole sheet (it is finger-injectable) but **not** undo/redo — those are
   multi-finger stationary double-taps, which `input` cannot inject. Paste/cut undo is eye-check only.
+  Nor can it lasso, so **every link case is eye-check only** — the rewrite table is JVM-tested
+  instead.
+- A page sheet that is up has `releaseRender()`'d the surface, so a screencap taken while it is
+  showing can be missing committed ink that is plainly there once the sheet closes. Dismiss before
+  judging a page's content from a screenshot.

@@ -40,7 +40,8 @@ class PageClipTest {
     private fun content() = listOf(
         row("s-loose", pageId, SoilSchema.TYPE_STROKE, order = 0, blob = byteArrayOf(9, 8, 7)),
         row("h-1", pageId, SoilSchema.TYPE_HEADING, order = 1, text = "## Title", flags = 2),
-        row("lnk-1", pageId, SoilSchema.TYPE_LINK, order = 0, text = "L1|u|p||page-9"),
+        row("lnk-1", pageId, SoilSchema.TYPE_LINK, order = 0,
+            text = LinkPayload.encode(LinkPayload.CHROME_UNDERLINE, LinkPayload.KIND_PAGE, null, "page-9")),
         row("s-wrapped", "lnk-1", SoilSchema.TYPE_STROKE, order = 5, blob = byteArrayOf(4, 5)),
     )
 
@@ -226,5 +227,130 @@ class PageClipTest {
         // Four descendants travelled, the orphan did not.
         assertEquals(4, plan.contentIds.size)
         assertEquals(3, plan.rows.count { it.type == SoilSchema.TYPE_STROKE || it.type == SoilSchema.TYPE_HEADING })
+    }
+
+    // ── plan: the cross-notebook link rewrite (B2) ───────────────────────────
+
+    /** A page carrying one link with [text], planned into [dest]; the pasted link's payload. */
+    private fun pastedLink(text: String?, dest: String): String? {
+        val link = row("lnk-x", pageId, SoilSchema.TYPE_LINK, text = text)
+        val env = PageClip.capture(pageRow, null, listOf(link), notebookId, now)
+        val plan = PageClip.plan(env, dest, 0, PageClip.Template.None, now, ids())!!
+        return plan.rows.first { it.type == SoilSchema.TYPE_LINK }.text
+    }
+
+    private fun ownPage(pageId: String, chrome: Int = LinkPayload.CHROME_UNDERLINE) =
+        LinkPayload.encode(chrome, LinkPayload.KIND_PAGE, null, pageId)
+
+    @Test
+    fun `a same-notebook paste leaves every link payload verbatim`() {
+        val own = ownPage("page-9")
+        assertEquals(own, pastedLink(own, notebookId))
+        // Including a link to the page being duplicated: the original is still right there.
+        assertEquals(ownPage(pageId), pastedLink(ownPage(pageId), notebookId))
+    }
+
+    @Test
+    fun `an own-notebook link is re-pointed at the source notebook across notebooks`() {
+        val out = LinkPayload.decode(pastedLink(ownPage("page-9"), "nb-dest")!!)!!
+        assertEquals(LinkPayload.KIND_NOTEBOOK_PAGE, out.kind)
+        assertEquals(notebookId, out.notebookId)
+        assertEquals("page-9", out.pageId)
+        assertEquals(LinkPayload.CHROME_UNDERLINE, out.chrome)
+    }
+
+    @Test
+    fun `chrome survives the rewrite`() {
+        val out = LinkPayload.decode(pastedLink(ownPage("page-9", LinkPayload.CHROME_NONE), "nb-dest")!!)!!
+        assertEquals(LinkPayload.CHROME_NONE, out.chrome)
+    }
+
+    @Test
+    fun `a link to the page being pasted follows the copy`() {
+        val link = row("lnk-self", pageId, SoilSchema.TYPE_LINK, text = ownPage(pageId))
+        val env = PageClip.capture(pageRow, null, listOf(link), notebookId, now)
+        val plan = PageClip.plan(env, "nb-dest", 0, PageClip.Template.None, now, ids())!!
+        val out = LinkPayload.decode(plan.rows.first { it.type == SoilSchema.TYPE_LINK }.text!!)!!
+        // Own-notebook still — but the destination's copy, not the source page.
+        assertEquals(LinkPayload.KIND_PAGE, out.kind)
+        assertNull(out.notebookId)
+        assertEquals(plan.pageId, out.pageId)
+        assertNotEquals(pageId, out.pageId)
+    }
+
+    @Test
+    fun `notebook and notebook-page links travel unchanged`() {
+        val toNotebook = LinkPayload.encode(
+            LinkPayload.CHROME_NONE, LinkPayload.KIND_NOTEBOOK, "nb-other", null)
+        assertEquals(toNotebook, pastedLink(toNotebook, "nb-dest"))
+
+        val toPage = LinkPayload.encode(
+            LinkPayload.CHROME_UNDERLINE, LinkPayload.KIND_NOTEBOOK_PAGE, "nb-other", "page-9")
+        assertEquals(toPage, pastedLink(toPage, "nb-dest"))
+
+        // Even one naming the source page explicitly: it was written to mean *that* page in *that*
+        // notebook, and the original is still there.
+        val toSource = LinkPayload.encode(
+            LinkPayload.CHROME_UNDERLINE, LinkPayload.KIND_NOTEBOOK_PAGE, notebookId, pageId)
+        assertEquals(toSource, pastedLink(toSource, "nb-dest"))
+    }
+
+    @Test
+    fun `an unreadable link payload travels verbatim rather than being invented`() {
+        assertEquals("L1|u|p||page-9", pastedLink("L1|u|p||page-9", "nb-dest"))
+        assertEquals("", pastedLink("", "nb-dest"))
+        assertNull(pastedLink(null, "nb-dest"))
+    }
+
+    @Test
+    fun `a payload naming no source notebook leaves own-notebook links alone`() {
+        // An envelope with a blank source (a hand-built or truncated one): there is no notebook id
+        // to re-point at, so rewriting could only invent one.
+        val own = ownPage("page-9")
+        val link = row("lnk-x", pageId, SoilSchema.TYPE_LINK, text = own)
+        val env = PageClip.capture(pageRow, null, listOf(link), "", now)
+        val plan = PageClip.plan(env, "nb-dest", 0, PageClip.Template.None, now, ids())!!
+        assertEquals(own, plan.rows.first { it.type == SoilSchema.TYPE_LINK }.text)
+    }
+
+    // ── template dedupe by content (B2) ──────────────────────────────────────
+
+    private val carried = PageClip.capture(pageRow, templateRow, emptyList(), notebookId, now)
+        .rows.first { it.type == SoilSchema.TYPE_TEMPLATE }
+
+    private fun candidate(
+        id: String, text: String? = "LINED", width: Float? = 1404f, height: Float? = 1872f,
+        blob: ByteArray? = byteArrayOf(1, 2, 3, 4),
+    ) = row(id, "nb-dest", SoilSchema.TYPE_TEMPLATE, text = text, width = width, height = height, blob = blob)
+
+    @Test
+    fun `the same paper under a different id matches`() {
+        assertEquals("tpl-dest", PageClip.matchTemplate(carried, listOf(candidate("tpl-dest"))))
+    }
+
+    @Test
+    fun `a different kind, size or pixel is not the same paper`() {
+        assertNull(PageClip.matchTemplate(carried, listOf(candidate("a", text = "DOTTED"))))
+        assertNull(PageClip.matchTemplate(carried, listOf(candidate("a", width = 1080f))))
+        assertNull(PageClip.matchTemplate(carried, listOf(candidate("a", height = 1440f))))
+        assertNull(PageClip.matchTemplate(carried, listOf(candidate("a", blob = byteArrayOf(1, 2, 3, 5)))))
+        assertNull(PageClip.matchTemplate(carried, listOf(candidate("a", blob = byteArrayOf(1, 2, 3)))))
+        assertNull(PageClip.matchTemplate(carried, listOf(candidate("a", blob = null))))
+    }
+
+    @Test
+    fun `the first match wins and no candidates is no match`() {
+        assertNull(PageClip.matchTemplate(carried, emptyList()))
+        assertEquals(
+            "tpl-first",
+            PageClip.matchTemplate(carried, listOf(candidate("tpl-first"), candidate("tpl-second"))),
+        )
+    }
+
+    @Test
+    fun `a template carrying no pixels never matches`() {
+        val blank = carried.copy(blob = null)
+        assertNull(PageClip.matchTemplate(blank, listOf(candidate("a", blob = null))))
+        assertNull(PageClip.matchTemplate(null, listOf(candidate("a"))))
     }
 }
