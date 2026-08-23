@@ -1138,7 +1138,7 @@ are fixed in g-paper per the standing rule.
 - zipflinger inflates incremental debug APKs — clean build before chasing size.
 
 ### K1 — Core link rows + render + ops
-**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-23)
+**Status:** ✅ Complete (commit ada8f09, Nomad-verified + user all-clear 2026-08-23)
 
 **Outcome:** Split per the recipe. Fable wrote the data/render/undo layer: `LinkPayload` in core
 (Paper's v1 grammar **byte-verified** against `PAPER_LINKS_PLAN.md` + its extension's codec — the
