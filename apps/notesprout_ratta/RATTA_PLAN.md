@@ -1085,6 +1085,165 @@ frozen. Both variants reinstalled current on SNN.
 
 ---
 
+## Phases — Arc 6 "Links" (planned 2026-08-23, wizard complete)
+
+Link objects **baked into the core, og style** — wrap a lasso selection into a tappable
+navigation object pointing at a page in this notebook, another notebook, or another
+notebook's page. og (`docs/links.md` at the monorepo root) and Paper's arc 7
+(`apps/notesprout_paper/PAPER_LINKS_PLAN.md`, `apps/notesprout_paper/docs/links.md`) are
+reading references — no code copied; Paper's whole extension layer (NSE · Links AIDL,
+opaque payload ownership, LinkCatalogBinder, ext store trail) vanishes, the arc-4/5
+precedent. Two og features Paper skipped come back: **page previews** in the picker and the
+**heading-as-page-name** rule. Arc-5 naming plugs in: picker-created notebooks are
+scheme-prenamed, picker-created folders take name + scheme like the library. g-paper stays
+at **0.1.4** — its links-era API (public `StrokeRasterizer`, eraser content hits,
+`ContentRenderer` hit targets + live-drag pair) was built for exactly this; gaps, if found,
+are fixed in g-paper per the standing rule.
+
+### Locked decisions (arc-6 wizard 2026-08-23 — do not re-ask)
+
+| Decision | Answer |
+|---|---|
+| Wrap model | **Re-parent** (Paper L1): the selected strokes/headings get `parentId = link.id` and stay live rows — no id churn, no embedded copies. Unlink = re-parent back to the page (undoable). Page delete/reconcile cascades **grandchildren** (`deepChildIds`). |
+| Storage | Additive row type `TYPE_LINK = "link"` in the universal `notebook` table — no version bump, no Room-hash change. **Payload = Paper's exact v1 grammar in `text`** (`L1\|chrome\|kind\|nb\|pg` — K1 verifies the byte-exact spec against `PAPER_LINKS_PLAN.md` before coding) so link rows stay family-compatible: SN reads a Paper-created link's chrome/target (cross-app ids simply resolve dead → the dead-target rule). `flags` stays null (no chrome cache — parse at load, session map); `style` written null, read leniently (Paper put its provider id there). |
+| Chrome | **Per-link, UNDERLINE default**, underline/none only (og's dotted-chevron excluded). Style toggle in the picker, editable via Edit. 1 dp inkBlack line under the union bbox, drawn **live** by the link renderer, never baked. |
+| Picker modes | og/Paper trio: **This notebook · Notebook · Notebook page**. Current page excluded from the This-notebook grid; current notebook hidden in both Notebook modes. Paged card grid (library `GridMath`), no search (deferred, as in Paper → BACKLOG). |
+| Page previews | **Both page grids** (og feature, Paper skipped): stroke + heading thumbnails rendered async per grid page (placeholder card while rendering), current notebook from the live session (drain first), foreign notebooks via a **read-only** `SoilCrypto` open (global key) + `StrokeRasterizer` + the markdown draw for headings. Notebook cards keep cover snapshots. |
+| Page names | **Heading-as-page-name**: a page's card label = "n · <topmost heading>" (topmost by `(y, x)`, `stripHeadingPrefix`), plain "Page n" when headingless. Picker grids only — SN has no other page index. |
+| Create-in-picker | **Full og/Paper-L3 parity + naming schemes.** New page in both page grids (selected anchor → Insert before/after sheet, else append; template inherited; auto-selected as target; **no undo** for picker creations — og rule). New notebook = **the real `NewNotebookActivity`** launched from the picker, `EXTRA_DEFAULT_NAME` prefilled via `resolveScheme` on the destination folder; on return auto-selected (Notebook mode) or drilled into (Page mode). New folder = the library's New-folder dialog shape (**name + scheme fields**, S2's `NameDialog.extraField`), scheme saved after create, navigate in. |
+| Follow | **Finger-only tap, never stylus** (og/Paper). Whole-link tappable via bbox; tap on a *selected* link = no-op. Same-notebook → direct navigate; cross-notebook → seal → relaunch with `EXTRA_VIA_LINK` (+`EXTRA_INITIAL_PAGE_ID`), **"Opening…" overlay at tap time** (og pattern, `OpeningOverlay.showThen`). Whole-notebook target opens at its remembered page (`refId`). |
+| Trail | **Persisted** (SN prefs — no ext store), cap 50, cleared on any fresh non-via-link open, dead entries skipped **silently** on the way back. **Swipe-up = walk back** (the user-specified gesture); in a via-link notebook **both Backs walk the trail too** (Paper L4). |
+| Dead target at tap | **Problem dialog + an "Edit link…" button** that opens the picker prefilled to retarget on the spot (notebook-gone and page-gone get their own wording). Link row untouched otherwise. |
+| Ops | **Full Paper set**: selection toolbar grows **Link** (pure stroke/heading selection — hidden when the selection contains a link), **Edit + Unlink** (single-link selection). Eraser erases **whole links** (scribble-erase immune — Paper L1 user call). Lasso move/delete first-class. Undo: `LinkCreated` / `LinkUnlinked` / `LinkEdited` + `Moved`/`Deleted` carrying `linkIds`. |
+| Arc shape | **Five phases**: K1 core rows/render/ops · K2 picker (existing targets) · K3 create-in-picker · K4 follow + trail · K5 review/freeze. |
+
+### Arc-6 standing traps (inherited from og + Paper's L arcs — assume they apply)
+
+- **The hover repaint trap (Paper L4's one field finding):** a freshly created link's chrome
+  stayed invisible while the pen hovered because the composite repaint was `whenPenIdle`-gated
+  and EMR hover held it back. Build/refresh link render content **before** the page-load
+  frame, never behind an idle gate.
+- **Seal/reopen race** on fast A→B→swipe-up: `close()` must await the seal before the relaunch
+  (`close(andThen)` starts the next Activity strictly after the seal — Paper L4's shape).
+- A recreated via-link notebook **re-applies `EXTRA_INITIAL_PAGE_ID`** from the redelivered
+  Intent (Paper accepted this; K4 decides handle-or-record).
+- **ActivityResult callback runs BEFORE `onResume`** (the S2 latch regression) — every latch
+  around the picker/new-notebook round-trips must release at the top of the result callback.
+- A picker page-create in the **current** notebook invalidates old `Structural` undo snapshots
+  → clear the undo stack on that return (Paper L3's recorded consequence).
+- adb cannot inject stylus ink or lasso — link creation and lasso ops on device are the
+  user's; finger `input tap` / `input swipe` DO work, so K4's follow + swipe-up walks are
+  agent-injectable once links exist.
+- One `writer.drain()` before any gather/raster of the current notebook (shared `SoilWriter`).
+- zipflinger inflates incremental debug APKs — clean build before chasing size.
+
+### K1 — Core link rows + render + ops
+**Status:** ⬜ Not started
+
+`SoilSchema.TYPE_LINK` + payload codec (Paper's v1 grammar, byte-verified against
+`PAPER_LINKS_PLAN.md`), `PageLink`/`LinkRows`, `LinkStore` on the session's shared serial
+`SoilWriter` (wrap = link row + child re-parent in one transaction; unlink = re-parent back;
+`deepChildIds` cascade for page delete/reconcile), link renderer as a g-paper
+`ContentRenderer` (children composite: `StrokeRasterizer` for stroke children + the N1
+markdown draw for heading children, 1 dp underline chrome from the session chrome map,
+hit targets, live-drag pair — below top-level strokes, og order), selection-toolbar Link /
+Edit / Unlink buttons (Link + Edit **inert until K2**, Unlink live), eraser whole-link via
+`onContentErased`, lasso move/delete with `linkIds` on `Moved`/`Deleted`, undo actions
+`LinkCreated`/`LinkUnlinked` (+`LinkEdited` contract, exercised in K2), **temporary
+debug-only "Create test link" button** (removed in K5) to exercise everything pre-picker.
+**Gate:** JVM tests (payload codec round-trip incl. Paper-grammar fixtures, LinkRows,
+wrap/unwrap transactions, undo replay, deepChildIds); debug + release build; Haiku device
+walk (test-link render in screencap, persistence across close/reopen + cold restart, crash
+buffer); **user eye check** (wrap a real selection via debug create, underline render, drag,
+whole-link erase, unlink, undo/redo of everything).
+*Fable writes the payload codec + store + renderer seam + undo contracts; Opus the flows and
+NotebookActivity wiring; Sonnet icons/strings.*
+
+**Questions to resolve at phase start:** link z-order confirmation (below strokes, og order —
+or above?); whether a link may wrap another link (Paper: selection containing a link hides
+the Link action — recommend the same); debug create-test-link's target (next page vs. fixed).
+
+### K2 — Picker (existing targets) + previews + heading page names
+**Status:** ⬜ Not started
+
+`LinkPickerActivity` (in-app, `IndexGuard`, portrait, e-ink chrome): mode trio, Style toggle
+(underline/none), paged card grids on `GridMath`, current-page/current-notebook exclusions,
+**page previews in both grids** (async raster + placeholder; foreign `.soil` read-only open;
+per-showing cache), **"n · heading" page labels** (topmost by `(y, x)`), edit prefill
+(`EXTRA_INITIAL_*`), OK → create (`LinkCreated`) or edit (`LinkEdited`) in the host; Link +
+Edit buttons go live. Reload-preserving-current on any picker return.
+**Gate:** JVM tests (label composition, preview sizing math, payload build from picker
+results, exclusion rules); debug + release build; Haiku device walk (modes, exclusions,
+previews visible in screencap, labels, style toggle, cancel/OK returns); **user eye check**
+(create + edit real links end to end, preview fidelity, picker feel).
+*Fable writes the preview raster seam + host create/edit wiring; Opus the picker screen;
+Sonnet layouts/icons/strings.*
+
+**Questions to resolve at phase start:** preview card size/aspect (page aspect at grid-cell
+width?); preview cache lifetime (per-showing vs. per-session); whether the This-notebook
+grid also labels the (excluded) current page's neighbours by heading — trivially yes, ask
+only if a conflict surfaces.
+
+### K3 — Create-in-picker (+ naming schemes)
+**Status:** ⬜ Not started
+
+New page in both page grids (anchor → Insert before/after `ActionSheetDialog`, else append;
+template inherited from anchor/last page; auto-selected; current-notebook insert without
+navigating + undo-stack clear on return); New notebook = real `NewNotebookActivity` from the
+picker (`EXTRA_DEFAULT_NAME` via `resolveScheme` on the browse folder, result → auto-select
+or drill); New folder = name + scheme dialog (S2 `NameDialog.extraField` recipe, library
+validation + duplicate check, `createFolder` + `setScheme`, navigate in). No undo for
+picker creations. All round-trip latches release in the result callback (S2 trap).
+**Gate:** JVM tests (anchor/append placement, template inheritance, scheme resolution for
+the picker path); debug + release build; Haiku device walk (new-page sheet + placement,
+new-notebook screen opens scheme-prenamed, new-folder dialog shape — typed text is the
+user's, IME trap); **user eye check** (create page/notebook/folder as targets, scheme
+prenaming correctness incl. `{n}`, link to each created target).
+*Opus implements against Fable's contract; Fable reviews.*
+
+**Questions to resolve at phase start:** none expected — og/Paper-L3 rules + arc-5 wiring
+locked above; ask only if `NewNotebookActivity`'s result contract needs widening.
+
+### K4 — Follow + trail
+**Status:** ⬜ Not started
+
+`PageGestures.onFingerTap` (escrowed inverse recogniser, finger-only) + `onSwipeUp` (the
+flip's constants against screen height, `dy < 0`, judged at the same `ACTION_UP` — mutually
+exclusive with the Contents swipe-down); pure `LinkNav` planner (`planFollow`/`planBack`);
+`LinkTrail` prefs store (cap 50, cleared on fresh non-via-link open, dead entries skipped
+silently); follow = same-notebook `navigateTo` vs. cross-notebook seal → `close(andThen)` →
+`EXTRA_VIA_LINK` + `EXTRA_INITIAL_PAGE_ID` + tap-time "Opening…" overlay; whole-notebook
+target honours `refId`; **both Backs walk the trail in via-link notebooks**; dead-target
+dialog with **Edit link…** button (picker prefilled); every follow pushes the origin.
+**Gate:** JVM tests (`LinkNav`, trail cap/clear/skip); debug + release build; Haiku device
+walk — **follows and swipe-up are finger-injectable**: real follow chains A→B→C, swipe-up
+walk-back, Back parity, trail survives force-stop, fresh open clears, dead-target dialog
+after deleting a target page, crash buffer; **user eye check** (tap feel vs. accidental
+follows while writing, swipe-up feel vs. flip misfires, Opening overlay, dead-target
+dialog wording).
+*Fable writes gestures + LinkNav + navigation surgery (close/seal ordering); Opus trail
+store + dialogs + wiring; Sonnet strings.*
+
+**Questions to resolve at phase start:** trail-push granularity on repeated follows of the
+same link (Paper: every follow pushes — recommend same); whether `EXTRA_INITIAL_PAGE_ID`
+Intent-redelivery on recreate is handled or recorded (Paper accepted it).
+
+### K5 — Review + hardening + docs + freeze
+**Status:** ⬜ Not started
+
+Remove the K1 debug create-test-link (+ its strings); arc-range `/code-review` (level asked
+at phase start), findings fixed or explicitly accepted → `BACKLOG.md`; docs
+(`docs/links.md` **new** under the app, `docs/notebook.md` links + gestures sections,
+`docs/library.md` if touched, frame-silence ledger if any new exception); app `CLAUDE.md`
+touch-ups; memory + this file's outcomes; version-stamp decision; full regression (Haiku
+walk + short user checklist); commit + push; arc freeze.
+**Gate:** everything green or explicitly accepted; user all-clear.
+
+**Questions to resolve at phase start:** review level (every arc froze at **high**);
+version stamp (0.1.0-ratta so far — links may warrant 0.2.0-ratta, user's call).
+
+---
+
 ## Verification (end of arc)
 
 1. All JVM unit tests green (`./gradlew test` in `apps/notesprout_ratta`).
