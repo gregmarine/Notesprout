@@ -161,7 +161,14 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   layer — Paper's arc-5 design baked into `:app`), both entry points (top-bar button +
   one-finger swipe-down), C2 hardening (arc-range `/code-review high`: 10 findings, all
   fixed — incl. the long-press sequence stand-down, ContentsFlow degrade-not-crash, and
-  navigate-by-page-id). Read `apps/notesprout_ratta/RATTA_PLAN.md` first for any work there.
+  navigate-by-page-id). **Arc 5 ("Naming") is complete and frozen — S1–S2 ✅ 2026-08-23**:
+  folder naming schemes as a core feature (v2 token language incl. date-part/name tokens,
+  additive `naming` index rows, nearest-ancestor resolution, four entry points incl.
+  breadcrumb long-press for the root), S2 hardening (arc-range `/code-review high`:
+  10 findings, 9 fixed + 1 accepted → `BACKLOG.md` — incl. the New-folder OK re-entry
+  guard, the counter-overflow cap backstop, and hand-list month/weekday names so CLDR
+  drift can't stall `{n}`; plus the user-caught create-then-open latch regression).
+  Read `apps/notesprout_ratta/RATTA_PLAN.md` first for any work there.
 - `germination` — previous post-MVP feature branch (reference, not active)
 - The former feature branches (`seed`, `sprout`, `sapling`, `supernote`, `paper`) are merged and
   **deleted** (local + remote) — "on sprout/sapling/supernote/paper" means `main`; history lives under

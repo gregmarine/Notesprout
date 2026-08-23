@@ -811,3 +811,22 @@ future engines, same acceptance shape as R6's `createRaw`); `NotebookActivity` e
 intent); `Dialogs.problem` duplication in `RecognizerReadiness.showDownloadFailed`, dead
 `problemTitleRes` default, `SelectionToolbar`/`NameDialog`-family duplication, per-draw markdown
 parse in `HeadingRenderer`, mirrored `SELECTION_BOX_INFLATE_PX` constant (deliberate, commented).
+
+## Notesprout SN — S2 (arc 5) review findings accepted (not fixed) in the naming freeze (2026-08-22)
+
+The arc-5 `/code-review high` pass (S1 range) fixed 9 of its 10 findings in SN (see RATTA_PLAN.md
+S2 Outcome). One was **explicitly accepted**:
+
+- **`resolveScheme` is N+1 on top of `ancestry`'s per-hop walk** (`IndexRepository.kt`): for a
+  folder D deep, D `summaryById` reads plus up to D+1 `namingRowAny` reads run sequentially in the
+  + tap's pre-launch gap (bounded ~101 round-trips by the 50-hop cap; realistic depths are
+  single-digit ms). Same family as R6's accepted library perf niggles. If it ever shows on device:
+  one query — `WHERE type='naming' AND deletedAt IS NULL AND (parentId IN (:ancestorIds) OR
+  parentId IS NULL)` — plus an in-memory nearest-first pick over the ancestry list.
+
+Refuted-but-noted from the same review, recorded so it isn't re-found: the naming-row table has no
+UNIQUE(parentId) constraint and `namingRowAny` is an unordered `LIMIT 1`, so two concurrent
+`setScheme` writers *could* create twin rows — provably unreachable through today's click-guarded,
+modal UI, and adding an index would touch the Room-validated schema (the format contract with
+Paper). Revisit only alongside a family-wide schema change. Also refuted: Cancel-during-save window
+(app-wide established pattern, sub-human-reaction window, no harm).

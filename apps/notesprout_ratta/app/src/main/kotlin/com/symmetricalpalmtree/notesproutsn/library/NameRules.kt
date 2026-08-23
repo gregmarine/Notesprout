@@ -11,7 +11,12 @@ package com.symmetricalpalmtree.notesproutsn.library
  */
 object NameRules {
 
-    private val ALLOWED = Regex("^[a-zA-Z0-9_\\-. ]+$")
+    /**
+     * The family charset — the ONE place it is written. Anchored, empty allowed: emptiness is
+     * [Problem.EMPTY]'s job here, and `SchemeEngine` validates literal *fragments* against this
+     * (a fragment like `".txt"` is a legal piece of a name without being a legal name).
+     */
+    val CHARSET = Regex("^[a-zA-Z0-9_\\-. ]*$")
 
     /** The three ways a name can fail, as string-resource-free tokens the caller maps to text. */
     enum class Problem { EMPTY, RESERVED, CHARSET }
@@ -20,7 +25,7 @@ object NameRules {
     fun validate(name: String): Problem? = when {
         name.isBlank() -> Problem.EMPTY
         name == "." || name == ".." -> Problem.RESERVED
-        !ALLOWED.matches(name) -> Problem.CHARSET
+        !CHARSET.matches(name) -> Problem.CHARSET
         else -> null
     }
 

@@ -1,7 +1,6 @@
 package com.symmetricalpalmtree.notesproutsn.library
 
 import android.content.Context
-import android.text.InputType
 import android.util.Log
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -68,18 +67,7 @@ object SchemeDialog {
             setTextColor(ink)
             setPadding(0, (16 * d).toInt(), 0, (4 * d).toInt())
         }
-        val input = EditText(context).apply {
-            setHint(hintRes)
-            textSize = 16f
-            setTextColor(ink)
-            background = ContextCompat.getDrawable(context, R.drawable.shape_bordered)
-            val pad = (12 * d).toInt()
-            setPadding(pad, pad, pad, pad)
-            inputType = InputType.TYPE_CLASS_TEXT
-            maxLines = 1
-            setSingleLine()
-            if (!initial.isNullOrEmpty()) { setText(initial); setSelection(0, initial.length) }
-        }
+        val input = NameDialog.input(context, hintRes, initial)
         val help = TextView(context).apply {
             setText(helpRes)
             // Secondary, so it is smaller — never inkLight: the token list is meant to be read.

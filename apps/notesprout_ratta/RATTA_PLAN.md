@@ -1038,7 +1038,7 @@ v2 tokens, inheritance, root scheme, create-with-scheme, bad-scheme dialog keeps
 all-clear. Version stays 0.1.0-ratta. Both variants reinstalled current on SNN.
 
 ### S2 — Review + hardening + docs
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-23)
 
 Arc-range `/code-review` (level asked at phase start), findings fixed or explicitly accepted →
 `BACKLOG.md`; docs (`docs/library.md` §Naming section); app `CLAUDE.md` touch-ups if any; memory +
@@ -1046,6 +1046,42 @@ this file's outcomes; version-stamp decision; regression (Haiku walk + short use
 commit + push; arc freeze.
 
 **Questions to resolve at phase start:** review level; version stamp.
+**Answered 2026-08-22:** review at **high** (the level every prior arc freeze used);
+version stays **0.1.0-ratta** (the version is the experiment's, not per-arc).
+
+**Outcome:** Arc-range `/code-review high` (acf04fd..HEAD): 23 raw candidates → **10 findings — 9
+fixed by Fable, 1 accepted** → monorepo `BACKLOG.md`. Correctness: ① the New-folder OK had no
+re-entry guard (an e-ink double-tap runs two creates whose duplicate checks both read before
+either insert — two identically named folders, each saving its own naming row) → closure-scoped
+`accepting` guard armed across the coroutine, rename given the same guard; ② a counter that
+outgrows its declared width expands past the 100-char cap and the `NameRules.isValid` backstop is
+length-blind → the backstop now also checks the cap; over-cap degrades to the timestamp default
+(never truncated). Cleanups: **one shared `launching` latch** for both library doors (two per-door
+flags let a card tap + a + tap stack two screens in the feedback gap); `SchemeEngine` validates
+against `NameRules.CHARSET`/`NameRules.validate` (the charset is written once); the month/weekday
+names are emitted **from the hand lists via Calendar indices, never a formatter** — CLDR drift
+(the en_GB "Sep"→"Sept" family) can no longer stall counters, pinned by a new 12-month + 7-weekday
+JVM test; `deleteFolderRecursive` calls `clearScheme` instead of an inline copy;
+`NameDialog`'s three sentinel res-int params → an optional caller-built `extraField`
+(callback back to `(name, dismiss)`); one shared `NameDialog.input` bordered-field recipe;
+siblings fetched only when the parsed scheme actually holds a counter (`hasCounter` +
+`expand(parts, …)` overload). Accepted: `resolveScheme`'s N+1 ancestry walk (single-digit ms at
+realistic depths, R6-perf-niggle family; the one-query fix is recorded in BACKLOG.md).
+Refuted-but-noted there too: naming-row UNIQUE hardening (race unreachable via the modal
+click-guarded UI; an index would touch the Room-validated schema — the Paper format contract).
+**One S2 regression, user-caught in the eye check:** the merged latch silently dropped the open
+of a just-created notebook — the ActivityResult callback runs *before* `onResume`'s reset, so
+`openNotebook` saw the latch still armed from the + tap. Fixed by releasing the latch at the top
+of the callback (the round-trip it guards is over); adb-verified end to end: create → auto-open,
+double-tap latch still one instance, cross-door latch still one screen. **313 JVM tests** (312 +
+the single-authority pin), debug + release build. **Haiku walk 11/11 on the first run, zero
+tap-aim false failures** (both scheme dialogs incl. the root crumb's, New-folder scheme field,
+timestamp prefill, create→open, both latches, delete, crash buffer, cold restart). Docs:
+`docs/library.md` gains § "Name schemes (arc 5)" + the `SchemeEngineTest` tests-table row;
+BACKLOG.md arc-5 section; app `CLAUDE.md` unchanged (no new rules, no new frame-silence
+exceptions). **User eye check all-pass 2026-08-23** (v2 tokens, `{n}` counting, double-tap OK
+guard, clear; the create-then-open fix confirmed live). Version stays **0.1.0-ratta**; arc 5
+frozen. Both variants reinstalled current on SNN.
 
 ---
 

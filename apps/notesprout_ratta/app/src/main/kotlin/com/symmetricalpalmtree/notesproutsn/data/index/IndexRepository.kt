@@ -99,10 +99,11 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
                     notebookIds += nb.id
                 }
                 for (sub in dao.childrenOfType(fid, ObjectType.FOLDER)) stack.add(sub.id)
-                // The folder's naming scheme goes with it, in the same transaction: a stranded
-                // alive naming row under a dead folder would be invisible, un-clearable, and would
-                // come back to life if that folder id were ever reused.
-                dao.namingRowAny(fid)?.let { if (it.deletedAt == null) dao.softDelete(it.id, now) }
+                // The folder's naming scheme goes with it — clearScheme's own semantics, inside
+                // this same transaction (Room's suspending withTransaction rides the coroutine
+                // context): a stranded alive naming row under a dead folder would be invisible,
+                // un-clearable, and would come back to life if that folder id were ever reused.
+                clearScheme(fid, now)
                 dao.softDelete(fid, now)
             }
         }

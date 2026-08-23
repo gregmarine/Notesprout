@@ -1,6 +1,7 @@
 package com.symmetricalpalmtree.notesproutsn.library
 
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.regex.Pattern
@@ -36,9 +37,9 @@ import java.util.regex.Pattern
  *  - **Everything is capped at [MAX_SCHEME_CHARS]**, counted at the *expansion*, not the source:
  *    `{monthname}` is 11 characters of scheme but up to 9 of name.
  *
- * All formatting is pinned to [FORMAT_LOCALE] (English) on purpose: the month and weekday names are
- * part of the skeleton's alphabet, so a device-locale change must never make yesterday's notebooks
- * stop counting.
+ * Numeric formatting is pinned to [FORMAT_LOCALE]; the month and weekday names come from the
+ * engine's own hand lists — the same alphabet the skeleton matches against — so neither a
+ * device-locale change nor a CLDR data update can make yesterday's notebooks stop counting.
  *
  * Failures are codes ([Error]) — the dialog maps them to sentences; the engine has no strings.
  */
@@ -50,11 +51,13 @@ object SchemeEngine {
     private const val MAX_COUNTER_WIDTH = 9
 
     /**
-     * The formatting locale — **`Locale.US`, not `Locale.ROOT`**. The numeric patterns are identical
-     * either way, but CLDR's *root* locale renders `MMMM` and `EEEE` as the abbreviated forms
-     * ("Aug", "Sun"), which would make `{monthname}` and `{mon}` the same token. `Locale.US` is what
-     * actually delivers the English names the language promises — and it is fixed, so the scheme a
-     * folder holds means the same thing whatever the device's locale is set to.
+     * The locale for the **numeric** patterns — fixed so a device-locale change can never alter a
+     * digit's shape. The month and weekday *names* deliberately do not come from a formatter at
+     * all: they are read from the hand lists below, the same alphabet [skeleton] matches against,
+     * so the formatter's CLDR data and the skeleton can never drift apart (en_GB's "Sep" → "Sept"
+     * is the kind of change that would otherwise stall every counter). One authority, both uses.
+     * (Historical note: `Locale.US`, not `Locale.ROOT`, because CLDR's root locale renders `MMMM`
+     * and `EEEE` as the abbreviated forms — kept for the numeric patterns' sake.)
      */
     private val FORMAT_LOCALE: Locale = Locale.US
 
@@ -77,9 +80,10 @@ object SchemeEngine {
 
     class SchemeException(val error: Error, val detail: String = "") : Exception("$error $detail")
 
-    private val LITERAL_PATTERN = Regex("^[a-zA-Z0-9_\\-. ]*$")
     private val COUNTER_PATTERN = Regex("^n(?::([1-9]))?$")
 
+    // The single authority for the name tokens: expansion reads these by Calendar index and the
+    // skeleton alternates over them — never a formatter, whose CLDR data could drift (K2/S2).
     private val MONTH_NAMES = listOf(
         "January", "February", "March", "April", "May", "June",
         "July", "August", "September", "October", "November", "December",
@@ -102,7 +106,7 @@ object SchemeEngine {
         fun flushLiteral() {
             if (literal.isNotEmpty()) {
                 val text = literal.toString()
-                if (!LITERAL_PATTERN.matches(text)) throw SchemeException(Error.ILLEGAL_CHAR)
+                if (!NameRules.CHARSET.matches(text)) throw SchemeException(Error.ILLEGAL_CHAR)
                 parts += Part.Literal(text)
                 literal.setLength(0)
             }
@@ -151,10 +155,12 @@ object SchemeEngine {
         // 100th notebook under {n:2}) is the one thing not knowable from the scheme alone.
         val expandedWorstCase = parts.sumOf { maxWidth(it) }
         if (expandedWorstCase > MAX_SCHEME_CHARS) throw SchemeException(Error.TOO_LONG)
-        // A literal-only scheme expands to itself, so it must be a name the library would take.
+        // A literal-only scheme expands to itself, so it must be a name the library would take —
+        // NameRules' word on it, not a re-spelling (charset is already fragment-checked above, so
+        // only EMPTY/RESERVED can fire here).
         if (parts.all { it is Part.Literal }) {
             val joined = parts.joinToString("") { (it as Part.Literal).text }
-            if (joined.isBlank() || joined == "." || joined == "..") throw SchemeException(Error.EMPTY)
+            if (NameRules.validate(joined) != null) throw SchemeException(Error.EMPTY)
         }
         return parts
     }
@@ -168,9 +174,18 @@ object SchemeEngine {
      * number among siblings matching the scheme's [skeleton]; numbers wider than the declared width
      * are never truncated. Throws [SchemeException] if the scheme does not parse.
      */
-    fun expand(scheme: String, now: Long, siblingNames: List<String>): String {
-        val parts = parse(scheme)
-        val next = if (parts.any { it is Part.Counter }) nextCounter(parts, siblingNames) else 0
+    fun expand(scheme: String, now: Long, siblingNames: List<String>): String =
+        expand(parse(scheme), now, siblingNames)
+
+    /** True when [parts] holds a counter — the only case [expand] reads the sibling names at all. */
+    fun hasCounter(parts: List<Part>): Boolean = parts.any { it is Part.Counter }
+
+    /**
+     * The already-parsed form of [expand] — for a caller that parses first (to decide whether the
+     * siblings are even worth fetching) and must not pay the parse twice.
+     */
+    fun expand(parts: List<Part>, now: Long, siblingNames: List<String>): String {
+        val next = if (hasCounter(parts)) nextCounter(parts, siblingNames) else 0
         val at = Date(now)
         val sb = StringBuilder()
         for (p in parts) {
@@ -181,10 +196,10 @@ object SchemeEngine {
                 Part.Year -> sb.append(format("yyyy", at))
                 Part.Month -> sb.append(format("MM", at))
                 Part.Day -> sb.append(format("dd", at))
-                Part.MonthName -> sb.append(format("MMMM", at))
-                Part.Weekday -> sb.append(format("EEEE", at))
-                Part.Mon -> sb.append(format("MMM", at))
-                Part.Wd -> sb.append(format("EEE", at))
+                Part.MonthName -> sb.append(MONTH_NAMES[monthIndex(at)])
+                Part.Weekday -> sb.append(WEEKDAY_NAMES[weekdayIndex(at)])
+                Part.Mon -> sb.append(MONTH_ABBREVIATIONS[monthIndex(at)])
+                Part.Wd -> sb.append(WEEKDAY_ABBREVIATIONS[weekdayIndex(at)])
                 is Part.Counter -> sb.append(next.toString().padStart(p.width, '0'))
             }
         }
@@ -238,6 +253,14 @@ object SchemeEngine {
 
     private fun format(pattern: String, at: Date): String =
         SimpleDateFormat(pattern, FORMAT_LOCALE).format(at)
+
+    /** 0-based month of [at] in the default timezone (the one the numeric formatter uses too). */
+    private fun monthIndex(at: Date): Int =
+        Calendar.getInstance().apply { time = at }.get(Calendar.MONTH)
+
+    /** Index into the Monday-first name lists (Calendar's week runs SUNDAY=1 … SATURDAY=7). */
+    private fun weekdayIndex(at: Date): Int =
+        (Calendar.getInstance().apply { time = at }.get(Calendar.DAY_OF_WEEK) + 5) % 7
 
     private fun nextCounter(parts: List<Part>, siblingNames: List<String>): Int {
         val skeleton = skeleton(parts)

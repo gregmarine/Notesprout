@@ -232,4 +232,26 @@ class SchemeEngineTest {
             assertTrue("'$s' expanded past the cap: '$name'", name.length <= SchemeEngine.MAX_SCHEME_CHARS)
         }
     }
+
+    /**
+     * The single-authority guarantee (S2): every month and weekday name the expansion can ever
+     * emit must match the skeleton's alphabet — with a counter alongside, so the match is the
+     * counter's own life-or-death path, not a vacuous one. All 12 months and 7 weekdays.
+     */
+    @Test fun `every emitted month and weekday name matches the skeleton alphabet`() {
+        val monthParts = SchemeEngine.parse("{monthname} {mon} {n}")
+        val monthSkeleton = SchemeEngine.skeleton(monthParts)
+        for (month in 0..11) {
+            val at = (calendar.clone() as Calendar).apply { set(Calendar.DAY_OF_MONTH, 1); set(Calendar.MONTH, month) }
+            val name = SchemeEngine.expand(monthParts, at.timeInMillis, emptyList())
+            assertTrue("month $month: '$name' escaped the skeleton", monthSkeleton.matches(name))
+        }
+        val dayParts = SchemeEngine.parse("{weekday} {wd} {n}")
+        val daySkeleton = SchemeEngine.skeleton(dayParts)
+        for (offset in 0..6) {
+            val at = (calendar.clone() as Calendar).apply { add(Calendar.DAY_OF_MONTH, offset) }
+            val name = SchemeEngine.expand(dayParts, at.timeInMillis, emptyList())
+            assertTrue("day offset $offset: '$name' escaped the skeleton", daySkeleton.matches(name))
+        }
+    }
 }

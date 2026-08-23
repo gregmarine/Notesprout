@@ -78,6 +78,10 @@ class LibraryActivity : AppCompatActivity() {
     private val newNotebookLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
+        // The result callback runs BEFORE onResume, so the launch latch armed by the + tap is
+        // still up here — release it first or the open of the just-created notebook is silently
+        // dropped (S2 regression, user-caught). The round-trip the latch guards is over.
+        launching = false
         if (result.resultCode == Activity.RESULT_OK) {
             val id = result.data?.getStringExtra(NewNotebookActivity.EXTRA_NOTEBOOK_ID)
             val name = result.data?.getStringExtra(NewNotebookActivity.EXTRA_NOTEBOOK_NAME)
@@ -134,16 +138,17 @@ class LibraryActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        launchingNotebook = false
-        launchingNewNotebook = false
+        launching = false
         if (gridMeasured) lifecycleScope.launch { refresh() }
     }
 
-    /** True from a notebook launch until the library is back on top — the double-tap latch. */
-    private var launchingNotebook = false
-
-    /** The same latch for +Notebook, which now resolves a naming scheme before it launches. */
-    private var launchingNewNotebook = false
+    /**
+     * True from any launch out of the library until it is back on top — ONE latch for every door
+     * (notebook card *and* +Notebook), because in the e-ink feedback gap the second tap is not
+     * always on the same control: a card tap plus a + tap would otherwise each pass their own flag
+     * and stack two screens (S2 review finding).
+     */
+    private var launching = false
 
     /**
      * The one door into [NotebookActivity]. E-ink gives a tap no feedback for hundreds of ms, so
@@ -156,8 +161,8 @@ class LibraryActivity : AppCompatActivity() {
      * carries the same box from its own first frame until the page lands.
      */
     private fun openNotebook(id: String, name: String) {
-        if (launchingNotebook) return
-        launchingNotebook = true
+        if (launching) return
+        launching = true
         OpeningOverlay.showThen(this) { startActivity(NotebookActivity.intent(this, id, name)) }
     }
 
@@ -171,15 +176,15 @@ class LibraryActivity : AppCompatActivity() {
      * all means the screen opens with its own timestamp default.
      */
     private fun launchNewNotebook() {
-        if (launchingNewNotebook) return
-        launchingNewNotebook = true
+        if (launching) return
+        launching = true
         val fid = folderId
         lifecycleScope.launch {
             val prefill = resolveAndExpand(fid)
             // The beat is normally a few ms, but if the user has meanwhile left this folder the tap
             // no longer means "here" — drop it rather than create somewhere else.
             if (folderId != fid || isFinishing || isDestroyed) {
-                launchingNewNotebook = false
+                launching = false
                 return@launch
             }
             newNotebookLauncher.launch(NewNotebookActivity.intent(this@LibraryActivity, fid, prefill))
@@ -188,18 +193,25 @@ class LibraryActivity : AppCompatActivity() {
 
     /**
      * The scheme governing [fid] (nearest ancestor, then the root), expanded against the folder's
-     * live notebook names so `{n}` counts the right siblings. Null when there is no scheme — or
-     * when anything at all goes wrong: this runs in `lifecycleScope`, which has no handler, and a
-     * naming scheme is never worth a crash.
+     * live notebook names so `{n}` counts the right siblings — which are fetched only when the
+     * scheme actually holds a counter; nothing else in the expansion reads them. Null when there
+     * is no scheme — or when anything at all goes wrong: this runs in `lifecycleScope`, which has
+     * no handler, and a naming scheme is never worth a crash.
      */
     private suspend fun resolveAndExpand(fid: String?): String? = try {
         val scheme = repo.resolveScheme(fid)
         if (scheme == null) null else {
-            val siblings = repo.notebooks(fid).map { it.name }
-            val expanded = SchemeEngine.expand(scheme, System.currentTimeMillis(), siblings)
-            // Belt and braces: the engine's literal charset is the core name rule, so this cannot
-            // normally fail — but a name the library would refuse must never be handed to it.
-            if (NameRules.isValid(expanded)) expanded else {
+            val parts = SchemeEngine.parse(scheme)
+            val siblings =
+                if (SchemeEngine.hasCounter(parts)) repo.notebooks(fid).map { it.name }
+                else emptyList()
+            val expanded = SchemeEngine.expand(parts, System.currentTimeMillis(), siblings)
+            // Belt and braces: a name the library would refuse must never be handed to it — and a
+            // counter that outgrew its declared width can push the expansion past the 100-char cap
+            // (never truncated, so over-cap falls back to the default instead).
+            if (NameRules.isValid(expanded) && expanded.length <= SchemeEngine.MAX_SCHEME_CHARS) {
+                expanded
+            } else {
                 Log.w(TAG, "scheme expanded to an unusable name — using the default")
                 null
             }
@@ -528,69 +540,94 @@ class LibraryActivity : AppCompatActivity() {
      * everything typed in it) rather than leaving a folder behind. Once the folder is created it
      * stands: a scheme that then fails to save is explained, not rolled back — the user asked for a
      * folder and got one, and the scheme can be set again from its long-press.
+     *
+     * `accepting` is the OK button's re-entry guard (S2 review finding): the accept path crosses a
+     * coroutine, and an e-ink double-tap landing in that window would run two creates whose
+     * duplicate checks both read before either insert — two identically named folders. Armed only
+     * once the checks that keep the dialog open have passed; released when the coroutine ends.
      */
-    private fun showNewFolderDialog() = NameDialog.show(
-        this,
-        titleRes = R.string.new_folder_title,
-        confirmRes = R.string.new_notebook_create,
-        hintRes = R.string.new_folder_hint,
-        schemeCaptionRes = R.string.scheme_caption,
-        schemeHintRes = R.string.scheme_hint,
-        schemeHelpRes = R.string.scheme_help,
-    ) { name, scheme, dismiss ->
-        val problem = NameRules.validate(name)
-        if (problem != null) {
-            Dialogs.problem(this, R.string.name_problem_title, NameDialog.problemMessage(this, problem))
-            return@show
-        }
-        if (scheme.isNotEmpty()) {
-            val bad = SchemeEngine.validate(scheme)
-            if (bad != null) {
-                Dialogs.problem(this, R.string.naming_problem_title, SchemeDialog.message(this, bad))
+    private fun showNewFolderDialog() {
+        val schemeField = SchemeDialog.buildField(this)
+        var accepting = false
+        NameDialog.show(
+            this,
+            titleRes = R.string.new_folder_title,
+            confirmRes = R.string.new_notebook_create,
+            hintRes = R.string.new_folder_hint,
+            extraField = schemeField,
+        ) { name, dismiss ->
+            if (accepting) return@show
+            val scheme = schemeField.text()
+            val problem = NameRules.validate(name)
+            if (problem != null) {
+                Dialogs.problem(this, R.string.name_problem_title, NameDialog.problemMessage(this, problem))
                 return@show
             }
-        }
-        lifecycleScope.launch {
-            if (repo.nameTaken(folderId, ObjectType.FOLDER, name)) {
-                Dialogs.problem(this@LibraryActivity, R.string.name_problem_title, getString(R.string.new_folder_duplicate, name))
-                return@launch
-            }
-            val folder = repo.createFolder(name, folderId)
             if (scheme.isNotEmpty()) {
-                try {
-                    repo.setScheme(folder.id, scheme)
-                } catch (e: Exception) {
-                    Log.w(TAG, "new folder: scheme save failed", e)
-                    Dialogs.problem(this@LibraryActivity, R.string.naming_problem_title, getString(R.string.naming_save_failed))
+                val bad = SchemeEngine.validate(scheme)
+                if (bad != null) {
+                    Dialogs.problem(this, R.string.naming_problem_title, SchemeDialog.message(this, bad))
+                    return@show
                 }
             }
-            dismiss()
-            refresh()
+            accepting = true
+            lifecycleScope.launch {
+                try {
+                    if (repo.nameTaken(folderId, ObjectType.FOLDER, name)) {
+                        Dialogs.problem(this@LibraryActivity, R.string.name_problem_title, getString(R.string.new_folder_duplicate, name))
+                        return@launch
+                    }
+                    val folder = repo.createFolder(name, folderId)
+                    if (scheme.isNotEmpty()) {
+                        try {
+                            repo.setScheme(folder.id, scheme)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "new folder: scheme save failed", e)
+                            Dialogs.problem(this@LibraryActivity, R.string.naming_problem_title, getString(R.string.naming_save_failed))
+                        }
+                    }
+                    dismiss()
+                    refresh()
+                } finally {
+                    accepting = false
+                }
+            }
         }
     }
 
-    private fun showRenameDialog(s: ObjectSummary) = NameDialog.show(
-        this,
-        titleRes = R.string.rename_title,
-        confirmRes = R.string.action_rename,
-        initial = s.name,
-    ) { name, _, dismiss ->
-        if (name == s.name) { dismiss(); return@show }
-        val problem = NameRules.validate(name)
-        if (problem != null) {
-            Dialogs.problem(this, R.string.name_problem_title, NameDialog.problemMessage(this, problem))
-            return@show
-        }
-        lifecycleScope.launch {
-            // Excluding the item itself: re-casing its own name is a rename, not a collision.
-            if (repo.nameTaken(s.parentId, s.type, name, s.id)) {
-                val msg = if (s.type == ObjectType.NOTEBOOK) R.string.rename_duplicate_notebook else R.string.rename_duplicate_folder
-                Dialogs.problem(this@LibraryActivity, R.string.name_problem_title, getString(msg, name))
-                return@launch
+    private fun showRenameDialog(s: ObjectSummary) {
+        // Same re-entry guard as the New-folder accept — a double-fired rename is harmless today
+        // (same name, same row), but the guard keeps the whole dialog family one shape.
+        var accepting = false
+        NameDialog.show(
+            this,
+            titleRes = R.string.rename_title,
+            confirmRes = R.string.action_rename,
+            initial = s.name,
+        ) { name, dismiss ->
+            if (accepting) return@show
+            if (name == s.name) { dismiss(); return@show }
+            val problem = NameRules.validate(name)
+            if (problem != null) {
+                Dialogs.problem(this, R.string.name_problem_title, NameDialog.problemMessage(this, problem))
+                return@show
             }
-            repo.rename(s.id, name)
-            dismiss()
-            refresh()
+            accepting = true
+            lifecycleScope.launch {
+                try {
+                    // Excluding the item itself: re-casing its own name is a rename, not a collision.
+                    if (repo.nameTaken(s.parentId, s.type, name, s.id)) {
+                        val msg = if (s.type == ObjectType.NOTEBOOK) R.string.rename_duplicate_notebook else R.string.rename_duplicate_folder
+                        Dialogs.problem(this@LibraryActivity, R.string.name_problem_title, getString(msg, name))
+                        return@launch
+                    }
+                    repo.rename(s.id, name)
+                    dismiss()
+                    refresh()
+                } finally {
+                    accepting = false
+                }
+            }
         }
     }
 

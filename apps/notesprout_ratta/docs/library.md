@@ -173,6 +173,118 @@ A rejected name — bad characters or a duplicate — is a **problem dialog**, n
 
 ---
 
+## Name schemes (arc 5)
+
+A folder can say what the notebooks created inside it should be called. `SchemeEngine` (pure
+Kotlin, JVM-tested) is the language; the index stores one row per folder; the library owns all
+the UI. Paper's arc-2 Naming *extension* is the reading reference — here the whole provider
+layer (AIDL, store, client, discovery) is gone and the feature is core.
+
+### The language (v2 = Paper's v1 + date-part/name tokens)
+
+Literal text (the core name charset) plus tokens:
+
+| token | expands to | example |
+|---|---|---|
+| `{date}` | `yyyyMMdd` | `20260822` |
+| `{time}` | `HHmmss` | `143005` |
+| `{year}` / `{month}` / `{day}` | `yyyy` / `MM` / `dd` | `2026` / `08` / `22` |
+| `{monthname}` / `{mon}` | `MMMM` / `MMM` | `August` / `Aug` |
+| `{weekday}` / `{wd}` | `EEEE` / `EEE` | `Saturday` / `Sat` |
+| `{n}` / `{n:K}` | next number, zero-padded to K (1–9), at most once | `07` |
+
+Three rules hold it together:
+
+- **Literals obey `NameRules`' charset** — validated against `NameRules.CHARSET` itself (the one
+  place the charset is written; a literal-only scheme is judged by `NameRules.validate`), so a
+  scheme can only produce a name the library would have accepted by hand. Belt-and-braces: the
+  library still runs `NameRules.isValid` **and the 100-char cap** on the expansion and falls back
+  to the timestamp if either fails — a counter that outgrows its declared width (the 100th
+  notebook under `{n:2}` with 97 literal chars) is never truncated, so over-cap degrades to the
+  default instead (S2).
+- **`{n}` is a sibling question, not stored state**: 1 + the highest number among the creation
+  folder's alive notebook names matching the scheme's anchored **skeleton** regex — every
+  date/time/name position a wildcard of the right shape (fixed digit widths; non-capturing
+  alternations of the 12 month / 7 weekday names, so the counter stays capture group 1). That
+  is what makes the run continue across days, months, and years. Numbers wider than K are
+  matched and never truncated. Nothing is persisted — a rename or delete just changes the answer.
+- **100-char cap counted at the worst-case expansion**, not the source: `{monthname}` is 11
+  characters of scheme but up to 9 of name.
+
+Numeric formatting is pinned to `Locale.US` (not `Locale.ROOT` — CLDR's root locale renders
+`MMMM`/`EEEE` as the abbreviated forms). The month/weekday **names** never come from a formatter
+at all (S2): expansion reads the engine's own hand lists by `Calendar` index — the same alphabet
+the skeleton alternates over — so neither a device-language change nor a CLDR data update
+(en_GB's "Sep" → "Sept" is the precedent) can make new expansions stop matching the skeleton and
+stall the counter. One authority, both uses; pinned by a 12-month + 7-weekday JVM test.
+Failures are codes (`SchemeEngine.Error`); the dialog maps them to sentences — the engine has
+no strings.
+
+### Storage
+
+Additive index row type `naming` (`ObjectType.NAMING`) in the `objects` table — **no schema
+change, no Room-hash change**; Paper filters listings by type so the rows are invisible to it.
+One row per folder: `parentId` = folder id (**null = the library root**), `name` = the scheme
+text. Set = upsert **in place** (`namingRowAny` reads the row *including a soft-deleted one*,
+so re-setting revives the same row — a folder never accumulates naming rows); clear = soft
+delete. `deleteFolderRecursive` soft-deletes each folder's naming row in the same transaction —
+a stranded alive row would be invisible, un-clearable, and would come back if the folder id
+were ever reused.
+
+### Resolution
+
+`resolveScheme`: **nearest ancestor wins** — the creation folder first, then up the (already
+cycle-guarded) `ancestry` chain, finally the root's `parentId = null` row; first alive scheme
+is the answer, none → the core timestamp default. `{n}` always counts siblings in the
+**creation folder**, never the scheme-holding ancestor's.
+
+### Entry points — four, one dialog
+
+1. **New-folder dialog** — a second optional field: the caller builds it with
+   `SchemeDialog.buildField`, hands it to `NameDialog.show` as `extraField`, and reads it back
+   itself in its accept closure (rename passes nothing and knows nothing about schemes). Both
+   fields come from `NameDialog.input`, the one bordered single-line recipe, so the two stacked
+   inputs can never drift visibly apart. Order is deliberate: name rule → **scheme validation** →
+   duplicate check → create → save scheme. The scheme is validated *before* the folder exists,
+   so a mistyped token keeps the dialog; once the folder is created it stands — a scheme that
+   then fails to save is explained, not rolled back. The accept path is re-entry-guarded (S2):
+   it crosses a coroutine, and an e-ink double-tap on OK would otherwise run two creates whose
+   duplicate checks both read before either insert — two identically named folders (rename
+   carries the same guard for family consistency).
+2. **Folder long-press sheet** — "Default notebook name…" (`ic_cursor_text`). Folders only:
+   a scheme is a rule about what is created *inside* something.
+3. **Breadcrumb long-press** — any crumb **including the root** (the root has no card, so this
+   is its only way in). The long-press returns `true` so it never also navigates on release.
+4. **+Notebook** — the library resolves + expands *before* launching `NewNotebookActivity` and
+   hands the result in as `EXTRA_DEFAULT_NAME`; the screen stays naming-agnostic (a prefill
+   like any other, fully editable, Create-time duplicate check unchanged). Siblings are fetched
+   only when the parsed scheme actually holds a counter — nothing else reads them (S2). The
+   launch shares the library's **one** `launching` latch with the notebook-card door (S2: in the
+   e-ink feedback gap the second tap is not always on the same control — two per-door flags
+   would let a card tap plus a + tap stack two screens); reset in `onResume` **and at the top of
+   the New-notebook result callback** — the callback runs *before* `onResume`, so without that
+   release the open of the just-created notebook would hit the still-armed latch and be silently
+   dropped (S2 regression, user-caught). A mid-resolve folder change drops the tap rather than
+   create elsewhere.
+
+`SchemeDialog` (the standalone editor): does its own current-scheme read before showing — a
+read failure explains itself and opens nothing (an empty field would silently offer to
+overwrite a scheme that is actually there). **Blank save = clear** — there is no separate
+remove control. Positive button wired after `show()` (the `NameDialog` pattern), click-guarded
+via `isClickable` (never `isEnabled` — invisible on e-ink). The help line is inkBlack made
+smaller, never inkLight — the token list is meant to be read.
+
+### The failure rule
+
+Naming never blocks what the user chose. An unresolvable/unparseable stored scheme, or any
+failure in the resolve path → timestamp default silently (`Log.w` — the degrade-not-throw rule:
+these run in `lifecycleScope`, which has no handler). Validation/save failures → problem
+dialogs that keep the user's text. Three distinct failure strings (folder-created-but-scheme-
+not, standalone save, standalone read) because one wording would read wrongly in two of the
+three places.
+
+---
+
 ## Sort
 
 `SortRules` + `SortPrefs` (`sn_sort`, enum names only, default Name ↑).
@@ -365,5 +477,6 @@ library falls back to the root. Nothing in prefs is trusted as still existing.
 | `library/GridMathTest` | columns/rows/cards-per-page against a real Nomad band, page count rounding, clamp after a delete, page slice ranges, degenerate inputs |
 | `library/NameRulesTest` | whitelist, `.`/`..`, blank/whitespace, control characters, dots that are legal |
 | `library/SortRulesTest` | all four orders, case-insensitivity, folders-first in both directions and on both fields, stability |
+| `library/SchemeEngineTest` | every token parses (v1 + v2, exact names only), each `Error` case, expansion-counted 100 cap (shrinking tokens not charged source length), fixed-clock expansion of all tokens, `{n}` counting (starts at 1, highest + 1 with gaps ignored, continues across days / months / weekdays — every date/name position a wildcard, padded + unpadded both count, width never truncates), anchored quoted-literal skeleton, counter stays capture group 1 behind name tokens, every expansion satisfies `NameRules`, every emitted month/weekday name matches the skeleton alphabet (all 12 + all 7 — the single-authority pin) |
 | `library/RecentsAssemblyTest` | stored order survives (anti-alphabetical, anti-chronological fixtures), dead ids dropped, duplicates collapsed to their newest position, empty inputs, and that an alive id never visited is not invented |
 | `data/TemplateGeometryTest` | 8 mm spacing at dpi, density-scaled feature sizes with the 1 px floor, lined top margin, grid symmetry, grid-≠-lined, dot intersections, Nomad-page counts |
