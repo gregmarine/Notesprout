@@ -103,6 +103,14 @@ class LinkPickFlow(
             val s = session()
             // Previews read rows; the stroke the user just lifted the pen from may still be queued.
             runCatching { s.store.drain() }
+            // The drain suspends, and the screen can close in that gap (K5 review): close() has
+            // already dropped the relay and may be sealing the session — re-arming it here would
+            // launch the picker over a dead notebook and retain the sealed session for its
+            // lifetime. Bail instead; the tap is simply lost with the screen.
+            if (activity.isFinishing || activity.isDestroyed || !s.isOpen) {
+                busy = false
+                return@launch
+            }
             pendingCreate = selection
             pendingEdit = edit
             pagesChanged = false

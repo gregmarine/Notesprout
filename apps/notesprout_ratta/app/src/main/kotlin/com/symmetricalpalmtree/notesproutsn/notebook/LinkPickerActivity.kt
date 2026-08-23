@@ -313,6 +313,9 @@ class LinkPickerActivity : AppCompatActivity() {
                 btnUp.visibility = if (browseFolderId == null) View.GONE else View.VISIBLE
             }
         }
+        // The current folder is the crumb the user needs — scroll to the end like the library does
+        // (K5 review: the picker's copy had drifted and showed the START of a deep path).
+        breadcrumbScroll.post { breadcrumbScroll.fullScroll(View.FOCUS_RIGHT) }
     }
 
     private fun renderStyle() = with(binding) {

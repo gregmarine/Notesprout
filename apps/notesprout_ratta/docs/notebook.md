@@ -35,8 +35,9 @@ deliberate differences are listed at the end.
 | `core/RecognizingOverlay` (N2) | the "Recognizing…" box during a convert — `OpeningOverlay`'s smaller, dialog-free sibling |
 | `notebook/InkPayload` (N2) | `Stroke` (g-paper) → `InkStroke` (extension-api) in writing order — the one place a page's ink is reduced to bare geometry for the recognizer |
 | `CoverSnapshot` | `paper.renderToBitmap()` → ≤ 512 px long edge → WEBP q100 → `IndexRepository.setCover`; headings ride along for free (`HeadingRenderer` is part of the same committed-layer render) |
-| `NotebookToolbar` | `[←] [pen] [eraser] [lasso]` — arming only; owns the fixed tool values |
-| `SelectionToolbar` | the floating bar over a live lasso selection: Delete (always) + H (hidden only in `MIXED` mode), plus (N2) the H1–H6 level sub-toolbar it can open |
+| `NotebookToolbar` | `[←] [pen] [eraser] [lasso]` — arming only; owns the fixed tool values. Back goes through `backPressed()`, never straight to `close()` (K4 — both Backs walk the link trail in a via-link notebook) |
+| `SelectionToolbar` | the floating bar over a live lasso selection: Delete (always) + H, plus (K1) **Link** / **Edit** / **Unlink** by `SelectionMode` (five modes since K1), plus (N2) the H1–H6 level sub-toolbar it can open |
+| **Links (arc 6)** | `LinkPayload` · `PageLink`/`LinkRows` · `LinkStore` · `LinkComposite`/`LinkRenderer` · `LinkPickerActivity`/`LinkPickerModel`/`PageCardGrid` · `LinkPickFlow` · `PickerPageSource`/`ForeignPageSource`/`PageReads`/`PagePreview`/`PreviewMath`/`PageLabels` · `LinkFollowFlow`/`LinkNav` · `data/prefs/LinkTrail` — the whole subsystem is documented in [`docs/links.md`](links.md) |
 | `SelectionAnchor` | pure placement arithmetic for the bar (centre / gap / flip / clamp) and (N2) `placeSub` — the sub-toolbar hung off the bar the same way. JVM-tested |
 | `core/OpeningOverlay` | the source-side "Opening…" box and its pre-draw + post launch sequencing |
 | `OutlineTree` (C1) | pure Contents tree: items → nested H1–H6 nodes (orphans attach to the nearest shallower heading or become roots — never dropped), `visible`/`all`/`highlight`/`ancestorsOf` and the paging math. JVM-tested |
@@ -120,15 +121,20 @@ remembered.**
 
 ## Open
 
-`IndexGuard.ready` → extras (`EXTRA_NOTEBOOK_ID`, `EXTRA_NOTEBOOK_NAME`) →
-`BrowseState.lastOpenNotebookId = id`, `RecentsPrefs.record(id)` → `repo.alive(id)` (else problem
+`IndexGuard.ready` → extras (`EXTRA_NOTEBOOK_ID`, `EXTRA_NOTEBOOK_NAME`; K4 adds
+`EXTRA_VIA_LINK` + `EXTRA_INITIAL_PAGE_ID` — the initial page is **consumed once**, read only when
+`savedInstanceState == null`, so a recreated via-link notebook lands on its remembered page rather
+than re-following the redelivered Intent; [`docs/links.md`](links.md)) →
+`BrowseState.lastOpenNotebookId = id` (+ `lastOpenViaLink`, K4), `RecentsPrefs.record(id)` → `repo.alive(id)` (else problem
 dialog + finish) → `session.open()`: `KeySession` passphrase → file must exist and be non-empty
 (**never created here**) → `SoilDatabase.open` (raw-key fast path via `KeyOpener` when cached) →
 page rows (none → fail) → last-open page from the notebook row's `refId` → template decoded with
 `Bitmaps.decodeBounded` (≤ 4096 px). Then on Main: `setPageSize(w,h)` (the page's authored px
-rect, so ink registration survives a different screen), `setTemplate`, headings loaded
-(`session.headings.loadPage`, handed to `headingRenderer` **before** `loadStrokes` so the load's
-re-record already paints them), `loadStrokes(store.loadPage(id))`, page indicator.
+rect, so ink registration survives a different screen), `setTemplate`, headings and links loaded
+(`session.headings.loadPage` / `session.links.loadPage`, handed to their renderers **before**
+`loadStrokes` so the load's re-record already paints them — for links this ordering is
+load-bearing, the K1 hover-repaint trap; [`docs/links.md`](links.md)),
+`loadStrokes(store.loadPage(id))`, page indicator.
 
 A failed open is a **problem dialog** (SN's toast-confirms / dialog-explains rule), OK → finish —
 including a crash *mid*-open (the R6 hardening: `openSession`'s catch turns any non-cancellation
@@ -242,7 +248,7 @@ toolbar are set there by hand rather than waiting on the callback.
 
 | Act | What happens |
 |---|---|
-| Draw a lasso outline (or a smart-lasso loop) | engine draws the box; host shows the **selection toolbar** anchored to it, in one of three modes (below) |
+| Draw a lasso outline (or a smart-lasso loop) | engine draws the box; host shows the **selection toolbar** anchored to it, in one of five modes (below; the two link modes are [`docs/links.md`](links.md)) |
 | Drag inside the box | `onSelectionDragStarted` hides the bar(s); the engine translates + re-renders; `onSelectionMoved` → `store.move`/`headings.move` + working-copy patch + `Action.Moved`, then the bar re-anchors at the new bounds |
 | Tap the bar's **Delete strokes** | `releaseRender()` then `deleteSelection` (order below) |
 | Tap the bar's **H**, then a level (N2) | `onLevelPicked` — CONVERT on a pure-stroke selection, CHANGE on a lone heading (below) |
@@ -384,14 +390,15 @@ heading-aware cover code exists or is needed.
 
 ### The toolbar: H button and the H1–H6 sub-toolbar
 
-`SelectionToolbar.show` classifies every selection into a `SelectionMode` and shows the bar
-accordingly:
+The **screen** classifies every selection into a `SelectionMode` (`showSelectionToolbar`, read off
+the working copies — since K1 the bar only renders the classification):
 
 | Mode | When | H button |
 |---|---|---|
 | `STROKES` | ink only, no content ids | shown — tapping it opens the level picker in **CONVERT** |
 | `HEADING` | `contentIds` is exactly one heading and `strokeIds` is empty | shown, and the sub-toolbar (once opened) highlights the heading's **current level** with a 1dp inkBlack border — this is **CHANGE** |
-| `MIXED` | anything else (ink plus a heading, or more than one heading) | hidden — Delete only, because there is no single sensible level to write |
+| `MIXED` | ink plus a heading, or more than one heading — no link | hidden — no single sensible level to write; Delete and (K1) **Link** remain |
+| `LINK` / `MIXED_WITH_LINK` (K1) | a lone link / a link alongside anything else | hidden — the link modes' buttons (Edit/Unlink; Link withheld — the no-nesting rule) are [`docs/links.md`](links.md)'s |
 
 Tapping **H** doesn't grow the bar or swap its buttons — it opens a **second floating bar**, the
 H1–H6 sub-toolbar, hung off the main bar by `SelectionAnchor.placeSub` (eye-check #5 round 1: the
@@ -663,7 +670,9 @@ paper is full-bleed and the chrome is two thin bars.
 |---|---|
 | 1-finger horizontal swipe ← | flip next — **past the last page, insert one** (the notebook grows where you write) |
 | 1-finger horizontal swipe → | flip previous (no-op on the first page) |
-| 1-finger vertical swipe ↓ | open the Contents (C1 — silent while the notebook has no heading; an up-swipe is nothing) |
+| 1-finger vertical swipe ↓ | open the Contents (C1 — silent while the notebook has no heading) |
+| 1-finger vertical swipe ↑ | walk back the link trail (K4 — silent while the trail is empty; [`docs/links.md`](links.md)) |
+| 1-finger tap on a link | follow it (K4 — finger only, never stylus; the escrowed inverse-recogniser tap below) |
 | 2-finger horizontal swipe ← / → | insert a page after / before this one |
 | 2-finger stationary double-tap | undo |
 | 3-finger stationary double-tap | redo |
@@ -679,10 +688,14 @@ Thresholds (Paper-v0 parity — the numbers are the feel):
 
 A swipe must be **horizontal-dominant** (`|dx| > |dy|`) and qualify on *velocity or* length;
 **direction comes from the sign of `dx`, never velocity**, because a decelerating finger can flip
-the velocity sign at the end of the drag. The Contents swipe (C1) is the same rule rotated 90° —
-vertical-dominant, the same three constants against the screen *height*, judged at the same
-`ACTION_UP` right after the flip evaluation (the two dominance tests are mutually exclusive), and
-only `dy > 0` acts. The two-finger swipe measures the two-finger centroid and
+the velocity sign at the end of the drag. The vertical swipes (C1, K4) are the same rule rotated
+90° — vertical-dominant, the same three constants against the screen *height*, judged at the same
+`ACTION_UP` right after the flip evaluation (the two dominance tests are mutually exclusive) — and
+one sign-routed evaluation: `dy > 0` opens the Contents, `dy < 0` walks back the link trail (K4),
+so the two can never both fire. The one-finger **tap** (K4) is the inverse recogniser: sub-slop
+travel, under the long-press timeout, single-finger, judged at `ACTION_UP` with the down point
+reported — and it rides the same escrow as the double-taps below, so a pen tail can veto it late.
+The two-finger swipe measures the two-finger centroid and
 commits at `POINTER_UP` back to 2→1 fingers; a third finger landing mid-swipe commits a qualifying
 insert before it dies, and a second finger landing on an already-qualifying one-finger swipe
 commits the flip for the same reason.
@@ -711,19 +724,26 @@ holds the full geometry of every stroke it must put back).
 
 **Notebook-level, not page-level.** Every entry carries the page it happened on, so history
 survives a page turn — and an insert or a delete *is* a page turn, which undoing has to reverse.
-The stack is cleared **only when the screen closes** — in-memory history dies with the screen.
+The stack is cleared when the screen closes — in-memory history dies with the screen — and (K3)
+when the link picker created a page in **this** notebook behind the screen's back: the old
+`Structural` snapshots no longer describe the page list, so the whole stack goes rather than a
+replay reviving the wrong shape (the new link's own `LinkCreated` is recorded *after* the clear
+and survives it — [`docs/links.md`](links.md)).
 
 | Action | Recorded by | Revert | Reapply |
 |---|---|---|---|
 | `Drew` | `onStrokeCommitted` | `store.remove([id])` | `store.revive` |
 | `Erased` | `onStrokesErased` (eraser tool **and** scribble erase) | `store.revive` | `store.remove` |
-| `Deleted` | the selection toolbar's Delete (strokes **and**, N2, `headingIds`) | `store.revive` + `headings.restore` | `store.remove` + `headings.erase` |
-| `Moved` | `onSelectionMoved` (strokes **and**, N2, `headingIds` riding the same drag) | `store.move(-dx,-dy)` + `headings.move(-dx,-dy)` | `store.move(dx,dy)` + `headings.move(dx,dy)` |
+| `Deleted` | the selection toolbar's Delete (strokes **and**, N2, `headingIds` — **and**, K1, `links` snapshots: a whole-link erase records here too) | `store.revive` + `headings.restore` + `links.restore` | `store.remove` + `headings.erase` + `links.remove` |
+| `Moved` | `onSelectionMoved` (strokes **and**, N2, `headingIds` **and**, K1, `linkIds` riding the same drag) | `store.move(-dx,-dy)` + `headings.move(-dx,-dy)` + `links.move(-dx,-dy)` | `store.move(dx,dy)` + `headings.move(dx,dy)` + `links.move(dx,dy)` |
 | `HeadingCreated` (N2) | a successful convert | `headings.erase` + `store.revive` (in place — order matters) | `headings.restore` + `store.remove` |
 | `HeadingDeleted` (N2) | edit-dialog empty Save, or the eraser sweeping a heading whole | `headings.restore` (in place) | `headings.erase` |
 | `HeadingTextEdited` (N2) | the edit dialog's Save | write `before`'s content | write `after`'s content |
 | `HeadingLevelChanged` (N2) | a level pick on an existing heading | write `before`'s content | write `after`'s content |
-| `Page` | insert / delete (`Structural` snapshot, whose `objectIds` are type-agnostic — strokes and headings both) | `reconcile(before)` | `reconcile(after)` |
+| `LinkCreated` (K1) | the picker's OK on a create ([`docs/links.md`](links.md)) | `links.unlink` | `links.relink` |
+| `LinkUnlinked` (K1) | the selection toolbar's Unlink | `links.relink` | `links.unlink` |
+| `LinkEdited` (K2) | the picker's OK on an edit | write `before`'s payload | write `after`'s payload |
+| `Page` | insert / delete (`Structural` snapshot, whose `objectIds` are type-agnostic — strokes, headings and links all) | `reconcile(before)` | `reconcile(after)` |
 
 `Deleted` replays exactly like `Erased` (and its N2 heading half like `HeadingDeleted`) and is
 deliberately kept as its own kind: to the user a sweep of the eraser and "delete these" are
@@ -770,10 +790,14 @@ pen is active and re-checks at fire, so we are outside the pen-active window the
 
 - `onResume` → `paper.resumeDrawing()`.
 - `onStop` (not closing) → app-scoped: `CoverSnapshot` + `saveLastOpened` (cheap durability point).
-- Toolbar back / system back → `close()`: `lastOpenNotebookId = null` → app-scoped
-  `NonCancellable`: cover → `saveLastOpened` → `refreshMeta` (name + folder path from the index)
-  → `seal()` (`flushTouch` → `drain` → `wal_checkpoint(TRUNCATE)` → close) → `finish()`. Each
-  step guarded; idempotent (`closing` flag; `onStop` stands down once closing).
+- Toolbar back / system back → **`backPressed()`** (K4 — in a via-link notebook both Backs walk
+  the link trail first, exactly like a swipe-up; only an empty trail falls through to `close()`) →
+  `close()`: `lastOpenNotebookId = null` → app-scoped `NonCancellable`: cover → `saveLastOpened`
+  → `refreshMeta` (name + folder path from the index) → `seal()` (`flushTouch` → `drain` →
+  `wal_checkpoint(TRUNCATE)` → close) → `finish()`. Each step guarded; idempotent (`closing`
+  flag; `onStop` stands down once closing). K4 adds `close(andThen)`: a cross-notebook hop
+  launches the next screen **strictly after the seal completes** — the seal/reopen race is not
+  survivable any other way ([`docs/links.md`](links.md)).
 - **Every seal/persist path holds `pageOps` (R6)** — `close()`, `onStop`'s persist, and the
   `onDestroy` fallback all take the same mutex the gesture ops run under. An insert/delete that
   passed the `closing` check before the flag flipped may still be inside its transaction; sealing
@@ -790,7 +814,9 @@ pen is active and re-checks at fire, so we are outside the pen-active window the
 - **Cold-launch restore:** the library's `reopenLastNotebookIfNeeded()` (cold launch only) reads
   `BrowseState.lastOpenNotebookId` — set on notebook open, cleared on close — and puts the
   notebook back on top of the library, but only when its index row is alive **and** its `.soil`
-  exists. Read once, cleared regardless of outcome.
+  exists. Read once, cleared regardless of outcome. K4 rides `lastOpenViaLink` along with it, so
+  a via-link notebook is restored *as* via-link — without it the restore would read as a fresh
+  open and clear the persisted link trail ([`docs/links.md`](links.md)).
 
 ## Frame-silence rule
 
@@ -824,6 +850,11 @@ boundary**, never under live ink:
    the same reason as exceptions 2 and 3).
 
 R3's exception — the tool-panel close at stylus pen-up — is **retired**: P1 removed the panels.
+
+**Arc 6 added no new exception**: every link surface (the follow's navigate and "Opening…"
+overlay, the dead-target dialog, the swipe-up walk-back) enters through a finger gesture behind
+`PageGestures`' pen gate, and the picker and the selection toolbar's link buttons ride the
+existing selection-toolbar exceptions (2 and 5).
 
 Any new exception needs the same written justification.
 
@@ -859,6 +890,11 @@ themselves are exercised on-device in N2, through `HeadingRenderer`.
 `HeadingPrefixTest`, `HeadingRowsTest`, `HeadingStoreTest`, `StrokeStoreTest`'s `revive` case, and
 the `placeSub` additions to `SelectionAnchorTest` noted above. A shared `FakeSoilDao` backs both
 `HeadingStoreTest` and `StrokeStoreTest`.
+
+**Arc 6 (links):** the inventory lives in [`docs/links.md`](links.md) — `LinkPayloadTest` (incl.
+the Paper-grammar byte fixtures), `LinkRowsTest`, `LinkStoreTest` (against the same
+`FakeSoilDao`), `LinkCompositeTest`, `LinkPickerModelTest`, `PageLabelsTest`, `PreviewMathTest`,
+`PageReadsTest`, `LinkNavTest`, `TrailCodecTest`, and `library/SchemePrefillTest`.
 
 ## Deliberate differences from Paper v0
 

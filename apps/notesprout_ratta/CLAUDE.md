@@ -11,6 +11,12 @@ references — **no app code is copied from either**. Devices: **Nomad only by d
 (SNN `SN078D10012852`); Manta (SNM `SN100C10023972`) only when the user explicitly asks.
 The Manta identifies as a Nomad — target by serial.
 
+**Subsystem docs (`docs/`) — read the matching one before working in that area:**
+`docs/library.md` (library screen, naming schemes) · `docs/notebook.md` (the notebook screen:
+tools, selection, headings, Contents, gestures, undo, frame-silence ledger) ·
+`docs/links.md` (arc 6: link rows/payload, render, picker + create-in-picker, follow + trail) ·
+`docs/extensions.md` (the one recognizer extension point).
+
 ## Standing rules
 
 All root `CLAUDE.md` rules apply (Kotlin/17, kotlinx-serialization only, no new Gradle

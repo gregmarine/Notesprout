@@ -134,6 +134,11 @@ no folder would ever look empty again once a card had rendered.
 - **No cover yet** → a small render of the notebook's own template kind
   (`BuiltInTemplates.placeholder`), squeezed to a fixed 12 rows so a 3 cm card still reads as
   "lined" / "dotted" / "grid". A Blank notebook shows a blank card, which is the honest picture.
+- **Selection** (arc 6 / K2) — `LibraryGrid.bind` takes an optional `selectedId`; the matching
+  card gets `state_selected` on its background (`bg_selectable_card`: the 1 dp border thickens to
+  3 dp — never a colour, never a grey). It exists for the link picker, where browsing *is*
+  choosing; the library and the move picker pass nothing, and the unselected state is
+  byte-identical to `shape_bordered`, so their cards are unchanged.
 
 **Covers are lazy, one page at a time.** The DAO listing is blob-free (`ObjectSummary` has no
 `blob` column); `bindCurrentPage()` reads `repo.cover(id)` only for the notebooks in the visible
@@ -240,25 +245,31 @@ is the answer, none → the core timestamp default. `{n}` always counts siblings
 
 ### Entry points — four, one dialog
 
-1. **New-folder dialog** — a second optional field: the caller builds it with
-   `SchemeDialog.buildField`, hands it to `NameDialog.show` as `extraField`, and reads it back
-   itself in its accept closure (rename passes nothing and knows nothing about schemes). Both
-   fields come from `NameDialog.input`, the one bordered single-line recipe, so the two stacked
-   inputs can never drift visibly apart. Order is deliberate: name rule → **scheme validation** →
-   duplicate check → create → save scheme. The scheme is validated *before* the folder exists,
-   so a mistyped token keeps the dialog; once the folder is created it stands — a scheme that
-   then fails to save is explained, not rolled back. The accept path is re-entry-guarded (S2):
-   it crosses a coroutine, and an e-ink double-tap on OK would otherwise run two creates whose
-   duplicate checks both read before either insert — two identically named folders (rename
-   carries the same guard for family consistency).
+1. **New-folder dialog** (`NewFolderFlow` — extracted whole in arc 6 / K3 so the link picker's
+   New folder is the *same* dialog, not a second implementation that can drift; the library
+   delegates with a refresh callback, the picker with navigate-in) — a second optional field: the
+   flow builds it with `SchemeDialog.buildField`, hands it to `NameDialog.show` as `extraField`,
+   and reads it back itself in its accept closure (rename passes nothing and knows nothing about
+   schemes). Both fields come from `NameDialog.input`, the one bordered single-line recipe, so the
+   two stacked inputs can never drift visibly apart. Order is deliberate: name rule → **scheme
+   validation** → duplicate check → create → save scheme. The scheme is validated *before* the
+   folder exists, so a mistyped token keeps the dialog; once the folder is created it stands — a
+   scheme that then fails to save is explained, not rolled back. The accept path is
+   re-entry-guarded (S2): it crosses a coroutine, and an e-ink double-tap on OK would otherwise
+   run two creates whose duplicate checks both read before either insert — two identically named
+   folders (rename carries the same guard for family consistency).
 2. **Folder long-press sheet** — "Default notebook name…" (`ic_cursor_text`). Folders only:
    a scheme is a rule about what is created *inside* something.
 3. **Breadcrumb long-press** — any crumb **including the root** (the root has no card, so this
    is its only way in). The long-press returns `true` so it never also navigates on release.
 4. **+Notebook** — the library resolves + expands *before* launching `NewNotebookActivity` and
    hands the result in as `EXTRA_DEFAULT_NAME`; the screen stays naming-agnostic (a prefill
-   like any other, fully editable, Create-time duplicate check unchanged). Siblings are fetched
-   only when the parsed scheme actually holds a counter — nothing else reads them (S2). The
+   like any other, fully editable, Create-time duplicate check unchanged). The scheme→prefill
+   rules live in **`SchemePrefill`** (pure, extracted in arc 6 / K3, shared verbatim with the
+   link picker's New notebook): siblings are fetched lazily, only when the parsed scheme
+   actually holds a counter — nothing else reads them (S2) — and an expansion `NameRules` would
+   refuse (or that outgrew the cap) falls back to the caller's default rather than reaching a
+   screen that will reject it. The
    launch shares the library's **one** `launching` latch with the notebook-card door (S2: in the
    e-ink feedback gap the second tap is not always on the same control — two per-door flags
    would let a card tap plus a + tap stack two screens); reset in `onResume` **and at the top of
@@ -407,14 +418,15 @@ notebooks only — a page must not silently re-rule itself under old ink.
 
 ## Prefs
 
-All three live in `data/prefs/` and hold **ids and enum names only — never a display name**. Prefs
-are device-local plaintext; every name in this app lives in the encrypted index.
+All of these live in `data/prefs/` and hold **ids and enum names only — never a display name**.
+Prefs are device-local plaintext; every name in this app lives in the encrypted index.
 
 | Store | File | Holds |
 |---|---|---|
 | `SortPrefs` | `sn_sort` | `field`, `order` |
-| `BrowseState` | `sn_view_state` | `folderId`, `mode`, `lastOpenNotebookId` |
+| `BrowseState` | `sn_view_state` | `folderId`, `mode`, `lastOpenNotebookId`, `lastOpenViaLink` (K4 — cold restore reopens a via-link notebook *as* via-link, so the persisted link trail survives a mid-chain process death; see [`docs/links.md`](links.md)) |
 | `RecentsPrefs` | `sn_recents` | JSON `List<RecentEntry(notebookId, timestamp)>`, max 20, newest first |
+| `LinkTrail` (K4) | `sn_trail` | the link-follow walk-back stack, ids only, cap 50 — owned by the notebook's follow flow; see [`docs/links.md`](links.md) |
 
 `RecentsPrefs` is written by **`NotebookActivity.onCreate`** (`record(id)` on every open, R3) and
 read by the Recents shelf (R5). Three things prune it: a notebook delete (`remove`), a folder
@@ -479,4 +491,5 @@ library falls back to the root. Nothing in prefs is trusted as still existing.
 | `library/SortRulesTest` | all four orders, case-insensitivity, folders-first in both directions and on both fields, stability |
 | `library/SchemeEngineTest` | every token parses (v1 + v2, exact names only), each `Error` case, expansion-counted 100 cap (shrinking tokens not charged source length), fixed-clock expansion of all tokens, `{n}` counting (starts at 1, highest + 1 with gaps ignored, continues across days / months / weekdays — every date/name position a wildcard, padded + unpadded both count, width never truncates), anchored quoted-literal skeleton, counter stays capture group 1 behind name tokens, every expansion satisfies `NameRules`, every emitted month/weekday name matches the skeleton alphabet (all 12 + all 7 — the single-authority pin) |
 | `library/RecentsAssemblyTest` | stored order survives (anti-alphabetical, anti-chronological fixtures), dead ids dropped, duplicates collapsed to their newest position, empty inputs, and that an alive id never visited is not invented |
+| `library/SchemePrefillTest` (K3) | no-scheme/unparseable/refused expansions all fall back to null, siblings fetched only when the scheme holds a counter, a throwing sibling fetch never escapes, valid expansions pass through |
 | `data/TemplateGeometryTest` | 8 mm spacing at dpi, density-scaled feature sizes with the 1 px floor, lined top margin, grid symmetry, grid-≠-lined, dot intersections, Nomad-page counts |

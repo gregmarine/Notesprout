@@ -207,4 +207,50 @@ class LinkStoreTest {
         assertEquals(0f, dao.rows["l1"]!!.x)
         writer.close()
     }
+
+    @Test
+    fun `relink revives in place — the snapshot's stale order never rewrites the row's z-order`() = runBlocking {
+        val dao = FakeSoilDao()
+        val (links, writer, stores) = make(dao)
+        seed(dao, writer, stores)
+        // Two links so the second lands at a store-assigned order the host snapshot (order = 0)
+        // does not know — the K5 review's overlap-tap scenario.
+        links.create("page", link("l1", listOf(stroke("s1")), emptyList()))
+        val snapshot = link("l2", listOf(stroke("s2")), emptyList())   // order = 0 in the snapshot
+        links.create("page", snapshot)
+        writer.drain()
+        assertEquals(1, dao.rows["l2"]!!.order)
+
+        links.unlink("page", snapshot)
+        links.relink("page", snapshot)                                  // undo of the unlink
+        writer.drain()
+        assertNull(dao.rows["l2"]!!.deletedAt)
+        assertEquals("l2", dao.rows["s2"]!!.parentId)
+        assertEquals(1, dao.rows["l2"]!!.order)                         // kept, not the snapshot's 0
+        writer.close()
+    }
+
+    @Test
+    fun `restore revives in place too, and still upserts a row that never existed`() = runBlocking {
+        val dao = FakeSoilDao()
+        val (links, writer, stores) = make(dao)
+        seed(dao, writer, stores)
+        links.create("page", link("l1", listOf(stroke("s1")), emptyList()))
+        val snapshot = link("l2", listOf(stroke("s2")), emptyList())
+        links.create("page", snapshot)
+        writer.drain()
+
+        links.remove(listOf(snapshot))
+        links.restore("page", listOf(snapshot))                         // undo of the delete
+        writer.drain()
+        assertNull(dao.rows["l2"]!!.deletedAt)
+        assertEquals(1, dao.rows["l2"]!!.order)                         // kept, not the snapshot's 0
+
+        // A row missing entirely (never written) still lands from the snapshot.
+        val ghost = link("l9", emptyList(), emptyList())
+        links.restore("page", listOf(ghost))
+        writer.drain()
+        assertNotNull(dao.rows["l9"])
+        writer.close()
+    }
 }

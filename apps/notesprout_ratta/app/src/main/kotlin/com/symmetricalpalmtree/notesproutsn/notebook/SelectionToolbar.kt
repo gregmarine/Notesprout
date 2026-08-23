@@ -40,9 +40,7 @@ enum class SelectionMode { STROKES, HEADING, LINK, MIXED, MIXED_WITH_LINK }
  *
  * **Main bar**, in order: Delete (always) · **H** (a level is only writable on ink or on one
  * heading) · **Link** (any link-free selection — K1) · **Edit** and **Unlink** (a lone link, the
- * only selection with one payload to act on) · and, in debug builds only, the flask that wraps the
- * selection without a picker (K1's scaffold — removed in K5, and absent entirely when the host
- * passes no [onDebugCreateLink]). **Sub-toolbar**: H1…H6, shown by an H tap and hung off the *bar*
+ * only selection with one payload to act on). **Sub-toolbar**: H1…H6, shown by an H tap and hung off the *bar*
  * by [SelectionAnchor.placeSub] — below it, above when the bar itself flipped — so opening it never
  * moves the Delete the user just aimed at. Every [show] closes it: a fresh selection (or a
  * re-anchor after a move) is a new decision and should not inherit the last one's open drawer.
@@ -78,8 +76,6 @@ class SelectionToolbar(
     private val onEditLink: () -> Unit,
     /** Unwrap the selected link, keeping its content on the page. */
     private val onUnlink: () -> Unit,
-    /** Debug-only wrap with a canned target; **null in release**, where the button is never built. */
-    private val onDebugCreateLink: (() -> Unit)? = null,
 ) {
 
     private val density = root.resources.displayMetrics.density
@@ -88,7 +84,6 @@ class SelectionToolbar(
     private val linkButton: AppCompatImageButton
     private val editButton: AppCompatImageButton
     private val unlinkButton: AppCompatImageButton
-    private val debugButton: AppCompatImageButton?
     /** Index 0 is H1 — `levelButtons[n - 1]` is level `n`. */
     private val levelButtons: List<AppCompatImageButton>
 
@@ -129,13 +124,6 @@ class SelectionToolbar(
             onUnlink()
         }
         bar.addView(unlinkButton)
-        // Last in the row so the shipping buttons never move when the scaffold goes away (K5).
-        debugButton = onDebugCreateLink?.let { create ->
-            button(R.drawable.ic_flask, ctx.getString(R.string.debug_create_test_link)) {
-                releaseRender()
-                create()
-            }.also { bar.addView(it) }
-        }
 
         levelButtons = (1..LEVELS).map { level ->
             button(LEVEL_ICONS[level - 1], ctx.getString(R.string.heading_level_hint, level)) {
@@ -159,7 +147,6 @@ class SelectionToolbar(
         val wrappable = levelable || mode == SelectionMode.MIXED
         headingButton.visibility = if (levelable) View.VISIBLE else View.GONE
         linkButton.visibility = if (wrappable) View.VISIBLE else View.GONE
-        debugButton?.visibility = if (wrappable) View.VISIBLE else View.GONE
         val lone = if (mode == SelectionMode.LINK) View.VISIBLE else View.GONE
         editButton.visibility = lone
         unlinkButton.visibility = lone

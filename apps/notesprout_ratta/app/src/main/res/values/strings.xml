@@ -182,7 +182,6 @@
     <string name="link_action">Link</string>
     <string name="link_edit_action">Edit link</string>
     <string name="link_unlink_action">Unlink</string>
-    <string name="debug_create_test_link">Create test link</string>
     <string name="link_result_lost_title">Couldn\'t apply the link</string>
     <string name="link_result_lost_body">This screen was rebuilt while the picker was open, so the choice was lost. Please try again.</string>
 

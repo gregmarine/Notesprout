@@ -8,8 +8,12 @@ import androidx.room.RoomDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteOpenHelper
 import com.symmetricalpalmtree.notesproutsn.crypto.KeyOpener
+import com.symmetricalpalmtree.notesproutsn.crypto.KeySession
 import com.symmetricalpalmtree.notesproutsn.crypto.SoilCrypto
+import com.symmetricalpalmtree.notesproutsn.data.soilFile
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Room database for one `.soil` file. **One instance per open notebook**, owned by the notebook
@@ -47,6 +51,38 @@ abstract class SoilDatabase : RoomDatabase() {
             KeyOpener.warm(context, notebookId, file, passphrase)
             return db
         }
+
+        /**
+         * One-shot **read-only** visit to a notebook that is open nowhere else: open through the
+         * one [open] door (global key from [KeySession]), run [block] over the DAO, and **always**
+         * seal — an unsealed open strands the connection and its WAL sidecar for the process
+         * lifetime (the R6 lesson). This is the single owner of that ritual (K5 review) — never
+         * hand-roll the open → read → seal-in-finally shape at a call site.
+         *
+         * Null on any failure at all (no key session, file missing/empty, unreadable, [block]
+         * threw): callers treat null as "cannot answer", never as data. MUST NOT be pointed at a
+         * notebook whose `.soil` is already open — one file, one connection, family-wide.
+         */
+        suspend fun <T> readOnce(context: Context, notebookId: String, block: suspend (SoilDao) -> T): T? =
+            withContext(Dispatchers.IO) {
+                val passphrase = KeySession.get() ?: return@withContext null
+                val file = soilFile(context, notebookId)
+                if (!file.exists() || file.length() == 0L) return@withContext null
+                val db = try {
+                    open(context, notebookId, file, passphrase)
+                } catch (e: Exception) {
+                    Log.w(TAG, "readOnce could not open $notebookId", e)
+                    return@withContext null
+                }
+                try {
+                    block(db.dao())
+                } catch (e: Exception) {
+                    Log.w(TAG, "readOnce could not read $notebookId", e)
+                    null
+                } finally {
+                    db.seal(file)   // never throws (its own contract)
+                }
+            }
 
         private fun build(context: Context, file: File, factory: SupportSQLiteOpenHelper.Factory): SoilDatabase =
             Room.databaseBuilder(context.applicationContext, SoilDatabase::class.java, file.absolutePath)

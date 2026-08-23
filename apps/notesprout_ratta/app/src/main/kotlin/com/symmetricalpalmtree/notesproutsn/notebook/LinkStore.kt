@@ -65,7 +65,7 @@ class LinkStore(
     fun relink(pageId: String, link: PageLink) = writer.enqueue {
         val now = System.currentTimeMillis()
         transact {
-            dao.upsert(LinkRows.toRow(link, pageId, now))
+            reviveOrInsert(pageId, link, now)
             link.childIds.chunked(ID_CHUNK).forEach { dao.reparent(it, link.id, now) }
         }
         Slog.d(TAG) { "relink ${link.id} wrapping ${link.childIds.size}" }
@@ -85,17 +85,30 @@ class LinkStore(
     }
 
     /** Undo of [remove]. The children rows still carry `parentId` = link id, so restoring by id
-     *  is enough; the link row is upserted so one that was never written lands too. */
+     *  is enough; the link rows revive in place too ([reviveOrInsert]). */
     fun restore(pageId: String, links: List<PageLink>) {
         if (links.isEmpty()) return
         writer.enqueue {
             val now = System.currentTimeMillis()
             transact {
-                for (l in links) dao.upsert(LinkRows.toRow(l, pageId, now))
+                for (l in links) reviveOrInsert(pageId, l, now)
                 links.flatMap { it.childIds }.chunked(ID_CHUNK).forEach { dao.restore(it, now) }
             }
             Slog.d(TAG) { "restore ${links.size} to $pageId" }
         }
+    }
+
+    /**
+     * Revive an existing row **in place** — un-delete by id, so the geometry and the
+     * store-assigned z-order the row already carries survive untouched — and only upsert the
+     * snapshot when no row exists at all. The host's snapshot holds `order = 0` (the store, not
+     * the caller, assigns the real `MAX(order)+1` inside [create]'s transaction), so writing the
+     * snapshot over a live row would silently sink the link below its overlap-mates and hand the
+     * topmost-last follow tap to the wrong link (K5 review).
+     */
+    private suspend fun reviveOrInsert(pageId: String, link: PageLink, now: Long) {
+        if (dao.byId(link.id) != null) dao.restore(listOf(link.id), now)
+        else dao.upsert(LinkRows.toRow(link, pageId, now))
     }
 
     /**
@@ -107,16 +120,20 @@ class LinkStore(
         if (linkIds.isEmpty() || (dx == 0f && dy == 0f)) return
         writer.enqueue {
             val now = System.currentTimeMillis()
-            for (linkId in linkIds) {
-                dao.moveBy(listOf(linkId), dx, dy, now)
-                for (row in dao.childrenOfType(linkId, SoilSchema.TYPE_STROKE)) {
-                    if (row.deletedAt != null) continue
-                    val stroke = StrokeRows.toStroke(row) ?: continue
-                    val moved = StrokeRows.toRow(stroke.translated(dx, dy), row.parentId, row.order, now)
-                    dao.upsert(moved.copy(createdAt = row.createdAt))
+            // One transaction like every other multi-row op: a row moved without its children —
+            // a crash between the writes — renders sheared forever, with no undo left to repair it.
+            transact {
+                for (linkId in linkIds) {
+                    dao.moveBy(listOf(linkId), dx, dy, now)
+                    for (row in dao.childrenOfType(linkId, SoilSchema.TYPE_STROKE)) {
+                        if (row.deletedAt != null) continue
+                        val stroke = StrokeRows.toStroke(row) ?: continue
+                        val moved = StrokeRows.toRow(stroke.translated(dx, dy), row.parentId, row.order, now)
+                        dao.upsert(moved.copy(createdAt = row.createdAt))
+                    }
+                    val headingIds = dao.childrenOfType(linkId, SoilSchema.TYPE_HEADING).map { it.id }
+                    if (headingIds.isNotEmpty()) dao.moveBy(headingIds, dx, dy, now)
                 }
-                val headingIds = dao.childrenOfType(linkId, SoilSchema.TYPE_HEADING).map { it.id }
-                if (headingIds.isNotEmpty()) dao.moveBy(headingIds, dx, dy, now)
             }
             Slog.d(TAG) { "move ${linkIds.size} by ($dx,$dy)" }
         }

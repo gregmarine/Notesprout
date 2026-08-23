@@ -1,7 +1,6 @@
 package com.symmetricalpalmtree.notesproutsn.notebook
 
 import android.content.Intent
-import android.util.Log
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -10,7 +9,6 @@ import com.symmetricalpalmtree.notesproutsn.R
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
 import com.symmetricalpalmtree.notesproutsn.core.OpeningOverlay
 import com.symmetricalpalmtree.notesproutsn.core.Slog
-import com.symmetricalpalmtree.notesproutsn.crypto.KeySession
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectType
 import com.symmetricalpalmtree.notesproutsn.data.prefs.LinkTrail
@@ -18,7 +16,6 @@ import com.symmetricalpalmtree.notesproutsn.data.prefs.TrailCodec
 import com.symmetricalpalmtree.notesproutsn.data.prefs.TrailEntry
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilDatabase
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilSchema
-import com.symmetricalpalmtree.notesproutsn.data.soilFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -93,7 +90,12 @@ class LinkFollowFlow(
                     deadTarget(link, R.string.link_target_unreadable_body)
                 }
                 is LinkNav.Follow.SamePage -> {
-                    if (session().pages.none { it.id == plan.pageId }) {
+                    if (plan.pageId == displayedPageId()) {
+                        // A page targeting itself (foreign/hand-edited payload — our picker
+                        // refuses to compose one): silent, like the notebook-self NoOp. Pushing
+                        // would stack self-entries that eat real walk-back hops (K5 review).
+                        Slog.d(TAG) { "follow: ${link.id} targets the displayed page — nothing to do" }
+                    } else if (session().pages.none { it.id == plan.pageId }) {
                         deadTarget(link, R.string.link_target_page_gone_body)
                     } else {
                         pushOrigin()
@@ -199,40 +201,22 @@ class LinkFollowFlow(
 
     /**
      * One-shot **read-only** pre-check of a page row in another notebook's `.soil`: live, still a
-     * page, and still parented to that notebook. Opened through the one [SoilDatabase.open] door and
-     * **always** sealed — an unsealed open strands the connection and its WAL sidecar for the process
-     * lifetime (the R6 lesson). Any failure at all (no key session, file gone, unreadable) answers
-     * false: the follow then explains rather than guessing.
+     * page, and still parented to that notebook — through [SoilDatabase.readOnce], the single
+     * owner of the open → read → always-seal ritual. Any failure at all answers false: the follow
+     * then explains rather than guessing.
      *
      * Only ever called for a genuinely foreign notebook — [LinkNav] routes every current-notebook
      * target to `SamePage`/`NoOp` — so this can never be a second connection to the live session's
      * own file.
      */
     private suspend fun foreignPageAlive(notebookId: String, pageId: String): Boolean =
-        withContext(Dispatchers.IO) {
-            val passphrase = KeySession.get() ?: return@withContext false
-            val app = activity.applicationContext
-            val file = soilFile(app, notebookId)
-            if (!file.exists() || file.length() == 0L) return@withContext false
-            val db = try {
-                SoilDatabase.open(app, notebookId, file, passphrase)
-            } catch (e: Exception) {
-                Log.w(TAG, "link pre-check could not open $notebookId", e)
-                return@withContext false
-            }
-            try {
-                val row = db.dao().byId(pageId)
-                row != null &&
-                    row.deletedAt == null &&
-                    row.type == SoilSchema.TYPE_PAGE &&
-                    row.parentId == notebookId
-            } catch (e: Exception) {
-                Log.w(TAG, "link pre-check could not read $notebookId", e)
-                false
-            } finally {
-                db.seal(file)   // never throws (its own contract)
-            }
-        }
+        SoilDatabase.readOnce(activity.applicationContext, notebookId) { dao ->
+            val row = dao.byId(pageId)
+            row != null &&
+                row.deletedAt == null &&
+                row.type == SoilSchema.TYPE_PAGE &&
+                row.parentId == notebookId
+        } ?: false
 
     // ── The dead-target dialog ───────────────────────────────────────────────
 

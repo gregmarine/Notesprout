@@ -8,6 +8,8 @@ import android.graphics.Paint
 import com.symmetricalpalmtree.gpaper.core.render.ContentLayer
 import com.symmetricalpalmtree.gpaper.core.render.ContentRenderer
 import com.symmetricalpalmtree.gpaper.core.render.HitTarget
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Draws the visible page's links into g-paper's committed layer — the arc-6 [ContentRenderer],
@@ -53,20 +55,48 @@ class LinkRenderer(
     }
 
     /**
-     * Swap the working copy and reconcile the composite cache: keep a cached bitmap whose size
-     * still matches the link's drawable size (a move — the composite is translation-invariant),
-     * build the rest, drop the departed. Main thread; call before the frame that must paint the
-     * result (`loadStrokes` / `notifyContentChanged`).
+     * Build the composites [update] would otherwise have to build, **off the Main thread** — the
+     * page-load paths call this from their suspend load block so a link-heavy flip (or an undo
+     * replay's refresh) never rasterizes bitmaps inside the Main-thread display frame (K5
+     * review). The needed set is decided on the caller's (Main) thread against the live cache;
+     * only the raster work hops to [Dispatchers.Default]. Hand the result to [update] —
+     * prebuilding is an optimisation only, and [update] still builds anything missing.
      */
-    fun update(links: List<PageLink>) {
+    suspend fun prebuild(links: List<PageLink>): Map<String, Bitmap> {
+        val todo = links.filter { l ->
+            val cached = composites[l.id]
+            val (w, h) = LinkComposite.sizeOf(l)
+            cached == null || cached.width != w || cached.height != h
+        }
+        if (todo.isEmpty()) return emptyMap()
+        return withContext(Dispatchers.Default) {
+            buildMap {
+                for (l in todo) LinkComposite.build(l, density, textPaint)?.let { put(l.id, it) }
+            }
+        }
+    }
+
+    /**
+     * Swap the working copy and reconcile the composite cache: install a [prebuilt] bitmap when
+     * one was handed in (still size-checked — the link could have changed since [prebuild]),
+     * else keep a cached bitmap whose size still matches the link's drawable size (a move — the
+     * composite is translation-invariant), build the rest, drop the departed. Main thread; call
+     * before the frame that must paint the result (`loadStrokes` / `notifyContentChanged`).
+     */
+    fun update(links: List<PageLink>, prebuilt: Map<String, Bitmap> = emptyMap()) {
         this.links = links
         val wanted = links.associateBy { it.id }
         composites.keys.retainAll(wanted.keys)
         for (l in links) {
-            val cached = composites[l.id]
             // The expected size is the PADDED one (LinkComposite.sizeOf — bounds + the stroke-width
             // margin), or a stale unpadded bitmap would be "reused" forever at the wrong offset.
             val (w, h) = LinkComposite.sizeOf(l)
+            val fresh = prebuilt[l.id]
+            if (fresh != null && fresh.width == w && fresh.height == h) {
+                composites[l.id] = fresh
+                continue
+            }
+            val cached = composites[l.id]
             if (cached != null && cached.width == w && cached.height == h) continue
             val built = LinkComposite.build(l, density, textPaint)
             if (built != null) composites[l.id] = built else composites.remove(l.id)

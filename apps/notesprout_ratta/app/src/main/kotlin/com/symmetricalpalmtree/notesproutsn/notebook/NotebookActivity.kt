@@ -20,7 +20,6 @@ import com.symmetricalpalmtree.gpaper.core.model.Bounds
 import com.symmetricalpalmtree.gpaper.core.model.Selection
 import com.symmetricalpalmtree.gpaper.core.model.SelectionMove
 import com.symmetricalpalmtree.gpaper.core.model.Stroke
-import com.symmetricalpalmtree.notesproutsn.BuildConfig
 import com.symmetricalpalmtree.notesproutsn.R
 import com.symmetricalpalmtree.notesproutsn.core.ActionSheetDialog
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
@@ -221,8 +220,6 @@ class NotebookActivity : AppCompatActivity() {
             onLink = { beginLinkPick() },
             onEditLink = { beginLinkEdit() },
             onUnlink = { unlinkSelection() },
-            // Release builds get no flask at all — the button is not built when this is null.
-            onDebugCreateLink = if (BuildConfig.DEBUG) ({ debugCreateTestLink() }) else null,
         )
         binding.notebookName.text = name
         binding.pageIndicator.text = ""
@@ -278,7 +275,10 @@ class NotebookActivity : AppCompatActivity() {
         }
         RecentsPrefs(this).record(notebookId)
         // Any fresh, non-via-link open starts a new story: the old trail would walk back into it.
-        if (!viaLink) LinkTrail(this).clear()
+        // Gated like the initial-page consume above: a recreate or a post-process-death task
+        // rebuild is not a fresh open, and clearing there would strand a mid-story walk-back —
+        // the trail is persisted precisely to survive that death (K5 review).
+        if (!viaLink && savedInstanceState == null) LinkTrail(this).clear()
 
         session = NotebookSession(this, notebookId, repo)
         // The surface accepts no ink until the page is truly loaded (pushExclusions blocks it all
@@ -310,6 +310,7 @@ class NotebookActivity : AppCompatActivity() {
             val strokes = session.store.loadPage(page.id)
             val headings = remeasureForDevice(session.headings.loadPage(page.id))
             val links = session.links.loadPage(page.id)
+            val linkBitmaps = linkRenderer.prebuild(links)   // raster off Main, in the load phase
             paper.setPageSize(page.width, page.height)
             paper.setTemplate(session.template)
             // Renderers before loadStrokes: the load's re-record is the frame that paints them, and
@@ -318,7 +319,7 @@ class NotebookActivity : AppCompatActivity() {
             liveHeadings = headings.associateByTo(linkedMapOf()) { it.id }
             headingRenderer.headings = headings
             liveLinks = links.associateByTo(linkedMapOf()) { it.id }
-            linkRenderer.update(links)
+            linkRenderer.update(links, linkBitmaps)
             paper.loadStrokes(strokes)
             liveStrokes = strokes.associateBy { it.id }.toMutableMap()
             displayedPageId = page.id
@@ -550,9 +551,13 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     /** Both Backs — the toolbar button and the system back — funnel here: in a via-link notebook
-     *  they walk the trail (Paper L4's rule); otherwise, or with the trail empty, they close. */
+     *  they walk the trail (Paper L4's rule); otherwise, or with the trail empty, they close.
+     *  Only a screen that is actually open walks the trail: while the session is still opening
+     *  (or once closing) `walkBack`'s alive/busy door would swallow the press silently, leaving
+     *  Back dead for the whole opening window — fall through to `close()`, which settles the
+     *  half-open session (K5 review). */
     private fun backPressed() {
-        if (viaLink) followFlow.walkBack(onEmpty = { close() }) else close()
+        if (viaLink && opened && !closing) followFlow.walkBack(onEmpty = { close() }) else close()
     }
 
     /** Serialise every page/undo mutation; ignore anything while not open or once closing. */
@@ -584,11 +589,15 @@ class NotebookActivity : AppCompatActivity() {
         val strokes: List<Stroke>
         val headings: List<Heading>
         val links: List<PageLink>
+        val linkBitmaps: Map<String, android.graphics.Bitmap>
         try {
             page = session.goTo(index)
             strokes = session.store.loadPage(page.id)
             headings = remeasureForDevice(session.headings.loadPage(page.id))
             links = session.links.loadPage(page.id)
+            // Composites raster off Main here, inside the buffered-commit window — never in the
+            // display block below, where a link-heavy page would stall the flip frame (K5 review).
+            linkBitmaps = linkRenderer.prebuild(links)
         } finally {
             loadingCommits = null
         }
@@ -605,7 +614,7 @@ class NotebookActivity : AppCompatActivity() {
         liveHeadings = headings.associateByTo(linkedMapOf()) { it.id }
         headingRenderer.headings = headings
         liveLinks = links.associateByTo(linkedMapOf()) { it.id }
-        linkRenderer.update(links)
+        linkRenderer.update(links, linkBitmaps)
         paper.loadStrokes(allStrokes)
         liveStrokes = allStrokes.associateBy { it.id }.toMutableMap()
         displayedPageId = page.id
@@ -1126,32 +1135,6 @@ class NotebookActivity : AppCompatActivity() {
             undo.record(Action.LinkUnlinked(pageId, link))
             session.store.drain()
             refreshToPage(pageId)
-        }
-    }
-
-    /**
-     * **Debug scaffold (K1, removed in K5):** wrap the selection in a link to the **next page** of
-     * this notebook, inserting one when the current page is the last — a real, followable
-     * page-kind target to exercise wrap / render / move / erase / undo with before the picker
-     * exists (K2). The selection is captured before the page op, because `insertBlank` suspends.
-     */
-    private fun debugCreateTestLink() {
-        val sel = currentSelection ?: return
-        runPageOp {
-            if (session.currentIndex == session.pages.lastIndex) {
-                val here = session.currentIndex
-                val snap = session.insertBlank(after = true)
-                undo.record(Action.Page(snap))
-                // The paper never swapped — only the session moved, so put it back on the page the
-                // user is looking at. `navigateTo` would flip away from the selection being wrapped.
-                session.goTo(here)
-                setPageIndicator(session.currentIndex + 1, session.pages.size)
-            }
-            val targetId = session.pages[session.currentIndex + 1].id
-            createLinkFromSelection(
-                sel,
-                LinkPayload.encode(LinkPayload.CHROME_UNDERLINE, LinkPayload.KIND_PAGE, null, targetId),
-            )
         }
     }
 

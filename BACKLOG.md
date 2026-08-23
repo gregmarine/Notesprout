@@ -830,3 +830,20 @@ UNIQUE(parentId) constraint and `namingRowAny` is an unordered `LIMIT 1`, so two
 modal UI, and adding an index would touch the Room-validated schema (the format contract with
 Paper). Revisit only alongside a family-wide schema change. Also refuted: Cancel-during-save window
 (app-wide established pattern, sub-human-reaction window, no harm).
+
+## Notesprout SN — K5 (arc 6) review findings accepted (not fixed) in the links freeze (2026-08-23)
+
+The arc-6 `/code-review high` pass (K1–K4 range) fixed 9 of its 10 findings in SN (see
+RATTA_PLAN.md K5 Outcome). One was **partially fixed, remainder accepted**:
+
+- **Breadcrumb builders are hand-rolled in three screens** (`LinkPickerActivity`,
+  `FolderPickerActivity`, `LibraryActivity` — `label()`/`crumb()`/`separator()` near-verbatim
+  copies). The behavioural drift the review caught (the picker showed the *start* of a deep path
+  instead of the current folder) was fixed in K5 by adding the library's
+  `post { fullScroll(FOCUS_RIGHT) }`; the 14sp-vs-16sp size difference and the extraction of one
+  shared `Breadcrumbs` builder (long-press as an optional parameter — the `NewFolderFlow` move)
+  remain deferred. Worth doing the next time any crumb styling or tap-target rule changes, so the
+  change lands once instead of three times.
+
+- **No search in the link picker** — carried from K2 exactly as Paper deferred it (recorded at the
+  arc's picker-modes decision; repeated here so the arc has one findings ledger).

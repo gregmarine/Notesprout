@@ -1393,7 +1393,43 @@ A→B→A→B are real history and belong on the trail); Intent-redelivery is **
 page, not the link target; Paper's accepted quirk is fixed here, not inherited).
 
 ### K5 — Review + hardening + docs + freeze
-**Status:** ⬜ Not started
+**Status:** 🟨 Code/docs/regression complete 2026-08-23 — awaiting user eye check for the freeze
+
+**Outcome (so far):** Phase-start answers: review level **high** (every arc's level), version stamp
+**stays 0.1.0-ratta** (user's call). K1 debug scaffold removed whole (flask button + string +
+`ic_flask` + `debugCreateTestLink` + the `SelectionToolbar` hook). Arc-range `/code-review high`
+(`5c383b0..HEAD`): **10 findings — 7 confirmed correctness + 3 cleanups; 9 fixed, 1 partially
+fixed + accepted → `BACKLOG.md`**:
+① `ForeignPageSource` cross-instance seal race (leave-drill → re-drill could hold two connections
+to one `.soil`) → `sealed` flips synchronously + companion `lastSeal` job joined by the next open;
+② Back silently dead for a via-link notebook's whole opening window (`walkBack`'s alive/busy door
+swallowed it) → `backPressed()` walks only while `opened && !closing`, else falls through to
+`close()`; ③ `LinkPickFlow.begin` re-armed the relay after its drain suspension even if the host
+had closed → re-checks finishing/destroyed/`isOpen` and bails; ④ `LinkStore.move` was the one
+multi-row op outside `transact` → wrapped; ⑤ the host's `order = 0` snapshot rewrote the
+store-assigned z-order on relink/restore (overlap taps then hit the wrong link) →
+`reviveOrInsert`: revive **in place** by id, upsert only a row that never existed (+2 JVM tests);
+⑥ the fresh-open trail clear ran on recreate/task-rebuild too, stranding a mid-story walk-back →
+gated on `savedInstanceState == null` like the initial-page consume; ⑦ a self-targeting page
+payload pushed self-entries onto the trail → silent no-op like the notebook-self case;
+⑧ `foreignPageAlive` hand-rolled the one-shot open→read→seal ritual → extracted
+**`SoilDatabase.readOnce`** (the single owner; never hand-roll that shape again); ⑨ breadcrumb
+triplication: the real drift fixed (picker now `fullScroll(FOCUS_RIGHT)`s to the current folder),
+shared-builder extraction **accepted → BACKLOG**; ⑩ link composites rasterized on Main in every
+flip → `LinkRenderer.prebuild` on `Dispatchers.Default` inside both suspend load blocks (in
+`navigateTo`, inside the buffered-commit window), `update(links, prebuilt)` installs. Docs:
+**`docs/links.md` new** (the arc's subsystem doc, K5 fixes folded in), `docs/notebook.md`
+(5 selection modes, link gestures + undo rows, open/close/`backPressed`, K3 undo-clear,
+frame-silence "arc 6 added no exception", test pointer), `docs/library.md` (`NewFolderFlow` /
+`SchemePrefill` extractions, card `selectedId`, `LinkTrail`/`lastOpenViaLink` prefs rows), app
+`CLAUDE.md` (subsystem-doc map). **423 JVM tests** (app 388 · api 6 · ext 29), debug + release
+built, signed, both installed on SNN. **Regression: Haiku walk hit the recorded tap-aim pattern
+again** (called the p3 link follow "broken" after tapping ~120 px off it; every other step
+passed) — **Fable re-drove by hand: follows, walk-backs, fresh-open trail clear, Contents
+swipe-down, flips all pass, crash buffer clean**. Note: the on-device test data has changed since
+K4 — every current link is in-notebook, so the **cross-notebook chain (seal → relaunch,
+`readOnce` pre-check, force-stop restore) is the user's eye check to re-prove**, along with the
+K5 fixes only a pen can reach.
 
 Remove the K1 debug create-test-link (+ its strings); arc-range `/code-review` (level asked
 at phase start), findings fixed or explicitly accepted → `BACKLOG.md`; docs

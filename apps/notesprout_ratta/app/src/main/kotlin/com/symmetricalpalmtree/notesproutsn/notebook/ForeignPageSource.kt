@@ -12,6 +12,7 @@ import com.symmetricalpalmtree.notesproutsn.data.soil.SoilSchema
 import com.symmetricalpalmtree.notesproutsn.data.soilFile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -52,7 +53,8 @@ class ForeignPageSource(
     private val lock = Mutex()
     private var db: SoilDatabase? = null
     private var failed = false
-    private var sealed = false
+    /** Volatile: flipped synchronously by [sealAsync] on the caller's thread, read under [lock]. */
+    @Volatile private var sealed = false
 
     override suspend fun pages(): List<PickerPage> =
         withDb { PageReads.pages(it.dao(), notebookId) } ?: emptyList()
@@ -97,12 +99,14 @@ class ForeignPageSource(
     }
 
     /** Checkpoint + close, fire-and-forget, idempotent — see the class KDoc for why not a
-     *  lifecycle scope. Reads after this answer empty. */
+     *  lifecycle scope. Reads after this answer empty — [sealed] flips synchronously, so a read
+     *  racing the queued seal can never re-open. The launched job is published as [lastSeal] so
+     *  the **next** instance's open waits behind it (see [openLocked]). */
     fun sealAsync() {
-        sealScope.launch {
+        sealed = true
+        lastSeal = sealScope.launch {
             withContext(NonCancellable) {
                 lock.withLock {
-                    sealed = true
                     db?.seal(soilFile(app, notebookId))   // never throws (its own contract)
                     db = null
                 }
@@ -122,6 +126,12 @@ class ForeignPageSource(
     }
 
     private suspend fun openLocked(): SoilDatabase? {
+        // Order this open behind the previous instance's still-pending seal: leave-drill →
+        // immediate re-drill into the same notebook would otherwise hold two live connections to
+        // one .soil (and K3's createPage a concurrent writer) — the sticky-lock crash family.
+        // Cheap and safe across different notebooks too, so it is not keyed. Never our own seal:
+        // sealAsync flips [sealed] synchronously, and withDb answers null before reaching here.
+        lastSeal?.join()
         val passphrase = KeySession.get() ?: run { failed = true; return null }
         val file = soilFile(app, notebookId)
         if (!file.exists() || file.length() == 0L) { failed = true; return null }
@@ -140,5 +150,9 @@ class ForeignPageSource(
 
         /** Outlives any Activity so a destroy-time seal always completes. */
         val sealScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+        /** The most recently queued seal, awaited by the next open — the cross-instance ordering
+         *  the per-instance [lock] cannot provide (K5 review). */
+        @Volatile var lastSeal: Job? = null
     }
 }
