@@ -1507,7 +1507,7 @@ Two constraints are settled by the standing rules, not by the wizard:
   second open of the destination file.
 
 ### B1 — Clipboard core + copy / cut / paste in one notebook
-**Status:** ✅ Complete
+**Status:** ✅ Complete (commit a4e3a10)
 
 `data/index/ObjectType.CLIPBOARD` + sentinel id + a header projection and blob read on
 `ObjectDao`; `data/clip/ClipEnvelope.kt` (serializable envelope + `ClipRow`, Base64 blobs,
