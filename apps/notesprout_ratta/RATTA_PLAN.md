@@ -1448,6 +1448,168 @@ version stamp (0.1.0-ratta so far — links may warrant 0.2.0-ratta, user's call
 
 ---
 
+## Phases — Arc 7 "Pages" (planned 2026-08-23, wizard complete)
+
+Whole-page **copy / cut / paste**, within a notebook and across notebooks, on a **global
+clipboard that lives in the index** (`notesprout.db`) so a copy survives a force-stop and
+travels between notebooks. og's `docs/clipboard-and-page-transfer.md` (monorepo root) is the
+reading reference — no code copied, and its picker-driven "copy to other notebook" flow is
+**not** what SN builds: the persisted clipboard *is* the cross-notebook mechanism (copy in A,
+open B, long-press → Paste). Entry point is the existing page long-press sheet, which today
+holds only Delete page. Phase letter **B** = clipboard.
+
+Two constraints are settled by the standing rules, not by the wizard:
+
+- **No new index table.** `notesprout.db` is Room-validated and format-compatible with Paper;
+  a new `@Entity` changes the identity hash and a Paper index would fail validation (and vice
+  versa). The clipboard is an **additive row type** at a sentinel id — the arc-5 `naming`
+  precedent, the proven-safe pattern.
+- **No encryption gate.** og's "protection drops" warning is vacuous in SN: one global key,
+  every `.soil` under it, and the index itself encrypted at rest. Recorded, not built — the
+  R6 rotation-leg reasoning.
+
+### Locked decisions (arc-7 wizard 2026-08-23 — do not re-ask)
+
+| Decision | Answer |
+|---|---|
+| Clipboard storage | **Additive index row type** `ObjectType.CLIPBOARD = "clipboard"` at the sentinel id `00000000-0000-0000-0000-636c69706264` ("clipbd" in hex — og's id). Single slot: every copy/cut is an `upsert` over it. `name` = kind label (`"page"`), `refId` = source notebook id, `flags` = envelope version, `createdAt`/`updatedAt` = copiedAt, **`blob` = the envelope JSON, UTF-8**. Invisible to the library (every listing query is type-filtered), never soft-deleted. |
+| Payload shape | **Neutral `.soil` row set, kotlinx-serialization JSON** — `ClipEnvelope(version, kind, rows, sourceNotebookId, copiedAt)` with `ClipRow` mirroring the universal row columns and stroke bytes as **Base64** (`java.util.Base64`, JVM-testable — never `android.util.Base64`). `kind = "page"` now; the same envelope carries `"objects"` (strokes / headings / links) in a later arc with **no format change**. Decode never throws (the `LinkPayload` discipline): unusable → the clipboard reads as empty. Byte cap enforced on write **and** read; over-cap copy = problem dialog, never a truncated payload. |
+| Op scope | **Single page** — always the page on the paper. SN has no page-index surface to multi-select on; `rows` is already a set, so multi-page is additive later. |
+| Cut | **Deletes now, undoable.** Cut = capture → `deleteCurrent()` → `undo.record(Action.Page(snap))` — the existing delete path, so undo restores the page *and* its ink; cutting the only page leaves the fresh blank behind. Cross-notebook "move" falls out of cut + paste with no move engine at all. |
+| Sheet | Four rows: **Copy page · Cut page · Paste page · Delete page**. Paste is present only when the clipboard holds a page (**GONE, never disabled** — the e-ink rule). Paste opens a second `ActionSheetDialog`: **Paste before this page / Paste after this page**. Delete keeps its bare confirm; copy/cut/paste confirm with a toast (toast-confirms / dialog-explains). |
+| Clipboard lifetime | **Sticky, single slot.** A paste leaves it loaded (paste the same page into several notebooks); replaced only by the next Copy/Cut; survives force-stop. **No Clear UI** this arc. Consequence worth keeping: the sticky payload is the safety net for a cut whose source notebook has since been closed — paste again. |
+| Availability read | In-memory header only (`SnClipboard`: kind · sourceNotebookId · copiedAt), rehydrated **off-main at app start** (`SnApplication`, og's pattern) and refreshed on every copy/cut, so the sheet decides synchronously. The **envelope blob is read from the index only at paste time** — a header projection never drags MBs out of the index. |
+| Paste undo | **Undoable**, symmetric with insert/delete: paste records a structural snapshot and replays through the one `reconcile` primitive. Undo soft-deletes the pasted page **and its pasted content**, redo restores both — a distinct action arm (`Action.PagePasted`-shaped) because `Structural.objectIds` runs the opposite direction from a delete's. A template row the paste inserted is **left in place** (harmless; the next paste's dedupe reuses it). |
+| Template + page size | Source template row **travels in the payload**. On paste it is **deduped** against the destination's template rows (same kind text + size + byte-identical blob → reuse, else insert fresh) so repeated pastes don't stack identical WEBPs. Page `width`/`height` are kept **verbatim** — ink is never resampled (a Manta-authored page stays its size inside a Nomad notebook). og's rule. |
+| Links on a cross-notebook paste | **Rewrite to an explicit target.** `KIND_PAGE` (own-notebook, carries no notebook id) → `KIND_NOTEBOOK_PAGE` with the **source** notebook id, so the link keeps working. Exception: a link whose target is the page being pasted re-points at the **new copy**. `KIND_NOTEBOOK` / `KIND_NOTEBOOK_PAGE` payloads travel unchanged. Same-notebook paste is verbatim. |
+| Ids | **Every pasted row gets a fresh UUID**, wired through one old→new map so link children re-parent onto the copied link and the page's `refId` points at the resolved template. `"order"` values are **preserved** (writing order is load-bearing — the M-arc/N3 lesson). |
+| Snapshot semantics | The clipboard is a **snapshot taken at copy time**: editing or deleting the source page (or its whole notebook) afterwards changes nothing about what pastes. |
+| Arc shape | **Three phases**: B1 core + same-notebook copy/cut/paste · B2 cross-notebook · B3 review/freeze. |
+
+### Arc-7 standing traps (assume they apply)
+
+- **Drain before capture.** A stroke commit still queued on the shared `SoilWriter` would land
+  after the copy's row read — `session.store.drain()` first, exactly as `doDelete` does.
+- **`java.util.Base64`, never `android.util.Base64`** — the android class is a stub under
+  `returnDefaultValues` and would make every JVM codec test lie (the N1 `StaticLayout` lesson).
+- Preserve `"order"` on every pasted row; never re-sequence content (writing order feeds
+  recognition and the composite raster).
+- `ObjectEntity.name` is **non-null** — the kind label fills it; don't reach for a nullable
+  column that doesn't exist in the lean SN index.
+- A page's own content is **two levels deep** since arc 6 (links wrap children) — capture and
+  paste must walk `liveDescendantIds`' shape, not `liveContentIds`.
+- The undo stack is **per-notebook and cleared on close**: a cut in A pasted into B is two
+  independent stacks. Recorded, not fixed — the sticky clipboard is the recovery.
+- adb can't lasso or ink, but the long-press sheet, its rows and the sub-sheet **are**
+  finger-injectable — device agents can drive copy/cut/paste end to end (measure before
+  tapping; the tap-aim pattern has cost nine false failures).
+- One `.soil` never has two connections: paste writes through the **open session**, never a
+  second open of the destination file.
+
+### B1 — Clipboard core + copy / cut / paste in one notebook
+**Status:** ✅ Complete
+
+`data/index/ObjectType.CLIPBOARD` + sentinel id + a header projection and blob read on
+`ObjectDao`; `data/clip/ClipEnvelope.kt` (serializable envelope + `ClipRow`, Base64 blobs,
+caps, never-throws decode) + `data/clip/ClipStore.kt` (write / readHeader / readEnvelope over
+`ObjectDao`) + `core/SnClipboard.kt` (in-memory header, rehydrated in `SnApplication`);
+`notebook/PageClip.kt` (pure capture → envelope, and the apply plan: id remap, parent
+rewiring, order preservation, template resolution) wired into `NotebookSession` as
+`pasteAt(envelope, before): Structural` on the `insertBlank` shape (one transaction, dense
+renumber, index mirror); the long-press sheet grows Copy / Cut / Paste with the before/after
+sub-sheet; `Action.PagePasted` replay arm; toasts.
+**Gate:** JVM tests (envelope round-trip incl. a Base64 stroke blob and a decode-refuses
+fixture set, capture/apply id remap + order preservation against `FakeSoilDao`, placement
+math, cap enforcement); debug + release build; Haiku device walk (copy → paste before/after,
+cut → page gone + undo restores, paste survives force-stop, page count + indicator honest,
+crash buffer); **user eye check** (copied ink renders identically on the pasted page,
+headings and links come with it, undo/redo of paste and cut, sheet feel).
+*Fable writes the envelope/store/capture-apply contracts + session seam; Opus the sheet flows
+and NotebookActivity wiring; Sonnet icons (Tabler `copy` / `scissors` / `clipboard`) and
+strings.*
+
+**Phase-start answers (2026-08-23):** paste toast **names the target** — "Pasted after
+page 3" / "Pasted before page 3"; Copy and Cut stay bare ("Page copied" / "Page cut").
+Copying a page with **no content is allowed** (no special case — capture yields a page row
++ template and zero content rows; a blank page is a legitimate thing to duplicate, and it
+stamps a template into another notebook in B2).
+
+**Outcome (2026-08-23, user all-clear):** built as planned. 455 JVM tests green
+(+31: `ClipEnvelopeTest`, `ClipStoreTest` + `FakeObjectDao`, `PageClipTest`); debug +
+release build; Nomad walk all-pass (sheet without Paste → Copy → "Page copied" → sheet
+with Paste → sub-sheet → paste after = 7/8 with the heading on the copy → cut = back to
+6/7 → force-stop → **Paste still there** → paste before = "Pasted before page 6" → delete
+to restore). `logcat -b crash` empty; notebook left exactly as found.
+
+Shape as built:
+- `ObjectType.CLIPBOARD` + `ListIds.CLIPBOARD_ID` + `ObjectDao.clipHeader` (a **blob-free
+  projection** — `name/refId/updatedAt/flags` aliased onto `ClipHeader`) / `clipBlob`.
+- `data/clip/` = `ClipEnvelope` (+ `ClipRow`, `ClipHeader`) and `ClipStore`. `MAX_BYTES`
+  = 12 MB, enforced on encode **and** decode; decode refuses garbage / truncation / an
+  empty row set / a **newer** version, and `ignoreUnknownKeys` keeps it forward-tolerant.
+- **Deviation from the plan, recorded:** the header is rehydrated at **notebook open**
+  (`SnClipboard.ensureLoaded()` in `openSession`), not in `SnApplication`. SN's index is
+  encrypted and only `BootstrapActivity` opens it — at `Application.onCreate` there is
+  nothing to read. The notebook screen is the only consumer and always runs after
+  Bootstrap, so this one call covers every route in, **including the unlock route**, which
+  never passes through a warm Bootstrap.
+- `PageClip` is pure and **row-level, not object-level** — it understands only the page row
+  (where the template reference lives), so anything a later arc adds to the family table
+  copies without it learning a content type. `plan()` takes an injected `newId` for
+  testability and **drops** a content row whose parent didn't travel (untrusted payload —
+  a visible absence beats a silent corruption).
+- Template resolution landed as `Reuse` / `Insert` / `None` in `NotebookSession`, with
+  `Insert` bringing the row in **under its source id** (free in the destination). Dedupe
+  therefore already falls out for a repeat paste of the same source page; B2 only adds the
+  content-match rule for the same paper under a different id.
+- `PageGestures.Listener.onDeleteRequested` renamed **`onPageSheetRequested`** — the
+  long-press no longer means "delete".
+- Docs: `docs/clipboard.md` **NEW** (written now rather than in B3 — `docs/notebook.md`
+  links it, and a dangling link is worse than a doc that B2 extends); `docs/notebook.md`
+  gesture table / page-ops table / undo table / long-press section / frame-silence
+  exception 1 all updated; app `CLAUDE.md` doc map + frame-silence line.
+- **A cross-notebook paste already works** (template travels, ids remap, size verbatim);
+  what B2 adds is the `KIND_PAGE` link rewrite. Left working rather than blocked — the arc
+  freezes at B3, and blocking would be code written only to be deleted.
+
+**Not verifiable by adb (eye check):** undo/redo of a paste and of a cut are multi-finger
+stationary double-taps, which `input` cannot inject.
+
+### B2 — Cross-notebook paste
+**Status:** ⬜ Not started
+
+Template dedupe against the destination's template rows (content match, else fresh insert);
+the `KIND_PAGE` → `KIND_NOTEBOOK_PAGE` link rewrite with the self-link exception; page-size
+mismatch kept verbatim and proven on a Manta-authored page; a source notebook deleted or
+renamed between copy and paste (payload is self-contained — only the rewritten link target
+resolves dead, into K4's dialog); envelope-version and cap handling for a payload written by
+an older build.
+**Gate:** JVM tests (template match rule, payload rewrite table incl. every kind and the
+self-link case, foreign-envelope rejection); debug + release build; Haiku device walk (copy in
+A → open B → paste, page count in both, force-stop between copy and paste, `.soil` size sanity
+after repeated pastes = dedupe working); **user eye check** (a real page with ink + heading +
+link copied A→B, the rewritten link followed back into A, cut A → paste B as a move).
+
+**Questions to resolve at phase start:** whether the Manta leg is in scope (needs the second
+device — Nomad-only is the standing rule) or the size-mismatch case is proven by a
+hand-built page; whether a cross-notebook paste should toast the source notebook's name.
+
+### B3 — Review + hardening + docs + freeze
+**Status:** ⬜ Not started
+
+Arc-range `/code-review` (level asked at phase start; every arc so far froze at **high**),
+findings fixed or explicitly accepted → monorepo `BACKLOG.md`; docs (`docs/clipboard.md`
+**new** under the app; `docs/notebook.md` long-press sheet + undo rows; `docs/library.md` if
+the index row type is described there; frame-silence ledger if any new exception); app
+`CLAUDE.md` touch-ups; memory + this file's outcomes; version-stamp decision; full regression
+(Haiku walk + the short user checklist); commit + push; arc freeze.
+**Gate:** everything green or explicitly accepted; user all-clear.
+
+**Questions to resolve at phase start:** review level; version stamp (0.1.0-ratta through six
+arcs — the user's call).
+
+---
+
 ## Verification (end of arc)
 
 1. All JVM unit tests green (`./gradlew test` in `apps/notesprout_ratta`).

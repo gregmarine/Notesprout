@@ -7,6 +7,7 @@ import androidx.room.withTransaction
 import com.symmetricalpalmtree.notesproutsn.core.Bitmaps
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.crypto.KeySession
+import com.symmetricalpalmtree.notesproutsn.data.clip.ClipEnvelope
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookMeta
 import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookMetaStore
@@ -219,6 +220,77 @@ class NotebookSession(
         pages[pos]
     }
 
+    // ── Clipboard (arc 7) ────────────────────────────────────────────────────
+
+    /**
+     * Snapshot the current page and everything on it into a clipboard payload (arc 7). Reads the
+     * page's own row, its template row, and its live descendants — two levels deep since arc 6, so
+     * a link's wrapped children ride along.
+     *
+     * **The caller must drain the writer first** (`store.drain()`): a stroke commit still queued
+     * would land after this read and be silently missing from the copy. Null only when the page row
+     * has vanished under us.
+     */
+    suspend fun capturePage(): ClipEnvelope? = withContext(Dispatchers.IO) {
+        val page = currentPage
+        val pageRow = db.dao().byId(page.id) ?: return@withContext null
+        val templateRow = page.templateId.takeIf { it.isNotEmpty() }?.let { db.dao().byId(it) }
+        val content = db.dao().liveDescendantIds(page.id)
+            .chunked(ID_CHUNK)
+            .flatMap { db.dao().byIds(it) }
+        PageClip.capture(pageRow, templateRow, content, notebookId, System.currentTimeMillis())
+    }
+
+    /**
+     * Paste [env]'s page next to the current one and land on it — [insertBlank]'s shape (one
+     * transaction, dense renumber, index mirror) with the payload's rows in place of a single blank
+     * row. Throws when the payload holds no page row; the caller checks the clipboard first.
+     *
+     * The page's `width`/`height` come across **verbatim** — ink is never resampled, so a
+     * Manta-authored page stays its own size inside a Nomad notebook (og's rule).
+     *
+     * The returned [Structural] is the paste's undo record. Its `objectIds` are the rows the paste
+     * *created*, which is the opposite direction from a delete's — see `Action.PagePasted`.
+     */
+    suspend fun pasteAt(env: ClipEnvelope, before: Boolean): Structural = withContext(Dispatchers.IO) {
+        val cur = currentPage
+        val beforeIds = pages.map { it.id }
+        val now = System.currentTimeMillis()
+        val pos = PageMath.insertPosition(currentIndex, after = !before)
+        val plan = PageClip.plan(env, notebookId, pos, resolveTemplate(env), now) {
+            java.util.UUID.randomUUID().toString()
+        } ?: error("clipboard payload has no page row")
+        val pageRow = plan.rows.first { it.type == SoilSchema.TYPE_PAGE }
+        val newPages = pages.toMutableList().apply { add(pos, pageRow.toPageRef(pos)) }
+        db.withTransaction {
+            plan.rows.chunked(ROW_CHUNK).forEach { db.dao().upsertAll(it) }
+            renumber(newPages, now)
+        }
+        pages = newPages.reindexed()
+        currentIndex = pos
+        loadTemplateFor(currentPage)
+        mirror(now)
+        Slog.d(TAG) { "pasted ${plan.pageId} at $pos (${plan.contentIds.size} objects, ${pages.size} pages)" }
+        Structural(beforeIds, pages.map { it.id }, plan.contentIds, cur.id, plan.pageId)
+    }
+
+    /**
+     * How this file should reach the payload's template. Same-notebook: the row is already here, so
+     * reuse it verbatim. Otherwise bring the carried row in **under its own id**, which is free
+     * here — so a second paste of the same source page finds it and reuses, and repeated pastes
+     * never stack identical WEBPs. (B2 adds the content-match rule for a template that is the same
+     * paper under a different id.)
+     */
+    private suspend fun resolveTemplate(env: ClipEnvelope): PageClip.Template {
+        val pageRow = env.rows.firstOrNull { it.type == SoilSchema.TYPE_PAGE }
+        val wanted = pageRow?.refId?.takeIf { it.isNotEmpty() } ?: return PageClip.Template.None
+        if (db.dao().byId(wanted) != null) return PageClip.Template.Reuse(wanted)
+        if (env.rows.any { it.type == SoilSchema.TYPE_TEMPLATE && it.id == wanted }) {
+            return PageClip.Template.Insert(wanted)
+        }
+        return PageClip.Template.None
+    }
+
     /**
      * Soft-delete the current page and its live content (strokes + headings), then land on the
      * previous page. Deleting the **only** page puts a fresh blank in its place instead — a
@@ -359,5 +431,12 @@ class NotebookSession(
     companion object {
         private const val TAG = "NotebookSession"
         const val MAX_TEMPLATE_EDGE = 4096
+
+        /** SQLite caps bound variables at 999 — id lists go in below that (`LinkStore.ID_CHUNK`). */
+        private const val ID_CHUNK = 500
+
+        /** Rows per `upsertAll`: Room binds ~18 columns each, so keep the statement well inside
+         *  SQLite's variable limit. Chunking inside one transaction loses no atomicity. */
+        private const val ROW_CHUNK = 50
     }
 }

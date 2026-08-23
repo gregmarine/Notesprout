@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import com.symmetricalpalmtree.notesproutsn.data.clip.ClipHeader
 
 private const val SUMMARY_COLS =
     "id, type, name, parentId, createdAt, updatedAt, pageCount, flags, templateKind"
@@ -85,4 +86,20 @@ interface ObjectDao {
         "((:parentId IS NULL AND parentId IS NULL) OR parentId = :parentId) LIMIT 1"
     )
     suspend fun namingRowAny(parentId: String?): ObjectEntity?
+
+    // ── Clipboard (arc 7) ────────────────────────────────────────────────────
+
+    /**
+     * The clipboard row's header — kind, provenance and clock, **blob-free**. This is what the
+     * long-press sheet's availability question costs: the payload is megabytes and is read only
+     * when a paste actually happens ([clipBlob]).
+     */
+    @Query(
+        "SELECT name AS kind, refId AS sourceNotebookId, updatedAt AS copiedAt, flags AS version " +
+        "FROM objects WHERE id = :id AND type = 'clipboard' AND deletedAt IS NULL"
+    )
+    suspend fun clipHeader(id: String): ClipHeader?
+
+    @Query("SELECT blob FROM objects WHERE id = :id AND type = 'clipboard' AND deletedAt IS NULL")
+    suspend fun clipBlob(id: String): ByteArray?
 }

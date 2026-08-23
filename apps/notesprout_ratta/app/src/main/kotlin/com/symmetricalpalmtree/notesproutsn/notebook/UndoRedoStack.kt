@@ -121,6 +121,19 @@ class UndoRedoStack {
         data class Page(val snapshot: NotebookSession.Structural) : Action {
             override val pageId: String get() = snapshot.afterCurrentId
         }
+
+        /**
+         * A page **paste** (arc 7) — the same [NotebookSession.Structural] snapshot, replayed
+         * through the same [NotebookSession.reconcile], but its own kind because `objectIds` runs
+         * the **opposite direction**: a delete's are rows to put *back* on undo, a paste's are rows
+         * to take *away*. Folding the two into one arm would restore what the paste created.
+         *
+         * The template row a paste may have inserted is deliberately not in the snapshot: it is
+         * left in place, harmless, and the next paste's dedupe reuses it.
+         */
+        data class PagePasted(val snapshot: NotebookSession.Structural) : Action {
+            override val pageId: String get() = snapshot.afterCurrentId
+        }
     }
 
     private val undo = ArrayDeque<Action>()

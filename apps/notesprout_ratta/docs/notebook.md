@@ -639,6 +639,8 @@ its row work inside one `db.withTransaction` and then mirrors the result into th
 | `insertBlank(after)` | new `page` row (fresh UUID, parent = notebook, `order` = `PageMath.insertPosition`), inheriting the **current page's template and authored size**, then a renumber; lands on the new page |
 | `deleteCurrent()` | soft-delete the page **and its live content** (`liveContentIds` — strokes **and**, N2, headings; the DAO call is type-agnostic), renumber the remainder, land on `PageMath.indexAfterDelete` (the previous page, or the new first) |
 | `deleteCurrent()` on the **only** page | the page and its content are soft-deleted and a **fresh blank replacement** is created in the same transaction, same template and size — a notebook always has ≥ 1 page, and an empty one would have nothing to open |
+| `pasteAt(env, before)` (B1) | write the clipboard payload's rows — a fresh page row, its content, and the template if this file doesn't already have it — at `PageMath.insertPosition`, renumber, land on the pasted page ([`docs/clipboard.md`](clipboard.md)) |
+| `capturePage()` (B1) | snapshot the current page, its template row and its live descendants into a clipboard payload; the caller drains the writer first |
 | `reconcile(targetAlive, restoreObjectIds, deleteObjectIds, currentId)` | make the live page set exactly `targetAlive`, in that order, restoring/soft-deleting the given **objects** (strokes and headings alike — "object" here is deliberately type-agnostic) with it, and land on `currentId` |
 
 Pages are **soft-deleted** like everything else in the family. That is what makes undo a
@@ -676,7 +678,7 @@ paper is full-bleed and the chrome is two thin bars.
 | 2-finger horizontal swipe ← / → | insert a page after / before this one |
 | 2-finger stationary double-tap | undo |
 | 3-finger stationary double-tap | redo |
-| 1-finger long-press | delete sheet → confirm dialog |
+| 1-finger long-press | the **page sheet** — Copy / Cut / Paste / Delete (B1; [`docs/clipboard.md`](clipboard.md)) |
 
 Thresholds (Paper-v0 parity — the numbers are the feel):
 
@@ -743,7 +745,8 @@ and survives it — [`docs/links.md`](links.md)).
 | `LinkCreated` (K1) | the picker's OK on a create ([`docs/links.md`](links.md)) | `links.unlink` | `links.relink` |
 | `LinkUnlinked` (K1) | the selection toolbar's Unlink | `links.relink` | `links.unlink` |
 | `LinkEdited` (K2) | the picker's OK on an edit | write `before`'s payload | write `after`'s payload |
-| `Page` | insert / delete (`Structural` snapshot, whose `objectIds` are type-agnostic — strokes, headings and links all) | `reconcile(before)` | `reconcile(after)` |
+| `Page` | insert / delete (`Structural` snapshot, whose `objectIds` are type-agnostic — strokes, headings and links all) | `reconcile(before)`, **restoring** `objectIds` | `reconcile(after)`, deleting them |
+| `PagePasted` (B1) | a paste — the same `Structural` shape, its own kind because `objectIds` runs the **opposite direction** (rows the paste *created*) | `reconcile(before)`, **deleting** `objectIds` | `reconcile(after)`, restoring them |
 
 `Deleted` replays exactly like `Erased` (and its N2 heading half like `HeadingDeleted`) and is
 deliberately kept as its own kind: to the user a sweep of the eraser and "delete these" are
@@ -778,13 +781,18 @@ Every gesture-driven operation runs through `runPageOp` — a `Mutex` on `lifecy
 while not open or once closing, `runCatching` + `Log.w` on failure — so two overlapping gestures
 can never tangle the page list.
 
-The delete long-press **asks**; it never deletes. Sheet (`ActionSheetDialog`, one "Delete page"
-row) → confirm dialog → the op. The confirm dialog is the bare question "Delete this page?" with
-**no warning body** — a deleted page and its ink come straight back via undo (soft delete +
-`reconcile`), so "cannot be recovered" would be false (eye-check #2 finding, 2026-08-22).
-`showDeleteSheet` calls `paper.releaseRender()` **ungated**, which
-is safe here only because the long-press fired through the gesture gate: it never arms while the
-pen is active and re-checks at fire, so we are outside the pen-active window the R3 rule protects.
+The long-press **asks**; it never acts. `showPageSheet` opens an `ActionSheetDialog` with
+**Copy page · Cut page · Paste page · Delete page** — Paste present only when the clipboard holds
+a page (**absent, never disabled**: a greyed control is invisible on e-ink). Copy and Cut confirm
+with a toast; Paste opens a second sheet for the placement (before/after); Delete goes to its
+confirm dialog. The whole clipboard side is [`docs/clipboard.md`](clipboard.md).
+
+The delete confirm is the bare question "Delete this page?" with **no warning body** — a deleted
+page and its ink come straight back via undo (soft delete + `reconcile`), so "cannot be recovered"
+would be false (eye-check #2 finding, 2026-08-22). `showPageSheet` calls `paper.releaseRender()`
+**ungated**, which is safe here only because the long-press fired through the gesture gate: it
+never arms while the pen is active and re-checks at fire, so we are outside the pen-active window
+the R3 rule protects.
 
 ## Close & lifecycle
 
@@ -827,8 +835,10 @@ during writing.
 Six recorded exceptions, all the same shape — **one chrome frame at a deliberate act or a
 boundary**, never under live ink:
 
-1. the **delete-page sheet at long-press** (R4 — safe because `PageGestures` never arms while the
-   pen is active and re-checks the gate at fire, so the sheet lands outside the pen-active window);
+1. the **page sheet at long-press** (R4 — safe because `PageGestures` never arms while the
+   pen is active and re-checks the gate at fire, so the sheet lands outside the pen-active window.
+   B1's paste-placement sub-sheet **rides this same exception** rather than opening a new one: it
+   is raised by a tap on a row of a dialog that is already up, so the pen is demonstrably idle);
 2. the **selection toolbar's show at lasso completion** (P1 — deliberately *not* idle-gated: a
    lasso ends with the pen hovering, and `isPenActive` counts hover, so the gate would deliver the
    bar long after its selection. Safe because the engine has already presented the selection box on

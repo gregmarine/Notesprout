@@ -1,0 +1,120 @@
+package com.symmetricalpalmtree.notesproutsn.data.clip
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import java.util.Base64
+
+/**
+ * One `.soil` row, neutral: the universal row shape with its identity and lineage carried as plain
+ * strings, and the blob as **Base64**. `createdAt`/`updatedAt`/`deletedAt` deliberately do not
+ * travel — a paste is a new row and stamps its own clock, and only live rows are ever captured.
+ *
+ * **`java.util.Base64`, never `android.util.Base64`**: the android class is a stub under
+ * `unitTests.isReturnDefaultValues`, which would make every JVM codec test in this file's suite
+ * lie (the N1 `StaticLayout` lesson, applied before it could cost anything).
+ */
+@Serializable
+data class ClipRow(
+    val id: String,
+    val parentId: String,
+    val type: String,
+    val order: Int = 0,
+    val text: String? = null,
+    val refId: String? = null,
+    val x: Float? = null,
+    val y: Float? = null,
+    val width: Float? = null,
+    val height: Float? = null,
+    val color: String? = null,
+    val strokeWidth: Float? = null,
+    val style: String? = null,
+    val flags: Int? = null,
+    val blob: String? = null,
+) {
+    /** The decoded blob, or null when there is none **or it is unusable** — a malformed stroke
+     *  blob costs that one stroke (`StrokeRows.toStroke` drops it), never the whole paste. */
+    fun blobBytes(): ByteArray? =
+        blob?.let { runCatching { Base64.getDecoder().decode(it) }.getOrNull() }
+
+    companion object {
+        fun encodeBlob(bytes: ByteArray?): String? = bytes?.let { Base64.getEncoder().encodeToString(it) }
+    }
+}
+
+/**
+ * What the clipboard holds: a set of `.soil` rows plus the provenance a paste needs, serialized as
+ * kotlinx JSON and stored in the global index's single clipboard row ([ClipStore]).
+ *
+ * The shape is deliberately **kind-discriminated and neutral** — [KIND_PAGE] is arc 7's whole
+ * story, but `rows` is already a set, so a later arc can put strokes / headings / links on the same
+ * clipboard as `kind = "objects"` with no format change and no migration.
+ *
+ * [decode] never throws (the `LinkPayload` discipline): an unusable payload simply reads as no
+ * clipboard at all. The byte cap is enforced on write **and** read, so a payload that grew past it
+ * — or one a future build wrote — is refused whole rather than half-applied.
+ */
+@Serializable
+data class ClipEnvelope(
+    val version: Int,
+    val kind: String,
+    val sourceNotebookId: String,
+    val copiedAt: Long,
+    val rows: List<ClipRow>,
+) {
+    companion object {
+        /** Envelope grammar version. Written into the row's `flags` too, so the header knows it. */
+        const val VERSION = 1
+
+        /** A whole page and everything on it. */
+        const val KIND_PAGE = "page"
+
+        /**
+         * Cap on the encoded payload. Generous — a dense page of ink Base64s to a few MB — but a
+         * hard stop: the blob is read whole into memory at paste time, and the index is the wrong
+         * place for something unbounded. Over-cap is a refused copy with a problem dialog, never a
+         * truncated payload.
+         */
+        const val MAX_BYTES = 12 * 1024 * 1024
+
+        private val json = Json {
+            ignoreUnknownKeys = true
+            encodeDefaults = true
+        }
+
+        /** Encoded UTF-8 JSON, or null when it does not fit [MAX_BYTES]. */
+        fun encode(env: ClipEnvelope): ByteArray? {
+            val bytes = try {
+                json.encodeToString(serializer(), env).toByteArray(Charsets.UTF_8)
+            } catch (_: Exception) {
+                return null
+            }
+            return bytes.takeIf { it.size <= MAX_BYTES }
+        }
+
+        /** The envelope in [bytes], or null for anything unusable — absent, over-cap, malformed,
+         *  empty, or written by a **newer** build than this one understands. */
+        fun decode(bytes: ByteArray?): ClipEnvelope? {
+            if (bytes == null || bytes.isEmpty() || bytes.size > MAX_BYTES) return null
+            val env = try {
+                json.decodeFromString(serializer(), String(bytes, Charsets.UTF_8))
+            } catch (_: Exception) {
+                return null
+            }
+            if (env.version !in 1..VERSION) return null
+            if (env.kind.isEmpty() || env.rows.isEmpty()) return null
+            return env
+        }
+    }
+}
+
+/**
+ * Everything the long-press sheet needs to decide synchronously whether Paste exists — and
+ * **not** the payload. Read as a projection ([com.symmetricalpalmtree.notesproutsn.data.index.ObjectDao.clipHeader]),
+ * so asking "is there a page on the clipboard?" never drags megabytes out of the encrypted index.
+ */
+data class ClipHeader(
+    val kind: String,
+    val sourceNotebookId: String?,
+    val copiedAt: Long,
+    val version: Int?,
+)

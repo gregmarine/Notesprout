@@ -142,6 +142,21 @@
     <string name="delete_page_action">Delete page</string>
     <string name="delete_page_title">Delete this page?</string>
 
+    <!-- Page clipboard (arc 7) -->
+    <string name="copy_page_action">Copy page</string>
+    <string name="cut_page_action">Cut page</string>
+    <string name="paste_page_action">Paste page</string>
+    <string name="paste_before_action">Paste before this page</string>
+    <string name="paste_after_action">Paste after this page</string>
+    <string name="page_copied_toast">Page copied</string>
+    <string name="page_cut_toast">Page cut</string>
+    <string name="pasted_before_toast">Pasted before page %1$d</string>
+    <string name="pasted_after_toast">Pasted after page %1$d</string>
+    <string name="clip_failed_title">Clipboard</string>
+    <string name="clip_capture_failed">This page couldn\'t be read. Nothing was copied.</string>
+    <string name="clip_too_large">There is too much on this page to copy. The clipboard was left unchanged.</string>
+    <string name="clip_paste_failed">The clipboard is empty or its contents couldn\'t be read. Copy a page again.</string>
+
     <!-- Notebook selection -->
     <string name="delete_selection_action">Delete strokes</string>
 

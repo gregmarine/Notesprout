@@ -59,7 +59,9 @@ class PageGestures(
         fun onInsertBefore() {}
         fun onUndo() {}
         fun onRedo() {}
-        fun onDeleteRequested() {}
+        /** A one-finger long-press on the page: the host opens its page sheet (copy / cut /
+         *  paste / delete — arc 7 grew it from the bare delete row). */
+        fun onPageSheetRequested() {}
         /** A qualifying one-finger swipe DOWN (arc 4 — the Contents). */
         fun onSwipeDown() {}
         /** A qualifying one-finger swipe UP (arc 6 — the trail walk-back). One vertical
@@ -109,20 +111,20 @@ class PageGestures(
     private var tapY = 0f
     private var tapDownTime = 0L
 
-    // ── 1-finger long-press → delete ────────────────────────────────────────────
+    // ── 1-finger long-press → the page sheet ────────────────────────────────────
     private var longPressArmed = false
     private var longPressX = 0f
     private var longPressY = 0f
     private val longPressRunnable = Runnable {
         if (longPressArmed && gateOpen()) {
             longPressArmed = false
-            // The delete sheet is about to own the screen — stand the rest of this touch sequence
+            // The page sheet is about to own the screen — stand the rest of this touch sequence
             // down. The finger is still on the glass, and its continued drag would otherwise be
             // judged at ACTION_UP as a flip or swipe-down *under the sheet*: the page changes, and
-            // the pending confirm then deletes the wrong page.
+            // the pending action then lands on the wrong page.
             cancelAll()
             ignoreSequence = true
-            listener.onDeleteRequested()
+            listener.onPageSheetRequested()
         }
     }
 

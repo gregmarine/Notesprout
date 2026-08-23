@@ -15,7 +15,8 @@ The Manta identifies as a Nomad — target by serial.
 `docs/library.md` (library screen, naming schemes) · `docs/notebook.md` (the notebook screen:
 tools, selection, headings, Contents, gestures, undo, frame-silence ledger) ·
 `docs/links.md` (arc 6: link rows/payload, render, picker + create-in-picker, follow + trail) ·
-`docs/extensions.md` (the one recognizer extension point).
+`docs/clipboard.md` (arc 7: the page clipboard — index row type, payload, capture/apply, the
+long-press page sheet) · `docs/extensions.md` (the one recognizer extension point).
 
 ## Standing rules
 
@@ -61,7 +62,9 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   page lands, the "Recognizing…" overlay around a heading convert, the selection
   toolbar's own-tap re-shows (H toggle / level pick / post-edit re-anchor), and the Contents
   dialog's show/hide (C1) — all one chrome frame at a deliberate act or a boundary, never
-  under live ink (R3's tool-panel-close exception retired with the panels in P1). Any new
+  under live ink (R3's tool-panel-close exception retired with the panels in P1). B1's
+  paste-placement sub-sheet rides the long-press sheet's exception rather than adding one (it is
+  raised from a row of a dialog already up). Any new
   exception needs the same written justification.
 - **Toast vs. dialog:** a toast only confirms something that already happened; anything
   explaining why a tap *didn't* work is a problem dialog. On e-ink a missed toast reads

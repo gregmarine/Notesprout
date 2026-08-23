@@ -8,6 +8,7 @@ import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
+import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -26,6 +27,9 @@ import com.symmetricalpalmtree.notesproutsn.core.Dialogs
 import com.symmetricalpalmtree.notesproutsn.core.Immersive
 import com.symmetricalpalmtree.notesproutsn.core.IndexGuard
 import com.symmetricalpalmtree.notesproutsn.core.Slog
+import com.symmetricalpalmtree.notesproutsn.core.SnClipboard
+import com.symmetricalpalmtree.notesproutsn.data.clip.ClipEnvelope
+import com.symmetricalpalmtree.notesproutsn.data.clip.ClipStore
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.prefs.BrowseState
 import com.symmetricalpalmtree.notesproutsn.data.prefs.LinkTrail
@@ -74,6 +78,9 @@ class NotebookActivity : AppCompatActivity() {
     private lateinit var linkPickFlow: LinkPickFlow
     private lateinit var followFlow: LinkFollowFlow
     private val repo by lazy { IndexRepository() }
+
+    /** The global clipboard's one index row (arc 7) — the payload, read and written only here. */
+    private val clipStore by lazy { ClipStore() }
 
     private var notebookId: String = ""
     private var opened = false
@@ -306,6 +313,10 @@ class NotebookActivity : AppCompatActivity() {
                 val idx = session.pages.indexOfFirst { it.id == want }
                 if (idx >= 0 && idx != session.currentIndex) session.goTo(idx)
             }
+            // One blob-free row read, before the page can be long-pressed: the sheet decides
+            // whether a Paste row exists synchronously, and this is where the process-wide header
+            // gets rehydrated (SN's index only opens at Bootstrap — see SnClipboard).
+            SnClipboard.ensureLoaded()
             val page = session.currentPage
             val strokes = session.store.loadPage(page.id)
             val headings = remeasureForDevice(session.headings.loadPage(page.id))
@@ -540,7 +551,7 @@ class NotebookActivity : AppCompatActivity() {
         override fun onInsertBefore() = runPageOp { doInsert(after = false) }
         override fun onUndo() = runPageOp { doUndo() }
         override fun onRedo() = runPageOp { doRedo() }
-        override fun onDeleteRequested() { showDeleteSheet() }
+        override fun onPageSheetRequested() { showPageSheet() }
         override fun onSwipeDown() { contentsFlow.open() }   // silently a no-op while unavailable
         override fun onSwipeUp() { followFlow.walkBack(onEmpty = {}) }   // empty trail: silent
         override fun onFingerTap(x: Float, y: Float) {
@@ -718,6 +729,12 @@ class NotebookActivity : AppCompatActivity() {
                 session.reconcile(a.snapshot.before, a.snapshot.objectIds, emptyList(), a.snapshot.beforeCurrentId)
                 refreshToPage(session.currentPage.id)
             }
+            // The mirror image of Page: a paste's objectIds are rows it CREATED, so undoing it
+            // soft-deletes them along with the page they hang under.
+            is Action.PagePasted -> {
+                session.reconcile(a.snapshot.before, emptyList(), a.snapshot.objectIds, a.snapshot.beforeCurrentId)
+                refreshToPage(session.currentPage.id)
+            }
         }
     }
 
@@ -750,6 +767,10 @@ class NotebookActivity : AppCompatActivity() {
             is Action.LinkEdited -> { session.links.updatePayload(a.linkId, a.after); session.store.drain(); refreshToPage(a.pageId) }
             is Action.Page -> {
                 session.reconcile(a.snapshot.after, emptyList(), a.snapshot.objectIds, a.snapshot.afterCurrentId)
+                refreshToPage(session.currentPage.id)
+            }
+            is Action.PagePasted -> {
+                session.reconcile(a.snapshot.after, a.snapshot.objectIds, emptyList(), a.snapshot.afterCurrentId)
                 refreshToPage(session.currentPage.id)
             }
         }
@@ -1138,17 +1159,93 @@ class NotebookActivity : AppCompatActivity() {
         }
     }
 
-    /** Long-press asks; it never deletes. Sheet → confirm dialog → the actual op. */
-    private fun showDeleteSheet() {
+    // ── The page sheet: copy / cut / paste / delete ──────────────────────────
+
+    /**
+     * Long-press asks; it never acts. Copy and Cut confirm with a toast (something happened);
+     * Paste opens a second sheet for the placement; Delete keeps its confirm dialog.
+     *
+     * **Paste is absent, never disabled**, when the clipboard holds no page — a greyed control is
+     * invisible on e-ink (the standing rule), and a sheet whose row count *is* its content can
+     * simply be one row shorter.
+     */
+    private fun showPageSheet() {
         if (!opened) return
         // Ungated releaseRender() is safe here only because the long-press fired through
         // PageGestures' own gate: it never arms while the pen is active and re-checks at fire, so
         // we are outside the pen-active window the R3 rule protects (a release inside it can cost
         // a live stroke).
         paper.releaseRender()
+        val sheet = ActionSheetDialog(this)
+            .addAction(R.drawable.ic_copy, getString(R.string.copy_page_action)) { runPageOp { doCopy(cut = false) } }
+            .addAction(R.drawable.ic_cut, getString(R.string.cut_page_action)) { runPageOp { doCopy(cut = true) } }
+        if (SnClipboard.hasPage) {
+            sheet.addAction(R.drawable.ic_clipboard, getString(R.string.paste_page_action)) { showPasteSheet() }
+        }
+        sheet.addAction(R.drawable.ic_trash, getString(R.string.delete_page_action)) { confirmDeletePage() }
+        sheet.show()
+    }
+
+    /** Where the pasted page goes. Opened from a row of the page sheet, so the pen is demonstrably
+     *  idle — this rides the long-press sheet's frame-silence exception, it is not a new one. */
+    private fun showPasteSheet() {
+        if (!opened) return
         ActionSheetDialog(this)
-            .addAction(R.drawable.ic_trash, getString(R.string.delete_page_action)) { confirmDeletePage() }
+            .addAction(R.drawable.ic_page_prev, getString(R.string.paste_before_action)) { runPageOp { doPaste(before = true) } }
+            .addAction(R.drawable.ic_page_next, getString(R.string.paste_after_action)) { runPageOp { doPaste(before = false) } }
             .show()
+    }
+
+    /**
+     * Copy — or cut, which is a copy followed by the ordinary delete, so undo puts the page *and*
+     * its ink back exactly as a Delete page would.
+     *
+     * The drain is the arc's standing trap: a stroke commit still queued on the shared writer would
+     * land after the capture's row read and be silently missing from the payload.
+     */
+    private suspend fun doCopy(cut: Boolean) {
+        session.store.drain()
+        val env = session.capturePage()
+        if (env == null) {
+            Dialogs.problem(this, R.string.clip_failed_title, R.string.clip_capture_failed)
+            return
+        }
+        val header = withContext(Dispatchers.IO) { clipStore.write(env) }
+        if (header == null) {
+            // Over the payload cap. Nothing was written, so whatever was on the clipboard stands.
+            Dialogs.problem(this, R.string.clip_failed_title, R.string.clip_too_large)
+            return
+        }
+        SnClipboard.set(header)
+        if (cut) {
+            val snap = session.deleteCurrent()
+            undo.record(Action.Page(snap))
+            navigateTo(session.currentIndex)
+        }
+        toast(getString(if (cut) R.string.page_cut_toast else R.string.page_copied_toast))
+    }
+
+    /** Paste the clipboard's page beside this one and land on it. */
+    private suspend fun doPaste(before: Boolean) {
+        val env = withContext(Dispatchers.IO) { clipStore.readEnvelope() }
+        if (env == null || env.kind != ClipEnvelope.KIND_PAGE) {
+            // The row is gone or unusable — stop advertising a Paste that cannot work.
+            SnClipboard.set(null)
+            Dialogs.problem(this, R.string.clip_failed_title, R.string.clip_paste_failed)
+            return
+        }
+        session.store.drain()
+        // The anchor's number, read before the paste shifts everything after it.
+        val anchor = session.currentIndex + 1
+        val snap = session.pasteAt(env, before)
+        undo.record(Action.PagePasted(snap))
+        navigateTo(session.currentIndex)
+        toast(getString(if (before) R.string.pasted_before_toast else R.string.pasted_after_toast, anchor))
+    }
+
+    private fun toast(text: String) {
+        if (isFinishing || isDestroyed) return
+        Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
     }
 
     private fun confirmDeletePage() {

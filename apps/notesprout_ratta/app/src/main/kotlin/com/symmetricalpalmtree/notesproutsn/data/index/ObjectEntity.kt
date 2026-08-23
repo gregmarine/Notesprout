@@ -18,6 +18,19 @@ object ObjectType {
      * with Paper — is untouched, and a Paper index simply never lists these rows.
      */
     const val NAMING = "naming"
+
+    /**
+     * The global clipboard (arc 7) — one row at [ListIds.CLIPBOARD_ID], replaced by every copy or
+     * cut. The same additive-row-type pattern as [NAMING] and for the same reason: `notesprout.db`
+     * is Room-validated and format-compatible with Paper, so a new `@Entity` would change the
+     * identity hash and a Paper index would fail validation (and vice versa).
+     *
+     * `name` = the payload kind (`"page"`) · `refId` = the source notebook id · `flags` = the
+     * envelope version · `createdAt`/`updatedAt` = when it was copied · `blob` = the
+     * [com.symmetricalpalmtree.notesproutsn.data.clip.ClipEnvelope] JSON, UTF-8. Never
+     * soft-deleted, and invisible to the library because every listing query is type-filtered.
+     */
+    const val CLIPBOARD = "clipboard"
 }
 
 /** Notebook `flags` bits. */
