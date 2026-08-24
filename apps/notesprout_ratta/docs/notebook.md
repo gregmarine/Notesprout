@@ -164,8 +164,18 @@ for hundreds of ms reads as a tap that missed. The box is shown across the whole
   **waits for `onPreDraw` and `post`s the launch**. That sequencing is the whole point:
   `Dispatchers.Main` is an *async* Handler, so a coroutine — or a bare `startActivity` in the tap
   handler — jumps the view traversal's sync barrier, the source pauses, and the overlay never draws
-  at all. It auto-hides on the first `ON_RESUME` after an `ON_PAUSE`, so the library is clean when
-  the user comes back; a source that finishes itself simply dies with its overlay.
+  at all. It **auto-hides on any `ON_RESUME` with no launch still pending**, so the library is clean
+  when the user comes back; a source that finishes itself simply dies with its overlay.
+- **The auto-hide is not pause-gated (B3), and that matters more than it looks.** The rule used to be
+  "hide on the first `ON_RESUME` after an `ON_PAUSE`", which assumes every show is followed by a
+  pause — true of the tap path and of nothing else. An activity that shows the box while it is *not*
+  resumed (recreated in the background, or opening from `onCreate` on the launch-restore path)
+  resumes with no pause on record and hides nothing. And a stranded box is not cosmetic: the root is
+  full-screen and `clickable`, so it swallows **every** tap and the screen underneath is dead until
+  the process is killed — seen once on the Nomad, a library that answered nothing. The `launchPending`
+  flag is what still protects the restore path: the one resume that must leave the box alone is the
+  one that arrives while the launch is in flight. A `WATCHDOG_MS` timer hides it anyway if the launch
+  never draws at all (a source that is off-screen never gets `onPreDraw`, so `then` never runs).
 - **Destination side** — `activity_notebook.xml`'s `openingOverlay` include is the last child and
   starts `VISIBLE`, so the notebook covers its own first frame and there is no gap after the
   source's box. It goes `GONE` at exactly two places: right after `opened = true` + the real

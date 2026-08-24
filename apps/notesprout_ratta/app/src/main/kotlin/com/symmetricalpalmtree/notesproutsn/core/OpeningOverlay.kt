@@ -39,19 +39,43 @@ object OpeningOverlay {
     private val TAG_KEY = "notesproutsn.openingOverlay"
     private val autoHideArmed = WeakHashMap<Activity, Boolean>()
 
+    // True from showThen until the launch has actually run. It is what separates "the box is doing
+    // its job" from "the box is stranded", and both values hold no reference back to the key.
+    private val launchPending = WeakHashMap<Activity, Boolean>()
+
+    /** A launch that has produced no frame by now is not going to; the box must not outlive it. */
+    private const val WATCHDOG_MS = 4000L
+
     /** Show the overlay, wait for its frame to be drawn, then run [then] (the launch). */
     fun showThen(activity: Activity, then: () -> Unit) {
         val overlay = obtain(activity)
         overlay.visibility = View.VISIBLE
         overlay.bringToFront()
+        launchPending[activity] = true
         armAutoHide(activity)
         overlay.viewTreeObserver.addOnPreDrawListener(object : ViewTreeObserver.OnPreDrawListener {
             override fun onPreDraw(): Boolean {
                 overlay.viewTreeObserver.removeOnPreDrawListener(this)
-                overlay.post(then)
+                overlay.post {
+                    try {
+                        then()
+                    } finally {
+                        // After the launch, not before: an auto-hide racing in between would pull
+                        // the box out from under the very wait it exists for.
+                        launchPending[activity] = false
+                    }
+                }
                 return true
             }
         })
+        // The backstop for a launch that never draws (the source is off-screen, so onPreDraw never
+        // fires and `then` never runs): a hidden box beats a screen no tap can reach.
+        overlay.postDelayed({
+            if (launchPending[activity] == true) {
+                launchPending[activity] = false
+                hide(activity)
+            }
+        }, WATCHDOG_MS)
         overlay.invalidate()
     }
 
@@ -71,23 +95,30 @@ object OpeningOverlay {
     }
 
     /**
-     * Hide again on the first resume *after* a pause: the launch always pauses the source, so a
-     * screen that stays on the back stack (the library) must find its own UI when the user comes
-     * back, not a stale box. Armed once per activity; the observer then re-hides on every later
-     * return, which is idempotent. A source that finishes itself never resumes and simply dies with
-     * its overlay.
+     * **The invariant: this screen is never the thing on the glass with the box up.** A screen that
+     * stays on the back stack (the library) must find its own UI when the user comes back, not a
+     * stale box — and a stale box here is not cosmetic: the root is full-screen and clickable, so it
+     * swallows *every* tap and the screen underneath is simply dead until the process is killed.
+     *
+     * So the rule is **hide on any resume with no launch pending**, not "hide on the first resume
+     * after a pause" (B3). The pause-gated version assumed every arming is followed by a pause,
+     * which the tap path guarantees and nothing else does: an activity armed while it is not
+     * resumed — recreated in the background, or opening from `onCreate` on the launch-restore path —
+     * resumes with no pause on record and hides nothing, forever. Observed once on the Nomad after a
+     * restore behind a locked screen: the library came back dead to touch.
+     *
+     * `launchPending` is what keeps the restore path honest: the resume that arrives *while the
+     * launch is still in flight* leaves the box alone, which is the one resume that must.
+     *
+     * Armed once per activity; the observer is idempotent. A source that finishes itself never
+     * resumes and simply dies with its overlay.
      */
     private fun armAutoHide(activity: Activity) {
         if (activity !is LifecycleOwner) return
         if (autoHideArmed[activity] == true) return
         autoHideArmed[activity] = true
-        var paused = false
         activity.lifecycle.addObserver(LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_PAUSE -> paused = true
-                Lifecycle.Event.ON_RESUME -> if (paused) hide(activity)
-                else -> {}
-            }
+            if (event == Lifecycle.Event.ON_RESUME && launchPending[activity] != true) hide(activity)
         })
     }
 }
