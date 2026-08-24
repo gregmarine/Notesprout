@@ -45,6 +45,23 @@ class PageMathTest {
         assertEquals(2, PageMath.insertPosition(currentIndex = 2, after = false))
     }
 
+    // ── anchorNumberAfterPaste (the toast's number — B3 review) ──────────────
+
+    @Test fun `pasting after leaves the anchor's number alone`() {
+        // on page 3 (index 2), paste after → the anchor is still page 3
+        assertEquals(3, PageMath.anchorNumberAfterPaste(currentIndex = 2, before = false))
+    }
+
+    @Test fun `pasting before pushes the anchor down one`() {
+        // on page 3 (index 2), paste before → the new page IS page 3, the anchor is now page 4.
+        // Naming 3 here would have the toast point at the page it just created.
+        assertEquals(4, PageMath.anchorNumberAfterPaste(currentIndex = 2, before = true))
+    }
+
+    @Test fun `pasting before the first page names it page 2`() {
+        assertEquals(2, PageMath.anchorNumberAfterPaste(currentIndex = 0, before = true))
+    }
+
     // ── toRestore / toDelete ─────────────────────────────────────────────────
 
     @Test fun `toRestore names the pages missing from the live set`() {

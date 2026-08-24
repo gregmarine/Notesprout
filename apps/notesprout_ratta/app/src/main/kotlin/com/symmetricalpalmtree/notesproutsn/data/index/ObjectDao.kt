@@ -102,4 +102,13 @@ interface ObjectDao {
 
     @Query("SELECT blob FROM objects WHERE id = :id AND type = 'clipboard' AND deletedAt IS NULL")
     suspend fun clipBlob(id: String): ByteArray?
+
+    /**
+     * Retire an **unusable** clipboard row (B3 review): soft-delete it *and* drop its pixels, so a
+     * payload that cannot be decoded stops advertising a Paste that can only fail — and stops
+     * costing megabytes in the index for nothing. There is still no Clear in the UI; this is the
+     * recovery path, and the next copy's upsert revives the row wholesale.
+     */
+    @Query("UPDATE objects SET deletedAt = :at, blob = NULL WHERE id = :id AND type = 'clipboard'")
+    suspend fun clipClear(id: String, at: Long)
 }

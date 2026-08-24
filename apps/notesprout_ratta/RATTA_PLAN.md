@@ -1641,7 +1641,7 @@ taken while it shows can be **missing committed ink that is plainly there once i
 one false data-loss scare mid-walk.
 
 ### B3 — Review + hardening + docs + freeze
-**Status:** ⬜ Not started
+**Status:** ✅ Complete — **Arc 7 "Pages" frozen 2026-08-23**
 
 Arc-range `/code-review` (level asked at phase start; every arc so far froze at **high**),
 findings fixed or explicitly accepted → monorepo `BACKLOG.md`; docs (`docs/clipboard.md`
@@ -1653,6 +1653,56 @@ the index row type is described there; frame-silence ledger if any new exception
 
 **Questions to resolve at phase start:** review level; version stamp (0.1.0-ratta through six
 arcs — the user's call).
+
+**Phase-start answers (2026-08-23):** review level **high** (the standing precedent), range
+`a4e3a10^..HEAD` (B1 + B2). Version stamp **stays `0.1.0-ratta`** — no bump at this freeze; the
+version waits for a real milestone rather than tracking arcs.
+
+**Outcome (2026-08-23):** review returned **5 findings, all verified real and all fixed** — none
+critical, none in the id-remap / order / undo core (the reviewer cleared those explicitly). **473 JVM
+tests** green (app 438 +7 · api 6 · ext 29); debug + release built, release signed; Nomad walk
+all-pass; `logcat -b crash` empty.
+
+| # | Finding | Fix |
+|---|---|---|
+| 1 (med) | `MAX_BYTES` 12 MB sat **above the 8 MiB cursor window** the blob is read back through (`SQLiteCursor.DEFAULT_CURSOR_WINDOW_SIZE`, confirmed in the sqlcipher-android 4.6.1 AAR). An 8–12 MB copy would write, replace a good clipboard, toast success — then throw on every paste, swallowed by `runPageOp` into a dead tap | cap → **6 MB**, `CURSOR_WINDOW_BYTES` + a guard test that fails if the cap is ever raised past the window; `readEnvelope` also guards the read |
+| 2 | `SnClipboard.set(null)` cleared only the in-memory mirror — the row's still-valid header came back at the next notebook open and failed again, **forever** | `ObjectDao.clipClear` / `ClipStore.clear()` (soft-delete **and** null the blob) on the paste-failed path |
+| 3 | The paste toast named the anchor's **pre**-paste number, so "Pasted before page 3" pointed at the page it had just created | `PageMath.anchorNumberAfterPaste` (pure, JVM-tested): before → anchor+1, after unchanged |
+| 4 | `doCopy` handled two failures and swallowed every other throw — a disk/IO error made Copy a dead tap while a **stale** clipboard stood ready to paste the wrong page | capture + write wrapped, distinct message for over-cap vs. failed write (`clip_write_failed`) |
+| 5 | `ensureLoaded` latched `loaded = true` on a **failed** read — one transient index error hid Paste for the whole process | only a successful read latches |
+
+Docs: `docs/clipboard.md` (status → arc complete, the cursor-window rationale, the clear path, the
+toast rule, two new traps). `docs/notebook.md` needed nothing — it delegates the clipboard to
+`docs/clipboard.md`. **`docs/library.md` deliberately unchanged**: it has no index-row-type section
+(the `naming` row is documented under *Name schemes*, its own feature), so the clipboard row stays
+documented where it lives.
+
+**Nomad walk, all-pass** (by hand over adb, no device agent — two scratch lined notebooks in
+`Test`, both deleted afterwards): copy → "Page copied" · paste after on 1/1 → 2/2 · **paste before
+on 2/2 → indicator 2/3 with the toast reading "Pasted before page 3"** (fix 3 proven on glass;
+pre-fix it said "page 2") · paste after on 2/3 → "Pasted after page 2", 3/4 · force-stop → **Paste
+row still there** · cut → "Page cut", 2/3 · cross-notebook paste into a second lined notebook →
+"Pasted after page 1" with `paste reuses matching template` in the log (B2's content dedupe still
+live after the changes). `logcat -b crash` empty; the user's notebooks untouched.
+
+**Observed once, NOT arc 7 — the "Opening…" overlay can stick and kill the library.** After
+`install -r` over a live app on a **sleeping, locked** device, the launch-restore chain ran behind
+the lock screen; on returning from the notebook the library carried a **full-screen clickable**
+`OpeningOverlay` node (uiautomator confirmed it, not a cover artefact) that swallowed every tap —
+the library was completely dead until a force-stop. Not reproducible in three later attempts (normal
+open→back, restore→back, restore-with-screen-off, which re-locks the device and blocks adb). Nothing
+in arc 7 touches `OpeningOverlay` or the restore path.
+
+**Chased and fixed at the user's call (2026-08-23), outside the arc range.** The hole was
+`armAutoHide`'s rule: *hide on the first `ON_RESUME` after an `ON_PAUSE`* assumes every show is
+followed by a pause, which the tap path guarantees and nothing else does — an activity that shows the
+box while it is not resumed (recreated in the background, or opening from `onCreate` via
+`reopenLastNotebookIfNeeded`) resumes with no pause on record and hides nothing, ever. Now: **hide on
+any `ON_RESUME` with no launch pending**, with `launchPending` keeping the restore path honest (the
+resume that arrives mid-launch is the one that must leave the box alone) and a `WATCHDOG_MS` = 4 s
+backstop for a launch that never draws. Verified on the Nomad: tap → notebook → back leaves a live
+library, and restore-into-notebook → back leaves a live library, no overlay node in either dump.
+Documented in `docs/notebook.md` § "Opening…" overlay. Committed separately from the arc-7 freeze.
 
 ---
 

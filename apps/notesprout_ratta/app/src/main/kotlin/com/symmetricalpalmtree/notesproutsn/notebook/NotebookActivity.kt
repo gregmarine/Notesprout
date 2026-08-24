@@ -1203,18 +1203,29 @@ class NotebookActivity : AppCompatActivity() {
      *
      * The drain is the arc's standing trap: a stroke commit still queued on the shared writer would
      * land after the capture's row read and be silently missing from the payload.
+     *
+     * The capture and the write are wrapped (B3 review): a throw on the way — a full disk, an index
+     * IO error — would otherwise unwind into `runPageOp`'s `runCatching` and make Copy a tap that
+     * did nothing, while a *stale* clipboard quietly stood ready to paste the wrong page. Anything
+     * that explains why a tap didn't work is a problem dialog, not a log line.
      */
     private suspend fun doCopy(cut: Boolean) {
         session.store.drain()
-        val env = session.capturePage()
+        val env = runCatching { session.capturePage() }
+            .onFailure { Log.w(TAG, "page capture failed", it) }
+            .getOrNull()
         if (env == null) {
             Dialogs.problem(this, R.string.clip_failed_title, R.string.clip_capture_failed)
             return
         }
-        val header = withContext(Dispatchers.IO) { clipStore.write(env) }
+        val write = runCatching { withContext(Dispatchers.IO) { clipStore.write(env) } }
+            .onFailure { Log.w(TAG, "clipboard write failed", it) }
+        val header = write.getOrNull()
         if (header == null) {
-            // Over the payload cap. Nothing was written, so whatever was on the clipboard stands.
-            Dialogs.problem(this, R.string.clip_failed_title, R.string.clip_too_large)
+            // Over the payload cap, or the write threw. Either way nothing landed, so whatever was
+            // on the clipboard still stands — and the message says which of the two it was.
+            val message = if (write.isSuccess) R.string.clip_too_large else R.string.clip_write_failed
+            Dialogs.problem(this, R.string.clip_failed_title, message)
             return
         }
         SnClipboard.set(header)
@@ -1235,13 +1246,20 @@ class NotebookActivity : AppCompatActivity() {
             // The row is gone, foreign, or claims a page it does not carry — stop advertising a
             // Paste that cannot work. Checked here rather than left to `pasteAt`, whose throw is a
             // caller-bug assertion and would be swallowed by `runPageOp` into a silent no-op.
+            //
+            // The index row goes too (B3 review): clearing only the in-memory mirror would hide the
+            // dead Paste for this session and then let `ensureLoaded` read its still-valid header
+            // back at the next notebook open, failing again — forever.
             SnClipboard.set(null)
+            runCatching { withContext(Dispatchers.IO) { clipStore.clear(System.currentTimeMillis()) } }
+                .onFailure { Log.w(TAG, "clipboard clear failed", it) }
             Dialogs.problem(this, R.string.clip_failed_title, R.string.clip_paste_failed)
             return
         }
         session.store.drain()
-        // The anchor's number, read before the paste shifts everything after it.
-        val anchor = session.currentIndex + 1
+        // The anchor page's number as it will read once the paste has landed — the indicator the
+        // user is looking at when the toast arrives (PageMath.anchorNumberAfterPaste).
+        val anchor = PageMath.anchorNumberAfterPaste(session.currentIndex, before)
         val snap = session.pasteAt(env, before)
         undo.record(Action.PagePasted(snap))
         navigateTo(session.currentIndex)

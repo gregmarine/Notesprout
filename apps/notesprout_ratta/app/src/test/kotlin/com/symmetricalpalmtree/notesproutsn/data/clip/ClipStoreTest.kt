@@ -86,4 +86,36 @@ class ClipStoreTest {
         // and it clears the in-memory mirror when it does.
         assertNotNull(store.readHeader())
     }
+
+    /** B3 review: clearing only the in-memory mirror let the still-valid header come back at the
+     *  next notebook open and advertise a Paste that could only fail again — forever. */
+    @Test
+    fun `clear retires an unusable row so it stops advertising a paste`() = runBlocking {
+        store.write(envelope("page-1", 111L))
+        store.clear(999L)
+        assertNull(store.readHeader())
+        assertNull(store.readEnvelope())
+        // The pixels go with it — a dead payload should not keep costing megabytes in the index.
+        assertNull(dao.rows.getValue(ListIds.CLIPBOARD_ID).blob)
+        assertEquals(999L, dao.rows.getValue(ListIds.CLIPBOARD_ID).deletedAt)
+    }
+
+    @Test
+    fun `a copy after a clear revives the one slot`() = runBlocking {
+        store.write(envelope("page-1", 111L))
+        store.clear(999L)
+        store.write(envelope("page-2", 222L))
+        assertEquals(1, dao.rows.size)
+        assertNull(dao.rows.getValue(ListIds.CLIPBOARD_ID).deletedAt)
+        assertEquals("page-2", store.readEnvelope()!!.rows.single().id)
+    }
+
+    /** A row a laxer build wrote can be too big for the cursor window to hand back — the read
+     *  throws rather than returning bytes, and the clipboard must read as unusable, not crash. */
+    @Test
+    fun `a read that throws reads as an empty clipboard`() = runBlocking {
+        store.write(envelope("page-1", 111L))
+        dao.clipBlobThrows = true
+        assertNull(store.readEnvelope())
+    }
 }

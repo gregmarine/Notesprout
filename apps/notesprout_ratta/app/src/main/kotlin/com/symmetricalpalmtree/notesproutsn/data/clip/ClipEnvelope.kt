@@ -73,8 +73,18 @@ data class ClipEnvelope(
          * hard stop: the blob is read whole into memory at paste time, and the index is the wrong
          * place for something unbounded. Over-cap is a refused copy with a problem dialog, never a
          * truncated payload.
+         *
+         * **The ceiling is not ours, it is the cursor's** (B3 review): SQLCipher reads a row back
+         * through an `android.database.CursorWindow` sized `SQLiteCursor.DEFAULT_CURSOR_WINDOW_SIZE`
+         * = 8 MiB, so a blob above that can be *written* and then never *read* —
+         * `SQLiteBlobTooBigException` at every paste, on a clipboard the sheet is still advertising.
+         * A copy that cannot be pasted is worse than a refused copy, so the cap sits well under the
+         * window with room for the row around it. Pinned by [MAX_BYTES] guard test.
          */
-        const val MAX_BYTES = 12 * 1024 * 1024
+        const val MAX_BYTES = 6 * 1024 * 1024
+
+        /** The read-back window the cap must stay under — see [MAX_BYTES]. */
+        const val CURSOR_WINDOW_BYTES = 8 * 1024 * 1024
 
         private val json = Json {
             ignoreUnknownKeys = true

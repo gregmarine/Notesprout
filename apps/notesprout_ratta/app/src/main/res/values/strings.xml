@@ -156,6 +156,7 @@
     <string name="clip_capture_failed">This page couldn\'t be read. Nothing was copied.</string>
     <string name="clip_too_large">There is too much on this page to copy. The clipboard was left unchanged.</string>
     <string name="clip_paste_failed">The clipboard is empty or its contents couldn\'t be read. Copy a page again.</string>
+    <string name="clip_write_failed">The page couldn\'t be put on the clipboard. The clipboard was left unchanged.</string>
 
     <!-- Notebook selection -->
     <string name="delete_selection_action">Delete strokes</string>

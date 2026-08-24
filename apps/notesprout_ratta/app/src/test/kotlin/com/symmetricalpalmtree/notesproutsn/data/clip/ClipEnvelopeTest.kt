@@ -128,4 +128,18 @@ class ClipEnvelopeTest {
         assertTrue(bytes!!.size <= ClipEnvelope.MAX_BYTES)
         assertNotNull(ClipEnvelope.decode(bytes))
     }
+
+    /**
+     * B3 review. The cap is not a taste question: SQLCipher hands a row back through an 8 MiB
+     * `CursorWindow`, so a payload above that can be written and then never read — every paste
+     * throwing on a clipboard the sheet still advertises. Raising [ClipEnvelope.MAX_BYTES] past the
+     * window must fail here, not on a device.
+     */
+    @Test
+    fun `the cap stays under the cursor window the payload is read back through`() {
+        assertTrue(
+            "MAX_BYTES must leave room inside the ${ClipEnvelope.CURSOR_WINDOW_BYTES}-byte cursor window",
+            ClipEnvelope.MAX_BYTES <= ClipEnvelope.CURSOR_WINDOW_BYTES - 1024 * 1024,
+        )
+    }
 }

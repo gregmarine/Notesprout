@@ -36,13 +36,18 @@ object SnClipboard {
     /**
      * Read the header once per process. Idempotent and cheap (one indexed, blob-free row read);
      * a failure leaves the clipboard reading as empty rather than taking the caller down.
+     *
+     * **A failed read does not latch** (B3 review): only a read that actually answered sets
+     * [loaded], so one transient index error costs this open, not the whole process — otherwise a
+     * clipboard sitting right there in the index would stay invisible until the app restarted.
      */
     suspend fun ensureLoaded() {
         if (loaded) return
         mutex.withLock {
             if (loaded) return@withLock
-            header = runCatching { ClipStore().readHeader() }.getOrNull()
-            loaded = true
+            runCatching { ClipStore().readHeader() }
+                .onSuccess { header = it; loaded = true }
+                .onFailure { Slog.d("SnClipboard") { "clipboard header read failed: $it" } }
         }
     }
 

@@ -9,6 +9,9 @@ class FakeObjectDao : ObjectDao {
 
     val rows = LinkedHashMap<String, ObjectEntity>()
 
+    /** Stands in for SQLCipher refusing a row that overflows the cursor window (B3 review). */
+    var clipBlobThrows = false
+
     override suspend fun upsert(row: ObjectEntity) { rows[row.id] = row }
 
     override suspend fun byId(id: String) = rows[id]
@@ -76,8 +79,14 @@ class FakeObjectDao : ObjectDao {
         rows[id]?.takeIf { it.type == "clipboard" && it.deletedAt == null }
             ?.let { ClipHeader(it.name, it.refId, it.updatedAt, it.flags) }
 
-    override suspend fun clipBlob(id: String): ByteArray? =
-        rows[id]?.takeIf { it.type == "clipboard" && it.deletedAt == null }?.blob
+    override suspend fun clipBlob(id: String): ByteArray? {
+        if (clipBlobThrows) throw IllegalStateException("Row too big to fit into CursorWindow")
+        return rows[id]?.takeIf { it.type == "clipboard" && it.deletedAt == null }?.blob
+    }
+
+    override suspend fun clipClear(id: String, at: Long) {
+        rows[id]?.takeIf { it.type == "clipboard" }?.let { rows[id] = it.copy(deletedAt = at, blob = null) }
+    }
 
     private fun ObjectEntity.toSummary() =
         ObjectSummary(id, type, name, parentId, createdAt, updatedAt, pageCount, flags, templateKind)

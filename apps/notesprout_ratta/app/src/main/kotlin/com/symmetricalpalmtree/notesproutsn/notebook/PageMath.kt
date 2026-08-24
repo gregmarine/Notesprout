@@ -20,6 +20,17 @@ object PageMath {
     fun insertPosition(currentIndex: Int, after: Boolean): Int =
         if (after) currentIndex + 1 else currentIndex
 
+    /**
+     * The **1-based number the anchor page carries once a paste beside it has landed** — what the
+     * "Pasted before/after page N" toast has to say (B3 review fixed an off-by-one here).
+     *
+     * The toast is read against the page indicator, which by then shows the post-paste numbering: a
+     * paste *before* the anchor pushes it down one, a paste *after* leaves it where it was. Naming
+     * the pre-paste number would have "Pasted before page 3" point at the pasted page itself.
+     */
+    fun anchorNumberAfterPaste(currentIndex: Int, before: Boolean): Int =
+        currentIndex + 1 + if (before) 1 else 0
+
     /** Ids to un-soft-delete so the live set becomes exactly [target] (target order preserved). */
     fun toRestore(currentlyAlive: Set<String>, target: List<String>): List<String> =
         target.filter { it !in currentlyAlive }
