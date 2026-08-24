@@ -1783,7 +1783,7 @@ built.
   `docs/host-responsibilities.md` there.
 
 ### O1 — Engine tap callback + object copy / cut / paste in one notebook
-**Status:** 🧪 Awaiting device verification (built + installed on the Nomad 2026-08-23)
+**Status:** ✅ Complete (commit `bae18da`, g-paper 0.1.5 = `bbcdc37`) — 2026-08-23
 
 g-paper **0.1.5**: the bare-paper stylus-tap callback (contract above) + its doc; re-pin.
 Host: `notebook/ObjectClip.kt` (pure — capture selection → `kind = "objects"` envelope via the
@@ -1858,12 +1858,14 @@ outside-tap dismissal or its re-tap would close the popup there and reopen it in
 trap, applied to placement). · `"order"` is per parent **and type** in this family, so the rebase
 reads three maxes, not one.
 
-**Verified so far:** `./gradlew test` green (466 JVM tests, 26 of them new) · debug + release build ·
-installed on the Nomad, launched, `logcat -b crash` empty, and the one thing adb can reach — a
-second tap on the armed lasso with an empty clipboard — is a silent no-op that leaves the lasso
-armed and puts no popup node in the dump. **adb can neither lasso nor ink**, so copy, cut, the
-placement tap, the popup and the badge icon are all the user's eye. g-paper's own commit is written
-but not yet made (its working tree carries 0.1.5).
+**Verified:** `./gradlew test` green (466 JVM tests, 26 of them new) · debug + release build ·
+installed on the Nomad, `logcat -b crash` empty, and the one thing adb can reach — a second tap on
+the armed lasso with an empty clipboard — is a silent no-op that leaves the lasso armed and puts no
+popup node in the dump. **adb can neither lasso nor ink**, so copy, cut, the placement tap, the
+popup and the icon were the user's eye: **eye check #11 all-pass**, one finding (the icon, fixed
+above). Docs done here rather than deferred to O2 — `docs/clipboard.md` now covers both kinds and
+`docs/notebook.md` has the selection-bar, undo and frame-silence entries. Committed `bae18da`,
+g-paper `bbcdc37`, both pushed.
 
 **Questions resolved at phase start (2026-08-23):**
 - **Popup buttons: icon-only**, at `toolbar_button_size`, each with a long-press name hint (its
@@ -1881,11 +1883,13 @@ but not yet made (its working tree carries 0.1.5).
 The `KIND_PAGE` link rewrite for an objects payload (B2's `rewriteLink`, minus the self-page
 case) and its test table; a copy whose source notebook is gone at paste time; arc-range
 `/code-review` (level asked at phase start — every arc so far froze at **high**), findings fixed
-or explicitly accepted → monorepo `BACKLOG.md`; docs (`docs/clipboard.md` grows an objects
-section; `docs/notebook.md` selection-bar table, undo table, frame-silence ledger — the popup's
-show/hide and the paste frame at pen-up are new exceptions needing the written justification;
-app `CLAUDE.md` if the rule list moves); memory + this file's outcomes; version stamp; full
+or explicitly accepted → monorepo `BACKLOG.md`; memory + this file's outcomes; version stamp; full
 regression; commit + push; arc freeze.
+
+**Docs are already done** (O1 wrote them rather than deferring): `docs/clipboard.md` covers both
+kinds end to end, `docs/notebook.md` has the selection-bar / undo / JVM-test entries and the
+seventh frame-silence exception, and both `CLAUDE.md`s are current. O2 only extends them with the
+cross-notebook rewrite.
 **Gate:** JVM tests green; debug + release build; Nomad walk; **user eye check** (a real
 selection copied A → B, the rewritten link followed back into A, cut A → paste B as a move);
 user all-clear.
