@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
 import androidx.room.withTransaction
+import com.symmetricalpalmtree.gpaper.core.model.Bounds
 import com.symmetricalpalmtree.notesproutsn.core.Bitmaps
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.crypto.KeySession
@@ -275,6 +276,70 @@ class NotebookSession(
     }
 
     /**
+     * Snapshot a lasso selection into a clipboard payload (arc 8). [topIds] are the selected rows —
+     * strokes, headings and links — and every selected **link**'s live children ride along with it
+     * (a link copies whole; nothing ever reaches inside one).
+     *
+     * Reads only: the rows are the truth, so a copy carries exactly what a reopen would show. **The
+     * caller must drain the writer first** — the arc's standing trap. Null when nothing selected is
+     * still on the page (the selection can go stale between the bar's tap and this read).
+     */
+    suspend fun captureObjects(topIds: List<String>): ClipEnvelope? = withContext(Dispatchers.IO) {
+        if (topIds.isEmpty()) return@withContext null
+        val top = topIds.chunked(ID_CHUNK)
+            .flatMap { db.dao().byIds(it) }
+            .filter { it.deletedAt == null }
+        if (top.isEmpty()) return@withContext null
+        val children = top.filter { it.type == SoilSchema.TYPE_LINK }.flatMap { link ->
+            db.dao().childrenOfType(link.id, SoilSchema.TYPE_STROKE) +
+                db.dao().childrenOfType(link.id, SoilSchema.TYPE_HEADING)
+        }
+        ObjectClip.capture(top, children, notebookId, System.currentTimeMillis())
+    }
+
+    /**
+     * Write [env]'s objects onto [pageId] — one transaction, the rows through the same
+     * [SoilObjectEntity] door every other write uses, then the index clock mirrored.
+     *
+     * The `"order"` bases are read **inside** the same transaction as the writes: two pastes racing
+     * would otherwise both read the same max and stack their rows on identical order numbers.
+     * [place] decides where the payload lands from its own bounding box ([ObjectPlacement]).
+     *
+     * Null when the payload holds nothing this build can place — the caller explains and writes
+     * nothing. `pageCount` is untouched: a paste of objects adds no page.
+     */
+    suspend fun pasteObjects(
+        env: ClipEnvelope,
+        pageId: String,
+        place: (Bounds) -> ObjectPlacement.Offset,
+    ): ObjectClip.Plan? = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        var plan: ObjectClip.Plan? = null
+        db.withTransaction {
+            // [ObjectClip.plan] is pure and synchronous, so its `baseOrder` lambda cannot suspend:
+            // the three bases a selection can need are read here, still inside the transaction.
+            val bases = ORDERED_TYPES.associateWith { db.dao().maxOrder(pageId, it) }
+            val built = ObjectClip.plan(
+                env = env,
+                pageId = pageId,
+                baseOrder = { type -> bases[type] ?: -1 },
+                now = now,
+                newId = { java.util.UUID.randomUUID().toString() },
+                place = place,
+            ) ?: return@withTransaction
+            built.rows.chunked(ROW_CHUNK).forEach { db.dao().upsertAll(it) }
+            plan = built
+        }
+        val built = plan ?: return@withContext null
+        repo.touch(notebookId, now)
+        Slog.d(TAG) {
+            "pasted ${built.contentIds.size} rows onto $pageId " +
+                "(${built.strokes.size} strokes, ${built.headings.size} headings, ${built.links.size} links)"
+        }
+        built
+    }
+
+    /**
      * How this file should reach the payload's template, in three tries:
      *
      *  1. **The row is already here under that id** — always so for a same-notebook paste, and for
@@ -455,5 +520,11 @@ class NotebookSession(
         /** Rows per `upsertAll`: Room binds ~18 columns each, so keep the statement well inside
          *  SQLite's variable limit. Chunking inside one transaction loses no atomicity. */
         private const val ROW_CHUNK = 50
+
+        /** The row types a lasso selection can put on the clipboard — `"order"` is numbered per
+         *  parent **and type** in the family, so a paste rebases each one against its own max. */
+        private val ORDERED_TYPES = listOf(
+            SoilSchema.TYPE_STROKE, SoilSchema.TYPE_HEADING, SoilSchema.TYPE_LINK,
+        )
     }
 }

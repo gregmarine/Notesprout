@@ -34,6 +34,17 @@ object SnClipboard {
     val hasPage: Boolean get() = header?.kind == ClipEnvelope.KIND_PAGE
 
     /**
+     * True when a lassoed set of objects is on the clipboard (arc 8) — the lasso popup's Paste-row
+     * question, and what decides whether a bare-paper pen tap places anything.
+     *
+     * **Kind wins, one slot:** [hasPage] and this are mutually exclusive by construction, so a page
+     * copy silently takes the objects' place and vice versa. That is why each surface offers only
+     * its own kind: Paste leaves the page sheet while objects are held, and leaves the popup while a
+     * page is.
+     */
+    val hasObjects: Boolean get() = header?.kind == ClipEnvelope.KIND_OBJECTS
+
+    /**
      * Read the header once per process. Idempotent and cheap (one indexed, blob-free row read);
      * a failure leaves the clipboard reading as empty rather than taking the caller down.
      *

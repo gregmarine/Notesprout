@@ -1730,6 +1730,171 @@ underline chrome rewritten. Verified on the Nomad by the user's eye.
 
 ---
 
+## Phases — Arc 8 "Objects" (planned 2026-08-23, wizard complete)
+
+Copy / cut / paste of **what's on a page** — strokes, headings, links — within a notebook and
+across notebooks, on the same clipboard arc 7 built. Arc 7 reserved this: `ClipEnvelope`'s
+`kind` discriminator was written so a later arc could put objects on the clipboard "with **no
+format change and no migration**". That promise is what makes this a light arc; the real work is
+the placement path (a tap has to mean *paste here*) and the lasso popup that og has and SN never
+built.
+
+### Locked decisions (arc-8 wizard 2026-08-23 — do not re-ask)
+
+| Decision | Answer |
+|---|---|
+| Copy / Cut entry | The **selection toolbar** gains Copy and Cut (Tabler `copy` / `scissors`), offered in **every** selection mode — ink, a lone heading, a lone link, mixed, mixed-with-link. A link copies **whole**, wrapped children included (the K1 model — nothing ever reaches inside one). |
+| Paste trigger | **og's tap-to-place, stylus only.** Lasso armed + no selection + a sub-threshold **pen** tap on bare paper → the clipboard pastes **centred on that tap**. Finger stays reserved for link-follow, gestures and dismissal, and a palm can never paste. Needs a g-paper addition (below). |
+| Engine change | **g-paper 0.1.5**: a new `PaperListener` callback for a sub-threshold **stylus** tap on bare paper while `tool == LASSO` and no selection exists — palm-gated and escrowed exactly like `onSelectionTapped`, never fired for finger, never for a tap inside a selection box. Fixed in g-paper, pinned here (the standing rule: never work an engine gap around in the host). |
+| After Copy / Cut | **og's**: the clipboard is written, the selection is dismissed, the bar goes away — and the host **explicitly re-arms `Tool.LASSO`** so the very next tap pastes. Cut deletes first, then the same. |
+| Smart-lasso trap | Dismissing a selection **ends the smart-lasso session and restores `Tool.PEN`** (g-paper's documented behaviour). Without the explicit re-arm above, the paste tap after a Copy would land under a PEN and **ink the page** instead. A host-initiated tool change ends the session cleanly. |
+| Lasso popup | og's, restored: a second tap on the **already-armed** lasso button opens a small bordered bar anchored under it, holding **Paste** and **Clear** (silent no-op when the clipboard holds no objects — P1's "second tap = no-op" survives for the empty case). Dismissed on tool switch, page swap, gesture start, paste, clear, and an outside tap. Its rect joins the exclusion rects and `overChrome`. |
+| Popup Paste placement | **Source coordinates** (clamped onto the page), landing selected — pasting into the same or a same-size page reproduces the original layout exactly. Tap-paste centres on the tap; the popup's Paste has no tap to aim at. |
+| Clipboard-loaded signal | The lasso toolbar button's icon swaps to a **clipboard-marked lasso** while the clipboard holds objects (og's `ic_lasso_clipboard`, fresh-drawn Tabler-style) — the only hint that a tap will paste. Reverts on Clear, and on a page copy taking the slot. |
+| Clear | og's: clears the in-memory header **and retires the index row** (`ClipStore.clear()` — soft-delete + null blob, the B3 lesson that clearing the mirror alone is not clearing the clipboard), toast-confirms, hides the popup, reverts the icon. |
+| Clipboard slot | **One slot, kind wins.** The same sentinel row, `kind = "page"` or `"objects"`; a copy of either replaces the other. So "Paste page" leaves the long-press sheet while objects are held, and the popup's Paste is absent while a page is held (GONE, never disabled). |
+| Off-page landing | **Clamp.** The pasted set is shifted so its bounding box sits inside the page when it fits; content larger than the page pastes from the top-left. Silent — no toast for a placement the user will see land. |
+| Order | **Rebased, not verbatim** — the one deliberate divergence from `PageClip`. A page paste owns a whole self-contained row set; an object paste lands *among* existing rows, so pasted content is appended after the destination page's current max `"order"` **with its relative order preserved** (writing order is load-bearing — the M-arc / N3 lesson). |
+| Geometry | `ObjectClip` is **object-level, not row-level** (again unlike `PageClip`): a `stroke` row carries **no** `x/y/width/height` — its geometry is entirely inside the format-B blob — so translating one means decode → `Stroke.translated` → re-encode (`StrokeCodec`/`StrokeRows`, both pure). Headings and links translate by their `x/y` columns; a link's wrapped children are page-absolute and translate with it (`PageLink.translated`'s rule). |
+| Ids / parents | Every pasted row gets a fresh UUID through one old→new map; top-level content parents to the destination **page**, a link's children to the **copied link**. A child whose parent didn't travel is dropped (`PageClip`'s untrusted-payload rule). |
+| Cross-notebook links | B2's rewrite, minus the self-page case (no page travels): `KIND_PAGE` → `KIND_NOTEBOOK_PAGE` naming the **source** notebook · `KIND_NOTEBOOK` / `KIND_NOTEBOOK_PAGE` / anything that doesn't decode → verbatim · same-notebook paste → verbatim. |
+| After a paste | The pasted content lands **selected**, bar up (`paper.setSelection`, host-initiated — the `selectAsHeading` precedent), so the pen can drag it straight into place. |
+| Undo | One entry per act. Paste = a new `Action.ObjectsPasted` arm (`Action.Deleted` run in reverse: undo soft-deletes the pasted strokes/headings/links, redo restores them). Cut = the existing `deleteSelection` path's single `Action.Deleted`, so undo puts the ink back exactly as the bar's Delete would. Copy and Clear record nothing. |
+| Toasts / dialogs | Toast-confirms: "Copied" · "Cut" · "Pasted" · "Clipboard cleared". Dialog-explains, on the B3 pattern: an over-cap payload, a failed clipboard write (copy **and** cut — a cut whose write failed must not delete), an unreadable/foreign payload at paste (which also retires the row). Never a silent no-op. |
+| Encryption | Nothing new — one global key, index encrypted at rest (arc 7's finding). Recorded, not built. |
+| Arc shape | **Two phases**: O1 engine bump + core copy/cut/paste + popup/Clear/icon, same notebook · O2 cross-notebook link rewrite + review + docs + freeze. |
+
+### Arc-8 standing traps
+
+- **A dismissed selection restores PEN** (smart lasso). Re-arm `Tool.LASSO` after Copy/Cut, or the
+  paste tap inks the page.
+- **A `stroke` row has no bounds columns** — never translate one by touching `x/y`; decode,
+  translate, re-encode. (A `heading` / `link` row is the opposite: bounds *are* columns.)
+- Arc 7's whole trap list still applies: drain before capture · `java.util.Base64` ·
+  `ObjectEntity.name` is non-null · content is two levels deep (`liveDescendantIds`) · the 6 MB cap
+  is pinned by the 8 MiB cursor window · clearing the in-memory mirror is not clearing the clipboard
+  · one `.soil`, one connection.
+- **`"order"` rebase is not `"order"` rewrite** — preserve the relative sequence of the pasted set.
+- **adb can neither lasso nor ink**, so Copy/Cut/paste-tap are **eye-check only**; device agents can
+  reach the popup only after the user has put something on the clipboard by hand. The pure halves
+  (`ObjectClip`, placement math, the rewrite table) are JVM-tested instead.
+- A new engine callback means a **g-paper version bump**: `~/git/g-paper` → `GPAPER_VERSION=0.1.5`,
+  `publishToMavenLocal`, re-pin in `app/build.gradle.kts`, and record the API in
+  `docs/host-responsibilities.md` there.
+
+### O1 — Engine tap callback + object copy / cut / paste in one notebook
+**Status:** 🧪 Awaiting device verification (built + installed on the Nomad 2026-08-23)
+
+g-paper **0.1.5**: the bare-paper stylus-tap callback (contract above) + its doc; re-pin.
+Host: `notebook/ObjectClip.kt` (pure — capture selection → `kind = "objects"` envelope via the
+existing `StrokeRows` / `HeadingRows` / `LinkRows` mappers; plan → fresh ids, parent rewiring,
+order rebase, geometry translation) and `notebook/ObjectPlacement.kt` (pure — payload bbox +
+tap point (or source origin) + page size → the clamped `dx/dy`); `NotebookSession.pasteObjects`
+(one transaction, rows through the existing stores, index/session mirrors honest);
+`SelectionToolbar` grows Copy / Cut; `NotebookActivity` gets `doObjectCopy` / `doObjectCut` /
+`doObjectPaste` (re-arm LASSO, live-map + renderer updates, `paper.addStrokes`, `setSelection`,
+`contentsFlow.refresh()` when a heading landed, `Action.ObjectsPasted`); the lasso popup
+(Paste + Clear) with its dismiss rules, exclusion rect and icon swap; strings + Tabler icons.
+**Gate:** JVM tests (`ObjectClip` capture/plan: id remap, parent rewiring, order rebase,
+stroke re-encode round-trip through `StrokeCodec`, dropped orphan; `ObjectPlacement` clamp
+cases incl. content bigger than the page; envelope `kind` round-trip and the page/objects slot
+swap); debug + release build; Haiku device walk for what adb can see (popup open/dismiss, Clear,
+icon swap, force-stop survival, crash buffer); **user eye check** (copy ink+heading+link → tap
+paste → drag, cut → undo, paste onto another page, popup Paste at source coordinates, no tap
+ever inking).
+*Fable does the g-paper callback + `ObjectClip`/placement contracts and the session seam; Opus
+the activity flows and the popup; Sonnet icons/strings.*
+
+**Built (2026-08-23) — what landed, and the three decisions the code had to make.**
+
+*Engine.* g-paper **0.1.5**: `PaperListener.onPaperTapped(x, y)` — the companion to
+`onSelectionTapped`, fired from `CanvasPaperView.completeLassoOutline` when the outline classified
+as a **tap** and nothing was selected at pen-down. Two facts made it cheap: the finger path
+(`handleFingerSelection`) only ever drags or dismisses an *active* selection, so a contact reaching
+`completeLassoOutline` is a stylus by construction and **needs no escrow**; and a new field
+`outlineDismissedSelection`, latched in `lassoOutlineStart`, keeps the tap that **dismissed** a
+selection from also pasting — a contact spent on a dismissal is spent. A few-sample gesture with a
+real extent is still neither an outline nor a tap and reports nothing. `api.md`,
+`host-responsibilities.md` (with the two host traps: re-arm the lasso yourself; the affordance is
+yours to draw), root `CLAUDE.md`, demo hook, every 0.1.3/0.1.4 version pin swept to 0.1.5,
+`publishToMavenLocal`, re-pinned here and in app `CLAUDE.md`.
+
+*Host.* `notebook/ObjectClip.kt` + `notebook/ObjectPlacement.kt` (both pure, 26 new JVM tests) ·
+`NotebookSession.captureObjects` / `pasteObjects` (one transaction; the `"order"` bases are read
+**inside** it, since `ObjectClip.plan` is synchronous and cannot suspend) · `SelectionToolbar` grew
+Copy + Cut after Delete · `NotebookToolbar` grew the armed-lasso re-tap hook and
+`showClipboardLoaded` · `LassoPopup` + `SelectionAnchor.placeUnder` (3 tests) ·
+`Action.ObjectsPasted` (`Deleted` run in reverse) · `ic_lasso_clipboard` · strings.
+
+**The icon is og's, not a fresh drawing** (user's eye-check call). A clipboard badge scaled into the
+corner was tried first and read as a blob at 24 dp on the panel; og's own `ic_lasso_clipboard` puts a
+plus crosshair in the middle of the loop instead — space the lasso already encloses, so the mark
+costs the lasso nothing and stays legible on e-ink. Copied geometry for geometry. **Standing note:
+check og's `drawable/` before drawing a "fresh Tabler-style" icon — the vocabulary is largely
+already there.**
+
+Three decisions the plan left open, made here:
+
+1. **The popup opens only while the clipboard holds objects.** The locked table says both "silent
+   no-op when the clipboard holds no objects" and "Paste is absent while a page is held", which
+   together would leave a popup holding nothing but a Clear for someone else's payload. Absent
+   beats half-empty, and it agrees with the phase-start answer that a page-kind clipboard says
+   nothing at all on this surface.
+2. **The source page id is inferred, not carried** (`ObjectClip.sourcePageOf`). `PageClip` tells a
+   top-level row from a link's orphan by the page row it carries; an objects payload has none, and
+   arc 7's promise was *no format change*. One selection lives on one page, so the **most common**
+   parent that is not itself in the payload is the source page — and anything parented to some
+   *other* absent id is an orphan, dropped rather than re-parented onto the page.
+3. **A paste that threw does not retire the clipboard.** A payload that decoded but carries nothing
+   placeable can only ever fail again, so its row goes; a write that *threw* (a full disk, an IO
+   error) is this attempt failing, and clearing the clipboard over it would turn a retry into a loss.
+
+*New standing traps.* The popup's own dismissal is a spent contact too — `tapDismissedPopup` is
+rewritten at **every** `ACTION_DOWN` in `dispatchTouchEvent` (a latch set once goes stale the moment
+the contact becomes a stroke instead of a tap), and the lasso button itself is excluded from the
+outside-tap dismissal or its re-tap would close the popup there and reopen it in the toolbar. ·
+`Stroke.bounds` is point-tight, so the box handed to `ObjectPlacement` is the **ink extent**
+(`bounds` grown by width/2) — otherwise a clamped paste shears half a nib off the page edge (the K2
+trap, applied to placement). · `"order"` is per parent **and type** in this family, so the rebase
+reads three maxes, not one.
+
+**Verified so far:** `./gradlew test` green (466 JVM tests, 26 of them new) · debug + release build ·
+installed on the Nomad, launched, `logcat -b crash` empty, and the one thing adb can reach — a
+second tap on the armed lasso with an empty clipboard — is a silent no-op that leaves the lasso
+armed and puts no popup node in the dump. **adb can neither lasso nor ink**, so copy, cut, the
+placement tap, the popup and the badge icon are all the user's eye. g-paper's own commit is written
+but not yet made (its working tree carries 0.1.5).
+
+**Questions resolved at phase start (2026-08-23):**
+- **Popup buttons: icon-only**, at `toolbar_button_size`, each with a long-press name hint (its
+  content description too) — Tabler `clipboard` for Paste, Tabler `trash` for Clear. Consistent
+  with every other chrome button in SN.
+- **Copy / Cut sit *after* Delete** on the selection toolbar — Delete keeps the leftmost slot it
+  has held since P1; the clipboard verbs append to the right.
+- **A pen tap on bare paper while the clipboard holds a *page* is silent.** Neither the icon swap
+  nor the popup's Paste row is present in that state, so nothing offered a paste for the tap to
+  fail at; "never a silent no-op" covers affordances that *were* offered.
+
+### O2 — Cross-notebook + review + docs + freeze
+**Status:** ⬜ Not started
+
+The `KIND_PAGE` link rewrite for an objects payload (B2's `rewriteLink`, minus the self-page
+case) and its test table; a copy whose source notebook is gone at paste time; arc-range
+`/code-review` (level asked at phase start — every arc so far froze at **high**), findings fixed
+or explicitly accepted → monorepo `BACKLOG.md`; docs (`docs/clipboard.md` grows an objects
+section; `docs/notebook.md` selection-bar table, undo table, frame-silence ledger — the popup's
+show/hide and the paste frame at pen-up are new exceptions needing the written justification;
+app `CLAUDE.md` if the rule list moves); memory + this file's outcomes; version stamp; full
+regression; commit + push; arc freeze.
+**Gate:** JVM tests green; debug + release build; Nomad walk; **user eye check** (a real
+selection copied A → B, the rewritten link followed back into A, cut A → paste B as a move);
+user all-clear.
+
+**Questions to resolve at phase start:** review level; version stamp (still `0.1.0-ratta` through
+seven arcs — the user's call).
+
+---
+
 ## Verification (end of arc)
 
 1. All JVM unit tests green (`./gradlew test` in `apps/notesprout_ratta`).

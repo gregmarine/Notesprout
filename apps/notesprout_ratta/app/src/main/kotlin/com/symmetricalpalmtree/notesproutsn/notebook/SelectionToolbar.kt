@@ -40,7 +40,8 @@ enum class SelectionMode { STROKES, HEADING, LINK, MIXED, MIXED_WITH_LINK }
  *
  * **Main bar**, in order: Delete (always) · **H** (a level is only writable on ink or on one
  * heading) · **Link** (any link-free selection — K1) · **Edit** and **Unlink** (a lone link, the
- * only selection with one payload to act on). **Sub-toolbar**: H1…H6, shown by an H tap and hung off the *bar*
+ * only selection with one payload to act on) · **Copy** and **Cut** (always — arc 8; they sit after
+ * Delete so its leftmost slot, aimed at since P1, never moves). **Sub-toolbar**: H1…H6, shown by an H tap and hung off the *bar*
  * by [SelectionAnchor.placeSub] — below it, above when the bar itself flipped — so opening it never
  * moves the Delete the user just aimed at. Every [show] closes it: a fresh selection (or a
  * re-anchor after a move) is a new decision and should not inherit the last one's open drawer.
@@ -76,6 +77,8 @@ class SelectionToolbar(
     private val onEditLink: () -> Unit,
     /** Unwrap the selected link, keeping its content on the page. */
     private val onUnlink: () -> Unit,
+    /** Put this selection on the clipboard (arc 8) — `cut = true` deletes it afterwards. */
+    private val onCopy: (cut: Boolean) -> Unit,
 ) {
 
     private val density = root.resources.displayMetrics.density
@@ -124,6 +127,18 @@ class SelectionToolbar(
             onUnlink()
         }
         bar.addView(unlinkButton)
+
+        // Copy and Cut go AFTER Delete (the O1 phase-start decision): Delete has been the leftmost
+        // button since P1 and the muscle memory is worth more than grouping the clipboard verbs.
+        // Both are offered in every mode — a link copies whole, wrapped children included (K1).
+        bar.addView(button(R.drawable.ic_copy, ctx.getString(R.string.copy_objects_action)) {
+            releaseRender()
+            onCopy(false)
+        })
+        bar.addView(button(R.drawable.ic_cut, ctx.getString(R.string.cut_objects_action)) {
+            releaseRender()
+            onCopy(true)
+        })
 
         levelButtons = (1..LEVELS).map { level ->
             button(LEVEL_ICONS[level - 1], ctx.getString(R.string.heading_level_hint, level)) {

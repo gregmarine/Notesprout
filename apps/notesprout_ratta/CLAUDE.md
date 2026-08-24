@@ -15,8 +15,9 @@ The Manta identifies as a Nomad — target by serial.
 `docs/library.md` (library screen, naming schemes) · `docs/notebook.md` (the notebook screen:
 tools, selection, headings, Contents, gestures, undo, frame-silence ledger) ·
 `docs/links.md` (arc 6: link rows/payload, render, picker + create-in-picker, follow + trail) ·
-`docs/clipboard.md` (arc 7: the page clipboard — index row type, payload, capture/apply, the
-long-press page sheet) · `docs/extensions.md` (the one recognizer extension point).
+`docs/clipboard.md` (arcs 7–8: the clipboard — one index row, one envelope, two kinds; the page
+half's long-press sheet and the object half's Copy/Cut, tap-to-place and lasso popup) ·
+`docs/extensions.md` (the one recognizer extension point).
 
 ## Standing rules
 
@@ -47,7 +48,7 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   never in Intent extras, never in the index. Never delete a DB on corruption.
 - **`IndexGuard.ready(this)` first thing in every index-touching `onCreate`**;
   `BootstrapActivity` is the only index opener and is `noHistory`.
-- **g-paper 0.1.4, `gpaper-core` + `gpaper-ratta` only** (mavenLocal). No `gpaper-onyx`,
+- **g-paper 0.1.5, `gpaper-core` + `gpaper-ratta` only** (mavenLocal). No `gpaper-onyx`,
   no BOOX repo, no jetifier, no jniLibs pickFirsts, no `tools:replace` label. Engine gaps
   are fixed in `~/git/g-paper` (bump version, `publishToMavenLocal`, re-pin) — never
   worked around in the host.
@@ -56,12 +57,13 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   `setPageSize`/`setTemplate` → `loadStrokes`; undo/redo via `addStrokes`/`removeStrokes`;
   chrome via `setExclusionRects`; lifecycle `resumeDrawing`/`releaseForHandoff`/`release`.
 - **Frame-silence rule:** never present an app frame while `paper.isPenActive` — route
-  chrome text/updates through a pen-idle gate. Six recorded exceptions (listed with their
+  chrome text/updates through a pen-idle gate. Seven recorded exceptions (listed with their
   justifications in `docs/notebook.md` § frame-silence): the delete-page sheet at long-press,
   the selection toolbar's show at lasso completion, the "Opening…" overlay's hide when the
   page lands, the "Recognizing…" overlay around a heading convert, the selection
-  toolbar's own-tap re-shows (H toggle / level pick / post-edit re-anchor), and the Contents
-  dialog's show/hide (C1) — all one chrome frame at a deliberate act or a boundary, never
+  toolbar's own-tap re-shows (H toggle / level pick / post-edit re-anchor), the Contents
+  dialog's show/hide (C1), and the object paste's frame at a tap's pen-up plus the lasso popup's
+  show/hide (O1) — all one chrome frame at a deliberate act or a boundary, never
   under live ink (R3's tool-panel-close exception retired with the panels in P1). B1's
   paste-placement sub-sheet rides the long-press sheet's exception rather than adding one (it is
   raised from a row of a dialog already up). Any new

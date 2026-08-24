@@ -4,6 +4,7 @@ import androidx.appcompat.widget.TooltipCompat
 import com.symmetricalpalmtree.gpaper.core.PaperView
 import com.symmetricalpalmtree.gpaper.core.Tool
 import com.symmetricalpalmtree.gpaper.core.model.StrokeStyle
+import com.symmetricalpalmtree.notesproutsn.R
 import com.symmetricalpalmtree.notesproutsn.core.InkColorCodec
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityNotebookBinding
@@ -35,6 +36,11 @@ class NotebookToolbar(
     private val binding: ActivityNotebookBinding,
     private val paper: PaperView,
     private val onBack: () -> Unit,
+    /** A tap on the **already-armed** lasso (arc 8) — P1's no-op grew a meaning: the screen opens
+     *  the clipboard popup, or keeps the no-op when there is nothing on the clipboard. */
+    private val onLassoReTap: () -> Unit = {},
+    /** Any tool tap at all — the screen closes floating chrome that belonged to the old tool. */
+    private val onToolTapped: () -> Unit = {},
 ) {
 
     init {
@@ -62,15 +68,33 @@ class NotebookToolbar(
     }
 
     /**
-     * Tapping a tool arms it. A second tap on the armed one is a **no-op** — nothing to configure,
-     * and a button that disarmed itself would leave the pen doing something the bar isn't showing.
+     * Tapping a tool arms it. A second tap on the armed one still changes nothing about the tool —
+     * a button that disarmed itself would leave the pen doing something the bar isn't showing — but
+     * on the **lasso** it now opens the clipboard popup ([onLassoReTap], arc 8), and on the other
+     * two it remains the P1 no-op.
      */
     private fun onToolTap(tool: Tool) {
         releaseRenderIfIdle()
-        if (paper.tool == tool) return
+        onToolTapped()
+        if (paper.tool == tool) {
+            if (tool == Tool.LASSO) onLassoReTap()
+            return
+        }
         paper.tool = tool
         sync(tool)
         Slog.d(TAG) { "armed $tool" }
+    }
+
+    /**
+     * Swap the lasso button's icon to the lasso-with-a-plus while [loaded] objects are on the
+     * clipboard (arc 8 — og's own icon). This is the **only** standing hint that a pen tap on bare paper will paste
+     * — tap-to-place changes nothing else about the surface — so it is a state of the button, not a
+     * transient toast. Idempotent; the screen calls it whenever the clipboard's kind can have moved.
+     */
+    fun showClipboardLoaded(loaded: Boolean) {
+        binding.btnLasso.setImageResource(
+            if (loaded) R.drawable.ic_lasso_clipboard else R.drawable.ic_lasso
+        )
     }
 
     /**

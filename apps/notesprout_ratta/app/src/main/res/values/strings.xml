@@ -158,6 +158,21 @@
     <string name="clip_paste_failed">The clipboard is empty or its contents couldn\'t be read. Copy a page again.</string>
     <string name="clip_write_failed">The page couldn\'t be put on the clipboard. The clipboard was left unchanged.</string>
 
+    <!-- Object clipboard (arc 8) -->
+    <string name="copy_objects_action">Copy</string>
+    <string name="cut_objects_action">Cut</string>
+    <string name="paste_objects_action">Paste</string>
+    <string name="clear_clipboard_action">Clear clipboard</string>
+    <string name="objects_copied_toast">Copied</string>
+    <string name="objects_cut_toast">Cut</string>
+    <string name="objects_pasted_toast">Pasted</string>
+    <string name="clipboard_cleared_toast">Clipboard cleared</string>
+    <string name="clip_objects_capture_failed">This selection couldn\'t be read. Nothing was copied.</string>
+    <string name="clip_objects_too_large">There is too much in this selection to copy. The clipboard was left unchanged.</string>
+    <string name="clip_objects_write_failed">The selection couldn\'t be put on the clipboard. Nothing was copied or cut.</string>
+    <string name="clip_objects_paste_failed">The clipboard is empty or its contents couldn\'t be read. Copy a selection again.</string>
+    <string name="clip_objects_cut_moved">The page changed while the copy was being made, so nothing was cut. The selection is on the clipboard.</string>
+
     <!-- Notebook selection -->
     <string name="delete_selection_action">Delete strokes</string>
 

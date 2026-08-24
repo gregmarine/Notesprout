@@ -73,6 +73,7 @@ class NotebookActivity : AppCompatActivity() {
     private lateinit var paper: PaperView
     private lateinit var toolbar: NotebookToolbar
     private lateinit var selectionToolbar: SelectionToolbar
+    private lateinit var lassoPopup: LassoPopup
     private lateinit var session: NotebookSession
     private lateinit var pageGestures: PageGestures
     private lateinit var contentsFlow: ContentsFlow
@@ -119,6 +120,13 @@ class NotebookActivity : AppCompatActivity() {
      * why the timing is load-bearing), and drained defensively right after in case none fired.
      */
     private var pendingSelection: (() -> Unit)? = null
+
+    /**
+     * Whether the contact now in flight is the one that took the lasso popup down (arc 8) —
+     * rewritten at every ACTION_DOWN, read by `onPaperTapped` so a dismissal is never also a paste.
+     * See [dismissLassoPopupOnContact].
+     */
+    private var tapDismissedPopup = false
 
     /** In-memory, notebook-level history: it survives page turns and dies with the screen. */
     private val undo = UndoRedoStack()
@@ -198,7 +206,25 @@ class NotebookActivity : AppCompatActivity() {
         // The toolbar owns all pen/eraser configuration — fixed values, no panels, no prefs.
         // Its Back goes through backPressed(), never straight to close(): in a via-link notebook
         // BOTH Backs walk the trail (the Paper L4 funnel — its top-bar Back initially didn't).
-        toolbar = NotebookToolbar(binding, paper) { backPressed() }
+        toolbar = NotebookToolbar(
+            binding = binding,
+            paper = paper,
+            onBack = { backPressed() },
+            // A second tap on the armed lasso opens the clipboard popup (arc 8) — and stays P1's
+            // silent no-op when there is nothing of ours on the clipboard.
+            onLassoReTap = { if (lassoPopup.isShowing) hideLassoPopup() else showLassoPopup() },
+            // Arming a different tool takes the popup with it: it belongs to the lasso.
+            onToolTapped = { if (lassoPopup.isShowing) hideLassoPopup() },
+        )
+        lassoPopup = LassoPopup(
+            root = binding.root,
+            bar = binding.lassoPopup,
+            anchor = binding.btnLasso,
+            bandBottom = { chromeBand()?.last },
+            releaseRender = { paper.releaseRender() },
+            onPaste = { hideLassoPopup(); doObjectPaste(tapX = null, tapY = null) },
+            onClear = { hideLassoPopup(); doClipboardClear() },
+        )
         // Must exist before RESUMED (it registers an ActivityResult launcher); the lambdas it
         // holds only fire from the toolbar, which the `opened` flag already gates.
         linkPickFlow = LinkPickFlow(
@@ -228,6 +254,7 @@ class NotebookActivity : AppCompatActivity() {
             onLink = { beginLinkPick() },
             onEditLink = { beginLinkEdit() },
             onUnlink = { unlinkSelection() },
+            onCopy = { cut -> doObjectCopy(cut) },
         )
         binding.notebookName.text = name
         binding.pageIndicator.text = ""
@@ -318,6 +345,10 @@ class NotebookActivity : AppCompatActivity() {
             // whether a Paste row exists synchronously, and this is where the process-wide header
             // gets rehydrated (SN's index only opens at Bootstrap — see SnClipboard).
             SnClipboard.ensureLoaded()
+            // …and the same read decides whether the lasso button wears its clipboard mark: the
+            // clipboard survives a force-stop, so a notebook opened tomorrow must still say that a
+            // tap will paste.
+            toolbar.showClipboardLoaded(SnClipboard.hasObjects)
             val page = session.currentPage
             val strokes = session.store.loadPage(page.id)
             val headings = remeasureForDevice(session.headings.loadPage(page.id))
@@ -463,6 +494,10 @@ class NotebookActivity : AppCompatActivity() {
         override fun onSelectionCreated(selection: Selection) {
             selectionActive = true
             currentSelection = selection
+            // A selection and the clipboard popup are two answers to the same button — the newer
+            // one wins. (The outline's pen-down already took it down; this covers a smart-lasso
+            // selection, which never touches the surface as a lasso contact.)
+            hideLassoPopup()
             // Shown immediately, **not** through the pen-idle gate: a lasso ends with the pen still
             // hovering over the glass (`isPenActive` counts proximity + a 350 ms tail), so an
             // idle-gated bar would arrive long after the selection it belongs to — the R3 panel
@@ -483,6 +518,23 @@ class NotebookActivity : AppCompatActivity() {
             // the dialog repaints over the page; there is no live stroke at a tap's pen-up.
             paper.releaseRender()
             HeadingEditDialog.show(this@NotebookActivity, h) { raw -> applyHeadingEdit(h.id, raw) }
+        }
+        /**
+         * A sub-threshold pen tap on bare paper with the lasso armed and nothing selected (0.1.5):
+         * **paste here** — the pasted set lands centred on the tap ([ObjectPlacement.centredOn]).
+         *
+         * Silent when the clipboard holds no objects of ours (a page, or nothing): neither the
+         * button's mark nor the popup was offering a paste, so there is no failed expectation to
+         * explain — the O1 phase-start decision. The engine never fires this for a finger, for a
+         * palm, or for the tap that dismissed a selection.
+         */
+        override fun onPaperTapped(x: Float, y: Float) {
+            if (!opened || closing) return
+            // A contact spent taking the popup down is not a placement — the same rule the engine
+            // applies to the tap that dismisses a selection. The user taps again to paste.
+            if (tapDismissedPopup) return
+            if (!SnClipboard.hasObjects) return
+            doObjectPaste(tapX = x, tapY = y)
         }
         /**
          * The eraser tool swept a heading or a link whole (0.1.4): the host deletes — nothing
@@ -618,6 +670,7 @@ class NotebookActivity : AppCompatActivity() {
         selectionActive = false
         currentSelection = null
         selectionToolbar.hide()   // idempotent — clearSelection fires onSelectionDismissed too
+        hideLassoPopup()          // it belongs to the page being left, like every other floating bar
         paper.clearForContentSwap()
         paper.setPageSize(page.width, page.height)
         paper.setTemplate(session.template)
@@ -720,6 +773,14 @@ class NotebookActivity : AppCompatActivity() {
                 session.store.drain(); refreshToPage(a.pageId)
             }
             is Action.HeadingDeleted -> { session.headings.restore(a.headingIds); session.store.drain(); refreshToPage(a.pageId) }
+            // The mirror image of Deleted: a paste's rows are ones it CREATED, so undoing it takes
+            // them away — a link whole, wrapped children and all.
+            is Action.ObjectsPasted -> {
+                session.store.remove(a.strokeIds)
+                session.headings.erase(a.headingIds)
+                session.links.remove(a.links)
+                session.store.drain(); refreshToPage(a.pageId)
+            }
             is Action.HeadingTextEdited -> { session.headings.updateContent(a.before); session.store.drain(); refreshToPage(a.pageId) }
             is Action.HeadingLevelChanged -> { session.headings.updateContent(a.before); session.store.drain(); refreshToPage(a.pageId) }
             // Undo of a wrap IS an unlink; undo of an unlink is a re-wrap in place (K1).
@@ -761,6 +822,12 @@ class NotebookActivity : AppCompatActivity() {
                 session.store.drain(); refreshToPage(a.pageId)
             }
             is Action.HeadingDeleted -> { session.headings.erase(a.headingIds); session.store.drain(); refreshToPage(a.pageId) }
+            is Action.ObjectsPasted -> {
+                session.store.revive(a.strokeIds)
+                session.headings.restore(a.headingIds)
+                session.links.restore(a.pageId, a.links)
+                session.store.drain(); refreshToPage(a.pageId)
+            }
             is Action.HeadingTextEdited -> { session.headings.updateContent(a.after); session.store.drain(); refreshToPage(a.pageId) }
             is Action.HeadingLevelChanged -> { session.headings.updateContent(a.after); session.store.drain(); refreshToPage(a.pageId) }
             is Action.LinkCreated -> { session.links.relink(a.pageId, a.link); session.store.drain(); refreshToPage(a.pageId) }
@@ -1171,6 +1238,207 @@ class NotebookActivity : AppCompatActivity() {
         }
     }
 
+    // ── The object clipboard (arc 8) ─────────────────────────────────────────
+
+    /**
+     * Copy — or cut, which is a copy **and then** the ordinary [deleteSelection], so undo puts the
+     * ink back exactly as the bar's own Delete would, in one entry.
+     *
+     * Three orderings carry the whole thing:
+     *  - **Drain first.** A stroke commit still queued on the shared writer would land after the
+     *    capture's row read and be silently missing from the payload (the arc-7 standing trap).
+     *  - **Write, then delete.** A cut whose clipboard write failed must not delete: the user would
+     *    be left with neither the ink nor a clipboard holding it.
+     *  - **Re-arm the lasso.** Dismissing a selection ends the smart-lasso session and restores
+     *    `Tool.PEN` (g-paper's documented behaviour), so without this the placement tap that
+     *    follows a copy would *ink the page*. A host-initiated tool change ends the session cleanly
+     *    and never echoes `onToolChanged`, which is why the button state is synced by hand.
+     *
+     * The selection is captured before the first suspension: it can die (a tap-away, a flip) while
+     * the capture is in flight, and what the user pointed at is what they meant to copy — the same
+     * discipline the heading convert and the link wrap follow.
+     */
+    private fun doObjectCopy(cut: Boolean) {
+        if (!opened || closing) return
+        val sel = currentSelection ?: return
+        val pageId = displayedPageId
+        val topIds = sel.strokeIds.toList() +
+            sel.contentIds.filter { liveHeadings.containsKey(it) || liveLinks.containsKey(it) }
+        if (topIds.isEmpty()) return
+        runPageOp {
+            session.store.drain()
+            val env = runCatching { session.captureObjects(topIds) }
+                .onFailure { Log.w(TAG, "selection capture failed", it) }
+                .getOrNull()
+            if (env == null) {
+                Dialogs.problem(this, R.string.clip_failed_title, R.string.clip_objects_capture_failed)
+                return@runPageOp
+            }
+            val write = runCatching { withContext(Dispatchers.IO) { clipStore.write(env) } }
+                .onFailure { Log.w(TAG, "clipboard write failed", it) }
+            val header = write.getOrNull()
+            if (header == null) {
+                // Over the payload cap, or the write threw. Nothing landed either way, so whatever
+                // was on the clipboard still stands — and the message says which of the two it was.
+                val message =
+                    if (write.isSuccess) R.string.clip_objects_too_large else R.string.clip_objects_write_failed
+                Dialogs.problem(this, R.string.clip_failed_title, message)
+                return@runPageOp
+            }
+            SnClipboard.set(header)
+            toolbar.showClipboardLoaded(true)
+            if (cut) {
+                if (displayedPageId != pageId) {
+                    // The page moved under the capture (only reachable through a race): the copy
+                    // stands, but deleting from a page the user is no longer looking at would be a
+                    // silent edit somewhere else. Explain rather than guess.
+                    Dialogs.problem(this, R.string.clip_failed_title, R.string.clip_objects_cut_moved)
+                    return@runPageOp
+                }
+                deleteSelection(sel)
+            } else {
+                paper.clearSelection()
+            }
+            armLasso()
+            toast(getString(if (cut) R.string.objects_cut_toast else R.string.objects_copied_toast))
+        }
+    }
+
+    /**
+     * Paste the clipboard's objects onto the visible page. ([tapX], [tapY]) is the pen tap that
+     * asked for it, in paper coordinates — the set lands centred there; null is the popup's Paste,
+     * which has no tap to aim at and lands at the **source** coordinates, so pasting into a
+     * same-size page reproduces the original layout exactly. Both clamp onto the page.
+     *
+     * The pasted content lands **selected**, bar up, so the pen can drag it straight into place.
+     * That is a chrome frame presented at a tap's pen-up — a deliberate act's visible result, the
+     * selection toolbar's own frame-silence exception applied to the act that created the selection
+     * (nothing is being written at a tap's pen-up).
+     */
+    private fun doObjectPaste(tapX: Float?, tapY: Float?) {
+        if (!opened || closing) return
+        val pageId = displayedPageId
+        runPageOp {
+            val env = withContext(Dispatchers.IO) { clipStore.readEnvelope() }
+            if (env == null || env.kind != ClipEnvelope.KIND_OBJECTS || env.rows.isEmpty()) {
+                // Gone, foreign, or a kind this surface does not paste. Stop advertising a Paste
+                // that can only fail — and retire the index row too, or `ensureLoaded` reads the
+                // still-valid header back at the next open and fails again, forever (the B3 lesson).
+                retireClipboard()
+                Dialogs.problem(this, R.string.clip_failed_title, R.string.clip_objects_paste_failed)
+                return@runPageOp
+            }
+            session.store.drain()
+            val page = session.pages.firstOrNull { it.id == pageId } ?: return@runPageOp
+            val written = runCatching {
+                session.pasteObjects(env, pageId) { box ->
+                    if (tapX != null && tapY != null) {
+                        ObjectPlacement.centredOn(box, tapX, tapY, page.width.toFloat(), page.height.toFloat())
+                    } else {
+                        ObjectPlacement.atSource(box, page.width.toFloat(), page.height.toFloat())
+                    }
+                }
+            }.onFailure { Log.w(TAG, "object paste failed", it) }
+            val plan = written.getOrNull()
+            if (plan == null || plan.isEmpty) {
+                // A payload that decoded but carries nothing this build can place is retired, like
+                // an unreadable one — it can only ever fail again. A write that *threw* is not:
+                // that is this attempt failing (a full disk, an IO error), and throwing the user's
+                // clipboard away over it would turn a retry into a loss.
+                if (written.isSuccess) retireClipboard()
+                Dialogs.problem(this, R.string.clip_failed_title, R.string.clip_objects_paste_failed)
+                return@runPageOp
+            }
+            // The user may have flipped away while the write was in flight; the rows are correct
+            // either way, and the next load will show them.
+            if (pageId != displayedPageId) { contentsFlow.refresh(); return@runPageOp }
+
+            // In-memory corrections a page load would make too: heading boxes re-measured for THIS
+            // device, and any under-sized underline band grown. Rows are corrected when next written.
+            val headings = remeasureForDevice(plan.headings)
+            val links = withUnderlineBand(plan.links)
+            // Composites off Main, before the frame that paints them (the hover-repaint trap).
+            val linkBitmaps = linkRenderer.prebuild(links)
+
+            headings.forEach { liveHeadings[it.id] = it }
+            links.forEach { liveLinks[it.id] = it }
+            plan.strokes.forEach { liveStrokes[it.id] = it }
+            headingRenderer.headings = liveHeadings.values.toList()
+            linkRenderer.update(liveLinks.values.toList(), linkBitmaps)
+            if (plan.strokes.isNotEmpty()) paper.addStrokes(plan.strokes)
+            // Unconditional: addStrokes only re-records when it actually added ink, and a
+            // heading-or-link-only paste still has to paint. One Main block → one frame.
+            paper.notifyContentChanged()
+            undo.record(
+                Action.ObjectsPasted(pageId, plan.strokes.map { it.id }, headings.map { it.id }, links)
+            )
+            if (headings.isNotEmpty() || links.any { it.headings.isNotEmpty() }) contentsFlow.refresh()
+
+            // Land it selected, bar up — the pen drags it into place from here.
+            var box: Bounds? = null
+            for (s in plan.strokes) box = box?.union(s.bounds) ?: s.bounds
+            for (h in headings) box = box?.union(h.bounds) ?: h.bounds
+            for (l in links) box = box?.union(l.bounds) ?: l.bounds
+            box?.let { bounds ->
+                val contentIds = (headings.map { it.id } + links.map { it.id }).toSet()
+                val strokeIds = plan.strokes.mapTo(HashSet()) { it.id }
+                val selection = Selection(strokeIds, contentIds, bounds)
+                paper.setSelection(strokeIds, contentIds, bounds)
+                selectionActive = true
+                currentSelection = selection
+                showSelectionToolbar(selection)
+            }
+            toast(getString(R.string.objects_pasted_toast))
+            Slog.d(TAG) {
+                "pasted ${plan.strokes.size} strokes, ${headings.size} headings, ${links.size} links"
+            }
+        }
+    }
+
+    /**
+     * The popup's Clear: the clipboard goes, in memory **and** in the index. Clearing only the
+     * mirror would hide it for this session and let the next notebook open read the row back — the
+     * B3 lesson, which is why [ClipStore.clear] exists at all.
+     */
+    private fun doClipboardClear() {
+        if (!opened || closing) return
+        lifecycleScope.launch {
+            retireClipboard()
+            toast(getString(R.string.clipboard_cleared_toast))
+        }
+    }
+
+    /** Retire the clipboard row and everything that advertises it. Never throws. */
+    private suspend fun retireClipboard() {
+        SnClipboard.set(null)
+        toolbar.showClipboardLoaded(false)
+        runCatching { withContext(Dispatchers.IO) { clipStore.clear(System.currentTimeMillis()) } }
+            .onFailure { Log.w(TAG, "clipboard clear failed", it) }
+    }
+
+    /**
+     * Arm the lasso from the host side, so the very next pen tap places rather than inks. A tool
+     * assignment is never echoed as `onToolChanged` (it is not component-initiated), so the button
+     * is synced by hand — and it ends any smart-lasso session cleanly, which is the whole point.
+     */
+    private fun armLasso() {
+        paper.tool = Tool.LASSO
+        toolbar.sync(Tool.LASSO)
+    }
+
+    /** Open the clipboard popup, or keep P1's silent no-op when there is nothing of ours to offer. */
+    private fun showLassoPopup() {
+        if (!opened || closing) return
+        if (!SnClipboard.hasObjects) return
+        if (lassoPopup.show()) pushExclusions()
+    }
+
+    private fun hideLassoPopup() {
+        if (!::lassoPopup.isInitialized || !lassoPopup.isShowing) return
+        lassoPopup.hide()
+        pushExclusions()
+    }
+
     // ── The page sheet: copy / cut / paste / delete ──────────────────────────
 
     /**
@@ -1240,6 +1508,10 @@ class NotebookActivity : AppCompatActivity() {
             return
         }
         SnClipboard.set(header)
+        // One slot, kind wins (arc 8): a page copy takes the objects' place, so the lasso's mark
+        // has to stop promising a paste it no longer holds.
+        toolbar.showClipboardLoaded(false)
+        hideLassoPopup()
         if (cut) {
             val snap = session.deleteCurrent()
             undo.record(Action.Page(snap))
@@ -1316,7 +1588,10 @@ class NotebookActivity : AppCompatActivity() {
             return
         }
         val paperLoc = IntArray(2).also { paper.asView().getLocationInWindow(it) }
-        val rects = (listOfNotNull(rectOf(binding.topBar), rectOf(binding.bottomStrip)) + selectionToolbar.rects())
+        val rects = (
+            listOfNotNull(rectOf(binding.topBar), rectOf(binding.bottomStrip)) +
+                selectionToolbar.rects() + lassoPopup.rects()
+            )
             .map { Rect(it.left - paperLoc[0], it.top - paperLoc[1], it.right - paperLoc[0], it.bottom - paperLoc[1]) }
         paper.setExclusionRects(rects)
     }
@@ -1347,11 +1622,15 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     /** EPD chrome-release: a finger landing on chrome must release the overlay so the tap's visual
-     *  result shows. Done here because the buttons consume the touch. Palm-gated. */
+     *  result shows. Done here because the buttons consume the touch. Palm-gated.
+     *
+     *  It is also where the lasso popup's outside-tap dismissal lives (arc 8) — the one place that
+     *  sees every contact, pen and finger alike, before anything else consumes it. */
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         // Observer only — consumes nothing.
         if (opened && ::pageGestures.isInitialized) pageGestures.onTouchEvent(ev)
         if (::paper.isInitialized && ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            dismissLassoPopupOnContact(ev)
             val tool = ev.getToolType(0)
             val stylus = tool == MotionEvent.TOOL_TYPE_STYLUS || tool == MotionEvent.TOOL_TYPE_ERASER
             if (!stylus && !paper.isPenActive && overChrome(ev)) paper.releaseRender()
@@ -1359,14 +1638,33 @@ class NotebookActivity : AppCompatActivity() {
         return super.dispatchTouchEvent(ev)
     }
 
-    /** Both bars and the selection toolbar — the floating bar is chrome like any other. */
+    /**
+     * Any contact that starts outside the popup — and outside the lasso button that toggles it —
+     * takes it down: an outside tap, the start of a finger gesture, a pen going to write.
+     *
+     * [tapDismissedPopup] latches whether *this* contact is the one that did it, and is rewritten at
+     * every ACTION_DOWN so it can never go stale. `onPaperTapped` reads it and declines to paste:
+     * a contact spent on a dismissal is spent, the same rule g-paper applies to the tap that
+     * dismisses a selection. The lasso button is excluded or its own re-tap would close the popup
+     * here and immediately reopen it in [NotebookToolbar].
+     */
+    private fun dismissLassoPopupOnContact(ev: MotionEvent) {
+        if (!::lassoPopup.isInitialized) { tapDismissedPopup = false; return }
+        val x = ev.x.toInt(); val y = ev.y.toInt()
+        val onToggle = rectOf(binding.btnLasso)?.contains(x, y) == true
+        tapDismissedPopup = lassoPopup.isShowing && !onToggle && !lassoPopup.contains(x, y)
+        if (tapDismissedPopup) hideLassoPopup()
+    }
+
+    /** Both bars, the selection toolbar and the lasso popup — a floating bar is chrome like any other. */
     private fun overChrome(ev: MotionEvent): Boolean {
         val top = rectOf(binding.topBar)
         val bottom = rectOf(binding.bottomStrip)
         val x = ev.x.toInt(); val y = ev.y.toInt()
         return (top?.contains(x, y) == true) ||
             (bottom?.contains(x, y) == true) ||
-            (::selectionToolbar.isInitialized && selectionToolbar.contains(x, y))
+            (::selectionToolbar.isInitialized && selectionToolbar.contains(x, y)) ||
+            (::lassoPopup.isInitialized && lassoPopup.contains(x, y))
     }
 
     private fun rectOf(v: View): Rect? {

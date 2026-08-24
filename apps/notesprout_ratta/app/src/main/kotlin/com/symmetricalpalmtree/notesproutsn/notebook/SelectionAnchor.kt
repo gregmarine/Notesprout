@@ -75,5 +75,27 @@ object SelectionAnchor {
         return Placement(x, y, flipped)
     }
 
+    /**
+     * A row hung [gap] below a chrome **button** and centred on it — the arc-8 lasso popup under the
+     * armed lasso button. No flip: the anchor is in the top bar, so below is always the free side,
+     * and a popup that jumped above it would land under the very bar it belongs to. Clamped inside
+     * `[0, rootWidth]` horizontally and pulled back off [bandBottom] vertically, for the same reason
+     * [place] clamps — a control the user cannot reach is worse than one that moved.
+     */
+    fun placeUnder(
+        anchorLeft: Int,
+        anchorRight: Int,
+        anchorBottom: Int,
+        w: Int,
+        h: Int,
+        gap: Int,
+        rootWidth: Int,
+        bandBottom: Int,
+    ): Placement {
+        val x = clamp((anchorLeft + anchorRight) / 2 - w / 2, 0, maxOf(0, rootWidth - w))
+        val y = clamp(anchorBottom + gap, 0, maxOf(0, bandBottom - h))
+        return Placement(x, y)
+    }
+
     private fun clamp(v: Int, lo: Int, hi: Int): Int = if (v < lo) lo else if (v > hi) hi else v
 }

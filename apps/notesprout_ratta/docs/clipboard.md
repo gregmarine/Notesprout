@@ -1,8 +1,16 @@
-# The page clipboard (arc 7)
+# The clipboard (arcs 7 and 8)
 
-Whole-page **copy / cut / paste**, on a global clipboard that lives in the index — so a copy
-survives a force-stop and travels between notebooks. Entry point is the notebook's one-finger
-long-press sheet.
+**Copy / cut / paste** on a global clipboard that lives in the index — so a copy survives a
+force-stop and travels between notebooks. Two things ride it, one slot at a time:
+
+| Kind | What it is | Entry point | Arc |
+|---|---|---|---|
+| `"page"` | a whole page and everything on it | the notebook's one-finger long-press sheet | 7 |
+| `"objects"` | what a lasso caught — strokes, headings, links, with the links' wrapped children | the selection toolbar's Copy / Cut; a pen tap on bare paper places it | 8 |
+
+Everything from *Where it lives* down to *Reading it* is shared by both. The page half is then
+`PageClip` + the sheet; the object half is `ObjectClip` + [*The object clipboard*](#the-object-clipboard-arc-8)
+at the bottom.
 
 **Status: arc 7 complete — B1 (core + same-notebook), B2 (cross-notebook), B3 (review + freeze).**
 B2 added the two rules a page needs once it lands in a *different* file: the template is deduped
@@ -10,6 +18,11 @@ B2 added the two rules a page needs once it lands in a *different* file: the tem
 copied from. B3's review hardened the edges: the payload cap now respects the cursor window it is
 read back through, an unreadable clipboard retires its own row, and every failure path in copy and
 paste ends in a dialog rather than a silent no-op.
+
+**Arc 8 status: O1 complete** (the engine tap callback, object copy/cut/paste within a notebook, the
+lasso popup, Clear, the icon). O2 adds the cross-notebook link rewrite, the review and the freeze.
+Arc 7's `kind` discriminator is what made this cheap: **no format change and no migration** — the
+promise, kept.
 
 ## Where it lives
 
@@ -20,10 +33,14 @@ paste ends in a dialog rather than a silent no-op.
 | `data/clip/ClipEnvelope.kt` | `ClipEnvelope` + `ClipRow` + `ClipHeader` — the payload grammar and its codec |
 | `data/clip/ClipStore.kt` | the one index row, read and written |
 | `core/SnClipboard.kt` | the process-wide in-memory **header** mirror |
-| `notebook/PageClip.kt` | pure capture → envelope, envelope → the rows a paste writes, the cross-notebook link rewrite, and the template content-match rule |
-| `NotebookSession.capturePage()` / `pasteAt()` / `resolveTemplate()` | the `.soil` side |
+| `notebook/PageClip.kt` | pure capture → envelope, envelope → the rows a paste writes, the cross-notebook link rewrite, and the template content-match rule (`kind = "page"`) |
+| `notebook/ObjectClip.kt` (O1) | the same, for a lasso selection (`kind = "objects"`): fresh ids, parent rewiring, the per-type `"order"` rebase, geometry translation |
+| `notebook/ObjectPlacement.kt` (O1) | pure placement: payload box + tap (or source origin) + page size → the clamped `dx/dy` |
+| `notebook/LassoPopup.kt` (O1) | Paste + Clear under the armed lasso button |
+| `NotebookSession.capturePage()` / `pasteAt()` / `resolveTemplate()` | the `.soil` side, pages |
+| `NotebookSession.captureObjects()` / `pasteObjects()` (O1) | the `.soil` side, objects |
 | `SoilDao.templateDigests` | the blob-free shortlist behind the template dedupe |
-| `NotebookActivity` | the sheet, the flows, the toasts, `Action.PagePasted` |
+| `NotebookActivity` | the sheet, the popup, the flows, the toasts, `Action.PagePasted` / `Action.ObjectsPasted` |
 
 **No new index table.** `notesprout.db` is Room-validated and format-compatible with Paper: a new
 `@Entity` changes the identity hash and a Paper index would fail validation (and vice versa). The
@@ -57,8 +74,9 @@ global key, every `.soil` under it, and the index itself encrypted at rest. Reco
   `StaticLayout` lesson, applied before it could cost anything).
 - `createdAt`/`updatedAt`/`deletedAt` do **not** travel — a paste is a new row and stamps its own
   clock, and only live rows are ever captured.
-- `kind` is a discriminator, and `rows` is already a set: a later arc can put strokes / headings /
-  links on the same clipboard as `kind = "objects"` with **no format change and no migration**.
+- `kind` is a discriminator, and `rows` is already a set — which is how arc 8 put strokes / headings
+  / links on the same clipboard as `kind = "objects"` with **no format change and no migration**.
+  The two kinds differ in what a paste *means*, not in what the envelope holds.
 - **`decode` never throws** (the `LinkPayload` discipline). Absent, empty, malformed, truncated, or
   written by a *newer* build → the clipboard reads as empty rather than half-applying.
 - The byte cap (`MAX_BYTES`, **6 MB**) is enforced on **write and read**. Over-cap on copy is a
@@ -232,6 +250,119 @@ whole.
 The clipboard is a **snapshot taken at copy time**: editing or deleting the source page — or its
 whole notebook — afterwards changes nothing about what pastes.
 
+## The object clipboard (arc 8)
+
+What a lasso caught, on the same row, the same envelope and the same 6 MB cap. **One slot, kind
+wins:** a copy of either kind replaces the other, which is why each surface offers only its own —
+Paste leaves the page sheet while objects are held, and the popup is absent entirely while a page
+is. No surface can ever advertise a Paste for a payload that is no longer there.
+
+### Copy and Cut
+
+The selection toolbar grows **Copy** and **Cut**, offered in **every** mode — ink, a lone heading, a
+lone link, mixed, mixed-with-link. A link copies **whole**, wrapped children included: nothing ever
+reaches inside one (the K1 model).
+
+Three orderings carry the flow, and each is a bug that was designed out rather than found:
+
+1. **Drain first** — arc 7's trap, unchanged: a stroke commit still queued on the shared writer
+   would land after the capture's row read and be silently missing from the copy.
+2. **Write, then delete.** A cut whose clipboard write failed must not delete, or the user is left
+   with neither the ink nor a clipboard holding it. Cut is a copy followed by the ordinary
+   `deleteSelection`, so it records the same single `Action.Deleted` the bar's own Delete does.
+3. **Re-arm `Tool.LASSO` afterwards.** Dismissing a selection ends the smart-lasso session and
+   restores `Tool.PEN` (g-paper's documented behaviour), so without this the placement tap that
+   follows a copy would **ink the page**. A host-initiated tool change ends the session cleanly and
+   is never echoed as `onToolChanged`, which is why the button is synced by hand.
+
+### Paste: a pen tap on bare paper
+
+The placement gesture is og's, and it needed **g-paper 0.1.5**:
+`PaperListener.onPaperTapped(x, y)` — a sub-threshold **stylus** tap on bare paper while
+`tool == LASSO` and **nothing is selected**. Never a finger, never a palm, never a tap inside a
+selection box (that is `onSelectionTapped`), and never the tap that *dismissed* a selection — a
+contact spent on a dismissal is spent, and the user taps again.
+
+The host applies the same rule one level up: `tapDismissedPopup`, rewritten at **every**
+`ACTION_DOWN` in `dispatchTouchEvent`, keeps the contact that closed the popup from also pasting.
+Rewritten every time rather than latched once, because a latch set at down goes stale the moment the
+contact turns out to be a stroke rather than a tap.
+
+| Where it lands | |
+|---|---|
+| Pen tap | **centred on the tap** — a tap is an aim, not a corner |
+| The popup's Paste | **source coordinates** — no tap to aim at, so pasting into the same (or a same-size) page reproduces the original layout exactly |
+
+Both then **clamp** onto the page, silently: no toast for a placement the user is about to watch
+land. Content larger than the page on an axis pastes from that edge rather than being centred into
+equal overflow on both sides. The box the clamp works from is the **ink extent** — a g-paper
+`Stroke.bounds` is point-tight (the K2 trap), so it is grown by half the stroke width first, or a
+clamped paste shears half a nib off the page edge.
+
+The pasted set lands **selected**, bar up, so the pen can drag it straight into place.
+
+### What `ObjectClip` does differently from `PageClip`
+
+Both share the two rules everything rests on — every pasted row gets a fresh id through one old→new
+map, and a row whose parent did not travel is **dropped**, never re-parented onto the page. Three
+things differ, each because a page paste owns a whole self-contained row set while an object paste
+lands *among* rows that are already there:
+
+1. **`"order"` is rebased, not verbatim.** Pasted rows go after the destination page's current
+   `MAX("order")` **for their own type** (the family numbers per parent *and* type), keeping their
+   relative sequence — writing order is load-bearing, so the sequence survives even though the
+   numbers do not. A link's wrapped children keep their orders verbatim: their parent is a
+   brand-new row with nothing to collide with. The bases are read **inside** the paste transaction,
+   or two pastes racing would both read the same max.
+2. **Geometry is object-level.** A `stroke` row carries no `x/y/width/height` — its geometry is
+   entirely inside the format-B blob — so translating one is decode → `Stroke.translated` →
+   re-encode. A `heading`/`link` row is the opposite: bounds *are* columns. A link's wrapped
+   children are page-absolute and translate with it.
+3. **The source page id is inferred, not carried** (`ObjectClip.sourcePageOf`). `PageClip` tells a
+   top-level row from a link's orphan by the page row it carries; an objects payload has none, and
+   arc 7's promise was *no format change*. One selection lives on one page, so the **most common**
+   parent that is not itself in the payload is the source page — and a row parented to some *other*
+   absent id is an orphan and is dropped. A link parented to a link is dropped too: no-nesting is a
+   locked rule this build will not reproduce, even from a foreign payload.
+
+### The lasso popup, Clear, and the icon
+
+Tap-to-place is invisible, so the button that means "the clipboard is in play" carries both the hint
+and the two acts that have no gesture:
+
+- **The icon.** While objects are held, the armed lasso button wears `ic_lasso_clipboard` — og's own
+  icon, a plus crosshair in the middle of the loop. It is the **only** standing hint that a pen tap
+  will paste, so it is a state of the button, not a transient toast. (A clipboard badge scaled into
+  the corner was tried first and read as a blob at 24 dp on the panel. **Check og's `drawable/`
+  before drawing a "fresh Tabler-style" icon** — the vocabulary is largely already there.)
+- **The popup.** A second tap on the **already-armed** lasso opens a small bordered bar hung under
+  it (`SelectionAnchor.placeUnder` — no flip; the anchor is in the top bar, so below is always the
+  free side): **Paste** and **Clear**, icon-only with long-press hints. It opens **only while the
+  clipboard holds objects** — with a page loaded, or nothing, a second tap stays P1's silent no-op.
+  That is the same rule as the page sheet's absent Paste row: absent beats open-and-half-empty, and
+  a greyed control is invisible on e-ink anyway. Its rect joins `pushExclusions` and `overChrome`;
+  the screen owns every dismissal (tool switch, page swap, any outside contact, paste, clear).
+- **Clear** empties the clipboard in memory **and** retires the index row — clearing only the mirror
+  lasts until the next `ensureLoaded` (the B3 lesson). Toast-confirms; the popup goes and the icon
+  reverts.
+
+### Toasts, dialogs, undo
+
+Toast-confirms "Copied" · "Cut" · "Pasted" · "Clipboard cleared". Dialog-explains an over-cap
+payload, a failed clipboard write (copy **and** cut), an unreadable or foreign payload at paste, and
+a cut whose page moved under the capture. **Never a silent no-op** — with one deliberate exception:
+a pen tap on bare paper while the clipboard holds a *page* does nothing at all, because neither the
+icon nor the popup was offering a paste for that tap to fail at.
+
+`Action.ObjectsPasted` is `Action.Deleted` run in reverse: undo soft-deletes the pasted rows (a link
+whole, wrapped children and all), redo restores them in place — geometry and rebased `"order"`
+intact, because a soft-deleted row keeps everything.
+
+One asymmetry worth knowing: a paste that **decoded but carried nothing placeable** retires the
+clipboard row, because it can only ever fail again — but a paste whose *write threw* (a full disk,
+an IO error) does not. That is this attempt failing, and throwing the clipboard away over it would
+turn a retry into a loss.
+
 ## Standing traps
 
 - Drain the writer before capture.
@@ -256,3 +387,16 @@ whole notebook — afterwards changes nothing about what pastes.
 - A page sheet that is up has `releaseRender()`'d the surface, so a screencap taken while it is
   showing can be missing committed ink that is plainly there once the sheet closes. Dismiss before
   judging a page's content from a screenshot.
+- **A dismissal is a spent contact.** Both g-paper (`outlineDismissedSelection`) and the host
+  (`tapDismissedPopup`) refuse to let the tap that closed something also do something. Rewrite such
+  a latch at every down — one set once goes stale the moment the contact becomes a stroke.
+- **`Stroke.bounds` is point-tight.** Any box used to place or clamp ink must be grown by half the
+  stroke width first.
+- **`"order"` is per parent AND type.** An object paste rebases three maxes, not one, and reads them
+  inside its own transaction.
+- **The lasso button must be excluded from its own popup's outside-tap dismissal**, or its re-tap
+  closes the popup in `dispatchTouchEvent` and immediately reopens it in `NotebookToolbar`.
+- adb can neither lasso nor ink, so **copy, cut, the placement tap, the popup and the icon swap are
+  all eye-check only**. The pure halves (`ObjectClip`, `ObjectPlacement`, the anchor) are JVM-tested
+  instead; the one thing adb *can* reach is a second tap on the armed lasso with an empty clipboard,
+  which must leave the lasso armed and put no popup node in the dump.

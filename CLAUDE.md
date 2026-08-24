@@ -149,7 +149,10 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
 - `ratta` — **the active feature branch** (cut 2026-08-20): Notesprout SN, a from-scratch
   Supernote-only rebuild under `apps/notesprout_ratta/`. Arcs 1–7 complete and frozen —
   Ratta Paper · Polish · Headings · Contents · Naming · Links · Pages (the page clipboard:
-  copy / cut / paste within and across notebooks), through B3 ✅ 2026-08-23.
+  copy / cut / paste within and across notebooks), through B3 ✅ 2026-08-23. **Arc 8 "Objects"
+  in progress** — object copy/cut/paste on the same clipboard: O1 ✅ (g-paper 0.1.5's
+  bare-paper tap callback, copy/cut/tap-to-place, the lasso popup) · O2 next
+  (cross-notebook, review, freeze).
   **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for any work there** — it holds the
   per-arc status, locked decisions, working protocol, and model recipe.
 - `germination` — previous post-MVP feature branch (reference, not active)

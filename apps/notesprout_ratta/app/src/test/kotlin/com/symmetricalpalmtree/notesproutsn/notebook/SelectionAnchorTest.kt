@@ -138,4 +138,32 @@ class SelectionAnchorTest {
         val right = sub(SelectionAnchor.Placement(rootWidth - w, 800))
         assertEquals(rootWidth - subW, right.x)
     }
+
+    // ── placeUnder: the arc-8 lasso popup under its chrome button ────────────
+
+    /** A 140-wide popup (two 70 px buttons) under a lasso button at x 400..470, bar bottom 170. */
+    private fun under(anchorLeft: Int, popupW: Int = 140) =
+        SelectionAnchor.placeUnder(
+            anchorLeft = anchorLeft, anchorRight = anchorLeft + 70, anchorBottom = bandTop,
+            w = popupW, h = h, gap = gap, rootWidth = rootWidth, bandBottom = bandBottom,
+        )
+
+    @Test
+    fun `the popup hangs the gap below the button, centred on it`() {
+        val p = under(400)
+        assertEquals(bandTop + gap, p.y)
+        assertEquals(435 - 70, p.x)   // centred on the button's midpoint, x = 435
+        assertTrue(!p.flipped)        // it never flips — below the top bar is always the free side
+    }
+
+    @Test
+    fun `a popup wider than the space to the right stays on screen`() {
+        val p = under(rootWidth - 80, popupW = 400)
+        assertEquals(rootWidth - 400, p.x)
+    }
+
+    @Test
+    fun `a button at the left edge keeps the popup on screen`() {
+        assertEquals(0, under(0, popupW = 400).x)
+    }
 }

@@ -62,6 +62,28 @@ class ClipStoreTest {
         assertEquals(222L, store.readHeader()!!.copiedAt)
     }
 
+    /**
+     * One slot, kind wins (arc 8): a copy of either kind replaces the other, so no surface can ever
+     * be offering a Paste for a payload that is no longer there.
+     */
+    @Test
+    fun `a copy of objects takes the page's slot, and a page copy takes it back`() = runBlocking {
+        store.write(envelope("page-1", 111L))
+        val objects = envelope("s-1", 222L).copy(
+            kind = ClipEnvelope.KIND_OBJECTS,
+            rows = listOf(ClipRow(id = "s-1", parentId = "page-1", type = "stroke")),
+        )
+        assertEquals(ClipEnvelope.KIND_OBJECTS, store.write(objects)!!.kind)
+        assertEquals(1, dao.rows.size)
+        assertEquals(ClipEnvelope.KIND_OBJECTS, store.readHeader()!!.kind)
+        assertEquals(ClipEnvelope.KIND_OBJECTS, dao.rows.getValue(ListIds.CLIPBOARD_ID).name)
+
+        store.write(envelope("page-3", 333L))
+        assertEquals(1, dao.rows.size)
+        assertEquals(ClipEnvelope.KIND_PAGE, store.readHeader()!!.kind)
+        assertEquals("page-3", store.readEnvelope()!!.rows.single().id)
+    }
+
     @Test
     fun `an over-cap payload writes nothing and leaves the previous clipboard standing`() = runBlocking {
         store.write(envelope("page-1", 111L))

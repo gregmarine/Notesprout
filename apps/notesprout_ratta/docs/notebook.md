@@ -35,10 +35,13 @@ deliberate differences are listed at the end.
 | `core/RecognizingOverlay` (N2) | the "Recognizing…" box during a convert — `OpeningOverlay`'s smaller, dialog-free sibling |
 | `notebook/InkPayload` (N2) | `Stroke` (g-paper) → `InkStroke` (extension-api) in writing order — the one place a page's ink is reduced to bare geometry for the recognizer |
 | `CoverSnapshot` | `paper.renderToBitmap()` → ≤ 512 px long edge → WEBP q100 → `IndexRepository.setCover`; headings ride along for free (`HeadingRenderer` is part of the same committed-layer render) |
-| `NotebookToolbar` | `[←] [pen] [eraser] [lasso]` — arming only; owns the fixed tool values. Back goes through `backPressed()`, never straight to `close()` (K4 — both Backs walk the link trail in a via-link notebook) |
-| `SelectionToolbar` | the floating bar over a live lasso selection: Delete (always) + H, plus (K1) **Link** / **Edit** / **Unlink** by `SelectionMode` (five modes since K1), plus (N2) the H1–H6 level sub-toolbar it can open |
+| `NotebookToolbar` | `[←] [pen] [eraser] [lasso]` — arming only; owns the fixed tool values. Back goes through `backPressed()`, never straight to `close()` (K4 — both Backs walk the link trail in a via-link notebook). O1: a second tap on the **armed lasso** calls back to the screen (the clipboard popup), and `showClipboardLoaded()` swaps that button's icon |
+| `SelectionToolbar` | the floating bar over a live lasso selection: Delete (always) + H, plus (K1) **Link** / **Edit** / **Unlink** by `SelectionMode` (five modes since K1), plus (O1) **Copy** / **Cut** in every mode, plus (N2) the H1–H6 level sub-toolbar it can open |
+| `LassoPopup` (O1) | the small bordered bar under the **armed** lasso button: **Paste** + **Clear** for the object clipboard. Opens only while the clipboard holds objects; the screen owns every dismissal |
+| `ObjectClip` (O1) | pure selection ⇄ clipboard payload — capture, fresh ids, parent rewiring, the per-type `"order"` rebase, geometry translation (stroke = decode/translate/re-encode). JVM-tested. [`docs/clipboard.md`](clipboard.md) |
+| `ObjectPlacement` (O1) | pure placement arithmetic: payload box + tap (or source origin) + page size → the clamped `dx/dy`. JVM-tested |
 | **Links (arc 6)** | `LinkPayload` · `PageLink`/`LinkRows` · `LinkStore` · `LinkComposite`/`LinkRenderer` · `LinkPickerActivity`/`LinkPickerModel`/`PageCardGrid` · `LinkPickFlow` · `PickerPageSource`/`ForeignPageSource`/`PageReads`/`PagePreview`/`PreviewMath`/`PageLabels` · `LinkFollowFlow`/`LinkNav` · `data/prefs/LinkTrail` — the whole subsystem is documented in [`docs/links.md`](links.md) |
-| `SelectionAnchor` | pure placement arithmetic for the bar (centre / gap / flip / clamp) and (N2) `placeSub` — the sub-toolbar hung off the bar the same way. JVM-tested |
+| `SelectionAnchor` | pure placement arithmetic for the bar (centre / gap / flip / clamp), (N2) `placeSub` — the sub-toolbar hung off the bar the same way — and (O1) `placeUnder`, a row hung under a chrome *button*, which never flips. JVM-tested |
 | `core/OpeningOverlay` | the source-side "Opening…" box and its pre-draw + post launch sequencing |
 | `OutlineTree` (C1) | pure Contents tree: items → nested H1–H6 nodes (orphans attach to the nearest shallower heading or become roots — never dropped), `visible`/`all`/`highlight`/`ancestorsOf` and the paging math. JVM-tested |
 | `ContentsLayout` (C1) | pure Contents layout rules: the 480 dp sidebar/full-screen branch, 60 % sidebar width, 68 dp rows, `(level−1)×16 dp` indent, `itemsPerPage`. JVM-tested |
@@ -264,14 +267,20 @@ toolbar are set there by hand rather than waiting on the callback.
 | Tap the bar's **H**, then a level (N2) | `onLevelPicked` — CONVERT on a pure-stroke selection, CHANGE on a lone heading (below) |
 | Tap inside the box, over a heading (N2) | `onSelectionTapped` hit-tests `liveHeadings` and opens `HeadingEditDialog` |
 | Tap inside the box, over ink only | nothing |
+| Tap the bar's **Copy** / **Cut** (O1) | the selection goes on the global clipboard; the bar goes, and the host **re-arms `Tool.LASSO`** so the next tap places ([`docs/clipboard.md`](clipboard.md)) |
+| Tap bare paper with the lasso armed and **nothing** selected (O1) | `onPaperTapped` (g-paper 0.1.5) → the clipboard's objects paste **centred on the tap**, landing selected |
 | Tap outside / tool change / any data-in call / page swap | `onSelectionDismissed` → bar(s) hidden, mirror cleared (unless a converted heading's selection is waiting to take its place — see Headings below) |
 
 ### The selection toolbar
 
 A bordered row floating over the paper: **Delete** always, plus (N2) an **H** button that opens a
 second floating bar of its own, the H1–H6 level sub-toolbar (`SelectionMode` and the convert/change
-flows are covered under Headings below). It is a *bar*, not a button, because it is the shape the
-selection's actions live in from here on.
+flows are covered under Headings below), plus (O1) **Copy** and **Cut**, offered in every mode. It
+is a *bar*, not a button, because it is the shape the selection's actions live in from here on.
+
+**Copy and Cut sit after Delete** (the O1 phase-start decision). Delete has been the leftmost
+button since P1; grouping the clipboard verbs at the front would have been tidier and would have
+moved a control the hand has been aiming at for seven arcs.
 
 It replaces R5's tap-inside-the-box action sheet. The sheet asked for a second deliberate act on top
 of the lasso the user had just drawn, and on e-ink a dialog is a full-screen repaint; the bar is
@@ -746,7 +755,7 @@ and survives it — [`docs/links.md`](links.md)).
 |---|---|---|---|
 | `Drew` | `onStrokeCommitted` | `store.remove([id])` | `store.revive` |
 | `Erased` | `onStrokesErased` (eraser tool **and** scribble erase) | `store.revive` | `store.remove` |
-| `Deleted` | the selection toolbar's Delete (strokes **and**, N2, `headingIds` — **and**, K1, `links` snapshots: a whole-link erase records here too) | `store.revive` + `headings.restore` + `links.restore` | `store.remove` + `headings.erase` + `links.remove` |
+| `Deleted` | the selection toolbar's Delete (strokes **and**, N2, `headingIds` — **and**, K1, `links` snapshots: a whole-link erase records here too; O1's **Cut** goes through the very same path, so undoing a cut puts the ink back exactly as undoing a Delete would) | `store.revive` + `headings.restore` + `links.restore` | `store.remove` + `headings.erase` + `links.remove` |
 | `Moved` | `onSelectionMoved` (strokes **and**, N2, `headingIds` **and**, K1, `linkIds` riding the same drag) | `store.move(-dx,-dy)` + `headings.move(-dx,-dy)` + `links.move(-dx,-dy)` | `store.move(dx,dy)` + `headings.move(dx,dy)` + `links.move(dx,dy)` |
 | `HeadingCreated` (N2) | a successful convert | `headings.erase` + `store.revive` (in place — order matters) | `headings.restore` + `store.remove` |
 | `HeadingDeleted` (N2) | edit-dialog empty Save, or the eraser sweeping a heading whole | `headings.restore` (in place) | `headings.erase` |
@@ -757,6 +766,7 @@ and survives it — [`docs/links.md`](links.md)).
 | `LinkEdited` (K2) | the picker's OK on an edit | write `before`'s payload | write `after`'s payload |
 | `Page` | insert / delete (`Structural` snapshot, whose `objectIds` are type-agnostic — strokes, headings and links all) | `reconcile(before)`, **restoring** `objectIds` | `reconcile(after)`, deleting them |
 | `PagePasted` (B1) | a paste — the same `Structural` shape, its own kind because `objectIds` runs the **opposite direction** (rows the paste *created*) | `reconcile(before)`, **deleting** `objectIds` | `reconcile(after)`, restoring them |
+| `ObjectsPasted` (O1) | an object paste — `Deleted` run in reverse, its own kind for `PagePasted`'s reason (a link travels as a `PageLink` snapshot, so undo takes its wrapped children down with it) | `store.remove` + `headings.erase` + `links.remove` | `store.revive` + `headings.restore` + `links.restore` |
 
 `Deleted` replays exactly like `Erased` (and its N2 heading half like `HeadingDeleted`) and is
 deliberately kept as its own kind: to the user a sweep of the eraser and "delete these" are
@@ -842,7 +852,7 @@ No app frame is presented while `paper.isPenActive` — the strip text only chan
 `whenPenIdle {}` (re-polls every `PEN_ACTIVE_TAIL_MS`). Nothing else on the screen repaints
 during writing.
 
-Six recorded exceptions, all the same shape — **one chrome frame at a deliberate act or a
+Seven recorded exceptions, all the same shape — **one chrome frame at a deliberate act or a
 boundary**, never under live ink:
 
 1. the **page sheet at long-press** (R4 — safe because `PageGestures` never arms while the
@@ -868,6 +878,15 @@ boundary**, never under live ink:
    a repaint under live ink, and `ContentsFlow` pen-gates its `releaseRender` first. Deliberately
    *not* idle-gated — `isPenActive` counts hover, and a hovering pen would hold the screen hostage,
    the same reason as exceptions 2 and 3).
+7. the **object paste's frame at pen-up, and the lasso popup's show/hide** (O1). The paste is the
+   direct visible result of a deliberate tap: the pasted content, the selection box and the bar all
+   land in one frame at the *tap's* pen-up, where nothing is being written — the same justification
+   as exception 2, applied to the act that creates the selection rather than the one that follows
+   it. Deliberately not idle-gated for exception 2's reason as well: the pen that just tapped is
+   still hovering, so a gate would deliver the paste long after the tap that asked for it. The
+   popup's show follows a chrome tap on the lasso button (`releaseRender()` first, pen-gated inside
+   `NotebookToolbar`), and every one of its hides is a deliberate act — a tool switch, an outside
+   contact, a page swap, a paste, a clear.
 
 R3's exception — the tool-panel close at stylus pen-up — is **retired**: P1 removed the panels.
 
@@ -915,6 +934,16 @@ the `placeSub` additions to `SelectionAnchorTest` noted above. A shared `FakeSoi
 the Paper-grammar byte fixtures), `LinkRowsTest`, `LinkStoreTest` (against the same
 `FakeSoilDao`), `LinkCompositeTest`, `LinkPickerModelTest`, `PageLabelsTest`, `PreviewMathTest`,
 `PageReadsTest`, `LinkNavTest`, `TrailCodecTest`, and `library/SchemePrefillTest`.
+
+**Arcs 7–8 (the clipboard):** `ClipEnvelopeTest`, `ClipStoreTest` (incl. the O1 kind-swap case:
+objects take the page's slot and a page copy takes it back), `PageClipTest` — and O1's
+`ObjectClipTest` (fresh ids, top-level vs wrapped parenting, the dropped orphan, a refused nested
+link, the per-type `"order"` rebase with children kept verbatim, the stroke decode→translate→
+re-encode round trip, the ink-extent box handed to the placement, an unusable blob costing one
+stroke, and a round trip through the clipboard codec) and `ObjectPlacementTest` (centre-on-tap,
+all four clamps, content bigger than the page, source-coordinate paste, an unknown page size, a
+non-finite box). `SelectionAnchorTest` gains the `placeUnder` cases. Full detail in
+[`docs/clipboard.md`](clipboard.md).
 
 ## Deliberate differences from Paper v0
 

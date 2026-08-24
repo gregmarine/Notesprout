@@ -69,6 +69,18 @@ data class ClipEnvelope(
         const val KIND_PAGE = "page"
 
         /**
+         * What a lasso selection caught — strokes, headings and links, with the links' wrapped
+         * children (arc 8). The promise arc 7 wrote into this discriminator, kept: no format
+         * change, no migration, and **one slot** — a copy of either kind replaces the other.
+         *
+         * The two kinds differ in what a paste *means*, not in what the envelope holds. A page
+         * payload owns a whole self-contained row set (its rows' `"order"` travels verbatim); an
+         * objects payload lands *among* the destination page's rows, so its `"order"` is rebased —
+         * see [com.symmetricalpalmtree.notesproutsn.notebook.ObjectClip].
+         */
+        const val KIND_OBJECTS = "objects"
+
+        /**
          * Cap on the encoded payload. Generous — a dense page of ink Base64s to a few MB — but a
          * hard stop: the blob is read whole into memory at paste time, and the index is the wrong
          * place for something unbounded. Over-cap is a refused copy with a problem dialog, never a

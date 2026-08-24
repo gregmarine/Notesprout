@@ -153,6 +153,18 @@
         android:background="@drawable/shape_dialog_bordered"
         android:padding="4dp"/>
 
+    <!-- The lasso button's popup (arc 8) — Paste + Clear for the object clipboard, hung under the
+         armed lasso button by SelectionAnchor.placeUnder. Buttons are built in code. -->
+    <LinearLayout
+        android:id="@+id/lassoPopup"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:orientation="horizontal"
+        android:visibility="gone"
+        android:background="@drawable/shape_dialog_bordered"
+        android:padding="4dp"/>
+
     <include
         android:id="@+id/openingOverlay"
         layout="@layout/overlay_opening"

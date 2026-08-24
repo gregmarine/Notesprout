@@ -117,6 +117,24 @@ class UndoRedoStack {
             val after: String,
         ) : Action
 
+        /**
+         * An object paste (arc 8) — [Deleted] run in reverse. Undo soft-deletes the rows the paste
+         * created (a link's [PageLink] snapshot takes its wrapped children down with it, exactly as
+         * a delete does); redo restores them in place, geometry and rebased `"order"` intact,
+         * because a soft-deleted row keeps everything. Ids suffice on the stroke and heading sides
+         * for the same reason.
+         *
+         * Its own kind rather than a `Deleted` with the arms swapped, for [PagePasted]'s reason: an
+         * entry whose ids run the opposite direction cannot share a replay arm without one of the
+         * two undoing itself.
+         */
+        data class ObjectsPasted(
+            override val pageId: String,
+            val strokeIds: List<String>,
+            val headingIds: List<String>,
+            val links: List<PageLink>,
+        ) : Action
+
         /** A page insert or delete, replayable both ways through [NotebookSession.reconcile]. */
         data class Page(val snapshot: NotebookSession.Structural) : Action {
             override val pageId: String get() = snapshot.afterCurrentId
