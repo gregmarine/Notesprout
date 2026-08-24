@@ -1878,8 +1878,8 @@ g-paper `bbcdc37`, both pushed.
   fail at; "never a silent no-op" covers affordances that *were* offered.
 
 ### O2 — Cross-notebook + review + docs + freeze
-**Status:** ✅ Complete — **Arc 8 "Objects" frozen 2026-08-23** (Nomad-verified + user all-clear:
-"All good")
+**Status:** ✅ Complete (commit `7f008ea`) — **Arc 8 "Objects" frozen 2026-08-23**
+(Nomad-verified + user all-clear: "All good")
 
 The `KIND_PAGE` link rewrite for an objects payload (B2's `rewriteLink`, minus the self-page
 case) and its test table; a copy whose source notebook is gone at paste time; arc-range
