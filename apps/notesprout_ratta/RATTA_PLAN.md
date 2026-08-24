@@ -1878,7 +1878,8 @@ g-paper `bbcdc37`, both pushed.
   fail at; "never a silent no-op" covers affordances that *were* offered.
 
 ### O2 — Cross-notebook + review + docs + freeze
-**Status:** ⬜ Not started
+**Status:** ✅ Complete — **Arc 8 "Objects" frozen 2026-08-23** (Nomad-verified + user all-clear:
+"All good")
 
 The `KIND_PAGE` link rewrite for an objects payload (B2's `rewriteLink`, minus the self-page
 case) and its test table; a copy whose source notebook is gone at paste time; arc-range
@@ -1894,8 +1895,78 @@ cross-notebook rewrite.
 selection copied A → B, the rewritten link followed back into A, cut A → paste B as a move);
 user all-clear.
 
-**Questions to resolve at phase start:** review level; version stamp (still `0.1.0-ratta` through
-seven arcs — the user's call).
+**Questions resolved at phase start (2026-08-23):** review level **high** (what every arc has frozen
+at); version stamp **stays `0.1.0-ratta`** — nothing ships from this branch yet and no user reads the
+number, so bumping it would only cost a decision about what the scheme means. Revisit when SN first
+goes to a device the user does not control.
+
+**Built (2026-08-23) — the rewrite, and what the review found.**
+
+*The rewrite.* `ObjectClip.plan` gains the **destination** `notebookId` and `ObjectClip.rewriteLink`
+— B2's rewrite minus the one case that cannot arise here. `KIND_PAGE` carries no notebook id, so a
+copied link left alone would mean *a page of the destination*, almost always no page at all; it is
+re-pointed at the source notebook as `KIND_NOTEBOOK_PAGE`. Everything that already names a notebook,
+anything that does not decode, a blank source, and every same-notebook paste travel **verbatim**.
+
+**There is no self-page exception, and that is the whole diff between the two rewrites.** `PageClip`
+has one — a link whose target *is* the page being pasted re-points at the new copy — but **no page
+travels in an objects payload**, so there is nothing for such a link to re-point at. A link to its
+own source page crosses like any other, back to that page in the source notebook, which is exactly
+where the page it named still is. Two functions rather than one shared with a nullable `newPageId`.
+
+The fire site is the top-level link rows only (a link inside a link is refused outright, so there is
+no second level), and `NotebookSession.pasteObjects` threads the id. **`NotebookActivity` needed no
+change at all** — `doObjectPaste` was already notebook-agnostic, which is the arc-7 clipboard
+paying off a second time.
+
+*A source notebook gone at paste time needed no code.* The payload is self-contained and the source
+`.soil` is never reopened; the rewritten target simply resolves dead, into the same K4 dialog a link
+to a deleted notebook has always landed in. B2 had already settled this for pages. Recorded in
+`docs/clipboard.md`, not built.
+
+*Review (`/code-review high`, `8616d22..HEAD`) — three findings, all real, all fixed.* Two of them
+were **arc-8 O1 bugs the eye check could not have caught**, which is the argument for running the
+review over the arc rather than the phase:
+
+1. **The lasso re-tap could never close the popup.** `onToolTap` fired `onToolTapped()` — the hook
+   that takes the popup down when another tool is armed — *before* the already-armed check, so the
+   toggle hid the popup and then `onLassoReTap` asked "is it showing?", got `false`, and reopened it.
+   The documented toggle never closed; only an outside tap did. Fixed by firing `onToolTapped()`
+   only on an actual tool change. **Standing trap: two handlers reading one piece of state — order
+   the write after the read.**
+2. **The dismissal latch went stale for a second pointer.** `tapDismissedPopup` was rewritten at
+   `ACTION_DOWN`, which is the *first* contact of a gesture. With a hand resting on the glass — the
+   normal writing posture — the palm lands first and the pen arrives as `ACTION_POINTER_DOWN`,
+   inheriting the palm's answer. If the palm had dismissed the popup, **every** pen tap until the
+   hand lifted silently declined to paste. Now every pointer-down rewrites it, reading
+   `ev.actionIndex`. The O1 note said this latch "can never go stale"; it could.
+3. **`sourcePageOf`'s majority vote could invert the rule it exists to enforce.** Rows
+   `[stroke → page, childA → lnk-1, childB → lnk-1]` with the link row missing put the *orphans* in
+   the majority, so they would have been written loose onto the page — the untrusted-payload rule
+   exactly backwards — while the one genuine top-level row was dropped as the orphan. Replaced with
+   two signals the format actually guarantees: a `link` row's parent (a link is top-level by
+   definition), else the first row parented outside the payload (`capture` writes `top + children`).
+   **Standing trap: when a rule exists to reject the malformed case, never let the malformed case
+   outvote it.** Only reachable from a corrupt or foreign blob — but the file treats the blob as
+   untrusted input by design, and the row survives force-stops.
+
+The review also cleared, by reading rather than assuming: the id remap and per-type `"order"` rebase,
+`ObjectPlacement`'s clamp order and guards, `Action.ObjectsPasted` against `LinkStore.remove/restore`
+and `SoilDao.byId`'s revive branch, the popup's first-open exclusion rect (the layout listener covers
+the zero-width first pass), `OpeningOverlay`'s `launchPending` against `LifecycleRegistry`'s
+immediate ON_RESUME replay, and `withUnderlineBand`'s monotonicity.
+
+**Verified:** `./gradlew test` green (**475** JVM tests, 9 new — the rewrite table, the two
+inference cases), debug + release build. Version left at `0.1.0-ratta` per the phase-start answer.
+Installed on the Nomad, `logcat -b crash` empty; adb re-checked the two things it can reach after the
+toolbar reorder — the empty-clipboard lasso re-tap is still a silent no-op with no popup node in the
+dump, and tool arming still tracks (lasso → pen → eraser). Everything else is lasso-driven and was
+the user's eye: a selection copied A → B, the rewritten link followed back into A, a self-page link
+likewise, cut A → paste B as a move, the popup's re-tap **closing** (it never could in O1), and a
+same-notebook paste unchanged. **All-clear: "All good."**
+
+**Arc 8 "Objects" is frozen at this commit.** Nothing is carried forward. `docs/clipboard.md` is the
+reference for both halves of the clipboard; the next arc is **not planned — ask first**.
 
 ---
 

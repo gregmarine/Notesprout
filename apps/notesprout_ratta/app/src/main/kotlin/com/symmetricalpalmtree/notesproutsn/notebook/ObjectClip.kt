@@ -31,13 +31,15 @@ import com.symmetricalpalmtree.notesproutsn.data.soil.SoilSchema
  *     payload's own box is not known until the stroke blobs are decoded, which is exactly the work
  *     [plan] is already doing.
  *
- * Two rules it shares with [PageClip], and rests on just as hard:
+ * Three rules it shares with [PageClip], and rests on just as hard:
  *  - **Every pasted row gets a fresh id**, wired through one old→new map, so a link's wrapped
  *    children re-parent onto the *copied* link and not the original.
  *  - **A row whose parent did not travel is dropped**, never re-parented onto the page: the payload
  *    is untrusted input like any file, and a link's orphaned child re-appearing loose on the page
  *    would be a silent corruption rather than a visible absence. Telling the two apart takes one
  *    inference here that [PageClip] gets for free from the page row it carries — see [sourcePageOf].
+ *  - **A copied link's own-notebook target is re-pointed across notebooks**, so it keeps meaning the
+ *    page it named rather than silently naming one of the destination — see [rewriteLink].
  */
 object ObjectClip {
 
@@ -92,8 +94,8 @@ object ObjectClip {
     }
 
     /**
-     * Turn [env] into the rows a paste onto [pageId] must write, and the objects the screen must
-     * then hold. Null when the payload carries nothing this build can place.
+     * Turn [env] into the rows a paste onto [pageId] of [notebookId] must write, and the objects the
+     * screen must then hold. Null when the payload carries nothing this build can place.
      *
      * [baseOrder] is the destination page's current `MAX("order")` for a row type (the caller reads
      * it per type); the first pasted row of that type takes `base + 1`. [place] receives the
@@ -101,10 +103,15 @@ object ObjectClip {
      * the page (a g-paper `Stroke.bounds` is point-tight — the K2 trap) — and answers with the shift
      * every pasted object takes.
      *
+     * [notebookId] is the **destination** notebook: when it differs from the envelope's source, a
+     * copied link's own-notebook target has to be re-pointed or it would silently mean a page of the
+     * destination — see [rewriteLink].
+     *
      * [newId] is injected so the id remap is testable; production passes `UUID.randomUUID`.
      */
     fun plan(
         env: ClipEnvelope,
+        notebookId: String,
         pageId: String,
         baseOrder: (type: String) -> Int,
         now: Long,
@@ -156,9 +163,13 @@ object ObjectClip {
         val contentIds = ArrayList<String>(top.size + children.size)
         val linkRows = ArrayList<SoilObjectEntity>()
 
+        val crossNotebook = env.sourceNotebookId.isNotBlank() && env.sourceNotebookId != notebookId
         for (row in top.sortedBy { it.order }) {
             val id = idMap.getValue(row.id)
-            val out = translated(row, id, pageId, rebased(row.type), now, dx, dy, decoded[row.id]) ?: continue
+            var out = translated(row, id, pageId, rebased(row.type), now, dx, dy, decoded[row.id]) ?: continue
+            if (crossNotebook && out.type == SoilSchema.TYPE_LINK) {
+                out = out.copy(text = rewriteLink(out.text, env.sourceNotebookId))
+            }
             rows += out
             contentIds += id
             when (out.type) {
@@ -189,31 +200,72 @@ object ObjectClip {
     }
 
     /**
+     * What a copied link's payload must say once it lives in **another** notebook (O2) — B2's
+     * rewrite in [PageClip], minus the one case that cannot arise here.
+     *
+     * [LinkPayload.KIND_PAGE] carries no notebook id: it means "a page of my own notebook", which is
+     * a *different* page — very likely no page at all — once the row has been pasted into a
+     * different file. So it is re-pointed explicitly at the notebook it was copied from:
+     * `KIND_PAGE` → [LinkPayload.KIND_NOTEBOOK_PAGE] with [sourceNotebookId]. The link keeps working,
+     * and it keeps meaning what it meant.
+     *
+     * **No self-page exception.** A page paste has one — a link whose target *is* the page being
+     * pasted re-points at the new copy — but no page travels in an objects payload, so there is
+     * nothing for such a link to re-point at. A link to its own source page is re-pointed at that
+     * page in the source notebook like any other, which is where the page it named still is.
+     *
+     * `KIND_NOTEBOOK` and `KIND_NOTEBOOK_PAGE` already name their notebook and travel unchanged. A
+     * payload that does not decode (foreign, future, corrupt) travels **verbatim**: rewriting what
+     * we cannot read would be inventing a target, and a follow already lands in K4's dead-target
+     * dialog. A same-notebook paste never reaches here at all — it is verbatim by definition.
+     *
+     * The source notebook being **deleted** between copy and paste changes nothing here: the
+     * payload is self-contained and the source file is never reopened. The rewritten target simply
+     * resolves dead, into the same dialog a link to a deleted notebook has always landed in.
+     */
+    private fun rewriteLink(text: String?, sourceNotebookId: String): String? {
+        val decoded = LinkPayload.decode(text ?: return null) ?: return text
+        if (decoded.kind != LinkPayload.KIND_PAGE) return text
+        val target = decoded.pageId ?: return text
+        return runCatching {
+            LinkPayload.encode(decoded.chrome, LinkPayload.KIND_NOTEBOOK_PAGE, sourceNotebookId, target)
+        }.getOrDefault(text)
+    }
+
+    /**
      * The id of the page the selection was copied from, inferred rather than carried — arc 7's
      * `kind` discriminator promised objects would need **no format change**, and this is what pays
      * for that promise.
      *
      * The inference is sound because one selection lives on one page: every top-level row shares a
-     * single parent that is not itself in the payload, so the **most common** such parent is the
-     * source page (first appearance breaks a tie, so the answer never depends on row order beyond
-     * what capture already fixes). What it buys is the untrusted-payload rule: a row whose parent is
-     * some *other* absent id is a link's orphan, and it is dropped rather than re-parented onto the
-     * page, where it would re-appear loose as a silent corruption.
+     * single parent that is not itself in the payload. What it buys is the untrusted-payload rule: a
+     * row whose parent is some *other* absent id is a link's orphan, and it is dropped rather than
+     * re-parented onto the page, where it would re-appear loose as a silent corruption.
+     *
+     * Two signals, in order, and both are things the format actually guarantees:
+     *
+     *  1. **A `link` row's parent.** A link is top-level by definition — no-nesting is the locked K1
+     *     rule — so a link row parented outside the payload names the page outright.
+     *  2. Otherwise **the first row parented outside the payload**, because [capture] writes
+     *     `top + children`: the top-level rows come first, by construction.
+     *
+     * It was a **majority vote** until the O2 review, which is a rule that can invert itself on a
+     * malformed payload: rows `[stroke → page, childA → lnk-1, childB → lnk-1]` with the link row
+     * itself missing put the *orphans* in the majority, so they would have been written loose onto
+     * the page while the one genuine top-level row was dropped as the orphan — precisely backwards.
+     * Neither signal above can be outvoted.
      *
      * Null when no row is parented outside the payload at all — nothing could be top-level, so
      * there is nothing to paste.
      */
     private fun sourcePageOf(rows: List<ClipRow>, rowIds: Set<String>): String? {
-        var best: String? = null
-        var bestCount = 0
-        val counts = LinkedHashMap<String, Int>()
+        var first: String? = null
         for (row in rows) {
             if (row.parentId in rowIds) continue
-            val n = (counts[row.parentId] ?: 0) + 1
-            counts[row.parentId] = n
-            if (n > bestCount) { best = row.parentId; bestCount = n }
+            if (row.type == SoilSchema.TYPE_LINK) return row.parentId
+            if (first == null) first = row.parentId
         }
-        return best
+        return first
     }
 
     /**

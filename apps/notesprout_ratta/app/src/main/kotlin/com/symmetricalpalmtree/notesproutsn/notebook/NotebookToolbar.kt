@@ -72,14 +72,19 @@ class NotebookToolbar(
      * a button that disarmed itself would leave the pen doing something the bar isn't showing — but
      * on the **lasso** it now opens the clipboard popup ([onLassoReTap], arc 8), and on the other
      * two it remains the P1 no-op.
+     *
+     * [onToolTapped] fires **only on an actual tool change**, and that ordering is load-bearing: it
+     * is what takes the popup down when another tool is armed, so firing it on the re-tap too would
+     * hide the popup a moment before [onLassoReTap] asked whether it was showing — and the toggle
+     * would reopen what it was meant to close, every time (O2 review).
      */
     private fun onToolTap(tool: Tool) {
         releaseRenderIfIdle()
-        onToolTapped()
         if (paper.tool == tool) {
             if (tool == Tool.LASSO) onLassoReTap()
             return
         }
+        onToolTapped()
         paper.tool = tool
         sync(tool)
         Slog.d(TAG) { "armed $tool" }

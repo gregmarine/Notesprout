@@ -283,10 +283,17 @@ The placement gesture is og's, and it needed **g-paper 0.1.5**:
 selection box (that is `onSelectionTapped`), and never the tap that *dismissed* a selection — a
 contact spent on a dismissal is spent, and the user taps again.
 
-The host applies the same rule one level up: `tapDismissedPopup`, rewritten at **every**
-`ACTION_DOWN` in `dispatchTouchEvent`, keeps the contact that closed the popup from also pasting.
+The host applies the same rule one level up: `tapDismissedPopup`, rewritten at **every pointer
+going down** in `dispatchTouchEvent`, keeps the contact that closed the popup from also pasting.
 Rewritten every time rather than latched once, because a latch set at down goes stale the moment the
 contact turns out to be a stroke rather than a tap.
+
+**Every pointer, not just the first** (O2 review). `ACTION_DOWN` alone is the *first* contact of a
+gesture; with a hand resting on the glass — the normal writing posture — the palm lands first and
+the pen arrives as `ACTION_POINTER_DOWN`. A latch written only at `ACTION_DOWN` would still be
+carrying the palm's answer, so if the palm had dismissed the popup, **every** pen tap until the hand
+lifted would silently decline to paste, reading as tap-to-place being broken outright. The dismissal
+now reads `ev.actionIndex`, so it always answers for the pointer that is actually going down.
 
 | Where it lands | |
 |---|---|
@@ -320,10 +327,51 @@ lands *among* rows that are already there:
    children are page-absolute and translate with it.
 3. **The source page id is inferred, not carried** (`ObjectClip.sourcePageOf`). `PageClip` tells a
    top-level row from a link's orphan by the page row it carries; an objects payload has none, and
-   arc 7's promise was *no format change*. One selection lives on one page, so the **most common**
-   parent that is not itself in the payload is the source page — and a row parented to some *other*
-   absent id is an orphan and is dropped. A link parented to a link is dropped too: no-nesting is a
-   locked rule this build will not reproduce, even from a foreign payload.
+   arc 7's promise was *no format change*. One selection lives on one page, so every top-level row
+   shares one parent that is not itself in the payload — and a row parented to some *other* absent
+   id is an orphan and is dropped. A link parented to a link is dropped too: no-nesting is a locked
+   rule this build will not reproduce, even from a foreign payload.
+
+   Two signals name that parent, in order, and both are things the format guarantees: **a `link`
+   row's parent** (a link is top-level by definition, so it names the page outright), else **the
+   first row parented outside the payload** (`capture` writes `top + children`). It was a
+   **majority vote** until the O2 review, and a vote is a rule that can invert itself: rows
+   `[stroke → page, childA → lnk-1, childB → lnk-1]` with the link row missing put the *orphans* in
+   the majority, so they would have been written loose onto the page — the untrusted-payload rule
+   exactly backwards — while the one genuine top-level row was dropped. **Standing trap: when a rule
+   exists to reject the malformed case, never let the malformed case outvote it.**
+
+### Links across notebooks, for objects (O2)
+
+The rewrite above, minus its one exception. A link copied out of notebook A and pasted into B is the
+same problem the page half solved: `LinkPayload.KIND_PAGE` carries no notebook id, so left alone it
+would mean *a page of B* — almost always no page at all.
+
+| Payload | Cross-notebook paste | Why |
+|---|---|---|
+| `KIND_PAGE` | → `KIND_NOTEBOOK_PAGE` naming the **source** notebook | the link keeps working and keeps meaning what it meant |
+| `KIND_NOTEBOOK` / `KIND_NOTEBOOK_PAGE` | unchanged | already named their notebook |
+| anything that does not decode | **verbatim** | rewriting what we cannot read is inventing a target |
+| same-notebook paste, any payload | **verbatim** | nothing resolves differently |
+| blank `sourceNotebookId` | **verbatim** | no notebook id to name |
+
+**There is no self-page exception here.** `PageClip` has one — a link whose target *is* the page
+being pasted re-points at the new copy — but **no page travels in an objects payload**, so there is
+nothing for such a link to re-point at. A link to its own source page crosses like any other, back
+to that page in A, which is exactly where the page it named still is. That is the whole diff between
+the two rewrites, and it is why they are two functions rather than one shared with a nullable
+`newPageId`.
+
+The rewrite fires on the **top-level** link rows only. A link's wrapped children are strokes and
+headings — a link inside a link is refused outright — so there is no second level to walk.
+
+The source notebook being **deleted** between copy and paste changes nothing: the payload is
+self-contained and the source `.soil` is never reopened. The rewritten target simply resolves dead,
+into the same K4 dialog a link to a deleted notebook has always landed in. Same for a cut — the ink
+is on the clipboard, and pasting it into B is the whole of a cross-notebook move.
+
+JVM-tested as a table (`ObjectClipTest` § links across notebooks), because **adb cannot lasso**: the
+device half of this is eye-check only.
 
 ### The lasso popup, Clear, and the icon
 
@@ -395,7 +443,14 @@ turn a retry into a loss.
 - **`"order"` is per parent AND type.** An object paste rebases three maxes, not one, and reads them
   inside its own transaction.
 - **The lasso button must be excluded from its own popup's outside-tap dismissal**, or its re-tap
-  closes the popup in `dispatchTouchEvent` and immediately reopens it in `NotebookToolbar`.
+  closes the popup in `dispatchTouchEvent` and immediately reopens it in `NotebookToolbar`. The same
+  trap has a second mouth inside the toolbar: `onToolTap` fires `onToolTapped` — which is what takes
+  the popup down when *another* tool is armed — **only on an actual tool change**. Firing it before
+  the already-armed check hid the popup a moment before `onLassoReTap` asked whether it was showing,
+  so the toggle reopened what it meant to close, every time (O2 review). Two handlers reading one
+  piece of state: order the write after the read.
+- **A latch keyed on `ACTION_DOWN` answers for the first contact only.** With a hand resting, the
+  pen is `ACTION_POINTER_DOWN` — read `ev.actionIndex`.
 - adb can neither lasso nor ink, so **copy, cut, the placement tap, the popup and the icon swap are
   all eye-check only**. The pure halves (`ObjectClip`, `ObjectPlacement`, the anchor) are JVM-tested
   instead; the one thing adb *can* reach is a second tap on the armed lasso with an empty clipboard,

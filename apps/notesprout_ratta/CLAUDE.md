@@ -16,7 +16,9 @@ The Manta identifies as a Nomad — target by serial.
 tools, selection, headings, Contents, gestures, undo, frame-silence ledger) ·
 `docs/links.md` (arc 6: link rows/payload, render, picker + create-in-picker, follow + trail) ·
 `docs/clipboard.md` (arcs 7–8: the clipboard — one index row, one envelope, two kinds; the page
-half's long-press sheet and the object half's Copy/Cut, tap-to-place and lasso popup) ·
+half's long-press sheet and the object half's Copy/Cut, tap-to-place and lasso popup, both
+within and **across notebooks**, where a copied link's own-notebook target is re-pointed at the
+notebook it came from) ·
 `docs/extensions.md` (the one recognizer extension point).
 
 ## Standing rules

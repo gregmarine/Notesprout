@@ -303,7 +303,9 @@ class NotebookSession(
      *
      * The `"order"` bases are read **inside** the same transaction as the writes: two pastes racing
      * would otherwise both read the same max and stack their rows on identical order numbers.
-     * [place] decides where the payload lands from its own bounding box ([ObjectPlacement]).
+     * [place] decides where the payload lands from its own bounding box ([ObjectPlacement]). A
+     * payload from **another** notebook has its links re-pointed on the way in (O2 —
+     * `ObjectClip.rewriteLink`); the source `.soil` is never opened, here or anywhere.
      *
      * Null when the payload holds nothing this build can place — the caller explains and writes
      * nothing. `pageCount` is untouched: a paste of objects adds no page.
@@ -321,6 +323,7 @@ class NotebookSession(
             val bases = ORDERED_TYPES.associateWith { db.dao().maxOrder(pageId, it) }
             val built = ObjectClip.plan(
                 env = env,
+                notebookId = notebookId,
                 pageId = pageId,
                 baseOrder = { type -> bases[type] ?: -1 },
                 now = now,

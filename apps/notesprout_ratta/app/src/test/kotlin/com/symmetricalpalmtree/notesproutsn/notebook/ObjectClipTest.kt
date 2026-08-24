@@ -40,17 +40,24 @@ class ObjectClipTest {
             parentId, now,
         )
 
-    private fun linkRow(id: String, parentId: String, order: Int, x: Float, y: Float) =
-        LinkRows.toRow(
-            PageLink(
-                id = id,
-                payload = LinkPayload.encode(LinkPayload.CHROME_UNDERLINE, LinkPayload.KIND_PAGE, null, "page-9"),
-                chrome = LinkPayload.CHROME_UNDERLINE,
-                x = x, y = y, width = 200f, height = 90f, order = order,
-                strokes = emptyList(), headings = emptyList(),
-            ),
-            parentId, now,
-        )
+    private fun linkRow(
+        id: String,
+        parentId: String,
+        order: Int,
+        x: Float,
+        y: Float,
+        payload: String =
+            LinkPayload.encode(LinkPayload.CHROME_UNDERLINE, LinkPayload.KIND_PAGE, null, "page-9"),
+    ) = LinkRows.toRow(
+        PageLink(
+            id = id,
+            payload = payload,
+            chrome = LinkPayload.chromeOf(payload),
+            x = x, y = y, width = 200f, height = 90f, order = order,
+            strokes = emptyList(), headings = emptyList(),
+        ),
+        parentId, now,
+    )
 
     /** Loose ink + a heading + a link wrapping ink and a heading of its own (two levels). */
     private fun top(): List<SoilObjectEntity> = listOf(
@@ -80,8 +87,9 @@ class ObjectClipTest {
         env: ClipEnvelope = envelope(),
         bases: Map<String, Int> = emptyMap(),
         place: (Bounds) -> ObjectPlacement.Offset = noMove,
+        into: String = notebookId,
     ) = ObjectClip.plan(
-        env = env, pageId = dstPage,
+        env = env, notebookId = into, pageId = dstPage,
         baseOrder = { bases[it] ?: -1 },
         now = 9_000L, newId = ids(), place = place,
     )
@@ -137,6 +145,40 @@ class ObjectClipTest {
         val p = plan(env)!!
         // Two loose + one wrapped = three strokes; the orphan is not one of them.
         assertEquals(3, p.rows.count { it.type == SoilSchema.TYPE_STROKE })
+    }
+
+    @Test
+    fun `orphans cannot outvote the page they are not parented to`() {
+        // The O2 review's case: a payload whose link row is missing but whose wrapped children are
+        // present. Under a majority vote the two orphans won, so they were written loose onto the
+        // page while the one genuine top-level row was dropped — the untrusted-payload rule exactly
+        // backwards. Capture writes top-level rows first, and that is the signal.
+        val env = ObjectClip.capture(
+            listOf(StrokeRows.toRow(stroke("s-a", 100f, 100f), srcPage, 3, now)),
+            listOf(
+                StrokeRows.toRow(stroke("orphan-a", 10f, 10f), "lnk-gone", 0, now),
+                StrokeRows.toRow(stroke("orphan-b", 20f, 20f), "lnk-gone", 1, now),
+            ),
+            notebookId, now,
+        )!!
+        val p = plan(env)!!
+        assertEquals(1, p.strokes.size)
+        assertEquals(listOf(dstPage), p.rows.map { it.parentId })
+        assertEquals(100f, p.strokes.single().bounds.left, 0.01f)
+    }
+
+    @Test
+    fun `a link row's parent names the page outright — a link is top-level by definition`() {
+        // Even outnumbered: one link and four rows parented to an absent link id.
+        val orphans = (0 until 4).map {
+            StrokeRows.toRow(stroke("orphan-$it", 10f, 10f), "lnk-gone", it, now)
+        }
+        val env = ObjectClip.capture(
+            orphans + linkRow("lnk-1", srcPage, 9, 300f, 300f), emptyList(), notebookId, now,
+        )!!
+        val p = plan(env)!!
+        assertEquals(1, p.links.size)
+        assertTrue(p.strokes.isEmpty())
     }
 
     @Test
@@ -209,6 +251,80 @@ class ObjectClipTest {
         assertEquals(500f, seen!!.right, 0.01f)
     }
 
+    // ── links across notebooks (O2) ──────────────────────────────────────────
+
+    private val otherNotebook = "nb-dst"
+
+    /** One link, alone on the page, carrying [payload]; planned into [into]. */
+    private fun pastedLinkPayload(payload: String, into: String): String {
+        val env = ObjectClip.capture(
+            listOf(linkRow("lnk-1", srcPage, 1, 300f, 300f, payload)),
+            emptyList(), notebookId, now,
+        )!!
+        return plan(env, into = into)!!.links.single().payload
+    }
+
+    @Test
+    fun `an own-notebook link is re-pointed at the source notebook when it crosses`() {
+        val payload = LinkPayload.encode(LinkPayload.CHROME_UNDERLINE, LinkPayload.KIND_PAGE, null, "page-9")
+        val out = LinkPayload.decode(pastedLinkPayload(payload, otherNotebook))!!
+        assertEquals(LinkPayload.KIND_NOTEBOOK_PAGE, out.kind)
+        assertEquals(notebookId, out.notebookId)
+        assertEquals("page-9", out.pageId)
+        assertEquals(LinkPayload.CHROME_UNDERLINE, out.chrome)
+    }
+
+    @Test
+    fun `a link to the source page itself is re-pointed like any other — no page travels`() {
+        // PageClip's self-page exception cannot arise here: an objects payload carries no page row.
+        val payload = LinkPayload.encode(LinkPayload.CHROME_NONE, LinkPayload.KIND_PAGE, null, srcPage)
+        val out = LinkPayload.decode(pastedLinkPayload(payload, otherNotebook))!!
+        assertEquals(LinkPayload.KIND_NOTEBOOK_PAGE, out.kind)
+        assertEquals(notebookId, out.notebookId)
+        assertEquals(srcPage, out.pageId)
+    }
+
+    @Test
+    fun `a same-notebook paste leaves every payload verbatim`() {
+        val payload = LinkPayload.encode(LinkPayload.CHROME_UNDERLINE, LinkPayload.KIND_PAGE, null, "page-9")
+        assertEquals(payload, pastedLinkPayload(payload, notebookId))
+    }
+
+    @Test
+    fun `a payload that already names its notebook crosses unchanged`() {
+        for (payload in listOf(
+            LinkPayload.encode(LinkPayload.CHROME_NONE, LinkPayload.KIND_NOTEBOOK, "nb-far", null),
+            LinkPayload.encode(LinkPayload.CHROME_UNDERLINE, LinkPayload.KIND_NOTEBOOK_PAGE, "nb-far", "page-9"),
+            // Including one naming the source page explicitly: the original is still there.
+            LinkPayload.encode(LinkPayload.CHROME_NONE, LinkPayload.KIND_NOTEBOOK_PAGE, notebookId, srcPage),
+        )) {
+            assertEquals(payload, pastedLinkPayload(payload, otherNotebook))
+        }
+    }
+
+    @Test
+    fun `a payload this build cannot read crosses verbatim rather than being invented a target`() {
+        for (payload in listOf("L9|1|0||page-9", "", "not a payload at all")) {
+            assertEquals(payload, pastedLinkPayload(payload, otherNotebook))
+        }
+    }
+
+    @Test
+    fun `a blank source notebook leaves own-notebook links alone — there is nothing to name`() {
+        val payload = LinkPayload.encode(LinkPayload.CHROME_UNDERLINE, LinkPayload.KIND_PAGE, null, "page-9")
+        val env = ObjectClip.capture(
+            listOf(linkRow("lnk-1", srcPage, 1, 300f, 300f, payload)), emptyList(), "", now,
+        )!!
+        assertEquals(payload, plan(env, into = otherNotebook)!!.links.single().payload)
+    }
+
+    @Test
+    fun `the rewrite touches links only — a heading's text crosses untouched`() {
+        val p = plan(into = otherNotebook)!!
+        assertEquals("## Title", p.headings.single().text)
+        assertEquals("## Title", p.links.single().headings.single().text)
+    }
+
     // ── untrusted payloads ───────────────────────────────────────────────────
 
     @Test
@@ -237,7 +353,7 @@ class ObjectClipTest {
         val back = ClipEnvelope.decode(bytes)!!
         assertEquals(ClipEnvelope.KIND_OBJECTS, back.kind)
         val p = ObjectClip.plan(
-            env = back, pageId = dstPage, baseOrder = { -1 },
+            env = back, notebookId = notebookId, pageId = dstPage, baseOrder = { -1 },
             now = 9_000L, newId = ids(), place = noMove,
         )!!
         assertEquals(2, p.strokes.size)

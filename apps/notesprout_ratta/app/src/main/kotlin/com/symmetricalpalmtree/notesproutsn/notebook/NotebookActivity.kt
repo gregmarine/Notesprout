@@ -1629,11 +1629,19 @@ class NotebookActivity : AppCompatActivity() {
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         // Observer only — consumes nothing.
         if (opened && ::pageGestures.isInitialized) pageGestures.onTouchEvent(ev)
-        if (::paper.isInitialized && ev.actionMasked == MotionEvent.ACTION_DOWN) {
-            dismissLassoPopupOnContact(ev)
-            val tool = ev.getToolType(0)
-            val stylus = tool == MotionEvent.TOOL_TYPE_STYLUS || tool == MotionEvent.TOOL_TYPE_ERASER
-            if (!stylus && !paper.isPenActive && overChrome(ev)) paper.releaseRender()
+        if (::paper.isInitialized) {
+            val action = ev.actionMasked
+            // Every pointer going down, not just the first: with a hand resting on the glass the
+            // pen arrives as ACTION_POINTER_DOWN, and a latch written only at ACTION_DOWN would
+            // still be carrying the resting contact's answer (O2 review).
+            if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) {
+                dismissLassoPopupOnContact(ev, ev.actionIndex)
+            }
+            if (action == MotionEvent.ACTION_DOWN) {
+                val tool = ev.getToolType(0)
+                val stylus = tool == MotionEvent.TOOL_TYPE_STYLUS || tool == MotionEvent.TOOL_TYPE_ERASER
+                if (!stylus && !paper.isPenActive && overChrome(ev)) paper.releaseRender()
+            }
         }
         return super.dispatchTouchEvent(ev)
     }
@@ -1643,14 +1651,14 @@ class NotebookActivity : AppCompatActivity() {
      * takes it down: an outside tap, the start of a finger gesture, a pen going to write.
      *
      * [tapDismissedPopup] latches whether *this* contact is the one that did it, and is rewritten at
-     * every ACTION_DOWN so it can never go stale. `onPaperTapped` reads it and declines to paste:
-     * a contact spent on a dismissal is spent, the same rule g-paper applies to the tap that
-     * dismisses a selection. The lasso button is excluded or its own re-tap would close the popup
-     * here and immediately reopen it in [NotebookToolbar].
+     * every pointer-down — [index] is the one going down — so it can never go stale. `onPaperTapped`
+     * reads it and declines to paste: a contact spent on a dismissal is spent, the same rule g-paper
+     * applies to the tap that dismisses a selection. The lasso button is excluded or its own re-tap
+     * would close the popup here and immediately reopen it in [NotebookToolbar].
      */
-    private fun dismissLassoPopupOnContact(ev: MotionEvent) {
+    private fun dismissLassoPopupOnContact(ev: MotionEvent, index: Int) {
         if (!::lassoPopup.isInitialized) { tapDismissedPopup = false; return }
-        val x = ev.x.toInt(); val y = ev.y.toInt()
+        val x = ev.getX(index).toInt(); val y = ev.getY(index).toInt()
         val onToggle = rectOf(binding.btnLasso)?.contains(x, y) == true
         tapDismissedPopup = lassoPopup.isShowing && !onToggle && !lassoPopup.contains(x, y)
         if (tapDismissedPopup) hideLassoPopup()
