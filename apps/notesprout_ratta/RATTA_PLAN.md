@@ -1704,6 +1704,30 @@ backstop for a launch that never draws. Verified on the Nomad: tap → notebook 
 library, and restore-into-notebook → back leaves a live library, no overlay node in either dump.
 Documented in `docs/notebook.md` § "Opening…" overlay. Committed separately from the arc-7 freeze.
 
+**Link underlines pruned to the og look (2026-08-23), outside the arc range.** The user's eye-check
+on glass: the underline read grey, worst under stroke-only links, and its gap was too tight. Two
+causes, both arc-6 code:
+
+1. **A 1 dp `drawLine` is not one weight.** 1 dp is **1.875 px** on the Nomad, and the line's centre
+   landed wherever the bounds' float bottom put it, so Skia's non-antialiased ">50 % of the pixel"
+   rule kept two rows for some links and a single hairline row for others. Now a `drawRect` of
+   `round(density)` px (≥ 2) on integer edges — same weight every time, every pixel fully black.
+   **Standing trap: a hairline measured in dp on a 300 ppi non-integer density is a coin flip.**
+2. **The band was measured from point-tight bounds.** `Stroke.bounds` carries no stroke width (the
+   trap `LinkComposite.padOf` already pads for), so half the stroke ate the 2 dp clearance and the
+   line sat against the writing — invisible on heading links, whose boxes carry 8 dp of their own.
+   The user's own model: *give ink the box a heading already has.* `PageLink.bandBottom` now puts the
+   line `UNDERLINE_CLEARANCE_DP` (4 dp) below the lowest wrapped **box** bottom, where a stroke's box
+   is its ink extent (`bounds.bottom + width / 2`) plus `HeadingTypography.PADDING_DP` (8 dp). Ink and
+   headings arrive at the line looking alike; heading-only links are unchanged.
+
+Links written under the old band self-heal at page load — `PageLink.withUnderlineBand`, applied by
+`NotebookActivity.withUnderlineBand` next to the heading remeasure and before `prebuild`, re-applies
+the wrap-time formula and **only ever grows** (a foreign link may wrap children this build cannot
+decode; shrinking to the union of what we can read would cut it down). In memory only; the row is
+corrected whenever the link is next written. Four new `LinkRowsTest` cases; `docs/links.md` §
+underline chrome rewritten. Verified on the Nomad by the user's eye.
+
 ---
 
 ## Verification (end of arc)

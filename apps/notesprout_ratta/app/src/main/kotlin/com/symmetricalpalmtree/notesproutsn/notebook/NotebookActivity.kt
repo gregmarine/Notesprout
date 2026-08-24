@@ -321,7 +321,7 @@ class NotebookActivity : AppCompatActivity() {
             val page = session.currentPage
             val strokes = session.store.loadPage(page.id)
             val headings = remeasureForDevice(session.headings.loadPage(page.id))
-            val links = session.links.loadPage(page.id)
+            val links = withUnderlineBand(session.links.loadPage(page.id))
             val linkBitmaps = linkRenderer.prebuild(links)   // raster off Main, in the load phase
             paper.setPageSize(page.width, page.height)
             paper.setTemplate(session.template)
@@ -606,7 +606,7 @@ class NotebookActivity : AppCompatActivity() {
             page = session.goTo(index)
             strokes = session.store.loadPage(page.id)
             headings = remeasureForDevice(session.headings.loadPage(page.id))
-            links = session.links.loadPage(page.id)
+            links = withUnderlineBand(session.links.loadPage(page.id))
             // Composites raster off Main here, inside the buffered-commit window — never in the
             // display block below, where a link-heavy page would stall the flip frame (K5 review).
             linkBitmaps = linkRenderer.prebuild(links)
@@ -857,6 +857,17 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     /**
+     * The links' sibling of [remeasureForDevice]: grow an under-sized underline band to what this
+     * build reserves ([PageLink.withUnderlineBand]) so a link wrapped before the band widened does
+     * not keep drawing its line against the ink. In memory only, only ever wider; the row is
+     * corrected whenever the link is next written (a move persists the grown bounds). Runs before
+     * `prebuild`, so the composite is rastered at the size the renderer will ask for.
+     */
+    private fun withUnderlineBand(links: List<PageLink>): List<PageLink> =
+        if (links.isEmpty()) links
+        else links.map { it.withUnderlineBand(resources.displayMetrics.density) }
+
+    /**
      * The bar with the right mode: pure strokes → CONVERT's H + Link, one heading alone → CHANGE's H
      * with its level lit + Link, one link alone → Edit + Unlink, anything mixed → Delete plus Link
      * while no link is in it. A link anywhere in a mixed selection takes Link away — the no-nesting
@@ -1104,7 +1115,7 @@ class NotebookActivity : AppCompatActivity() {
         val strokes = liveStrokes.values.filter { it.id in sel.strokeIds }
         val headings = sel.contentIds.mapNotNull { liveHeadings[it] }
         val bounds = PageLink.unionBounds(
-            strokes, headings, PageLink.UNDERLINE_CLEARANCE_DP * resources.displayMetrics.density,
+            strokes, headings, resources.displayMetrics.density,
         ) ?: return   // nothing of the captured selection is still on the page
         val link = PageLink(
             id = java.util.UUID.randomUUID().toString(),

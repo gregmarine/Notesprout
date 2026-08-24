@@ -8,6 +8,8 @@ import android.graphics.Paint
 import com.symmetricalpalmtree.gpaper.core.render.ContentLayer
 import com.symmetricalpalmtree.gpaper.core.render.ContentRenderer
 import com.symmetricalpalmtree.gpaper.core.render.HitTarget
+import kotlin.math.floor
+import kotlin.math.round
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -18,8 +20,8 @@ import kotlinx.coroutines.withContext
  * **Below the ink** ([ContentLayer.BELOW_STROKES], the K1 wizard's og-parity call): fresh ink over
  * a link stays visible on top. Each link draws its composite bitmap ([LinkComposite] — the wrapped
  * strokes + headings at 1:1 page px) or the standard dashed placeholder when the composite could
- * not build, then its chrome: a 1 dp inkBlack underline across the bounds' bottom when the link's
- * decoded chrome says so — drawn **live**, never baked, so a chrome edit repaints without a
+ * not build, then its chrome: a whole-pixel inkBlack underline across the bounds' bottom when the
+ * link's decoded chrome says so — drawn **live**, never baked, so a chrome edit repaints without a
  * rebuild.
  *
  * [update] is the one way in, on Main: it swaps the working copy and (re)builds composites —
@@ -46,7 +48,7 @@ class LinkRenderer(
     private val composites = HashMap<String, Bitmap>()
     private val textPaint = HeadingRenderer.basePaint(scaledDensity)
     private val bitmapPaint = Paint(Paint.FILTER_BITMAP_FLAG)
-    private val underline = Paint().apply { color = Color.BLACK; style = Paint.Style.STROKE }
+    private val underline = Paint().apply { color = Color.BLACK; style = Paint.Style.FILL }
     private val placeholder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = 1f
@@ -132,10 +134,14 @@ class LinkRenderer(
             canvas.drawRect(l.x + 0.5f, l.y + 0.5f, l.x + l.width - 0.5f, l.y + l.height - 0.5f, placeholder)
         }
         if (l.chrome == LinkPayload.CHROME_UNDERLINE) {
-            val px = density.coerceAtLeast(1f)           // 1 dp, never sub-px
-            underline.strokeWidth = px
-            val y = l.y + l.height - px / 2f             // inside the bounds' clearance band
-            canvas.drawLine(l.x, y, l.x + l.width, y, underline)
+            // Solid inkBlack, snapped to WHOLE pixels. Drawn as a 1 dp `drawLine` it was faint:
+            // 1 dp is 1.875 px on the Nomad and the line's centre lands wherever the bounds' float
+            // bottom puts it, so Skia's non-antialiased ">50 % of the pixel" rule kept two rows for
+            // some links and a single hairline row for others. A filled rect on integer edges is
+            // the same weight every time, and every pixel of it is fully black.
+            val px = round(density).coerceAtLeast(2f)
+            val bottom = floor(l.y + l.height)           // inside the bounds' clearance band
+            canvas.drawRect(l.x, bottom - px, l.x + l.width, bottom, underline)
         }
     }
 

@@ -2,6 +2,7 @@ package com.symmetricalpalmtree.notesproutsn.notebook
 
 import com.symmetricalpalmtree.gpaper.core.model.Stroke
 import com.symmetricalpalmtree.gpaper.core.model.StrokePoint
+import com.symmetricalpalmtree.notesproutsn.core.markdown.HeadingTypography
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilObjectEntity
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilSchema
 import org.junit.Assert.assertEquals
@@ -95,22 +96,55 @@ class LinkRowsTest {
         id = id, text = "# T", level = 1, x = x, y = y, width = w, height = h, order = 0,
     )
 
+    /** 2f keeps the arithmetic readable: `PADDING_DP` 8 → 16 px, `UNDERLINE_CLEARANCE_DP` 4 → 8 px. */
+    private val density = 2f
+    private val pad = HeadingTypography.PADDING_DP * density
+    private val clear = PageLink.UNDERLINE_CLEARANCE_DP * density
+
     @Test
-    fun `unionBounds spans strokes and headings plus the clearance below`() {
+    fun `unionBounds spans strokes and headings and carries the bottom to the band`() {
         val b = PageLink.unionBounds(
-            strokes = listOf(stroke("s", 10f, 10f, 50f, 30f)),
+            strokes = listOf(stroke("s", 10f, 10f, 50f, 30f).copy(width = 4f)),
             headings = listOf(heading("h", 40f, 5f, 60f, 20f)),
-            bottomClearancePx = 4f,
+            density = density,
         )!!
         assertEquals(10f, b.left)
         assertEquals(5f, b.top)
         assertEquals(100f, b.right)
-        assertEquals(34f, b.bottom)   // stroke bottom 30 + clearance 4
+        // Stroke box = ink 30 + width/2 + the heading pad, then the clearance; the heading's own
+        // box bottom (25) is higher, so the ink decides.
+        assertEquals(30f + 2f + pad + clear, b.bottom)
     }
 
     @Test
     fun `unionBounds of nothing is null`() {
-        assertNull(PageLink.unionBounds(emptyList(), emptyList(), 4f))
+        assertNull(PageLink.unionBounds(emptyList(), emptyList(), density))
+    }
+
+    @Test
+    fun `bandBottom gives ink the padding a heading box builds in`() {
+        val wide = stroke("a", 0f, 0f, 1f, 40f).copy(width = 6f)
+        val thin = stroke("b", 0f, 0f, 1f, 40f).copy(width = 2f)
+        // Point-tight bounds: the widest stroke's ink overhangs by width/2, then the heading pad.
+        assertEquals(40f + 3f + pad + clear, PageLink.bandBottom(listOf(wide, thin), emptyList(), density))
+        // A heading's box IS its bounds — the pad is already inside it, so only the clearance.
+        assertEquals(25f + clear, PageLink.bandBottom(emptyList(), listOf(heading("h", 40f, 5f, 60f, 20f)), density))
+        assertNull(PageLink.bandBottom(emptyList(), emptyList(), density))
+    }
+
+    @Test
+    fun `withUnderlineBand grows a short band and never shrinks a long one`() {
+        val s = stroke("s", 10f, 10f, 50f, 30f).copy(width = 4f)
+        val needed = PageLink.bandBottom(listOf(s), emptyList(), density)!! - 10f
+        // Written under an earlier, tighter band.
+        val short = link().copy(x = 10f, y = 10f, width = 40f, height = 21f, strokes = listOf(s))
+        assertEquals(needed, short.withUnderlineBand(density).height)
+        // Idempotent — re-applying the wrap-time formula changes nothing.
+        assertEquals(needed, short.withUnderlineBand(density).withUnderlineBand(density).height)
+        // Never shrinks: a foreign link may wrap children this build cannot decode.
+        assertEquals(200f, short.copy(height = 200f).withUnderlineBand(density).height)
+        // Nothing decodable to measure — the stored bounds are taken on trust.
+        assertEquals(21f, short.copy(strokes = emptyList()).withUnderlineBand(density).height)
     }
 
     @Test

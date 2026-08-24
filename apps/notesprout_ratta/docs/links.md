@@ -19,11 +19,11 @@ renderer and the follow all live in `:app`. Deliberate differences are listed at
 | File | Owns |
 |---|---|
 | `notebook/LinkPayload` | the payload codec — Paper's v1 grammar; `encode` throws on caller bugs, `decode` never throws (a file is untrusted input); `chromeOf` degrades unusable → `CHROME_NONE`. JVM-tested with Paper-grammar fixtures |
-| `notebook/PageLink` | the in-memory link: payload + decoded chrome + bounds + wrapped `strokes`/`headings` (page-absolute, ids unchanged); `unionBounds` adds the underline clearance band. JVM-tested via `LinkRows` |
+| `notebook/PageLink` | the in-memory link: payload + decoded chrome + bounds + wrapped `strokes`/`headings` (page-absolute, ids unchanged); `unionBounds`/`bandBottom` reserve the underline band (ink gets the heading box's padding); `withUnderlineBand` self-heals a short one at load. JVM-tested via `LinkRows` |
 | `notebook/LinkRows` | `PageLink ⇄ SoilObjectEntity` (`SoilSchema.TYPE_LINK`); `style` written null / read leniently, payload capped both directions. JVM-tested |
 | `notebook/LinkStore` | `link` rows through the session's shared serial `SoilWriter`; wrap/unlink/relink/remove/restore/move, each multi-row op in **one Room transaction** via an injected `transact` lambda (JVM-testable against `FakeSoilDao`); `deepChildIds` for page delete/reconcile |
 | `notebook/LinkComposite` | the wrapped content rendered to one bitmap at 1:1 page px — `padOf`/`sizeOf` add the stroke-overhang margin (eye-check #7), `build` bakes headings then strokes, never the chrome |
-| `notebook/LinkRenderer` | the g-paper `ContentRenderer` (`BELOW_STROKES`): composite (or dashed placeholder) + the **live** 1 dp underline; `update()` reconciles the composite cache (move = free reuse); live-drag pair + whole-link `hitTargets` |
+| `notebook/LinkRenderer` | the g-paper `ContentRenderer` (`BELOW_STROKES`): composite (or dashed placeholder) + the **live** whole-pixel underline; `update()` reconciles the composite cache (move = free reuse); live-drag pair + whole-link `hitTargets` |
 | `notebook/LinkPickFlow` | the notebook screen's side of the picker: launch for create/edit, capture-at-launch, one-door `busy` released at the **top** of the result callback, K3's `createPage` relay arm + `onPagesChanged` |
 | `notebook/LinkPickerActivity` | the picker screen — three modes, style toggle, paged card grids, previews, create buttons; chrome and wiring only |
 | `notebook/LinkPickerModel` | every picker decision that is not a view: `modeFor`/`chromeFor` prefills, `pageCards` numbering, `gridPageOf`, `insertIndexFor`/`inheritIndexFor`/`createButtons` (K3), `composeOk`. JVM-tested |
@@ -128,10 +128,33 @@ the renderer a fresh `PageLink` via a page reload or `syncLinkRenderer` (the Edi
 composite that cannot build (degenerate size, OOM — bounds are untrusted input, edge-capped at
 4096) leaves the standard dashed placeholder.
 
-The **underline chrome is never baked**: a 1 dp inkBlack line across the bounds' bottom, drawn
-live from the link's decoded chrome inside the clearance band `PageLink.UNDERLINE_CLEARANCE_DP`
-added at wrap time (`unionBounds`) — so the chrome never overlaps the writing and a style-only
-Edit repaints without a rebuild. `hitTargets()` exposes each link's whole bounds: lasso selection
+The **underline chrome is never baked**: a solid inkBlack line across the bounds' bottom, drawn
+live from the link's decoded chrome inside the clearance band `PageLink.bandBottom` reserves at
+wrap time (`unionBounds`) — so the chrome never overlaps the writing and a style-only Edit
+repaints without a rebuild. Three rules keep it looking like og's:
+
+- **Whole pixels, or it reads grey.** It is a `drawRect` of `round(density)` px (≥ 2) with its
+  edges on integers, not a 1 dp `drawLine`. 1 dp is 1.875 px on the Nomad and the line's centre
+  landed wherever the bounds' float bottom put it, so Skia's non-antialiased ">50 % of the pixel"
+  rule kept two rows for some links and a single hairline row for others — the "faint underline"
+  the user reported. A filled rect on integer edges is the same weight every time and every pixel
+  of it is fully black.
+- **Ink gets the box a heading already has.** The band sits `UNDERLINE_CLEARANCE_DP` (4 dp) below
+  the lowest wrapped **box** bottom. A heading's box *is* its bounds — `HeadingTypography.PADDING_DP`
+  (8 dp) of breathing room is built in around its line, and that is the gap the user calls right.
+  Loose ink has no box, so `bandBottom` gives it the same one: a stroke's box is its ink extent
+  (`bounds.bottom + width / 2` — `Stroke.bounds` is point-tight, the trap `LinkComposite.padOf`
+  pads for) plus that same 8 dp. Ink and headings then arrive at the line looking alike; measuring
+  from the point bounds alone let half the stroke eat the band, which is why only **stroke-only**
+  links looked cramped.
+- **Old links self-heal.** A link written under an earlier, tighter band would keep its stored
+  bounds forever, so `PageLink.withUnderlineBand` (applied by `NotebookActivity.withUnderlineBand`,
+  next to the heading remeasure, before `prebuild`) re-applies the wrap-time formula at page load
+  and **only ever grows** — a foreign link may wrap children this build cannot decode, so shrinking
+  to the union of what we can read would cut it down. In memory only; the row is corrected whenever
+  the link is next written.
+
+`hitTargets()` exposes each link's whole bounds: lasso selection
 and the follow tap are both whole-link. The live-drag pair (`draw` with exclusions +
 `drawObject`) lets a dragged link ride under the pen as its real self.
 
@@ -147,7 +170,7 @@ what enforces no-nesting. The bar (order: Delete · H · Link · Edit · Unlink)
 | `MIXED_WITH_LINK` | a link plus anything | neither — Delete only |
 
 - **Wrap** (`createLinkFromSelection`): capture-at-tap discipline (the heading-convert precedent),
-  no-nesting re-check at use time, bounds from `unionBounds` + the clearance band, one frame. The
+  no-nesting re-check at use time, bounds from `unionBounds` + the underline band, one frame. The
   smart-lasso session survives a wrap exactly as it does a heading conversion —
   `pendingSelection` is a select-successor lambda, so the new link comes up selected.
 - **Unlink**: store → `Action.LinkUnlinked` → drain → `refreshToPage` (the reload is the sync).
@@ -338,7 +361,7 @@ rebuilt screen is the same story.
 ## JVM tests
 
 `LinkPayloadTest` (round-trips, Paper-grammar fixtures, decode rejections, caps),
-`LinkRowsTest` (row mapping, lenient `style`, `unionBounds` + clearance), `LinkStoreTest`
+`LinkRowsTest` (row mapping, lenient `style`, `unionBounds` + `bandBottom` + `withUnderlineBand`), `LinkStoreTest`
 (wrap/unlink/relink/remove/restore/move transactions over `FakeSoilDao`, chunking, K5's
 revive-in-place order preservation),
 `LinkCompositeTest` (pad/size math), `LinkPickerModelTest` (modes, prefills,
