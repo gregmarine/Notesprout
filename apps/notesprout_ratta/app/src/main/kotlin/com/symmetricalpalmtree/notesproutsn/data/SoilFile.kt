@@ -9,7 +9,6 @@ fun gardenDir(context: Context): File = File(context.getExternalFilesDir(null), 
 /**
  * The single canonical way to derive a notebook's `.soil` path. **No other code constructs one.**
  * Flat directory, UUID filenames; folder structure lives exclusively in the global index.
- * (No `extensionStoreFile` in SN — arc-1 locked decision: no extension machinery of any kind.)
  */
 fun soilFile(context: Context, notebookId: String): File = File(gardenDir(context), "$notebookId.soil")
 
@@ -19,3 +18,20 @@ fun indexFile(context: Context): File = File(context.getExternalFilesDir(null), 
 /** SQLite sidecars that may sit next to a database file (delete/move them with it). */
 fun sidecarsOf(dbFile: File): List<File> =
     listOf("-wal", "-shm", "-journal").map { File(dbFile.path + it) }
+
+/** Package names an extension store may be keyed by (a `ProviderRef` package name — never user input). */
+private val EXTENSION_PACKAGE = Regex("[a-zA-Z0-9_.]+")
+
+/** True iff [pkg] is a safe store-file stem: `[a-zA-Z0-9_.]+`, never a path segment or empty. */
+fun isValidExtensionPackage(pkg: String): Boolean = EXTENSION_PACKAGE.matches(pkg)
+
+/**
+ * The single canonical way to derive an extension's host-owned store path: `Garden/<pkg>.db`,
+ * beside the `.soil` files (arc 11 / J2). Nothing enumerates `Garden/` — the library's structure is
+ * index-only — so the two kinds never mix and the `.db`s are invisible to it. Throws on a package
+ * name that fails [isValidExtensionPackage]; a `..` or a `/` would otherwise escape the directory.
+ */
+fun extensionStoreFile(context: Context, pkg: String): File {
+    require(isValidExtensionPackage(pkg)) { "not a valid extension package name" }
+    return File(gardenDir(context), "$pkg.db")
+}

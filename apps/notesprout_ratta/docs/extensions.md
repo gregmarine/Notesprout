@@ -3,8 +3,13 @@
 Arc 3 (N0–N2), landed as arc 1's one deliberate amendment: SN ships with **no extension system**
 through R0–R6, and picks up exactly **one** extension point in arc 3 — handwriting recognition —
 so a different HWR engine can slot in later without touching the host. Headings and the markdown
-engine that consume it are core, not extension surface; no other capability point may be added
-without a fresh user decision (`apps/notesprout_ratta/CLAUDE.md`).
+engine that consume it are core, not extension surface.
+
+**Arc 11 is the fresh user decision that rule required.** The user asked for the scratch pad as an
+extension, so SN gains a second capability point — `SCRATCH_PAD`, and the first **screen-owning**
+one — and, with it, the **extension store** documented below. J2 landed the store and the contract
+half; the point itself, its client and the pad arrive in J3–J5. The rule survives, one word wider:
+no *third* capability point without another user decision (`apps/notesprout_ratta/CLAUDE.md`).
 
 Fresh code. Paper's own extension arcs (`PAPER_EXTENSIONS_PLAN.md`, `PAPER_RECOGNITION_PLAN.md`,
 its `:extension-api` / `:ext-mlkit`) are the shape reference — nothing is copied, and SN's AIDL is
@@ -19,9 +24,9 @@ Four modules, SN's own Gradle root:
 | Module | Type | Depends on | Holds |
 |---|---|---|---|
 | `:sn-screen` | Android library | g-paper (`api`) + androidx; **never** `:app`, **never** `:extension-api` | the design resources and the screen helpers both paper surfaces need — see [`sn-screen.md`](sn-screen.md) |
-| `:extension-api` | Android library | nothing in `:app`, no library beyond the Kotlin stdlib (`build.gradle.kts` says so explicitly) | the AIDL (`IHandwritingRecognizer`, `InkStroke.aidl`), the hand-written `InkStroke` parcelable, `RecognizerStatus`, `ExtensionContract`, `HostCallerCheck` |
+| `:extension-api` | Android library | nothing in `:app`, no library beyond the Kotlin stdlib (`build.gradle.kts` says so explicitly) | the AIDL (`IHandwritingRecognizer`, `InkStroke.aidl`; `IExtensionStore`, `LargeValue.aidl`), the hand-written `InkStroke` / `LargeValue` parcelables, `SharedBytes`, `RecognizerStatus`, `ExtensionContract`, `HostCallerCheck` |
 | `:ext-mlkit` | Android application (its own installable APK) | `:extension-api` + `com.google.mlkit:digital-ink-recognition:19.0.0` | `HandwritingRecognizerService`, `ModelManager`, `MlKitEngine`, `PageText`, `StrokeSegmenter`, `Dots`, `Box` |
-| `:app` (`extension/` package) | part of the host APK | `:extension-api` | `ExtensionRegistry`, `ExtensionBinder`, `ExtensionCallException`, `InkCaps`, `RecognizerClient`, `RecognizerReadiness` |
+| `:app` (`extension/` package) | part of the host APK | `:extension-api` | `ExtensionRegistry`, `ExtensionBinder`, `ExtensionCallException`, `InkCaps`, `RecognizerClient`, `RecognizerReadiness`; and in `data/extstore/`, the extension store (`ExtensionStores`, `ExtensionStoreDatabase`, `KvEntity`, `KvDao`, `ExtensionStoreGate`, `ExtensionStoreBinder`) |
 
 `:sn-screen` is deliberately **not** in that dependency chain: it never sees `:extension-api`, so a
 shared screen helper can never quietly become part of the wire contract. An extension APK depends on
@@ -246,6 +251,115 @@ immutable rectangle both use, so the segmenter stays pure Kotlin end to end.
 
 Language is **hardcoded `en-US`** — a setting could add others later with no format impact, but
 nothing in this arc reads a locale.
+
+---
+
+## The extension store (arc 11 / J2)
+
+`IExtensionStore` is **not a capability point** — it is the service the host offers an extension it
+has already bound: a per-package, host-owned, encrypted key/value store, handed in as a *parameter*
+of the calls that need it and revoked when the bind ends. The rule it exists to enforce is short:
+**an extension writes nothing to disk itself, ever.** Its data is the host's, under the host's key,
+in the host's directory, and it survives the extension being uninstalled.
+
+Six methods, in this order — the base four first, the large pair **appended**, never reordered, so
+the four keep their transaction codes and `API_VERSION` can stay **1** (the family's
+compatible-append recipe, kept even though SN ships all six at once):
+
+```
+byte[]     get(String key)
+void       put(String key, in byte[] value)
+void       delete(String key)
+List<String> keys(String prefix)
+void       putLarge(String key, in LargeValue value)
+LargeValue getLarge(String key)
+```
+
+### Caps
+
+`ExtensionContract.STORE_*`, enforced by the host and pinned by test:
+
+| Cap | Value | Why |
+|---|---|---|
+| `STORE_MAX_KEY_CHARS` | 512 | the empty key is rejected too |
+| `STORE_MAX_INLINE_BYTES` | 512 KiB | the `byte[]` path's ceiling — the Binder transaction budget is ~1 MB |
+| `STORE_MAX_VALUE_BYTES` | 4 MiB | the large path's ceiling, sized for one key per scratch page |
+| `STORE_MAX_KEYS` | 50 000 | per extension |
+| `STORE_VALUE_LARGE` | `"value is large — use getLarge"` | the **exact** message `get` throws for a stored value above the inline cap; extensions compare it verbatim, not by substring |
+
+A `put` above the inline cap is an `IllegalArgumentException`; a `get` of a value that was stored
+above it is the `STORE_VALUE_LARGE` `IllegalStateException`, never a truncation. A put of a **new**
+key at `STORE_MAX_KEYS` fails; replacing an existing key at the cap is still fine.
+
+### Why the large pair exists — and the ashmem handshake
+
+A 4 MiB `byte[]` cannot cross a Binder. Values above the inline cap travel in an ashmem region
+(`LargeValue` = `SharedMemory` + `byteCount`), the same handshake in both directions:
+
+- the **sender** creates a region of exactly `bytes.size`, maps RW, copies in, unmaps,
+  `setProtect(PROT_READ)`, hands it over, and closes **its own** handle once the transaction is
+  marshalled — a stub in `onTransact`'s `finally`, a client after the call returns;
+- the **receiver** maps read-only, copies out exactly `byteCount` bytes, unmaps and closes in its
+  own `finally`.
+
+`SharedBytes.write` / `read` / `readAndClose` write that handshake once for both sides, so neither
+side re-derives it. Two details are load-bearing:
+
+- **ashmem refuses a zero-size region**, so an empty value rides a **1-byte region with
+  `byteCount = 0`**. An empty value is a value, not an absence.
+- `LargeValue.requireValid` runs in the constructor, therefore also at **unmarshal** — it is the one
+  thing between a malformed parcel and a read past the region's end. `describeContents` returns
+  `CONTENTS_FILE_DESCRIPTOR`, or `Bundle.hasFileDescriptors()` lies about it.
+
+### Only three exceptions cross a Binder
+
+`SecurityException`, `IllegalArgumentException`, `IllegalStateException` — that is the whole set.
+Anything else kills the transaction **silently**, and the caller reads the empty reply as
+null / success. In Paper that is exactly how a page came back blank and was then saved over the real
+one. So:
+
+- every DAO failure (SQLite full / locked / I/O) becomes an `IllegalStateException` inside
+  `ExtensionStoreGate.io {}`;
+- every ashmem step is wrapped by `ExtensionStoreBinder.region {}`, which exists **separately** from
+  the gate's mapping because `ErrnoException` is checked and outside the set;
+- an extension treats all three the same way: *store unavailable*.
+
+### Host side
+
+| Piece | Role |
+|---|---|
+| `data/SoilFile.kt` → `extensionStoreFile(ctx, pkg)` | **still the only path constructor**, `extensionStoreFile` included: `Garden/<pkg>.db`, beside the `.soil` files. `isValidExtensionPackage` (`[a-zA-Z0-9_.]+`) refuses anything that could become a path segment |
+| `ExtensionStores` | open-or-create on IO, process-lifetime cache, one DB per package. SN's **second named create entry point** after `SoilDatabase.create`, and it obeys the same two doors — create only over a missing/empty file, open only through `requireExisting` + the raw-key cache. Raw-key id `ext:<pkg>`, which can never collide with a notebook UUID or the index's id |
+| `ExtensionStoreDatabase` / `KvEntity` / `KvDao` | one `kv(key, value, updatedAt)` table, its own version. Nothing here touches the global index or any `.soil`, so neither one's version moves when this one does. `keysWithPrefix` uses `substr`, not `LIKE`: `LIKE` is ASCII-case-insensitive per connection *and* reads `%` / `_` as wildcards |
+| `ExtensionStoreGate` | every check and cap, **with no Android types precisely so it is JVM-testable** — the binder is an `android.os.Binder` and cannot be constructed in a unit test |
+| `ExtensionStoreBinder` | the `IExtensionStore.Stub` the host mints **per bind**, bound to that extension's uid; the ashmem copy in / out around the gate; `getLarge`'s region parked in a per-Binder-thread slot that `onTransact`'s `finally` closes **after** the reply (holding a dup of the descriptor) is written |
+
+Encryption: `Garden/<pkg>.db` is SQLCipher under the **global** key, opened through `SoilCrypto`
+like everything else, so every factory is `NonDestructiveOpenHelperFactory`-wrapped and a wrong key
+reports corruption without deleting the file. The `.db`s sit in `Garden/` beside the `.soil`s and
+are invisible to the library, whose structure is index-only — nothing enumerates that directory.
+
+**Pre-open rule:** a caller opens the store on IO **before** binding the extension. A cold open runs
+the KDF (≈ 0.5–1.5 s on e-ink when the raw key is not cached yet), and that must never land inside a
+call's timeout window.
+
+**Lifecycle:** the binder is minted per bind, uid-bound, and `revoke()`d in the same `finally` as
+the unbind — after which every method throws `SecurityException`. The store file itself outlives the
+extension: uninstalling or disabling one leaves its `.db` in place, because removing an extension's
+data is a deliberate act, not a side effect.
+
+### Verification
+
+Room, SQLCipher and `SharedMemory` cannot run on the JVM, so the store is checked from two sides:
+
+- **JVM** — `ExtensionStoreGateTest` drives every check and cap over a fake `KvDao` with an
+  injectable calling uid; `LargeValueTest` pins the unmarshal validation; `ExtensionContractTest`
+  pins the caps and the exact `STORE_VALUE_LARGE` string; `SoilFileTest` pins the package-name guard.
+- **Device** — the debug library's ⋯ → **"Extension store self-test"** opens `probe.test`, checks
+  the file header is encrypted, round-trips through a **real** `ExtensionStoreBinder` (called
+  in-process, so `Binder.getCallingUid()` is our own uid and the gate passes), drives 4 MiB and
+  empty values through real ashmem both ways, and proves the inline cap, the `STORE_VALUE_LARGE`
+  refusal, the wrong-uid refusal and the revoked refusal. OK / FAIL as a toast.
 
 ---
 

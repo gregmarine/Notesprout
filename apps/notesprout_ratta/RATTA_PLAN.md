@@ -2403,7 +2403,7 @@ before every conclusion. Version stays `0.1.0-ratta`. New reference doc: `docs/s
 load-bearing.
 
 ### J2 — Contract + extension store (host only)
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (commit PENDING, Nomad-verified 2026-08-24)
 
 `:extension-api` gains `IExtensionStore.aidl` — all six methods, the base four
 (`get`/`put`/`delete`/`keys`) first and `putLarge`/`getLarge` appended last (the trap above) —
@@ -2439,6 +2439,43 @@ doc touch-ups; Haiku the walk.*
 
 **Questions to resolve at phase start:** none — the store's rules are Paper's, and everything
 wire-visible is locked above.
+
+**Outcome:** landed as written — eleven new files, no deviations from the phase text. `:extension-api`
+gained `IExtensionStore.aidl` (base four first, `putLarge`/`getLarge` appended last), `LargeValue.aidl`,
+`LargeValue.kt`, `SharedBytes.kt` and the six `STORE_*` constants; `:app` gained `data/extstore/`
+(`KvEntity`, `KvDao`, `ExtensionStoreDatabase`, `ExtensionStores`, `ExtensionStoreGate`,
+`ExtensionStoreBinder`) and `data/SoilFile.kt`'s `extensionStoreFile` + `isValidExtensionPackage`.
+`API_VERSION` stays 1. Both `CLAUDE.md` rules amended by name, and `docs/extensions.md` gained a
+full § "The extension store" (caps table, the ashmem handshake, the three-marshalable-exceptions
+rule, the host-side table, the pre-open rule, verification).
+
+**Tests: 544 JVM** (`:app` 445 · `:sn-screen` 58 · `:extension-api` 12 · `:ext-mlkit` 29) — up 19
+from J1's baseline on the same two modules (`:app` 432 → 445, `:extension-api` 6 → 12).
+`ExtensionStoreGateTest` (11) drives every check and cap over a fake `KvDao` with an injectable
+calling uid — uid and revoke on **all six** methods, both value caps, `get`-above-inline throwing the
+exact `STORE_VALUE_LARGE`, the key-count cap rejecting a new key while still allowing a replace, the
+literal case-sensitive prefix, and a DAO failure becoming `IllegalStateException`. `LargeValueTest`
+(5) pins the unmarshal validation including the 1-byte-region / `byteCount 0` rule; `SoilFileTest`
+(2) pins the package-name guard against `../` and `/`; `ExtensionContractTest` gained a
+`storeConstants` case. `assembleDebug` + `assembleRelease` green.
+
+**Nomad walk (by hand — the whole path is finger-drivable):** ⋯ → "Extension store self-test" →
+`Extension store: OK`. Both open paths exercised, in the order that proves the pre-open rule matters:
+**cold create 2004 ms** (`created store for probe.test` — the native KDF) then, after a `force-stop`
+and relaunch, **open 171 ms** via the cached raw key (`KeyOpener: raw-key open: ext:probe.test`) —
+a 12× difference, which is exactly why a caller opens the store on IO *before* it binds. 4 MiB
+round trip 373–379 ms through real ashmem both ways. File encryption confirmed **independently of
+the app's own probe**: `head -c 16 …/Garden/probe.test.db | xxd` reads `15ed 7b8b 9865 4aec …`, not
+`SQLite format 3`. `logcat -b crash` empty; no E/W from our code.
+
+Two notes for J3+:
+- The probe store (`Garden/probe.test.db`) is **left in place** on the dev device, as Paper leaves
+  its own. That is the store's lifecycle rule showing itself: a store outlives the extension it
+  belongs to, because removing an extension's data is a deliberate act, not a side effect.
+- `ExtensionStoreBinder.putLarge` copies the caller's region in and closes the host's handle
+  **before** the gate's uid / cap check. Deliberate (and Paper's shape): the handle must be closed
+  whatever the gate then says, and the bytes are the caller's own, so a refused call wastes a copy
+  but leaks nothing.
 
 ### J3 — Held bind + client + extension skeleton
 **Status:** ⬜ Not started

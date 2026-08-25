@@ -20,7 +20,8 @@ frame-silence ledger) ·
 half's long-press sheet and the object half's Copy/Cut, tap-to-place and lasso popup, both
 within and **across notebooks**, where a copied link's own-notebook target is re-pointed at the
 notebook it came from) ·
-`docs/extensions.md` (the one recognizer extension point) ·
+`docs/extensions.md` (the two extension points — the recognizer, and arc 11's screen-owning
+scratch pad — plus **the extension store**, the host-owned encrypted KV an extension is lent) ·
 `docs/sn-screen.md` (arc 11 / J1: the shared `:sn-screen` paper-screen library — what may live
 there, what may not depend on it, and the `nonTransitiveRClass` flag that holds it together).
 
@@ -37,11 +38,17 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   `:ext-mlkit` (the **NSE · ML Kit** extension APK). `gradle.properties` sets
   `android.nonTransitiveRClass=false` so `:app`'s `R` keeps seeing the moved resources —
   the move needed no import sweep, and undoing that flag breaks every one of them.
-- **The recognizer point is SN's ONE extension surface** (arc-3 amendment to
-  the arc-1 no-extensions rule): `ACTION_HANDWRITING_RECOGNIZER` / `IHandwritingRecognizer`
-  exists solely so other HWR engines can slot in later — headings and the markdown engine are
-  core, and **no other capability point may be added** without a new user decision. No
-  extension stores. The action strings are SN-namespaced (`…notesproutsn.extension.*`) so
+- **SN has TWO extension points** (arc-11 amendment to the arc-3 rule, on the user's explicit
+  decision — which is exactly the "new user decision" that rule demanded):
+  `ACTION_HANDWRITING_RECOGNIZER` / `IHandwritingRecognizer`, so other HWR engines can slot in
+  later (headings and the markdown engine are core), and `ACTION_SCRATCH_PAD` — the first
+  **screen-owning** point, served by the pad's own extension APK (the point itself lands in J3;
+  J2 shipped the store and the contract half). **No THIRD capability point may be added** without
+  another user decision. Extensions get one host service, the
+  **extension store** (`IExtensionStore`, `data/extstore/`, `docs/extensions.md` § "The extension
+  store"): per-package, encrypted under the global key at `Garden/<pkg>.db`, minted per bind,
+  uid-bound, revoked with the unbind — because **an extension writes nothing to disk itself,
+  ever**. The action strings are SN-namespaced (`…notesproutsn.extension.*`) so
   Paper's extensions on the same device are never discovered; trust is same-signature both
   ways (`ExtensionRegistry` at discovery + bind-time re-check, `HostCallerCheck` first thing
   in every stub method), the ML Kit dependency lives in `:ext-mlkit` only, **only `prepare()`
@@ -53,7 +60,9 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   `notebook_meta`, StrokeCodec format B, encrypt-by-default global key, SQLCipher stock
   defaults. Any schema/codec/crypto change must keep a Paper-created file openable and
   vice versa. References: `apps/notesprout_paper/docs/data.md` + `docs/crypto.md`.
-- **`data/SoilFile.kt` is the only path constructor.** No `extensionStoreFile` here.
+- **`data/SoilFile.kt` is the only path constructor** — `extensionStoreFile` included
+  (arc-11 / J2 amendment: the function exists now, and it is the only way to derive an
+  extension store's `Garden/<pkg>.db`).
 - **Every SQLCipher open routes through `crypto/SoilCrypto`.** Passphrases never logged,
   never in Intent extras, never in the index. Never delete a DB on corruption.
 - **`IndexGuard.ready(this)` first thing in every index-touching `onCreate`**;

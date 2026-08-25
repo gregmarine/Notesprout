@@ -1,6 +1,7 @@
 package com.symmetricalpalmtree.notesproutsn.extension
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -32,6 +33,19 @@ class ExtensionContractTest {
             "com.symmetricalpalmtree.notesproutsn.extension.API_VERSION",
             ExtensionContract.META_API_VERSION,
         )
+    }
+
+    /** The store's caps and its one exact message (extensions compare it verbatim, not by substring). */
+    @Test
+    fun storeConstants() {
+        assertEquals(512, ExtensionContract.STORE_MAX_KEY_CHARS)
+        assertEquals(4 * 1024 * 1024, ExtensionContract.STORE_MAX_VALUE_BYTES)
+        assertEquals(512 * 1024, ExtensionContract.STORE_MAX_INLINE_BYTES)
+        assertEquals(50_000, ExtensionContract.STORE_MAX_KEYS)
+        assertEquals("value is large — use getLarge", ExtensionContract.STORE_VALUE_LARGE)
+        // The inline path must be a strict subset of the large one, or `get` could refuse a value
+        // `put` was willing to take.
+        assertTrue(ExtensionContract.STORE_MAX_INLINE_BYTES < ExtensionContract.STORE_MAX_VALUE_BYTES)
     }
 
     @Test
