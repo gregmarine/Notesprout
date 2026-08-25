@@ -3034,7 +3034,7 @@ only from the UI.
 | Scratch pad | **Not included.** Pad pages are blank by construction and hold no template rows; its long-press goes straight to the delete confirm. Nothing about this arc reaches the extension. |
 
 ### P2 — Change a page's template
-**Status:** ✅ Complete (commit <hash>, Nomad-verified + user all-clear 2026-08-25) — **ARC 12 COMPLETE + FROZEN**
+**Status:** ✅ Complete (commit 7067a10, Nomad-verified + user all-clear 2026-08-25) — **ARC 12 COMPLETE + FROZEN**
 
 `PageTemplate` (pure: `reusableId` + `kindOf`), `NotebookSession.changeTemplate` /
 `applyTemplate` / `currentTemplateKind`, `Action.TemplateChanged` + both replay arms, the page

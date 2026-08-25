@@ -189,7 +189,7 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   an extension-owned screen. 623 JVM tests; version stays `0.1.0-ratta`; g-paper pin stays 0.1.6.
   One open non-blocker in `BACKLOG.md`: a transferred selection drags worse than a hand-lassoed one
   (two hypotheses built, shipped to the Nomad and **both disproved** — read it before re-theorising).
-  **Arc 12 "Paper"** ✅ **COMPLETE + FROZEN 2026-08-25** (**P2 `<hash>`**): a page can finally
+  **Arc 12 "Paper"** ✅ **COMPLETE + FROZEN 2026-08-25** (**P2 `7067a10`**): a page can finally
   change its paper. The long-press page sheet gains a **Page template** row → a second sheet
   (Blank / Lined / Dotted / Grid, current kind ticked, the library sort sheet's pattern); the pick
   re-papers **that page only** — the same scope Copy/Cut/Delete already have — and is undoable
