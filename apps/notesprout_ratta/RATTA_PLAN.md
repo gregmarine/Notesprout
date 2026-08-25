@@ -2478,7 +2478,7 @@ Two notes for J3+:
   but leaks nothing.
 
 ### J3 — Held bind + client + extension skeleton
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (commit PENDING, Nomad-verified + user-verified 2026-08-24)
 
 Host: `ExtensionBinder.hold` + `HeldBinding<I>` — the bind half of `call` without the unbind (same
 timeout and exception mapping, `isDead` after `onBindingDied`/`onServiceDisconnected`, idempotent
@@ -2523,6 +2523,82 @@ client; Sonnet the module scaffold, manifest, icon, strings.*
 
 **Questions to resolve at phase start:** none expected — the contract is Paper's shipped shape
 under SN names; ask only if a wire detail surfaces that the frozen Paper docs disagree on.
+*(None arose — nothing in the frozen Paper docs disagreed with itself.)*
+
+**Outcome:** landed as written; one deviation, noted below. **`:extension-api`** gained
+`IScratchPad.aidl` (with the explicit `import` lines both parcelables need), `WireStroke` +
+`WireStroke.aidl`, `InkBundle` + `InkBundle.aidl`, `InkChunks`, `HostCallerCheck.enforceActivity`,
+and the twelve scratch constants at Paper's shipped values. `API_VERSION` stays **1**.
+**`:app`** gained `ExtensionBinder.hold` + `HeldBinding` (SN's first held bind — it had none;
+verified), `ExtensionRegistry.scratchPad`, `TransferCaps`, `ScratchPadClient`, both new `<queries>`
+intents, and a debug library ⋯ row **"Probe scratch pad"** that drives the real client path end to
+end (store pre-open → hold → `begin` → **launch for a result** → `end` → unbind → revoke).
+**`:ext-scratchpad`** is new: `ScratchPadApplication` (`RattaEngine.register()` only),
+`ScratchPadService`, `ScratchSession`, `ScratchStore`, `ScratchPageCodec`, `ScratchPages`,
+`ScratchInk`, and the stub `ScratchPadActivity` (caller-checked title + Back). Release APK **6.7 MB**
+— against Paper's ≈ 25 MB, exactly the predicted Onyx tax it does not pay; no `tools:replace`, no
+`pickFirsts`.
+
+**The one deviation:** `TransferCaps.sanitize` has **no NaN-width branch** (Paper's does). It is
+unreachable — `WireStroke.requireValid` runs in the constructor, which is also where unmarshalling
+lands, and it already rejects a non-finite or non-positive width. A test pins that
+(`assertThrows` on constructing one) rather than leaving a branch nothing can reach.
+
+**Tests: 590 JVM** (`:app` 455 · `:sn-screen` 58 · `:extension-api` 29 · `:ext-mlkit` 29 ·
+`:ext-scratchpad` 19) — up 46 from J2. `WireStrokeTest` (4) and `InkBundleTest` (6) pin the
+`requireValid` rules including the one that matters most — a single stroke over the point chunk cap
+is a legal chunk of one, because the chunker never splits a stroke; `InkChunksTest` (6) drives the
+chunker and pins that `TRANSFER_MAX_CHUNKS` really is `ceil(MAX_STROKES / CHUNK_STROKES)` (a
+too-small budget would silently truncate a legal maximum transfer); `TransferCapsTest` (10) covers
+both mappings and every `Drain` exit — empty chunk, stroke cap, and the probe chunk past the budget
+being refused **whole**; `ScratchPageCodecTest` (7) pins the exact `strokeBytes` running total the
+4 MiB full rule depends on, plus the truncated-tail and unknown-version rules;
+`ScratchPagesTest` (8) and `ScratchInkTest` (4) the rest. `assembleDebug` + `assembleRelease` green
+across all five modules.
+
+**Nomad walk (agent-free, by hand — the whole path is finger-drivable):**
+- Discovery: the "Probe scratch pad" row appears only with the extension installed —
+  `pm disable-user` makes it **vanish**, `pm enable` brings it **back**, because discovery re-runs
+  on every sheet open.
+- The sequence, exact: `hold` → `ScratchPadService begin: pages=1 in 47–57 ms` (first run creates
+  the page) → screen `opened (J3 stub)` → Back → `ScratchPadService end` → `finish: end ok` →
+  `unbind … (held)`. `dumpsys activity services <pkg>` = **(nothing)**; binds = unbinds.
+- **The pre-open rule, measured:** cold `open` **3 123 ms** (SQLCipher's KDF creating
+  `Garden/…ext.scratchpad.dev.db`) vs. warm **114 ms** — 27×. That gap is the whole reason a caller
+  opens the store on IO *before* it binds.
+- Store file created **encrypted**, checked independently of the app's own probe:
+  `head -c 16 …/Garden/com.symmetricalpalmtree.notesproutsn.ext.scratchpad.dev.db | xxd` reads
+  `7fd5 ad06 662d 8925 …`, not `SQLite format 3`.
+- `am start` of the screen from a shell is **refused**: `D ScratchPadActivity: refused caller (none)`,
+  nothing shown, the Supernote's own app comes straight back.
+- Labels verified in both APKs (`aapt2 dump strings`): `NSE · Scratch Pad Dev` / `NSE · Scratch Pad`.
+  versionName `0.1.0-ratta-dev`.
+- J2 regression: the store self-test still reports `Extension store: OK (open 176ms, 4 MiB round
+  trip 396ms, probe.test.db)`.
+- `logcat -b crash` **empty** throughout; no E/W from our code (every warning in the buffer is
+  SurfaceFlinger / WindowManager / NotificationService).
+
+**The J3 question, answered and then removed:** a once-per-process debug `StoreProbe` ran the
+cross-process 4 MiB `putLarge` / `getLarge` round trip from `begin` — ashmem over a **real** Binder,
+which the host's in-process self-test never exercises. **916 ms on the Nomad** (Paper measured 917 ms
+on the same device), comfortably inside `begin`'s 2 s budget. Removed in this same phase, as Paper
+removed its own: left in, it would sit inside the first pad open of every session and muddy J4's
+timings. Its numbers live here and in `docs/extensions.md`.
+
+**Carried into J4:**
+- The debug "Probe scratch pad" row is **removed** when the two real entry buttons land, exactly as
+  the phase text says.
+- SN has still **never** called `releaseForHandoff` — J4 remains its first use, and the arc's
+  headline risk is untouched by J3 (the stub screen hosts no paper surface).
+- `receiveInk` / `takeOutgoing` throw `UnsupportedOperationException` until J5. That **is** Binder-
+  marshalable (`EX_UNSUPPORTED_OPERATION`), despite the arc's trap list naming only three
+  exceptions — the trap's list is the conservative set this contract uses, not Binder's full one.
+  `docs/extensions.md` now records the distinction so the next reader does not "fix" a working throw.
+
+**User checklist — all three pass (2026-08-24):** 1. Settings → Apps shows **"NSE · Scratch Pad Dev"**
+with the puzzle icon, next to "NSE · ML Kit Dev". 2. Library ⋯ → "Probe scratch pad" opens a
+white screen with a Back arrow flush at the top-left and the title "Scratch Pad", and Back returns
+to the library. 3. Nothing else in the library or the notebook looks different.
 
 ### J4 — The pad screen + both entry buttons
 **Status:** ⬜ Not started

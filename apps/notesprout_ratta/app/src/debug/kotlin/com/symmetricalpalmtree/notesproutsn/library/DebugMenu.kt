@@ -2,15 +2,20 @@ package com.symmetricalpalmtree.notesproutsn.library
 
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.Toast
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatImageButton
 import androidx.appcompat.widget.TooltipCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.lifecycleScope
 import com.symmetricalpalmtree.notesproutsn.R
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
@@ -24,8 +29,12 @@ import com.symmetricalpalmtree.notesproutsn.data.extensionStoreFile
 import com.symmetricalpalmtree.notesproutsn.data.extstore.ExtensionStoreBinder
 import com.symmetricalpalmtree.notesproutsn.data.extstore.ExtensionStores
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
+import com.symmetricalpalmtree.notesproutsn.extension.ExtensionRegistry
+import com.symmetricalpalmtree.notesproutsn.extension.ProviderRef
+import com.symmetricalpalmtree.notesproutsn.extension.ScratchPadClient
 import com.symmetricalpalmtree.notesproutsn.extension.SharedBytes
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -35,6 +44,12 @@ import kotlinx.coroutines.withContext
  *  - **Show recovery key** — reveal + copy the global passphrase.
  *  - **Forget cached key** — clear the Keystore-cached passphrase and raw keys, then kill the
  *    process; the next launch must land on the Unlock screen with the file intact.
+ *  - **Probe scratch pad** (arc 11 / J3, removed in J4 when the real entry buttons land) — present
+ *    only while a trusted `SCRATCH_PAD` extension is installed (re-discovered on every sheet open):
+ *    drives the real [ScratchPadClient] path — store pre-open → held bind → `begin(store)` →
+ *    **launch the screen for a result** (an `ActivityResultLauncher`, the only launch shape whose
+ *    `callingPackage` the extension's screen accepts) → on return `finish` (`end` → unbind → revoke).
+ *    `logcat -s ScratchPadClient ScratchPadService ScratchPadActivity` shows the whole sequence.
  *  - **Extension store self-test** (arc 11 / J2) — open-or-create the store of a fake package
  *    `probe.test` (`Garden/probe.test.db`), round-trip a value through a **real**
  *    [ExtensionStoreBinder] (calling uid = our own, so the gate's uid check passes), check the file
@@ -45,7 +60,37 @@ import kotlinx.coroutines.withContext
  */
 object DebugMenu {
 
+    /** The pad's result launcher + the client whose held bind it brackets — registered in [install],
+     *  which the library runs from `onCreate` (a launcher may not be registered after STARTED). One
+     *  screen at a time, so one slot each; the client is released on the result and, as a backstop,
+     *  when the launching activity is destroyed while still open. */
+    private var padLauncher: ActivityResultLauncher<Intent>? = null
+    private var padClient: ScratchPadClient? = null
+
     fun install(activity: AppCompatActivity, bar: ViewGroup) {
+        val launcher = activity.registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val client = padClient
+            padClient = null
+            Slog.d("DebugMenu") { "scratch pad returned: resultCode=${result.resultCode}" }
+            activity.lifecycleScope.launch {
+                client?.finish()
+                Toast.makeText(activity, "Scratch pad: returned (see log)", Toast.LENGTH_SHORT).show()
+            }
+        }
+        padLauncher = launcher
+        activity.lifecycle.addObserver(LifecycleEventObserver { _, event ->
+            if (event != Lifecycle.Event.ON_DESTROY) return@LifecycleEventObserver
+            // Drop the launcher only if it is still OURS: on a recreate the replacement's `onCreate`
+            // — and its `install` — runs BEFORE this callback, so an unconditional null would throw
+            // away the live one and leave the row inert.
+            if (padLauncher === launcher) padLauncher = null
+            val client = padClient ?: return@LifecycleEventObserver
+            padClient = null
+            // The bind must not outlive the screen that opened it, even if the result never came.
+            // A detached scope on purpose: `lifecycleScope` is already cancelled by ON_DESTROY, and
+            // `finish` still has an `end()` call and an unbind + revoke to run.
+            MainScope().launch { client.finish() }
+        })
         val btn = AppCompatImageButton(activity, null, 0).apply {
             setImageResource(R.drawable.ic_dots)
             setBackgroundResource(R.drawable.bg_toolbar_button)
@@ -63,23 +108,47 @@ object DebugMenu {
     }
 
     private fun showSheet(activity: AppCompatActivity) {
-        val labels = arrayOf<CharSequence>(
-            "Show recovery key",
-            "Forget cached key (relaunch → Unlock)",
-            "Extension store self-test",
-        )
-        Dialogs.style(
-            AlertDialog.Builder(activity)
-                .setTitle("Debug tools")
-                .setItems(labels) { _, which ->
-                    when (which) {
-                        0 -> showKey(activity)
-                        1 -> confirmForget(activity)
-                        2 -> storeSelfTest(activity)
-                    }
-                }
-                .create()
-        ).show()
+        // Discovery is IO and refreshed per open — a package can be disabled or replaced under us.
+        activity.lifecycleScope.launch {
+            val padRef = ExtensionRegistry.scratchPad(activity)
+            if (activity.isFinishing || activity.isDestroyed) return@launch
+            val labels = ArrayList<CharSequence>()
+            val actions = ArrayList<() -> Unit>()
+            labels += "Show recovery key"; actions += { showKey(activity) }
+            labels += "Forget cached key (relaunch → Unlock)"; actions += { confirmForget(activity) }
+            labels += "Extension store self-test"; actions += { storeSelfTest(activity) }
+            // Absent when no trusted pad is installed — the row never lies about what is there.
+            if (padRef != null) {
+                labels += "Probe scratch pad"; actions += { probeScratchPad(activity, padRef) }
+            }
+            Dialogs.style(
+                AlertDialog.Builder(activity)
+                    .setTitle("Debug tools")
+                    .setItems(labels.toTypedArray()) { _, which -> actions[which]() }
+                    .create()
+            ).show()
+        }
+    }
+
+    /** J3: store pre-open → held bind → `begin` → launch the screen for a result. `finish` runs in
+     *  the result callback (or on the activity's destruction, whichever comes first). */
+    private fun probeScratchPad(activity: AppCompatActivity, ref: ProviderRef) {
+        val launcher = padLauncher ?: return
+        if (padClient != null) { Slog.d("DebugMenu") { "scratch pad: already open" }; return }
+        activity.lifecycleScope.launch {
+            val client = ScratchPadClient(activity, ref)
+            val t0 = System.currentTimeMillis()
+            val intent = client.open(sendEnabled = false, openReceived = false)
+            val ms = System.currentTimeMillis() - t0
+            if (intent == null) {
+                Slog.d("DebugMenu") { "scratch pad: open FAILED after $ms ms" }
+                Toast.makeText(activity, "Scratch pad: FAIL (see log)", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            padClient = client
+            Slog.d("DebugMenu") { "scratch pad: open ok in $ms ms — launching screen" }
+            launcher.launch(intent)
+        }
     }
 
     private fun storeSelfTest(activity: AppCompatActivity) {

@@ -8,29 +8,38 @@ engine that consume it are core, not extension surface.
 **Arc 11 is the fresh user decision that rule required.** The user asked for the scratch pad as an
 extension, so SN gains a second capability point — `SCRATCH_PAD`, and the first **screen-owning**
 one — and, with it, the **extension store** documented below. J2 landed the store and the contract
-half; the point itself, its client and the pad arrive in J3–J5. The rule survives, one word wider:
-no *third* capability point without another user decision (`apps/notesprout_ratta/CLAUDE.md`).
+half; **J3 landed the point itself** — the AIDL, the wire parcelables, the held bind, the host's
+client and the `:ext-scratchpad` APK with a stub screen. The pad's real screen is J4 and the two ink
+transfers are J5. The rule survives, one word wider: no *third* capability point without another
+user decision (`apps/notesprout_ratta/CLAUDE.md`).
 
 Fresh code. Paper's own extension arcs (`PAPER_EXTENSIONS_PLAN.md`, `PAPER_RECOGNITION_PLAN.md`,
-its `:extension-api` / `:ext-mlkit`) are the shape reference — nothing is copied, and SN's AIDL is
-scoped to the recognizer alone rather than Paper's broader capability set.
+`PAPER_SCRATCHPAD_PLAN.md`, its `:extension-api` / `:ext-mlkit` / `:ext-scratchpad`) are the shape
+reference — nothing is copied, and SN's AIDL is scoped to its **two** points rather than Paper's
+broader capability set.
 
 ---
 
 ## Module layout
 
-Four modules, SN's own Gradle root:
+Five modules, SN's own Gradle root:
 
 | Module | Type | Depends on | Holds |
 |---|---|---|---|
 | `:sn-screen` | Android library | g-paper (`api`) + androidx; **never** `:app`, **never** `:extension-api` | the design resources and the screen helpers both paper surfaces need — see [`sn-screen.md`](sn-screen.md) |
-| `:extension-api` | Android library | nothing in `:app`, no library beyond the Kotlin stdlib (`build.gradle.kts` says so explicitly) | the AIDL (`IHandwritingRecognizer`, `InkStroke.aidl`; `IExtensionStore`, `LargeValue.aidl`), the hand-written `InkStroke` / `LargeValue` parcelables, `SharedBytes`, `RecognizerStatus`, `ExtensionContract`, `HostCallerCheck` |
+| `:extension-api` | Android library | nothing in `:app`, no library beyond the Kotlin stdlib (`build.gradle.kts` says so explicitly) | the AIDL (`IHandwritingRecognizer`, `InkStroke.aidl`; `IExtensionStore`, `LargeValue.aidl`; `IScratchPad`, `WireStroke.aidl`, `InkBundle.aidl`), the hand-written `InkStroke` / `LargeValue` / `WireStroke` / `InkBundle` parcelables, `SharedBytes`, `InkChunks`, `RecognizerStatus`, `ExtensionContract`, `HostCallerCheck` |
 | `:ext-mlkit` | Android application (its own installable APK) | `:extension-api` + `com.google.mlkit:digital-ink-recognition:19.0.0` | `HandwritingRecognizerService`, `ModelManager`, `MlKitEngine`, `PageText`, `StrokeSegmenter`, `Dots`, `Box` |
-| `:app` (`extension/` package) | part of the host APK | `:extension-api` | `ExtensionRegistry`, `ExtensionBinder`, `ExtensionCallException`, `InkCaps`, `RecognizerClient`, `RecognizerReadiness`; and in `data/extstore/`, the extension store (`ExtensionStores`, `ExtensionStoreDatabase`, `KvEntity`, `KvDao`, `ExtensionStoreGate`, `ExtensionStoreBinder`) |
+| `:ext-scratchpad` | Android application (its own installable APK) | `:extension-api` + `:sn-screen` (g-paper arrives through its `api`) + androidx; **never** `:app`, no Room / SQLCipher / serialization | `ScratchPadApplication`, `ScratchPadService`, `ScratchPadActivity`, `ScratchSession`, `ScratchStore`, `ScratchPageCodec`, `ScratchPages`, `ScratchInk` |
+| `:app` (`extension/` package) | part of the host APK | `:extension-api` | `ExtensionRegistry`, `ExtensionBinder`, `ExtensionCallException`, `InkCaps`, `RecognizerClient`, `RecognizerReadiness`, `ScratchPadClient`, `TransferCaps`; and in `data/extstore/`, the extension store (`ExtensionStores`, `ExtensionStoreDatabase`, `KvEntity`, `KvDao`, `ExtensionStoreGate`, `ExtensionStoreBinder`) |
 
 `:sn-screen` is deliberately **not** in that dependency chain: it never sees `:extension-api`, so a
-shared screen helper can never quietly become part of the wire contract. An extension APK depends on
-both, separately.
+shared screen helper can never quietly become part of the wire contract. `:ext-scratchpad` depends on
+both, separately — and that seam is exactly why the host's `TransferCaps` and the extension's
+`ScratchInk` are deliberate **twins** of the same wire ⇄ paper mapping rather than one shared class.
+
+`:ext-scratchpad` needs **no** `tools:replace` and **no** libc++ `pickFirsts`: both exist in Paper
+only because the Onyx SDK arrives through its shared screen module. SN has no Onyx, and the release
+APK is **6.7 MB** against Paper's ≈ 25 MB.
 
 `:extension-api` is the contract both sides compile against — a host that never binds an
 extension still needs its constants and parcelable, and an extension that never sees `:app` still
@@ -44,12 +53,20 @@ The host's `AndroidManifest.xml` declares package-visibility for the point (API 
 ```xml
 <queries>
     <intent>
-        <action android:name="com.symmetricalpalmtree.notesproutsn.extension.HANDWRITING_RECOGNIZER" />
+        <action android:name="…extension.HANDWRITING_RECOGNIZER" />
+    </intent>
+    <intent>
+        <action android:name="…extension.SCRATCH_PAD" />
+    </intent>
+    <intent>
+        <action android:name="…extension.SCRATCH_PAD_SCREEN" />
     </intent>
 </queries>
 ```
 
-plus `ACCESS_NETWORK_STATE`, for the readiness flow's offline pre-check (below).
+The scratch pad needs **both** of its actions listed: one to discover and bind the service, one to
+resolve and launch the screen. Plus `ACCESS_NETWORK_STATE`, for the readiness flow's offline
+pre-check (below).
 
 ---
 
@@ -132,6 +149,15 @@ signed with.
   and requires `checkSignatures(callerUid, myUid) == SIGNATURE_MATCH`. Anything else is a
   `SecurityException` — belt-and-braces against the host's own checks, enforced independently on
   the side that has the most to lose from a spoofed caller.
+- **Extension-side gate for a screen** (`HostCallerCheck.enforceActivity`, arc 11 / J3): an exported
+  Activity the host launches for a result calls it **first thing in `onCreate`, before anything is
+  inflated**, and returns at once if it answers false (the Activity has already finished itself).
+  It compares `callingPackage` — which Android sets **only** for a `startActivityForResult`-style
+  launch — against the host package, then checks the signature. A plain `startActivity`, an
+  `am start` from a shell included, leaves `callingPackage` null and is refused: verified on the
+  Nomad, where a shell `am start` of the pad screen logs `refused caller (none)` and shows nothing.
+  This is why the host must launch the screen through an `ActivityResultLauncher` — a design
+  constraint, not a bug.
 
 **Marshalable exceptions only.** `HandwritingRecognizerService`'s stub methods may only let
 `SecurityException`, `IllegalArgumentException`, or `IllegalStateException` leave — anything else
@@ -313,8 +339,11 @@ side re-derives it. Two details are load-bearing:
 
 ### Only three exceptions cross a Binder
 
-`SecurityException`, `IllegalArgumentException`, `IllegalStateException` — that is the whole set.
-Anything else kills the transaction **silently**, and the caller reads the empty reply as
+`SecurityException`, `IllegalArgumentException`, `IllegalStateException` — that is the whole set
+this contract uses. (Binder's own marshalable set is slightly wider — `NullPointerException` and
+`UnsupportedOperationException` are in it too, which is why `ScratchPadService`'s not-yet-implemented
+J5 methods can throw the latter safely — but nothing in the store path relies on that.) Anything
+outside it kills the transaction **silently**, and the caller reads the empty reply as
 null / success. In Paper that is exactly how a page came back blank and was then saved over the real
 one. So:
 
@@ -363,6 +392,158 @@ Room, SQLCipher and `SharedMemory` cannot run on the JVM, so the store is checke
 
 ---
 
+## The scratch-pad point (arc 11 / J3)
+
+`ACTION_SCRATCH_PAD` is SN's **second** capability point and its first **screen-owning** one: the
+extension owns an off-paper Activity (`ACTION_SCRATCH_PAD_SCREEN`) that the core launches for a
+result and returns from. The core grows no second drawing surface — the pad's canvas lives in the
+extension's own process, which is also why the extension registers g-paper itself
+(`RattaEngine.register()` in `ScratchPadApplication`; **no Onyx** — SN has none).
+
+### The held bind
+
+This is the one place SN keeps a binding across more than a single call, and the reason is that the
+*operation* is longer, not that the rule changed: the operation **is** the showing of the screen.
+`ExtensionBinder.hold` is `call`'s bind half without the unbind — same explicit component, same
+signature re-check immediately before `bindService`, same `BIND_AUTO_CREATE` on the application
+context, same `BIND_TIMEOUT_MS`. It returns a `HeldBinding`, which runs any number of timed calls
+over that one connection with `call`'s exception mapping, reports `isDead` once the connection dies
+(`onBindingDied` / `onServiceDisconnected`) or it is closed, and unbinds on an **idempotent**
+`close()`. On any failure during the hold itself the attempted bind is released before the
+`ExtensionCallException` is thrown.
+
+The bracket is: `begin(store)` → launch the screen → the result → `end()` → unbind → revoke the
+store binder — the last three in one `finally`, on every path.
+
+```
+interface IScratchPad {
+    void begin(IExtensionStore store);                                // hold the store for this showing
+    void receiveInk(in InkBundle chunk, int placement, boolean last); // notebook → pad (J5)
+    InkBundle takeOutgoing(int chunkIndex);                           // pad → notebook (J5)
+    void end();                                                       // drop the store, clear pending ink
+}
+```
+
+Every byte of ink crosses through these methods. **Nothing rides the Intent** but two booleans:
+`EXTRA_SCRATCH_SEND_ENABLED` (opened from a notebook, so the pad shows Send) and
+`EXTRA_SCRATCH_OPEN_RECEIVED` (opened right after a `receiveInk`, so the pad opens on the received
+page with the strokes selected).
+
+### The wire types
+
+`WireStroke` — deliberately **not** Paper's name `PaperStroke`; "Paper" names the other app and a
+wire type is on the wire forever. It is a whole paper stroke minus its id and time: parallel
+`x` / `y` / `pressure` / `tilt` arrays in the authoring page's px space, plus `width`, `colorArgb`
+and the g-paper `StrokeStyle` **name**. No id (both sides mint fresh ones), no time, no page id, no
+notebook id.
+
+`InkBundle` is one chunk of a transfer: its strokes plus the page px geometry they were authored in
+(`0 × 0` = unknown → the reader uses its own page). An **empty** bundle is legal — it is how
+`takeOutgoing` says "done".
+
+Both run `requireValid` **in the constructor**, which is also where unmarshalling lands, so a
+malformed stroke rejects the whole bundle it rides in rather than being quietly dropped. `InkChunks`
+holds the chunking rule once, for both sides: greedy at the per-call caps, and **a single stroke over
+the point chunk cap is its own chunk** — never split, still bounded by the whole-transfer cap.
+
+| Constant | Value | What it bounds |
+|---|---|---|
+| `MAX_TRANSFER_STROKES` | 10 000 | one whole transfer, either direction |
+| `MAX_TRANSFER_POINTS` | 400 000 | ditto, summed over its strokes |
+| `TRANSFER_CHUNK_STROKES` | 300 | one Binder call |
+| `TRANSFER_CHUNK_POINTS` | 20 000 | ditto (≈ 320 KB of floats — under the ~1 MB transaction budget) |
+| `TRANSFER_MAX_CHUNKS` | 34 | how many chunks the host drains = `ceil(10 000 / 300)` |
+
+These are Paper's **shipped** values (its S2 outcome), not the pre-S2 table in its plan appendix; a
+JVM test pins each one, and another pins that the chunk budget really does cover a full transfer.
+
+### Host side — `ScratchPadClient`
+
+One instance per calling screen. `open(sendEnabled, openReceived)`:
+
+1. `ExtensionStores.open` **on IO, before the bind** — the pre-open rule. Measured on the Nomad:
+   a cold create is **3 123 ms** end to end and a warm one **114 ms**. A 27× difference is what a
+   cold SQLCipher KDF costs, and it must never sit inside a call's timeout window.
+2. Mint one `ExtensionStoreBinder` bound to the extension's uid.
+3. `ExtensionBinder.hold` (signature re-checked at bind).
+4. `begin(store)` under `CALL_TIMEOUT_MS` (2 s). Measured: **47–57 ms**, first run included — it
+   creates the pad's first blank page.
+5. Return the screen `Intent` (or **null** on any failure, reason logged, everything opened so far
+   released — the caller shows the core's own dialog). Returning the Intent rather than a boolean
+   plus an accessor keeps it one call: the caller launches exactly what it got.
+
+`finish()` — `end()` best-effort under the same 2 s, then `close()` + `revoke()` in `finally`.
+Idempotent, and the caller runs it from its **result callback and** from `onDestroy` while still
+open, because a bind must not outlive the screen that opened it even when the result never comes.
+
+`send` / `drainOutgoing` are wired in J5. Two rules are already built into them:
+
+- The **last** `receiveInk` chunk carries the whole placement — a read, decode, re-encode and write
+  of up to 4 MiB on an e-ink CPU — so it takes `PLACE_TIMEOUT_MS` (10 s), not the 2 s of every other
+  call. A Binder call cannot be cancelled: a budget that is too short reports failure for ink that
+  then lands anyway.
+- `drainOutgoing` probes **one chunk past** `TRANSFER_MAX_CHUNKS`, so a non-empty chunk there tells
+  the caller something was left behind rather than letting a silent truncation read as success.
+
+`TransferCaps` is the host's pure, JVM-tested half. Outward: `withinLimits` is checked **before any
+bind**, `toWireStrokes` is the one reduction site from a g-paper `Stroke` (id and time never leave;
+point-less strokes are skipped), `chunk` delegates to `InkChunks`. Inward is untrusted: `Drain`
+accumulates `takeOutgoing` chunks under the summed caps and says whether it truncated, `sanitize`
+forces what SN can draw (unknown style → PEN, width clamped to 0.5–50 px, colour forced opaque
+black), and `toStrokes` mints **fresh ids** here. No id ever crosses in either direction.
+
+### Extension side
+
+`ScratchPadService` holds what the host lent for this showing in `ScratchSession` — the store
+binder, and (in J5) the inbound chunks, the outbound chunks and the one-shot "open selected"
+record. `end()` clears all of it. `begin` reads the page list on the Binder thread; the first run
+creates one blank page. `receiveInk` / `takeOutgoing` throw `UnsupportedOperationException` until
+J5 — which Binder marshals intact (`EX_UNSUPPORTED_OPERATION`), so the host sees a real refusal
+rather than a silently dead transaction.
+
+`ScratchStore` is the pad's key layout over `IExtensionStore`, and the extension's only storage:
+
+| Key | Value |
+|---|---|
+| `pages` | UTF-8, one page id per line, in order |
+| `current` | the current page id |
+| `page/<id>` | the page blob (`ScratchPageCodec`) |
+
+It is **blocking** — IO thread or the Binder thread, never Main. Values at or below
+`STORE_MAX_INLINE_BYTES` go through `put` / `get`; above that through `putLarge` / `getLarge`.
+`readPage` tries `get` first and falls to `getLarge` **only** on the contract's exact
+`STORE_VALUE_LARGE` message. A blob over `STORE_MAX_VALUE_BYTES` is `PageFullException` — never
+split, never written elsewhere; every other store failure is `StoreUnavailable`.
+
+`ScratchPageCodec` is a page blob ⇄ `(pageWidth, pageHeight, strokes)`: a small header plus the
+`.soil`'s own `StrokeCodec` format-B blob per stroke, so a page is that format with a header on it.
+Three rules matter and each has a test:
+
+- **`strokeBytes` is exact.** The 4 MiB full rule keeps a *running* encoded size rather than
+  re-encoding the page on every stroke, so `HEADER_BYTES + Σ strokeBytes` must equal
+  `encode(...).size` to the byte. Geometry is zlib-compressed **per stroke**, so a moved stroke has
+  to be re-measured — "floats re-encode to the same size" is false, and a test caught it in Paper.
+- **A truncated tail keeps what decoded whole.** The partial stroke is dropped; the page still opens.
+- **An unknown version is unreadable, not empty.** It throws, so the caller can say "unreadable" —
+  a blank page saved over real ink is the failure this prevents.
+
+### What J3 proved on the Nomad
+
+Discovery finds the extension and the debug row appears; `pm disable-user` makes it vanish and
+`pm enable` brings it back, because discovery re-runs on every open. The whole sequence runs clean:
+`hold` → `begin: pages=1` → screen `opened` → Back → `end` → `finish: end ok` → `unbind`, with
+`dumpsys activity services` showing nothing left bound and the crash buffer empty. The store's
+`.db` is created encrypted (`head -c 16 | xxd` — not `SQLite format 3`), and a shell `am start` of
+the screen is refused with `refused caller (none)`.
+
+One question this phase existed to answer: does a 4 MiB `putLarge` / `getLarge` round trip survive a
+**real** Binder — ashmem crossing two processes — inside `begin`'s 2 s budget? A once-per-process
+debug probe answered **916 ms on the Nomad** (Paper measured 917 ms), and was removed in the same
+phase, as Paper removed its own: left in, it would sit inside the first pad open of every session
+and muddy J4's timings.
+
+---
+
 ## Privacy
 
 Recognized text is never logged on either side of the boundary — every log line in
@@ -374,6 +555,21 @@ closest to describing recognized content, explicitly logs geometry and a coarse 
 ---
 
 ## Identity
+
+Both extensions share one recipe; only the name and the point differ.
+
+**`:ext-scratchpad`**
+
+| | |
+|---|---|
+| Label | **"NSE · Scratch Pad"** (`"NSE · Scratch Pad Dev"` in debug — a build-type string override, not a suffix) |
+| Package | `com.symmetricalpalmtree.notesproutsn.ext.scratchpad` (`.dev` in debug) |
+| Icon | the same Tabler "puzzle" glyph as `:ext-mlkit` — the extension family reads as one thing |
+| Launcher activity | **None**; the screen `<activity>` is exported under its own action with `<category DEFAULT>` (without which implicit resolution never matches it) and is refused unless launched for a result by the host |
+| versionName | host lockstep: `0.1.0-ratta` (`-dev` in debug) |
+| Release APK | 6.7 MB |
+
+**`:ext-mlkit`**
 
 | | |
 |---|---|

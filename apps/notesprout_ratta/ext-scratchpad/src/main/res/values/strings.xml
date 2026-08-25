@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ext_label">NSE · Scratch Pad</string>
+    <string name="scratch_title">Scratch Pad</string>
+    <string name="cd_scratch_back">Back</string>
+</resources>

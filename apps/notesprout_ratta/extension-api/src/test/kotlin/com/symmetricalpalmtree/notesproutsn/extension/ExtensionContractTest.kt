@@ -33,6 +33,34 @@ class ExtensionContractTest {
             "com.symmetricalpalmtree.notesproutsn.extension.API_VERSION",
             ExtensionContract.META_API_VERSION,
         )
+        assertEquals(
+            "com.symmetricalpalmtree.notesproutsn.extension.SCRATCH_PAD",
+            ExtensionContract.ACTION_SCRATCH_PAD,
+        )
+        assertEquals(
+            "com.symmetricalpalmtree.notesproutsn.extension.SCRATCH_PAD_SCREEN",
+            ExtensionContract.ACTION_SCRATCH_PAD_SCREEN,
+        )
+    }
+
+    /** The scratch-pad transfer values: Paper's **shipped** constants (its S2 outcome), not the
+     *  pre-S2 table in its plan appendix — copying the wrong ones silently halves every transfer. */
+    @Test
+    fun scratchPadConstants() {
+        assertEquals("sendEnabled", ExtensionContract.EXTRA_SCRATCH_SEND_ENABLED)
+        assertEquals("openReceived", ExtensionContract.EXTRA_SCRATCH_OPEN_RECEIVED)
+        assertEquals(1, ExtensionContract.RESULT_SCRATCH_SEND)
+        assertEquals(0, ExtensionContract.PLACEMENT_NEW_PAGE)
+        assertEquals(1, ExtensionContract.PLACEMENT_CURRENT_PAGE)
+        assertEquals(10_000, ExtensionContract.MAX_TRANSFER_STROKES)
+        assertEquals(400_000, ExtensionContract.MAX_TRANSFER_POINTS)
+        assertEquals(300, ExtensionContract.TRANSFER_CHUNK_STROKES)
+        assertEquals(20_000, ExtensionContract.TRANSFER_CHUNK_POINTS)
+        assertEquals(34, ExtensionContract.TRANSFER_MAX_CHUNKS)
+        assertEquals("scratch page full", ExtensionContract.SCRATCH_PAGE_FULL)
+        // A chunk must never be able to exceed a whole transfer.
+        assertTrue(ExtensionContract.TRANSFER_CHUNK_STROKES <= ExtensionContract.MAX_TRANSFER_STROKES)
+        assertTrue(ExtensionContract.TRANSFER_CHUNK_POINTS <= ExtensionContract.MAX_TRANSFER_POINTS)
     }
 
     /** The store's caps and its one exact message (extensions compare it verbatim, not by substring). */

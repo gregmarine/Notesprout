@@ -24,6 +24,16 @@ object ExtensionContract {
     const val ACTION_HANDWRITING_RECOGNIZER: String =
         "com.symmetricalpalmtree.notesproutsn.extension.HANDWRITING_RECOGNIZER"
 
+    /** Intent action a scratch-pad `<service>` declares in its intent-filter (arc 11 / J3). */
+    const val ACTION_SCRATCH_PAD: String =
+        "com.symmetricalpalmtree.notesproutsn.extension.SCRATCH_PAD"
+
+    /** Intent action the scratch-pad extension's exported screen `<activity>` declares; the host
+     *  resolves it with `setPackage(<the discovered service's package>)` and launches it **for a
+     *  result** (a plain `startActivity` leaves `callingPackage` null and the screen refuses it). */
+    const val ACTION_SCRATCH_PAD_SCREEN: String =
+        "com.symmetricalpalmtree.notesproutsn.extension.SCRATCH_PAD_SCREEN"
+
     /** `<meta-data>` name (on the `<service>`) carrying the extension's API version. */
     const val META_API_VERSION: String =
         "com.symmetricalpalmtree.notesproutsn.extension.API_VERSION"
@@ -74,4 +84,39 @@ object ExtensionContract {
      * substring.
      */
     const val RECOGNIZER_NOT_READY: String = "recognizer not ready"
+
+    // ── Scratch pad (`IScratchPad`, arc 11 / J3) ──────
+    // The screen's launch extras / result code, the ink-transfer caps (host-enforced outward before
+    // any bind, re-checked inward on both sides) and the per-Binder-call chunk sizes. The values are
+    // Paper's **shipped** ones (its arc-6 S2 outcome), not its plan appendix's pre-S2 table.
+
+    /** Boolean launch extra — true when the pad is opened from a notebook (the pad shows its Send buttons). */
+    const val EXTRA_SCRATCH_SEND_ENABLED: String = "sendEnabled"
+
+    /** Boolean launch extra — true right after a `receiveInk` (the pad opens on the received page, strokes selected). */
+    const val EXTRA_SCRATCH_OPEN_RECEIVED: String = "openReceived"
+
+    /** Activity result code: the pad has outbound ink for `takeOutgoing` (= `Activity.RESULT_FIRST_USER`). */
+    const val RESULT_SCRATCH_SEND: Int = 1
+
+    /** `receiveInk` placement: a new page after the pad's current page / the current page itself. */
+    const val PLACEMENT_NEW_PAGE: Int = 0
+    const val PLACEMENT_CURRENT_PAGE: Int = 1
+
+    /** Most strokes / points (summed) in one transfer, either direction. */
+    const val MAX_TRANSFER_STROKES: Int = 10_000
+    const val MAX_TRANSFER_POINTS: Int = 400_000
+
+    /** Most strokes / points per Binder call (≈ 320 KB of floats — under the ~1 MB transaction budget
+     *  with headroom); the host chunks, the extension re-checks ([InkBundle.requireValid]). */
+    const val TRANSFER_CHUNK_STROKES: Int = 300
+    const val TRANSFER_CHUNK_POINTS: Int = 20_000
+
+    /** Most chunks the host drains on `takeOutgoing` (`ceil(MAX_TRANSFER_STROKES / TRANSFER_CHUNK_STROKES)`). */
+    const val TRANSFER_MAX_CHUNKS: Int = 34
+
+    /** The exact `IllegalStateException` message the scratch-pad extension throws from `receiveInk`
+     *  when the target page's encoded ink would exceed [STORE_MAX_VALUE_BYTES]. The host compares the
+     *  message, not a substring. */
+    const val SCRATCH_PAGE_FULL: String = "scratch page full"
 }

@@ -31,19 +31,28 @@ All root `CLAUDE.md` rules apply (Kotlin/17, kotlinx-serialization only, no new 
 deps without discussion, no Material Components, no `runBlocking` on main, `Slog.d` not
 `Log.d`, e-ink design system, Tabler icons only). Plus, for this app:
 
-- **Four modules, own Gradle root:** `:app` (the host), `:sn-screen` (the shared paper-screen
+- **Five modules, own Gradle root:** `:app` (the host), `:sn-screen` (the shared paper-screen
   library — arc 11 / J1: the design resources and the screen helpers both paper surfaces need,
   depends on g-paper + androidx only and **never** on `:app` or `:extension-api`),
   `:extension-api` (the contract library — depends on nothing in `:app`, stdlib only),
-  `:ext-mlkit` (the **NSE · ML Kit** extension APK). `gradle.properties` sets
+  `:ext-mlkit` (the **NSE · ML Kit** extension APK), `:ext-scratchpad` (the **NSE · Scratch Pad**
+  extension APK — arc 11 / J3: depends on `:extension-api` **and** `:sn-screen`, never `:app`;
+  no `tools:replace`, no libc++ `pickFirsts` — those are Paper's Onyx tax and SN has no Onyx).
+  `gradle.properties` sets
   `android.nonTransitiveRClass=false` so `:app`'s `R` keeps seeing the moved resources —
   the move needed no import sweep, and undoing that flag breaks every one of them.
 - **SN has TWO extension points** (arc-11 amendment to the arc-3 rule, on the user's explicit
   decision — which is exactly the "new user decision" that rule demanded):
   `ACTION_HANDWRITING_RECOGNIZER` / `IHandwritingRecognizer`, so other HWR engines can slot in
-  later (headings and the markdown engine are core), and `ACTION_SCRATCH_PAD` — the first
-  **screen-owning** point, served by the pad's own extension APK (the point itself lands in J3;
-  J2 shipped the store and the contract half). **No THIRD capability point may be added** without
+  later (headings and the markdown engine are core), and `ACTION_SCRATCH_PAD` / `IScratchPad` —
+  the first **screen-owning** point, served by `:ext-scratchpad` (J2 shipped the store and the
+  contract half; **J3 shipped the point**: the AIDL, `WireStroke` / `InkBundle` / `InkChunks`,
+  `ExtensionBinder.hold` + `HeldBinding` — SN's **only** bind held across more than one call,
+  because the operation is the showing of a screen — `ScratchPadClient`, `TransferCaps`, and the
+  APK with a stub screen; the real screen is J4, the transfers J5). Its screen is exported under
+  `ACTION_SCRATCH_PAD_SCREEN` with `<category DEFAULT>` and refuses any caller that is not a
+  `startActivityForResult` from the host (`HostCallerCheck.enforceActivity`), so the host **must**
+  launch it with an `ActivityResultLauncher`. **No THIRD capability point may be added** without
   another user decision. Extensions get one host service, the
   **extension store** (`IExtensionStore`, `data/extstore/`, `docs/extensions.md` § "The extension
   store"): per-package, encrypted under the global key at `Garden/<pkg>.db`, minted per bind,

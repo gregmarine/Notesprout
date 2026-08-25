@@ -159,7 +159,8 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   the right edge with its 2 dp rule on the left (the ToC's own rule thickens to 2 dp to match),
   a two-finger swipe down as its second entry point, and a tap that seals this notebook and
   opens that one. No new store: `sn_recents` plus index lookups.
-  **Arc 11 "Scratch Pad"** (planned 2026-08-24, J1–J6, not started): Paper's arc-6 scratch pad
+  **Arc 11 "Scratch Pad"** (planned 2026-08-24; **J1 ✅ `12fe218` · J2 ✅ `cd8a918` · J3 ✅** —
+  J4–J6 to go): Paper's arc-6 scratch pad
   ported **as an extension** — the user's explicit call, and the "fresh user decision" the
   extension rule requires before SN may hold a second capability point. It is SN's first
   **screen-owning** point (`SCRATCH_PAD`, tier 2): `NSE · Scratch Pad` owns its own g-paper
@@ -168,8 +169,11 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   extension need the notebook screen's parts; the alternative was the `RattaNotebookView`
   sibling-copy trap), and the **full extension store** (encrypted per-package KV + ashmem large
   values), which amends two standing rules in `apps/notesprout_ratta/CLAUDE.md` by name. Entry
-  points: the library's bottom bar after Recents, the notebook's top bar before Recents. The
-  headline risk is the EPD handoff — two paper surfaces in two processes, an SN first.
+  points: the library's bottom bar after Recents, the notebook's top bar before Recents. J3 landed
+  the point itself — `IScratchPad`, `WireStroke` / `InkBundle`, `ExtensionBinder.hold` (SN's only
+  bind held across more than one call), `ScratchPadClient`, and the `:ext-scratchpad` APK with a
+  stub screen. The headline risk is still ahead: the EPD handoff — two paper surfaces in two
+  processes, an SN first, and J4's first-ever `releaseForHandoff` call in this app.
   **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for any work there** — it holds the
   per-arc status, locked decisions, working protocol, and model recipe.
 - `germination` — previous post-MVP feature branch (reference, not active)

@@ -17,7 +17,7 @@ data class ProviderRef(
 )
 
 /**
- * Discovery + trust for SN's one extension point. A candidate `<service>` is kept only if it is
+ * Discovery + trust for SN's two extension points. A candidate `<service>` is kept only if it is
  * exported, its `<meta-data>` API version equals [ExtensionContract.API_VERSION], and it is signed
  * with the host's own certificate (`checkSignatures == SIGNATURE_MATCH` — same-signature only).
  * Everything else is skipped with a `Slog.d`. Disabled packages/components are never returned by the
@@ -35,6 +35,17 @@ object ExtensionRegistry {
     suspend fun handwritingRecognizer(context: Context): ProviderRef? = withContext(Dispatchers.IO) {
         val all = discover(context.applicationContext, ExtensionContract.ACTION_HANDWRITING_RECOGNIZER)
         for (extra in all.drop(1)) Slog.d(TAG) { "ignoring additional recognizer ${extra.component.flattenToShortString()}" }
+        all.firstOrNull()
+    }
+
+    /**
+     * The one trusted scratch pad, or null (arc 11 / J3). Same filter and same first-wins rule: a
+     * second installed pad is ignored with a `Slog.d`. Re-run on every resume of a screen that shows
+     * the pad's entry button — a package can be disabled or replaced under it.
+     */
+    suspend fun scratchPad(context: Context): ProviderRef? = withContext(Dispatchers.IO) {
+        val all = discover(context.applicationContext, ExtensionContract.ACTION_SCRATCH_PAD)
+        for (extra in all.drop(1)) Slog.d(TAG) { "ignoring additional scratch pad ${extra.component.flattenToShortString()}" }
         all.firstOrNull()
     }
 
