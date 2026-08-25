@@ -2742,7 +2742,7 @@ extends to not-built); `ScratchAction` has no `Pasted`; `ScratchPadEntry.onResul
 `ScratchPadClient.send` / `drainOutgoing` are wired but unexercised.
 
 ### J5 — The two transfers
-**Status:** ✅ Complete (Nomad-verified + user-verified 2026-08-25)
+**Status:** ✅ Complete (commit cc0ba79, Nomad-verified + user-verified 2026-08-25)
 
 Both directions are **copies**, cross **only through the held service** — never the Intent, never a
 file — carry **no ids** (fresh ids minted on the receiving side), and keep **coordinates 1:1**
