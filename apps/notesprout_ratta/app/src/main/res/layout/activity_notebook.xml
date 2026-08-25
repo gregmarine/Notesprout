@@ -72,6 +72,19 @@
                 android:src="@drawable/ic_lasso"
                 android:contentDescription="@string/cd_tool_lasso"/>
 
+            <!-- Everything above is a tool; Recents is not, so the row's free space sits here and
+                 pushes it to the far edge — the same edge its panel comes in from (arc 10). -->
+            <View
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_weight="1"/>
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnRecents"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_clock"
+                android:contentDescription="@string/cd_recents"/>
+
         </LinearLayout>
 
         <!-- Bar's bottom border -->

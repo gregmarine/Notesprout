@@ -2088,6 +2088,120 @@ next arc is **not planned — ask first**.
 
 ---
 
+## Phases — Arc 10 "Recents" (planned 2026-08-24, wizard complete)
+
+og's **in-notebook recents** — the "Recent Notebooks" switcher on the notebook toolbar — fitted to
+SN and **mirrored to the right**: the button sits flush at the top bar's right edge, the panel slides
+in as a right sidebar (og's and the ToC's are both on the left), and a **two-finger swipe down**
+opens it the way a one-finger swipe down opens the Contents. Tapping a row seals this notebook and
+opens that one. While it is built, the ToC panel's edge rule thickens to 2 dp and the new panel takes
+the same rule on its left edge.
+
+### Locked decisions (arc-10 wizard 2026-08-24 — do not re-ask)
+
+| Decision | Answer |
+|---|---|
+| What it lists | **Recently opened notebooks** (og parity) — not recent pages. The **current notebook is excluded**; tap = switch to that notebook. |
+| Store | SN's existing `data/prefs/RecentsPrefs` (`sn_recents`, id + timestamp, MAX 20) — the same store the library's Recents shelf reads. **No new store, no schema change, nothing in the index or any `.soil`.** |
+| Timestamp | **og's close bump**: `RecentsPrefs.touch()` re-stamps the notebook when it closes, so a row reads "when I last put it down". Ordering is unaffected (the open already moved it to the front). Written exactly once per screen — `close()` and the `onDestroy` fallback are mutually exclusive on `closing`. |
+| Row | **og parity — three lines**: notebook name · `<medium date>, <time>` (device format) · the full breadcrumb (`Notebooks › A › B`). Names and paths are resolved **from the index at gather time** — the prefs store must never learn a name. |
+| Panel shape | **The ToC mirrored.** One layout, two forms on `ContentsLayout.fullScreen` (< 480 dp full screen, else a sidebar) — the breakpoint is shared, the **width is not: 50 %** (`RecentRows.SIDEBAR_WIDTH_FRACTION`, user's call at T1 — the ToC's 60 % is more than a name/time/path row needs; the ToC keeps 60 %) — and anchored **right**, with the header mirrored too: title first, back/close arrow at the panel's right edge. Same 68 dp rows, same first/prev/next/last pager, same paginate-never-scroll rule, same scrim-tap dismissal. |
+| Availability | **Always visible** (og). No availability gate, no `refresh()` machinery: an empty list shows "No recent notebooks", and the two-finger swipe always opens the panel. |
+| Toolbar placement | **Flush against the bar's right edge** — a weighted spacer after Lasso. Icon `ic_clock` (Tabler, already in the app, og's icon for this button). |
+| Gesture | **Two-finger swipe down** — the two-finger centroid judged by the flip rule rotated 90°, exactly as the one-finger vertical swipe already is. **Two-finger up is unassigned** (silently nothing). Two-finger horizontal keeps inserting a page; dominance keeps them exclusive. |
+| The hop | Row tap → dismiss → "Opening…" → `close { startActivity(...) }`, the link-follow path's seal-then-launch. The target opens at its own remembered page. **Nothing is pushed onto the link trail** — a switch is not a follow, so Back in the target exits to the library. It *is* a fresh non-via-link open, so `onCreate`'s standing rule **clears** the trail on arrival, which is the wanted behaviour: a trail surviving a switch would let a link followed later in the new notebook walk back into the one you switched away from. (Corrected at T1 review — the wizard's "not cleared" was wrong.) |
+| Panel edge | **2 dp** inkBlack (was 1 dp): ToC on its right edge, Recents on its left. |
+| Arc shape | **One phase** (T1) — panel + button + gesture + borders, then review/docs/freeze in the same phase. Nothing here eye-checks until it is whole. |
+| Staffing | **No background agents this arc** (user's call) — implemented in-session; device work is adb from here plus the user's eye check. |
+
+### Arc-10 standing traps
+
+- **The panel must raise `BLOCK_ALL`** while it is up, like the Contents dialog: the Ratta ink daemon
+  draws firmware ink beneath any Android window, so a full-height panel over the paper needs the whole
+  surface excluded, and the chrome rects back on dismiss.
+- **A dialog outliving a finishing Activity is a window leak** — the recents dialog joins
+  `contentsFlow.dismissIfShowing()` in *both* `close()` and `onDestroy`.
+- The two-finger detector is judged at `ACTION_POINTER_UP` (back to one finger) and at 3+ fingers.
+  A vertical evaluation must be added at **every** place the horizontal one is, or the swipe fires
+  only on some lifts.
+- A two-finger swipe that starts as one finger travelling far before the second lands is committed by
+  the existing **late-arrival rule** as a *one*-finger swipe → the Contents opens. That is the rule
+  arc 4 chose; land the second finger with the first.
+- `IndexRepository.alive()` reads the **whole row, cover blob included** — never use it for twenty
+  ids. The panel uses one blob-free batch query (`ObjectDao.aliveNotebooks`).
+- adb cannot lasso or drag, but it **can** tap and `input swipe` (finger paths work — R4). A device
+  agent can drive the button, the pager, a row tap and the swipe; only the EPD look is the user's eye.
+
+### T1 — Recents panel + toolbar button + two-finger swipe + panel edges
+**Status:** 🧪 Awaiting the user's eye check — built, reviewed, Nomad-verified as far as adb reaches;
+committed on the user's instruction (see Outcome). The two-finger swipe and the panel-edge look are
+the only untested things, and neither is injectable.
+
+New: `data/index/ObjectDao.aliveNotebooks` (blob-free batch) + `IndexRepository.aliveNotebooks`;
+`RecentsPrefs.touch()`; `notebook/RecentRows` (pure: stored order, drop dead/current/dupes → display
+rows; JVM-tested); `notebook/RecentsSource` (the IO gather + breadcrumbs + prune);
+`notebook/RecentsFlow` (busy guard, pen-gated `releaseRender`, gather → dialog, `showing` →
+exclusions, `dismissIfShowing`); `notebook/RecentsDialog` (the mirrored panel);
+`layout/dialog_recents.xml`, `layout/item_recent_entry.xml`, `drawable/shape_recents_sidebar.xml`,
+strings. Changed: `shape_contents_sidebar` 1 dp → 2 dp; `activity_notebook.xml` (spacer + `btnRecents`);
+`PageGestures` (two-finger vertical → `onTwoFingerSwipeDown`); `NotebookActivity` (wiring, the hop,
+`BLOCK_ALL`, close hygiene, the close bump).
+**Gate:** JVM tests (`RecentRows`, the gesture's pure rules where they exist); `./gradlew test` green;
+debug + release build; Nomad install + `logcat -b crash` empty; adb walk (button opens the panel,
+rows render, pager, a row tap switches notebooks, the swipe opens it); **user eye check** (panel edge
+weight both sides, right-anchored feel, the two-finger swipe, the switch); `/code-review`; docs
+(`docs/notebook.md`, both `CLAUDE.md`s) + memory; commit + push; arc freeze.
+
+**Built (2026-08-24), in-session, no agents (the user's staffing call).** The panel is the Contents
+dialog seen from the other side, and building it that way — same layout skeleton, same pagination
+contract, same BLOCK_ALL / dismiss-hygiene wiring — is why it cost four small files instead of a
+subsystem. New: `RecentRows` (pure: stored-order selection with the current notebook dropped, the
+breadcrumb join, the sidebar fraction, `itemsPerPage`), `RecentsSource` (the IO gather),
+`RecentsFlow`, `RecentsDialog`, `dialog_recents.xml` / `item_recent_entry.xml` /
+`shape_recents_sidebar.xml`, plus `ObjectDao.aliveNotebooks` (blob-free batch),
+`RecentsPrefs.touch()`, the gesture's vertical twin, and `NotebookActivity.switchToNotebook`.
+`shape_contents_sidebar` went 1 dp → 2 dp with its hidden-edge insets widened past the stroke.
+
+**The width changed after the first device look:** the user cut the panel from the ToC's 60 % to
+**50 %** — a row is a name, a time and a path, and the ToC's width was empty space. Only the width
+forked; the 480 dp full-screen breakpoint stays shared with `ContentsLayout`, so "a sidebar doesn't
+fit here" is still decided in one place.
+
+**Review (`/code-review high`, pre-commit working tree) — two findings, both real, both fixed.**
+Neither was in the new subsystem's logic; both were about telling the truth:
+
+1. **The hop clears the link trail — the code was right and three pieces of prose were wrong.** The
+   switch launches without `viaLink`, so `onCreate`'s standing "a fresh open starts a new story" rule
+   clears the trail; the KDoc, `docs/notebook.md` and this file's locked-decision row all said "not
+   cleared" (the wizard's answer, taken too literally). Clearing is what you want: a trail left
+   standing across a switch would let a link followed later in the *new* notebook walk back into the
+   notebook you switched away from. All three corrected rather than the code.
+   **Standing lesson: when a review finds code and comment disagreeing, decide which one is right
+   before reaching for the editor** — here the comment was the defect.
+2. **An index-read failure was reported to the user as "It was deleted".** `switchToNotebook` folded
+   every exception into `null`, and `null`'s only message is the deleted-row dialog — so a transient
+   read fault (the class `ContentsFlow` already degrades on) would have told someone their notebook
+   was gone, repeatably, and they had no way to check. The read is a `runCatching` now: failure logs
+   and says "The library couldn't be read just now"; `recents_gone_body` is reserved for a genuinely
+   absent row.
+
+The reviewer separately cleared by reading: the vertical evaluation is present at **both** places the
+horizontal one is and dominance keeps the paired calls mutually exclusive; `touch()` writes exactly
+once per screen and never reorders; the BLOCK_ALL / `dismissIfShowing` / busy-reset paths match the
+Contents precedent; the check-then-raise-overlay ordering avoids B3's stranded-overlay hazard; and
+the 2 dp strokes render at full weight given the −4 dp insets (`GradientDrawable` insets a stroked
+rect by half its width).
+
+**Verified:** 489 JVM tests green (+14: `RecentRowsTest`), debug + release build, installed on the
+Nomad. adb walk: the button opens the panel (17 rows over 2 pages, the open notebook absent), the
+pager pages, a row tap switched into "Test 04" at 1/4, Back landed in the library (not a trail walk),
+reopening showed Test 04 at the top stamped with its **close** time — the bump working end to end —
+the one-finger swipe-down still opens the Contents, the scrim dismisses, `panel=702px` of 1404 after
+the width change, crash buffer empty throughout. **adb cannot inject multi-touch**, so the two-finger
+swipe is the user's eye check, as is the 2 dp rule's weight on e-ink. Version stays `0.1.0-ratta`.
+
+---
+
 ## Verification (end of arc)
 
 1. All JVM unit tests green (`./gradlew test` in `apps/notesprout_ratta`).

@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Contents sidebar panel (sidebar form, wide windows): paperWhite with a 1dp inkBlack border on
-     the right edge only (the other three edges are pushed out of bounds). -->
+<!-- Contents sidebar panel (sidebar form, wide windows): paperWhite with a 2dp inkBlack border on
+     the right edge only (the other three edges are pushed out of bounds — the inset is wider than
+     the stroke, or the pushed-out edges would still graze the panel). Recents' mirror image is
+     shape_recents_sidebar.xml; the two rules are the same weight by design. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:top="-2dp" android:bottom="-2dp" android:left="-2dp">
+    <item android:top="-4dp" android:bottom="-4dp" android:left="-4dp">
         <shape android:shape="rectangle">
-            <stroke android:width="1dp" android:color="@color/inkBlack" />
+            <stroke android:width="2dp" android:color="@color/inkBlack" />
             <solid android:color="@color/paperWhite" />
         </shape>
     </item>

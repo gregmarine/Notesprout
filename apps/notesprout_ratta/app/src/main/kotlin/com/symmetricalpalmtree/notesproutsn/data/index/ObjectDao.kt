@@ -29,6 +29,17 @@ interface ObjectDao {
     )
     suspend fun childrenOfType(parentId: String?, type: String): List<ObjectSummary>
 
+    /**
+     * The alive notebooks among [ids], blob-free and in no particular order (arc 10 — the notebook's
+     * Recents panel resolves up to twenty ids at once). Deliberately **not** [byId]/`alive`, which
+     * read the whole row: twenty cover blobs is a megabyte the panel never draws.
+     */
+    @Query(
+        "SELECT $SUMMARY_COLS FROM objects " +
+        "WHERE id IN (:ids) AND type = 'notebook' AND deletedAt IS NULL"
+    )
+    suspend fun aliveNotebooks(ids: List<String>): List<ObjectSummary>
+
     @Query(
         "SELECT count(*) FROM objects WHERE type = :type AND deletedAt IS NULL AND name = :name AND " +
         "((:parentId IS NULL AND parentId IS NULL) OR parentId = :parentId) AND id <> :excludeId"

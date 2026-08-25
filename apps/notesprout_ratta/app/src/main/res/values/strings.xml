@@ -252,4 +252,12 @@
     <string name="link_target_notebook_gone_body">The notebook this link points to no longer exists.</string>
     <string name="link_target_page_gone_body">The page this link points to no longer exists.</string>
     <string name="link_target_unreadable_body">This link was made by a newer or different version of Notesprout, so where it points can\'t be read here.</string>
+
+    <!-- Recents in the notebook (arc 10). cd_recents is shared with the library's shelf button. -->
+    <string name="recents_title">Recent notebooks</string>
+    <string name="recents_empty">No recent notebooks</string>
+    <string name="recents_when">%1$s, %2$s</string>
+    <string name="recents_gone_title">Can\'t open that notebook</string>
+    <string name="recents_gone_body">It was deleted while the list was open.</string>
+    <string name="recents_read_failed_body">The library couldn\'t be read just now. Please try again.</string>
 </resources>

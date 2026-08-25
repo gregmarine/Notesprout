@@ -3,6 +3,7 @@ package com.symmetricalpalmtree.notesproutsn.data.clip
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectDao
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectEntity
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectSummary
+import com.symmetricalpalmtree.notesproutsn.data.index.ObjectType
 
 /** Minimal in-memory `objects` table — enough for [ClipStoreTest]; Room is not what is under test. */
 class FakeObjectDao : ObjectDao {
@@ -20,6 +21,11 @@ class FakeObjectDao : ObjectDao {
 
     override suspend fun childrenOfType(parentId: String?, type: String) =
         rows.values.filter { it.type == type && it.deletedAt == null && it.parentId == parentId }.map { it.toSummary() }
+
+    override suspend fun aliveNotebooks(ids: List<String>) =
+        ids.mapNotNull { rows[it] }
+            .filter { it.type == ObjectType.NOTEBOOK && it.deletedAt == null }
+            .map { it.toSummary() }
 
     override suspend fun countSiblingsNamed(parentId: String?, type: String, name: String, excludeId: String) =
         rows.values.count {

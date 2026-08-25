@@ -35,7 +35,7 @@ deliberate differences are listed at the end.
 | `core/RecognizingOverlay` (N2) | the "Recognizing…" box during a convert — `OpeningOverlay`'s smaller, dialog-free sibling |
 | `notebook/InkPayload` (N2) | `Stroke` (g-paper) → `InkStroke` (extension-api) in writing order — the one place a page's ink is reduced to bare geometry for the recognizer |
 | `CoverSnapshot` | `paper.renderToBitmap()` → ≤ 512 px long edge → WEBP q100 → `IndexRepository.setCover`; headings ride along for free (`HeadingRenderer` is part of the same committed-layer render) |
-| `NotebookToolbar` | `[←] [pen] [eraser] [lasso]` — arming only; owns the fixed tool values. Back goes through `backPressed()`, never straight to `close()` (K4 — both Backs walk the link trail in a via-link notebook). O1: a second tap on the **armed lasso** calls back to the screen (the clipboard popup), and `showClipboardLoaded()` swaps that button's icon |
+| `NotebookToolbar` | `[←] [contents] [pen] [eraser] [lasso] … [recents]` — arming only; owns the fixed tool values (the Contents and Recents buttons belong to their flows, not to it). Back goes through `backPressed()`, never straight to `close()` (K4 — both Backs walk the link trail in a via-link notebook). O1: a second tap on the **armed lasso** calls back to the screen (the clipboard popup), and `showClipboardLoaded()` swaps that button's icon |
 | `SelectionToolbar` | the floating bar over a live lasso selection: Delete (always) + H, plus (K1) **Link** / **Edit** / **Unlink** by `SelectionMode` (five modes since K1), plus (O1) **Copy** / **Cut** in every mode, plus (N2) the H1–H6 level sub-toolbar it can open |
 | `LassoPopup` (O1) | the small bordered bar under the **armed** lasso button: **Paste** + **Clear** for the object clipboard. Opens only while the clipboard holds objects; the screen owns every dismissal |
 | `ObjectClip` (O1) | pure selection ⇄ clipboard payload — capture, fresh ids, parent rewiring, the per-type `"order"` rebase, geometry translation (stroke = decode/translate/re-encode). JVM-tested. [`docs/clipboard.md`](clipboard.md) |
@@ -48,6 +48,10 @@ deliberate differences are listed at the end.
 | `ContentsSource` (C1) | the gather (IO): writer drain → `liveHeadingsAll()` → the pure `items()` pass (live-page filter, `stripHeadingPrefix` label, `flags` level, document order, the 2000 cap) → `OutlineTree.build`. No cache — rebuilt every open |
 | `ContentsFlow` (C1) | what both entry points call: busy guard, the `available` gate + generation-counted `refresh()`, pen-gated `releaseRender`, gather → `ContentsDialog`, `showing` (drives the host's BLOCK_ALL), `dismissIfShowing()` for the close path. Owns `btnContents` outright |
 | `ContentsDialog` (C1) | the Contents screen: one layout, two forms (sidebar/full-screen), paginated rows, collapsible tree, active-entry highlight, tap = navigate |
+| `RecentRows` (T1) | pure Recents arithmetic: stored order wins, the open notebook and dead/duplicate ids dropped, the breadcrumb join, `itemsPerPage`. JVM-tested |
+| `RecentsSource` (T1) | the Recents gather (IO): `sn_recents` → one blob-free batch index read (`aliveNotebooks`) → prune → one ancestry walk per distinct parent → display rows. Touches no `.soil` |
+| `RecentsFlow` (T1) | what the clock button and the two-finger swipe-down both call: busy guard, pen-gated `releaseRender`, gather → `RecentsDialog`, `showing` (drives BLOCK_ALL), `dismissIfShowing()`. Owns `btnRecents` outright |
+| `RecentsDialog` (T1) | the Recents screen: `dialog_contents.xml` mirrored to the right (2 dp rule on the left edge), three-line rows, measured pagination, tap = switch notebooks |
 
 ## Layout (`activity_notebook.xml`)
 
@@ -58,6 +62,10 @@ bottom border) → `bottomStrip` overlay ("`<name>` `n / N`", 1dp top border) �
 placed by `SelectionAnchor.placeSub` off the main bar when H is tapped) → `openingOverlay` (an
 `<include>` of `overlay_opening.xml`, **last child so it is topmost**, and `VISIBLE` from the first
 frame). Immersive: system bars hidden, transient by swipe. Portrait-locked.
+
+The `topBarRow` is left-packed — Back, a 12 dp gap, then Contents / Pen / Eraser / Lasso — with a
+**weighted spacer** after the Lasso holding the row's free space, so `btnRecents` (T1) sits flush at
+the right edge and everything to its left keeps its position whatever the screen width.
 
 Both bars — and both selection bars while they are up — are pushed to `paper.setExclusionRects`
 after every root layout pass, translated into the paper view's coordinates, so the stylus can never
@@ -700,6 +708,67 @@ parents, level clamp, `visible`/`all`/`highlight`/`ancestorsOf`, paging edges, t
 indent math), and `ContentsSourceTest` (the pure `items()` pass: prefix strip + `flags` level via
 `HeadingRows`, dead-page and malformed and blank-label drops, document order, the 2000 cap + bit).
 
+## Recents (arc 10)
+
+og's in-notebook **Recent Notebooks** switcher, fitted to SN and **mirrored to the right** — the ToC
+seen from the other side. It lists the notebooks you have opened recently and switches to the one you
+tap. Nothing about it is stored anywhere new: it reads the same device-local `sn_recents`
+`SharedPreferences` the library's Recents shelf reads (`data/prefs/RecentsPrefs` — **id and timestamp
+only**, so a notebook's name never reaches plaintext prefs), and resolves names and folder paths from
+the global index at gather time. No schema change, nothing in any `.soil`.
+
+**Entry points:** `btnRecents` (Tabler `clock`) **flush at the top bar's right edge** — a weighted
+spacer after the Lasso puts it there, because it is not a tool and its panel comes in from that side
+— and a **two-finger swipe down** on the paper. Unlike the Contents, neither is gated: the button is
+always visible and the swipe always acts, because "nothing recent" is a real answer the panel gives
+("No recent notebooks") rather than a reason to hide a control.
+
+**The timestamp is a close stamp.** `RecentsPrefs.record()` still runs at `onCreate` — opening is what
+puts a notebook at the front of the list — and `RecentsPrefs.touch()` now re-stamps it as the screen
+goes away, so a row reads *when you last put the notebook down*, not when you picked it up. `touch()`
+never inserts and never reorders (the open already moved it to the front); `close()` and the
+`onDestroy` fallback are mutually exclusive on `closing`, so exactly one stamp is written per screen.
+
+**The gather** (`RecentsSource`, IO): every stored id in one **blob-free batch** index read
+(`ObjectDao.aliveNotebooks` — `IndexRepository.alive()` reads whole rows, cover blob included, which
+is a megabyte the panel never draws), ids that no longer resolve pruned from the store in the same
+pass (self-healing, like the library shelf), then one ancestry walk per *distinct* parent folder for
+the breadcrumb. The open notebook is looked up like any other — it is health-checked and only then
+dropped from the display list, because excluding it earlier would make it the one id the prune could
+never verify. Ordering is `RecentRows.select`: **stored order wins**, dead ids out, duplicates
+collapsed, the current notebook never listed. Logs counts and durations — never a name.
+
+**The screen** (`RecentsDialog`): `dialog_recents.xml` is `dialog_contents.xml` mirrored — panel
+anchored `end`, its 2 dp inkBlack rule on the **left** edge (`shape_recents_sidebar`), header running
+title-then-arrow so the dismissal sits nearest the edge the panel came from. The 480 dp full-screen
+breakpoint is shared with `ContentsLayout` — "a sidebar doesn't fit here" is decided once — but the
+width is its own: `RecentRows.SIDEBAR_WIDTH_FRACTION` = **50 %** (702 px on the Nomad), narrower than
+the Contents' 60 %, because a row is a name, a time and a path. Rows are three lines — name 20 sp, `<medium date>, <time>` and the full
+breadcrumb at 13 sp, all inkBlack (the palette rule: secondary text is *smaller*, never grey). It
+paginates, never scrolls: one row is inflated and **measured** at the real panel width after the first
+layout (three lines at two text sizes is not a height worth guessing) and `RecentRows.itemsPerPage`
+follows, with the library-shape pager footer `INVISIBLE` at one page.
+
+**The hop** (`NotebookActivity.switchToNotebook`): the panel is a snapshot, so the tapped notebook is
+re-checked against the index first — gone → the "Can't open that notebook" problem dialog, and this
+screen stays. Otherwise the link-follow's order exactly: raise the "Opening…" box, and only once its
+frame is on the glass `close { startActivity(…) }` — one live session per `.soil`, family-wide.
+Deliberately **not a follow**: nothing is pushed onto the link trail and the target opens without
+`viaLink`, so its Back exits to the library. Being a fresh open, it takes the library's rule with it
+— `onCreate` **clears** the trail on arrival — and that is deliberate, not a side effect: a trail
+left standing across a switch would let a link followed later in the *new* notebook walk back into
+the notebook you switched away from. A switch starts a new story.
+
+**BLOCK_ALL while showing**, on the Contents' reasoning and through the same `pushExclusions()`
+branch; `close()` and the `onDestroy` fallback both call `RecentsFlow.dismissIfShowing()`.
+
+### JVM tests specific to the Recents
+
+`RecentRowsTest` — stored order kept against both an alphabetical and a chronological trap, the
+current notebook dropped (including a duplicate of it), dead ids dropped, duplicates collapsed,
+nothing invented, the breadcrumb's root-only and nested forms, and `itemsPerPage` (whole rows, ≥ 1,
+and no divide-by-zero on an unmeasured row).
+
 ## Pages
 
 A notebook is an ordered list of `page` rows under the notebook row; `"order"` is kept **dense,
@@ -749,6 +818,7 @@ paper is full-bleed and the chrome is two thin bars.
 | 1-finger vertical swipe ↑ | walk back the link trail (K4 — silent while the trail is empty; [`docs/links.md`](links.md)) |
 | 1-finger tap on a link | follow it (K4 — finger only, never stylus; the escrowed inverse-recogniser tap below) |
 | 2-finger horizontal swipe ← / → | insert a page after / before this one |
+| 2-finger vertical swipe ↓ | open the **Recents** (T1 — its upward twin is unassigned) |
 | 2-finger stationary double-tap | undo |
 | 3-finger stationary double-tap | redo |
 | 1-finger long-press | the **page sheet** — Copy / Cut / Paste / Delete (B1; [`docs/clipboard.md`](clipboard.md)) |
@@ -772,8 +842,15 @@ travel, under the long-press timeout, single-finger, judged at `ACTION_UP` with 
 reported — and it rides the same escrow as the double-taps below, so a pen tail can veto it late.
 The two-finger swipe measures the two-finger centroid and
 commits at `POINTER_UP` back to 2→1 fingers; a third finger landing mid-swipe commits a qualifying
-insert before it dies, and a second finger landing on an already-qualifying one-finger swipe
+gesture before it dies, and a second finger landing on an already-qualifying one-finger swipe
 commits the flip for the same reason.
+
+The **two-finger vertical** swipe (T1) is the insert's rule rotated 90°, evaluated at every place the
+insert is — the `POINTER_UP` back to one finger, and the 3+-finger commit — and, like the one-finger
+pair, mutually exclusive with it by dominance. Only **down** is claimed: it opens the Recents panel.
+A consequence of the late-arrival rule above: a two-finger swipe whose first finger has already
+travelled a qualifying distance before the second lands is committed as a *one*-finger swipe, so it
+opens the Contents instead — land both fingers together.
 
 **Pen-gating.** A resting palm produces MotionEvents a writing stylus does not, so no recogniser
 arms while `isPenActive`, every one re-checks the gate before it fires, and the two double-taps are
@@ -926,12 +1003,12 @@ boundary**, never under live ink:
 5. the **selection toolbar's re-show / sub-row toggle on its own taps** (N2 — the H toggle, a level
    pick and the post-edit re-anchor are all responses to a deliberate chrome tap, the same
    justification as its original show; each tap goes through `releaseRender()` first);
-6. the **Contents dialog's show/hide** (C1 — the show follows a deliberate act that already passed
-   a pen gate: a chrome tap on `btnContents`, or a swipe committed through `PageGestures`'
-   `gateOpen()`; the hide is a deliberate row / scrim / back tap. Both are screen boundaries, never
-   a repaint under live ink, and `ContentsFlow` pen-gates its `releaseRender` first. Deliberately
-   *not* idle-gated — `isPenActive` counts hover, and a hovering pen would hold the screen hostage,
-   the same reason as exceptions 2 and 3).
+6. the **Contents and Recents dialogs' show/hide** (C1, and T1 riding the same exception — the show
+   follows a deliberate act that already passed a pen gate: a chrome tap on `btnContents` /
+   `btnRecents`, or a swipe committed through `PageGestures`' `gateOpen()`; the hide is a deliberate
+   row / scrim / back tap. Both are screen boundaries, never a repaint under live ink, and both
+   flows pen-gate their `releaseRender` first. Deliberately *not* idle-gated — `isPenActive` counts
+   hover, and a hovering pen would hold the screen hostage, the same reason as exceptions 2 and 3).
 7. the **object paste's frame at pen-up, and the lasso popup's show/hide** (O1). The paste is the
    direct visible result of a deliberate tap: the pasted content, the selection box and the bar all
    land in one frame at the *tap's* pen-up, where nothing is being written — the same justification
@@ -943,6 +1020,10 @@ boundary**, never under live ink:
    contact, a page swap, a paste, a clear.
 
 R3's exception — the tool-panel close at stylus pen-up — is **retired**: P1 removed the panels.
+
+**Arc 10 added no new exception**: the Recents panel is folded into exception 6 above (it is the
+Contents dialog's act, mirrored), and its button never changes visibility, so the chrome it owns
+presents no frame of its own.
 
 **Arc 9 added no new exception**: the Snap button re-styles itself on its own deliberate chrome tap,
 through `releaseRender()` first — exception 5 exactly. The guide lines themselves are drawn by

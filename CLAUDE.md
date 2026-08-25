@@ -154,6 +154,11 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   2026-08-24: og's snap-to-guide for a dragged selection — necessarily built into g-paper
   0.1.6 (`SnapEngine`), since the engine owns every drag sample — with a remembered toggle
   on the selection toolbar and margin guides one measured toolbar in from each page edge.
+  **Arc 10 "Recents"** (T1, in progress): og's in-notebook Recent-Notebooks switcher, mirrored
+  to the right — a clock button flush at the top bar's right edge, the ToC's panel anchored to
+  the right edge with its 2 dp rule on the left (the ToC's own rule thickens to 2 dp to match),
+  a two-finger swipe down as its second entry point, and a tap that seals this notebook and
+  opens that one. No new store: `sn_recents` plus index lookups.
   **The next arc is not planned — ask first.**
   **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for any work there** — it holds the
   per-arc status, locked decisions, working protocol, and model recipe.

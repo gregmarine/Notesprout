@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Recents sidebar panel (sidebar form, wide windows): paperWhite with a 2dp inkBlack border on
+     the LEFT edge only — the mirror of shape_contents_sidebar.xml, because this panel comes in from
+     the right. The other three edges are pushed out of bounds by more than the stroke's width. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:top="-4dp" android:bottom="-4dp" android:right="-4dp">
+        <shape android:shape="rectangle">
+            <stroke android:width="2dp" android:color="@color/inkBlack" />
+            <solid android:color="@color/paperWhite" />
+        </shape>
+    </item>
+</layer-list>

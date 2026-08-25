@@ -28,6 +28,11 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
             ObjectSummary(it.id, it.type, it.name, it.parentId, it.createdAt, it.updatedAt, it.pageCount, it.flags, it.templateKind)
         }
 
+    /** The alive notebooks among [ids], blob-free, keyed by id (arc 10 — one read for a whole
+     *  recents list; [alive] would drag a cover blob per row). Empty [ids] never hits the database. */
+    suspend fun aliveNotebooks(ids: List<String>): Map<String, ObjectSummary> =
+        if (ids.isEmpty()) emptyMap() else dao.aliveNotebooks(ids).associateBy { it.id }
+
     /** True when an alive sibling of [type] named [name] exists under [parentId] (excluding [excludeId]). */
     suspend fun nameTaken(parentId: String?, type: String, name: String, excludeId: String = ""): Boolean =
         dao.countSiblingsNamed(parentId, type, name, excludeId) > 0

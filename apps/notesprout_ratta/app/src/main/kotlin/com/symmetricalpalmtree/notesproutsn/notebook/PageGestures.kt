@@ -20,6 +20,7 @@ import kotlin.math.hypot
  * | 1-finger vertical swipe down | open the Contents (arc 4) |
  * | 1-finger vertical swipe up | walk the link trail back (arc 6) |
  * | 2-finger horizontal swipe | insert a page before / after this one |
+ * | 2-finger vertical swipe down | open the Recents (arc 10); a 2-finger swipe up is unassigned |
  * | 2-finger stationary double-tap | undo |
  * | 3-finger stationary double-tap | redo |
  * | 1-finger long-press | ask to delete the page |
@@ -64,6 +65,9 @@ class PageGestures(
         fun onPageSheetRequested() {}
         /** A qualifying one-finger swipe DOWN (arc 4 — the Contents). */
         fun onSwipeDown() {}
+        /** A qualifying **two**-finger swipe DOWN (arc 10 — the Recents). Its upward twin is
+         *  deliberately unassigned, so there is nothing to be exclusive with. */
+        fun onTwoFingerSwipeDown() {}
         /** A qualifying one-finger swipe UP (arc 6 — the trail walk-back). One vertical
          *  evaluation routes on the `dy` sign, so this and [onSwipeDown] are exclusive. */
         fun onSwipeUp() {}
@@ -193,14 +197,17 @@ class PageGestures(
                     twoFingerTracker?.recycle()
                     twoFingerTracker = VelocityTracker.obtain().also { it.addMovement(ev) }
                 } else {
-                    // 3+ fingers: commit a qualifying two-finger insert before the extra finger kills it.
+                    // 3+ fingers: commit a qualifying two-finger gesture — the insert or its
+                    // vertical twin, the Recents swipe — before the extra finger kills it.
                     if (twoFingerActive) {
                         val dx = centroidX(ev) - twoFingerStartX
                         val dy = centroidY(ev) - twoFingerStartY
                         val tracker = twoFingerTracker
-                        if (tracker != null && horizontalQualifies(dx, dy)) {
+                        if (tracker != null && (horizontalQualifies(dx, dy) || verticalQualifies(dx, dy))) {
                             tracker.addMovement(ev); tracker.computeCurrentVelocity(1000)
+                            // Dominance makes the two mutually exclusive; at most one fires.
                             evaluateInsert(tracker.getXVelocity(0), dx, dy)
+                            evaluateTwoFingerVertical(tracker.getYVelocity(0), dx, dy)
                         }
                     }
                     clearTwoFinger()
@@ -212,11 +219,11 @@ class PageGestures(
                     val tracker = twoFingerTracker
                     if (tracker != null) {
                         tracker.addMovement(ev); tracker.computeCurrentVelocity(1000)
-                        evaluateInsert(
-                            tracker.getXVelocity(0),
-                            centroidX(ev) - twoFingerStartX,
-                            centroidY(ev) - twoFingerStartY,
-                        )
+                        val dx = centroidX(ev) - twoFingerStartX
+                        val dy = centroidY(ev) - twoFingerStartY
+                        // Axis-exclusive by dominance, exactly like the one-finger pair above.
+                        evaluateInsert(tracker.getXVelocity(0), dx, dy)
+                        evaluateTwoFingerVertical(tracker.getYVelocity(0), dx, dy)
                     }
                     clearTwoFinger()
                 }
@@ -293,6 +300,18 @@ class PageGestures(
         if (!qualifiesVerticalSwipe(vy, dx, dy)) return
         if (!gateOpen()) return
         if (dy > 0) listener.onSwipeDown() else listener.onSwipeUp()
+    }
+
+    /**
+     * The two-finger centroid's vertical rule (arc 10): the same gates as the one-finger vertical
+     * swipe, but only the **down** direction is claimed — an upward two-finger swipe is nothing, so
+     * it is dropped here rather than routed anywhere.
+     */
+    private fun evaluateTwoFingerVertical(vy: Float, dx: Float, dy: Float) {
+        if (!qualifiesVerticalSwipe(vy, dx, dy)) return
+        if (dy <= 0) return
+        if (!gateOpen()) return
+        listener.onTwoFingerSwipeDown()
     }
 
     private fun clearSwipe() {

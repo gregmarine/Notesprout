@@ -42,6 +42,18 @@ class RecentsPrefs(context: Context) {
         save(list)
     }
 
+    /**
+     * Re-stamp [notebookId] where it already sits (arc 10) — the notebook is closing, and the time
+     * a recents row shows is "when I last put it down", not "when I opened it". **Never inserts**:
+     * an id that is not listed has no business appearing at close, and the order is untouched
+     * because [record] already moved it to the front when it opened.
+     */
+    fun touch(notebookId: String, now: Long = System.currentTimeMillis()) {
+        val list = entries()
+        if (list.none { it.notebookId == notebookId }) return
+        save(list.map { if (it.notebookId == notebookId) it.copy(timestamp = now) else it })
+    }
+
     fun remove(notebookId: String) {
         val list = entries().toMutableList()
         if (list.removeAll { it.notebookId == notebookId }) save(list)

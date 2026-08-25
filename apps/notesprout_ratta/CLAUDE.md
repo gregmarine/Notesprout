@@ -13,7 +13,8 @@ The Manta identifies as a Nomad — target by serial.
 
 **Subsystem docs (`docs/`) — read the matching one before working in that area:**
 `docs/library.md` (library screen, naming schemes) · `docs/notebook.md` (the notebook screen:
-tools, selection, **snap to guides**, headings, Contents, gestures, undo, frame-silence ledger) ·
+tools, selection, **snap to guides**, headings, Contents, **Recents**, gestures, undo,
+frame-silence ledger) ·
 `docs/links.md` (arc 6: link rows/payload, render, picker + create-in-picker, follow + trail) ·
 `docs/clipboard.md` (arcs 7–8: the clipboard — one index row, one envelope, two kinds; the page
 half's long-press sheet and the object half's Copy/Cut, tap-to-place and lasso popup, both
@@ -64,7 +65,8 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   the selection toolbar's show at lasso completion, the "Opening…" overlay's hide when the
   page lands, the "Recognizing…" overlay around a heading convert, the selection
   toolbar's own-tap re-shows (H toggle / level pick / post-edit re-anchor), the Contents
-  dialog's show/hide (C1), and the object paste's frame at a tap's pen-up plus the lasso popup's
+  dialog's show/hide (C1 — **the arc-10 Recents panel rides this same exception**, it is the same
+  act mirrored), and the object paste's frame at a tap's pen-up plus the lasso popup's
   show/hide (O1) — all one chrome frame at a deliberate act or a boundary, never
   under live ink (R3's tool-panel-close exception retired with the panels in P1). B1's
   paste-placement sub-sheet rides the long-press sheet's exception rather than adding one (it is

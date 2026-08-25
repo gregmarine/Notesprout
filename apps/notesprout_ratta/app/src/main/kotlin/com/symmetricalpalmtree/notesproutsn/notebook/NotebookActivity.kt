@@ -26,6 +26,7 @@ import com.symmetricalpalmtree.notesproutsn.core.ActionSheetDialog
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
 import com.symmetricalpalmtree.notesproutsn.core.Immersive
 import com.symmetricalpalmtree.notesproutsn.core.IndexGuard
+import com.symmetricalpalmtree.notesproutsn.core.OpeningOverlay
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.core.SnClipboard
 import com.symmetricalpalmtree.notesproutsn.data.clip.ClipEnvelope
@@ -78,6 +79,7 @@ class NotebookActivity : AppCompatActivity() {
     private lateinit var session: NotebookSession
     private lateinit var pageGestures: PageGestures
     private lateinit var contentsFlow: ContentsFlow
+    private lateinit var recentsFlow: RecentsFlow
     private lateinit var linkPickFlow: LinkPickFlow
     private lateinit var followFlow: LinkFollowFlow
     /** Snap-to-guide's durable preference (arc 9). `paper.snapToGuides` is the live copy. */
@@ -294,6 +296,19 @@ class NotebookActivity : AppCompatActivity() {
             navigate = { pageId -> if (pageId != displayedPageId) runPageOp { refreshToPage(pageId) } },
             button = binding.btnContents,
             whenPenIdle = ::whenPenIdle,
+        )
+
+        // Recents (arc 10): the ToC's mirror image — right-hand button, right-hand panel. No
+        // availability gate; an empty list says so in the panel.
+        recentsFlow = RecentsFlow(
+            activity = this,
+            paper = paper,
+            repo = repo,
+            notebookId = notebookId,
+            alive = { opened && !closing },
+            onShowingChanged = { pushExclusions() },
+            switchTo = { id -> switchToNotebook(id) },
+            button = binding.btnRecents,
         )
 
         // Chrome moved/appeared/disappeared: re-push the exclusion rects once the pass settles.
@@ -619,6 +634,7 @@ class NotebookActivity : AppCompatActivity() {
         override fun onPageSheetRequested() { showPageSheet() }
         override fun onSwipeDown() { contentsFlow.open() }   // silently a no-op while unavailable
         override fun onSwipeUp() { followFlow.walkBack(onEmpty = {}) }   // empty trail: silent
+        override fun onTwoFingerSwipeDown() { recentsFlow.open() }       // arc 10 — the Recents
         override fun onFingerTap(x: Float, y: Float) {
             // Gesture coordinates are the window's; link bounds are page px = paper-view px.
             val loc = IntArray(2).also { paper.asView().getLocationInWindow(it) }
@@ -634,6 +650,43 @@ class NotebookActivity : AppCompatActivity() {
      *  half-open session (K5 review). */
     private fun backPressed() {
         if (viaLink && opened && !closing) followFlow.walkBack(onEmpty = { close() }) else close()
+    }
+
+    /**
+     * The Recents hop (arc 10). The panel is a snapshot, so the tapped notebook is re-checked against
+     * the index first — a delete elsewhere is possible, and the honest answer is a problem dialog,
+     * not an open that fails. Then the launch runs the link-follow's order exactly: raise the
+     * "Opening…" box, and only once its frame is on the glass seal **this** notebook and start the
+     * other — one live session per `.soil`, family-wide.
+     *
+     * Deliberately **not** a follow: nothing is pushed onto the link trail, and the target opens
+     * without `viaLink`, so its Back exits to the library. It is a fresh open like the library's,
+     * which means `onCreate` **clears** the trail on arrival — and that is the point rather than a
+     * side effect: a trail left standing across a switch would let a link followed later in the
+     * *new* notebook walk back into the one you switched away from. A switch starts a new story.
+     */
+    private fun switchToNotebook(targetId: String) {
+        if (!opened || closing || targetId == notebookId) return
+        lifecycleScope.launch {
+            // Kept apart deliberately: "the row is gone" and "the read failed" are different
+            // answers, and telling someone their notebook was deleted when the index merely
+            // hiccupped is a lie they cannot check.
+            val read = runCatching { repo.aliveNotebooks(listOf(targetId))[targetId] }
+            if (isFinishing || isDestroyed || closing) return@launch
+            read.onFailure { e ->
+                Log.w(TAG, "recents switch: index read failed", e)
+                Dialogs.problem(this@NotebookActivity, R.string.recents_gone_title, R.string.recents_read_failed_body)
+                return@launch
+            }
+            val summary = read.getOrNull()
+            if (summary == null) {
+                Dialogs.problem(this@NotebookActivity, R.string.recents_gone_title, R.string.recents_gone_body)
+                return@launch
+            }
+            OpeningOverlay.showThen(this@NotebookActivity) {
+                close { startActivity(intent(this@NotebookActivity, targetId, summary.name)) }
+            }
+        }
     }
 
     /** Serialise every page/undo mutation; ignore anything while not open or once closing. */
@@ -1610,11 +1663,13 @@ class NotebookActivity : AppCompatActivity() {
             paper.setExclusionRects(listOf(BLOCK_ALL))
             return
         }
-        if (::contentsFlow.isInitialized && contentsFlow.showing) {
-            // The Contents dialog is up: the Ratta ink daemon draws firmware ink beneath any
-            // Android window, so the whole paper is one exclusion rect until it dismisses.
-            // (The small transient dialogs deliberately don't do this — a persistent full-height
-            // panel is where a pen plausibly lands.)
+        if ((::contentsFlow.isInitialized && contentsFlow.showing) ||
+            (::recentsFlow.isInitialized && recentsFlow.showing)
+        ) {
+            // A full-height panel is up (Contents, or arc 10's Recents): the Ratta ink daemon draws
+            // firmware ink beneath any Android window, so the whole paper is one exclusion rect
+            // until it dismisses. (The small transient dialogs deliberately don't do this — a
+            // persistent full-height panel is where a pen plausibly lands.)
             paper.setExclusionRects(listOf(BLOCK_ALL))
             return
         }
@@ -1750,8 +1805,12 @@ class NotebookActivity : AppCompatActivity() {
         if (closing) return
         closing = true
         undo.clear()   // in-memory history dies with the screen
-        // A Dialog outliving its finishing Activity is a window leak — take the Contents down now.
+        // A Dialog outliving its finishing Activity is a window leak — take both panels down now.
         if (::contentsFlow.isInitialized) contentsFlow.dismissIfShowing()
+        if (::recentsFlow.isInitialized) recentsFlow.dismissIfShowing()
+        // Recents shows "when I last put it down" (arc 10). This and the onDestroy fallback are
+        // mutually exclusive on `closing`, so the stamp is written exactly once per screen.
+        RecentsPrefs(this).touch(notebookId)
         // The relay's source closes over the session about to be sealed — drop it with the screen.
         if (::linkPickFlow.isInitialized) linkPickFlow.close()
         BrowseState(this).lastOpenNotebookId = null
@@ -1779,14 +1838,16 @@ class NotebookActivity : AppCompatActivity() {
     override fun onDestroy() {
         if (IndexGuard.bounced(this)) { super.onDestroy(); return }
         // A destroy that bypassed close() (config-change recreate, "don't keep activities") would
-        // otherwise leak the Contents dialog's window — the exact hazard close() documents.
+        // otherwise leak a panel dialog's window — the exact hazard close() documents.
         if (::contentsFlow.isInitialized) contentsFlow.dismissIfShowing()
+        if (::recentsFlow.isInitialized) recentsFlow.dismissIfShowing()
         if (::linkPickFlow.isInitialized) linkPickFlow.close()
         if (::paper.isInitialized) paper.release()
         // A destroy that isn't a normal close (e.g. finish() out of failOpen) still seals.
         if (::session.isInitialized && session.isOpen && !closing) {
             closing = true
             undo.clear()
+            RecentsPrefs(this).touch(notebookId)   // close()'s twin — see the note there
             val s = session
             appScope.launch {
                 withContext(NonCancellable) {
