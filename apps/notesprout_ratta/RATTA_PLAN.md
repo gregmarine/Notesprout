@@ -2403,7 +2403,7 @@ before every conclusion. Version stays `0.1.0-ratta`. New reference doc: `docs/s
 load-bearing.
 
 ### J2 — Contract + extension store (host only)
-**Status:** ✅ Complete (commit PENDING, Nomad-verified 2026-08-24)
+**Status:** ✅ Complete (commit cd8a918, Nomad-verified 2026-08-24)
 
 `:extension-api` gains `IExtensionStore.aidl` — all six methods, the base four
 (`get`/`put`/`delete`/`keys`) first and `putLarge`/`getLarge` appended last (the trap above) —
