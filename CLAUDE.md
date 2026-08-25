@@ -189,6 +189,19 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   an extension-owned screen. 623 JVM tests; version stays `0.1.0-ratta`; g-paper pin stays 0.1.6.
   One open non-blocker in `BACKLOG.md`: a transferred selection drags worse than a hand-lassoed one
   (two hypotheses built, shipped to the Nomad and **both disproved** — read it before re-theorising).
+  **Arc 12 "Paper"** ✅ **COMPLETE + FROZEN 2026-08-25** (**P2 `<hash>`**): a page can finally
+  change its paper. The long-press page sheet gains a **Page template** row → a second sheet
+  (Blank / Lined / Dotted / Grid, current kind ticked, the library sort sheet's pattern); the pick
+  re-papers **that page only** — the same scope Copy/Cut/Delete already have — and is undoable
+  (`Action.TemplateChanged`). No schema change, no migration, no new dependency: the `template` row
+  and the page's `refId` already said everything it needed. The one decision worth knowing is
+  **reuse before mint** (`PageTemplate`, pure + JVM-tested): a template row is *shared paper*, so a
+  change re-points at a row the file already holds of that kind at the page's own size, and only
+  renders a new WEBP when there is none — nothing ever soft-deletes a template, so the trip back is
+  free. Identity is kind + page size, never pixels (a byte-identical foreign row was already
+  content-deduped on the way in), and the render uses the **page's** size, never the screen's. The
+  index's `templateKind` stays the notebook's birth record. 637 JVM tests; version stays
+  `0.1.0-ratta`; g-paper pin stays 0.1.6.
   **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for any work there** — it holds the
   per-arc status, locked decisions, working protocol, and model recipe.
 - `germination` — previous post-MVP feature branch (reference, not active)

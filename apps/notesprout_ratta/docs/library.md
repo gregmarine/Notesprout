@@ -134,6 +134,10 @@ no folder would ever look empty again once a card had rendered.
 - **No cover yet** → a small render of the notebook's own template kind
   (`BuiltInTemplates.placeholder`), squeezed to a fixed 12 rows so a 3 cm card still reads as
   "lined" / "dotted" / "grid". A Blank notebook shows a blank card, which is the honest picture.
+  The index's `templateKind` is the notebook's **birth record** and stays that: re-papering a page
+  (arc 12, [`notebook.md`](notebook.md)) deliberately does not write it, because with per-page
+  paper there is no longer one true answer for a whole notebook — and a real cover snapshot, minted
+  on every close, supersedes the placeholder anyway.
 - **Selection** (arc 6 / K2) — `LibraryGrid.bind` takes an optional `selectedId`; the matching
   card gets `state_selected` on its background (`bg_selectable_card`: the 1 dp border thickens to
   3 dp — never a colour, never a grey). It exists for the link picker, where browsing *is*

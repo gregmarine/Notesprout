@@ -71,4 +71,22 @@ class NotebookUndoTest {
         // Two carried strokes, both still there: a delete undo is only as good as its geometry.
         assertEquals(listOf("b", "c"), (deleted as Action.Deleted).strokes.map { it.id })
     }
+
+    /**
+     * A re-papering (arc 12) carries both template ids, and blank is one of them — `""` is the
+     * format's answer for blank paper, so an entry that dropped it could not undo a page back to
+     * blank.
+     */
+    @Test
+    fun `a template change carries both ids, blank included`() {
+        val s = UndoRedoStack<Action>()
+        val toGrid = Action.TemplateChanged("p1", from = "", to = "t-grid")
+        s.record(toGrid)
+
+        val popped = s.popUndo()!!
+        assertSame(toGrid, popped)
+        assertEquals("p1", popped.pageId)
+        assertEquals("", (popped as Action.TemplateChanged).from)
+        assertEquals("t-grid", popped.to)
+    }
 }

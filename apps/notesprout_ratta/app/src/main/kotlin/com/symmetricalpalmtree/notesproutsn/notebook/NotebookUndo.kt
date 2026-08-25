@@ -146,5 +146,17 @@ object NotebookUndo {
         data class PagePasted(val snapshot: NotebookSession.Structural) : Action {
             override val pageId: String get() = snapshot.afterCurrentId
         }
+
+        /**
+         * One page re-papered (arc 12) — the two template-row ids the page moved between, `""` for
+         * blank. Replayed through [NotebookSession.applyTemplate] in either direction; no rows are
+         * created or destroyed by the replay, because the template row the change may have minted
+         * is left standing (see [NotebookSession.changeTemplate]) exactly as a page paste's is.
+         */
+        data class TemplateChanged(
+            override val pageId: String,
+            val from: String,
+            val to: String,
+        ) : Action
     }
 }

@@ -783,6 +783,8 @@ its row work inside one `db.withTransaction` and then mirrors the result into th
 | `deleteCurrent()` on the **only** page | the page and its content are soft-deleted and a **fresh blank replacement** is created in the same transaction, same template and size — a notebook always has ≥ 1 page, and an empty one would have nothing to open |
 | `pasteAt(env, before)` (B1) | write the clipboard payload's rows — a fresh page row, its content, and the template unless `resolveTemplate` finds this file already has it (by id, or B2, by content) — at `PageMath.insertPosition`, renumber, land on the pasted page. Across notebooks the page's own-notebook links are rewritten to name the source ([`docs/clipboard.md`](clipboard.md)) |
 | `capturePage()` (B1) | snapshot the current page, its template row and its live descendants into a clipboard payload; the caller drains the writer first |
+| `changeTemplate(kind, dpi)` (arc 12) | re-paper the **current page only**: find or mint the `template` row for `kind` at the page's own size, point the page's `refId` at it, mirror the index clock. Null when the page already has that paper |
+| `applyTemplate(pageId, templateId)` (arc 12) | point one page's `refId` at one template id (`""` = blank) — `changeTemplate`'s undo/redo primitive; the decode is left to the caller's page swap |
 | `reconcile(targetAlive, restoreObjectIds, deleteObjectIds, currentId)` | make the live page set exactly `targetAlive`, in that order, restoring/soft-deleting the given **objects** (strokes and headings alike — "object" here is deliberately type-agnostic) with it, and land on `currentId` |
 
 Pages are **soft-deleted** like everything else in the family. That is what makes undo a
@@ -821,7 +823,7 @@ paper is full-bleed and the chrome is two thin bars.
 | 2-finger vertical swipe ↓ | open the **Recents** (T1 — its upward twin is unassigned) |
 | 2-finger stationary double-tap | undo |
 | 3-finger stationary double-tap | redo |
-| 1-finger long-press | the **page sheet** — Copy / Cut / Paste / Delete (B1; [`docs/clipboard.md`](clipboard.md)) |
+| 1-finger long-press | the **page sheet** — Copy / Cut / Paste / Page template (arc 12) / Delete (B1; [`docs/clipboard.md`](clipboard.md)) |
 
 Thresholds (Paper-v0 parity — the numbers are the feel):
 
@@ -897,6 +899,7 @@ and survives it — [`docs/links.md`](links.md)).
 | `LinkEdited` (K2) | the picker's OK on an edit | write `before`'s payload | write `after`'s payload |
 | `Page` | insert / delete (`Structural` snapshot, whose `objectIds` are type-agnostic — strokes, headings and links all) | `reconcile(before)`, **restoring** `objectIds` | `reconcile(after)`, deleting them |
 | `PagePasted` (B1) | a paste — the same `Structural` shape, its own kind because `objectIds` runs the **opposite direction** (rows the paste *created*) | `reconcile(before)`, **deleting** `objectIds` | `reconcile(after)`, restoring them |
+| `TemplateChanged` (arc 12) | a pick in the page template sheet — the two template ids the page moved between (`""` = blank). No drain: it writes one page row and never touches the stroke writer | `applyTemplate(from)` | `applyTemplate(to)` |
 | `ObjectsPasted` (O1) | an object paste — `Deleted` run in reverse, its own kind for `PagePasted`'s reason (a link travels as a `PageLink` snapshot, so undo takes its wrapped children down with it) | `store.remove` + `headings.erase` + `links.remove` | `store.revive` + `headings.restore` + `links.restore` |
 
 `Deleted` replays exactly like `Erased` (and its N2 heading half like `HeadingDeleted`) and is
@@ -933,10 +936,11 @@ while not open or once closing, `runCatching` + `Log.w` on failure — so two ov
 can never tangle the page list.
 
 The long-press **asks**; it never acts. `showPageSheet` opens an `ActionSheetDialog` with
-**Copy page · Cut page · Paste page · Delete page** — Paste present only when the clipboard holds
-a page (**absent, never disabled**: a greyed control is invisible on e-ink). Copy and Cut confirm
-with a toast; Paste opens a second sheet for the placement (before/after); Delete goes to its
-confirm dialog. The whole clipboard side is [`docs/clipboard.md`](clipboard.md).
+**Copy page · Cut page · Paste page · Page template · Delete page** — Paste present only when the
+clipboard holds a page (**absent, never disabled**: a greyed control is invisible on e-ink). Copy
+and Cut confirm with a toast; Paste opens a second sheet for the placement (before/after); Page
+template opens the paper picker (below); Delete goes to its confirm dialog. The whole clipboard
+side is [`docs/clipboard.md`](clipboard.md).
 
 The delete confirm is the bare question "Delete this page?" with **no warning body** — a deleted
 page and its ink come straight back via undo (soft delete + `reconcile`), so "cannot be recovered"
@@ -944,6 +948,61 @@ would be false (eye-check #2 finding, 2026-08-22). `showPageSheet` calls `paper.
 **ungated**, which is safe here only because the long-press fired through the gesture gate: it
 never arms while the pen is active and re-checks at fire, so we are outside the pen-active window
 the R3 rule protects.
+
+### Page template (arc 12)
+
+**Page template** opens a second sheet — Blank · Lined · Dotted · Grid, the current one carrying
+`ic_check` (the library sort sheet's pattern). Picking one re-papers **this page only**, which is
+the same scope every other row of the sheet has: Copy, Cut and Delete are all the page you
+long-pressed. Ink is untouched — a template is the paper *under* the strokes, and re-ruling a page
+never moves, resamples or reflows what is written on it.
+
+It is the one sheet in the app that opens **asynchronously**: the tick needs to know which kind the
+page is on, which is a `.soil` read (`session.currentTemplateKind()` → `templateDigests`, blob-free
+— never `byId`, which would drag a whole WEBP through the cursor to read one word). The sheet the
+user just tapped is already dismissed by then, so no window exists where two surfaces are up. A
+read that **fails** still shows the sheet, with no tick: all four choices stay valid, an unknown
+kind already draws no tick, and there is nothing here the user must act on.
+
+Three states share "no tick", deliberately (`PageTemplate.kindOf`): the row has vanished, its
+`text` is not one of this build's four built-ins (family-compatible files can carry paper we cannot
+name), or the read failed. Ticking **Blank** for any of them would claim the page is empty while a
+ruled sheet is on the glass — a lie the user can see through. An empty `refId`, on the other hand,
+*is* Blank: that is what blank means in the format, not a missing answer.
+
+**Reuse before mint** (`PageTemplate.reusableId`, pure, JVM-tested). A `template` row is *shared
+paper*: every page a notebook was created with points at one row. So a change first looks for a row
+this file already holds that is the wanted kind **at the page's own size**, and only renders and
+stores a new one when there is none. That makes Lined → Grid → Lined free — nothing ever
+soft-deletes a template, so the way back finds the original row still standing. Among equal matches
+the page's **current** id wins, so picking the kind the sheet already ticked is a true no-op rather
+than a re-point onto an identical-looking twin plus a pointless undo step. (Two rows of one kind at
+one size is possible: a page pasted from a notebook whose panel had a different density, so the
+paste's content dedupe found no match — [`docs/clipboard.md`](clipboard.md).)
+
+Identity is deliberately `kind + page size`, not the pixels: a byte-identical row arriving from
+another notebook was already deduped by content on the way in (`resolveTemplate` →
+`PageClip.matchTemplate`), so the only row that could pass this test while looking different is one
+authored at the same page size and a different panel dpi — a device that does not exist in the
+family.
+
+The render uses the **page's own** width/height, never the screen's. A page pasted in from a larger
+device keeps its authored size (ink is never resampled), and ruling it to this screen would print a
+template that stops short of its own edge.
+
+The **old row is left exactly where it is**. Nothing may still point at it, but a template is
+cheap, deleting one is not undoable, and leaving it is what makes the change back free — the same
+reasoning the paste path uses for the template row it may have inserted.
+
+The notebook's index `templateKind` is **not** touched: it is the notebook's birth record, a real
+cover snapshot supersedes it on every close, and with per-page paper there is no longer one true
+answer for a whole notebook ([`docs/library.md`](library.md)).
+
+`applyTemplate` deliberately does **not** decode. `loadTemplateFor` compares against
+`templateIdLoaded`, so the id changing is exactly what makes the following `navigateTo` reload the
+bitmap — one decode, on the swap that paints it, in one EPD refresh. It is also safe on a page
+deleted since: the write lands on a soft-deleted row (which a restore then honours), the page list
+has no entry to update, and `refreshToPage` finds no index and stays put.
 
 ## Close & lifecycle
 
@@ -989,7 +1048,10 @@ boundary**, never under live ink:
 1. the **page sheet at long-press** (R4 — safe because `PageGestures` never arms while the
    pen is active and re-checks the gate at fire, so the sheet lands outside the pen-active window.
    B1's paste-placement sub-sheet **rides this same exception** rather than opening a new one: it
-   is raised by a tap on a row of a dialog that is already up, so the pen is demonstrably idle);
+   is raised by a tap on a row of a dialog that is already up, so the pen is demonstrably idle —
+   and so does arc 12's page-template sub-sheet, whose one blob-free read between the tap and the
+   sheet is not a reason to re-gate on the pen: `isPenActive` counts hover, so a gate there would
+   hold the sheet while the pen merely floats near the glass, which is the R3 lesson);
 2. the **selection toolbar's show at lasso completion** (P1 — deliberately *not* idle-gated: a
    lasso ends with the pen hovering, and `isPenActive` counts hover, so the gate would deliver the
    bar long after its selection. Safe because the engine has already presented the selection box on
@@ -1050,6 +1112,13 @@ by a new edit, the 100-entry bound dropping the *oldest*, `clear`, each action's
 a `Deleted` rides the stack like any other action while staying distinguishable from an `Erased`,
 and the R6 `generation` counter: moved only by `record`, and the mid-replay protocol that drops the
 redo push when an edit interleaves).
+`PageTemplateTest` (arc 12, 13 cases) covers the re-paper decision — reuse the notebook's existing
+paper vs. mint another copy of it, the page's own row winning among identical twins, a pixel-less
+row refused, a different page size minting, blank never doing either — and `kindOf`'s three "no
+tick" states kept apart from real blank paper. `NotebookUndoTest` gains the `TemplateChanged` case
+(both ids carried, blank's `""` included — an entry that dropped it could not undo a page back to
+blank).
+
 `SelectionAnchorTest` (P1) drives `SelectionAnchor` against a Nomad-shaped band: fits below, flips
 above when below would cross the bottom strip, clamps at both ends of the band (including a
 selection taller than the band itself), x centring, both x clamps, a bar wider than the root, and a

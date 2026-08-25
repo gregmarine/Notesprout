@@ -16,6 +16,8 @@ import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookMetaStore
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilDatabase
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilObjectEntity
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilSchema
+import com.symmetricalpalmtree.notesproutsn.data.template.BuiltInTemplates
+import com.symmetricalpalmtree.notesproutsn.data.template.TemplateKind
 import com.symmetricalpalmtree.notesproutsn.data.soilFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -520,6 +522,85 @@ class NotebookSession(
     }
 
     // ── Template ─────────────────────────────────────────────────────────────
+
+    /**
+     * What one re-papering did, in the two ids it moved between — enough to replay in either
+     * direction ([applyTemplate]). Both are template-row ids, `""` for blank paper.
+     */
+    data class TemplateChange(val pageId: String, val from: String, val to: String)
+
+    /**
+     * Re-paper the **current** page with a built-in [kind] (arc 12): find or mint the template row,
+     * then point the page's `refId` at it. Null when the page already has that paper — nothing is
+     * written and the caller records no undo step.
+     *
+     * Only this page moves. A notebook created as one paper stays one paper until someone says
+     * otherwise, and the pages either side of this one are not touched — the same rule the rest of
+     * the page sheet follows (copy, cut and delete are all the page you long-pressed).
+     *
+     * The template is rendered at the **page's own** width/height, never the screen's: a page
+     * pasted in from a larger device keeps its authored size (og's ink-is-never-resampled rule), and
+     * ruling it to the screen would print a template that stops short of its own edge. [dpi] is
+     * this panel's, which is the only density available — see [PageTemplate] for why that is safe.
+     *
+     * The old row is left exactly where it is. Nothing else may still point at it, but a template
+     * is cheap, deleting one is not undoable, and leaving it is what makes the change back free.
+     */
+    suspend fun changeTemplate(kind: TemplateKind, dpi: Float): TemplateChange? = withContext(Dispatchers.IO) {
+        val page = currentPage
+        val target = if (kind == TemplateKind.BLANK) "" else mintOrReuse(kind, page, dpi)
+        if (target == page.templateId) return@withContext null
+        val change = TemplateChange(page.id, page.templateId, target)
+        applyTemplate(page.id, target)
+        Slog.d(TAG) { "page ${page.id} re-papered ${kind.name} (${change.from.ifEmpty { "blank" }} → ${change.to.ifEmpty { "blank" }})" }
+        change
+    }
+
+    /**
+     * Point [pageId]'s row at [templateId] (`""` = blank) and mirror it into the page list. The
+     * undo/redo primitive behind [changeTemplate] — both directions are this call with the change's
+     * two ids swapped.
+     *
+     * The **decode is deliberately left to the caller's page refresh**: [loadTemplateFor] compares
+     * against `templateIdLoaded`, so the id changing here is exactly what makes the following
+     * `navigateTo` reload the bitmap — one decode, on the swap that paints it, in one EPD refresh.
+     * Decoding here as well would cost a second read for a bitmap the page swap throws away.
+     *
+     * Safe on a page that has since been deleted: the row write lands on a soft-deleted row (which
+     * a restore would then honour), the page list has no entry to update, and the caller's
+     * `refreshToPage` finds no index and stays put.
+     */
+    suspend fun applyTemplate(pageId: String, templateId: String) = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        db.dao().setRefId(pageId, templateId, now)
+        pages = pages.map { if (it.id == pageId) it.copy(templateId = templateId) else it }
+        repo.touch(notebookId, now)
+    }
+
+    /** The current page's paper as one of the four built-ins, or null when it is not one of ours
+     *  ([PageTemplate.kindOf]). Reads digests, never pixels — this runs at a sheet's tap. */
+    suspend fun currentTemplateKind(): TemplateKind? = withContext(Dispatchers.IO) {
+        PageTemplate.kindOf(db.dao().templateDigests(notebookId), currentPage.templateId)
+    }
+
+    /** The id of a row already holding this paper at this page's size, or a freshly stored one.
+     *  A render that comes back null (a page with no size) falls back to blank rather than
+     *  writing a template row that names paper it cannot draw. */
+    private suspend fun mintOrReuse(kind: TemplateKind, page: PageRef, dpi: Float): String {
+        PageTemplate.reusableId(db.dao().templateDigests(notebookId), kind, page.width, page.height, prefer = page.templateId)
+            ?.let { Slog.d(TAG) { "re-paper reuses template $it" }; return it }
+        val bitmap = BuiltInTemplates.render(kind, page.width, page.height, dpi) ?: return ""
+        val blob = try { BuiltInTemplates.toWebp(bitmap) } finally { bitmap.recycle() }
+        val id = java.util.UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+        db.dao().upsert(SoilObjectEntity(
+            id = id, parentId = notebookId, type = SoilSchema.TYPE_TEMPLATE,
+            createdAt = now, updatedAt = now, text = kind.name,
+            width = page.width.toFloat(), height = page.height.toFloat(), blob = blob,
+        ))
+        Slog.d(TAG) { "re-paper minted template $id (${kind.name}, ${blob.size} B)" }
+        return id
+    }
 
     private suspend fun loadTemplateFor(page: PageRef) {
         if (page.templateId == templateIdLoaded) return

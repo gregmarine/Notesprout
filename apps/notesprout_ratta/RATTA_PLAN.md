@@ -3014,6 +3014,69 @@ data behind it mixed two input devices. Measure the matched pair before believin
 
 ---
 
+## Phases — Arc 12 "Paper" (planned 2026-08-25, wizard complete)
+
+One capability, one phase: **change a page's template from the long-press page sheet.** The
+notebook has been able to *start* as one of four papers since R2 and never been able to change its
+mind. No new dependency, no schema change, no migration, no extension surface — the `template` row
+and the page's `refId` already say everything this needs; nothing here was missing from the format,
+only from the UI.
+
+### Locked decisions (arc-12 wizard 2026-08-25 — do not re-ask)
+
+| Decision | Answer |
+|---|---|
+| Scope of one change | **This page only.** The same scope every other row of the page sheet has (Copy, Cut and Delete are all the page you long-pressed). A mixed-paper notebook was already reachable via cross-notebook page paste, so this makes no new shape possible. |
+| Undoable | **Yes** — a new `NotebookUndo.Action.TemplateChanged(pageId, from, to)`, replayed both ways through `NotebookSession.applyTemplate`. Consistent with every other page-level edit. |
+| Picker UI | **Nested action sheet with a check mark.** Page sheet gains a **Page template** row → a second `ActionSheetDialog` titled "Page template" listing Blank / Lined / Dotted / Grid, the current kind carrying `ic_check` — the library sort sheet's exact pattern. No new widget, no radios, no previews. |
+| Index `templateKind` | **Left alone.** It is the notebook's birth record; a real cover snapshot supersedes it on every close, and with per-page paper there is no longer one true answer for a whole notebook. |
+| Kinds offered | The four built-ins only (`TemplateKind.entries`). No custom templates, no import — out of scope and unasked. |
+| Scratch pad | **Not included.** Pad pages are blank by construction and hold no template rows; its long-press goes straight to the delete confirm. Nothing about this arc reaches the extension. |
+
+### P2 — Change a page's template
+**Status:** ✅ Complete (commit <hash>, Nomad-verified + user all-clear 2026-08-25) — **ARC 12 COMPLETE + FROZEN**
+
+`PageTemplate` (pure: `reusableId` + `kindOf`), `NotebookSession.changeTemplate` /
+`applyTemplate` / `currentTemplateKind`, `Action.TemplateChanged` + both replay arms, the page
+sheet's new row and the sub-sheet, `ic_template` (Tabler "template"), one string.
+**Gate:** JVM tests green; debug + release build; Nomad walk (sheet row, tick tracks the page,
+per-page independence, persistence across a cold restart, template-row reuse, crash buffer);
+**user eye check** (the four papers on the glass, undo/redo — the one thing adb cannot drive,
+since undo is a multi-finger double-tap).
+
+**Outcome:** Implemented in one pass. New `notebook/PageTemplate.kt` — the whole decision that
+costs pixels, pure and JVM-testable: **reuse before mint** (a `template` row is *shared paper*, so
+a change looks for a row this file already holds of the wanted kind **at the page's own size**
+before rendering another megabyte of the same WEBP), with the page's **current** id winning among
+equal matches so picking the already-ticked kind is a true no-op. Nothing ever soft-deletes a
+template, so Lined → Grid → Lined is free — and the old row is deliberately left standing, the same
+reasoning the paste path uses. `kindOf` keeps three states as **unknown** (vanished row, a `text`
+this build cannot name, a failed read) rather than folding them into Blank — the T1 lesson; an
+empty `refId` *is* Blank, which is a real answer, not a missing one. Session: `changeTemplate`
+renders at the **page's own** width/height (a page pasted from a larger device keeps its authored
+size; ruling it to this screen would stop short of its edge), `applyTemplate` writes the `refId`
+and **does not decode** — `loadTemplateFor`'s `templateIdLoaded` compare means the following
+`navigateTo` is what reloads the bitmap, so one decode lands on the swap that paints it, in one EPD
+refresh. The sub-sheet is the one sheet in the app that opens **asynchronously** (the tick needs a
+blob-free `templateDigests` read); it rides the page sheet's existing frame-silence exception and
+is deliberately **not** re-gated on the pen — `isPenActive` counts hover, so a gate would hold the
+sheet while the pen floats (R3's lesson). A failed read still shows the sheet, unticked.
+**637 JVM tests** (14 new: `PageTemplateTest` ×13, one `TemplateChanged` case in
+`NotebookUndoTest`), debug + release build green. **Nomad walk, all pass** (driven by hand — the
+sheet is finger-tappable, so no agent needed): the row appears between Cut and Delete; the sub-sheet
+renders titled with the tick on **Blank**; Grid applied with the ink untouched and the tick moved to
+**Grid** on reopen; page 2 inserted and set to **Lined** while page 1 stayed Grid (per-page
+independence); force-stop → cold restore lands back on a Grid page 1; setting page 2 to Grid logged
+`re-paper reuses template 4d6c76a4…` — page 1's row, no second blob minted; crash buffer empty. Test
+data restored (page 2 deleted, page 1 back to Blank). Version stays **0.1.0-ratta**; g-paper pin
+stays 0.1.6. **Undo/redo was the user's to check** — the multi-finger double-tap is the one gesture
+adb cannot inject. **User all-clear 2026-08-25** ("All tests pass…this one is good to go"), no
+findings; the arc is frozen at this commit.
+
+**Questions to resolve at phase start:** all answered in the wizard above.
+
+---
+
 ## Verification (end of arc)
 
 1. All JVM unit tests green (`./gradlew test` in `apps/notesprout_ratta`).

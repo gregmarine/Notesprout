@@ -13,8 +13,8 @@ The Manta identifies as a Nomad — target by serial.
 
 **Subsystem docs (`docs/`) — read the matching one before working in that area:**
 `docs/library.md` (library screen, naming schemes) · `docs/notebook.md` (the notebook screen:
-tools, selection, **snap to guides**, headings, Contents, **Recents**, gestures, undo,
-frame-silence ledger) ·
+tools, selection, **snap to guides**, headings, Contents, **Recents**, gestures, **the page
+template picker**, undo, frame-silence ledger) ·
 `docs/links.md` (arc 6: link rows/payload, render, picker + create-in-picker, follow + trail) ·
 `docs/clipboard.md` (arcs 7–8: the clipboard — one index row, one envelope, two kinds; the page
 half's long-press sheet and the object half's Copy/Cut, tap-to-place and lasso popup, both
@@ -113,7 +113,9 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   show/hide (O1) — all one chrome frame at a deliberate act or a boundary, never
   under live ink (R3's tool-panel-close exception retired with the panels in P1). B1's
   paste-placement sub-sheet rides the long-press sheet's exception rather than adding one (it is
-  raised from a row of a dialog already up). Any new
+  raised from a row of a dialog already up), **and so does arc 12's page-template sub-sheet** —
+  whose one blob-free read between the tap and the sheet is deliberately *not* re-gated on the pen,
+  because `isPenActive` counts hover. Any new
   exception needs the same written justification. **Arc 11 / J4 added none**: the pad's own screen
   (in `:ext-scratchpad`) carries the same rule and its four frames are the notebook's exceptions in
   scratch-pad form, and the host's "Opening…" box at the pad button rides C1 — the same act as the

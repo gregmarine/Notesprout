@@ -48,6 +48,7 @@ import com.symmetricalpalmtree.notesproutsn.extension.ScratchPadClient
 import com.symmetricalpalmtree.notesproutsn.extension.ScratchPadEntry
 import com.symmetricalpalmtree.notesproutsn.extension.TransferCaps
 import com.symmetricalpalmtree.notesproutsn.notebook.NotebookUndo.Action
+import com.symmetricalpalmtree.notesproutsn.data.template.TemplateKind
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -898,6 +899,8 @@ class NotebookActivity : AppCompatActivity() {
                 session.reconcile(a.snapshot.before, emptyList(), a.snapshot.objectIds, a.snapshot.beforeCurrentId)
                 refreshToPage(session.currentPage.id)
             }
+            // No drain: a re-papering writes one page row and never touches the stroke writer.
+            is Action.TemplateChanged -> { session.applyTemplate(a.pageId, a.from); refreshToPage(a.pageId) }
         }
     }
 
@@ -942,6 +945,7 @@ class NotebookActivity : AppCompatActivity() {
                 session.reconcile(a.snapshot.after, a.snapshot.objectIds, emptyList(), a.snapshot.afterCurrentId)
                 refreshToPage(session.currentPage.id)
             }
+            is Action.TemplateChanged -> { session.applyTemplate(a.pageId, a.to); refreshToPage(a.pageId) }
         }
     }
 
@@ -1725,8 +1729,50 @@ class NotebookActivity : AppCompatActivity() {
         if (SnClipboard.hasPage) {
             sheet.addAction(R.drawable.ic_clipboard, getString(R.string.paste_page_action)) { showPasteSheet() }
         }
+        sheet.addAction(R.drawable.ic_template, getString(R.string.page_template_action)) { showTemplateSheet() }
         sheet.addAction(R.drawable.ic_trash, getString(R.string.delete_page_action)) { confirmDeletePage() }
         sheet.show()
+    }
+
+    /**
+     * The page's paper (arc 12). Opened from a row of the page sheet, so the pen is demonstrably
+     * idle — this rides the long-press sheet's frame-silence exception, it is not a new one.
+     *
+     * The current kind is read first so the sheet can tick it, which makes this the one sheet in
+     * the app that opens asynchronously: the read is blob-free (digests only) and the sheet the
+     * user just tapped is already gone, so there is no window where two surfaces are up. A read
+     * that **fails** still shows the sheet, unticked — the four choices are all still valid, and
+     * an unknown kind already draws no tick, so a failure costs nothing the user must act on.
+     */
+    private fun showTemplateSheet() {
+        if (!opened || closing) return
+        lifecycleScope.launch {
+            val current = runCatching { session.currentTemplateKind() }
+                .onFailure { Log.w(TAG, "template kind read failed", it) }
+                .getOrNull()
+            if (isFinishing || isDestroyed || !opened || closing) return@launch
+            fun tick(kind: TemplateKind) = if (kind == current) R.drawable.ic_check else null
+            fun label(kind: TemplateKind) = getString(when (kind) {
+                TemplateKind.BLANK -> R.string.template_blank
+                TemplateKind.LINED -> R.string.template_lined
+                TemplateKind.DOTTED -> R.string.template_dotted
+                TemplateKind.GRID -> R.string.template_grid
+            })
+            val sheet = ActionSheetDialog(this@NotebookActivity)
+                .title(getString(R.string.page_template_action))
+            TemplateKind.entries.forEach { kind ->
+                sheet.addAction(tick(kind), label(kind)) { runPageOp { doChangeTemplate(kind) } }
+            }
+            sheet.show()
+        }
+    }
+
+    /** Re-paper the current page, record it, and put the result on the glass — the page swap is
+     *  what decodes the new template, so this is a single EPD refresh like every other flip. */
+    private suspend fun doChangeTemplate(kind: TemplateKind) {
+        val change = session.changeTemplate(kind, resources.displayMetrics.densityDpi.toFloat()) ?: return
+        undo.record(Action.TemplateChanged(change.pageId, change.from, change.to))
+        refreshToPage(change.pageId)
     }
 
     /** Where the pasted page goes. Opened from a row of the page sheet, so the pen is demonstrably
