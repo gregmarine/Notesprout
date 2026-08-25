@@ -847,3 +847,30 @@ RATTA_PLAN.md K5 Outcome). One was **partially fixed, remainder accepted**:
 
 - **No search in the link picker** — carried from K2 exactly as Paper deferred it (recorded at the
   arc's picker-modes decision; repeated here so the arc has one findings ledger).
+
+## Notesprout SN — arc 11 (Scratch Pad) J6 review ledger (2026-08-25)
+
+The J1–J5 arc-range `/code-review high` raised six items. Five were fixed in J6 (see RATTA_PLAN.md
+J6 Outcome) and one was refuted. Two things are carried, neither of them SN bugs:
+
+- **Paper carries the same `TRANSFER_MAX_CHUNKS` derivation bug SN just fixed.** SN inherited `34`
+  = `ceil(MAX_TRANSFER_STROKES / TRANSFER_CHUNK_STROKES)` from Paper's shipped arc-6 values, and it
+  is not an upper bound on what the chunker produces: a chunk also closes when the *next* stroke
+  would cross the point cap, so a transfer inside both whole-transfer caps can chunk into more than
+  34 and the drain reports a legal transfer as truncated, leaving ink on the pad. SN's constant is
+  now computed from the other four (= 74, both close reasons counted) with three shape tests.
+  `apps/notesprout_paper/` has the same constant, the same one-sided derivation, and the same test
+  pinning it. Not fixed here — Paper is on `main` and out of this arc's range. Worth a small
+  targeted fix the next time Paper's `:extension-api` is opened.
+
+- **The pad/notebook colour clamp is asymmetric, and deliberately so.** The host forces inbound ink
+  to opaque black; the extension does not clamp the colour of ink the host sends it. Recorded in
+  `apps/notesprout_ratta/docs/extensions.md` § Boundary audit rather than "fixed": SN's ink is fixed
+  black so the host has no other colour to send, the sender is signature-matched, and the untrusted
+  direction is the one that clamps. Revisit only if SN ever gains colour ink — at which point the
+  pad's fixed-tool rule changes too, and both belong in the same change.
+
+**Refuted, recorded so it is not re-raised:** "the store binder's `pending` ThreadLocal leaks a
+4 MiB `SharedMemory` because `DebugMenu.runStoreProbe` calls `getLarge` in-process, where
+`onTransact` never runs." That probe was deleted in J3 — there is no in-process caller — and
+`onTransact`'s `finally` already calls `pending.remove()`.

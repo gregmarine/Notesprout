@@ -112,8 +112,28 @@ object ExtensionContract {
     const val TRANSFER_CHUNK_STROKES: Int = 300
     const val TRANSFER_CHUNK_POINTS: Int = 20_000
 
-    /** Most chunks the host drains on `takeOutgoing` (`ceil(MAX_TRANSFER_STROKES / TRANSFER_CHUNK_STROKES)`). */
-    const val TRANSFER_MAX_CHUNKS: Int = 34
+    /**
+     * Most chunks the host drains on `takeOutgoing` — a **safe upper bound on what [InkChunks.chunk]
+     * can produce** for any transfer inside [MAX_TRANSFER_STROKES] / [MAX_TRANSFER_POINTS], because
+     * a drain that stops early reports a legal transfer as truncated.
+     *
+     * A chunk closes for one of two reasons, and both have to be counted (arc 11 / J6 — the
+     * stroke-only derivation this constant used to carry was 34, and a transfer of 39 strokes of
+     * 10 001 points is inside both caps yet chunks into 39):
+     *
+     * - **stroke-driven** — the chunk held [TRANSFER_CHUNK_STROKES]: at most
+     *   `MAX_TRANSFER_STROKES / TRANSFER_CHUNK_STROKES` of those;
+     * - **point-driven** — the chunk's points plus the *next* chunk's first stroke crossed
+     *   [TRANSFER_CHUNK_POINTS]. Summed over those chunks each point is counted at most twice, so
+     *   there are fewer than `2 * MAX_TRANSFER_POINTS / TRANSFER_CHUNK_POINTS` of them;
+     * - plus the last chunk, which closes because the strokes ran out.
+     *
+     * The bound is loose on purpose — it is a runaway guard, not a target. The drain normally stops
+     * at the first empty bundle, one call after the ink.
+     */
+    const val TRANSFER_MAX_CHUNKS: Int =
+        MAX_TRANSFER_STROKES / TRANSFER_CHUNK_STROKES +
+            2 * MAX_TRANSFER_POINTS / TRANSFER_CHUNK_POINTS + 1
 
     /** The exact `IllegalStateException` message the scratch-pad extension throws from `receiveInk`
      *  when the target page's encoded ink would exceed [STORE_MAX_VALUE_BYTES]. The host compares the

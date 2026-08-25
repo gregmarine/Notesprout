@@ -2881,7 +2881,9 @@ state must order the write after the read.
 `CLAUDE.md`s), the arc-range `/code-review high`, the boundary audit and the freeze.
 
 ### J6 — Review, hardening, docs, freeze
-**Status:** ⬜ Not started
+**Status:** 🧪 Awaiting the user's all-clear (review + hardening + docs done, Nomad-verified
+2026-08-25; review level **high**, version stamp stays **`0.1.0-ratta`** — the user's two calls at
+phase start)
 
 `/code-review high` **over the whole arc range, never the last phase** — the O2 lesson: reviewing
 the arc caught two O1 bugs no eye check could have. A **boundary audit** on Paper's rows-28–32
@@ -2901,6 +2903,88 @@ freeze**.
 
 **Questions to resolve at phase start:** review level (every arc has frozen at **high**); version
 stamp (0.1.0-ratta through ten arcs — the user's call).
+*(Answered: **high** — where every arc has frozen, and the arc range `832fba7..HEAD` is what the O2
+lesson says to review, never the last phase. And **leave `0.1.0-ratta`** — the version has never
+tracked arcs and nothing ships from this branch yet.)*
+
+**Outcome:** the arc-range review found **six** things; **five were real and are fixed**, and the
+sixth was **refuted** — the review is itself reviewed, which is the whole point of doing it over the
+arc rather than the phase.
+
+**The one that mattered — a bound that was never a bound.** `TRANSFER_MAX_CHUNKS` was inherited from
+Paper as `34`, documented as `ceil(MAX_TRANSFER_STROKES / TRANSFER_CHUNK_STROKES)`. But a chunk does
+not only close when it is full of strokes: it also closes when the **next** stroke would cross the
+point cap. So 39 strokes of 10 001 points — comfortably inside *both* whole-transfer caps — chunks
+into 39, and the host's drain, which stops at the budget, would have reported a **legal transfer as
+truncated** and left ink behind on the pad. Worse, a JVM test pinned the wrong derivation, so the
+bug had a test defending it. The constant is now **computed from the other four** and counts both
+reasons a chunk closes (stroke-driven ≤ `MAX_STROKES / CHUNK_STROKES`; point-driven <
+`2 * MAX_POINTS / CHUNK_POINTS`, because summing those pairs counts each point at most twice; plus
+the last chunk) = **74**, deliberately loose — it is a runaway guard, not a target. Three tests
+replace the one, a chunking shape each. **This is the arc's one deviation from Paper's shipped
+values**, and it is recorded as such in `docs/extensions.md`.
+
+The other four:
+- **A failure that said nothing.** A failed or empty `drainOutgoing` was swallowed into a `Slog.d`:
+  the user taps Send, watches the pad disappear, and lands back in the notebook with nothing pasted
+  and **no dialog** — the one path in J5 that broke the standing rule (a tap that did nothing reads
+  as broken on e-ink). Now the "Nothing came back" problem dialog, saying the ink is still on the pad.
+- **`finish()` ran before `onDrained`**, contradicting both its own KDoc and the parameter's. Benign
+  today, but the comment is what a future change would trust. The finish moved after the callback,
+  in a `finally` so it cannot leak — and the parameter doc now says exactly what is true: the
+  callback is *invoked* with the bind held, and work it **defers** is past it.
+- **A stray page could outlive a refusal.** `ScratchStore.receive(newPage)` inserted the page into
+  the list *before* writing its ink, so a store failure between the two left a blank page behind
+  while the host was telling the user nothing was sent. The ink is now written first and the list
+  published last, with the orphan blob taken back out if the list write fails — the promise the
+  KDoc already made, now kept. A test asserts the store is byte-clean afterwards.
+- **A documented extra nobody read.** `EXTRA_SCRATCH_OPEN_RECEIVED` was set by the host, documented
+  in the contract, and never read — dead surface a later change would have trusted. The pad reads it
+  and gates the placement consume on it: belt and braces of the kind the rest of this seam is made of.
+
+**The refuted one** claimed the store binder's `pending` ThreadLocal leaks a 4 MiB region because
+`DebugMenu.runStoreProbe` calls `getLarge` in-process, where `onTransact` never runs. Both premises
+are false: that probe was **deleted in J3** (there is no in-process caller), and `onTransact`'s
+`finally` already calls `pending.remove()`. No change made — recorded here so it is not re-raised.
+
+**Boundary audit:** walked on Paper's rows-28–32 shape against SN's code and written into
+`docs/extensions.md` as five rows — the uid-bound store binder as `begin`'s only outward argument;
+outward ink as bare geometry with **no parameter for an id to travel in**; inward ink validated,
+capped, fresh-id'd and pasted as one undoable step; the screen caller-checked both ways with data
+never on the Intent; and the store caps changing no trust rule. One **asymmetry recorded rather than
+changed**: the host clamps inbound colour to black, the extension does not clamp the host's — SN's
+ink is fixed black, so there is no other colour to send, and the untrusted direction is the one that
+clamps.
+
+**Docs:** `docs/scratchpad.md` is **new** — the pad as a feature (screen, tools, pages, store layout,
+both transfers, failure table, what the pad is *not*). `docs/extensions.md` grew from a
+one-screen-owning-point doc into the **seam** doc: the tier-2 recipe for an extension-owned screen
+written as a numbered order (exported + `<category DEFAULT>`, caller check as the first statement,
+launch only after `begin`, drain before finish, `onDestroy` as the backstop), the transfers as a
+who-trusts-what table, and the boundary audit. Both `CLAUDE.md`s: the five-module layout, the
+**`:sn-screen` rule** in the words that make it enforceable ("a fix to shared screen logic goes
+there, never in a consumer — breaking it recreates the `RattaNotebookView` sibling-copy trap one
+file at a time"), and a Scratch Pad bullet.
+
+**Tests: 623 JVM** (`:app` 456 · `:sn-screen` 58 · `:extension-api` 31 · `:ext-mlkit` 29 ·
+`:ext-scratchpad` 49) — up 3 from J5: the three chunking-shape tests replacing the one that pinned
+the wrong bound, and the page-list rollback test. `assembleDebug`, `assembleRelease` and `test`
+green across all five modules.
+
+**Nomad, verified after the fixes:** the pad opens from the library **without** a Send button and
+from the notebook **with** one (the caller-property rule, proven side by side); the page arrows
+walk 4/4 → 2/4; a Send of the whole page runs the round trip in one sitting — release (`.605`) →
+notebook reclaims (`.696`) → the pad's window closes (`.795`) → drain 1 chunk / 9 strokes (`.808`)
+→ `end ok` → unbind → `pasted 9 strokes` — with the **reclaim before the close**, the ordering the
+whole handoff turns on. The paste lands **selected**, lasso armed, under the seven-button bar.
+A shell `am start` of the screen is still `refused caller (none)`; `dumpsys activity services` is
+`(nothing)` after every showing; `logcat -b crash` empty and **no E or W from our tags** throughout.
+The device agent's three skips were the standing tap-aim trap, not app failures — re-walked by hand
+from measured screencaps, all three pass.
+
+**Deviation from the phase text:** the phase said Fable reviews and Sonnet writes the docs. Both were
+done in-session — the review by the `/code-review` agent at `high` and the fixes, audit and docs
+by the session model — and the Haiku device walk ran as written.
 
 ---
 

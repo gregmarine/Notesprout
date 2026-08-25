@@ -58,11 +58,53 @@ class InkChunksTest {
     }
 
     @Test
-    fun theChunkBudgetCoversAFullTransfer() {
-        // TRANSFER_MAX_CHUNKS is what the host drains; it must be ceil(MAX_STROKES / CHUNK_STROKES)
-        // or a legal maximum transfer would be silently truncated at the far end.
-        val needed = (ExtensionContract.MAX_TRANSFER_STROKES + ExtensionContract.TRANSFER_CHUNK_STROKES - 1) /
-            ExtensionContract.TRANSFER_CHUNK_STROKES
-        assertEquals(needed, ExtensionContract.TRANSFER_MAX_CHUNKS)
+    fun theChunkBudgetCoversAStrokeCappedTransfer() {
+        // The many-small-strokes shape: MAX_TRANSFER_STROKES strokes of one point each.
+        val chunks = InkChunks.chunk(List(ExtensionContract.MAX_TRANSFER_STROKES) { stroke(1) })
+        assertTrue(
+            "chunk() produced ${chunks.size}, budget is ${ExtensionContract.TRANSFER_MAX_CHUNKS}",
+            chunks.size <= ExtensionContract.TRANSFER_MAX_CHUNKS,
+        )
+        assertEveryChunkValid(chunks)
+    }
+
+    @Test
+    fun theChunkBudgetCoversAPointCappedTransfer() {
+        // The shape the stroke-only derivation missed (arc 11 / J6): a chunk also closes when the
+        // NEXT stroke would cross the point cap, so strokes just over half of it go one per chunk.
+        // 39 strokes of 10 001 points is inside both whole-transfer caps and chunks into 39 —
+        // more than the old budget of 34, which made the host's drain call a legal transfer
+        // truncated. The bound has to count point-driven closes too.
+        val per = ExtensionContract.TRANSFER_CHUNK_POINTS / 2 + 1
+        val count = ExtensionContract.MAX_TRANSFER_POINTS / per
+        val chunks = InkChunks.chunk(List(count) { stroke(per) })
+        assertEquals("one stroke per chunk is the point of this case", count, chunks.size)
+        assertTrue(
+            "chunk() produced ${chunks.size}, budget is ${ExtensionContract.TRANSFER_MAX_CHUNKS}",
+            chunks.size <= ExtensionContract.TRANSFER_MAX_CHUNKS,
+        )
+        assertEveryChunkValid(chunks)
+    }
+
+    @Test
+    fun theChunkBudgetCoversTheWorstMixedTransfer() {
+        // Both split reasons in one transfer, at both caps: runs of 300 one-point strokes (a
+        // stroke-driven close) alternating with one huge stroke (a point-driven close).
+        val huge = ExtensionContract.TRANSFER_CHUNK_POINTS / 2 + 1
+        val strokes = ArrayList<WireStroke>()
+        var points = 0
+        while (strokes.size + ExtensionContract.TRANSFER_CHUNK_STROKES + 1 <= ExtensionContract.MAX_TRANSFER_STROKES &&
+            points + ExtensionContract.TRANSFER_CHUNK_STROKES + huge <= ExtensionContract.MAX_TRANSFER_POINTS
+        ) {
+            repeat(ExtensionContract.TRANSFER_CHUNK_STROKES) { strokes += stroke(1) }
+            strokes += stroke(huge)
+            points += ExtensionContract.TRANSFER_CHUNK_STROKES + huge
+        }
+        val chunks = InkChunks.chunk(strokes)
+        assertTrue(
+            "chunk() produced ${chunks.size}, budget is ${ExtensionContract.TRANSFER_MAX_CHUNKS}",
+            chunks.size <= ExtensionContract.TRANSFER_MAX_CHUNKS,
+        )
+        assertEveryChunkValid(chunks)
     }
 }

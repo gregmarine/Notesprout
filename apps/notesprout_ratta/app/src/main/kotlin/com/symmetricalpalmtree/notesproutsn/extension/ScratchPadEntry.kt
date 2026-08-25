@@ -63,8 +63,11 @@ class ScratchPadEntry(
     /** An outbound [Send] is across (J5) — fired **after** the last `receiveInk` returns, never at
      *  the tap, so the caller's confirmation only ever confirms something that has happened. */
     private val onSent: () -> Unit = {},
-    /** Ink the pad sent back (J5), already sanitized and capped. Runs on Main with the bind still
-     *  held; the caller guards its own liveness and does the pasting. */
+    /** Ink the pad sent back (J5), already sanitized and capped. **Invoked** on Main with the bind
+     *  still held — but the bind is finished the moment it returns, so anything needing the
+     *  extension must happen before then, not in work this callback defers (the notebook's paste
+     *  reads only the materialised [ScratchPadClient.Drained], so it is free to). The caller guards
+     *  its own liveness and does the pasting. */
     private val onDrained: suspend (ScratchPadClient.Drained) -> Unit = {},
 ) {
 
@@ -177,6 +180,12 @@ class ScratchPadEntry(
         return true
     }
 
+    /** Explain a failure that has nothing left to release (the pad has already closed itself). */
+    private fun problem(titleRes: Int, bodyRes: Int) {
+        if (activity.isFinishing || activity.isDestroyed) return
+        Dialogs.problem(activity, titleRes, bodyRes)
+    }
+
     /** Every failure path: release everything, take the box down, explain, re-run discovery. */
     private suspend fun fail(open: ScratchPadClient, titleRes: Int, bodyRes: Int) {
         client = null
@@ -206,8 +215,17 @@ class ScratchPadEntry(
                     val drained = runCatching { open.drainOutgoing() }
                         .onFailure { Slog.d(TAG) { "drain failed: ${it.message}" } }
                         .getOrNull()
-                    open.finish()
-                    if (drained != null && drained.strokes.isNotEmpty()) onDrained(drained)
+                    try {
+                        // The pad already closed saying it sent something. Nothing arriving — a dead
+                        // bind, a timeout mid-drain, or an empty reply — is a tap that did nothing,
+                        // and on e-ink that reads as broken. The ink is still on the pad; say so.
+                        if (drained != null && drained.strokes.isNotEmpty()) onDrained(drained)
+                        else problem(R.string.scratch_drain_failed_title, R.string.scratch_drain_failed_body)
+                    } finally {
+                        // After `onDrained`, per the contract above: the callback may still read the
+                        // bind, and `finish()` revokes the store binder along with it.
+                        open.finish()
+                    }
                 } else {
                     open?.finish()
                 }

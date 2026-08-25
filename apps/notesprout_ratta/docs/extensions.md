@@ -8,10 +8,14 @@ engine that consume it are core, not extension surface.
 **Arc 11 is the fresh user decision that rule required.** The user asked for the scratch pad as an
 extension, so SN gains a second capability point — `SCRATCH_PAD`, and the first **screen-owning**
 one — and, with it, the **extension store** documented below. J2 landed the store and the contract
-half; **J3 landed the point itself** — the AIDL, the wire parcelables, the held bind, the host's
-client and the `:ext-scratchpad` APK with a stub screen. The pad's real screen is J4 and the two ink
-transfers are J5. The rule survives, one word wider: no *third* capability point without another
-user decision (`apps/notesprout_ratta/CLAUDE.md`).
+half; J3 the point itself — the AIDL, the wire parcelables, the held bind, the host's client and
+the `:ext-scratchpad` APK; J4 the real screen, both entry buttons and **the EPD handoff between two
+paper surfaces in two processes**; J5 the two ink transfers. The arc is complete and frozen. The
+rule survives, one word wider: no *third* capability point without another user decision
+(`apps/notesprout_ratta/CLAUDE.md`).
+
+The pad as a **feature** has its own reference — [`docs/scratchpad.md`](scratchpad.md). This doc is
+the seam.
 
 Fresh code. Paper's own extension arcs (`PAPER_EXTENSIONS_PLAN.md`, `PAPER_RECOGNITION_PLAN.md`,
 `PAPER_SCRATCHPAD_PLAN.md`, its `:extension-api` / `:ext-mlkit` / `:ext-scratchpad`) are the shape
@@ -392,7 +396,11 @@ Room, SQLCipher and `SharedMemory` cannot run on the JVM, so the store is checke
 
 ---
 
-## The scratch-pad point (arc 11 / J3)
+## The scratch-pad point (arc 11)
+
+> The pad **as a feature** — its screen, tools, pages, store layout, transfers and failure table —
+> is [`docs/scratchpad.md`](scratchpad.md). What follows is the **seam**: the point, the held bind,
+> the wire types, and what each side is allowed to know.
 
 `ACTION_SCRATCH_PAD` is SN's **second** capability point and its first **screen-owning** one: the
 extension owns an off-paper Activity (`ACTION_SCRATCH_PAD_SCREEN`) that the core launches for a
@@ -452,10 +460,21 @@ the point chunk cap is its own chunk** — never split, still bounded by the who
 | `MAX_TRANSFER_POINTS` | 400 000 | ditto, summed over its strokes |
 | `TRANSFER_CHUNK_STROKES` | 300 | one Binder call |
 | `TRANSFER_CHUNK_POINTS` | 20 000 | ditto (≈ 320 KB of floats — under the ~1 MB transaction budget) |
-| `TRANSFER_MAX_CHUNKS` | 34 | how many chunks the host drains = `ceil(10 000 / 300)` |
+| `TRANSFER_MAX_CHUNKS` | 74 | how many chunks the host drains — a safe **upper bound** on what `chunk()` can produce |
 
-These are Paper's **shipped** values (its S2 outcome), not the pre-S2 table in its plan appendix; a
-JVM test pins each one, and another pins that the chunk budget really does cover a full transfer.
+The first four are Paper's **shipped** values (its S2 outcome), not the pre-S2 table in its plan
+appendix, and a JVM test pins each one.
+
+`TRANSFER_MAX_CHUNKS` is SN's own, and it is the arc's one **deviation from Paper** — J6's review
+found the inherited 34 was derived from the stroke cap alone (`ceil(10 000 / 300)`), which is not an
+upper bound on what the chunker produces: a chunk also closes when the **next** stroke would cross
+the point cap, so 39 strokes of 10 001 points — inside both whole-transfer caps — chunks into 39,
+and the drain would have called a legal transfer truncated. The bound now counts both reasons a
+chunk closes (stroke-driven, at most `MAX_TRANSFER_STROKES / TRANSFER_CHUNK_STROKES`; point-driven,
+fewer than `2 * MAX_TRANSFER_POINTS / TRANSFER_CHUNK_POINTS`, because summing those pairs counts
+each point at most twice; plus the last chunk) and is **computed from the other four** rather than
+written down. It is loose on purpose — a runaway guard, not a target: the drain normally stops at
+the first empty bundle, one call after the ink. Three tests pin it, one per chunking shape.
 
 ### Host side — `ScratchPadClient`
 
@@ -476,7 +495,7 @@ One instance per calling screen. `open(sendEnabled, openReceived)`:
 Idempotent, and the caller runs it from its **result callback and** from `onDestroy` while still
 open, because a bind must not outlive the screen that opened it even when the result never comes.
 
-`send` / `drainOutgoing` are wired in J5. Two rules are already built into them:
+`send` / `drainOutgoing` (J5) are the two transfers' host half. Two rules are built into them:
 
 - The **last** `receiveInk` chunk carries the whole placement — a read, decode, re-encode and write
   of up to 4 MiB on an e-ink CPU — so it takes `PLACE_TIMEOUT_MS` (10 s), not the 2 s of every other
@@ -495,11 +514,22 @@ black), and `toStrokes` mints **fresh ids** here. No id ever crosses in either d
 ### Extension side
 
 `ScratchPadService` holds what the host lent for this showing in `ScratchSession` — the store
-binder, and (in J5) the inbound chunks, the outbound chunks and the one-shot "open selected"
-record. `end()` clears all of it. `begin` reads the page list on the Binder thread; the first run
-creates one blank page. `receiveInk` / `takeOutgoing` throw `UnsupportedOperationException` until
-J5 — which Binder marshals intact (`EX_UNSUPPORTED_OPERATION`), so the host sees a real refusal
-rather than a silently dead transaction.
+binder, the inbound chunks, the outbound chunks and the one-shot "open selected" record. `end()`
+clears all of it. `begin` reads the page list on the Binder thread; the first run creates one blank
+page. `receiveInk` accumulates chunks under **one monitor** (`begin` and `end` take the same one, so
+a host that restarts mid-transfer can never interleave with a placement), re-checking the running
+totals against the transfer caps as it goes — the untrusted-input half of the host's own
+before-any-bind check — and on `last` mints fresh ids and places through `ScratchStore.receive`,
+still on the Binder thread. `takeOutgoing` hands back one parked chunk; an index past the end is an
+**empty bundle, not an error**, because "done" is exactly what the host is asking about and it
+probes one chunk past the budget on purpose.
+
+Only exceptions that survive Binder marshalling are ever thrown from a stub method — anything else
+kills the transaction silently and the caller reads an empty reply as success. Through J3 the two
+transfer methods threw `UnsupportedOperationException` for that reason (`EX_UNSUPPORTED_OPERATION`
+crosses intact); J5 replaced them with the real implementations, whose refusals are
+`IllegalArgumentException` (over the caps) and `IllegalStateException` (`SCRATCH_PAGE_FULL`, store
+gone).
 
 `ScratchStore` is the pad's key layout over `IExtensionStore`, and the extension's only storage:
 
@@ -542,6 +572,76 @@ debug probe answered **916 ms on the Nomad** (Paper measured 917 ms), and was re
 phase, as Paper removed its own: left in, it would sit inside the first pad open of every session
 and muddy J4's timings.
 
+### An extension-owned screen — the tier-2 recipe (arc 11 / J4)
+
+A **tier-2** point does not answer a question; it takes the screen. The recipe, in the order it has
+to happen:
+
+1. **The Activity is exported, with a custom action and no launcher filter.** `<category DEFAULT>`
+   is required or implicit resolution never matches it.
+2. **`HostCallerCheck.enforceActivity` is the first statement in `onCreate`**, before anything is
+   inflated: `callingPackage` must be the host **and** share this extension's signature. A plain
+   `startActivity` — `am start` from a shell included — leaves `callingPackage` null and is refused.
+   Which means the host **must** launch it with an `ActivityResultLauncher`; that is what sets it.
+3. **The core launches it only after `begin(store)` has succeeded** on the held bind, and only
+   through the Intent the client returned. Two booleans ride it and nothing else.
+4. **The result comes back on the bind that is still held** — drain first, `finish()` after.
+5. **The caller's `onDestroy` calls `finish()` too**, as the backstop for a caller destroyed while
+   the screen is up: a bind must not outlive the screen that opened it even when the result never
+   comes.
+
+**Two paper surfaces, one EPD pipeline.** The screen-owning point's real cost is not the Activity,
+it is the firmware ink session. The caller releases (`releaseForHandoff()`) immediately before the
+launch; the extension reclaims in `onResume`; **every** exit on the extension side releases before
+`finish()`. The ordering that matters is at the end: the caller's reclaim lands *before* the
+departing window's close, because g-paper's ownership guards are process-local statics and a close
+landing after the reclaim tears the caller's live session down. This worked on the Nomad first try,
+in both directions and on both exits, with **no g-paper change** — the pin stayed 0.1.6. An
+extension screen that draws must follow the same order, and a failure in it is fixed in g-paper.
+
+**The extension registers the engine itself** (`RattaEngine.register()` in its own `Application`) —
+it is a different process, so the host's registration means nothing to it.
+
+### The transfers as a seam (arc 11 / J5)
+
+Both directions are copies that cross **only through the held service** — never the Intent, never a
+file — carry **no ids**, and keep coordinates 1:1. The feature-level walk-through is in
+[`docs/scratchpad.md`](scratchpad.md); what belongs here is which side is allowed to trust what:
+
+| | Notebook → pad (`receiveInk`) | Pad → notebook (`takeOutgoing`) |
+|---|---|---|
+| Capped **before any bind** | `TransferCaps.withinLimits` in the host | — (the reply is bounded by the drain) |
+| Capped **on receipt** | the service re-checks the running totals across chunks | `TransferCaps.Drain` — summed caps, chunk budget, one probe past it |
+| Validated at unmarshal | `WireStroke` / `InkBundle` `requireValid` (a malformed stroke rejects the whole bundle) | the same, host-side |
+| Sanitized | `ScratchInk.toStrokes` — unknown style → PEN, width clamped | `TransferCaps.sanitize` — the same, **plus colour forced opaque black** |
+| Ids | minted by the extension | minted by the host |
+| Failure | `SCRATCH_PAGE_FULL` refuses the **whole** placement — nothing placed, nothing inserted | a cut drain is reported, never silently truncated |
+
+The two mappings are deliberate **twins** (`TransferCaps` host-side, `ScratchInk` extension-side)
+rather than one shared class: `:sn-screen` never sees `:extension-api`, and keeping the twin is what
+keeps that seam honest.
+
+---
+
+## Boundary audit
+
+What crosses the process boundary, in which direction, and what guards it. **Re-walk this table
+whenever a point is added or a contract field changes.** Rows 1–5 are the scratch-pad point, walked
+against the code at the arc-11 freeze (2026-08-25) on the shape Paper's rows 28–32 established.
+
+| # | The claim | Where it holds |
+|---|---|---|
+| 1 | **Outward on `begin` is the uid-bound store binder only.** `begin(store)` is the held bind's opening call and its one argument: an `ExtensionStoreBinder` minted in `ScratchPadClient.open` **after** `ExtensionStores.open` on IO (the pre-open rule), bound to `getPackageUid(ref.packageName)`, gated by `ExtensionStoreGate.check()` on every method, held for the showing in `ScratchSession.store` and revoked in the same `finally` as the unbind — on every path: result, cancel, caller `onDestroy`, failed `begin`. `IExtensionStore` still has no method that could return a key, path or `File`. Nothing else reaches the extension at open: the Intent is the action + `setPackage` + two booleans — no key, path, name, notebook or page id. | `ScratchPadClient.open/finish`, `ExtensionBinder.hold` / `HeldBinding`, `ExtensionStoreBinder`, `ExtensionStoreGate` (JVM-tested), `ScratchPadService.begin/end`, `ScratchSession` |
+| 2 | **Outward ink is bare geometry + width + colour + style name + the page px size — capped and chunked before the bind.** `InkBundle(strokes, pageWidth, pageHeight)` with `WireStroke` = four parallel `FloatArray`s + `width` + `colorArgb` + the `StrokeStyle` **name**. `TransferCaps.toWireStrokes` is the one reduction site from a g-paper `Stroke` (id and time never leave; point-less strokes skipped); `placement` is one of two recorded ints. **No stroke id, page id or number, notebook id or name, or selection bounds has a parameter to travel in** — `IScratchPad` has no other argument. Host side, before any bind: `withinLimits` → the "too much to send" dialog, then `InkChunks.chunk`. Extension side: `requireValid` at unmarshal, the running totals re-checked under one monitor, the placement int checked, fresh ids minted, the page written on the Binder thread under the full rule. | `IScratchPad.aidl`, `WireStroke` / `InkBundle` (parcel + `requireValid`, JVM-tested), `TransferCaps.withinLimits/chunk/toWireStrokes`, `InkChunks`, `ScratchPadClient.send`, `ScratchPadService.receiveInk`, `ScratchInk.toStrokes`, `ScratchStore.receive` |
+| 3 | **Inward ink is validated, capped and fresh-id'd; the paste is one undoable step and nothing else on the page changes.** Every reply is an `InkBundle` → `requireValid` at unmarshal, then `TransferCaps.sanitize` (known style or PEN, width in 0.5–50 px, **colour forced opaque black**) under `Drain`: stop at the first empty bundle, at the summed caps, or at `TRANSFER_MAX_CHUNKS` + one probe past it (a non-empty chunk there = truncated → the "not everything came back" dialog, naming the pasted count). Fresh ids are minted host-side (`toStrokes`, `timeMillis 0`); `NotebookSession.pasteStrokes` writes the rows in **one transaction** with `"order"` rebased inside it, and `NotebookActivity` records **one** `Action.ObjectsPasted` and leaves the strokes selected. No other row, object, page or session state is touched; a failed write → a dialog, nothing pasted, and a drain that fails or brings back nothing gets its own dialog rather than a silent return (J6). The bind is finished **after** the paste callback, never before it. | `IScratchPad.aidl`, `InkBundle.requireValid`, `TransferCaps.sanitize/toStrokes/Drain` (JVM-tested), `ScratchPadClient.drainOutgoing`, `ScratchPadEntry.onResult`, `NotebookSession.pasteStrokes`, `NotebookActivity.pasteFromPad` |
+| 4 | **The screen is the extension's, launched only by the core, caller-checked both ways; data never rides the Intent.** `ScratchPadActivity` is exported under `ACTION_SCRATCH_PAD_SCREEN` with `<category DEFAULT>` and **no launcher filter**; `HostCallerCheck.enforceActivity` is the first statement in `onCreate` (host package **and** `SIGNATURE_MATCH`, else `finish()` before anything is inflated). The core launches it only through an `ActivityResultLauncher` with `setPackage` from a trusted `ProviderRef`, and only after `begin` succeeded and (on a paper-hosting caller) `releaseForHandoff()`. The Activity reads only the two booleans and returns only `RESULT_SCRATCH_SEND` / `RESULT_CANCELED`; ink goes through the service, pages through the store binder. Every exit runs `releaseForHandoff()` before `finish()`. Verified on the Nomad every phase: a shell `am start` is `refused caller (none)`. | `ScratchPadActivity.onCreate` / `finishWithHandoff` / `onResume`, `HostCallerCheck.enforceActivity`, the `:ext-scratchpad` manifest, `ScratchPadClient.open`, `ScratchPadEntry` (`ActivityResultLauncher`, `beforeLaunch`) |
+| 5 | **The store caps change no trust rule.** A value is ≤ `STORE_MAX_VALUE_BYTES` (4 MiB): **inline** up to `STORE_MAX_INLINE_BYTES` (512 KiB); above that as a `LargeValue` — a read-only ashmem region + `byteCount` the receiver copies out of and closes in `finally`, host side through `SharedBytes.readAndClose` **before** the gate sees bytes, so the cap applies to the copy and never to a live mapping. Keys are still bounded, every method is still uid-bound and revocable through the same gate, and the DB is still opened only through `SoilCrypto` under the global key. On a **new-page** placement the ink is written before the page list names it and a failed list write takes the orphan blob back out, so "nothing was sent" is never contradicted by a stray blank page (J6). **A page over the cap is refused by the extension, never split, never written elsewhere:** `PageFullException` → `SCRATCH_PAGE_FULL` on `receiveInk` (the host's dialog; nothing placed) or the pad's own dialog once per visit on a stroke the page cannot take. The pad has no file, prefs or second store of its own. | `ExtensionContract.STORE_*`, `IExtensionStore.aidl`, `LargeValue`, `SharedBytes`, `ExtensionStoreBinder`, `ExtensionStoreGate` (JVM-tested), `ScratchStore`, `ScratchDocument`, `ScratchPadActivity` |
+
+**One recorded asymmetry.** The host forces inbound colour to opaque black; the extension does not
+force it on the ink the host sends. That is not an oversight and not a hole: SN's ink is fixed
+black, so the host has no other colour to send, and the sender is signature-matched. The *untrusted*
+direction — anything coming **into** the core — is the one that clamps.
+
 ---
 
 ## Privacy
@@ -567,7 +667,7 @@ Both extensions share one recipe; only the name and the point differ.
 | Icon | the same Tabler "puzzle" glyph as `:ext-mlkit` — the extension family reads as one thing |
 | Launcher activity | **None**; the screen `<activity>` is exported under its own action with `<category DEFAULT>` (without which implicit resolution never matches it) and is refused unless launched for a result by the host |
 | versionName | host lockstep: `0.1.0-ratta` (`-dev` in debug) |
-| Release APK | 6.7 MB |
+| Release APK | 6.8 MB |
 
 **`:ext-mlkit`**
 

@@ -20,8 +20,11 @@ frame-silence ledger) ·
 half's long-press sheet and the object half's Copy/Cut, tap-to-place and lasso popup, both
 within and **across notebooks**, where a copied link's own-notebook target is re-pointed at the
 notebook it came from) ·
-`docs/extensions.md` (the two extension points — the recognizer, and arc 11's screen-owning
-scratch pad — plus **the extension store**, the host-owned encrypted KV an extension is lent) ·
+`docs/extensions.md` (the **seam**: the two extension points — the recognizer, and arc 11's
+screen-owning scratch pad — the extension store, the tier-2 recipe for an extension-owned screen,
+and **the boundary audit**) ·
+`docs/scratchpad.md` (arc 11: the Scratch Pad as a feature — screen, tools, pages, store layout,
+both transfers, failure table) ·
 `docs/sn-screen.md` (arc 11 / J1: the shared `:sn-screen` paper-screen library — what may live
 there, what may not depend on it, and the `nonTransitiveRClass` flag that holds it together).
 
@@ -33,7 +36,9 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
 
 - **Five modules, own Gradle root:** `:app` (the host), `:sn-screen` (the shared paper-screen
   library — arc 11 / J1: the design resources and the screen helpers both paper surfaces need,
-  depends on g-paper + androidx only and **never** on `:app` or `:extension-api`),
+  depends on g-paper + androidx only and **never** on `:app` or `:extension-api`; **a fix to shared
+  screen logic goes there, never in a consumer** — that rule is the whole reason the module exists,
+  and breaking it recreates the `RattaNotebookView` sibling-copy trap one file at a time),
   `:extension-api` (the contract library — depends on nothing in `:app`, stdlib only),
   `:ext-mlkit` (the **NSE · ML Kit** extension APK), `:ext-scratchpad` (the **NSE · Scratch Pad**
   extension APK — arc 11 / J3: depends on `:extension-api` **and** `:sn-screen`, never `:app`;
@@ -49,7 +54,8 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   contract half; **J3 shipped the point**: the AIDL, `WireStroke` / `InkBundle` / `InkChunks`,
   `ExtensionBinder.hold` + `HeldBinding` — SN's **only** bind held across more than one call,
   because the operation is the showing of a screen — `ScratchPadClient`, `TransferCaps`, and the
-  APK with a stub screen; the real screen is J4, the transfers J5). Its screen is exported under
+  APK; **J4 the real screen, both entry buttons and the EPD handoff; J5 the two ink transfers** —
+  the arc is complete). Its screen is exported under
   `ACTION_SCRATCH_PAD_SCREEN` with `<category DEFAULT>` and refuses any caller that is not a
   `startActivityForResult` from the host (`HostCallerCheck.enforceActivity`), so the host **must**
   launch it with an `ActivityResultLauncher`. **No THIRD capability point may be added** without
@@ -64,6 +70,17 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   may start a model download** (host consent dialog first — and never at notebook open, which
   only warms an already-present model), and recognized text is never logged on either side
   (counts + durations only).
+- **The Scratch Pad is not ours to change from here** (arc 11, `docs/scratchpad.md`). It is the
+  `:ext-scratchpad` APK: its own process, its own g-paper surface, its own undo stack, and it
+  **writes nothing to disk itself** — its pages live in the host store, lent for the showing and
+  revoked with the unbind. It opens **no `.soil`**, and the notebook behind it is **not sealed** —
+  what the notebook gives up is the EPD pipeline, not its data. Both transfers are **copies** that
+  cross only through the held service (never the Intent, never a file), carry **no ids**, and keep
+  coordinates 1:1. The pad's tools are the notebook's, fixed: a pad that lassoed differently one tap
+  from the notebook would read as a bug, so a change to the notebook's ink feel is a change to both.
+  Touching either paper surface's handoff means re-reading the ordering rule in
+  `docs/extensions.md` § the tier-2 recipe first; a failure there is fixed in **g-paper**.
+
 - **Data model is Paper's, byte-for-byte format-compatible** — `notesprout.db` `objects`
   table (user_version 1) + `Garden/<uuid>.soil` universal `notebook` table v1 +
   `notebook_meta`, StrokeCodec format B, encrypt-by-default global key, SQLCipher stock

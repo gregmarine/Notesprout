@@ -101,6 +101,15 @@ class ScratchPadActivity : AppCompatActivity() {
     private var sendEnabled = false
 
     /**
+     * True when the host says this launch follows a `receiveInk` (arc 11 / J6 — the extra was
+     * written and never read until then). It is what makes a placement *this showing's*: the record
+     * itself is process-local state that a `begin` clears, so gating on the Intent is belt and
+     * braces of the kind the rest of this seam is built from — and it is what keeps the contract
+     * honest, since a documented extra nobody reads is one a later change will trust wrongly.
+     */
+    private var openReceived = false
+
+    /**
      * The tool that was armed before a **received** placement selected what arrived (J5). Put back
      * pen-idle when that selection is dismissed — but only if the lasso is still the armed tool, so
      * a tool the user picked meanwhile wins.
@@ -126,6 +135,7 @@ class ScratchPadActivity : AppCompatActivity() {
             return
         }
         sendEnabled = intent.getBooleanExtra(ExtensionContract.EXTRA_SCRATCH_SEND_ENABLED, false)
+        openReceived = intent.getBooleanExtra(ExtensionContract.EXTRA_SCRATCH_OPEN_RECEIVED, false)
         binding = ActivityScratchPadBinding.inflate(layoutInflater)
         setContentView(binding.root)
         Immersive.apply(window, binding.root)
@@ -240,9 +250,10 @@ class ScratchPadActivity : AppCompatActivity() {
      * The one-shot handover of a `receiveInk` placement (J5) — the ink is already in the store and
      * already on the paper (it came in with [ScratchDocument.load]); what is left is to say so.
      *
-     * **Consumed once, unconditionally**: the record is cleared before anything can fail, so a
-     * placement whose page has since gone (only reachable through a host restart mid-showing) is
-     * dropped rather than re-applied at the next open.
+     * **Consumed once**: the record is cleared before anything can fail, so a placement whose page
+     * has since gone (only reachable through a host restart mid-showing) is dropped rather than
+     * re-applied at the next open — and it is only applied at all when the launch Intent's
+     * [ExtensionContract.EXTRA_SCRATCH_OPEN_RECEIVED] says the host sent one.
      *
      * One undo step, and which one depends on what the placement did to the page list: a **new
      * page** is a [ScratchAction.Page] whose `afterBlob` is the ink that came with it — undo takes
@@ -256,6 +267,12 @@ class ScratchPadActivity : AppCompatActivity() {
     private fun consumeReceived() {
         val received = ScratchSession.received ?: return
         ScratchSession.received = null
+        if (!openReceived) {
+            // The host did not launch us for a placement, so this record is not ours to apply.
+            // Not reachable while `begin` clears the session — which is the point of checking.
+            Slog.d(TAG) { "received placement dropped: this launch did not ask for one" }
+            return
+        }
         if (received.pageId != document.currentPageId) {
             Slog.d(TAG) { "received placement dropped: page ${received.pageId} is not current" }
             return

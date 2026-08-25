@@ -189,4 +189,38 @@ class ScratchStoreReceiveTest {
         }
         assertTrue("expected StoreUnavailable", threw)
     }
+
+    @Test
+    fun aFailedPageListWriteLeavesNoStrayPageBehind() {
+        // The J6 review's case: on a new-page placement the ink is written before the page list
+        // names it, so a store that dies between the two must not leave a page in the list the host
+        // has just been told was never placed. The blob goes back out and the old list is restored.
+        val store = FakeExtensionStore()
+        val s = ScratchStore(store)
+        val first = s.load().currentId
+        val idsBefore = pageIds(store)
+        val currentBefore = current(store)
+
+        // Fail once, on the write that publishes the page list — the blob write has landed by then.
+        store.onPut = { key ->
+            if (key.startsWith(ScratchStore.PAGE_PREFIX)) {
+                store.failWith = { store.failWith = null; SecurityException("revoked") }
+            }
+        }
+        var threw = false
+        try {
+            s.receive(listOf(stroke("a")), 1404f, 1872f, newPage = true)
+        } catch (e: StoreUnavailable) {
+            threw = true
+        }
+        assertTrue("expected StoreUnavailable", threw)
+        assertEquals(idsBefore, pageIds(store))
+        assertEquals(currentBefore, current(store))
+        // No page blob is left over — not the original's (it never had ink), and not the new one's.
+        assertTrue(
+            "a stray page blob survived: ${store.values.keys}",
+            store.values.keys.none { it.startsWith(ScratchStore.PAGE_PREFIX) },
+        )
+        assertFalse(pageIds(store).any { it != first })
+    }
 }

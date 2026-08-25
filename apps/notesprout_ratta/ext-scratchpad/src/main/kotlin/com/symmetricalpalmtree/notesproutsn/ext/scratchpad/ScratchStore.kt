@@ -72,8 +72,12 @@ class ScratchStore(private val store: IExtensionStore) {
     }
 
     /** Insert a new blank page after [afterId]; returns (new id list, new id). */
-    fun insertPage(ids: List<String>, afterId: String?): Pair<List<String>, String> = guard {
-        val id = newId()
+    fun insertPage(ids: List<String>, afterId: String?): Pair<List<String>, String> =
+        insertPageAt(ids, afterId, newId())
+
+    /** [insertPage] with the id chosen by the caller — the receive path writes the ink under it
+     *  before the list names it, so the id has to exist first. */
+    fun insertPageAt(ids: List<String>, afterId: String?, id: String): Pair<List<String>, String> = guard {
         val next = ScratchPages.insertAfter(ids, afterId, id)
         writeIds(next)
         next to id
@@ -117,6 +121,9 @@ class ScratchStore(private val store: IExtensionStore) {
      * layout) or appended to the **current page** (its own size kept; the bundle's if it has none
      * yet) — and make that page current, so the next screen launch opens on it. **The full rule:** a
      * result over `STORE_MAX_VALUE_BYTES` is [PageFullException] — nothing placed, nothing inserted.
+     * The same promise holds for a store failure part-way through: the new page's ink is written
+     * before the page list names it, and a failed list write takes the orphan blob back out, so the
+     * host's "nothing was sent" is never contradicted by a stray blank page appearing in the pad.
      */
     fun receive(strokes: List<Stroke>, pageWidth: Float, pageHeight: Float, newPage: Boolean): Received {
         val loaded = load()
@@ -124,9 +131,19 @@ class ScratchStore(private val store: IExtensionStore) {
         if (newPage) {
             val blob = ScratchPageCodec.encode(pageWidth, pageHeight, strokes)
             if (blob.size > ExtensionContract.STORE_MAX_VALUE_BYTES) throw PageFullException(blob.size)
-            val (_, id) = insertPage(loaded.ids, loaded.currentId)
+            // The ink is written FIRST and the page list published LAST, so a failure part-way
+            // through cannot leave a page in the list that the host has been told was never placed.
+            // A blob under a key no list names is invisible; it is still cleaned up on the way out.
+            val id = newId()
             savePage(id, blob)
-            setCurrent(id)
+            try {
+                insertPageAt(loaded.ids, loaded.currentId, id)
+                setCurrent(id)
+            } catch (e: Throwable) {
+                runCatching { store.delete(pageKey(id)) }
+                runCatching { writeIds(loaded.ids) }
+                throw e
+            }
             return Received(id, ids, true, loaded.ids, loaded.currentId)
         }
         val cur = loaded.currentId
