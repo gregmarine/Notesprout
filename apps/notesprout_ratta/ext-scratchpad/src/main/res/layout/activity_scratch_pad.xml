@@ -1,40 +1,185 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- J3 stub: a caller-checked title + Back. The real paper screen arrives in J4. -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!--
+  The Scratch Pad screen (arc 11 / J4) — the notebook's shape, spartan: full-bleed paper with two
+  thin chrome bars overlaid. The PaperView is added into paperContainer programmatically.
+
+  Both bars go to paper.setExclusionRects (via PaperChrome) after layout, so ink never lands under
+  chrome. Chrome sits flush at the top edge — the top guard is 0 on Ratta.
+
+  openingOverlay is the LAST child (topmost) and starts VISIBLE: the pad covers its own first frame
+  the way the notebook does, so the launch reads as one continuous "Opening…".
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/paperWhite"
-    android:orientation="vertical">
+    android:background="@color/paperWhite">
+
+    <FrameLayout
+        android:id="@+id/paperContainer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
 
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
-        android:layout_height="@dimen/toolbar_bar_thickness"
-        android:gravity="center_vertical"
-        android:orientation="horizontal">
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:background="@color/paperWhite"
+        android:orientation="vertical">
 
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnBack"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:contentDescription="@string/cd_scratch_back"
-            android:src="@drawable/ic_arrow_left" />
+        <LinearLayout
+            android:id="@+id/topBarRow"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/toolbar_bar_thickness"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp">
 
-        <TextView
-            android:id="@+id/title"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:paddingStart="8dp"
-            android:paddingEnd="8dp"
-            android:singleLine="true"
-            android:text="@string/scratch_title"
-            android:textColor="@color/inkBlack"
-            android:textSize="13sp" />
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnBack"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_scratch_back"
+                android:src="@drawable/ic_arrow_left" />
+
+            <TextView
+                android:id="@+id/title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:singleLine="true"
+                android:text="@string/scratch_title"
+                android:textColor="@color/inkBlack"
+                android:textSize="16sp" />
+
+            <!-- Send (top bar = the whole page) lands in J5. Nothing stands here in its place: the
+                 rule is GONE, never disabled — and never a visible no-op. -->
+
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
+
     </LinearLayout>
 
-    <View
+    <LinearLayout
+        android:id="@+id/bottomBar"
         android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:background="@color/inkBlack" />
-</LinearLayout>
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:background="@color/paperWhite"
+        android:orientation="vertical">
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
+
+        <LinearLayout
+            android:id="@+id/bottomBarRow"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/toolbar_bar_thickness"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnPen"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_tool_pen"
+                android:src="@drawable/ic_pen" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnEraser"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_tool_eraser"
+                android:src="@drawable/ic_eraser" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnLasso"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_tool_lasso"
+                android:src="@drawable/ic_lasso" />
+
+            <!-- Tools left, pages right: the free space between says which is which. -->
+            <View
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnPrevPage"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_prev_page"
+                android:src="@drawable/ic_page_prev" />
+
+            <TextView
+                android:id="@+id/pageIndicator"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:minWidth="56dp"
+                android:singleLine="true"
+                android:textColor="@color/inkBlack"
+                android:textSize="14sp" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnNextPage"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_next_page"
+                android:src="@drawable/ic_page_next" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <!-- The selection's floating bar — Delete alone in J4 (Send joins it in J5). Placed by margins
+         from SelectionAnchor.place; its button is built in code. -->
+    <LinearLayout
+        android:id="@+id/selectionToolbar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:background="@drawable/shape_dialog_bordered"
+        android:orientation="horizontal"
+        android:padding="4dp"
+        android:visibility="gone" />
+
+    <!-- "Opening…" — the pad's own box (the host's core/OpeningOverlay is :app's and never crosses).
+         Full-screen but transparent and clickable: it swallows the second tap a slow e-ink refresh
+         invites while the page is still being read. -->
+    <FrameLayout
+        android:id="@+id/openingOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/transparent"
+        android:clickable="true"
+        android:focusable="true">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:background="@drawable/shape_dialog_bordered"
+            android:orientation="vertical"
+            android:padding="24dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/scratch_opening"
+                android:textColor="@color/inkBlack"
+                android:textSize="16sp" />
+
+        </LinearLayout>
+
+    </FrameLayout>
+
+</FrameLayout>

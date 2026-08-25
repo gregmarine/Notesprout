@@ -96,7 +96,10 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   under live ink (R3's tool-panel-close exception retired with the panels in P1). B1's
   paste-placement sub-sheet rides the long-press sheet's exception rather than adding one (it is
   raised from a row of a dialog already up). Any new
-  exception needs the same written justification.
+  exception needs the same written justification. **Arc 11 / J4 added none**: the pad's own screen
+  (in `:ext-scratchpad`) carries the same rule and its four frames are the notebook's exceptions in
+  scratch-pad form, and the host's "Opening…" box at the pad button rides C1 — the same act as the
+  Contents and Recents buttons.
 - **Toast vs. dialog:** a toast only confirms something that already happened; anything
   explaining why a tap *didn't* work is a problem dialog. On e-ink a missed toast reads
   as "broken".

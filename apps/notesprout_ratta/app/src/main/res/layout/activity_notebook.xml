@@ -79,6 +79,16 @@
                 android:layout_height="0dp"
                 android:layout_weight="1"/>
 
+            <!-- The Scratch Pad (arc 11). GONE unless a trusted extension is installed —
+                 ScratchPadEntry owns it, re-discovering on every resume. It sits on the far right
+                 with Recents because that edge is now "things that leave this page". -->
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnScratchPad"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_sketching"
+                android:visibility="gone"
+                android:contentDescription="@string/cd_scratch_pad"/>
+
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnRecents"
                 style="@style/Widget.Notesprout.ToolbarButton"

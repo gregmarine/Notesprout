@@ -12,6 +12,7 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.TooltipCompat
 import androidx.lifecycle.lifecycleScope
 import com.symmetricalpalmtree.gpaper.core.PaperListener
 import com.symmetricalpalmtree.gpaper.core.PaperView
@@ -42,6 +43,7 @@ import com.symmetricalpalmtree.notesproutsn.core.markdown.HeadingPrefix
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionCallException
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionRegistry
 import com.symmetricalpalmtree.notesproutsn.extension.RecognizerClient
+import com.symmetricalpalmtree.notesproutsn.extension.ScratchPadEntry
 import com.symmetricalpalmtree.notesproutsn.notebook.NotebookUndo.Action
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -84,6 +86,8 @@ class NotebookActivity : AppCompatActivity() {
     private lateinit var followFlow: LinkFollowFlow
     /** Snap-to-guide's durable preference (arc 9). `paper.snapToGuides` is the live copy. */
     private lateinit var snapPrefs: SnapPrefs
+    /** The Scratch Pad's entry button (arc 11) — the host half of the EPD handoff lives in it. */
+    private lateinit var scratchPad: ScratchPadEntry
     private val repo by lazy { IndexRepository() }
 
     /** The global clipboard's one index row (arc 7) — the payload, read and written only here. */
@@ -310,6 +314,19 @@ class NotebookActivity : AppCompatActivity() {
             switchTo = { id -> switchToNotebook(id) },
             button = binding.btnRecents,
         )
+
+        // The Scratch Pad (arc 11). Must exist before RESUMED — it registers an ActivityResult
+        // launcher. The one line that is the notebook's own: the EPD pipeline goes over immediately
+        // before the launch, because the pad is a second paper surface in a second process. The
+        // notebook is NOT sealed behind it — the pad opens no `.soil`, and this session, its undo
+        // stack and its unsaved page are all still here when the result comes back.
+        scratchPad = ScratchPadEntry(
+            activity = this,
+            button = binding.btnScratchPad,
+            beforeLaunch = { paper.releaseForHandoff() },
+        )
+        binding.btnScratchPad.setOnClickListener { if (opened && !closing) scratchPad.open() }
+        TooltipCompat.setTooltipText(binding.btnScratchPad, binding.btnScratchPad.contentDescription)
 
         // Chrome moved/appeared/disappeared: re-push the exclusion rects once the pass settles.
         binding.root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> binding.root.post { pushExclusions() } }
@@ -1773,6 +1790,9 @@ class NotebookActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (::paper.isInitialized) paper.resumeDrawing()
+        // Re-discovered on every resume: a package can be disabled or replaced under us, and this
+        // is also the resume that follows a return from the pad.
+        if (::scratchPad.isInitialized) scratchPad.refresh()
     }
 
     override fun onStop() {
@@ -1842,6 +1862,8 @@ class NotebookActivity : AppCompatActivity() {
         if (::contentsFlow.isInitialized) contentsFlow.dismissIfShowing()
         if (::recentsFlow.isInitialized) recentsFlow.dismissIfShowing()
         if (::linkPickFlow.isInitialized) linkPickFlow.close()
+        // The pad's held bind must not outlive the screen that opened it, result or no result.
+        if (::scratchPad.isInitialized) scratchPad.close()
         if (::paper.isInitialized) paper.release()
         // A destroy that isn't a normal close (e.g. finish() out of failOpen) still seals.
         if (::session.isInitialized && session.isOpen && !closing) {

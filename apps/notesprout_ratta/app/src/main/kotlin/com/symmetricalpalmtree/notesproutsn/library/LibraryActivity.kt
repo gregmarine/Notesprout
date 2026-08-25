@@ -31,6 +31,7 @@ import com.symmetricalpalmtree.notesproutsn.data.prefs.SortPrefs
 import com.symmetricalpalmtree.notesproutsn.data.sidecarsOf
 import com.symmetricalpalmtree.notesproutsn.data.soilFile
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityLibraryBinding
+import com.symmetricalpalmtree.notesproutsn.extension.ScratchPadEntry
 import com.symmetricalpalmtree.notesproutsn.notebook.NotebookActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -60,6 +61,8 @@ class LibraryActivity : AppCompatActivity() {
     private lateinit var sortPrefs: SortPrefs
     private lateinit var recentsPrefs: RecentsPrefs
     private val repo by lazy { IndexRepository() }
+    /** The Scratch Pad's entry button (arc 11) — GONE unless a trusted extension is installed. */
+    private lateinit var scratchPad: ScratchPadEntry
 
     private var folderId: String? = null
     private var pageIndex = 0
@@ -113,6 +116,11 @@ class LibraryActivity : AppCompatActivity() {
         coldLaunch = savedInstanceState == null
 
         wireBars()
+        // The Scratch Pad (arc 11). Built here because it registers an ActivityResult launcher, and
+        // one may not be registered after STARTED. No handoff to make: the library hosts no paper.
+        scratchPad = ScratchPadEntry(activity = this, button = binding.btnScratchPad)
+        binding.btnScratchPad.setOnClickListener { scratchPad.open() }
+        TooltipCompat.setTooltipText(binding.btnScratchPad, binding.btnScratchPad.contentDescription)
         DebugMenu.install(this, binding.topBar)
 
         // The grid cannot be sized until the band it lives in has been laid out.
@@ -139,7 +147,19 @@ class LibraryActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         launching = false
+        // Re-discovered on every resume: a package can be disabled or replaced under us. Guarded
+        // because an IndexGuard bounce returns from onCreate but still gets this callback.
+        if (::scratchPad.isInitialized) scratchPad.refresh()
         if (gridMeasured) lifecycleScope.launch { refresh() }
+    }
+
+    override fun onDestroy() {
+        // The guard bounce still runs this callback, and a `lateinit` teardown would crash on the
+        // way out of a task Android rebuilt after a background process kill.
+        if (IndexGuard.bounced(this)) { super.onDestroy(); return }
+        // The pad's held bind must not outlive the screen that opened it, result or no result.
+        if (::scratchPad.isInitialized) scratchPad.close()
+        super.onDestroy()
     }
 
     /**

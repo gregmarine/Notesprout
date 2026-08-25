@@ -108,6 +108,15 @@
             android:src="@drawable/ic_clock"
             android:contentDescription="@string/cd_recents" />
 
+        <!-- The Scratch Pad (arc 11). GONE unless a trusted extension is installed —
+             ScratchPadEntry owns it, re-discovering on every resume. -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnScratchPad"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_sketching"
+            android:visibility="gone"
+            android:contentDescription="@string/cd_scratch_pad" />
+
         <LinearLayout
             android:id="@+id/pager"
             android:layout_width="0dp"

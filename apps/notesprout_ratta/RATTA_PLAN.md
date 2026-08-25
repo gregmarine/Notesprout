@@ -2601,7 +2601,7 @@ white screen with a Back arrow flush at the top-left and the title "Scratch Pad"
 to the library. 3. Nothing else in the library or the notebook looks different.
 
 ### J4 — The pad screen + both entry buttons
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (Nomad-verified + user-verified 2026-08-24)
 
 The extension's screen, the notebook's shape from `:sn-screen`: `ScratchPadActivity` (caller check
 first thing in `onCreate`, before anything is inflated; full-bleed `GPaper.create` in the
@@ -2645,6 +2645,101 @@ strings; Fable reviews the handoff seam and the flush ordering.*
 this page and its ink?", SN's notebook uses the bare "Delete this page?" because undo restores the
 ink (the R4 lesson) and the pad's structural undo restores ink too; recommend the bare SN wording —
 confirm.
+*(Answered: the **bare SN wording**, "Delete this page?" — the two surfaces read identically and the
+pad's structural undo puts the page **and its ink** back.)*
+
+**Outcome:** landed as written, with three deviations noted below. **`:ext-scratchpad`** gained the
+real screen: `ScratchPadActivity` (caller check first statement, full-bleed `GPaper.create` in the
+extension's own process, immersive, `PaperChrome` exclusions with the whole paper blocked under the
+"Opening…" box until the page lands, `PageGestures` for the finger vocabulary, `UndoRedoStack<ScratchAction>`,
+the 800 ms debounce, `exit()` → flush-under-the-lock → `finishWithHandoff`), `ScratchToolbar` (the
+fixed tools + `:sn-screen`'s `PaperToolbar` + the page arrows + the pen-idle-gated indicator),
+`ScratchSelectionToolbar` (Delete alone, `SelectionAnchor`-placed), `ScratchDocument` (pages in
+memory over `ScratchStore`: load / goTo / insert / deleteCurrent / flushUntilClean, the three
+mutations, the replay, the running **exact** encoded size), `ScratchUndo` (Drew · Erased · Moved ·
+Page), `activity_scratch_pad.xml` and the strings. **`:app`** gained `extension/ScratchPadEntry`
+(visibility · busy guard · the "Opening…" wait · `beforeLaunch` · the bind's life), the two buttons
+at the locked slots (both `ic_sketching`, both GONE by default) and their strings; the J3 debug
+"Probe scratch pad" row is **removed**.
+
+**The headline risk is answered — the handoff works, both ways, first try.** SN's first-ever
+`releaseForHandoff` call, and the log reads exactly as the trap says it must:
+
+```
+ScratchPadClient: open: begin ok in 35 ms      ← host
+GPaperRatta: enableFullUiAuto(false) ok        ← host (15251)
+GPaperRatta: firmware ink released for handoff ← host, immediately before the launch
+GPaperRatta: firmware ink session claimed      ← pad  (15382)
+…Back…
+GPaperRatta: firmware ink released for handoff ← pad,  .036
+ScratchPadActivity: finishing (handoff released)
+GPaperRatta: firmware ink session claimed      ← host, .120 — the caller reclaims
+ViewRootImpl[ScratchPadActivity]: Change to Gone ← the pad's window closes, .209, AFTER the reclaim
+```
+The departing window's visibility close lands **after** the caller's reclaim, which is the exact
+ordering Paper's S3 root cause turns on. No g-paper change was needed; the pin stays **0.1.6**.
+
+**Three deviations from the phase text:**
+- **One entry class, not two.** The phase named `notebook/ScratchPadFlow` and `library/ScratchPadLaunch`;
+  they came out ~90 % identical, so this is one `extension/ScratchPadEntry` with a `beforeLaunch`
+  lambda — the notebook passes `paper.releaseForHandoff()`, the library passes nothing. Two
+  near-identical files is the sibling-copy trap `:sn-screen` exists to keep out of this app.
+- **The long-press goes straight to the confirm**, with no one-row sheet in between. The notebook's
+  sheet has three or four rows and earns itself; the pad has exactly one page action, and a sheet
+  whose only row leads to a confirm is two taps for one decision. It rides the same recorded
+  frame-silence exception ("the delete-page sheet at long-press").
+- **The host's "Opening…" box rides the C1 exception rather than adding one.** It is the same act as
+  the Contents and Recents buttons — a deliberate chrome tap that raises a full-screen thing, after
+  `dispatchTouchEvent` has already released the render — and it is genuinely needed: a **cold** open
+  is 3 123 ms on the Nomad against 114 ms warm.
+
+**Tests: 605 JVM** (`:app` 455 · `:sn-screen` 58 · `:extension-api` 29 · `:ext-mlkit` 29 ·
+`:ext-scratchpad` 34) — up 15 from J3. `ScratchDocumentTest` (15) drives a `FakeExtensionStore` (a
+plain map behind the real `IExtensionStore` — implementable on the JVM because it is an interface)
+and pins the arc's three correctness rules directly: **re-flush until clean** (the fake's `onPut`
+hook drops a stroke into the very window a flush's IO hop opens, and the second pass writes it),
+**the full rule** (incompressible strokes until `PAGE_FULL`, then the held page is re-encoded and
+proved to sit inside the 4 MiB cap — the running total is the encoder's own answer, never assumed),
+and **an unreadable page is never written over** (a damaged blob is byte-identical after a flush).
+Plus both directions of every action, including the two that are easy to get wrong: an erase comes
+back **in place** (indices, not an append), and a `Moved` revert leaves the store holding exactly what
+`ScratchPageCodec.encode` produces for the reverted geometry — the zlib re-measure, proven rather
+than asserted. `assembleDebug` + `assembleRelease` green across all five modules on the first pass;
+the pad's release APK is **6.5 MB**.
+
+**Nomad walk (agent-free, by hand — chrome, pages and the handoff are all finger-drivable):**
+- **Library**: "Scratch pad" sits at `[232,1748]`, immediately after Recents and before the pager.
+  **Notebook**: at `[1164,7]`, immediately left of Recents. Both GONE without the extension:
+  `pm disable-user` makes them vanish on the next resume, `pm enable` brings them back on the one
+  after — discovery re-runs every time.
+- **The pad's chrome, dumped**: Back · "Scratch Pad" on top; Pen (selected) · Eraser · Lasso on the
+  left of the bottom bar, `<` · `1 / 1` · `>` on the right.
+- **Pages**: both arrows **no-op at a bound** (1 / 1 stayed 1 / 1 on either arrow, and 2 / 2 stayed
+  2 / 2 on Next) and never disable; a one-finger swipe past the last page inserted one (2 / 2); the
+  arrows walk 1 / 2 ⇄ 2 / 2; long-press raises **"Delete this page?"** with mixed-case
+  Cancel / Delete, and the delete lands on the previous page.
+- **The bind**: `hold` → `begin: pages=1 in 9–50 ms` → screen → Back → `finishing (handoff released)`
+  → result → `end` → `finish: end ok` → `unbind … (held)`.
+  `dumpsys activity services <pkg>` = **(nothing)**; binds = unbinds.
+- **The double tap in the e-ink gap produces one showing** — one `hold`, one `begin`. The guard is
+  latched at the tap, not when the client lands (see the fix note below).
+- **Persistence**: three pages, left on page 2, `am force-stop` of **both** processes, relaunch →
+  the pad reopens on **2 / 3**.
+- `am start` of the screen from a shell is still **refused** (`refused caller (none)`), and the store
+  file is still encrypted (`head -c 16 | xxd` → `7fd5 ad06 662d 8925 …`).
+- `logcat -b crash` **empty** throughout; no E/W from our code (every line in the buffer is
+  SurfaceFlinger / WindowManager).
+
+**One bug found and fixed in self-review, before the device walk's second pass:** the entry's busy
+guard watched the client slot, which is filled *asynchronously* — a pre-draw hop, then the store and
+the bind. A second tap inside that window (which on e-ink is the normal thing to do) would have
+started a second showing. The guard is now latched synchronously at the tap and released with the
+result or the failure; the double-tap probe above is what pins it.
+
+**Carried into J5:** `receiveInk` / `takeOutgoing` still throw `UnsupportedOperationException`; the
+pad's Send buttons and the notebook's 7th selection button do not exist yet (GONE-never-disabled
+extends to not-built); `ScratchAction` has no `Pasted`; `ScratchPadEntry.onResult` and
+`ScratchPadClient.send` / `drainOutgoing` are wired but unexercised.
 
 ### J5 — The two transfers
 **Status:** ⬜ Not started
