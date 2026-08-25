@@ -2881,8 +2881,8 @@ state must order the write after the read.
 `CLAUDE.md`s), the arc-range `/code-review high`, the boundary audit and the freeze.
 
 ### J6 — Review, hardening, docs, freeze
-**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-25 — "These tests pass"). **ARC 11
-FROZEN.** Review level **high**, version stamp stays **`0.1.0-ratta`**, g-paper pin stays **0.1.6**.
+**Status:** ✅ Complete (commits d31cb62 + 98a836e, Nomad-verified + user all-clear 2026-08-25 —
+"These tests pass"). **ARC 11 FROZEN.** Review level **high**, version stamp stays **`0.1.0-ratta`**, g-paper pin stays **0.1.6**.
 
 `/code-review high` **over the whole arc range, never the last phase** — the O2 lesson: reviewing
 the arc caught two O1 bugs no eye check could have. A **boundary audit** on Paper's rows-28–32

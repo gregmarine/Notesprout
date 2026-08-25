@@ -160,7 +160,7 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   a two-finger swipe down as its second entry point, and a tap that seals this notebook and
   opens that one. No new store: `sn_recents` plus index lookups.
   **Arc 11 "Scratch Pad"** ✅ **COMPLETE + FROZEN 2026-08-25** (**J1 `12fe218` · J2 `cd8a918` ·
-  J3 `c7c83b5` · J4 `1187f29` · J5 `cc0ba79` · J6 `__J6HASH__`**): Paper's arc-6 scratch pad
+  J3 `c7c83b5` · J4 `1187f29` · J5 `cc0ba79` · J6 `98a836e`**): Paper's arc-6 scratch pad
   ported **as an extension** — the user's explicit call, and the "fresh user decision" the
   extension rule requires before SN may hold a second capability point. It is SN's first
   **screen-owning** point (`SCRATCH_PAD`, tier 2): `NSE · Scratch Pad` owns its own g-paper
