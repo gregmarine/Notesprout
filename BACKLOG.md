@@ -874,3 +874,55 @@ J6 Outcome) and one was refuted. Two things are carried, neither of them SN bugs
 4 MiB `SharedMemory` because `DebugMenu.runStoreProbe` calls `getLarge` in-process, where
 `onTransact` never runs." That probe was deleted in J3 — there is no in-process caller — and
 `onTransact`'s `finally` already calls `pending.remove()`.
+
+## g-paper / Notesprout SN — a transferred selection drags worse than a hand-lassoed one (open, 2026-08-25)
+
+**Symptom (user, Nomad, arc 11 / J6):** after a scratch-pad transfer in either direction, dragging
+the resulting selection feels sluggish; an ordinary hand-lassoed selection drags smoothly. Not a
+showstopper — the drag lands where it should, nothing is lost.
+
+**Still open.** Two hypotheses were tested on the device and **both were disproved** — recorded here
+so nobody spends the time again:
+
+1. **The firmware dash trail painting under the app-drawn ghost.** `RattaPaperView` never overrides
+   `onSelectionDragVisual`, so the `firmwareInkSuppressed` flip at drag start is never pushed to the
+   firmware — suppression rests on `updateLassoDragHoverSuppress` winning the race from the hover
+   stream (overlay law 3), with a down-time backstop whose own comment says it is "too late for this
+   contact's first dashes". A `0.1.7` adding `override fun onSelectionDragVisual(active) { if (active)
+   fullScreenDisable() else applyToolToFirmware() }` was built, published, pinned and installed:
+   **user reported no change in behaviour.** The change was reverted (unproven engine changes do not
+   ride into an arc freeze) — but **the gap it names is real** and is worth closing on its own merits
+   the next time gpaper-ratta is opened: the base documents the hook, `OnyxPaperView` implements it,
+   Ratta ignores it, and the `false` edge would also cover drag-cancel and dismiss-mid-drag, which
+   never reach the existing lift-time `applyToolToFirmware`.
+
+2. **Per-frame drag cost scaling with selection size.** `CanvasPaperView.onDraw` rebuilds every
+   dragged stroke from raw points each frame (`StrokeRenderer.draw` per stroke in `dragStrokes`,
+   main thread), so a rasterize-once drag layer looked like the fix. The measurement that suggested
+   it was **confounded**: the fast drags were pen and the slow ones finger. Rasterizing the drag
+   layer once at drag start is still a defensible optimization, but it is **not** established as
+   this bug's cause.
+
+**What the instrumented run actually measured** (temporary `DBG` logging in `lassoDragMove` /
+`lassoDragFinish` / the Ratta suppress points; sample counts + throttled invalidate counts):
+
+| drag | input | selected | sample rate | frame rate |
+|---|---|---|---|---|
+| transferred | pen | 1 | 432 Hz | 16 Hz |
+| hand-lassoed | pen | 1 | 431 Hz | 16 Hz |
+| transferred | finger | 10 | 47 Hz | 12 Hz |
+| hand-lassoed | finger | 10 | 56 Hz | 13 Hz |
+
+Reading: the repaint rate is flat everywhere (the 60 ms `LASSO_REFRESH_INTERVAL_MS` throttle caps it
+at ~16 Hz), so the felt sluggishness is **pen/finger input sampling**, not frames. The pen samples at
+~430 Hz and the finger at ~50 Hz — that gap is the EMR digitizer vs the touch panel and explains most
+of the table. **The residual worth chasing is the matched finger pair: 47 Hz transferred vs 56 Hz
+hand-lassoed, one sample each**, with the user confirming the transferred one still felt worse at
+equal stroke count. Everything else is confound.
+
+**Next step if picked up:** one controlled run — same ink, same stroke count, one drag each of
+{pen, finger} × {transferred, hand-lassoed} — with the same instrumentation, to see whether the
+finger-pair residual survives. A stylus contact logs `down inside box` and a finger does not, which
+is the cheap way to tell the two apart in a trace. Note `dragStrokes` is emptied before
+`onSelectionDragVisual(false)`, so a drag-summary log must read `selection?.strokeIds?.size`, not
+`dragStrokes.size`.

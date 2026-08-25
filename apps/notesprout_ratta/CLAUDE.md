@@ -54,8 +54,9 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   contract half; **J3 shipped the point**: the AIDL, `WireStroke` / `InkBundle` / `InkChunks`,
   `ExtensionBinder.hold` + `HeldBinding` — SN's **only** bind held across more than one call,
   because the operation is the showing of a screen — `ScratchPadClient`, `TransferCaps`, and the
-  APK; **J4 the real screen, both entry buttons and the EPD handoff; J5 the two ink transfers** —
-  the arc is complete). Its screen is exported under
+  APK; **J4 the real screen, both entry buttons and the EPD handoff; J5 the two ink transfers; J6
+  the review, the boundary audit and the docs** — the arc is **complete and frozen**, 2026-08-25).
+  Its screen is exported under
   `ACTION_SCRATCH_PAD_SCREEN` with `<category DEFAULT>` and refuses any caller that is not a
   `startActivityForResult` from the host (`HostCallerCheck.enforceActivity`), so the host **must**
   launch it with an `ActivityResultLauncher`. **No THIRD capability point may be added** without

@@ -2881,9 +2881,8 @@ state must order the write after the read.
 `CLAUDE.md`s), the arc-range `/code-review high`, the boundary audit and the freeze.
 
 ### J6 — Review, hardening, docs, freeze
-**Status:** 🧪 Awaiting the user's all-clear (review + hardening + docs done, Nomad-verified
-2026-08-25; review level **high**, version stamp stays **`0.1.0-ratta`** — the user's two calls at
-phase start)
+**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-25 — "These tests pass"). **ARC 11
+FROZEN.** Review level **high**, version stamp stays **`0.1.0-ratta`**, g-paper pin stays **0.1.6**.
 
 `/code-review high` **over the whole arc range, never the last phase** — the O2 lesson: reviewing
 the arc caught two O1 bugs no eye check could have. A **boundary audit** on Paper's rows-28–32
@@ -2985,6 +2984,33 @@ from measured screencaps, all three pass.
 **Deviation from the phase text:** the phase said Fable reviews and Sonnet writes the docs. Both were
 done in-session — the review by the `/code-review` agent at `high` and the fixes, audit and docs
 by the session model — and the Haiku device walk ran as written.
+
+**One thing the user found at the freeze check, and where it landed.** After the transfers, dragging
+the *resulting* selection feels sluggish where an ordinary hand-lassoed drag is smooth. Not a
+showstopper; chased at the user's request and **left open, banked in `BACKLOG.md`** with the
+evidence. Two hypotheses were built, shipped to the device and **both disproved** — worth recording
+as method, not just outcome:
+
+1. **The firmware dash trail under the app-drawn ghost.** `RattaPaperView` never overrides
+   `onSelectionDragVisual`, so the `firmwareInkSuppressed` flip at drag start is never pushed to the
+   firmware; suppression rests on the hover stream winning the race (overlay law 3). A g-paper
+   **0.1.7** adding the override was built, published, pinned and installed — **the user reported no
+   change**, so it was **reverted** and the pin stays 0.1.6. An unproven engine change does not ride
+   into an arc freeze. The gap it names is real and is in `BACKLOG.md` on its own merits.
+2. **Per-frame drag cost scaling with selection size** (`onDraw` rebuilds every dragged stroke from
+   raw points each frame). The measurement that suggested it was **confounded**: the fast drags were
+   pen and the slow ones finger.
+
+What instrumentation actually established: the repaint rate is flat at ~12–16 Hz everywhere (the
+60 ms throttle caps it), so the felt sluggishness is **input sampling**, not frames — pen ~430 Hz vs
+finger ~50 Hz, which is the digitizer vs the touch panel and explains most of the spread. The
+residual worth chasing is the **matched finger pair at equal stroke count: 47 Hz transferred vs
+56 Hz hand-lassoed**, one sample each, with the user confirming the transferred one still felt
+worse. The full table, the ruled-out causes and the next controlled run are in `BACKLOG.md`.
+
+**The lesson, and it cost two device round trips:** *a plausible mechanism is not a cause.* Both
+hypotheses were well-argued from the code and both were wrong, and the second was wrong because the
+data behind it mixed two input devices. Measure the matched pair before believing the story.
 
 ---
 

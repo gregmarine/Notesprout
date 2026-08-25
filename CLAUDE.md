@@ -159,8 +159,8 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   the right edge with its 2 dp rule on the left (the ToC's own rule thickens to 2 dp to match),
   a two-finger swipe down as its second entry point, and a tap that seals this notebook and
   opens that one. No new store: `sn_recents` plus index lookups.
-  **Arc 11 "Scratch Pad"** (planned 2026-08-24; **J1 ✅ `12fe218` · J2 ✅ `cd8a918` · J3 ✅ `c7c83b5` ·
-  J4 ✅ `1187f29` · J5 ✅ `cc0ba79`** — J6 to go): Paper's arc-6 scratch pad
+  **Arc 11 "Scratch Pad"** ✅ **COMPLETE + FROZEN 2026-08-25** (**J1 `12fe218` · J2 `cd8a918` ·
+  J3 `c7c83b5` · J4 `1187f29` · J5 `cc0ba79` · J6 `__J6HASH__`**): Paper's arc-6 scratch pad
   ported **as an extension** — the user's explicit call, and the "fresh user decision" the
   extension rule requires before SN may hold a second capability point. It is SN's first
   **screen-owning** point (`SCRATCH_PAD`, tier 2): `NSE · Scratch Pad` owns its own g-paper
@@ -183,7 +183,12 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   arrive selected with the lasso armed and **one** undo step behind them. Pad → notebook: the top
   bar sends the page, the selection bar sends the lasso, and the host drains on the bind it is
   **still holding** and pastes as one `ObjectsPasted` step, rebased after the destination page's
-  max `"order"`.
+  max `"order"`. **J6** was the arc-range review (`high`, J1→J5 — five real findings fixed, one
+  refuted), the boundary audit, and the docs: **`apps/notesprout_ratta/docs/scratchpad.md`** is the
+  pad as a feature, and `docs/extensions.md` is now the **seam** doc carrying the tier-2 recipe for
+  an extension-owned screen. 623 JVM tests; version stays `0.1.0-ratta`; g-paper pin stays 0.1.6.
+  One open non-blocker in `BACKLOG.md`: a transferred selection drags worse than a hand-lassoed one
+  (two hypotheses built, shipped to the Nomad and **both disproved** — read it before re-theorising).
   **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for any work there** — it holds the
   per-arc status, locked decisions, working protocol, and model recipe.
 - `germination` — previous post-MVP feature branch (reference, not active)
