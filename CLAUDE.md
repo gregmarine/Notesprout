@@ -154,12 +154,22 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   2026-08-24: og's snap-to-guide for a dragged selection — necessarily built into g-paper
   0.1.6 (`SnapEngine`), since the engine owns every drag sample — with a remembered toggle
   on the selection toolbar and margin guides one measured toolbar in from each page edge.
-  **Arc 10 "Recents"** (T1, in progress): og's in-notebook Recent-Notebooks switcher, mirrored
+  **Arc 10 "Recents"** ✅ T1 2026-08-24: og's in-notebook Recent-Notebooks switcher, mirrored
   to the right — a clock button flush at the top bar's right edge, the ToC's panel anchored to
   the right edge with its 2 dp rule on the left (the ToC's own rule thickens to 2 dp to match),
   a two-finger swipe down as its second entry point, and a tap that seals this notebook and
   opens that one. No new store: `sn_recents` plus index lookups.
-  **The next arc is not planned — ask first.**
+  **Arc 11 "Scratch Pad"** (planned 2026-08-24, J1–J6, not started): Paper's arc-6 scratch pad
+  ported **as an extension** — the user's explicit call, and the "fresh user decision" the
+  extension rule requires before SN may hold a second capability point. It is SN's first
+  **screen-owning** point (`SCRATCH_PAD`, tier 2): `NSE · Scratch Pad` owns its own g-paper
+  canvas in its own process, and the core grows no second drawing surface. Two structural moves
+  ride along — a shared **`:sn-screen`** library extracted from `:app` (both the host and the
+  extension need the notebook screen's parts; the alternative was the `RattaNotebookView`
+  sibling-copy trap), and the **full extension store** (encrypted per-package KV + ashmem large
+  values), which amends two standing rules in `apps/notesprout_ratta/CLAUDE.md` by name. Entry
+  points: the library's bottom bar after Recents, the notebook's top bar before Recents. The
+  headline risk is the EPD handoff — two paper surfaces in two processes, an SN first.
   **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for any work there** — it holds the
   per-arc status, locked decisions, working protocol, and model recipe.
 - `germination` — previous post-MVP feature branch (reference, not active)

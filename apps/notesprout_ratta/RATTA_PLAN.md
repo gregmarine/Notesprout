@@ -2133,9 +2133,9 @@ the same rule on its left edge.
   agent can drive the button, the pager, a row tap and the swipe; only the EPD look is the user's eye.
 
 ### T1 — Recents panel + toolbar button + two-finger swipe + panel edges
-**Status:** 🧪 Awaiting the user's eye check — built, reviewed, Nomad-verified as far as adb reaches;
-committed on the user's instruction as `627b635` (see Outcome). The two-finger swipe and the panel-edge look are
-the only untested things, and neither is injectable.
+**Status:** ✅ Complete (commit `627b635`) — **Arc 10 "Recents" frozen 2026-08-24** (Nomad-verified as far
+as adb reaches, then user eye-checked: the two-finger swipe-down and the 2 dp panel edges, neither of which is
+adb-injectable, both confirmed on the device).
 
 New: `data/index/ObjectDao.aliveNotebooks` (blob-free batch) + `IndexRepository.aliveNotebooks`;
 `RecentsPrefs.touch()`; `notebook/RecentRows` (pure: stored order, drop dead/current/dupes → display
@@ -2199,6 +2199,371 @@ reopening showed Test 04 at the top stamped with its **close** time — the bump
 the one-finger swipe-down still opens the Contents, the scrim dismisses, `panel=702px` of 1404 after
 the width change, crash buffer empty throughout. **adb cannot inject multi-touch**, so the two-finger
 swipe is the user's eye check, as is the 2 dp rule's weight on e-ink. Version stays `0.1.0-ratta`.
+**The user's eye check came back clear**, and **arc 10 "Recents" is frozen at this commit.** Nothing is
+carried forward; `docs/notebook.md` § "Recents" is the reference.
+
+---
+
+## Phases — Arc 11 "Scratch Pad" (planned 2026-08-24, wizard complete)
+
+og's **scratch pad** — one global, multi-page jotter reachable from the notebook and the library,
+persisted across restarts, with two-way ink transfer to and from the notebook it was opened from —
+fitted to SN **as an extension**, on the user's explicit call. That call is the fresh user decision
+the standing extension rule demands before a second capability point may exist: SN gains
+**`SCRATCH_PAD`** as its second point and its first **screen-owning** one (Paper's UI-rule tier 2 —
+an extension-owned screen *off* the paper that the core launches for a result and returns from; the
+core grows no second drawing surface). og (`docs/scratchpad.md` at the monorepo root) and Paper's
+arc 6 (`apps/notesprout_paper/PAPER_SCRATCHPAD_PLAN.md`, `docs/scratchpad.md`, `docs/extensions.md`
+§"ScratchPad (contract)" / §"The extension store" / rules 25–27 / the tier-2 recipe) are reading
+references — **no code copied**, the standing rule; Paper's shipped constants and its S3 review
+findings are inherited as traps below, because every one of them was found the hard way.
+
+Two structural moves ride with the feature, both wizard-locked: a shared **`:sn-screen`** library
+(the second paper surface needs what the notebook screen already has — the sibling-copy trap og's
+`RattaNotebookView` still teaches), and the **full extension-store port** (the pad's pages persist
+in a host-owned encrypted store; the extension itself writes nothing to disk, ever). J2 amends the
+two `apps/notesprout_ratta/CLAUDE.md` standing rules those moves collide with, by name.
+
+**The arc's headline risk is the EPD handoff**: two paper surfaces in two processes for the first
+time on SN. The traps section carries the whole discipline; a failure there goes to g-paper, never
+a host workaround.
+
+### Locked decisions (arc-11 wizard 2026-08-24 — do not re-ask)
+
+| Decision | Answer |
+|---|---|
+| It stays an extension | **Yes — the user was explicit.** This is the fresh user decision `CLAUDE.md` requires; `SCRATCH_PAD` becomes SN's second extension point and the first screen-owning one (tier 2). `NSE · Scratch Pad` owns `ScratchPadActivity`, its own g-paper canvas, tools and pages; the core adds the point, two entry buttons, one selection action and the transfers. |
+| Shared code | **New `:sn-screen` Android library**, Paper's S0 move on SN's files: a pure `git mv` out of `:app` — `core/{StrokeCodec, InkColorCodec, Slog, Dialogs, TopGuard, ActionSheetDialog}`, `notebook/{PageMath, SelectionAnchor, PageGestures, UndoRedoStack}` (genericised to `UndoRedoStack<A : Any>`; its 14-case `Action` sealed interface stays in `:app` as `notebook/NotebookUndo.kt`), plus the design resources (`values/{colors,dimens,styles,themes}`, `values-sw720dp/dimens`, the **37 chrome** `ic_*.xml`, `bg_toolbar_button`, `shape_dialog_bordered`, a module `strings.xml` holding only `ok`). **`ic_launcher_foreground.xml` and every `mipmap-*` stay in `:app`** — the launcher glyph is the host's identity, not shared chrome, and the extension draws its own (the Tabler puzzle, ext-mlkit's recipe). New in the module: `PaperChrome` (no SN equivalent exists — exclusions are inlined in `NotebookActivity`; Paper's is 46 lines), a **binding-free** `PaperToolbar` (Paper's is 61; SN's `NotebookToolbar` is hard-bound to `ActivityNotebookBinding` and is not reusable — it stays in `:app`), and `ic_pencil_down.xml` + `ic_sketching.xml` (SN has neither; both exist in `apps/notesprout_paper/paper-screen/src/main/res/drawable/` as the Tabler reference). g-paper becomes the module's `api(...)` so it reaches the extension transitively; `:app` and `:ext-scratchpad` both depend on it; it must **NEVER** see `:extension-api` — that seam is why `TransferCaps` on the host and `ScratchInk` in the extension are deliberate twin mappings, not one shared class. |
+| Extension store | **Full port.** `IExtensionStore` with all six methods (`get`/`put`/`delete`/`keys` + the appended `putLarge`/`getLarge`), `LargeValue` + `SharedBytes` (ashmem), host-side `data/extstore/` (`KvEntity`, `KvDao`, `ExtensionStoreDatabase`, `ExtensionStores`, `ExtensionStoreGate`, `ExtensionStoreBinder`): a per-package SQLCipher Room KV at `Garden/<pkg>.db` under the **global** key, uid-bound per bind, revoked in the same `finally` as the unbind. Caps: key 512 chars · inline 512 KiB · value 4 MiB · 50 000 keys. `data/SoilFile.kt` gains `extensionStoreFile(ctx, pkg)` and stays the only path constructor. Nothing lands in the index or any `.soil`; `Garden/` gains `.db` files beside the `.soil`s — invisible to the library, whose structure is index-only. |
+| Pad feel | **Paper parity plus two SN engine flags.** Fixed tools (`PEN_WIDTH_PX 3f`, black, `ERASER_RADIUS_PX 15f`) — but **`smartLassoEnabled = true` and `scribbleEraseEnabled = true`**: SN's notebook has both on, and a pad one tap away that lassos differently reads as a bug. Everything else spartan: no headings, no links, no clipboard, no snap, no Contents, no Recents, no templates, no colour, no debug menu. |
+| Entry points | Notebook: right cluster, **immediately LEFT of `btnRecents`** — after `topBarRow`'s weight-1 spacer, before `btnRecents` (`activity_notebook.xml`); the right edge becomes "things that leave this page". Library: **immediately AFTER `btnRecents`**, before the weighted `pager` LinearLayout (`activity_library.xml`'s `bottomBar`). Icon for both: Tabler `sketching` (`ic_sketching`) — Paper's choice. Both GONE unless a trusted extension is installed, re-discovered on every resume. |
+| Selection action | The notebook's **"Pad" action is ink-only** — hidden the moment the selection holds a heading or a link, because `WireStroke` is the only thing the contract carries. `SelectionToolbar` goes to **7 buttons in STROKES mode** (Delete · H · Link · Copy · Cut · Snap · Pad = 434 dp of the Nomad's 749 dp). |
+| Naming | The wire parcelable is **`WireStroke`**, not Paper's `PaperStroke` — "Paper" is the other app's name and this one is on the wire forever. Modules `:sn-screen`, `:ext-scratchpad`. Package `com.symmetricalpalmtree.notesproutsn.ext.scratchpad` (`.dev` in debug). Label `NSE · Scratch Pad` / `NSE · Scratch Pad Dev` — a build-type string override, not a suffix (the ext-mlkit recipe, verified in its `src/{main,debug}/res`). versionName host lockstep `0.1.0-ratta` (`-dev` in debug). Action strings SN-namespaced: `…notesproutsn.extension.SCRATCH_PAD` and `…SCRATCH_PAD_SCREEN`. |
+| Arc shape | **Six phases J1–J6** (below). Each ends green — build + `./gradlew test` + Nomad — so the user can `/clear` between them. |
+| Staffing | **The full model recipe returns**: Fable plans, reviews, and writes the contract, store and crypto seams; Opus the substantial feature code; Sonnet scaffolding, layouts, resources, docs; Haiku the Nomad adb walks. Background agents ≤ 5 concurrent. |
+
+### Arc-11 standing traps
+
+Device / process:
+
+- **adb cannot inject stylus ink or multi-finger gestures** on the Supernote; `input text` and
+  `input keyevent` letters are swallowed; EPD live ink is invisible to `screencap` (committed
+  strokes are visible). Finger `input tap` / `input swipe` work — so buttons, sheets and flips are
+  agent-drivable, but every lasso and every stroke is the user's.
+- **`am start -n <pkg>/<FQCN>` and verify `dumpsys activity activities | grep mResumedActivity`**
+  before trusting any screencap — `monkey` does not reliably foreground the target, and an entire
+  device walk once "passed" against the wrong app (R4).
+- **`adb push` into `/sdcard/Android/data/<pkg>/files/` fails AND deletes the target** — push to
+  `/data/local/tmp`, then `shell cp` (R6).
+- **`callingPackage` is non-null only for a `startActivityForResult`-style launch** — the host MUST
+  use an `ActivityResultLauncher`, and a plain `am start` from a shell is always refused. A design
+  constraint, not a bug (Paper's risk register 2).
+
+EPD / handoff — the arc's headline risk:
+
+- **Two paper surfaces, two processes.** The notebook calls `paper.releaseForHandoff()` immediately
+  before launching the pad, and **the pad calls it before EVERY `finish()`** — Back, Send, the
+  store-failure dialog — Paper's `finishWithHandoff`. The returning caller reclaims the pipeline in
+  its `onResume`, which runs *before* the departing window's visibility close; a close landing after
+  that reclaim tears the caller's live session down. **SN's host has never called
+  `releaseForHandoff` before** (verified — zero call sites today; it has only ever had one paper
+  surface), so J4 is its first use. The API is in g-paper 0.1.6 and the Ratta ownership-token fix
+  landed in 0.1.2, so no engine bump is expected — but if the pad's ink daemon does not arm, or the
+  notebook's does not re-arm on return, **the fix goes to g-paper, never a host workaround**, and an
+  engine commit lands with or before the host commit that pins it (the A1 rule).
+- **g-paper's ownership guards are process-local statics** — which is why the departing side's
+  `releaseForHandoff()` must be its full teardown (Paper S3's root cause: the pad's late `release()`
+  from the other process re-sent teardown to the device-global daemon ~200 ms after the notebook's
+  reclaim).
+
+Correctness — Paper's arc, found the hard way:
+
+- Stroke geometry is **zlib-compressed per stroke**, so a move must re-measure the moved strokes
+  against the page's running size total — "floats re-encode to the same size" is false and a test
+  caught it.
+- A page turn must **re-flush until clean** (Paper's `flushUntilClean`): a stroke committed during a
+  flush's or a page-swap's IO hop otherwise lands in the departing page's map and is discarded.
+- **Back must await the flush before `finish()`** — the host's result callback runs `end()` →
+  unbind → revoke immediately, and a save left in flight would hit a revoked binder.
+- An undecodable page blob is an honest **"unreadable"** failure — never a blank page saved over it.
+- `onResult` must not clear its busy/client state before the async drain completes — a second
+  launch mid-drain would `begin()` a new showing and wipe the parked chunks (silent partial paste).
+- The **last** `receiveInk` chunk carries the whole placement (read + decode + re-encode + write of
+  up to 4 MiB on an e-ink CPU) and **a Binder call cannot be cancelled** — it takes its own ~10 s
+  timeout (Paper's `PLACE_TIMEOUT_MS`), not the 2 s of the other calls, or a timeout reports failure
+  for ink that lands anyway.
+- Only `SecurityException` / `IllegalArgumentException` / `IllegalStateException` survive Binder
+  marshalling. Anything else — an `ErrnoException` from ashmem is checked and outside the set —
+  kills the transaction **silently** and the caller reads an empty reply as success; in Paper that
+  made a page read as blank and then get saved over. Every ashmem step runs inside the gate's
+  exception mapping.
+- ashmem refuses a zero-size region: an empty value rides a **1-byte region with `byteCount = 0`**.
+- A `put` of a 4 MiB `byte[]` exceeds the ~1 MB Binder transaction budget — that is why
+  `putLarge`/`getLarge` exist; the inline `put`/`get` path stops at 512 KiB.
+- A received selection under the **pen** can neither be dragged nor dismissed — switch to the lasso
+  **before** `setSelection`, and restore the prior tool pen-idle when that selection is dismissed
+  (Paper S2 round 1; SN's own N2 `pendingSelection` lesson rhymes with it).
+- **The extension writes nothing to disk itself, ever** — its data is the host's store (the model
+  sandbox is ML Kit's recorded exception, and it does not transfer).
+- **The pad opens no `.soil` and the notebook is not sealed behind it.** This is the one way the
+  hop differs from arc 10's notebook switch, and the difference is easy to get backwards: a switch
+  seals because two live `SoilDatabase`s on one file is a family-wide hard invariant, whereas the
+  pad touches no notebook file at all — the notebook stays open, keeps its session, its undo stack
+  and its unsaved page, and is still there when the result comes back. What the notebook *does*
+  give up before the launch is the **EPD pipeline** (`releaseForHandoff()`), not its data. A pad
+  launch that sealed the notebook would throw away the very undo stack J5's paste has to land on.
+- `API_VERSION` stays **1**: `putLarge`/`getLarge` are *appended* to `IExtensionStore` — base four
+  first, the large pair last, never reordered — the family's compatible-append recipe, kept even
+  though SN ships all six methods at once.
+- A `.aidl` that takes a parcelable needs an explicit `import` line for it (Paper S0).
+- `testOptions.unitTests.isReturnDefaultValues = true` in any module whose tested code calls
+  `Slog`/`Log` — `:sn-screen` and `:ext-scratchpad` both need it; `:app` already has it.
+- The screen's intent-filter **must carry `<category android:name="android.intent.category.DEFAULT" />`**
+  or implicit resolution will not match it (Paper S0).
+- A failed open **re-runs discovery** so the entry button hides at once — a package can be disabled
+  under you (Paper's post-S1 fix; SN has no BOOX freezer, but `pm disable` exists everywhere).
+- The pad's long-press-to-delete rides the shared `PageGestures.Listener`'s existing long-press
+  callback — which SN renamed **`onPageSheetRequested`** in B1 (the notebook's sheet outgrew
+  delete). The pad implements that, rather than gaining a Paper-named `onDeleteRequested` twin; and
+  it leaves SN's other callbacks (`onSwipeDown` Contents, `onTwoFingerSwipeDown` Recents,
+  `onSwipeUp` trail walk, `onFingerTap` link follow) as the all-default no-ops they already are.
+- `:ext-scratchpad` needs **no** `tools:replace` and **no** libc++ `pickFirsts` — both exist in
+  Paper only because the Onyx SDK arrives through `:paper-screen`. SN has no Onyx, so the APK will
+  be a fraction of Paper's ~21 MB release (verified against Paper's built release APK).
+- The debug extension trusts the **debug** host package (`…notesproutsn.dev`) via a per-build-type
+  `HOST_PACKAGE` `buildConfigField` — the ext-mlkit recipe, verified in its build file;
+  same-signature trust runs in both directions.
+- **Paper's plan appendix holds the pre-S2 transfer caps** (5 000 / 200 000 / 17 chunks); the
+  shipped contract is **10 000 / 400 000 / 34** (`apps/notesprout_paper/docs/scratchpad.md`, frozen).
+  Copy constants from the frozen doc and the S2 outcome, never the appendix table.
+
+### J1 — `:sn-screen` extraction
+**Status:** ⬜ Not started
+
+Paper's S0 move on SN's files. `settings.gradle.kts` gains the module; the **pure `git mv`** listed
+in the locked decision moves out of `:app` with packages unchanged; `UndoRedoStack` is genericised
+to `<A : Any>` and its 14-case `Action` sealed interface stays behind in `:app` as
+`notebook/NotebookUndo.kt`; `Slog` gates on the module's own `BuildConfig.DEBUG`
+(`buildFeatures.buildConfig = true`); tests travel with their subjects (`UndoRedoStack`'s re-typed
+on a test-local action set — Paper's recipe — with the replay shapes staying pinned in `:app`).
+Fresh-written in the module, to Paper's shape but SN's code: `PaperChrome` (`extraRects` /
+`extraContains` suppliers; `NotebookActivity` keeps its own inline `pushExclusions` untouched this
+phase — adopting the helper in the notebook is not this arc's business) and the binding-free
+`PaperToolbar`, plus the two drawables `ic_pencil_down.xml` / `ic_sketching.xml` drawn from the
+Tabler originals. g-paper moves to `:sn-screen` as `api(...)` — the two `implementation` lines
+leave `app/build.gradle.kts`, the pin stays **0.1.6** — and `:app` depends on the module.
+**`gradle.properties` gains `android.nonTransitiveRClass=false`** — checked: SN does *not* set it
+today (the file has four lines, none R-related), and AGP 8.11's default is non-transitive, so
+without the line every moved resource falls out of `:app`'s `R` (Paper's S0 Q1, same answer).
+**Gate:** all **489** JVM tests green and unmoved in behaviour (moved suites run in their new
+home); debug + release build; Nomad install + a Haiku smoke walk proving the notebook and library
+are visually and behaviourally identical (the move is pure); `logcat -b crash` empty.
+*Sonnet drives the mechanical move and the module scaffold; Fable writes `PaperChrome` /
+`PaperToolbar` and reviews the seam; Haiku the Nomad walk.*
+
+**Questions to resolve at phase start:** none. (`core/Immersive.kt` was missing from the wizard's
+move list and **joins the move in J1** — 23 pure lines the pad needs in J4, and splitting a trivial
+move across two phases buys nothing. `core/OpeningOverlay.kt` does **not** move: it is the host's
+tap-feedback-then-launch helper, which the notebook and library need when launching the pad and the
+pad itself never uses — the pad's own "Opening…" box lives in its own layout, as Paper's does.)
+
+### J2 — Contract + extension store (host only)
+**Status:** ⬜ Not started
+
+`:extension-api` gains `IExtensionStore.aidl` — all six methods, the base four
+(`get`/`put`/`delete`/`keys`) first and `putLarge`/`getLarge` appended last (the trap above) —
+plus `LargeValue` (SharedMemory + `byteCount`, `describeContents = CONTENTS_FILE_DESCRIPTOR`,
+`requireValid` accepting `0..STORE_MAX_VALUE_BYTES`), `SharedBytes` (the ashmem handshake written
+once for both sides), and the `STORE_*` constants. `:app` gains `data/extstore/`: `KvEntity` /
+`KvDao` / `ExtensionStoreDatabase` (its own Room DB — one `kv(key, value, updatedAt)` table, no
+index-hash impact), `ExtensionStores` (open-or-create on IO, process-lifetime cache — a named
+create entry point beside `SoilDatabase.create`, under the global key through `SoilCrypto`),
+`ExtensionStoreGate` (pure, `byte[]` in/out, **no Android types precisely so it is JVM-testable**),
+and `ExtensionStoreBinder` (uid-bound per bind; every method checks calling uid + revoked; the
+ashmem copy in/out runs inside the gate's exception mapping; revoked in the same `finally` as the
+unbind). `data/SoilFile.kt` gains `extensionStoreFile(ctx, pkg)` — still the only path constructor.
+No pad, no new extension, no `<queries>` change yet. Verified by a **debug-only library ⋯
+"Extension store self-test"** (Paper's probe): open-or-create a `probe.test` store, round-trip
+through a real `ExtensionStoreBinder`, verify the file header is encrypted, prove the wrong-uid and
+revoked refusals, a 4 MiB `putLarge`/`getLarge` round trip, the inline cap, and `get`'s
+`STORE_VALUE_LARGE` refusal.
+
+**This phase amends two `apps/notesprout_ratta/CLAUDE.md` standing rules, by name:** ① the arc-3
+extension rule — "the recognizer point is SN's ONE extension surface … no other capability point
+may be added without a new user decision. **No extension stores.**" The arc-11 wizard's first
+answer *is* that user decision: the rule now names two points, and the no-stores sentence falls.
+② the SoilFile rule — "`data/SoilFile.kt` is the only path constructor. **No `extensionStoreFile`
+here.**" The function exists now; the rule becomes "still the only path constructor,
+`extensionStoreFile` included."
+**Gate:** JVM tests for `ExtensionStoreGate` (inline cap, large cap, `get`-above-inline throws,
+key-count cap on both puts) + whatever crypto-seam pins Fable deems load-bearing; debug + release
+build; Haiku Nomad walk: self-test all-OK, the probe store's `.db` header encrypted, crash buffer
+empty.
+*Fable writes the store, gate, binder and crypto seam plus the self-test; Sonnet the CLAUDE.md and
+doc touch-ups; Haiku the walk.*
+
+**Questions to resolve at phase start:** none — the store's rules are Paper's, and everything
+wire-visible is locked above.
+
+### J3 — Held bind + client + extension skeleton
+**Status:** ⬜ Not started
+
+Host: `ExtensionBinder.hold` + `HeldBinding<I>` — the bind half of `call` without the unbind (same
+timeout and exception mapping, `isDead` after `onBindingDied`/`onServiceDisconnected`, idempotent
+`close()`; SN's binder today is strictly bind-per-call — verified, no `hold` exists);
+`ExtensionRegistry.scratchPad` (the first trusted `ACTION_SCRATCH_PAD` service, a second installed
+pad ignored); `ScratchPadClient` with its full surface — `open` (store pre-open on IO → hold →
+`begin(store)` ≤ 2 s → the screen Intent) / `send` / `drainOutgoing` / `finish` (`end` → unbind →
+revoke in one `finally`, idempotent, called from the result callback *and* the caller's
+`onDestroy`) — of which only `open`/`finish` are exercised until J5; pure `TransferCaps` (limits,
+chunk delegation, `sanitize` — unknown style → PEN, width clamped 0.5..50 px — and the wire ⇄
+g-paper mappings, ids dropped outward and minted inward). Contract: `IScratchPad.aidl`
+(`begin` / `receiveInk` / `takeOutgoing` / `end`), **`WireStroke`** + `InkBundle` (hand-written
+parcelables, `requireValid` at unmarshal — a malformed stroke rejects the whole bundle),
+`InkChunks` (the per-call chunking rule written once for both sides), `HostCallerCheck.enforceActivity`
+(the sibling of `enforce`), and the transfer constants at **Paper's shipped values** —
+`MAX_TRANSFER_STROKES` 10 000 · `MAX_TRANSFER_POINTS` 400 000 · chunks 300 / 20 000 ·
+`TRANSFER_MAX_CHUNKS` 34 · `PLACEMENT_NEW_PAGE`/`PLACEMENT_CURRENT_PAGE` · `RESULT_SCRATCH_SEND` ·
+`EXTRA_SCRATCH_SEND_ENABLED` / `EXTRA_SCRATCH_OPEN_RECEIVED` · `SCRATCH_PAGE_FULL` — SN-namespaced.
+The `:ext-scratchpad` APK: `ScratchPadApplication` (**`RattaEngine.register()` only** — no Onyx in
+SN), `ScratchPadService` (`HostCallerCheck.enforce` first in every method; `begin`/`end` real, the
+transfer pair throwing `UnsupportedOperationException` until J5), `ScratchSession`, `ScratchStore`
+(key layout `pages` / `current` / `page/<id>`; `readPage` tries `get` and falls to `getLarge` on
+`STORE_VALUE_LARGE`; the 4 MiB full rule), `ScratchPageCodec` (pure — header + `StrokeCodec`
+format-B strokes; a truncated tail drops the partial stroke, an unknown version is unreadable),
+`ScratchPages` (pure id-list math over the shared `PageMath`) — with the Activity a **stub**
+(caller-checked title + Back) that proves `enforceActivity` and returns; the real screen is J4.
+Identity per the locked naming, Tabler puzzle icon at the family scale, no launcher activity,
+per-build-type `HOST_PACKAGE`. Host `<queries>` gains both new actions. The stub is reached through
+a **debug-only library ⋯ row** driving the real `ScratchPadClient.open` path (Paper's "Probe
+scratch pad" precedent — removed in J4 when the real buttons land), and a one-time debug
+**cross-process 4 MiB store round trip** runs from `begin` (Paper's S0 measured 917 ms on the
+Nomad, inside the 2 s budget) — verified, then removed, exactly as Paper did.
+**Gate:** JVM tests (parcelable round trips + `requireValid` rejections, `InkChunks`,
+`TransferCaps`, `ScratchPageCodec`, `ScratchPages`, contract-constant pins); all five modules build
+debug + release; Haiku Nomad walk: discovery finds the extension, the debug row opens the stub and
+returns (`begin` → `pages=1` on first run → `end` → unbind; binds = unbinds, no lingering service
+in `dumpsys activity services`), the store `.db` created encrypted, the cross-process 4 MiB probe
+passes, and `am start` of the screen from a shell is **refused** (`refused caller (none)`); crash
+buffer empty.
+*Fable writes the AIDL contract, `hold` and the trust seam; Opus the extension skeleton and the
+client; Sonnet the module scaffold, manifest, icon, strings.*
+
+**Questions to resolve at phase start:** none expected — the contract is Paper's shipped shape
+under SN names; ask only if a wire detail surfaces that the frozen Paper docs disagree on.
+
+### J4 — The pad screen + both entry buttons
+**Status:** ⬜ Not started
+
+The extension's screen, the notebook's shape from `:sn-screen`: `ScratchPadActivity` (caller check
+first thing in `onCreate`, before anything is inflated; full-bleed `GPaper.create` in the
+extension's own process; immersive, chrome flush at the top edge — TopGuard is 0 on Ratta; top bar
+**Back · "Scratch Pad" · [Send]**, bottom bar **Pen · Eraser · Lasso … `<` · `n / N` · `>`** with
+arrows that no-op at a bound, never disabled; chrome geometry through `PaperChrome`, the whole
+paper one exclusion rect under an "Opening…" overlay until the first page is on it; strip text
+pen-idle-gated — the frame-silence rule is SN-wide), `ScratchToolbar`, `ScratchSelectionToolbar`
+(the floating Delete bar over a lasso selection, anchored by the shared `SelectionAnchor`),
+`ScratchDocument` (the pages in memory + persistence over `ScratchStore`: `load` / `goTo` /
+`insert` / `deleteCurrent` / `flush`, the mutations, the undo replay, the running **exact** encoded
+size for the 4 MiB full rule, the re-flush-until-clean page turn), `ScratchUndo` (Drew · Erased ·
+Moved · Page — `Pasted` arrives in J5), `activity_scratch_pad.xml`, strings. Tools per the locked
+decision — PEN · black · 3 px, eraser 15 px, **smart lasso and scribble erase ON**, nothing else.
+Pages: one-finger swipe flips and past-the-last inserts, two-finger horizontal inserts before /
+after, multi-finger double-tap undo / redo, long-press → delete sheet (the last page is emptied,
+never removed); the current page id persists so the pad reopens where it was left. Saves: 800 ms
+debounce + flush on page leave / `onPause` / **Back awaited before `finish()`**. Host:
+`notebook/ScratchPadFlow` (button visibility — GONE unless a trusted extension is installed,
+re-discovered on every resume and after a failed open; busy guard; **`paper.releaseForHandoff()`
+immediately before the launch — SN's first use of that API, ever**; any result → `client.finish()`)
+and `library/ScratchPadLaunch` (no send target, `close()` from an `IndexGuard.bounced`-guarded
+`onDestroy`); the two buttons land at the locked slots, both `ic_sketching`. The pad's every exit
+goes through `finishWithHandoff` (`releaseForHandoff()` then `finish()` — Back now; Send and the
+store-failure dialog when they exist). **No transfers: the Send buttons do not exist in this
+phase** (not Paper's S1 visible no-ops — SN's GONE-never-disabled rule extends to not-built). The
+J3 debug row is removed.
+**Gate:** JVM tests (`ScratchDocument` over a fake store — the full rule, gap ink kept on a page
+turn, the unreadable-blob case; `ScratchUndo` replay); debug + release build; Haiku Nomad walk
+(buttons present, gone after `pm disable-user` + resume; the pad's chrome in a dump; finger flips
+and inserts; the delete sheet; Back; binds = unbinds; `am start` still refused); **user eye
+check** — write, flip, insert, delete a page, undo/redo, the full rule, persistence across an app
+restart **and a process death**, and above all **the handoff both ways**: ink lands on the pad, and
+the notebook's pen is live the instant it returns — live EPD ink is invisible to screencap, so this
+is the user's eye and the arc's headline risk. A handoff failure stops the phase and goes to
+g-paper.
+*Opus builds the screen and host flows against Fable's written contract; Sonnet layouts and
+strings; Fable reviews the handoff seam and the flush ordering.*
+
+**Questions to resolve at phase start:** the delete sheet's confirm wording — Paper asks "Delete
+this page and its ink?", SN's notebook uses the bare "Delete this page?" because undo restores the
+ink (the R4 lesson) and the pad's structural undo restores ink too; recommend the bare SN wording —
+confirm.
+
+### J5 — The two transfers
+**Status:** ⬜ Not started
+
+Both directions are **copies**, cross **only through the held service** — never the Intent, never a
+file — carry **no ids** (fresh ids minted on the receiving side), and keep **coordinates 1:1**
+(the pad page and the notebook page are both this device's screen; a cross-size page is clipped
+like any other ink). *Notebook → pad (`receiveInk`):* the selection toolbar's ink-only **Pad**
+action (the 7th STROKES button, per the locked decision) → the **New page / Current page**
+placement sheet (`ActionSheetDialog`) → caps checked **before any bind** → `open` → the chunks
+(`placement` + `last` on each) → toast → the screen launched with `EXTRA_SCRATCH_OPEN_RECEIVED`.
+The service re-checks the running totals, mints ids (`ScratchInk` — the extension's own mapping),
+and places on the Binder thread through `ScratchStore.receive`: New page = inserted after the
+current one at the bundle's size, Current page = appended keeping its own size; the target becomes
+`current` so the screen opens on it; the full rule refuses the **whole** placement
+(`SCRATCH_PAGE_FULL` → the host's page-full dialog, the pad not opened). The received record is
+consumed once: the screen switches to the **lasso before `setSelection`**, selects the strokes,
+restores the prior tool pen-idle at dismissal, and records **one step** on the pad's stack — a New
+page placement as `Page` (undo removes the page with its cargo), a Current-page one as `Pasted`
+(undo removes exactly what arrived). *Pad → notebook (`takeOutgoing`):* the top-bar **Send** = the
+whole current page, the selection bar's **Send** = the lasso's strokes — both `ic_pencil_down`,
+both existing only when opened from a notebook (`EXTRA_SCRATCH_SEND_ENABLED`); an empty pick → the
+nothing-to-send dialog, never silence. The page is flushed first (the pad keeps its ink), the
+chunks parked, `RESULT_SCRATCH_SEND`; the host drains on the still-held bind (empty bundle, summed
+caps, or the chunk budget — a cut drain says so), sanitizes, mints ids and pastes into the notebook
+as **one undo step**, appended after the destination page's current max `"order"` with relative
+order preserved (the arc-8 rebase rule — writing order is load-bearing), landing **selected** with
+the lasso armed; only then `finish`. Failures on the B3 pattern: over-cap, a failed write, page
+full, store gone are dialogs; toasts only confirm. No new frame-silence exception is expected —
+the placement sheet rises from a selection-toolbar tap, the O1/C1 pattern; a surprise needs the
+standing written justification.
+**Gate:** JVM tests (`TransferCaps` chunk/limits/sanitize both ways, `ScratchInk`,
+`ScratchStore.receive` incl. the full-rule-leaves-nothing-behind case, the drain's truncation, the
+undo arms both sides); debug + release build; Haiku's reach is short — **adb cannot lasso or
+ink** — so the agent covers regression + the refusal probes; **user eye check** — both directions
+with real ink, coordinates 1:1, undo on the pad removes what arrived (both placements), undo in the
+notebook removes what was pasted, the truncation and page-full paths, and the handoff still clean
+across a Send exit.
+*Fable writes the transfer contracts, `ScratchStore.receive` and the undo arms; Opus the flows on
+both sides; Sonnet strings and icons.*
+
+**Questions to resolve at phase start:** the notebook-side undo arm — reuse arc-8's
+`Action.ObjectsPasted` (a scratch paste is a strokes-only object paste) or a strokes-only twin
+(Paper's `Pasted`); and whether the paste-back confirms with a toast (arc-8's "Pasted" precedent)
+or the landing selection is confirmation enough.
+
+### J6 — Review, hardening, docs, freeze
+**Status:** ⬜ Not started
+
+`/code-review high` **over the whole arc range, never the last phase** — the O2 lesson: reviewing
+the arc caught two O1 bugs no eye check could have. A **boundary audit** on Paper's rows-28–32
+shape, walked against SN's code: outward on `begin` is the uid-bound store binder only; outward ink
+is bare geometry + width + colour + style name + the page px size — no stroke, page or notebook id
+or name ever crosses; inward ink is validated, capped and fresh-id'd; the screen is caller-checked
+both ways and data never rides the Intent; the store caps change no trust rule. Docs:
+**`apps/notesprout_ratta/docs/scratchpad.md` new** (the pad's own reference — screen, tools, pages,
+store layout, transfers, failure table); **`docs/extensions.md` grown** from a one-point doc to
+cover a second point, the first screen-owning point (the tier-2 recipe), the extension store, and
+the held bind; both `CLAUDE.md`s (the five-module layout, the `:sn-screen` "a fix to shared screen
+logic goes there, never in a consumer" rule, the Scratch Pad bullet); memory; version-stamp
+decision; full regression (Haiku walk + the arc's short user checklist); commit + push; **arc
+freeze**.
+**Gate:** everything green or explicitly accepted → monorepo `BACKLOG.md`; user all-clear.
+*Fable reviews and hardens; Sonnet the doc pass; Haiku the regression walk.*
+
+**Questions to resolve at phase start:** review level (every arc has frozen at **high**); version
+stamp (0.1.0-ratta through ten arcs — the user's call).
 
 ---
 
