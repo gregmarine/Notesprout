@@ -2134,7 +2134,7 @@ the same rule on its left edge.
 
 ### T1 — Recents panel + toolbar button + two-finger swipe + panel edges
 **Status:** 🧪 Awaiting the user's eye check — built, reviewed, Nomad-verified as far as adb reaches;
-committed on the user's instruction (see Outcome). The two-finger swipe and the panel-edge look are
+committed on the user's instruction as `627b635` (see Outcome). The two-finger swipe and the panel-edge look are
 the only untested things, and neither is injectable.
 
 New: `data/index/ObjectDao.aliveNotebooks` (blob-free batch) + `IndexRepository.aliveNotebooks`;
