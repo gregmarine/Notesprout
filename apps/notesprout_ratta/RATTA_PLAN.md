@@ -2338,7 +2338,7 @@ Correctness — Paper's arc, found the hard way:
   Copy constants from the frozen doc and the S2 outcome, never the appendix table.
 
 ### J1 — `:sn-screen` extraction
-**Status:** 🧪 Awaiting device verification
+**Status:** ✅ Complete (commit 12fe218, Nomad-verified 2026-08-24)
 
 Paper's S0 move on SN's files. `settings.gradle.kts` gains the module; the **pure `git mv`** listed
 in the locked decision moves out of `:app` with packages unchanged; `UndoRedoStack` is genericised
