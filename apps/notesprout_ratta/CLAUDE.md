@@ -20,7 +20,9 @@ frame-silence ledger) ·
 half's long-press sheet and the object half's Copy/Cut, tap-to-place and lasso popup, both
 within and **across notebooks**, where a copied link's own-notebook target is re-pointed at the
 notebook it came from) ·
-`docs/extensions.md` (the one recognizer extension point).
+`docs/extensions.md` (the one recognizer extension point) ·
+`docs/sn-screen.md` (arc 11 / J1: the shared `:sn-screen` paper-screen library — what may live
+there, what may not depend on it, and the `nonTransitiveRClass` flag that holds it together).
 
 ## Standing rules
 
@@ -28,9 +30,14 @@ All root `CLAUDE.md` rules apply (Kotlin/17, kotlinx-serialization only, no new 
 deps without discussion, no Material Components, no `runBlocking` on main, `Slog.d` not
 `Log.d`, e-ink design system, Tabler icons only). Plus, for this app:
 
-- **Three modules, own Gradle root:** `:app` (the host), `:extension-api` (the contract
-  library — depends on nothing in `:app`, stdlib only), `:ext-mlkit` (the **NSE · ML Kit**
-  extension APK). **The recognizer point is SN's ONE extension surface** (arc-3 amendment to
+- **Four modules, own Gradle root:** `:app` (the host), `:sn-screen` (the shared paper-screen
+  library — arc 11 / J1: the design resources and the screen helpers both paper surfaces need,
+  depends on g-paper + androidx only and **never** on `:app` or `:extension-api`),
+  `:extension-api` (the contract library — depends on nothing in `:app`, stdlib only),
+  `:ext-mlkit` (the **NSE · ML Kit** extension APK). `gradle.properties` sets
+  `android.nonTransitiveRClass=false` so `:app`'s `R` keeps seeing the moved resources —
+  the move needed no import sweep, and undoing that flag breaks every one of them.
+- **The recognizer point is SN's ONE extension surface** (arc-3 amendment to
   the arc-1 no-extensions rule): `ACTION_HANDWRITING_RECOGNIZER` / `IHandwritingRecognizer`
   exists solely so other HWR engines can slot in later — headings and the markdown engine are
   core, and **no other capability point may be added** without a new user decision. No

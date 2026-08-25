@@ -58,6 +58,8 @@ android {
 
 dependencies {
     implementation(project(":extension-api"))
+    // g-paper arrives transitively: `:sn-screen` declares both artifacts as `api` (arc 11 / J1).
+    implementation(project(":sn-screen"))
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.room:room-runtime:2.7.0")
@@ -69,9 +71,6 @@ dependencies {
     implementation("net.zetetic:sqlcipher-android:4.6.1")
     implementation("androidx.sqlite:sqlite:2.4.0")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
-
-    implementation("com.symmetricalpalmtree.gpaper:gpaper-core:0.1.6")
-    implementation("com.symmetricalpalmtree.gpaper:gpaper-ratta:0.1.6")
 
     testImplementation("junit:junit:4.13.2")
 }

@@ -3,22 +3,16 @@ package com.symmetricalpalmtree.notesproutsn.notebook
 import com.symmetricalpalmtree.gpaper.core.model.Stroke
 
 /**
- * The notebook's in-memory undo/redo history. g-paper keeps no history by design
- * (`host-responsibilities.md`) — the host records what happened and replays it — so this is the
- * record.
+ * The notebook screen's undo action set (arc 11 / J1 — lifted out of `UndoRedoStack`, which is now
+ * the generic `UndoRedoStack<A>` in `:sn-screen`; the notebook's stack is
+ * `UndoRedoStack<NotebookUndo.Action>`, and the Scratch Pad extension will bring its own set).
+ * Every entry carries the page it happened on, so history survives a page turn.
  *
- * **Notebook-level, not page-level:** every entry carries the page it happened on, so history
- * survives a page turn (an insert or a delete *is* a page turn, and undoing one has to reverse
- * that turn too). The stack is cleared only when the screen dies — never on a flip. Recording a
- * fresh edit clears the redo side. Bounded at [MAX] entries, oldest dropped: an [Action.Erased]
- * (or [Action.Deleted]) holds the full geometry of every stroke it must be able to put back.
- *
- * Pure ordering only. Applying an action back onto the paper and the store lives in
- * [NotebookActivity], where the paper, the session and the store are all in reach — and where the
- * SN rule holds that a replay mutates the store first and then reloads the page, because the `.soil`
- * is the source of truth.
+ * The replay stays in [NotebookActivity], where the paper, the session and the store are all in
+ * reach — and where the SN rule holds that a replay mutates the store first and then reloads the
+ * page, because the `.soil` is the source of truth.
  */
-class UndoRedoStack {
+object NotebookUndo {
 
     sealed interface Action {
         val pageId: String
@@ -152,51 +146,5 @@ class UndoRedoStack {
         data class PagePasted(val snapshot: NotebookSession.Structural) : Action {
             override val pageId: String get() = snapshot.afterCurrentId
         }
-    }
-
-    private val undo = ArrayDeque<Action>()
-    private val redo = ArrayDeque<Action>()
-
-    /**
-     * Bumped by every [record]. A replay in flight snapshots it before reverting and compares
-     * after: a change means a fresh edit landed mid-replay (and cleared redo) — the replayer must
-     * not push the undone entry onto redo, or record-clears-redo silently breaks.
-     */
-    var generation: Int = 0
-        private set
-
-    /** Record an edit that just happened. Clears the redo history. */
-    fun record(action: Action) {
-        undo.addLast(action)
-        while (undo.size > MAX) undo.removeFirst()
-        redo.clear()
-        generation++
-    }
-
-    fun canUndo(): Boolean = undo.isNotEmpty()
-
-    fun canRedo(): Boolean = redo.isNotEmpty()
-
-    /** Take the newest edit off the undo side; the caller reverts it, then [pushRedo]s it. */
-    fun popUndo(): Action? = undo.removeLastOrNull()
-
-    fun pushRedo(action: Action) {
-        redo.addLast(action)
-    }
-
-    /** Take the newest undone edit off the redo side; the caller re-applies it, then [pushUndo]s it. */
-    fun popRedo(): Action? = redo.removeLastOrNull()
-
-    fun pushUndo(action: Action) {
-        undo.addLast(action)
-    }
-
-    fun clear() {
-        undo.clear()
-        redo.clear()
-    }
-
-    private companion object {
-        const val MAX = 100
     }
 }

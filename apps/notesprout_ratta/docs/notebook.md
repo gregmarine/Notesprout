@@ -20,9 +20,9 @@ deliberate differences are listed at the end.
 |---|---|
 | `NotebookActivity` | lifecycle, wiring, chrome, exclusion rects, immersive mode, `IndexGuard`, the close sequence; the gesture → operation wiring and the undo/redo replay |
 | `NotebookSession` | the open `SoilDatabase`, `pages: List<PageRef>`, `currentIndex`, decoded template bitmap; `open()`, `goTo()`, `insertBlank()`, `deleteCurrent()`, `reconcile()`, `saveLastOpened()`, `refreshMeta()`, `seal()` — all IO |
-| `PageMath` | pure page arithmetic: `indexAfterDelete`, `insertPosition`, `toRestore`, `toDelete`. JVM-tested |
-| `PageGestures` | the finger vocabulary over the paper — observer only, fed from `dispatchTouchEvent`, consumes nothing |
-| `UndoRedoStack` | notebook-level in-memory history; pure ordering, bounded at 100; the N2 heading actions live here too |
+| `PageMath` (`:sn-screen`) | pure page arithmetic: `indexAfterDelete`, `insertPosition`, `toRestore`, `toDelete`. JVM-tested |
+| `PageGestures` (`:sn-screen`) | the finger vocabulary over the paper — observer only, fed from `dispatchTouchEvent`, consumes nothing |
+| `UndoRedoStack<A>` (`:sn-screen`) + `NotebookUndo.Action` | screen-level in-memory history; pure ordering, bounded at 100. Arc 11 / J1 split the two: the stack is generic and shared with the Scratch Pad's surface, while the notebook's fourteen action kinds — the N2 heading ones included — live in `:app` as `NotebookUndo.Action`, and the replay stays in `NotebookActivity` |
 | `SoilWriter` | the session's **single serial write queue** (N2: extracted out of `StrokeStore` so `StrokeStore` and `HeadingStore` share it) — one IO coroutine draining a `Channel` of jobs, so a stroke soft-delete and the heading row it converted into always land in the order they were enqueued; the debounced index `updatedAt` bump; `drain()`/`flushTouch()` for the seal path |
 | `StrokeStore` | g-paper callbacks → `stroke` rows through the session's `SoilWriter`; `loadPage()`, `commit()`, `erase()`/`remove()`, `revive()` (in-place un-delete — since N3 the only way strokes come back, because the page's writing order is load-bearing for recognition), `move()` |
 | `StrokeRows` | pure mapper `Stroke ⇄ SoilObjectEntity` (format-B blob, `InkColorCodec`, `StrokeStyle` name; unknown → PEN). JVM-tested |
@@ -41,7 +41,7 @@ deliberate differences are listed at the end.
 | `ObjectClip` (O1) | pure selection ⇄ clipboard payload — capture, fresh ids, parent rewiring, the per-type `"order"` rebase, geometry translation (stroke = decode/translate/re-encode). JVM-tested. [`docs/clipboard.md`](clipboard.md) |
 | `ObjectPlacement` (O1) | pure placement arithmetic: payload box + tap (or source origin) + page size → the clamped `dx/dy`. JVM-tested |
 | **Links (arc 6)** | `LinkPayload` · `PageLink`/`LinkRows` · `LinkStore` · `LinkComposite`/`LinkRenderer` · `LinkPickerActivity`/`LinkPickerModel`/`PageCardGrid` · `LinkPickFlow` · `PickerPageSource`/`ForeignPageSource`/`PageReads`/`PagePreview`/`PreviewMath`/`PageLabels` · `LinkFollowFlow`/`LinkNav` · `data/prefs/LinkTrail` — the whole subsystem is documented in [`docs/links.md`](links.md) |
-| `SelectionAnchor` | pure placement arithmetic for the bar (centre / gap / flip / clamp), (N2) `placeSub` — the sub-toolbar hung off the bar the same way — and (O1) `placeUnder`, a row hung under a chrome *button*, which never flips. JVM-tested |
+| `SelectionAnchor` (`:sn-screen`) | pure placement arithmetic for the bar (centre / gap / flip / clamp), (N2) `placeSub` — the sub-toolbar hung off the bar the same way — and (O1) `placeUnder`, a row hung under a chrome *button*, which never flips. JVM-tested |
 | `core/OpeningOverlay` | the source-side "Opening…" box and its pre-draw + post launch sequencing |
 | `OutlineTree` (C1) | pure Contents tree: items → nested H1–H6 nodes (orphans attach to the nearest shallower heading or become roots — never dropped), `visible`/`all`/`highlight`/`ancestorsOf` and the paging math. JVM-tested |
 | `ContentsLayout` (C1) | pure Contents layout rules: the 480 dp sidebar/full-screen branch, 60 % sidebar width, 68 dp rows, `(level−1)×16 dp` indent, `itemsPerPage`. JVM-tested |
@@ -234,7 +234,7 @@ These also maintain `liveStrokes` and (N2) `liveHeadings` — the Activity's wor
 is on the visible page. `liveStrokes` is the only place an erased stroke's geometry still exists
 once the engine drops it (a delete/undo needs it); `liveHeadings` is what `HeadingRenderer` actually
 paints from, kept in step with every row write so a re-record never shows a stale position or size.
-Each callback records the matching `UndoRedoStack.Action`.
+Each callback records the matching `NotebookUndo.Action`.
 
 **Page attribution: `displayedPageId`, never `session.currentPage` (R6).** The callbacks stamp
 their rows with the Activity's `displayedPageId` — written on Main only, at the two places

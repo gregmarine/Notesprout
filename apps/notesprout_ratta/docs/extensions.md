@@ -14,13 +14,18 @@ scoped to the recognizer alone rather than Paper's broader capability set.
 
 ## Module layout
 
-Three modules, SN's own Gradle root:
+Four modules, SN's own Gradle root:
 
 | Module | Type | Depends on | Holds |
 |---|---|---|---|
+| `:sn-screen` | Android library | g-paper (`api`) + androidx; **never** `:app`, **never** `:extension-api` | the design resources and the screen helpers both paper surfaces need — see [`sn-screen.md`](sn-screen.md) |
 | `:extension-api` | Android library | nothing in `:app`, no library beyond the Kotlin stdlib (`build.gradle.kts` says so explicitly) | the AIDL (`IHandwritingRecognizer`, `InkStroke.aidl`), the hand-written `InkStroke` parcelable, `RecognizerStatus`, `ExtensionContract`, `HostCallerCheck` |
 | `:ext-mlkit` | Android application (its own installable APK) | `:extension-api` + `com.google.mlkit:digital-ink-recognition:19.0.0` | `HandwritingRecognizerService`, `ModelManager`, `MlKitEngine`, `PageText`, `StrokeSegmenter`, `Dots`, `Box` |
 | `:app` (`extension/` package) | part of the host APK | `:extension-api` | `ExtensionRegistry`, `ExtensionBinder`, `ExtensionCallException`, `InkCaps`, `RecognizerClient`, `RecognizerReadiness` |
+
+`:sn-screen` is deliberately **not** in that dependency chain: it never sees `:extension-api`, so a
+shared screen helper can never quietly become part of the wire contract. An extension APK depends on
+both, separately.
 
 `:extension-api` is the contract both sides compile against — a host that never binds an
 extension still needs its constants and parcelable, and an extension that never sees `:app` still

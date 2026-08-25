@@ -2,8 +2,7 @@
 <resources>
     <string name="app_name">Notesprout SN</string>
 
-    <!-- Shared -->
-    <string name="ok">OK</string>
+    <!-- Shared. `ok` and `cancel` live in :sn-screen — the moved helpers reference them. -->
     <string name="retry">Retry</string>
     <string name="close_app">Close app</string>
 
@@ -82,7 +81,6 @@
     <string name="delete_folder_title">Delete \"%1$s\"?</string>
     <string name="delete_folder_body">This will permanently remove all notebooks and subfolders inside it. This cannot be undone.</string>
     <string name="delete_confirm">Delete</string>
-    <string name="cancel">Cancel</string>
 
     <!-- Naming schemes (default notebook name) -->
     <string name="action_naming">Default notebook name…</string>

@@ -42,7 +42,7 @@ import com.symmetricalpalmtree.notesproutsn.core.markdown.HeadingPrefix
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionCallException
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionRegistry
 import com.symmetricalpalmtree.notesproutsn.extension.RecognizerClient
-import com.symmetricalpalmtree.notesproutsn.notebook.UndoRedoStack.Action
+import com.symmetricalpalmtree.notesproutsn.notebook.NotebookUndo.Action
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -134,7 +134,7 @@ class NotebookActivity : AppCompatActivity() {
     private var tapDismissedPopup = false
 
     /** In-memory, notebook-level history: it survives page turns and dies with the screen. */
-    private val undo = UndoRedoStack()
+    private val undo = UndoRedoStack<Action>()
 
     /** Serialises page/undo operations so two overlapping gestures can't tangle the page list. */
     private val pageOps = Mutex()

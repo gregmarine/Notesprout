@@ -2338,7 +2338,7 @@ Correctness — Paper's arc, found the hard way:
   Copy constants from the frozen doc and the S2 outcome, never the appendix table.
 
 ### J1 — `:sn-screen` extraction
-**Status:** ⬜ Not started
+**Status:** 🧪 Awaiting device verification
 
 Paper's S0 move on SN's files. `settings.gradle.kts` gains the module; the **pure `git mv`** listed
 in the locked decision moves out of `:app` with packages unchanged; `UndoRedoStack` is genericised
@@ -2366,6 +2366,41 @@ move list and **joins the move in J1** — 23 pure lines the pad needs in J4, an
 move across two phases buys nothing. `core/OpeningOverlay.kt` does **not** move: it is the host's
 tap-feedback-then-launch helper, which the notebook and library need when launching the pad and the
 pad itself never uses — the pad's own "Opening…" box lives in its own layout, as Paper's does.)
+
+**Outcome:** the move landed pure — of the 81 changed files, **every moved source and resource is
+byte-identical**; only three `R`/`BuildConfig` import lines changed, plus the deliberate splits and
+the four fresh files. `:sn-screen` namespace `…notesproutsn.screen` (a library sharing the app's
+namespace would collide on `R`/`BuildConfig`), Kotlin packages unchanged — which is why no import
+sweep was needed anywhere in `:app`. `assembleDebug`, `assembleRelease` and `test` green on the
+first pass; **490** JVM tests (`:app` 432 + `:sn-screen` 58), one more than the 489 baseline because
+the undo split gained a test rather than losing one: the generic suite kept a two-kinds-side-by-side
+case of its own while `:app`'s new `NotebookUndoTest` took the three notebook-shaped ones. Resource
+identity checked against the built APK with `aapt2 dump resources` — all 37 moved icons, the theme,
+the widget styles and both tiers' `dimens` present, plus the two new drawables.
+
+Deliberate deviations from the phase text, all forced by the dependency closure:
+- **Six more drawables moved than the wizard listed** — `btn_elevated_background`, `shape_bordered`,
+  `bg_selectable_card`, `radio_selector`, `radio_checked`, `radio_unchecked`. A library's own
+  `styles.xml` cannot reference a resource that exists only in the consuming app, and the moved
+  `Widget.Notesprout.*` styles reference all six. (Paper's `:paper-screen` holds the same set — the
+  closure is the same shape there.) Everything they in turn reference is `colors.xml`, which moved.
+- **The module `strings.xml` holds `cancel` as well as `ok`** — SN's `ActionSheetDialog` sets the
+  close-X's content description from `R.string.cancel`, where Paper's does not. Both were removed
+  from `:app`'s `strings.xml` rather than left duplicated.
+- **`UndoRedoStack.generation` travelled with the generic stack** (Paper's has no such counter): the
+  mid-replay protocol is SN's, and it is stack mechanics, not action shape.
+
+Verified on the Nomad by hand (the walk is finger-drivable end to end; no ink was needed, because
+everything under test is chrome): library grid and both bars render identically · notebook opens
+with committed ink, heading and page indicator · a tool arm shows the bordered `state_selected`
+look · Contents panel · Recents panel · the long-press page sheet (`ActionSheetDialog` +
+`shape_dialog_bordered` + the moved icons) · a swipe past the last page inserts one (`PageGestures`
+from the module) · Delete-page's `AlertDialog` keeps the bordered window and the mixed-case
+non-accent buttons that `themes.xml`'s un-prefixed `buttonBar*` attrs buy · the library's own action
+sheet. `logcat -b crash` empty throughout; `mResumedActivity` checked against `…notesproutsn.dev`
+before every conclusion. Version stays `0.1.0-ratta`. New reference doc: `docs/sn-screen.md`;
+`CLAUDE.md`'s module rule now reads "Four modules" and names `nonTransitiveRClass=false` as
+load-bearing.
 
 ### J2 — Contract + extension store (host only)
 **Status:** ⬜ Not started

@@ -14,7 +14,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.widget.AppCompatImageView
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.content.ContextCompat
-import com.symmetricalpalmtree.notesproutsn.R
+import com.symmetricalpalmtree.notesproutsn.screen.R
 
 /**
  * A list of choices, drawn as full-width rows separated by 1 dp inkBlack lines — the app's "what do

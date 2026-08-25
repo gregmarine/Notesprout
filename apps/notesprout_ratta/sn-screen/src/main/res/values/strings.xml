@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Only what the moved screen helpers reference themselves: Dialogs.problem's OK button and
+         the action sheet's close-X content description. Every other string stays in `:app`. -->
+    <string name="ok">OK</string>
+    <string name="cancel">Cancel</string>
+</resources>

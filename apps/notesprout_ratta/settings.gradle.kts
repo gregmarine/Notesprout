@@ -17,5 +17,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "notesprout_ratta"
 include(":app")
+include(":sn-screen")
 include(":extension-api")
 include(":ext-mlkit")

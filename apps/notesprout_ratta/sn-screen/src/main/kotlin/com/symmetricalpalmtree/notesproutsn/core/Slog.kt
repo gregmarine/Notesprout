@@ -1,7 +1,7 @@
 package com.symmetricalpalmtree.notesproutsn.core
 
 import android.util.Log
-import com.symmetricalpalmtree.notesproutsn.BuildConfig
+import com.symmetricalpalmtree.notesproutsn.screen.BuildConfig
 
 /** Debug-gated logging — the lambda is never evaluated in release. `Log.e`/`Log.w` stay direct. */
 object Slog {

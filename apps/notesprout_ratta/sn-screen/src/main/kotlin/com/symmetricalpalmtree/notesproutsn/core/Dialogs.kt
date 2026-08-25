@@ -3,7 +3,7 @@ package com.symmetricalpalmtree.notesproutsn.core
 import android.app.Activity
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AlertDialog
-import com.symmetricalpalmtree.notesproutsn.R
+import com.symmetricalpalmtree.notesproutsn.screen.R
 
 /** The e-ink AlertDialog look: no elevation, 2dp inkBlack bordered window. Apply after `create()`. */
 object Dialogs {
