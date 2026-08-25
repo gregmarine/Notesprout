@@ -41,7 +41,10 @@ enum class SelectionMode { STROKES, HEADING, LINK, MIXED, MIXED_WITH_LINK }
  * **Main bar**, in order: Delete (always) · **H** (a level is only writable on ink or on one
  * heading) · **Link** (any link-free selection — K1) · **Edit** and **Unlink** (a lone link, the
  * only selection with one payload to act on) · **Copy** and **Cut** (always — arc 8; they sit after
- * Delete so its leftmost slot, aimed at since P1, never moves). **Sub-toolbar**: H1…H6, shown by an H tap and hung off the *bar*
+ * Delete so its leftmost slot, aimed at since P1, never moves) · **Snap** (always — arc 9; last,
+ * because it is the one button that acts on the *next* drag rather than on this selection, and it
+ * shows its state with the same selected border the top bar's armed tool wears).
+ * **Sub-toolbar**: H1…H6, shown by an H tap and hung off the *bar*
  * by [SelectionAnchor.placeSub] — below it, above when the bar itself flipped — so opening it never
  * moves the Delete the user just aimed at. Every [show] closes it: a fresh selection (or a
  * re-anchor after a move) is a new decision and should not inherit the last one's open drawer.
@@ -79,6 +82,11 @@ class SelectionToolbar(
     private val onUnlink: () -> Unit,
     /** Put this selection on the clipboard (arc 8) — `cut = true` deletes it afterwards. */
     private val onCopy: (cut: Boolean) -> Unit,
+    /** Whether snap-to-guide is armed (arc 9) — read on every [show] and after every toggle, so
+     *  the screen stays the one owner of the setting and the bar only reports it. */
+    private val isSnapOn: () -> Boolean,
+    /** Flip snap-to-guide. The screen persists it and tells the engine; the bar re-reads. */
+    private val onToggleSnap: () -> Unit,
 ) {
 
     private val density = root.resources.displayMetrics.density
@@ -87,6 +95,7 @@ class SelectionToolbar(
     private val linkButton: AppCompatImageButton
     private val editButton: AppCompatImageButton
     private val unlinkButton: AppCompatImageButton
+    private val snapButton: AppCompatImageButton
     /** Index 0 is H1 — `levelButtons[n - 1]` is level `n`. */
     private val levelButtons: List<AppCompatImageButton>
 
@@ -140,6 +149,16 @@ class SelectionToolbar(
             onCopy(true)
         })
 
+        // Snap last, and offered in every mode: it is a setting, not an act on this selection, so
+        // it never changes place or disappears. Its own tap re-styles the bar — the same
+        // own-tap re-show the H toggle already rides (docs/notebook.md § frame-silence).
+        snapButton = button(R.drawable.ic_snap, ctx.getString(R.string.snap_action_off)) {
+            releaseRender()
+            onToggleSnap()
+            syncSnapButton()
+        }
+        bar.addView(snapButton)
+
         levelButtons = (1..LEVELS).map { level ->
             button(LEVEL_ICONS[level - 1], ctx.getString(R.string.heading_level_hint, level)) {
                 releaseRender()
@@ -169,6 +188,7 @@ class SelectionToolbar(
         // Only an existing heading has a level to report; converting ink picks one from scratch.
         val selected = if (mode == SelectionMode.HEADING) currentLevel else null
         levelButtons.forEachIndexed { i, b -> b.isSelected = (i + 1) == selected }
+        syncSnapButton()
 
         val rootLoc = IntArray(2).also { root.getLocationInWindow(it) }
         val paperLoc = IntArray(2).also { paperView.getLocationInWindow(it) }
@@ -207,6 +227,21 @@ class SelectionToolbar(
     fun rects(): List<Rect> = listOfNotNull(rectOf(bar), rectOf(subBar))
 
     fun contains(x: Int, y: Int): Boolean = rects().any { it.contains(x, y) }
+
+    /**
+     * Draw snap's current state: the selected border `bg_toolbar_button` gives an armed tool, and
+     * the hint (long-press and content description both) says it in words, since a border alone is
+     * a thing you have to have been told about.
+     */
+    private fun syncSnapButton() {
+        val on = isSnapOn()
+        snapButton.isSelected = on
+        val hint = bar.context.getString(
+            if (on) R.string.snap_action_on else R.string.snap_action_off
+        )
+        snapButton.contentDescription = hint
+        TooltipCompat.setTooltipText(snapButton, hint)
+    }
 
     /** Open/close the level sub-toolbar, hung off the main bar — which never moves for it. */
     private fun toggleLevels() {

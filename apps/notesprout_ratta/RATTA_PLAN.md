@@ -1970,6 +1970,124 @@ reference for both halves of the clipboard; the next arc is **not planned — as
 
 ---
 
+## Phases — Arc 9 "Snap" (planned 2026-08-24, wizard complete)
+
+og's **snap-to-guide** for a lasso selection being dragged, fitted to SN: while snap is armed a
+dragged selection pulls to page edges, page margins, page centres, and to the edges/centres/one-
+margin-out proximities of the other content objects on the page, with a dashed guide drawn where
+it caught. Dragging past the threshold releases it — there is no clamping, and with snap off the
+drag is exactly what it is today.
+
+**The drag is g-paper's, not the host's.** `CanvasPaperView.lassoTryBeginDrag` / `lassoDragMove` /
+`lassoDragFinish` own the per-sample delta and the drag layer's `onDraw`; the host never sees a
+sample. So the engine gets the feature and the host gets a toggle — the standing rule (never work
+an engine gap around in the host) decides this, not preference.
+
+### Locked decisions (arc-9 wizard 2026-08-24 — do not re-ask)
+
+| Decision | Answer |
+|---|---|
+| Where it lives | **g-paper 0.1.6.** `SnapEngine` + `SnapGuide`/`SnapResult`, all three in `core/geometry/SnapEngine.kt`, wired into the existing drag; new `PaperView.snapToGuides` / `snapMarginPx`. Host wires a toggle and a pref, nothing more. |
+| Margin value | **One toolbar** — `@dimen/toolbar_bar_thickness` (70dp on the Nomad/Manta tier, 56dp below) **plus the bar's 1dp bottom border**, which is why the host passes `topBar.height` measured after layout rather than the dimen: the dimen sizes the button row only, and an object snapped to it would sit two pixels behind the black rule. og's `SNAP_MARGIN_DP = 44f` was the *small*-tier button size; "the same margin as the toolbar" means the bar. g-paper holds no dimens, so the value crosses as px. |
+| Page guides | og's twelve: x = 0 · margin · w/2 · w−margin · w; y = 0 · margin · h/2 · h−margin · h. Measured against the **page rect** (`setPageSize`) when known, else the view — the same rule `templateDestRect()` already uses, so the guides agree with the template. |
+| Object guides | **Content objects only — headings and links.** Strokes are never snap targets (og's rule): a handwriting page is ink everywhere, and a guide per stroke bbox is a thicket that fights the pen. Targets are derived inside the engine from `ContentRenderer.hitTargets()` minus the selected ids — no host plumbing, and always current. |
+| Object guide set | og's ten, per target: `left−margin` · `left` · `centerX` · `right` · `right+margin`; same five on Y. The ±margin proximities are what make equal spacing fall out of a drag. |
+| Proximity gap | **The same value as the margin** (70dp / 56dp), og's single constant. Two stacked headings settle a bar-thickness apart. |
+| Anchors / threshold | og's: three anchors per axis (left/centerX/right, top/centerY/bottom); nearest (anchor, guide) pair within **20dp** wins, X and Y independent, offset adjusted by `guide − anchor`. Anchors are the **tight** `Selection.bounds`, not the 12px-inflated box the overlay draws — the user is aligning content, so a heading snapped to the top margin must start at the bar's edge, not 12px inside it. `HitTarget.bounds` are tight too, so both sides of an object snap agree. |
+| Guide line | 2px black dash **24 on / 12 off**, edge to edge, drawn only for an engaged guide. Same weight as the selection box (a 1dp hairline at the Nomad's 1.875 density is a non-integer coin flip — the link-underline lesson) but a visibly longer stride, so the ruler never reads as another box. |
+| Toggle | Last button on the **selection toolbar**, after Cut, always visible in every selection mode. **One icon** (Tabler `template`) plus `isSelected` — `bg_toolbar_button`'s 1.5dp border is already how Pen/Eraser/Lasso show what is armed, so snap reads in the same vocabulary. No icon swap (og's pair is action-labelled and would read backwards next to those borders). |
+| Default + memory | **Off by default, remembered across app restarts** — a `SnapPrefs` flag beside `BrowseState` / `SortPrefs` / `RecentsPrefs`. On once is on for every later selection, page, notebook and relaunch. |
+| Scope | **Drags only.** Arc 8's tap-to-place still lands exactly where the pen tapped; the paste already arrives selected with the bar up, so the very next drag snaps it. A paste that moved itself would read as the app relocating your content. |
+| Arc shape | **One phase.** ~95 lines of pure engine, one API pair, one button, one pref — splitting it would put a device round-trip in the middle of something that cannot be eye-checked until it is whole. |
+
+### Arc-9 standing traps
+
+- **`lassoDragFinish` recomputes `dx/dy` from the pen position** — it must report the *snapped*
+  delta (`dragDx`/`dragDy`, which equal the raw delta when snap is off), or the drop would undo the
+  snap the user just watched happen.
+- Every drag exit (`clearSelection`, `release`, cancel, tool change, page swap) must clear the
+  active guides alongside `dragDx`/`dragDy`, or a stale dashed rule survives onto the next frame.
+- **adb can neither lasso nor drag**, so the snap itself is **eye-check only**; `SnapEngine` is pure
+  and JVM-tested instead, and a device agent can only confirm the button exists and toggles.
+- The bar grows by one button. Its widest modes are **six** (STROKES / HEADING: Delete · H · Link ·
+  Copy · Cut · Snap; LINK: Delete · Edit · Unlink · Copy · Cut · Snap) — `show()` never puts more
+  up. `SelectionAnchor` re-measures anyway, and 6 × 62dp = 372dp fits the Nomad's 749dp easily.
+- **The margin is the bar's measured height, not the dimen** — the top bar is the button row plus a
+  1dp border, and snapping to the dimen alone parks content behind that rule. `pushExclusions()`
+  re-reads it, so it can never drift from the chrome it names.
+- A g-paper change means the full ritual: `GPAPER_VERSION=0.1.6`, `publishToMavenLocal`, re-pin in
+  `app/build.gradle.kts`, and record the API in that repo's `docs/api.md` +
+  `docs/host-responsibilities.md`.
+
+### A1 — Snap to guide (engine + toggle + freeze)
+**Status:** ✅ Complete — **Arc 9 "Snap" frozen 2026-08-24** (Nomad-verified + user all-clear:
+"All tests pass"). g-paper 0.1.6 committed alongside it (`~/git/g-paper` `b224a55`).
+
+g-paper **0.1.6**: `SnapEngine`/`SnapGuide` + the drag wiring + `snapToGuides`/`snapMarginPx` +
+guide paint + docs; re-pin. Host: `ic_snap.xml`, strings, `data/prefs/SnapPrefs.kt`,
+`SelectionToolbar` gains the toggle (state via `isSelected`), `NotebookActivity` loads the pref and
+feeds `paper.snapToGuides` + `snapMarginPx` from `@dimen/toolbar_bar_thickness`.
+**Gate:** JVM tests (page guides each axis, object edge/centre/proximity, nearest-wins, threshold
+release, independent axes, no-target and off cases); `./gradlew test` green; debug + release build;
+Nomad install + `logcat -b crash` empty; Nomad walk for the button's presence and toggle
+persistence across a relaunch; **user eye check** (guide appears at each page guide, objects snap to
+each other, past-threshold releases, snap off = free drag, preference survives a relaunch);
+`/code-review` over the arc; docs (`docs/notebook.md`, both `CLAUDE.md`s) + memory; commit + push;
+arc freeze.
+
+**Built (2026-08-24).** The arc turned out to be an *engine* arc with a host garnish, and finding
+that out was most of the value. `CanvasPaperView` owns `lassoTryBeginDrag` / `lassoDragMove` /
+`lassoDragFinish` and the drag layer's `onDraw`; the host is handed one `SelectionMove` at the end
+and never sees a sample. There was no host-side version of this feature to write. So **g-paper
+0.1.6** gained `core/geometry/SnapEngine.kt` (the engine, `SnapGuide` and `SnapResult`, all pure)
+and two properties, and Notesprout SN gained `SnapPrefs`, one icon, one button, and a five-line
+`toggleSnap()`. Onyx inherits the whole thing untouched — it drives the same protected drag entries.
+
+*The one thing that would have quietly ruined it.* `lassoDragFinish` computed its delta fresh from
+the lift position, which is right for a raw drag and **discards a snap entirely** — the user watches
+an object catch a guide and then watches it drop somewhere else. Both the samples and the lift now
+go through one `applyDragDelta`, so the drop uses the freshest pen position *and* the same snap
+pass. (Naively fixing this by reporting the last move sample instead trades one bug for a smaller
+one: a fast drag travels ~30 px between the final sample and the lift.)
+
+*Review (`/code-review high`, pre-commit working tree) — three findings, all real, all fixed.* None
+were correctness bugs in the host; the useful one was geometric:
+
+1. **The margin was one dimen, but the toolbar is not.** `snapMarginPx` came from
+   `@dimen/toolbar_bar_thickness`, which sizes the button **row**; `topBar` is that row *plus* a 1 dp
+   `inkBlack` border. An object snapped to the top margin would sit two pixels behind the black
+   rule — breaking the exact invariant the value was chosen for. Now read from `topBar.height` in
+   `pushExclusions()`, which re-runs on every chrome layout change, so it cannot drift.
+   **Standing trap: a chrome dimen names a part, a measured view names the whole thing.**
+2. **The engine change was uncommitted.** The pin moved to 0.1.6 while `~/git/g-paper` HEAD was
+   still `bbcdc37` (0.1.5) — a fresh clone plus `publishToMavenLocal` would have failed to resolve.
+   The engine commit lands with this one, and that ordering is now a rule for any g-paper bump.
+3. **Two wrong facts in this file** — `SnapGuide`/`SnapResult` placed in `core/model` (they are in
+   `core/geometry/SnapEngine.kt`) and a bar-width note claiming 8 buttons (`show()` never puts up
+   more than 6). Both corrected above; this file is cross-session memory, so a wrong fact here
+   outlives the session that wrote it.
+
+Two more came out of reading the diff before the review: `hitTargets()` was being asked twice per
+renderer at drag start (once for the travelling objects, once for the guides) — now one pass split
+two ways, since a host's `hitTargets()` is arbitrary work; and every drag exit clears
+`activeSnapGuides` / `snapTargets` alongside the deltas, or a stale rule survives onto the next
+frame. The review separately cleared, by reading: `bg_toolbar_button` really does carry a
+`state_selected` item, `SelectionAnchor.place` clamps the now-wider bar, and a dragged link cannot
+snap to its own wrapped children (`HeadingStore.loadPage` returns page-parented rows only).
+
+**Verified:** g-paper `:gpaper-core:test` green (23 new `SnapEngineTest` cases), Notesprout
+`./gradlew test` green, debug + release build, installed on the Nomad, notebook opens on engine
+`ratta`, crash buffer empty. Version stays `0.1.0-ratta`. **adb can neither lasso nor drag**, so the
+snap itself was the user's eye — guides at each page guide, object-to-object catches, release past
+the threshold, snap off = free drag, and the preference surviving a relaunch. All-clear: "All tests
+pass."
+
+**Arc 9 "Snap" is frozen at this commit.** Nothing is carried forward. `docs/notebook.md` §
+"Snap to guides" is the reference on this side, `~/git/g-paper/docs/api.md` on the engine side; the
+next arc is **not planned — ask first**.
+
+---
+
 ## Verification (end of arc)
 
 1. All JVM unit tests green (`./gradlew test` in `apps/notesprout_ratta`).

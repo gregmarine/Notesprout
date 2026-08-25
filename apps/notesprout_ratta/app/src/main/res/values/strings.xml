@@ -176,6 +176,10 @@
     <!-- Notebook selection -->
     <string name="delete_selection_action">Delete strokes</string>
 
+    <!-- Snap to guide (arc 9). One button, two hints — the border says which state it is in. -->
+    <string name="snap_action_on">Snap to guides (on)</string>
+    <string name="snap_action_off">Snap to guides (off)</string>
+
     <!-- Handwriting recognition (the one extension point) -->
     <string name="recognize_problem_title">Recognition</string>
     <string name="recognize_no_extension">No recognizer extension is installed on this device.</string>

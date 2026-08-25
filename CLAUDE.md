@@ -150,7 +150,10 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   Supernote-only rebuild under `apps/notesprout_ratta/`. Arcs 1–8 complete and frozen —
   Ratta Paper · Polish · Headings · Contents · Naming · Links · Pages · Objects, through
   O2 ✅ 2026-08-23. Arcs 7–8 are one clipboard with two kinds: a whole page, or what a lasso
-  caught (copy / cut / tap-to-place, within and across notebooks).
+  caught (copy / cut / tap-to-place, within and across notebooks). **Arc 9 "Snap"** ✅ A1
+  2026-08-24: og's snap-to-guide for a dragged selection — necessarily built into g-paper
+  0.1.6 (`SnapEngine`), since the engine owns every drag sample — with a remembered toggle
+  on the selection toolbar and margin guides one measured toolbar in from each page edge.
   **The next arc is not planned — ask first.**
   **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for any work there** — it holds the
   per-arc status, locked decisions, working protocol, and model recipe.

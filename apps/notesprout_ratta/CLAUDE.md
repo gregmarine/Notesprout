@@ -13,7 +13,7 @@ The Manta identifies as a Nomad — target by serial.
 
 **Subsystem docs (`docs/`) — read the matching one before working in that area:**
 `docs/library.md` (library screen, naming schemes) · `docs/notebook.md` (the notebook screen:
-tools, selection, headings, Contents, gestures, undo, frame-silence ledger) ·
+tools, selection, **snap to guides**, headings, Contents, gestures, undo, frame-silence ledger) ·
 `docs/links.md` (arc 6: link rows/payload, render, picker + create-in-picker, follow + trail) ·
 `docs/clipboard.md` (arcs 7–8: the clipboard — one index row, one envelope, two kinds; the page
 half's long-press sheet and the object half's Copy/Cut, tap-to-place and lasso popup, both
@@ -50,7 +50,7 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   never in Intent extras, never in the index. Never delete a DB on corruption.
 - **`IndexGuard.ready(this)` first thing in every index-touching `onCreate`**;
   `BootstrapActivity` is the only index opener and is `noHistory`.
-- **g-paper 0.1.5, `gpaper-core` + `gpaper-ratta` only** (mavenLocal). No `gpaper-onyx`,
+- **g-paper 0.1.6, `gpaper-core` + `gpaper-ratta` only** (mavenLocal). No `gpaper-onyx`,
   no BOOX repo, no jetifier, no jniLibs pickFirsts, no `tools:replace` label. Engine gaps
   are fixed in `~/git/g-paper` (bump version, `publishToMavenLocal`, re-pin) — never
   worked around in the host.

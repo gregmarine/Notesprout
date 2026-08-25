@@ -269,18 +269,24 @@ toolbar are set there by hand rather than waiting on the callback.
 | Tap inside the box, over ink only | nothing |
 | Tap the bar's **Copy** / **Cut** (O1) | the selection goes on the global clipboard; the bar goes, and the host **re-arms `Tool.LASSO`** so the next tap places ([`docs/clipboard.md`](clipboard.md)) |
 | Tap bare paper with the lasso armed and **nothing** selected (O1) | `onPaperTapped` (g-paper 0.1.5) → the clipboard's objects paste **centred on the tap**, landing selected |
+| Tap the bar's **Snap** (A1) | snap-to-guide flips for every drag from now on — nothing on the page moves ([Snap to guides](#snap-to-guides-a1) below) |
 | Tap outside / tool change / any data-in call / page swap | `onSelectionDismissed` → bar(s) hidden, mirror cleared (unless a converted heading's selection is waiting to take its place — see Headings below) |
 
 ### The selection toolbar
 
 A bordered row floating over the paper: **Delete** always, plus (N2) an **H** button that opens a
 second floating bar of its own, the H1–H6 level sub-toolbar (`SelectionMode` and the convert/change
-flows are covered under Headings below), plus (O1) **Copy** and **Cut**, offered in every mode. It
-is a *bar*, not a button, because it is the shape the selection's actions live in from here on.
+flows are covered under Headings below), plus (O1) **Copy** and **Cut**, offered in every mode, and
+(A1) **Snap** last. It is a *bar*, not a button, because it is the shape the selection's actions
+live in from here on.
 
 **Copy and Cut sit after Delete** (the O1 phase-start decision). Delete has been the leftmost
 button since P1; grouping the clipboard verbs at the front would have been tidier and would have
 moved a control the hand has been aiming at for seven arcs.
+
+**Snap sits last** for the opposite reason: it is the one button that is not an act on this
+selection. Everything before it does something and the bar goes away; Snap changes how the *next*
+drag behaves and the bar stays exactly as it was.
 
 It replaces R5's tap-inside-the-box action sheet. The sheet asked for a second deliberate act on top
 of the lasso the user had just drawn, and on e-ink a dialog is a full-screen repaint; the bar is
@@ -339,6 +345,54 @@ counts proximity + a 350 ms tail), so an idle gate would deliver the bar long af
 belongs to — the R3 panel lesson. It is safe because the engine has *already* presented the
 selection box on this same boundary: this frame is part of that presentation, not a repaint during
 writing. See the frame-silence section for the full list.
+
+## Snap to guides (A1)
+
+A dragged selection can be pulled onto the page's own structure instead of landing wherever the pen
+let go. Off by default; the toggle is the bar's last button, and the setting outlives every
+selection, page, notebook and relaunch (`data/prefs/SnapPrefs.kt`, `sn_snap`/`enabled`).
+
+**It is g-paper's, and it had to be.** `CanvasPaperView` owns `lassoTryBeginDrag` /
+`lassoDragMove` / `lassoDragFinish` and the drag layer's `onDraw`; the host never sees a sample of
+the drag. So **g-paper 0.1.6** grew `SnapEngine` (pure, `core/geometry`, JVM-tested there) plus two
+host-facing properties, and the host's whole share is a button and a preference — the standing rule
+that engine gaps are fixed in the engine, not worked around above it.
+
+**The guides.** Per axis, the page contributes five (edge · margin · centre · margin · edge) and
+every content object *not* in the selection contributes five more (`left − margin` · `left` ·
+`centerX` · `right` · `right + margin`, and the same on Y). The ±margin **proximity** guides are
+what make equal spacing fall out of a drag: pull one heading below another and it catches exactly
+one margin from its neighbour's edge, with no measuring.
+
+**The margin is one toolbar thick** — and *the whole toolbar*, which is why `paper.snapMarginPx` is
+set from `topBar.height` in `pushExclusions()` rather than from `@dimen/toolbar_bar_thickness`. That
+dimen (70 dp on the Nomad/Manta tier, 56 dp below) sizes the **button row**; `topBar` is that row
+plus a 1 dp `inkBlack` border, so snapping to the dimen alone would park the top of an object two
+pixels behind the black rule — breaking the exact invariant the value was chosen for. Reading the
+measured height also means the margin can never drift from the chrome it names. og used 44 dp here,
+which was its *small*-tier button size and lines up with nothing on a Supernote.
+
+**Strokes are never snap targets.** Only headings and links (whatever `hitTargets()` returns) are.
+On a handwriting page ink is everywhere; a guide per stroke box would be a thicket that fights the
+pen instead of helping it.
+
+**Nothing is clamped.** Anchors are the selection's leading edge, centre and trailing edge per axis,
+taken from the **tight** bounds rather than the 12 px-inflated box the overlay draws — the user is
+aligning content, not chrome. The nearest (anchor, guide) pair within 20 dp wins, X and Y decided
+independently, and the guide holds only while the pen stays inside that threshold. Drag on and it
+simply lets go. `onSelectionMoved` reports the **snapped** delta, so `store.move` and `Action.Moved`
+need no knowledge of any of this.
+
+**Where it does not apply:** O1's tap-to-place. A paste still lands exactly where the pen tapped —
+it arrives selected with the bar up, so the next drag snaps it. A paste that relocated itself would
+read as the app moving your content on its own.
+
+**The toggle.** One icon (`ic_snap`, Tabler `template`) with the selected border from
+`bg_toolbar_button`, which is already how the top bar shows which tool is armed; the long-press hint
+says "on"/"off" in words, because a border alone is something you have to have been told about. No
+toast — the border *is* the confirmation, and the current selection does not move.
+`NotebookActivity.toggleSnap()` writes both the live flag (`paper.snapToGuides`) and the durable one
+in the same breath so they can never disagree.
 
 ## Headings (N2)
 
@@ -890,6 +944,11 @@ boundary**, never under live ink:
 
 R3's exception — the tool-panel close at stylus pen-up — is **retired**: P1 removed the panels.
 
+**Arc 9 added no new exception**: the Snap button re-styles itself on its own deliberate chrome tap,
+through `releaseRender()` first — exception 5 exactly. The guide lines themselves are drawn by
+g-paper inside the drag layer it was already repainting, so they cost no frame the drag did not
+already present.
+
 **Arc 6 added no new exception**: every link surface (the follow's navigate and "Opening…"
 overlay, the dead-target dialog, the swipe-up walk-back) enters through a finger gesture behind
 `PageGestures`' pen gate, and the picker and the selection toolbar's link buttons ride the
@@ -944,6 +1003,15 @@ stroke, and a round trip through the clipboard codec) and `ObjectPlacementTest` 
 all four clamps, content bigger than the page, source-coordinate paste, an unknown page size, a
 non-finite box). `SelectionAnchorTest` gains the `placeUnder` cases. Full detail in
 [`docs/clipboard.md`](clipboard.md).
+
+**Arc 9 (snap) has no tests in this repo, on purpose.** The whole of the logic is
+`SnapEngine.computeSnap`, which lives in g-paper — so its suite lives there too
+(`gpaper-core/src/test/.../geometry/SnapEngineTest.kt`: each page guide on each axis, object edge /
+centre / proximity catches, nearest-wins, the page-over-object and leading-edge tie-breaks, release
+past the threshold, exact-threshold miss, independent axes, no targets, a zero page dimension, a
+zero margin, and a zero-size selection). What is left on this side is a preference and a button,
+which is a device eye-check, not a unit test — and one adb can only half reach, since it can neither
+lasso nor drag.
 
 ## Deliberate differences from Paper v0
 

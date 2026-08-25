@@ -35,6 +35,7 @@ import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.prefs.BrowseState
 import com.symmetricalpalmtree.notesproutsn.data.prefs.LinkTrail
 import com.symmetricalpalmtree.notesproutsn.data.prefs.RecentsPrefs
+import com.symmetricalpalmtree.notesproutsn.data.prefs.SnapPrefs
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityNotebookBinding
 import com.symmetricalpalmtree.notesproutsn.core.markdown.HeadingPrefix
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionCallException
@@ -79,6 +80,8 @@ class NotebookActivity : AppCompatActivity() {
     private lateinit var contentsFlow: ContentsFlow
     private lateinit var linkPickFlow: LinkPickFlow
     private lateinit var followFlow: LinkFollowFlow
+    /** Snap-to-guide's durable preference (arc 9). `paper.snapToGuides` is the live copy. */
+    private lateinit var snapPrefs: SnapPrefs
     private val repo by lazy { IndexRepository() }
 
     /** The global clipboard's one index row (arc 7) — the payload, read and written only here. */
@@ -191,6 +194,13 @@ class NotebookActivity : AppCompatActivity() {
         // because the engine reads them as it wires itself up. Order is load-bearing.
         paper.smartLassoEnabled = true
         paper.scribbleEraseEnabled = true
+        // Snap-to-guide (arc 9): the margin guides are one toolbar thick, so content snapped to a
+        // page margin lands exactly where the chrome ends. Armed from the remembered preference —
+        // the toggle lives on the selection bar, but the setting outlives every selection. The
+        // margin itself is set from the bar's real laid-out height in pushExclusions().
+        snapPrefs = SnapPrefs(this)
+        paper.snapMarginPx = resources.getDimensionPixelSize(R.dimen.toolbar_bar_thickness).toFloat()
+        paper.snapToGuides = snapPrefs.enabled
         paper.setPaperListener(listener)
 
         // The page's headings live in g-paper's committed layer via this renderer — registered
@@ -255,6 +265,8 @@ class NotebookActivity : AppCompatActivity() {
             onEditLink = { beginLinkEdit() },
             onUnlink = { unlinkSelection() },
             onCopy = { cut -> doObjectCopy(cut) },
+            isSnapOn = { paper.snapToGuides },
+            onToggleSnap = { toggleSnap() },
         )
         binding.notebookName.text = name
         binding.pageIndicator.text = ""
@@ -954,6 +966,20 @@ class NotebookActivity : AppCompatActivity() {
         selectionToolbar.show(sel.bounds, mode, loneHeading?.level)
     }
 
+    /**
+     * Flip snap-to-guide (arc 9). The engine holds the live flag and `SnapPrefs` the durable one;
+     * both are written here so they can never disagree, and the bar re-reads the engine.
+     *
+     * Nothing else happens: no toast (the border is the confirmation, and a toast for a setting the
+     * user can see would be noise), and the current selection stays exactly where it is — snapping
+     * governs the *next* drag, it never moves anything by itself.
+     */
+    private fun toggleSnap() {
+        val next = !paper.snapToGuides
+        paper.snapToGuides = next
+        snapPrefs.enabled = next
+    }
+
     /** The single selected link, or null — resolved at tap time, never captured into a callback
      *  (the selection can move, die or change kind between the bar going up and a button landing). */
     private fun loneSelectedLink(): PageLink? {
@@ -1572,6 +1598,11 @@ class NotebookActivity : AppCompatActivity() {
      *  coordinates, so the stylus can never ink under chrome. */
     private fun pushExclusions() {
         if (!::paper.isInitialized) return
+        // Snap's margin is "one toolbar" (arc 9) — and the toolbar is the button row *plus* its
+        // 1 dp border, so the dimen alone would leave a snapped object two pixels behind the black
+        // rule. Take the bar's real laid-out height instead, here because this runs on every chrome
+        // layout change and so can never drift from the thing it is measuring.
+        binding.topBar.height.takeIf { it > 0 }?.let { paper.snapMarginPx = it.toFloat() }
         if (!opened) {
             // The toolbar arms the pen from the first frame, but the page isn't on the paper yet —
             // a stroke committed now would hit the listener's `opened` guard, never reach the
