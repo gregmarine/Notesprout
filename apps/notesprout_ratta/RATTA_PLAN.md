@@ -2020,7 +2020,7 @@ an engine gap around in the host) decides this, not preference.
   `docs/host-responsibilities.md`.
 
 ### A1 — Snap to guide (engine + toggle + freeze)
-**Status:** ✅ Complete — **Arc 9 "Snap" frozen 2026-08-24** (Nomad-verified + user all-clear:
+**Status:** ✅ Complete (commit `844b136`) — **Arc 9 "Snap" frozen 2026-08-24** (Nomad-verified + user all-clear:
 "All tests pass"). g-paper 0.1.6 committed alongside it (`~/git/g-paper` `b224a55`).
 
 g-paper **0.1.6**: `SnapEngine`/`SnapGuide` + the drag wiring + `snapToGuides`/`snapMarginPx` +
