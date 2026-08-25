@@ -160,7 +160,7 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   a two-finger swipe down as its second entry point, and a tap that seals this notebook and
   opens that one. No new store: `sn_recents` plus index lookups.
   **Arc 11 "Scratch Pad"** (planned 2026-08-24; **J1 ✅ `12fe218` · J2 ✅ `cd8a918` · J3 ✅ `c7c83b5` ·
-  J4 ✅ `1187f29`** — J5–J6 to go): Paper's arc-6 scratch pad
+  J4 ✅ `1187f29` · J5 ✅ `__J5HASH__`** — J6 to go): Paper's arc-6 scratch pad
   ported **as an extension** — the user's explicit call, and the "fresh user decision" the
   extension rule requires before SN may hold a second capability point. It is SN's first
   **screen-owning** point (`SCRATCH_PAD`, tier 2): `NSE · Scratch Pad` owns its own g-paper
@@ -175,8 +175,15 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   stub screen. **J4 landed the real screen and both entry buttons — and answered the headline
   risk: the EPD handoff works both ways, first try, needing no g-paper change.** The pad releases
   its pipeline before every `finish()`, the caller reclaims in `onResume`, and the departing
-  window's close lands *after* that reclaim — the ordering Paper's arc-6 S3 turns on. Transfers
-  are J5.
+  window's close lands *after* that reclaim — the ordering Paper's arc-6 S3 turns on. **J5 landed
+  both transfers, and both worked on the Nomad first try.** Each direction is a *copy* that crosses
+  only through the held service — never the Intent, never a file — carries **no ids** (fresh ones
+  minted on the receiving side) and keeps **coordinates 1:1**. Notebook → pad: the selection bar's
+  ink-only Pad button → a New page / Current page sheet → caps checked before any bind → the strokes
+  arrive selected with the lasso armed and **one** undo step behind them. Pad → notebook: the top
+  bar sends the page, the selection bar sends the lasso, and the host drains on the bind it is
+  **still holding** and pastes as one `ObjectsPasted` step, rebased after the destination page's
+  max `"order"`.
   **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for any work there** — it holds the
   per-arc status, locked decisions, working protocol, and model recipe.
 - `germination` — previous post-MVP feature branch (reference, not active)

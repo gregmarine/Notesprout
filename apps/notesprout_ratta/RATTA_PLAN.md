@@ -2742,7 +2742,7 @@ extends to not-built); `ScratchAction` has no `Pasted`; `ScratchPadEntry.onResul
 `ScratchPadClient.send` / `drainOutgoing` are wired but unexercised.
 
 ### J5 — The two transfers
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (Nomad-verified + user-verified 2026-08-25)
 
 Both directions are **copies**, cross **only through the held service** — never the Intent, never a
 file — carry **no ids** (fresh ids minted on the receiving side), and keep **coordinates 1:1**
@@ -2785,6 +2785,100 @@ both sides; Sonnet strings and icons.*
 `Action.ObjectsPasted` (a scratch paste is a strokes-only object paste) or a strokes-only twin
 (Paper's `Pasted`); and whether the paste-back confirms with a toast (arc-8's "Pasted" precedent)
 or the landing selection is confirmation enough.
+*(Answered: **reuse `Action.ObjectsPasted`** with empty heading and link lists — a scratch paste is
+a strokes-only object paste, the direction and the rows are the same, and both existing replay arms
+already no-op on the empty lists; no 15th kind, no new arm. And **the toast, in arc-8's words**
+(`objects_pasted_toast` = "Pasted") — a paste is a paste and confirms the same way whichever source
+it came from; a cut drain overrides it with its dialog.)*
+
+**Outcome:** landed as written, and **both directions worked on the Nomad first try** — the whole
+round trip is finger-drivable, because a paste from the pad lands *selected*, which is the very
+selection the notebook's Pad button needs.
+
+**`:extension-api`** unchanged — J3's contract was complete, which is the point of having written it
+first. **`:ext-scratchpad`**: `ScratchPadService.receiveInk` / `takeOutgoing` are real (the two J3
+`UnsupportedOperationException` throws are gone) — chunks accumulate under `ScratchSession`'s one
+monitor with the **running totals re-checked** as they go, and the last chunk mints ids and places
+through `ScratchStore.receive` on the Binder thread; `ScratchAction` gained **`Pasted`** and its
+`Page` gained a second blob (`afterBlob`) so one shape now covers three acts — insert (blank both
+sides), delete (ink on the `before` side) and **a received new page** (ink on the `after` side),
+which the J4 shape could not express because its redo always dropped the blob; `ScratchDocument`
+gained `addStrokes` (all-or-nothing under the full rule), `encodeCurrentPage` and the two `Pasted`
+arms; `ScratchPadActivity` gained `sendEnabled`, both Send buttons (top bar = the page, selection bar
+= the lasso, both `ic_pencil_down`, both **absent** without a notebook behind them),
+`send()` (flush under the lock → park the chunks → `RESULT_SCRATCH_SEND` through `finishWithHandoff`,
+which now takes the result code) and **`consumeReceived()`** — the one-shot handover, cleared before
+anything can fail. **`:app`**: `ScratchPadEntry` grew the outbound `Send` payload (chunked off Main,
+handed over on the held bind **before** the launch, a `SCRATCH_PAGE_FULL` stopping the whole thing
+because nothing was placed) and the inbound drain (on the bind that is **still held**, `opening`
+released only after it); `SelectionToolbar` is **7 buttons in STROKES mode** with the ink-only Pad
+last; `NotebookSession.pasteStrokes` writes the rows in one transaction with `"order"` rebased inside
+it; `NotebookActivity` gained the placement sheet, the caps gate **before any bind**, and the paste.
+
+**Both directions, from the device log, in one sitting:**
+
+```
+ScratchPadActivity: send: 9 strokes in 1 chunks          ← pad → notebook
+GPaperRatta: firmware ink released for handoff             pad
+ScratchPadActivity: finishing (handoff released, result=1)
+ScratchPadEntry: scratch pad returned: resultCode=1
+GPaperRatta: firmware ink session claimed                  notebook reclaims, .097
+ViewRootImpl[ScratchPadActivity]: Change to Gone           the pad's window closes, .198 — AFTER
+ScratchPadClient: drainOutgoing: 1 chunks, 9 strokes in 99 ms
+ScratchPadService: end · finish: end ok · unbind … (held)
+NotebookSession: pasted 9 strokes from the scratch pad onto 5c69e5aa…
+
+ScratchPadClient: send: 1 chunks, 9 strokes, placement=0 in 77 ms   ← notebook → pad
+GPaperRatta: firmware ink released for handoff             notebook
+ScratchPadActivity: page fba0923d… loaded: 9 strokes, 2 pages
+ScratchPadActivity: received 9 strokes (newPage=true)
+```
+
+The handoff ordering held on the Send exit exactly as it does on Back — the caller's reclaim lands
+**before** the departing window's close. No g-paper change; the pin stays **0.1.6**.
+
+**Landing state, dumped:** the notebook's paste lands with **Lasso armed** and the seven-button bar
+(Delete · H · Link · Copy · Cut · Snap · **Send to Scratch Pad** — 812 px of the Nomad's 1404); the
+pad's received placement opens on **2 / 2** (the inserted page) with the strokes selected, the lasso
+armed and **Delete · Send selection to notebook** floating over them. The placement sheet reads
+"Send to Scratch Pad — New page / Current page". A Send from a blank page raises **"Nothing to
+send"** and the pad stays up. `am start` of the screen is still **refused** (`refused caller (none)`);
+`dumpsys activity services <pkg>` = **(nothing)** after every showing; binds = unbinds; `logcat -b
+crash` **empty** and no E/W from our code throughout.
+
+**Tests: 620 JVM** (`:app` 456 · `:sn-screen` 58 · `:extension-api` 29 · `:ext-mlkit` 29 ·
+`:ext-scratchpad` 48) — up 15 from J4. New: `ScratchStoreReceiveTest` (10) pins where a placement
+lands, which page becomes current, what the `Received` record carries so the screen can build **one**
+undo step from it, and above all that a placement over the cap **leaves nothing behind** — no ink, no
+inserted page, no moved current (the half that is easy to get wrong is the insert, and it is asserted
+directly); `ScratchReceivedUndoTest` (5) pins the two undo shapes, including the one the J4 shape
+could not do — a redo of a received new page brings the page back **with its ink**, and an ordinary
+insert still redoes blank; plus a `TransferCaps` round-trip proving **coordinates 1:1** through the
+full outward → drain → mint path, id excepted. `assembleDebug`, `assembleRelease` and `test` green
+across all five modules; the pad's release APK is **6.8 MB**.
+
+**Three deviations from the phase text:**
+- **`ScratchAction.Page` grew a second blob rather than the arc gaining a fifth kind.** The phase
+  said a New-page placement records as `Page`; J4's `Page` could put the page back but would redo it
+  **blank**, because its redo always dropped the blob. `afterBlob` (default null) makes the one shape
+  say what the page holds on *each* side, and J4's two acts are unchanged — pinned by a test.
+- **`ScratchPadEntry` gained an `onSent` callback** rather than the notebook toasting at the tap.
+  The send is asynchronous inside the entry, so a toast fired at the tap would confirm something that
+  had not happened — and could be followed by a failure dialog. It fires after the last `receiveInk`
+  returns, which is also where the selection is cleared.
+- **The library's entry passes `sendEnabled = false`, and it is a constructor flag, not a `Send`.**
+  Whether the pad shows its Send buttons is a property of the *caller*, not of whether ink was handed
+  over: the notebook's plain top-bar tap must still come back with ink.
+
+**One bug found in self-review, before the second device pass:** the tool restore wrote its "put this
+back" field **before** arming the lasso. Arming the lasso dismisses whatever selection was still up,
+and that dismissal is exactly what runs the restore — so it would have consumed its own field and put
+the pen back under the selection it was about to make. The write now lands after the tool change on
+**both** sides (notebook and pad). It is the O2 lesson verbatim: two handlers reading one piece of
+state must order the write after the read.
+
+**Carried into J6:** the docs (`docs/scratchpad.md` new, `docs/extensions.md` grown, both
+`CLAUDE.md`s), the arc-range `/code-review high`, the boundary audit and the freeze.
 
 ### J6 — Review, hardening, docs, freeze
 **Status:** ⬜ Not started

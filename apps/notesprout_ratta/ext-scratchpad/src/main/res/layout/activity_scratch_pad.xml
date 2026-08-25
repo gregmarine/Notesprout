@@ -56,8 +56,15 @@
                 android:textColor="@color/inkBlack"
                 android:textSize="16sp" />
 
-            <!-- Send (top bar = the whole page) lands in J5. Nothing stands here in its place: the
-                 rule is GONE, never disabled — and never a visible no-op. -->
+            <!-- Send = this whole page, to the notebook the pad was opened from (J5). GONE when
+                 there is no notebook behind us — the library's pad has nowhere to send to, and the
+                 rule is GONE, never disabled. -->
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnSend"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_scratch_send_page"
+                android:src="@drawable/ic_pencil_down"
+                android:visibility="gone" />
 
         </LinearLayout>
 
@@ -140,8 +147,8 @@
 
     </LinearLayout>
 
-    <!-- The selection's floating bar — Delete alone in J4 (Send joins it in J5). Placed by margins
-         from SelectionAnchor.place; its button is built in code. -->
+    <!-- The selection's floating bar — Delete, and Send when a notebook is behind us (J5). Placed
+         by margins from SelectionAnchor.place; both buttons are built in code. -->
     <LinearLayout
         android:id="@+id/selectionToolbar"
         android:layout_width="wrap_content"

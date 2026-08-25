@@ -22,7 +22,9 @@ import com.symmetricalpalmtree.notesproutsn.core.Immersive
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.core.TopGuard
 import com.symmetricalpalmtree.notesproutsn.ext.scratchpad.databinding.ActivityScratchPadBinding
+import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
 import com.symmetricalpalmtree.notesproutsn.extension.HostCallerCheck
+import com.symmetricalpalmtree.notesproutsn.extension.InkChunks
 import com.symmetricalpalmtree.notesproutsn.notebook.PageGestures
 import com.symmetricalpalmtree.notesproutsn.notebook.PaperChrome
 import com.symmetricalpalmtree.notesproutsn.notebook.UndoRedoStack
@@ -61,11 +63,22 @@ import kotlinx.coroutines.withContext
  * we finish, so a save still in flight would hit a revoked binder. [exit] flushes under the page-op
  * lock first and only then hands off and finishes.
  *
+ * **The transfers (J5) never touch the paper from outside.** Inbound ink was placed in the store on
+ * the Binder thread *before* this screen existed, so [openDocument] simply loads it and then
+ * consumes [ScratchSession.received] **once**: it switches to the **lasso before `setSelection`** (a
+ * selection under the pen can neither be dragged nor dismissed), selects what arrived, and records
+ * exactly one undo step — a new-page placement as a [ScratchAction.Page] carrying the arrived ink as
+ * its `afterBlob`, a current-page one as a [ScratchAction.Pasted]. The tool the user had comes back
+ * pen-idle when that selection is dismissed, unless they picked another one meanwhile. Outbound ink
+ * is parked in [ScratchSession] and the screen finishes with [ExtensionContract.RESULT_SCRATCH_SEND]
+ * — the host drains it on the bind it is still holding.
+ *
  * Frame silence: no app frame while `paper.isPenActive`. The page indicator waits for the gate
- * ([ScratchToolbar]); the four frames that do not are the notebook's own recorded exceptions, in
- * their scratch-pad form — the delete confirm at a long-press, the selection bar's show at lasso
- * completion (and its own re-anchor after a move), the "Opening…" box's hide when the page lands,
- * and a refused stroke's problem dialog at a pen-up.
+ * ([ScratchToolbar]); the frames that do not are the notebook's own recorded exceptions, in their
+ * scratch-pad form — the delete confirm at a long-press, the selection bar's show at lasso
+ * completion (and its own re-anchor after a move, and its show over a received placement), the
+ * "Opening…" box's hide when the page lands, and a problem dialog at a pen-up or at a chrome tap
+ * (a refused stroke, an empty Send).
  */
 class ScratchPadActivity : AppCompatActivity() {
 
@@ -83,6 +96,16 @@ class ScratchPadActivity : AppCompatActivity() {
     /** Serialises every page/undo/flush operation, so two overlapping gestures can't tangle the
      *  page list — and so a debounced save can never run inside a page swap. */
     private val pageOps = Mutex()
+
+    /** True when the pad was opened from a notebook — the two Send buttons exist only then. */
+    private var sendEnabled = false
+
+    /**
+     * The tool that was armed before a **received** placement selected what arrived (J5). Put back
+     * pen-idle when that selection is dismissed — but only if the lasso is still the armed tool, so
+     * a tool the user picked meanwhile wins.
+     */
+    private var toolBeforeReceive: Tool? = null
 
     private var opened = false
     private var closing = false
@@ -102,6 +125,7 @@ class ScratchPadActivity : AppCompatActivity() {
             Slog.d(TAG) { "refused caller ${callingPackage ?: "(none)"}" }
             return
         }
+        sendEnabled = intent.getBooleanExtra(ExtensionContract.EXTRA_SCRATCH_SEND_ENABLED, false)
         binding = ActivityScratchPadBinding.inflate(layoutInflater)
         setContentView(binding.root)
         Immersive.apply(window, binding.root)
@@ -128,13 +152,16 @@ class ScratchPadActivity : AppCompatActivity() {
             btnPen = binding.btnPen,
             btnEraser = binding.btnEraser,
             btnLasso = binding.btnLasso,
+            btnSend = binding.btnSend,
             btnPrevPage = binding.btnPrevPage,
             btnNextPage = binding.btnNextPage,
             pageIndicator = binding.pageIndicator,
             onBack = { exit() },
+            onSend = { sendPage() },
             // No-op at a bound, never disabled: a greyed control is invisible on e-ink.
             onPrevPage = { runPageOp { flipTo(document.pageIndex - 1) } },
             onNextPage = { runPageOp { flipTo(document.pageIndex + 1) } },
+            sendEnabled = sendEnabled,
         )
         selectionToolbar = ScratchSelectionToolbar(
             root = binding.root,
@@ -143,6 +170,8 @@ class ScratchPadActivity : AppCompatActivity() {
             band = { chromeBand() },
             releaseRender = { paper.releaseRender() },
             onDelete = { currentSelection?.let { deleteSelection(it) } },
+            onSend = { sendSelection() },
+            sendEnabled = sendEnabled,
         )
         chrome = PaperChrome(
             paper = paper,
@@ -203,7 +232,73 @@ class ScratchPadActivity : AppCompatActivity() {
         // frame during writing — nothing has been drawn yet.
         binding.openingOverlay.visibility = View.GONE
         Slog.d(TAG) { "page ${document.currentPageId} loaded: ${document.strokes.size} strokes, ${document.pageCount} pages" }
+        consumeReceived()
         if (document.isUnreadable) showProblem(R.string.scratch_unreadable_title, R.string.scratch_unreadable_body)
+    }
+
+    /**
+     * The one-shot handover of a `receiveInk` placement (J5) — the ink is already in the store and
+     * already on the paper (it came in with [ScratchDocument.load]); what is left is to say so.
+     *
+     * **Consumed once, unconditionally**: the record is cleared before anything can fail, so a
+     * placement whose page has since gone (only reachable through a host restart mid-showing) is
+     * dropped rather than re-applied at the next open.
+     *
+     * One undo step, and which one depends on what the placement did to the page list: a **new
+     * page** is a [ScratchAction.Page] whose `afterBlob` is the ink that came with it — undo takes
+     * the page away with its cargo, redo brings both back — and a **current page** placement is a
+     * [ScratchAction.Pasted], which removes and restores exactly what arrived.
+     *
+     * The **lasso is armed before `setSelection`** (a selection under the pen can neither be dragged
+     * nor dismissed) and the state is set by hand, because a host-initiated selection never echoes
+     * `onSelectionCreated`.
+     */
+    private fun consumeReceived() {
+        val received = ScratchSession.received ?: return
+        ScratchSession.received = null
+        if (received.pageId != document.currentPageId) {
+            Slog.d(TAG) { "received placement dropped: page ${received.pageId} is not current" }
+            return
+        }
+        val ids = received.strokeIds.toHashSet()
+        val arrived = document.strokes.filter { it.id in ids }
+        if (arrived.isEmpty()) return
+
+        undo.record(
+            if (received.newPage) {
+                ScratchAction.Page(
+                    before = received.pagesBefore,
+                    beforeCurrent = received.currentBefore,
+                    after = document.pageIds,
+                    afterCurrent = received.pageId,
+                    pageId = received.pageId,
+                    blob = null,                          // the page did not exist before
+                    afterBlob = document.encodeCurrentPage(),
+                )
+            } else {
+                ScratchAction.Pasted(received.pageId, arrived)
+            }
+        )
+
+        var box = arrived.first().bounds
+        for (i in 1 until arrived.size) box = box.union(arrived[i].bounds)
+        // The write lands AFTER the tool change, never before it (the notebook's O2 lesson, kept
+        // here for the same reason): a tool change dismisses any live selection, and that dismissal
+        // runs `restoreToolAfterReceive` — which would consume this very field and put the pen back
+        // under the selection we are about to make.
+        val prior = paper.tool
+        if (prior != Tool.LASSO) {
+            paper.tool = Tool.LASSO
+            toolbar.sync(Tool.LASSO)   // a host-initiated tool change is never echoed back
+            toolBeforeReceive = prior
+        }
+        val selection = Selection(ids, emptySet(), box)
+        paper.setSelection(ids, emptySet(), box)
+        selectionActive = true
+        currentSelection = selection
+        selectionToolbar.show(box)
+        pushExclusions()
+        Slog.d(TAG) { "received ${arrived.size} strokes (newPage=${received.newPage})" }
     }
 
     /** A pad that opened nothing is explained, not toasted — then it leaves the way every exit does. */
@@ -274,6 +369,7 @@ class ScratchPadActivity : AppCompatActivity() {
             currentSelection = null
             selectionToolbar.hide()
             pushExclusions()
+            restoreToolAfterReceive()
         }
 
         override fun onToolChanged(tool: Tool) = toolbar.sync(tool)
@@ -441,6 +537,75 @@ class ScratchPadActivity : AppCompatActivity() {
         ).show()
     }
 
+    /**
+     * Put back the tool a received placement took away (J5) — **only if the lasso is still armed**,
+     * so a tool the user picked while the selection was up wins, and **pen-idle**, because this is a
+     * chrome frame like any other. One shot: the field is cleared whichever way it goes.
+     */
+    private fun restoreToolAfterReceive() {
+        val prior = toolBeforeReceive ?: return
+        toolBeforeReceive = null
+        if (paper.tool != Tool.LASSO) return
+        whenPenIdle {
+            if (isFinishing || isDestroyed || paper.tool != Tool.LASSO) return@whenPenIdle
+            paper.tool = prior
+            toolbar.sync(prior)
+        }
+    }
+
+    private fun whenPenIdle(action: () -> Unit) {
+        if (!paper.isPenActive) { action(); return }
+        binding.root.postDelayed({ whenPenIdle(action) }, PaperView.PEN_ACTIVE_TAIL_MS)
+    }
+
+    // ── Send (pad → notebook, J5) ────────────────────────────────────────────
+
+    /** The top bar's Send: this whole page, in writing order. */
+    private fun sendPage() = send(null)
+
+    /** The selection bar's Send: what the lasso caught. The ids are read **now** — the selection can
+     *  die (a tap-away, a flip) between the tap and the page-op lock, and what the user pointed at is
+     *  what they meant to send. */
+    private fun sendSelection() {
+        val ids = currentSelection?.strokeIds?.toHashSet() ?: return
+        send(ids)
+    }
+
+    /**
+     * Park [ids] (or the whole page when null) for the host to drain, and leave with
+     * [ExtensionContract.RESULT_SCRATCH_SEND].
+     *
+     * **Send is a copy** — the pad keeps its ink, and nothing goes on its undo stack. The page is
+     * **flushed first**, under the same lock every other page op takes, so what the pad keeps and
+     * what the notebook gets are the same ink. An empty pick is a dialog, never silence: a tap that
+     * did nothing reads as broken on e-ink.
+     *
+     * The chunking is the contract's own ([InkChunks]), so the host's `takeOutgoing` loop and the
+     * extension's parked list can never disagree about what one Binder call holds. The whole-transfer
+     * caps are the host's to enforce as it drains — a page over them comes back cut, and the host
+     * says so.
+     */
+    private fun send(ids: Set<String>?) {
+        if (!opened || closing) return
+        runPageOp {
+            document.flushUntilClean()
+            val picked = if (ids == null) document.strokes else document.strokes.filter { it.id in ids }
+            val wire = ScratchInk.toWireStrokes(picked)
+            if (wire.isEmpty()) {
+                showProblem(R.string.scratch_nothing_to_send_title, R.string.scratch_nothing_to_send_body)
+                return@runPageOp
+            }
+            ScratchSession.outbound = InkChunks.chunk(wire)
+            ScratchSession.outboundPageWidth = document.pageWidth
+            ScratchSession.outboundPageHeight = document.pageHeight
+            Slog.d(TAG) { "send: ${wire.size} strokes in ${ScratchSession.outbound.size} chunks" }
+            // Nothing more may run against the document: the host drains and then revokes the store.
+            closing = true
+            binding.root.removeCallbacks(saveRunnable)
+            finishWithHandoff(ExtensionContract.RESULT_SCRATCH_SEND)
+        }
+    }
+
     // ── Saving ───────────────────────────────────────────────────────────────
 
     /** Debounced: a hand writing a line of text would otherwise re-encode the page on every stroke. */
@@ -528,12 +693,14 @@ class ScratchPadActivity : AppCompatActivity() {
     /**
      * `releaseForHandoff()` and then `finish()` — the whole of the pad's half of the EPD handoff,
      * and the reason no exit here calls `finish()` on its own. See the class note.
+     *
+     * [resultCode] is [ExtensionContract.RESULT_SCRATCH_SEND] when ink is parked for the host to
+     * drain, and `RESULT_CANCELED` for every other exit; the host finishes the bind either way.
      */
-    private fun finishWithHandoff() {
+    private fun finishWithHandoff(resultCode: Int = Activity.RESULT_CANCELED) {
         if (::paper.isInitialized) paper.releaseForHandoff()
-        // J4 has no transfers: every exit is a plain return. RESULT_SCRATCH_SEND arrives in J5.
-        setResult(Activity.RESULT_CANCELED)
-        Slog.d(TAG) { "finishing (handoff released)" }
+        setResult(resultCode)
+        Slog.d(TAG) { "finishing (handoff released, result=$resultCode)" }
         finish()
     }
 

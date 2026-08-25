@@ -11,15 +11,20 @@ import com.symmetricalpalmtree.notesproutsn.core.InkColorCodec
 import com.symmetricalpalmtree.notesproutsn.notebook.PaperToolbar
 
 /**
- * The pad's chrome (arc 11 / J4): Back and the title on the top bar, the three tools and the page
- * arrows on the bottom one. The tool half is `:sn-screen`'s [PaperToolbar] — the whole reason that
- * module exists — and this adds what is the pad's own: the fixed tool values, the page arrows, and
- * the page indicator behind the frame-silence gate.
+ * The pad's chrome (arc 11 / J4, grown in J5): Back, the title and — when a notebook is behind us —
+ * Send on the top bar; the three tools and the page arrows on the bottom one. The tool half is
+ * `:sn-screen`'s [PaperToolbar] — the whole reason that module exists — and this adds what is the
+ * pad's own: the fixed tool values, Send, the page arrows, and the page indicator behind the
+ * frame-silence gate.
  *
  * **The tools are fixed, and they are the notebook's.** PEN · black · [PEN_WIDTH_PX], eraser
  * [ERASER_RADIUS_PX] — no panels, no colour, nothing remembered. Smart lasso and scribble erase are
  * armed by the screen before the listener attaches: a pad one tap from the notebook that lassoed
  * differently would read as a bug.
+ *
+ * **Send exists only when there is somewhere to send to** (J5): the pad opened from the library has
+ * no notebook behind it, so the button is absent rather than present-and-failing — GONE, never
+ * disabled, and never a visible no-op.
  *
  * **The arrows no-op at a bound, never disable.** A greyed control is invisible on e-ink (the
  * standing rule), so the buttons always look the same and simply do nothing at page 1 or page N.
@@ -34,12 +39,16 @@ class ScratchToolbar(
     btnPen: ImageButton,
     btnEraser: ImageButton,
     btnLasso: ImageButton,
+    private val btnSend: ImageButton,
     private val btnPrevPage: ImageButton,
     private val btnNextPage: ImageButton,
     private val pageIndicator: TextView,
     onBack: () -> Unit,
+    /** Send this whole page to the notebook. Never called when [sendEnabled] is false — the button is GONE. */
+    onSend: () -> Unit,
     onPrevPage: () -> Unit,
     onNextPage: () -> Unit,
+    sendEnabled: Boolean,
 ) {
 
     private val tools: PaperToolbar
@@ -61,11 +70,13 @@ class ScratchToolbar(
             onBack = onBack,
         )
 
-        listOf(btnPrevPage, btnNextPage).forEach {
+        listOf(btnPrevPage, btnNextPage, btnSend).forEach {
             TooltipCompat.setTooltipText(it, it.contentDescription)
         }
         btnPrevPage.setOnClickListener { releaseRenderIfIdle(); onPrevPage() }
         btnNextPage.setOnClickListener { releaseRenderIfIdle(); onNextPage() }
+        btnSend.visibility = if (sendEnabled) View.VISIBLE else View.GONE
+        btnSend.setOnClickListener { releaseRenderIfIdle(); onSend() }
         pageIndicator.text = ""
     }
 

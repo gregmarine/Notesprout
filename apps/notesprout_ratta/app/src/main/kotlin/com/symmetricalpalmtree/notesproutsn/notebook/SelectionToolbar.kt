@@ -41,9 +41,12 @@ enum class SelectionMode { STROKES, HEADING, LINK, MIXED, MIXED_WITH_LINK }
  * **Main bar**, in order: Delete (always) · **H** (a level is only writable on ink or on one
  * heading) · **Link** (any link-free selection — K1) · **Edit** and **Unlink** (a lone link, the
  * only selection with one payload to act on) · **Copy** and **Cut** (always — arc 8; they sit after
- * Delete so its leftmost slot, aimed at since P1, never moves) · **Snap** (always — arc 9; last,
- * because it is the one button that acts on the *next* drag rather than on this selection, and it
- * shows its state with the same selected border the top bar's armed tool wears).
+ * Delete so its leftmost slot, aimed at since P1, never moves) · **Snap** (always — arc 9; it is the
+ * one button that acts on the *next* drag rather than on this selection, and it shows its state with
+ * the same selected border the top bar's armed tool wears) · **Pad** (arc 11 / J5 — last, and the
+ * narrowest of them all: only on a pure-ink selection, and only while a trusted scratch-pad
+ * extension is installed. `WireStroke` is the whole of what the contract carries, so the moment the
+ * selection holds a heading or a link there is nothing honest to send and the button is gone).
  * **Sub-toolbar**: H1…H6, shown by an H tap and hung off the *bar*
  * by [SelectionAnchor.placeSub] — below it, above when the bar itself flipped — so opening it never
  * moves the Delete the user just aimed at. Every [show] closes it: a fresh selection (or a
@@ -87,6 +90,11 @@ class SelectionToolbar(
     private val isSnapOn: () -> Boolean,
     /** Flip snap-to-guide. The screen persists it and tells the engine; the bar re-reads. */
     private val onToggleSnap: () -> Unit,
+    /** Send this ink selection to the Scratch Pad (arc 11 / J5). */
+    private val onScratchPad: () -> Unit = {},
+    /** Whether a trusted scratch-pad extension is installed — re-read on every [show], because it
+     *  can be disabled under us and a button that lies is worse than one that is absent. */
+    private val isScratchPadAvailable: () -> Boolean = { false },
 ) {
 
     private val density = root.resources.displayMetrics.density
@@ -96,6 +104,7 @@ class SelectionToolbar(
     private val editButton: AppCompatImageButton
     private val unlinkButton: AppCompatImageButton
     private val snapButton: AppCompatImageButton
+    private val padButton: AppCompatImageButton
     /** Index 0 is H1 — `levelButtons[n - 1]` is level `n`. */
     private val levelButtons: List<AppCompatImageButton>
 
@@ -159,6 +168,14 @@ class SelectionToolbar(
         }
         bar.addView(snapButton)
 
+        // Last, and the only button gated on something outside this selection. Ink-only: the wire
+        // carries strokes and nothing else, so a heading or a link in the set takes it away.
+        padButton = button(R.drawable.ic_sketching, ctx.getString(R.string.scratch_send_action)) {
+            releaseRender()
+            onScratchPad()
+        }
+        bar.addView(padButton)
+
         levelButtons = (1..LEVELS).map { level ->
             button(LEVEL_ICONS[level - 1], ctx.getString(R.string.heading_level_hint, level)) {
                 releaseRender()
@@ -189,6 +206,8 @@ class SelectionToolbar(
         val selected = if (mode == SelectionMode.HEADING) currentLevel else null
         levelButtons.forEachIndexed { i, b -> b.isSelected = (i + 1) == selected }
         syncSnapButton()
+        padButton.visibility =
+            if (mode == SelectionMode.STROKES && isScratchPadAvailable()) View.VISIBLE else View.GONE
 
         val rootLoc = IntArray(2).also { root.getLocationInWindow(it) }
         val paperLoc = IntArray(2).also { paperView.getLocationInWindow(it) }

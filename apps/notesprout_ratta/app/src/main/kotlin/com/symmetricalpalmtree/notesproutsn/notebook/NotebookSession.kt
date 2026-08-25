@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.util.Log
 import androidx.room.withTransaction
 import com.symmetricalpalmtree.gpaper.core.model.Bounds
+import com.symmetricalpalmtree.gpaper.core.model.Stroke
 import com.symmetricalpalmtree.notesproutsn.core.Bitmaps
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.crypto.KeySession
@@ -340,6 +341,33 @@ class NotebookSession(
                 "(${built.strokes.size} strokes, ${built.headings.size} headings, ${built.links.size} links)"
         }
         built
+    }
+
+    /**
+     * Write [strokes] onto [pageId] — the scratch pad's ink coming home (arc 11 / J5). One
+     * transaction, the same [StrokeRows] door every other stroke write uses, `"order"` rebased after
+     * the page's current max **inside** that transaction (two pastes racing would otherwise both
+     * read the same max and stack their rows on identical numbers — `pasteObjects`' rule).
+     *
+     * The ids are the caller's: [com.symmetricalpalmtree.notesproutsn.extension.TransferCaps.toStrokes]
+     * minted them on this side, and no id ever crosses the wire. Coordinates are kept **1:1** — the
+     * pad page and the notebook page are both this device's screen, and a cross-size page clips the
+     * ink like any other. Relative order is preserved: writing order is load-bearing (a later
+     * lasso-convert reads the strokes as a sequence — the arc-3 / N3 lesson).
+     *
+     * Not routed through the session's serial [SoilWriter]: the caller has drained it and holds the
+     * page-op lock, and one transaction is the atomicity a paste needs.
+     */
+    suspend fun pasteStrokes(pageId: String, strokes: List<Stroke>) = withContext(Dispatchers.IO) {
+        if (strokes.isEmpty()) return@withContext
+        val now = System.currentTimeMillis()
+        db.withTransaction {
+            var order = db.dao().maxOrder(pageId, SoilSchema.TYPE_STROKE)
+            val rows = strokes.map { StrokeRows.toRow(it, pageId, ++order, now) }
+            rows.chunked(ROW_CHUNK).forEach { db.dao().upsertAll(it) }
+        }
+        repo.touch(notebookId, now)
+        Slog.d(TAG) { "pasted ${strokes.size} strokes from the scratch pad onto $pageId" }
     }
 
     /**

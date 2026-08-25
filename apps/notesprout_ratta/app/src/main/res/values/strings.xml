@@ -264,4 +264,19 @@
     <string name="cd_scratch_pad">Scratch pad</string>
     <string name="scratch_failed_title">Scratch pad unavailable</string>
     <string name="scratch_failed_body">The scratch pad could not be opened. It may have been disabled or removed.</string>
+
+    <!-- The transfers (arc 11 / J5). The selection toolbar's Pad button, its placement sheet, and
+         the four things that can go wrong on the way there and back. -->
+    <string name="scratch_send_action">Send to Scratch Pad</string>
+    <string name="scratch_placement_title">Send to Scratch Pad</string>
+    <string name="scratch_placement_new_page">New page</string>
+    <string name="scratch_placement_current_page">Current page</string>
+    <string name="scratch_sent_toast">Sent to scratch pad</string>
+    <string name="scratch_too_large_title">Too much to send</string>
+    <string name="scratch_too_large_body">This selection holds more ink than the scratch pad can take. Send a smaller part of it.</string>
+    <string name="scratch_page_full_host_title">Scratch page is full</string>
+    <string name="scratch_page_full_host_body">The scratch pad\'s current page holds as much ink as it can, so nothing was sent. Send to a new page instead.</string>
+    <string name="scratch_truncated_title">Not everything came back</string>
+    <string name="scratch_paste_failed_body">The ink from the scratch pad could not be written to this page. Nothing was changed — it is still on the pad.</string>
+    <string name="scratch_truncated_body">The scratch pad had more ink than one transfer can carry. The first %1$d strokes were pasted; the rest are still on the pad.</string>
 </resources>

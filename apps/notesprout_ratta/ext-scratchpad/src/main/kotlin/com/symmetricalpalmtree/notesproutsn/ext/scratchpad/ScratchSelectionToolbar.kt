@@ -13,9 +13,10 @@ import com.symmetricalpalmtree.gpaper.core.model.Bounds
 import com.symmetricalpalmtree.notesproutsn.notebook.SelectionAnchor
 
 /**
- * The pad's floating selection bar (arc 11 / J4): **Delete alone** — the pad has no headings, no
- * links, no clipboard and no snap, so the notebook's seven buttons come down to the one that
- * always applied. (Send joins it in J5, when there is a notebook to send to.)
+ * The pad's floating selection bar (arc 11 / J4, grown in J5): **Delete**, and **Send** when the pad
+ * was opened from a notebook — the pad has no headings, no links, no clipboard and no snap, so the
+ * notebook's seven buttons come down to the one that always applied plus the one that pays for the
+ * hop. Send is absent, never disabled, when there is no notebook behind us.
  *
  * Geometry is `:sn-screen`'s [SelectionAnchor], in the root's coordinates: [Bounds] arrive in paper
  * coordinates, are grown by [SELECTION_BOX_INFLATE_PX] so the gap is measured from the box g-paper
@@ -34,6 +35,10 @@ class ScratchSelectionToolbar(
     private val band: () -> IntRange?,
     private val releaseRender: () -> Unit,
     private val onDelete: () -> Unit,
+    /** Send the selected strokes to the notebook (J5). Never called when [sendEnabled] is false. */
+    private val onSend: () -> Unit = {},
+    /** Whether a notebook is behind us — false from the library, and then Send is never built. */
+    sendEnabled: Boolean = false,
 ) {
 
     private val density = root.resources.displayMetrics.density
@@ -42,27 +47,38 @@ class ScratchSelectionToolbar(
 
     init {
         val ctx = bar.context
+        // Delete keeps the leftmost slot it has always had; Send goes after it, in the pad's only
+        // other order-bearing decision.
+        bar.addView(button(R.drawable.ic_trash, ctx.getString(R.string.delete_selection_action)) {
+            // Release before the row runs: the tap has to show its result, and the delete repaints
+            // the page underneath.
+            releaseRender()
+            onDelete()
+        })
+        if (sendEnabled) {
+            bar.addView(button(R.drawable.ic_pencil_down, ctx.getString(R.string.cd_scratch_send_selection)) {
+                releaseRender()
+                onSend()
+            })
+        }
+    }
+
+    /** One toolbar button, to the one recipe: dimen-driven size, no ripple, tooltip == description. */
+    private fun button(iconRes: Int, hint: String, onClick: () -> Unit): AppCompatImageButton {
+        val ctx = bar.context
         val size = ctx.resources.getDimensionPixelSize(R.dimen.toolbar_button_size)
         val pad = ctx.resources.getDimensionPixelSize(R.dimen.toolbar_button_padding)
-        val hint = ctx.getString(R.string.delete_selection_action)
-        bar.addView(
-            AppCompatImageButton(ctx).apply {
-                setImageResource(R.drawable.ic_trash)
-                scaleType = ImageView.ScaleType.FIT_CENTER
-                setPadding(pad, pad, pad, pad)
-                setBackgroundResource(R.drawable.bg_toolbar_button)
-                stateListAnimator = null
-                contentDescription = hint
-                TooltipCompat.setTooltipText(this, hint)
-                layoutParams = LinearLayout.LayoutParams(size, size)
-                setOnClickListener {
-                    // Release before the row runs: the tap has to show its result, and the delete
-                    // repaints the page underneath.
-                    releaseRender()
-                    onDelete()
-                }
-            }
-        )
+        return AppCompatImageButton(ctx).apply {
+            setImageResource(iconRes)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding(pad, pad, pad, pad)
+            setBackgroundResource(R.drawable.bg_toolbar_button)
+            stateListAnimator = null
+            contentDescription = hint
+            TooltipCompat.setTooltipText(this, hint)
+            layoutParams = LinearLayout.LayoutParams(size, size)
+            setOnClickListener { onClick() }
+        }
     }
 
     fun show(bounds: Bounds) {

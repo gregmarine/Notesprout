@@ -116,6 +116,33 @@ class TransferCapsTest {
         assertEquals(ExtensionContract.TRANSFER_MAX_CHUNKS, d.strokes.size)
     }
 
+    /**
+     * The arc's locked rule, end to end (J5): the pad page and the notebook page are both this
+     * device's screen, so a stroke crosses **1:1** — no translation to an origin, no inset, no
+     * rescale. A cross-size page clips the ink like any other, which is a page-load concern and not
+     * this mapping's business.
+     */
+    @Test
+    fun aRoundTripKeepsCoordinatesOneToOne() {
+        val original = paperStroke("keep-me", 5)
+        // Out through the host's reduction, back through the drain's sanitize + mint.
+        val d = TransferCaps.Drain()
+        assertTrue(d.add(TransferCaps.toWireStrokes(listOf(original))))
+        val back = TransferCaps.toStrokes(d.strokes).single()
+
+        assertEquals(original.points.size, back.points.size)
+        for (i in original.points.indices) {
+            assertEquals(original.points[i].x, back.points[i].x, 0f)
+            assertEquals(original.points[i].y, back.points[i].y, 0f)
+            assertEquals(original.points[i].pressure, back.points[i].pressure, 0f)
+            assertEquals(original.points[i].tilt, back.points[i].tilt, 0f)
+        }
+        assertEquals(original.width, back.width, 0f)
+        assertEquals(original.style, back.style)
+        // Everything except the id, which is minted here and never taken from the wire.
+        assertNotEquals(original.id, back.id)
+    }
+
     @Test
     fun chunkDelegatesToTheContractRule() {
         val strokes = List(ExtensionContract.TRANSFER_CHUNK_STROKES + 1) { wire(1) }

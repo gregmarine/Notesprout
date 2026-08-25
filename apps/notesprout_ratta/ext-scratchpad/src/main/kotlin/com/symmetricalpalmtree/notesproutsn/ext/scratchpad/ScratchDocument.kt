@@ -30,6 +30,10 @@ import kotlinx.coroutines.withContext
  * cross `STORE_MAX_VALUE_BYTES` is refused whole ([Add.PAGE_FULL]); a move **re-measures** every
  * stroke it touched.
  *
+ * **A received placement (J5) never lands here.** `ScratchStore.receive` writes it on the Binder
+ * thread before the screen exists; the document simply [load]s what is already in the store. What
+ * the screen does record is one undo entry, and the two arms it replays through are here.
+ *
  * **An unreadable page is a failure, not a blank page.** A page blob that will not decode marks the
  * page [isUnreadable]: it is shown empty, it accepts no ink, and it is never written — a blank save
  * over it would destroy what could not be read.
@@ -157,6 +161,29 @@ class ScratchDocument(
         return Add.OK
     }
 
+    /**
+     * Take a whole set at once — a received placement's redo (J5). **All or nothing**: the full rule
+     * is measured against the sum, because half a placement back on the page is a worse answer than
+     * none of it. Ids are the caller's (they were minted when the ink arrived and never change).
+     */
+    fun addStrokes(strokes: List<Stroke>): Add {
+        if (isUnreadable) return Add.UNREADABLE
+        if (strokes.isEmpty()) return Add.OK
+        val bytes = strokes.sumOf { ScratchPageCodec.strokeBytes(it) }
+        if (encodedBytes + bytes > ExtensionContract.STORE_MAX_VALUE_BYTES) {
+            Slog.d(TAG) { "page full: $encodedBytes + $bytes > ${ExtensionContract.STORE_MAX_VALUE_BYTES}" }
+            return Add.PAGE_FULL
+        }
+        for (s in strokes) {
+            val n = ScratchPageCodec.strokeBytes(s)
+            page[s.id] = s
+            sizes[s.id] = n
+            encodedBytes += n
+        }
+        dirty = true
+        return Add.OK
+    }
+
     /** Drop [ids]; returns the undo action, or null when nothing of ours was in the set. */
     fun erase(ids: Collection<String>): ScratchAction.Erased? {
         if (ids.isEmpty()) return null
@@ -206,6 +233,12 @@ class ScratchDocument(
         }
     }
 
+    /**
+     * The current page exactly as [flushUntilClean] would write it (J5) — what a received new page's
+     * redo has to put back. Read after a load, so the answer is the ink that arrived, byte for byte.
+     */
+    fun encodeCurrentPage(): ByteArray = ScratchPageCodec.encode(pageWidth, pageHeight, page.values.toList())
+
     /** The page's size once the surface has been laid out — a page stored as `0 × 0` takes it. */
     fun adoptSurfaceSize() {
         if (pageWidth > 0f && pageHeight > 0f) return
@@ -239,6 +272,13 @@ class ScratchDocument(
                 if (translate(a.ids, -a.dx, -a.dy).isNotEmpty()) dirty = true
                 flushUntilClean()
             }
+            is ScratchAction.Pasted -> {
+                if (!goToLiving(a.pageId)) return
+                var removed = false
+                for (s in a.strokes) if (removeStroke(s.id)) removed = true
+                if (removed) dirty = true
+                flushUntilClean()
+            }
             is ScratchAction.Page -> replayPages(a.before, a.beforeCurrent, a.pageId, a.blob)
         }
     }
@@ -260,9 +300,14 @@ class ScratchDocument(
                 if (translate(a.ids, a.dx, a.dy).isNotEmpty()) dirty = true
                 flushUntilClean()
             }
-            // Redo always drops the blob: a re-inserted page is blank, and a re-deleted one has no
-            // ink to keep. The `before`/`after` pair is what tells the two apart in the id list.
-            is ScratchAction.Page -> replayPages(a.after, a.afterCurrent, a.pageId, blob = null)
+            is ScratchAction.Pasted -> {
+                if (!goToLiving(a.pageId)) return
+                if (addStrokes(a.strokes) == Add.OK) flushUntilClean()
+            }
+            // Redo writes the page's ink **in the `after` state**: null for an insert (it lands
+            // blank) and for a delete (there is nothing to keep), and the arrived ink for a received
+            // new page. The `before`/`after` id lists are what tell the three apart.
+            is ScratchAction.Page -> replayPages(a.after, a.afterCurrent, a.pageId, a.afterBlob)
         }
     }
 

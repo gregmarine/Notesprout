@@ -41,9 +41,12 @@ import com.symmetricalpalmtree.notesproutsn.data.prefs.SnapPrefs
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityNotebookBinding
 import com.symmetricalpalmtree.notesproutsn.core.markdown.HeadingPrefix
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionCallException
+import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionRegistry
 import com.symmetricalpalmtree.notesproutsn.extension.RecognizerClient
+import com.symmetricalpalmtree.notesproutsn.extension.ScratchPadClient
 import com.symmetricalpalmtree.notesproutsn.extension.ScratchPadEntry
+import com.symmetricalpalmtree.notesproutsn.extension.TransferCaps
 import com.symmetricalpalmtree.notesproutsn.notebook.NotebookUndo.Action
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -120,6 +123,13 @@ class NotebookActivity : AppCompatActivity() {
      * is that flag.
      */
     private var currentSelection: Selection? = null
+
+    /**
+     * The tool that was armed before ink came back from the scratch pad selected it (arc 11 / J5).
+     * Put back **pen-idle** when that selection is dismissed, and only if the lasso is still armed —
+     * a tool the user picked meanwhile wins. Null the rest of the time.
+     */
+    private var toolBeforePadPaste: Tool? = null
 
     /**
      * The selection a just-created object (a converted heading, a wrapped link) wants as the
@@ -273,6 +283,10 @@ class NotebookActivity : AppCompatActivity() {
             onCopy = { cut -> doObjectCopy(cut) },
             isSnapOn = { paper.snapToGuides },
             onToggleSnap = { toggleSnap() },
+            onScratchPad = { sendSelectionToPad() },
+            // Read at every show, not captured once: the extension can be disabled under us, and
+            // `ScratchPadEntry` re-runs discovery on every resume and after a failed open.
+            isScratchPadAvailable = { ::scratchPad.isInitialized && scratchPad.isAvailable },
         )
         binding.notebookName.text = name
         binding.pageIndicator.text = ""
@@ -323,7 +337,11 @@ class NotebookActivity : AppCompatActivity() {
         scratchPad = ScratchPadEntry(
             activity = this,
             button = binding.btnScratchPad,
+            // The notebook is the one caller that can be sent to, so the pad shows its Send buttons.
+            sendEnabled = true,
             beforeLaunch = { paper.releaseForHandoff() },
+            onSent = { onPadSent() },
+            onDrained = { drained -> pasteFromPad(drained) },
         )
         binding.btnScratchPad.setOnClickListener { if (opened && !closing) scratchPad.open() }
         TooltipCompat.setTooltipText(binding.btnScratchPad, binding.btnScratchPad.contentDescription)
@@ -629,6 +647,7 @@ class NotebookActivity : AppCompatActivity() {
                 pendingSelection = null
                 select()
             }
+            restoreToolAfterPadPaste()
         }
         override fun onToolChanged(tool: Tool) { toolbar.sync(tool) }
     }
@@ -1510,6 +1529,154 @@ class NotebookActivity : AppCompatActivity() {
         toolbar.showClipboardLoaded(false)
         runCatching { withContext(Dispatchers.IO) { clipStore.clear(System.currentTimeMillis()) } }
             .onFailure { Log.w(TAG, "clipboard clear failed", it) }
+    }
+
+    // ── Scratch Pad transfers (arc 11 / J5) ──────────────────────────────────
+
+    /**
+     * The selection toolbar's **Pad**: ask where the ink should land on the pad, then hand it over
+     * and open the pad on it.
+     *
+     * **A copy, not a move** — the notebook keeps its ink and records nothing on its undo stack.
+     * There is nothing to undo: nothing on this page changed.
+     *
+     * The order carries three rules:
+     *  - **Ink only.** The bar's button is already gone on anything else, but the selection can
+     *    change kind between the show and the tap, and `WireStroke` is the whole of what the
+     *    contract carries — a heading or a link in the set has no honest wire form.
+     *  - **The strokes come from [liveStrokes] filtered by the id set**, which preserves **writing
+     *    order** (a LinkedHashMap filled by load then by commit) — never iterate the Set itself.
+     *  - **The caps are checked before any bind.** A refusal must cost nothing: no store open, no
+     *    bind, no screen.
+     *
+     * The placement sheet rises from a selection-toolbar tap — the O1 pattern, the same act as the
+     * lasso popup's own sheet — so it needs no new frame-silence exception.
+     */
+    private fun sendSelectionToPad() {
+        if (!opened || closing || !::scratchPad.isInitialized) return
+        val sel = currentSelection ?: return
+        if (sel.contentIds.isNotEmpty() || sel.strokeIds.isEmpty()) return
+        val ids = sel.strokeIds
+        val strokes = liveStrokes.values.filter { it.id in ids }
+        if (strokes.isEmpty()) return
+        if (!TransferCaps.withinLimits(strokes.size, TransferCaps.pointCount(strokes))) {
+            Dialogs.problem(this, R.string.scratch_too_large_title, R.string.scratch_too_large_body)
+            return
+        }
+        val page = session.currentPage
+        ActionSheetDialog(this)
+            .title(getString(R.string.scratch_placement_title))
+            .addAction(R.drawable.ic_plus, getString(R.string.scratch_placement_new_page)) {
+                openPadWith(strokes, page, ExtensionContract.PLACEMENT_NEW_PAGE)
+            }
+            .addAction(R.drawable.ic_pencil_down, getString(R.string.scratch_placement_current_page)) {
+                openPadWith(strokes, page, ExtensionContract.PLACEMENT_CURRENT_PAGE)
+            }
+            .show()
+    }
+
+    /** Hand the ink to the entry, which opens the store, holds the bind, sends and launches — and
+     *  which tells us [onPadSent] only once the ink is actually across. */
+    private fun openPadWith(strokes: List<Stroke>, page: PageRef, placement: Int) {
+        if (!opened || closing) return
+        scratchPad.open(
+            ScratchPadEntry.Send(strokes, page.width.toFloat(), page.height.toFloat(), placement)
+        )
+    }
+
+    /** The ink is on the pad. The selection it came from goes (it has been acted on) and the toast
+     *  confirms something that has already happened — the standing toast rule, kept honest by
+     *  firing here rather than at the tap, where the send could still have failed. */
+    private fun onPadSent() {
+        if (isFinishing || isDestroyed) return
+        paper.clearSelection()
+        toast(getString(R.string.scratch_sent_toast))
+    }
+
+    /**
+     * Ink coming back from the pad ([ScratchPadEntry.onDrained]) — the strokes are already
+     * sanitized and capped by [TransferCaps.Drain], and their **ids are minted here**: nothing from
+     * the wire is trusted beyond its geometry.
+     *
+     * It lands on the page that is displayed **when the write runs**, appended after that page's
+     * current max `"order"` with relative order preserved (writing order is load-bearing — the
+     * arc-8 rebase rule), as **one** undoable step. Coordinates are kept **1:1**: the pad page and
+     * the notebook page are both this device's screen, and a cross-size page clips the ink like any
+     * other.
+     *
+     * It lands **selected with the lasso armed**, so the pen can drag it into place at once — a
+     * selection under the pen can neither be dragged nor dismissed, so the tool is switched
+     * **before** `setSelection`, and the tool the user had comes back pen-idle when that selection
+     * is dismissed. That frame is the selection toolbar's own recorded exception, at a boundary
+     * (nothing is being written — the user has just come back from another screen).
+     */
+    private fun pasteFromPad(drained: ScratchPadClient.Drained) {
+        if (!opened || closing) return
+        runPageOp {
+            val pageId = displayedPageId
+            session.store.drain()
+            val strokes = TransferCaps.toStrokes(drained.strokes)
+            if (strokes.isEmpty()) return@runPageOp
+            val written = runCatching { session.pasteStrokes(pageId, strokes) }
+                .onFailure { Log.w(TAG, "scratch paste failed", it) }
+            if (written.isFailure) {
+                Dialogs.problem(this, R.string.clip_failed_title, R.string.scratch_paste_failed_body)
+                return@runPageOp
+            }
+            // The user may have flipped away while the write was in flight; the rows are correct
+            // either way, and the next load will show them.
+            if (pageId != displayedPageId) return@runPageOp
+
+            strokes.forEach { liveStrokes[it.id] = it }
+            paper.addStrokes(strokes)
+            paper.notifyContentChanged()
+            // A scratch paste IS a strokes-only object paste: same rows created, same direction,
+            // same replay — so it takes arc-8's entry rather than a fifteenth kind (J5 Q1).
+            undo.record(Action.ObjectsPasted(pageId, strokes.map { it.id }, emptyList(), emptyList()))
+
+            var box = strokes.first().bounds
+            for (i in 1 until strokes.size) box = box.union(strokes[i].bounds)
+            // The write lands AFTER the tool change, never before it (the O2 lesson): arming the
+            // lasso dismisses whatever selection was still up, and that dismissal runs
+            // `restoreToolAfterPadPaste` — which would consume this very field and put the pen back
+            // under the selection we are about to make.
+            val priorTool = paper.tool
+            if (priorTool != Tool.LASSO) {
+                armLasso()
+                toolBeforePadPaste = priorTool
+            }
+            val strokeIds = strokes.mapTo(HashSet()) { it.id }
+            val selection = Selection(strokeIds, emptySet(), box)
+            paper.setSelection(strokeIds, emptySet(), box)
+            selectionActive = true
+            currentSelection = selection
+            showSelectionToolbar(selection)
+
+            // A cut drain is a problem the user has to know about — the rest of their ink is still
+            // on the pad. Otherwise the ordinary paste toast, in arc-8's words (J5 Q2).
+            if (drained.truncated) {
+                Dialogs.problem(
+                    this, getString(R.string.scratch_truncated_title),
+                    getString(R.string.scratch_truncated_body, strokes.size),
+                )
+            } else {
+                toast(getString(R.string.objects_pasted_toast))
+            }
+            Slog.d(TAG) { "pasted ${strokes.size} strokes from the scratch pad onto $pageId" }
+        }
+    }
+
+    /** Put back the tool a pad paste took away — only while the lasso is still armed (a tool the
+     *  user picked meanwhile wins), and pen-idle, because it is a chrome frame like any other. */
+    private fun restoreToolAfterPadPaste() {
+        val prior = toolBeforePadPaste ?: return
+        toolBeforePadPaste = null
+        if (paper.tool != Tool.LASSO) return
+        whenPenIdle {
+            if (isFinishing || isDestroyed || paper.tool != Tool.LASSO) return@whenPenIdle
+            paper.tool = prior
+            toolbar.sync(prior)
+        }
     }
 
     /**
