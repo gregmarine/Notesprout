@@ -2478,7 +2478,7 @@ Two notes for J3+:
   but leaks nothing.
 
 ### J3 — Held bind + client + extension skeleton
-**Status:** ✅ Complete (commit PENDING, Nomad-verified + user-verified 2026-08-24)
+**Status:** ✅ Complete (commit c7c83b5, Nomad-verified + user-verified 2026-08-24)
 
 Host: `ExtensionBinder.hold` + `HeldBinding<I>` — the bind half of `call` without the unbind (same
 timeout and exception mapping, `isDead` after `onBindingDied`/`onServiceDisconnected`, idempotent
