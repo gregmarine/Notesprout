@@ -2601,7 +2601,7 @@ white screen with a Back arrow flush at the top-left and the title "Scratch Pad"
 to the library. 3. Nothing else in the library or the notebook looks different.
 
 ### J4 — The pad screen + both entry buttons
-**Status:** ✅ Complete (Nomad-verified + user-verified 2026-08-24)
+**Status:** ✅ Complete (commit 1187f29, Nomad-verified + user-verified 2026-08-24)
 
 The extension's screen, the notebook's shape from `:sn-screen`: `ScratchPadActivity` (caller check
 first thing in `onCreate`, before anything is inflated; full-bleed `GPaper.create` in the
