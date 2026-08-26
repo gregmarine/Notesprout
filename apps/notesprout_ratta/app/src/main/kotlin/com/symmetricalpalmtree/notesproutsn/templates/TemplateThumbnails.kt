@@ -10,6 +10,7 @@ import android.util.Log
 import android.util.LruCache
 import com.symmetricalpalmtree.notesproutsn.core.Bitmaps
 import com.symmetricalpalmtree.notesproutsn.data.template.BuiltInTemplates
+import com.symmetricalpalmtree.notesproutsn.data.template.TemplateFit
 import com.symmetricalpalmtree.notesproutsn.notebook.PreviewMath
 
 /**
@@ -78,10 +79,12 @@ object TemplateThumbnails {
         }
         val bmp = kind?.let { BuiltInTemplates.miniature(it, w, h, scale, dpi) } ?: blankPage(w, h) ?: return null
 
-        // Imported pixels: fit-centred on the white page. The other two fit modes arrive with the
-        // import flow that can produce them (G4); until then a static row is either a saved
-        // built-in (handled above) or nothing at all.
-        if (kind == null && image != null) drawFitted(bmp, image)
+        // Imported pixels, laid on with the row's own fit mode ([TemplateFit]) — the same
+        // arithmetic the page will get. A card that showed a picture fitted while the page
+        // stretched it would be the one thing a true miniature must never do.
+        if (kind == null && image != null) {
+            drawFitted(bmp, image, (card as? TemplateCard.Static)?.fit ?: TemplateFit.FIT)
+        }
 
         // The page's own edge, drawn ON the bitmap — a border on the ImageView is overpainted by
         // the fit-centred paper wherever the two disagree (the page-card lesson). Inset half a
@@ -97,21 +100,24 @@ object TemplateThumbnails {
         null
     }
 
-    /** Decode [image] bounded (untrusted bytes out of a database) and fit it centred into [page]. */
-    private fun drawFitted(page: Bitmap, image: ByteArray) {
+    /** Decode [image] bounded (untrusted bytes out of a database) and lay it onto [page] under
+     *  [fit] — one blit, the same plan the page-sized render uses. */
+    private fun drawFitted(page: Bitmap, image: ByteArray, fit: Int) {
         val src = Bitmaps.decodeBounded(image, DECODE_EDGE) ?: return
-        val scale = minOf(page.width.toFloat() / src.width, page.height.toFloat() / src.height)
-        val w = src.width * scale
-        val h = src.height * scale
-        val left = (page.width - w) / 2f
-        val top = (page.height - h) / 2f
-        Canvas(page).drawBitmap(
-            src,
-            Rect(0, 0, src.width, src.height),
-            RectF(left, top, left + w, top + h),
-            Paint(Paint.FILTER_BITMAP_FLAG),
-        )
-        src.recycle()
+        try {
+            val plan = TemplateFit.plan(fit, src.width, src.height, page.width, page.height) ?: return
+            Canvas(page).drawBitmap(
+                src,
+                Rect(
+                    plan.src.left.toInt(), plan.src.top.toInt(),
+                    plan.src.right.toInt(), plan.src.bottom.toInt(),
+                ),
+                RectF(plan.dst.left, plan.dst.top, plan.dst.right, plan.dst.bottom),
+                Paint(Paint.FILTER_BITMAP_FLAG),
+            )
+        } finally {
+            src.recycle()
+        }
     }
 
     private val border = Paint().apply {

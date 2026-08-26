@@ -9,13 +9,32 @@
     android:background="@drawable/bg_selectable_card"
     android:padding="4dp">
 
-    <ImageView
-        android:id="@+id/templatePreview"
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
-        android:scaleType="fitCenter"
-        android:contentDescription="@null" />
+        android:layout_weight="1">
+
+        <ImageView
+            android:id="@+id/templatePreview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="fitCenter"
+            android:contentDescription="@null" />
+
+        <!-- The paper this page (or this new notebook) is already using. Over the miniature rather
+             than beside the name: the tick has to sit on the thing it is about, and on paperWhite
+             so it reads against a dense grid. -->
+        <ImageView
+            android:id="@+id/templateTick"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|start"
+            android:src="@drawable/ic_check"
+            android:background="@color/paperWhite"
+            android:padding="2dp"
+            android:visibility="gone"
+            android:contentDescription="@string/cd_template_current" />
+    </FrameLayout>
 
     <TextView
         android:id="@+id/templateName"

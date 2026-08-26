@@ -1,5 +1,6 @@
 package com.symmetricalpalmtree.notesproutsn.notebook
 
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.graphics.Rect
@@ -10,6 +11,7 @@ import android.view.View
 import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.TooltipCompat
@@ -48,7 +50,9 @@ import com.symmetricalpalmtree.notesproutsn.extension.ScratchPadClient
 import com.symmetricalpalmtree.notesproutsn.extension.ScratchPadEntry
 import com.symmetricalpalmtree.notesproutsn.extension.TransferCaps
 import com.symmetricalpalmtree.notesproutsn.notebook.NotebookUndo.Action
-import com.symmetricalpalmtree.notesproutsn.data.template.TemplateKind
+import com.symmetricalpalmtree.notesproutsn.templates.TemplatePick
+import com.symmetricalpalmtree.notesproutsn.templates.TemplatePicks
+import com.symmetricalpalmtree.notesproutsn.templates.TemplatesActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -96,6 +100,25 @@ class NotebookActivity : AppCompatActivity() {
 
     /** The global clipboard's one index row (arc 7) — the payload, read and written only here. */
     private val clipStore by lazy { ClipStore() }
+
+    /**
+     * The page-paper picker (arc 13 / G3) — the template library, opened full-screen from the page
+     * sheet's **Page template** row and answering with a [TemplatePick].
+     *
+     * **No `releaseForHandoff`.** It is chrome, not a paper surface: nothing over there draws ink,
+     * so the EPD pipeline stays here and the notebook's session, undo stack and unsaved page are
+     * untouched while it is up. A cancel (or a result this build cannot read) changes nothing —
+     * decoding to null is deliberately the same answer as backing out, so a picker that came back
+     * garbled can never wipe the paper the page already had.
+     */
+    private val templatePickLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode != Activity.RESULT_OK) return@registerForActivityResult
+        val pick = TemplatePick.decode(result.data?.getStringExtra(TemplatesActivity.EXTRA_PICK))
+            ?: return@registerForActivityResult
+        if (opened && !closing) runPageOp { doChangeTemplate(pick) }
+    }
 
     private var notebookId: String = ""
     private var opened = false
@@ -1729,48 +1752,54 @@ class NotebookActivity : AppCompatActivity() {
         if (SnClipboard.hasPage) {
             sheet.addAction(R.drawable.ic_clipboard, getString(R.string.paste_page_action)) { showPasteSheet() }
         }
-        sheet.addAction(R.drawable.ic_template, getString(R.string.page_template_action)) { showTemplateSheet() }
+        sheet.addAction(R.drawable.ic_template, getString(R.string.page_template_action)) { openTemplatePicker() }
         sheet.addAction(R.drawable.ic_trash, getString(R.string.delete_page_action)) { confirmDeletePage() }
         sheet.show()
     }
 
     /**
-     * The page's paper (arc 12). Opened from a row of the page sheet, so the pen is demonstrably
-     * idle — this rides the long-press sheet's frame-silence exception, it is not a new one.
+     * The page's paper (arc 12; the whole template library since arc 13 / G3). Opened from a row of
+     * the page sheet, so the pen is demonstrably idle — this rides the long-press sheet's
+     * frame-silence exception, it is not a new one, and launching a screen adds no frame here at all.
      *
-     * The current kind is read first so the sheet can tick it, which makes this the one sheet in
-     * the app that opens asynchronously: the read is blob-free (digests only) and the sheet the
-     * user just tapped is already gone, so there is no window where two surfaces are up. A read
-     * that **fails** still shows the sheet, unticked — the four choices are all still valid, and
-     * an unknown kind already draws no tick, so a failure costs nothing the user must act on.
+     * The page's current token is read first so the picker can tick the card in force, which makes
+     * this the one page-sheet row that acts asynchronously: the read is blob-free (digests only)
+     * and the sheet the user just tapped is already gone, so there is no window where two surfaces
+     * are up.
+     *
+     * Scope is unchanged and stays **this page only** — the same scope Copy, Cut and Delete have.
      */
-    private fun showTemplateSheet() {
+    private fun openTemplatePicker() {
         if (!opened || closing) return
         lifecycleScope.launch {
-            val current = runCatching { session.currentTemplateKind() }
-                .onFailure { Log.w(TAG, "template kind read failed", it) }
+            val current = runCatching { session.currentTemplateToken() }
+                .onFailure { Log.w(TAG, "template token read failed", it) }
                 .getOrNull()
             if (isFinishing || isDestroyed || !opened || closing) return@launch
-            fun tick(kind: TemplateKind) = if (kind == current) R.drawable.ic_check else null
-            fun label(kind: TemplateKind) = getString(when (kind) {
-                TemplateKind.BLANK -> R.string.template_blank
-                TemplateKind.LINED -> R.string.template_lined
-                TemplateKind.DOTTED -> R.string.template_dotted
-                TemplateKind.GRID -> R.string.template_grid
-            })
-            val sheet = ActionSheetDialog(this@NotebookActivity)
-                .title(getString(R.string.page_template_action))
-            TemplateKind.entries.forEach { kind ->
-                sheet.addAction(tick(kind), label(kind)) { runPageOp { doChangeTemplate(kind) } }
-            }
-            sheet.show()
+            // A read that FAILS still opens the picker, with nothing ticked — every card is still a
+            // valid choice, and an unknown token already ticks nothing, so a failure costs the user
+            // nothing they must act on.
+            templatePickLauncher.launch(TemplatesActivity.pickIntent(this@NotebookActivity, current))
         }
     }
 
-    /** Re-paper the current page, record it, and put the result on the glass — the page swap is
-     *  what decodes the new template, so this is a single EPD refresh like every other flip. */
-    private suspend fun doChangeTemplate(kind: TemplateKind) {
-        val change = session.changeTemplate(kind, resources.displayMetrics.densityDpi.toFloat()) ?: return
+    /**
+     * Re-paper the current page from a library pick, record it, and put the result on the glass —
+     * the page swap is what decodes the new template, so this is a single EPD refresh like every
+     * other flip.
+     *
+     * The pick names a card; the pixels are read here ([TemplatePicks.paper]) because the browser
+     * never opens a `.soil` and the notebook never held a library id. A row that has gone since the
+     * tap leaves the page exactly as it was and says so — a template that vanished must never
+     * become blank paper by default.
+     */
+    private suspend fun doChangeTemplate(pick: TemplatePick) {
+        val paper = withContext(Dispatchers.IO) { TemplatePicks.paper(repo, pick) }
+        if (paper == null) {
+            Dialogs.problem(this, R.string.template_gone_title, R.string.template_gone_body)
+            return
+        }
+        val change = session.changeTemplate(paper, resources.displayMetrics.densityDpi.toFloat()) ?: return
         undo.record(Action.TemplateChanged(change.pageId, change.from, change.to))
         refreshToPage(change.pageId)
     }

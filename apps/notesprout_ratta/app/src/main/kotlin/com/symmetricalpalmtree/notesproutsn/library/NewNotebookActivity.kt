@@ -23,8 +23,12 @@ import com.symmetricalpalmtree.notesproutsn.data.soil.SoilObjectEntity
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilSchema
 import com.symmetricalpalmtree.notesproutsn.data.soilFile
 import com.symmetricalpalmtree.notesproutsn.data.template.BuiltInTemplates
-import com.symmetricalpalmtree.notesproutsn.data.template.TemplateKind
+import com.symmetricalpalmtree.notesproutsn.data.template.PagePaper
+import com.symmetricalpalmtree.notesproutsn.data.template.PaperSource
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityNewNotebookBinding
+import com.symmetricalpalmtree.notesproutsn.templates.TemplateBrowser
+import com.symmetricalpalmtree.notesproutsn.templates.TemplatePick
+import com.symmetricalpalmtree.notesproutsn.templates.TemplatePicks
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -36,13 +40,20 @@ import java.util.UUID
 /**
  * Name the notebook, pick its paper, create it.
  *
+ * **The paper is picked from the template library itself** (arc 13 / G3), not from four radios: the
+ * whole [TemplateBrowser] lives under this screen's header, with the same folders, the same
+ * long-press management and the same Default folder as the Templates screen. One browser, three
+ * hosts — a second, smaller way to choose paper would drift from the real one within an arc.
+ *
  * **Creation order matters and is the format contract** (`RATTA_PLAN.md` R2, Paper's `docs/data.md`):
  *
  * 1. mint a UUID — the id is the filename and the notebook row's primary key at once;
  * 2. `SoilDatabase.create` the encrypted file (refuses to write over anything that exists);
  * 3. the **notebook** row (`text` = name, `refId` = the first page, so a reopen knows where to land);
- * 4. the **template** row for Lined/Dotted/Grid — the pattern is baked to a lossless WEBP blob at
- *    page size. **Blank writes no template row at all** and the page's `refId` stays `""`;
+ * 4. the **template** row for whatever paper was picked — drawn from arithmetic for a built-in,
+ *    fitted from the library's stored pixels for an imported one, and baked to a lossless WEBP blob
+ *    at page size either way ([PagePaper]). **Blank writes no template row at all** and the page's
+ *    `refId` stays `""`;
  * 5. **page 1**, sized to the full portrait screen in pixels, order 0;
  * 6. `notebook_meta` — the file's self-description, including the folder path, so it is portable
  *    on its own;
@@ -53,9 +64,15 @@ import java.util.UUID
 class NewNotebookActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityNewNotebookBinding
+    private lateinit var browser: TemplateBrowser
     private val repo by lazy { IndexRepository() }
     private var parentFolderId: String? = null
     private var creating = false
+
+    /** The card the user has chosen. Blank until they say otherwise — the honest default for a
+     *  notebook nobody has told anything about yet, and the one every other paper is measured
+     *  against. */
+    private var pick: TemplatePick = TemplatePick.Blank
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -74,9 +91,10 @@ class NewNotebookActivity : AppCompatActivity() {
         }
         binding = ActivityNewNotebookBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        // followIme: the name field must stay above the on-screen keyboard (the only text entry
-        // in the library, and on Ratta the IME is the only thing that delivers key events).
-        TopGuard.applyInsetPadding(binding.root, followIme = true)
+        // No followIme, and the window is adjustNothing (manifest): this screen has a page on it
+        // now, and resizing for the keyboard would squash the grid it measured itself against. The
+        // name field sits in the top row instead, where the IME can never reach it.
+        TopGuard.applyInsetPadding(binding.root)
 
         parentFolderId = intent.getStringExtra(EXTRA_PARENT_FOLDER_ID)
 
@@ -90,17 +108,26 @@ class NewNotebookActivity : AppCompatActivity() {
         binding.btnBack.setOnClickListener { finish() }
         TooltipCompat.setTooltipText(binding.btnBack, binding.btnBack.contentDescription)
         binding.btnCreate.setOnClickListener { attemptCreate() }
+
+        browser = TemplateBrowser(
+            activity = this,
+            binding = binding.browser,
+            // A tap here chooses; it does not create. The name still has to be right and Create is
+            // still the act — so the card ticks and the screen stays where it is.
+            onPick = { chosen -> pick = chosen; browser.refreshSelection() },
+            selection = { TemplateBrowser.Selection(cardId = pick.cardId) },
+        )
+    }
+
+    /** Back peels one layer: up a folder in the browser, then out of the screen. */
+    @Suppress("OVERRIDE_DEPRECATION")
+    override fun onBackPressed() {
+        if (::browser.isInitialized && browser.onBackPressed()) return
+        @Suppress("DEPRECATION") super.onBackPressed()
     }
 
     /** A timestamp, because the honest default for an unnamed notebook is when it started. */
     private fun defaultName(): String = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.ROOT).format(Date())
-
-    private fun selectedTemplate(): TemplateKind = when (binding.templateGroup.checkedRadioButtonId) {
-        R.id.radioLined -> TemplateKind.LINED
-        R.id.radioDotted -> TemplateKind.DOTTED
-        R.id.radioGrid -> TemplateKind.GRID
-        else -> TemplateKind.BLANK
-    }
 
     private fun attemptCreate() {
         if (creating) return
@@ -109,7 +136,7 @@ class NewNotebookActivity : AppCompatActivity() {
             Dialogs.problem(this, R.string.name_problem_title, NameDialog.problemMessage(this, problem))
             return
         }
-        val kind = selectedTemplate()
+        val chosen = pick
         setCreating(true)
 
         lifecycleScope.launch {
@@ -120,7 +147,20 @@ class NewNotebookActivity : AppCompatActivity() {
                 Dialogs.problem(this@NewNotebookActivity, R.string.name_problem_title, getString(R.string.new_notebook_duplicate, name))
                 return@launch
             }
-            val result = runCatching { withContext(Dispatchers.IO) { createNotebook(name, kind) } }
+            // The pixels are resolved before the file is touched. A template deleted from another
+            // screen while this one was open must stop the create with an explanation, not leave a
+            // notebook on blank paper the user did not ask for.
+            val paper = withContext(Dispatchers.IO) { TemplatePicks.paper(repo, chosen) }
+            if (paper == null) {
+                setCreating(false)
+                Dialogs.problem(
+                    this@NewNotebookActivity,
+                    R.string.template_gone_title,
+                    R.string.template_gone_body,
+                )
+                return@launch
+            }
+            val result = runCatching { withContext(Dispatchers.IO) { createNotebook(name, chosen, paper) } }
             result.onSuccess { id ->
                 setResult(Activity.RESULT_OK, Intent().apply {
                     putExtra(EXTRA_NOTEBOOK_ID, id)
@@ -147,7 +187,7 @@ class NewNotebookActivity : AppCompatActivity() {
     }
 
     /** Everything from step 2 to step 8 of the class note. Runs on IO; throws on failure. */
-    private suspend fun createNotebook(name: String, kind: TemplateKind): String {
+    private suspend fun createNotebook(name: String, pick: TemplatePick, paper: PaperSource): String {
         val notebookId = UUID.randomUUID().toString()
         // The passphrase lives only in process RAM (KeySession) — never an extra, never the index.
         // Absent means this process never went through bootstrap; bounce the way IndexGuard does.
@@ -169,15 +209,16 @@ class NewNotebookActivity : AppCompatActivity() {
                 createdAt = now, updatedAt = now, text = name, refId = pageId,
             ))
 
+            // The bitmap decides, not the pick: paper that will not draw at this page size writes
+            // no row at all rather than one naming pixels it cannot produce (the arc-12 rule).
             var templateId: String? = null
-            if (kind != TemplateKind.BLANK) {
+            val bitmap = PagePaper.render(paper, pageW, pageH, metrics.densityDpi.toFloat())
+            if (bitmap != null) {
                 templateId = UUID.randomUUID().toString()
-                val bitmap = BuiltInTemplates.render(kind, pageW, pageH, metrics.densityDpi.toFloat())
-                val blob = bitmap?.let { BuiltInTemplates.toWebp(it) }
-                bitmap?.recycle()
+                val blob = try { BuiltInTemplates.toWebp(bitmap) } finally { bitmap.recycle() }
                 dao.upsert(SoilObjectEntity(
                     id = templateId, parentId = notebookId, type = SoilSchema.TYPE_TEMPLATE,
-                    createdAt = now, updatedAt = now, text = kind.name,
+                    createdAt = now, updatedAt = now, text = PagePaper.token(paper),
                     width = pageW.toFloat(), height = pageH.toFloat(), blob = blob,
                 ))
             }
@@ -201,7 +242,7 @@ class NewNotebookActivity : AppCompatActivity() {
             throw e
         }
 
-        repo.createNotebook(notebookId, name, parentFolderId, kind.name, pageCount = 1, now = now)
+        repo.createNotebook(notebookId, name, parentFolderId, TemplatePicks.birthKind(pick), pageCount = 1, now = now)
         return notebookId
     }
 

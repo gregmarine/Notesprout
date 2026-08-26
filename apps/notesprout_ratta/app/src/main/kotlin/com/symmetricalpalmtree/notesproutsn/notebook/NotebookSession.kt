@@ -17,7 +17,8 @@ import com.symmetricalpalmtree.notesproutsn.data.soil.SoilDatabase
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilObjectEntity
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilSchema
 import com.symmetricalpalmtree.notesproutsn.data.template.BuiltInTemplates
-import com.symmetricalpalmtree.notesproutsn.data.template.TemplateKind
+import com.symmetricalpalmtree.notesproutsn.data.template.PagePaper
+import com.symmetricalpalmtree.notesproutsn.data.template.PaperSource
 import com.symmetricalpalmtree.notesproutsn.data.soilFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -546,13 +547,14 @@ class NotebookSession(
      * The old row is left exactly where it is. Nothing else may still point at it, but a template
      * is cheap, deleting one is not undoable, and leaving it is what makes the change back free.
      */
-    suspend fun changeTemplate(kind: TemplateKind, dpi: Float): TemplateChange? = withContext(Dispatchers.IO) {
+    suspend fun changeTemplate(paper: PaperSource, dpi: Float): TemplateChange? = withContext(Dispatchers.IO) {
         val page = currentPage
-        val target = if (kind == TemplateKind.BLANK) "" else mintOrReuse(kind, page, dpi)
+        val token = PagePaper.token(paper)
+        val target = if (token.isEmpty()) "" else mintOrReuse(paper, token, page, dpi)
         if (target == page.templateId) return@withContext null
         val change = TemplateChange(page.id, page.templateId, target)
         applyTemplate(page.id, target)
-        Slog.d(TAG) { "page ${page.id} re-papered ${kind.name} (${change.from.ifEmpty { "blank" }} → ${change.to.ifEmpty { "blank" }})" }
+        Slog.d(TAG) { "page ${page.id} re-papered ${token.ifEmpty { "blank" }} (${change.from.ifEmpty { "blank" }} → ${change.to.ifEmpty { "blank" }})" }
         change
     }
 
@@ -577,28 +579,29 @@ class NotebookSession(
         repo.touch(notebookId, now)
     }
 
-    /** The current page's paper as one of the four built-ins, or null when it is not one of ours
-     *  ([PageTemplate.kindOf]). Reads digests, never pixels — this runs at a sheet's tap. */
-    suspend fun currentTemplateKind(): TemplateKind? = withContext(Dispatchers.IO) {
-        PageTemplate.kindOf(db.dao().templateDigests(notebookId), currentPage.templateId)
+    /** The current page's paper as its [TemplateToken], `""` for blank, or null when the row has
+     *  vanished ([PageTemplate.tokenOf]). Reads digests, never pixels — this runs at a sheet's tap,
+     *  and it is what the browser ticks the current card from. */
+    suspend fun currentTemplateToken(): String? = withContext(Dispatchers.IO) {
+        PageTemplate.tokenOf(db.dao().templateDigests(notebookId), currentPage.templateId)
     }
 
     /** The id of a row already holding this paper at this page's size, or a freshly stored one.
      *  A render that comes back null (a page with no size) falls back to blank rather than
      *  writing a template row that names paper it cannot draw. */
-    private suspend fun mintOrReuse(kind: TemplateKind, page: PageRef, dpi: Float): String {
-        PageTemplate.reusableId(db.dao().templateDigests(notebookId), kind, page.width, page.height, prefer = page.templateId)
+    private suspend fun mintOrReuse(paper: PaperSource, token: String, page: PageRef, dpi: Float): String {
+        PageTemplate.reusableId(db.dao().templateDigests(notebookId), token, page.width, page.height, prefer = page.templateId)
             ?.let { Slog.d(TAG) { "re-paper reuses template $it" }; return it }
-        val bitmap = BuiltInTemplates.render(kind, page.width, page.height, dpi) ?: return ""
+        val bitmap = PagePaper.render(paper, page.width, page.height, dpi) ?: return ""
         val blob = try { BuiltInTemplates.toWebp(bitmap) } finally { bitmap.recycle() }
         val id = java.util.UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
         db.dao().upsert(SoilObjectEntity(
             id = id, parentId = notebookId, type = SoilSchema.TYPE_TEMPLATE,
-            createdAt = now, updatedAt = now, text = kind.name,
+            createdAt = now, updatedAt = now, text = token,
             width = page.width.toFloat(), height = page.height.toFloat(), blob = blob,
         ))
-        Slog.d(TAG) { "re-paper minted template $id (${kind.name}, ${blob.size} B)" }
+        Slog.d(TAG) { "re-paper minted template $id ($token, ${blob.size} B)" }
         return id
     }
 

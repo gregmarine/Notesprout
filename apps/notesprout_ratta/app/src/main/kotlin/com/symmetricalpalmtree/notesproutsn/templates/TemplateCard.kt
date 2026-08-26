@@ -2,6 +2,7 @@ package com.symmetricalpalmtree.notesproutsn.templates
 
 import com.symmetricalpalmtree.notesproutsn.data.index.ListIds
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectSummary
+import com.symmetricalpalmtree.notesproutsn.data.template.TemplateFit
 import com.symmetricalpalmtree.notesproutsn.data.template.TemplateKind
 
 /**
@@ -42,6 +43,9 @@ sealed class TemplateCard(val id: String, val name: String) {
             TemplateKind.entries.firstOrNull { it.name == summary.templateKind }
 
         val isImage: Boolean get() = summary.templateKind == TemplateLibrary.KIND_IMAGE
+
+        /** The [TemplateFit] mode the row's `flags` carries, clamped to one this build can draw. */
+        val fit: Int get() = TemplateFit.sanitize(summary.flags)
     }
 
     /** True for the three hardcoded card families that are neither a place nor a row the user owns. */

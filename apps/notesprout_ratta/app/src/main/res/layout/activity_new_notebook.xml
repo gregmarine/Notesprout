@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- New Notebook (arc 13 / G3): a header carrying the name and Create, over the whole template
+     browser. The four radios are gone — paper is a library now, and the screen that picks paper is
+     the same screen everywhere.
+
+     The header is one row at the very top on purpose. This screen has a page on it (a grid of
+     miniatures), so the window never resizes for the keyboard (adjustNothing); the field the IME is
+     up for is above where the IME lands, so it can never be covered. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/root"
     android:layout_width="match_parent"
@@ -19,120 +26,44 @@
             android:src="@drawable/ic_arrow_left"
             android:contentDescription="@string/cd_back" />
 
-        <TextView
+        <EditText
+            android:id="@+id/nameField"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="@string/new_notebook_title"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="12dp"
+            android:inputType="text"
+            android:maxLines="1"
             android:textSize="16sp"
-            android:textStyle="bold"
             android:textColor="@color/inkBlack"
-            android:paddingStart="4dp"
-            android:paddingEnd="12dp" />
-    </LinearLayout>
-
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:background="@color/inkBlack" />
-
-    <ScrollView
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:fillViewport="true">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="24dp">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/new_notebook_name_label"
-                android:textSize="14sp"
-                android:textColor="@color/inkBlack"
-                android:layout_marginBottom="8dp" />
-
-            <EditText
-                android:id="@+id/nameField"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:inputType="text"
-                android:maxLines="1"
-                android:textSize="16sp"
-                android:textColor="@color/inkBlack"
-                android:background="@drawable/shape_bordered"
-                android:padding="12dp"
-                android:importantForAutofill="no"
-                android:hint="@string/new_notebook_name_label"
-                android:layout_marginBottom="24dp" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/new_notebook_template_label"
-                android:textSize="14sp"
-                android:textColor="@color/inkBlack"
-                android:layout_marginBottom="8dp" />
-
-            <RadioGroup
-                android:id="@+id/templateGroup"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical">
-
-                <RadioButton
-                    android:id="@+id/radioBlank"
-                    style="@style/Widget.Notesprout.RadioButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="@string/template_blank"
-                    android:checked="true" />
-
-                <RadioButton
-                    android:id="@+id/radioLined"
-                    style="@style/Widget.Notesprout.RadioButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="@string/template_lined" />
-
-                <RadioButton
-                    android:id="@+id/radioDotted"
-                    style="@style/Widget.Notesprout.RadioButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="@string/template_dotted" />
-
-                <RadioButton
-                    android:id="@+id/radioGrid"
-                    style="@style/Widget.Notesprout.RadioButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="@string/template_grid" />
-            </RadioGroup>
-        </LinearLayout>
-    </ScrollView>
-
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:background="@color/inkBlack" />
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="@dimen/toolbar_bar_thickness"
-        android:orientation="horizontal"
-        android:gravity="center">
+            android:background="@drawable/shape_bordered"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp"
+            android:importantForAutofill="no"
+            android:hint="@string/new_notebook_name_label" />
 
         <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnCreate"
             style="@style/Widget.Notesprout.ElevatedButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
             android:text="@string/new_notebook_create" />
     </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <include
+        android:id="@+id/browser"
+        layout="@layout/view_template_browser"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
 
 </LinearLayout>

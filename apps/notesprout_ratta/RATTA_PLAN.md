@@ -3260,7 +3260,7 @@ three are cheap to lose and expensive to rediscover:
    above where the panel lands.
 
 ### G3 — Picking: New Notebook, and a page's paper
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (commit `PENDING`)
 
 The browser becomes shared. The grid + breadcrumbs + long-press behaviour move into one component
 hosted three ways: `TemplatesActivity` (no pick), `NewNotebookActivity` (name + **Create** header,
@@ -3281,6 +3281,68 @@ check** — undo/redo of a template change (adb cannot inject the multi-finger d
 *Opus — this is the risky seam.*
 
 **Questions to resolve at phase start:** none expected.
+
+**Outcome (2026-08-26):** built and walked on the Nomad; **683 JVM tests** across the five modules
+(was 658 — `:app` alone went 491 → 516), debug + release both build, release signs, crash buffer
+empty, test data restored. Version stays `0.1.0-ratta`; g-paper pin stays 0.1.6. No new dependency,
+no schema change, no migration.
+
+*What landed.* **`TemplateBrowser`** — the grid, breadcrumbs, sort sheet, New folder, both
+long-press sheets and the Move picker, lifted whole out of `TemplatesActivity` and hosted three
+ways over one shared layout (`view_template_browser.xml`, `<include>`d by both screens). Hosts
+supply only the two things that genuinely differ: **what a tap means** (`onPick`) and **what is in
+force** (`selection`). `TemplatesActivity` is now 97 lines with two modes — browse (a tap on paper
+means nothing; it is a library) and **pick**, launched from the notebook with an
+`ActivityResultLauncher`. `NewNotebookActivity` hosts the browser under a one-row header carrying
+the name field and **Create**; the four radios are gone.
+
+*The one structural decision, and it is the arc's hinge:* **paper is identified by a token, not by a
+kind.** `TemplateToken` widens arc 12's `TemplateKind` match into one vocabulary that also says
+`IMG#<8 hex>`, and the built-ins keep exactly `LINED` / `DOTTED` / `GRID` — every file this family
+has written, and Paper on the same device, still read them unchanged. `PageTemplate.reusableId`
+takes a token, `kindOf` became `tokenOf` (a vanished row still answers null, and a token this build
+cannot parse comes back verbatim and simply matches no card — unknown stays unknown, by a shorter
+road). `PaperSource` + `PagePaper` are the one place a pick becomes pixels, so notebook creation and
+re-papering render through the same function.
+
+*Three calls worth knowing.*
+**(1) The image token digests the fit mode as well as the bytes.** The locked wording said "8 hex of
+the image bytes", and that is wrong by exactly one input: fit is what turns stored bytes into page
+pixels, so the same picture Fitted and Stretched are two papers. Digesting the bytes alone would let
+a page that asked for the stretched one be silently re-pointed at the fitted row already in the
+file. The shape is unchanged (`IMG#` + 8 hex); the fit byte goes in first so it can never be read as
+image data. JVM-tested both ways.
+**(2) `TemplateFit` landed here rather than in G4.** The apply path has to render a static template
+*somehow*, and a stub would have been a second thing to replace. It is ~40 lines of pure arithmetic
+for all three modes (Fit moves the destination, Fill moves the source, Stretch moves neither), with
+Fit tested now; G4 adds the choice UI and the other two modes' cases. `TemplateThumbnails` was
+re-pointed at it in the same breath — a card that showed a picture fitted while the page stretched
+it is the one thing a *true miniature* must never do.
+**(3) `NewNotebookActivity` is `adjustNothing` now, not `adjustResize`.** G2's third finding, applied
+before it could bite: this screen has a page on it, and resizing for the keyboard would squash the
+grid it measured itself against. The name field moved into the top row instead, where the IME cannot
+reach it — which is also why the header is one row and not a title plus a field.
+
+*Traps confirmed on the glass.* Reuse-before-mint was verified through the log, not by eye: Dotted →
+Grid → Dotted re-papered twice and logged **`re-paper reuses template <id>`** both times, never a
+mint — so a there-and-back stacks no second megabyte of WEBP. Re-picking the **ticked** card logged
+the reuse and then **no `re-papered` line at all** — `changeTemplate` returned null, so it is a true
+no-op with no undo step, which is what the `prefer` argument exists for. The tick resolves from the
+page's own `.soil` token with the library never having heard of the notebook: Grid ticked inside
+**Default** while the page was Grid, and nothing ticked at the root. Inside Default both Sort and
+New folder are still GONE. The Move picker launches from the browser's own
+`registerForActivityResult`, which is the one lifecycle rule the component imposes on its hosts
+(construct it in `onCreate`).
+
+*Two things deliberately not done.* A pick that will not decode is treated as **a cancel, not
+Blank** — the two are indistinguishable from the caller's side and only one of them is safe. And a
+static row that vanished between the tap and the apply raises a **problem dialog** and leaves the
+page exactly as it was, in both hosts; a template that disappeared must never become blank paper by
+default.
+
+*Left for the user's eye:* undo/redo of a template change (adb cannot inject the multi-finger
+double-tap). Docs (`docs/templates.md`, `docs/library.md`, `docs/notebook.md`) stay in G6 as planned
+— `docs/notebook.md` still describes arc 12's four-row sub-sheet, which is now a full-screen browser.
 
 ### G4 — Import and export
 **Status:** ⬜ Not started

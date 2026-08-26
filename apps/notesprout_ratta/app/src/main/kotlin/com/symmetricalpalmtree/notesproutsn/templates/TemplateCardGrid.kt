@@ -57,8 +57,16 @@ class TemplateCardGrid(
      * Draw the [pageIndex] slice of [items]. [art] supplies a card's miniature by id; a missing
      * entry just means "not rendered", and the card shows an empty band rather than a wrong one.
      * Folders take the library's own folder card — a place looks like a place everywhere.
+     *
+     * [ticked] are the card ids showing the paper in force (arc 13 / G3). A **set**, not one id: two
+     * library rows can hold the same picture, and both are honestly the paper the page is using.
      */
-    fun bind(items: List<TemplateCard>, pageIndex: Int, art: Map<String, Bitmap?>) {
+    fun bind(
+        items: List<TemplateCard>,
+        pageIndex: Int,
+        art: Map<String, Bitmap?>,
+        ticked: Set<String> = emptySet(),
+    ) {
         currentGrid?.let { container.removeView(it) }
         currentGrid = null
         val range = GridMath.pageRange(pageIndex, cardsPerPage, items.size)
@@ -78,7 +86,8 @@ class TemplateCardGrid(
         for (i in range) {
             val item = items[i]
             val isFolder = item is TemplateCard.Folder || item is TemplateCard.Defaults
-            val view = if (isFolder) folderCard(inflater, item) else templateCard(inflater, item, art[item.id])
+            val view = if (isFolder) folderCard(inflater, item)
+                       else templateCard(inflater, item, art[item.id], item.id in ticked)
             view.layoutParams = GridLayout.LayoutParams().apply {
                 width = cardWidth
                 height = cardHeight
@@ -97,9 +106,14 @@ class TemplateCardGrid(
             findViewById<TextView>(R.id.folderName).text = item.name
         }
 
-    private fun templateCard(inflater: LayoutInflater, item: TemplateCard, art: Bitmap?): View =
-        inflater.inflate(R.layout.card_template, container, false).apply {
-            findViewById<TextView>(R.id.templateName).text = item.name
-            findViewById<ImageView>(R.id.templatePreview).setImageBitmap(art)
-        }
+    private fun templateCard(
+        inflater: LayoutInflater,
+        item: TemplateCard,
+        art: Bitmap?,
+        ticked: Boolean,
+    ): View = inflater.inflate(R.layout.card_template, container, false).apply {
+        findViewById<TextView>(R.id.templateName).text = item.name
+        findViewById<ImageView>(R.id.templatePreview).setImageBitmap(art)
+        findViewById<ImageView>(R.id.templateTick).visibility = if (ticked) View.VISIBLE else View.GONE
+    }
 }

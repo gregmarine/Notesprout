@@ -275,10 +275,14 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
         return row
     }
 
-    /** A static template's stored image bytes. The one read that costs pixels — never in a listing. */
-    suspend fun templateImage(id: String): ByteArray? = dao.byId(id)?.takeIf {
+    /** An alive static template row, whole — pixels included. The one read that costs bytes; never
+     *  in a listing, and never where a digest would do. */
+    suspend fun templateRow(id: String): ObjectEntity? = dao.byId(id)?.takeIf {
         it.type == ObjectType.TEMPLATE && it.deletedAt == null
-    }?.blob
+    }
+
+    /** A static template's stored image bytes. The one read that costs pixels — never in a listing. */
+    suspend fun templateImage(id: String): ByteArray? = templateRow(id)?.blob
 
     /**
      * Copy an alive static template into its own folder under [newName]. Returns the new row, or

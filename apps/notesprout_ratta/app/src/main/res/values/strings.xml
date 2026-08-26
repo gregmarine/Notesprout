@@ -49,9 +49,7 @@
     <string name="new_folder_duplicate">A folder named \"%1$s\" already exists here.</string>
 
     <!-- New notebook -->
-    <string name="new_notebook_title">New notebook</string>
     <string name="new_notebook_name_label">Name</string>
-    <string name="new_notebook_template_label">Template</string>
     <string name="new_notebook_create">Create</string>
     <string name="new_notebook_creating">Creating…</string>
     <string name="new_notebook_duplicate">A notebook named \"%1$s\" already exists here.</string>
@@ -82,6 +80,9 @@
     <string name="move_collision_template">A template named \"%1$s\" already exists here.</string>
     <string name="cd_templates">Templates</string>
     <string name="cd_close_templates">Close</string>
+    <string name="cd_template_current">Current paper</string>
+    <string name="template_gone_title">Couldn\'t use that template</string>
+    <string name="template_gone_body">That template is no longer in the library. Nothing has been changed.</string>
 
     <!-- Item actions -->
     <string name="action_pin">Pin</string>

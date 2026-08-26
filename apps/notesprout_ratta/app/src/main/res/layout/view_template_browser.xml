@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The template browser (arc 13 / G3) — breadcrumbs, the paginated card grid, and the bar of
+     controls that acts on the folder you are standing in.
+
+     One layout, three hosts: the Templates screen, the New Notebook screen (under its own name +
+     Create header) and the notebook's page-paper picker. What differs between them is the header
+     above and what a tap on a card means — never the browser itself, which is the whole point of
+     pulling it out of TemplatesActivity.
+
+     btnClose is GONE by default: only a host that IS this screen has a way out by tap. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/paperWhite">
+
+    <LinearLayout
+        android:id="@+id/browserTopBar"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/toolbar_bar_thickness"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnUp"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_arrow_left"
+            android:contentDescription="@string/cd_up_folder"
+            android:visibility="gone" />
+
+        <HorizontalScrollView
+            android:id="@+id/breadcrumbScroll"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/breadcrumbContainer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:gravity="center_vertical" />
+        </HorizontalScrollView>
+
+        <!-- The way out by tap. Back does the same once there is no folder left to leave. -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnClose"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_x"
+            android:contentDescription="@string/cd_close_templates"
+            android:visibility="gone" />
+
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <FrameLayout
+        android:id="@+id/gridContainer"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <TextView
+            android:id="@+id/emptyState"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:text="@string/templates_empty"
+            android:textSize="16sp"
+            android:textColor="@color/inkBlack" />
+    </FrameLayout>
+
+    <!-- |< < n/n > >|  [Sort] [+Folder] -->
+    <LinearLayout
+        android:id="@+id/browserBottomBar"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/toolbar_bar_thickness"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@drawable/toolbar_background_bottom">
+
+        <LinearLayout
+            android:id="@+id/pager"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:visibility="invisible">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnFirst"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_page_first"
+                android:contentDescription="@string/cd_first_page" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnPrev"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_page_prev"
+                android:contentDescription="@string/cd_prev_page" />
+
+            <TextView
+                android:id="@+id/pageLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="56dp"
+                android:gravity="center"
+                android:textSize="14sp"
+                android:textColor="@color/inkBlack" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnNext"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_page_next"
+                android:contentDescription="@string/cd_next_page" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnLast"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_page_last"
+                android:contentDescription="@string/cd_last_page" />
+        </LinearLayout>
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnSort"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_sort"
+            android:contentDescription="@string/cd_sort" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnNewFolder"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_folder_plus"
+            android:contentDescription="@string/cd_new_folder" />
+
+    </LinearLayout>
+
+</LinearLayout>
