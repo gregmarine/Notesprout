@@ -3077,6 +3077,183 @@ findings; the arc is frozen at this commit.
 
 ---
 
+## Phases — Arc 13 "Stationery" (planned 2026-08-25, wizard complete)
+
+Templates stop being four radio buttons and become **a library**: folders, previews, adjustable
+generators, import, export. Two things are joined here that the app has always kept apart — og's
+reusable template library (index-owned, foldered, importable) and SN's *generated* paper (rendered
+from arithmetic, never stored twice) — and the join is the whole design: a **generator** is a recipe
+the app draws, a **static template** is pixels the library keeps, and there is no third kind.
+
+The one screen behind every paper decision is shared: **New Notebook**, the **page's paper** row on
+the notebook's long-press sheet, and a new **Templates** button in the library all host the same
+browser, with the same folders, the same long-press behaviour and the same import.
+
+### Locked decisions (arc-13 wizard 2026-08-25 — do not re-ask)
+
+| Decision | Answer |
+|---|---|
+| Two card kinds, no third | **Generator** (Lined / Dotted / Grid, in the reserved **Generated** folder) — long-press opens the **options screen**. **Static template** (imported images, and every variant saved out of a generator) — long-press opens **management** (rename / move / duplicate / export / delete, plus **Fit…** on an imported one). A saved variant is **static, baked**: to change its margins you go back to the generator and save another. |
+| The three generators are **not rows** | They are hardcoded, with sentinel ids in the `ListIds` style, and so is the **Generated** folder card and the **Blank** card. Nothing is seeded at bootstrap, nothing can be deleted or renamed, nothing needs repairing if an index is restored from a backup, and there is no migration. "Generated" is a **reserved name** at the templates root — a user folder cannot take it and no import may land in it. |
+| Options screen exits | **Cancel · Use once · Save as template…**. *Use once* applies the settings to the pending target (the page being re-papered, or the notebook being created) and stores nothing; it is **hidden when there is no pending pick** (opened from the library). *Save as template…* asks for a name and a folder, mints a static card, and applies it too. |
+| Options: margins | **Four independent insets in mm** (top / bottom / left / right) plus three copy buttons — **top → all**, **left → right**, **top → bottom** — and one checkbox, **margin rule**: a vertical rule drawn at the left inset (off by default). The insets are blank space; the pattern stops short of them. |
+| Options: density | A **mode toggle — spacing (mm) or count** — with the other shown live as a read-out ("8.0 mm → 27 lines"). Dotted and Grid carry **two independent axes** (rows/Y and cols/X) with a **⇄ square** link button. Stock spacing stays **8 mm**. |
+| Options: the rest | **Rule thickness**, **dot size**, and **ruling shade** (greyscale, the 16-level ladder e-paper renders). Stock values are today's tuned constants. |
+| Stock output is unchanged | A generator at its defaults must render **exactly what `BuiltInTemplates` renders today** — same first-rule origin, same 8 mm, same thickness, same dot radius. A JVM regression test pins it. Existing notebooks and new ones must agree, and `.soil` reuse across old and new files depends on it. |
+| Library storage | **Additive index row types** `template` / `template_folder` in `notesprout.db` — the arc-5 `naming` / arc-7 `clipboard` pattern. No schema change, no migration, no Room identity-hash break with Paper. Folders are `parentId`, exactly like notebook folders. Nothing about templates touches the filesystem. |
+| The static row's shape | `type=template` · `name` · `parentId` (null = root) · `templateKind` = the base kind or `IMAGE` · `flags` = the fit mode · `blob` = the image bytes. `refId` / `sortOrder` / `pageCount` / `keyScope` unused. No new columns. |
+| Imported images | **PNG / JPEG / WEBP** only, through SAF. **No PDF** — that is a new Gradle dependency and its own decision. The fit is **asked at import** (Fit, centred on white · Stretch · Fill/crop) and **kept as a setting**: the row stores the *original* image and the page-sized render happens **on use**, so the same template lands correctly on a Nomad page and a Manta page and **Fit…** can be changed later. |
+| Export | **PNG rendered at the page size**, one rule for both kinds: a generator renders its pattern, a static template renders with its fit applied. Written through SAF `CreateDocument`. **No share sheet** — the Supernote suppresses it. |
+| New Notebook | Hosts the **whole browser inline** — breadcrumbs, folders, import, new folder, both long-press sheets — under a header carrying the name field and **Create**. The radios are gone. |
+| The page's paper | The page sheet's **Page template** row opens the same browser full-screen (the `LinkPickerActivity` shape: an `ActivityResultLauncher`, chrome only, **no `releaseForHandoff`** — it is not a paper surface). Scope stays **this page only**, one undo step, exactly as arc 12 locked it. |
+| Browse chrome | **Sort · Search · Pinned · Recents**, all four. Sort reuses the library's sheet. Pinned is a sentinel `LIST` row (templates only, never folders); Recents is device-local prefs and records a use **only when a template is actually applied**. Pinned / Recents / Search are mutually exclusive flat views, as og has them. |
+| Thumbnails | **True miniature** — the card is the page, scaled honestly. Density is what tells two variants apart, so the card must show it; a dense grid reading as a grey wash is what a dense grid looks like. Rendered on IO, cached in memory keyed `id:updatedAt`. |
+| `.soil` identity | The `.soil` `template` row's `text` is the **spec token**, and **reuse is `text` + page size** — arc 12's rule, generalised. Stock kinds keep exactly `LINED` / `DOTTED` / `GRID` (every existing file and Paper still read them); a custom spec is `LINED#<8 hex of the canonical spec>`; a static template is `IMG#<8 hex of the image bytes>`. Nothing ever soft-deletes a template row, so there-and-back stays free. |
+| Deleting a library template | **Never touches a notebook that used it** — the pixels were copied into the `.soil` at apply time. og's rule. |
+| Scratch pad | **Not included.** Pad pages are blank by construction; nothing here reaches the extension. |
+| Non-goals | No PDF import, no bulk/folder export, no template sync or backup, no per-notebook "default paper for new pages" (a new page still inherits the page it was inserted after), no landscape, no third extension point. |
+
+### Arc-13 standing traps (assume they apply)
+
+- **An index blob you can write is not one you can read** (B3): SQLCipher's 8 MiB `CursorWindow`
+  caps any row the app reads back. Imports downscale (longest edge ≤ 2× the page's long edge) and
+  refuse, with a **problem dialog**, anything whose encoded bytes exceed the cap set in G4.
+- **Reuse before mint** (P2): a `.soil` `template` row is *shared paper*. Every apply path looks for
+  a row this file already holds with the same token at the page's size before rendering another
+  megabyte of WEBP, and the page's **current** row wins among equal matches so re-picking the
+  ticked card is a true no-op.
+- **Render at the page's own size, never the screen's** (P2) — a page pasted from a larger device
+  keeps its authored size.
+- **`applyTemplate` must not decode** (P2) — the id change is what makes the following `navigateTo`
+  reload the bitmap; decoding here costs a read the swap throws away.
+- **`kindOf` keeps unknown as unknown** (T1, P2) — a vanished row, a token this build cannot parse,
+  or a failed read shows **no tick**; only an empty `refId` is Blank.
+- **Read kinds through blob-free digests** (`templateDigests`), never `byId` — the pixels are the
+  one thing the decision never needs.
+- **SAF is new to SN.** Nothing in the app has ever opened a system file picker, and the Supernote
+  is known to suppress the share sheet. **G4's first step is a probe**: confirm
+  `ACTION_OPEN_DOCUMENT` and `ACTION_CREATE_DOCUMENT` resolve and return a usable URI on the Nomad,
+  *before* any of the import flow is built. If DocumentsUI is absent or crippled, the fallback is a
+  fixed on-device folder (the contingency is decided then, not now).
+- **Supernote swallows `adb shell input text` and `input keyevent` letters** — naming a template or
+  a folder in a device walk means tapping the on-screen keyboard, or the agent avoids the path.
+- **A disabled button is invisible on e-ink** — click-guard plus a dialog, never `isEnabled = false`.
+- **Toast confirms, dialog explains** — a refused import (too large, unreadable, reserved folder) is
+  a dialog.
+- **Frame silence** — the notebook's launch of the browser rides the page sheet's existing
+  exception (arc 12); no new exception may be added without a written justification.
+- **The browser never opens a `.soil`** (og's rule, and K2's): the notebook holds the only
+  connection; the browser returns a pick and the session does the write.
+- **`IndexGuard.ready(this)` first thing** in every new index-touching `onCreate`, and
+  `IndexGuard.bounced(this)` at the top of any `onDestroy` override.
+- **`"order"` is quoted in SQL and backticked in Room**; index writes are soft deletes only.
+
+### G1 — The template store + the Templates screen (browse, folders, management)
+**Status:** ⬜ Not started
+
+The index side and the screen, with nothing to pick yet. Additive `template` / `template_folder`
+row types + an `IndexRepository` template region (create / rename / move / duplicate / soft-delete /
+list, recursive folder delete, per-folder duplicate-name check). `TemplatesActivity`: breadcrumbs,
+the library's paginated non-scrolling card grid, the sort sheet, **New folder**, and the two
+long-press sheets — management for static cards, and a **Template options…** row on a generator that
+lands in G2. The root's synthetic cards (**Blank**, **Generated**) and the generator cards inside
+`Generated`, all from hardcoded sentinel ids. True-miniature thumbnails rendered on IO with an
+in-memory cache. Entry point: a **Templates** button in the library's bottom bar (`ic_template`).
+**Gate:** JVM tests for the pure rules (root composition, reserved name, sentinel ids, duplicate
+naming, recursive delete); debug + release build; Nomad walk (browse, create/rename/move/delete a
+folder, pagination, sort, crash buffer).
+*Opus builds the store + screen; Sonnet does the layout, drawables and strings.*
+
+**Questions to resolve at phase start:** none — the wizard above covers G1.
+
+### G2 — `TemplateSpec` + the generator options screen
+**Status:** ⬜ Not started
+
+The arithmetic and the screen that drives it. `TemplateSpec` (pure, `kotlinx.serialization`): kind,
+four insets, margin rule, per-axis density (spacing mm **or** count), thickness, dot size, shade —
+with a **canonical form** and an 8-hex digest for the `.soil` token. `TemplateGeometry` grows to
+serve it and `BuiltInTemplates` becomes a spec renderer at any size. The full-screen options
+Activity: the controls above with the copy / square buttons, a **live page-shaped preview** at the
+target page's aspect, and **Cancel · Use once · Save as template…** (name + folder, reusing G1's
+create path). *Use once* is hidden with no pending pick.
+**Gate:** JVM tests — spacing↔count round-trips, inset arithmetic, margin-rule position, canonical
+form + digest stability, and a **regression test pinning stock output byte-for-byte against today's
+`BuiltInTemplates`**; debug + release build; Nomad walk (open options on each generator, edit every
+control, watch the preview follow, save a variant into a folder); **user eye check** — the preview
+and the four papers on the glass.
+*Opus writes the spec/geometry; Sonnet the layout; the preview render is Opus's.*
+
+**Questions to resolve at phase start:** the control widgets themselves (stepper vs. field vs.
+slider for a millimetre value on e-ink) — decided at the start of G2 against a real screencap, since
+it is a measuring question, not a design one.
+
+### G3 — Picking: New Notebook, and a page's paper
+**Status:** ⬜ Not started
+
+The browser becomes shared. The grid + breadcrumbs + long-press behaviour move into one component
+hosted three ways: `TemplatesActivity` (no pick), `NewNotebookActivity` (name + **Create** header,
+radios deleted), and a full-screen launch from the notebook's **Page template** row
+(`ActivityResultLauncher`, the `LinkPickerActivity` shape). The result contract is one small
+`TemplatePick` — Blank, a generator + spec, or a static template id — and the apply path generalises
+arc 12: token + page-size reuse before mint, `NotebookSession.changeTemplate` taking a pick,
+`Action.TemplateChanged` unchanged, and the **tick** on whichever card the page is currently using.
+New-notebook creation seeds page 1 from the pick with the same renderer.
+**Gate:** JVM tests (token derivation, reuse matching incl. the static/`IMG#` case, tick resolution,
+pick round-trip); debug + release build; Nomad walk (create a notebook from a saved variant; re-paper
+a page from each of the three sources; per-page independence; cold restart; no duplicate template
+rows in the `.soil`); **user eye check** — undo/redo of a template change (adb cannot inject the
+multi-finger double-tap).
+*Opus — this is the risky seam.*
+
+**Questions to resolve at phase start:** none expected.
+
+### G4 — Import and export
+**Status:** ⬜ Not started
+
+**First step is the SAF probe on the Nomad** (see the traps). Then: `ACTION_OPEN_DOCUMENT` limited
+to `image/png`, `image/jpeg`, `image/webp`; a fit choice (Fit · Stretch · Fill) and a name + folder
+in one sheet; decode with bounds-first sampling, downscale to the cap, re-encode lossless WEBP,
+store with `flags` = fit. The apply path renders original → fit → page rect. A **Fit…** row appears
+on an imported card's management sheet. Export: `ACTION_CREATE_DOCUMENT`, PNG at page size, for
+generators and static cards alike. Reserved-folder guard on every landing spot.
+**Gate:** JVM tests (fit arithmetic for all three modes at several aspects, cap/downscale decision,
+name collision suffixing); debug + release build; Nomad walk (import a PNG of each of three aspects,
+check the card and the applied page, export both kinds and re-import the result, refuse an
+oversized file with a dialog, refuse a landing in Generated).
+*Opus for the codec + fit path; Sonnet for the sheets.*
+
+**Questions to resolve at phase start:** the blob cap's number, once the probe says what a real
+scanned page costs; and the fallback if SAF is unusable on the Supernote.
+
+### G5 — Pinned, Recents, Search
+**Status:** ⬜ Not started
+
+Three flat, paginated, mutually exclusive views on the same grid, reached from the Templates
+screen's top bar: **Pinned** (a sentinel `LIST` row + `list_item` edges, templates only, Pin/Unpin on
+the management sheet, scrubbed on delete), **Recents** (device-local prefs, newest first, recorded
+**only** when a template is actually applied — creating, importing and saving are not uses), and
+**Search** (name match across all template folders, flattened). Generators are pinnable and
+recordable through their sentinel ids.
+**Gate:** JVM tests (pin toggle + scrub, recents ordering + self-healing prune of dead ids, search
+matching); debug + release build; Nomad walk (pin/unpin, the three views' exclusivity, a recents
+entry appearing only after a real apply, a deleted template vanishing from both lists).
+*Sonnet, with Opus on the recents/pin store.*
+
+### G6 — Review, hardening, docs, freeze
+**Status:** ⬜ Not started
+
+`/code-review` over the **whole arc range** (G1→G5, `high`) — the arc, not the phase; every finding
+treated as a hypothesis whose premises get checked before it is fixed. Boundary audit (nothing new
+crosses into `:extension-api` or `:ext-scratchpad`; `:sn-screen` holds anything both surfaces use).
+Full JVM suite; debug + release build; a Haiku device walk of everything adb can see; a short user
+checklist for what only an eye and a pen can judge. Docs: **`apps/notesprout_ratta/docs/templates.md`**
+(the library as a feature — the two kinds, the spec, the three hosts, the `.soil` token, the failure
+table), plus edits to `docs/library.md`, `docs/notebook.md` (the page-paper row now opens a screen),
+`apps/notesprout_ratta/CLAUDE.md`, root `CLAUDE.md`, and memory. Then commit + freeze.
+*Fable is out for this arc — review runs as `/code-review`, fixes go to Opus.*
+
+---
+
 ## Verification (end of arc)
 
 1. All JVM unit tests green (`./gradlew test` in `apps/notesprout_ratta`).
