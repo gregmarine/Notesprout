@@ -50,21 +50,21 @@ class TemplateLibraryTest {
     // ── Reserved name ────────────────────────────────────────────────────────
 
     @Test
-    fun `Generated is reserved at the templates root, in any casing, trimmed`() {
-        assertTrue(TemplateLibrary.isReservedName(null, "Generated"))
-        assertTrue(TemplateLibrary.isReservedName(null, "generated"))
-        assertTrue(TemplateLibrary.isReservedName(null, "GENERATED"))
-        assertTrue(TemplateLibrary.isReservedName(null, "  Generated  "))
+    fun `Default is reserved at the templates root, in any casing, trimmed`() {
+        assertTrue(TemplateLibrary.isReservedName(null, "Default"))
+        assertTrue(TemplateLibrary.isReservedName(null, "default"))
+        assertTrue(TemplateLibrary.isReservedName(null, "DEFAULT"))
+        assertTrue(TemplateLibrary.isReservedName(null, "  Default  "))
     }
 
     @Test
-    fun `Generated is an ordinary name anywhere but the root`() {
-        assertFalse(TemplateLibrary.isReservedName("some-folder-id", "Generated"))
+    fun `Default is an ordinary name anywhere but the root`() {
+        assertFalse(TemplateLibrary.isReservedName("some-folder-id", "Default"))
     }
 
     @Test
     fun `only that one name is reserved`() {
-        assertFalse(TemplateLibrary.isReservedName(null, "Generated stuff"))
+        assertFalse(TemplateLibrary.isReservedName(null, "Default stuff"))
         assertFalse(TemplateLibrary.isReservedName(null, "Gen"))
         assertFalse(TemplateLibrary.isReservedName(null, "Templates"))
     }
@@ -72,46 +72,46 @@ class TemplateLibraryTest {
     // ── Root composition ─────────────────────────────────────────────────────
 
     @Test
-    fun `the root leads with Blank then Generated, then the sorted rows`() {
+    fun `the root leads with Blank then Default, then the sorted rows`() {
         val rows = listOf(
             row("f1", "Aaa", type = ObjectType.TEMPLATE_FOLDER),
             row("t1", "Bbb"),
             row("t2", "Ccc"),
         )
-        val cards = TemplateLibrary.rootCards("Blank", "Generated", rows)
+        val cards = TemplateLibrary.rootCards("Blank", "Default", rows)
 
         assertEquals(5, cards.size)
         assertTrue(cards[0] is TemplateCard.Blank)
-        assertTrue(cards[1] is TemplateCard.Generated)
+        assertTrue(cards[1] is TemplateCard.Defaults)
         assertEquals(ListIds.TEMPLATE_BLANK_ID, cards[0].id)
-        assertEquals(ListIds.TEMPLATE_GENERATED_ID, cards[1].id)
+        assertEquals(ListIds.TEMPLATE_DEFAULT_ID, cards[1].id)
         assertEquals(listOf("Aaa", "Bbb", "Ccc"), cards.drop(2).map { it.name })
     }
 
     @Test
-    fun `an empty root is still Blank and Generated`() {
-        val cards = TemplateLibrary.rootCards("Blank", "Generated", emptyList())
-        assertEquals(listOf("Blank", "Generated"), cards.map { it.name })
+    fun `an empty root is still Blank and Default`() {
+        val cards = TemplateLibrary.rootCards("Blank", "Default", emptyList())
+        assertEquals(listOf("Blank", "Default"), cards.map { it.name })
     }
 
     @Test
     fun `the two synthetic cards lead whatever order the rows arrive in`() {
         // The sort control reorders the rows; it must never move the furniture.
         val descending = listOf(row("t2", "Zzz"), row("t1", "Aaa"))
-        val cards = TemplateLibrary.rootCards("Blank", "Generated", descending)
-        assertEquals(listOf("Blank", "Generated", "Zzz", "Aaa"), cards.map { it.name })
+        val cards = TemplateLibrary.rootCards("Blank", "Default", descending)
+        assertEquals(listOf("Blank", "Default", "Zzz", "Aaa"), cards.map { it.name })
     }
 
-    // ── Generated ────────────────────────────────────────────────────────────
+    // ── Default ──────────────────────────────────────────────────────────────
 
     @Test
-    fun `Generated holds exactly the three generators in a fixed order`() {
-        val cards = TemplateLibrary.generatedCards("Lined", "Dotted", "Grid")
+    fun `Default holds exactly the three built-in papers in a fixed order`() {
+        val cards = TemplateLibrary.defaultCards("Lined", "Dotted", "Grid")
         assertEquals(3, cards.size)
         assertEquals(listOf("Lined", "Dotted", "Grid"), cards.map { it.name })
         assertEquals(
             listOf(TemplateKind.LINED, TemplateKind.DOTTED, TemplateKind.GRID),
-            cards.map { (it as TemplateCard.Generator).kind },
+            cards.map { (it as TemplateCard.BuiltIn).kind },
         )
         assertEquals(
             listOf(ListIds.TEMPLATE_LINED_ID, ListIds.TEMPLATE_DOTTED_ID, ListIds.TEMPLATE_GRID_ID),
@@ -121,9 +121,9 @@ class TemplateLibraryTest {
     }
 
     @Test
-    fun `Blank is never a generator`() {
-        // BLANK writes no template row at all; it is the absence of paper, not a fourth recipe.
-        assertFalse(TemplateLibrary.GENERATOR_KINDS.any { it.second == TemplateKind.BLANK })
+    fun `Blank is never a built-in paper`() {
+        // BLANK writes no template row at all; it is the absence of paper, not a fourth paper.
+        assertFalse(TemplateLibrary.BUILT_IN_KINDS.any { it.second == TemplateKind.BLANK })
     }
 
     // ── Row cards ────────────────────────────────────────────────────────────
@@ -144,9 +144,9 @@ class TemplateLibraryTest {
 
     @Test
     fun `a static card knows the kind it draws from, and when it is pixels`() {
-        val generated = TemplateCard.Static(row("t1", "Ruled", kind = TemplateKind.LINED.name))
-        assertEquals(TemplateKind.LINED, generated.baseKind)
-        assertFalse(generated.isImage)
+        val fromKind = TemplateCard.Static(row("t1", "Ruled", kind = TemplateKind.LINED.name))
+        assertEquals(TemplateKind.LINED, fromKind.baseKind)
+        assertFalse(fromKind.isImage)
 
         val imported = TemplateCard.Static(row("t2", "Scan", kind = TemplateLibrary.KIND_IMAGE))
         assertNull(imported.baseKind)

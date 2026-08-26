@@ -33,8 +33,8 @@ object ObjectType {
     const val CLIPBOARD = "clipboard"
 
     /**
-     * A **static template** in the template library (arc 13) — imported pixels, or a generator
-     * variant the user saved. The same additive-row-type pattern as [NAMING] and [CLIPBOARD], and
+     * A **static template** in the template library (arc 13) — imported pixels. The same
+     * additive-row-type pattern as [NAMING] and [CLIPBOARD], and
      * for the same reason: `notesprout.db` is Room-validated and format-compatible with Paper, so a
      * new `@Entity` would change the identity hash and a Paper index would fail validation.
      *

@@ -10,8 +10,9 @@ import com.symmetricalpalmtree.notesproutsn.data.template.TemplateKind
  * the Templates screen decides *before* it draws anything lives here: what the root is made of,
  * what may be called what, and what a duplicate is named.
  *
- * The one structural idea it encodes: **the sentinels are not rows.** Blank, the Generated folder
- * and the three generators are hardcoded ids ([ListIds]) composed into every listing on the fly.
+ * The one structural idea it encodes: **the sentinels are not rows.** Blank, the Default folder
+ * and the three built-in papers are hardcoded ids ([ListIds]) composed into every listing on the
+ * fly.
  * Nothing is seeded at bootstrap, nothing can be deleted or renamed, an index restored from a
  * backup needs no repair, and there is no migration. The database is asked only about the things
  * the user actually made.
@@ -28,10 +29,10 @@ object TemplateLibrary {
      * The reserved folder name at the templates root. Compared **case-insensitively**: two cards a
      * user cannot tell apart are not two names, whatever SQLite thinks of the bytes.
      */
-    const val RESERVED_ROOT_NAME = "Generated"
+    const val RESERVED_ROOT_NAME = "Default"
 
-    /** The three generators, in the order they always appear inside Generated. */
-    val GENERATOR_KINDS: List<Pair<String, TemplateKind>> = listOf(
+    /** The three built-in papers, in the order they always appear inside Default. */
+    val BUILT_IN_KINDS: List<Pair<String, TemplateKind>> = listOf(
         ListIds.TEMPLATE_LINED_ID to TemplateKind.LINED,
         ListIds.TEMPLATE_DOTTED_ID to TemplateKind.DOTTED,
         ListIds.TEMPLATE_GRID_ID to TemplateKind.GRID,
@@ -40,7 +41,7 @@ object TemplateLibrary {
     /** Every hardcoded id. Nothing here is ever written to, moved, renamed or deleted. */
     val SENTINEL_IDS: Set<String> = setOf(
         ListIds.TEMPLATE_BLANK_ID,
-        ListIds.TEMPLATE_GENERATED_ID,
+        ListIds.TEMPLATE_DEFAULT_ID,
         ListIds.TEMPLATE_LINED_ID,
         ListIds.TEMPLATE_DOTTED_ID,
         ListIds.TEMPLATE_GRID_ID,
@@ -51,39 +52,39 @@ object TemplateLibrary {
     /**
      * True when [name] may not be used under [parentId]. Only the **templates root** reserves
      * anything, and only the one name: deeper folders are the user's, and a folder called
-     * "Generated" three levels down is a perfectly ordinary folder.
+     * "Default" three levels down is a perfectly ordinary folder.
      *
      * It is reserved for templates as well as folders. The rule is about the *name at the root* —
-     * a second card reading "Generated" beside the real one would be a confusion the user cannot
+     * a second card reading "Default" beside the real one would be a confusion the user cannot
      * resolve by looking, whichever kind it is.
      */
     fun isReservedName(parentId: String?, name: String): Boolean =
         parentId == null && name.trim().equals(RESERVED_ROOT_NAME, ignoreCase = true)
 
     /**
-     * The templates root: **Blank**, then **Generated**, then whatever the user made — already
+     * The templates root: **Blank**, then **Default**, then whatever the user made — already
      * sorted by the caller, folders first. The two synthetic cards always lead and are never
      * re-ordered by the sort control: they are the fixed furniture of the screen, and a sort that
      * moved Blank to the end would hide the most-used card behind a page turn.
      */
     fun rootCards(
         blankLabel: String,
-        generatedLabel: String,
+        defaultLabel: String,
         sortedRows: List<ObjectSummary>,
     ): List<TemplateCard> = buildList {
         add(TemplateCard.Blank(blankLabel))
-        add(TemplateCard.Generated(generatedLabel))
+        add(TemplateCard.Defaults(defaultLabel))
         addAll(rowCards(sortedRows))
     }
 
     /**
-     * Inside **Generated**: the three generators and nothing else, ever. No row can land here (the
-     * name is reserved at the root and the folder has no id in the database to be a `parentId`), so
-     * this listing takes no arguments beyond its labels.
+     * Inside **Default**: the three built-in papers and nothing else, ever. No row can land here
+     * (the name is reserved at the root and the folder has no id in the database to be a
+     * `parentId`), so this listing takes no arguments beyond its labels.
      */
-    fun generatedCards(linedLabel: String, dottedLabel: String, gridLabel: String): List<TemplateCard> {
+    fun defaultCards(linedLabel: String, dottedLabel: String, gridLabel: String): List<TemplateCard> {
         val labels = listOf(linedLabel, dottedLabel, gridLabel)
-        return GENERATOR_KINDS.mapIndexed { i, (id, kind) -> TemplateCard.Generator(id, labels[i], kind) }
+        return BUILT_IN_KINDS.mapIndexed { i, (id, kind) -> TemplateCard.BuiltIn(id, labels[i], kind) }
     }
 
     /** Any ordinary folder: just the rows, already sorted. */

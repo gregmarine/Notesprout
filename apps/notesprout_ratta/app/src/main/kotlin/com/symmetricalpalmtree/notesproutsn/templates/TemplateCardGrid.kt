@@ -77,7 +77,7 @@ class TemplateCardGrid(
 
         for (i in range) {
             val item = items[i]
-            val isFolder = item is TemplateCard.Folder || item is TemplateCard.Generated
+            val isFolder = item is TemplateCard.Folder || item is TemplateCard.Defaults
             val view = if (isFolder) folderCard(inflater, item) else templateCard(inflater, item, art[item.id])
             view.layoutParams = GridLayout.LayoutParams().apply {
                 width = cardWidth

@@ -18,15 +18,15 @@ object ListIds {
     /** The **Blank** card at the templates root — "_blank" (5f 62 6c 61 6e 6b). No paper at all. */
     const val TEMPLATE_BLANK_ID = "00000000-0000-0000-0000-5f626c616e6b"
 
-    /** The reserved **Generated** folder at the templates root — "genrtd" (67 65 6e 72 74 64). */
-    const val TEMPLATE_GENERATED_ID = "00000000-0000-0000-0000-67656e727464"
+    /** The reserved **Default** folder at the templates root — "deflt_" (64 65 66 6c 74 5f). */
+    const val TEMPLATE_DEFAULT_ID = "00000000-0000-0000-0000-6465666c745f"
 
-    /** The Lined generator, inside [TEMPLATE_GENERATED_ID] — "lined_" (6c 69 6e 65 64 5f). */
+    /** The Lined built-in, inside [TEMPLATE_DEFAULT_ID] — "lined_" (6c 69 6e 65 64 5f). */
     const val TEMPLATE_LINED_ID = "00000000-0000-0000-0000-6c696e65645f"
 
-    /** The Dotted generator — "dotted" (64 6f 74 74 65 64). */
+    /** The Dotted built-in — "dotted" (64 6f 74 74 65 64). */
     const val TEMPLATE_DOTTED_ID = "00000000-0000-0000-0000-646f74746564"
 
-    /** The Grid generator — "_grid_" (5f 67 72 69 64 5f). */
+    /** The Grid built-in — "_grid_" (5f 67 72 69 64 5f). */
     const val TEMPLATE_GRID_ID = "00000000-0000-0000-0000-5f677269645f"
 }

@@ -118,7 +118,7 @@
             android:contentDescription="@string/cd_scratch_pad" />
 
         <!-- Templates (arc 13) — the template library, the one screen behind every paper
-             decision. Always present: the three generators need no extension and no data. -->
+             decision. Always present: the three built-in papers need no extension and no data. -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnTemplates"
             style="@style/Widget.Notesprout.ToolbarButton"

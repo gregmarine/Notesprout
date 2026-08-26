@@ -3079,11 +3079,15 @@ findings; the arc is frozen at this commit.
 
 ## Phases — Arc 13 "Stationery" (planned 2026-08-25, wizard complete)
 
-Templates stop being four radio buttons and become **a library**: folders, previews, adjustable
-generators, import, export. Two things are joined here that the app has always kept apart — og's
-reusable template library (index-owned, foldered, importable) and SN's *generated* paper (rendered
-from arithmetic, never stored twice) — and the join is the whole design: a **generator** is a recipe
-the app draws, a **static template** is pixels the library keeps, and there is no third kind.
+Templates stop being four radio buttons and become **a library**: folders, previews, import,
+export. Two things are joined here that the app has always kept apart — og's reusable template
+library (index-owned, foldered, importable) and SN's built-in paper (rendered from arithmetic,
+never stored twice) — and the join is the whole design: a **built-in** is paper the app draws, a
+**static template** is pixels the library keeps, and there is no third kind.
+
+**The generator-options idea was tried and abandoned** (2026-08-26, the user's call after seeing it
+on the glass — see G2 below). The three built-ins are not adjustable and are not meant to be: they
+are the **Default** set, always present, and the way to get different paper is to import it.
 
 The one screen behind every paper decision is shared: **New Notebook**, the **page's paper** row on
 the notebook's long-press sheet, and a new **Templates** button in the library all host the same
@@ -3093,25 +3097,21 @@ browser, with the same folders, the same long-press behaviour and the same impor
 
 | Decision | Answer |
 |---|---|
-| Two card kinds, no third | **Generator** (Lined / Dotted / Grid, in the reserved **Generated** folder) — long-press opens the **options screen**. **Static template** (imported images, and every variant saved out of a generator) — long-press opens **management** (rename / move / duplicate / export / delete, plus **Fit…** on an imported one). A saved variant is **static, baked**: to change its margins you go back to the generator and save another. |
-| The three generators are **not rows** | They are hardcoded, with sentinel ids in the `ListIds` style, and so is the **Generated** folder card and the **Blank** card. Nothing is seeded at bootstrap, nothing can be deleted or renamed, nothing needs repairing if an index is restored from a backup, and there is no migration. "Generated" is a **reserved name** at the templates root — a user folder cannot take it and no import may land in it. |
-| Options screen exits | **Cancel · Use once · Save as template…**. *Use once* applies the settings to the pending target (the page being re-papered, or the notebook being created) and stores nothing; it is **hidden when there is no pending pick** (opened from the library). *Save as template…* asks for a name and a folder, mints a static card, and applies it too. |
-| Options: margins | **Four independent insets in mm** (top / bottom / left / right) plus three copy buttons — **top → all**, **left → right**, **top → bottom** — and one checkbox, **margin rule**: a vertical rule drawn at the left inset (off by default). The insets are blank space; the pattern stops short of them. |
-| Options: density | A **mode toggle — spacing (mm) or count** — with the other shown live as a read-out ("8.0 mm → 27 lines"). Dotted and Grid carry **two independent axes** (rows/Y and cols/X) with a **⇄ square** link button. Stock spacing stays **8 mm**. |
-| Options: the rest | **Rule thickness**, **dot size**, and **ruling shade** (greyscale, the 16-level ladder e-paper renders). Stock values are today's tuned constants. |
-| Stock output is unchanged | A generator at its defaults must render **exactly what `BuiltInTemplates` renders today** — same first-rule origin, same 8 mm, same thickness, same dot radius. A JVM regression test pins it. Existing notebooks and new ones must agree, and `.soil` reuse across old and new files depends on it. |
+| Two card kinds, no third | **Built-in** (Lined / Dotted / Grid, in the reserved **Default** folder) — the app's own paper, **not adjustable and not editable**: it does not long-press at all. **Static template** (imported images) — long-press opens **management** (rename / move / duplicate / export / delete, plus **Fit…**). |
+| The three built-ins are **not rows** | They are hardcoded, with sentinel ids in the `ListIds` style, and so is the **Default** folder card and the **Blank** card. Nothing is seeded at bootstrap, nothing can be deleted, renamed or moved, nothing needs repairing if an index is restored from a backup, and there is no migration. **"Default" is a reserved name** at the templates root — a user folder cannot take it, no template of the user's may be called it, and no import may land in it. |
+| The **Default** folder | Always present, always the same three papers, in one order, forever. It is the floor of the library: however empty the rest of it is, every notebook can still reach Lined, Dotted and Grid. (Renamed from "Generated" on 2026-08-26 when the generator idea was dropped — nothing about it is generated *by the user* any more.) |
 | Library storage | **Additive index row types** `template` / `template_folder` in `notesprout.db` — the arc-5 `naming` / arc-7 `clipboard` pattern. No schema change, no migration, no Room identity-hash break with Paper. Folders are `parentId`, exactly like notebook folders. Nothing about templates touches the filesystem. |
 | The static row's shape | `type=template` · `name` · `parentId` (null = root) · `templateKind` = the base kind or `IMAGE` · `flags` = the fit mode · `blob` = the image bytes. `refId` / `sortOrder` / `pageCount` / `keyScope` unused. No new columns. |
 | Imported images | **PNG / JPEG / WEBP** only, through SAF. **No PDF** — that is a new Gradle dependency and its own decision. The fit is **asked at import** (Fit, centred on white · Stretch · Fill/crop) and **kept as a setting**: the row stores the *original* image and the page-sized render happens **on use**, so the same template lands correctly on a Nomad page and a Manta page and **Fit…** can be changed later. |
-| Export | **PNG rendered at the page size**, one rule for both kinds: a generator renders its pattern, a static template renders with its fit applied. Written through SAF `CreateDocument`. **No share sheet** — the Supernote suppresses it. |
+| Export | **PNG rendered at the page size**, one rule for both kinds: a built-in renders its pattern, a static template renders with its fit applied. Written through SAF `CreateDocument`. **No share sheet** — the Supernote suppresses it. |
 | New Notebook | Hosts the **whole browser inline** — breadcrumbs, folders, import, new folder, both long-press sheets — under a header carrying the name field and **Create**. The radios are gone. |
 | The page's paper | The page sheet's **Page template** row opens the same browser full-screen (the `LinkPickerActivity` shape: an `ActivityResultLauncher`, chrome only, **no `releaseForHandoff`** — it is not a paper surface). Scope stays **this page only**, one undo step, exactly as arc 12 locked it. |
 | Browse chrome | **Sort · Search · Pinned · Recents**, all four. Sort reuses the library's sheet. Pinned is a sentinel `LIST` row (templates only, never folders); Recents is device-local prefs and records a use **only when a template is actually applied**. Pinned / Recents / Search are mutually exclusive flat views, as og has them. |
-| Thumbnails | **True miniature** — the card is the page, scaled honestly. Density is what tells two variants apart, so the card must show it; a dense grid reading as a grey wash is what a dense grid looks like. Rendered on IO, cached in memory keyed `id:updatedAt`. |
-| `.soil` identity | The `.soil` `template` row's `text` is the **spec token**, and **reuse is `text` + page size** — arc 12's rule, generalised. Stock kinds keep exactly `LINED` / `DOTTED` / `GRID` (every existing file and Paper still read them); a custom spec is `LINED#<8 hex of the canonical spec>`; a static template is `IMG#<8 hex of the image bytes>`. Nothing ever soft-deletes a template row, so there-and-back stays free. |
+| Thumbnails | **True miniature** — the card is the page, scaled honestly. Density is what tells two papers apart, so the card must show it; a dense grid reading as a grey wash is what a dense grid looks like. Rendered on IO, cached in memory keyed `id:updatedAt`. |
+| `.soil` identity | The `.soil` `template` row's `text` is the **token**, and **reuse is `text` + page size** — arc 12's rule, generalised. The built-ins keep exactly `LINED` / `DOTTED` / `GRID` (every existing file and Paper still read them, and nothing about them changes); an imported template is `IMG#<8 hex of the image bytes>`. Nothing ever soft-deletes a template row, so there-and-back stays free. |
 | Deleting a library template | **Never touches a notebook that used it** — the pixels were copied into the `.soil` at apply time. og's rule. |
 | Scratch pad | **Not included.** Pad pages are blank by construction; nothing here reaches the extension. |
-| Non-goals | No PDF import, no bulk/folder export, no template sync or backup, no per-notebook "default paper for new pages" (a new page still inherits the page it was inserted after), no landscape, no third extension point. |
+| Non-goals | **No adjustable built-ins** (tried in G2, abandoned — do not re-raise without a fresh user decision), no PDF import, no bulk/folder export, no template sync or backup, no per-notebook "default paper for new pages" (a new page still inherits the page it was inserted after), no landscape, no third extension point. |
 
 ### Arc-13 standing traps (assume they apply)
 
@@ -3128,6 +3128,8 @@ browser, with the same folders, the same long-press behaviour and the same impor
   reload the bitmap; decoding here costs a read the swap throws away.
 - **`kindOf` keeps unknown as unknown** (T1, P2) — a vanished row, a token this build cannot parse,
   or a failed read shows **no tick**; only an empty `refId` is Blank.
+- **The Default folder and its three papers are the app's, not the user's** — no rename, no move,
+  no delete, no long-press, and no import may land inside it.
 - **Read kinds through blob-free digests** (`templateDigests`), never `byId` — the pixels are the
   one thing the decision never needs.
 - **SAF is new to SN.** Nothing in the app has ever opened a system file picker, and the Supernote
@@ -3155,9 +3157,9 @@ The index side and the screen, with nothing to pick yet. Additive `template` / `
 row types + an `IndexRepository` template region (create / rename / move / duplicate / soft-delete /
 list, recursive folder delete, per-folder duplicate-name check). `TemplatesActivity`: breadcrumbs,
 the library's paginated non-scrolling card grid, the sort sheet, **New folder**, and the two
-long-press sheets — management for static cards, and a **Template options…** row on a generator that
-lands in G2. The root's synthetic cards (**Blank**, **Generated**) and the generator cards inside
-`Generated`, all from hardcoded sentinel ids. True-miniature thumbnails rendered on IO with an
+long-press sheet for static cards (the sentinels do not long-press at all). The root's synthetic
+cards (**Blank**, **Default**) and the built-in paper cards inside `Default`, all from hardcoded
+sentinel ids. True-miniature thumbnails rendered on IO with an
 in-memory cache. Entry point: a **Templates** button in the library's bottom bar (`ic_template`).
 **Gate:** JVM tests for the pure rules (root composition, reserved name, sentinel ids, duplicate
 naming, recursive delete); debug + release build; Nomad walk (browse, create/rename/move/delete a
@@ -3188,13 +3190,16 @@ either hierarchy** (`browseFolderType` + `rootLabel` extras) — one Move picker
 than a sibling copy that would drift. `SortPrefs` gained a `templates(context)` file: two shelves of
 two different things, and re-sorting one must not silently re-sort the other.
 
-*Two calls worth knowing.* **(1) The generator's long-press sheet is not in G1.** Its only row is
-*Template options…*, and what that opens is G2 — a row that opens nothing is worse than no row, and
-the phase gate never named it. Blank, Generated and the three generators therefore do not
-long-press at all yet. **(2) "Generated" is reserved at the templates root for templates as well as
-folders.** The locked decision's headline sentence is about *the name at the root*; a second card
+*Two calls worth knowing.* **(1) The built-in's long-press sheet is not in G1.** Its only row would
+have been *Template options…*, and what that opened was G2 — a row that opens nothing is worse than
+no row, and the phase gate never named it. **G2 was then abandoned, so that row never landed and
+never will**: Blank, Default and the three built-in papers do not long-press at all, by design.
+**(2) The reserved root name is reserved for templates as well as folders.** The locked decision's headline sentence is about *the name at the root*; a second card
 reading "Generated" beside the real one would be a confusion the user cannot resolve by looking,
 whichever kind it is. Say so if you meant folders only.
+
+*(The folder this phase called **"Generated"** was renamed **"Default"** on 2026-08-26 when the
+generator idea was dropped; its sentinel id spells `deflt_`. Everything else below still stands.)*
 
 *Traps confirmed on the glass.* The bottom bar now carries **nine** controls on a 1404 px Nomad —
 7 buttons × 116 px + the pager's 569 px = 1381 px, **23 px of headroom**; measured before it was
@@ -3204,94 +3209,55 @@ the bitmap**, not as an ImageView background (the page-card lesson). The reserve
 walked end-to-end with the on-screen keyboard — the dialog stays open with the typing intact.
 
 *Not verifiable on device yet, by construction.* Static-template management (rename/move/**duplicate**
-/delete of a `template` row) has no way to make one until G2 saves a variant or G4 imports an image;
-the pure half is JVM-tested and the sheet is built. Same for the `IMAGE` fit path in
+/delete of a `template` row) had no way to make one — G2's discarded save flow proved it end to end
+on the glass before it was reverted (sheet, Duplicate, Delete, all correct), so the only untested
+path left is the one G4's import will open. Same for the `IMAGE` fit path in
 `TemplateThumbnails`, which draws Fit only until G4 brings the other two modes.
 
-### G2 — `TemplateSpec` + the generator options screen
-**Status:** ✅ Complete (commit `6706340`)
+### G2 — Adjustable generators ❌ ABANDONED
+**Status:** ❌ Abandoned 2026-08-26 — built (commit `6706340`), shown to the user, **reverted**.
+Its one surviving product is the rename of "Generated" to **Default**.
 
-The arithmetic and the screen that drives it. `TemplateSpec` (pure, `kotlinx.serialization`): kind,
-four insets, margin rule, per-axis density (spacing mm **or** count), thickness, dot size, shade —
-with a **canonical form** and an 8-hex digest for the `.soil` token. `TemplateGeometry` grows to
-serve it and `BuiltInTemplates` becomes a spec renderer at any size. The full-screen options
-Activity: the controls above with the copy / square buttons, a **live page-shaped preview** at the
-target page's aspect, and **Cancel · Use once · Save as template…** (name + folder, reusing G1's
-create path). *Use once* is hidden with no pending pick.
-**Gate:** JVM tests — spacing↔count round-trips, inset arithmetic, margin-rule position, canonical
-form + digest stability, and a **regression test pinning stock output byte-for-byte against today's
-`BuiltInTemplates`**; debug + release build; Nomad walk (open options on each generator, edit every
-control, watch the preview follow, save a variant into a folder); **user eye check** — the preview
-and the four papers on the glass.
-*Opus writes the spec/geometry; Sonnet the layout; the preview render is Opus's.*
+**Do not rebuild this. Do not re-raise it without a fresh user decision.**
 
-**Questions to resolve at phase start:** the control widgets themselves (stepper vs. field vs.
-slider for a millimetre value on e-ink) — decided at the start of G2 against a real screencap, since
-it is a measuring question, not a design one. **Answered: steppers with press-and-hold repeat**
-(user's pick, from the measurement below).
+*What it was.* `TemplateSpec` (a serializable recipe: kind, per-axis density in spacing **or**
+count, four insets in mm, margin rule, rule thickness, dot size, ruling shade) with a canonical form
+and an 8-hex digest for a `LINED#<hex>` `.soil` token; `TemplateGeometry` grown into a
+`TemplatePlan` renderer; and a full-screen options Activity with a live page preview and
+**Cancel · Use once · Save as template…**, saving a variant as a static card carrying its spec.
 
-**Outcome (2026-08-25):** built and walked on the Nomad; **694 JVM tests** (was 658), debug +
-release both build, release signs, crash buffer empty, test data restored. Version stays
-`0.1.0-ratta`; g-paper pin stays 0.1.6. No new dependency, no schema change, no migration.
+*Why it went.* The user's call, on the glass: *"I'm not happy with the generated template options.
+I want to abandon that idea completely."* Two rounds of layout work went in first — the margins
+rearranged spatially around a centred preview, then their steppers replaced with typed input boxes
+— and the verdict after both was that the whole idea, not the arrangement, was wrong. A generator
+with nine knobs is a settings screen wearing a page's clothes, and this app is meant to feel like
+paper.
 
-*The widget question, measured first.* The body between the bars is **1404 × 1602 px = 748 × 855 dp**
-on a Nomad (1.875 px/dp) and tap targets are **62 dp** on this tier, so a page-aspect preview 316 dp
-wide leaves a 420 dp control column — room for the Dotted worst case (mode toggle · two axes · four
-insets · copy row · margin rule · rule · dot · shade) with **no scrolling**. A slider was ruled out
-on the panel (a drag is a stream of full refreshes and lands on a 0.5 mm step by luck) and a text
-field on the device (the Supernote swallows `input text`, so no walk could ever drive it). Steppers
-also snap **to** the grid rather than moving **by** the step — the stock rule thickness is one mdpi
-pixel, 0.15875 mm, so a first press lands on 0.20 rather than carrying .00875 forever (`StepMath`,
-pure + tested).
+*What replaced it.* Nothing. The three built-ins are fixed paper in a fixed folder, and **import
+(G4) is how a user gets different paper.** That is one idea instead of two, and it is the one the
+rest of the arc was already built around.
 
-*What landed.* `TemplateSpec` (pure, `kotlinx.serialization`: kind · two `DensityAxis` · four insets
-· margin rule · thickness · dot · shade) with a **canonical form** and an 8-hex digest behind
-`token()`; `TemplateGeometry` grew a `TemplatePlan` — the whole drawing decision, in pixels, without
-a `Canvas` — plus `contentRect`, `countsFor`, `spacingMmFor` and `placeholderPlan`;
-`BuiltInTemplates` became a **spec renderer with one painter** (the four kinds are now the stock
-specs, and the library's squeezed cover placeholder is a hand-built plan through the same painter).
-`TemplateOptionsActivity` + `OptionStepper` + `StepMath` are the screen; `TemplateNaming` is the
-naming rules the Templates screen and the save flow now share; `FolderPickerActivity` gained a
-**pick mode** (answer a folder, move nothing) so *Save as template…* can ask folder-then-name and
-let the name dialog run the whole check with the typing intact.
+*What the revert removed*, so a future session does not go looking for it: `TemplateSpec`,
+`TemplatePlan` and the spec half of `TemplateGeometry` / `BuiltInTemplates` (both back to their G1
+shape, kind-based), `TemplateOptionsActivity`, `OptionStepper`, `OptionField`, `StepMath`,
+`TemplateNaming`, the two option layouts, `FolderPickerActivity`'s pick mode, the options strings
+and the three test files. The tree is the G1 tree plus the rename.
 
-*Four decisions worth knowing.* **(1) Stock output is bit-identical, and that is why the constants
-look odd.** `STOCK_THICKNESS_MM = 25.4/160` and `STOCK_DOT_MM = 4×25.4/160` are the mdpi-authored
-pixels written in millimetres, because `mm × dpi / 25.4` of them reproduces the old `px × dpi / 160`
-exactly at every density in the family — checked in float32 before a line was written, and pinned in
-`TemplatePlanTest` against the legacy functions **and** against hardcoded numbers, so a change that
-moved both together still fails. **(2) A saved variant stores its *spec*, not pixels** — index
-`blob` = the spec JSON (the clipboard row's precedent), `templateKind` = the base kind. A bitmap
-could not land correctly on a page it has never seen, which is the whole reason the library is
-device-portable. `createTemplate(image=)` became `payload=` and `templateImage` became
-`templatePayload`. **(3) Identity is the canonical form, not the fields**: a Lined spec carrying
-some dot size nobody can see *is* stock lined paper, so `isStock` compares canonical strings — the
-first version compared the data class and gave stock paper a custom token. **(4) The shade ladder is
-15 levels, not 16** — e-paper renders 16 greys and the 16th is the paper; a rule drawn in it would
-not be a lighter rule, it would be no rule.
+*Three things worth keeping in mind if this ever comes back* — they were real findings, and all
+three are cheap to lose and expensive to rediscover:
 
-*Two things the device taught.* A **count is not a spacing**: 10.0 mm → 14 lines → 9.9 mm, because a
-count spreads evenly over the page. The count is carried across the mode toggle exactly; the spacing
-cannot be, and the KDoc says so. And the exact count derivation `extent / (count + leading)` puts the
-phantom next feature **precisely on the far edge**, which float accumulation then includes about half
-the time (12 asked, 13 drawn) — hence `spacingPxFor`'s `COUNT_EPS` nudge, which lives in the count
-path only so stock output never touches it.
-
-*Walked on the Nomad.* Long-press a generator → *Template options…* → the screen; stepping Lines
-8.0 → 10.0 mm with the read-out following (18 → 14 lines) and the preview redrawing; margin rule on
-and visible in the preview; Count mode carrying 14 across; Save as template… → the pick-mode picker
-("Save here") → the name dialog typed on the on-screen keyboard → a **"wide"** card whose miniature
-shows its *own* density beside the stock Lined card's. That also closed G1's one untestable gap:
-**static-template management is now verified on the glass** (the sheet, Duplicate → "wide copy" with
-the payload copied, Delete → confirm → gone). One fix came from the screencap: the Square latch was
-pushing the Columns row's `[−] value [+]` out of line with every other row, so the latch's slot is
-now **reserved and INVISIBLE in every row** — a stack of controls that nearly line up reads as a
-mistake. Dotted, the tallest kind, ends 5 px above the bottom bar: the `ScrollView` around the
-column is a safety net for a longer translation, not a scroll anyone should meet.
-
-*Left for G3, by construction.* **Use once** is built and wired (`EXTRA_SPEC` both ways) but `GONE`
-until something is waiting for a pick, and a generator card's **tap** still does nothing — G3 gives
-it meaning in all three hosts at once.
+1. **Stock output has to stay bit-identical.** The rule thickness and dot radius are authored in
+   *mdpi pixels*, not millimetres (`px × dpi / 160`). Expressing them in mm reproduces the old
+   numbers exactly only because `25.4 / 160` and `4 × 25.4 / 160` round-trip in float32 at every
+   density in the family — checked before a line was written. Any future arithmetic change needs
+   that check.
+2. **A count is not a spacing.** 10.0 mm → 14 lines → 9.9 mm, because a count spreads evenly over
+   the page. And the exact derivation `extent / (count + leading)` puts the phantom next feature
+   *precisely* on the far edge, which float accumulation then includes about half the time (12 rows
+   asked for, 13 drawn) — it needs a hair of a nudge.
+3. **`adjustResize` is wrong for a screen with a page on it.** It squashed the preview to a sliver
+   and clipped the field boxes. `adjustPan` moved nothing at all, because the fields already sat
+   above where the panel lands.
 
 ### G3 — Picking: New Notebook, and a page's paper
 **Status:** ⬜ Not started
@@ -3300,15 +3266,18 @@ The browser becomes shared. The grid + breadcrumbs + long-press behaviour move i
 hosted three ways: `TemplatesActivity` (no pick), `NewNotebookActivity` (name + **Create** header,
 radios deleted), and a full-screen launch from the notebook's **Page template** row
 (`ActivityResultLauncher`, the `LinkPickerActivity` shape). The result contract is one small
-`TemplatePick` — Blank, a generator + spec, or a static template id — and the apply path generalises
+`TemplatePick` — Blank, a built-in kind, or a static template id — and the apply path generalises
 arc 12: token + page-size reuse before mint, `NotebookSession.changeTemplate` taking a pick,
 `Action.TemplateChanged` unchanged, and the **tick** on whichever card the page is currently using.
 New-notebook creation seeds page 1 from the pick with the same renderer.
+
+Note that until G4 lands there is nothing to pick *but* the built-ins and Blank — which is exactly
+what the notebook can already do through arc 12's sub-sheet. G3 is therefore the seam, not the
+feature: it is what makes one browser serve all three hosts, and what G4's imports arrive into.
 **Gate:** JVM tests (token derivation, reuse matching incl. the static/`IMG#` case, tick resolution,
-pick round-trip); debug + release build; Nomad walk (create a notebook from a saved variant; re-paper
-a page from each of the three sources; per-page independence; cold restart; no duplicate template
-rows in the `.soil`); **user eye check** — undo/redo of a template change (adb cannot inject the
-multi-finger double-tap).
+pick round-trip); debug + release build; Nomad walk (create a notebook from each source; re-paper a
+page; per-page independence; cold restart; no duplicate template rows in the `.soil`); **user eye
+check** — undo/redo of a template change (adb cannot inject the multi-finger double-tap).
 *Opus — this is the risky seam.*
 
 **Questions to resolve at phase start:** none expected.
@@ -3321,11 +3290,11 @@ to `image/png`, `image/jpeg`, `image/webp`; a fit choice (Fit · Stretch · Fill
 in one sheet; decode with bounds-first sampling, downscale to the cap, re-encode lossless WEBP,
 store with `flags` = fit. The apply path renders original → fit → page rect. A **Fit…** row appears
 on an imported card's management sheet. Export: `ACTION_CREATE_DOCUMENT`, PNG at page size, for
-generators and static cards alike. Reserved-folder guard on every landing spot.
+built-ins and static cards alike. Reserved-folder guard on every landing spot.
 **Gate:** JVM tests (fit arithmetic for all three modes at several aspects, cap/downscale decision,
 name collision suffixing); debug + release build; Nomad walk (import a PNG of each of three aspects,
 check the card and the applied page, export both kinds and re-import the result, refuse an
-oversized file with a dialog, refuse a landing in Generated).
+oversized file with a dialog, refuse a landing in Default).
 *Opus for the codec + fit path; Sonnet for the sheets.*
 
 **Questions to resolve at phase start:** the blob cap's number, once the probe says what a real
@@ -3338,8 +3307,8 @@ Three flat, paginated, mutually exclusive views on the same grid, reached from t
 screen's top bar: **Pinned** (a sentinel `LIST` row + `list_item` edges, templates only, Pin/Unpin on
 the management sheet, scrubbed on delete), **Recents** (device-local prefs, newest first, recorded
 **only** when a template is actually applied — creating, importing and saving are not uses), and
-**Search** (name match across all template folders, flattened). Generators are pinnable and
-recordable through their sentinel ids.
+**Search** (name match across all template folders, flattened). The built-in papers are pinnable
+and recordable through their sentinel ids.
 **Gate:** JVM tests (pin toggle + scrub, recents ordering + self-healing prune of dead ids, search
 matching); debug + release build; Nomad walk (pin/unpin, the three views' exclusivity, a recents
 entry appearing only after a real apply, a deleted template vanishing from both lists).
@@ -3348,13 +3317,14 @@ entry appearing only after a real apply, a deleted template vanishing from both 
 ### G6 — Review, hardening, docs, freeze
 **Status:** ⬜ Not started
 
-`/code-review` over the **whole arc range** (G1→G5, `high`) — the arc, not the phase; every finding
+`/code-review` over the **whole arc range** (G1→G5 — note G2 is a revert, so the range's net
+content is G1 + G3–G5, `high`) — the arc, not the phase; every finding
 treated as a hypothesis whose premises get checked before it is fixed. Boundary audit (nothing new
 crosses into `:extension-api` or `:ext-scratchpad`; `:sn-screen` holds anything both surfaces use).
 Full JVM suite; debug + release build; a Haiku device walk of everything adb can see; a short user
 checklist for what only an eye and a pen can judge. Docs: **`apps/notesprout_ratta/docs/templates.md`**
-(the library as a feature — the two kinds, the spec, the three hosts, the `.soil` token, the failure
-table), plus edits to `docs/library.md`, `docs/notebook.md` (the page-paper row now opens a screen),
+(the library as a feature — the two kinds, the Default folder, the three hosts, the `.soil` token,
+the failure table, and a line on the abandoned generator options so the question stays closed), plus edits to `docs/library.md`, `docs/notebook.md` (the page-paper row now opens a screen),
 `apps/notesprout_ratta/CLAUDE.md`, root `CLAUDE.md`, and memory. Then commit + freeze.
 *Fable is out for this arc — review runs as `/code-review`, fixes go to Opus.*
 

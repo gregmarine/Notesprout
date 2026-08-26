@@ -52,16 +52,6 @@ class FolderPickerActivity : AppCompatActivity() {
     private var browseFolderType = ObjectType.FOLDER
     private var rootLabel = ""
 
-    /**
-     * **Pick mode** (arc 13 / G2): the screen answers "which folder?" and moves nothing. Saving a
-     * generator variant needs a destination before the row exists, so there is nothing to carry,
-     * nothing to exclude and no collision to check here — the caller names the template afterwards
-     * and does its own duplicate check, exactly as New folder does.
-     */
-    private var pickOnly = false
-    private var titleText = ""
-    private var confirmText = ""
-
     /** The folder being moved — hidden from every listing. Empty when moving a notebook. */
     private var excludeId = ""
 
@@ -78,15 +68,12 @@ class FolderPickerActivity : AppCompatActivity() {
         setContentView(binding.root)
         TopGuard.applyInsetPadding(binding.root)
 
-        pickOnly = intent.getBooleanExtra(EXTRA_PICK_ONLY, false)
-        movingId = intent.getStringExtra(EXTRA_ITEM_ID) ?: if (pickOnly) "" else run { finish(); return }
+        movingId = intent.getStringExtra(EXTRA_ITEM_ID) ?: run { finish(); return }
         movingType = intent.getStringExtra(EXTRA_ITEM_TYPE) ?: ObjectType.NOTEBOOK
         movingName = intent.getStringExtra(EXTRA_ITEM_NAME).orEmpty()
         currentFolderId = intent.getStringExtra(EXTRA_CURRENT_PARENT)
         browseFolderType = intent.getStringExtra(EXTRA_BROWSE_FOLDER_TYPE) ?: ObjectType.FOLDER
         rootLabel = intent.getStringExtra(EXTRA_ROOT_LABEL) ?: getString(R.string.library_root)
-        titleText = intent.getStringExtra(EXTRA_TITLE_TEXT) ?: getString(R.string.move_title)
-        confirmText = intent.getStringExtra(EXTRA_CONFIRM_TEXT) ?: getString(R.string.move_here)
         // A folder being moved is hidden from every listing, so its own subtree can never be
         // entered. A notebook or a template carries nothing with it and hides nothing.
         excludeId = if (movingType == browseFolderType) movingId else ""
@@ -105,7 +92,6 @@ class FolderPickerActivity : AppCompatActivity() {
     }
 
     private fun wireBars() = with(binding) {
-        btnMoveHere.text = confirmText
         btnCancel.setOnClickListener { finish() }
         btnMoveHere.setOnClickListener { moveHere() }
         btnUp.setOnClickListener { navigateUp() }
@@ -135,7 +121,7 @@ class FolderPickerActivity : AppCompatActivity() {
             val ancestry = repo.ancestry(currentFolderId, browseFolderType)
             val container = binding.breadcrumbContainer
             container.removeAllViews()
-            container.addView(label(titleText, ink))
+            container.addView(label(getString(R.string.move_title), ink))
             container.addView(crumb(rootLabel, ink) { navigateTo(null) })
             for (ref in ancestry) {
                 if (ref.id == excludeId) continue
@@ -203,11 +189,6 @@ class FolderPickerActivity : AppCompatActivity() {
     }
 
     private fun moveHere() {
-        if (pickOnly) {
-            setResult(Activity.RESULT_OK, Intent().putExtra(EXTRA_PICKED_FOLDER_ID, currentFolderId))
-            finish()
-            return
-        }
         lifecycleScope.launch {
             if (repo.nameTaken(currentFolderId, movingType, movingName, movingId)) {
                 val msg = when (movingType) {
@@ -242,36 +223,6 @@ class FolderPickerActivity : AppCompatActivity() {
         private const val EXTRA_CURRENT_PARENT = "currentParent"
         private const val EXTRA_BROWSE_FOLDER_TYPE = "browseFolderType"
         private const val EXTRA_ROOT_LABEL = "rootLabel"
-        private const val EXTRA_PICK_ONLY = "pickOnly"
-        private const val EXTRA_TITLE_TEXT = "titleText"
-        private const val EXTRA_CONFIRM_TEXT = "confirmText"
-
-        /** Pick mode's answer: the chosen folder's id, or absent for the root. */
-        const val EXTRA_PICKED_FOLDER_ID = "pickedFolderId"
-
-        /** Read [EXTRA_PICKED_FOLDER_ID] out of a pick-mode result. */
-        fun pickedFolderId(data: Intent?): String? = data?.getStringExtra(EXTRA_PICKED_FOLDER_ID)
-
-        /**
-         * Walk [browseFolderType]'s tree and return a folder rather than moving anything — the
-         * "where does this go?" half of Save as template… ([pickOnly]).
-         */
-        fun pickIntent(
-            context: Context,
-            browseFolderType: String,
-            rootLabel: String,
-            title: String,
-            confirm: String,
-            startAt: String? = null,
-        ): Intent = Intent(context, FolderPickerActivity::class.java)
-            .putExtra(EXTRA_PICK_ONLY, true)
-            .putExtra(EXTRA_ITEM_ID, "")
-            .putExtra(EXTRA_ITEM_TYPE, browseFolderType)
-            .putExtra(EXTRA_CURRENT_PARENT, startAt)
-            .putExtra(EXTRA_BROWSE_FOLDER_TYPE, browseFolderType)
-            .putExtra(EXTRA_ROOT_LABEL, rootLabel)
-            .putExtra(EXTRA_TITLE_TEXT, title)
-            .putExtra(EXTRA_CONFIRM_TEXT, confirm)
 
         fun intent(
             context: Context,
