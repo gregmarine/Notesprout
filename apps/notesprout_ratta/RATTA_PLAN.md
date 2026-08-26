@@ -3148,6 +3148,11 @@ browser, with the same folders, the same long-press behaviour and the same impor
   `recyclerview-selection`, which reads the event in ways an injected one does not satisfy. So
   **every path that begins with choosing a file is a user checklist item**, and a `CREATE_DOCUMENT`
   save is too (its SAVE button is reachable, but only after a pick has produced something to save).
+- **A query is not a name** (found in G5, 2026-08-26). `NameDialog` is the family's one "type a
+  short string" dialog, and reusing it drags `name_problem_title` / `name_empty` along by habit —
+  so an empty *search* first refused with *"That name won't work / Name cannot be empty"*, which
+  answers a question the user did not ask. A dialog reused for something that is not a name needs
+  its own words.
 - **A disabled button is invisible on e-ink** — click-guard plus a dialog, never `isEnabled = false`.
 - **Toast confirms, dialog explains** — a refused import (too large, unreadable, reserved folder) is
   a dialog.
@@ -3438,7 +3443,7 @@ a file is a user checklist item. That is also what caught the elvis bug: the che
 the only thing that could.
 
 ### G5 — Pinned, Recents, Search
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (commit `PENDING`)
 
 Three flat, paginated, mutually exclusive views on the same grid, reached from the Templates
 screen's top bar: **Pinned** (a sentinel `LIST` row + `list_item` edges, templates only, Pin/Unpin on
@@ -3450,6 +3455,103 @@ and recordable through their sentinel ids.
 matching); debug + release build; Nomad walk (pin/unpin, the three views' exclusivity, a recents
 entry appearing only after a real apply, a deleted template vanishing from both lists).
 *Sonnet, with Opus on the recents/pin store.*
+
+**Questions to resolve at phase start — answered 2026-08-26, do not re-ask:**
+
+| Question | Answer |
+|---|---|
+| **Where the three controls live** | **The bottom bar, on the left** — the library's shape, not G5's "top bar" sentence. Pinned · Recents · Search at the bottom-left, and the *top* bar swaps its breadcrumbs for a shelf title + a close ✕ while a shelf is up, exactly as `LibraryActivity` does. Measured first: 6 fixed buttons × 116 px + the pager's 569 px = **1265 px of 1404** on the Nomad, 139 px of headroom, no reflow. |
+| **Which hosts** | **All three.** It is one component, so they come free — and Pinned/Recents earn the most while *picking*: the paper used constantly is one tap from the notebook instead of three folders deep. |
+| **How a query is typed** | **A dialog, then a flat shelf.** Search opens the family's one-field `NameDialog`; confirming shows the matches as a shelf whose title is the query, closed like the other two, and re-tapping Search re-opens the dialog with the last query in it. An inline field was rejected: `NewNotebookActivity` is `adjustNothing` (G3), so a field in the browser's own chrome would sit under the IME with no way to reach it — and live filtering is a repaint per keystroke on e-ink. |
+| **What Search finds** | **Paper only, sentinels included.** Template names anywhere in the tree, plus **Blank** and the three built-ins by their labels — typing "grid" and not finding Grid would read as a bug. **Folders never appear**: a place is not paper, and a flat shelf you tap to pick must not have taps that mean two things. |
+| **What can be pinned** | **Static templates and the three built-ins**; never a folder, never Blank (it is already card #1 at the root, forever). |
+| **Do the built-ins long-press?** | **Yes — to exactly one row, Pin / Unpin.** This reverses G1's "the built-in papers do not long-press at all" *for this row only*, on the user's call, and the reason is the reason G1 gave: its rule was written because the sentinel's only candidate row was *Template options…*, which opened G2, and **a row that opens nothing is worse than no row**. Pin is a row that does something. **Blank and Default still do not long-press at all.** (Note this is the *opposite* call to G4's dropped built-in export — the difference is that Export on a sentinel had a live alternative and Pin has none.) |
+| **Does a shelf persist?** | **No.** The browser opens at the templates root, in the tree, every time, in all three hosts. A shelf is a glance, not a place to live — and persisting a Search would mean writing a **name** into device-local plaintext prefs, which the family's prefs rule forbids. |
+| **When Recents records** | On an **apply that resolved**: the New Notebook screen creating from a pick, and the notebook re-papering a page. A pick whose row vanished (the problem dialog) records nothing; **Blank records nothing**. A re-pick of the ticked card *does* record — the prefs write is not a page change and raises no undo step. |
+
+**Outcome (2026-08-26):** built and walked on the Nomad; **753 JVM tests** across the five modules
+(was 704 — `:app` alone went 537 → 586), debug + release both build, release signs, crash buffer
+empty. Version stays `0.1.0-ratta`; g-paper pin stays 0.1.6. No new dependency, no schema change,
+no migration.
+
+*What landed.* A second `LIST` sentinel (`TEMPLATE_PINNED_LIST_ID`, "tpinnd") and an
+`IndexRepository` shelf region (pin/unpin/`pinnedTemplateIds`/`aliveTemplates`/`searchTemplates`);
+`ObjectDao.searchOfType` (a `LIKE … ESCAPE '\'` with **no `parentId` at all**) and `aliveOfType`
+(one blob-free read per shelf). Two pure, JVM-tested files —
+**`data/template/TemplateSearch`** (the `LIKE` pattern, the label matcher, the runnable check) and
+**`templates/TemplateShelves`** (what is pinnable, the pinned composition, the recents ordering and
+its prune set, the search card composition). **`templates/TemplateShelfView`** is the shelves
+themselves, beside `TemplateBrowser` the way `TemplateTransfer` is: this class is about *where you
+are*, and a shelf has no where. `templates/TemplateRecents` is the one place that decides what
+counts as a use. Chrome: three buttons at the bottom-left, a `shelfTitle` + its own ✕ in the top
+bar, and a pin badge on `card_template` — the notebook card's badge in the notebook card's chip.
+
+*One implementation, two stores.* `RecentsPrefs` was generalised rather than copied: same
+"move to front, cap, prune" arithmetic, a `templates(context)` factory beside `SortPrefs`'s, and
+`RecentEntry.notebookId` renamed to `id` **keeping `@SerialName("notebookId")`** — blobs written
+before the rename are on every device this app has ever run on, and a field name is not worth a
+silently emptied recents shelf.
+
+*Four calls worth knowing.*
+**(1) The built-ins long-press now — to exactly one row.** The wizard said they are pinnable and G1
+said they do not long-press at all; put to the user, **the pin wins**, and for G1's own reason: G1's
+rule was written because the sentinel's only candidate row *then* was *Template options…*, which
+opened the abandoned G2, and **a row that opens nothing is worse than no row**. Pin is a row that
+does something. Blank and Default still do not long-press. Note this is the *opposite* call to G4's
+dropped built-in export — the difference is that Export on a sentinel had a live alternative and Pin
+has none.
+**(2) The browser owns the host's ✕ now.** In a shelf the Templates screen would have shown two
+identical ✕ side by side — one leaving the shelf, one leaving the screen — which is a choice nobody
+can make by looking. `showCloseButton` moved the button under the browser so a shelf can hide it,
+and back peels the same way: shelf first, then folders, then out.
+**(3) A shelf is a glance, not a place.** Nothing persists — not the mode, not the query. The
+browser opens in the tree, at the root, in all three hosts. Persisting a search would also mean
+writing a **name** into device-local plaintext prefs, which the family's prefs rule forbids; the
+query lives in the `TemplateShelfView` instance and dies with the screen.
+**(4) Duplicate stands down on a shelf**, with New folder and Import. It lands a copy in the
+*original's* folder, which a shelf is neither standing in nor showing — in the tree the new card
+appears under your finger, on a shelf it would read as a row that did nothing.
+
+*Confirmed on the glass.* The bottom bar measured **exactly** as written: 3 shelf buttons at
+0–348 px, Sort/New folder/Import at 1056–1404, the pager invisible between them, no reflow. Pinned →
+Recents switched rather than stacked (one field, so exclusivity is structural). A built-in pinned
+from inside **Default** showed on the Pinned shelf opened from inside **test** — a shelf cuts across
+the tree. The two orderings are visibly different and correct: Pinned drew *Grid, tpl-square* (the
+built-in first, then the rows in the screen's sort) while Recents drew *tpl-square, Grid* (stored
+order, newest first). A card wore **both** badges honestly — the tick top-left, the pin top-right.
+Deleting a pinned, recently-used template from the Pinned shelf removed it from **both** shelves and
+left the built-in alone. Search from the root found all four `tpl` rows two folders down, including
+`x-tpl-huge` (substring anywhere), and found the **Grid** built-in by its label. Recents stayed
+empty through browsing, pinning and searching and filled only at the apply — the log reads
+`template use recorded` then `re-paper minted template`. Re-picking the ticked card logged
+`template use recorded` then **`re-paper reuses template` with no `re-papered` line**: G3's true
+no-op survives, and the prefs write raised no undo step. Back peeled shelf → tree → out; a cold
+restart landed in the tree. Crash buffer empty.
+
+*Two traps this phase paid for.*
+**The refusal borrowed the wrong words.** An empty query first raised *"That name won't work / Name
+cannot be empty"* — `name_problem_title` reused out of habit. **A query is not a name**, and that
+dialog answers a question the user did not ask; it now has its own two strings. Worth watching for
+wherever `NameDialog` gets reused for something that is not a name.
+**`TemplateBrowser` hit 831 lines** — over this app's ~800 rule. Rather than write a justification,
+the shelves came out into `TemplateShelfView` (708 / 212), which is the better shape anyway and is
+the same seam G4 used for `TemplateTransfer`.
+
+*The `input text` trap re-confirmed, and the way through it.* `adb shell input text "grid"` left the
+field on its hint — PinyinIME eats injected keys, exactly as recorded. The query **was** typed by
+tapping the on-screen keyboard: the IME window is invisible to `uiautomator dump`, so its key
+centres came off a `screencap` read as an image (the capture is 1:1 with device pixels), and the
+dialog's own 350 px shift under the IME is the tell that the keyboard is actually up.
+
+**User checklist — restoration only, nothing about G5 is unverified:**
+1. **Re-import `tpl-square`.** The delete-scrub walk needed a pinned, recently-used static template
+   and `tpl-square` was the one to hand, so it is gone. Its source is staged back on the device at
+   `/sdcard/Download/tpl-square.png` — Templates → **test** → Import → Downloads → tpl-square.png →
+   Fit → name it `tpl-square`. (A SAF pick cannot be driven by adb; that is the standing G4 trap.)
+2. **The page `abc / abc 20260822 001 / page 1` was re-papered** three times during the walk and is
+   now on the `tpl-square` image (whose library row was then deleted — the page keeps its pixels,
+   which is the rule). Undo it back if you want it as it was: the multi-finger double-tap, which adb
+   cannot inject.
 
 ### G6 — Review, hardening, docs, freeze
 **Status:** ⬜ Not started

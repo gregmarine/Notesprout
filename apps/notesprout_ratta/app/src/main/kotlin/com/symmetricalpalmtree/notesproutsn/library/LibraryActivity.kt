@@ -428,10 +428,10 @@ class LibraryActivity : AppCompatActivity() {
         val entries = recentsPrefs.entries()
         val alive = LinkedHashMap<String, ObjectSummary>(entries.size)
         for (e in entries) {
-            if (e.notebookId in alive) continue
-            val s = repo.alive(e.notebookId) ?: continue
+            if (e.id in alive) continue
+            val s = repo.alive(e.id) ?: continue
             if (s.type != ObjectType.NOTEBOOK) continue
-            alive[e.notebookId] = s
+            alive[e.id] = s
         }
         val order = RecentsAssembly.visibleIds(entries, alive.keys)
         val folderNames = HashMap<String, String>()

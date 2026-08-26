@@ -54,8 +54,15 @@ import kotlinx.coroutines.withContext
  *    row that has vanished (the unknown-stays-unknown rule).
  *
  * Everything else — the two kinds and no third, the sentinels that are not rows, the reserved
- * **Default** folder, and the fact that only a real row long-presses — is the browser's own and the
- * same wherever it is shown.
+ * **Default** folder, the three shelves, and what may be long-pressed — is the browser's own and
+ * the same wherever it is shown.
+ *
+ * **The shelves** (G5) are three flat, mutually exclusive views that cut across the folder tree:
+ * Pinned, Recents and Search. A shelf has no path, so the breadcrumbs give way to its title and a
+ * close ✕, and the three controls that act on a folder (Sort excepted) stand down. Nothing about a
+ * shelf persists: the browser opens in the tree, at the root, every time and in every host — a
+ * shelf is a glance you take, not a place to live, and a picker that opened onto one would have no
+ * visible way back to the paper the page is actually using.
  */
 class TemplateBrowser(
     private val activity: AppCompatActivity,
@@ -81,8 +88,22 @@ class TemplateBrowser(
         onChanged = { reload() },
     )
 
+    /**
+     * The three flat views that cut across the tree (G5): Pinned, Recents, Search. Its own
+     * component, beside this one rather than inside it — this class is about *where you are*, and
+     * a shelf has no where.
+     */
+    private val shelf = TemplateShelfView(activity, repo, sortPrefs, onChanged = { reload() })
+
     /** null = the templates root · [ListIds.TEMPLATE_DEFAULT_ID] = the reserved folder · else a row. */
     private var folderId: String? = null
+
+    /** The pinned ids, read once per [refresh] — every badge and the sheet's Pin/Unpin row come
+     *  from this, so no card ever asks the index on its own. */
+    private var pinnedIds: Set<String> = emptySet()
+
+    /** Whether the host asked for its own close ✕ ([showCloseButton]). A shelf hides it either way. */
+    private var hostCloseWanted = false
 
     private var pageIndex = 0
     private var pageCount = 1
@@ -125,13 +146,20 @@ class TemplateBrowser(
         btnSort.setOnClickListener { showSortSheet() }
         btnNewFolder.setOnClickListener { showNewFolderDialog() }
         btnImport.setOnClickListener { transfer.startImport() }
+        // A shelf button toggles its own shelf: tapping Pinned while Pinned is up returns to the
+        // folder you were in, so the same button is always the way out of what it opened.
+        btnPinned.setOnClickListener { shelf.toggle(TemplateShelfView.Mode.PINNED) }
+        btnRecents.setOnClickListener { shelf.toggle(TemplateShelfView.Mode.RECENTS) }
+        btnSearch.setOnClickListener { shelf.openSearchDialog() }
+        btnCloseShelf.setOnClickListener { shelf.close() }
         btnUp.setOnClickListener { navigateUp() }
         btnFirst.setOnClickListener { goToPage(0) }
         btnPrev.setOnClickListener { goToPage(pageIndex - 1) }
         btnNext.setOnClickListener { goToPage(pageIndex + 1) }
         btnLast.setOnClickListener { goToPage(pageCount - 1) }
 
-        listOf(btnSort, btnNewFolder, btnImport, btnUp, btnFirst, btnPrev, btnNext, btnLast)
+        listOf(btnSort, btnNewFolder, btnImport, btnPinned, btnRecents, btnSearch, btnCloseShelf,
+               btnUp, btnFirst, btnPrev, btnNext, btnLast)
             .forEach { TooltipCompat.setTooltipText(it, it.contentDescription) }
     }
 
@@ -148,6 +176,20 @@ class TemplateBrowser(
         activity.lifecycleScope.launch { bindCurrentPage() }
     }
 
+    /**
+     * Offer the host's own way out by tap (the Templates screen; the other two hosts have their own
+     * headers). The browser owns the button rather than the host **because a shelf hides it**: two
+     * identical ✕ side by side, one leaving the shelf and one leaving the screen, is a choice no
+     * one can make by looking. While a shelf is up the only ✕ is the shelf's, and the host's comes
+     * back the moment the shelf closes — the same peel-one-layer rule [onBackPressed] follows.
+     */
+    fun showCloseButton(onClose: () -> Unit) {
+        hostCloseWanted = true
+        binding.btnClose.setOnClickListener { onClose() }
+        TooltipCompat.setTooltipText(binding.btnClose, binding.btnClose.contentDescription)
+        binding.btnClose.visibility = if (shelf.isOpen) View.GONE else View.VISIBLE
+    }
+
     /** The host's `onSaveInstanceState` / `onCreate`, passed through to [TemplateTransfer] — the
      *  only browser state that must survive the host being killed behind a system picker. */
     fun saveState(outState: Bundle) = transfer.saveState(outState)
@@ -160,6 +202,10 @@ class TemplateBrowser(
      * would make the tree not worth using.
      */
     fun onBackPressed(): Boolean {
+        // The shelf is the outermost layer: it is what is on screen, and the folder underneath it
+        // is where back will land next. Peeling both at once would drop the user two levels for one
+        // press, which is the thing this method exists to prevent.
+        if (shelf.isOpen) { shelf.close(); return true }
         if (folderId == null) return false
         navigateUp()
         return true
@@ -171,7 +217,12 @@ class TemplateBrowser(
 
     private suspend fun refresh() {
         renderChrome()
+        // One read of the pinned list per refresh, whichever view is up: every badge and the
+        // management sheet's Pin/Unpin row come from it. Unfiltered — resolving which of those ids
+        // still stands for something is the shelf's job, and only the Pinned shelf has to care.
+        pinnedIds = repo.pinnedTemplateIds().toSet()
         items = when {
+            shelf.isOpen -> shelf.cards(pinnedIds)
             inDefaults -> TemplateLibrary.defaultCards(
                 activity.getString(R.string.template_lined),
                 activity.getString(R.string.template_dotted),
@@ -185,6 +236,7 @@ class TemplateBrowser(
             else -> TemplateLibrary.rowCards(sortedRows(folderId))
         }
 
+        binding.emptyState.setText(shelf.emptyTextRes())
         binding.emptyState.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
         pageCount = GridMath.pageCount(items.size, grid?.cardsPerPage ?: 1)
         pageIndex = GridMath.clampPage(pageIndex, pageCount)
@@ -229,7 +281,7 @@ class TemplateBrowser(
             }
             art to ticked
         }
-        g.bind(items, pageIndex, work.first, work.second)
+        g.bind(items, pageIndex, work.first, work.second, pinnedIds)
         renderPager()
     }
 
@@ -264,13 +316,30 @@ class TemplateBrowser(
      * `isEnabled = false`: a disabled control is invisible on e-ink and reads as a broken one.
      */
     private fun renderChrome() = with(binding) {
-        val fixed = inDefaults
-        btnSort.visibility = if (fixed) View.GONE else View.VISIBLE
+        val inShelf = shelf.isOpen
+        // A shelf has no folder to create into or import into either — and unlike Default it has no
+        // path at all, so btnUp and the breadcrumbs go with them. Sort stays: the pinned and search
+        // shelves are ordered by it, and it is the one control that still has something to act on.
+        val fixed = inDefaults || inShelf
+        btnSort.visibility = if (inDefaults) View.GONE else View.VISIBLE
         btnNewFolder.visibility = if (fixed) View.GONE else View.VISIBLE
         // Import goes too: the Default folder is the app's paper, and the arc reserves it against
         // anything landing inside. A button that could only refuse itself is not a button.
         btnImport.visibility = if (fixed) View.GONE else View.VISIBLE
-        renderBreadcrumb()
+        btnPinned.isSelected = shelf.mode == TemplateShelfView.Mode.PINNED
+        btnRecents.isSelected = shelf.mode == TemplateShelfView.Mode.RECENTS
+        btnSearch.isSelected = shelf.mode == TemplateShelfView.Mode.SEARCH
+
+        breadcrumbScroll.visibility = if (inShelf) View.GONE else View.VISIBLE
+        shelfTitle.visibility = if (inShelf) View.VISIBLE else View.GONE
+        btnCloseShelf.visibility = if (inShelf) View.VISIBLE else View.GONE
+        btnClose.visibility = if (hostCloseWanted && !inShelf) View.VISIBLE else View.GONE
+        if (inShelf) {
+            btnUp.visibility = View.GONE
+            shelfTitle.text = shelf.title()
+        } else {
+            renderBreadcrumb()
+        }
     }
 
     private fun renderBreadcrumb() {
@@ -321,6 +390,11 @@ class TemplateBrowser(
 
     private fun navigateTo(id: String?) {
         folderId = id
+        // Going somewhere is being in the tree. Nothing reaches here from a shelf today (a shelf
+        // holds no folder cards and hides btnUp), but a shelf left standing over a breadcrumb
+        // navigation would show one place and list another. reset(), not close(): the reload
+        // below is the redraw, and close()'s own would race it over the same fields.
+        shelf.reset()
         pageIndex = 0
         reload()
     }
@@ -355,13 +429,24 @@ class TemplateBrowser(
     }
 
     /**
-     * The management sheet. Only the two card kinds that *are* rows have one — a sentinel cannot be
-     * renamed, moved or deleted, so it does not long-press at all — and a built-in paper is the
-     * app's own, not the user's, so it does not either.
+     * The management sheet.
+     *
+     * A **static template** and a **folder** are rows, and get the full sheet. A **built-in paper**
+     * is the app's own and cannot be renamed, moved, duplicated, re-fitted, exported or deleted —
+     * but it *can* be pinned, so as of G5 it long-presses to exactly that one row.
+     *
+     * That reverses G1's "the built-in papers do not long-press at all", on the user's call, and
+     * for G1's own reason: the rule was written because the sentinel's only candidate row then was
+     * *Template options…*, which opened the abandoned G2, and **a row that opens nothing is worse
+     * than no row**. Pin is a row that does something. **Blank and the Default folder still do not
+     * long-press** — Blank is not pinnable (it is already the first card at the root, forever) and
+     * a folder is a place.
      */
     private fun onCardLongPress(item: TemplateCard) {
         val sheet = ActionSheetDialog(activity).title(item.name)
         when (item) {
+            is TemplateCard.BuiltIn -> sheet.addPinRow(item.id).show()
+
             is TemplateCard.Folder -> sheet
                 .addAction(R.drawable.ic_edit, activity.getString(R.string.action_rename)) { showRenameDialog(item.summary) }
                 .addAction(R.drawable.ic_move_folder, activity.getString(R.string.action_move)) { showMovePicker(item.summary) }
@@ -369,9 +454,14 @@ class TemplateBrowser(
                 .show()
 
             is TemplateCard.Static -> sheet
+                .addPinRow(item.id)
                 .addAction(R.drawable.ic_edit, activity.getString(R.string.action_rename)) { showRenameDialog(item.summary) }
                 .addAction(R.drawable.ic_move_folder, activity.getString(R.string.action_move)) { showMovePicker(item.summary) }
-                .addAction(R.drawable.ic_copy, activity.getString(R.string.action_duplicate)) { duplicate(item.summary) }
+                // Duplicate lands a copy beside the original, in the original's folder — which a
+                // shelf is not standing in and does not show. In the tree the new card appears
+                // under your finger; on a shelf it would look like a row that did nothing, so it
+                // stands down there with New folder and Import.
+                .also { if (!shelf.isOpen) it.addAction(R.drawable.ic_copy, activity.getString(R.string.action_duplicate)) { duplicate(item.summary) } }
                 // Fit is only a question for imported pixels — a static row carrying a base kind is
                 // drawn from arithmetic and already fills the page exactly.
                 .also { if (item.isImage) it.addAction(R.drawable.ic_aspect_ratio, activity.getString(R.string.action_fit)) { transfer.chooseFit(item.summary) } }
@@ -380,6 +470,24 @@ class TemplateBrowser(
                 .show()
 
             else -> Unit
+        }
+    }
+
+    /**
+     * Pin / Unpin, worded from [pinnedIds] — the listing's own read, not a fresh index query, so
+     * the sheet can never disagree with the badge the user is looking at.
+     */
+    private fun ActionSheetDialog.addPinRow(cardId: String): ActionSheetDialog {
+        val pinned = cardId in pinnedIds
+        val label = if (pinned) R.string.action_unpin else R.string.action_pin
+        return addAction(R.drawable.ic_pinned, activity.getString(label)) { togglePin(cardId, pinned) }
+    }
+
+    private fun togglePin(cardId: String, currentlyPinned: Boolean) {
+        activity.lifecycleScope.launch {
+            if (currentlyPinned) repo.unpinTemplate(cardId) else repo.pinTemplate(cardId)
+            Slog.d(TAG) { "template ${if (currentlyPinned) "unpinned" else "pinned"}" }
+            refresh()
         }
     }
 
@@ -497,7 +605,12 @@ class TemplateBrowser(
         name = s.name,
     ) {
         activity.lifecycleScope.launch {
+            // The pin edge goes with the row (deleteTemplate scrubs it); the recents entry is in
+            // prefs and has to be removed by hand. The shelf's own read would prune it eventually,
+            // but "eventually" here means "the next time the user opens Recents", and until then
+            // the id is a live pointer at a dead row.
             repo.deleteTemplate(s.id)
+            shelf.forget(listOf(s.id))
             refresh()
         }
     }
@@ -508,11 +621,35 @@ class TemplateBrowser(
         name = s.name,
     ) {
         activity.lifecycleScope.launch {
+            // The ids first: the cascade soft-deletes them, and afterwards there is no way to ask
+            // the index which templates were inside. Their pin edges are scrubbed by the cascade
+            // itself; their recents entries are prefs, and this is the only chance to name them.
+            val inside = templateIdsUnder(s.id)
             val removed = repo.deleteTemplateFolderRecursive(s.id)
+            shelf.forget(inside)
             Slog.d(TAG) { "deleted folder ${s.id} with $removed templates" }
             // Standing inside the folder that just went: step out to where it used to be.
             if (folderId == s.id) navigateTo(s.parentId) else refresh()
         }
+    }
+
+    /**
+     * Every static template under [folderId], at any depth — read **before** a recursive delete,
+     * because afterwards the rows are soft-deleted and the listing calls can no longer see them.
+     * Cycle-guarded the way the repository's own cascade is: a corrupt `parentId` costs a bounded
+     * walk rather than a hang.
+     */
+    private suspend fun templateIdsUnder(folderId: String): List<String> {
+        val found = mutableListOf<String>()
+        val seen = HashSet<String>()
+        val stack = ArrayDeque<String>().apply { add(folderId) }
+        while (stack.isNotEmpty()) {
+            val fid = stack.removeLast()
+            if (!seen.add(fid)) continue
+            found += repo.templates(fid).map { it.id }
+            repo.templateFolders(fid).forEach { stack.add(it.id) }
+        }
+        return found
     }
 
     private fun confirm(titleRes: Int, bodyRes: Int, name: String, onConfirm: () -> Unit) {

@@ -29,4 +29,14 @@ object ListIds {
 
     /** The Grid built-in — "_grid_" (5f 67 72 69 64 5f). */
     const val TEMPLATE_GRID_ID = "00000000-0000-0000-0000-5f677269645f"
+
+    /**
+     * The pinned-**templates** list (arc 13 / G5) — "tpinnd" (74 70 69 6e 6e 64). A real row, unlike
+     * the five above: it is a `LIST` created on demand, exactly like [PINNED_LIST_ID], and its
+     * `list_item` edges may point at either a static template's id **or** one of the three built-in
+     * sentinels. It is a second list rather than a second use of the notebook one because a shelf
+     * of paper and a shelf of notebooks are two different shelves, and one `refId` space shared
+     * between them would make every read filter by type to tell them apart.
+     */
+    const val TEMPLATE_PINNED_LIST_ID = "00000000-0000-0000-0000-7470696e6e64"
 }

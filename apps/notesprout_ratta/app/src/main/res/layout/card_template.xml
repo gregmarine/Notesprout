@@ -21,6 +21,20 @@
             android:scaleType="fitCenter"
             android:contentDescription="@null" />
 
+        <!-- Pinned. Top-right, the notebook card's own badge in the notebook card's own chip, so a
+             pin means one thing across the app; the tick keeps the top-left corner it already had,
+             and a card can honestly wear both. -->
+        <ImageView
+            android:id="@+id/pinBadge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|end"
+            android:background="@drawable/bg_pin_badge"
+            android:src="@drawable/ic_pinned"
+            android:padding="2dp"
+            android:visibility="gone"
+            android:contentDescription="@string/cd_pinned_badge" />
+
         <!-- The paper this page (or this new notebook) is already using. Over the miniature rather
              than beside the name: the tick has to sit on the thing it is about, and on paperWhite
              so it reads against a dense grid. -->

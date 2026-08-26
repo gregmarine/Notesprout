@@ -1,11 +1,12 @@
-package com.symmetricalpalmtree.notesproutsn.data.clip
+package com.symmetricalpalmtree.notesproutsn.data.index
 
-import com.symmetricalpalmtree.notesproutsn.data.index.ObjectDao
-import com.symmetricalpalmtree.notesproutsn.data.index.ObjectEntity
-import com.symmetricalpalmtree.notesproutsn.data.index.ObjectSummary
-import com.symmetricalpalmtree.notesproutsn.data.index.ObjectType
+import com.symmetricalpalmtree.notesproutsn.data.clip.ClipHeader
 
-/** Minimal in-memory `objects` table — enough for [ClipStoreTest]; Room is not what is under test. */
+/**
+ * Minimal in-memory `objects` table — Room is not what is under test. Shared by the clipboard
+ * store's tests and arc 13's template-shelf tests, which is why it sits beside [ObjectDao] rather
+ * than inside either feature's package.
+ */
 class FakeObjectDao : ObjectDao {
 
     val rows = LinkedHashMap<String, ObjectEntity>()
@@ -26,6 +27,31 @@ class FakeObjectDao : ObjectDao {
         ids.mapNotNull { rows[it] }
             .filter { it.type == ObjectType.NOTEBOOK && it.deletedAt == null }
             .map { it.toSummary() }
+
+    override suspend fun searchOfType(type: String, pattern: String): List<ObjectSummary> {
+        // The `%`/`_` wildcards and `\` escaping of a real LIKE, in the smallest form that keeps
+        // `TemplateSearch.likePattern`'s output honest here — an escaped wildcard must match the
+        // literal character, which is exactly what the escaping exists to guarantee.
+        val regex = StringBuilder()
+        var i = 0
+        while (i < pattern.length) {
+            val c = pattern[i]
+            when {
+                c == '\\' && i + 1 < pattern.length -> { regex.append(Regex.escape(pattern[i + 1].toString())); i++ }
+                c == '%' -> regex.append(".*")
+                c == '_' -> regex.append(".")
+                else -> regex.append(Regex.escape(c.toString()))
+            }
+            i++
+        }
+        val re = Regex(regex.toString(), RegexOption.IGNORE_CASE)
+        return rows.values
+            .filter { it.type == type && it.deletedAt == null && re.matches(it.name) }
+            .map { it.toSummary() }
+    }
+
+    override suspend fun aliveOfType(ids: List<String>, type: String): List<ObjectSummary> =
+        ids.mapNotNull { rows[it] }.filter { it.type == type && it.deletedAt == null }.map { it.toSummary() }
 
     override suspend fun countSiblingsNamed(parentId: String?, type: String, name: String, excludeId: String) =
         rows.values.count {

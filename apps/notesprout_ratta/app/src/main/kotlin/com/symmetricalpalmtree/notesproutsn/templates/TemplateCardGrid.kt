@@ -60,12 +60,14 @@ class TemplateCardGrid(
      *
      * [ticked] are the card ids showing the paper in force (arc 13 / G3). A **set**, not one id: two
      * library rows can hold the same picture, and both are honestly the paper the page is using.
+     * [pinned] (G5) is resolved once per refresh from the pinned list, so no card asks on its own.
      */
     fun bind(
         items: List<TemplateCard>,
         pageIndex: Int,
         art: Map<String, Bitmap?>,
         ticked: Set<String> = emptySet(),
+        pinned: Set<String> = emptySet(),
     ) {
         currentGrid?.let { container.removeView(it) }
         currentGrid = null
@@ -87,7 +89,7 @@ class TemplateCardGrid(
             val item = items[i]
             val isFolder = item is TemplateCard.Folder || item is TemplateCard.Defaults
             val view = if (isFolder) folderCard(inflater, item)
-                       else templateCard(inflater, item, art[item.id], item.id in ticked)
+                       else templateCard(inflater, item, art[item.id], item.id in ticked, item.id in pinned)
             view.layoutParams = GridLayout.LayoutParams().apply {
                 width = cardWidth
                 height = cardHeight
@@ -111,9 +113,11 @@ class TemplateCardGrid(
         item: TemplateCard,
         art: Bitmap?,
         ticked: Boolean,
+        pinned: Boolean,
     ): View = inflater.inflate(R.layout.card_template, container, false).apply {
         findViewById<TextView>(R.id.templateName).text = item.name
         findViewById<ImageView>(R.id.templatePreview).setImageBitmap(art)
         findViewById<ImageView>(R.id.templateTick).visibility = if (ticked) View.VISIBLE else View.GONE
+        findViewById<ImageView>(R.id.pinBadge).visibility = if (pinned) View.VISIBLE else View.GONE
     }
 }

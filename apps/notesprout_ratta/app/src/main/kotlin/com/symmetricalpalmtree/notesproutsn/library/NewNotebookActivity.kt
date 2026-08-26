@@ -29,6 +29,7 @@ import com.symmetricalpalmtree.notesproutsn.databinding.ActivityNewNotebookBindi
 import com.symmetricalpalmtree.notesproutsn.templates.TemplateBrowser
 import com.symmetricalpalmtree.notesproutsn.templates.TemplatePick
 import com.symmetricalpalmtree.notesproutsn.templates.TemplatePicks
+import com.symmetricalpalmtree.notesproutsn.templates.TemplateRecents
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -170,6 +171,10 @@ class NewNotebookActivity : AppCompatActivity() {
             }
             val result = runCatching { withContext(Dispatchers.IO) { createNotebook(name, chosen, paper) } }
             result.onSuccess { id ->
+                // Baking page 1 is an apply, and an apply is the only thing that makes paper
+                // recent (arc 13 / G5). After the create, never before: a notebook that failed to
+                // be written is not paper the user has been working on.
+                TemplateRecents.record(this@NewNotebookActivity, chosen)
                 setResult(Activity.RESULT_OK, Intent().apply {
                     putExtra(EXTRA_NOTEBOOK_ID, id)
                     putExtra(EXTRA_NOTEBOOK_NAME, name)

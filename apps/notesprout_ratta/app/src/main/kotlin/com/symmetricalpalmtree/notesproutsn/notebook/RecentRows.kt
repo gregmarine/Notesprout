@@ -24,7 +24,7 @@ object RecentRows {
     fun select(entries: List<RecentEntry>, aliveIds: Set<String>, currentId: String): List<String> {
         val seen = HashSet<String>(entries.size)
         return entries.mapNotNull { e ->
-            e.notebookId.takeIf { it != currentId && it in aliveIds && seen.add(it) }
+            e.id.takeIf { it != currentId && it in aliveIds && seen.add(it) }
         }
     }
 

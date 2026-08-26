@@ -47,7 +47,7 @@ object RecentsSource {
         val entries = prefs.entries()
         if (entries.isEmpty()) return@withContext emptyList()
 
-        val alive = repo.aliveNotebooks(entries.map { it.notebookId }.distinct())
+        val alive = repo.aliveNotebooks(entries.map { it.id }.distinct())
         prefs.pruneDeleted(alive.keys)
 
         val root = context.getString(R.string.library_root)
@@ -58,7 +58,7 @@ object RecentsSource {
             val path = if (parent == null) root else paths.getOrPut(parent) {
                 RecentRows.breadcrumb(root, repo.ancestry(parent).map { it.name })
             }
-            Row(id, s.name, path, entries.first { it.notebookId == id }.timestamp)
+            Row(id, s.name, path, entries.first { it.id == id }.timestamp)
         }
         Slog.d(TAG) {
             "gather: stored=${entries.size} alive=${alive.size} rows=${rows.size} " +

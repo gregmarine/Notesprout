@@ -40,6 +40,29 @@ interface ObjectDao {
     )
     suspend fun aliveNotebooks(ids: List<String>): List<ObjectSummary>
 
+    /**
+     * Alive rows of [type] whose name matches [pattern] (`LIKE`, `\\` escaping —
+     * `templates/TemplateSearch.likePattern` builds it), **anywhere in the tree**, blob-free.
+     *
+     * No `parentId` at all: a search that only looked in the folder you happen to be standing in
+     * would answer "no" for paper that is two folders over, which is the one question a search
+     * exists to answer. SQLite's `LIKE` is ASCII case-insensitive, which is deliberately the same
+     * rule `TemplateSearch.matchesLabel` applies to the sentinels the screen composes.
+     */
+    @Query(
+        "SELECT $SUMMARY_COLS FROM objects " +
+        "WHERE type = :type AND deletedAt IS NULL AND name LIKE :pattern ESCAPE '\\'"
+    )
+    suspend fun searchOfType(type: String, pattern: String): List<ObjectSummary>
+
+    /** The alive rows of [type] among [ids], blob-free (arc 13 / G5 — one read for a whole pinned
+     *  or recents shelf). Empty [ids] never hits the database. */
+    @Query(
+        "SELECT $SUMMARY_COLS FROM objects " +
+        "WHERE id IN (:ids) AND type = :type AND deletedAt IS NULL"
+    )
+    suspend fun aliveOfType(ids: List<String>, type: String): List<ObjectSummary>
+
     @Query(
         "SELECT count(*) FROM objects WHERE type = :type AND deletedAt IS NULL AND name = :name AND " +
         "((:parentId IS NULL AND parentId IS NULL) OR parentId = :parentId) AND id <> :excludeId"

@@ -4,9 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import android.view.View
 import androidx.appcompat.app.AppCompatActivity
-import androidx.appcompat.widget.TooltipCompat
 import com.symmetricalpalmtree.notesproutsn.core.IndexGuard
 import com.symmetricalpalmtree.notesproutsn.core.TopGuard
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityTemplatesBinding
@@ -60,9 +58,9 @@ class TemplatesActivity : AppCompatActivity() {
         // The export in flight, if the host was killed behind a system picker (G4).
         browser.restoreState(savedInstanceState)
 
-        binding.browser.btnClose.visibility = View.VISIBLE
-        binding.browser.btnClose.setOnClickListener { finish() }
-        TooltipCompat.setTooltipText(binding.browser.btnClose, binding.browser.btnClose.contentDescription)
+        // The browser owns the button, not this screen: it hides it while a shelf is up, so the
+        // only ✕ on screen is ever the one that leaves what is actually showing (G5).
+        browser.showCloseButton { finish() }
     }
 
     private fun finishWith(pick: TemplatePick) {

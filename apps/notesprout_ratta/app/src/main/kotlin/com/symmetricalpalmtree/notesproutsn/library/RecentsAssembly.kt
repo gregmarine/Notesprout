@@ -20,7 +20,7 @@ object RecentsAssembly {
     fun visibleIds(entries: List<RecentEntry>, aliveIds: Set<String>): List<String> {
         val seen = HashSet<String>(entries.size)
         return entries.mapNotNull { e ->
-            e.notebookId.takeIf { it in aliveIds && seen.add(it) }
+            e.id.takeIf { it in aliveIds && seen.add(it) }
         }
     }
 }

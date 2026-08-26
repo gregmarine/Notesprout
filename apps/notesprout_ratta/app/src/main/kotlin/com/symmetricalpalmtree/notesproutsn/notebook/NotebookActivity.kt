@@ -52,6 +52,7 @@ import com.symmetricalpalmtree.notesproutsn.extension.TransferCaps
 import com.symmetricalpalmtree.notesproutsn.notebook.NotebookUndo.Action
 import com.symmetricalpalmtree.notesproutsn.templates.TemplatePick
 import com.symmetricalpalmtree.notesproutsn.templates.TemplatePicks
+import com.symmetricalpalmtree.notesproutsn.templates.TemplateRecents
 import com.symmetricalpalmtree.notesproutsn.templates.TemplatesActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -1799,6 +1800,12 @@ class NotebookActivity : AppCompatActivity() {
             Dialogs.problem(this, R.string.template_gone_title, R.string.template_gone_body)
             return
         }
+        // The paper resolved and the page took it — that is an apply, and an apply is the only
+        // thing that makes paper recent (arc 13 / G5). Recorded before the null check: re-picking
+        // the paper already in force returns null (a true no-op with no undo step), but the user
+        // did choose it, and the shelf's job is to remember what they chose. A prefs write is not
+        // a page change, so the no-op stays one.
+        TemplateRecents.record(this, pick)
         val change = session.changeTemplate(paper, resources.displayMetrics.densityDpi.toFloat()) ?: return
         undo.record(Action.TemplateChanged(change.pageId, change.from, change.to))
         refreshToPage(change.pageId)

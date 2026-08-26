@@ -1,5 +1,6 @@
 package com.symmetricalpalmtree.notesproutsn.data.clip
 
+import com.symmetricalpalmtree.notesproutsn.data.index.FakeObjectDao
 import com.symmetricalpalmtree.notesproutsn.data.index.ListIds
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectType
 import kotlinx.coroutines.runBlocking

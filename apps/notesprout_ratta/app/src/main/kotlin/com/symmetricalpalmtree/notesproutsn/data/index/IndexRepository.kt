@@ -3,6 +3,7 @@ package com.symmetricalpalmtree.notesproutsn.data.index
 import androidx.room.withTransaction
 import com.symmetricalpalmtree.notesproutsn.data.soil.FolderRef
 import com.symmetricalpalmtree.notesproutsn.data.soil.KEY_SCOPE_GLOBAL
+import com.symmetricalpalmtree.notesproutsn.data.template.TemplateSearch
 import java.util.UUID
 
 /**
@@ -355,6 +356,61 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
         }
         return removed
     }
+
+    // ── The template shelves (arc 13 / G5) ───────────────────────────────────
+    //
+    // Pinned is a second LIST, in its own sentinel, holding list_item edges. Its members are not
+    // all rows: the three built-in papers are pinned by their hardcoded ids, and there is nothing
+    // in the database for them to be. So every read here answers with ids and lets the screen
+    // resolve them — `templates/TemplateShelves` is where "a sentinel is always alive" lives, and
+    // it lives there rather than here because it is a rule about cards, not about storage.
+
+    suspend fun ensureTemplatePinnedListExists(now: Long = System.currentTimeMillis()) {
+        if (dao.byId(ListIds.TEMPLATE_PINNED_LIST_ID) == null) {
+            dao.upsert(ObjectEntity(
+                id = ListIds.TEMPLATE_PINNED_LIST_ID, type = ObjectType.LIST, name = "pinned_templates",
+                parentId = null, createdAt = now, updatedAt = now,
+            ))
+        }
+    }
+
+    suspend fun isTemplatePinned(templateId: String): Boolean =
+        dao.listItem(ListIds.TEMPLATE_PINNED_LIST_ID, templateId) != null
+
+    suspend fun pinTemplate(templateId: String, now: Long = System.currentTimeMillis()) {
+        ensureTemplatePinnedListExists(now)
+        if (isTemplatePinned(templateId)) return
+        dao.upsert(ObjectEntity(
+            id = UUID.randomUUID().toString(), type = ObjectType.LIST_ITEM, name = "",
+            parentId = ListIds.TEMPLATE_PINNED_LIST_ID, createdAt = now, updatedAt = now,
+            refId = templateId, sortOrder = dao.maxSortOrder(ListIds.TEMPLATE_PINNED_LIST_ID) + 1,
+        ))
+    }
+
+    suspend fun unpinTemplate(templateId: String) =
+        dao.deleteListItem(ListIds.TEMPLATE_PINNED_LIST_ID, templateId)
+
+    /**
+     * Every pinned id in `sortOrder`, **unfiltered** — sentinels and rows alike, dead rows included.
+     * Filtering is the caller's, and it needs [aliveTemplates] to do it: a `deleteTemplate` scrubs
+     * the edge itself ([deleteTemplate] / [deleteTemplateFolderRecursive] both call `deleteEdgesTo`),
+     * so a dead id here means an index restored from a backup or a row deleted by a build that did
+     * not scrub — neither of which is worth a per-id read on every refresh.
+     */
+    suspend fun pinnedTemplateIds(): List<String> = dao.listMemberIds(ListIds.TEMPLATE_PINNED_LIST_ID)
+
+    /** The alive static templates among [ids], blob-free, keyed by id. One read for a whole shelf —
+     *  never `templateRow`, which drags every pinned template's pixels along with it. */
+    suspend fun aliveTemplates(ids: List<String>): Map<String, ObjectSummary> =
+        if (ids.isEmpty()) emptyMap() else dao.aliveOfType(ids, ObjectType.TEMPLATE).associateBy { it.id }
+
+    /**
+     * Every alive static template whose name matches [query], anywhere in the tree, blob-free.
+     * A blank query reads nothing at all rather than the whole library.
+     */
+    suspend fun searchTemplates(query: String): List<ObjectSummary> =
+        if (!TemplateSearch.isRunnable(query)) emptyList()
+        else dao.searchOfType(ObjectType.TEMPLATE, TemplateSearch.likePattern(query))
 
     private companion object {
         const val MAX_ANCESTRY_HOPS = 50

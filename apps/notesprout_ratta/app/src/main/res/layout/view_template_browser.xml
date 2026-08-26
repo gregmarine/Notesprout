@@ -45,6 +45,30 @@
                 android:gravity="center_vertical" />
         </HorizontalScrollView>
 
+        <!-- In a shelf there is no path to show, only a flat list of paper. Exactly one of
+             breadcrumbScroll / shelfTitle is ever visible (arc 13 / G5). -->
+        <TextView
+            android:id="@+id/shelfTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:textSize="16sp"
+            android:textColor="@color/inkBlack"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:visibility="gone" />
+
+        <!-- Out of the shelf, back into the tree. Its own control rather than a second meaning for
+             btnClose: one of them leaves the screen and the other does not. -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCloseShelf"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_x"
+            android:contentDescription="@string/cd_close_shelf"
+            android:visibility="gone" />
+
         <!-- The way out by tap. Back does the same once there is no folder left to leave. -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnClose"
@@ -76,7 +100,13 @@
             android:textColor="@color/inkBlack" />
     </FrameLayout>
 
-    <!-- |< < n/n > >|  [Sort] [+Folder] -->
+    <!-- [Pin] [Recents] [Search]  |< < n/n > >|  [Sort] [+Folder] [Import]
+
+         Six fixed buttons and the weighted pager. Measured before it was written: 6 x 116 px +
+         the pager's own 569 px = 1265 px of a 1404 px Nomad, 139 px of headroom, so the row never
+         reflows and the pager keeps its slot (INVISIBLE, never GONE). The three shelves sit on the
+         left and the three acting-on-a-folder controls on the right — the library's split, and the
+         reason a template bar and a notebook bar read as the same bar. -->
     <LinearLayout
         android:id="@+id/browserBottomBar"
         android:layout_width="match_parent"
@@ -84,6 +114,24 @@
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:background="@drawable/toolbar_background_bottom">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnPinned"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_pinned"
+            android:contentDescription="@string/cd_pinned_templates" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnRecents"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_clock"
+            android:contentDescription="@string/cd_recent_templates" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnSearch"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_search"
+            android:contentDescription="@string/cd_search_templates" />
 
         <LinearLayout
             android:id="@+id/pager"
