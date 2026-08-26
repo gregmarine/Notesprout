@@ -3260,7 +3260,7 @@ three are cheap to lose and expensive to rediscover:
    above where the panel lands.
 
 ### G3 — Picking: New Notebook, and a page's paper
-**Status:** ✅ Complete (commit `PENDING`)
+**Status:** ✅ Complete (commit `bc9afec`)
 
 The browser becomes shared. The grid + breadcrumbs + long-press behaviour move into one component
 hosted three ways: `TemplatesActivity` (no pick), `NewNotebookActivity` (name + **Create** header,
