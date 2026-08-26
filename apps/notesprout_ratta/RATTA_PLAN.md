@@ -3209,7 +3209,7 @@ the pure half is JVM-tested and the sheet is built. Same for the `IMAGE` fit pat
 `TemplateThumbnails`, which draws Fit only until G4 brings the other two modes.
 
 ### G2 — `TemplateSpec` + the generator options screen
-**Status:** ✅ Complete (commit `PENDING`)
+**Status:** ✅ Complete (commit `6706340`)
 
 The arithmetic and the screen that drives it. `TemplateSpec` (pure, `kotlinx.serialization`): kind,
 four insets, margin rule, per-axis density (spacing mm **or** count), thickness, dot size, shade —
