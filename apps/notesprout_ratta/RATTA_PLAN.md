@@ -3443,7 +3443,7 @@ a file is a user checklist item. That is also what caught the elvis bug: the che
 the only thing that could.
 
 ### G5 — Pinned, Recents, Search
-**Status:** ✅ Complete (commit `PENDING`)
+**Status:** ✅ Complete (commit `faec9e7`)
 
 Three flat, paginated, mutually exclusive views on the same grid, reached from the Templates
 screen's top bar: **Pinned** (a sentinel `LIST` row + `list_item` edges, templates only, Pin/Unpin on
