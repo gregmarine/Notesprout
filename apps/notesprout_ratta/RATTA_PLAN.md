@@ -3354,7 +3354,7 @@ double-tap). Docs (`docs/templates.md`, `docs/library.md`, `docs/notebook.md`) s
 — `docs/notebook.md` still describes arc 12's four-row sub-sheet, which is now a full-screen browser.
 
 ### G4 — Import and export
-**Status:** 🧪 Awaiting commit
+**Status:** ✅ Complete (commit `8485ee8`)
 
 **First step is the SAF probe on the Nomad** (see the traps). Then: `ACTION_OPEN_DOCUMENT` limited
 to `image/png`, `image/jpeg`, `image/webp`; a fit choice (Fit · Stretch · Fill) and a name + folder
