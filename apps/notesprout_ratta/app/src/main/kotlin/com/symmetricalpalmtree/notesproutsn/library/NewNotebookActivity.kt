@@ -117,6 +117,14 @@ class NewNotebookActivity : AppCompatActivity() {
             onPick = { chosen -> pick = chosen; browser.refreshSelection() },
             selection = { TemplateBrowser.Selection(cardId = pick.cardId) },
         )
+
+        // The export in flight, if this screen was killed behind a system picker (G4).
+        browser.restoreState(savedInstanceState)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        if (::browser.isInitialized) browser.saveState(outState)
     }
 
     /** Back peels one layer: up a folder in the browser, then out of the screen. */

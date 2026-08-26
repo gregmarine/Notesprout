@@ -77,6 +77,28 @@
     <string name="template_duplicate_gone_title">Couldn\'t duplicate</string>
     <string name="template_duplicate_gone_body">That template is no longer there. The list has been refreshed.</string>
     <string name="template_move_title">Move to…</string>
+
+    <!-- Import / export (arc 13 / G4) -->
+    <string name="action_fit">Fit…</string>
+    <string name="action_export">Export…</string>
+    <string name="template_import_default_name">Imported template</string>
+    <string name="template_fit_title">How should it fill the page?</string>
+    <string name="template_fit_fit">Fit — whole picture, centred</string>
+    <string name="template_fit_stretch">Stretch — pulled to the edges</string>
+    <string name="template_fit_fill">Fill — cover the page, crop the rest</string>
+    <string name="template_import_name_title">Name this template</string>
+    <string name="template_import_name_hint">Template name</string>
+    <string name="template_import_confirm">Import</string>
+    <string name="template_imported">Template imported</string>
+    <string name="template_exported">Template exported</string>
+    <string name="template_import_failed_title">Couldn\'t read that image</string>
+    <string name="template_import_failed_body">The file could not be opened as a PNG, JPEG or WEBP image. Nothing has been added.</string>
+    <string name="template_import_too_big_title">That image is too large</string>
+    <string name="template_import_too_big_body">It comes to %1$s once stored, and a template can be at most %2$s. Try a smaller or less grainy image.</string>
+    <string name="template_import_no_picker_title">No file picker</string>
+    <string name="template_import_no_picker_body">This device has no app for choosing files, so templates cannot be imported or exported here.</string>
+    <string name="template_export_failed_title">Couldn\'t export</string>
+    <string name="template_export_failed_body">The template could not be written to that file. Nothing has been changed.</string>
     <string name="move_collision_template">A template named \"%1$s\" already exists here.</string>
     <string name="cd_templates">Templates</string>
     <string name="cd_close_templates">Close</string>
@@ -149,6 +171,7 @@
     <string name="cd_last_page">Last page</string>
     <string name="cd_sort">Sort</string>
     <string name="cd_new_folder">New folder</string>
+    <string name="cd_import_template">Import template</string>
     <string name="cd_new_notebook">New notebook</string>
     <string name="cd_tool_pen">Pen</string>
     <string name="cd_tool_eraser">Eraser</string>

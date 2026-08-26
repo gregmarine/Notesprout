@@ -3139,6 +3139,15 @@ browser, with the same folders, the same long-press behaviour and the same impor
   fixed on-device folder (the contingency is decided then, not now).
 - **Supernote swallows `adb shell input text` and `input keyevent` letters** — naming a template or
   a folder in a device walk means tapping the on-screen keyboard, or the agent avoids the path.
+- **A SAF pick cannot be driven by adb** (found in G4, 2026-08-26, and it is a hard boundary — the
+  lasso's rule in a new place). DocumentsUI's *chrome* answers injected taps perfectly — the roots
+  drawer, the list/grid toggle, the breadcrumb, Cancel — but its **file items are inert to every
+  injectable input**: `input tap`, `input touchscreen tap`, a 60/150/900 ms `swipe` in place, and
+  `input stylus` / `mouse` / `trackball` all land on nothing, and `KEYCODE_TAB` focus stops at the
+  first folder card and `DPAD_DOWN` will not enter the file grid. Its items come from
+  `recyclerview-selection`, which reads the event in ways an injected one does not satisfy. So
+  **every path that begins with choosing a file is a user checklist item**, and a `CREATE_DOCUMENT`
+  save is too (its SAVE button is reachable, but only after a pick has produced something to save).
 - **A disabled button is invisible on e-ink** — click-guard plus a dialog, never `isEnabled = false`.
 - **Toast confirms, dialog explains** — a refused import (too large, unreadable, reserved folder) is
   a dialog.
@@ -3345,7 +3354,7 @@ double-tap). Docs (`docs/templates.md`, `docs/library.md`, `docs/notebook.md`) s
 — `docs/notebook.md` still describes arc 12's four-row sub-sheet, which is now a full-screen browser.
 
 ### G4 — Import and export
-**Status:** ⬜ Not started
+**Status:** 🧪 Awaiting commit
 
 **First step is the SAF probe on the Nomad** (see the traps). Then: `ACTION_OPEN_DOCUMENT` limited
 to `image/png`, `image/jpeg`, `image/webp`; a fit choice (Fit · Stretch · Fill) and a name + folder
@@ -3359,8 +3368,74 @@ check the card and the applied page, export both kinds and re-import the result,
 oversized file with a dialog, refuse a landing in Default).
 *Opus for the codec + fit path; Sonnet for the sheets.*
 
-**Questions to resolve at phase start:** the blob cap's number, once the probe says what a real
-scanned page costs; and the fallback if SAF is unusable on the Supernote.
+**Questions to resolve at phase start — answered 2026-08-26, do not re-ask:**
+
+| Question | Answer |
+|---|---|
+| **Is SAF usable on the Supernote?** | **Yes — the probe passed, no fallback needed.** Both `ACTION_OPEN_DOCUMENT` and `ACTION_CREATE_DOCUMENT` resolve to `com.android.documentsui/.picker.PickActivity` (`enabled=true exported=true isDefault=true`, `/system/priv-app/DocumentsUI`) and both render on the Nomad: Open shows a browsable Recent-images grid with roots behind the hamburger, Create shows a folder with a name field, create-folder and **SAVE**. |
+| **Stored encoding + downscale bound** | **Lossless WEBP, longest edge ≤ 1× the page's long edge** (1872 px on a Nomad), never upscaled. Measured at 2× (2106×2808): a clean vector-ish template is 0.004 MB lossless, a mild greyscale scan **3.56 MB**, a grainy scan **12.51 MB**, a photo **12.86 MB** — so lossless at 2× writes blobs the 8 MiB `CursorWindow` cannot read back (the B3 trap, arrived by way of the spec's own encoding choice). At 1× a mild scan is 1.45 MB and the worst cases land ~4–5 MB. The user chose exact pixels over headroom: **the refusal dialog is a live path, by design.** |
+| **The blob cap** | **6 MiB** (`6 × 1024 × 1024`), on the *encoded* bytes after the downscale. Two thirds of the read ceiling, above every measured case. |
+| **Built-in export** | **Dropped.** G4's "for built-ins and static cards alike" collided with G1's frozen "Blank, Default and the three built-in papers do not long-press at all"; **G1 wins** — the sentinels stay completely inert and only an imported static template exports. |
+
+**Outcome (2026-08-26):** built and walked on the Nomad; **704 JVM tests** across the five modules
+(was 683 — `:app` alone went 516 → 537), debug + release both build, release signs, crash buffer
+empty. Version stays `0.1.0-ratta`; g-paper pin stays 0.1.6. No new dependency, no schema change,
+no migration.
+
+*What landed.* `TemplateImport` (pure, JVM-tested) — the sample/scale/cap/name arithmetic;
+`TemplateTransfer` — both `ActivityResultLauncher`s, the decoder, the three sheets, and the export
+render, beside `TemplateBrowser` rather than inside it (the browser is about what is *in* the
+library; this is about what crosses its edge). `IndexRepository.setTemplateFit`. An **Import**
+button (`ic_photo_plus`) in the browser's bottom bar — so all three hosts have it — plus **Fit…**
+(`ic_aspect_ratio`) and **Export…** (`ic_download`) on an imported card's management sheet. Three
+Tabler drawables in `:sn-screen`; og's `ic_import` was deliberately *not* reused — it is a notebook
+with an arrow, and this is a picture.
+
+*The measurement that changed a locked line.* G4's text said "re-encode lossless WEBP" and the cap
+was to be set "once the probe says what a real scanned page costs". Measured at 2× the page
+(2106×2808), lossless comes to **3.56 MB** for a mild greyscale scan, **12.51 MB** for a grainy one
+and **12.86 MB** for a photo — so the spec's own encoding choice walks straight into the B3 trap and
+writes blobs the 8 MiB `CursorWindow` cannot read back. Put to the user with the numbers: **lossless
+kept, bound dropped to 1× the page's long edge, cap 6 MiB**, and the refusal dialog is a live path
+by design rather than a formality.
+
+*Three calls worth knowing.*
+**(1) Built-in export was dropped.** G4's "for built-ins and static cards alike" collided head-on
+with G1's frozen "Blank, Default and the three built-in papers do not long-press at all". The user's
+call: **G1 wins** — the sentinels stay completely inert, and only an imported static template
+exports. Import stands down inside **Default** for the same reason (a button that could only refuse
+itself is not a button), so that folder's bottom bar is now empty of all three controls.
+**(2) The fit is asked before the name.** The order is the point: the decode, the resize, the encode
+and the cap check all happen on IO *before* a word is asked, so a file that is going to be refused
+is refused before the user has spent their two decisions on it.
+**(3) `pendingExportId` is saved and restored.** A `CREATE_DOCUMENT` is the one operation whose state
+outlives the call, and DocumentsUI is another process on a memory-tight device — a host killed
+behind it would come back holding a `Uri` with nothing to write into it. `TemplateBrowser.saveState`
+/ `restoreState` pass it through, and both hosting Activities wire them.
+
+*The bug the tests could not reach, and it is the phase's lesson.* The first import on the glass
+failed with "Couldn't read that image" for **every** file. `BitmapFactory.decodeStream` with
+`inJustDecodeBounds = true` returns null **by contract** — it only fills `outWidth`/`outHeight` —
+and `open(uri)?.use { decodeStream(...) } ?: return Failed` binds the elvis to the whole expression,
+not to the stream. So the bounds pass "failed" on every valid image, before the file was ever really
+read. `TemplateImport`'s arithmetic was correct and green throughout; the Android half never got as
+far as calling it. **An elvis after a `?.use { }` answers for the lambda's result, not the receiver's
+nullability** — and a null-returning-by-contract call inside one silently inverts the check.
+
+*Confirmed on the glass, through the log.* `2000x1200 → 1872x1123` (downscale to the page's long
+edge) · `1500x1500 → 1500x1500` and `1200x1600 → 1200x1600` (**never upscales** — the `scaledSize`
+null path) · `6000x8000 → 1404x1872 sample=4` (the sampled decode: 8000/4 = 2000, still clear of
+1872, then the exact resize) · the 7.9 MB noise refused at **7,885,510 bytes** against the cap · and
+an exported card re-imported to **33,784 bytes**, byte-for-byte the size of the original blob, so
+the export→re-import round trip is stable. All three fit modes checked by eye against a test image
+carrying a border, two diagonals, a circle and four corner blocks. Crash buffer empty.
+
+*The new standing trap* (recorded above): **a SAF pick cannot be driven by adb.** DocumentsUI's
+chrome answers injected taps perfectly, but its file items are inert to every injectable input —
+`input tap`, `touchscreen tap`, 60/150/900 ms presses, `stylus`/`mouse`/`trackball`, and TAB focus
+stops at the first folder with DPAD refusing to enter the grid. Every path that begins with choosing
+a file is a user checklist item. That is also what caught the elvis bug: the checklist's item 1 was
+the only thing that could.
 
 ### G5 — Pinned, Recents, Search
 **Status:** ⬜ Not started

@@ -140,6 +140,14 @@
             android:src="@drawable/ic_folder_plus"
             android:contentDescription="@string/cd_new_folder" />
 
+        <!-- Import (G4). Three fixed buttons beside the weighted pager: 3 x 116 px on a 1404 px
+             Nomad leaves the pager 1056 px, so the row never reflows. -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnImport"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_photo_plus"
+            android:contentDescription="@string/cd_import_template" />
+
     </LinearLayout>
 
 </LinearLayout>

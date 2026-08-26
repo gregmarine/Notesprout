@@ -2,6 +2,7 @@ package com.symmetricalpalmtree.notesproutsn.templates
 
 import android.app.Activity
 import android.graphics.Bitmap
+import android.os.Bundle
 import android.view.View
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
@@ -69,6 +70,17 @@ class TemplateBrowser(
     private val repo = IndexRepository()
     private val sortPrefs = SortPrefs.templates(activity)
 
+    /**
+     * Import / export / re-fit (G4). It registers its own two `ActivityResultLauncher`s, so it is
+     * built here and the "construct the browser in `onCreate`" rule covers it too.
+     */
+    private val transfer = TemplateTransfer(
+        activity = activity,
+        repo = repo,
+        currentFolder = { folderId },
+        onChanged = { reload() },
+    )
+
     /** null = the templates root · [ListIds.TEMPLATE_DEFAULT_ID] = the reserved folder · else a row. */
     private var folderId: String? = null
 
@@ -112,13 +124,14 @@ class TemplateBrowser(
     private fun wire() = with(binding) {
         btnSort.setOnClickListener { showSortSheet() }
         btnNewFolder.setOnClickListener { showNewFolderDialog() }
+        btnImport.setOnClickListener { transfer.startImport() }
         btnUp.setOnClickListener { navigateUp() }
         btnFirst.setOnClickListener { goToPage(0) }
         btnPrev.setOnClickListener { goToPage(pageIndex - 1) }
         btnNext.setOnClickListener { goToPage(pageIndex + 1) }
         btnLast.setOnClickListener { goToPage(pageCount - 1) }
 
-        listOf(btnSort, btnNewFolder, btnUp, btnFirst, btnPrev, btnNext, btnLast)
+        listOf(btnSort, btnNewFolder, btnImport, btnUp, btnFirst, btnPrev, btnNext, btnLast)
             .forEach { TooltipCompat.setTooltipText(it, it.contentDescription) }
     }
 
@@ -134,6 +147,12 @@ class TemplateBrowser(
     fun refreshSelection() {
         activity.lifecycleScope.launch { bindCurrentPage() }
     }
+
+    /** The host's `onSaveInstanceState` / `onCreate`, passed through to [TemplateTransfer] — the
+     *  only browser state that must survive the host being killed behind a system picker. */
+    fun saveState(outState: Bundle) = transfer.saveState(outState)
+
+    fun restoreState(savedInstanceState: Bundle?) = transfer.restoreState(savedInstanceState)
 
     /**
      * Back, offered to the host: **true** when the browser consumed it by stepping out of a folder.
@@ -241,13 +260,16 @@ class TemplateBrowser(
 
     /**
      * Inside **Default** the contents are fixed — three built-in papers, in one order, forever — so
-     * neither Sort nor New folder has anything to act on and both stand down. GONE, never
+     * Sort, New folder and Import have nothing to act on and all three stand down. GONE, never
      * `isEnabled = false`: a disabled control is invisible on e-ink and reads as a broken one.
      */
     private fun renderChrome() = with(binding) {
         val fixed = inDefaults
         btnSort.visibility = if (fixed) View.GONE else View.VISIBLE
         btnNewFolder.visibility = if (fixed) View.GONE else View.VISIBLE
+        // Import goes too: the Default folder is the app's paper, and the arc reserves it against
+        // anything landing inside. A button that could only refuse itself is not a button.
+        btnImport.visibility = if (fixed) View.GONE else View.VISIBLE
         renderBreadcrumb()
     }
 
@@ -350,6 +372,10 @@ class TemplateBrowser(
                 .addAction(R.drawable.ic_edit, activity.getString(R.string.action_rename)) { showRenameDialog(item.summary) }
                 .addAction(R.drawable.ic_move_folder, activity.getString(R.string.action_move)) { showMovePicker(item.summary) }
                 .addAction(R.drawable.ic_copy, activity.getString(R.string.action_duplicate)) { duplicate(item.summary) }
+                // Fit is only a question for imported pixels — a static row carrying a base kind is
+                // drawn from arithmetic and already fills the page exactly.
+                .also { if (item.isImage) it.addAction(R.drawable.ic_aspect_ratio, activity.getString(R.string.action_fit)) { transfer.chooseFit(item.summary) } }
+                .addAction(R.drawable.ic_download, activity.getString(R.string.action_export)) { transfer.export(item.summary) }
                 .addAction(R.drawable.ic_trash, activity.getString(R.string.action_delete)) { confirmDeleteTemplate(item.summary) }
                 .show()
 

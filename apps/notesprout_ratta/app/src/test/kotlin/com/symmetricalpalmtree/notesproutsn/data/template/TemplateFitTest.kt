@@ -69,6 +69,50 @@ class TemplateFitTest {
         assertNull(TemplateFit.plan(TemplateFit.FIT, 100, 100, pageW, -1))
     }
 
+    /**
+     * The three modes' defining property, swept across the aspects a real import brings (G4):
+     * **Fit** never leaves the page and never crops; **Fill** never letterboxes and only ever crops
+     * one axis; **Stretch** does both rects whole. A mode that broke one of these would still pass
+     * every worked example above — the examples check arithmetic, this checks the promise.
+     */
+    @Test
+    fun `every mode keeps its promise at every aspect`() {
+        val sources = listOf(
+            4000 to 3000,   // landscape 4:3, a camera
+            3000 to 4000,   // portrait 4:3
+            1404 to 1872,   // the page's own aspect
+            2480 to 3508,   // A4 at 300 dpi, a scanner
+            5000 to 500,    // a panorama
+            300 to 4000,    // a strip
+            1000 to 1000,   // square
+        )
+        for ((sw, sh) in sources) {
+            val fit = TemplateFit.plan(TemplateFit.FIT, sw, sh, pageW, pageH)!!
+            assertEquals("fit crops $sw x $sh", 0f, fit.src.left, 0.01f)
+            assertEquals("fit crops $sw x $sh", sw.toFloat(), fit.src.right, 0.01f)
+            assertEquals("fit crops $sw x $sh", sh.toFloat(), fit.src.bottom, 0.01f)
+            assertTrue("fit overflows $sw x $sh", fit.dst.left >= -0.01f && fit.dst.top >= -0.01f)
+            assertTrue("fit overflows $sw x $sh", fit.dst.right <= pageW + 0.01f && fit.dst.bottom <= pageH + 0.01f)
+            // One axis fills exactly; the other is the letterbox.
+            val fillsW = Math.abs(fit.dst.width - pageW) < 0.5f
+            val fillsH = Math.abs(fit.dst.height - pageH) < 0.5f
+            assertTrue("fit fills neither axis at $sw x $sh", fillsW || fillsH)
+
+            val fill = TemplateFit.plan(TemplateFit.FILL, sw, sh, pageW, pageH)!!
+            assertEquals("fill letterboxes $sw x $sh", pageW.toFloat(), fill.dst.width, 0.01f)
+            assertEquals("fill letterboxes $sw x $sh", pageH.toFloat(), fill.dst.height, 0.01f)
+            assertTrue("fill reads outside $sw x $sh", fill.src.left >= -0.01f && fill.src.top >= -0.01f)
+            assertTrue("fill reads outside $sw x $sh", fill.src.right <= sw + 0.01f && fill.src.bottom <= sh + 0.01f)
+            // The crop is centred: equal margins on whichever axis it took from.
+            assertEquals("fill crop off-centre $sw x $sh", fill.src.left, sw - fill.src.right, 0.01f)
+            assertEquals("fill crop off-centre $sw x $sh", fill.src.top, sh - fill.src.bottom, 0.01f)
+
+            val stretch = TemplateFit.plan(TemplateFit.STRETCH, sw, sh, pageW, pageH)!!
+            assertEquals(TemplateFit.Rect(0f, 0f, sw.toFloat(), sh.toFloat()), stretch.src)
+            assertEquals(TemplateFit.Rect(0f, 0f, pageW.toFloat(), pageH.toFloat()), stretch.dst)
+        }
+    }
+
     @Test
     fun `an unknown fit falls back to Fit rather than drawing something else`() {
         assertEquals(TemplateFit.FIT, TemplateFit.sanitize(null))

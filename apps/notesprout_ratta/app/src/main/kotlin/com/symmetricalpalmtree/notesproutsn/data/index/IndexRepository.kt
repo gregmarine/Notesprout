@@ -302,6 +302,24 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
     }
 
     /**
+     * Change a static template's fit mode (G4's **Fit…** row) and bump `updatedAt`.
+     *
+     * The bump is not bookkeeping — it is what the change *is* on screen. A card's miniature is
+     * cached on `id:updatedAt`, and fit is the whole difference between the same picture centred on
+     * white and pulled to the corners, so a silent write would leave every card showing the old
+     * arrangement until the cache happened to be evicted.
+     *
+     * Notebooks already papered with the old fit are untouched, like every other edit here: their
+     * pixels were copied into the `.soil` when it was applied.
+     */
+    suspend fun setTemplateFit(id: String, fit: Int, now: Long = System.currentTimeMillis()): Boolean {
+        val row = templateRow(id) ?: return false
+        if (row.flags == fit) return true
+        dao.upsert(row.copy(flags = fit, updatedAt = now))
+        return true
+    }
+
+    /**
      * Soft-delete a static template and scrub its membership edges (G5's Pinned list). The pixels
      * of every notebook that used it are untouched — they were copied into the `.soil` at apply
      * time, which is og's rule and the whole reason a template can be deleted at all.

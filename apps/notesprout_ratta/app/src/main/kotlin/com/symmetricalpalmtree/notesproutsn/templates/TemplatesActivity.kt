@@ -57,6 +57,9 @@ class TemplatesActivity : AppCompatActivity() {
             selection = { TemplateBrowser.Selection(token = selectedToken.takeIf { picking }) },
         )
 
+        // The export in flight, if the host was killed behind a system picker (G4).
+        browser.restoreState(savedInstanceState)
+
         binding.browser.btnClose.visibility = View.VISIBLE
         binding.browser.btnClose.setOnClickListener { finish() }
         TooltipCompat.setTooltipText(binding.browser.btnClose, binding.browser.btnClose.contentDescription)
@@ -65,6 +68,11 @@ class TemplatesActivity : AppCompatActivity() {
     private fun finishWith(pick: TemplatePick) {
         setResult(Activity.RESULT_OK, Intent().putExtra(EXTRA_PICK, pick.encode()))
         finish()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        if (::browser.isInitialized) browser.saveState(outState)
     }
 
     /** Back peels one layer: up a folder, then out of the screen. */
