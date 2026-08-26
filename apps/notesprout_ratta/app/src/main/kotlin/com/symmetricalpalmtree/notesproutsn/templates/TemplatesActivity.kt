@@ -30,7 +30,6 @@ import com.symmetricalpalmtree.notesproutsn.databinding.ActivityTemplatesBinding
 import com.symmetricalpalmtree.notesproutsn.library.FolderPickerActivity
 import com.symmetricalpalmtree.notesproutsn.library.GridMath
 import com.symmetricalpalmtree.notesproutsn.library.NameDialog
-import com.symmetricalpalmtree.notesproutsn.library.NameRules
 import com.symmetricalpalmtree.notesproutsn.library.SortRules
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -74,6 +73,13 @@ class TemplatesActivity : AppCompatActivity() {
     private var pageHeightPx = 0
 
     private val movePickerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) lifecycleScope.launch { refresh() }
+    }
+
+    /** The options screen only reports back when it *saved* something — a new card to list. */
+    private val optionsLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) lifecycleScope.launch { refresh() }
@@ -167,13 +173,14 @@ class TemplatesActivity : AppCompatActivity() {
         val art = withContext(Dispatchers.IO) {
             HashMap<String, Bitmap?>(visible.size).apply {
                 for (card in visible) {
-                    // Only an imported picture needs its bytes; a generator (and a saved variant of
-                    // one) is drawn from arithmetic, so its miniature costs no read at all.
-                    val image = (card as? TemplateCard.Static)?.takeIf { it.isImage }
-                        ?.let { runCatching { repo.templateImage(it.id) }.getOrNull() }
+                    // A generator costs no read at all — it is arithmetic. A stored row's payload
+                    // is either its spec (a few hundred bytes) or an imported picture, and only
+                    // the row itself knows which, so both are fetched the same way.
+                    val payload = (card as? TemplateCard.Static)
+                        ?.let { runCatching { repo.templatePayload(it.id) }.getOrNull() }
                     put(
                         card.id,
-                        TemplateThumbnails.bitmap(card, g.cardWidth, pageWidthPx, pageHeightPx, dpi(), image),
+                        TemplateThumbnails.bitmap(card, g.cardWidth, pageWidthPx, pageHeightPx, dpi(), payload),
                     )
                 }
             }
@@ -285,13 +292,18 @@ class TemplatesActivity : AppCompatActivity() {
     }
 
     /**
-     * The management sheet. Only the two card kinds that *are* rows have one — a sentinel cannot be
-     * renamed, moved or deleted, so it does not long-press at all. The generator's own
-     * **Template options…** row lands with the options screen it opens (G2).
+     * The long-press sheet. What a card *is* decides what it offers: a **generator** is a recipe,
+     * so its one row opens the options screen; a **folder** and a **static template** are rows the
+     * user owns, so they get management. Blank and Generated are neither and do not long-press at
+     * all — a sentinel cannot be renamed, moved or deleted.
      */
     private fun onCardLongPress(item: TemplateCard) {
         val sheet = ActionSheetDialog(this).title(item.name)
         when (item) {
+            is TemplateCard.Generator -> sheet
+                .addAction(R.drawable.ic_template, getString(R.string.template_options)) { openOptions(item) }
+                .show()
+
             is TemplateCard.Folder -> sheet
                 .addAction(R.drawable.ic_edit, getString(R.string.action_rename)) { showRenameDialog(item.summary) }
                 .addAction(R.drawable.ic_move_folder, getString(R.string.action_move)) { showMovePicker(item.summary) }
@@ -309,6 +321,20 @@ class TemplatesActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * The generator's recipe, adjustable. The **Generated** folder is not a row, so it can never
+     * be a save destination: the picker starts at the templates root instead.
+     */
+    private fun openOptions(item: TemplateCard.Generator) = optionsLauncher.launch(
+        TemplateOptionsActivity.intent(
+            this,
+            kind = item.kind,
+            startFolderId = folderId.takeIf { it != ListIds.TEMPLATE_GENERATED_ID },
+            pageWidthPx = pageWidthPx,
+            pageHeightPx = pageHeightPx,
+        )
+    )
+
     // ── New folder / rename ──────────────────────────────────────────────────
 
     private fun showNewFolderDialog() {
@@ -323,7 +349,7 @@ class TemplatesActivity : AppCompatActivity() {
             hintRes = R.string.new_folder_hint,
         ) { name, dismiss ->
             if (accepting) return@show
-            if (rejectName(name, folderId)) return@show
+            if (TemplateNaming.reject(this, name, folderId)) return@show
             accepting = true
             lifecycleScope.launch {
                 try {
@@ -354,7 +380,7 @@ class TemplatesActivity : AppCompatActivity() {
         ) { name, dismiss ->
             if (accepting) return@show
             if (name == s.name) { dismiss(); return@show }
-            if (rejectName(name, s.parentId)) return@show
+            if (TemplateNaming.reject(this, name, s.parentId)) return@show
             accepting = true
             lifecycleScope.launch {
                 try {
@@ -373,25 +399,6 @@ class TemplatesActivity : AppCompatActivity() {
                 }
             }
         }
-    }
-
-    /**
-     * The name rules, in order, with their dialogs: the family charset first, then the reserved
-     * root name. True when the name was refused and the dialog must stay open.
-     */
-    private fun rejectName(name: String, parentId: String?): Boolean {
-        NameRules.validate(name)?.let { problem ->
-            Dialogs.problem(this, R.string.name_problem_title, NameDialog.problemMessage(this, problem))
-            return true
-        }
-        if (TemplateLibrary.isReservedName(parentId, name)) {
-            Dialogs.problem(
-                this, R.string.name_problem_title,
-                getString(R.string.template_name_reserved, TemplateLibrary.RESERVED_ROOT_NAME),
-            )
-            return true
-        }
-        return false
     }
 
     // ── Duplicate / delete / move ────────────────────────────────────────────

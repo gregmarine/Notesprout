@@ -83,6 +83,47 @@
     <string name="cd_templates">Templates</string>
     <string name="cd_close_templates">Close</string>
 
+    <!-- Template options (arc 13 / G2): a generator's recipe, adjustable. Steppers, not sliders —
+         a drag on e-ink is a stream of full-panel refreshes and the Supernote swallows injected
+         text, so a stepper is also the only control a device walk can drive. -->
+    <string name="template_options">Template options…</string>
+    <string name="options_density">Density</string>
+    <string name="options_mode_spacing">Spacing</string>
+    <string name="options_mode_count">Count</string>
+    <string name="options_lines">Lines</string>
+    <string name="options_rows">Rows</string>
+    <string name="options_columns">Columns</string>
+    <string name="options_square">Square</string>
+    <string name="options_inset_top">Top</string>
+    <string name="options_inset_bottom">Bottom</string>
+    <string name="options_inset_left">Left</string>
+    <string name="options_inset_right">Right</string>
+    <string name="options_copy_all">Top → all</string>
+    <string name="options_copy_sides">L → R</string>
+    <string name="options_copy_ends">T → B</string>
+    <string name="options_margin_rule">Margin rule</string>
+    <string name="options_thickness">Rule</string>
+    <string name="options_dot">Dot size</string>
+    <string name="options_shade">Shade</string>
+    <string name="options_value_mm1">%1$.1f mm</string>
+    <string name="options_value_mm2">%1$.2f mm</string>
+    <string name="options_value_shade">%1$d/%2$d</string>
+    <string name="options_readout_lines">→ %1$d lines</string>
+    <string name="options_readout_rows">→ %1$d rows</string>
+    <string name="options_readout_columns">→ %1$d columns</string>
+    <string name="options_readout_mm">→ %1$.1f mm</string>
+    <string name="options_use_once">Use once</string>
+    <string name="options_save_as">Save as template…</string>
+    <string name="options_save_title">Save as template</string>
+    <string name="options_save_here">Save here</string>
+    <string name="options_save_confirm">Save</string>
+    <string name="options_save_hint">Template name</string>
+    <string name="options_saved">Saved to Templates</string>
+    <string name="cd_close_options">Close</string>
+    <string name="cd_template_preview">Template preview</string>
+    <string name="cd_option_decrease">Decrease</string>
+    <string name="cd_option_increase">Increase</string>
+
     <!-- Item actions -->
     <string name="action_pin">Pin</string>
     <string name="action_unpin">Unpin</string>

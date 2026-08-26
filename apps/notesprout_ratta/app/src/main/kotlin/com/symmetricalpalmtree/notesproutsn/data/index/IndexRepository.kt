@@ -255,28 +255,33 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
 
     /**
      * Mint a static template row. [kind] is the base kind's name (or `IMAGE` for an imported
-     * picture), [fit] the fit mode (G4; 0 until then), [image] the **original** pixels — the
-     * page-sized render happens on use, so one row lands correctly on a Nomad page and a Manta one.
+     * picture) and [fit] the fit mode (G4; 0 until then).
+     *
+     * [payload] is what the row *is*, and the kind says which of the two it holds: a saved
+     * generator variant carries its [com.symmetricalpalmtree.notesproutsn.data.template.TemplateSpec]
+     * JSON (a few hundred bytes), an import carries the **original** pixels. Neither is a
+     * page-sized render — that happens on use, so one row lands correctly on a Nomad page and a
+     * Manta one.
      */
     suspend fun createTemplate(
         name: String,
         parentId: String?,
         kind: String,
         fit: Int,
-        image: ByteArray?,
+        payload: ByteArray?,
         now: Long = System.currentTimeMillis(),
     ): ObjectEntity {
         val row = ObjectEntity(
             id = UUID.randomUUID().toString(), type = ObjectType.TEMPLATE, name = name,
             parentId = parentId, createdAt = now, updatedAt = now,
-            flags = fit, templateKind = kind, blob = image,
+            flags = fit, templateKind = kind, blob = payload,
         )
         dao.upsert(row)
         return row
     }
 
-    /** A static template's stored image bytes. The one read that costs pixels — never in a listing. */
-    suspend fun templateImage(id: String): ByteArray? = dao.byId(id)?.takeIf {
+    /** A static template's stored bytes — its spec, or its imported pixels. Never in a listing. */
+    suspend fun templatePayload(id: String): ByteArray? = dao.byId(id)?.takeIf {
         it.type == ObjectType.TEMPLATE && it.deletedAt == null
     }?.blob
 
@@ -293,7 +298,7 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
         val src = dao.byId(id)?.takeIf { it.type == ObjectType.TEMPLATE && it.deletedAt == null } ?: return null
         return createTemplate(
             name = newName, parentId = src.parentId, kind = src.templateKind.orEmpty(),
-            fit = src.flags ?: 0, image = src.blob, now = now,
+            fit = src.flags ?: 0, payload = src.blob, now = now,
         )
     }
 

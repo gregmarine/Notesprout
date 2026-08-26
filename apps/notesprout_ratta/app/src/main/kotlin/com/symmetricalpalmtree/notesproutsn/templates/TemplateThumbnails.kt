@@ -10,6 +10,7 @@ import android.util.Log
 import android.util.LruCache
 import com.symmetricalpalmtree.notesproutsn.core.Bitmaps
 import com.symmetricalpalmtree.notesproutsn.data.template.BuiltInTemplates
+import com.symmetricalpalmtree.notesproutsn.data.template.TemplateSpec
 import com.symmetricalpalmtree.notesproutsn.notebook.PreviewMath
 
 /**
@@ -30,8 +31,9 @@ object TemplateThumbnails {
 
     /**
      * The miniature for [card] on a card [cellWidthPx] wide, or null when there is nothing to draw.
-     * [image] is a static template's stored bytes — the caller reads it (the one read that costs
-     * pixels) and passes it in, so this function never touches the index.
+     * [payload] is a static template's stored bytes — its imported pixels, or the
+     * [TemplateSpec] JSON of a saved generator variant. The caller reads it (the one read that
+     * costs pixels) and passes it in, so this function never touches the index.
      *
      * Safe off the main thread. Returns a bitmap owned by the cache.
      */
@@ -41,14 +43,14 @@ object TemplateThumbnails {
         pageWidthPx: Int,
         pageHeightPx: Int,
         dpi: Float,
-        image: ByteArray? = null,
+        payload: ByteArray? = null,
     ): Bitmap? {
         if (cellWidthPx < 1 || pageWidthPx < 1 || pageHeightPx < 1) return null
         // A place is not a paper: folders draw the folder card, not a page.
         if (card is TemplateCard.Folder || card is TemplateCard.Generated) return null
         val key = "${card.id}:${card.stamp}:$cellWidthPx"
         cache.get(key)?.let { return it }
-        val bmp = render(card, cellWidthPx, pageWidthPx, pageHeightPx, dpi, image) ?: return null
+        val bmp = render(card, cellWidthPx, pageWidthPx, pageHeightPx, dpi, payload) ?: return null
         cache.put(key, bmp)
         return bmp
     }
@@ -62,7 +64,7 @@ object TemplateThumbnails {
         pageWidthPx: Int,
         pageHeightPx: Int,
         dpi: Float,
-        image: ByteArray?,
+        payload: ByteArray?,
     ): Bitmap? {
         // The page's aspect, clamped against a degenerate size — the same arithmetic the link
         // picker's page cards use, so a template card and a page card are the same object on screen.
@@ -70,18 +72,27 @@ object TemplateThumbnails {
         val scale = w / pageWidthPx.toFloat()
 
         // A generator (and a saved variant of one) is drawn from the same arithmetic the page bakes
-        // with, scaled — never from stored pixels, which is why a miniature costs no blob read.
-        val kind = when (card) {
-            is TemplateCard.Generator -> card.kind
-            is TemplateCard.Static -> card.baseKind
+        // with, scaled — never from stored pixels. A variant's payload is its **spec**, a few
+        // hundred bytes; only an imported picture costs a real blob read.
+        val spec = when (card) {
+            is TemplateCard.Generator -> TemplateSpec.stock(card.kind)
+            // A payload this build cannot parse falls back to the base kind's stock paper rather
+            // than to nothing: the card still says which family it belongs to.
+            // The row's `templateKind` is what classified this card, so it wins over a payload
+            // that disagrees: a card sorted as Lined must not draw a grid.
+            is TemplateCard.Static -> card.baseKind?.let { kind ->
+                TemplateSpec.decode(payload)?.copy(kind = kind) ?: TemplateSpec.stock(kind)
+            }
             else -> null
         }
-        val bmp = kind?.let { BuiltInTemplates.miniature(it, w, h, scale, dpi) } ?: blankPage(w, h) ?: return null
+        val bmp = spec?.let { BuiltInTemplates.miniature(it, w, h, scale, dpi) } ?: blankPage(w, h) ?: return null
 
         // Imported pixels: fit-centred on the white page. The other two fit modes arrive with the
         // import flow that can produce them (G4); until then a static row is either a saved
         // generator variant (handled above) or nothing at all.
-        if (kind == null && image != null) drawFitted(bmp, image)
+        if (spec == null && payload != null && (card as? TemplateCard.Static)?.isImage == true) {
+            drawFitted(bmp, payload)
+        }
 
         // The page's own edge, drawn ON the bitmap — a border on the ImageView is overpainted by
         // the fit-centred paper wherever the two disagree (the page-card lesson). Inset half a

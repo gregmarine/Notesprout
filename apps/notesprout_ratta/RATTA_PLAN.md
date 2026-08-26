@@ -3209,7 +3209,7 @@ the pure half is JVM-tested and the sheet is built. Same for the `IMAGE` fit pat
 `TemplateThumbnails`, which draws Fit only until G4 brings the other two modes.
 
 ### G2 — `TemplateSpec` + the generator options screen
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (commit `PENDING`)
 
 The arithmetic and the screen that drives it. `TemplateSpec` (pure, `kotlinx.serialization`): kind,
 four insets, margin rule, per-axis density (spacing mm **or** count), thickness, dot size, shade —
@@ -3227,7 +3227,71 @@ and the four papers on the glass.
 
 **Questions to resolve at phase start:** the control widgets themselves (stepper vs. field vs.
 slider for a millimetre value on e-ink) — decided at the start of G2 against a real screencap, since
-it is a measuring question, not a design one.
+it is a measuring question, not a design one. **Answered: steppers with press-and-hold repeat**
+(user's pick, from the measurement below).
+
+**Outcome (2026-08-25):** built and walked on the Nomad; **694 JVM tests** (was 658), debug +
+release both build, release signs, crash buffer empty, test data restored. Version stays
+`0.1.0-ratta`; g-paper pin stays 0.1.6. No new dependency, no schema change, no migration.
+
+*The widget question, measured first.* The body between the bars is **1404 × 1602 px = 748 × 855 dp**
+on a Nomad (1.875 px/dp) and tap targets are **62 dp** on this tier, so a page-aspect preview 316 dp
+wide leaves a 420 dp control column — room for the Dotted worst case (mode toggle · two axes · four
+insets · copy row · margin rule · rule · dot · shade) with **no scrolling**. A slider was ruled out
+on the panel (a drag is a stream of full refreshes and lands on a 0.5 mm step by luck) and a text
+field on the device (the Supernote swallows `input text`, so no walk could ever drive it). Steppers
+also snap **to** the grid rather than moving **by** the step — the stock rule thickness is one mdpi
+pixel, 0.15875 mm, so a first press lands on 0.20 rather than carrying .00875 forever (`StepMath`,
+pure + tested).
+
+*What landed.* `TemplateSpec` (pure, `kotlinx.serialization`: kind · two `DensityAxis` · four insets
+· margin rule · thickness · dot · shade) with a **canonical form** and an 8-hex digest behind
+`token()`; `TemplateGeometry` grew a `TemplatePlan` — the whole drawing decision, in pixels, without
+a `Canvas` — plus `contentRect`, `countsFor`, `spacingMmFor` and `placeholderPlan`;
+`BuiltInTemplates` became a **spec renderer with one painter** (the four kinds are now the stock
+specs, and the library's squeezed cover placeholder is a hand-built plan through the same painter).
+`TemplateOptionsActivity` + `OptionStepper` + `StepMath` are the screen; `TemplateNaming` is the
+naming rules the Templates screen and the save flow now share; `FolderPickerActivity` gained a
+**pick mode** (answer a folder, move nothing) so *Save as template…* can ask folder-then-name and
+let the name dialog run the whole check with the typing intact.
+
+*Four decisions worth knowing.* **(1) Stock output is bit-identical, and that is why the constants
+look odd.** `STOCK_THICKNESS_MM = 25.4/160` and `STOCK_DOT_MM = 4×25.4/160` are the mdpi-authored
+pixels written in millimetres, because `mm × dpi / 25.4` of them reproduces the old `px × dpi / 160`
+exactly at every density in the family — checked in float32 before a line was written, and pinned in
+`TemplatePlanTest` against the legacy functions **and** against hardcoded numbers, so a change that
+moved both together still fails. **(2) A saved variant stores its *spec*, not pixels** — index
+`blob` = the spec JSON (the clipboard row's precedent), `templateKind` = the base kind. A bitmap
+could not land correctly on a page it has never seen, which is the whole reason the library is
+device-portable. `createTemplate(image=)` became `payload=` and `templateImage` became
+`templatePayload`. **(3) Identity is the canonical form, not the fields**: a Lined spec carrying
+some dot size nobody can see *is* stock lined paper, so `isStock` compares canonical strings — the
+first version compared the data class and gave stock paper a custom token. **(4) The shade ladder is
+15 levels, not 16** — e-paper renders 16 greys and the 16th is the paper; a rule drawn in it would
+not be a lighter rule, it would be no rule.
+
+*Two things the device taught.* A **count is not a spacing**: 10.0 mm → 14 lines → 9.9 mm, because a
+count spreads evenly over the page. The count is carried across the mode toggle exactly; the spacing
+cannot be, and the KDoc says so. And the exact count derivation `extent / (count + leading)` puts the
+phantom next feature **precisely on the far edge**, which float accumulation then includes about half
+the time (12 asked, 13 drawn) — hence `spacingPxFor`'s `COUNT_EPS` nudge, which lives in the count
+path only so stock output never touches it.
+
+*Walked on the Nomad.* Long-press a generator → *Template options…* → the screen; stepping Lines
+8.0 → 10.0 mm with the read-out following (18 → 14 lines) and the preview redrawing; margin rule on
+and visible in the preview; Count mode carrying 14 across; Save as template… → the pick-mode picker
+("Save here") → the name dialog typed on the on-screen keyboard → a **"wide"** card whose miniature
+shows its *own* density beside the stock Lined card's. That also closed G1's one untestable gap:
+**static-template management is now verified on the glass** (the sheet, Duplicate → "wide copy" with
+the payload copied, Delete → confirm → gone). One fix came from the screencap: the Square latch was
+pushing the Columns row's `[−] value [+]` out of line with every other row, so the latch's slot is
+now **reserved and INVISIBLE in every row** — a stack of controls that nearly line up reads as a
+mistake. Dotted, the tallest kind, ends 5 px above the bottom bar: the `ScrollView` around the
+column is a safety net for a longer translation, not a scroll anyone should meet.
+
+*Left for G3, by construction.* **Use once** is built and wired (`EXTRA_SPEC` both ways) but `GONE`
+until something is waiting for a pick, and a generator card's **tap** still does nothing — G3 gives
+it meaning in all three hosts at once.
 
 ### G3 — Picking: New Notebook, and a page's paper
 **Status:** ⬜ Not started

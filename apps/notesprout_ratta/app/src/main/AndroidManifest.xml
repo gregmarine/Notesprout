@@ -67,6 +67,11 @@
             android:screenOrientation="portrait" />
 
         <activity
+            android:name=".templates.TemplateOptionsActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
+        <activity
             android:name=".library.FolderPickerActivity"
             android:exported="false"
             android:screenOrientation="portrait" />

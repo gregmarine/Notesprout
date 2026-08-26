@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One adjustable value on the generator options screen: a label, [−] value [+], an optional
+     trailing latch (the axes' "Square" link) and an optional read-out line under it.
+
+     A stepper, not a slider: a drag on e-ink is a stream of full-panel refreshes and lands on a
+     0.5 mm step by luck, while a tap is one small partial refresh — and it is the only widget adb
+     can drive in a device walk, since the Supernote swallows injected text. Press-and-hold repeats
+     (OptionStepper) so a long run does not cost forty taps. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/label"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textSize="15sp"
+            android:textColor="@color/inkBlack"
+            android:maxLines="1"
+            android:ellipsize="end" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnMinus"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:background="@drawable/shape_bordered"
+            android:src="@drawable/ic_minus"
+            android:contentDescription="@string/cd_option_decrease" />
+
+        <TextView
+            android:id="@+id/value"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="84dp"
+            android:gravity="center"
+            android:textSize="16sp"
+            android:textColor="@color/inkBlack" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnPlus"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:background="@drawable/shape_bordered"
+            android:src="@drawable/ic_plus"
+            android:contentDescription="@string/cd_option_increase" />
+
+        <!-- The trailing latch's slot is reserved in every row, INVISIBLE where there is no latch,
+             so one row carrying a "Square" button does not push its own [-] value [+] out of line
+             with the rest of the column. On e-ink a stack of controls that nearly line up reads as
+             a mistake. -->
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnExtra"
+            style="@style/Widget.Notesprout.LatchButton"
+            android:layout_width="82dp"
+            android:layout_height="@dimen/toolbar_button_size"
+            android:layout_marginStart="6dp"
+            android:visibility="invisible" />
+
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/readout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="end"
+        android:paddingEnd="4dp"
+        android:textSize="13sp"
+        android:textColor="@color/inkBlack"
+        android:visibility="gone" />
+
+</LinearLayout>
