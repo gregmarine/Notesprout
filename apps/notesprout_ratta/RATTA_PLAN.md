@@ -3149,7 +3149,7 @@ browser, with the same folders, the same long-press behaviour and the same impor
 - **`"order"` is quoted in SQL and backticked in Room**; index writes are soft deletes only.
 
 ### G1 — The template store + the Templates screen (browse, folders, management)
-**Status:** ⬜ Not started
+**Status:** ✅ Complete
 
 The index side and the screen, with nothing to pick yet. Additive `template` / `template_folder`
 row types + an `IndexRepository` template region (create / rename / move / duplicate / soft-delete /
@@ -3165,6 +3165,48 @@ folder, pagination, sort, crash buffer).
 *Opus builds the store + screen; Sonnet does the layout, drawables and strings.*
 
 **Questions to resolve at phase start:** none — the wizard above covers G1.
+
+**Outcome (2026-08-25):** built and walked on the Nomad; **658 JVM tests** (was 637), debug +
+release both build, release signs, crash buffer empty, test data restored. Version stays
+`0.1.0-ratta`; g-paper pin stays 0.1.6. No new dependency, no schema change, no migration.
+
+*What landed.* Two additive index row types (`template` / `template_folder`) and an
+`IndexRepository` template region (list · create folder · create template · image read · duplicate ·
+soft-delete · **transactional** recursive folder delete). Five hardcoded sentinel ids in the
+`ListIds` hex-ASCII style — `_blank`, `genrtd`, `lined_`, `dotted`, `_grid_`. `TemplateLibrary`
+(pure, JVM-tested) owns root composition, the reserved name and duplicate-name suffixing;
+`TemplateCard` is the card model; `TemplateCardGrid` is the library's grid shape over
+`GridMath` (the `PageCardGrid` precedent — the shared part is already the arithmetic);
+`TemplateThumbnails` is the true-miniature renderer + `LruCache`. `TemplatesActivity` is the screen.
+Entry point: a **Templates** button in the library's bottom bar (`ic_template`, already in
+`:sn-screen`).
+
+*Three things generalised rather than copied.* `IndexRepository.ancestry` and `folders` take a row
+type (a row of the wrong type ends the walk, so the two trees can never be spliced by a corrupt
+`parentId`); `SortRules.foldersFirst` takes a `folderType`; and **`FolderPickerActivity` now walks
+either hierarchy** (`browseFolderType` + `rootLabel` extras) — one Move picker, two trees, rather
+than a sibling copy that would drift. `SortPrefs` gained a `templates(context)` file: two shelves of
+two different things, and re-sorting one must not silently re-sort the other.
+
+*Two calls worth knowing.* **(1) The generator's long-press sheet is not in G1.** Its only row is
+*Template options…*, and what that opens is G2 — a row that opens nothing is worse than no row, and
+the phase gate never named it. Blank, Generated and the three generators therefore do not
+long-press at all yet. **(2) "Generated" is reserved at the templates root for templates as well as
+folders.** The locked decision's headline sentence is about *the name at the root*; a second card
+reading "Generated" beside the real one would be a confusion the user cannot resolve by looking,
+whichever kind it is. Say so if you meant folders only.
+
+*Traps confirmed on the glass.* The bottom bar now carries **nine** controls on a 1404 px Nomad —
+7 buttons × 116 px + the pager's 569 px = 1381 px, **23 px of headroom**; measured before it was
+written, and the pager stays `INVISIBLE` so the row never reflows. Inside **Generated** both Sort
+and New folder are GONE (never `isEnabled = false`). The miniature's 1 px page edge is drawn **on
+the bitmap**, not as an ImageView background (the page-card lesson). The reserved-name rejection was
+walked end-to-end with the on-screen keyboard — the dialog stays open with the typing intact.
+
+*Not verifiable on device yet, by construction.* Static-template management (rename/move/**duplicate**
+/delete of a `template` row) has no way to make one until G2 saves a variant or G4 imports an image;
+the pure half is JVM-tested and the sheet is built. Same for the `IMAGE` fit path in
+`TemplateThumbnails`, which draws Fit only until G4 brings the other two modes.
 
 ### G2 — `TemplateSpec` + the generator options screen
 **Status:** ⬜ Not started

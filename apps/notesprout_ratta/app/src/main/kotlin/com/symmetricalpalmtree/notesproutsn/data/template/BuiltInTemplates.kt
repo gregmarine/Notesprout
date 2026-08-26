@@ -46,6 +46,25 @@ object BuiltInTemplates {
         )
     }
 
+    /**
+     * A **true miniature** of the same paper (arc 13): the page pattern scaled honestly to a card,
+     * not the squeezed hint [placeholder] draws. `scale` is the card's width over the page's, so
+     * 8 mm ruling on a quarter-width card is 2 mm of card — which is exactly what makes a dense
+     * grid look dense and tells two variants apart at a glance.
+     *
+     * Feature sizes floor at 1 px: below that a rule stops being drawn at all, and a card showing
+     * nothing would read as Blank.
+     */
+    fun miniature(kind: TemplateKind, widthPx: Int, heightPx: Int, scale: Float, dpi: Float): Bitmap? {
+        if (scale <= 0f) return null
+        return renderWith(
+            kind, widthPx, heightPx,
+            spacingPx = TemplateGeometry.spacingPx(dpi) * scale,
+            lineWidthPx = maxOf(1f, TemplateGeometry.lineWidthPx(dpi) * scale),
+            dotRadiusPx = maxOf(1f, TemplateGeometry.dotRadiusPx(dpi) * scale),
+        )
+    }
+
     private fun renderWith(
         kind: TemplateKind,
         widthPx: Int,

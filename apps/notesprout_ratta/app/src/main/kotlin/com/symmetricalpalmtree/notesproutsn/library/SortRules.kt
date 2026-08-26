@@ -29,9 +29,18 @@ object SortRules {
     fun sort(items: List<ObjectSummary>, field: SortField, order: SortOrder): List<ObjectSummary> =
         items.sortedWith(comparator(field, order))
 
-    /** Folders first, then notebooks; the chosen order applied inside each group. */
-    fun foldersFirst(items: List<ObjectSummary>, field: SortField, order: SortOrder): List<ObjectSummary> {
-        val (folders, rest) = items.partition { it.type == ObjectType.FOLDER }
+    /**
+     * Folders first, then everything else; the chosen order applied inside each group.
+     * [folderType] says what counts as a folder — the library's [ObjectType.FOLDER], or arc 13's
+     * [ObjectType.TEMPLATE_FOLDER] on the Templates screen. Same rule, two hierarchies.
+     */
+    fun foldersFirst(
+        items: List<ObjectSummary>,
+        field: SortField,
+        order: SortOrder,
+        folderType: String = ObjectType.FOLDER,
+    ): List<ObjectSummary> {
+        val (folders, rest) = items.partition { it.type == folderType }
         return sort(folders, field, order) + sort(rest, field, order)
     }
 }

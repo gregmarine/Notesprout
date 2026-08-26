@@ -62,6 +62,11 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity
+            android:name=".templates.TemplatesActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
+        <activity
             android:name=".library.FolderPickerActivity"
             android:exported="false"
             android:screenOrientation="portrait" />

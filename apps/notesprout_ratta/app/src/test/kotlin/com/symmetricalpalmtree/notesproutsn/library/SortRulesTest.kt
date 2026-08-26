@@ -91,4 +91,18 @@ class SortRulesTest {
     fun emptyListIsHandled() {
         assertEquals(emptyList<String>(), names(SortRules.foldersFirst(emptyList(), SortField.NAME, SortOrder.ASC)))
     }
+
+    @Test
+    fun `folders first honours the hierarchy it is asked about`() {
+        // Arc 13: the Templates screen sorts template folders ahead of templates with the same
+        // rule. Passing the notebook folder type here would scatter the places among the papers.
+        val items = listOf(
+            row("Aaa", ObjectType.TEMPLATE, 0L),
+            row("Zzz", ObjectType.TEMPLATE_FOLDER, 0L),
+        )
+        val sorted = SortRules.foldersFirst(
+            items, SortField.NAME, SortOrder.ASC, folderType = ObjectType.TEMPLATE_FOLDER,
+        )
+        assertEquals(listOf("Zzz", "Aaa"), sorted.map { it.name })
+    }
 }

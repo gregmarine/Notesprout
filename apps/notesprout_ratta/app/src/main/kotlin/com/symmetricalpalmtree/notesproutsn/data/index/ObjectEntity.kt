@@ -31,6 +31,29 @@ object ObjectType {
      * soft-deleted, and invisible to the library because every listing query is type-filtered.
      */
     const val CLIPBOARD = "clipboard"
+
+    /**
+     * A **static template** in the template library (arc 13) — imported pixels, or a generator
+     * variant the user saved. The same additive-row-type pattern as [NAMING] and [CLIPBOARD], and
+     * for the same reason: `notesprout.db` is Room-validated and format-compatible with Paper, so a
+     * new `@Entity` would change the identity hash and a Paper index would fail validation.
+     *
+     * `name` = the template's name · `parentId` = its [TEMPLATE_FOLDER] (null = the templates root)
+     * · `templateKind` = the base [com.symmetricalpalmtree.notesproutsn.data.template.TemplateKind]
+     * or `IMAGE` · `flags` = the fit mode (G4) · `blob` = the **original** image bytes, rendered to
+     * the page's size only on use. `refId` / `sortOrder` / `pageCount` / `keyScope` unused.
+     *
+     * Nothing about templates touches the filesystem, and deleting one never touches a notebook
+     * that used it — the pixels were copied into the `.soil` at apply time.
+     */
+    const val TEMPLATE = "template"
+
+    /**
+     * A folder in the template library (arc 13). `parentId` exactly like a notebook [FOLDER], and
+     * a separate type so the two hierarchies can never see each other: a templates listing asks for
+     * this type, and the library's own listing asks for [FOLDER].
+     */
+    const val TEMPLATE_FOLDER = "template_folder"
 }
 
 /** Notebook `flags` bits. */

@@ -62,6 +62,27 @@
     <string name="template_dotted">Dotted</string>
     <string name="template_grid">Grid</string>
 
+    <!-- Template library (arc 13). "Generated" is a reserved name at the templates root: the
+         folder is hardcoded, not a row, and no folder or template of the user's may take it. -->
+    <string name="templates_title">Templates</string>
+    <string name="templates_empty">No templates here yet</string>
+    <string name="template_generated_folder">Generated</string>
+    <string name="template_name_reserved">\"%1$s\" is the name of the built-in folder. Choose another.</string>
+    <string name="new_template_folder_duplicate">A folder named \"%1$s\" already exists here.</string>
+    <string name="rename_duplicate_template">A template named \"%1$s\" already exists here.</string>
+    <string name="rename_duplicate_template_folder">A folder named \"%1$s\" already exists here.</string>
+    <string name="action_duplicate">Duplicate</string>
+    <string name="delete_template_title">Delete \"%1$s\"?</string>
+    <string name="delete_template_body">Notebooks that already use it keep their paper — the pattern was copied into them when it was applied. This cannot be undone.</string>
+    <string name="delete_template_folder_title">Delete \"%1$s\"?</string>
+    <string name="delete_template_folder_body">This will permanently remove all templates and subfolders inside it. Notebooks that already use them keep their paper. This cannot be undone.</string>
+    <string name="template_duplicate_gone_title">Couldn\'t duplicate</string>
+    <string name="template_duplicate_gone_body">That template is no longer there. The list has been refreshed.</string>
+    <string name="template_move_title">Move to…</string>
+    <string name="move_collision_template">A template named \"%1$s\" already exists here.</string>
+    <string name="cd_templates">Templates</string>
+    <string name="cd_close_templates">Close</string>
+
     <!-- Item actions -->
     <string name="action_pin">Pin</string>
     <string name="action_unpin">Unpin</string>

@@ -6,7 +6,7 @@
     android:orientation="vertical"
     android:background="@color/paperWhite">
 
-    <!-- Breadcrumb bar. Flush at the top edge: on Ratta the top guard is 0 (no status-bar hazard). -->
+    <!-- Breadcrumb bar, the library's own shape. Flush at the top edge: TopGuard is 0 on Ratta. -->
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
@@ -38,29 +38,12 @@
                 android:gravity="center_vertical" />
         </HorizontalScrollView>
 
-        <!-- Pinned / Recents replace the breadcrumbs while a mode is on: there is no path to
-             show, only a shelf. Exactly one of breadcrumbScroll / modeTitle is ever visible. -->
-        <TextView
-            android:id="@+id/modeTitle"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
-            android:textSize="16sp"
-            android:textColor="@color/inkBlack"
-            android:singleLine="true"
-            android:ellipsize="end"
-            android:visibility="gone" />
-
+        <!-- The way out by tap. Back does the same once there is no folder left to leave. -->
         <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnCloseMode"
+            android:id="@+id/btnClose"
             style="@style/Widget.Notesprout.ToolbarButton"
             android:src="@drawable/ic_x"
-            android:contentDescription="@string/cd_close_mode"
-            android:visibility="gone" />
-
-        <!-- The debug ⋯ is appended here at runtime by DebugMenu (no-op in release). -->
+            android:contentDescription="@string/cd_close_templates" />
 
     </LinearLayout>
 
@@ -69,8 +52,6 @@
         android:layout_height="1dp"
         android:background="@color/inkBlack" />
 
-    <!-- Card grid. Cards are added programmatically; emptyState is a sibling that must survive
-         every bind (LibraryGrid removes only the GridLayout it added last). -->
     <FrameLayout
         android:id="@+id/gridContainer"
         android:layout_width="match_parent"
@@ -82,12 +63,12 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center"
-            android:text="@string/library_empty"
+            android:text="@string/templates_empty"
             android:textSize="16sp"
             android:textColor="@color/inkBlack" />
     </FrameLayout>
 
-    <!-- [Pinned] [Recents]  |< < n/n > >|  [Sort] [+Folder] [+Notebook] -->
+    <!-- |< < n/n > >|  [Sort] [+Folder] -->
     <LinearLayout
         android:id="@+id/bottomBar"
         android:layout_width="match_parent"
@@ -95,35 +76,6 @@
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:background="@drawable/toolbar_background_bottom">
-
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnPinned"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_pinned"
-            android:contentDescription="@string/cd_pinned" />
-
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnRecents"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_clock"
-            android:contentDescription="@string/cd_recents" />
-
-        <!-- The Scratch Pad (arc 11). GONE unless a trusted extension is installed —
-             ScratchPadEntry owns it, re-discovering on every resume. -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnScratchPad"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_sketching"
-            android:visibility="gone"
-            android:contentDescription="@string/cd_scratch_pad" />
-
-        <!-- Templates (arc 13) — the template library, the one screen behind every paper
-             decision. Always present: the three generators need no extension and no data. -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnTemplates"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_template"
-            android:contentDescription="@string/cd_templates" />
 
         <LinearLayout
             android:id="@+id/pager"
@@ -179,12 +131,6 @@
             style="@style/Widget.Notesprout.ToolbarButton"
             android:src="@drawable/ic_folder_plus"
             android:contentDescription="@string/cd_new_folder" />
-
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnNewNotebook"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_plus"
-            android:contentDescription="@string/cd_new_notebook" />
 
     </LinearLayout>
 

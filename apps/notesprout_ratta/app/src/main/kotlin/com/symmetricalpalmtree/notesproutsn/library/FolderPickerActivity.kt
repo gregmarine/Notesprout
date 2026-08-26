@@ -24,6 +24,10 @@ import kotlinx.coroutines.launch
 /**
  * "Move to…" — the library's grid again, folders only, with one destination question at the end.
  *
+ * Arc 13 gave it a second hierarchy to walk: [EXTRA_BROWSE_FOLDER_TYPE] says whether these are
+ * notebook folders or **template** folders, and everything else is identical. One picker, two
+ * trees — the alternative was a sibling copy that would drift the first time a rule changed.
+ *
  * Same chrome so the move feels like browsing rather than a mode: breadcrumb + Cancel on top,
  * pagination + **Move here** at the bottom. What is *not* the same:
  *
@@ -43,6 +47,10 @@ class FolderPickerActivity : AppCompatActivity() {
     private var movingType = ObjectType.NOTEBOOK
     private var movingName = ""
     private var currentFolderId: String? = null
+
+    /** Which hierarchy is being walked: [ObjectType.FOLDER] or [ObjectType.TEMPLATE_FOLDER]. */
+    private var browseFolderType = ObjectType.FOLDER
+    private var rootLabel = ""
 
     /** The folder being moved — hidden from every listing. Empty when moving a notebook. */
     private var excludeId = ""
@@ -64,7 +72,11 @@ class FolderPickerActivity : AppCompatActivity() {
         movingType = intent.getStringExtra(EXTRA_ITEM_TYPE) ?: ObjectType.NOTEBOOK
         movingName = intent.getStringExtra(EXTRA_ITEM_NAME).orEmpty()
         currentFolderId = intent.getStringExtra(EXTRA_CURRENT_PARENT)
-        excludeId = if (movingType == ObjectType.FOLDER) movingId else ""
+        browseFolderType = intent.getStringExtra(EXTRA_BROWSE_FOLDER_TYPE) ?: ObjectType.FOLDER
+        rootLabel = intent.getStringExtra(EXTRA_ROOT_LABEL) ?: getString(R.string.library_root)
+        // A folder being moved is hidden from every listing, so its own subtree can never be
+        // entered. A notebook or a template carries nothing with it and hides nothing.
+        excludeId = if (movingType == browseFolderType) movingId else ""
 
         wireBars()
 
@@ -93,7 +105,7 @@ class FolderPickerActivity : AppCompatActivity() {
 
     private suspend fun refresh() {
         renderBreadcrumb()
-        val folders = repo.folders(currentFolderId).filter { it.id != excludeId }
+        val folders = repo.folders(currentFolderId, browseFolderType).filter { it.id != excludeId }
         items = SortRules.sort(folders, SortField.NAME, SortOrder.ASC).map { CardItem.Folder(it) }
 
         binding.emptyState.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
@@ -106,11 +118,11 @@ class FolderPickerActivity : AppCompatActivity() {
     private fun renderBreadcrumb() {
         val ink = ContextCompat.getColor(this, R.color.inkBlack)
         lifecycleScope.launch {
-            val ancestry = repo.ancestry(currentFolderId)
+            val ancestry = repo.ancestry(currentFolderId, browseFolderType)
             val container = binding.breadcrumbContainer
             container.removeAllViews()
             container.addView(label(getString(R.string.move_title), ink))
-            container.addView(crumb(getString(R.string.library_root), ink) { navigateTo(null) })
+            container.addView(crumb(rootLabel, ink) { navigateTo(null) })
             for (ref in ancestry) {
                 if (ref.id == excludeId) continue
                 container.addView(separator(ink))
@@ -158,7 +170,7 @@ class FolderPickerActivity : AppCompatActivity() {
     private fun navigateUp() {
         val current = currentFolderId ?: return
         lifecycleScope.launch {
-            val ancestry = repo.ancestry(current)
+            val ancestry = repo.ancestry(current, browseFolderType)
             navigateTo(if (ancestry.size >= 2) ancestry[ancestry.size - 2].id else null)
         }
     }
@@ -179,12 +191,17 @@ class FolderPickerActivity : AppCompatActivity() {
     private fun moveHere() {
         lifecycleScope.launch {
             if (repo.nameTaken(currentFolderId, movingType, movingName, movingId)) {
-                val msg = if (movingType == ObjectType.NOTEBOOK) R.string.move_collision_notebook
-                          else R.string.move_collision_folder
+                val msg = when (movingType) {
+                    ObjectType.NOTEBOOK -> R.string.move_collision_notebook
+                    ObjectType.TEMPLATE -> R.string.move_collision_template
+                    else -> R.string.move_collision_folder
+                }
                 Dialogs.problem(this@FolderPickerActivity, R.string.move_collision_title, getString(msg, movingName))
                 return@launch
             }
-            if (movingType == ObjectType.FOLDER && repo.isSelfOrDescendant(currentFolderId, movingId)) {
+            if (movingType == browseFolderType &&
+                repo.isSelfOrDescendant(currentFolderId, movingId, browseFolderType)
+            ) {
                 Dialogs.problem(this@FolderPickerActivity, R.string.move_collision_title, getString(R.string.move_into_self))
                 return@launch
             }
@@ -204,6 +221,8 @@ class FolderPickerActivity : AppCompatActivity() {
         private const val EXTRA_ITEM_TYPE = "itemType"
         private const val EXTRA_ITEM_NAME = "itemName"
         private const val EXTRA_CURRENT_PARENT = "currentParent"
+        private const val EXTRA_BROWSE_FOLDER_TYPE = "browseFolderType"
+        private const val EXTRA_ROOT_LABEL = "rootLabel"
 
         fun intent(
             context: Context,
@@ -211,10 +230,14 @@ class FolderPickerActivity : AppCompatActivity() {
             itemType: String,
             itemName: String,
             currentParent: String?,
+            browseFolderType: String = ObjectType.FOLDER,
+            rootLabel: String? = null,
         ): Intent = Intent(context, FolderPickerActivity::class.java)
             .putExtra(EXTRA_ITEM_ID, itemId)
             .putExtra(EXTRA_ITEM_TYPE, itemType)
             .putExtra(EXTRA_ITEM_NAME, itemName)
             .putExtra(EXTRA_CURRENT_PARENT, currentParent)
+            .putExtra(EXTRA_BROWSE_FOLDER_TYPE, browseFolderType)
+            .putExtra(EXTRA_ROOT_LABEL, rootLabel)
     }
 }

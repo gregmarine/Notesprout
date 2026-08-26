@@ -14,7 +14,9 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
 
     // ── Listing ──────────────────────────────────────────────────────────────
 
-    suspend fun folders(parentId: String?): List<ObjectSummary> = dao.childrenOfType(parentId, ObjectType.FOLDER)
+    /** Alive child folders of [parentId], blob-free. [type] picks the hierarchy (arc 13). */
+    suspend fun folders(parentId: String?, type: String = ObjectType.FOLDER): List<ObjectSummary> =
+        dao.childrenOfType(parentId, type)
 
     suspend fun notebooks(parentId: String?): List<ObjectSummary> = dao.childrenOfType(parentId, ObjectType.NOTEBOOK)
 
@@ -166,15 +168,20 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
 
     // ── Ancestry ─────────────────────────────────────────────────────────────
 
-    /** Root-first chain of folders from the root down to [folderId] (inclusive). Cycle-guarded, ≤ 50 hops. */
-    suspend fun ancestry(folderId: String?): List<FolderRef> {
+    /**
+     * Root-first chain of folders from the root down to [folderId] (inclusive). Cycle-guarded,
+     * ≤ 50 hops. [type] says which hierarchy is being walked — the library's [ObjectType.FOLDER]
+     * or arc 13's [ObjectType.TEMPLATE_FOLDER]; a row of the wrong type ends the walk, so the two
+     * trees can never be spliced together by a corrupt `parentId`.
+     */
+    suspend fun ancestry(folderId: String?, type: String = ObjectType.FOLDER): List<FolderRef> {
         val chain = ArrayList<FolderRef>()
         val seen = HashSet<String>()
         var cur = folderId
         var hops = 0
         while (cur != null && hops < MAX_ANCESTRY_HOPS && seen.add(cur)) {
             val row = dao.summaryById(cur) ?: break
-            if (row.type != ObjectType.FOLDER) break
+            if (row.type != type) break
             chain.add(FolderRef(row.id, row.name, row.parentId))
             cur = row.parentId
             hops++
@@ -184,8 +191,11 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
     }
 
     /** True when [candidateAncestorId] is [folderId] itself or one of its ancestors. */
-    suspend fun isSelfOrDescendant(folderId: String?, candidateAncestorId: String): Boolean =
-        ancestry(folderId).any { it.id == candidateAncestorId }
+    suspend fun isSelfOrDescendant(
+        folderId: String?,
+        candidateAncestorId: String,
+        type: String = ObjectType.FOLDER,
+    ): Boolean = ancestry(folderId, type).any { it.id == candidateAncestorId }
 
     // ── Pinned list ──────────────────────────────────────────────────────────
 
@@ -215,6 +225,114 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
     /** Pinned notebook ids in `sortOrder`, alive only. */
     suspend fun pinnedNotebookIds(): List<String> =
         dao.listMemberIds(ListIds.PINNED_LIST_ID).filter { alive(it)?.type == ObjectType.NOTEBOOK }
+
+    // ── Template library (arc 13) ────────────────────────────────────────────
+    //
+    // Two additive row types, no schema change, no migration, and nothing on the filesystem. The
+    // sentinel cards (Blank, Generated, the three generators) live nowhere in here: they are
+    // hardcoded ids composed by the screen, so none of these calls can ever see or touch one.
+
+    /** Alive static templates directly inside [parentId] (null = the templates root), blob-free. */
+    suspend fun templates(parentId: String?): List<ObjectSummary> =
+        dao.childrenOfType(parentId, ObjectType.TEMPLATE)
+
+    /** Alive template folders directly inside [parentId] (null = the templates root), blob-free. */
+    suspend fun templateFolders(parentId: String?): List<ObjectSummary> =
+        dao.childrenOfType(parentId, ObjectType.TEMPLATE_FOLDER)
+
+    suspend fun createTemplateFolder(
+        name: String,
+        parentId: String?,
+        now: Long = System.currentTimeMillis(),
+    ): ObjectEntity {
+        val row = ObjectEntity(
+            id = UUID.randomUUID().toString(), type = ObjectType.TEMPLATE_FOLDER, name = name,
+            parentId = parentId, createdAt = now, updatedAt = now,
+        )
+        dao.upsert(row)
+        return row
+    }
+
+    /**
+     * Mint a static template row. [kind] is the base kind's name (or `IMAGE` for an imported
+     * picture), [fit] the fit mode (G4; 0 until then), [image] the **original** pixels — the
+     * page-sized render happens on use, so one row lands correctly on a Nomad page and a Manta one.
+     */
+    suspend fun createTemplate(
+        name: String,
+        parentId: String?,
+        kind: String,
+        fit: Int,
+        image: ByteArray?,
+        now: Long = System.currentTimeMillis(),
+    ): ObjectEntity {
+        val row = ObjectEntity(
+            id = UUID.randomUUID().toString(), type = ObjectType.TEMPLATE, name = name,
+            parentId = parentId, createdAt = now, updatedAt = now,
+            flags = fit, templateKind = kind, blob = image,
+        )
+        dao.upsert(row)
+        return row
+    }
+
+    /** A static template's stored image bytes. The one read that costs pixels — never in a listing. */
+    suspend fun templateImage(id: String): ByteArray? = dao.byId(id)?.takeIf {
+        it.type == ObjectType.TEMPLATE && it.deletedAt == null
+    }?.blob
+
+    /**
+     * Copy an alive static template into its own folder under [newName]. Returns the new row, or
+     * null when the source is gone — a duplicate of nothing is not an error worth throwing for, it
+     * is a listing that moved under the user's finger.
+     */
+    suspend fun duplicateTemplate(
+        id: String,
+        newName: String,
+        now: Long = System.currentTimeMillis(),
+    ): ObjectEntity? {
+        val src = dao.byId(id)?.takeIf { it.type == ObjectType.TEMPLATE && it.deletedAt == null } ?: return null
+        return createTemplate(
+            name = newName, parentId = src.parentId, kind = src.templateKind.orEmpty(),
+            fit = src.flags ?: 0, image = src.blob, now = now,
+        )
+    }
+
+    /**
+     * Soft-delete a static template and scrub its membership edges (G5's Pinned list). The pixels
+     * of every notebook that used it are untouched — they were copied into the `.soil` at apply
+     * time, which is og's rule and the whole reason a template can be deleted at all.
+     */
+    suspend fun deleteTemplate(id: String, now: Long = System.currentTimeMillis()) {
+        dao.deleteEdgesTo(id)
+        dao.softDelete(id, now)
+    }
+
+    /**
+     * Soft-delete a template folder and everything under it, in one transaction — the same
+     * never-strand-a-subtree rule as [deleteFolderRecursive], for the same reason: a half-walked
+     * cascade leaves alive rows under a dead parent, invisible in browse and un-deletable again.
+     * Returns how many templates went with it. Cycle-guarded.
+     */
+    suspend fun deleteTemplateFolderRecursive(id: String, now: Long = System.currentTimeMillis()): Int {
+        var removed = 0
+        SnIndex.db().withTransaction {
+            val seen = HashSet<String>()
+            val stack = ArrayDeque<String>().apply { add(id) }
+            while (stack.isNotEmpty()) {
+                val fid = stack.removeLast()
+                if (!seen.add(fid)) continue
+                for (t in dao.childrenOfType(fid, ObjectType.TEMPLATE)) {
+                    dao.deleteEdgesTo(t.id)
+                    dao.softDelete(t.id, now)
+                    removed++
+                }
+                for (sub in dao.childrenOfType(fid, ObjectType.TEMPLATE_FOLDER)) stack.add(sub.id)
+                dao.deleteEdgesTo(fid)
+                dao.softDelete(fid, now)
+            }
+        }
+        return removed
+    }
 
     private companion object {
         const val MAX_ANCESTRY_HOPS = 50

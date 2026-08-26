@@ -33,6 +33,7 @@ import com.symmetricalpalmtree.notesproutsn.data.soilFile
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityLibraryBinding
 import com.symmetricalpalmtree.notesproutsn.extension.ScratchPadEntry
 import com.symmetricalpalmtree.notesproutsn.notebook.NotebookActivity
+import com.symmetricalpalmtree.notesproutsn.templates.TemplatesActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -264,6 +265,7 @@ class LibraryActivity : AppCompatActivity() {
         btnPinned.setOnClickListener { setMode(if (mode == BrowseMode.PINNED) BrowseMode.NORMAL else BrowseMode.PINNED) }
         btnRecents.setOnClickListener { setMode(if (mode == BrowseMode.RECENTS) BrowseMode.NORMAL else BrowseMode.RECENTS) }
         btnCloseMode.setOnClickListener { setMode(BrowseMode.NORMAL) }
+        btnTemplates.setOnClickListener { startActivity(TemplatesActivity.intent(this@LibraryActivity)) }
         btnSort.setOnClickListener { showSortSheet() }
         btnNewFolder.setOnClickListener { showNewFolderDialog() }
         btnNewNotebook.setOnClickListener { launchNewNotebook() }
@@ -273,8 +275,8 @@ class LibraryActivity : AppCompatActivity() {
         btnNext.setOnClickListener { goToPage(pageIndex + 1) }
         btnLast.setOnClickListener { goToPage(pageCount - 1) }
 
-        listOf(btnPinned, btnRecents, btnCloseMode, btnSort, btnNewFolder, btnNewNotebook, btnUp,
-               btnFirst, btnPrev, btnNext, btnLast)
+        listOf(btnPinned, btnRecents, btnCloseMode, btnTemplates, btnSort, btnNewFolder,
+               btnNewNotebook, btnUp, btnFirst, btnPrev, btnNext, btnLast)
             .forEach { TooltipCompat.setTooltipText(it, it.contentDescription) }
     }
 
