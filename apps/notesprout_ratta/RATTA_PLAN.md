@@ -3149,7 +3149,7 @@ browser, with the same folders, the same long-press behaviour and the same impor
 - **`"order"` is quoted in SQL and backticked in Room**; index writes are soft deletes only.
 
 ### G1 — The template store + the Templates screen (browse, folders, management)
-**Status:** ✅ Complete
+**Status:** ✅ Complete (commit `2ee39f3`)
 
 The index side and the screen, with nothing to pick yet. Additive `template` / `template_folder`
 row types + an `IndexRepository` template region (create / rename / move / duplicate / soft-delete /
