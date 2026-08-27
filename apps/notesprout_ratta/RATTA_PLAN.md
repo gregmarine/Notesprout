@@ -3682,7 +3682,7 @@ wrapped ink found nothing on the stroke list either. The user reversed it on 202
 | API compatibility | The new `PaperListener.onScribbleErased` **defaults to `onStrokesErased` + `onContentErased`**, so every host that does not implement it keeps today's behaviour exactly. |
 
 ### S1 — Scribble erases headings and links
-**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-26) — **ARC 14 COMPLETE + FROZEN**
+**Status:** ✅ Complete (commit `802ddc9`, Nomad-verified + user all-clear 2026-08-26) — **ARC 14 COMPLETE + FROZEN**
 
 **g-paper (`~/git/g-paper`, main → 0.1.23):**
 - `GestureRecognizer` — `SCRIBBLE_BBOX_PENETRATION_DP = 14f`.
