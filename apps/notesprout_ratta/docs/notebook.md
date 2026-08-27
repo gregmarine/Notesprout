@@ -45,7 +45,7 @@ deliberate differences are listed at the end.
 | `core/OpeningOverlay` | the source-side "Opening…" box and its pre-draw + post launch sequencing |
 | `OutlineTree` (C1) | pure Contents tree: items → nested H1–H6 nodes (orphans attach to the nearest shallower heading or become roots — never dropped), `visible`/`all`/`highlight`/`ancestorsOf` and the paging math. JVM-tested |
 | `ContentsLayout` (C1) | pure Contents layout rules: the 480 dp sidebar/full-screen branch, 60 % sidebar width, 68 dp rows, `(level−1)×16 dp` indent, `itemsPerPage`. JVM-tested |
-| `ContentsSource` (C1) | the gather (IO): writer drain → `liveHeadingsAll()` → the pure `items()` pass (live-page filter, `stripHeadingPrefix` label, `flags` level, document order, the 2000 cap) → `OutlineTree.build`. No cache — rebuilt every open |
+| `ContentsSource` (C1) | the gather (IO): writer drain → `liveHeadingsAll()` + `liveLinkPages()` → the pure `items()` pass (page resolution — page, else the link's page — `stripHeadingPrefix` label, `flags` level, document order, the 2000 cap) → `OutlineTree.build`. No cache — rebuilt every open |
 | `ContentsFlow` (C1) | what both entry points call: busy guard, the `available` gate + generation-counted `refresh()`, pen-gated `releaseRender`, gather → `ContentsDialog`, `showing` (drives the host's BLOCK_ALL), `dismissIfShowing()` for the close path. Owns `btnContents` outright |
 | `ContentsDialog` (C1) | the Contents screen: one layout, two forms (sidebar/full-screen), paginated rows, collapsible tree, active-entry highlight, tap = navigate |
 | `RecentRows` (T1) | pure Recents arithmetic: stored order wins, the open notebook and dead/duplicate ids dropped, the breadcrumb join, `itemsPerPage`. JVM-tested |
@@ -623,7 +623,8 @@ compat with Paper untouched, and the recognizer point stays SN's only extension 
 
 **Entry points, both gated the same way:** the top-bar `btnContents` (Tabler `list`, between Back
 and the pen) and a one-finger swipe-down on the paper. Both exist only while the notebook holds
-≥ 1 live heading on a live page (`ContentsSource.available` — exact: one id-only EXISTS query
+≥ 1 live heading on a live page — **loose or wrapped in a link** (`ContentsSource.available` —
+exact: one id-only EXISTS query
 (`SoilDao.anyLiveHeadingOnLivePage`) after a writer drain, because it runs at the tail of every
 `navigateTo` and a full-entity scan would tax every flip — a C2 review fix). No headings → the
 button is `GONE` and the swipe is silent (no toast — an
@@ -639,9 +640,26 @@ layout listener, which re-pushes the exclusion rects.
 nothing and re-refreshes. The gather is rebuilt from scratch on every open — no cache, nothing to
 invalidate; the dialog is a modal snapshot. Entries are the live headings in **document order**
 (`pageIndex`, `y`, `x`), label = `stripHeadingPrefix(text)`, level = the row's authoritative
-`flags`; blank-stripping or malformed rows are dropped, never crashed on; a cap of
+`flags`; blank-stripping or rows whose page cannot be resolved are dropped, never crashed on; a cap of
 `ContentsSource.MAX_ENTRIES` (2000) bounds a pathological imported file, with the honest
 "Showing the first N headings" footer.
+
+**A wrapped heading is listed too.** A heading's `parentId` is its page while it is loose and its
+**link** once a wrap re-parents it (arc 6 / K1), so the gather resolves a page in two hops: the
+page map directly, else `SoilDao.liveLinkPages()` (every live link → the page it sits on) and then
+the page map. Nothing else is needed — only the parentage moves in a wrap, the child keeps its
+page-absolute `(x, y)` — so the entry sorts into document order exactly where it is written, and a
+tap navigates by the resolved **page id** like any other. A link on a dead page, or a heading whose
+link is soft-deleted (a link erases whole, children and all), resolves to nothing and is dropped by
+the same rule that has always dropped an unresolvable row. `anyLiveHeadingOnLivePage` reaches
+through a link the same way — the gate must reach exactly as far as the gather, or the button would
+hide an outline that has entries.
+
+This reverses K1's "a wrapped heading belongs to the link, everywhere" (2026-08-26, the user's
+call): both places that answer *what is written on this page* now reach through a link — the outline
+here, and the link picker's page label (`PageLabels.titleOf(PageContent)`). Ownership rules that
+govern *editing* — the eraser, delete, move, the page cascade — are untouched: a link is still
+whole.
 
 **The tree** (`OutlineTree`, pure): H1–H6 by a per-level "last open node" stack — parents persist
 across page boundaries, and an **orphan attaches to the nearest shallower heading before it or

@@ -9,9 +9,9 @@ data class PickerPage(val id: String, val width: Int, val height: Int)
 
 /**
  * Everything a page preview draws and a page label reads: the page's loose strokes (writing
- * order), its loose headings (z-order — also the label source, [PageLabels]), and its links with
- * their wrapped children ([PageLink] — the wrapped content is *not* in the loose lists, exactly
- * as the rows have it).
+ * order), its loose headings (z-order), and its links with their wrapped children ([PageLink] —
+ * the wrapped content is *not* in the loose lists, exactly as the rows have it). The page label
+ * reads across both ([PageLabels.titleOf]): a wrapped heading still names its page.
  */
 class PageContent(
     val strokes: List<Stroke>,

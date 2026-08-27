@@ -9,8 +9,9 @@ import kotlinx.coroutines.withContext
 /**
  * The Contents gather (arc 4 / C1 — IO): drain the writer (a heading created a moment ago must be
  * in its row — the shared [SoilWriter] makes one drain cover strokes and headings) → every live
- * `heading` row (`SoilDao.liveHeadingsAll`, blob-free in effect: heading writes never set `blob`) →
- * the pure [items] pass (live-page filter, label from `stripHeadingPrefix`, level from the row's
+ * `heading` row (`SoilDao.liveHeadingsAll`, blob-free in effect: heading writes never set `blob`)
+ * + every live link's page (`SoilDao.liveLinkPages`, so a **wrapped** heading can be placed) →
+ * the pure [items] pass (page resolution, label from `stripHeadingPrefix`, level from the row's
  * authoritative `flags` via [HeadingRows.toHeading], document order, the cap) →
  * [OutlineTree.build]. Rebuilt on every open — no cache, nothing to invalidate; the dialog is a
  * modal snapshot. Logs counts + durations — never a label.
@@ -57,10 +58,12 @@ object ContentsSource {
         val pageIndexById = HashMap<String, Int>(pages.size * 2)
         pages.forEachIndexed { i, p -> pageIndexById[p.id] = i }
         val rows = session.db.dao().liveHeadingsAll()
-        val (items, truncated) = items(rows, pageIndexById)
+        val linkPageById = session.db.dao().liveLinkPages().associate { it.id to it.parentId }
+        val (items, truncated) = items(rows, pageIndexById, linkPageById)
         val roots = OutlineTree.build(items)
         Slog.d(TAG) {
-            "gather: rows=${rows.size} entries=${items.size} roots=${roots.size} truncated=$truncated " +
+            "gather: rows=${rows.size} links=${linkPageById.size} entries=${items.size} " +
+                "roots=${roots.size} truncated=$truncated " +
                 "in ${System.currentTimeMillis() - t0} ms"
         }
         Outline(roots, items.size, truncated)
@@ -68,22 +71,35 @@ object ContentsSource {
 
     /**
      * The pure half of the gather (JVM-tested): rows → capped, document-ordered [OutlineTree.Item]s
-     * + the truncation bit. Dropped, never crashed on: a row on a page not in [pageIndexById]
+     * + the truncation bit. Dropped, never crashed on: a row whose page cannot be resolved
      * (soft-deleted page, foreign parent), a malformed row ([HeadingRows.toHeading] → null), and a
      * label that strips to blank (the empty-Save rule means one shouldn't exist — Paper's "blank is
      * not an outline item" kept for rows written by something else).
+     *
+     * **A wrapped heading is listed too.** A heading's `parentId` is its page while it is loose and
+     * its **link** once a wrap re-parents it (arc 6 / K1), so the page is resolved in two hops:
+     * [pageIndexById] directly, else [linkPageById] (live links → their page) and then
+     * [pageIndexById]. Only the parentage moves in a wrap — the child keeps its page-absolute
+     * `(x, y)` — so document order, the level and the label need nothing else, and a link on a
+     * dead page or a dead link resolves to nothing and is dropped by the same rule as before.
+     * This is the one place the "a wrapped heading belongs to the link" rule is *not* applied: the
+     * outline answers "what did the user write, and where", and a heading is written text wherever
+     * its parentage since ended up.
      */
     fun items(
         rows: List<SoilObjectEntity>,
         pageIndexById: Map<String, Int>,
+        linkPageById: Map<String, String> = emptyMap(),
     ): Pair<List<OutlineTree.Item>, Boolean> {
         val all = rows.asSequence()
             .mapNotNull { row ->
-                val pageIndex = pageIndexById[row.parentId] ?: return@mapNotNull null
+                val pageId = if (pageIndexById.containsKey(row.parentId)) row.parentId
+                    else linkPageById[row.parentId] ?: return@mapNotNull null
+                val pageIndex = pageIndexById[pageId] ?: return@mapNotNull null
                 val h = HeadingRows.toHeading(row) ?: return@mapNotNull null
                 val label = HeadingPrefix.stripHeadingPrefix(h.text).trim()
                 if (label.isEmpty()) return@mapNotNull null
-                OutlineTree.Item(h.id, row.parentId, pageIndex, h.x, h.y, label, h.level)
+                OutlineTree.Item(h.id, pageId, pageIndex, h.x, h.y, label, h.level)
             }
             .sortedWith(OutlineTree.DOCUMENT_ORDER)
             .toList()

@@ -92,12 +92,26 @@ interface SoilDao {
 
     /** Does **any** live heading sit on a live page? — the Contents availability gate (arc 4),
      *  asked on every page flip: EXISTS over ids only, so nothing is materialized and the scan
-     *  stops at the first hit. */
+     *  stops at the first hit. A **wrapped** heading counts too: its `parentId` is a live `link`
+     *  whose own parent is a live page (the outline reaches through a link — see [liveLinkPages]),
+     *  and the gate must reach exactly as far as the gather does or the button would hide an
+     *  outline that has entries. */
     @Query(
         "SELECT EXISTS(SELECT 1 FROM notebook h WHERE h.type = 'heading' AND h.deletedAt IS NULL " +
-            "AND h.parentId IN (SELECT p.id FROM notebook p WHERE p.type = 'page' AND p.deletedAt IS NULL))",
+            "AND (h.parentId IN (SELECT p.id FROM notebook p WHERE p.type = 'page' AND p.deletedAt IS NULL) " +
+            "OR h.parentId IN (SELECT l.id FROM notebook l WHERE l.type = 'link' AND l.deletedAt IS NULL " +
+            "AND l.parentId IN (SELECT p.id FROM notebook p WHERE p.type = 'page' AND p.deletedAt IS NULL))))",
     )
     suspend fun anyLiveHeadingOnLivePage(): Boolean
+
+    /**
+     * Every live link row as `id → its page`: the Contents gather's one link → page hop. A wrap
+     * re-parents its children page → link but leaves their **coordinates page-absolute**, so this
+     * pair is all the outline needs to place a wrapped heading — no payload, no bounds, no blob.
+     * Projection-only (two id columns) and small: links per notebook are counted in dozens.
+     */
+    @Query("SELECT id, parentId FROM notebook WHERE type = 'link' AND deletedAt IS NULL")
+    suspend fun liveLinkPages(): List<LinkPage>
 
     /** Reposition an object (a heading drag) — geometry only, size untouched. */
     @Query("UPDATE notebook SET x = :x, y = :y, updatedAt = :at WHERE id = :id")
@@ -125,6 +139,9 @@ interface SoilDao {
     @Query("SELECT COALESCE(MAX(`order`), -1) FROM notebook WHERE parentId = :parentId AND type = :type")
     suspend fun maxOrder(parentId: String, type: String): Int
 }
+
+/** A live link's page — [SoilDao.liveLinkPages]. `parentId` is the page the link sits on. */
+data class LinkPage(val id: String, val parentId: String)
 
 /** A template row without its pixels — [SoilDao.templateDigests]. */
 data class TemplateDigest(

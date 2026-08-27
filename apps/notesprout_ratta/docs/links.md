@@ -59,10 +59,26 @@ Both halves ride one Room transaction (plus the shared serial `SoilWriter`), so 
 its children's parentage are never separately visible — and big wraps chunk their id lists at 500
 *inside* the transaction (SQLite's 999-variable cap; chunking loses no atomicity).
 
-Because wrapped children belong to the link, a page's "loose" content queries no longer see them:
-a wrapped heading **leaves the Contents outline** and **names no page** in the picker — one rule
-for "whose heading is it", everywhere. Page delete/reconcile therefore cascades **grandchildren**
-(`SoilDao.liveDescendantIds` — the page's own children *and* the links' children).
+Because wrapped children belong to the link, a page's "loose" content queries no longer see them.
+Page delete/reconcile therefore cascades **grandchildren** (`SoilDao.liveDescendantIds` — the page's
+own children *and* the links' children).
+
+**But a wrapped heading is still a heading the user wrote on that page**, and the two places that
+answer "what is written here" both reach through the link. It was the other way at K1 — one rule for
+"whose heading is it", everywhere — and that lost real writing: a heading turned into a link's title
+vanished from the table of contents and stopped naming its page, with no way back short of
+unlinking. Reversed on **2026-08-26**, on the user's call:
+
+- **The Contents outline** lists it. The gather hops link → page (`SoilDao.liveLinkPages`), so the
+  entry sits on the page its link is on, in document order, and the tap navigates by the resolved
+  page id. See [`notebook.md`](notebook.md) § Contents.
+- **The picker's page label** takes it. `PageLabels.titleOf(PageContent)` reads the loose headings
+  and the links' wrapped ones together, and topmost by `(y, x)` still wins.
+
+Both are free because a wrap moves **parentage, not coordinates** — the child keeps its
+page-absolute `(x, y)`, so ordering, level and label need nothing the row didn't already carry.
+A link on a dead page, or one soft-deleted by an erase (a link erases whole, children and all),
+resolves to nothing and is dropped by the rule that has always dropped an unresolvable row.
 
 **The payload** lives in the link row's `text` column — **Paper's v1 grammar, byte-for-byte**
 (verified against `PAPER_LINKS_PLAN.md` and pinned by JVM fixtures), so link rows stay
@@ -250,7 +266,8 @@ screen), so a preview is always of the notebook as it is now and there is no sta
 to be wrong. Notebook cards keep their cover snapshots.
 
 **Heading page names**: a page card reads "n · <topmost heading>" (`PageLabels` — topmost by
-`(y, x)`, prefix-stripped, **loose headings only**), plain "Page n" otherwise.
+`(y, x)`, prefix-stripped, across the page's loose headings **and** the ones its links wrap),
+plain "Page n" otherwise.
 
 **Foreign notebooks** answer from `ForeignPageSource` — a lazy, **near-read-only**
 `SoilDatabase.open` under the global key (never creates the file), at most one instance at a

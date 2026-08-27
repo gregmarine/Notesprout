@@ -137,6 +137,67 @@ class ContentsSourceTest {
         assertEquals(ContentsSource.MAX_ENTRIES, items.size)
     }
 
+    // --- Wrapped headings (arc 15): a heading parented to a link is placed on the link's page ---
+
+    @Test
+    fun `a heading wrapped in a link is listed on the link's page`() {
+        val (items, _) = ContentsSource.items(
+            listOf(row("wrapped", "lnk", text = "## Inside", level = 2, y = 50f)),
+            pages,
+            mapOf("lnk" to "p2"),
+        )
+        assertEquals(1, items.size)
+        assertEquals("p2", items[0].pageId)
+        assertEquals(2, items[0].pageIndex)
+        assertEquals("Inside", items[0].label)
+        assertEquals(2, items[0].level)
+    }
+
+    @Test
+    fun `a wrapped heading keeps its page-absolute place in document order`() {
+        // The wrap only re-parents; (x, y) stay page-absolute, so the wrapped one sorts between
+        // the two loose headings on the same page rather than at either end.
+        val (items, _) = ContentsSource.items(
+            listOf(
+                row("late", "p1", y = 300f),
+                row("wrapped", "lnk", y = 200f),
+                row("early", "p1", y = 100f),
+            ),
+            pages,
+            mapOf("lnk" to "p1"),
+        )
+        assertEquals(listOf("early", "wrapped", "late"), items.map { it.objectId })
+    }
+
+    @Test
+    fun `a heading wrapped in a link on a dead page is dropped`() {
+        val (items, _) = ContentsSource.items(
+            listOf(row("wrapped", "lnk")),
+            pages,
+            mapOf("lnk" to "gone"),
+        )
+        assertTrue(items.isEmpty())
+    }
+
+    @Test
+    fun `a heading whose parent is neither a page nor a live link is dropped`() {
+        val (items, _) = ContentsSource.items(listOf(row("orphan", "lnk")), pages, emptyMap())
+        assertTrue(items.isEmpty())
+    }
+
+    @Test
+    fun `a page id always wins over the link map`() {
+        // Defensive: ids are UUIDs so a collision cannot happen, but the page hop must be the
+        // first one tried — a heading on a page is never redirected.
+        val (items, _) = ContentsSource.items(
+            listOf(row("loose", "p1")),
+            pages,
+            mapOf("p1" to "p2"),
+        )
+        assertEquals("p1", items[0].pageId)
+        assertEquals(1, items[0].pageIndex)
+    }
+
     @Test
     fun `no rows is an empty, untruncated result`() {
         val (items, truncated) = ContentsSource.items(emptyList(), pages)

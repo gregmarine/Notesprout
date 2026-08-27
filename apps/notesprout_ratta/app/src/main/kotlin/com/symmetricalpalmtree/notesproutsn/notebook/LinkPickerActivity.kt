@@ -57,7 +57,7 @@ import kotlinx.coroutines.withContext
  *    at most one at a time, sealed the moment the drill is left. Nothing here ever opens the
  *    current notebook's `.soil`: it is already open, and one file never has two connections.
  *  - **Heading page names** (the og rule): a page's card reads "4 · Meeting notes" when it has a
- *    topmost heading, plain "Page 4" when it does not ([PageLabels]).
+ *    topmost heading — loose or wrapped in a link — plain "Page 4" when it has none ([PageLabels]).
  *
  * K3 adds the other half of "where does this point": the target may not exist yet. Whichever grid is
  * on screen carries its own create — **New page** on a page grid, **New notebook** and **New
@@ -481,7 +481,7 @@ class LinkPickerActivity : AppCompatActivity() {
                     bitmap = PagePreview.render(
                         page, content, w, h, density, HeadingRenderer.basePaint(scaledDensity),
                     ),
-                    title = PageLabels.titleOf(content.headings),
+                    title = PageLabels.titleOf(content),
                 )
             }
             if (previewCache.size >= maxCachedPreviews) previewCache.clear()

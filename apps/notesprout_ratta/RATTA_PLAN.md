@@ -3751,6 +3751,48 @@ so every scribble in this arc is the user's hand.
 
 ---
 
+## Post-arc fixes (outside any arc)
+
+### F1 — A wrapped heading is listed in the Contents (2026-08-26)
+**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-26, "all tests pass") — found by
+the user while eye-checking arc 14's scribble-erase of objects: a heading wrapped in a link had
+vanished from the table of contents.
+
+**The cause was a design rule, not a bug in the query.** K1 decided "a wrapped heading belongs to
+the link" and applied it *everywhere*: the gather resolved a heading's page as
+`pageIndexById[row.parentId]`, and after a wrap that `parentId` is a link id — never in the map —
+so every wrapped heading was silently dropped, and `anyLiveHeadingOnLivePage` hid the button
+outright in a notebook whose only headings were wrapped. **Reversed on the user's call**, the
+second locked decision this week's work has overturned (arc 14 took the first).
+
+**The fix — the outline reaches through a link:**
+- `SoilDao.liveLinkPages()` — a new **projection** query, `id, parentId` for every live link
+  (dozens per notebook, no payload, no blob).
+- `ContentsSource.items()` takes `linkPageById` and resolves a page in **two hops**: the page map,
+  else the link's page, then the page map. Nothing else changes, because a wrap moves **parentage,
+  not coordinates** — the child keeps its page-absolute `(x, y)`, so document order, level and
+  label need nothing new, and the tap navigates by the **resolved page id** like any other entry.
+- `anyLiveHeadingOnLivePage` reaches one level further the same way. **The gate must reach exactly
+  as far as the gather** or the button hides an outline that has entries — the standing shape of
+  every availability bug in this feature.
+- Unresolvable still means dropped, never crashed: a link on a dead page, or a heading whose link
+  was erased (a link erases whole, children carry `deletedAt`), resolves to nothing.
+
+**And the same reversal in the picker's page label** (the user's second call, asked at the same
+time): `PageLabels.titleOf(PageContent)` reads the loose headings **and** the links' wrapped ones
+together — topmost by `(y, x)` still wins — so a page whose only heading is wrapped is named
+again instead of reading "Page 4". The `List<Heading>` overload stays the tested primitive.
+
+Ownership rules that govern **editing** are untouched: the eraser, delete, move and the page
+cascade all still treat a link as whole. What changed is only the two reads that answer *what is
+written on this page*.
+
+598 `:app` JVM tests (+8: five over the two-hop resolution, three over the wrapped page label);
+`./gradlew test assembleDebug` green. No schema change, no migration, no g-paper change, no new
+dependency. Docs: `docs/notebook.md` § Contents, `docs/links.md`.
+
+---
+
 ## Verification (end of arc)
 
 1. All JVM unit tests green (`./gradlew test` in `apps/notesprout_ratta`).

@@ -1396,7 +1396,9 @@ class NotebookActivity : AppCompatActivity() {
         )
         session.links.create(pageId, link)
         undo.record(Action.LinkCreated(pageId, link))
-        contentsFlow.refresh()   // a wrapped heading leaves the outline with its new parent
+        // A wrapped heading now *stays* in the outline (the gather hops link → page), so this
+        // cannot flip availability any more — kept because parentage moved and the gate is cheap.
+        contentsFlow.refresh()
         val strokeIds = strokes.map { it.id }
         strokeIds.forEach { liveStrokes.remove(it) }
         headings.forEach { liveHeadings.remove(it.id) }
