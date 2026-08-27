@@ -3791,6 +3791,64 @@ written on this page*.
 `./gradlew test assembleDebug` green. No schema change, no migration, no g-paper change, no new
 dependency. Docs: `docs/notebook.md` § Contents, `docs/links.md`.
 
+### F2 — Chrome rearrangement, user-directed (2026-08-26)
+
+**Status:** ✅ Complete (Nomad-verified throughout; each step shown to the user and adjusted on
+their call). A pure **chrome** pass — no data, no schema, no engine, no new dependency, no
+behaviour outside the bars themselves. It is recorded because it moved controls the hand has been
+aiming at since P1, and because two of the moves overturned written rationale.
+
+**Library** (`activity_library.xml`) — the six action buttons left the bottom bar for the **top**
+bar's right edge: `+Notebook · +Folder · Templates · Scratch pad · Recents · Pinned · Sort`. The
+bottom bar became a **`FrameLayout`** holding the centred pager and a right-aligned `bottomRight`
+group (`Templates`, then the debug ⋯ that `DebugMenu.install` appends). *That is the whole reason
+it is not a row:* the ⋯ is a **no-op in release**, so a weight-centred pager would sit in a
+different place in the two build types. `btnCloseMode` moved to the row's head and became a
+**left arrow** — it and `btnUp` share `ic_arrow_left` and can never co-show, since a shelf has no
+path to go up out of.
+
+**Notebook** — `btnRecents` and `btnScratchPad` swapped, and the **12 dp spacer after Back is
+gone**, so the row is butted together the way the scratch pad's is.
+
+**Selection toolbar** (`SelectionToolbar`) — **`Snap · Copy · Cut` lead and `Delete` is last**.
+This **supersedes the O1 phase-start decision** ("Copy and Cut sit after Delete… Delete has been
+the leftmost button since P1"): the destructive verb now sits alone on the far edge, away from the
+buttons reached for casually. Visibility is untouched — only the `addView` order in `init` changed.
+The pad's own bar (`ScratchSelectionToolbar`) follows: **Send, then Delete**.
+
+**Scratch pad** (`:ext-scratchpad`) — the tools moved up beside Back; both rows became
+`FrameLayout`s so the **title** and the **pager** centre on the *screen*. Same reason as the
+library's: `btnSend` is `GONE` with no notebook behind the pad, so a weight-centred title would
+move between the two cases.
+
+**Templates** (`view_template_browser.xml`) — all six controls to the top bar in the library's
+order (`Import · +Folder · Search · Recents · Pinned · Sort`), bottom bar reduced to the pager.
+The head arrow steps back **one** layer (`btnCloseShelf` out of a shelf, `btnUp` up a folder —
+never both), and the corner **✕ leaves the screen from anywhere**, which **supersedes G5's "the
+browser owns the host's ✕ because a shelf hides it"**: with the shelf's exit now an arrow there is
+only one ✕ left, so nothing has to hide. `shelfTitle` takes **18 dp** of start padding, not the
+container's 12 — a crumb `TextView` carries 6 dp of its own, so a plain title has to add it back by
+hand to start on the same pixel the breadcrumb does.
+
+**Two icons.** `ic_snap` is now Tabler `layout-align-left` with its rule broken into long dashes
+(g-paper's `snapGuidePaint` stride) — the blocks stay **solid**, because at 24 dp with a 2-unit
+stroke a dashed rectangle is all corner and no rectangle; the all-dashed version was built,
+rendered and rejected. `ic_notebook_plus` is Tabler `address-book` with the person removed and a
+plus cut into the bottom-right on `folder-plus`/`photo-plus`'s exact arms; it replaces `ic_plus` on
+**both** New-notebook buttons, including the link picker's, where it had been a second identical
+plus beside "new page". `ic_plus` itself is unchanged — it is still the Contents expand toggle and
+two New-page controls.
+
+**The trap this pass keeps re-teaching:** a bar centred by `layout_weight` is centred on *leftover
+space*, and leftover space changes with the build type (`DebugMenu`) and with the caller
+(`btnSend`). Where something must look centred, it is a `FrameLayout` child with
+`layout_gravity="center"`.
+
+Everything is id-based wiring, so no host code changed for a reorder — only `SelectionToolbar`'s
+`init`, `LibraryActivity`'s `DebugMenu.install` target, and `TemplateBrowser`'s chrome rules.
+`./gradlew test assembleDebug` green throughout. Docs: `docs/library.md`, `docs/notebook.md`,
+`docs/scratchpad.md`, `docs/templates.md`.
+
 ---
 
 ## Verification (end of arc)

@@ -30,8 +30,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Debug build only (this file has a no-op twin in `src/release`): a ⋯ button on the library's
- * top bar with the actions that make key and store testing practical on a device —
+ * Debug build only (this file has a no-op twin in `src/release`): a ⋯ button at the right of the
+ * library's bottom bar with the actions that make key and store testing practical on a device —
  *  - **Show recovery key** — reveal + copy the global passphrase.
  *  - **Forget cached key** — clear the Keystore-cached passphrase and raw keys, then kill the
  *    process; the next launch must land on the Unlock screen with the file intact.

@@ -243,6 +243,18 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   eraser tool's mid-sweep `onContentErased` still *must* repaint, which is why `removeContent`
   repaints for neither and each caller owns its frame). 757 JVM tests + 157 in g-paper; version
   stays `0.1.0-ratta`.
+  **Post-arc fixes** (outside any arc, in `RATTA_PLAN.md` § Post-arc fixes): **F1** — a wrapped
+  heading is listed in the Contents and names its page again (K1's "a wrapped heading belongs to
+  the link" reversed for the two *read* paths only; editing ownership untouched). **F2** — a
+  user-directed **chrome rearrangement** across every bar in the app: the library's, templates'
+  and the scratch pad's action buttons all moved to their **top** bars, the bottom bars keep only
+  a pager, the selection toolbar now leads with `Snap · Copy · Cut` and ends with **Delete**
+  (superseding O1's "Delete is leftmost"), the templates browser's shelf exit became a head arrow
+  while its ✕ leaves the screen from anywhere (superseding G5's two-✕ rationale), and two icons
+  changed (`ic_snap`, `ic_notebook_plus`). **The trap it kept re-teaching:** a bar centred by
+  `layout_weight` is centred on *leftover space*, which changes with the build type (`DebugMenu`
+  is a no-op in release) and with the caller (`btnSend`) — anything that must look centred is a
+  `FrameLayout` child with `layout_gravity="center"`.
   **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for any work there** — it holds the
   per-arc status, locked decisions, working protocol, and model recipe.
 - `germination` — previous post-MVP feature branch (reference, not active)

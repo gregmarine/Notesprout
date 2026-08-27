@@ -114,7 +114,6 @@
     <string name="template_search_empty_title">Nothing to search for</string>
     <string name="template_search_empty_body">Type some of the template\'s name first.</string>
     <string name="cd_templates">Templates</string>
-    <string name="cd_close_templates">Close</string>
     <string name="cd_template_current">Current paper</string>
     <string name="template_render_failed_title">Couldn\'t draw that paper</string>
     <string name="template_render_failed_body">The template could not be rendered at this page\'s size. The page has been left as it was.</string>
@@ -176,10 +175,12 @@
     <string name="cd_debug">Debug tools</string>
     <string name="cd_back">Back</string>
     <string name="cd_up_folder">Go up one folder</string>
+    <string name="cd_close_templates">Close</string>
+    <string name="cd_close_shelf">Back to folders</string>
     <string name="cd_pinned">Pinned notebooks</string>
     <string name="cd_recents">Recent notebooks</string>
     <string name="cd_pinned_badge">Pinned</string>
-    <string name="cd_close_mode">Close</string>
+    <string name="cd_close_mode">Back</string>
     <string name="cd_first_page">First page</string>
     <string name="cd_prev_page">Previous page</string>
     <string name="cd_next_page">Next page</string>
@@ -190,7 +191,6 @@
     <string name="cd_pinned_templates">Pinned templates</string>
     <string name="cd_recent_templates">Recent templates</string>
     <string name="cd_search_templates">Search templates</string>
-    <string name="cd_close_shelf">Back to folders</string>
     <string name="cd_new_notebook">New notebook</string>
     <string name="cd_tool_pen">Pen</string>
     <string name="cd_tool_eraser">Eraser</string>

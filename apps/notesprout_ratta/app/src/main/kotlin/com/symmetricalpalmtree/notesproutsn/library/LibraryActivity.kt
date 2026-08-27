@@ -122,7 +122,7 @@ class LibraryActivity : AppCompatActivity() {
         scratchPad = ScratchPadEntry(activity = this, button = binding.btnScratchPad)
         binding.btnScratchPad.setOnClickListener { scratchPad.open() }
         TooltipCompat.setTooltipText(binding.btnScratchPad, binding.btnScratchPad.contentDescription)
-        DebugMenu.install(this, binding.topBar)
+        DebugMenu.install(this, binding.bottomRight)
 
         // The grid cannot be sized until the band it lives in has been laid out.
         binding.gridContainer.viewTreeObserver.addOnGlobalLayoutListener {

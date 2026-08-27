@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Tabler "plus" — new notebook; also the Contents entry expand toggle -->
+<!-- Tabler "plus" — the Contents entry expand toggle, the link picker's New page, and the
+     scratch-pad placement sheet's New page. New notebook took ic_notebook_plus instead. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"

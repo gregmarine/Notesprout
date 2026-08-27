@@ -47,20 +47,20 @@ class ScratchSelectionToolbar(
 
     init {
         val ctx = bar.context
-        // Delete keeps the leftmost slot it has always had; Send goes after it, in the pad's only
-        // other order-bearing decision.
-        bar.addView(button(R.drawable.ic_trash, ctx.getString(R.string.delete_selection_action)) {
-            // Release before the row runs: the tap has to show its result, and the delete repaints
-            // the page underneath.
-            releaseRender()
-            onDelete()
-        })
+        // Send first, Delete last — the notebook's selection bar puts its one destructive verb on
+        // the far edge and the pad's tools are the notebook's, so its bar reads the same way.
         if (sendEnabled) {
             bar.addView(button(R.drawable.ic_pencil_down, ctx.getString(R.string.cd_scratch_send_selection)) {
                 releaseRender()
                 onSend()
             })
         }
+        bar.addView(button(R.drawable.ic_trash, ctx.getString(R.string.delete_selection_action)) {
+            // Release before the row runs: the tap has to show its result, and the delete repaints
+            // the page underneath.
+            releaseRender()
+            onDelete()
+        })
     }
 
     /** One toolbar button, to the one recipe: dimen-driven size, no ripple, tooltip == description. */

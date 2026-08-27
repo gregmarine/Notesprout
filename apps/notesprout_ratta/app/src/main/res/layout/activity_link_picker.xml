@@ -139,7 +139,7 @@
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnNewNotebook"
             style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_plus"
+            android:src="@drawable/ic_notebook_plus"
             android:contentDescription="@string/link_new_notebook"
             android:visibility="gone" />
 

@@ -30,22 +30,39 @@ passphrase.
 
 ## Chrome
 
-**Top bar** — the breadcrumb *is* the path. `Notebooks` is the root crumb; each ancestor follows,
-separated by ` / `; any crumb jumps straight there. A back arrow appears left of the crumbs once
-you are below the root. The debug ⋯ is appended to this bar at runtime (`DebugMenu.install`,
-no-op in release). **In a mode the breadcrumbs give way** to a title (`modeTitle`) and a close
-button (`btnCloseMode`, `ic_x`) — see [Modes](#modes).
-
-**Bottom bar** — constant, seven buttons plus the pager:
+**Top bar** — the breadcrumb *is* the path, and everything you do *to* the library sits at the
+row's right edge:
 
 ```
-[Pinned] [Recents] [Scratch pad] [Templates]   |<  <  n / n  >  >|   [Sort] [+Folder] [+Notebook]
+[←]  Notebooks / … / Folder        [+Notebook] [+Folder] [Recents] [Pinned] [Sort] [Scratch pad]
 ```
 
-Measured before the seventh was written: 7 × 116 px + the pager's 569 px = **1381 px** of the
-Nomad's 1404, **23 px of headroom**. The pager stays `INVISIBLE` rather than `GONE` so the row never
-reflows. Every icon button carries a `contentDescription` and a `TooltipCompat` long-press hint
-naming it.
+`+Notebook` is `ic_notebook_plus` — Tabler `address-book` with the person taken out and a plus cut
+into the bottom-right corner, on `folder-plus`/`photo-plus`'s exact geometry, so the two create
+buttons read as a pair. (The plain `ic_plus` it replaced named nothing, and on the link picker it
+sat beside a second identical plus meaning "new page".)
+
+`Notebooks` is the root crumb; each ancestor follows, separated by ` / `; any crumb jumps straight
+there. `btnUp`'s back arrow appears left of the crumbs once you are below the root. **In a mode the
+breadcrumbs give way** to a title (`modeTitle`) and `btnCloseMode` — a **left arrow**, first child
+of the row, before the title — see [Modes](#modes). `btnUp` and `btnCloseMode` share the same
+`ic_arrow_left` and never show at once: a shelf has no path to go up out of.
+
+**Bottom bar** — a `FrameLayout`, not a row:
+
+```
+                        |<  <  n / n  >  >|                          [Templates] [debug ⋯]
+```
+
+The pager takes `layout_gravity="center"` so it is centred on the **screen**, and the right-hand
+group (`bottomRight`) takes `layout_gravity="end"`. That is the whole reason the bar is not a
+`LinearLayout`: `DebugMenu.install` appends the ⋯ into `bottomRight` at runtime and is a **no-op in
+release**, so a weight-centred pager would sit in a different place in the two build types. The
+pager stays `INVISIBLE` rather than `GONE` so the row never reflows. Every icon button carries a
+`contentDescription` and a `TooltipCompat` long-press hint naming it.
+
+The Templates screen is reachable from here only; paper is *picked* from New Notebook and from the
+notebook's page-template row, which go straight to `TemplatesActivity.pickIntent`.
 
 **Back press** peels one layer at a time: out of a mode, then up one folder, then out of the app.
 
@@ -59,12 +76,12 @@ to exactly the folder you were in.
 
 `setMode(new)` is a no-op on the mode already showing; otherwise it writes `browseState.mode`,
 resets `pageIndex` to 0 and refreshes. `btnPinned` toggles PINNED ↔ NORMAL, `btnRecents` toggles
-RECENTS ↔ NORMAL, `btnCloseMode` and Back both go to NORMAL. The mode **persists across a
+RECENTS ↔ NORMAL, `btnCloseMode` (the left arrow at the row's head) and Back both go to NORMAL. The mode **persists across a
 relaunch**: it is read back in `onCreate` and honoured by the first refresh.
 
 **Chrome in a mode** (`renderChrome`): breadcrumb scroll and `btnUp` hidden, `modeTitle` ("Pinned"
 / "Recent") and `btnCloseMode` shown; `btnNewFolder` / `btnNewNotebook` hidden — a shelf is not a
-place to create into. Sort stays active. The active mode's bottom-bar button takes
+place to create into. Sort stays active. The active mode's top-bar button takes
 `isSelected = true`, so `bg_toolbar_button`'s border says which shelf you are on.
 
 **What each shelf holds** — one `repo.pinnedNotebookIds()` read per refresh feeds every card's

@@ -38,11 +38,11 @@ for the exclusion rects, `UndoRedoStack` for the history, `SelectionAnchor` for 
 
 | | |
 |---|---|
-| Top bar | Back · "Scratch Pad" · **Send** (only with a notebook behind it) |
-| Bottom bar | Pen · Eraser · Lasso · ← · page indicator · → · **Send** on the selection bar when one is up |
+| Top bar | Back · Pen · Eraser · Lasso · "Scratch Pad" (centred on the screen) · **Send** (only with a notebook behind it) |
+| Bottom bar | ← · page indicator · → , centred on the screen |
 | Tools | **Fixed and they are the notebook's**: PEN, black, the notebook's pen width; the notebook's eraser radius. No panels, no colour, nothing remembered — a pad that lassoed differently one tap from the notebook would read as a bug. |
 | Gestures | The notebook's, minus what the pad has no use for: 1-finger horizontal swipe = flip (past the last page, insert one) · 2-finger horizontal swipe = insert before / after · 2-finger stationary double-tap = undo · 3-finger = redo · 1-finger long-press = ask to delete this page. No link follow, no trail walk-back, no Contents, no Recents. |
-| Selection | Smart lasso + scribble erase, armed before the listener attaches. The floating bar is Delete (+ Send selection, with a notebook behind). |
+| Selection | Smart lasso + scribble erase, armed before the listener attaches. The floating bar is Send selection (with a notebook behind) then Delete — Delete last, as on the notebook's bar. |
 | Undo | Pad-level and **in memory**: it survives page turns and dies with the screen. |
 
 **The caller check is the first statement in `onCreate`**, before anything is inflated. The screen is

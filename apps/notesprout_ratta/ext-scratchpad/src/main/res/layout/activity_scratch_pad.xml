@@ -28,26 +28,21 @@
         android:background="@color/paperWhite"
         android:orientation="vertical">
 
-        <LinearLayout
+        <!-- A FrameLayout, not a row: the title is centred on the SCREEN, so it stays put
+             whatever flanks it — and Send is GONE when there is no notebook behind us, which
+             would otherwise move a weight-centred title between the two cases. -->
+        <FrameLayout
             android:id="@+id/topBarRow"
             android:layout_width="match_parent"
             android:layout_height="@dimen/toolbar_bar_thickness"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
             android:paddingStart="4dp"
             android:paddingEnd="4dp">
 
-            <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnBack"
-                style="@style/Widget.Notesprout.ToolbarButton"
-                android:contentDescription="@string/cd_scratch_back"
-                android:src="@drawable/ic_arrow_left" />
-
             <TextView
                 android:id="@+id/title"
-                android:layout_width="0dp"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
+                android:layout_gravity="center"
                 android:ellipsize="end"
                 android:paddingStart="8dp"
                 android:paddingEnd="8dp"
@@ -56,17 +51,52 @@
                 android:textColor="@color/inkBlack"
                 android:textSize="16sp" />
 
+            <!-- Back, then the tools (moved up from the bottom bar): the whole of what you do
+                 *on* this page now lives on one edge. -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:layout_gravity="start"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnBack"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:contentDescription="@string/cd_scratch_back"
+                    android:src="@drawable/ic_arrow_left" />
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnPen"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:contentDescription="@string/cd_tool_pen"
+                    android:src="@drawable/ic_pen" />
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnEraser"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:contentDescription="@string/cd_tool_eraser"
+                    android:src="@drawable/ic_eraser" />
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnLasso"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:contentDescription="@string/cd_tool_lasso"
+                    android:src="@drawable/ic_lasso" />
+            </LinearLayout>
+
             <!-- Send = this whole page, to the notebook the pad was opened from (J5). GONE when
                  there is no notebook behind us — the library's pad has nowhere to send to, and the
                  rule is GONE, never disabled. -->
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnSend"
                 style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_gravity="end|center_vertical"
                 android:contentDescription="@string/cd_scratch_send_page"
                 android:src="@drawable/ic_pencil_down"
                 android:visibility="gone" />
 
-        </LinearLayout>
+        </FrameLayout>
 
         <View
             android:layout_width="match_parent"
@@ -88,62 +118,45 @@
             android:layout_height="1dp"
             android:background="@color/inkBlack" />
 
-        <LinearLayout
+        <!-- Pages only, centred on the SCREEN — the tools moved up to the top bar. -->
+        <FrameLayout
             android:id="@+id/bottomBarRow"
             android:layout_width="match_parent"
             android:layout_height="@dimen/toolbar_bar_thickness"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
             android:paddingStart="4dp"
             android:paddingEnd="4dp">
 
-            <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnPen"
-                style="@style/Widget.Notesprout.ToolbarButton"
-                android:contentDescription="@string/cd_tool_pen"
-                android:src="@drawable/ic_pen" />
-
-            <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnEraser"
-                style="@style/Widget.Notesprout.ToolbarButton"
-                android:contentDescription="@string/cd_tool_eraser"
-                android:src="@drawable/ic_eraser" />
-
-            <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnLasso"
-                style="@style/Widget.Notesprout.ToolbarButton"
-                android:contentDescription="@string/cd_tool_lasso"
-                android:src="@drawable/ic_lasso" />
-
-            <!-- Tools left, pages right: the free space between says which is which. -->
-            <View
-                android:layout_width="0dp"
-                android:layout_height="0dp"
-                android:layout_weight="1" />
-
-            <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnPrevPage"
-                style="@style/Widget.Notesprout.ToolbarButton"
-                android:contentDescription="@string/cd_prev_page"
-                android:src="@drawable/ic_page_prev" />
-
-            <TextView
-                android:id="@+id/pageIndicator"
+            <LinearLayout
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:gravity="center"
-                android:minWidth="56dp"
-                android:singleLine="true"
-                android:textColor="@color/inkBlack"
-                android:textSize="14sp" />
+                android:layout_height="match_parent"
+                android:layout_gravity="center"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
 
-            <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnNextPage"
-                style="@style/Widget.Notesprout.ToolbarButton"
-                android:contentDescription="@string/cd_next_page"
-                android:src="@drawable/ic_page_next" />
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnPrevPage"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:contentDescription="@string/cd_prev_page"
+                    android:src="@drawable/ic_page_prev" />
 
-        </LinearLayout>
+                <TextView
+                    android:id="@+id/pageIndicator"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:minWidth="56dp"
+                    android:singleLine="true"
+                    android:textColor="@color/inkBlack"
+                    android:textSize="14sp" />
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnNextPage"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:contentDescription="@string/cd_next_page"
+                    android:src="@drawable/ic_page_next" />
+            </LinearLayout>
+
+        </FrameLayout>
 
     </LinearLayout>
 

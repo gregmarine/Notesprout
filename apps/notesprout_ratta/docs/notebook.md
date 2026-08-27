@@ -35,7 +35,7 @@ deliberate differences are listed at the end.
 | `core/RecognizingOverlay` (N2) | the "Recognizing…" box during a convert — `OpeningOverlay`'s smaller, dialog-free sibling |
 | `notebook/InkPayload` (N2) | `Stroke` (g-paper) → `InkStroke` (extension-api) in writing order — the one place a page's ink is reduced to bare geometry for the recognizer |
 | `CoverSnapshot` | `paper.renderToBitmap()` → ≤ 512 px long edge → WEBP q100 → `IndexRepository.setCover`; headings ride along for free (`HeadingRenderer` is part of the same committed-layer render) |
-| `NotebookToolbar` | `[←] [contents] [pen] [eraser] [lasso] … [recents]` — arming only; owns the fixed tool values (the Contents and Recents buttons belong to their flows, not to it). Back goes through `backPressed()`, never straight to `close()` (K4 — both Backs walk the link trail in a via-link notebook). O1: a second tap on the **armed lasso** calls back to the screen (the clipboard popup), and `showClipboardLoaded()` swaps that button's icon |
+| `NotebookToolbar` | `[←] [contents] [pen] [eraser] [lasso] … [recents] [scratch pad]` — arming only; owns the fixed tool values (the Contents and Recents buttons belong to their flows, not to it). Back goes through `backPressed()`, never straight to `close()` (K4 — both Backs walk the link trail in a via-link notebook). O1: a second tap on the **armed lasso** calls back to the screen (the clipboard popup), and `showClipboardLoaded()` swaps that button's icon |
 | `SelectionToolbar` | the floating bar over a live lasso selection: Delete (always) + H, plus (K1) **Link** / **Edit** / **Unlink** by `SelectionMode` (five modes since K1), plus (O1) **Copy** / **Cut** in every mode, plus (N2) the H1–H6 level sub-toolbar it can open |
 | `LassoPopup` (O1) | the small bordered bar under the **armed** lasso button: **Paste** + **Clear** for the object clipboard. Opens only while the clipboard holds objects; the screen owns every dismissal |
 | `ObjectClip` (O1) | pure selection ⇄ clipboard payload — capture, fresh ids, parent rewiring, the per-type `"order"` rebase, geometry translation (stroke = decode/translate/re-encode). JVM-tested. [`docs/clipboard.md`](clipboard.md) |
@@ -63,9 +63,10 @@ placed by `SelectionAnchor.placeSub` off the main bar when H is tapped) → `ope
 `<include>` of `overlay_opening.xml`, **last child so it is topmost**, and `VISIBLE` from the first
 frame). Immersive: system bars hidden, transient by swipe. Portrait-locked.
 
-The `topBarRow` is left-packed — Back, a 12 dp gap, then Contents / Pen / Eraser / Lasso — with a
-**weighted spacer** after the Lasso holding the row's free space, so `btnRecents` (T1) sits flush at
-the right edge and everything to its left keeps its position whatever the screen width.
+The `topBarRow` is left-packed — Back, then Contents / Pen / Eraser / Lasso, all butted together
+(the same spacing the scratch pad's row uses) — with a **weighted spacer** after the Lasso holding
+the row's free space, so `btnRecents` (T1) and the Scratch Pad button sit flush at the right edge
+and everything to their left keeps its position whatever the screen width.
 
 Both bars — and both selection bars while they are up — are pushed to `paper.setExclusionRects`
 after every root layout pass, translated into the paper view's coordinates, so the stylus can never
@@ -283,19 +284,19 @@ toolbar are set there by hand rather than waiting on the callback.
 
 ### The selection toolbar
 
-A bordered row floating over the paper: **Delete** always, plus (N2) an **H** button that opens a
-second floating bar of its own, the H1–H6 level sub-toolbar (`SelectionMode` and the convert/change
-flows are covered under Headings below), plus (O1) **Copy** and **Cut**, offered in every mode, and
-(A1) **Snap** last. It is a *bar*, not a button, because it is the shape the selection's actions
-live in from here on.
+A bordered row floating over the paper: (A1) **Snap** and (O1) **Copy** / **Cut** first — all three
+offered in every mode — then (N2) an **H** button that opens a second floating bar of its own, the
+H1–H6 level sub-toolbar (`SelectionMode` and the convert/change flows are covered under Headings
+below), then Link / Edit / Unlink, then Pad, and **Delete** last. It is a *bar*, not a button,
+because it is the shape the selection's actions live in from here on.
 
-**Copy and Cut sit after Delete** (the O1 phase-start decision). Delete has been the leftmost
-button since P1; grouping the clipboard verbs at the front would have been tidier and would have
-moved a control the hand has been aiming at for seven arcs.
+**Delete sits on the far edge, alone**: it is the one destructive verb, and it is kept away from
+the buttons the hand reaches for casually. (It led the row from P1 through arc 13; the order above
+supersedes that.)
 
-**Snap sits last** for the opposite reason: it is the one button that is not an act on this
-selection. Everything before it does something and the bar goes away; Snap changes how the *next*
-drag behaves and the bar stays exactly as it was.
+**Snap leads** because it is the one button that is not an act on this selection. Everything after
+it does something and the bar goes away; Snap changes how the *next* drag behaves and the bar stays
+exactly as it was.
 
 It replaces R5's tap-inside-the-box action sheet. The sheet asked for a second deliberate act on top
 of the lasso the user had just drawn, and on e-ink a dialog is a full-screen repaint; the bar is
@@ -396,7 +397,10 @@ need no knowledge of any of this.
 it arrives selected with the bar up, so the next drag snaps it. A paste that relocated itself would
 read as the app moving your content on its own.
 
-**The toggle.** One icon (`ic_snap`, Tabler `template`) with the selected border from
+**The toggle.** One icon (`ic_snap`, Tabler `layout-align-left` with its rule broken into long
+dashes — the same stride g-paper's `snapGuidePaint` draws a caught guide with, so the button shows
+what the page shows: a selection sitting against a guide. The two blocks stay solid; at 24 dp with a
+2-unit stroke a dashed rectangle is all corner and no rectangle) with the selected border from
 `bg_toolbar_button`, which is already how the top bar shows which tool is armed; the long-press hint
 says "on"/"off" in words, because a border alone is something you have to have been told about. No
 toast — the border *is* the confirmation, and the current selection does not move.
@@ -735,8 +739,9 @@ tap. Nothing about it is stored anywhere new: it reads the same device-local `sn
 only**, so a notebook's name never reaches plaintext prefs), and resolves names and folder paths from
 the global index at gather time. No schema change, nothing in any `.soil`.
 
-**Entry points:** `btnRecents` (Tabler `clock`) **flush at the top bar's right edge** — a weighted
-spacer after the Lasso puts it there, because it is not a tool and its panel comes in from that side
+**Entry points:** `btnRecents` (Tabler `clock`) **at the top bar's right edge**, with the Scratch
+Pad button after it — a weighted spacer after the Lasso puts them there, because neither is a tool
+and the Recents panel comes in from that side
 — and a **two-finger swipe down** on the paper. Unlike the Contents, neither is gated: the button is
 always visible and the swipe always acts, because "nothing recent" is a real answer the panel gives
 ("No recent notebooks") rather than a reason to hide a control.

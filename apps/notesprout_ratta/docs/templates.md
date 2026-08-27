@@ -144,7 +144,7 @@ A host supplies exactly two things:
 
 | Host | What a tap means | Chrome around it |
 |---|---|---|
-| `TemplatesActivity` (browse) | nothing — it is a library, not a picker | the Templates button in the library's bottom bar |
+| `TemplatesActivity` (browse) | nothing — it is a library, not a picker | the Templates button at the library's bottom-right |
 | `NewNotebookActivity` | tick it and wait for **Create** | a one-row header carrying the name field and Create; the four radios are gone |
 | `TemplatesActivity` (pick) | apply it and leave | launched full-screen from the notebook's page sheet **Page template** row, `LinkPickerActivity` shape — an `ActivityResultLauncher`, chrome only, **no `releaseForHandoff`** (it is not a paper surface) |
 
@@ -224,12 +224,35 @@ round trip is stable.
 
 ---
 
+## Chrome
+
+Everything that acts on the folder you are standing in sits on the **top bar**, in the library's
+order, so a template bar and a library bar read as the same bar:
+
+```
+[←]  Templates / Folder        [Import] [+Folder] [Search] [Recents] [Pinned] [Sort]  [✕]
+
+[←] = one layer back (shelf, then folder) · [✕] = leave the screen, from anywhere
+```
+
+The **bottom bar is the pager and nothing else** — weighted, centred, `INVISIBLE` rather than `GONE`
+so the bar never changes height under the grid.
+
+`[←]` steps back **one** layer and is the only arrow on the row: `btnCloseShelf` out of a shelf,
+`btnUp` up a folder — never both, since a shelf has no path to go up out of. The `[✕]` in the right
+corner leaves the **screen**, and it is offered from everywhere: root, folder, shelf alike. One
+arrow, one ✕, and they never mean the same thing. In a shelf the breadcrumbs give way to the shelf's
+title; inside **Default** Sort, New folder and Import stand down (the folder's contents are fixed),
+and in a shelf New folder and Import go too.
+
+---
+
 ## The three shelves
 
-Pinned · Recents · Search, at the **bottom-left** of the browser's bar, in all three hosts. They are
+Pinned · Recents · Search, on the browser's **top bar**, in all three hosts. They are
 flat, paginated, and **mutually exclusive** (one field holds the mode, so exclusivity is structural).
-While a shelf is up the top bar swaps its breadcrumbs for the shelf's title and its own ✕, and
-New folder, Import and **Duplicate** stand down.
+While a shelf is up the top bar swaps its breadcrumbs for the shelf's title and puts a back arrow at
+its head — the library's shape for its own shelves — and New folder, Import and **Duplicate** stand down.
 
 | | |
 |---|---|
@@ -242,10 +265,10 @@ opens in the tree, at the root, every time and in every host. A picker that open
 have no visible way back to the paper the page is actually using; and persisting a search would mean
 writing a **name** into device-local plaintext prefs, which the family's prefs rule forbids.
 
-**The browser owns the host's ✕.** In a shelf, `TemplatesActivity` would otherwise show two identical
-✕ side by side — one leaving the shelf, one leaving the screen — which is a choice nobody can make by
-looking. `showCloseButton` puts the button under the browser so a shelf can hide it, and back peels
-the same way: shelf → folders → out.
+**The way out of a shelf is the head arrow, not the ✕.** `showCloseButton`'s ✕ means one thing that
+never changes — leave the screen — so it stays put in the corner from root, folder and shelf alike;
+stepping back one layer is the arrow's job. The Back key still peels the arrow's order:
+shelf → folders → out.
 
 ### How a query is typed
 

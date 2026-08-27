@@ -102,7 +102,7 @@ class TemplateBrowser(
      *  from this, so no card ever asks the index on its own. */
     private var pinnedIds: Set<String> = emptySet()
 
-    /** Whether the host asked for its own close ✕ ([showCloseButton]). A shelf hides it either way. */
+    /** Whether the host asked for its own close ✕ ([showCloseButton]) — shown from everywhere. */
     private var hostCloseWanted = false
 
     private var pageIndex = 0
@@ -178,16 +178,16 @@ class TemplateBrowser(
 
     /**
      * Offer the host's own way out by tap (the Templates screen; the other two hosts have their own
-     * headers). The browser owns the button rather than the host **because a shelf hides it**: two
-     * identical ✕ side by side, one leaving the shelf and one leaving the screen, is a choice no
-     * one can make by looking. While a shelf is up the only ✕ is the shelf's, and the host's comes
-     * back the moment the shelf closes — the same peel-one-layer rule [onBackPressed] follows.
+     * headers). It is the bar's **only ✕**, and it is offered from everywhere — a shelf, a folder,
+     * the root — because it means one thing that never changes: leave the screen. Stepping back
+     * **one** layer is the head arrow's job ([TemplateBrowser] wires btnCloseShelf and btnUp there),
+     * and the two read apart because one is an arrow at the head and one is a ✕ in the corner.
      */
     fun showCloseButton(onClose: () -> Unit) {
         hostCloseWanted = true
         binding.btnClose.setOnClickListener { onClose() }
         TooltipCompat.setTooltipText(binding.btnClose, binding.btnClose.contentDescription)
-        binding.btnClose.visibility = if (shelf.isOpen) View.GONE else View.VISIBLE
+        binding.btnClose.visibility = View.VISIBLE
     }
 
     /** The host's `onSaveInstanceState` / `onCreate`, passed through to [TemplateTransfer] — the
@@ -343,7 +343,7 @@ class TemplateBrowser(
         breadcrumbScroll.visibility = if (inShelf) View.GONE else View.VISIBLE
         shelfTitle.visibility = if (inShelf) View.VISIBLE else View.GONE
         btnCloseShelf.visibility = if (inShelf) View.VISIBLE else View.GONE
-        btnClose.visibility = if (hostCloseWanted && !inShelf) View.VISIBLE else View.GONE
+        btnClose.visibility = if (hostCloseWanted) View.VISIBLE else View.GONE
         if (inShelf) {
             btnUp.visibility = View.GONE
             shelfTitle.text = shelf.title()

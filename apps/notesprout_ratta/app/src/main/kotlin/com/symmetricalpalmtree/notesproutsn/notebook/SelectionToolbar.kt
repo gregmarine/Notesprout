@@ -38,18 +38,19 @@ enum class SelectionMode { STROKES, HEADING, LINK, MIXED, MIXED_WITH_LINK }
  * the lasso the user had *just* drawn, and on e-ink a dialog is a full repaint; the bar is already
  * there when the selection appears, and its rect is chrome the pen cannot ink through.
  *
- * **Main bar**, in order: Delete (always) · **H** (a level is only writable on ink or on one
- * heading) · **Link** (any link-free selection — K1) · **Edit** and **Unlink** (a lone link, the
- * only selection with one payload to act on) · **Copy** and **Cut** (always — arc 8; they sit after
- * Delete so its leftmost slot, aimed at since P1, never moves) · **Snap** (always — arc 9; it is the
- * one button that acts on the *next* drag rather than on this selection, and it shows its state with
- * the same selected border the top bar's armed tool wears) · **Pad** (arc 11 / J5 — last, and the
- * narrowest of them all: only on a pure-ink selection, and only while a trusted scratch-pad
- * extension is installed. `WireStroke` is the whole of what the contract carries, so the moment the
- * selection holds a heading or a link there is nothing honest to send and the button is gone).
+ * **Main bar**, in order: **Snap** (always — arc 9; it is the one button that acts on the *next*
+ * drag rather than on this selection, and it shows its state with the same selected border the top
+ * bar's armed tool wears) · **Copy** and **Cut** (always — arc 8) · **H** (a level is only writable
+ * on ink or on one heading) · **Link** (any link-free selection — K1) · **Edit** and **Unlink** (a
+ * lone link, the only selection with one payload to act on) · **Pad** (arc 11 / J5 — the narrowest
+ * of them all: only on a pure-ink selection, and only while a trusted scratch-pad extension is
+ * installed. `WireStroke` is the whole of what the contract carries, so the moment the selection
+ * holds a heading or a link there is nothing honest to send and the button is gone) · **Delete**
+ * (always, and last: the one destructive verb sits alone on the far edge, away from the buttons
+ * reached for casually).
  * **Sub-toolbar**: H1…H6, shown by an H tap and hung off the *bar*
  * by [SelectionAnchor.placeSub] — below it, above when the bar itself flipped — so opening it never
- * moves the Delete the user just aimed at. Every [show] closes it: a fresh selection (or a
+ * moves the buttons the user just aimed at. Every [show] closes it: a fresh selection (or a
  * re-anchor after a move) is a new decision and should not inherit the last one's open drawer.
  *
  * Geometry is [SelectionAnchor]'s, in the notebook root's coordinates: [Bounds] arrive in **paper**
@@ -115,15 +116,27 @@ class SelectionToolbar(
 
     init {
         val ctx = bar.context
-        bar.addView(
-            // Release before the row runs, for the same reason the R5 sheet did: the tap has to
-            // show its result, and the delete repaints the page underneath. Ungated — see the
-            // frame-silence note in docs/notebook.md.
-            button(R.drawable.ic_trash, ctx.getString(R.string.delete_selection_action)) {
-                releaseRender()
-                onDelete()
-            }
-        )
+
+        // Snap first, and offered in every mode: it is a setting, not an act on this selection, so
+        // it never changes place or disappears. Its own tap re-styles the bar — the same
+        // own-tap re-show the H toggle already rides (docs/notebook.md § frame-silence).
+        snapButton = button(R.drawable.ic_snap, ctx.getString(R.string.snap_action_off)) {
+            releaseRender()
+            onToggleSnap()
+            syncSnapButton()
+        }
+        bar.addView(snapButton)
+
+        // Copy and Cut next, also in every mode — a link copies whole, wrapped children included (K1).
+        bar.addView(button(R.drawable.ic_copy, ctx.getString(R.string.copy_objects_action)) {
+            releaseRender()
+            onCopy(false)
+        })
+        bar.addView(button(R.drawable.ic_cut, ctx.getString(R.string.cut_objects_action)) {
+            releaseRender()
+            onCopy(true)
+        })
+
         headingButton = button(R.drawable.ic_heading, ctx.getString(R.string.heading_action)) {
             releaseRender()
             toggleLevels()
@@ -146,35 +159,24 @@ class SelectionToolbar(
         }
         bar.addView(unlinkButton)
 
-        // Copy and Cut go AFTER Delete (the O1 phase-start decision): Delete has been the leftmost
-        // button since P1 and the muscle memory is worth more than grouping the clipboard verbs.
-        // Both are offered in every mode — a link copies whole, wrapped children included (K1).
-        bar.addView(button(R.drawable.ic_copy, ctx.getString(R.string.copy_objects_action)) {
-            releaseRender()
-            onCopy(false)
-        })
-        bar.addView(button(R.drawable.ic_cut, ctx.getString(R.string.cut_objects_action)) {
-            releaseRender()
-            onCopy(true)
-        })
-
-        // Snap last, and offered in every mode: it is a setting, not an act on this selection, so
-        // it never changes place or disappears. Its own tap re-styles the bar — the same
-        // own-tap re-show the H toggle already rides (docs/notebook.md § frame-silence).
-        snapButton = button(R.drawable.ic_snap, ctx.getString(R.string.snap_action_off)) {
-            releaseRender()
-            onToggleSnap()
-            syncSnapButton()
-        }
-        bar.addView(snapButton)
-
-        // Last, and the only button gated on something outside this selection. Ink-only: the wire
-        // carries strokes and nothing else, so a heading or a link in the set takes it away.
+        // The only button gated on something outside this selection. Ink-only: the wire carries
+        // strokes and nothing else, so a heading or a link in the set takes it away.
         padButton = button(R.drawable.ic_sketching, ctx.getString(R.string.scratch_send_action)) {
             releaseRender()
             onScratchPad()
         }
         bar.addView(padButton)
+
+        bar.addView(
+            // Delete last, alone on the far edge — the one destructive verb, kept away from the
+            // ones you reach for casually. Release before the row runs, for the same reason the R5
+            // sheet did: the tap has to show its result, and the delete repaints the page
+            // underneath. Ungated — see the frame-silence note in docs/notebook.md.
+            button(R.drawable.ic_trash, ctx.getString(R.string.delete_selection_action)) {
+                releaseRender()
+                onDelete()
+            }
+        )
 
         levelButtons = (1..LEVELS).map { level ->
             button(LEVEL_ICONS[level - 1], ctx.getString(R.string.heading_level_hint, level)) {

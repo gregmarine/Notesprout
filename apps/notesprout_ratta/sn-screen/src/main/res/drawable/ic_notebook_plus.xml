@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  New notebook — Tabler "address-book" with the person taken out (the circle and the line under it
+  meant a contact, not a page) and a plus put in the corner, cut out of the body exactly the way
+  Tabler's own folder-plus and photo-plus do it: the outline stops short of the bottom-right, and
+  the plus sits in the notch at (19,19) on the same 16..22 arms.
+
+  What is left of the address book is a bound cover with three tabs on its spine, which is what a
+  notebook is. The plain ic_plus it replaces said "add" and named nothing — and on the link picker
+  it sat beside a second identical plus meaning "new page".
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- The cover, open at the bottom-right for the plus. -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M12.5 20h-5.5a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2h11a2 2 0 0 1 2 2v6.5"/>
+
+    <!-- The three spine tabs. -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M4 8h3"/>
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M4 12h3"/>
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M4 16h3"/>
+
+    <!-- The plus, on folder-plus / photo-plus's exact arms. -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M16 19h6"/>
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M19 16v6"/>
+
+</vector>
