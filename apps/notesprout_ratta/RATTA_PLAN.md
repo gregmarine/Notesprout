@@ -3077,7 +3077,7 @@ findings; the arc is frozen at this commit.
 
 ---
 
-## Phases — Arc 13 "Stationery" (planned 2026-08-25, wizard complete)
+## Phases — Arc 13 "Stationery" ✅ COMPLETE + FROZEN 2026-08-26 (planned 2026-08-25, wizard complete)
 
 Templates stop being four radio buttons and become **a library**: folders, previews, import,
 export. Two things are joined here that the app has always kept apart — og's reusable template
@@ -3554,7 +3554,7 @@ dialog's own 350 px shift under the IME is the tell that the keyboard is actuall
    cannot inject.
 
 ### G6 — Review, hardening, docs, freeze
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (commit `PENDING`)
 
 `/code-review` over the **whole arc range** (G1→G5 — note G2 is a revert, so the range's net
 content is G1 + G3–G5, `high`) — the arc, not the phase; every finding
@@ -3566,6 +3566,91 @@ checklist for what only an eye and a pen can judge. Docs: **`apps/notesprout_rat
 the failure table, and a line on the abandoned generator options so the question stays closed), plus edits to `docs/library.md`, `docs/notebook.md` (the page-paper row now opens a screen),
 `apps/notesprout_ratta/CLAUDE.md`, root `CLAUDE.md`, and memory. Then commit + freeze.
 *Fable is out for this arc — review runs as `/code-review`, fixes go to Opus.*
+
+**Outcome (2026-08-26):** reviewed, hardened, walked on the Nomad and frozen. **754 JVM tests**
+across the five modules (was 753 — `:app` alone 586 → 587), debug + release both build, release
+signs, crash buffer empty, test data restored. Version stays `0.1.0-ratta`; g-paper pin stays 0.1.6.
+No new dependency, no schema change, no migration.
+
+*The review.* `/code-review high` over `88dbbc4..HEAD` — the whole arc, whose net content is
+G1 + G3–G5 (G2 is a revert). **Eight findings, seven fixed, one recorded as a deliberate non-fix**,
+each premise checked against the code before anything was changed. Also worth keeping: the review
+listed eleven things it checked and found *correct* — the three fit modes' arithmetic, the
+never-upscale rule, the G4 elvis (right now), the `LIKE` escaping against `ESCAPE '\'`, `prefer`'s
+no-op, the shelves never sweeping the sentinels, the recursive delete's cycle guard,
+`FolderPickerActivity`'s exclusions under the new `browseFolderType`, `RecentEntry`'s
+`@SerialName` back-compat, and `matchTemplate` staying token-agnostic so `IMG#` rows still
+content-dedupe on paste.
+
+*The two that mattered.*
+**(1) A failed *render* was blanking the page.** `mintOrReuse` returned `""` when `PagePaper.render`
+came back null, so `changeTemplate` wrote `refId = ""`, recorded an undo step and repainted — the
+paper the user could see, wiped, with no dialog. Arc 12's only null path was "a page with no size"
+(impossible); **arc 13 added two live ones** — a stored blob that no longer decodes, and the
+`OutOfMemoryError` catch in `renderImage`. `PaperRenderFailed` now separates *broken* from *absent*:
+nothing is written, no undo step, nothing recorded as recent, and its own dialog. The same shape in
+`NewNotebookActivity` was fixed by **rendering before the `.soil` is created**, so the failure costs
+not even an orphan file. The lesson generalises: a rule that only ever had an unreachable failure
+path is a rule nobody has tested, and the arc that makes it reachable has to go looking for it.
+**(2) A rule enforced in three places was missed in the fourth.** The reserved root name is checked
+on create, rename and import — but not on **move**, and `repo.nameTaken` cannot cover for it because
+**Default is not a row**. Creating a folder called `default` three folders down is legal, and moving
+it to the templates root put a second identical card beside the built-in one. Walked end to end on
+the glass, both before and after. Its dialog also took `name_problem_title`, not the move sheet's
+"Already taken": nothing has *taken* the name, it is reserved — the G5 borrowed-words lesson in a
+new place.
+
+*The other five.* An `LruCache(32)` of page-sized bitmaps was bounded by **count, not bytes** (~30 MB
+held for the life of the process, while the notebook behind the picker still holds the EPD pipeline)
+— it has a `sizeOf` and an 8 MiB bound now, and `clear()`, which had no call sites, is gone with it.
+Every tap in the New Notebook host re-read **every visible template's blob** to hand it to a
+thumbnail that was already drawn — `TemplateThumbnails.isCached` is the probe that skips it, and only
+a host that ticks by *token* (the notebook) still pays. A deleted template kept its up-to-6 MiB blob
+forever; `deleteTemplate` drops it now, `softDelete` **before** `clearBlob` so no interruption can
+leave an alive row with no pixels — which is also why it needs no transaction and stays JVM-tested.
+New Notebook's chosen card was not in `onSaveInstanceState` (it is `TemplatePick.encode()` now — the
+same kill-behind-SAF scenario `pendingExportId` exists for). And **Sort vanished on a shelf raised
+from inside Default**: opening a shelf does not clear the folder, and a shelf *is* ordered by the
+sort prefs.
+
+*The one recorded non-fix.* A notebook born from an **imported** template shows an empty cover card
+until its first snapshot — `birthKind` records `"IMAGE"`, `LibraryGrid` cannot read that as a
+`TemplateKind` and falls to Blank. Left as it is, deliberately: the only thing that knows what that
+paper looks like is a blob, and reading one per card is exactly what the blob-free listing rule
+prevents — and the window is nearly closed by construction, since creating a notebook *opens* it and
+its first `onStop` writes a real cover. Written down in `docs/templates.md` so the next reader knows
+it was weighed, not missed.
+
+*Boundary audit — clean.* `:extension-api`, `:ext-scratchpad` and `:ext-mlkit` have **no diff at all**
+in the arc range. `:sn-screen` gained four chrome drawables and nothing else; every line of Kotlin is
+in `:app`. The four icons are used only by `:app`, which matches the module's standing convention
+(all 39 chrome `ic_*` live there, `ic_snap` and `ic_sketching` among them, and both are `:app`-only).
+Nothing new crosses a process boundary — the arc adds no AIDL, no service, no Intent payload beyond
+a `TemplatePick` string between two of the app's own Activities.
+
+*The device walk* (Nomad, by hand rather than by agent): library bottom bar measured as written;
+Templates root (Blank · Default · test) and Default's three built-ins with Sort/New folder/Import all
+GONE; **Sort back on a shelf raised from inside Default** (the fix, on the glass); the reserved-name
+move refused with the right words, read off a `screencap` because the dialog body has no id; a
+normally-named template moved out to the root and back with no false refusal; folder create and
+recursive delete; all three shelves, with Recents drawing **Grid, Dotted** in stored order and a card
+wearing the tick *and* the pin badge; New Notebook's browser with the tick following each tap; the
+notebook's page-paper picker ticking Grid inside Default and nothing at the root; re-paper
+Grid → Dotted → Grid **reusing the original row both ways**; a pick from a *shelf*; and the true
+no-op — `re-paper reuses template` + `template use recorded` with **no `re-papered` line**. Crash
+buffer empty, test data restored.
+
+*Three things adb could not do*, recorded rather than claimed: the render-failure dialog (there is no
+way to author a corrupt stored blob without writing into the encrypted index), the saved-pick restore
+(the Supernote ignores `always_finish_activities`, and `am kill` refuses a foreground process — the
+fix is a `Bundle` put/get of an already-JVM-tested wire form), and anything beginning with a **SAF
+pick**, which is the standing G4 trap.
+
+**User checklist (eye/hand only, 2 items):**
+1. **Undo/redo a template change** — the multi-finger double-tap, which adb cannot inject. Re-paper a
+   page from the picker, then undo and redo it; the ink must not move.
+2. **Import and export**, if you want them re-walked after the review: both begin with a SAF pick and
+   neither can be driven by adb. Nothing about them changed in G6.
 
 ---
 

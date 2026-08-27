@@ -1800,13 +1800,25 @@ class NotebookActivity : AppCompatActivity() {
             Dialogs.problem(this, R.string.template_gone_title, R.string.template_gone_body)
             return
         }
+        // Paper that resolved but will not DRAW (bytes that no longer decode, an allocation the
+        // device refused) leaves the page exactly as it was and says so — the same answer as a row
+        // that vanished, because from the user's side it is the same event: the paper they asked
+        // for is not available and the paper they had must not be wiped for it.
+        val change = try {
+            session.changeTemplate(paper, resources.displayMetrics.densityDpi.toFloat())
+        } catch (e: NotebookSession.PaperRenderFailed) {
+            Log.w(TAG, "template render failed", e)
+            Dialogs.problem(this, R.string.template_render_failed_title, R.string.template_render_failed_body)
+            return
+        }
         // The paper resolved and the page took it — that is an apply, and an apply is the only
         // thing that makes paper recent (arc 13 / G5). Recorded before the null check: re-picking
-        // the paper already in force returns null (a true no-op with no undo step), but the user
+        // the paper already in force writes nothing (a true no-op with no undo step), but the user
         // did choose it, and the shelf's job is to remember what they chose. A prefs write is not
-        // a page change, so the no-op stays one.
+        // a page change, so the no-op stays one. A *failed* render never reaches here: it is not
+        // paper the user can go back to.
         TemplateRecents.record(this, pick)
-        val change = session.changeTemplate(paper, resources.displayMetrics.densityDpi.toFloat()) ?: return
+        if (change == null) return
         undo.record(Action.TemplateChanged(change.pageId, change.from, change.to))
         refreshToPage(change.pageId)
     }

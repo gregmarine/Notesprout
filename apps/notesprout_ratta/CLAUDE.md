@@ -14,8 +14,12 @@ The Manta identifies as a Nomad — target by serial.
 **Subsystem docs (`docs/`) — read the matching one before working in that area:**
 `docs/library.md` (library screen, naming schemes) · `docs/notebook.md` (the notebook screen:
 tools, selection, **snap to guides**, headings, Contents, **Recents**, gestures, **the page
-template picker**, undo, frame-silence ledger) ·
+template picker — the whole library since arc 13**, undo, frame-silence ledger) ·
 `docs/links.md` (arc 6: link rows/payload, render, picker + create-in-picker, follow + trail) ·
+`docs/templates.md` (arc 13: **the paper library** — the two kinds and no third, the sentinels that
+are not rows, the reserved **Default** folder, the one browser its three hosts share, SAF import and
+export, the Pinned/Recents/Search shelves, the `.soil` **token** and reuse-before-mint, the failure
+table, and the abandoned generator idea) ·
 `docs/clipboard.md` (arcs 7–8: the clipboard — one index row, one envelope, two kinds; the page
 half's long-press sheet and the object half's Copy/Cut, tap-to-place and lasso popup, both
 within and **across notebooks**, where a copied link's own-notebook target is re-pointed at the
@@ -82,6 +86,18 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   Touching either paper surface's handoff means re-reading the ordering rule in
   `docs/extensions.md` § the tier-2 recipe first; a failure there is fixed in **g-paper**.
 
+- **Paper is identified by a TOKEN, not a kind** (arc 13, `docs/templates.md`). A `.soil` `template`
+  row's `text` is `""` (blank — no row at all), `LINED`/`DOTTED`/`GRID` byte-for-byte as every build
+  in this family has written them, or `IMG#<8 hex>` for an imported picture — whose digest covers the
+  **fit mode** as well as the bytes. Reuse is `token + page size`, **reuse before mint**, and nothing
+  ever soft-deletes a template row. The library's **sentinels are not rows** (Blank, the reserved
+  **Default** folder, the three built-in papers): hardcoded ids, nothing seeded, nothing repairable
+  — so any prune against "alive rows" must exempt them by name. The browser **never opens a `.soil`**
+  and never returns pixels; it returns a `TemplatePick` and the caller does the read and the write.
+  Paper that will not **draw** is not paper that is **absent** and neither is blank: a failed render
+  leaves the page exactly as it was. **No adjustable generators** — built, shown, abandoned
+  (arc 13 / G2); import is how a user gets different paper, and re-raising it needs a fresh user
+  decision.
 - **Data model is Paper's, byte-for-byte format-compatible** — `notesprout.db` `objects`
   table (user_version 1) + `Garden/<uuid>.soil` universal `notebook` table v1 +
   `notebook_meta`, StrokeCodec format B, encrypt-by-default global key, SQLCipher stock

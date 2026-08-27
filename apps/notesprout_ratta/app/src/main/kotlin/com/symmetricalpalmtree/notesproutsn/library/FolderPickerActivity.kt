@@ -19,6 +19,7 @@ import com.symmetricalpalmtree.notesproutsn.data.index.ObjectType
 import com.symmetricalpalmtree.notesproutsn.data.prefs.SortField
 import com.symmetricalpalmtree.notesproutsn.data.prefs.SortOrder
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityFolderPickerBinding
+import com.symmetricalpalmtree.notesproutsn.templates.TemplateLibrary
 import kotlinx.coroutines.launch
 
 /**
@@ -190,6 +191,26 @@ class FolderPickerActivity : AppCompatActivity() {
 
     private fun moveHere() {
         lifecycleScope.launch {
+            // The reserved templates-root name, checked here as well as on create, rename and
+            // import. `nameTaken` cannot see it: **Default is not a row**, it is a hardcoded card,
+            // so the database has nothing to collide with. A folder called "Default" three levels
+            // down is perfectly legal (the name is only reserved at the root) — moving it *to* the
+            // root is the one path that could put a second identical card beside the built-in one,
+            // which is exactly the confusion the rule was written for.
+            if (browseFolderType == ObjectType.TEMPLATE_FOLDER &&
+                TemplateLibrary.isReservedName(currentFolderId, movingName)
+            ) {
+                // `name_problem_title`, not the move sheet's "Already taken": nothing has taken
+                // this name — it is reserved, and the create and rename paths say exactly that. A
+                // dialog borrowing the neighbouring flow's words answers a question nobody asked
+                // (the G5 lesson, in a new place).
+                Dialogs.problem(
+                    this@FolderPickerActivity,
+                    R.string.name_problem_title,
+                    getString(R.string.template_name_reserved, TemplateLibrary.RESERVED_ROOT_NAME),
+                )
+                return@launch
+            }
             if (repo.nameTaken(currentFolderId, movingType, movingName, movingId)) {
                 val msg = when (movingType) {
                     ObjectType.NOTEBOOK -> R.string.move_collision_notebook

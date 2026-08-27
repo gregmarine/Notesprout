@@ -321,13 +321,27 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
     }
 
     /**
-     * Soft-delete a static template and scrub its membership edges (G5's Pinned list). The pixels
-     * of every notebook that used it are untouched — they were copied into the `.soil` at apply
-     * time, which is og's rule and the whole reason a template can be deleted at all.
+     * Soft-delete a static template, scrub its membership edges (G5's Pinned list) and drop its
+     * stored pixels. Every notebook that used it is untouched: those pixels were copied into the
+     * `.soil` at apply time, which is og's rule and the whole reason a template can be deleted at
+     * all.
+     *
+     * **The blob goes with it** (G6). The row stays — soft deletes are the family's rule and what
+     * keeps a restore honest — but an imported template's blob is up to 6 MiB that nothing can ever
+     * read again (`templateRow` filters on `deletedAt`), and a delete the dialog calls permanent
+     * should not leave the largest thing about it behind. Deleting twenty templates would otherwise
+     * carry ~120 MB of unreachable bytes in an encrypted index forever.
+     *
+     * **The order is the atomicity.** `softDelete` lands *before* `clearBlob`, so no interruption
+     * can leave an alive row with no pixels — a template that lists but draws nothing. The worst a
+     * kill between the two can do is leave the blob behind on a row already gone, which is exactly
+     * the state this call was written to improve on. That is why there is no transaction here: one
+     * would need Android, and these three writes are already JVM-tested against the real repository.
      */
     suspend fun deleteTemplate(id: String, now: Long = System.currentTimeMillis()) {
         dao.deleteEdgesTo(id)
         dao.softDelete(id, now)
+        dao.clearBlob(id)
     }
 
     /**
@@ -347,6 +361,7 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
                 for (t in dao.childrenOfType(fid, ObjectType.TEMPLATE)) {
                     dao.deleteEdgesTo(t.id)
                     dao.softDelete(t.id, now)
+                    dao.clearBlob(t.id)
                     removed++
                 }
                 for (sub in dao.childrenOfType(fid, ObjectType.TEMPLATE_FOLDER)) stack.add(sub.id)

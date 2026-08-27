@@ -121,10 +121,18 @@ class NewNotebookActivity : AppCompatActivity() {
 
         // The export in flight, if this screen was killed behind a system picker (G4).
         browser.restoreState(savedInstanceState)
+        // And the card the user had chosen (G6). Same reason as the export: SAF is another process
+        // on a memory-tight device and this screen can be killed behind it — coming back with the
+        // pick reset to Blank and Create still armed would make a notebook on paper nobody asked
+        // for. `pick` is a card name, so its own wire form carries it.
+        savedInstanceState?.getString(KEY_PICK)
+            ?.let { TemplatePick.decode(it) }
+            ?.let { pick = it }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
+        outState.putString(KEY_PICK, pick.encode())
         if (::browser.isInitialized) browser.saveState(outState)
     }
 
@@ -212,6 +220,17 @@ class NewNotebookActivity : AppCompatActivity() {
         val pageW = minOf(metrics.widthPixels, metrics.heightPixels)
         val pageH = maxOf(metrics.widthPixels, metrics.heightPixels)
 
+        // The paper is drawn BEFORE the file exists. Blank draws nothing by definition; anything
+        // else that comes back null is paper that will not render — bytes that no longer decode, an
+        // allocation the device refused — and creating a notebook on silently blank paper because
+        // of it is the arc's one forbidden outcome. Throwing here (rather than after step 2) means
+        // the failure costs no orphan `.soil` either.
+        val pageBlob = if (paper is PaperSource.Blank) null else {
+            val bitmap = PagePaper.render(paper, pageW, pageH, metrics.densityDpi.toFloat())
+                ?: error("template render failed")
+            try { BuiltInTemplates.toWebp(bitmap) } finally { bitmap.recycle() }
+        }
+
         val db = SoilDatabase.create(this, notebookId, file, passphrase)
         try {
             val dao = db.dao()
@@ -222,17 +241,15 @@ class NewNotebookActivity : AppCompatActivity() {
                 createdAt = now, updatedAt = now, text = name, refId = pageId,
             ))
 
-            // The bitmap decides, not the pick: paper that will not draw at this page size writes
-            // no row at all rather than one naming pixels it cannot produce (the arc-12 rule).
+            // Blank writes no template row at all — that is what blank IS in this format. Every
+            // other paper has pixels by now or the create never got here.
             var templateId: String? = null
-            val bitmap = PagePaper.render(paper, pageW, pageH, metrics.densityDpi.toFloat())
-            if (bitmap != null) {
+            if (pageBlob != null) {
                 templateId = UUID.randomUUID().toString()
-                val blob = try { BuiltInTemplates.toWebp(bitmap) } finally { bitmap.recycle() }
                 dao.upsert(SoilObjectEntity(
                     id = templateId, parentId = notebookId, type = SoilSchema.TYPE_TEMPLATE,
                     createdAt = now, updatedAt = now, text = PagePaper.token(paper),
-                    width = pageW.toFloat(), height = pageH.toFloat(), blob = blob,
+                    width = pageW.toFloat(), height = pageH.toFloat(), blob = pageBlob,
                 ))
             }
 
@@ -261,6 +278,7 @@ class NewNotebookActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "NewNotebook"
+        private const val KEY_PICK = "templatePick"
         const val EXTRA_PARENT_FOLDER_ID = "parentFolderId"
         const val EXTRA_NOTEBOOK_ID = "notebookId"
         const val EXTRA_NOTEBOOK_NAME = "notebookName"

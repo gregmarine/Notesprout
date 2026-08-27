@@ -116,6 +116,8 @@
     <string name="cd_templates">Templates</string>
     <string name="cd_close_templates">Close</string>
     <string name="cd_template_current">Current paper</string>
+    <string name="template_render_failed_title">Couldn\'t draw that paper</string>
+    <string name="template_render_failed_body">The template could not be rendered at this page\'s size. The page has been left as it was.</string>
     <string name="template_gone_title">Couldn\'t use that template</string>
     <string name="template_gone_body">That template is no longer in the library. Nothing has been changed.</string>
 

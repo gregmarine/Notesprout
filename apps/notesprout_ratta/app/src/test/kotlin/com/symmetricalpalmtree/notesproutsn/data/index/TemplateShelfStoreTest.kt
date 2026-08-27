@@ -3,6 +3,7 @@ package com.symmetricalpalmtree.notesproutsn.data.index
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -20,10 +21,15 @@ class TemplateShelfStoreTest {
     private val dao = FakeObjectDao()
     private val repo = IndexRepository(dao)
 
-    private fun template(id: String, name: String, parentId: String? = null) = runBlocking {
+    private fun template(
+        id: String,
+        name: String,
+        parentId: String? = null,
+        image: ByteArray? = null,
+    ) = runBlocking {
         dao.upsert(ObjectEntity(
             id = id, type = ObjectType.TEMPLATE, name = name, parentId = parentId,
-            createdAt = 0L, updatedAt = 0L, templateKind = "IMAGE",
+            createdAt = 0L, updatedAt = 0L, templateKind = "IMAGE", blob = image,
         ))
     }
 
@@ -104,6 +110,22 @@ class TemplateShelfStoreTest {
         repo.deleteTemplate("t1")
         assertEquals(listOf("t2"), repo.pinnedTemplateIds())
         assertFalse(repo.isTemplatePinned("t1"))
+    }
+
+    /**
+     * The row survives (soft deletes are the family's rule) but its pixels do not — an imported
+     * template's blob is up to 6 MiB nothing can read again, and the delete dialog calls it
+     * permanent. The order matters and is asserted by the code, not here: `softDelete` before
+     * `clearBlob`, so no interruption can leave an **alive** row with no pixels.
+     */
+    @Test
+    fun `deleting a template drops its stored pixels but keeps the row`() = runBlocking {
+        template("t1", "Scan", image = ByteArray(64) { 7 })
+        repo.deleteTemplate("t1")
+        val row = dao.byId("t1")
+        assertNotNull(row)
+        assertNull(row?.blob)
+        assertNotNull(row?.deletedAt)
     }
 
     // ── Batch reads ──────────────────────────────────────────────────────────

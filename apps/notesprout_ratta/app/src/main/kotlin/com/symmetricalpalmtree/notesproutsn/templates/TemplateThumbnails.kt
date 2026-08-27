@@ -47,15 +47,27 @@ object TemplateThumbnails {
         if (cellWidthPx < 1 || pageWidthPx < 1 || pageHeightPx < 1) return null
         // A place is not a paper: folders draw the folder card, not a page.
         if (card is TemplateCard.Folder || card is TemplateCard.Defaults) return null
-        val key = "${card.id}:${card.stamp}:$cellWidthPx"
+        val key = key(card, cellWidthPx)
         cache.get(key)?.let { return it }
         val bmp = render(card, cellWidthPx, pageWidthPx, pageHeightPx, dpi, image) ?: return null
         cache.put(key, bmp)
         return bmp
     }
 
-    /** Drop everything — the screen calls this when the page size it renders against changes. */
-    fun clear() = cache.evictAll()
+    /**
+     * True when [bitmap] would answer from the cache — i.e. the caller need not pay for this card's
+     * stored pixels at all (arc 13 / G6).
+     *
+     * It exists because the blob read is *the* expensive thing on this screen: an imported template
+     * is up to 6 MiB decrypted out of SQLCipher, and the browser rebinds its page on every tap in
+     * the New Notebook host (a tap only moves the tick). Reading a megabyte to hand it to a function
+     * that will throw it away is the whole cost of the screen, repeated.
+     */
+    fun isCached(card: TemplateCard, cellWidthPx: Int): Boolean =
+        cache.get(key(card, cellWidthPx)) != null
+
+    private fun key(card: TemplateCard, cellWidthPx: Int): String =
+        "${card.id}:${card.stamp}:$cellWidthPx"
 
     private fun render(
         card: TemplateCard,
@@ -126,8 +138,21 @@ object TemplateThumbnails {
         strokeWidth = 1f
     }
 
-    /** Two grid pages' worth of cards, which is what a page turn back and forth costs. */
-    private val cache = LruCache<String, Bitmap>(32)
+    /**
+     * Bounded in **bytes, not entries**. `LruCache`'s default `sizeOf` is 1, so a 32-entry bound is
+     * a 32-*card* bound — and a card at the tablet tier is ~1 MB of ARGB_8888, so the cache could
+     * hold ~30 MB for the life of the process, on a memory-tight e-ink device, while the notebook
+     * behind this screen still holds the EPD pipeline and a page of strokes.
+     *
+     * [MAX_CACHE_BYTES] is several grid pages at any card size, which is what a page turn back and
+     * forth costs — and it is self-correcting when the card size changes, because the key carries
+     * the width and the old entries simply age out.
+     */
+    private val cache = object : LruCache<String, Bitmap>(MAX_CACHE_BYTES) {
+        override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
+    }
+
+    private const val MAX_CACHE_BYTES = 8 * 1024 * 1024
 
     /** Card art is small; the bound only protects against an oversized stored image. */
     private const val DECODE_EDGE = 1024

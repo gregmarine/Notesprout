@@ -202,6 +202,26 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   content-deduped on the way in), and the render uses the **page's** size, never the screen's. The
   index's `templateKind` stays the notebook's birth record. 637 JVM tests; version stays
   `0.1.0-ratta`; g-paper pin stays 0.1.6.
+  **Arc 13 "Stationery"** ✅ **COMPLETE + FROZEN 2026-08-26** (**G6 `PENDING`**): templates stop
+  being four radio buttons and become **a library** — folders, true-miniature previews, SAF import
+  and export, and three flat shelves. The join is the whole design, and it has no exceptions: a
+  **built-in** is paper the app draws (Lined / Dotted / Grid, in the reserved **Default** folder, the
+  floor of the library), a **static template** is pixels the library keeps (an imported PNG/JPEG/WEBP
+  in an index row), and **there is no third kind**. One `TemplateBrowser` serves all three places
+  paper is chosen — the Templates screen, New Notebook (the radios are gone) and the notebook's
+  **Page template** row (now a full-screen picker, not a sub-sheet). Storage is two **additive index
+  row types** (`template` / `template_folder`): no schema change, no migration, no format break with
+  Paper. The sentinels — Blank, Default and the three papers — are **hardcoded ids, not rows**, so
+  nothing is seeded, nothing can be deleted, and a restored index needs no repair (the trap that
+  follows: a prune against "alive rows" would sweep them out forever). The arc's hinge is that
+  **paper is identified by a token, not a kind** — `LINED`/`DOTTED`/`GRID` byte-for-byte as before,
+  `IMG#<8 hex>` for a picture, and the digest covers the **fit mode** as well as the bytes (the same
+  picture Fitted and Stretched are two papers). Arc 12's reuse-before-mint generalises onto it
+  unchanged. Imports are lossless WEBP downscaled to **1× the page's long edge** with a hard **6 MiB**
+  refusal — the B3 `CursorWindow` trap, arrived at by measurement. **G2 (adjustable generators) was
+  built, shown to the user and abandoned** — do not rebuild, do not re-raise without a fresh user
+  decision; import is how you get different paper. 754 JVM tests; version stays `0.1.0-ratta`;
+  g-paper pin stays 0.1.6. Reference: **`apps/notesprout_ratta/docs/templates.md`**.
   **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for any work there** — it holds the
   per-arc status, locked decisions, working protocol, and model recipe.
 - `germination` — previous post-MVP feature branch (reference, not active)

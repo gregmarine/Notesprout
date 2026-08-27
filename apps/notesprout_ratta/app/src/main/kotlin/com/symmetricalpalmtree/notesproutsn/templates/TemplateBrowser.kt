@@ -269,10 +269,17 @@ class TemplateBrowser(
         val work = withContext(Dispatchers.IO) {
             val art = HashMap<String, Bitmap?>(visible.size)
             val ticked = HashSet<String>(4)
+            // A pick host that ticks by TOKEN has to compare an imported card's digest, and the
+            // digest is of the bytes — so those cards pay for their pixels on every bind. A host
+            // that ticks by CARD ID (New Notebook) never needs them, and a tap there only moves the
+            // tick: without the cache probe below, every tap would re-read every visible template's
+            // blob out of SQLCipher to hand it to a thumbnail that is already drawn.
+            val needsToken = chosen.token != null
             for (card in visible) {
                 // Only an imported picture needs its bytes; a built-in paper is drawn from
                 // arithmetic, so its miniature costs no read at all.
                 val image = (card as? TemplateCard.Static)?.takeIf { it.isImage }
+                    ?.takeIf { needsToken || !TemplateThumbnails.isCached(card, g.cardWidth) }
                     ?.let { runCatching { repo.templateImage(it.id) }.getOrNull() }
                 art[card.id] = TemplateThumbnails.bitmap(
                     card, g.cardWidth, pageWidthPx, pageHeightPx, dpi(), image,
@@ -321,7 +328,10 @@ class TemplateBrowser(
         // path at all, so btnUp and the breadcrumbs go with them. Sort stays: the pinned and search
         // shelves are ordered by it, and it is the one control that still has something to act on.
         val fixed = inDefaults || inShelf
-        btnSort.visibility = if (inDefaults) View.GONE else View.VISIBLE
+        // `inDefaults && !inShelf`, not `inDefaults`: opening a shelf does not clear the folder you
+        // opened it from, so gating on Default alone hid Sort on a shelf raised from inside it —
+        // a shelf that IS ordered by the sort prefs, with no way to change them.
+        btnSort.visibility = if (inDefaults && !inShelf) View.GONE else View.VISIBLE
         btnNewFolder.visibility = if (fixed) View.GONE else View.VISIBLE
         // Import goes too: the Default folder is the app's paper, and the arc reserves it against
         // anything landing inside. A button that could only refuse itself is not a button.

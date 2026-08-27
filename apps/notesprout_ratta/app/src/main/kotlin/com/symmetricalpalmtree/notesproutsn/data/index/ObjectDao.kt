@@ -90,6 +90,14 @@ interface ObjectDao {
     @Query("SELECT blob FROM objects WHERE id = :id")
     suspend fun cover(id: String): ByteArray?
 
+    /**
+     * Drop a row's pixels without touching anything else (arc 13 / G6). A soft-deleted template
+     * keeps its row — that is the family's rule and what makes a restore honest — but its blob is
+     * the one column nothing can ever read again, and an imported template's is up to 6 MiB.
+     */
+    @Query("UPDATE objects SET blob = NULL WHERE id = :id")
+    suspend fun clearBlob(id: String)
+
     // ── Lists (pinned) ───────────────────────────────────────────────────────
 
     @Query("SELECT * FROM objects WHERE type = 'list_item' AND parentId = :listId AND refId = :memberId LIMIT 1")

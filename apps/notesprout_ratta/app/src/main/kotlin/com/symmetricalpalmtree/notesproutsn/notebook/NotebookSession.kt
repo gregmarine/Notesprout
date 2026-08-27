@@ -546,6 +546,13 @@ class NotebookSession(
      *
      * The old row is left exactly where it is. Nothing else may still point at it, but a template
      * is cheap, deleting one is not undoable, and leaving it is what makes the change back free.
+     *
+     * Throws [PaperRenderFailed] when the paper will not draw — a stored picture whose bytes will
+     * not decode, or an allocation the device refused. **Nothing is written on that path.** Arc 12
+     * had no live case for it (the only null was a page with no size), so a failed render fell
+     * through to `""` and blanked the page; arc 13's imported pixels made it reachable, and wiping
+     * the paper a user can see because we could not redraw it is the one outcome the whole
+     * vanished-template rule exists to prevent.
      */
     suspend fun changeTemplate(paper: PaperSource, dpi: Float): TemplateChange? = withContext(Dispatchers.IO) {
         val page = currentPage
@@ -586,13 +593,17 @@ class NotebookSession(
         PageTemplate.tokenOf(db.dao().templateDigests(notebookId), currentPage.templateId)
     }
 
+    /** Thrown when paper that is *not* blank will not draw at the page's size. See [changeTemplate]. */
+    class PaperRenderFailed : IllegalStateException("template render failed")
+
     /** The id of a row already holding this paper at this page's size, or a freshly stored one.
-     *  A render that comes back null (a page with no size) falls back to blank rather than
-     *  writing a template row that names paper it cannot draw. */
+     *  A render that comes back null throws rather than falling back to blank: this is only ever
+     *  called with a non-empty token, so "nothing to draw" here means the paper is broken, not
+     *  absent, and the page must keep what it has. */
     private suspend fun mintOrReuse(paper: PaperSource, token: String, page: PageRef, dpi: Float): String {
         PageTemplate.reusableId(db.dao().templateDigests(notebookId), token, page.width, page.height, prefer = page.templateId)
             ?.let { Slog.d(TAG) { "re-paper reuses template $it" }; return it }
-        val bitmap = PagePaper.render(paper, page.width, page.height, dpi) ?: return ""
+        val bitmap = PagePaper.render(paper, page.width, page.height, dpi) ?: throw PaperRenderFailed()
         val blob = try { BuiltInTemplates.toWebp(bitmap) } finally { bitmap.recycle() }
         val id = java.util.UUID.randomUUID().toString()
         val now = System.currentTimeMillis()

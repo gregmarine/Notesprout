@@ -84,6 +84,10 @@ class FakeObjectDao : ObjectDao {
 
     override suspend fun cover(id: String) = rows[id]?.blob
 
+    override suspend fun clearBlob(id: String) {
+        rows[id]?.let { rows[id] = it.copy(blob = null) }
+    }
+
     override suspend fun listItem(listId: String, memberId: String) =
         rows.values.firstOrNull { it.type == "list_item" && it.parentId == listId && it.refId == memberId }
 

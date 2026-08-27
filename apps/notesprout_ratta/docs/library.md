@@ -14,8 +14,9 @@ deliberate differences are listed at the end.
 | Screen | Class | Purpose |
 |---|---|---|
 | Library | `library/LibraryActivity` | Browse, create, rename, move, delete, sort, page |
-| New notebook | `library/NewNotebookActivity` | Name + template radio + Create |
-| Folder picker | `library/FolderPickerActivity` | The Move destination picker |
+| New notebook | `library/NewNotebookActivity` | Name + the template browser + Create |
+| Templates | `templates/TemplatesActivity` | The paper library — browse, or pick for a result ([`templates.md`](templates.md)) |
+| Folder picker | `library/FolderPickerActivity` | The Move destination picker — **either hierarchy** (`browseFolderType` + `rootLabel`), notebooks or templates |
 | Notebook | `notebook/NotebookActivity` | The drawing surface (R3) — see [`notebook.md`](notebook.md) |
 
 Every one of them opens with `IndexGuard.ready(this)` and takes `TopGuard.applyInsetPadding`.
@@ -35,15 +36,16 @@ you are below the root. The debug ⋯ is appended to this bar at runtime (`Debug
 no-op in release). **In a mode the breadcrumbs give way** to a title (`modeTitle`) and a close
 button (`btnCloseMode`, `ic_x`) — see [Modes](#modes).
 
-**Bottom bar** — constant, seven controls plus the pager:
+**Bottom bar** — constant, seven buttons plus the pager:
 
 ```
-[Pinned] [Recents]   |<  <  n / n  >  >|   [Sort] [+Folder] [+Notebook]
+[Pinned] [Recents] [Scratch pad] [Templates]   |<  <  n / n  >  >|   [Sort] [+Folder] [+Notebook]
 ```
 
-At the sw720dp tier (62 dp buttons) that is ~614 dp of controls in a 749 dp-wide Nomad portrait
-screen — it fits, with the pager taking the slack via `layout_weight`. Every icon button carries a
-`contentDescription` and a `TooltipCompat` long-press hint naming it.
+Measured before the seventh was written: 7 × 116 px + the pager's 569 px = **1381 px** of the
+Nomad's 1404, **23 px of headroom**. The pager stays `INVISIBLE` rather than `GONE` so the row never
+reflows. Every icon button carries a `contentDescription` and a `TooltipCompat` long-press hint
+naming it.
 
 **Back press** peels one layer at a time: out of a mode, then up one folder, then out of the app.
 
@@ -356,8 +358,14 @@ Deleting the folder you are standing in navigates out to its parent.
 
 ## Creating a notebook
 
-`NewNotebookActivity`: name field pre-filled with `YYYYMMDD_HHmmss` (editable, fully selected),
-template radios Blank / Lined / Dotted / Grid with Blank default, Create.
+`NewNotebookActivity`: a one-row header carrying the name field (pre-filled with
+`YYYYMMDD_HHmmss`, editable, fully selected) and **Create**, over the **whole template browser** —
+breadcrumbs, folders, shelves, import, both long-press sheets ([`templates.md`](templates.md)). The
+four radios are gone (arc 13 / G3); a tap ticks a card and the screen waits for Create.
+
+The screen is **`adjustNothing`**, not `adjustResize`: it has a page on it, and resizing for the
+keyboard would squash the grid it measured itself against. The name field sits in the top row where
+the IME cannot reach it — which is also why the header is one row and not a title plus a field.
 
 The order is the format contract:
 
@@ -366,14 +374,17 @@ The order is the format contract:
    birth, and it refuses to write over an existing file;
 3. **notebook** row: `parentId = ""`, `text` = name, `refId` = the page id (so a reopen knows where
    to land);
-4. **template** row for Lined/Dotted/Grid: `text` = kind name, `width`/`height` = page px, `blob` =
-   lossless WEBP q100. **Blank writes no template row at all**;
+4. **template** row for whatever was picked: `text` = the [token](templates.md#the-token-is-the-identity)
+   (`LINED` / `DOTTED` / `GRID`, or `IMG#<8 hex>` for an imported picture), `width`/`height` = page
+   px, `blob` = lossless WEBP q100 rendered through `PagePaper.render` at the **page's** size.
+   **Blank writes no template row at all**;
 5. **page 1**: `order = 0`, `width`/`height` = the full portrait screen in pixels,
    `refId` = the template row id, or `""` for Blank;
 6. `NotebookMetaStore.write` — the file's self-description, folder ancestry included, so it is
    portable on its own;
 7. `db.seal(file)` — WAL checkpoint back into the file, close;
-8. **then** `IndexRepository.createNotebook(...)` (pageCount 1, `templateKind` = the kind's name).
+8. **then** `IndexRepository.createNotebook(...)` (pageCount 1, `templateKind` =
+   `TemplatePicks.birthKind` — the kind's name, or `IMAGE` for an imported template).
 
 The index row is last on purpose: the index is the library's truth, so a crash anywhere earlier
 leaves an orphan file in `Garden/` — never a card pointing at nothing. A failure mid-way still
@@ -390,6 +401,10 @@ throwing with a half-typed name on screen.
 ---
 
 ## Templates
+
+The **library** of them — folders, import, export, the three shelves, and the one browser all three
+hosts share — is [`templates.md`](templates.md). What follows is only the three built-ins' own
+arithmetic, which is where the library's floor comes from.
 
 Split in two, on purpose:
 
@@ -416,7 +431,12 @@ finding — a 1.5 px-authored dot still read faint). A literal 1 px rule on a
 300 ppi e-ink panel is 0.08 mm and renders as faint grey, not a line.
 
 Everything is **baked into the file at creation**, so changing a constant here affects new
-notebooks only — a page must not silently re-rule itself under old ink.
+notebooks only — a page must not silently re-rule itself under old ink. **The three built-ins'
+output must stay bit-identical**: their thickness and dot constants are authored in *mdpi pixels*,
+not millimetres, and any arithmetic change needs that check ([`templates.md`](templates.md)).
+
+Blank, Lined, Dotted and Grid are also the four cards a user meets first: the three built-ins live
+in the reserved **Default** folder at the templates root, and Blank is card #1 there, forever.
 
 ---
 
