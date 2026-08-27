@@ -3849,6 +3849,56 @@ Everything is id-based wiring, so no host code changed for a reorder — only `S
 `./gradlew test assembleDebug` green throughout. Docs: `docs/library.md`, `docs/notebook.md`,
 `docs/scratchpad.md`, `docs/templates.md`.
 
+### F3 — A one-finger swipe flips every paginated list (2026-08-27)
+
+**Status:** ✅ Complete (Nomad-verified; user asked for it directly). The notebook has flipped its
+paper on a one-finger horizontal swipe since P1, and the scratch pad since J4. Everywhere *else*
+that paginates — six surfaces — the only way to turn a page was to tap a pager button. Now the same
+gesture works on all of them.
+
+**One rule, written once.** `core/SwipeMath` (`:sn-screen`, pure, JVM-tested) is the flip rule
+lifted out of `PageGestures` verbatim: horizontal-dominant, at least `MIN_DISTANCE_FRAC` = 30 % of
+the surface's width, and either faster than `scaledMinimumFlingVelocity` **or** simply past
+`LONG_DISTANCE_FRAC` = 50 % — the second clause is what lets a slow, deliberate drag work on paper
+that hates being flung. Direction comes from **displacement, never velocity** (a decelerating finger
+reports the opposite sign at the lift). `PageGestures` now calls it instead of computing it, so the
+notebook's page turn and a list's can never drift apart; its vertical recognisers keep the same
+constants rotated 90°.
+
+**`core/ListSwipe`** applies that rule to a **region** instead of the screen. Three decisions:
+
+- **Observer only**, fed from the host's `dispatchTouchEvent`, consuming nothing — `PageGestures`'
+  shape. Cards keep their taps and long-presses; a swipe is past the touch slop long before the
+  flip fires, which is what cancels the card's click on the way. Verified on the Nomad: a swipe
+  *across* a folder card turns the page and does not open the folder.
+- **Armed by region.** The sequence counts only if its DOWN landed inside the grid container or the
+  list body — never a bar. That is what lets the template browser sit inside **New Notebook**
+  without a drag across the name field turning the page, and it is why the width in the distance
+  rule is the **region's**: the Contents panel is a 60 % sidebar, and a swipe should be measured
+  against the paper it is on.
+- **Finger only** (the user's call, asked at the start): a stylus sequence is dropped whole. The pen
+  writes, the hand navigates — the same division `PageGestures` draws on the page itself.
+
+A swipe at either bound is a **no-op**, because it goes through the host's own `goToPage`, which
+already clamped for the pager buttons. Nothing wraps.
+
+**The six surfaces, and the one thing that differs.** `LibraryActivity`, `FolderPickerActivity`,
+`LinkPickerActivity` and `TemplateBrowser` (whose two hosts forward to
+`onDispatchTouchEvent`) arm on `gridContainer`. The **Contents** and **Recents** panels are
+`Dialog`s, and **a Dialog owns its own window** — an Activity's `dispatchTouchEvent` never sees a
+touch that landed on the panel. Both now build their dialog as an anonymous subclass that feeds the
+detector from the *dialog's* own dispatch, over `contentsBody` / `recentsBody`. The upside is
+structural: the notebook's `PageGestures` behind the panel cannot see these events either, so the
+page underneath can never turn while the outline is up.
+
+The notebook and the scratch pad are untouched — they already had the gesture, and now they share
+its arithmetic.
+
+12 new JVM tests over `SwipeMath` (776 total: `:app` 598 · `:sn-screen` 69 · `:extension-api` 31 ·
+`:ext-mlkit` 29 · `:ext-scratchpad` 49). `./gradlew test assembleDebug` green; no schema change, no
+migration, no g-paper change, no new dependency. Docs: `docs/sn-screen.md`, `docs/library.md`,
+`docs/templates.md`, `docs/notebook.md`, `docs/links.md`.
+
 ---
 
 ## Verification (end of arc)

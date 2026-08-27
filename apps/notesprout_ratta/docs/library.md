@@ -135,6 +135,21 @@ sw720dp**. On a Nomad (1404 × 1872, density 1.875) that gives 3 columns × 2 ro
 The pager is hidden with `INVISIBLE`, not `GONE`, when there is one page — its slot must not
 collapse and shuffle the rest of the bar.
 
+### The flip (F3)
+
+A **one-finger horizontal swipe over the grid** turns the page — left for the next, right for the
+one before — the same gesture, and the same `core/SwipeMath` rule, the notebook flips its paper by:
+horizontal-dominant, at least 30 % of the way across, and either fast enough or simply long enough.
+`core/ListSwipe` is the recogniser, fed from `dispatchTouchEvent` and **consuming nothing**, so
+cards keep their taps and long-presses (a swipe is past the touch slop long before it fires, which
+cancels the card's click on the way). It arms only if the DOWN landed inside `gridContainer` — a
+drag along either bar is not a page turn — and the width in the distance rule is the **region's**,
+not the screen's. A stylus sequence is dropped whole: the pen writes, the hand navigates. A swipe at
+either end is a no-op, because it goes through the same `goToPage` the pager buttons do.
+
+The same flip is on every paginated list in the app: the folder picker, the link picker, the
+template browser (`docs/templates.md`), and the Contents and Recents panels (`docs/notebook.md`).
+
 **Empty-state trap:** `emptyState` is a sibling of the grid inside `gridContainer`. `bind()` removes
 only the `GridLayout` it added last. A `removeAllViews()` there would delete the empty message and
 no folder would ever look empty again once a card had rendered.

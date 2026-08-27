@@ -3,6 +3,7 @@ package com.symmetricalpalmtree.notesproutsn.templates
 import android.app.Activity
 import android.graphics.Bitmap
 import android.os.Bundle
+import android.view.MotionEvent
 import android.view.View
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
@@ -14,6 +15,7 @@ import androidx.lifecycle.lifecycleScope
 import com.symmetricalpalmtree.notesproutsn.R
 import com.symmetricalpalmtree.notesproutsn.core.ActionSheetDialog
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
+import com.symmetricalpalmtree.notesproutsn.core.ListSwipe
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.index.ListIds
@@ -108,6 +110,17 @@ class TemplateBrowser(
     private var pageIndex = 0
     private var pageCount = 1
     private var items = emptyList<TemplateCard>()
+
+    /**
+     * The one-finger flip over the card grid — the pager buttons' gesture twin. Armed by the grid
+     * container alone, which is what lets this browser sit inside New Notebook beside a name field
+     * without a drag across that field turning the page.
+     */
+    private val listSwipe = ListSwipe(
+        region = { binding.gridContainer },
+        onFlipNext = { goToPage(pageIndex + 1) },
+        onFlipPrevious = { goToPage(pageIndex - 1) },
+    )
     private var grid: TemplateCardGrid? = null
     private var gridMeasured = false
 
@@ -164,6 +177,12 @@ class TemplateBrowser(
     }
 
     // ── Host API ─────────────────────────────────────────────────────────────
+
+    /**
+     * The host forwards its `dispatchTouchEvent` here so a one-finger swipe over the grid flips the
+     * page. Observer only — it consumes nothing, so cards keep their taps and long-presses.
+     */
+    fun onDispatchTouchEvent(ev: MotionEvent) = listSwipe.onTouchEvent(ev)
 
     /** Re-read the folder and redraw. Safe before the grid has measured — the measure reloads. */
     fun reload() {

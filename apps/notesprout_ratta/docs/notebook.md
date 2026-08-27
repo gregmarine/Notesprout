@@ -680,7 +680,11 @@ are `[+/− toggle | page number 52 dp 20 sp bold | 1 dp divider | label 20 sp e
 whole row indented `(level−1)×16 dp`, 68 dp min height; the toggle is `INVISIBLE` on leaves so the
 columns align; the highlight row takes the 5 dp inkBlack right-edge bar. Pagination, not scrolling:
 `itemsPerPage` measured once from the real body height, the library-shape pager footer `INVISIBLE`
-at one page with bound taps as no-ops (never a disabled look). Expansion state is in-memory only —
+at one page with bound taps as no-ops (never a disabled look). A **one-finger horizontal swipe over
+the body** flips those pages too (F3, `core/ListSwipe` — `docs/library.md` § The flip). A `Dialog`
+owns its own window, so the sequence is taken from the *dialog's* `dispatchTouchEvent`, not the
+Activity's: the notebook's own `PageGestures` behind the panel never sees a stroke of it, and the
+page underneath cannot turn while the outline is up. Expansion state is in-memory only —
 every open starts collapsed again. A row tap dismisses and navigates **by the entry's page id**,
 resolved at tap time under the page-op lock (`refreshToPage` — gone → no-op, current → no reload):
 a snapshot *index* would go stale under a page op that committed mid-gather (an escrowed undo, a
@@ -770,7 +774,8 @@ the Contents' 60 %, because a row is a name, a time and a path. Rows are three l
 breadcrumb at 13 sp, all inkBlack (the palette rule: secondary text is *smaller*, never grey). It
 paginates, never scrolls: one row is inflated and **measured** at the real panel width after the first
 layout (three lines at two text sizes is not a height worth guessing) and `RecentRows.itemsPerPage`
-follows, with the library-shape pager footer `INVISIBLE` at one page.
+follows, with the library-shape pager footer `INVISIBLE` at one page — and, like the Contents panel,
+a one-finger horizontal swipe over the body flips them (F3).
 
 **The hop** (`NotebookActivity.switchToNotebook`): the panel is a snapshot, so the tapped notebook is
 re-checked against the index first — gone → the "Can't open that notebook" problem dialog, and this

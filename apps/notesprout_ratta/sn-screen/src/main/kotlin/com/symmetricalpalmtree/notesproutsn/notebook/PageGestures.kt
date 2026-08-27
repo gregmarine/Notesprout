@@ -6,6 +6,7 @@ import android.view.View
 import android.view.ViewConfiguration
 import com.symmetricalpalmtree.gpaper.core.PaperView
 import com.symmetricalpalmtree.notesproutsn.core.Slog
+import com.symmetricalpalmtree.notesproutsn.core.SwipeMath
 import kotlin.math.abs
 import kotlin.math.hypot
 
@@ -261,15 +262,10 @@ class PageGestures(
     private fun verticalQualifies(dx: Float, dy: Float): Boolean =
         abs(dy) > abs(dx) && abs(dy) >= PAGE_SWIPE_MIN_DISTANCE_FRAC * height
 
-    /** Horizontal-dominant, far enough, and either fast enough or simply long enough. */
-    private fun qualifiesFling(vx: Float, dx: Float, dy: Float): Boolean {
-        val absDx = abs(dx)
-        if (absDx <= abs(dy)) return false
-        if (absDx < PAGE_SWIPE_MIN_DISTANCE_FRAC * width) return false
-        val fast = abs(vx) >= minFlingVel
-        val long = absDx >= PAGE_SWIPE_LONG_DISTANCE_FRAC * width
-        return fast || long
-    }
+    /** Horizontal-dominant, far enough, and either fast enough or simply long enough — [SwipeMath]
+     *  is the one place that rule is written, shared with the paginated lists' `ListSwipe`. */
+    private fun qualifiesFling(vx: Float, dx: Float, dy: Float): Boolean =
+        SwipeMath.flip(dx, dy, vx, width, minFlingVel) != SwipeMath.NONE
 
     /** Direction comes from displacement, never velocity — a decelerating finger can flip the sign. */
     private fun evaluateFlip(vx: Float, dx: Float, dy: Float) {
@@ -452,13 +448,10 @@ class PageGestures(
     private companion object {
         const val TAG = "PageGestures"
 
-        /** Minimum horizontal travel, as a fraction of the screen width, before anything counts. */
-        const val PAGE_SWIPE_MIN_DISTANCE_FRAC = 0.30f
-
-        /** Travel that qualifies on its own, however slowly the finger moved. */
-        const val PAGE_SWIPE_LONG_DISTANCE_FRAC = 0.50f
-
-        /** Fling threshold as a multiple of `scaledMinimumFlingVelocity`. */
-        const val PAGE_SWIPE_MIN_VELOCITY_MULT = 1.0f
+        /** The travel and velocity thresholds are [SwipeMath]'s — the same rule the paginated
+         *  lists flip by. Aliased here because the vertical recognisers reuse them rotated 90°. */
+        const val PAGE_SWIPE_MIN_DISTANCE_FRAC = SwipeMath.MIN_DISTANCE_FRAC
+        const val PAGE_SWIPE_LONG_DISTANCE_FRAC = SwipeMath.LONG_DISTANCE_FRAC
+        const val PAGE_SWIPE_MIN_VELOCITY_MULT = SwipeMath.MIN_VELOCITY_MULT
     }
 }

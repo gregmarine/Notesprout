@@ -52,6 +52,8 @@ app's debug build consumes the library's debug variant, so the gate means exactl
 | `notebook/PageMath` | page-index arithmetic |
 | `notebook/SelectionAnchor` | where a floating bar may sit relative to a selection |
 | `notebook/PageGestures` | the finger vocabulary — flips, inserts, the two swipes, the multi-finger undo/redo taps, the long-press. Pen-gated throughout |
+| `core/SwipeMath` | the one horizontal-flip rule, in pure arithmetic — shared by `PageGestures` and `ListSwipe` so a page turn means the same travel everywhere. JVM-tested |
+| `core/ListSwipe` | the one-finger flip for a **paginated list** (F3): `SwipeMath` applied to a region rather than the screen, armed only inside it, finger-only, observer-only |
 | `notebook/UndoRedoStack<A>` | the generic LIFO history plus its `generation` counter. The notebook's fourteen action kinds stay in `:app` as `NotebookUndo.Action` |
 | `notebook/PaperToolbar` | back + the three tool buttons, **binding-free** |
 | `notebook/PaperChrome` | exclusion rects and the over-chrome hit test, with the host-specific parts as suppliers |

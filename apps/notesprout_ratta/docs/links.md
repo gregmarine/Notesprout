@@ -229,6 +229,10 @@ link point" and returns a single payload string. In-app (`IndexGuard`, portrait,
 `exported="false"` — an external `am start` is refused by Android itself), launched by
 `LinkPickFlow` via ActivityResult.
 
+Its card grids flip on a **one-finger horizontal swipe** like every other paginated view in the app
+(F3, `core/ListSwipe` — `docs/library.md` § The flip), armed on `gridContainer` so the mode buttons
+and the style toggle above it are not page turns.
+
 **What crosses where (the relay rule):** the current notebook's pages reach the picker through
 `LinkPickerRelay` — the family's transfer-singleton shape. The relay's `source` closes over the
 **live session** (the notebook screen stays alive underneath), because the current `.soil` is

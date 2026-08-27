@@ -235,6 +235,12 @@ order, so a template bar and a library bar read as the same bar:
 [←] = one layer back (shelf, then folder) · [✕] = leave the screen, from anywhere
 ```
 
+A **one-finger horizontal swipe over the grid** flips the page, the same rule the library and the
+notebook use (`core/ListSwipe` over `core/SwipeMath` — `docs/library.md` § The flip). The host
+forwards its `dispatchTouchEvent` to `TemplateBrowser.onDispatchTouchEvent`; the browser arms on
+`gridContainer` alone, which is what lets it sit inside **New Notebook** beside a name field without
+a drag across that field turning the page.
+
 The **bottom bar is the pager and nothing else** — weighted, centred, `INVISIBLE` rather than `GONE`
 so the bar never changes height under the grid.
 

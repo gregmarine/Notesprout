@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.text.format.DateFormat
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewTreeObserver
 import android.view.Window
@@ -18,6 +19,7 @@ import androidx.appcompat.widget.TooltipCompat
 import androidx.core.content.ContextCompat
 import com.symmetricalpalmtree.notesproutsn.R
 import com.symmetricalpalmtree.notesproutsn.core.Immersive
+import com.symmetricalpalmtree.notesproutsn.core.ListSwipe
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.core.TopGuard
 import com.symmetricalpalmtree.notesproutsn.library.GridMath
@@ -47,7 +49,24 @@ class RecentsDialog(
     private val onDismissed: () -> Unit,
     private val onNotebookSelected: (notebookId: String) -> Unit,
 ) {
-    private val dialog = Dialog(activity, R.style.Theme_Notesprout)
+    /** The list's one-finger page flip. A `Dialog` owns its own window, so the sequence is taken
+     *  from the dialog's `dispatchTouchEvent` rather than the Activity's — the panel is a different
+     *  window and the notebook behind it never sees these events. */
+    private val listSwipe = ListSwipe(
+        region = { body },
+        onFlipNext = { goToListPage(listPage + 1) },
+        onFlipPrevious = { goToListPage(listPage - 1) },
+    )
+
+    private val dialog = object : Dialog(activity, R.style.Theme_Notesprout) {
+        override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+            listSwipe.onTouchEvent(ev)
+            return super.dispatchTouchEvent(ev)
+        }
+    }
+
+    /** The body band the rows paginate inside — the region the flip arms on; null until shown. */
+    private var body: View? = null
     private var listPage = 0
     private var itemsPerPage = 1
 
@@ -81,6 +100,7 @@ class RecentsDialog(
         val root = dialog.findViewById<FrameLayout>(R.id.recentsRoot)
         TopGuard.applyRootPadding(root)
         val panel = dialog.findViewById<LinearLayout>(R.id.recentsPanel)
+        body = dialog.findViewById(R.id.recentsBody)
         val btnBack = dialog.findViewById<AppCompatImageButton>(R.id.btnRecentsBack)
         list = dialog.findViewById(R.id.recentsRows)
         empty = dialog.findViewById(R.id.recentsEmpty)

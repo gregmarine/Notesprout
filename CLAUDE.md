@@ -254,7 +254,15 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   changed (`ic_snap`, `ic_notebook_plus`). **The trap it kept re-teaching:** a bar centred by
   `layout_weight` is centred on *leftover space*, which changes with the build type (`DebugMenu`
   is a no-op in release) and with the caller (`btnSend`) — anything that must look centred is a
-  `FrameLayout` child with `layout_gravity="center"`.
+  `FrameLayout` child with `layout_gravity="center"`. **F3** — a **one-finger horizontal swipe now
+  flips every paginated list** (library, folder picker, link picker, template browser, Contents and
+  Recents), not just the notebook's paper: the flip rule came out of `PageGestures` into pure
+  `core/SwipeMath`, and `core/ListSwipe` applies it to a **region** — observer-only (cards keep
+  their taps), armed only inside the grid/body, **finger only** (a stylus sequence is dropped), and
+  a bound is a no-op because it routes through the host's own `goToPage`. The two panels are
+  `Dialog`s, so they feed the detector from the **dialog's** `dispatchTouchEvent` — an Activity's
+  never sees a touch on another window, which is also why the page underneath can't turn while the
+  outline is up.
   **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for any work there** — it holds the
   per-arc status, locked decisions, working protocol, and model recipe.
 - `germination` — previous post-MVP feature branch (reference, not active)

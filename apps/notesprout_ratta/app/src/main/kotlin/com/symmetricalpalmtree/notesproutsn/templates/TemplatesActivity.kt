@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.view.MotionEvent
 import androidx.appcompat.app.AppCompatActivity
 import com.symmetricalpalmtree.notesproutsn.core.IndexGuard
 import com.symmetricalpalmtree.notesproutsn.core.TopGuard
@@ -71,6 +72,12 @@ class TemplatesActivity : AppCompatActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         if (::browser.isInitialized) browser.saveState(outState)
+    }
+
+    /** The browser's one-finger page flip — forwarded, never consumed (`ListSwipe`). */
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (::browser.isInitialized) browser.onDispatchTouchEvent(ev)
+        return super.dispatchTouchEvent(ev)
     }
 
     /** Back peels one layer: up a folder, then out of the screen. */

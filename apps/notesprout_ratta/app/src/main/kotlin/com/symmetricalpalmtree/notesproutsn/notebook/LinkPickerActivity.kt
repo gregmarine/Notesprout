@@ -6,6 +6,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.os.Bundle
 import android.util.Log
+import android.view.MotionEvent
 import android.view.View
 import android.widget.ImageView
 import android.widget.TextView
@@ -18,6 +19,7 @@ import com.symmetricalpalmtree.notesproutsn.R
 import com.symmetricalpalmtree.notesproutsn.core.ActionSheetDialog
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
 import com.symmetricalpalmtree.notesproutsn.core.IndexGuard
+import com.symmetricalpalmtree.notesproutsn.core.ListSwipe
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.core.TopGuard
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
@@ -95,6 +97,13 @@ class LinkPickerActivity : AppCompatActivity() {
 
     private var pageIndex = 0
     private var pageCount = 1
+
+    /** The one-finger flip over the card grid — the pager buttons' gesture twin. */
+    private val listSwipe = ListSwipe(
+        region = { if (::binding.isInitialized) binding.gridContainer else null },
+        onFlipNext = { goToPage(pageIndex + 1) },
+        onFlipPrevious = { goToPage(pageIndex - 1) },
+    )
     private var browseItems = emptyList<CardItem>()
     private var pageItems = emptyList<Pair<PickerPage, Int>>()
 
@@ -588,6 +597,12 @@ class LinkPickerActivity : AppCompatActivity() {
         selectedPageId = null
         // Previews from that notebook can never be shown again without a fresh open.
         previewCache.clear()
+    }
+
+    /** Observer only — the grid's cards keep every tap (see [ListSwipe]). */
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        listSwipe.onTouchEvent(ev)
+        return super.dispatchTouchEvent(ev)
     }
 
     private fun goToPage(index: Int) {

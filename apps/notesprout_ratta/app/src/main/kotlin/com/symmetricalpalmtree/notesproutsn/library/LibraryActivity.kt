@@ -3,6 +3,7 @@ package com.symmetricalpalmtree.notesproutsn.library
 import android.app.Activity
 import android.os.Bundle
 import android.util.Log
+import android.view.MotionEvent
 import android.view.View
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
@@ -15,6 +16,7 @@ import com.symmetricalpalmtree.notesproutsn.R
 import com.symmetricalpalmtree.notesproutsn.core.ActionSheetDialog
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
 import com.symmetricalpalmtree.notesproutsn.core.IndexGuard
+import com.symmetricalpalmtree.notesproutsn.core.ListSwipe
 import com.symmetricalpalmtree.notesproutsn.core.OpeningOverlay
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.core.TopGuard
@@ -78,6 +80,13 @@ class LibraryActivity : AppCompatActivity() {
     private var grid: LibraryGrid? = null
     private var gridMeasured = false
     private var coldLaunch = false
+
+    /** The one-finger flip over the card grid — the pager buttons' gesture twin. */
+    private val listSwipe = ListSwipe(
+        region = { if (::binding.isInitialized) binding.gridContainer else null },
+        onFlipNext = { goToPage(pageIndex + 1) },
+        onFlipPrevious = { goToPage(pageIndex - 1) },
+    )
 
     private val newNotebookLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -676,6 +685,12 @@ class LibraryActivity : AppCompatActivity() {
         sortPrefs.order = order
         pageIndex = 0
         lifecycleScope.launch { refresh() }
+    }
+
+    /** Observer only — the grid's cards keep every tap and long-press (see [ListSwipe]). */
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        listSwipe.onTouchEvent(ev)
+        return super.dispatchTouchEvent(ev)
     }
 
     private companion object {

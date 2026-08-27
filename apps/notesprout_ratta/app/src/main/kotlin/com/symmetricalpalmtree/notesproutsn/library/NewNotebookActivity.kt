@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.view.MotionEvent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.TooltipCompat
 import androidx.lifecycle.lifecycleScope
@@ -134,6 +135,13 @@ class NewNotebookActivity : AppCompatActivity() {
         super.onSaveInstanceState(outState)
         outState.putString(KEY_PICK, pick.encode())
         if (::browser.isInitialized) browser.saveState(outState)
+    }
+
+    /** The browser's one-finger page flip — forwarded, never consumed (`ListSwipe`). It arms on
+     *  the grid alone, so a drag across the name field above it is not a page turn. */
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (::browser.isInitialized) browser.onDispatchTouchEvent(ev)
+        return super.dispatchTouchEvent(ev)
     }
 
     /** Back peels one layer: up a folder in the browser, then out of the screen. */
