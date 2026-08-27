@@ -3851,7 +3851,9 @@ Everything is id-based wiring, so no host code changed for a reorder — only `S
 
 ### F3 — A one-finger swipe flips every paginated list (2026-08-27)
 
-**Status:** ✅ Complete (Nomad-verified; user asked for it directly). The notebook has flipped its
+**Status:** ✅ Complete (Nomad-verified; **user all-clear 2026-08-27, "it works great"** — the
+eye/hand checks passed as shipped: no threshold adjusted, no surface reworked, and the finger-only
+rule confirmed on the glass). User-asked, not part of any arc. The notebook has flipped its
 paper on a one-finger horizontal swipe since P1, and the scratch pad since J4. Everywhere *else*
 that paginates — six surfaces — the only way to turn a page was to tap a pager button. Now the same
 gesture works on all of them.
