@@ -42,8 +42,8 @@ dependencies {
     // `:extension-api`: keeping the contract out of here is what makes the host's `TransferCaps`
     // and the extension's own ink mapping deliberate twins rather than one shared class.
     // g-paper is `api` because both consumers write against PaperView / Stroke.
-    api("com.symmetricalpalmtree.gpaper:gpaper-core:0.1.6")
-    api("com.symmetricalpalmtree.gpaper:gpaper-ratta:0.1.6")
+    api("com.symmetricalpalmtree.gpaper:gpaper-core:0.1.23")
+    api("com.symmetricalpalmtree.gpaper:gpaper-ratta:0.1.23")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
 

@@ -178,10 +178,18 @@ what enforces no-nesting. The bar (order: Delete · H · Link · Edit · Unlink)
 - **Edit** (`applyLinkEdit`): rewrite the payload (`updatePayload`), patch the working copy,
   `syncLinkRenderer`, record `Action.LinkEdited` (payload before/after), re-select. An
   unchanged payload is a no-op — no write, no undo step.
-- **Eraser**: a link erases **whole**, and is **scribble-erase immune** (Paper L1's user call — a
-  scribble over wrapped ink must not shred a navigation object). `onContentErased` splits
-  headings from links: a sweep that took a link records **one `Action.Deleted`** covering both
-  kinds; heading-only sweeps keep `HeadingDeleted`.
+- **Eraser**: a link erases **whole**, wrapped content and all — the eraser can never reach
+  inside one. `onContentErased` splits headings from links: a sweep that took a link records
+  **one `Action.Deleted`** covering both kinds; heading-only sweeps keep `HeadingDeleted`.
+- **Scribble** (arc 14): a link is **no longer scribble-immune**. It was, on Paper L1's user call
+  ("a scribble over wrapped ink must not shred a navigation object"), and the immunity was total
+  rather than partial — a wrap re-parents its children off the page, so a scribble over wrapped
+  ink found nothing on the stroke list either. **The user reversed it on 2026-08-26**: a scribble
+  now erases a link exactly as the eraser tool does, whole. What protects a link is not immunity
+  but *reach* — the engine decides content by **penetration** (≥ 14 dp of scribble path inside
+  the bounds, `EraseHitTest.scribbleContentIds`), so ink scribbled out beside a link leaves it
+  standing. It arrives with any ink the same gesture took, in one `onScribbleErased`, and is
+  recorded as one `Action.ScribbleErased` — one gesture, one undo step.
 - **Lasso move/delete** are first-class: `Moved` carries `linkIds` (`LinkStore.move` re-encodes
   stroke children's blobs and `moveBy`s heading children + the row, all in one transaction —
   children stay page-absolute), `Deleted` carries link snapshots (`remove`/`restore` soft-delete

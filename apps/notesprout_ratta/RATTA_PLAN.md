@@ -3654,6 +3654,103 @@ pick**, which is the standing G4 trap.
 
 ---
 
+## Phases — Arc 14 "Scribble" ✅ COMPLETE + FROZEN 2026-08-26 (planned 2026-08-26, wizard complete)
+
+One capability, one phase: **a scribble erases headings and links, not just ink.** Scribble-erase
+has consumed strokes since R2 and has never been able to see a heading or a link — because the
+recognizer lives in g-paper and only ever hit-tested `strokeList`, never the `ContentRenderer`
+hit targets the eraser tool has consulted since 0.1.4. This is an **engine gap**, so it is fixed
+in g-paper (the standing rule) and the host only wires the result: no schema change, no
+migration, no new dependency, no new screen.
+
+It also **reverses one locked decision**: links were scribble-erase immune (the Paper L1 call,
+recorded in `docs/links.md` — "a scribble over wrapped ink must not shred a navigation object").
+Immunity was total, not partial: a wrap re-parents its children off the page, so a scribble over
+wrapped ink found nothing on the stroke list either. The user reversed it on 2026-08-26.
+
+### Locked decisions (arc-14 wizard 2026-08-26 — do not re-ask)
+
+| Decision | Answer |
+|---|---|
+| Link immunity | **Reversed.** A scribble over a link erases it **whole — row and wrapped children** — exactly what the eraser tool already does. Not an unwrap: the two erase paths must not diverge. og has always behaved this way; SN was the outlier. |
+| Hit rule | **Penetration, og parity.** Sum the length of every scribble segment with at least one endpoint inside the target's bounds; a hit needs ≥ `SCRIBBLE_BBOX_PENETRATION_DP` (14 dp) of travel *inside*. Deliberately **not** the eraser's `hitContentIds` (touch any part of the inflated rect) — a scribble is a large gesture, and that rule would take a heading every time ink beside it was erased. Tune the threshold at eye-check if the glass disagrees. |
+| Escape hatch | **None — universal.** Anything a `ContentRenderer` exposes as a `HitTarget` is scribble-erasable. No `eraseWithScribble` flag on `HitTarget`: it matches how the eraser tool already works, keeps the engine ignorant of what a heading or a link is, and any future SN object kind is included for free. |
+| Undo granularity | **One scribble = one undo entry**, even when it took ink, a heading and a link together. This is what forces the new listener method — today's `onStrokesErased` + `onContentErased` would record two entries the user would have to undo twice. |
+| Undo kind | **Its own: `Action.ScribbleErased(pageId, strokes, headingIds, links)`**, replay arms identical to `Deleted`'s. Kept separate for the reason `Erased` and `Deleted` are separate — a future undo *label* has to be able to say which act it reverses. |
+| g-paper base | **On `main` → 0.1.23**, ratta pinned 0.1.6 → 0.1.23. The 16 intervening versions are one continuous graphite/pencil effort; `gpaper-ratta` is byte-identical across the whole range, and in `gpaper-core` the only non-`PENCIL` change is a stroke-id-minting refactor (ids minted at pen-down instead of at commit) that is style-agnostic. SN only ever arms `StrokeStyle.PEN`. The jump is low risk but **real, and belongs in the device eye-check**. |
+| Scratch pad | **Untouched.** The pad registers no `ContentRenderer`, so it has no hit targets and behaves exactly as now. The new listener method carries a default, so `:ext-scratchpad` compiles unchanged. |
+| API compatibility | The new `PaperListener.onScribbleErased` **defaults to `onStrokesErased` + `onContentErased`**, so every host that does not implement it keeps today's behaviour exactly. |
+
+### S1 — Scribble erases headings and links
+**Status:** ✅ Complete (Nomad-verified + user all-clear 2026-08-26) — **ARC 14 COMPLETE + FROZEN**
+
+**g-paper (`~/git/g-paper`, main → 0.1.23):**
+- `GestureRecognizer` — `SCRIBBLE_BBOX_PENETRATION_DP = 14f`.
+- `EraseHitTest.scribbleContentIds(targets, scribblePoints, minPenetrationPx)` — pure, AABB broad
+  phase then the penetration sum. New, alongside `hitContentIds`; the eraser's rule is unchanged.
+- `CanvasPaperView.recognizeGesture` — the scribble branch also collects
+  `contentRenderers.flatMap { hitTargets() }`, falls through to ink only when **both** stroke and
+  content hits are empty, and extends the selection-dismissal parity to `sel.contentIds`
+  (mirroring `eraseAlong`).
+- `PaperListener.onScribbleErased(strokeIds, contentIds)` — fires before `finalizeEraseRedraw()`,
+  as the stroke path already does. The now-false KDoc on `onContentErased` ("Scribble erase never
+  touches content") is corrected.
+- JVM tests: `EraseHitTestTest` + `GestureRecognizerTest` (threshold, corner-graze rejection, deep
+  crossing, content-only hit, empty inputs). `docs/api.md` + `docs/host-responsibilities.md`.
+
+**Ratta (`apps/notesprout_ratta`):**
+- `sn-screen/build.gradle.kts` — both artifacts 0.1.6 → 0.1.23.
+- `NotebookActivity.onScribbleErased` — split ids into strokes / headings / links, capture the
+  strokes from `liveStrokes` (the only place the geometry still exists once the engine drops it),
+  `session.store.erase` + `session.headings.erase` + `session.links.remove`, prune both working
+  copies and both renderers, `paper.notifyContentChanged()`, `contentsFlow.refresh()` when a
+  heading or a link holding one went, one `Action.ScribbleErased`.
+- `NotebookUndo` — the new kind, both replay arms.
+- Docs: `docs/notebook.md` (persistence table + the three "scribble erase never reports content"
+  claims), `docs/links.md` (the reversed rule).
+
+**Gate:** JVM tests green in both repos; debug + release build; Nomad walk; **user eye check** —
+the gesture itself is pen-only, which adb cannot inject on the Supernote (the standing R3 trap),
+so every scribble in this arc is the user's hand.
+
+**Outcome / as built:**
+
+- **g-paper 0.1.23** (`~/git/g-paper`, on `main` over the pencil work). `SCRIBBLE_BBOX_PENETRATION_DP
+  = 14f`; `EraseHitTest.scribbleContentIds` (pure, 8 new JVM tests) alongside the untouched
+  `hitContentIds`; the scribble branch of `recognizeGesture` collects hit targets, falls through to
+  ink only when **both** lists are empty, and dismisses a selection that lost a stroke *or* a
+  content object; new `PaperListener.onScribbleErased(strokeIds, contentIds)` whose **default
+  forwards to `onStrokesErased` + `onContentErased`**, so no existing host breaks. 157 g-paper tests.
+- **The one non-obvious finding, caught in self-review before the device saw it:** the host must
+  **not** call `notifyContentChanged()` from `onScribbleErased`. On Ratta every `redrawCommitted()`
+  presents an EPD frame, and the engine re-records itself (`finalizeEraseRedraw`) the moment the
+  callback returns — so a host that also repainted would pay **two refreshes for one gesture**, the
+  first of them showing the ink gone and the heading still standing. One scribble would read as two
+  erases on the glass. The rule is now in the `onScribbleErased` KDoc, `docs/api.md` and
+  `docs/host-responsibilities.md`; the eraser tool's mid-sweep `onContentErased` still *must*
+  repaint, so `removeContent` deliberately does not, and each caller owns its own frame.
+- **Host:** pin 0.1.6 → 0.1.23 in `sn-screen/build.gradle.kts`; `NotebookActivity.onScribbleErased`
+  + the shared `removeContent` helper (the content half of an erase, factored out of
+  `onContentErased`); `Action.ScribbleErased` with both replay arms (identical to `Deleted`'s).
+  757 JVM tests (+3).
+- **Nomad smoke, all pass:** installs over the previous build, launches to the library, the notebook
+  `20260822_210431` opens with its template, its heading and its link rendering correctly on the new
+  engine, crash buffer empty. Backing out of the live notebook screen *through the app* before
+  installing is what keeps the EPD app-scope pin from leaking — the standing trap.
+- **What adb could not do here, and it is the whole feature:** `input stylus swipe` delivers nothing
+  to the ink path on the Supernote (the R3 trap), so **every scribble in this arc was the user's
+  hand** — the six-item eye-check (heading, link, the beside-it non-hit, a mixed scribble under one
+  undo, undo/redo, and the 0.1.6 → 0.1.23 engine jump) came back clean, **user all-clear 2026-08-26**
+  ("All tests pass"). 14 dp of penetration is therefore the shipped threshold, unadjusted.
+- Version stays **`0.1.0-ratta`**; the g-paper pin moves to **0.1.23**, and the engine commit landed
+  with this one (the arc-9 rule) — `~/git/g-paper` **`fe4e71b`**, pushed. That push also carried the
+  sixteen pencil commits 0.1.7–0.1.22, which had been local-only since 0.1.6 (`b224a55`) — the
+  arc-9 trap was still live in the remote, and is now closed.
+
+**Questions to resolve at phase start:** all answered in the wizard above.
+
+---
+
 ## Verification (end of arc)
 
 1. All JVM unit tests green (`./gradlew test` in `apps/notesprout_ratta`).
@@ -3681,8 +3778,12 @@ adb -s SN078D10012852 install -r <apk>      # Nomad (SNN) — the only default t
 # Manta SN100C10023972 — ONLY when the user explicitly asks
 ```
 
-JVM tests: `./gradlew test`. If g-paper needs a change: `cd ~/git/g-paper && ./gradlew
-publishToMavenLocal`, bump the pinned version in `app/build.gradle.kts`.
+JVM tests: `./gradlew test`. If g-paper needs a change: bump `GPAPER_VERSION` in
+`~/git/g-paper/gradle.properties`, `./gradlew publishToMavenLocal` there, then re-pin in
+**`sn-screen/build.gradle.kts`** — both artifacts. (Not `app/build.gradle.kts`: the g-paper
+dependency moved to `:sn-screen` as `api(...)` in arc 11 / J2, and `:app` inherits it.)
+**The g-paper commit lands with the host commit** — the arc-9 rule; a pin pointing at an
+uncommitted engine is a tree a fresh clone cannot resolve.
 
 ## Appendix — Reference map (read, don't copy)
 

@@ -41,6 +41,25 @@ object NotebookUndo {
         ) : Action
 
         /**
+         * A scribble-erase gesture (arc 14) — a dense zigzag that crossed out ink, headings and
+         * links in one act. The engine reports all three kinds in a single `onScribbleErased`
+         * for exactly this reason: one gesture is one undo step, and a scribble that took a
+         * stroke and a heading together must not cost the user two undos.
+         *
+         * Replayed identically to [Deleted] (strokes revive by id, heading rows revive in place,
+         * links need their full [PageLink] snapshots to bring back the row *and* its wrapped
+         * children). Kept as its own kind for the reason [Erased] and [Deleted] are separate
+         * kinds: a scribble is a different act to the user than a Delete tap, and a future undo
+         * *label* has to be able to say which one it is reversing.
+         */
+        data class ScribbleErased(
+            override val pageId: String,
+            val strokes: List<Stroke>,
+            val headingIds: List<String> = emptyList(),
+            val links: List<PageLink> = emptyList(),
+        ) : Action
+
+        /**
          * One selection drag. [headingIds] (N2) are the headings that rode along — a mixed lasso
          * moves strokes and headings in one gesture, and one gesture must stay one undo step
          * (this is the plan's `HeadingMoved`, folded in rather than split).

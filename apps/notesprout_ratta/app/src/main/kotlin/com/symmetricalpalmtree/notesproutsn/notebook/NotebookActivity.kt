@@ -625,36 +625,50 @@ class NotebookActivity : AppCompatActivity() {
         }
         /**
          * The eraser tool swept a heading or a link whole (0.1.4): the host deletes — nothing
-         * vanishes by itself. One batched call per gesture; scribble erase never reports content.
-         * A link erases **whole**, wrapped content and all (the locked K1 model) — the eraser can
-         * never reach inside one.
+         * vanishes by itself. One batched call per gesture. A link erases **whole**, wrapped
+         * content and all (the locked K1 model) — the eraser can never reach inside one.
+         *
+         * A **scribble** reports through [onScribbleErased] instead, not here.
          */
         override fun onContentErased(contentIds: List<String>) {
             if (!opened) return
             val pageId = displayedPageId
-            val headingIds = contentIds.filter { liveHeadings.containsKey(it) }
-            val links = contentIds.mapNotNull { liveLinks[it] }
-            if (headingIds.isEmpty() && links.isEmpty()) return
-            if (headingIds.isNotEmpty()) {
-                session.headings.erase(headingIds)
-                headingIds.forEach { liveHeadings.remove(it) }
-                headingRenderer.headings = liveHeadings.values.toList()
-            }
-            if (links.isNotEmpty()) {
-                session.links.remove(links)
-                links.forEach { liveLinks.remove(it.id) }
-                linkRenderer.update(liveLinks.values.toList())
-            }
+            val (headingIds, links) = removeContent(contentIds) ?: return
             paper.notifyContentChanged()
             // One sweep is one entry. A link's restore needs its full snapshot (row + wrapped
             // children), so anything with a link in it is recorded as a Deleted covering both
             // kinds rather than two entries the user would have to undo twice.
             if (links.isNotEmpty()) undo.record(Action.Deleted(pageId, emptyList(), headingIds, links))
             else undo.record(Action.HeadingDeleted(pageId, headingIds))
-            // Wrapped headings are out of the outline while wrapped (their parent is the link, not
-            // the page), so erasing a link that holds one changes the Contents just as a loose one does.
-            if (headingIds.isNotEmpty() || links.any { it.headings.isNotEmpty() }) contentsFlow.refresh()
             Slog.d(TAG) { "eraser removed ${headingIds.size} headings, ${links.size} links" }
+        }
+        /**
+         * A scribble crossed something out (arc 14 / g-paper 0.1.23). One gesture, one callback,
+         * **one undo entry** — which is the whole reason the engine reports strokes and content
+         * together here rather than through [onStrokesErased] + [onContentErased]: a scribble
+         * that took a line of ink and the heading above it must not cost the user two undos.
+         *
+         * Per kind the semantics are the eraser tool's — whole strokes, whole headings, whole
+         * links (wrapped children and all). What differs is only *reach*: the engine decides
+         * content by penetration (14 dp of scribble path inside the bounds), so ink scribbled
+         * out beside a heading leaves the heading standing. Links used to be scribble-immune
+         * outright; the user reversed that on 2026-08-26 (arc-14 wizard).
+         *
+         * Either list may be empty, never both.
+         */
+        override fun onScribbleErased(strokeIds: List<String>, contentIds: List<String>) {
+            if (!opened) return
+            val pageId = displayedPageId
+            // The mirror is the only place the geometry still exists once the engine drops it.
+            val strokes = strokeIds.mapNotNull { liveStrokes.remove(it) }
+            if (strokeIds.isNotEmpty()) session.store.erase(strokeIds)
+            val (headingIds, links) = removeContent(contentIds) ?: (emptyList<String>() to emptyList())
+            if (strokes.isEmpty() && headingIds.isEmpty() && links.isEmpty()) return
+            undo.record(Action.ScribbleErased(pageId, strokes, headingIds, links))
+            Slog.d(TAG) {
+                "scribble removed ${strokes.size} strokes, ${headingIds.size} headings, " +
+                    "${links.size} links"
+            }
         }
         /** The pen is dragging the box — the bar would be dragged over, and it never follows live. */
         override fun onSelectionDragStarted() { selectionToolbar.hide() }
@@ -675,6 +689,39 @@ class NotebookActivity : AppCompatActivity() {
             restoreToolAfterPadPaste()
         }
         override fun onToolChanged(tool: Tool) { toolbar.sync(tool) }
+    }
+
+    /**
+     * The content half of an erase, shared by the eraser tool ([PaperListener.onContentErased])
+     * and a scribble ([PaperListener.onScribbleErased]): take the ids that are ours off the page
+     * — rows, working copies, renderers — and hand back what actually went so the caller can
+     * record the undo entry its own act deserves. Null when none of [contentIds] was ours.
+     *
+     * The component owns no content, so nothing disappears until this runs and something
+     * re-records; until then the objects stay on the committed layer. **The repaint is the
+     * caller's**, not this helper's: the eraser tool has to ask for one
+     * (`paper.notifyContentChanged()`), while a scribble must not — g-paper re-records on its
+     * own the moment `onScribbleErased` returns, and a second repaint is a second EPD refresh
+     * whose first half would show the ink gone and the heading still standing.
+     */
+    private fun removeContent(contentIds: List<String>): Pair<List<String>, List<PageLink>>? {
+        val headingIds = contentIds.filter { liveHeadings.containsKey(it) }
+        val links = contentIds.mapNotNull { liveLinks[it] }
+        if (headingIds.isEmpty() && links.isEmpty()) return null
+        if (headingIds.isNotEmpty()) {
+            session.headings.erase(headingIds)
+            headingIds.forEach { liveHeadings.remove(it) }
+            headingRenderer.headings = liveHeadings.values.toList()
+        }
+        if (links.isNotEmpty()) {
+            session.links.remove(links)
+            links.forEach { liveLinks.remove(it.id) }
+            linkRenderer.update(liveLinks.values.toList())
+        }
+        // Wrapped headings are out of the outline while wrapped (their parent is the link, not
+        // the page), so erasing a link that holds one changes the Contents just as a loose one does.
+        if (headingIds.isNotEmpty() || links.any { it.headings.isNotEmpty() }) contentsFlow.refresh()
+        return headingIds to links
     }
 
     // ── Page gestures → operations ───────────────────────────────────────────
@@ -885,6 +932,13 @@ class NotebookActivity : AppCompatActivity() {
                 session.links.restore(a.pageId, a.links)
                 session.store.drain(); refreshToPage(a.pageId)
             }
+            // Same replay as Deleted — a different act to the user, the same rows to put back.
+            is Action.ScribbleErased -> {
+                session.store.revive(a.strokes.map { it.id })
+                session.headings.restore(a.headingIds)
+                session.links.restore(a.pageId, a.links)
+                session.store.drain(); refreshToPage(a.pageId)
+            }
             is Action.Moved -> {
                 session.store.move(a.ids, -a.dx, -a.dy)
                 session.headings.move(a.headingIds, -a.dx, -a.dy)
@@ -933,6 +987,12 @@ class NotebookActivity : AppCompatActivity() {
             is Action.Drew -> { session.store.revive(listOf(a.stroke.id)); session.store.drain(); refreshToPage(a.pageId) }
             is Action.Erased -> { session.store.remove(a.strokes.map { it.id }); session.store.drain(); refreshToPage(a.pageId) }
             is Action.Deleted -> {
+                session.store.remove(a.strokes.map { it.id })
+                session.headings.erase(a.headingIds)
+                session.links.remove(a.links)
+                session.store.drain(); refreshToPage(a.pageId)
+            }
+            is Action.ScribbleErased -> {
                 session.store.remove(a.strokes.map { it.id })
                 session.headings.erase(a.headingIds)
                 session.links.remove(a.links)

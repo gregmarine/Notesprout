@@ -217,11 +217,12 @@ opened but never reached `opened = true`, on `appScope` (`sealAbandonedOpen`).
 | g-paper callback | Row effect (serial IO) |
 |---|---|
 | `onStrokeCommitted(s)` | insert `stroke` row, `"order"` = `MAX("order")+1` among the page's strokes (live **and** deleted — order stays monotonic) |
-| `onStrokesErased(ids)` | soft delete (`deletedAt`) — **also the scribble-erase path**: the engine reports a consumed scribble through this same callback, so persistence and undo needed no change for it |
+| `onStrokesErased(ids)` | soft delete (`deletedAt`) — the **eraser tool** only, as of arc 14; a scribble reports through `onScribbleErased` instead |
 | `onSelectionMoved(m)` | read rows → decode → `Stroke.translated(dx,dy)` → re-encode → upsert (`createdAt` kept); headings among `move.contentIds` (N2) get the same delta through `session.headings.move` and the working copy is patched too; `currentSelection`'s bounds shift by the same delta, and the selection toolbar re-anchors there |
 | `onSelectionCreated/Dismissed` | `selectionActive` flag + the `currentSelection` copy + show/hide the selection toolbar (N2: `onSelectionDismissed` also consumes `pendingSelection` — see below) |
 | `onSelectionTapped(x, y)` (N2) | hit-tests `currentSelection`'s heading ids against `liveHeadings`; a hit opens `HeadingEditDialog`. A tap over ink only, or outside any heading's bounds, still does nothing |
-| `onContentErased(ids)` (N2) | the eraser tool swept a heading whole: `session.headings.erase` + drop from `liveHeadings` + re-record, recorded as `Action.HeadingDeleted` |
+| `onContentErased(ids)` (N2) | the eraser tool swept a heading or a link whole → `removeContent` (rows + working copies + both renderers + `notifyContentChanged`), recorded as `Action.HeadingDeleted`, or `Action.Deleted` when a link was in it |
+| `onScribbleErased(strokeIds, contentIds)` (arc 14) | a scribble crossed out ink **and** content in one gesture: `store.erase` for the strokes, the same `removeContent` for the rest, recorded as **one** `Action.ScribbleErased`. One callback because one gesture must be one undo step — see below |
 | `onSelectionDragStarted()` | hide the selection toolbar (the mirror is **not** cleared) |
 | `onToolChanged` | toolbar sync only |
 
@@ -565,8 +566,7 @@ text edit re-select the heading afterward (`selectAsHeading`) — its box just m
 the stale selection frame has to be replaced with a fresh one at the new bounds.
 
 **Eraser sweep** (`onContentErased`): the eraser tool (0.1.4) can report that it swept a heading's
-hit target whole, in the same batched callback per gesture that scribble-erase never populates (a
-scribble consumes strokes only). The host deletes on the engine's word — nothing vanishes by
+hit target whole, in one batched callback per gesture. The host deletes on the engine's word — nothing vanishes by
 itself — recorded as `Action.HeadingDeleted`.
 
 There is **no un-heading / revert-to-ink command** (og parity) — a heading, once created, is either
@@ -887,7 +887,8 @@ and survives it — [`docs/links.md`](links.md)).
 | Action | Recorded by | Revert | Reapply |
 |---|---|---|---|
 | `Drew` | `onStrokeCommitted` | `store.remove([id])` | `store.revive` |
-| `Erased` | `onStrokesErased` (eraser tool **and** scribble erase) | `store.revive` | `store.remove` |
+| `Erased` | `onStrokesErased` (the eraser tool; a scribble records `ScribbleErased` instead) | `store.revive` | `store.remove` |
+| `ScribbleErased` (arc 14) | `onScribbleErased` — one scribble, whatever mix of strokes / `headingIds` / `links` snapshots it crossed out | `store.revive` + `headings.restore` + `links.restore` | `store.remove` + `headings.erase` + `links.remove` |
 | `Deleted` | the selection toolbar's Delete (strokes **and**, N2, `headingIds` — **and**, K1, `links` snapshots: a whole-link erase records here too; O1's **Cut** goes through the very same path, so undoing a cut puts the ink back exactly as undoing a Delete would) | `store.revive` + `headings.restore` + `links.restore` | `store.remove` + `headings.erase` + `links.remove` |
 | `Moved` | `onSelectionMoved` (strokes **and**, N2, `headingIds` **and**, K1, `linkIds` riding the same drag) | `store.move(-dx,-dy)` + `headings.move(-dx,-dy)` + `links.move(-dx,-dy)` | `store.move(dx,dy)` + `headings.move(dx,dy)` + `links.move(dx,dy)` |
 | `HeadingCreated` (N2) | a successful convert | `headings.erase` + `store.revive` (in place — order matters) | `headings.restore` + `store.remove` |

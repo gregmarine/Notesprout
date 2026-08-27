@@ -222,6 +222,27 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   built, shown to the user and abandoned** — do not rebuild, do not re-raise without a fresh user
   decision; import is how you get different paper. 754 JVM tests; version stays `0.1.0-ratta`;
   g-paper pin stays 0.1.6. Reference: **`apps/notesprout_ratta/docs/templates.md`**.
+  **Arc 14 "Scribble"** ✅ **COMPLETE + FROZEN 2026-08-26**: a scribble stops being an ink-only
+  correction and crosses out **headings and links** too. The gap was in the engine, not the host —
+  the recognizer only ever hit-tested the stroke list — so it was fixed in **g-paper 0.1.23**
+  (pin 0.1.6 → 0.1.23, sixteen intervening versions of pencil work SN had never run;
+  `gpaper-ratta` is byte-identical across them and SN only arms `StrokeStyle.PEN`). Three joined
+  decisions: content is decided by **penetration, not touch** (≥ 14 dp of scribble path *inside*
+  the bounds — `EraseHitTest.scribbleContentIds`, deliberately **not** the eraser's
+  `hitContentIds`, or a scribble would take a heading every time the ink beside it went);
+  **universal, no escape hatch** (anything a `ContentRenderer` exposes as a `HitTarget` is
+  scribble-erasable, so a future object kind is included for free); and **one gesture is one undo**,
+  which is what forced the new `PaperListener.onScribbleErased(strokeIds, contentIds)` —
+  its default forwards to `onStrokesErased` + `onContentErased` so no existing host breaks, and SN
+  overrides it to record a single `Action.ScribbleErased`. **This reversed a locked decision**: a
+  link was scribble-immune (Paper L1) and now erases whole, wrapped children and all, on the user's
+  2026-08-26 call. The trap the arc turned up: **the host must not repaint from
+  `onScribbleErased`** — on Ratta every `redrawCommitted()` is an EPD frame and the engine
+  re-records itself the moment the callback returns, so a host that also repainted paid **two
+  refreshes for one gesture**, the first showing the ink gone and the heading still standing (the
+  eraser tool's mid-sweep `onContentErased` still *must* repaint, which is why `removeContent`
+  repaints for neither and each caller owns its frame). 757 JVM tests + 157 in g-paper; version
+  stays `0.1.0-ratta`.
   **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for any work there** — it holds the
   per-arc status, locked decisions, working protocol, and model recipe.
 - `germination` — previous post-MVP feature branch (reference, not active)
