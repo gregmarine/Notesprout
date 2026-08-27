@@ -202,7 +202,7 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   content-deduped on the way in), and the render uses the **page's** size, never the screen's. The
   index's `templateKind` stays the notebook's birth record. 637 JVM tests; version stays
   `0.1.0-ratta`; g-paper pin stays 0.1.6.
-  **Arc 13 "Stationery"** ✅ **COMPLETE + FROZEN 2026-08-26** (**G6 `PENDING`**): templates stop
+  **Arc 13 "Stationery"** ✅ **COMPLETE + FROZEN 2026-08-26** (**G6 `1d77cce`**): templates stop
   being four radio buttons and become **a library** — folders, true-miniature previews, SAF import
   and export, and three flat shelves. The join is the whole design, and it has no exceptions: a
   **built-in** is paper the app draws (Lined / Dotted / Grid, in the reserved **Default** folder, the

@@ -3554,7 +3554,7 @@ dialog's own 350 px shift under the IME is the tell that the keyboard is actuall
    cannot inject.
 
 ### G6 — Review, hardening, docs, freeze
-**Status:** ✅ Complete (commit `PENDING`)
+**Status:** ✅ Complete (commit `1d77cce`)
 
 `/code-review` over the **whole arc range** (G1→G5 — note G2 is a revert, so the range's net
 content is G1 + G3–G5, `high`) — the arc, not the phase; every finding
