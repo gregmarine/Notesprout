@@ -58,7 +58,8 @@ app's debug build consumes the library's debug variant, so the gate means exactl
 | `notebook/PaperToolbar` | back + the three tool buttons, **binding-free** |
 | `notebook/PaperChrome` | exclusion rects and the over-chrome hit test, with the host-specific parts as suppliers |
 
-Resources: `values/{colors,dimens,styles,themes}`, `values-sw720dp/dimens`, the 39 chrome
+Resources: `values/{colors,dimens,styles,themes}`, `values-sw720dp/dimens`,
+`values-sw960dp/dimens` (the Manta's card-grid minimum only — see `docs/library.md` § The grid), the 39 chrome
 `ic_*.xml` (the 37 that moved plus `ic_sketching` and `ic_pencil_down`), the button/border/radio
 drawables the moved styles reference, and a `strings.xml` holding only `ok` and `cancel` — the two
 strings the moved helpers reference themselves. Every other string stays in `:app`.

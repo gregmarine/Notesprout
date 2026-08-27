@@ -3901,6 +3901,55 @@ its arithmetic.
 migration, no g-paper change, no new dependency. Docs: `docs/sn-screen.md`, `docs/library.md`,
 `docs/templates.md`, `docs/notebook.md`, `docs/links.md`.
 
+### F4 — Three cards a row on the Manta (2026-08-27)
+
+**Status:** ✅ Complete (built and installed to the Manta for the user's eye check). User-asked,
+not part of any arc: *"the notebook, template, and page thumbnail cards are too small… I want the
+card lists to be 3 per row like we have on Nomad. Seeing the previews of each is more important
+than the number on the screen."*
+
+**The cause is a tier that stopped at the Nomad.** `library_card_min_width` is 140 dp base and
+200 dp at `sw720dp`, and the 200 dp was measured against the **Nomad's** 1404 px panel, where
+`floor(1404 / 375) = 3`. The Manta is 1920 × 2560 at the same density 300 — **1024 dp wide, 37 %
+more than the Nomad's 749 dp** — but it lands in the *same* `sw720dp` bucket, so it took
+`floor(1920 / 375) = 5` columns and a cover shrank to roughly the size the base tier exists to
+avoid.
+
+**The fix is one resource file**, `sn-screen/src/main/res/values-sw960dp/dimens.xml`
+(`library_card_min_width` 320 dp, `library_card_gap` 12 dp) — a bucket only the Manta reaches, so
+the Nomad is untouched. **No Kotlin changed for the layout itself.** That is the payoff of the
+library's deliberate difference from Paper (`docs/library.md` § Deliberate differences): the grid
+has been dimen-driven since P1 rather than branching on a hardcoded width, so a new device tier is
+a resource, not a code path.
+
+Three things worth keeping:
+
+- **The dimen only ever picks the column count.** `GridMath.cardWidthPx` is the band split evenly
+  between the columns, so the card takes its full share whatever the minimum was — anything in
+  257 dp – 341 dp gives three columns on the Manta and an identical card. 320 dp sits in the middle
+  of that band rather than on its edge.
+- **One dimen, three grids.** `LibraryGrid`, `TemplateCardGrid` and `PageCardGrid` all read
+  `library_card_min_width`, so the library, the templates browser, the folder picker and the link
+  picker changed together — which is the whole reason there is one dimen and not three.
+- **`values-sw960dp` defines only these two dimens, and that is correct.** Android falls back per
+  resource *name*, so `toolbar_button_size` / `toolbar_bar_thickness` still resolve from
+  `values-sw720dp` on the Manta. A "complete" copy of that file here would be a second place for
+  the tablet toolbar sizing to drift.
+
+**The knock-on, and the standing rule it turns into.** A wider card is a bigger bitmap:
+`TemplateThumbnails` renders at the card width, so a Manta card is ~628 × 837 ARGB_8888 ≈ **2.1 MB**
+against the Nomad's ~1.1 MB. The G6 byte-bound of 8 MB then held **three** cards of a **six**-card
+page, so every flip back re-rendered the whole page. Raised to **16 MB**, and the doc rule is now
+explicit: *the bound's job is to hold one whole grid page at the widest card the app draws*, so it
+is re-checked whenever the card gets wider. Still byte-bounded with a real `sizeOf`, still
+self-correcting across a card-size change (the key carries the width).
+
+The Manta now shows 3 columns × 2 rows = 6 cards a page, the same shape as the Nomad. 776 JVM
+tests unchanged (`GridMath` is pure arithmetic — dimens are an input, not a constant, so nothing
+needed a new case). `./gradlew test assembleDebug` green; no schema change, no migration, no
+g-paper change, no new dependency. Docs: `docs/library.md`, `docs/sn-screen.md`,
+`docs/templates.md`.
+
 ---
 
 ## Verification (end of arc)

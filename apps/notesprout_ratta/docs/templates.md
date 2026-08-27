@@ -459,7 +459,11 @@ Three findings from it worth keeping, all cheap to lose and expensive to redisco
   needs walking against every way something can arrive there.
 - **An `LruCache` bound is a count until you give it a `sizeOf`.** The default is 1 per entry, so a
   32-entry bound on page-sized bitmaps was ~30 MB held for the life of the process — while the
-  notebook behind the picker still holds the EPD pipeline. It is bounded in bytes now.
+  notebook behind the picker still holds the EPD pipeline. It is bounded in bytes now (16 MB), and
+  **the bound has to be re-checked whenever the card gets wider**: F4's 3-column Manta grid put a
+  card at ~2.1 MB, so the old 8 MB held only three of a six-card page and every flip back
+  re-rendered the lot. The bound's job is to hold one whole grid page at the widest card the app
+  draws.
 - **A soft delete keeps the row; it should not keep the pixels.** A deleted template's blob is up to
   6 MiB nothing can read again. The order is the atomicity: `softDelete` **before** `clearBlob`, so
   no interruption can leave an alive row with no pixels.

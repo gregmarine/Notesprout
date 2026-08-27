@@ -130,7 +130,21 @@ pageCount    = ceil(total / cardsPerPage)        — never 0; an empty folder is
 
 Measured **once**, against the container's real width and height, in a global-layout listener that
 waits for a non-zero size. `library_card_min_width` is a tier dimen: **140 dp base, 200 dp at
-sw720dp**. On a Nomad (1404 × 1872, density 1.875) that gives 3 columns × 2 rows = 6 cards a page.
+sw720dp, 320 dp at sw960dp**. Both Supernotes land on 3 columns × 2 rows = 6 cards a page — the
+Nomad (1404 × 1872, density 1.875 → 749 dp wide) at 200 dp, the Manta (1920 × 2560, same density →
+1024 dp wide) at 320 dp.
+
+**Why the Manta needs its own bucket.** The 200 dp minimum was measured against the Nomad's panel;
+the Manta is 37 % wider but falls in the same `sw720dp` tier, so it took **five** columns and a
+cover shrank to about the size the base tier was trying to avoid. `values-sw960dp` (which only the
+Manta reaches) puts it back on three. The dimen only ever chooses the **column count** — the card
+then takes its even share of the band — so anything in 257 dp – 341 dp gives three there; 320 dp
+sits in the middle. The `sw720dp` toolbar dimens still apply on the Manta: Android falls back
+per resource *name*, and `values-sw960dp` defines only these two.
+
+The same dimen sizes the **template** cards (`TemplateCardGrid`) and the **page** cards
+(`PageCardGrid`, used by the link picker), so all three grids change together — which is the point
+of there being one dimen rather than three.
 
 The pager is hidden with `INVISIBLE`, not `GONE`, when there is one page — its slot must not
 collapse and shuffle the rest of the bar.
@@ -503,9 +517,10 @@ library falls back to the root. Nothing in prefs is trusted as still existing.
 - **Duplicate names and invalid names are problem dialogs, not toasts.** SN's standing rule: a
   toast only confirms something that happened; anything explaining why a tap *didn't* work is a
   dialog, because on e-ink a missed toast reads as "broken". Paper toasted these.
-- **`library_card_min_width` is a tier dimen (140 dp / 200 dp)** rather than Paper's hardcoded
-  "3 columns above 480 dp, else 2". Same result on a Nomad (3 columns), but the grid is now
-  dimen-driven like every other sizing decision, and `GridMath` is pure and testable.
+- **`library_card_min_width` is a tier dimen (140 dp / 200 dp / 320 dp)** rather than Paper's
+  hardcoded "3 columns above 480 dp, else 2". Same result on a Nomad (3 columns), but the grid is
+  now dimen-driven like every other sizing decision, and `GridMath` is pure and testable — which is
+  what let the Manta be put back on three columns by adding one resource file (F4).
 - **`NameRules` returns a `Problem` enum**, not a hardcoded English string, so the wording lives in
   `strings.xml`. Paper's `validateName` returned literals from an Activity companion.
 - **`NameDialog` is shared** between new-folder and rename instead of two near-identical copies.

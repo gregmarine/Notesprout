@@ -263,6 +263,16 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   `Dialog`s, so they feed the detector from the **dialog's** `dispatchTouchEvent` — an Activity's
   never sees a touch on another window, which is also why the page underneath can't turn while the
   outline is up.
+  **F4** — the Manta shows **3 cards a row** like the Nomad. `library_card_min_width` was a
+  two-step tier (140 dp / 200 dp at `sw720dp`) whose 200 dp was measured on the *Nomad's* 1404 px
+  panel; the Manta is 1920 px at the same density — **1024 dp wide** — so it fell in the same
+  bucket and took **five** columns. Fixed by one resource file, `values-sw960dp/dimens.xml`
+  (320 dp), which only the Manta reaches; no Kotlin changed, because the grid has been
+  dimen-driven since P1. The dimen only picks the **column count** (the card takes an even share of
+  the band), and one dimen feeds all three grids — library, templates, page/link-picker. The
+  knock-on rule: a wider card is a bigger bitmap, so `TemplateThumbnails`' byte bound went 8 → 16 MB
+  — **it has to hold one whole grid page at the widest card the app draws**, and gets re-checked
+  whenever a card grows.
   **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for any work there** — it holds the
   per-arc status, locked decisions, working protocol, and model recipe.
 - `germination` — previous post-MVP feature branch (reference, not active)

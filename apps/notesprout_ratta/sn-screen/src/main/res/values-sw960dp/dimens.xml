@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The Manta tier (1920 px @ 300 dpi = 1024 dp wide). The sw720dp 200dp minimum was measured
+         against the Nomad's 1404 px panel, where it lands on three columns; the same dimen on the
+         Manta lands on five, and a cover shrinks to about the size the phone tier was trying to
+         avoid. 320dp (600 px) puts the Manta back on three columns, so a preview is a preview on
+         both Supernotes. Anything in 257dp–341dp gives three here — 320dp sits in the middle.
+
+         Card width is the band split evenly between the columns, so this dimen only ever chooses
+         the column count; the card then fills its share. -->
+    <dimen name="library_card_min_width">320dp</dimen>
+    <dimen name="library_card_gap">12dp</dimen>
+</resources>
