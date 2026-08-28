@@ -44,6 +44,37 @@ class ExportOptionsTest {
     }
 
     @Test
+    fun anUnknownKeyingChoiceIsNotRenderable() {
+        // Keying is host-EXECUTED, not just host-drawn: a choice id the host has no transform for
+        // would otherwise surface only at export time as ExportKeying.plan's rejection — which the
+        // flow explains as the passphrase-lost state (arc-15 review). Dropped at discovery instead.
+        val unknown = info(
+            choice(
+                ExporterContract.OPTION_KEYING,
+                listOf(ExporterContract.KEYING_KEEP, "shamir"),
+                ExporterContract.KEYING_KEEP,
+            ),
+        )
+        assertFalse(ExportOptions.isRenderable(unknown))
+        // The full trio and any subset of it stay renderable.
+        assertTrue(ExportOptions.isRenderable(trio))
+        assertTrue(
+            ExportOptions.isRenderable(
+                info(
+                    choice(
+                        ExporterContract.OPTION_KEYING,
+                        listOf(ExporterContract.KEYING_KEEP, ExporterContract.KEYING_PLAIN),
+                        ExporterContract.KEYING_KEEP,
+                    ),
+                ),
+            ),
+        )
+        // The reserved id declared as another kind is not the reserved option — an ordinary toggle
+        // named "keying" renders like any toggle (and keying() already answers null for it).
+        assertTrue(ExportOptions.isRenderable(info(toggle(ExporterContract.OPTION_KEYING, "0"))))
+    }
+
+    @Test
     fun aFreeStandingPassphraseDescriptorIsNotRenderable() {
         // The one host-executed passphrase step is the reserved keying's rekey choice, whose
         // fields the host shows itself — a passphrase *kind* still has no meaning to execute.

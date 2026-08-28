@@ -28,9 +28,24 @@ import com.symmetricalpalmtree.notesproutsn.extension.OptionDescriptor
  */
 object ExportOptions {
 
-    /** True when every option this exporter declares is one the host can draw today. */
-    fun isRenderable(info: ExporterInfo): Boolean =
-        info.options.none { it.kind == ExporterContract.KIND_PASSPHRASE }
+    /** True when every option this exporter declares is one the host can draw today — and, for the
+     *  reserved keying option, one the host can *execute*: keying is host-executed, so a choice id
+     *  outside the known trio is a step the host has no transform for, and it takes its exporter
+     *  out of the list the same way an undrawable kind does. Without this check the unknown value
+     *  would surface only at export time, as [com.symmetricalpalmtree.notesproutsn.crypto.ExportKeying.plan]'s
+     *  IllegalArgumentException — which the flow reads as the *passphrase-lost* state and explains
+     *  wrongly (arc-15 review). */
+    fun isRenderable(info: ExporterInfo): Boolean {
+        if (info.options.any { it.kind == ExporterContract.KIND_PASSPHRASE }) return false
+        val keying = info.options.firstOrNull {
+            it.id == ExporterContract.OPTION_KEYING && it.kind == ExporterContract.KIND_SINGLE_CHOICE
+        } ?: return true
+        return keying.choiceIds.all {
+            it == ExporterContract.KEYING_KEEP ||
+                it == ExporterContract.KEYING_REKEY ||
+                it == ExporterContract.KEYING_PLAIN
+        }
+    }
 
     /**
      * The spec map for [info] given the panel's [chosen] values — declaration order, one entry per

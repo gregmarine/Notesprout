@@ -101,6 +101,16 @@ object ExportArtifact {
             // is still being written back into.
             db.seal(source)
         }
+        // seal() swallows a failed checkpoint by contract (a claim must never be left standing),
+        // so the copy re-checks the one thing the copy depends on: everything is in the main file.
+        // A `-wal` still holding frames means the newest writes never made it across — a copy now
+        // would pass every downstream check (the main file is self-consistent) and still be stale
+        // (arc-15 review).
+        val wal = File(source.path + "-wal")
+        if (wal.exists() && wal.length() > 0L) {
+            Log.w(TAG, "WAL not checkpointed (${wal.length()} bytes) — refusing a stale copy")
+            return@withContext Outcome.Failed(Problem.COPY_FAILED)
+        }
 
         val dir = File(context.cacheDir, DIR)
         val artifact = try {

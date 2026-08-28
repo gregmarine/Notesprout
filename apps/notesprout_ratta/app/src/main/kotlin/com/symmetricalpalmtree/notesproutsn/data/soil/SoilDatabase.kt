@@ -114,6 +114,9 @@ abstract class SoilDatabase : RoomDatabase() {
         }
     }
 
+    /** Whether this handle has given its [SoilOpenFiles] claim back — at most once per handle. */
+    private val claimReleased = java.util.concurrent.atomic.AtomicBoolean(false)
+
     /**
      * Close sequence: checkpoint the WAL back into the main file (TRUNCATE), close, and remove a
      * stray empty `-journal`. Meta refresh is the caller's step before seal (it needs the index).
@@ -132,9 +135,12 @@ abstract class SoilDatabase : RoomDatabase() {
         }
         // Released *after* the close, and whatever the close did (arc 15 / E1): the file is only
         // free for an export's copy once no connection is left, and a checkpoint that threw must
-        // still not leave the claim standing — an export would refuse forever. Idempotent, so a
-        // second seal of the same handle releases nothing.
-        SoilOpenFiles.release(file)
+        // still not leave the claim standing — an export would refuse forever. The release is
+        // handle-scoped (arc-15 review): two seal launches on one handle are constructible
+        // (close() on appScope racing sealAbandonedOpen), and a bare second decrement would take
+        // down a *new* session's claim — isOpen() answering false under a live writer is exactly
+        // what this registry exists to prevent.
+        if (claimReleased.compareAndSet(false, true)) SoilOpenFiles.release(file)
         val journal = File(file.path + "-journal")
         if (journal.exists() && journal.length() == 0L) journal.delete()
     }

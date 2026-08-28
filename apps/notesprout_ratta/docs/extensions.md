@@ -10,31 +10,38 @@ extension, so SN gains a second capability point — `SCRATCH_PAD`, and the firs
 one — and, with it, the **extension store** documented below. J2 landed the store and the contract
 half; J3 the point itself — the AIDL, the wire parcelables, the held bind, the host's client and
 the `:ext-scratchpad` APK; J4 the real screen, both entry buttons and **the EPD handoff between two
-paper surfaces in two processes**; J5 the two ink transfers. The arc is complete and frozen. The
-rule survives, one word wider: no *third* capability point without another user decision
-(`apps/notesprout_ratta/CLAUDE.md`).
+paper surfaces in two processes**; J5 the two ink transfers. The arc is complete and frozen.
 
-The pad as a **feature** has its own reference — [`docs/scratchpad.md`](scratchpad.md). This doc is
-the seam.
+**Arc 15 is the second fresh user decision, on 2026-08-27.** The user asked for notebook export,
+with the export *implementations* as extensions, so SN gains a **third** capability point —
+`ACTION_NOTEBOOK_EXPORTER`, generic and plural (any number of trusted exporters may register) — and
+its first shipped exporter, **`NSE · Soil Export`** (`:ext-soil`). E1 landed the point itself, the
+extension, and the host's `ExportActivity` on the Keep path; E2 landed the two keying transforms.
+The arc is complete and frozen. The rule survives, one word wider each time: **no *fourth* capability
+point without another user decision** (`apps/notesprout_ratta/CLAUDE.md`).
+
+The pad as a **feature** has its own reference — [`docs/scratchpad.md`](scratchpad.md); export has
+its own reference too — [`docs/export.md`](export.md). This doc is the seam for all three points.
 
 Fresh code. Paper's own extension arcs (`PAPER_EXTENSIONS_PLAN.md`, `PAPER_RECOGNITION_PLAN.md`,
 `PAPER_SCRATCHPAD_PLAN.md`, its `:extension-api` / `:ext-mlkit` / `:ext-scratchpad`) are the shape
-reference — nothing is copied, and SN's AIDL is scoped to its **two** points rather than Paper's
-broader capability set.
+reference — nothing is copied, and SN's AIDL is scoped to its **three** points rather than Paper's
+broader capability set. Paper never built export, so it has nothing to say about the third.
 
 ---
 
 ## Module layout
 
-Five modules, SN's own Gradle root:
+Six modules, SN's own Gradle root:
 
 | Module | Type | Depends on | Holds |
 |---|---|---|---|
 | `:sn-screen` | Android library | g-paper (`api`) + androidx; **never** `:app`, **never** `:extension-api` | the design resources and the screen helpers both paper surfaces need — see [`sn-screen.md`](sn-screen.md) |
-| `:extension-api` | Android library | nothing in `:app`, no library beyond the Kotlin stdlib (`build.gradle.kts` says so explicitly) | the AIDL (`IHandwritingRecognizer`, `InkStroke.aidl`; `IExtensionStore`, `LargeValue.aidl`; `IScratchPad`, `WireStroke.aidl`, `InkBundle.aidl`), the hand-written `InkStroke` / `LargeValue` / `WireStroke` / `InkBundle` parcelables, `SharedBytes`, `InkChunks`, `RecognizerStatus`, `ExtensionContract`, `HostCallerCheck` |
+| `:extension-api` | Android library | nothing in `:app`, no library beyond the Kotlin stdlib (`build.gradle.kts` says so explicitly) | the AIDL (`IHandwritingRecognizer`, `InkStroke.aidl`; `IExtensionStore`, `LargeValue.aidl`; `IScratchPad`, `WireStroke.aidl`, `InkBundle.aidl`; `INotebookExporter`, `ExporterInfo.aidl`, `ExportSpec.aidl`, `ExportResult.aidl`), the hand-written `InkStroke` / `LargeValue` / `WireStroke` / `InkBundle` / `ExporterInfo` / `OptionDescriptor` / `ExportSpec` / `ExportResult` parcelables, `SharedBytes`, `InkChunks`, `RecognizerStatus`, `ExtensionContract`, `ExporterContract`, `HostCallerCheck` |
 | `:ext-mlkit` | Android application (its own installable APK) | `:extension-api` + `com.google.mlkit:digital-ink-recognition:19.0.0` | `HandwritingRecognizerService`, `ModelManager`, `MlKitEngine`, `PageText`, `StrokeSegmenter`, `Dots`, `Box` |
 | `:ext-scratchpad` | Android application (its own installable APK) | `:extension-api` + `:sn-screen` (g-paper arrives through its `api`) + androidx; **never** `:app`, no Room / SQLCipher / serialization | `ScratchPadApplication`, `ScratchPadService`, `ScratchPadActivity`, `ScratchSession`, `ScratchStore`, `ScratchPageCodec`, `ScratchPages`, `ScratchInk` |
-| `:app` (`extension/` package) | part of the host APK | `:extension-api` | `ExtensionRegistry`, `ExtensionBinder`, `ExtensionCallException`, `InkCaps`, `RecognizerClient`, `RecognizerReadiness`, `ScratchPadClient`, `TransferCaps`; and in `data/extstore/`, the extension store (`ExtensionStores`, `ExtensionStoreDatabase`, `KvEntity`, `KvDao`, `ExtensionStoreGate`, `ExtensionStoreBinder`) |
+| `:ext-soil` | Android application (its own installable APK) | `:extension-api` only | `SoilExporterService`, `SoilExportSpec` — see [`export.md`](export.md) |
+| `:app` (`extension/` package) | part of the host APK | `:extension-api` | `ExtensionRegistry`, `ExtensionBinder`, `ExtensionCallException`, `InkCaps`, `RecognizerClient`, `RecognizerReadiness`, `ScratchPadClient`, `TransferCaps`, `ExporterClient`; and in `data/extstore/`, the extension store (`ExtensionStores`, `ExtensionStoreDatabase`, `KvEntity`, `KvDao`, `ExtensionStoreGate`, `ExtensionStoreBinder`) — plus, in `export/` and `crypto/`, export's own host-side half (`ExportActivity`, `ExportPanel`, `ExportOptions`, `ExportArtifact`, `ExportNaming`, `ExportKeying`, `SoilOpenFiles`) |
 
 `:sn-screen` is deliberately **not** in that dependency chain: it never sees `:extension-api`, so a
 shared screen helper can never quietly become part of the wire contract. `:ext-scratchpad` depends on
@@ -65,12 +72,16 @@ The host's `AndroidManifest.xml` declares package-visibility for the point (API 
     <intent>
         <action android:name="…extension.SCRATCH_PAD_SCREEN" />
     </intent>
+    <intent>
+        <action android:name="…extension.NOTEBOOK_EXPORTER" />
+    </intent>
 </queries>
 ```
 
 The scratch pad needs **both** of its actions listed: one to discover and bind the service, one to
-resolve and launch the screen. Plus `ACCESS_NETWORK_STATE`, for the readiness flow's offline
-pre-check (below).
+resolve and launch the screen. The exporter point needs only the one — `describe()` and `export()`
+both ride the same bind-per-call service. Plus `ACCESS_NETWORK_STATE`, for the readiness flow's
+offline pre-check (below).
 
 ---
 
@@ -623,11 +634,99 @@ keeps that seam honest.
 
 ---
 
+## The exporter point (arc 15)
+
+> The exporter **as a feature** — the screen, the flow, the keying table, the failure table — is
+> [`docs/export.md`](export.md). What follows is the **seam**: the point, the descriptor contract,
+> and what each side is allowed to know.
+
+`ACTION_NOTEBOOK_EXPORTER` is SN's **third** capability point, and its first **plural, call-shaped**
+one: unlike the recognizer and the pad, any number of trusted exporters may register at once, the
+Export screen lists whatever is installed (`ExtensionRegistry.exporters` returns a `List<ProviderRef>`,
+ordered by `(label, package)` — every candidate is kept, none dropped as "additional"), and each
+export is one `ExtensionBinder.call` — there is no held bind, because the operation is a single
+`describe()` or a single `export()`, never a showing. `ExporterClient` is the whole host-side client:
+same bind-per-operation shape as `RecognizerClient`, `DESCRIBE_TIMEOUT_MS` (3 s) for the fast call,
+`EXPORT_TIMEOUT_MS` (120 s, measured — see below) for the slow one.
+
+### The declarative descriptor seam
+
+An exporter never draws its own UI. `describe()` returns an `ExporterInfo` — format label, file
+extension, MIME, and a **bounded** `OptionDescriptor` list (`ExporterContract.MAX_OPTIONS` = 8 per
+exporter, `MAX_CHOICES` = 8 per single-choice option, `MAX_ID_CHARS` = 32, `MAX_LABEL_CHARS` = 80) —
+and the host renders every option with its own e-ink widgets (`ExportPanel`: caption, fixed value,
+radio choice, tick toggle). Both parcelables' constructors `require` every cap, so **unmarshal is
+the validation**, same as every other point in this file: a descriptor over the caps, or one
+declaring an option kind this build cannot draw (`ExportOptions.isRenderable` — the one unrenderable
+kind is a free-standing `KIND_PASSPHRASE`), or declaring the reserved keying option with a choice id
+outside the trio the host can execute (keying is host-*executed*, not just host-drawn — an unknown
+value would otherwise surface only at export time, explained as the wrong failure), **drops that
+exporter with a log line, never a crash** (`ExportActivity.loadCandidates`). Inward is untrusted the same way it is for `describe()`'s
+siblings on the other two points.
+
+### The reserved keying option — declared like any other, executed by the host
+
+`ExporterContract.OPTION_KEYING` is a normal single-choice `OptionDescriptor` by shape — an exporter
+declares it exactly like any other option, with its own choice ids and labels — but the host
+recognizes the id and treats it specially: the transform it names (`ExportKeying`, beside
+`SoilCrypto`) runs **host-side**, before the fds are ever opened, and **a passphrase-kind option's
+value never enters the spec at all**. Only the chosen *choice id* crosses in `ExportSpec.values`;
+the typed secret behind `KEYING_REKEY` is collected in host-owned, `saveEnabled="false"` masked
+fields and consumed by `ExportKeying` in the same process — it is never marshalled, never logged,
+never in an Intent. This is the same rule the contract states for `KIND_PASSPHRASE` generally: a
+passphrase-kind option exists to *ask the host* for a host-executed step, never to receive the
+secret, and the reserved keying option is the one such step this arc implements.
+
+### The two-fd seam
+
+`INotebookExporter.export(source, destination, spec)` is the whole data path: a read fd (the
+host-prepared, already-keyed artifact) and a write fd (the SAF destination the host opened), plus
+the bounded `ExportSpec`. **The extension writes only through the granted write fd** — the
+writes-nothing-to-disk rule every extension in this app keeps, applied to the one point that is
+fundamentally about writing a file. `SoilExporterService.export()` is the reference implementation:
+read the whole source fd in 64 KiB chunks, write each to the destination fd, `fsync` before closing,
+return the byte count the host will verify against what it actually streamed.
+
+### Call-shaped, not held
+
+No `begin`/`end` bracket, no `HeldBinding` — `ExporterClient.describe()` and `.export()` are each
+their own `ExtensionBinder.call`: explicit `ComponentName`, signature re-checked immediately before
+`bindService`, the call run on IO under its own timeout, unbind in `finally` unconditionally. An
+export that fails partway through leaves nothing bound; a second export is a second bind.
+
+### fd lifecycle, and the E1 trap
+
+The fd handshake is the ashmem handshake's shape in `ParcelFileDescriptor` clothes, same as the
+store's `LargeValue`: the client hands over both descriptors and closes them in `finally` once the
+transaction is marshalled; the extension closes its own dups in its own `finally`. **The caller
+check must run *inside* that `try`** — `SoilExporterService.export()` calls `enforce()` as the first
+statement inside the try whose `finally` closes both descriptors, not before it. Outside it, a
+refused caller would still have handed the extension two live dups with nothing left to close them
+— the E1 trap, found and fixed before the walk.
+
+Only three exception shapes may leave a stub method — `SecurityException` (the caller check),
+`IllegalArgumentException` (a spec this exporter cannot serve), `IllegalStateException` (a delivery
+failure) — the same marshalable set as every other point. Anything else kills the transaction
+silently and the host would read the empty reply as success; `SoilExporterService` funnels every
+other `Throwable`, `IOException` and `OutOfMemoryError` included, down to an `IllegalStateException`
+whose message names only the exception's class, never a path.
+
+### Timeouts, measured
+
+A Binder call cannot be cancelled, so `EXPORT_TIMEOUT_MS` could not be guessed the way a first pass
+might guess it (the J5 `PLACE_TIMEOUT_MS` lesson, repeated): it is 120 s, sized against a 100 MB
+flash copy measured on the Nomad at ~0.45 s (~525 MB/s `dd`, ~230 MB/s `cp`) on 2026-08-27 — two
+minutes comfortably covers a 1 GB artifact even through a slow DocumentsProvider at 10 MB/s.
+`DESCRIBE_TIMEOUT_MS` stays short (3 s): a descriptor is a small in-memory answer by construction.
+
+---
+
 ## Boundary audit
 
 What crosses the process boundary, in which direction, and what guards it. **Re-walk this table
 whenever a point is added or a contract field changes.** Rows 1–5 are the scratch-pad point, walked
-against the code at the arc-11 freeze (2026-08-25) on the shape Paper's rows 28–32 established.
+against the code at the arc-11 freeze (2026-08-25) on the shape Paper's rows 28–32 established. Rows
+6–8 are the exporter point, walked against the code at the arc-15 freeze (2026-08-27).
 
 | # | The claim | Where it holds |
 |---|---|---|
@@ -636,6 +735,9 @@ against the code at the arc-11 freeze (2026-08-25) on the shape Paper's rows 28�
 | 3 | **Inward ink is validated, capped and fresh-id'd; the paste is one undoable step and nothing else on the page changes.** Every reply is an `InkBundle` → `requireValid` at unmarshal, then `TransferCaps.sanitize` (known style or PEN, width in 0.5–50 px, **colour forced opaque black**) under `Drain`: stop at the first empty bundle, at the summed caps, or at `TRANSFER_MAX_CHUNKS` + one probe past it (a non-empty chunk there = truncated → the "not everything came back" dialog, naming the pasted count). Fresh ids are minted host-side (`toStrokes`, `timeMillis 0`); `NotebookSession.pasteStrokes` writes the rows in **one transaction** with `"order"` rebased inside it, and `NotebookActivity` records **one** `Action.ObjectsPasted` and leaves the strokes selected. No other row, object, page or session state is touched; a failed write → a dialog, nothing pasted, and a drain that fails or brings back nothing gets its own dialog rather than a silent return (J6). The bind is finished **after** the paste callback, never before it. | `IScratchPad.aidl`, `InkBundle.requireValid`, `TransferCaps.sanitize/toStrokes/Drain` (JVM-tested), `ScratchPadClient.drainOutgoing`, `ScratchPadEntry.onResult`, `NotebookSession.pasteStrokes`, `NotebookActivity.pasteFromPad` |
 | 4 | **The screen is the extension's, launched only by the core, caller-checked both ways; data never rides the Intent.** `ScratchPadActivity` is exported under `ACTION_SCRATCH_PAD_SCREEN` with `<category DEFAULT>` and **no launcher filter**; `HostCallerCheck.enforceActivity` is the first statement in `onCreate` (host package **and** `SIGNATURE_MATCH`, else `finish()` before anything is inflated). The core launches it only through an `ActivityResultLauncher` with `setPackage` from a trusted `ProviderRef`, and only after `begin` succeeded and (on a paper-hosting caller) `releaseForHandoff()`. The Activity reads only the two booleans and returns only `RESULT_SCRATCH_SEND` / `RESULT_CANCELED`; ink goes through the service, pages through the store binder. Every exit runs `releaseForHandoff()` before `finish()`. Verified on the Nomad every phase: a shell `am start` is `refused caller (none)`. | `ScratchPadActivity.onCreate` / `finishWithHandoff` / `onResume`, `HostCallerCheck.enforceActivity`, the `:ext-scratchpad` manifest, `ScratchPadClient.open`, `ScratchPadEntry` (`ActivityResultLauncher`, `beforeLaunch`) |
 | 5 | **The store caps change no trust rule.** A value is ≤ `STORE_MAX_VALUE_BYTES` (4 MiB): **inline** up to `STORE_MAX_INLINE_BYTES` (512 KiB); above that as a `LargeValue` — a read-only ashmem region + `byteCount` the receiver copies out of and closes in `finally`, host side through `SharedBytes.readAndClose` **before** the gate sees bytes, so the cap applies to the copy and never to a live mapping. Keys are still bounded, every method is still uid-bound and revocable through the same gate, and the DB is still opened only through `SoilCrypto` under the global key. On a **new-page** placement the ink is written before the page list names it and a failed list write takes the orphan blob back out, so "nothing was sent" is never contradicted by a stray blank page (J6). **A page over the cap is refused by the extension, never split, never written elsewhere:** `PageFullException` → `SCRATCH_PAGE_FULL` on `receiveInk` (the host's dialog; nothing placed) or the pad's own dialog once per visit on a stroke the page cannot take. The pad has no file, prefs or second store of its own. | `ExtensionContract.STORE_*`, `IExtensionStore.aidl`, `LargeValue`, `SharedBytes`, `ExtensionStoreBinder`, `ExtensionStoreGate` (JVM-tested), `ScratchStore`, `ScratchDocument`, `ScratchPadActivity` |
+| 6 | **Outward on `export` is two fds and a bounded spec with no secret, no id and no path.** The call's only arguments are a read `ParcelFileDescriptor` (the host's own already-keyed cache artifact), a write `ParcelFileDescriptor` (the SAF destination the host opened) and an `ExportSpec` — an id → value map (each value ≤ `MAX_SPEC_VALUE_CHARS`, 64, a choice id or `"0"`/`"1"`, never free text) plus a display-only `notebookName` (≤ `MAX_NAME_CHARS`, 200; its constructor refuses `/` and NUL, so it cannot carry a path). **No notebook id, no file path, no passphrase has anywhere to ride** — the reserved keying option's chosen choice id crosses; the typed secret behind it never does, because `ExportOptions.specValues` never writes an entry for a `KIND_PASSPHRASE` option. | `INotebookExporter.aidl`, `ExportSpec` (constructor `require`s, JVM-tested), `ExportOptions.specValues`, `ExportNaming.specName`, `ExportActivity.runExport`, `ExporterClient.export` |
+| 7 | **Inward is bounded descriptors and a byte count verified before success is believed.** `describe()`'s `ExporterInfo` and its `OptionDescriptor` list are capped at unmarshal (`MAX_OPTIONS` 8, `MAX_CHOICES` 8, `MAX_ID_CHARS` 32, `MAX_LABEL_CHARS` 80, `MAX_FILE_EXTENSION_CHARS` 12, `MAX_MIME_CHARS` 128 — every cap pinned by `ExporterContractTest`); a descriptor over any cap, declaring an option kind the host cannot draw, or declaring the reserved keying option with a choice id the host has no transform for, **drops that exporter with a log line, never a crash** (`ExportOptions.isRenderable`, `ExportActivity.loadCandidates`). `export()`'s `ExportResult` carries only a non-negative `bytesWritten`; the host checks it against the length of the file it actually streamed (the keying transform's output, when there was one) and, where the destination provider will answer, against what that provider now reports holding — an exporter that died mid-stream, or under-reported its own copy, cannot read as success on either count. | `ExporterInfo`, `OptionDescriptor`, `ExportResult` (constructor `require`s, JVM-tested), `ExporterContractTest`, `ExportActivity.loadCandidates` / `runExport`, `ExporterClient.describe` / `.export` |
+| 8 | **The keying secret's whole lifecycle is host-side.** A typed *New passphrase…* value is entered into `ExportActivity`'s own XML-static, `saveEnabled="false"` masked fields — never saved to instance state, because the system may persist that Bundle to disk and the secret has no business there — held in a private, non-persisted `typedPassphrase` var from the Export tap to the end of the flow, consumed by `ExportKeying.apply` on the local cache artifact, and cleared in the flow's own `finally` — and at the picker's cancel, the other way the flow ends. It is never written into `ExportSpec` (the reserved keying option only ever carries a choice id), never put in an Intent extra, and never logged — failure paths log the transform's exception **class name only** (`Log.w(TAG, "keying transform failed: ${e.javaClass.simpleName}")`), on the recorded principle that a transform's own message text could carry a path. A rekey armed with the fields lost to a screen rebuild is refused with its own honest dialog rather than silently falling back to Keep. | `ExportActivity` (`editPassphrase`/`editPassphraseConfirm` XML `saveEnabled="false"`, `typedPassphrase`, `onExportTap`, `runExport`), `ExportKeying.plan` / `.apply`, `activity_export.xml` |
 
 **One recorded asymmetry.** The host forces inbound colour to opaque black; the extension does not
 force it on the ink the host sends. That is not an oversight and not a hole: SN's ink is fixed
@@ -656,7 +758,7 @@ closest to describing recognized content, explicitly logs geometry and a coarse 
 
 ## Identity
 
-Both extensions share one recipe; only the name and the point differ.
+All three extensions share one recipe; only the name and the point differ.
 
 **`:ext-scratchpad`**
 
@@ -677,6 +779,16 @@ Both extensions share one recipe; only the name and the point differ.
 | Package | `com.symmetricalpalmtree.notesproutsn.ext.mlkit` (`.dev` in debug) |
 | Icon | Tabler "puzzle," ink-black outline, at the same ×3.1 / 108dp-viewport scale as the host's own launcher glyph — same visual family in Settings → Apps and in any launcher that lists every package |
 | Launcher activity | **None** — Supernote's own launcher shows the package anyway; accepted as "Ratta being Ratta" rather than worked around |
+| versionName | host lockstep: `0.1.0-ratta` (`-dev` suffixed in debug), bumped together with `:app` at arc freezes |
+
+**`:ext-soil`** (arc 15 / E1)
+
+| | |
+|---|---|
+| Label | **"NSE · Soil Export"** (`"NSE · Soil Export Dev"` in debug — a build-type string override, not a suffix) |
+| Package | `com.symmetricalpalmtree.notesproutsn.ext.soil` (`.dev` in debug) |
+| Icon | the same Tabler "puzzle" glyph as `:ext-mlkit` and `:ext-scratchpad`, byte-identical vector — ink-black outline, ×3.1 / 108dp-viewport scale, same family in Settings → Apps |
+| Launcher activity | **None** — the Supernote launcher shows the package anyway; the family recipe |
 | versionName | host lockstep: `0.1.0-ratta` (`-dev` suffixed in debug), bumped together with `:app` at arc freezes |
 
 ---

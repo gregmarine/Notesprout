@@ -4238,7 +4238,62 @@ pulled files).
 measurement (rekey vs. export-and-key) surfaces a user-visible trade.
 
 ### E3 — Review, boundary audit, docs, freeze
-**Status:** ⬜ Not started
+**Status:** ✅ Complete 2026-08-27 — user Keep-export check passed, all-clear given; **arc 15 frozen at this commit**
+
+**Outcome.** Review at **high** over the arc range (`a315034..HEAD` — the range is the arc, the O2
+lesson): 28 unique verified candidates → **10 correctness findings survived (8 CONFIRMED, 2
+PLAUSIBLE) — all ten fixed by Fable**; the cap-cut cleanups and the `"w"`-fallback stale-tail
+plausible are **accepted** into monorepo `BACKLOG.md` (§ arc-15 E3 review ledger), and three
+refutations are recorded there implicitly (zetetic delete-on-corruption — matches the 2026-07-20
+stability refutation; the bytesWritten-equality "transforming exporter" claim — verbatim streaming
+is the documented contract; the per-long-press exporter query — deliberate freshness). The fixes:
+① `fail()` deleted the destination unconditionally — the picker's **overwrite confirmation hands
+back a pre-existing document's URI**, so a pre-write failure destroyed the user's previous good
+export; deletion is now allowed only once the truncating open has destroyed the old content anyway,
+or when the document was verifiably empty at flow start, **and the dialog reports what actually
+happened** (removed / may remain / untouched — the delete is best-effort and the old strings
+asserted removal as fact, finding ⑦). ② The **double-seal race**: `SoilOpenFiles.release` was a
+bare path-keyed decrement, so seal #1 + fast reopen + seal #2 dropped a *live* session's claim and
+export's IN_USE guard read a held file as free — the release is now **handle-scoped**
+(`claimReleased` CAS in `SoilDatabase.seal`). ③ Back/system-back latched while busy (a Binder call
+cannot be cancelled; leaving skipped verification and cleanup) — busy taps get the
+`export_busy_body` dialog. ④ `discover()`'s continuation now stands down under a running export
+(a rebuilt screen's pending SAF result lands before discovery answers; the fallback `select()`
+could substitute the exporter with values reset, or `problemAndClose()` mid-flight). ⑤ The
+destination-size check takes **every answer the provider gives** (SIZE + statSize) as
+**corroboration, not authority**: any agreeing answer passes, and a unanimous disagreement after a
+fully-streamed fsynced write is a *check-the-file* dialog with **no delete** — a cloud provider's
+stale metadata must never destroy a good export. ⑥ `prepare()` re-checks after seal that the
+`-wal` is absent/empty (seal swallows a failed checkpoint by contract; a stale main-file copy
+passes every downstream check). ⑧ `typedPassphrase` wiped at picker cancel (its documented
+lifetime). ⑨ The library's async notebook sheet gained its own `sheetPending` latch (the IO beat
+before the sheet is an e-ink feedback gap; two long-presses stacked two sheets). ⑩ An exporter
+declaring the reserved keying option with an **unknown choice id** is dropped at discovery
+(`ExportOptions.isRenderable` — keying is host-*executed*, and the unknown value surfaced at
+export time as the wrong explanation, the "passphrase lost" dialog).
+
+**Round-trip compat proof** (the R6 two-step): the E2 Keep export (`e2-keep2.soil`) pulled from
+the Nomad, `cmp`-verified byte-identical to the Garden source, placed back into SN dev's Garden
+via `/data/local/tmp` + `shell cp` with its index row **rewritten through the stock sqlcipher CLI**
+(temp-table round trip — delete + CLI re-insert, key read from the debug menu) → **opens in the
+app at its remembered page 12/13**, lined template + ink + headings render, flip works, crash
+buffer empty. The finding worth keeping: **a fresh-UUID index row cannot open an export** —
+`NotebookSession` (line ~107) queries pages by the *index* notebook id and the export's pages are
+parented to the original id, so the R6 method works only under the file's own id; re-identifying
+an import is the remap job the import arc will own.
+
+**Docs:** `docs/export.md` **new** (feature: screen, flow, SoilOpenFiles, keying table with the
+export-and-key mechanism, measured timeouts, conditional-deletion rule, failure table, the two E2
+traps); `docs/extensions.md` grown (three points, six modules, § "The exporter point (arc 15)",
+**boundary-audit rows 6–8** walked against the code at the freeze — every cited cap/guard/timeout
+re-verified — and `:ext-soil`'s identity block); `docs/library.md` (the Export… row + the
+`sheetPending` latch); app `CLAUDE.md` (docs list + three points — E1's amendment stands); monorepo
+`BACKLOG.md` (the E3 ledger). **Regression:** 835 JVM tests, debug + release build, both variants
+reinstalled on SNN, Haiku walk **12/12** (sheet gating + no-stack, keying trio reveal/hide,
+passphrase-missing dialog before the picker, SAF picker opens and cancels clean, relaunch restore,
+crash buffer empty, no lingering ext.soil binds). Version stays **0.1.0-ratta**; g-paper pin stays
+0.1.23. **User checklist done 2026-08-27: a real Keep export through SAF succeeded on the fixed
+build; all-clear given → committed + pushed, arc frozen.**
 
 Arc-range `/code-review` (level asked at phase start — every arc has frozen at **high**; the range
 is the arc, never the last phase — the O2 lesson). **Boundary audit rows for the third point**

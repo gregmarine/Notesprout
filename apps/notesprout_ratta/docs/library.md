@@ -201,8 +201,23 @@ Main — the shared map is only ever written single-threaded. The page label is 
 the bind, so "n / N" can never name a page before its cards are on screen.
 
 Tap a folder to enter it, a notebook to open it. Long-press either for the action sheet:
-**Pin/Unpin · Rename · Move · Delete** — the first row is notebooks-only, and its label comes from
-the card's own `pinned` flag (the listing already read the pinned list) rather than a fresh query.
+**Pin/Unpin · Rename · Move · Export… · Delete** — the first row is notebooks-only, and its label
+comes from the card's own `pinned` flag (the listing already read the pinned list) rather than a
+fresh query.
+
+**Export…** (arc 15 / E1) is notebooks-only too — a folder's sheet never even asks. Whether it
+shows depends on a trusted exporter extension being installed *right now*: `onCardLongPress` runs
+`ExtensionRegistry.exporters()` (an IO-dispatched package query) **before** raising a notebook's
+sheet, one beat later than a folder's, and the row is passed in as a plain boolean. That beat is an
+e-ink feedback gap like any other, so it is latched (`sheetPending`, arc-15 review): a second
+long-press in it would stack a second sheet, and a card tap in it drops the pending sheet rather
+than popping it over a departing library. It re-runs at
+every long-press rather than being cached — a package can be disabled or replaced under a standing
+library — and the row is **GONE**, never disabled, when none is installed: a control that cannot
+work is invisible on e-ink, and a sheet that grew a row after it was already up would move the
+user's finger. A tap hands off to `ExportActivity` with `EXTRA_NOTEBOOK_ID` / `EXTRA_NOTEBOOK_NAME`
+only — never a `File` — latched against a double-tap the same way every other door out of the
+library is. See [`docs/export.md`](export.md) for the screen itself.
 
 ---
 

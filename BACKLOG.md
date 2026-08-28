@@ -875,6 +875,33 @@ J6 Outcome) and one was refuted. Two things are carried, neither of them SN bugs
 `onTransact` never runs." That probe was deleted in J3 — there is no in-process caller — and
 `onTransact`'s `finally` already calls `pending.remove()`.
 
+## Notesprout SN — arc 15 (Export) E3 review ledger (2026-08-27)
+
+The E1–E2 arc-range `/code-review high` surfaced 28 unique verified candidates; the ten surviving
+correctness findings were **all fixed in E3** (see RATTA_PLAN.md E3 Outcome). Carried here: the
+items the review confirmed but cut under its output cap, accepted rather than fixed at the freeze.
+
+- **`openDestination`'s plain-`"w"` fallback never truncates.** Providers differ on which write
+  modes they accept, so `"rwt"` → `"wt"` → `"w"` is tried in order — but a provider that rejects
+  the truncating modes, opens `"w"` in place over a *longer* pre-existing overwrite target, and
+  answers **neither** `OpenableColumns.SIZE` nor `statSize` would leave the old file's trailing
+  bytes after the new content, passing both size checks (the on-disk check is skipped when the
+  provider won't answer at all). Three provider quirks have to coincide, and the local DocumentsUI
+  path always accepts `"rwt"` — accepted. If picked up: a best-effort
+  `FileOutputStream(pfd.fileDescriptor).channel.truncate(0)` after a plain-`"w"` open closes most
+  of it.
+- **`NotebookSession.refreshMeta` does not carry `exportedAt`/`appVersionCode` forward** — the next
+  notebook open after an export rewrites `notebook_meta` without them, so the *Garden* file's
+  export stamp is transient (every export re-stamps its own artifact, which is the copy that
+  travels, so nothing user-visible is wrong). Worth aligning the two writers the next time
+  `NotebookMeta` changes.
+- **Cleanups cut under the cap, none behavioural:** `describe()` binds run sequentially at
+  discovery (one exporter installed today); `Ready.bytes` duplicates `Ready.file.length()`;
+  `ExportArtifact`'s cache copy uses `copyTo`'s default 8 KiB buffer where `:ext-soil` streams at
+  64 KiB; `prepare()` hand-rolls a variant of the `readOnce` open→work→seal ritual (it needs the
+  meta write, which `readOnce`'s read-only contract refuses); `versionCode()` is a third copy of
+  the same helper; `ExportKeying`'s `plan`/`apply` split forces a nullable passphrase parameter.
+
 ## g-paper / Notesprout SN — a transferred selection drags worse than a hand-lassoed one (open, 2026-08-25)
 
 **Symptom (user, Nomad, arc 11 / J6):** after a scratch-pad transfer in either direction, dragging

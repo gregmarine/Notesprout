@@ -283,6 +283,29 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   reproducible, unexplained exception** (the one case lossless wins). No migration —
   `BitmapFactory` sniffs the header. **Host libwebp cannot stand in for Skia and says the opposite**;
   use `DebugMenu`'s "WEBP encoder measurement" (`WebpProbe`, debug-only) on a device.
+  **Arc 15 "Export"** (E1 `c5fb23b` · E2 `1860da3` · E3 2026-08-27): notebook export, with the
+  export *implementations* as extensions — SN's **third capability point** on the user's explicit
+  2026-08-27 decision. One **generic exporter point** (`ACTION_NOTEBOOK_EXPORTER`, plural: any
+  number of trusted exporters may register; the host's `ExportActivity` lists whatever is
+  installed and renders each `describe()`'s bounded declarative descriptor with its own e-ink
+  widgets), first exporter **NSE · Soil Export** (`:ext-soil`, sixth module). The seam is *the
+  host keys, the extension delivers*: everything touching a key — transient checkpoint,
+  `exportedAt` meta stamp, cache copy, the keying transform, SAF destination — runs host-side,
+  and the extension receives **two fds + an id → value spec with no secret, no id, no path** (a
+  passphrase-kind option's value never enters the spec at all). Keying trio: Keep encrypted (pure
+  copy) · New passphrase… · Remove encryption — both transforms are **export-and-key, never
+  `PRAGMA rekey`** (og's on-device finding), `user_version` copied by hand + re-verified,
+  `notebook_meta` restamped, nothing accepted without probing as its claimed kind +
+  `integrity_check`. `SoilOpenFiles` writes the one-file-one-connection rule down and an export
+  *refuses* a held file. The E3 review (high, arc range) fixed all ten surviving findings — the
+  headline pair: the picker's **overwrite confirmation hands back a pre-existing document's URI**,
+  so a failure may delete the destination only once the truncating open destroyed the old content
+  (and the dialog reports removed / may-remain / untouched honestly); and the **double-seal race**
+  (`SoilOpenFiles.release` made handle-scoped) that let an export copy under a live writer.
+  Round-trip proven: a Keep export placed back by the R6 two-step + a CLI index row opens at its
+  remembered page — but **only under the file's own id** (pages are parented to the original
+  notebook id; re-identifying is the future import arc's remap job). Reference:
+  **`apps/notesprout_ratta/docs/export.md`** (feature) + `docs/extensions.md` rows 6–8 (seam).
   **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for any work there** — it holds the
   per-arc status, locked decisions, working protocol, and model recipe.
 - `germination` — previous post-MVP feature branch (reference, not active)

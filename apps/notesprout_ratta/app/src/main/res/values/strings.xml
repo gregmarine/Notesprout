@@ -153,8 +153,15 @@
     <string name="export_no_picker_title">No file picker</string>
     <string name="export_no_picker_body">This device has no app for choosing where to save a file, so nothing can be exported here.</string>
     <string name="export_failed_title">Export didn\'t finish</string>
-    <string name="export_failed_body">The export extension didn\'t finish writing the file. The unfinished file has been removed; your notebook is untouched.</string>
-    <string name="export_short_body">Only part of the notebook reached that file, so the unfinished file has been removed. Your notebook is untouched.</string>
+    <string name="export_failed_body">The export extension didn\'t finish writing the file. Your notebook is untouched.</string>
+    <string name="export_short_body">Only part of the notebook reached that file. Your notebook is untouched.</string>
+    <string name="export_removed_note">The unfinished file was removed.</string>
+    <string name="export_remains_note">An unfinished file may remain where you chose to save.</string>
+    <string name="export_untouched_note">The file you chose was not changed.</string>
+    <string name="export_busy_title">Export in progress</string>
+    <string name="export_busy_body">Wait for the export to finish — leaving now could leave a half-written file behind.</string>
+    <string name="export_verify_title">Check the exported file</string>
+    <string name="export_verify_body">The whole notebook was written, but the destination reports a different size. Open or re-export the file before relying on it.</string>
     <string name="export_gone_body">The export format you chose is no longer available on this device. Nothing was exported.</string>
     <string name="export_destination_body">That file could not be opened for writing. Nothing was exported.</string>
     <string name="export_prepare_failed_body">A copy of the notebook could not be made — the device may be out of space. Nothing was exported and your notebook is untouched.</string>

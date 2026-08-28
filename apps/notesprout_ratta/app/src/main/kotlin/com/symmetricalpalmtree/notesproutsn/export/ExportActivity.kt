@@ -11,6 +11,7 @@ import android.provider.OpenableColumns
 import android.util.Log
 import android.view.View
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AlertDialog
@@ -69,8 +70,11 @@ import kotlinx.coroutines.withContext
  *     anything says the word "exported". An exporter that died mid-stream must never read as
  *     success.
  *  5. **Toast and finish**, back to the library: a toast only ever confirms something that has
- *     already happened. Every failure instead deletes the half-written destination and explains
- *     itself in a dialog naming what went wrong — never a path, never a secret.
+ *     already happened. Every failure instead explains itself in a dialog naming what went wrong —
+ *     never a path, never a secret — and removes the half-written destination where removing it
+ *     cannot cost the user anything: a pre-existing file the picker offered to overwrite is
+ *     deleted only after the truncating open has already destroyed its old content, and the
+ *     dialog says what actually happened to the file either way.
  */
 class ExportActivity : AppCompatActivity() {
 
@@ -112,6 +116,9 @@ class ExportActivity : AppCompatActivity() {
             runExport(uri)
         } else {
             // Cancelled at the picker: nothing was created, nothing to explain, screen stays.
+            // The secret collected at the tap goes with the flow it was collected for — its
+            // documented lifetime ends here, not at the next tap (arc-15 review).
+            typedPassphrase = null
             busy = false
             Slog.d(TAG) { "destination picker cancelled" }
         }
@@ -132,7 +139,16 @@ class ExportActivity : AppCompatActivity() {
         panel = ExportPanel(this)
 
         binding.notebookName.text = notebookName
-        binding.btnBack.setOnClickListener { finish() }
+        // Leaving mid-export would cancel the flow past its verification and cleanup while the
+        // extension's un-cancellable Binder stream keeps writing — an unverified file standing
+        // silently (arc-15 review). Both doors out are latched on busy; the dialog explains why
+        // the tap did nothing (the toast-vs-dialog rule).
+        binding.btnBack.setOnClickListener { if (busy) showBusyGuard() else finish() }
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (busy) showBusyGuard() else finish()
+            }
+        })
         TooltipCompat.setTooltipText(binding.btnBack, binding.btnBack.contentDescription)
         binding.btnExport.setOnClickListener { onExportTap() }
 
@@ -172,7 +188,12 @@ class ExportActivity : AppCompatActivity() {
             } finally {
                 discovering = false
             }
-            if (isFinishing || isDestroyed) return@launch
+            // Never under a running export (arc-15 review): a screen rebuilt behind the picker
+            // starts this discovery from onCreate, and the pending SAF result lands before the
+            // continuation — a substitution or a problemAndClose here would swap the exporter
+            // (values reset, keying back to Keep) or close the screen under the flow. runExport
+            // does its own no-substitution reselect.
+            if (busy || isFinishing || isDestroyed) return@launch
             candidates = kept
             Slog.d(TAG) { "${kept.size} usable exporter(s)" }
             if (kept.isEmpty()) {
@@ -361,18 +382,28 @@ class ExportActivity : AppCompatActivity() {
         stage(R.string.export_preparing)
         showBusy(true)
         lifecycleScope.launch {
+            // What a failure may delete (arc-15 review): the picker's overwrite confirmation hands
+            // back a PRE-EXISTING document's URI, and a failure that never wrote a byte must not
+            // take the user's previous good file with it. Deletion is allowed only once the
+            // truncating open has destroyed the old content anyway — or when the document was
+            // verifiably empty to begin with (a fresh creation).
+            val sizesAtStart = withContext(Dispatchers.IO) { destinationSizes(uri) }
+            val emptyAtStart = sizesAtStart.isNotEmpty() && sizesAtStart.all { it == 0L }
+            var destinationTouched = false
+            suspend fun failed(@StringRes titleRes: Int, message: String) =
+                fail(uri, titleRes, message, mayDelete = destinationTouched || emptyAtStart)
             try {
                 // DocumentsUI is another process on a memory-tight e-ink device, so this screen can
                 // be rebuilt behind it: the result arrives before the recreated screen's discovery
                 // has answered. Ask again rather than drop the tap and leave an empty document.
                 val c = current() ?: reselectAfterRestore()
                 if (c == null) {
-                    fail(uri, R.string.export_failed_title, getString(R.string.export_gone_body))
+                    failed(R.string.export_failed_title, getString(R.string.export_gone_body))
                     return@launch
                 }
                 val prepared = ExportArtifact.prepare(applicationContext, notebookId, repo, versionCode())
                 if (prepared is ExportArtifact.Outcome.Failed) {
-                    fail(uri, R.string.export_failed_title, prepareMessage(prepared.problem))
+                    failed(R.string.export_failed_title, prepareMessage(prepared.problem))
                     return@launch
                 }
                 val artifact = (prepared as ExportArtifact.Outcome.Ready)
@@ -384,7 +415,7 @@ class ExportActivity : AppCompatActivity() {
                     )
                 } catch (e: IllegalArgumentException) {
                     Log.w(TAG, "spec rejected", e)
-                    fail(uri, R.string.export_failed_title, getString(R.string.export_failed_body))
+                    failed(R.string.export_failed_title, getString(R.string.export_failed_body))
                     return@launch
                 }
 
@@ -399,7 +430,7 @@ class ExportActivity : AppCompatActivity() {
                     // and the fields went with it (saveEnabled=false, deliberately). Say so — a
                     // silent Keep would hand the user a file keyed the way they asked it not to be.
                     Log.w(TAG, "keying plan rejected: ${e.javaClass.simpleName}")
-                    fail(uri, R.string.export_failed_title, getString(R.string.export_passphrase_lost_body))
+                    failed(R.string.export_failed_title, getString(R.string.export_passphrase_lost_body))
                     return@launch
                 }
                 val streamFile = if (plan == ExportKeying.Plan.KEEP) artifact.file else {
@@ -407,7 +438,7 @@ class ExportActivity : AppCompatActivity() {
                     // none, which is why the session is only asked here.
                     val devicePassphrase = KeySession.get()
                     if (devicePassphrase == null) {
-                        fail(uri, R.string.export_failed_title, getString(R.string.export_locked_body))
+                        failed(R.string.export_failed_title, getString(R.string.export_locked_body))
                         return@launch
                     }
                     stage(if (plan == ExportKeying.Plan.REKEY) R.string.export_rekeying else R.string.export_decrypting)
@@ -419,7 +450,7 @@ class ExportActivity : AppCompatActivity() {
                         // The class name only: a transform message can carry a path, and a
                         // passphrase is never anywhere near a log line.
                         Log.w(TAG, "keying transform failed: ${e.javaClass.simpleName}")
-                        fail(uri, R.string.export_failed_title, getString(R.string.export_transform_body))
+                        failed(R.string.export_failed_title, getString(R.string.export_transform_body))
                         return@launch
                     }
                 }
@@ -432,15 +463,18 @@ class ExportActivity : AppCompatActivity() {
                     }.getOrNull()
                 }
                 if (source == null) {
-                    fail(uri, R.string.export_failed_title, getString(R.string.export_prepare_failed_body))
+                    failed(R.string.export_failed_title, getString(R.string.export_prepare_failed_body))
                     return@launch
                 }
                 val destination = withContext(Dispatchers.IO) { openDestination(uri) }
                 if (destination == null) {
                     withContext(Dispatchers.IO) { runCatching { source.close() } }
-                    fail(uri, R.string.export_failed_title, getString(R.string.export_destination_body))
+                    failed(R.string.export_failed_title, getString(R.string.export_destination_body))
                     return@launch
                 }
+                // The truncating open has run: whatever the document held is gone, and from here a
+                // failure's delete removes only wreckage, never the user's old file.
+                destinationTouched = true
 
                 // Both descriptors are the client's from here — it closes them in `finally`,
                 // success, failure or timeout.
@@ -450,7 +484,7 @@ class ExportActivity : AppCompatActivity() {
                     throw e
                 } catch (e: Exception) {
                     Slog.d(TAG) { "export call failed: ${e.message}" }
-                    fail(uri, R.string.export_failed_title, getString(R.string.export_failed_body))
+                    failed(R.string.export_failed_title, getString(R.string.export_failed_body))
                     return@launch
                 }
 
@@ -458,13 +492,22 @@ class ExportActivity : AppCompatActivity() {
                 // when there was one, whose length is not the artifact's.
                 if (result.bytesWritten != streamBytes) {
                     Log.w(TAG, "short export: ${result.bytesWritten} of $streamBytes bytes")
-                    fail(uri, R.string.export_failed_title, getString(R.string.export_short_body))
+                    failed(R.string.export_failed_title, getString(R.string.export_short_body))
                     return@launch
                 }
-                val onDisk = withContext(Dispatchers.IO) { destinationSize(uri) }
-                if (onDisk != null && onDisk != streamBytes) {
-                    Log.w(TAG, "destination holds $onDisk of $streamBytes bytes")
-                    fail(uri, R.string.export_failed_title, getString(R.string.export_short_body))
+                // The stream itself completed and was fsynced, so the destination's own account is
+                // corroboration, not authority (arc-15 review): a cloud provider's metadata can lag
+                // the write it just took, and deleting a fully-written export over a stale answer
+                // would destroy the very thing that was just made. Any agreeing answer is enough;
+                // a unanimous disagreement is an honest check-the-file dialog, never a delete.
+                val onDisk = withContext(Dispatchers.IO) { destinationSizes(uri) }
+                if (onDisk.isNotEmpty() && onDisk.none { it == streamBytes }) {
+                    Log.w(TAG, "destination reports $onDisk for $streamBytes bytes")
+                    if (!isFinishing && !isDestroyed) {
+                        Dialogs.problem(
+                            this@ExportActivity, R.string.export_verify_title, getString(R.string.export_verify_body)
+                        )
+                    }
                     return@launch
                 }
 
@@ -513,33 +556,55 @@ class ExportActivity : AppCompatActivity() {
         return null
     }
 
-    /** What the destination provider says it now holds, or null when it will not say. */
-    private fun destinationSize(uri: Uri): Long? {
+    /** Every account the destination provider will give of what it now holds — the SIZE column and
+     *  the reopened fd's stat, in that order. Empty when it will not say at all. Two answers rather
+     *  than one because neither is authoritative alone: a cloud provider's metadata can lag a write
+     *  it just took, and a proxy fd can refuse to stat (arc-15 review). */
+    private fun destinationSizes(uri: Uri): List<Long> {
+        val sizes = ArrayList<Long>(2)
         runCatching {
             contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { c ->
-                if (c.moveToFirst() && !c.isNull(0)) return c.getLong(0)
+                if (c.moveToFirst() && !c.isNull(0)) sizes += c.getLong(0)
             }
         }
         runCatching {
             contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                return pfd.statSize.takeIf { it >= 0L }
+                pfd.statSize.takeIf { it >= 0L }?.let { sizes += it }
             }
         }
-        return null
+        return sizes
+    }
+
+    /** The busy latch's voice: why the door out did nothing (a silent ignore reads as broken). */
+    private fun showBusyGuard() {
+        Dialogs.problem(this, R.string.export_busy_title, getString(R.string.export_busy_body))
     }
 
     /**
-     * Every failure path ends here: the created document goes (a half-written export standing in
-     * the user's files under a name that says "notebook" is worse than none at all), then the
-     * dialog. No path and no secret in the message.
+     * Every failure path ends here. The created document goes **only when [mayDelete]** — the
+     * caller answers for whether what stands at [uri] is this export's wreckage (a truncating
+     * open ran, or the document was verifiably empty at the start) or a pre-existing file the
+     * picker offered to overwrite, which a failure that never wrote a byte must not destroy
+     * (arc-15 review). The dialog then says what actually happened to the file — removed, possibly
+     * remaining, or untouched — because the delete is best-effort and a claim of removal that
+     * did not happen is a partial file the user was told is gone. No path and no secret in the
+     * message.
      */
-    private suspend fun fail(uri: Uri, @StringRes titleRes: Int, message: String) {
-        withContext(Dispatchers.IO) {
+    private suspend fun fail(uri: Uri, @StringRes titleRes: Int, message: String, mayDelete: Boolean) {
+        val removed = if (mayDelete) withContext(Dispatchers.IO) {
             runCatching { DocumentsContract.deleteDocument(contentResolver, uri) }
                 .onFailure { Log.w(TAG, "could not remove the partial export: ${it.message}") }
-        }
+                .getOrDefault(false)
+        } else false
         if (isFinishing || isDestroyed) return
-        Dialogs.problem(this, titleRes, message)
+        val note = getString(
+            when {
+                removed -> R.string.export_removed_note
+                mayDelete -> R.string.export_remains_note
+                else -> R.string.export_untouched_note
+            }
+        )
+        Dialogs.problem(this, titleRes, "$message $note")
     }
 
     private fun prepareMessage(problem: ExportArtifact.Problem): String = getString(

@@ -24,9 +24,12 @@ table, and the abandoned generator idea) ·
 half's long-press sheet and the object half's Copy/Cut, tap-to-place and lasso popup, both
 within and **across notebooks**, where a copied link's own-notebook target is re-pointed at the
 notebook it came from) ·
-`docs/extensions.md` (the **seam**: the two extension points — the recognizer, and arc 11's
-screen-owning scratch pad — the extension store, the tier-2 recipe for an extension-owned screen,
-and **the boundary audit**) ·
+`docs/extensions.md` (the **seam**: the three extension points — the recognizer, arc 11's
+screen-owning scratch pad, and arc 15's generic exporter point — the extension store, the tier-2
+recipe for an extension-owned screen, and **the boundary audit**) ·
+`docs/export.md` (arc 15: notebook export as a feature — the library sheet's Export… row, the
+`ExportActivity` screen, the keying trio and its host-side transforms, `SoilOpenFiles`, the
+conditional-deletion rule, the failure table) ·
 `docs/scratchpad.md` (arc 11: the Scratch Pad as a feature — screen, tools, pages, store layout,
 both transfers, failure table) ·
 `docs/sn-screen.md` (arc 11 / J1: the shared `:sn-screen` paper-screen library — what may live

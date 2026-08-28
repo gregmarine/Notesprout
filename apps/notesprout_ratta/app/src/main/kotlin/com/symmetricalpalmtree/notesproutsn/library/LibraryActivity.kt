@@ -528,12 +528,25 @@ class LibraryActivity : AppCompatActivity() {
      */
     private fun onCardLongPress(item: CardItem) {
         if (item !is CardItem.Notebook) { showCardSheet(item, canExport = false); return }
+        // The IO beat between the long-press and the sheet is an e-ink feedback gap like any other
+        // (arc-15 review): a second long-press in it would stack a second sheet, and a card tap in
+        // it would pop the sheet over a departing library. One latch closes the gap; a sheet that
+        // is up is modal, so nothing needs to guard past the show.
+        if (sheetPending || launching) return
+        sheetPending = true
         lifecycleScope.launch {
-            val canExport = ExtensionRegistry.exporters(this@LibraryActivity).isNotEmpty()
-            if (isFinishing || isDestroyed) return@launch
+            val canExport = try {
+                ExtensionRegistry.exporters(this@LibraryActivity).isNotEmpty()
+            } finally {
+                sheetPending = false
+            }
+            if (isFinishing || isDestroyed || launching) return@launch
             showCardSheet(item, canExport)
         }
     }
+
+    /** True while a notebook sheet's exporter discovery is in flight — long-press to show. */
+    private var sheetPending = false
 
     private fun showCardSheet(item: CardItem, canExport: Boolean) {
         val s = item.summary
