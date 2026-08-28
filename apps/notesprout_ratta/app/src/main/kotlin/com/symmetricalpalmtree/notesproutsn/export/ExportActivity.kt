@@ -22,6 +22,8 @@ import com.symmetricalpalmtree.notesproutsn.core.Dialogs
 import com.symmetricalpalmtree.notesproutsn.core.IndexGuard
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.core.TopGuard
+import com.symmetricalpalmtree.notesproutsn.crypto.ExportKeying
+import com.symmetricalpalmtree.notesproutsn.crypto.KeySession
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityExportBinding
 import com.symmetricalpalmtree.notesproutsn.extension.ExporterClient
@@ -59,10 +61,13 @@ import kotlinx.coroutines.withContext
  *     filename [ExportNaming] made from the index name. (An `ActivityResultContracts.CreateDocument`
  *     takes its MIME at *registration*, and this screen does not know it until `describe()` has
  *     answered — so it is the family's explicit-Intent form, as the templates screen uses.)
- *  4. **Prepare, hand over, verify.** [ExportArtifact] seals a cold copy into the cache; the fds are
- *     opened; `export()` runs under its own timeout; and the byte count is checked against the
- *     artifact — **and against the destination where the provider can answer** — before anything
- *     says the word "exported". An exporter that died mid-stream must never read as success.
+ *  4. **Prepare, key, hand over, verify.** [ExportArtifact] seals a cold copy into the cache;
+ *     [ExportKeying] runs the reserved keying option's transform on that copy (E2 — the exporter
+ *     never learns which, and the typed passphrase stays in this process); the fds are opened;
+ *     `export()` runs under its own timeout; and the byte count is checked against **the file that
+ *     was actually streamed** — and against the destination where the provider can answer — before
+ *     anything says the word "exported". An exporter that died mid-stream must never read as
+ *     success.
  *  5. **Toast and finish**, back to the library: a toast only ever confirms something that has
  *     already happened. Every failure instead deletes the half-written destination and explains
  *     itself in a dialog naming what went wrong — never a path, never a secret.
@@ -93,6 +98,11 @@ class ExportActivity : AppCompatActivity() {
     private var busy = false
 
     private var discovering = false
+
+    /** The passphrase typed for a *rekey*, held only from the Export tap to the end of the flow.
+     *  It is never saved into instance state, never put in an Intent, never logged — the host
+     *  collects it, the host consumes it, and nothing about it crosses the exporter seam. */
+    private var typedPassphrase: String? = null
 
     private val saveLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -212,6 +222,11 @@ class ExportActivity : AppCompatActivity() {
         val merged = ExportOptions.specValues(c.info, if (keepValues) values else emptyMap())
         values.clear()
         values.putAll(merged)
+        // A different exporter is a different question: what was typed for the last one goes with it.
+        if (!keepValues) {
+            binding.editPassphrase.setText("")
+            binding.editPassphraseConfirm.setText("")
+        }
         render()
     }
 
@@ -267,18 +282,58 @@ class ExportActivity : AppCompatActivity() {
                 // No other kind reaches here: an exporter declaring one was dropped at discovery.
             }
         }
+
+        // The two keying consequences the host owns (E2). Both are XML-static, so a half-typed
+        // passphrase survives the rebuild the options loop above just did.
+        val info = c.info
+        binding.passphraseBlock.visibility =
+            if (ExportOptions.needsPassphrase(info, values)) View.VISIBLE else View.GONE
+        binding.plainWarning.visibility =
+            if (ExportOptions.showsPlainWarning(info, values)) View.VISIBLE else View.GONE
     }
 
     private fun showBusy(running: Boolean) {
         binding.status.visibility = if (running) View.VISIBLE else View.GONE
     }
 
+    /** The one line of running commentary this screen has — the stages are long enough on e-ink
+     *  that a single unchanging "Exporting…" would read as a stall. */
+    private fun stage(@StringRes textRes: Int) {
+        binding.status.setText(textRes)
+    }
+
     // ── The export ───────────────────────────────────────────────────────────
 
-    /** Ask where to put it. The filename is offered, not imposed — the picker's field is the user's. */
+    /**
+     * Ask where to put it. The filename is offered, not imposed — the picker's field is the user's.
+     *
+     * A rekey's fields are checked **before** the picker, because a passphrase problem found after
+     * the user has named a file is a dialog on top of a document that then has to be deleted. Both
+     * refusals are dialogs, not toasts: each explains why the tap did nothing. The IME is left
+     * exactly as it is — on Ratta, hiding it takes the hardware keys with it.
+     */
     private fun onExportTap() {
         if (busy) { Slog.d(TAG) { "export tap ignored: already running" }; return }
         val c = current() ?: return
+        if (ExportOptions.needsPassphrase(c.info, values)) {
+            val typed = binding.editPassphrase.text?.toString().orEmpty()
+            val confirm = binding.editPassphraseConfirm.text?.toString().orEmpty()
+            if (typed.isEmpty() || confirm.isEmpty()) {
+                Dialogs.problem(
+                    this, R.string.export_passphrase_missing_title, R.string.export_passphrase_missing_body
+                )
+                return
+            }
+            if (typed != confirm) {
+                Dialogs.problem(
+                    this, R.string.export_passphrase_mismatch_title, R.string.export_passphrase_mismatch_body
+                )
+                return
+            }
+            typedPassphrase = typed
+        } else {
+            typedPassphrase = null
+        }
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
             .addCategory(Intent.CATEGORY_OPENABLE)
             .setType(c.info.mimeType)
@@ -303,6 +358,7 @@ class ExportActivity : AppCompatActivity() {
      */
     private fun runExport(uri: Uri) {
         busy = true
+        stage(R.string.export_preparing)
         showBusy(true)
         lifecycleScope.launch {
             try {
@@ -332,9 +388,47 @@ class ExportActivity : AppCompatActivity() {
                     return@launch
                 }
 
+                // The host-executed keying step (E2). It runs on the cache artifact, beside the
+                // crypto, and produces the file the exporter will stream — which from here on is
+                // the only file this flow talks about.
+                val keying = ExportOptions.keying(c.info, values)
+                val plan = try {
+                    ExportKeying.plan(keying, typedPassphrase != null)
+                } catch (e: IllegalArgumentException) {
+                    // Rekey armed with nothing in hand: the screen was rebuilt behind the picker
+                    // and the fields went with it (saveEnabled=false, deliberately). Say so — a
+                    // silent Keep would hand the user a file keyed the way they asked it not to be.
+                    Log.w(TAG, "keying plan rejected: ${e.javaClass.simpleName}")
+                    fail(uri, R.string.export_failed_title, getString(R.string.export_passphrase_lost_body))
+                    return@launch
+                }
+                val streamFile = if (plan == ExportKeying.Plan.KEEP) artifact.file else {
+                    // Both transforms read the artifact, so both need the device key. Keep needs
+                    // none, which is why the session is only asked here.
+                    val devicePassphrase = KeySession.get()
+                    if (devicePassphrase == null) {
+                        fail(uri, R.string.export_failed_title, getString(R.string.export_locked_body))
+                        return@launch
+                    }
+                    stage(if (plan == ExportKeying.Plan.REKEY) R.string.export_rekeying else R.string.export_decrypting)
+                    try {
+                        ExportKeying.apply(artifact.file, devicePassphrase, plan, typedPassphrase)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        // The class name only: a transform message can carry a path, and a
+                        // passphrase is never anywhere near a log line.
+                        Log.w(TAG, "keying transform failed: ${e.javaClass.simpleName}")
+                        fail(uri, R.string.export_failed_title, getString(R.string.export_transform_body))
+                        return@launch
+                    }
+                }
+                val streamBytes = withContext(Dispatchers.IO) { streamFile.length() }
+                stage(R.string.export_exporting)
+
                 val source = withContext(Dispatchers.IO) {
                     runCatching {
-                        ParcelFileDescriptor.open(artifact.file, ParcelFileDescriptor.MODE_READ_ONLY)
+                        ParcelFileDescriptor.open(streamFile, ParcelFileDescriptor.MODE_READ_ONLY)
                     }.getOrNull()
                 }
                 if (source == null) {
@@ -360,19 +454,21 @@ class ExportActivity : AppCompatActivity() {
                     return@launch
                 }
 
-                if (result.bytesWritten != artifact.bytes) {
-                    Log.w(TAG, "short export: ${result.bytesWritten} of ${artifact.bytes} bytes")
+                // Verification is against what was actually handed over — the transform's output
+                // when there was one, whose length is not the artifact's.
+                if (result.bytesWritten != streamBytes) {
+                    Log.w(TAG, "short export: ${result.bytesWritten} of $streamBytes bytes")
                     fail(uri, R.string.export_failed_title, getString(R.string.export_short_body))
                     return@launch
                 }
                 val onDisk = withContext(Dispatchers.IO) { destinationSize(uri) }
-                if (onDisk != null && onDisk != artifact.bytes) {
-                    Log.w(TAG, "destination holds $onDisk of ${artifact.bytes} bytes")
+                if (onDisk != null && onDisk != streamBytes) {
+                    Log.w(TAG, "destination holds $onDisk of $streamBytes bytes")
                     fail(uri, R.string.export_failed_title, getString(R.string.export_short_body))
                     return@launch
                 }
 
-                Slog.d(TAG) { "exported ${artifact.bytes} bytes" }
+                Slog.d(TAG) { "exported $streamBytes bytes" }
                 if (isFinishing || isDestroyed) return@launch
                 Toast.makeText(this@ExportActivity, R.string.export_done_toast, Toast.LENGTH_SHORT).show()
                 finish()
@@ -381,7 +477,11 @@ class ExportActivity : AppCompatActivity() {
                 // export that made it, whichever way the export ended — a screen destroyed
                 // mid-export included, which is why the wipe is NonCancellable: a plain
                 // withContext in an already-cancelled scope throws before it runs anything.
+                // The wipe takes the transform's output with it — it is a sibling in the same
+                // cache directory — and the secret that made it has no business outliving the
+                // flow either.
                 withContext(NonCancellable + Dispatchers.IO) { ExportArtifact.clean(applicationContext) }
+                typedPassphrase = null
                 busy = false
                 if (!isFinishing && !isDestroyed) showBusy(false)
             }

@@ -163,6 +163,22 @@
     <string name="export_missing_body">This notebook\'s file is no longer on the device, so there is nothing to export.</string>
     <string name="export_unreadable_body">This notebook could not be read just now. Nothing was exported and the file was left untouched.</string>
 
+    <!-- Keying (arc 15 / E2). The host runs the transform, so these are the host's sentences: the
+         typed passphrase is collected here, consumed here, and never crosses to an extension. -->
+    <string name="export_passphrase_caption">New passphrase</string>
+    <string name="export_passphrase_hint">New passphrase</string>
+    <string name="export_passphrase_confirm_hint">Confirm passphrase</string>
+    <string name="export_plain_warning">The exported file will be readable by anyone.</string>
+    <string name="export_passphrase_missing_title">Passphrase needed</string>
+    <string name="export_passphrase_missing_body">Type the new passphrase in both fields before exporting.</string>
+    <string name="export_passphrase_mismatch_title">Passphrases don\'t match</string>
+    <string name="export_passphrase_mismatch_body">The two fields must hold the same passphrase. Nothing was exported.</string>
+    <string name="export_passphrase_lost_body">The typed passphrase was lost while choosing where to save. Nothing was exported — type it and try again.</string>
+    <string name="export_transform_body">The notebook could not be converted for this export. Nothing was exported and your notebook is untouched.</string>
+    <string name="export_preparing">Preparing…</string>
+    <string name="export_rekeying">Re-keying…</string>
+    <string name="export_decrypting">Removing encryption…</string>
+
     <!-- Naming schemes (default notebook name) -->
     <string name="action_naming">Default notebook name…</string>
     <string name="scheme_caption">Default notebook name</string>

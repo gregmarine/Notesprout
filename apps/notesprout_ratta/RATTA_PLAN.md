@@ -4121,7 +4121,7 @@ accordingly (three points; no FOURTH without another user decision; the module l
 - Ratta's Apps grid caches label/icon rows after `install -r` — cosmetic, Settings → Apps is fresh.
 
 ### E1 — The exporter point + NSE · Soil Export + the Export screen (Keep path end to end)
-**Status:** ✅ Complete 2026-08-27 (commit: this phase's `ratta: E1` commit)
+**Status:** ✅ Complete 2026-08-27 (commit `c5fb23b`)
 
 **Outcome.** The third point is live end to end on the Keep path. `:extension-api` grew
 `INotebookExporter` + `ExporterContract` + four constructor-validated parcelables (`ExporterInfo`,
@@ -4178,7 +4178,41 @@ and the extension; Sonnet module scaffold, layouts, icon, strings; Haiku the wal
 `EXPORT_TIMEOUT_MS` measured on the Nomad before pinning.
 
 ### E2 — The keying transforms (New passphrase · Remove encryption)
-**Status:** ⬜ Not started
+**Status:** ✅ Complete 2026-08-27
+
+**Outcome.** All three keyings live end to end, proven by the external CLIs. The mechanism
+question resolved itself from og's recorded on-device finding — `PRAGMA rekey` unreliable, so both
+transforms are **export-and-key** (`crypto/ExportKeying.kt`): the destination is always the primary
+zetetic connection (og's orientation — plaintext as primary with empty key does not expose data
+reliably), `user_version` is copied by hand and **re-verified from the finished file**, and nothing
+is accepted without probing as its claimed kind + `PRAGMA integrity_check` = ok. Transforms run
+only on the cache artifact, write a sibling output, and a failure deletes only that unaccepted
+output. Host UI: XML-static passphrase + confirm fields (masked, `saveEnabled=false` — an
+instance-state Bundle can reach disk, so a rebuilt screen *loses* the secret and the rekey path
+then refuses with an honest "passphrase was lost" dialog, never a silent Keep), the inline plain
+warning in og's exact wording, staged progress (Preparing/Re-keying/Removing encryption/Exporting),
+empty/mismatch dialogs before the picker, and all byte verification against the **streamed** file.
+`:ext-soil` changed by one declaration (the trio) — the options seam paying off as designed.
+`ExportOptions` gained the pure keying helpers; a free-standing `KIND_PASSPHRASE` stays
+unrenderable (the one host-executed passphrase step is the reserved keying's rekey choice — a
+generic passphrase kind has no host-executed meaning yet). 835 JVM tests; debug + release green;
+Haiku walk 13/13; user checklist done — **Keep is byte-identical to the post-seal Garden file
+(`cmp` + equal SHA-256), stock sqlite3 opens the plain export (integrity ok, `user_version` 1,
+full schema), stock sqlcipher opens the re-keyed export with the typed passphrase (integrity ok,
+`user_version` 1), content identical across all three, and every wrong pairing refuses.**
+
+Traps recorded: (1) **the Keep `cmp` proof needs Keep to be the LAST export** — every prepare
+re-stamps `exportedAt` into the Garden file and SQLCipher re-encrypts the rewritten pages, so an
+earlier Keep honestly diverges from the current Garden bytes; not a bug, re-export and compare.
+(2) **The transform must restamp `notebook_meta`** (og's `restampMeta`, og's recorded bug shape) —
+found live: the first plain/rekey exports still claimed `"encrypted":true,"keyScope":"GLOBAL"`.
+Now plain stamps `encrypted:false` with the scope absent and rekey stamps `keyScope:"NOTEBOOK"`
+(`KEY_SCOPE_NOTEBOOK` exists for exactly this stamp; SN never *opens* under it). The family codec
+(`explicitNulls=false` + GLOBAL default on read) **cannot express an explicit-null scope** — an
+absent key decodes back to GLOBAL — so `encrypted:false` is the governing field, pinned by test.
+(3) CLI-proof noise: the sqlcipher CLI cannot mix `.dump` with SQL in one argument (feed stdin),
+different CLI versions print REALs at different shortest-round-trip widths and blob literals as
+`x'`/`X'` — normalize before reading a dump diff as data drift.
 
 Fable writes the transform (`crypto/`, beside `SoilCrypto` — the one SQLCipher door): **plain** =
 `sqlcipher_export` to an attached plaintext DB **+ the explicit `user_version` copy** (og's trap)

@@ -5,6 +5,7 @@ import com.symmetricalpalmtree.notesproutsn.extension.ExporterInfo
 import com.symmetricalpalmtree.notesproutsn.extension.OptionDescriptor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -43,7 +44,9 @@ class ExportOptionsTest {
     }
 
     @Test
-    fun aPassphraseDescriptorIsNotRenderableInE1() {
+    fun aFreeStandingPassphraseDescriptorIsNotRenderable() {
+        // The one host-executed passphrase step is the reserved keying's rekey choice, whose
+        // fields the host shows itself — a passphrase *kind* still has no meaning to execute.
         assertFalse(ExportOptions.isRenderable(info(passphrase("pw"))))
         // One unrenderable option takes the whole exporter with it — the host drops it wholesale.
         assertFalse(ExportOptions.isRenderable(info(toggle("verify", "0"), passphrase("pw"))))
@@ -108,5 +111,51 @@ class ExportOptionsTest {
         assertEquals("Label of keep", ExportOptions.choiceLabel(d, "keep"))
         assertEquals("Label of plain", ExportOptions.choiceLabel(d, "plain"))
         assertEquals("mystery", ExportOptions.choiceLabel(d, "mystery"))
+    }
+
+    // ── The reserved keying option (E2) ──────────────────────────────────────
+
+    /** E2's shipped descriptor: the keying option, the full trio. */
+    private val trio = info(
+        choice(
+            ExporterContract.OPTION_KEYING,
+            listOf(ExporterContract.KEYING_KEEP, ExporterContract.KEYING_REKEY, ExporterContract.KEYING_PLAIN),
+            ExporterContract.KEYING_KEEP,
+        ),
+    )
+
+    @Test
+    fun keyingAnswersTheArmedValueAndDefaultsLikeTheSpec() {
+        assertEquals(ExporterContract.KEYING_KEEP, ExportOptions.keying(trio, emptyMap()))
+        assertEquals(
+            ExporterContract.KEYING_REKEY,
+            ExportOptions.keying(trio, mapOf(ExporterContract.OPTION_KEYING to ExporterContract.KEYING_REKEY)),
+        )
+        // A stale value from another descriptor falls back to the default, exactly as specValues would.
+        assertEquals(
+            ExporterContract.KEYING_KEEP,
+            ExportOptions.keying(e1, mapOf(ExporterContract.OPTION_KEYING to ExporterContract.KEYING_PLAIN)),
+        )
+    }
+
+    @Test
+    fun keyingIsNullWhenTheExporterNeverDeclaredIt() {
+        assertNull(ExportOptions.keying(info(toggle("verify", "1")), emptyMap()))
+        // The reserved id declared as the wrong kind is not the reserved option.
+        assertNull(ExportOptions.keying(info(toggle(ExporterContract.OPTION_KEYING, "0")), emptyMap()))
+        assertFalse(ExportOptions.needsPassphrase(info(), emptyMap()))
+        assertFalse(ExportOptions.showsPlainWarning(info(), emptyMap()))
+    }
+
+    @Test
+    fun rekeyArmsThePassphraseFieldsAndPlainArmsTheWarning() {
+        assertFalse(ExportOptions.needsPassphrase(trio, emptyMap()))
+        assertFalse(ExportOptions.showsPlainWarning(trio, emptyMap()))
+        val rekey = mapOf(ExporterContract.OPTION_KEYING to ExporterContract.KEYING_REKEY)
+        assertTrue(ExportOptions.needsPassphrase(trio, rekey))
+        assertFalse(ExportOptions.showsPlainWarning(trio, rekey))
+        val plain = mapOf(ExporterContract.OPTION_KEYING to ExporterContract.KEYING_PLAIN)
+        assertFalse(ExportOptions.needsPassphrase(trio, plain))
+        assertTrue(ExportOptions.showsPlainWarning(trio, plain))
     }
 }

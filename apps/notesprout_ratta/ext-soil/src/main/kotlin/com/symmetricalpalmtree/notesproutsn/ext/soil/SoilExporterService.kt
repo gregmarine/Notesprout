@@ -38,14 +38,24 @@ class SoilExporterService : Service() {
                 fileExtension = "soil",
                 mimeType = "application/octet-stream",
                 options = listOf(
-                    // E1 declares ONLY the Keep choice — the not-built-controls-do-not-exist rule.
-                    // E2 flips this to the Keep/Re-key/Plain trio.
+                    // The full trio (E2) — declared here, EXECUTED BY THE HOST: the reserved id is
+                    // recognized host-side, the transform runs there, and a typed passphrase never
+                    // reaches this process. Whatever was chosen, this exporter streams the artifact
+                    // the host prepared.
                     OptionDescriptor(
                         id = ExporterContract.OPTION_KEYING,
                         label = "Encryption",
                         kind = ExporterContract.KIND_SINGLE_CHOICE,
-                        choiceIds = listOf(ExporterContract.KEYING_KEEP),
-                        choiceLabels = listOf("Keep encrypted (this device's key)"),
+                        choiceIds = listOf(
+                            ExporterContract.KEYING_KEEP,
+                            ExporterContract.KEYING_REKEY,
+                            ExporterContract.KEYING_PLAIN,
+                        ),
+                        choiceLabels = listOf(
+                            "Keep encrypted (this device's key)",
+                            "New passphrase…",
+                            "Remove encryption",
+                        ),
                         defaultValue = ExporterContract.KEYING_KEEP,
                     ),
                 ),
@@ -79,8 +89,8 @@ class SoilExporterService : Service() {
                 val src = source ?: throw IllegalArgumentException("no source descriptor")
                 val dst = destination ?: throw IllegalArgumentException("no destination descriptor")
                 val values = (spec ?: throw IllegalArgumentException("no export spec")).values
-                // Keep-only in E1; anything else was never offered, and a refusal here costs the
-                // user a dialog rather than a file that is not what they asked for.
+                // A keying outside the declared trio was never offered, and a refusal here costs
+                // the user a dialog rather than a file that is not what they asked for.
                 SoilExportSpec.keying(values)
                 return ExportResult(streamCopy(src, dst))
             } catch (e: SecurityException) {

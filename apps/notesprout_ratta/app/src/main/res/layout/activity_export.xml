@@ -123,6 +123,71 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical" />
+
+            <!-- The keying fields (arc 15 / E2). Static in the layout, not built by the panel: the
+                 options above are rebuilt whole after every tap, and a field rebuilt under a
+                 half-typed passphrase would lose it. `saveEnabled="false"` on both is not a nicety
+                 — the system may persist an instance-state Bundle to disk, and a typed passphrase
+                 has no business there (the host consumes it and it never reaches the spec). -->
+            <LinearLayout
+                android:id="@+id/passphraseBlock"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/export_passphrase_caption"
+                    android:textColor="@color/inkBlack"
+                    android:textSize="13sp" />
+
+                <androidx.appcompat.widget.AppCompatEditText
+                    android:id="@+id/editPassphrase"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:background="@drawable/shape_bordered"
+                    android:padding="12dp"
+                    android:hint="@string/export_passphrase_hint"
+                    android:textColorHint="@color/inkLight"
+                    android:textColor="@color/inkBlack"
+                    android:textSize="16sp"
+                    android:inputType="textPassword"
+                    android:singleLine="true"
+                    android:saveEnabled="false"
+                    android:importantForAutofill="no" />
+
+                <androidx.appcompat.widget.AppCompatEditText
+                    android:id="@+id/editPassphraseConfirm"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:background="@drawable/shape_bordered"
+                    android:padding="12dp"
+                    android:hint="@string/export_passphrase_confirm_hint"
+                    android:textColorHint="@color/inkLight"
+                    android:textColor="@color/inkBlack"
+                    android:textSize="16sp"
+                    android:inputType="textPassword"
+                    android:singleLine="true"
+                    android:saveEnabled="false"
+                    android:importantForAutofill="no" />
+            </LinearLayout>
+
+            <!-- Removing encryption is stated inline, in plain ink — og's pattern. Not a popup and
+                 not an icon: an extra tap to dismiss a warning teaches the user to dismiss it. -->
+            <TextView
+                android:id="@+id/plainWarning"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:visibility="gone"
+                android:text="@string/export_plain_warning"
+                android:textColor="@color/inkBlack"
+                android:textSize="14sp" />
         </LinearLayout>
     </ScrollView>
 

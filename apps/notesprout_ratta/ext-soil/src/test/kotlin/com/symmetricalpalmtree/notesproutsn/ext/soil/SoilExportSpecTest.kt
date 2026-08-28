@@ -14,29 +14,30 @@ class SoilExportSpecTest {
     }
 
     @Test
-    fun theDeclaredChoiceIsAccepted() {
-        assertEquals(
+    fun everyDeclaredChoiceIsAccepted() {
+        for (keying in listOf(
             ExporterContract.KEYING_KEEP,
-            SoilExportSpec.keying(mapOf(ExporterContract.OPTION_KEYING to ExporterContract.KEYING_KEEP)),
-        )
+            ExporterContract.KEYING_REKEY,
+            ExporterContract.KEYING_PLAIN,
+        )) {
+            assertEquals(keying, SoilExportSpec.keying(mapOf(ExporterContract.OPTION_KEYING to keying)))
+        }
     }
 
     @Test
     fun aKeyingThisBuildNeverOfferedIsRefused() {
-        // E2's choices are declared by E2's descriptor — until then they are not on offer, and an
-        // IllegalArgumentException is the refusal that actually reaches the host.
-        assertThrows(IllegalArgumentException::class.java) {
-            SoilExportSpec.keying(mapOf(ExporterContract.OPTION_KEYING to ExporterContract.KEYING_REKEY))
-        }
-        assertThrows(IllegalArgumentException::class.java) {
-            SoilExportSpec.keying(mapOf(ExporterContract.OPTION_KEYING to ExporterContract.KEYING_PLAIN))
-        }
+        // An IllegalArgumentException is the refusal that actually reaches the host.
         assertThrows(IllegalArgumentException::class.java) {
             SoilExportSpec.keying(mapOf(ExporterContract.OPTION_KEYING to "nonsense"))
         }
         // Empty is a value, not an absence: it is not a declared choice either.
         assertThrows(IllegalArgumentException::class.java) {
             SoilExportSpec.keying(mapOf(ExporterContract.OPTION_KEYING to ""))
+        }
+        // A secret sent where a choice id belongs is refused, never acted on — the host never
+        // sends one, so a value shaped like free text is by definition not on offer.
+        assertThrows(IllegalArgumentException::class.java) {
+            SoilExportSpec.keying(mapOf(ExporterContract.OPTION_KEYING to "hunter2"))
         }
     }
 
@@ -57,7 +58,14 @@ class SoilExportSpecTest {
     }
 
     @Test
-    fun onlyKeepIsSupportedInE1() {
-        assertEquals(setOf(ExporterContract.KEYING_KEEP), SoilExportSpec.SUPPORTED_KEYING)
+    fun theFullTrioIsSupported() {
+        assertEquals(
+            setOf(
+                ExporterContract.KEYING_KEEP,
+                ExporterContract.KEYING_REKEY,
+                ExporterContract.KEYING_PLAIN,
+            ),
+            SoilExportSpec.SUPPORTED_KEYING,
+        )
     }
 }

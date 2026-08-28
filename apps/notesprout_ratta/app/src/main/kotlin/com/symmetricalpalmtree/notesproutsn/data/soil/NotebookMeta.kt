@@ -13,6 +13,11 @@ private val codec = Json {
 /** The only key scope in SN. Kept as a string column/field so the file stays in the `.soil` family. */
 const val KEY_SCOPE_GLOBAL = "GLOBAL"
 
+/** The family's own-passphrase scope. SN never *opens* under it — it appears only in the meta of a
+ *  re-keyed export (arc 15 / E2), where the file's honest self-description is "keyed to a
+ *  passphrase of my own", exactly as og stamps it. */
+const val KEY_SCOPE_NOTEBOOK = "NOTEBOOK"
+
 /**
  * The self-describing single row of `notebook_meta` — the same field set (and declaration order)
  * as the family's `NotebookMeta`, so an SN file is indistinguishable from a Paper one. Refreshed

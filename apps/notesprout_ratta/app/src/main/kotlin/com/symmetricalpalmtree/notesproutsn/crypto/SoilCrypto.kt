@@ -6,7 +6,8 @@ import net.zetetic.database.sqlcipher.SQLiteDatabase as ZeticDB
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 import java.io.File
 
-/** What a probe of a database file found. SN never opens [Plaintext] — it has no plaintext mode. */
+/** What a probe of a database file found. SN has no plaintext mode: the one plaintext open in the
+ *  app is [ExportKeying]'s read-only acceptance check of its own transform output (arc 15 / E2). */
 enum class SoilFileKind { Plaintext, Encrypted, Invalid }
 
 /**

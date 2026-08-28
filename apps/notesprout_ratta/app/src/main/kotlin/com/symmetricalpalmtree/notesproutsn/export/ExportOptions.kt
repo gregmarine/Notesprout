@@ -12,9 +12,12 @@ import com.symmetricalpalmtree.notesproutsn.extension.OptionDescriptor
  * Three rules, and each one is a decision:
  *
  *  - **Renderable or dropped.** A descriptor the host cannot draw takes its exporter out of the
- *    list with a log line, never a crash (the inward-is-untrusted rule). In E1 the one unrenderable
- *    kind is [ExporterContract.KIND_PASSPHRASE] — E2 builds those fields — so an exporter that
- *    declares one simply is not offered yet. **GONE, never disabled**, applied to a whole exporter.
+ *    list with a log line, never a crash (the inward-is-untrusted rule). The one unrenderable kind
+ *    is a free-standing [ExporterContract.KIND_PASSPHRASE]: a passphrase option exists to ask the
+ *    host for a host-executed step, and the one such step the host implements (E2) is the reserved
+ *    keying option's *rekey* choice — whose fields the host shows on its own recognizance, no
+ *    descriptor kind involved. A passphrase kind with no host-executed meaning stays undrawable
+ *    until an arc gives it one. **GONE, never disabled**, applied to a whole exporter.
  *  - **The chosen value is always a declared one.** [specValues] re-checks every value against the
  *    descriptor that asked for it and falls back to that option's default. A panel cannot send a
  *    choice the exporter never offered, whatever the screen's state got up to (a restored instance
@@ -68,4 +71,28 @@ object ExportOptions {
         val i = d.choiceIds.indexOf(value)
         return if (i >= 0) d.choiceLabels[i] else value
     }
+
+    // ── The reserved keying option (arc 15 / E2 — recognized by id, executed by the host) ──
+
+    /**
+     * The armed keying value, or null when this exporter never declared the reserved option.
+     * Validated the same way [specValues] validates — a stale or foreign value falls back to the
+     * declared default — so what this answers is always exactly what the spec would carry.
+     */
+    fun keying(info: ExporterInfo, chosen: Map<String, String>): String? {
+        val d = info.options.firstOrNull {
+            it.id == ExporterContract.OPTION_KEYING && it.kind == ExporterContract.KIND_SINGLE_CHOICE
+        } ?: return null
+        return chosen[d.id]?.takeIf { it in d.choiceIds } ?: d.defaultValue
+    }
+
+    /** True while *New passphrase…* is armed — the host shows its own passphrase + confirm
+     *  fields. The typed secret is consumed host-side and never enters the spec. */
+    fun needsPassphrase(info: ExporterInfo, chosen: Map<String, String>): Boolean =
+        keying(info, chosen) == ExporterContract.KEYING_REKEY
+
+    /** True while *Remove encryption* is armed — the inline plain warning is on screen
+     *  (og's pattern: a plain inkBlack line, no popup, no extra tap). */
+    fun showsPlainWarning(info: ExporterInfo, chosen: Map<String, String>): Boolean =
+        keying(info, chosen) == ExporterContract.KEYING_PLAIN
 }
