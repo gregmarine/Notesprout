@@ -49,6 +49,10 @@ object LinkComposite {
     fun build(link: PageLink, density: Float, paint: TextPaint): Bitmap? {
         val (w, h) = sizeOf(link)
         if (w < 1 || h < 1) return null
+        // ARGB_8888 and it must stay that way: unlike the card thumbnails, this bitmap is NOT
+        // erased to white — it is drawn over the live page, so the paper has to show through
+        // everywhere the wrapped ink isn't. RGB_565 has no alpha channel and would paint the
+        // link's whole bounding box black.
         val bmp = try {
             Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         } catch (e: OutOfMemoryError) {

@@ -457,6 +457,22 @@ Three findings from it worth keeping, all cheap to lose and expensive to redisco
   checked in three places and missed in the fourth, and `nameTaken` cannot cover for it — **Default
   is not a row**, so the database has nothing to collide with. Every guard that protects a *place*
   needs walking against every way something can arrive there.
+- **`toWebp` is lossy q100, and that was measured, not assumed (F5).** It was `WEBP_LOSSLESS` until
+  2026-08-27 on the reasoning that a template is line art. On both Supernotes Skia's lossless
+  encoder came out ~10x PNG on the page bakes and took **103 seconds** on an imported picture to
+  produce a *larger* file than q100 made in 3.7 — and since the encode happens **before** the
+  `MAX_BLOB_BYTES` check, it was stalling every import and inflating good pictures into a refusal.
+  og Notesprout's `core/ImageCodec` had reached the same conclusion years earlier. **Grid is a real
+  exception** — the one case lossless wins, reproducibly on both devices, for reasons nobody has
+  explained — but the three built-ins together are 782K lossless against 95K lossy. No migration:
+  `BitmapFactory` sniffs the header, so old lossless blobs keep decoding. Re-run `DebugMenu`'s
+  **WEBP encoder measurement** before revisiting; **host libwebp cannot stand in for Skia** and says
+  the opposite.
+- **Card art is `RGB_565`, page bakes are `ARGB_8888` (F5).** A card is erased to white and drawn
+  over, so it has no alpha to lose and costs half the memory; a bake is stored, so it keeps full
+  depth. `renderWith` takes a `config` defaulting to `ARGB_8888` so the bake cannot be switched by
+  accident. **`LinkComposite` is not in this family** — it is drawn *over* the live page and must
+  keep its alpha, or a link's whole bounding box paints black.
 - **An `LruCache` bound is a count until you give it a `sizeOf`.** The default is 1 per entry, so a
   32-entry bound on page-sized bitmaps was ~30 MB held for the life of the process — while the
   notebook behind the picker still holds the EPD pipeline. It is bounded in bytes now (16 MB), and

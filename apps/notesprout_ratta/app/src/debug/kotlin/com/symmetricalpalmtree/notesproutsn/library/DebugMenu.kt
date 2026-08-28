@@ -42,6 +42,9 @@ import kotlinx.coroutines.withContext
  *    prove the inline cap, the `STORE_VALUE_LARGE` refusal, the wrong-uid refusal and the revoked
  *    refusal; toast OK / FAIL. Room + SQLCipher + `SharedMemory` cannot run on the JVM, so this is
  *    the store's only on-device check until an extension actually uses it.
+ *  - **WEBP encoder measurement** ([WebpProbe]) — lossless vs lossy-q100 on this device's own page
+ *    size, for the open question in `BuiltInTemplates.toWebp`. Skia's encoders are the subject, so
+ *    no host tool can answer it; run it on every device tier before changing the format.
  */
 object DebugMenu {
 
@@ -67,11 +70,13 @@ object DebugMenu {
             "Show recovery key",
             "Forget cached key (relaunch → Unlock)",
             "Extension store self-test",
+            "WEBP encoder measurement",
         )
         val actions = listOf<() -> Unit>(
             { showKey(activity) },
             { confirmForget(activity) },
             { storeSelfTest(activity) },
+            { webpProbe(activity) },
         )
         Dialogs.style(
             AlertDialog.Builder(activity)
@@ -79,6 +84,52 @@ object DebugMenu {
                 .setItems(labels) { _, which -> actions[which]() }
                 .create()
         ).show()
+    }
+
+    /**
+     * [WebpProbe] off Main, then the report in a dialog with a Copy button — the numbers are meant
+     * to be pasted back into a decision, and a toast cannot hold a table.
+     *
+     * **The run takes minutes, not seconds** (a page-sized `WEBP_LOSSLESS` encode is seconds by
+     * itself, and there are four encodes per case), which is why the dialog is not the only way out:
+     * every row is logged and appended to [WebpProbe.reportFile] as it finishes, so `adb logcat -s
+     * DebugMenu` or an `adb pull` of that file gets the numbers even if the screen is left. The
+     * first version reported only at the end and read as "it just shows a toast".
+     */
+    private fun webpProbe(activity: AppCompatActivity) {
+        Toast.makeText(
+            activity,
+            "Measuring — MINUTES, not seconds. Rows land in ${WebpProbe.reportFile(activity).name} as they finish.",
+            Toast.LENGTH_LONG,
+        ).show()
+        activity.lifecycleScope.launch {
+            val result = withContext(Dispatchers.Default) {
+                runCatching {
+                    val rows = WebpProbe.run(activity) { row ->
+                        // Progress on the glass: one toast per finished case, so a long run never
+                        // looks hung. The file and the log already have the row by this point.
+                        activity.runOnUiThread {
+                            Toast.makeText(activity, "${row.label}: ${row.pixels}", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    WebpProbe.report(activity, rows)
+                }
+            }
+            val text = result.getOrElse { "FAILED — ${it.message}" }
+            Slog.d("DebugMenu") { "webp probe\n$text" }
+            Dialogs.style(
+                AlertDialog.Builder(activity)
+                    .setTitle("WEBP encoder measurement")
+                    .setMessage(text)
+                    .setPositiveButton("Copy") { _, _ ->
+                        val cm = activity.getSystemService(AppCompatActivity.CLIPBOARD_SERVICE) as ClipboardManager
+                        cm.setPrimaryClip(ClipData.newPlainText("webp probe", text))
+                        Toast.makeText(activity, "Copied", Toast.LENGTH_SHORT).show()
+                    }
+                    .setNegativeButton("Close", null)
+                    .create()
+            ).show()
+        }
     }
 
     private fun storeSelfTest(activity: AppCompatActivity) {

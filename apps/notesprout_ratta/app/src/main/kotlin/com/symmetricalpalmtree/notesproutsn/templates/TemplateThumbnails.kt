@@ -105,8 +105,10 @@ object TemplateThumbnails {
         return bmp
     }
 
+    /** **RGB_565, not ARGB_8888** — see [MAX_CACHE_BYTES]. The card is erased to white and every
+     *  draw lands on top of it, so there is no alpha channel to lose. */
     private fun blankPage(w: Int, h: Int): Bitmap? = try {
-        Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.WHITE) }
+        Bitmap.createBitmap(w, h, Bitmap.Config.RGB_565).apply { eraseColor(Color.WHITE) }
     } catch (e: OutOfMemoryError) {
         Log.w(TAG, "thumbnail ${w}x$h allocation failed")
         null
@@ -140,21 +142,23 @@ object TemplateThumbnails {
 
     /**
      * Bounded in **bytes, not entries**. `LruCache`'s default `sizeOf` is 1, so a 32-entry bound is
-     * a 32-*card* bound — and a card at the tablet tier is ~1 MB of ARGB_8888, so the cache could
-     * hold ~30 MB for the life of the process, on a memory-tight e-ink device, while the notebook
-     * behind this screen still holds the EPD pipeline and a page of strokes.
+     * a 32-*card* bound — and a card at the tablet tier is ~0.5 MB, so the cache could hold tens of
+     * MB for the life of the process, on a memory-tight e-ink device, while the notebook behind
+     * this screen still holds the EPD pipeline and a page of strokes.
      *
      * [MAX_CACHE_BYTES] is sized so a **whole grid page still fits at the widest card the app
      * draws**, which is what a page turn back and forth costs — and it is self-correcting when the
      * card size changes, because the key carries the width and the old entries simply age out.
-     * The widest card is the Manta's (F4: 3 columns of a 1920 px band, ~628 x 837 = ~2.1 MB each),
-     * so a six-card page is ~13 MB; 8 MB held only three of them and every flip back re-rendered.
+     * The widest card is the Manta's (F4: 3 columns of a 1920 px band, ~628 x 837), and **because
+     * every card is RGB_565 that is ~1.05 MB rather than ~2.1 MB** — so a six-card page is ~6.3 MB
+     * and 8 MB holds it whole. Two things have to move together here: make a card wider, or give
+     * one back an alpha channel, and this bound needs recomputing.
      */
     private val cache = object : LruCache<String, Bitmap>(MAX_CACHE_BYTES) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
 
-    private const val MAX_CACHE_BYTES = 16 * 1024 * 1024
+    private const val MAX_CACHE_BYTES = 8 * 1024 * 1024
 
     /** Card art is small; the bound only protects against an oversized stored image. */
     private const val DECODE_EDGE = 1024

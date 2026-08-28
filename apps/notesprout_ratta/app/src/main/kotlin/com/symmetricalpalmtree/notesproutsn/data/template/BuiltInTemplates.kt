@@ -43,6 +43,7 @@ object BuiltInTemplates {
             spacingPx = (heightPx / PLACEHOLDER_ROWS).toFloat().coerceAtLeast(2f),
             lineWidthPx = feature,
             dotRadiusPx = feature,
+            config = Bitmap.Config.RGB_565,
         )
     }
 
@@ -62,9 +63,18 @@ object BuiltInTemplates {
             spacingPx = TemplateGeometry.spacingPx(dpi) * scale,
             lineWidthPx = maxOf(1f, TemplateGeometry.lineWidthPx(dpi) * scale),
             dotRadiusPx = maxOf(1f, TemplateGeometry.dotRadiusPx(dpi) * scale),
+            config = Bitmap.Config.RGB_565,
         )
     }
 
+    /**
+     * [config] is **ARGB_8888 for anything that gets stored, RGB_565 for anything that is only
+     * ever shown.** The page-sized [render] is encoded to lossless WEBP and becomes the page's
+     * actual paper, so it keeps full depth; the two card renders ([miniature], [placeholder]) are
+     * throwaway pixels bound for an `ImageView`, and at 2 bytes a pixel instead of 4 they halve
+     * what the thumbnail cache holds. Safe for both because every render here is **opaque** —
+     * erased to white before anything is drawn, so there is no alpha channel to lose.
+     */
     private fun renderWith(
         kind: TemplateKind,
         widthPx: Int,
@@ -72,9 +82,10 @@ object BuiltInTemplates {
         spacingPx: Float,
         lineWidthPx: Float,
         dotRadiusPx: Float,
+        config: Bitmap.Config = Bitmap.Config.ARGB_8888,
     ): Bitmap? {
         if (kind == TemplateKind.BLANK || widthPx <= 0 || heightPx <= 0) return null
-        val bitmap = Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888)
+        val bitmap = Bitmap.createBitmap(widthPx, heightPx, config)
         bitmap.eraseColor(Color.WHITE)
         val canvas = Canvas(bitmap)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
@@ -110,14 +121,49 @@ object BuiltInTemplates {
     private const val PLACEHOLDER_ROWS = 12
 
     /**
-     * Lossless WEBP at quality 100 — a template is line art; a lossy codec would fuzz every rule.
-     * `WEBP_LOSSLESS` is API 30; on 29 the legacy `WEBP` at quality 100 is the closest available.
-     * (minSdk is 29 for the family; every Supernote actually runs 30+.)
+     * **Lossy WEBP at quality 100** — the same encoder og Notesprout's `core/ImageCodec` uses for
+     * every blob it stores, and the same one `CoverSnapshot.encode` already used here.
+     *
+     * This was `WEBP_LOSSLESS` until 2026-08-27, on the untested assumption that a template is line
+     * art and a lossy codec would fuzz every rule. **`DebugMenu`'s "WEBP encoder measurement"
+     * ([WebpProbe]) refuted that on both Supernotes**, and the numbers were not close:
+     *
+     * ```
+     *                          lossless        q100        (Manta 1920x2560)
+     *   page lined              258K/663ms       9K/1294ms   26x smaller
+     *   page dotted             521K/1038ms     58K/1470ms    9x smaller
+     *   page grid                 3K/463ms      28K/1415ms    9x LARGER  <- the one exception
+     *   photo-like import      3669K/102890ms 2903K/3695ms   28x FASTER
+     * ```
+     *
+     * Two of those lines are the whole argument. Skia's lossless encoder bloats opaque line art by
+     * ~10x PNG — exactly the effect og measured and rejected, which we had discounted because og
+     * measured it on *alpha* content. And on an imported picture it took **103 seconds** on the
+     * Manta to produce a *larger* file than q100 managed in under four: [TemplateTransfer] encodes
+     * before it checks [TemplateImport.MAX_BLOB_BYTES], so lossless both stalled every import and
+     * inflated a band of good pictures past the cap into a refusal.
+     *
+     * **Grid is a real, reproducible exception and is knowingly accepted.** It is the only case
+     * lossless wins, identically on both devices, and why remains unexplained — but across the
+     * three built-ins together lossless is 782K against q100's 95K, so the trade is not close.
+     *
+     * **No migration, and none is needed.** Every read path decodes through `BitmapFactory`, which
+     * detects the format from the byte header, so lossless blobs already written keep decoding
+     * forever alongside new lossy ones. This is the same reason og could change format without one.
+     *
+     * The API-29 branch is not a fallback of a different kind: the legacy
+     * `Bitmap.CompressFormat.WEBP` constant *is* this encoder — q100 lossy, exactly what
+     * `WEBP_LOSSY` names on 30+ — so both branches now agree. (minSdk 29 is a family-wide floor;
+     * every Supernote runs 30+.)
+     *
+     * Do not raise q90 here without re-running the probe: it beat q100 on every lossy row, but this
+     * is the one encoder in the app whose output is **stored paper**, and q100 is the floor og
+     * settled on for the same reason.
      */
     fun toWebp(bitmap: Bitmap): ByteArray {
         val out = ByteArrayOutputStream()
         val format = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            Bitmap.CompressFormat.WEBP_LOSSLESS
+            Bitmap.CompressFormat.WEBP_LOSSY
         } else {
             @Suppress("DEPRECATION") Bitmap.CompressFormat.WEBP
         }

@@ -273,6 +273,16 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   knock-on rule: a wider card is a bigger bitmap, so `TemplateThumbnails`' byte bound went 8 → 16 MB
   — **it has to hold one whole grid page at the widest card the app draws**, and gets re-checked
   whenever a card grows.
+  **F5** — card art is **RGB_565** (opaque, erased to white — no alpha to lose, half the bytes;
+  **`LinkComposite` is the exception and must stay ARGB_8888**, since it is drawn *over* the live
+  page), and `BuiltInTemplates.toWebp` switched from **`WEBP_LOSSLESS` to lossy q100** — matching og
+  Notesprout's `core/ImageCodec` and SN's own `CoverSnapshot`. **Measured on both Supernotes, not
+  assumed:** Skia's lossless encoder is ~10x PNG on the page bakes and took **103 s** on an imported
+  picture to make a *bigger* file than q100 made in 3.7, while the 6 MiB cap is checked *after*
+  encoding — so it stalled every import and inflated good pictures into a refusal. **Grid is a
+  reproducible, unexplained exception** (the one case lossless wins). No migration —
+  `BitmapFactory` sniffs the header. **Host libwebp cannot stand in for Skia and says the opposite**;
+  use `DebugMenu`'s "WEBP encoder measurement" (`WebpProbe`, debug-only) on a device.
   **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for any work there** — it holds the
   per-arc status, locked decisions, working protocol, and model recipe.
 - `germination` — previous post-MVP feature branch (reference, not active)

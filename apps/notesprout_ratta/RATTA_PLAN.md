@@ -3950,6 +3950,101 @@ needed a new case). `./gradlew test assembleDebug` green; no schema change, no m
 g-paper change, no new dependency. Docs: `docs/library.md`, `docs/sn-screen.md`,
 `docs/templates.md`.
 
+### F5 — RGB_565 card art, and the WEBP encoder settled by measurement (2026-08-27)
+
+**Status:** ✅ Complete (measured on both Supernotes; the encoder switch made on the user's call
+2026-08-27, "OG uses it. It works well on that version"). Came straight out of F4 — the user asked what image format made the
+thumbnails so large, and the answer was that there is no format: the cache holds live `Bitmap`s.
+
+**The cards are RGB_565 now.** They were `ARGB_8888` — 4 bytes a pixel, and a Manta card is
+~628 x 837, so ~2.1 MB each. Every one of them is **erased to white and drawn on top of**, so the
+alpha channel was never carrying anything; at 2 bytes a pixel a card is ~1.05 MB, a six-card page is
+~6.3 MB, and F4's cache bound goes **back down from 16 MB to 8 MB** with the "hold one whole grid
+page" rule still satisfied. Four sites: `TemplateThumbnails.blankPage`, `BuiltInTemplates.miniature`,
+`BuiltInTemplates.placeholder`, `PagePreview.render`.
+
+**Three sites deliberately keep `ARGB_8888`, and the reasons are not the same:**
+- `BuiltInTemplates.render` and `PagePaper.renderImage` are the **page bake** — their pixels are
+  encoded and stored, so they keep full depth. `renderWith` was shared between the bake and the two
+  card renders, so it now takes a `config` parameter **defaulting to `ARGB_8888`**: the cards opt
+  in, the bake cannot be changed by accident. All three `toWebp` callers were checked — nothing
+  stored is ever fed by a 565 bitmap.
+- **`LinkComposite.build` is the trap.** It is the one bitmap here that is *not* erased to white,
+  because it is drawn **over** the live page and the paper has to show through around the wrapped
+  ink. RGB_565 has no alpha, so a blind sweep would have painted every link's bounding box solid
+  black. It carries a comment saying so.
+
+**The encoder question — asked, measured, and settled: `toWebp` is now lossy q100.**
+Cross-referencing og Notesprout turned up a real divergence. og centralises every internal encode in
+`core/ImageCodec` as **`WEBP_LOSSY` q100** and rejects `WEBP_LOSSLESS` outright, on an on-device
+finding that Skia's lossless encoder bloats to 2-6x PNG. SN had **two** encoders for the same class
+of data: `CoverSnapshot.encode` lossy q100 (matching og), and `BuiltInTemplates.toWebp`
+**`WEBP_LOSSLESS`** (not), on the untested assumption that "a lossy codec would fuzz every rule".
+
+**Host measurement was worse than useless here and nearly sent us the wrong way.** Desktop libwebp
+said lossless wins by 8-22x on line art *and could not reproduce og's alpha bloat at all* — which
+was itself the clue: the effect is **Skia-specific**, so only a device can answer it. `WebpProbe`
+(`src/debug`, on the ⋯ menu) measures both encoders plus q90 and PNG with the app's own
+`Bitmap.compress` calls, at the device's real page size.
+
+Both Supernotes, 2026-08-27 (sizes KiB, `/` encode ms):
+
+```
+                       lossless        q100         q90     png    winner
+NOMAD 1404x1872
+  cover 512 (opaque)     10K/54         1K/54        1K      2K    q100     9.1x
+  page lined            133K/349        5K/684       6K     14K    q100    23.5x
+  page dotted           273K/542       29K/809      22K     29K    q100     9.2x
+  page grid               2K/240       15K/743      13K     25K    LOSSLESS 5.7x
+  photo-like import    1991K/50038   1554K/1966   1079K   3426K    q100     1.3x
+  alpha ink (og case)   247K/957      133K/989     133K    172K    q100     1.9x
+MANTA 1920x2560
+  cover 512 (opaque)      4K/34         1K/53        1K      1K    q100     4.0x
+  page lined            258K/663        9K/1294     11K     24K    q100    26.0x
+  page dotted           521K/1038      58K/1470     43K     53K    q100     8.9x
+  page grid               3K/463       28K/1415     25K     46K    LOSSLESS 7.4x
+  photo-like import    3669K/102890  2903K/3695   2008K   6405K    q100     1.3x
+  alpha ink (og case)   508K/1620     189K/1807    189K    247K    q100     2.7x
+```
+
+**Two lines carry the decision.** og's bloat claim is **confirmed on this hardware** — lossless is
+9-10x PNG on the opaque page bakes and 1.4-2.1x PNG on og's own alpha case, inside the 2-6x band og
+reported. And the import row was a **live user-facing bug**: on the Manta, lossless took
+**103 seconds** to produce a *larger* file than q100 managed in 3.7 — and because
+[TemplateTransfer] encodes **before** it checks the 6 MiB cap, lossless both stalled every import
+and inflated a band of good pictures past the cap into a refusal.
+
+**Grid is a real, reproducible exception, knowingly accepted.** It is the only case lossless wins,
+and it wins hugely (3K vs 258K for lined — on paper with *more* ink), **identically on both
+devices**, so it is deterministic and not noise. Why is **unexplained**; do not repeat the switch
+argument as though grid did not happen. Across the three built-ins together lossless is 782K against
+q100's 95K, so the trade is not close.
+
+**No migration, and none is needed** — every read decodes through `BitmapFactory`, which sniffs the
+format from the byte header, so lossless blobs already written keep decoding alongside new lossy
+ones. Verified on the Nomad: a notebook whose grid paper was baked losslessly renders correctly
+under the new build, and a notebook created *after* the switch renders crisp rules.
+
+**A separate comment bug, fixed on the way:** `toWebp`'s API-29 branch claimed to be "the closest
+available" to lossless. Legacy `Bitmap.CompressFormat.WEBP` **is** the lossy encoder, so that path
+silently produced lossy bytes while reading as a lossless fallback. Both branches now agree, and
+the header says so. Dormant either way (minSdk 29 is a family floor; every Supernote runs 30+).
+
+**q90 beat q100 on every lossy row, sometimes by 30% — and was deliberately not taken.** This is
+the one encoder whose output is *stored paper*; q100 is the floor og settled on for the same reason.
+Re-run the probe before revisiting.
+
+**Traps `WebpProbe` itself taught.** The first version reported only at the end and read as *"it
+just shows a toast"* — a page-sized lossless encode is seconds and there are four per case, so the
+run is **minutes**. It now logs and rewrites its file after **every row**, so an abandoned run still
+leaves what it measured (`adb pull` from `files/webp-probe.txt`, or `adb logcat -s DebugMenu`).
+And its header prints the **resolution**, because `Build.MODEL` is "Supernote Nomad" on the Manta
+too — the standing family trap.
+
+776 JVM tests; `./gradlew test assembleDebug assembleRelease` green. `WebpProbe` is debug-only and
+the release `DebugMenu` twin does not reference it. No schema change, no migration, no g-paper
+change, no new dependency. Docs: `docs/templates.md`, `docs/library.md`.
+
 ---
 
 ## Verification (end of arc)

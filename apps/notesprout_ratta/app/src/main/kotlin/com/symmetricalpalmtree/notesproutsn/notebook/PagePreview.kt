@@ -35,8 +35,12 @@ object PagePreview {
         paint: TextPaint,
     ): Bitmap? {
         if (outWidth < 1 || outHeight < 1 || page.width <= 0) return null
+        // RGB_565, not ARGB_8888: the preview is erased to white and every draw lands on top, so
+        // there is no alpha channel to lose, and a card costs 2 bytes a pixel instead of 4. These
+        // are the widest previews the app builds (a Manta page card is ~628 x 837), and the picker
+        // renders a whole grid page of them at once.
         val bmp = try {
-            Bitmap.createBitmap(outWidth, outHeight, Bitmap.Config.ARGB_8888)
+            Bitmap.createBitmap(outWidth, outHeight, Bitmap.Config.RGB_565)
         } catch (e: OutOfMemoryError) {
             Log.w(TAG, "preview ${outWidth}x$outHeight allocation failed for ${page.id}")
             return null
