@@ -4047,6 +4047,159 @@ change, no new dependency. Docs: `docs/templates.md`, `docs/library.md`.
 
 ---
 
+## Phases — Arc 15 "Export" (planned 2026-08-27, wizard complete)
+
+**Notebook export, with the export *implementations* as extensions.** The host owns the entry
+point, the Export screen and everything that touches a key; how an export actually happens is an
+exporter extension's job — and the first one is **`.soil` export**: the notebook's database,
+importable into another Ratta-based Notesprout instance, exported as-is (encrypted under this
+device's key), re-keyed to a passphrase of its own, or decrypted to plaintext. og's
+`docs/full-notebook-export.md` (monorepo root) is the reading reference — no code copied; Paper
+never built export, so it has nothing to say here.
+
+**This is SN's THIRD capability point, on the user's explicit 2026-08-27 decision** — exactly the
+fresh user decision the standing rule demands. E1 amends `apps/notesprout_ratta/CLAUDE.md`
+accordingly (three points; no FOURTH without another user decision; the module list grows to six).
+
+### Locked decisions (arc-15 wizard 2026-08-27 — do not re-ask)
+
+| Decision | Answer |
+|---|---|
+| Scope | **Export only.** Import (og's probe → unlock → placement → collision → keying pipeline) is its own later arc. The round trip is proven this arc without it: the stock sqlcipher/sqlite CLI on the Mac opens every keying variant, and a Keep-export copied back into SN's Garden by the R6 two-step method + a CLI index row opens in the app. |
+| The point | **One generic exporter point**, `ACTION_NOTEBOOK_EXPORTER` (SN-namespaced `…notesproutsn.extension.NOTEBOOK_EXPORTER`): any number of trusted exporter extensions may register; each `describe()`s the one format it offers (label, file extension, MIME, options); the host's Export screen lists whatever is installed. A future PDF/PNG/Markdown exporter is another APK — no new point, no host release. This arc ships one exporter. |
+| The seam | **Host keys, extension delivers via fds.** Host: entry UI, transient checkpoint + meta refresh, copy to cache, the keying transform (`SoilCrypto` — all SQLCipher stays in the host), SAF `CreateDocument`. It hands the exporter **two `ParcelFileDescriptor`s** — read (the prepared artifact) and write (the destination) — and the extension produces the output (for `.soil`: a verified streamed copy, byte count reported back). **No passphrase, path, or SQLCipher ever crosses; the extension writes only through granted fds** — the writes-nothing-to-disk rule, kept to the letter. |
+| Entry point | **The library's notebook long-press sheet only** gains an **Export…** row — GONE when no trusted exporter is installed (discovery re-runs at every sheet open). Export always works from the sealed, cold file; the library context guarantees no open session holds it. The notebook screen gets no entry this arc. |
+| The screen | **A full-screen host `ExportActivity`** (IndexGuard, portrait, e-ink chrome, TopGuard 0): the exporter chooser at the top, the chosen exporter's **options panel below it** on one screen, Export at the top-right. **With exactly one exporter installed the chooser collapses to a plain label** naming it — no choice shown for a choice that doesn't exist. Receives `EXTRA_NOTEBOOK_ID` / `_NAME` only. |
+| Options seam | **Declarative descriptors.** `describe()` returns the format identity plus a bounded option list (id · label · kind: single-choice / toggle / passphrase · choices · default). The host renders them with its own widgets, so every exporter's panel is native e-ink chrome. Chosen values cross to `export()` as a plain id → value map. **The reserved keying option (`ExporterContract.OPTION_KEYING`) is recognized and *executed by the host*** — its transform runs host-side and a typed passphrase **never enters the spec the extension receives** (only the choice id crosses). |
+| Keying options | The soil exporter's declared trio: **Keep encrypted** (this device's key — a pure file copy) · **New passphrase…** (typed + confirmed, host-owned fields; becomes the file's own passphrase) · **Remove encryption** (plaintext). |
+| Plain warning | **Inline warning text**, og's pattern: while Remove encryption is armed, a plain inkBlack line on the screen itself ("The exported file will be readable by anyone."). No popup, no extra tap. |
+| Identity | **`NSE · Soil Export`** (`… Dev` in debug — build-type string override), module **`:ext-soil`**, package `com.symmetricalpalmtree.notesproutsn.ext.soil` (`.dev` in debug), Tabler puzzle icon at the family ×3.1 scale, **no launcher activity**, versionName host lockstep `0.1.0-ratta`. The ext-mlkit/ext-scratchpad recipe verbatim. |
+| Destination | **Local storage via SAF `ACTION_CREATE_DOCUMENT` only** (the G4 probe proved DocumentsUI works on the Nomad). Other destinations are later arcs; the seam already carries them — a destination is just where the host's write fd points. |
+| Staffing | **Fable writes the two seams** (user's explicit call, planning-only rule amended for this arc): the AIDL contract + trust seam in E1, and the keying transform in E2. Opus builds around them; Sonnet scaffolds/layouts/resources; Haiku the Nomad walks; ≤ 5 background agents. |
+| Arc shape | **Three phases E1–E3** (phase letter E, unused in SN). Each ends green — build + `./gradlew test` + Nomad — so the user can `/clear` between them. |
+
+### Arc-15 standing traps (assume they apply)
+
+- **A SAF pick cannot be driven by adb** (the G4 trap, verbatim): every path that begins with the
+  destination picker is a **user checklist item**. Agents verify everything up to the picker — and
+  *after* the user saves once, an agent can `adb pull` the saved file and byte-compare it.
+- **`sqlcipher_export` drops `PRAGMA user_version`** (og's recorded finding, fixed there as
+  `copyUserVersion` + repair). The plain transform must copy it explicitly and the tests must pin
+  it — a version-less export imports as garbage on the other side.
+- **The source `.soil` is never mutated.** Every transform runs on a temp copy in the host's cache
+  (`cacheDir/export/`, wiped and recreated per export — og's `exported_notebooks` hygiene). A
+  failed transform leaves Garden byte-identical; never-delete-on-corruption applies to the temp too.
+- **One `.soil`, one connection**: the transient checkpoint/meta open goes through `SoilCrypto`,
+  and it must be sealed before the copy. The library context means no `NotebookActivity` session
+  holds the file — but the code asserts it rather than assumes it (the `openNotebook` latch is the
+  door in).
+- **WAL discipline**: transient open → best-effort `notebook_meta` refresh with `exportedAt`
+  stamped (og's upkeep rule) → `PRAGMA wal_checkpoint(TRUNCATE)` → close → **copy the main file
+  only**, never `-wal`/`-shm`.
+- **Only marshalable exceptions cross the point** (`SecurityException` / `IllegalArgumentException`
+  / `IllegalStateException`) — anything else kills the transaction silently and the host reads an
+  empty reply as success. Same rule as both prior points.
+- **fd lifecycle is the ashmem handshake's shape in `ParcelFileDescriptor` clothes**: the sender
+  closes its own dup once the transaction is marshalled; the receiver closes in `finally`. The
+  host verifies the destination (size written vs. the artifact's) before it toasts — an exporter
+  that died mid-stream must not read as success.
+- **A failed or short export must not leave a partial destination file standing silently**:
+  best-effort `DocumentsContract.deleteDocument` on the created URI + a problem dialog.
+- **Passphrases never in Intent extras, never logged, never in the spec map.** The new-passphrase
+  prompt is host-owned; the Ratta IME rule applies (never hide the IME while the field has focus).
+- **Inward is untrusted**: `describe()` results are capped and clamped (bounded option count,
+  choice count, label lengths — `ExporterContract` caps pinned by test); a descriptor the host
+  cannot render drops that exporter with a log line, never a crash.
+- **An export `call` cannot be cancelled** (a Binder call never can) — the timeout must be sized
+  generously against a big file on an e-ink CPU (the J5 `PLACE_TIMEOUT_MS` lesson), measured in E1
+  rather than guessed.
+- **GONE, never disabled — and not-built controls do not exist** (the J4 rule): E1's shipped
+  descriptor declares only the Keep choice; E2 flips the extension's descriptor to the full trio
+  when the host transforms exist. No dead rows in between.
+- **Supernote swallows `adb shell input text`** — typing a new passphrase in a device walk is the
+  user's; agents verify the prompt's presence via uiautomator only.
+- Ratta's Apps grid caches label/icon rows after `install -r` — cosmetic, Settings → Apps is fresh.
+
+### E1 — The exporter point + NSE · Soil Export + the Export screen (Keep path end to end)
+**Status:** ⬜ Not started
+
+Contract (`:extension-api`): `INotebookExporter.aidl` — `ExporterInfo describe()` and
+`ExportResult export(in ParcelFileDescriptor source, in ParcelFileDescriptor destination, in
+ExportSpec spec)` — with hand-written parcelables (`ExporterInfo`: format label, file extension,
+MIME, bounded `OptionDescriptor` list; `ExportSpec`: the id → value map, notebook display name —
+**no id, no path, no secret**; `ExportResult`: bytes written), `requireValid` in every constructor
+(unmarshal is validation — the family rule), `ExporterContract` constants (action string, caps,
+`OPTION_KEYING` + its three value ids, timeouts), `HostCallerCheck.enforce` reused as-is. Host:
+`<queries>` entry, `ExtensionRegistry.exporters()` (plural — every trusted candidate, ordered by
+(label, package)), `ExporterClient` on the **call-shaped** `ExtensionBinder.call` (no held bind —
+an export is one operation; `DESCRIBE_TIMEOUT_MS` short, `EXPORT_TIMEOUT_MS` generous and
+measured), the library sheet's Export… row (GONE without a trusted exporter), and `ExportActivity`
+— chooser (collapsed to a label when one exporter), descriptor-rendered options panel, Export →
+SAF `CreateDocument` → transient checkpoint + meta refresh → cache copy → two fds → `export()` →
+size verify → toast. `:ext-soil`: the service (caller check first in every stub), `describe()`
+declaring the keying option **Keep-only this phase**, `export()` = the streamed copy with byte
+count. Filename from the index name by og's sanitize rule (confirm at phase start).
+**Gate:** JVM tests (parcelable round trips + `requireValid` rejections, descriptor caps, spec
+map, filename sanitize, contract pins); all **six** modules build debug + release; Haiku Nomad
+walk (Export row gated by the installed exporter — `pm disable-user`/`enable` flip it; screen
+chrome + collapsed chooser via uiautomator; crash buffer; binds = unbinds); **user checklist**
+(the SAF pick — save a Keep export, then the agent pulls it and byte-compares against the Garden
+file post-checkpoint: a Keep export is a **pure copy** and the proof is `cmp`). App `CLAUDE.md`
+amended: three points, six modules.
+*Fable writes the AIDL contract + trust seam + `ExporterClient`; Opus the Export screen, host flow
+and the extension; Sonnet module scaffold, layouts, icon, strings; Haiku the walk.*
+
+**Questions to resolve at phase start:** filename rule (og's sanitize + UUID fallback — confirm);
+post-export behaviour (toast + finish back to the library, or stay on the screen); the
+`EXPORT_TIMEOUT_MS` starting value (measure a large `.soil` copy on the Nomad first).
+
+### E2 — The keying transforms (New passphrase · Remove encryption)
+**Status:** ⬜ Not started
+
+Fable writes the transform (`crypto/`, beside `SoilCrypto` — the one SQLCipher door): **plain** =
+`sqlcipher_export` to an attached plaintext DB **+ the explicit `user_version` copy** (og's trap)
++ an integrity check before the artifact is accepted; **new passphrase** = re-key of the temp copy
+(mechanism Fable's call — `PRAGMA rekey` vs. export-and-key — with `user_version` preservation
+pinned either way). Both operate only on the cache temp; a failure leaves Garden untouched and
+raises a problem dialog. Host UI: the passphrase + confirm fields (host-owned, masked, Ratta IME
+rule), the inline plain warning, busy-guarded Export with inline progress, the
+failure paths (transform failed · destination write failed → best-effort partial delete · exporter
+died → honest dialog, never a silent empty success). `:ext-soil`'s `describe()` flips to the full
+keying trio — the extension itself changes by one declaration, which is the options seam paying
+off. **Verification is external and real:** on the Mac, the stock sqlite CLI opens the plain
+export (schema + `user_version` intact), the stock sqlcipher CLI opens the re-keyed export with
+the typed passphrase, and neither opens the other's file.
+**Gate:** JVM tests for every pure part (transform planning, `user_version` pin where JVM-able,
+spec/keying mapping); debug + release build; Haiku walk (prompt presence, warning visibility,
+busy guard, crash buffer — typed passphrases are the user's, the IME trap); **user checklist**
+(all three keyings end to end through SAF; the Mac CLI proofs run by the session against the
+pulled files).
+*Fable writes the transform; Opus the screen wiring and failure paths; Haiku the walk.*
+
+**Questions to resolve at phase start:** none expected — ask only if the rekey mechanism
+measurement (rekey vs. export-and-key) surfaces a user-visible trade.
+
+### E3 — Review, boundary audit, docs, freeze
+**Status:** ⬜ Not started
+
+Arc-range `/code-review` (level asked at phase start — every arc has frozen at **high**; the range
+is the arc, never the last phase — the O2 lesson). **Boundary audit rows for the third point**
+walked and written into `docs/extensions.md` (what crosses: two fds, the id → value spec with no
+secret and no id, bounded descriptors inward; what never crosses: passphrases, paths, SQLCipher).
+Round-trip compat proof: a Keep export copied back into SN's Garden by the R6 two-step
+(`/data/local/tmp` + `shell cp`) + a CLI index row → opens in the app. Docs:
+**`docs/export.md` new** (the feature — the screen, the point, the keying table, the failure
+table), `docs/extensions.md` grown (the third point + the fd seam), `docs/library.md` (the sheet
+row), both `CLAUDE.md`s, memory; version-stamp decision; full regression (Haiku walk + the short
+user checklist); commit + push; **arc freeze**.
+**Gate:** everything green or explicitly accepted → monorepo `BACKLOG.md`; user all-clear.
+*Review as `/code-review`; fixes to the right model per finding; Sonnet the doc pass; Haiku the
+regression walk.*
+
+**Questions to resolve at phase start:** review level; version stamp.
+
+---
+
 ## Verification (end of arc)
 
 1. All JVM unit tests green (`./gradlew test` in `apps/notesprout_ratta`).
