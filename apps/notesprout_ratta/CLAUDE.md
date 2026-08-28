@@ -38,7 +38,7 @@ All root `CLAUDE.md` rules apply (Kotlin/17, kotlinx-serialization only, no new 
 deps without discussion, no Material Components, no `runBlocking` on main, `Slog.d` not
 `Log.d`, e-ink design system, Tabler icons only). Plus, for this app:
 
-- **Five modules, own Gradle root:** `:app` (the host), `:sn-screen` (the shared paper-screen
+- **Six modules, own Gradle root:** `:app` (the host), `:sn-screen` (the shared paper-screen
   library — arc 11 / J1: the design resources and the screen helpers both paper surfaces need,
   depends on g-paper + androidx only and **never** on `:app` or `:extension-api`; **a fix to shared
   screen logic goes there, never in a consumer** — that rule is the whole reason the module exists,
@@ -46,14 +46,17 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   `:extension-api` (the contract library — depends on nothing in `:app`, stdlib only),
   `:ext-mlkit` (the **NSE · ML Kit** extension APK), `:ext-scratchpad` (the **NSE · Scratch Pad**
   extension APK — arc 11 / J3: depends on `:extension-api` **and** `:sn-screen`, never `:app`;
-  no `tools:replace`, no libc++ `pickFirsts` — those are Paper's Onyx tax and SN has no Onyx).
+  no `tools:replace`, no libc++ `pickFirsts` — those are Paper's Onyx tax and SN has no Onyx),
+  and `:ext-soil` (the **NSE · Soil Export** extension APK — arc 15 / E1: depends on
+  `:extension-api` only).
   `gradle.properties` sets
   `android.nonTransitiveRClass=false` so `:app`'s `R` keeps seeing the moved resources —
   the move needed no import sweep, and undoing that flag breaks every one of them.
-- **SN has TWO extension points** (arc-11 amendment to the arc-3 rule, on the user's explicit
-  decision — which is exactly the "new user decision" that rule demanded):
+- **SN has THREE extension points** (the arc-15 amendment, on the user's explicit 2026-08-27
+  decision — which is exactly the "new user decision" that rule demanded; arc 11 made the same
+  amendment for the second):
   `ACTION_HANDWRITING_RECOGNIZER` / `IHandwritingRecognizer`, so other HWR engines can slot in
-  later (headings and the markdown engine are core), and `ACTION_SCRATCH_PAD` / `IScratchPad` —
+  later (headings and the markdown engine are core), `ACTION_SCRATCH_PAD` / `IScratchPad` —
   the first **screen-owning** point, served by `:ext-scratchpad` (J2 shipped the store and the
   contract half; **J3 shipped the point**: the AIDL, `WireStroke` / `InkBundle` / `InkChunks`,
   `ExtensionBinder.hold` + `HeldBinding` — SN's **only** bind held across more than one call,
@@ -63,8 +66,18 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   Its screen is exported under
   `ACTION_SCRATCH_PAD_SCREEN` with `<category DEFAULT>` and refuses any caller that is not a
   `startActivityForResult` from the host (`HostCallerCheck.enforceActivity`), so the host **must**
-  launch it with an `ActivityResultLauncher`. **No THIRD capability point may be added** without
-  another user decision. Extensions get one host service, the
+  launch it with an `ActivityResultLauncher`. And `ACTION_NOTEBOOK_EXPORTER` /
+  `INotebookExporter` (arc 15 / E1) — the **generic exporter point**: any number of trusted
+  exporter extensions may register (`ExtensionRegistry.exporters()` is plural), each `describe()`s
+  the one format it offers via a bounded declarative descriptor the host renders with its own
+  widgets, and the host's Export screen lists whatever is installed. **The host keys, the
+  extension delivers via fds**: everything that touches a key (checkpoint, keying transform, SAF
+  destination) runs host-side; the extension receives two `ParcelFileDescriptor`s + an
+  `ExportSpec` (id → value map + display name — no id, no path, no secret) and writes only
+  through the granted write fd. A typed passphrase **never** crosses — the reserved
+  `ExporterContract.OPTION_KEYING` (and any passphrase-kind option) is executed by the host, and
+  the spec carries only the chosen value id. Served by `:ext-soil` (**NSE · Soil Export**).
+  **No FOURTH capability point may be added** without another user decision. Extensions get one host service, the
   **extension store** (`IExtensionStore`, `data/extstore/`, `docs/extensions.md` § "The extension
   store"): per-package, encrypted under the global key at `Garden/<pkg>.db`, minted per bind,
   uid-bound, revoked with the unbind — because **an extension writes nothing to disk itself,

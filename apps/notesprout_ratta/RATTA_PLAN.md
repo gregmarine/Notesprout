@@ -4121,7 +4121,30 @@ accordingly (three points; no FOURTH without another user decision; the module l
 - Ratta's Apps grid caches label/icon rows after `install -r` — cosmetic, Settings → Apps is fresh.
 
 ### E1 — The exporter point + NSE · Soil Export + the Export screen (Keep path end to end)
-**Status:** ⬜ Not started
+**Status:** ✅ Complete 2026-08-27 (commit: this phase's `ratta: E1` commit)
+
+**Outcome.** The third point is live end to end on the Keep path. `:extension-api` grew
+`INotebookExporter` + `ExporterContract` + four constructor-validated parcelables (`ExporterInfo`,
+`OptionDescriptor`, `ExportSpec`, `ExportResult` — unmarshal is validation; a passphrase-kind
+option's value never enters the spec **at all**, the host consumes the secret and sends only choice
+ids); the host grew `ExtensionRegistry.exporters()` (plural), `ExporterClient` (call-shaped, fd
+close in `finally`), `export/` (`ExportNaming` · `ExportOptions` · `ExportPanel` ·
+`ExportArtifact` · `ExportActivity`), the library sheet's Export… row (GONE without a trusted
+exporter, discovery at every sheet open), and **`SoilOpenFiles`** — the one-file-one-connection
+rule written down, claimed/released inside `SoilDatabase.open/create/seal` so every door is covered
+by construction and an export *refuses* a held file. `:ext-soil` (NSE · Soil Export, sixth module)
+ships the Keep-only descriptor and a streamed verified copy (64 KiB, fsync, short-write →
+`IllegalStateException`). `EXPORT_TIMEOUT_MS = 120 s` — measured (Nomad flash ~525 MB/s; 100 MB in
+0.45 s). 824 JVM tests / six modules / debug + release green; Haiku walk 8/8 (gating flip via
+`pm disable-user`/`enable`, collapsed chooser, SAF suggested filename, cancel path, binds =
+unbinds, crash buffer empty); **user checklist done: a Keep export saved through SAF is
+byte-identical to the post-seal Garden file (`cmp` + equal SHA-256), sidecars checkpointed away.**
+Traps recorded: (1) the walk's first FAIL was the agent long-pressing a **folder** card — folders
+deliberately have no Export row; check the sheet's title row before believing a missing-row report.
+(2) Writing a space or NUL char literal through the file tool can land a **raw NUL byte** in
+source — write it escaped (backslash-uXXXX) and byte-check the file after. (3) In an fd-receiving Binder stub the caller
+check must run **inside** the try whose `finally` closes the fds — outside it, a refused caller
+leaks both dups.
 
 Contract (`:extension-api`): `INotebookExporter.aidl` — `ExporterInfo describe()` and
 `ExportResult export(in ParcelFileDescriptor source, in ParcelFileDescriptor destination, in
@@ -4149,9 +4172,10 @@ amended: three points, six modules.
 *Fable writes the AIDL contract + trust seam + `ExporterClient`; Opus the Export screen, host flow
 and the extension; Sonnet module scaffold, layouts, icon, strings; Haiku the walk.*
 
-**Questions to resolve at phase start:** filename rule (og's sanitize + UUID fallback — confirm);
-post-export behaviour (toast + finish back to the library, or stay on the screen); the
-`EXPORT_TIMEOUT_MS` starting value (measure a large `.soil` copy on the Nomad first).
+**Questions resolved at phase start (2026-08-27):** filename rule = **og's verbatim**
+(index name with `[^a-zA-Z0-9_\-. ]` stripped + trimmed, spaces kept; empty/`.`/`..` → UUID;
+`.soil`, `application/octet-stream`); post-export = **toast + finish** back to the library;
+`EXPORT_TIMEOUT_MS` measured on the Nomad before pinning.
 
 ### E2 — The keying transforms (New passphrase · Remove encryption)
 **Status:** ⬜ Not started

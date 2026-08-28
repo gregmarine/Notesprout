@@ -49,6 +49,16 @@ object ExtensionRegistry {
         all.firstOrNull()
     }
 
+    /**
+     * Every trusted notebook exporter, ordered by (label, package) — plural on purpose (arc 15 /
+     * E1): any number may register, the Export screen lists them all, and with exactly one the
+     * chooser collapses to a label. Re-run at every library-sheet open — a package can be
+     * disabled or replaced under a standing screen.
+     */
+    suspend fun exporters(context: Context): List<ProviderRef> = withContext(Dispatchers.IO) {
+        discover(context.applicationContext, ExporterContract.ACTION_NOTEBOOK_EXPORTER)
+    }
+
     @Suppress("DEPRECATION")
     private fun discover(context: Context, action: String): List<ProviderRef> {
         val pm = context.packageManager

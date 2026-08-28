@@ -4,8 +4,9 @@
     <!-- The readiness flow's offline pre-check (ML Kit's model download hangs silently offline). -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-    <!-- Package-visibility for SN's two extension points (API 30+ filtering). The scratch pad needs
-         both: the service to discover and bind, the screen to resolve and launch for a result. -->
+    <!-- Package-visibility for SN's three extension points (API 30+ filtering). The scratch pad
+         needs both: the service to discover and bind, the screen to resolve and launch for a
+         result. -->
     <queries>
         <intent>
             <action android:name="com.symmetricalpalmtree.notesproutsn.extension.HANDWRITING_RECOGNIZER" />
@@ -15,6 +16,9 @@
         </intent>
         <intent>
             <action android:name="com.symmetricalpalmtree.notesproutsn.extension.SCRATCH_PAD_SCREEN" />
+        </intent>
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesproutsn.extension.NOTEBOOK_EXPORTER" />
         </intent>
     </queries>
 
@@ -73,6 +77,13 @@
 
         <activity
             android:name=".notebook.NotebookActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
+        <!-- Export (arc 15 / E1). Reached only from the library's notebook long-press sheet;
+             receives EXTRA_NOTEBOOK_ID / _NAME and nothing else. -->
+        <activity
+            android:name=".export.ExportActivity"
             android:exported="false"
             android:screenOrientation="portrait" />
 

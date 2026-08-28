@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Extension glyph: Tabler "puzzle", ink-black outline only — same vocabulary as the host's launcher
+     icon (Tabler seedling, mirrored), so the two read as one family in Settings → Apps and in
+     launchers that list every package (Supernote). Adaptive-icon 108dp viewport; the glyph is
+     Tabler's 24-unit grid × 3.1 centred at 54 — sized like Ratta's own icons; fits the rounded-square
+     mask. Not mirrored — only the app's seedling is. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="19.9"
+        android:translateY="13.7"
+        android:scaleX="3.1"
+        android:scaleY="3.1">
+        <path
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#000000"
+            android:strokeWidth="2"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M4 7h3a1 1 0 0 0 1 -1v-1a2 2 0 0 1 4 0v1a1 1 0 0 0 1 1h3a1 1 0 0 1 1 1v3a1 1 0 0 0 1 1h1a2 2 0 0 1 0 4h-1a1 1 0 0 0 -1 1v3a1 1 0 0 1 -1 1h-3a1 1 0 0 1 -1 -1v-1a2 2 0 0 0 -4 0v1a1 1 0 0 1 -1 1h-3a1 1 0 0 1 -1 -1v-3a1 1 0 0 1 1 -1h1a2 2 0 0 0 0 -4h-1a1 1 0 0 1 -1 -1v-3a1 1 0 0 1 1 -1" />
+    </group>
+</vector>

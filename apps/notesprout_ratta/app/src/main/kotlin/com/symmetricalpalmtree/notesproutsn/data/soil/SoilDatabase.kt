@@ -39,7 +39,9 @@ abstract class SoilDatabase : RoomDatabase() {
         fun open(context: Context, notebookId: String, file: File, passphrase: String): SoilDatabase {
             SoilCrypto.requireExisting(file)
             val factory = KeyOpener.roomFactoryFor(context, notebookId, file, passphrase)
-            return build(context, file, factory).also { forceOpen(it) }
+            // Claimed only once the connection is really up (arc 15 / E1) — a failed open holds
+            // nothing, and a claim it never made is a claim nothing would ever release.
+            return build(context, file, factory).also { forceOpen(it); SoilOpenFiles.claim(file) }
         }
 
         /** Create a brand-new notebook file with the schema in place. New-notebook flow only. IO thread. */
@@ -48,6 +50,7 @@ abstract class SoilDatabase : RoomDatabase() {
             file.parentFile?.mkdirs()
             val db = build(context, file, SoilCrypto.roomFactory(passphrase))
             forceOpen(db) // creates file + schema (one native KDF)
+            SoilOpenFiles.claim(file)
             KeyOpener.warm(context, notebookId, file, passphrase)
             return db
         }
@@ -127,6 +130,11 @@ abstract class SoilDatabase : RoomDatabase() {
         } catch (e: Exception) {
             Log.w(TAG, "close failed for ${file.name}", e)
         }
+        // Released *after* the close, and whatever the close did (arc 15 / E1): the file is only
+        // free for an export's copy once no connection is left, and a checkpoint that threw must
+        // still not leave the claim standing — an export would refuse forever. Idempotent, so a
+        // second seal of the same handle releases nothing.
+        SoilOpenFiles.release(file)
         val journal = File(file.path + "-journal")
         if (journal.exists() && journal.length() == 0L) journal.delete()
     }

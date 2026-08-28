@@ -140,6 +140,29 @@
     <string name="delete_folder_body">This will permanently remove all notebooks and subfolders inside it. This cannot be undone.</string>
     <string name="delete_confirm">Delete</string>
 
+    <!-- Export (arc 15 / E1). The library's long-press row reuses `action_export` above; the
+         screen owns everything else. Every failure sentence says what happened to the file the
+         picker created — a partial export must never stand there unexplained. -->
+    <string name="export_title">Export</string>
+    <string name="export_action">Export</string>
+    <string name="export_format_caption">Format</string>
+    <string name="export_exporting">Exporting…</string>
+    <string name="export_done_toast">Exported</string>
+    <string name="export_none_title">Nothing to export with</string>
+    <string name="export_none_body">No export extension is installed on this device, so there is no format to export to.</string>
+    <string name="export_no_picker_title">No file picker</string>
+    <string name="export_no_picker_body">This device has no app for choosing where to save a file, so nothing can be exported here.</string>
+    <string name="export_failed_title">Export didn\'t finish</string>
+    <string name="export_failed_body">The export extension didn\'t finish writing the file. The unfinished file has been removed; your notebook is untouched.</string>
+    <string name="export_short_body">Only part of the notebook reached that file, so the unfinished file has been removed. Your notebook is untouched.</string>
+    <string name="export_gone_body">The export format you chose is no longer available on this device. Nothing was exported.</string>
+    <string name="export_destination_body">That file could not be opened for writing. Nothing was exported.</string>
+    <string name="export_prepare_failed_body">A copy of the notebook could not be made — the device may be out of space. Nothing was exported and your notebook is untouched.</string>
+    <string name="export_in_use_body">This notebook is open somewhere else in the app. Close it, then export again.</string>
+    <string name="export_locked_body">The library is locked. Unlock Notesprout SN, then export again.</string>
+    <string name="export_missing_body">This notebook\'s file is no longer on the device, so there is nothing to export.</string>
+    <string name="export_unreadable_body">This notebook could not be read just now. Nothing was exported and the file was left untouched.</string>
+
     <!-- Naming schemes (default notebook name) -->
     <string name="action_naming">Default notebook name…</string>
     <string name="scheme_caption">Default notebook name</string>

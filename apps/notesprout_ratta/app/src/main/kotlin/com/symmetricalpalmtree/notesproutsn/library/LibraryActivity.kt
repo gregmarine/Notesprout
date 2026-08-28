@@ -33,6 +33,8 @@ import com.symmetricalpalmtree.notesproutsn.data.prefs.SortPrefs
 import com.symmetricalpalmtree.notesproutsn.data.sidecarsOf
 import com.symmetricalpalmtree.notesproutsn.data.soilFile
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityLibraryBinding
+import com.symmetricalpalmtree.notesproutsn.export.ExportActivity
+import com.symmetricalpalmtree.notesproutsn.extension.ExtensionRegistry
 import com.symmetricalpalmtree.notesproutsn.extension.ScratchPadEntry
 import com.symmetricalpalmtree.notesproutsn.notebook.NotebookActivity
 import com.symmetricalpalmtree.notesproutsn.templates.TemplatesActivity
@@ -516,7 +518,24 @@ class LibraryActivity : AppCompatActivity() {
         is CardItem.Notebook -> openNotebook(item.summary.id, item.summary.name)
     }
 
+    /**
+     * The action sheet. A **notebook's** sheet is raised one beat later than a folder's: whether it
+     * offers **Export…** depends on whether a trusted exporter extension is installed *right now*
+     * (arc 15 / E1), and discovery is a package query on IO. It re-runs at every open rather than
+     * being cached — a package can be disabled or replaced under a standing library — and the row
+     * is **GONE**, never disabled, when there is none: a control that cannot work is invisible on
+     * e-ink, and a sheet that grew a row after it was already up would move the user's finger.
+     */
     private fun onCardLongPress(item: CardItem) {
+        if (item !is CardItem.Notebook) { showCardSheet(item, canExport = false); return }
+        lifecycleScope.launch {
+            val canExport = ExtensionRegistry.exporters(this@LibraryActivity).isNotEmpty()
+            if (isFinishing || isDestroyed) return@launch
+            showCardSheet(item, canExport)
+        }
+    }
+
+    private fun showCardSheet(item: CardItem, canExport: Boolean) {
         val s = item.summary
         val isFolder = item is CardItem.Folder
         val sheet = ActionSheetDialog(this).title(s.name)
@@ -535,10 +554,24 @@ class LibraryActivity : AppCompatActivity() {
         sheet
             .addAction(R.drawable.ic_edit, getString(R.string.action_rename)) { showRenameDialog(s) }
             .addAction(R.drawable.ic_move_folder, getString(R.string.action_move)) { showMovePicker(s) }
+        // Notebooks only, and only with an exporter installed. Export always works from the sealed,
+        // cold file — which is exactly what the library context guarantees and the notebook screen
+        // could not, which is why this is the only entry point.
+        if (canExport) {
+            sheet.addAction(R.drawable.ic_download, getString(R.string.action_export)) { showExport(s) }
+        }
+        sheet
             .addAction(R.drawable.ic_trash, getString(R.string.action_delete)) {
                 if (isFolder) confirmDeleteFolder(s) else confirmDeleteNotebook(s)
             }
             .show()
+    }
+
+    /** Identity travels as id + name — never a `File`. Latched with every other door out (S2). */
+    private fun showExport(s: ObjectSummary) {
+        if (launching) return
+        launching = true
+        startActivity(ExportActivity.intent(this, s.id, s.name))
     }
 
     /**
