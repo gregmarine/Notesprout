@@ -80,6 +80,9 @@ class BootstrapActivity : AppCompatActivity() {
         when (SnIndex.ensureReady(this)) {
             SnIndex.PrepareOutcome.READY,
             SnIndex.PrepareOutcome.FIRST_LAUNCH -> {
+                // Arc 17 / K1: purge soft-deleted index rows while nothing else is reading —
+                // gated on an EXISTS probe, so the ordinary launch pays one trivial query.
+                SnIndex.compactIfNeeded()
                 val next = if (PassphraseStore.isRecoveryKeyAcknowledged(this)) LibraryActivity::class.java
                            else RecoveryKeyActivity::class.java
                 forward(next)

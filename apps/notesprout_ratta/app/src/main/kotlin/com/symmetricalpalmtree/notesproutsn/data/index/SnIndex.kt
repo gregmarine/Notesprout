@@ -161,4 +161,18 @@ object SnIndex {
             Log.w(TAG, "checkpoint failed", e)
         }
     }
+
+    /**
+     * Arc 17 / K1: the opportunistic index purge. Bootstrap calls this once the index is open —
+     * the one moment it has no other reader, so the `VACUUM` cannot lose to a busy library screen.
+     * The `EXISTS` gate keeps the ordinary launch at one trivial query. Never throws. IO.
+     */
+    suspend fun compactIfNeeded() = withContext(Dispatchers.IO) {
+        try {
+            val raw = db().openHelper.writableDatabase
+            if (IndexCompactor.hasSoftDeletedRows(raw)) IndexCompactor.compact(raw)
+        } catch (e: Exception) {
+            Log.w(TAG, "compact skipped", e)
+        }
+    }
 }

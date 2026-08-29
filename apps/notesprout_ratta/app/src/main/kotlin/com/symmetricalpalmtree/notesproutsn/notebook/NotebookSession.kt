@@ -13,6 +13,7 @@ import com.symmetricalpalmtree.notesproutsn.data.clip.ClipEnvelope
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookMeta
 import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookMetaStore
+import com.symmetricalpalmtree.notesproutsn.data.soil.SoilCompactor
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilDatabase
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilObjectEntity
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilSchema
@@ -509,12 +510,18 @@ class NotebookSession(
         ))
     }
 
-    /** Wait for queued writes (both stores), then checkpoint + close. Idempotent; never throws. */
+    /** Wait for queued writes (both stores), then purge + checkpoint + close. Idempotent; never throws. */
     suspend fun seal() = withContext(Dispatchers.IO) {
         if (!isOpen) return@withContext
         try { writer.flushTouch() } catch (e: Exception) { Log.w(TAG, "flushTouch failed", e) }
         try { writer.drain() } catch (e: Exception) { Log.w(TAG, "drain failed", e) }
         writer.close()
+        // The arc-17 purge, exactly here: after the writer is closed (no queued write can race the
+        // deletes), before db.seal (the checkpoint absorbs the VACUUM and the connection is still
+        // ours). Undo dies with this session, so its soft-deleted rows are unreachable from now on.
+        // compact() never throws, and it never touches `updatedAt` — this close must not re-flag
+        // the notebook for backup.
+        SoilCompactor.compact(db.raw())
         db.seal(file)
         // Reference drop only — the paper view can outlive the seal by a frame (recycle() here
         // would race a final repaint; see loadTemplateFor).

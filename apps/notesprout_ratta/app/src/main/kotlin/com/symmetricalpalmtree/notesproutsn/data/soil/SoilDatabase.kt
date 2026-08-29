@@ -143,5 +143,11 @@ abstract class SoilDatabase : RoomDatabase() {
         if (claimReleased.compareAndSet(false, true)) SoilOpenFiles.release(file)
         val journal = File(file.path + "-journal")
         if (journal.exists() && journal.length() == 0L) journal.delete()
+        // Arc 17 / K1: with no connection left, a fully-checkpointed WAL and its -shm are noise —
+        // the Garden holds only .soil files after a clean close. A non-empty WAL (the checkpoint
+        // above failed) is live data and stays. Gated on the registry: if the one-file-one-
+        // connection rule is ever broken, deleting a -shm under the surviving connection's map is
+        // exactly the kind of damage this pass must not add.
+        if (!SoilOpenFiles.isOpen(file)) SoilCompactor.sweepSidecars(file)
     }
 }
