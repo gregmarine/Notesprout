@@ -4634,7 +4634,27 @@ scaffolds for it.
 - **SAF writes stream to `.part` then rename** (og): a torn write never replaces a good backup.
 
 ### K1 — Compaction: clean at rest
-**Status:** ⬜ Not started
+**Status:** ✅ Complete 2026-08-28 (commit 73d6490)
+
+**Outcome:** `SoilCompactor` (pure `purgeIds` plan + executor) purges every soft-deleted `.soil`
+row at `NotebookSession.seal` — after `writer.close()`, before `db.seal` so the checkpoint absorbs
+the `VACUUM` — with the cascade started **only from rows this purge deletes** (a dangling-parent
+row is damage, never an orphan: never-delete-on-corruption) and template rows exempt by type on
+both sides. `VACUUM` only when something went; `compact()` never throws; `updatedAt` untouched.
+`SoilDatabase.seal` sweeps a fully-checkpointed `-wal`/`-shm` pair last, gated on
+`SoilOpenFiles.isOpen` (never under a surviving connection, never a non-empty WAL).
+`IndexCompactor` purges soft-deleted index rows + orphan `list_item` edges — the five template
+sentinels exempt by name (`PROTECTED_REF_IDS`, pinned equal to `TemplateLibrary.SENTINEL_IDS` by
+test), null `refId` left as it came — via `SnIndex.compactIfNeeded()` at bootstrap behind an
+`EXISTS` gate; callable standalone for K2. Revived-row paths (`createNotebook`, import Replace,
+`setScheme`) JVM-tested fresh-create over purged rows (`RevivedRowPurgeTest` on `FakeObjectDao`).
+907 JVM tests (17 new). **Nomad-proven** (Haiku walked sidecars/stability; Fable drove the purge
+proof after the agent's page-delete didn't land): deleting one inked page of an import-walk
+throwaway → `SoilCompactor: purged 143 row(s)` (12 from the delete + ~131 pre-existing
+soft-deleted history in the imported file — the purge's whole point), **442368 → 225280 bytes
+(49%)**; reopen intact at 12 pages; notebook delete → relaunch → `IndexCompactor: purged 1 index
+row(s)`; zero `.soil-wal`/`-shm` in the Garden; crash buffer clean. Extension-store
+`Garden/<pkg>.db` files keep their sidecars — their connection lifecycle, out of K1's scope.
 
 `data/soil/SoilCompactor`: hard-delete every `deletedAt IS NOT NULL` row, then a cascading
 orphan sweep (rows whose parent no longer exists — template rows exempt by type), then `VACUUM`
