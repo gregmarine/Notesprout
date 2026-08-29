@@ -4673,14 +4673,31 @@ size shrinks, `Garden/` holds only `.soil` files after close; reopen intact; cra
 **Questions to resolve at phase start:** none — all locked above.
 
 ### K2 — Local backup: state, engine, screen
-**Status:** 🔨 In progress (started 2026-08-28) — built (engine + screen + chrome), all JVM tests
-green both variants, release signed, Nomad walk 8/8 PASS (hand-driven — **walk trap: the debug
-package id is `….notesproutsn.dev`**; an agent pointed at the bare package walks the stale release
-install and reports the new code missing). Awaiting the user checklist (the SAF pick), then commit.
-One screen-level decision for the K3 review: **picking a different backup folder clears the stamp
-map** (stamps are statements about a destination; carrying them to a fresh folder would back up
-only the index there). `SafBackupWriter` is hand-rolled over platform `DocumentsContract` —
-`androidx.documentfile` is not on the classpath and new dependencies are banned.
+**Status:** ✅ Complete 2026-08-29 (commit `7fb0aa2`)
+
+**Outcome:** the full local backup, gate met end to end — all JVM tests green both variants,
+release signed, Nomad walk 8/8 (hand-driven), **user checklist passed 2026-08-29**: first run
+copied all 36 notebooks + the index (index timestamp after every `.soil` — index-last proven on
+the destination), second run copied none, an edited notebook re-copied alone, the exclude flag
+was honored; the destination tree inspected over adb showed UUID names only, zero
+`.part`/`.old`/`-wal` leftovers, and ciphertext headers on both a `.soil` and the index copy.
+Checklist item 6 (open-elsewhere skip) is **structurally unreachable from the UI** — Backup is
+only enterable from the library, where no notebook is open — so the `SoilOpenFiles` held-check
+stays as defense-in-depth, the same posture as export's.
+
+Decisions and traps the phase minted:
+- **Picking a *different* backup folder clears the stamp map** (screen-level, in `adoptFolder`):
+  stamps are statements about a destination, and carrying them to a fresh folder would back up
+  only the index there while every notebook read "up to date". Re-picking the same folder keeps
+  them. Flag at the K3 review.
+- `SafBackupWriter` is hand-rolled over platform `DocumentsContract` — `androidx.documentfile`
+  is not on the classpath and new dependencies are banned. `.part` → `.old` → rename swap.
+- The stamp value is the notebook's `updatedAt` *as read at work-list time*, never the wall
+  clock — an edit landing mid-run can never be masked. Equal-to-stamp means backed up.
+- **Walk trap (fired 2026-08-28): the debug package id is `….notesproutsn.dev`** — a walk agent
+  pointed at the bare package walks the stale *release* install, reports the new code missing,
+  and invents a story around it. Give walk agents the `.dev` id for debug builds; the tell was
+  `lastUpdateTime` predating the install.
 
 **Phase-start answers (user, 2026-08-28):** icon = **Tabler `device-floppy`** (drawn fresh as
 `ic_backup` in `:sn-screen`); position = **library bottom bar, far left**, with **Import moved to
