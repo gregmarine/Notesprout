@@ -4363,7 +4363,9 @@ serves both directions).
   applies to the prompt.
 
 ### I1 — The importer point + the whole pipeline (all keyings, placement, remap)
-**Status:** 🧪 Awaiting user checklist (code complete 2026-08-28; JVM tests + debug/release builds
+**Status:** ✅ Complete 2026-08-28 (commit `ecf0443`)
+
+(Code complete 2026-08-28; JVM tests + debug/release builds
 green; installed on SNN; Haiku walk effectively **10/10** — its two FAILs were both walk artifacts,
 refuted by hand: (6) the gating flip *does* work, 1 → 0 → 1 across real pause/resume cycles — the
 agent re-`am start`ed onto an **already-resumed** activity, which fires no `onResume` and so no
