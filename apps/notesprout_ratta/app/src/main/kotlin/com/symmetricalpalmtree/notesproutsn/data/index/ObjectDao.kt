@@ -63,6 +63,10 @@ interface ObjectDao {
     )
     suspend fun aliveOfType(ids: List<String>, type: String): List<ObjectSummary>
 
+    /** Every alive notebook, anywhere in the tree, blob-free — the backup work list (arc 17 / K2). */
+    @Query("SELECT $SUMMARY_COLS FROM objects WHERE type = 'notebook' AND deletedAt IS NULL")
+    suspend fun allAliveNotebooks(): List<ObjectSummary>
+
     @Query(
         "SELECT count(*) FROM objects WHERE type = :type AND deletedAt IS NULL AND name = :name AND " +
         "((:parentId IS NULL AND parentId IS NULL) OR parentId = :parentId) AND id <> :excludeId"
@@ -80,6 +84,11 @@ interface ObjectDao {
 
     @Query("UPDATE objects SET updatedAt = :at WHERE id = :id")
     suspend fun touch(id: String, at: Long)
+
+    /** Rewrite a row's `flags` and nothing else — deliberately no `updatedAt` (arc 17 / K2: the
+     *  exclude-from-backup toggle is policy, not a content edit; see [NotebookFlags]). */
+    @Query("UPDATE objects SET flags = :flags WHERE id = :id")
+    suspend fun setFlags(id: String, flags: Int)
 
     @Query("UPDATE objects SET pageCount = :count WHERE id = :id")
     suspend fun setPageCount(id: String, count: Int)
@@ -153,4 +162,9 @@ interface ObjectDao {
      */
     @Query("UPDATE objects SET deletedAt = :at, blob = NULL WHERE id = :id AND type = 'clipboard'")
     suspend fun clipClear(id: String, at: Long)
+
+    // ── Backup config (arc 17 / K2) ──────────────────────────────────────────
+
+    @Query("SELECT blob FROM objects WHERE id = :id AND type = 'backup'")
+    suspend fun backupBlob(id: String): ByteArray?
 }

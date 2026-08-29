@@ -6,6 +6,7 @@ import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -20,7 +21,9 @@ import com.symmetricalpalmtree.notesproutsn.core.ListSwipe
 import com.symmetricalpalmtree.notesproutsn.core.OpeningOverlay
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.core.TopGuard
+import com.symmetricalpalmtree.notesproutsn.backup.BackupActivity
 import com.symmetricalpalmtree.notesproutsn.crypto.KeyMaterial
+import com.symmetricalpalmtree.notesproutsn.data.backup.BackupPredicates
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectSummary
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectType
@@ -70,8 +73,8 @@ class LibraryActivity : AppCompatActivity() {
     /** The Scratch Pad's entry button (arc 11) — GONE unless a trusted extension is installed. */
     private lateinit var scratchPad: ScratchPadEntry
 
-    /** Import (arc 16) — the bottom bar's Import button (right group, before Templates) and the
-     *  whole pipeline behind it. GONE unless a trusted importer extension is installed. */
+    /** Import (arc 16) — the bottom bar's Import button (left group, right after Backup since
+     *  arc 17 / K2) and the whole pipeline behind it. GONE unless a trusted importer is installed. */
     private lateinit var importFlow: ImportFlow
 
     private var folderId: String? = null
@@ -296,6 +299,11 @@ class LibraryActivity : AppCompatActivity() {
         btnRecents.setOnClickListener { setMode(if (mode == BrowseMode.RECENTS) BrowseMode.NORMAL else BrowseMode.RECENTS) }
         btnCloseMode.setOnClickListener { setMode(BrowseMode.NORMAL) }
         btnTemplates.setOnClickListener { startActivity(TemplatesActivity.intent(this@LibraryActivity)) }
+        // Backup (arc 17 / K2), the bottom bar's far-left button. Not latched with `launching`:
+        // that latch guards the doors onto a `.soil` (two NotebookActivities is two SQLCipher
+        // writers), and the backup screen opens no notebook — it is a plain chrome screen, and the
+        // Activity's own singleTop-less relaunch is harmless.
+        btnBackup.setOnClickListener { startActivity(BackupActivity.intent(this@LibraryActivity)) }
         btnSort.setOnClickListener { showSortSheet() }
         btnNewFolder.setOnClickListener { showNewFolderDialog() }
         btnNewNotebook.setOnClickListener { launchNewNotebook() }
@@ -305,7 +313,7 @@ class LibraryActivity : AppCompatActivity() {
         btnNext.setOnClickListener { goToPage(pageIndex + 1) }
         btnLast.setOnClickListener { goToPage(pageCount - 1) }
 
-        listOf(btnPinned, btnRecents, btnCloseMode, btnTemplates, btnSort, btnNewFolder,
+        listOf(btnPinned, btnRecents, btnCloseMode, btnTemplates, btnBackup, btnSort, btnNewFolder,
                btnNewNotebook, btnUp, btnFirst, btnPrev, btnNext, btnLast)
             .forEach { TooltipCompat.setTooltipText(it, it.contentDescription) }
     }
@@ -595,6 +603,14 @@ class LibraryActivity : AppCompatActivity() {
         if (canExport) {
             sheet.addAction(R.drawable.ic_download, getString(R.string.action_export)) { showExport(s) }
         }
+        // Exclude from backup (arc 17 / K2) — notebooks only, and always there: it needs no
+        // extension and no destination. The state comes from the listing's own `flags`, not a
+        // fresh read, and the label carries it (the Pin/Unpin pattern) so the row never moves.
+        (item as? CardItem.Notebook)?.let { nb ->
+            val excluded = BackupPredicates.isExcluded(nb.summary.flags)
+            val label = if (excluded) R.string.action_include_backup else R.string.action_exclude_backup
+            sheet.addAction(R.drawable.ic_backup, getString(label)) { toggleExcludeFromBackup(s.id, excluded) }
+        }
         sheet
             .addAction(R.drawable.ic_trash, getString(R.string.action_delete)) {
                 if (isFolder) confirmDeleteFolder(s) else confirmDeleteNotebook(s)
@@ -617,6 +633,25 @@ class LibraryActivity : AppCompatActivity() {
     private fun togglePin(notebookId: String, currentlyPinned: Boolean) {
         lifecycleScope.launch {
             if (currentlyPinned) repo.unpin(notebookId) else repo.pin(notebookId)
+            refresh()
+        }
+    }
+
+    /**
+     * Flip the exclude-from-backup bit (arc 17 / K2). [IndexRepository.setExcludeFromBackup] does
+     * **not** bump `updatedAt` — deliberately, and nothing here may add a touch: `updatedAt` is both
+     * the library's Last-modified sort key and the backup's needs-copying flag, so a bump would
+     * re-flag the notebook the instant the user said not to back it up.
+     *
+     * The refresh is what makes the sheet's own label agree next time it is raised — the listing's
+     * `flags` are where it reads the state from.
+     */
+    private fun toggleExcludeFromBackup(notebookId: String, currentlyExcluded: Boolean) {
+        lifecycleScope.launch {
+            repo.setExcludeFromBackup(notebookId, !currentlyExcluded)
+            // A toast, because it only confirms what already happened (the toast-vs-dialog rule).
+            val message = if (currentlyExcluded) R.string.backup_included_toast else R.string.backup_excluded_toast
+            Toast.makeText(this@LibraryActivity, message, Toast.LENGTH_SHORT).show()
             refresh()
         }
     }

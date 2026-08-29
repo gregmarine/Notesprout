@@ -21,6 +21,23 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
 
     suspend fun notebooks(parentId: String?): List<ObjectSummary> = dao.childrenOfType(parentId, ObjectType.NOTEBOOK)
 
+    /** Every alive notebook, anywhere in the tree — the backup work list (arc 17 / K2). */
+    suspend fun allNotebooks(): List<ObjectSummary> = dao.allAliveNotebooks()
+
+    /**
+     * Set or clear the exclude-from-backup bit (arc 17 / K2). Deliberately **not** an edit:
+     * `updatedAt` is untouched, so toggling never re-flags the notebook for backup or moves it in
+     * the library's Last-modified sort.
+     */
+    suspend fun setExcludeFromBackup(id: String, excluded: Boolean) {
+        val row = dao.summaryById(id) ?: return
+        val flags = row.flags ?: 0
+        val next =
+            if (excluded) flags or NotebookFlags.EXCLUDE_FROM_BACKUP
+            else flags and NotebookFlags.EXCLUDE_FROM_BACKUP.inv()
+        if (next != flags) dao.setFlags(id, next)
+    }
+
     suspend fun get(id: String): ObjectEntity? = dao.byId(id)
 
     suspend fun summary(id: String): ObjectSummary? = dao.summaryById(id)

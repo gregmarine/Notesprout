@@ -114,6 +114,7 @@
     <string name="template_search_empty_title">Nothing to search for</string>
     <string name="template_search_empty_body">Type some of the template\'s name first.</string>
     <string name="cd_templates">Templates</string>
+    <string name="cd_backup">Backup</string>
     <string name="cd_template_current">Current paper</string>
     <string name="template_render_failed_title">Couldn\'t draw that paper</string>
     <string name="template_render_failed_body">The template could not be rendered at this page\'s size. The page has been left as it was.</string>
@@ -125,6 +126,10 @@
     <string name="action_unpin">Unpin</string>
     <string name="action_rename">Rename</string>
     <string name="action_move">Move</string>
+    <!-- The exclude toggle (arc 17 / K2), notebooks only. One row, two labels — the Pin/Unpin
+         pattern: the label carries the state, the icon stays the same so the row never moves. -->
+    <string name="action_exclude_backup">Exclude from backup</string>
+    <string name="action_include_backup">Include in backup</string>
     <string name="action_delete">Delete</string>
     <string name="rename_title">Rename</string>
     <string name="rename_hint">Name</string>
@@ -236,6 +241,36 @@
     <string name="import_placement_choose">Choose folder…</string>
     <string name="import_name_title">Name already used</string>
     <string name="import_name_body">A notebook called \"%1$s\" is already in that folder. Replace it, or keep both?</string>
+
+    <!-- Backup (arc 17 / K2). Plain verbs, the user's phase-start call: the screen says what it
+         does and the status line says what happened last. A toast confirms a run that finished
+         cleanly; anything a run could not do is a dialog naming the counts — never a path, never a
+         secret. -->
+    <string name="backup_title">Backup</string>
+    <string name="backup_folder_caption">Backup folder</string>
+    <string name="backup_no_folder">No folder chosen</string>
+    <string name="backup_choose">Choose…</string>
+    <string name="backup_run">Back up now</string>
+    <string name="backup_status_never">Never backed up</string>
+    <string name="backup_status_last">Last backup: %1$s — %2$d copied, %3$d skipped</string>
+    <string name="backup_progress">Backing up… %1$d/%2$d</string>
+    <string name="backup_done_toast">Backed up — %1$d copied, %2$d skipped</string>
+    <string name="backup_no_folder_title">No backup folder</string>
+    <string name="backup_no_folder_body">Choose a folder to back up to first — nothing has been backed up.</string>
+    <string name="backup_folder_gone_title">Backup folder unavailable</string>
+    <string name="backup_folder_gone_body">That folder is no longer there, or Notesprout SN has lost access to it. Choose it again. Nothing was backed up and your notebooks are untouched.</string>
+    <string name="backup_locked_title">Library locked</string>
+    <string name="backup_locked_body">The library is locked. Unlock Notesprout SN, then back up again.</string>
+    <string name="backup_problem_title">Backup didn\'t finish</string>
+    <string name="backup_problem_body">%1$d copied, %2$d skipped, %3$d failed. %4$s\n\nYour notebooks are untouched, and anything that failed will be tried again next time.</string>
+    <string name="backup_index_copied">The library index was backed up.</string>
+    <string name="backup_index_failed">The library index was not backed up.</string>
+    <string name="backup_folder_failed_title">Couldn\'t use that folder</string>
+    <string name="backup_folder_failed_body">Notesprout SN could not keep lasting access to that folder. Choose it again — the backup folder has not been changed.</string>
+    <string name="backup_no_picker_title">No folder picker</string>
+    <string name="backup_no_picker_body">This device has no app for choosing a folder, so a backup folder cannot be chosen here.</string>
+    <string name="backup_excluded_toast">Excluded from backup</string>
+    <string name="backup_included_toast">Included in backup</string>
 
     <!-- Naming schemes (default notebook name) -->
     <string name="action_naming">Default notebook name…</string>

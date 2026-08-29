@@ -39,4 +39,9 @@ object ListIds {
      * between them would make every read filter by type to tell them apart.
      */
     const val TEMPLATE_PINNED_LIST_ID = "00000000-0000-0000-0000-7470696e6e64"
+
+    /** The single backup-config slot (arc 17 / K2): "backup" in hex (62 61 63 6b 75 70). One row,
+     *  the [CLIPBOARD_ID] pattern — upserted whole, never soft-deleted, invisible to every
+     *  type-filtered listing. */
+    const val BACKUP_ID = "00000000-0000-0000-0000-6261636b7570"
 }

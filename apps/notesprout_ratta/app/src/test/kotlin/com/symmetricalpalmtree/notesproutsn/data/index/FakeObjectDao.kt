@@ -28,6 +28,9 @@ class FakeObjectDao : ObjectDao {
             .filter { it.type == ObjectType.NOTEBOOK && it.deletedAt == null }
             .map { it.toSummary() }
 
+    override suspend fun allAliveNotebooks() =
+        rows.values.filter { it.type == ObjectType.NOTEBOOK && it.deletedAt == null }.map { it.toSummary() }
+
     override suspend fun searchOfType(type: String, pattern: String): List<ObjectSummary> {
         // The `%`/`_` wildcards and `\` escaping of a real LIKE, in the smallest form that keeps
         // `TemplateSearch.likePattern`'s output honest here — an escaped wildcard must match the
@@ -72,6 +75,11 @@ class FakeObjectDao : ObjectDao {
 
     override suspend fun touch(id: String, at: Long) {
         rows[id]?.let { rows[id] = it.copy(updatedAt = at) }
+    }
+
+    override suspend fun setFlags(id: String, flags: Int) {
+        // Deliberately no updatedAt — mirrors the real query (arc 17 / K2).
+        rows[id]?.let { rows[id] = it.copy(flags = flags) }
     }
 
     override suspend fun setPageCount(id: String, count: Int) {
@@ -123,6 +131,9 @@ class FakeObjectDao : ObjectDao {
     override suspend fun clipClear(id: String, at: Long) {
         rows[id]?.takeIf { it.type == "clipboard" }?.let { rows[id] = it.copy(deletedAt = at, blob = null) }
     }
+
+    override suspend fun backupBlob(id: String): ByteArray? =
+        rows[id]?.takeIf { it.type == "backup" }?.blob
 
     private fun ObjectEntity.toSummary() =
         ObjectSummary(id, type, name, parentId, createdAt, updatedAt, pageCount, flags, templateKind)

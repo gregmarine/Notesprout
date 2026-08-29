@@ -54,11 +54,28 @@ object ObjectType {
      * this type, and the library's own listing asks for [FOLDER].
      */
     const val TEMPLATE_FOLDER = "template_folder"
+
+    /**
+     * The backup configuration (arc 17 / K2) — one row at [ListIds.BACKUP_ID], the same additive
+     * row-type pattern as [CLIPBOARD] and for the same reason (the Room identity hash is the format
+     * contract with Paper).
+     *
+     * `name` = `"backup"` · `flags` = the config grammar version · `blob` = the
+     * [com.symmetricalpalmtree.notesproutsn.data.backup.BackupConfig] JSON, UTF-8 (the SAF tree
+     * URI, `lastRunAt`, and the per-notebook stamp map). Never soft-deleted; a corrupt blob reads
+     * as a fresh config, whose worst case is re-copying everything — the safe direction.
+     */
+    const val BACKUP = "backup"
 }
 
 /** Notebook `flags` bits. */
 object NotebookFlags {
     const val ENCRYPTED = 1
+
+    /** Arc 17 / K2 — "Exclude from backup" on the library long-press sheet. Format-safe: Paper
+     *  ignores unknown bits. Setting or clearing it never bumps `updatedAt` (policy, not content —
+     *  og's rule: a bump would re-flag the notebook the moment it was toggled). */
+    const val EXCLUDE_FROM_BACKUP = 2
 }
 
 /**

@@ -73,6 +73,13 @@
             android:exported="false"
             android:screenOrientation="portrait" />
 
+        <!-- Backup (arc 17 / K2). Reached only from the library's bottom bar; carries no extras —
+             the destination and every stamp live in the index's own backup row. -->
+        <activity
+            android:name=".backup.BackupActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
         <activity
             android:name=".library.FolderPickerActivity"
             android:exported="false"

@@ -4589,7 +4589,7 @@ scaffolds for it.
 | Arc shape | **Pure core — no extension involvement.** Local backup lives in `:app` (SAF destination, copy engine, state). Everything it touches is host-only by the standing seam rule anyway (keys, paths, the index). SN stays at **four** capability points; the Drive-extension question waits for its own arc and its own user decision. |
 | Restore | **Backup only this arc.** No whole-library restore. A single notebook is already recoverable via arc 16's Import (each backup file is a self-describing `.soil` with `notebook_meta`); whole-library restore becomes its own future arc. |
 | Purge policy | **Purge at every close.** `seal`-path compaction hard-deletes every soft-deleted row and vacuums when anything changed. Undo is in-memory and dies with the session, so a closed notebook's soft-deleted rows are unreachable by construction — from the user's view nothing changes except file size. og never purged user content; SN does, deliberately. |
-| Entry + trigger | **A dedicated Backup screen, manual only.** Off the library top bar (F2: actions on top bars): choose SAF folder, Back Up Now, last-run status. No automatic runs. |
+| Entry + trigger | **A dedicated Backup screen, manual only**: choose SAF folder, Back Up Now, last-run status. No automatic runs. ~~Off the library top bar~~ — **superseded at K2 phase start (user, 2026-08-28): the Backup button sits on the library BOTTOM bar, far left, and the Import button moves to sit right after it** — `[Backup] [Import*] … pager … [Templates] [⋯]`. |
 | Incremental | **og's D8 rule**: a notebook is copied when it has no stamp for the destination or `updatedAt > stamp`; a failed copy does not stamp and retries next run. Compaction and backup stamps never bump `updatedAt` (og's rule — a bump would re-flag the file just backed up). |
 | Exclude toggle | **Yes** — "Exclude from backup" in the library long-press sheet, stored as notebook `flags` bit 1 (`EXCLUDE_FROM_BACKUP = 2`; bit 0 is ENCRYPTED). A flags bit is format-safe — Paper ignores it. |
 | Per-device subfolder | **No.** Backups write to the chosen SAF tree directly (og's LOCAL shape). Debug builds write into a `dev/` subfolder — debug and release coexist on the Nomad and must not share a root. |
@@ -4673,7 +4673,21 @@ size shrinks, `Garden/` holds only `.soil` files after close; reopen intact; cra
 **Questions to resolve at phase start:** none — all locked above.
 
 ### K2 — Local backup: state, engine, screen
-**Status:** ⬜ Not started
+**Status:** 🔨 In progress (started 2026-08-28) — built (engine + screen + chrome), all JVM tests
+green both variants, release signed, Nomad walk 8/8 PASS (hand-driven — **walk trap: the debug
+package id is `….notesproutsn.dev`**; an agent pointed at the bare package walks the stale release
+install and reports the new code missing). Awaiting the user checklist (the SAF pick), then commit.
+One screen-level decision for the K3 review: **picking a different backup folder clears the stamp
+map** (stamps are statements about a destination; carrying them to a fresh folder would back up
+only the index there). `SafBackupWriter` is hand-rolled over platform `DocumentsContract` —
+`androidx.documentfile` is not on the classpath and new dependencies are banned.
+
+**Phase-start answers (user, 2026-08-28):** icon = **Tabler `device-floppy`** (drawn fresh as
+`ic_backup` in `:sn-screen`); position = **library bottom bar, far left**, with **Import moved to
+sit right after it** (`[Backup] [Import*] … pager … [Templates] [⋯]` — supersedes the wizard's
+"top bar" line, see the locked-decisions table); wording = **plain verbs**: screen title "Backup",
+section "Backup folder" + "Choose…", action "Back up now", status
+"Last backup: <date time> — N copied, N skipped" ("Never backed up" before the first run).
 
 `data/backup/`: `BackupConfig` (kotlinx JSON in the singleton `backup` row), `BackupPredicates`
 (og D8), `SafBackupWriter` (`.part` → rename), `BackupEngine` (work list → compact pass via

@@ -128,15 +128,48 @@
             android:textColor="@color/inkBlack" />
     </FrameLayout>
 
-    <!-- |< < n/n > >|                                                   [Templates] [debug ⋯] -->
+    <!-- [Backup] [Import*]           |< < n/n > >|                     [Templates] [debug ⋯] -->
     <!-- A FrameLayout, not a row: the pager is centred on the SCREEN, not on the space left over
-         beside the right-hand group — whose width differs between debug and release, since the ⋯
-         is only there in debug. -->
+         between the two groups — and neither group's width is a constant. The right one differs
+         between debug and release (the ⋯ is only there in debug) and the left one differs with
+         whether an importer extension is installed. Anything that must LOOK centred is a
+         FrameLayout child with layout_gravity="center"; centring by layout_weight is the F2 trap. -->
     <FrameLayout
         android:id="@+id/bottomBar"
         android:layout_width="match_parent"
         android:layout_height="@dimen/toolbar_bar_thickness"
         android:background="@drawable/toolbar_background_bottom">
+
+        <!-- Backup, then Import — the user's 2026-08-28 placement call. Both are things you do to
+             the library itself, so they lead the bar; the pager sits between them and Templates. -->
+        <LinearLayout
+            android:id="@+id/bottomLeft"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:layout_gravity="start"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <!-- Backup (arc 17 / K2). Always visible: backing up needs no extension — the engine,
+                 the SAF destination and the whole run are core. -->
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnBackup"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_backup"
+                android:contentDescription="@string/cd_backup" />
+
+            <!-- Import (arc 16 / I1), right after Backup — moved here from the right-hand group at
+                 K2 on the user's 2026-08-28 call. GONE unless a trusted importer extension is
+                 installed; ImportFlow owns it, re-discovering on every resume. Its counterpart,
+                 Export…, is a row on a notebook's long-press sheet: exporting is something you do
+                 *to* a notebook, importing is something you do to the library. -->
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnImport"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_import"
+                android:visibility="gone"
+                android:contentDescription="@string/cd_import" />
+        </LinearLayout>
 
         <LinearLayout
             android:id="@+id/pager"
@@ -190,18 +223,6 @@
             android:layout_gravity="end"
             android:orientation="horizontal"
             android:gravity="center_vertical">
-
-            <!-- Import (arc 16 / I1), before Templates — the user's placement call 2026-08-28.
-                 GONE unless a trusted importer extension is installed; ImportFlow owns it,
-                 re-discovering on every resume. Its counterpart, Export…, is a row on a
-                 notebook's long-press sheet: exporting is something you do *to* a notebook,
-                 importing is something you do to the library. -->
-            <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnImport"
-                style="@style/Widget.Notesprout.ToolbarButton"
-                android:src="@drawable/ic_import"
-                android:visibility="gone"
-                android:contentDescription="@string/cd_import" />
 
             <!-- Templates (arc 13) — the template library, the one screen behind every paper
                  decision. Always present: the three built-in papers need no extension and no data. -->
