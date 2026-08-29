@@ -4570,3 +4570,118 @@ uncommitted engine is a tree a fresh clone cannot resolve.
 | Ratta engine internals | `~/git/g-paper/gpaper-ratta/src/main/java/.../{RattaEngine,RattaPaperView,RattaInkMap,SupernoteInk}.kt` |
 | E-ink design system | root `CLAUDE.md` + `apps/notesprout_paper/paper-screen/src/main/res/values/` |
 | Icon vector recipe | `apps/notesprout_paper/app/src/main/res/drawable/ic_launcher_foreground.xml` (mirror it) |
+
+## Phases — Arc 17 "Backup" (planned 2026-08-28, wizard complete)
+
+**Local backup + database compaction.** Two joined halves on the user's 2026-08-28 direction:
+first the databases learn to clean up after themselves — every `.soil` close hard-deletes its
+soft-deleted rows and vacuums, sidecars never linger, the index purges too — and then a manual
+local backup (og's LOCAL slot reshaped for SN: SAF tree, incremental by timestamp, index last)
+copies those now-lean files out. og's `docs/backup.md` + `NotebookCompactor` are the reading
+references — no code copied. **Google Drive backup is explicitly deferred to a future effort as
+an extension** — that will be its own capability-point user decision then; nothing in this arc
+scaffolds for it.
+
+### Locked decisions (arc-17 wizard 2026-08-28 — do not re-ask)
+
+| Decision | Answer |
+|---|---|
+| Arc shape | **Pure core — no extension involvement.** Local backup lives in `:app` (SAF destination, copy engine, state). Everything it touches is host-only by the standing seam rule anyway (keys, paths, the index). SN stays at **four** capability points; the Drive-extension question waits for its own arc and its own user decision. |
+| Restore | **Backup only this arc.** No whole-library restore. A single notebook is already recoverable via arc 16's Import (each backup file is a self-describing `.soil` with `notebook_meta`); whole-library restore becomes its own future arc. |
+| Purge policy | **Purge at every close.** `seal`-path compaction hard-deletes every soft-deleted row and vacuums when anything changed. Undo is in-memory and dies with the session, so a closed notebook's soft-deleted rows are unreachable by construction — from the user's view nothing changes except file size. og never purged user content; SN does, deliberately. |
+| Entry + trigger | **A dedicated Backup screen, manual only.** Off the library top bar (F2: actions on top bars): choose SAF folder, Back Up Now, last-run status. No automatic runs. |
+| Incremental | **og's D8 rule**: a notebook is copied when it has no stamp for the destination or `updatedAt > stamp`; a failed copy does not stamp and retries next run. Compaction and backup stamps never bump `updatedAt` (og's rule — a bump would re-flag the file just backed up). |
+| Exclude toggle | **Yes** — "Exclude from backup" in the library long-press sheet, stored as notebook `flags` bit 1 (`EXCLUDE_FROM_BACKUP = 2`; bit 0 is ENCRYPTED). A flags bit is format-safe — Paper ignores it. |
+| Per-device subfolder | **No.** Backups write to the chosen SAF tree directly (og's LOCAL shape). Debug builds write into a `dev/` subfolder — debug and release coexist on the Nomad and must not share a root. |
+| Filenames | og's D5: `<notebookUuid>.soil` + `notesprout.db`. UUID names give replace-in-place identity; display names travel inside each file's `notebook_meta`. |
+| Backup state storage | **Additive row type** `backup` (the CLIPBOARD pattern — no schema change, no Room-hash break): one singleton row at a sentinel id, `blob` = `BackupConfig` JSON (`treeUri`, `lastRunAt`, per-notebook stamp map `notebookId → epochMs`). Stamps are written per successful copy; `lastRunAt` only when at least one destination action succeeded. |
+| Encrypted handling | Ciphertext byte-copy, never decrypt (og D10). SN is global-key-only and the raw key is cached post-unlock, so **every** notebook can be opened unattended for the compact pass — og's NOTEBOOK-scope skip has no SN equivalent. |
+| Phases | **Three: K1 compaction · K2 backup · K3 review/docs/freeze** (letter K unused). K1 is device-measurable on its own (file shrink); K2 rides the now-lean seal. |
+| Staffing | Fable plans + writes the compactor/seal ordering and the engine's index-last/atomicity seams; Opus the backup engine + screen; Sonnet chrome/resources/docs; Haiku the Nomad walks; ≤ 5 background agents. |
+
+### Arc-17 standing traps (assume they apply)
+
+- **`updatedAt` is sacred both ways**: compaction, stamps, and the exclude toggle must never bump
+  it (og's rule — it is the library sort key AND the needs-backup flag; bumping re-flags forever).
+  Purge only deletes rows; it rewrites nothing live.
+- **VACUUM, not `incremental_vacuum`, when rows changed** (og's measured finding): freed-value
+  fragmentation is not returned by incremental. `auto_vacuum=INCREMENTAL` is only set on files SN
+  *created* — an imported/re-keyed file may not have it, so the full VACUUM is also the only form
+  that works fleet-wide. VACUUM preserves SQLCipher encryption. Issue it only when a purge
+  actually deleted something.
+- **Never delete a non-empty `-wal`.** Sidecar hygiene may remove a zero-length `-wal` and its
+  `-shm` after a clean close; a non-empty one after a failed checkpoint is live data — og's rule:
+  it is *copied alongside* the `.soil` at backup, and a stale destination sidecar is deleted when
+  the WAL was absorbed (a fresh `.soil` + old `-wal` corrupts on restore).
+- **The purge must not touch template rows** (arc 13: nothing ever soft-deletes a template, and
+  reuse-before-mint depends on them persisting) — purging `deletedAt IS NOT NULL` can't reach
+  them, and the orphan sweep must exempt them by type. Index sentinels are not rows and the
+  CLIPBOARD row is never soft-deleted; a purge of soft-deleted index rows can't reach either, but
+  any *orphan*-style sweep must exempt sentinel-parented shapes by name (the arc-13 prune trap).
+- **A revived-row path exists**: `createNotebook`/import Replace revive a soft-deleted index row
+  in place. Purging soft-deleted index rows makes those paths take their fresh-create branch —
+  verify both tolerate the row being gone.
+- **Seal never throws** — the compactor rides inside that contract: purge/VACUUM failures log and
+  fall through to checkpoint+close; a compaction bug must never cost a save or strand a
+  `SoilOpenFiles` claim.
+- **Backup copies only sealed files**: a `SoilOpenFiles`-held notebook is skipped-and-counted,
+  never copied live (the arc-15 double-seal lesson).
+- **Index snapshot before streaming** (og step 6): checkpoint+vacuum the index, snapshot to a
+  local temp, **probe the snapshot**, then stream — a torn copy of the live index is worse than
+  no backup. Fall back to streaming the live file only if the snapshot fails.
+- **A SAF pick cannot be driven by adb** — the folder pick is a user checklist item; agents
+  verify up to the picker and inspect the destination tree afterwards via shell.
+- **SAF writes stream to `.part` then rename** (og): a torn write never replaces a good backup.
+
+### K1 — Compaction: clean at rest
+**Status:** ⬜ Not started
+
+`data/soil/SoilCompactor`: hard-delete every `deletedAt IS NOT NULL` row, then a cascading
+orphan sweep (rows whose parent no longer exists — template rows exempt by type), then `VACUUM`
+iff anything was deleted. Wired into the notebook close path (`NotebookSession` seal) and
+callable standalone (K2's compact pass). Sidecar hygiene after close: delete a zero-length
+`-wal` + `-shm` (never a non-empty `-wal`); `seal()` already removes an empty `-journal`.
+Index side: purge soft-deleted `objects` rows + `deleteEdgesTo` leftovers, checkpoint, VACUUM —
+run from K2's backup run and opportunistically at bootstrap when soft-deleted rows exist.
+`updatedAt` untouched everywhere. **JVM tests:** purge/orphan/exempt behavior over real fixture
+DBs (the arc-16 remap-test pattern), revived-row paths tolerate purged rows, sidecar-hygiene
+decision table.
+**Gate:** JVM tests green; Haiku Nomad walk: write + delete pages/ink → close → pull the file —
+size shrinks, `Garden/` holds only `.soil` files after close; reopen intact; crash buffer empty.
+*Fable the compactor + seal ordering; Opus the wiring; Haiku the walk.*
+
+**Questions to resolve at phase start:** none — all locked above.
+
+### K2 — Local backup: state, engine, screen
+**Status:** ⬜ Not started
+
+`data/backup/`: `BackupConfig` (kotlinx JSON in the singleton `backup` row), `BackupPredicates`
+(og D8), `SafBackupWriter` (`.part` → rename), `BackupEngine` (work list → compact pass via
+`SoilCompactor` → copy + per-success stamp → index purge/checkpoint/vacuum → snapshot + probe →
+index copy last → `lastRunAt`). `BackupActivity` off the library top bar: choose folder
+(persistable read+write URI), Back Up Now (AtomicBoolean-guarded, progress dialog, honest
+per-count summary — toast confirms, dialog explains), last-backup line. Library long-press sheet
+gains "Exclude from backup" / "Include in backup" (flags bit 1, no `updatedAt` bump). Debug
+builds write to `dev/`. **JVM tests:** predicate table, config round-trip, stamp-map semantics
+(failed copy never stamps), work-list math, filename scheme.
+**Gate:** JVM tests green; build both variants; Haiku walk up to the picker + post-run tree
+inspection via shell; **user checklist**: pick a folder (SAF), first run copies all + index,
+second run copies none, edit one notebook → only it re-copies, exclude flag honored, backup of
+an open-elsewhere notebook skipped-and-counted.
+*Fable the engine's ordering/atomicity seams; Opus engine + screen; Sonnet chrome/strings/icon;
+Haiku the walk.*
+
+**Questions to resolve at phase start:** the Backup button's icon + exact top-bar position;
+screen section wording.
+
+### K3 — Review, docs, freeze
+**Status:** ⬜ Not started
+
+Arc-range `/code-review` (level asked at phase start), fixes triaged with the user. Docs:
+`docs/backup.md` NEW (feature reference: the screen, the engine ordering, the compaction story,
+failure table), `docs/library.md` (button + sheet row), `docs/notebook.md` (seal-time compaction
+note), both `CLAUDE.md`s, root `CLAUDE.md` arc record, memory. No boundary-audit rows — no seam
+touched (pure core, locked above). Version stamp question to the user; freeze.
+**Gate:** review findings resolved; docs in; user all-clear; statuses flipped.
+
+**Questions to resolve at phase start:** review level; version stamp.
