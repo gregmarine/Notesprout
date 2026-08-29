@@ -58,6 +58,14 @@ class FolderPickerActivity : AppCompatActivity() {
     /** The folder being moved — hidden from every listing. Empty when moving a notebook. */
     private var excludeId = ""
 
+    /**
+     * **Pick-only** (arc 16 / I1): walk the same tree, but answer with the folder instead of moving
+     * anything into it. The import's "Choose folder…" has nothing to move yet — the notebook does
+     * not exist until the import commits — and it asks its own name-conflict question afterwards,
+     * so the collision checks below stand down and the id comes back in the result.
+     */
+    private var pickOnly = false
+
     private var pageIndex = 0
     private var pageCount = 1
 
@@ -84,6 +92,12 @@ class FolderPickerActivity : AppCompatActivity() {
         currentFolderId = intent.getStringExtra(EXTRA_CURRENT_PARENT)
         browseFolderType = intent.getStringExtra(EXTRA_BROWSE_FOLDER_TYPE) ?: ObjectType.FOLDER
         rootLabel = intent.getStringExtra(EXTRA_ROOT_LABEL) ?: getString(R.string.library_root)
+        pickOnly = intent.getBooleanExtra(EXTRA_PICK_ONLY, false)
+        if (pickOnly) {
+            // The verb is the whole difference the user sees: "Move here" would promise something
+            // this screen is not about to do.
+            binding.btnMoveHere.setText(R.string.import_here)
+        }
         // A folder being moved is hidden from every listing, so its own subtree can never be
         // entered. A notebook or a template carries nothing with it and hides nothing.
         excludeId = if (movingType == browseFolderType) movingId else ""
@@ -131,7 +145,9 @@ class FolderPickerActivity : AppCompatActivity() {
             val ancestry = repo.ancestry(currentFolderId, browseFolderType)
             val container = binding.breadcrumbContainer
             container.removeAllViews()
-            container.addView(label(getString(R.string.move_title), ink))
+            container.addView(
+                label(getString(if (pickOnly) R.string.import_to_title else R.string.move_title), ink)
+            )
             container.addView(crumb(rootLabel, ink) { navigateTo(null) })
             for (ref in ancestry) {
                 if (ref.id == excludeId) continue
@@ -205,6 +221,13 @@ class FolderPickerActivity : AppCompatActivity() {
     }
 
     private fun moveHere() {
+        if (pickOnly) {
+            // Nothing to check and nothing to write: the caller owns the collision question, and it
+            // cannot even ask it until it knows which folder was chosen.
+            setResult(Activity.RESULT_OK, Intent().putExtra(EXTRA_PICKED_FOLDER_ID, currentFolderId))
+            finish()
+            return
+        }
         lifecycleScope.launch {
             // The reserved templates-root name, checked here as well as on create, rename and
             // import. `nameTaken` cannot see it: **Default is not a row**, it is a hardcoded card,
@@ -259,6 +282,10 @@ class FolderPickerActivity : AppCompatActivity() {
         private const val EXTRA_CURRENT_PARENT = "currentParent"
         private const val EXTRA_BROWSE_FOLDER_TYPE = "browseFolderType"
         private const val EXTRA_ROOT_LABEL = "rootLabel"
+        private const val EXTRA_PICK_ONLY = "pickOnly"
+
+        /** The chosen folder id in a [pickIntent] result — absent (null) means the library root. */
+        const val EXTRA_PICKED_FOLDER_ID = "pickedFolderId"
 
         fun intent(
             context: Context,
@@ -275,5 +302,19 @@ class FolderPickerActivity : AppCompatActivity() {
             .putExtra(EXTRA_CURRENT_PARENT, currentParent)
             .putExtra(EXTRA_BROWSE_FOLDER_TYPE, browseFolderType)
             .putExtra(EXTRA_ROOT_LABEL, rootLabel)
+
+        /**
+         * The same screen, asked for an answer instead of a move (arc 16 / I1). `RESULT_OK` carries
+         * [EXTRA_PICKED_FOLDER_ID]; a cancel carries nothing. Nothing is written here — the caller
+         * does its own placing, and its own name-conflict question.
+         */
+        fun pickIntent(context: Context, startInFolder: String? = null): Intent =
+            Intent(context, FolderPickerActivity::class.java)
+                .putExtra(EXTRA_ITEM_ID, "")
+                .putExtra(EXTRA_ITEM_TYPE, ObjectType.NOTEBOOK)
+                .putExtra(EXTRA_ITEM_NAME, "")
+                .putExtra(EXTRA_CURRENT_PARENT, startInFolder)
+                .putExtra(EXTRA_BROWSE_FOLDER_TYPE, ObjectType.FOLDER)
+                .putExtra(EXTRA_PICK_ONLY, true)
     }
 }

@@ -65,6 +65,62 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
         return row
     }
 
+    // ── Import (arc 16 / I1) ─────────────────────────────────────────────────
+
+    /**
+     * Create a folder **under an id the caller chose** — the "Notebook's folders" pass, and the one
+     * write in this class that is *create-only by construction*: if anything at all already holds
+     * [id] — a live folder, a soft-deleted one, a notebook, a list — nothing is written and this
+     * answers false. An imported ancestry can therefore never resurrect, rename or move the user's
+     * own folders; the planner ([com.symmetricalpalmtree.notesproutsn.importing.AncestryPlan]) has
+     * already decided the same thing, and this is the backstop that makes it true even if it had
+     * not.
+     */
+    suspend fun createFolderWithId(
+        id: String,
+        name: String,
+        parentId: String?,
+        now: Long = System.currentTimeMillis(),
+    ): Boolean {
+        if (dao.byId(id) != null) return false
+        dao.upsert(
+            ObjectEntity(
+                id = id, type = ObjectType.FOLDER, name = name, parentId = parentId,
+                createdAt = now, updatedAt = now,
+            )
+        )
+        return true
+    }
+
+    /**
+     * Write the index row for a notebook whose `.soil` is **already in the Garden and verified** —
+     * the last step of an import, and deliberately the last: a crash before it leaves the library
+     * exactly as it was (og's step 9 → 10 ordering).
+     *
+     * Under a fresh id this inserts; under an id the user already had (an id-collision *Replace*)
+     * it rewrites that row in place, keeping its `createdAt` and reviving it if it had been
+     * soft-deleted. The cover always goes to null: the pixels in the row describe the notebook that
+     * used to be behind this id, and the first open/close cycle seeds a true one.
+     */
+    suspend fun importNotebookRow(
+        id: String,
+        name: String,
+        parentId: String?,
+        pageCount: Int,
+        createdAt: Long,
+        updatedAt: Long,
+    ): ObjectEntity {
+        val existing = dao.byId(id)
+        val row = ObjectEntity(
+            id = id, type = ObjectType.NOTEBOOK, name = name, parentId = parentId,
+            createdAt = existing?.createdAt ?: createdAt, updatedAt = updatedAt, deletedAt = null,
+            pageCount = pageCount, flags = NotebookFlags.ENCRYPTED, keyScope = KEY_SCOPE_GLOBAL,
+            templateKind = existing?.templateKind, blob = null,
+        )
+        dao.upsert(row)
+        return row
+    }
+
     // ── Edit ─────────────────────────────────────────────────────────────────
 
     suspend fun rename(id: String, name: String, now: Long = System.currentTimeMillis()) = dao.rename(id, name, now)

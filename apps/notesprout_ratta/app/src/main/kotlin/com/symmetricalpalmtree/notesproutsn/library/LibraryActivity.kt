@@ -36,6 +36,7 @@ import com.symmetricalpalmtree.notesproutsn.databinding.ActivityLibraryBinding
 import com.symmetricalpalmtree.notesproutsn.export.ExportActivity
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionRegistry
 import com.symmetricalpalmtree.notesproutsn.extension.ScratchPadEntry
+import com.symmetricalpalmtree.notesproutsn.importing.ImportFlow
 import com.symmetricalpalmtree.notesproutsn.notebook.NotebookActivity
 import com.symmetricalpalmtree.notesproutsn.templates.TemplatesActivity
 import kotlinx.coroutines.Dispatchers
@@ -68,6 +69,10 @@ class LibraryActivity : AppCompatActivity() {
     private val repo by lazy { IndexRepository() }
     /** The Scratch Pad's entry button (arc 11) — GONE unless a trusted extension is installed. */
     private lateinit var scratchPad: ScratchPadEntry
+
+    /** Import (arc 16) — the top bar's Import button and the whole pipeline behind it. GONE unless
+     *  a trusted importer extension is installed. */
+    private lateinit var importFlow: ImportFlow
 
     private var folderId: String? = null
     private var pageIndex = 0
@@ -133,6 +138,19 @@ class LibraryActivity : AppCompatActivity() {
         scratchPad = ScratchPadEntry(activity = this, button = binding.btnScratchPad)
         binding.btnScratchPad.setOnClickListener { scratchPad.open() }
         TooltipCompat.setTooltipText(binding.btnScratchPad, binding.btnScratchPad.contentDescription)
+        // Import (arc 16 / I1). Built here for the same reason as the pad: it registers two
+        // ActivityResult launchers (the document picker and the folder picker), and one may not be
+        // registered after STARTED.
+        importFlow = ImportFlow(
+            activity = this,
+            repo = repo,
+            button = binding.btnImport,
+            currentFolder = { folderId },
+            retireNotebook = { id -> retireNotebook(id) },
+            onImported = { refresh() },
+        )
+        binding.btnImport.setOnClickListener { importFlow.onTap() }
+        TooltipCompat.setTooltipText(binding.btnImport, binding.btnImport.contentDescription)
         DebugMenu.install(this, binding.bottomRight)
 
         // The grid cannot be sized until the band it lives in has been laid out.
@@ -162,6 +180,7 @@ class LibraryActivity : AppCompatActivity() {
         // Re-discovered on every resume: a package can be disabled or replaced under us. Guarded
         // because an IndexGuard bounce returns from onCreate but still gets this callback.
         if (::scratchPad.isInitialized) scratchPad.refresh()
+        if (::importFlow.isInitialized) importFlow.refresh()
         if (gridMeasured) lifecycleScope.launch { refresh() }
     }
 
@@ -503,9 +522,12 @@ class LibraryActivity : AppCompatActivity() {
         lifecycleScope.launch { bindCurrentPage() }
     }
 
-    /** Back peels one layer at a time: out of a mode, then up a folder, then out of the app. */
+    /** Back peels one layer at a time: out of a mode, then up a folder, then out of the app —
+     *  except while an import runs, when it does not peel at all (a Binder call cannot be
+     *  cancelled, so leaving would abandon the flow past its verification and cleanup). */
     @Suppress("OVERRIDE_DEPRECATION")
     override fun onBackPressed() = when {
+        ::importFlow.isInitialized && importFlow.isImporting -> importFlow.showBusyGuard()
         mode != BrowseMode.NORMAL -> setMode(BrowseMode.NORMAL)
         folderId != null -> navigateUp()
         else -> @Suppress("DEPRECATION") super.onBackPressed()
@@ -685,6 +707,18 @@ class LibraryActivity : AppCompatActivity() {
     }
 
     /**
+     * Retire a notebook that an import replaced (arc 16 / I1) — **the library's own delete**, not a
+     * second one: same soft delete, same recents scrub, same file purge, so a replaced notebook goes
+     * exactly where a deleted one goes and nothing about it is special-cased. Called only after the
+     * import has fully committed; cancelling anywhere earlier never reaches it.
+     */
+    private suspend fun retireNotebook(id: String) {
+        repo.deleteNotebook(id)
+        recentsPrefs.remove(id)
+        withContext(Dispatchers.IO) { purgeNotebookFile(id) }
+    }
+
+    /**
      * The file half of a delete. The index row is soft-deleted (and its pinned edges scrubbed) by
      * the repository; the bytes are a hard delete — file, SQLite sidecars, and the cached raw key,
      * which must go or a future notebook that happened to reuse the id would be opened with a key
@@ -733,9 +767,15 @@ class LibraryActivity : AppCompatActivity() {
         lifecycleScope.launch { refresh() }
     }
 
-    /** Observer only — the grid's cards keep every tap and long-press (see [ListSwipe]). */
+    /**
+     * Observer only — the grid's cards keep every tap and long-press (see [ListSwipe]).
+     *
+     * Except under an import: the overlay swallows taps at the *view* level, but dispatch reaches
+     * this observer first, so a swipe would flip the grid — an EPD frame under a box that says the
+     * app is busy — behind it.
+     */
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        listSwipe.onTouchEvent(ev)
+        if (!(::importFlow.isInitialized && importFlow.isImporting)) listSwipe.onTouchEvent(ev)
         return super.dispatchTouchEvent(ev)
     }
 

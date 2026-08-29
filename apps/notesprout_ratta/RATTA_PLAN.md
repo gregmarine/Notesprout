@@ -4313,6 +4313,157 @@ regression walk.*
 
 ---
 
+## Phases — Arc 16 "Import" (planned 2026-08-28, wizard complete)
+
+**Notebook import — the reverse of arc 15, riding the same seam.** A `.soil` export (any of the
+three keyings) comes back in through a library top-bar **Import** button → SAF `OPEN_DOCUMENT` →
+og's pipeline reshaped for SN: probe → (unlock if foreign) → **always re-key to this device's
+global key** → placement/collision (og's full shape, including the E3 remap job) → Garden + index →
+toast. og's `docs/full-notebook-export.md` § Import is the reading reference — no code copied.
+
+**This is SN's FOURTH capability point, on the user's explicit 2026-08-28 decision** — exactly the
+fresh user decision the standing rule demands. I1 amends `apps/notesprout_ratta/CLAUDE.md`
+accordingly (four points; no FIFTH without another user decision; still six modules — `:ext-soil`
+serves both directions).
+
+### Locked decisions (arc-16 wizard 2026-08-28 — do not re-ask)
+
+| Decision | Answer |
+|---|---|
+| The point | **A generic importer point**, `ACTION_NOTEBOOK_IMPORTER` (SN-namespaced), mirroring the exporter exactly: any number of trusted importer extensions may register; each `describe()`s the formats it accepts (label, extensions, MIME); `import(source fd, destination fd, spec)` streams the picked document into the host's cache. **The host keys, the extension delivers** — probe, unlock, re-key, placement, remap, Garden and index writes are all host-side; the extension only ever streams bytes between two granted fds. |
+| Identity | **Label stays `NSE · Soil Export`** (user's call — no rename). `:ext-soil` grows a second service (`SoilImporterService`); module and package untouched; still six modules. |
+| Entry point | **The library top-bar Import button only** (F2 chrome), GONE when no trusted importer is installed (discovery at every `onResume`, same gating rule as the Export… row). SAF `ACTION_OPEN_DOCUMENT` (`application/octet-stream` + `*/*` — og's filter). No open-with / share-to intent filters this arc. |
+| Keying | **Every accepted import is re-keyed to this device's global key — no chooser.** Plaintext → encrypt-to-global; foreign passphrase (another device's GLOBAL export or a NOTEBOOK re-keyed export) → prompt (AttemptLimiter `"IMPORT"` bucket), verify, re-key; a file the global passphrase already opens (same-device Keep) → pure copy. All via `ExportKeying`'s export-and-key mechanism generalised (`PRAGMA rekey` stays banned); `user_version` copied by hand + re-verified; `notebook_meta` restamped `encrypted:true` / `keyScope:GLOBAL`; nothing accepted without probing as its claimed kind + `integrity_check` = ok. |
+| Placement / collisions | **og's full shape.** Id collision (live index row) → **Replace existing / Keep both / Cancel**; Keep both = fresh UUID + **in-file remap** (the E3 finding: pages are parented to the notebook id — re-point every row whose `parentId` is the old id, the notebook row's own id, any link payload targeting the old id, and `notebook_meta.notebookId`). Placement → **"Notebook's folders"** (create-only ancestry recreation from `folderPath` — never mutate an existing folder; a blocked segment stops the descent one level up) or **"Choose folder…"** (`FolderPickerActivity`). Name conflict in the target folder → Replace / Keep both (" Copy"). Replace retires the old notebook only **after** the import fully commits, and refuses if the file is held (`SoilOpenFiles`). |
+| Untrusted manifest | Every id read from `notebook_meta` is validated (UUID alphabet only — og's `isSafeImportId`) before use as a `soilFile()` path or index key; a non-UUID id falls back to a fresh UUID (which forces the remap pass). A file with no `notebook` table is rejected at probe; missing `notebook_meta` imports under the picked file's display name at the chosen folder. |
+| Post-import | **Toast + stay in library** (og's shape; create-opens, import-doesn't). The toast names the target folder when it is not the current one. No cover until the first open/close cycle seeds `CoverSnapshot` (an encrypted export carries `cover: null` by family rule). |
+| Failure honesty | Arc-15's rules carry over verbatim: toast confirms / dialog explains; the import cache (`cacheDir/import/`, wiped per import) is the only thing a failure may delete — Garden and the index are written last, only after acceptance; never-delete-on-corruption covers the temp. Busy-latch both doors while an import runs (a Binder call cannot be cancelled). |
+| Timeouts | `DESCRIBE_TIMEOUT_MS` 3 s and `IMPORT_TIMEOUT_MS` 120 s — the export measurements (Nomad flash ~525 MB/s) transfer directly; the stream is the same copy in the other direction. |
+| Staffing | **Fable writes the seams** (the importer AIDL contract + parcelables, the import keying transform, the remap pass); Opus the pipeline/screen wiring and `:ext-soil`'s service; Sonnet chrome/resources/parcelable boilerplate/docs; Haiku the Nomad walks; ≤ 5 background agents. |
+| Arc shape | **Two phases I1–I2** (phase letter I, unused in SN): I1 everything functional end to end, I2 review + boundary audit + docs + freeze. Each ends green. |
+
+### Arc-16 standing traps (assume they apply)
+
+- **A SAF pick cannot be driven by adb** (G4, verbatim): every path through the picker is a user
+  checklist item; agents verify up to the picker and inspect pulled results after.
+- **`sqlcipher_export` drops `PRAGMA user_version`** — the import transforms copy it by hand and
+  re-verify from the finished file, exactly as `ExportKeying` does.
+- **A fresh-UUID import cannot open without the remap** (the E3 round-trip finding):
+  `NotebookSession` queries pages by the index notebook id; an un-remapped Keep-both import is a
+  notebook that opens empty. The remap is in-file, before the Garden copy, and covers link payloads.
+- **The incoming file is untrusted bytes**: probe before anything, validate every id, and the
+  acceptance opens use the no-op corruption handler (the framework default **deletes** the file).
+- **Only marshalable exceptions cross the point**; caller check first in every stub method, and
+  **inside** the try whose `finally` closes the fds (the E1 trap).
+- **Supernote swallows `adb shell input text`** — the foreign-passphrase prompt is typed by the
+  user; agents verify presence via uiautomator only.
+- **Index write ordering**: the index row lands only after the Garden copy is verified in place —
+  a crash mid-import must leave the library exactly as it was (og's step 9 → 10 ordering).
+- Passphrases never in Intent extras, never logged, never in the spec map; the Ratta IME rule
+  applies to the prompt.
+
+### I1 — The importer point + the whole pipeline (all keyings, placement, remap)
+**Status:** 🧪 Awaiting user checklist (code complete 2026-08-28; JVM tests + debug/release builds
+green; installed on SNN; Haiku walk effectively **10/10** — its two FAILs were both walk artifacts,
+refuted by hand: (6) the gating flip *does* work, 1 → 0 → 1 across real pause/resume cycles — the
+agent re-`am start`ed onto an **already-resumed** activity, which fires no `onResume` and so no
+discovery (new device-walk trap: HOME first, then relaunch; and even the stale button's tap got the
+designed "Nothing to import with" dialog); (7) the "missing" Export… row was checked **while the
+agent's own step 6 still had `:ext-soil` disabled** (its re-enable was permission-blocked) — with
+the extension re-enabled the sheet shows Export… again. Crash buffer empty, no lingering binds,
+picker opens/cancels/re-arms cleanly.)
+
+**User checklist ✅ 2026-08-28 — all items passed**: all three export keyings imported back
+(same-device Keep with no prompt; plain; re-keyed with wrong-then-right passphrase), Replace and
+Keep-both both proven, placement both ways, folder-naming toast. **Post-checklist polish, all
+user-directed and device-verified**: ① `ic_import` redrawn on the `ic_notebook_plus` recipe
+(notebook + input arrow in the corner notch — the Tabler file-import glyph said "a file");
+② **one Keep-both answer is one answer** — after Keep both at the id-collision dialog, a name
+clash takes the first free `… Copy N` silently instead of asking Replace/Keep-both again (the
+second dialog was redundant, and Replace there would have deleted the notebook just kept; the
+name dialog remains for the never-asked case, a foreign notebook clashing by name alone);
+③ the folder picker's **Move here / Import here button moved to the top bar after Cancel**
+(bottom bar pager-only — the F2 rule; saved to memory as standing guidance for confirm actions);
+④ the library's **Import button moved to the bottom-right group, just before Templates**
+(order: Import · Templates · debug ⋯ — the user's placement call; `bottomBar` is a FrameLayout so
+the pager stays screen-centred regardless).
+
+**Outcome so far.** The fourth point is live in code end to end. `:extension-api` grew
+`INotebookImporter` (method `importDocument` — `import` is a Java keyword) + `ImporterContract`
+(caps and timeouts shared with `ExporterContract` by reference) + three constructor-validated
+parcelables (`ImporterInfo` label/extensions/MIMEs · `ImportSpec` empty-map + display name, crossing
+now because an AIDL method cannot grow parameters later · `ImportResult` bytes). Fable wrote the
+seams: the contract, `crypto/ImportKeying` (export-and-key to the global key, destination always
+primary, `user_version` copied + re-verified, meta restamped GLOBAL, integrity-checked acceptance,
+deletes only its own unaccepted sibling; same-key files pass through untouched) and
+`data/soil/NotebookRemap` (one transaction: root row id, every `parentId = old`, link payloads
+targeting the old id — own-page `KIND_PAGE` links carry no notebook id and survive free — and the
+meta's `notebookId`; pure `remapLinkPayload` JVM-pinned). Opus built the pipeline: `:ext-soil`'s
+`SoilImporterService` (same APK, same label — one package, two directions), `ExtensionRegistry.importers()`,
+`ImporterClient`, the library's top-bar Import button (discovery per onResume, GONE never disabled),
+and `importing/` — `ImportFlow` (SAF OPEN_DOCUMENT with the importers' MIME union + `*/*`,
+extension-matched importer choice with the arc-15 collapse rule, delivery byte-verify as
+corroboration-not-authority, probe → device-key-first unlock with the `"IMPORT"` `AttemptLimiter`
+bucket, the three questions, index-last commit, honest toast naming a non-current folder) +
+`NotebookImport` (cache hygiene, untrusted manifest via `SafeImportId`, **staged-rename Garden
+write** via new `soilStagingFile` — an id-collision Replace whose copy dies half-way can never
+leave the user's existing notebook in pieces — key-cache invalidation, one-door meta refresh) +
+pure `ImporterMatch` / `ImportNames` / `AncestryPlan` (create-only, **soft-deleted folders BLOCK
+rather than revive** — tightened from og; ` Copy N` numbering past og's single ` Copy`).
+`FolderPickerActivity` gained a pick-only mode; `IndexRepository` grew `createFolderWithId`
+(create-only by construction) + `importNotebookRow` (in-place rewrite for an id-collision Replace —
+the resolved id *is* that row, so it is rewritten, not retired; the **name**-conflict Replace is
+the one that retires, after commit, via the library's own delete). Both `CLAUDE.md` amendments in
+(four points, no fifth). 890 JVM tests; debug + release build. **The E1 raw-NUL file-tool trap
+fired twice more** (`ImportSpec.kt`, `ImportSpecTest.kt`/`ImportNames.kt`) — byte-scan for `\x00`
+before calling any phase done. Remaining for the gate: install on SNN, Haiku walk (button gating
+via `pm disable-user`/`enable`, dialogs up to the picker, relaunch, crash buffer, binds = unbinds),
+and the user checklist (all three export keyings imported back, Replace + Keep-both proven).
+
+Contract (`:extension-api`, mirroring the exporter): `INotebookImporter.aidl` —
+`ImporterInfo describe()` + `ImportResult import(in ParcelFileDescriptor source, in
+ParcelFileDescriptor destination, in ImportSpec spec)` — with `ImporterInfo` (label, accepted
+extensions, MIME), `ImportSpec` (bounded id → value map + display name, empty this arc — the
+AIDL cannot grow methods later, so the spec crosses now), `ImportResult` (bytes written),
+`requireValid` in every constructor, `ImporterContract` (action, caps shared with
+`ExporterContract`'s values, timeouts). `:ext-soil`: `SoilImporterService` — caller check, streamed
+64 KiB copy, fsync, byte count (the exporter's stream in the other direction). Host:
+`<queries>` entry, `ExtensionRegistry.importers()`, `ImporterClient` (call-shaped, fd close in
+`finally`), the library top-bar Import button (gated by discovery), SAF `OPEN_DOCUMENT` →
+`cacheDir/import/` (wiped per import) ← the extension streams into it → probe →
+global-passphrase-first unlock (prompt only when the global key does not open it; AttemptLimiter
+`"IMPORT"`) → `ImportKeying` (crypto/, beside `ExportKeying` — encrypt-to-global · rekey-to-global
+· pure copy) → manifest read + id validation → collision / placement / name-conflict dialogs →
+remap when the id is fresh → Garden write (`soilFile`, sidecars cleared) → index row
+(`importNotebookRow` / create-only `ensureFolderWithId`) → best-effort meta refresh → toast.
+App `CLAUDE.md` amended: **four points**, no fifth without a user decision.
+**Gate:** JVM tests (parcelable round trips + `requireValid` rejections, contract pins, id
+validation, remap over a real fixture file, keying acceptance where JVM-able); all six modules
+build debug + release; Haiku Nomad walk (button gating via `pm disable-user`/`enable`, dialogs up
+to the picker, relaunch restore, crash buffer, binds = unbinds); **user checklist** (real imports
+of all three export keyings, Replace and Keep-both both proven — the round trip arc 15 could not
+finish).
+*Fable the contract + `ImportKeying` + remap; Opus the pipeline, dialogs and `:ext-soil` service;
+Sonnet the button chrome, strings, icon and parcelable boilerplate; Haiku the walk.*
+
+### I2 — Review, boundary audit, docs, freeze
+**Status:** ⬜ Not started
+
+Arc-range `/code-review` (level asked at phase start; the range is the arc). Boundary-audit rows
+for the fourth point walked into `docs/extensions.md` (outward: two fds + an empty bounded spec;
+inward: `ImporterInfo`/`ImportResult` caps; the unlock passphrase's host-side lifecycle). Docs:
+**`docs/import.md` new** (the feature — entry, pipeline, keying table, remap, failure table),
+`docs/extensions.md` grown (four points), `docs/library.md` (the button), both `CLAUDE.md`s,
+memory, monorepo `BACKLOG.md` ledger. Full regression (JVM + Haiku walk + short user checklist);
+version-stamp decision; commit + push; **arc freeze**.
+**Gate:** everything green or explicitly accepted; user all-clear.
+*Review as `/code-review`; fixes to the right model per finding; Sonnet the doc pass; Haiku the
+regression walk.*
+
+**Questions to resolve at phase start:** review level; version stamp.
+
+---
+
 ## Verification (end of arc)
 
 1. All JVM unit tests green (`./gradlew test` in `apps/notesprout_ratta`).

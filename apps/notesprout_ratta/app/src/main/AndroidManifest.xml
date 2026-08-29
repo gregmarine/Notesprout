@@ -4,7 +4,7 @@
     <!-- The readiness flow's offline pre-check (ML Kit's model download hangs silently offline). -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-    <!-- Package-visibility for SN's three extension points (API 30+ filtering). The scratch pad
+    <!-- Package-visibility for SN's four extension points (API 30+ filtering). The scratch pad
          needs both: the service to discover and bind, the screen to resolve and launch for a
          result. -->
     <queries>
@@ -19,6 +19,9 @@
         </intent>
         <intent>
             <action android:name="com.symmetricalpalmtree.notesproutsn.extension.NOTEBOOK_EXPORTER" />
+        </intent>
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesproutsn.extension.NOTEBOOK_IMPORTER" />
         </intent>
     </queries>
 

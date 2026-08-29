@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The import's one line of running commentary (arc 16 / I1) — a centred bordered box over the
+  library while an import is in flight. The stages are long enough on e-ink that a single unchanging
+  word would read as a stall, which is why the text has an id: `ImportOverlay` rewrites it as the
+  pipeline moves (Reading… → Unlocking… → Importing… → Finishing…).
+
+  The root is full-screen but transparent, clickable and focusable: it exists to swallow the second
+  tap a slow e-ink refresh invites while leaving the library visible underneath, so only the box's
+  region repaints. It is not a dialog — a dialog explains why something did not happen, and this
+  says that something is happening.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:clickable="true"
+    android:focusable="true"
+    android:background="@android:color/transparent">
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:orientation="vertical"
+        android:background="@drawable/shape_dialog_bordered"
+        android:padding="24dp">
+
+        <TextView
+            android:id="@+id/importStage"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/import_stage_reading"
+            android:textColor="@color/inkBlack"
+            android:textSize="16sp" />
+
+    </LinearLayout>
+
+</FrameLayout>

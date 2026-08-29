@@ -24,9 +24,9 @@ table, and the abandoned generator idea) ·
 half's long-press sheet and the object half's Copy/Cut, tap-to-place and lasso popup, both
 within and **across notebooks**, where a copied link's own-notebook target is re-pointed at the
 notebook it came from) ·
-`docs/extensions.md` (the **seam**: the three extension points — the recognizer, arc 11's
-screen-owning scratch pad, and arc 15's generic exporter point — the extension store, the tier-2
-recipe for an extension-owned screen, and **the boundary audit**) ·
+`docs/extensions.md` (the **seam**: the four extension points — the recognizer, arc 11's
+screen-owning scratch pad, arc 15's generic exporter point and arc 16's generic importer point —
+the extension store, the tier-2 recipe for an extension-owned screen, and **the boundary audit**) ·
 `docs/export.md` (arc 15: notebook export as a feature — the library sheet's Export… row, the
 `ExportActivity` screen, the keying trio and its host-side transforms, `SoilOpenFiles`, the
 conditional-deletion rule, the failure table) ·
@@ -51,13 +51,15 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   extension APK — arc 11 / J3: depends on `:extension-api` **and** `:sn-screen`, never `:app`;
   no `tools:replace`, no libc++ `pickFirsts` — those are Paper's Onyx tax and SN has no Onyx),
   and `:ext-soil` (the **NSE · Soil Export** extension APK — arc 15 / E1: depends on
-  `:extension-api` only).
+  `:extension-api` only; **arc 16 / I1 made it serve both directions** — one package, two
+  services, `SoilExporterService` + `SoilImporterService`, and the label stays `NSE · Soil
+  Export` on the user's call).
   `gradle.properties` sets
   `android.nonTransitiveRClass=false` so `:app`'s `R` keeps seeing the moved resources —
   the move needed no import sweep, and undoing that flag breaks every one of them.
-- **SN has THREE extension points** (the arc-15 amendment, on the user's explicit 2026-08-27
+- **SN has FOUR extension points** (the arc-16 amendment, on the user's explicit 2026-08-28
   decision — which is exactly the "new user decision" that rule demanded; arc 11 made the same
-  amendment for the second):
+  amendment for the second and arc 15 for the third):
   `ACTION_HANDWRITING_RECOGNIZER` / `IHandwritingRecognizer`, so other HWR engines can slot in
   later (headings and the markdown engine are core), `ACTION_SCRATCH_PAD` / `IScratchPad` —
   the first **screen-owning** point, served by `:ext-scratchpad` (J2 shipped the store and the
@@ -80,7 +82,19 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   through the granted write fd. A typed passphrase **never** crosses — the reserved
   `ExporterContract.OPTION_KEYING` (and any passphrase-kind option) is executed by the host, and
   the spec carries only the chosen value id. Served by `:ext-soil` (**NSE · Soil Export**).
-  **No FOURTH capability point may be added** without another user decision. Extensions get one host service, the
+  And `ACTION_NOTEBOOK_IMPORTER` / `INotebookImporter` (arc 16 / I1) — the **generic importer
+  point**, the exporter's mirror: plural again (`ExtensionRegistry.importers()`), each
+  `describe()`s the formats it accepts (label, file extensions, MIME types), and the library's
+  top-bar **Import** button is there when at least one trusted importer is installed and GONE
+  when none is. **The host keys, the extension delivers** — the probe, the unlock (foreign
+  passphrase, `AttemptLimiter` bucket `"IMPORT"`), the re-key to this device's global key
+  (`ImportKeying` — every accepted import, no chooser), the manifest's id validation
+  (`SafeImportId`), placement, the in-file remap (`NotebookRemap`) and both writes all run
+  host-side; the extension receives **two `ParcelFileDescriptor`s** (read: the picked document ·
+  write: a host cache file) plus an `ImportSpec` carrying a bounded id → value map (empty this
+  arc) and the picked file's display name — no id, no path, no secret — and streams bytes.
+  Served by `:ext-soil` (`SoilImporterService`, same package, same label).
+  **No FIFTH capability point may be added** without another user decision. Extensions get one host service, the
   **extension store** (`IExtensionStore`, `data/extstore/`, `docs/extensions.md` § "The extension
   store"): per-package, encrypted under the global key at `Garden/<pkg>.db`, minted per bind,
   uid-bound, revoked with the unbind — because **an extension writes nothing to disk itself,

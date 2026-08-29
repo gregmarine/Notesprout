@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Import — ic_notebook_plus's notebook (Tabler "address-book" cover with the three spine tabs,
+  outline stopped short of the bottom-right) with an **input arrow** in the notch where the plus
+  was: shaft on the same 16..22 arms at y 19, head pointing left, INTO the notebook. The user's
+  own call (arc 16 / I1 polish): the Tabler file-import glyph said "a file", not "a notebook".
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- The cover, open at the bottom-right for the arrow. -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M12.5 20h-5.5a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2h11a2 2 0 0 1 2 2v6.5"/>
+
+    <!-- The three spine tabs. -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M4 8h3"/>
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M4 12h3"/>
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M4 16h3"/>
+
+    <!-- The input arrow, on the plus's arms: shaft 22→16 at y 19, head pointing in. -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M22 19h-6"/>
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M19 16l-3 3l3 3"/>
+
+</vector>

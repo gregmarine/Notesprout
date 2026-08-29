@@ -43,6 +43,16 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/cancel" />
+
+        <!-- The confirm action lives on the TOP bar, after Cancel (the user's arc-16 call — the
+             F2 rule: action buttons on top bars, the bottom bar keeps only the pager). -->
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnMoveHere"
+            style="@style/Widget.Notesprout.ElevatedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
+            android:text="@string/move_here" />
     </LinearLayout>
 
     <View
@@ -115,14 +125,6 @@
                 android:src="@drawable/ic_page_last"
                 android:contentDescription="@string/cd_last_page" />
         </LinearLayout>
-
-        <androidx.appcompat.widget.AppCompatButton
-            android:id="@+id/btnMoveHere"
-            style="@style/Widget.Notesprout.ElevatedButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginEnd="8dp"
-            android:text="@string/move_here" />
     </LinearLayout>
 
 </LinearLayout>

@@ -17,7 +17,7 @@ data class ProviderRef(
 )
 
 /**
- * Discovery + trust for SN's two extension points. A candidate `<service>` is kept only if it is
+ * Discovery + trust for SN's four extension points. A candidate `<service>` is kept only if it is
  * exported, its `<meta-data>` API version equals [ExtensionContract.API_VERSION], and it is signed
  * with the host's own certificate (`checkSignatures == SIGNATURE_MATCH` — same-signature only).
  * Everything else is skipped with a `Slog.d`. Disabled packages/components are never returned by the
@@ -57,6 +57,16 @@ object ExtensionRegistry {
      */
     suspend fun exporters(context: Context): List<ProviderRef> = withContext(Dispatchers.IO) {
         discover(context.applicationContext, ExporterContract.ACTION_NOTEBOOK_EXPORTER)
+    }
+
+    /**
+     * Every trusted notebook importer, ordered by (label, package) — plural for the same reason
+     * [exporters] is (arc 16 / I1): any number may register, and the library's Import button is
+     * there when at least one is and **GONE** when none is. Re-run on every library resume — a
+     * package can be disabled or replaced under a standing screen.
+     */
+    suspend fun importers(context: Context): List<ProviderRef> = withContext(Dispatchers.IO) {
+        discover(context.applicationContext, ImporterContract.ACTION_NOTEBOOK_IMPORTER)
     }
 
     @Suppress("DEPRECATION")

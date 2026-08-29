@@ -19,5 +19,18 @@
                 android:name="com.symmetricalpalmtree.notesproutsn.extension.API_VERSION"
                 android:value="1" />
         </service>
+
+        <!-- The same format, the other direction (arc 16 / I1). One package, two services: the
+             label stays "NSE · Soil Export" (the user's call — no rename). -->
+        <service
+            android:name=".SoilImporterService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.symmetricalpalmtree.notesproutsn.extension.NOTEBOOK_IMPORTER" />
+            </intent-filter>
+            <meta-data
+                android:name="com.symmetricalpalmtree.notesproutsn.extension.API_VERSION"
+                android:value="1" />
+        </service>
     </application>
 </manifest>

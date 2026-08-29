@@ -186,6 +186,57 @@
     <string name="export_rekeying">Re-keying…</string>
     <string name="export_decrypting">Removing encryption…</string>
 
+    <!-- Import (arc 16 / I1). Export's tone, in the other direction: a toast only confirms an
+         import that happened, and every failure is a sentence naming what went wrong — never a
+         path, never a secret — and saying that the library was left as it was. -->
+    <string name="cd_import">Import notebook</string>
+    <string name="import_here">Import here</string>
+    <string name="import_to_title">Import to…</string>
+    <string name="import_done_toast">Imported</string>
+    <string name="import_done_toast_in">Imported to %1$s</string>
+    <string name="import_stage_reading">Reading…</string>
+    <string name="import_stage_unlocking">Unlocking…</string>
+    <string name="import_stage_keying">Preparing…</string>
+    <string name="import_stage_importing">Importing…</string>
+    <string name="import_stage_finishing">Finishing…</string>
+    <string name="import_format_title">Import as</string>
+    <string name="import_none_title">Nothing to import with</string>
+    <string name="import_none_body">No import extension is installed on this device, so there is no format to import from.</string>
+    <string name="import_no_picker_title">No file picker</string>
+    <string name="import_no_picker_body">This device has no app for choosing a file, so nothing can be imported here.</string>
+    <string name="import_unsupported_title">Can\'t import that file</string>
+    <string name="import_unsupported_body">No installed import extension accepts a file of that kind. Nothing was imported.</string>
+    <string name="import_failed_title">Import didn\'t finish</string>
+    <string name="import_generic_body">The import could not be finished. Nothing was imported and your library is untouched.</string>
+    <string name="import_delivery_body">The import extension didn\'t finish reading that file. Nothing was imported.</string>
+    <string name="import_short_body">Only part of that file arrived. Nothing was imported and your library is untouched.</string>
+    <string name="import_not_a_notebook_body">That file is not a Notesprout notebook. Nothing was imported.</string>
+    <string name="import_locked_body">The library is locked. Unlock Notesprout SN, then import again.</string>
+    <string name="import_keying_body">That notebook could not be prepared for this device. Nothing was imported and your library is untouched.</string>
+    <string name="import_unreadable_body">That notebook could not be read — it may be damaged. Nothing was imported.</string>
+    <string name="import_in_use_body">The notebook you chose to replace is open somewhere else in the app. Close it, then import again.</string>
+    <string name="import_write_body">The notebook could not be written — the device may be out of space. Nothing was imported.</string>
+    <string name="import_interrupted_body">The import was interrupted before that folder could be used. Nothing was imported — try again.</string>
+    <string name="import_busy_title">Import in progress</string>
+    <string name="import_busy_body">Wait for the import to finish — leaving now could leave a half-imported notebook behind.</string>
+    <string name="import_passphrase_title">Passphrase needed</string>
+    <string name="import_passphrase_body">This notebook was encrypted on another device. Type its passphrase to import it.</string>
+    <string name="import_passphrase_hint">Passphrase</string>
+    <string name="import_passphrase_wrong">That passphrase didn\'t open the file.</string>
+    <string name="import_unlock_action">Unlock</string>
+    <string name="import_locked_out_title">Too many tries</string>
+    <string name="import_locked_out_body">Wait %1$s before trying that passphrase again. Nothing was imported.</string>
+    <string name="import_replace">Replace</string>
+    <string name="import_keep_both">Keep both</string>
+    <string name="import_collision_title">Already in your library</string>
+    <string name="import_collision_body">\"%1$s\" is the same notebook. Replace it, or keep both as separate notebooks?</string>
+    <string name="import_placement_title">Where should it go?</string>
+    <string name="import_placement_body">This notebook remembers the folders it came from. Put it back there, or choose a folder yourself.</string>
+    <string name="import_placement_own">Notebook\'s folders</string>
+    <string name="import_placement_choose">Choose folder…</string>
+    <string name="import_name_title">Name already used</string>
+    <string name="import_name_body">A notebook called \"%1$s\" is already in that folder. Replace it, or keep both?</string>
+
     <!-- Naming schemes (default notebook name) -->
     <string name="action_naming">Default notebook name…</string>
     <string name="scheme_caption">Default notebook name</string>
