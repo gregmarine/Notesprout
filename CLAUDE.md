@@ -306,7 +306,8 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   remembered page — but **only under the file's own id** (pages are parented to the original
   notebook id; re-identifying is the future import arc's remap job). Reference:
   **`apps/notesprout_ratta/docs/export.md`** (feature) + `docs/extensions.md` rows 6–8 (seam).
-  **Arc 16 "Import"** (I1 `ecf0443` · I2 2026-08-28): notebook import, riding the same seam —
+  **Arc 16 "Import"** ✅ **COMPLETE + FROZEN 2026-08-28** (I1 `ecf0443` · I2 `20b6306`; the
+  post-fix user checklist re-run passed): notebook import, riding the same seam —
   SN's **fourth capability point** on the user's explicit 2026-08-28 decision (`ACTION_NOTEBOOK_IMPORTER`,
   the exporter's mirror: plural, call-shaped, *the host keys, the extension delivers*; served by
   the **same `:ext-soil` APK** under the same `NSE · Soil Export` label — one package, two

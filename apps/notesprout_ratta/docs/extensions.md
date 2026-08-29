@@ -23,7 +23,8 @@ The arc is complete and frozen.
 riding the same seam, so SN gains a **fourth** capability point — `ACTION_NOTEBOOK_IMPORTER`, the
 exporter's mirror: generic, plural, and served by the **same** `:ext-soil` APK under the **same**
 label (`NSE · Soil Export` — the user declined a rename; one package, two directions of one
-format). I1 landed the point, the second service and the host's whole pipeline. The rule survives,
+format). I1 landed the point, the second service and the host's whole pipeline; I2 the review
+fixes, this doc's rows 9–11 and the freeze. The arc is complete and frozen. The rule survives,
 one word wider each time: **no *fifth* capability point without another user decision**
 (`apps/notesprout_ratta/CLAUDE.md`).
 

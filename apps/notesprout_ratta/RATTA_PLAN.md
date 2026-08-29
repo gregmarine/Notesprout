@@ -4449,7 +4449,8 @@ finish).
 Sonnet the button chrome, strings, icon and parcelable boilerplate; Haiku the walk.*
 
 ### I2 — Review, boundary audit, docs, freeze
-**Status:** ✅ Complete 2026-08-28 — **freeze pending the user's short checklist + all-clear**
+**Status:** ✅ Complete 2026-08-28 (`20b6306`) — **ARC 16 FROZEN 2026-08-28**: post-fix user
+checklist re-run passed (all keyings + Replace + Keep-both) and the user gave the all-clear.
 
 **Outcome.** The arc-range `/code-review high` (`e9101fb..HEAD`) produced **10 findings; 9 fixed,
 1 accepted** (the fixer's answers, phase-start: level `high`, version stays `0.1.0-ratta`):
@@ -4504,10 +4505,10 @@ empty, no lingering binds, relaunch restore). Docs: **`docs/import.md` new** (th
 `docs/library.md` (the button), both `CLAUDE.md`s, monorepo `BACKLOG.md` ledger. Version stays
 `0.1.0-ratta` (the user's phase-start call); g-paper pin stays 0.1.23.
 
-**Remaining for the freeze:** the short user checklist re-run — the review changed the commit
-path (atomic Garden swap, pass-through integrity check, folder-creation timing, shared keying
-core), so one import of each keying plus a Replace and a Keep-both should be re-proven by hand —
-then the user's all-clear.
+**Freeze gate met 2026-08-28:** the short user checklist was re-run against the fixed build
+(the review changed the commit path — atomic Garden swap, pass-through integrity check,
+folder-creation timing, shared keying core) — one import of each keying plus Replace and
+Keep-both all passed, and the user gave the all-clear.
 
 Arc-range `/code-review` (level asked at phase start; the range is the arc). Boundary-audit rows
 for the fourth point walked into `docs/extensions.md` (outward: two fds + an empty bounded spec;

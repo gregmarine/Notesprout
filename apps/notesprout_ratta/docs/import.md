@@ -16,8 +16,10 @@ This is the feature doc. The seam it rides on — the point, the AIDL, the trust
 [`docs/extensions.md`](extensions.md) § "The importer point (arc 16)"; the button it hangs off is
 [`docs/library.md`](library.md).
 
-**Status: arc 16 in progress** — I1 the point + the whole pipeline, all keyings, placement and the
-remap (commit `ecf0443`, user checklist passed) · I2 review, boundary audit, this doc, freeze.
+**Status: arc 16 complete + frozen 2026-08-28** — I1 the point + the whole pipeline, all keyings,
+placement and the remap (`ecf0443`, user checklist passed) · I2 review fixes (9/10, the two
+Replace data-loss paths the headline), boundary audit, this doc (`20b6306`, checklist re-run
+passed against the fixed build).
 
 ---
 
