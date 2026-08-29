@@ -92,7 +92,7 @@ class SoilExporterService : Service() {
                 // A keying outside the declared trio was never offered, and a refusal here costs
                 // the user a dialog rather than a file that is not what they asked for.
                 SoilExportSpec.keying(values)
-                return ExportResult(streamCopy(src, dst))
+                return ExportResult(SoilStreams.streamCopy(src, dst, TAG, "export"))
             } catch (e: SecurityException) {
                 throw e
             } catch (e: IllegalArgumentException) {
@@ -111,52 +111,11 @@ class SoilExporterService : Service() {
         }
     }
 
-    /**
-     * Read [src] to the end, write every byte to [dst], and return the count — verified against the
-     * source's own length where the fd will say, because **a short copy that reports its own short
-     * count would read as a success** on both sides. The host verifies the same number again from
-     * the outside; this is the inside half of that check.
-     *
-     * The `fsync` before the close is what makes the returned count mean something durable: without
-     * it the bytes may still be in a page cache when the host is told they arrived. A destination
-     * that cannot be synced (a provider handing back a pipe rather than a file) is not an error —
-     * there is nothing to flush to — so that one failure is logged and stepped over.
-     */
-    private fun streamCopy(src: ParcelFileDescriptor, dst: ParcelFileDescriptor): Long {
-        var total = 0L
-        ParcelFileDescriptor.AutoCloseInputStream(src).use { input ->
-            val expected = src.statSize.takeIf { it >= 0L }
-                ?: runCatching { input.channel.size() }.getOrNull()?.takeIf { it > 0L }
-            ParcelFileDescriptor.AutoCloseOutputStream(dst).use { output ->
-                val buffer = ByteArray(BUFFER_BYTES)
-                while (true) {
-                    val n = input.read(buffer)
-                    if (n < 0) break
-                    output.write(buffer, 0, n)
-                    total += n
-                }
-                output.flush()
-                try {
-                    output.fd.sync()
-                } catch (e: Exception) {
-                    Log.w(TAG, "destination could not be synced: ${e.javaClass.simpleName}")
-                }
-            }
-            if (expected != null && total != expected) {
-                throw IllegalStateException("short export: $total of $expected bytes")
-            }
-        }
-        return total
-    }
-
     private fun enforce() = HostCallerCheck.enforce(this, BuildConfig.HOST_PACKAGE)
 
     override fun onBind(intent: Intent?): IBinder = binder
 
     private companion object {
         const val TAG = "SoilExporter"
-
-        /** One flash page-cluster's worth per hop — the size the family copies files at. */
-        const val BUFFER_BYTES = 64 * 1024
     }
 }

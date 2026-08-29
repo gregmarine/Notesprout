@@ -70,8 +70,8 @@ class LibraryActivity : AppCompatActivity() {
     /** The Scratch Pad's entry button (arc 11) — GONE unless a trusted extension is installed. */
     private lateinit var scratchPad: ScratchPadEntry
 
-    /** Import (arc 16) — the top bar's Import button and the whole pipeline behind it. GONE unless
-     *  a trusted importer extension is installed. */
+    /** Import (arc 16) — the bottom bar's Import button (right group, before Templates) and the
+     *  whole pipeline behind it. GONE unless a trusted importer extension is installed. */
     private lateinit var importFlow: ImportFlow
 
     private var folderId: String? = null

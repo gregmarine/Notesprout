@@ -99,8 +99,10 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
      *
      * Under a fresh id this inserts; under an id the user already had (an id-collision *Replace*)
      * it rewrites that row in place, keeping its `createdAt` and reviving it if it had been
-     * soft-deleted. The cover always goes to null: the pixels in the row describe the notebook that
-     * used to be behind this id, and the first open/close cycle seeds a true one.
+     * soft-deleted. The cover always goes to null, and [templateKind] is the **imported file's**
+     * (read from its first page's template row) — the pixels and kind in the old row describe the
+     * notebook that used to be behind this id, not the one now arriving (the I2 review's finding);
+     * the first open/close cycle seeds a true cover.
      */
     suspend fun importNotebookRow(
         id: String,
@@ -109,13 +111,14 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
         pageCount: Int,
         createdAt: Long,
         updatedAt: Long,
+        templateKind: String?,
     ): ObjectEntity {
         val existing = dao.byId(id)
         val row = ObjectEntity(
             id = id, type = ObjectType.NOTEBOOK, name = name, parentId = parentId,
             createdAt = existing?.createdAt ?: createdAt, updatedAt = updatedAt, deletedAt = null,
             pageCount = pageCount, flags = NotebookFlags.ENCRYPTED, keyScope = KEY_SCOPE_GLOBAL,
-            templateKind = existing?.templateKind, blob = null,
+            templateKind = templateKind, blob = null,
         )
         dao.upsert(row)
         return row

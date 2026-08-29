@@ -15,6 +15,7 @@ import com.symmetricalpalmtree.notesproutsn.data.soil.SoilOpenFiles
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilSchema
 import com.symmetricalpalmtree.notesproutsn.data.soilFile
 import com.symmetricalpalmtree.notesproutsn.data.soilStagingFile
+import com.symmetricalpalmtree.notesproutsn.templates.TemplateLibrary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import net.zetetic.database.sqlcipher.SQLiteDatabase as ZeticDB
@@ -129,6 +130,11 @@ object NotebookImport {
         val rawFileId: String?,
         val meta: NotebookMeta?,
         val pageCount: Int,
+        /** The first page's paper, as an index `templateKind` label (`BLANK`/`LINED`/`DOTTED`/
+         *  `GRID`/`IMAGE`) — the imported row's card placeholder until the first open seeds a real
+         *  cover. Null when the file will not say (the I2 review's finding: carrying a *replaced*
+         *  notebook's old kind forward described paper the file behind the id no longer uses). */
+        val templateKind: String?,
     ) {
         /** The ancestry the file remembers, validated segment by segment when it is planned. */
         val folderPath: List<FolderRef> get() = meta?.folderPath.orEmpty()
@@ -165,11 +171,14 @@ object NotebookImport {
             val meta = readMeta(db)
             val rawFileId = rowId?.takeIf { it.isNotBlank() } ?: meta?.notebookId?.takeIf { it.isNotBlank() }
             val fileId = SafeImportId.orNull(rowId) ?: SafeImportId.orNull(meta?.notebookId)
-            val pages = if (fileId != null) {
+            // Pages are parented to the id the rows literally carry — rawFileId, not the validated
+            // fileId, which can fall back to a *different* meta id (the I2 review's finding: the
+            // count came out 0 for a notebook full of pages).
+            val pages = if (rawFileId != null) {
                 queryLong(
                     db,
                     "SELECT count(*) FROM ${SoilSchema.TABLE} WHERE type = ? AND deletedAt IS NULL AND parentId = ?",
-                    arrayOf(SoilSchema.TYPE_PAGE, fileId),
+                    arrayOf(SoilSchema.TYPE_PAGE, rawFileId),
                 )
             } else {
                 queryLong(
@@ -179,7 +188,7 @@ object NotebookImport {
                 )
             }
             Slog.d(TAG) { "manifest: ${if (meta == null) "no meta" else "meta"}, $pages page(s)" }
-            Manifest(fileId, rawFileId, meta, pages.toInt().coerceAtLeast(0))
+            Manifest(fileId, rawFileId, meta, pages.toInt().coerceAtLeast(0), readTemplateKind(db, rawFileId))
         } catch (e: ImportProblem) {
             throw e
         } catch (e: Exception) {
@@ -188,6 +197,36 @@ object NotebookImport {
         } finally {
             runCatching { db.close() }
         }
+    }
+
+    /**
+     * The first live page's paper, as an index `templateKind` label. Best effort and never a
+     * failure — an answer the file will not give is null, and the card falls back to BLANK.
+     * A page with no `refId` **is** blank paper; a token this build does not draw (a foreign
+     * `IMG#` variant, a future kind) is null rather than a guess.
+     */
+    private fun readTemplateKind(db: ZeticDB, rawFileId: String?): String? = try {
+        if (rawFileId == null) null
+        else {
+            val refId = queryString(
+                db,
+                "SELECT refId FROM ${SoilSchema.TABLE} WHERE type = ? AND deletedAt IS NULL AND parentId = ? " +
+                    "ORDER BY \"order\", createdAt LIMIT 1",
+                arrayOf(SoilSchema.TYPE_PAGE, rawFileId),
+            ) ?: return SoilSchema.TEMPLATE_BLANK
+            val token = queryString(
+                db, "SELECT text FROM ${SoilSchema.TABLE} WHERE id = ?", arrayOf(refId),
+            )
+            when {
+                token == null || token.isEmpty() -> SoilSchema.TEMPLATE_BLANK
+                token == "LINED" || token == "DOTTED" || token == "GRID" -> token
+                token.startsWith("IMG#") -> TemplateLibrary.KIND_IMAGE
+                else -> null
+            }
+        }
+    } catch (e: Exception) {
+        Log.w(TAG, "template kind read skipped: ${e.javaClass.simpleName}")
+        null
     }
 
     /** The meta row, or null when the table is absent, the row is missing, or the JSON will not
@@ -241,8 +280,15 @@ object NotebookImport {
      *    only, and one with un-checkpointed frames behind it is a notebook missing its newest rows
      *    (arc 15's rule, in the other direction);
      *  - the copy goes to a [soilStagingFile] **sibling** and is length-verified there, so a
-     *    half-written copy never becomes the target; only then are the target and its sidecars
-     *    removed and the staging file renamed over it;
+     *    half-written copy never becomes the target; the swap itself is **one `rename` over the
+     *    live target** — `rename(2)` replaces atomically, so there is no instant at which the
+     *    user's existing notebook is deleted-but-not-yet-replaced, and a rename that fails (the
+     *    two are same-directory siblings, so it has no failure mode a copy would survive) leaves
+     *    the target exactly as it was — never a fallback copy over a target already torn down
+     *    (the I2 review's data-loss finding);
+     *  - the replaced file's sidecars go **after** the swap, not before: they described the old
+     *    bytes, and deleting them first would strip the old notebook's `-wal` on a path that can
+     *    still fail and keep it;
      *  - the cached raw key for this id is invalidated afterwards, because the file behind the id
      *    has different bytes — and therefore a different SQLCipher salt — than the one that key was
      *    derived from. (`KeyOpener` self-heals a stale key, but a key that is known wrong is not
@@ -272,18 +318,17 @@ object NotebookImport {
                     Log.w(TAG, "staged ${staging.length()} of $bytes bytes")
                     throw ImportProblem(Problem.WRITE)
                 }
-                // Past here the target is going: everything that could have failed already has.
-                sidecarsOf(target).forEach { runCatching { it.delete() } }
-                if (target.exists() && !target.delete()) {
-                    Log.w(TAG, "could not clear the destination file")
+                if (!staging.renameTo(target)) {
+                    // rename(2) replaces an existing target atomically, and staging and target are
+                    // same-directory siblings — a failure here has no mode a copy would survive,
+                    // and the target is still exactly whatever it was.
+                    Log.w(TAG, "staging rename failed")
                     throw ImportProblem(Problem.WRITE)
                 }
-                if (!staging.renameTo(target)) {
-                    // A rename inside one directory does not normally fail; if it does, the copy is
-                    // the honest fallback and the verification below still governs.
-                    Log.w(TAG, "staging rename failed — copying instead")
-                    staging.copyTo(target, overwrite = true)
-                }
+                // Only now, with the swap durable, do the replaced file's sidecars go: they
+                // described the old bytes (a stale -wal's salts cannot match the new file, but a
+                // stale sidecar is still nothing to keep).
+                sidecarsOf(target).forEach { runCatching { it.delete() } }
                 if (target.length() != bytes) {
                     Log.w(TAG, "wrote ${target.length()} of $bytes bytes")
                     throw ImportProblem(Problem.WRITE)

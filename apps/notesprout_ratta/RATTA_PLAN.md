@@ -4449,7 +4449,65 @@ finish).
 Sonnet the button chrome, strings, icon and parcelable boilerplate; Haiku the walk.*
 
 ### I2 — Review, boundary audit, docs, freeze
-**Status:** ⬜ Not started
+**Status:** ✅ Complete 2026-08-28 — **freeze pending the user's short checklist + all-clear**
+
+**Outcome.** The arc-range `/code-review high` (`e9101fb..HEAD`) produced **10 findings; 9 fixed,
+1 accepted** (the fixer's answers, phase-start: level `high`, version stays `0.1.0-ratta`):
+
+1. **`placeInGarden` rename-fallback data loss (fixed, the headline):** the old target was
+   deleted before the swap and a failed rename fell back to a copy whose mid-write death — with
+   the unconditional staging delete in `finally` — could destroy the user's existing notebook on
+   a Replace while the dialog claimed the library untouched. Now the swap is **one atomic
+   `rename(2)` over the live target** (no pre-delete, no fallback copy — same-directory siblings
+   have no rename failure a copy survives), and the replaced file's sidecars go only **after**
+   the swap.
+2. **Same-device pass-through skipped acceptance (fixed, the other data-loss path):** a corrupt
+   same-device Keep export probed, verified, and skipped every check the transform paths run —
+   then a Replace overwrote a healthy notebook. The pass-through now pays a **whole-file
+   `integrity_check`** (verify-only: it never deletes the incoming file).
+3. **Folders created during the question phase (fixed):** "Notebook's folders" wrote rows while
+   the name dialog could still be cancelled, stranding empty folders. `placement()` now returns a
+   pure `Landing` (parent + planned creates); the creates run **in the commit step**, after the
+   last question, right before the index row.
+4. **Uncaught discovery crash (fixed):** `ExtensionRegistry.importers()` could throw
+   (`PackageManager` under a system hiccup) out of `refresh()`'s coroutine and crash the library
+   on resume. One `discover()` wrapper catches to `emptyList()` for both callers.
+5. **Source-size corroboration over-authoritative (fixed):** a provider reporting a stale/zero
+   `SIZE` hard-failed a byte-perfect delivery. Now only a provider claiming **more** than landed
+   fails (a truncated stream both first-hand counts agreed on); anything else is logged, and the
+   probe + keying acceptance answer for the bytes.
+6. **Page count against the wrong id (fixed):** counted `parentId = fileId` (validated, can fall
+   back to the meta id) where pages are parented to `rawFileId`. Counts `rawFileId` now.
+7. **`ImportKeying` duplicated `ExportKeying`'s whole mechanism (fixed):** extracted
+   **`ExportKeying.exportAndKeyToPrimary`** — the shared destination-primary export-and-key core
+   (create-under-dest-key → ATTACH → `sqlcipher_export('main','old_src')` → hand-copied
+   `user_version` → meta restamp → four-part acceptance) — used by export's rekey and both import
+   transform cases. One copy of the og traps.
+8. **`streamCopy` duplicated across the two `:ext-soil` services (fixed):** now one
+   `SoilStreams.streamCopy` both services call.
+9. **`importNotebookRow` carried the replaced notebook's `templateKind` (fixed):** the row now
+   takes the **imported file's** kind — `readManifest` best-effort reads the first page's
+   template token (`LINED`/`DOTTED`/`GRID` as-is, `IMG#` → `IMAGE`, no refId → `BLANK`, unknown →
+   null) — so the card placeholder shows the arriving notebook's paper, not the retired one's.
+10. **Imported names vs `NameRules`' typed charset (ACCEPTED, not fixed → monorepo
+    `BACKLOG.md`):** `ImportNames.clean` deliberately admits characters the rename dialog's
+    charset refuses, so editing an imported name means retyping it in the restricted alphabet.
+    Fixing it is a naming-scheme user decision — raise before touching either side.
+
+Refuted along the way: a ListSwipe stale-arm race, stacked busy dialogs, cursor column-0
+fragility, and a claimed CLAUDE.md top/bottom-bar contradiction (only stale "top bar" doc
+comments — fixed). 890 JVM tests green after the fixes (run twice, debug + release); all six
+modules build; release signed. **Haiku Nomad walk 8/8 PASS** post-fix (launch, button present,
+picker open/cancel/re-arm, gating flip both ways with the HOME-first relaunch rule, crash buffer
+empty, no lingering binds, relaunch restore). Docs: **`docs/import.md` new** (the feature),
+`docs/extensions.md` grown (four points, the importer seam section, **boundary-audit rows 9–11**),
+`docs/library.md` (the button), both `CLAUDE.md`s, monorepo `BACKLOG.md` ledger. Version stays
+`0.1.0-ratta` (the user's phase-start call); g-paper pin stays 0.1.23.
+
+**Remaining for the freeze:** the short user checklist re-run — the review changed the commit
+path (atomic Garden swap, pass-through integrity check, folder-creation timing, shared keying
+core), so one import of each keying plus a Replace and a Keep-both should be re-proven by hand —
+then the user's all-clear.
 
 Arc-range `/code-review` (level asked at phase start; the range is the arc). Boundary-audit rows
 for the fourth point walked into `docs/extensions.md` (outward: two fds + an empty bounded spec;

@@ -47,8 +47,8 @@ class SoilImporterService : Service() {
 
         /**
          * The delivery: a **streamed, verified copy** of the picked document into the host's cache
-         * file. The export's `streamCopy` in the other direction, and deliberately the same code
-         * shape — one seam, one copy, two names.
+         * file — [SoilStreams.streamCopy], literally the export's copy in the other direction: one
+         * seam, one copy, shared.
          *
          * The whole method is one `try`/`finally` around the two descriptors: they are this
          * process's dups and are closed here whatever happens — success, refusal or crash — because
@@ -76,7 +76,7 @@ class SoilImporterService : Service() {
                 // ignored rather than refused, which is the forward-compatible direction: a newer
                 // host paired with this extension may send options a newer descriptor declared.
                 spec ?: throw IllegalArgumentException("no import spec")
-                return ImportResult(streamCopy(src, dst))
+                return ImportResult(SoilStreams.streamCopy(src, dst, TAG, "import"))
             } catch (e: SecurityException) {
                 throw e
             } catch (e: IllegalArgumentException) {
@@ -95,57 +95,11 @@ class SoilImporterService : Service() {
         }
     }
 
-    /**
-     * Read [src] to the end, write every byte to [dst], and return the count — verified against the
-     * source's own length where the fd will say, because **a short copy that reports its own short
-     * count would read as a success** on both sides. The host verifies the same number again from
-     * the outside; this is the inside half of that check.
-     *
-     * A picked document often arrives through a proxy fd that will not stat (a cloud provider, a
-     * pipe): `statSize` is -1 then and there is nothing to compare against — the host's own
-     * corroboration takes over, and the stream is accepted on its own terms rather than refused for
-     * a number nobody can supply.
-     *
-     * The `fsync` before the close is what makes the returned count mean something durable: without
-     * it the bytes may still be in a page cache when the host probes the file. The destination here
-     * is always a host cache file, so a sync failure is unexpected — but it is still logged and
-     * stepped over rather than failing a delivery that has already landed.
-     */
-    private fun streamCopy(src: ParcelFileDescriptor, dst: ParcelFileDescriptor): Long {
-        var total = 0L
-        ParcelFileDescriptor.AutoCloseInputStream(src).use { input ->
-            val expected = src.statSize.takeIf { it >= 0L }
-                ?: runCatching { input.channel.size() }.getOrNull()?.takeIf { it > 0L }
-            ParcelFileDescriptor.AutoCloseOutputStream(dst).use { output ->
-                val buffer = ByteArray(BUFFER_BYTES)
-                while (true) {
-                    val n = input.read(buffer)
-                    if (n < 0) break
-                    output.write(buffer, 0, n)
-                    total += n
-                }
-                output.flush()
-                try {
-                    output.fd.sync()
-                } catch (e: Exception) {
-                    Log.w(TAG, "destination could not be synced: ${e.javaClass.simpleName}")
-                }
-            }
-            if (expected != null && total != expected) {
-                throw IllegalStateException("short import: $total of $expected bytes")
-            }
-        }
-        return total
-    }
-
     private fun enforce() = HostCallerCheck.enforce(this, BuildConfig.HOST_PACKAGE)
 
     override fun onBind(intent: Intent?): IBinder = binder
 
     private companion object {
         const val TAG = "SoilImporter"
-
-        /** One flash page-cluster's worth per hop — the size the family copies files at. */
-        const val BUFFER_BYTES = 64 * 1024
     }
 }

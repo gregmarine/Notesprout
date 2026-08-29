@@ -131,51 +131,78 @@ object ExportKeying {
      * old key, and the two-argument `sqlcipher_export('main', 'old_src')` copies attachment → main.
      */
     private suspend fun rekey(artifact: File, passphrase: String, newPassphrase: String): File =
-        withContext(Dispatchers.IO) {
-            val out = sibling(artifact, "rekeyed")
-            val sourceVersion: Long
-            val dest = try {
-                SoilCrypto.createRaw(out, newPassphrase)
-            } catch (e: Exception) {
-                Log.w(TAG, "rekey destination could not be created: ${e.javaClass.simpleName}")
-                throw IllegalStateException("the re-keyed copy could not be made")
-            }
-            try {
-                dest.execSQL("ATTACH DATABASE ${sqlLiteral(artifact.path)} AS old_src KEY ${sqlLiteral(passphrase)}")
-                try {
-                    sourceVersion = queryLong(dest, "PRAGMA old_src.user_version")
-                    dest.rawQuery("SELECT sqlcipher_export('main', 'old_src')", null).use { it.moveToFirst() }
-                    copyUserVersion(dest, from = "old_src", to = "main")
-                    restampMeta(dest, schema = "main", encrypted = true, keyScope = KEY_SCOPE_NOTEBOOK)
-                } finally {
-                    dest.execSQL("DETACH DATABASE old_src")
-                }
-            } catch (e: Exception) {
-                rejectOutput(out)
-                Log.w(TAG, "rekey transform failed: ${e.javaClass.simpleName}")
-                throw IllegalStateException("the re-keyed copy could not be made")
-            } finally {
-                runCatching { dest.close() }
-            }
+        exportAndKeyToPrimary(
+            out = sibling(artifact, "rekeyed"),
+            sourcePath = artifact.path,
+            attachKeyLiteral = sqlLiteral(passphrase),
+            destPassphrase = newPassphrase,
+            keyScope = KEY_SCOPE_NOTEBOOK,
+            what = "re-keyed",
+        )
 
-            // Acceptance: the typed passphrase opens it, it is intact, and the version travelled.
-            if (SoilCrypto.probe(out) != SoilFileKind.Encrypted) {
-                rejectOutput(out)
-                throw IllegalStateException("the re-keyed copy did not come out encrypted")
-            }
-            val check = openArtifact(out, newPassphrase)
-            try {
-                requireIntact(queryString(check, "PRAGMA integrity_check"))
-                requireVersion(queryLong(check, "PRAGMA main.user_version"), sourceVersion)
-            } catch (e: Exception) {
-                rejectOutput(out)
-                throw e
-            } finally {
-                runCatching { check.close() }
-            }
-            Slog.d(TAG) { "rekey transform accepted (${out.length()} bytes)" }
-            out
+    /**
+     * **The destination-primary export-and-key core, shared with
+     * [ImportKeying]** (the I2 review's dedup finding — this family of transforms has a recorded
+     * history of on-device traps, and a fix that lands in one copy and not the other is exactly the
+     * sibling-copy trap): create [out] under [destPassphrase] as the primary connection, attach
+     * [sourcePath] with [attachKeyLiteral] (already SQL-quoted — `''` **is** how a plaintext key is
+     * spelled), `sqlcipher_export('main', 'old_src')`, carry `user_version` by hand, restamp the
+     * meta to `encrypted: true` / [keyScope] — then accept nothing unverified: the output must
+     * probe [SoilFileKind.Encrypted], open under [destPassphrase], answer `integrity_check` with
+     * `ok` and hold the source's version. A failure deletes only the unaccepted output and throws
+     * with a path-free message built on [what].
+     */
+    internal suspend fun exportAndKeyToPrimary(
+        out: File,
+        sourcePath: String,
+        attachKeyLiteral: String,
+        destPassphrase: String,
+        keyScope: String?,
+        what: String,
+    ): File = withContext(Dispatchers.IO) {
+        val sourceVersion: Long
+        val dest = try {
+            SoilCrypto.createRaw(out, destPassphrase)
+        } catch (e: Exception) {
+            Log.w(TAG, "$what destination could not be created: ${e.javaClass.simpleName}")
+            throw IllegalStateException("the $what copy could not be made")
         }
+        try {
+            dest.execSQL("ATTACH DATABASE ${sqlLiteral(sourcePath)} AS old_src KEY $attachKeyLiteral")
+            try {
+                sourceVersion = queryLong(dest, "PRAGMA old_src.user_version")
+                dest.rawQuery("SELECT sqlcipher_export('main', 'old_src')", null).use { it.moveToFirst() }
+                copyUserVersion(dest, from = "old_src", to = "main")
+                restampMeta(dest, schema = "main", encrypted = true, keyScope = keyScope)
+            } finally {
+                dest.execSQL("DETACH DATABASE old_src")
+            }
+        } catch (e: Exception) {
+            rejectOutput(out)
+            Log.w(TAG, "$what transform failed: ${e.javaClass.simpleName}")
+            throw IllegalStateException("the $what copy could not be made")
+        } finally {
+            runCatching { dest.close() }
+        }
+
+        // Acceptance: the destination passphrase opens it, it is intact, and the version travelled.
+        if (SoilCrypto.probe(out) != SoilFileKind.Encrypted) {
+            rejectOutput(out)
+            throw IllegalStateException("the $what copy did not come out encrypted")
+        }
+        val check = openArtifact(out, destPassphrase)
+        try {
+            requireIntact(queryString(check, "PRAGMA integrity_check"))
+            requireVersion(queryLong(check, "PRAGMA main.user_version"), sourceVersion)
+        } catch (e: Exception) {
+            rejectOutput(out)
+            throw e
+        } finally {
+            runCatching { check.close() }
+        }
+        Slog.d(TAG) { "$what transform accepted (${out.length()} bytes)" }
+        out
+    }
 
     // ── Acceptance ───────────────────────────────────────────────────────────
 
@@ -276,8 +303,9 @@ object ExportKeying {
         return out
     }
 
-    /** Remove an output that was never accepted, and its sidecars. Never pointed at an input. */
-    private fun rejectOutput(out: File) {
+    /** Remove an output that was never accepted, and its sidecars. Never pointed at an input.
+     *  Internal so [ImportKeying]'s own sibling naming can clear its leftovers the same way. */
+    internal fun rejectOutput(out: File) {
         out.parentFile?.listFiles { f -> f.name.startsWith(out.name) }?.forEach { runCatching { it.delete() } }
     }
 

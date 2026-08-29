@@ -953,3 +953,27 @@ finger-pair residual survives. A stylus contact logs `down inside box` and a fin
 is the cheap way to tell the two apart in a trace. Note `dragStrokes` is emptied before
 `onSelectionDragVisual(false)`, so a drag-summary log must read `selection?.strokeIds?.size`, not
 `dragStrokes.size`.
+
+## Notesprout SN — arc 16 "Import" I2 (2026-08-28): one review finding accepted + deferred items
+
+The I2 `/code-review high` pass (arc range `e9101fb..HEAD`, 10 findings) fixed nine in SN —
+including the two Replace-import data-loss paths (`placeInGarden` now swaps by one atomic
+`rename(2)` over the live target with no fallback copy, and the same-device keying pass-through
+now pays a whole-file `integrity_check`) — and refactored the two duplication findings into
+shared code (`ExportKeying.exportAndKeyToPrimary`, `SoilStreams.streamCopy`). One was
+**explicitly accepted, not fixed**:
+
+- **Imported names can't be edited under `NameRules`' charset**
+  (`apps/notesprout_ratta/.../importing/ImportNames.kt` + `library/NameRules.kt`): `ImportNames.clean`
+  deliberately admits characters (parentheses, unicode) the typed-name charset
+  (`^[a-zA-Z0-9_\-. ]*$`) forbids — mangling `Field notes (2)` at import would rename the user's
+  notebook for no benefit, and that decision stands. The cost: any later *edit* of such a name in
+  the rename dialog fails validation until the whole name is retyped in the restricted alphabet
+  (confirming unchanged is a no-op and still works). Fixing it means deciding what the library's
+  naming rules *are* for non-typed names (relax the charset? accept chars already present in the
+  current name?) — a user-facing naming-scheme decision, not a patch. Raise it with the user
+  before touching either side.
+
+Deferred by the arc-16 wizard (not findings):
+- **No open-with / share-to intent filters** for `.soil` on SN — the library Import button is the
+  only entry this arc; a future arc may add the receive-intent path (og has one).

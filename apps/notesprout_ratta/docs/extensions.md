@@ -17,16 +17,25 @@ with the export *implementations* as extensions, so SN gains a **third** capabil
 `ACTION_NOTEBOOK_EXPORTER`, generic and plural (any number of trusted exporters may register) — and
 its first shipped exporter, **`NSE · Soil Export`** (`:ext-soil`). E1 landed the point itself, the
 extension, and the host's `ExportActivity` on the Keep path; E2 landed the two keying transforms.
-The arc is complete and frozen. The rule survives, one word wider each time: **no *fourth* capability
-point without another user decision** (`apps/notesprout_ratta/CLAUDE.md`).
+The arc is complete and frozen.
+
+**Arc 16 is the third fresh user decision, on 2026-08-28.** The user asked for notebook import
+riding the same seam, so SN gains a **fourth** capability point — `ACTION_NOTEBOOK_IMPORTER`, the
+exporter's mirror: generic, plural, and served by the **same** `:ext-soil` APK under the **same**
+label (`NSE · Soil Export` — the user declined a rename; one package, two directions of one
+format). I1 landed the point, the second service and the host's whole pipeline. The rule survives,
+one word wider each time: **no *fifth* capability point without another user decision**
+(`apps/notesprout_ratta/CLAUDE.md`).
 
 The pad as a **feature** has its own reference — [`docs/scratchpad.md`](scratchpad.md); export has
-its own reference too — [`docs/export.md`](export.md). This doc is the seam for all three points.
+its own — [`docs/export.md`](export.md); import has its own too — [`docs/import.md`](import.md).
+This doc is the seam for all four points.
 
 Fresh code. Paper's own extension arcs (`PAPER_EXTENSIONS_PLAN.md`, `PAPER_RECOGNITION_PLAN.md`,
 `PAPER_SCRATCHPAD_PLAN.md`, its `:extension-api` / `:ext-mlkit` / `:ext-scratchpad`) are the shape
-reference — nothing is copied, and SN's AIDL is scoped to its **three** points rather than Paper's
-broader capability set. Paper never built export, so it has nothing to say about the third.
+reference — nothing is copied, and SN's AIDL is scoped to its **four** points rather than Paper's
+broader capability set. Paper never built export or import, so it has nothing to say about the
+third or fourth; og's `docs/full-notebook-export.md` § Import was the fourth's reading reference.
 
 ---
 
@@ -40,8 +49,8 @@ Six modules, SN's own Gradle root:
 | `:extension-api` | Android library | nothing in `:app`, no library beyond the Kotlin stdlib (`build.gradle.kts` says so explicitly) | the AIDL (`IHandwritingRecognizer`, `InkStroke.aidl`; `IExtensionStore`, `LargeValue.aidl`; `IScratchPad`, `WireStroke.aidl`, `InkBundle.aidl`; `INotebookExporter`, `ExporterInfo.aidl`, `ExportSpec.aidl`, `ExportResult.aidl`), the hand-written `InkStroke` / `LargeValue` / `WireStroke` / `InkBundle` / `ExporterInfo` / `OptionDescriptor` / `ExportSpec` / `ExportResult` parcelables, `SharedBytes`, `InkChunks`, `RecognizerStatus`, `ExtensionContract`, `ExporterContract`, `HostCallerCheck` |
 | `:ext-mlkit` | Android application (its own installable APK) | `:extension-api` + `com.google.mlkit:digital-ink-recognition:19.0.0` | `HandwritingRecognizerService`, `ModelManager`, `MlKitEngine`, `PageText`, `StrokeSegmenter`, `Dots`, `Box` |
 | `:ext-scratchpad` | Android application (its own installable APK) | `:extension-api` + `:sn-screen` (g-paper arrives through its `api`) + androidx; **never** `:app`, no Room / SQLCipher / serialization | `ScratchPadApplication`, `ScratchPadService`, `ScratchPadActivity`, `ScratchSession`, `ScratchStore`, `ScratchPageCodec`, `ScratchPages`, `ScratchInk` |
-| `:ext-soil` | Android application (its own installable APK) | `:extension-api` only | `SoilExporterService`, `SoilExportSpec` — see [`export.md`](export.md) |
-| `:app` (`extension/` package) | part of the host APK | `:extension-api` | `ExtensionRegistry`, `ExtensionBinder`, `ExtensionCallException`, `InkCaps`, `RecognizerClient`, `RecognizerReadiness`, `ScratchPadClient`, `TransferCaps`, `ExporterClient`; and in `data/extstore/`, the extension store (`ExtensionStores`, `ExtensionStoreDatabase`, `KvEntity`, `KvDao`, `ExtensionStoreGate`, `ExtensionStoreBinder`) — plus, in `export/` and `crypto/`, export's own host-side half (`ExportActivity`, `ExportPanel`, `ExportOptions`, `ExportArtifact`, `ExportNaming`, `ExportKeying`, `SoilOpenFiles`) |
+| `:ext-soil` | Android application (its own installable APK) | `:extension-api` only | `SoilExporterService`, `SoilExportSpec` — see [`export.md`](export.md); and, arc 16, `SoilImporterService` — see [`import.md`](import.md). One package, two services, one label |
+| `:app` (`extension/` package) | part of the host APK | `:extension-api` | `ExtensionRegistry`, `ExtensionBinder`, `ExtensionCallException`, `InkCaps`, `RecognizerClient`, `RecognizerReadiness`, `ScratchPadClient`, `TransferCaps`, `ExporterClient`, `ImporterClient`; and in `data/extstore/`, the extension store (`ExtensionStores`, `ExtensionStoreDatabase`, `KvEntity`, `KvDao`, `ExtensionStoreGate`, `ExtensionStoreBinder`) — plus, in `export/` and `crypto/`, export's own host-side half (`ExportActivity`, `ExportPanel`, `ExportOptions`, `ExportArtifact`, `ExportNaming`, `ExportKeying`, `SoilOpenFiles`), and in `importing/` and `crypto/`, import's (`ImportFlow`, `NotebookImport`, `ImporterMatch`, `ImportNames`, `AncestryPlan`, `SafeImportId`, `ImportDialogs`, `ImportOverlay`, `ImportKeying`, `NotebookRemap` in `data/soil/`) |
 
 `:sn-screen` is deliberately **not** in that dependency chain: it never sees `:extension-api`, so a
 shared screen helper can never quietly become part of the wire contract. `:ext-scratchpad` depends on
@@ -75,13 +84,16 @@ The host's `AndroidManifest.xml` declares package-visibility for the point (API 
     <intent>
         <action android:name="…extension.NOTEBOOK_EXPORTER" />
     </intent>
+    <intent>
+        <action android:name="…extension.NOTEBOOK_IMPORTER" />
+    </intent>
 </queries>
 ```
 
 The scratch pad needs **both** of its actions listed: one to discover and bind the service, one to
-resolve and launch the screen. The exporter point needs only the one — `describe()` and `export()`
-both ride the same bind-per-call service. Plus `ACCESS_NETWORK_STATE`, for the readiness flow's
-offline pre-check (below).
+resolve and launch the screen. The exporter and importer points need only one each — `describe()`
+and the delivery call both ride the same bind-per-call service. Plus `ACCESS_NETWORK_STATE`, for
+the readiness flow's offline pre-check (below).
 
 ---
 
@@ -721,12 +733,80 @@ minutes comfortably covers a 1 GB artifact even through a slow DocumentsProvider
 
 ---
 
+## The importer point (arc 16)
+
+> Import **as a feature** — the button, the pipeline, the keying table, the three questions, the
+> remap, the failure table — is [`docs/import.md`](import.md). What follows is the **seam**: the
+> point, and what each side is allowed to know.
+
+`ACTION_NOTEBOOK_IMPORTER` is SN's **fourth** capability point and the exporter's mirror in every
+structural respect: plural (`ExtensionRegistry.importers()` returns every trusted candidate,
+ordered by `(label, package)`), call-shaped (each `describe()` or `importDocument()` is its own
+`ExtensionBinder.call` — no held bind, no store), and served by the same `:ext-soil` APK
+(`SoilImporterService` beside `SoilExporterService` — one package, two directions, one label).
+`ImporterClient` mirrors `ExporterClient`; `ImporterContract` shares the exporter's caps and
+timeouts **by reference** (`DESCRIBE_TIMEOUT_MS` = 3 s, `IMPORT_TIMEOUT_MS` = `EXPORT_TIMEOUT_MS`
+= 120 s — the stream is the same copy in the other direction, so the arc-15 Nomad measurement
+transfers directly).
+
+### The descriptor, reversed
+
+`describe()` returns an `ImporterInfo` — format label plus the bounded **file-extension** and
+**MIME** lists (`MAX_FILE_EXTENSIONS` 8, `MAX_MIME_TYPES` 8, extensions `[a-z0-9]{1..12}`, MIME
+shape-checked). Constructor `require`s make unmarshal the validation, the family rule; a
+descriptor over the caps drops that importer with a log line, never a crash
+(`ImportFlow.loadCandidates`). The two lists do two different jobs, and the split is deliberate:
+the **MIME union seeds the `OPEN_DOCUMENT` filter** (plus `*/*` — og's rule: providers mislabel a
+`.soil` routinely, and a filter that hid the file the user came for would be a dead end), while
+the **extensions are what actually choose an importer** for the picked document
+(`ImporterMatch`, on the display name's extension — a MIME match would drop the one importer that
+can read the file). One match is no question; several is a chooser; none is a dialog.
+
+### The AIDL is one delivery call
+
+```
+ImporterInfo describe()
+ImportResult importDocument(in ParcelFileDescriptor source, in ParcelFileDescriptor destination, in ImportSpec spec)
+```
+
+The method is `importDocument` because `import` is a Java keyword — AIDL codegen would not
+compile it. `ImportSpec` crosses **now**, empty, because an AIDL method cannot grow parameters
+later: a bounded id → value map (the exporter's caps: ≤ `MAX_OPTIONS` entries, ids by
+`OptionDescriptor.requireId`, values ≤ `MAX_SPEC_VALUE_CHARS`) plus the picked document's
+**display name** — display only, ≤ `MAX_NAME_CHARS`, its constructor refusing `/` and NUL so it
+can never carry a path. `ImportResult` is one non-negative `bytesWritten`.
+
+The extension's whole job is `streamCopy`: read the source fd to the end, write every byte to the
+destination fd, `fsync`, return the count — the exporter's stream in the other direction, same
+64 KiB buffer. It verifies its own copy against the source's length where the fd will stat (a
+proxy fd from a cloud provider answers −1, and the stream is then accepted on its own terms — the
+host's corroboration takes over). **It does not probe the bytes, and must not**: recognising a
+`.soil` is the host's job, after the copy, behind its own crypto. The caller check runs inside
+the `try` whose `finally` closes both descriptors (the E1 trap, kept), and only the three
+marshalable exception shapes leave.
+
+### Where the trust boundary actually sits
+
+The delivered file is **still untrusted bytes** after a successful, verified copy — the copy
+proves delivery, not content. Everything that decides what the bytes *are* runs host-side, after
+the seam: the probe (`SoilCrypto.probe`), the unlock (device key tried first; a foreign
+passphrase prompted under the `"IMPORT"` `AttemptLimiter` bucket), the unconditional re-key to
+the device's global key (`ImportKeying` — export-and-key, never `PRAGMA rekey`; `user_version`
+copied by hand and re-verified; `notebook_meta` restamped `GLOBAL`; nothing accepted without
+probing as encrypted + opening + `integrity_check` = ok), the manifest's id validation
+(`SafeImportId` — UUID alphabet only before any id becomes a `soilFile()` path component or index
+key), the three questions, the in-file remap (`NotebookRemap`), the staged-rename Garden write
+and the index-last commit. The extension never learns any of it happened.
+
+---
+
 ## Boundary audit
 
 What crosses the process boundary, in which direction, and what guards it. **Re-walk this table
 whenever a point is added or a contract field changes.** Rows 1–5 are the scratch-pad point, walked
 against the code at the arc-11 freeze (2026-08-25) on the shape Paper's rows 28–32 established. Rows
-6–8 are the exporter point, walked against the code at the arc-15 freeze (2026-08-27).
+6–8 are the exporter point, walked against the code at the arc-15 freeze (2026-08-27). Rows 9–11 are
+the importer point, walked against the code at the arc-16 freeze (2026-08-28).
 
 | # | The claim | Where it holds |
 |---|---|---|
@@ -738,6 +818,9 @@ against the code at the arc-11 freeze (2026-08-25) on the shape Paper's rows 28�
 | 6 | **Outward on `export` is two fds and a bounded spec with no secret, no id and no path.** The call's only arguments are a read `ParcelFileDescriptor` (the host's own already-keyed cache artifact), a write `ParcelFileDescriptor` (the SAF destination the host opened) and an `ExportSpec` — an id → value map (each value ≤ `MAX_SPEC_VALUE_CHARS`, 64, a choice id or `"0"`/`"1"`, never free text) plus a display-only `notebookName` (≤ `MAX_NAME_CHARS`, 200; its constructor refuses `/` and NUL, so it cannot carry a path). **No notebook id, no file path, no passphrase has anywhere to ride** — the reserved keying option's chosen choice id crosses; the typed secret behind it never does, because `ExportOptions.specValues` never writes an entry for a `KIND_PASSPHRASE` option. | `INotebookExporter.aidl`, `ExportSpec` (constructor `require`s, JVM-tested), `ExportOptions.specValues`, `ExportNaming.specName`, `ExportActivity.runExport`, `ExporterClient.export` |
 | 7 | **Inward is bounded descriptors and a byte count verified before success is believed.** `describe()`'s `ExporterInfo` and its `OptionDescriptor` list are capped at unmarshal (`MAX_OPTIONS` 8, `MAX_CHOICES` 8, `MAX_ID_CHARS` 32, `MAX_LABEL_CHARS` 80, `MAX_FILE_EXTENSION_CHARS` 12, `MAX_MIME_CHARS` 128 — every cap pinned by `ExporterContractTest`); a descriptor over any cap, declaring an option kind the host cannot draw, or declaring the reserved keying option with a choice id the host has no transform for, **drops that exporter with a log line, never a crash** (`ExportOptions.isRenderable`, `ExportActivity.loadCandidates`). `export()`'s `ExportResult` carries only a non-negative `bytesWritten`; the host checks it against the length of the file it actually streamed (the keying transform's output, when there was one) and, where the destination provider will answer, against what that provider now reports holding — an exporter that died mid-stream, or under-reported its own copy, cannot read as success on either count. | `ExporterInfo`, `OptionDescriptor`, `ExportResult` (constructor `require`s, JVM-tested), `ExporterContractTest`, `ExportActivity.loadCandidates` / `runExport`, `ExporterClient.describe` / `.export` |
 | 8 | **The keying secret's whole lifecycle is host-side.** A typed *New passphrase…* value is entered into `ExportActivity`'s own XML-static, `saveEnabled="false"` masked fields — never saved to instance state, because the system may persist that Bundle to disk and the secret has no business there — held in a private, non-persisted `typedPassphrase` var from the Export tap to the end of the flow, consumed by `ExportKeying.apply` on the local cache artifact, and cleared in the flow's own `finally` — and at the picker's cancel, the other way the flow ends. It is never written into `ExportSpec` (the reserved keying option only ever carries a choice id), never put in an Intent extra, and never logged — failure paths log the transform's exception **class name only** (`Log.w(TAG, "keying transform failed: ${e.javaClass.simpleName}")`), on the recorded principle that a transform's own message text could carry a path. A rekey armed with the fields lost to a screen rebuild is refused with its own honest dialog rather than silently falling back to Keep. | `ExportActivity` (`editPassphrase`/`editPassphraseConfirm` XML `saveEnabled="false"`, `typedPassphrase`, `onExportTap`, `runExport`), `ExportKeying.plan` / `.apply`, `activity_export.xml` |
+| 9 | **Outward on `importDocument` is two fds and a bounded spec with no secret, no id and no path.** The call's only arguments are a read `ParcelFileDescriptor` on the user's picked document (opened `"r"` from the SAF URI — the extension never sees the URI itself), a write `ParcelFileDescriptor` on `cacheDir/import/incoming.soil` (a host cache file — never a Garden path), and an `ImportSpec` — an id → value map (empty this arc; capped at unmarshal like the exporter's) plus a display-only `displayName` (≤ `MAX_NAME_CHARS`; constructor refuses `/` and NUL, and `ImportNames.specDisplayName` strips to the leaf and drops both before construction — a name the parcelable cannot express degrades to `""` rather than failing the import). **No notebook id, no path, no passphrase has anywhere to ride**: the unlock prompt does not even exist until after the delivery call has fully returned and the fds are closed. | `INotebookImporter.aidl`, `ImportSpec` (constructor `require`s, JVM-tested), `ImportNames.specDisplayName`, `ImportFlow.deliver`, `ImporterClient.importDocument` (both fds closed in `finally`) |
+| 10 | **Inward is a bounded descriptor and a byte count that is corroborated, never believed — and the delivered bytes stay untrusted after both.** `describe()`'s `ImporterInfo` is capped at unmarshal (`MAX_FILE_EXTENSIONS` 8, `MAX_MIME_TYPES` 8, extension charset `[a-z0-9]`, MIME shape, label cap — pinned by `ImporterContractTest` / `ImporterInfoTest`); a failing descriptor drops that importer with a log line, never a crash. `importDocument()`'s `ImportResult.bytesWritten` must equal the length of the file that actually landed, a zero-byte delivery is refused, and the count is checked against every size the source provider will report (`OpenableColumns.SIZE` + fd stat) — **corroboration, not authority**: a provider claiming *more* than landed is a truncated stream and fails; one that says nothing or less (streaming providers report stale/placeholder sizes) never overrules two agreeing first-hand counts. Passing all of that earns the bytes nothing: the probe, the unlock, the re-key with its four-part acceptance (a same-device pass-through still pays a whole-file `integrity_check`), `SafeImportId` on every manifest id, and the create-only `AncestryPlan` all still treat the file as a stranger's — and the acceptance opens ride `SoilCrypto`'s no-op corruption handler, so a hostile file is refused, never deleted. | `ImporterInfo` / `ImportResult` (constructor `require`s, JVM-tested), `ImportFlow.loadCandidates` / `deliver` / `sourceSizes`, `NotebookImport.readManifest`, `ImportKeying.toGlobal`, `SafeImportId`, `AncestryPlan` (all pure parts JVM-tested) |
+| 11 | **The unlock passphrase's whole lifecycle is host-side, and shorter than export's.** A foreign file's passphrase is typed into a dialog field built with `isSaveEnabled = false` (never in a saved instance state — a secret that survives a process death is a secret on disk), returned to the flow as a local, verified on IO (`SoilCrypto.verifyPassphrase`) under the `"IMPORT"` `AttemptLimiter` bucket (its own — a wrong guess at a stranger's file never counts against the library's unlock), consumed by `ImportKeying` as an SQL literal on a local connection (`ExportKeying.sqlLiteral`, pure, pinned by test), and out of scope when the flow ends. It is never in the spec (delivery is already over by then), never in an Intent, never logged — every failure path here logs an exception's **class name only**. The device's global key follows the same path one step shorter: fetched from `KeySession` inside the flow, handed only to `SoilCrypto` / `ImportKeying` / `SoilDatabase.open`, never crossing the seam. | `ImportDialogs.passphrase` (`isSaveEnabled = false`, IME kept up — the Ratta rule), `ImportFlow.unlock` (`ATTEMPT_BUCKET`), `AttemptLimiter`, `ImportKeying` (path-free messages), `ExportKeying.sqlLiteral` (JVM-tested) |
 
 **One recorded asymmetry.** The host forces inbound colour to opaque black; the extension does not
 force it on the ink the host sends. That is not an oversight and not a hole: SN's ink is fixed
@@ -758,7 +841,9 @@ closest to describing recognized content, explicitly logs geometry and a coarse 
 
 ## Identity
 
-All three extensions share one recipe; only the name and the point differ.
+All three extensions share one recipe; only the name and the point differ. (`:ext-soil` serves
+**two** points — exporter and importer — under one identity: the user's arc-16 call was no rename,
+so the label stays `NSE · Soil Export` even though it imports too.)
 
 **`:ext-scratchpad`**
 
@@ -781,7 +866,7 @@ All three extensions share one recipe; only the name and the point differ.
 | Launcher activity | **None** — Supernote's own launcher shows the package anyway; accepted as "Ratta being Ratta" rather than worked around |
 | versionName | host lockstep: `0.1.0-ratta` (`-dev` suffixed in debug), bumped together with `:app` at arc freezes |
 
-**`:ext-soil`** (arc 15 / E1)
+**`:ext-soil`** (arc 15 / E1 · arc 16 / I1 — `SoilExporterService` + `SoilImporterService`, one APK)
 
 | | |
 |---|---|

@@ -51,7 +51,7 @@ of the row, before the title — see [Modes](#modes). `btnUp` and `btnCloseMode`
 **Bottom bar** — a `FrameLayout`, not a row:
 
 ```
-                        |<  <  n / n  >  >|                          [Templates] [debug ⋯]
+                        |<  <  n / n  >  >|                [Import] [Templates] [debug ⋯]
 ```
 
 The pager takes `layout_gravity="center"` so it is centred on the **screen**, and the right-hand
@@ -60,6 +60,18 @@ group (`bottomRight`) takes `layout_gravity="end"`. That is the whole reason the
 release**, so a weight-centred pager would sit in a different place in the two build types. The
 pager stays `INVISIBLE` rather than `GONE` so the row never reflows. Every icon button carries a
 `contentDescription` and a `TooltipCompat` long-press hint naming it.
+
+**Import** (arc 16 / I1), just before Templates — the user's placement call. Icon `ic_import`: the
+`ic_notebook_plus` recipe (the create button's notebook-with-spine-tabs glyph) with an **input
+arrow** in the corner notch where the plus sits on that icon, pointing into the notebook — drawn
+this way on the user's own call after the Tabler file-import glyph read as "a file," not "a
+notebook." `ImportFlow` owns the button: `VISIBLE` only while at least one trusted importer
+extension is installed, re-discovered on every `onResume` (a package can be disabled or replaced
+under a standing screen) and **`GONE`, never `isEnabled = false`**, when none is — a disabled
+control is invisible on e-ink. A tap opens SAF `ACTION_OPEN_DOCUMENT` and hands off to the whole
+import pipeline; see [`docs/import.md`](import.md). Import sits on its own bar rather than on a
+notebook's long-press sheet on purpose: exporting is something you do *to* a notebook, importing is
+something you do to the library itself.
 
 The Templates screen is reachable from here only; paper is *picked* from New Notebook and from the
 notebook's page-template row, which go straight to `TemplatesActivity.pickIntent`.

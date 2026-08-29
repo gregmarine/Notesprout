@@ -30,6 +30,9 @@ the extension store, the tier-2 recipe for an extension-owned screen, and **the 
 `docs/export.md` (arc 15: notebook export as a feature — the library sheet's Export… row, the
 `ExportActivity` screen, the keying trio and its host-side transforms, `SoilOpenFiles`, the
 conditional-deletion rule, the failure table) ·
+`docs/import.md` (arc 16: notebook import as a feature — the library's Import button, the SAF
+picker and extension match, the always-re-key-to-global pipeline, the untrusted manifest, the
+three questions, the remap, the staged-rename Garden write, the failure table) ·
 `docs/scratchpad.md` (arc 11: the Scratch Pad as a feature — screen, tools, pages, store layout,
 both transfers, failure table) ·
 `docs/sn-screen.md` (arc 11 / J1: the shared `:sn-screen` paper-screen library — what may live
@@ -85,7 +88,8 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   And `ACTION_NOTEBOOK_IMPORTER` / `INotebookImporter` (arc 16 / I1) — the **generic importer
   point**, the exporter's mirror: plural again (`ExtensionRegistry.importers()`), each
   `describe()`s the formats it accepts (label, file extensions, MIME types), and the library's
-  top-bar **Import** button is there when at least one trusted importer is installed and GONE
+  **Import** button (bottom-right group, before Templates — the user's I1 placement call) is
+  there when at least one trusted importer is installed and GONE
   when none is. **The host keys, the extension delivers** — the probe, the unlock (foreign
   passphrase, `AttemptLimiter` bucket `"IMPORT"`), the re-key to this device's global key
   (`ImportKeying` — every accepted import, no chooser), the manifest's id validation

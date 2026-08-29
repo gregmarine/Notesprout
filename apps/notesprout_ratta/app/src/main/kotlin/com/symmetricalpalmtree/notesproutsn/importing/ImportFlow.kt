@@ -43,7 +43,7 @@ import java.util.UUID
 
 /**
  * **Import** (arc 16 / I1) — the host's whole side of getting a notebook *into* the app, hung off
- * the library's top-bar Import button.
+ * the library's Import button (bottom-right group, before Templates).
  *
  * The seam in one sentence, and it is the exporter's reversed: *the host keys, the extension
  * delivers.* This class owns the entry, the picker, the cache, the probe, the unlock, the re-key,
@@ -82,7 +82,8 @@ import java.util.UUID
 class ImportFlow(
     private val activity: AppCompatActivity,
     private val repo: IndexRepository,
-    /** The top-bar button this owns: `VISIBLE` only while a trusted importer is installed. */
+    /** The library button this owns (bottom-right group, before Templates): `VISIBLE` only while
+     *  a trusted importer is installed. */
     private val button: View,
     /** Where the library is standing — used only to decide whether the toast names a folder. */
     private val currentFolder: () -> String?,
@@ -164,7 +165,7 @@ class ImportFlow(
         discovering = true
         activity.lifecycleScope.launch {
             val refs = try {
-                ExtensionRegistry.importers(activity)
+                discover()
             } finally {
                 discovering = false
             }
@@ -216,8 +217,23 @@ class ImportFlow(
         }
     }
 
+    /**
+     * Discovery, with `PackageManager`'s weather kept out of the coroutine: `queryIntentServices`
+     * and `checkSignatures` can throw under a system-server hiccup or a package replaced mid-query,
+     * and an uncaught throw here would crash the library on a screen the user merely resumed (the
+     * I2 review's finding). No importers is the honest degraded answer either way.
+     */
+    private suspend fun discover(): List<ProviderRef> = try {
+        ExtensionRegistry.importers(activity)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Log.w(TAG, "importer discovery failed: ${e.javaClass.simpleName}")
+        emptyList()
+    }
+
     private suspend fun loadCandidates(): List<Candidate> {
-        val refs = ExtensionRegistry.importers(activity)
+        val refs = discover()
         val kept = ArrayList<Candidate>(refs.size)
         for (ref in refs) {
             val info = try {
@@ -299,21 +315,33 @@ class ImportFlow(
         val manifest = NotebookImport.readManifest(keyed, global)
         val name = ImportNames.notebookName(manifest.meta?.name, displayName)
 
-        // 4 · The three questions.
+        // 4 · The three questions — decided here, written nowhere: cancelling any of them must
+        //     cost nothing but the cache, so no index row (the recreated folders included — the I2
+        //     review's finding) lands until every question has an answer.
         val identity = resolveIdentity(manifest) ?: return
-        val parentId = if (identity.placementDecided) identity.parentId else {
-            val landing = placement(manifest) ?: return
-            if (landing == ROOT) null else landing
-        }
-        val naming = resolveName(name, parentId, identity.notebookId, identity.keepBothChosen) ?: return
+        val landing = if (identity.placementDecided) Landing(identity.parentId)
+        else placement(manifest) ?: return
+        val naming = resolveName(name, landing.parentId, identity.notebookId, identity.keepBothChosen) ?: return
 
-        // 5 · Commit: remap in the cache, then the Garden, then the index — in that order.
+        // 5 · Commit: remap in the cache, then the Garden, then the index — folders first, the
+        //     notebook row last — in that order.
         ImportOverlay.stage(activity, R.string.import_stage_importing)
         val oldId = manifest.rawFileId
         if (oldId != null && oldId != identity.notebookId) {
             NotebookImport.remap(keyed, global, oldId, identity.notebookId)
         }
         NotebookImport.placeInGarden(activity, keyed, identity.notebookId)
+        var parentId = landing.parentId
+        for (create in landing.create) {
+            if (!repo.createFolderWithId(create.id, create.name, create.parentId)) {
+                // Something took the id between the read and the write. The rule is the planner's:
+                // never mutate, land one level up. (The name was resolved against the planned
+                // folder — a clash after this fallback is a cosmetic duplicate, not a hole.)
+                Slog.d(TAG) { "folder id taken under us — landing one level up" }
+                parentId = create.parentId
+                break
+            }
+        }
         val now = System.currentTimeMillis()
         repo.importNotebookRow(
             id = identity.notebookId,
@@ -322,6 +350,7 @@ class ImportFlow(
             pageCount = manifest.pageCount,
             createdAt = manifest.meta?.createdAt ?: now,
             updatedAt = manifest.meta?.updatedAt ?: now,
+            templateKind = manifest.templateKind,
         )
         // The replaced notebook goes only now — cancelling anywhere above left it untouched.
         naming.retireId?.let { retireNotebook(it) }
@@ -415,9 +444,18 @@ class ImportFlow(
             throw NotebookImport.ImportProblem(NotebookImport.Problem.SHORT)
         }
         if (landed == 0L) throw NotebookImport.ImportProblem(NotebookImport.Problem.NOT_A_NOTEBOOK)
-        if (sizes.isNotEmpty() && sizes.none { it == landed }) {
+        // Corroboration, not authority (arc 15's verify lesson, honoured in both halves): a
+        // provider claiming MORE than landed describes bytes that never arrived — a truncated
+        // stream both first-hand counts agreed on — and fails. A provider claiming less or zero is
+        // contradicted by two agreeing first-hand counts (streaming providers routinely report a
+        // stale or placeholder SIZE — the I2 review's finding); it is logged, and the probe and the
+        // keying acceptance downstream still answer for what the bytes actually are.
+        if (sizes.any { it > landed }) {
             Log.w(TAG, "source reports $sizes for $landed delivered bytes")
             throw NotebookImport.ImportProblem(NotebookImport.Problem.SHORT)
+        }
+        if (sizes.isNotEmpty() && sizes.none { it == landed }) {
+            Log.w(TAG, "source size accounts $sizes disagree with $landed delivered bytes")
         }
         Slog.d(TAG) { "delivered $landed bytes" }
     }
@@ -520,16 +558,21 @@ class ImportFlow(
         }
     }
 
+    /** Where the notebook will land: the folder (null = the library root) plus the folders that
+     *  must be created for it — **at commit, never here**: the questions only decide. */
+    private class Landing(val parentId: String?, val create: List<AncestryPlan.Create> = emptyList())
+
     /**
-     * **Placement.** *Notebook's folders* recreates the file's remembered ancestry, strictly
+     * **Placement.** *Notebook's folders* plans the file's remembered ancestry, strictly
      * create-only ([AncestryPlan]) — a segment that is anything but a live folder of the user's own
      * stops the descent one level up, and nothing existing is ever touched. *Choose folder…* hands
-     * the question to the library's own picker.
+     * the question to the library's own picker. Null means the user backed out.
      *
-     * Returns [ROOT] for the library root (null means the user backed out — the two answers are
-     * different and a nullable String cannot say both).
+     * Nothing is written here: the planned creates run in the commit step, after the last
+     * question, so a cancel at the name dialog cannot leave empty folders behind (the I2 review's
+     * finding).
      */
-    private suspend fun placement(manifest: NotebookImport.Manifest): String? {
+    private suspend fun placement(manifest: NotebookImport.Manifest): Landing? {
         val choice = ImportDialogs.choose(
             activity,
             R.string.import_placement_title,
@@ -541,7 +584,8 @@ class ImportFlow(
             val deferred = CompletableDeferred<String?>()
             folderPick = deferred
             folderLauncher.launch(FolderPickerActivity.pickIntent(activity, currentFolder()))
-            return deferred.await()
+            val picked = deferred.await() ?: return null
+            return Landing(if (picked == ROOT) null else picked)
         }
         // The plan is decided from reads taken up front, so the rule itself stays pure.
         val path = manifest.folderPath
@@ -557,18 +601,8 @@ class ImportFlow(
             }
         }
         val plan = AncestryPlan.plan(path) { slots[it] ?: AncestryPlan.Slot.BLOCKED }
-        var landing = plan.parentId
-        for (create in plan.create) {
-            if (!repo.createFolderWithId(create.id, create.name, create.parentId)) {
-                // Something took the id between the read and the write. The rule is the same as the
-                // planner's: never mutate, land one level up.
-                Slog.d(TAG) { "folder id taken under us — landing one level up" }
-                landing = create.parentId
-                break
-            }
-        }
         if (plan.truncated) Slog.d(TAG) { "ancestry truncated — landing one level up" }
-        return landing ?: ROOT
+        return Landing(plan.parentId, plan.create)
     }
 
     /** The name the notebook lands under, and the notebook (if any) that is retired for it. */

@@ -306,6 +306,27 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   remembered page — but **only under the file's own id** (pages are parented to the original
   notebook id; re-identifying is the future import arc's remap job). Reference:
   **`apps/notesprout_ratta/docs/export.md`** (feature) + `docs/extensions.md` rows 6–8 (seam).
+  **Arc 16 "Import"** (I1 `ecf0443` · I2 2026-08-28): notebook import, riding the same seam —
+  SN's **fourth capability point** on the user's explicit 2026-08-28 decision (`ACTION_NOTEBOOK_IMPORTER`,
+  the exporter's mirror: plural, call-shaped, *the host keys, the extension delivers*; served by
+  the **same `:ext-soil` APK** under the same `NSE · Soil Export` label — one package, two
+  services, on the user's no-rename call; **no FIFTH point without another user decision**).
+  Entry: the library's Import button (bottom-right, before Templates), GONE when no importer is
+  installed. Pipeline: SAF pick → extension-matched delivery into `cacheDir/import/` →
+  device-key-first unlock (`AttemptLimiter` bucket `"IMPORT"`) → **always re-keyed to the device
+  global key** (`ImportKeying`, riding `ExportKeying.exportAndKeyToPrimary` — the shared
+  export-and-key core; a same-device pass-through still pays a whole-file `integrity_check`) →
+  untrusted manifest (`SafeImportId`, UUID alphabet only) → three questions (id collision
+  Replace/Keep-both, create-only placement planned-then-committed, name conflict — one Keep-both
+  answer is one answer) → in-file **remap** (`NotebookRemap` — the E3 finding: pages are parented
+  to the notebook id, so a fresh-id import opens empty un-remapped) → **staged-rename Garden
+  write** (one atomic `rename(2)` over the live target, sidecars after, never a fallback copy) →
+  index row last. The I2 review (high, arc range) fixed 9 of 10 findings — the headline pair both
+  Replace-import data-loss paths (the rename-fallback window; the unverified pass-through) — and
+  accepted one to `BACKLOG.md` (imported names vs `NameRules`' typed charset — a naming-scheme
+  user decision). 890 JVM tests; version stays `0.1.0-ratta`; g-paper pin stays 0.1.23.
+  Reference: **`apps/notesprout_ratta/docs/import.md`** (feature) + `docs/extensions.md`
+  rows 9–11 (seam).
   **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for any work there** — it holds the
   per-arc status, locked decisions, working protocol, and model recipe.
 - `germination` — previous post-MVP feature branch (reference, not active)
