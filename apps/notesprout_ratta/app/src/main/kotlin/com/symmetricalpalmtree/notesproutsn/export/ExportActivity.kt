@@ -179,6 +179,14 @@ class ExportActivity : AppCompatActivity() {
         if (!busy && ::binding.isInitialized) discover()
     }
 
+    override fun onDestroy() {
+        // The guard bounce still runs this callback, and the dialog is attached to this window —
+        // leaving it up past the teardown leaks it.
+        if (IndexGuard.bounced(this)) { super.onDestroy(); return }
+        hideProgress()
+        super.onDestroy()
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putString(KEY_PACKAGE, chosenPackage)
@@ -345,19 +353,37 @@ class ExportActivity : AppCompatActivity() {
             if (ExportOptions.showsPlainWarning(info, values)) View.VISIBLE else View.GONE
     }
 
-    private fun showBusy(running: Boolean) {
-        binding.status.visibility = if (running) View.VISIBLE else View.GONE
+    /** The flow's modal progress dialog while an export is running (the Backup screen's pattern —
+     *  the user's 2026-08-30 call: the running commentary belongs in a dialog, not an inline line).
+     *  Non-cancelable: leaving mid-export is exactly what the busy latch exists to prevent, and
+     *  the dialog covering the screen is the latch made visible. */
+    private var progress: AlertDialog? = null
+
+    private fun showProgress(@StringRes textRes: Int) {
+        if (isFinishing || isDestroyed) return
+        progress = Dialogs.style(
+            AlertDialog.Builder(this)
+                .setMessage(textRes)
+                .setCancelable(false)
+                .create()
+        ).also { it.show() }
     }
 
-    /** The one line of running commentary this screen has — the stages are long enough on e-ink
-     *  that a single unchanging "Exporting…" would read as a stall. */
+    private fun hideProgress() {
+        progress?.let { runCatching { it.dismiss() } }
+        progress = null
+    }
+
+    /** The running commentary — the stages are long enough on e-ink that a single unchanging
+     *  "Exporting…" would read as a stall. Updates the dialog already up; a stage with no dialog
+     *  to land on (the screen is going down) is a stage nobody is watching. */
     private fun stage(@StringRes textRes: Int) {
-        binding.status.setText(textRes)
+        progress?.setMessage(getString(textRes))
     }
 
-    /** The same line with a count in it — the render's per-page commentary. Main thread only. */
+    /** The same commentary with a count in it — the render's per-page line. Main thread only. */
     private fun stage(text: String) {
-        binding.status.text = text
+        progress?.setMessage(text)
     }
 
     // ── The export ───────────────────────────────────────────────────────────
@@ -433,8 +459,7 @@ class ExportActivity : AppCompatActivity() {
      */
     private fun runExport(uri: Uri) {
         busy = true
-        stage(R.string.export_preparing)
-        showBusy(true)
+        showProgress(R.string.export_preparing)
         lifecycleScope.launch {
             // What a failure may delete (arc-15 review): the picker's overwrite confirmation hands
             // back a PRE-EXISTING document's URI, and a failure that never wrote a byte must not
@@ -547,6 +572,7 @@ class ExportActivity : AppCompatActivity() {
                     }
                     ExportVerification.Verdict.UNCONFIRMED -> {
                         Log.w(TAG, "destination reports $onDisk for ${result.bytesWritten} bytes")
+                        hideProgress()
                         if (!isFinishing && !isDestroyed) {
                             Dialogs.problem(
                                 this@ExportActivity, R.string.export_verify_title, getString(R.string.export_verify_body)
@@ -561,6 +587,7 @@ class ExportActivity : AppCompatActivity() {
                 // "Last used" is written by an export that finished, never by a tap the picker
                 // then abandoned — the next fresh Export screen defaults to this format.
                 exportPrefs.lastExporter = c.ref.packageName
+                hideProgress()
                 if (isFinishing || isDestroyed) return@launch
                 Dialogs.confirm(this@ExportActivity, R.string.export_done_title, R.string.export_done_body) {
                     finish()
@@ -577,7 +604,9 @@ class ExportActivity : AppCompatActivity() {
                 typedPassphrase = null
                 typedExportSecret = null
                 busy = false
-                if (!isFinishing && !isDestroyed) showBusy(false)
+                // The result paths each dismiss before their own dialog; this is the net under
+                // them, so no way out of the flow leaves a non-cancelable dialog standing.
+                hideProgress()
             }
         }
     }
@@ -717,6 +746,7 @@ class ExportActivity : AppCompatActivity() {
      * message.
      */
     private suspend fun fail(uri: Uri, @StringRes titleRes: Int, message: String, mayDelete: Boolean) {
+        hideProgress()
         val removed = if (mayDelete) withContext(Dispatchers.IO) {
             runCatching { DocumentsContract.deleteDocument(contentResolver, uri) }
                 .onFailure { Log.w(TAG, "could not remove the partial export: ${it.message}") }

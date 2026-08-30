@@ -73,21 +73,6 @@
         android:layout_height="1dp"
         android:background="@color/inkBlack" />
 
-    <!-- The inline busy state. GONE until an export is actually running — a control that says
-         nothing is better than one that lies, and on e-ink a toast for this would be missed. -->
-    <TextView
-        android:id="@+id/status"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:visibility="gone"
-        android:paddingStart="16dp"
-        android:paddingEnd="16dp"
-        android:paddingTop="12dp"
-        android:paddingBottom="12dp"
-        android:text="@string/export_exporting"
-        android:textColor="@color/inkBlack"
-        android:textSize="14sp" />
-
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="0dp"
