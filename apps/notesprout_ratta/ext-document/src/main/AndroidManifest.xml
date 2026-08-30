@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- No launcher activity: the Supernote launcher lists the package anyway (accepted — "Ratta
+         being Ratta"); everywhere else only Settings → Apps shows it. -->
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/ext_label"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:theme="@style/Theme.Notesprout">
+
+        <!-- The DOCUMENT_EDITOR point (arc 19 / M3) — the second screen-owning point after
+             SCRATCH_PAD. No Application class: this extension has no drawing engine to register. -->
+        <service
+            android:name=".DocumentEditorService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.symmetricalpalmtree.notesproutsn.extension.DOCUMENT_EDITOR" />
+            </intent-filter>
+            <meta-data
+                android:name="com.symmetricalpalmtree.notesproutsn.extension.API_VERSION"
+                android:value="2" />
+        </service>
+
+        <!-- The extension-owned screen: exported, custom action, NO launcher filter; launched only
+             by the host via startActivityForResult — it refuses any other caller first thing in
+             onCreate. <category DEFAULT> is required or implicit resolution will not match it. -->
+        <activity
+            android:name=".DocumentEditorActivity"
+            android:exported="true"
+            android:screenOrientation="portrait">
+            <intent-filter>
+                <action android:name="com.symmetricalpalmtree.notesproutsn.extension.DOCUMENT_EDITOR_SCREEN" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

@@ -75,6 +75,17 @@
                 android:layout_height="0dp"
                 android:layout_weight="1"/>
 
+            <!-- The Document (arc 19). GONE unless a trusted extension is installed —
+                 DocumentEditorEntry owns it, re-discovering on every resume. First of the
+                 "leaves this page" cluster because it is the page-bound one: the page is the
+                 draft, the document is what that page became. -->
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnDocument"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_file_text"
+                android:visibility="gone"
+                android:contentDescription="@string/cd_document"/>
+
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnRecents"
                 style="@style/Widget.Notesprout.ToolbarButton"

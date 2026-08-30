@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The document editor screen (arc 19 / M3) — the STUB the M4 editor replaces. Chrome, not paper:
+  no PaperView, no exclusion rects, nothing to hand the EPD pipeline to.
+
+  Shape: one top bar (Close · title · page indicator · Done) over a scrolling read-only text view.
+  The bar takes @dimen/toolbar_bar_thickness and its buttons Widget.Notesprout.ToolbarButton, so
+  every tap target is the tier's — never a hardcoded size. The Done button sits at the far end of
+  the TOP bar (the SN rule: action buttons on the top bar, after the cancel side).
+
+  Chrome sits flush at the top edge — the top guard is 0 on Ratta; the Activity still applies it,
+  because the guard, not this file, is where that decision lives.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/paperWhite"
+    android:orientation="vertical">
+
+    <!-- A FrameLayout, not a row: the title is centred on the SCREEN, so it stays put whatever
+         flanks it (the scratch pad's lesson — a weight-centred title moves when a button on one
+         side appears or goes). -->
+    <FrameLayout
+        android:id="@+id/topBarRow"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/toolbar_bar_thickness"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/title"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:singleLine="true"
+                android:text="@string/document_title"
+                android:textColor="@color/inkBlack"
+                android:textSize="16sp" />
+
+            <!-- `n / m`. Smaller than the title rather than grey: it carries information, and
+                 information takes inkBlack and gets smaller to read as secondary. -->
+            <TextView
+                android:id="@+id/pageIndicator"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:singleLine="true"
+                android:textColor="@color/inkBlack"
+                android:textSize="13sp" />
+
+        </LinearLayout>
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnClose"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_gravity="start|center_vertical"
+            android:contentDescription="@string/cd_document_close"
+            android:src="@drawable/ic_arrow_left" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnDone"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_gravity="end|center_vertical"
+            android:contentDescription="@string/cd_document_done"
+            android:src="@drawable/ic_check" />
+
+    </FrameLayout>
+
+    <!-- Bar's bottom border. 1dp solid inkBlack — borderGray is invisible on e-ink. -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true">
+
+        <!-- Read-only at M3: this screen exists to prove the callback seam carries state and
+             chunked text, not to edit anything. M4 turns it into the real editor. -->
+        <TextView
+            android:id="@+id/text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="16dp"
+            android:textColor="@color/inkBlack"
+            android:textIsSelectable="false"
+            android:textSize="15sp" />
+
+    </ScrollView>
+
+</LinearLayout>

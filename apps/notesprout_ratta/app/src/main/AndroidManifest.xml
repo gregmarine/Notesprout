@@ -23,6 +23,15 @@
         <intent>
             <action android:name="com.symmetricalpalmtree.notesproutsn.extension.NOTEBOOK_IMPORTER" />
         </intent>
+        <!-- The document editor (arc 19) — two actions like the scratch pad's, for the same
+             reason: the service is discovered by one and its exported screen resolved by the
+             other, and package visibility gates both. -->
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesproutsn.extension.DOCUMENT_EDITOR" />
+        </intent>
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesproutsn.extension.DOCUMENT_EDITOR_SCREEN" />
+        </intent>
     </queries>
 
     <application

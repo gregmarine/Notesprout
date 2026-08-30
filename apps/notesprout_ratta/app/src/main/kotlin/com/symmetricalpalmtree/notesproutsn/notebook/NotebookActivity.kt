@@ -42,6 +42,7 @@ import com.symmetricalpalmtree.notesproutsn.data.prefs.RecentsPrefs
 import com.symmetricalpalmtree.notesproutsn.data.prefs.SnapPrefs
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityNotebookBinding
 import com.symmetricalpalmtree.notesproutsn.core.markdown.HeadingPrefix
+import com.symmetricalpalmtree.notesproutsn.extension.DocumentEditorEntry
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionCallException
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionRegistry
@@ -97,6 +98,8 @@ class NotebookActivity : AppCompatActivity() {
     private lateinit var snapPrefs: SnapPrefs
     /** The Scratch Pad's entry button (arc 11) — the host half of the EPD handoff lives in it. */
     private lateinit var scratchPad: ScratchPadEntry
+    /** The Document editor's entry button (arc 19 / M3) — the fifth extension point's door. */
+    private lateinit var documentEntry: DocumentEditorEntry
     private val repo by lazy { IndexRepository() }
 
     /** The global clipboard's one index row (arc 7) — the payload, read and written only here. */
@@ -122,6 +125,16 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     private var notebookId: String = ""
+
+    /**
+     * The notebook's display name (arc 19 / M3) — the same string the bottom strip shows, kept as a
+     * field because the document editor's header asks for it from a **Binder thread**, where
+     * reading `binding.notebookName` would be a View touched off Main. `@Volatile` for the
+     * publication, not for any update: nothing rewrites it until M8's rename-from-title.
+     */
+    @Volatile
+    private var notebookName: String = ""
+
     private var opened = false
     private var closing = false
 
@@ -217,6 +230,7 @@ class NotebookActivity : AppCompatActivity() {
         if (!IndexGuard.ready(this)) return
         notebookId = intent.getStringExtra(EXTRA_NOTEBOOK_ID) ?: run { finish(); return }
         val name = intent.getStringExtra(EXTRA_NOTEBOOK_NAME) ?: ""
+        notebookName = name
         viaLink = intent.getBooleanExtra(EXTRA_VIA_LINK, false)
         if (savedInstanceState == null) initialPageId = intent.getStringExtra(EXTRA_INITIAL_PAGE_ID)
 
@@ -370,6 +384,33 @@ class NotebookActivity : AppCompatActivity() {
         )
         binding.btnScratchPad.setOnClickListener { if (opened && !closing) scratchPad.open() }
         TooltipCompat.setTooltipText(binding.btnScratchPad, binding.btnScratchPad.contentDescription)
+
+        // The Document editor (arc 19 / M3) — the fifth extension point. Like the pad it must exist
+        // before RESUMED (it registers an ActivityResult launcher), and like the pad the notebook is
+        // NOT sealed behind it: the editor opens no `.soil` at all — every read and write it makes
+        // comes back here through the callback binder [DocumentHostHooks] serves.
+        //
+        // **No `releaseForHandoff`.** The editor is chrome, not a paper surface — nothing over there
+        // draws ink, so the EPD pipeline stays here, exactly as it does for the arc-13 template
+        // picker (see `templatePickLauncher`). But it is SN's first CROSS-PROCESS full-screen child
+        // over a live notebook, and the two are not the same claim: the M3 on-device pen check is
+        // what decides whether it holds. If the Ratta ink daemon draws beneath the editor, the fix
+        // is the scratch pad's ordering (releaseForHandoff immediately before the launch, the
+        // extension reclaiming in its own onResume) — never a repaint, and never a workaround here.
+        documentEntry = DocumentEditorEntry(
+            activity = this,
+            button = binding.btnDocument,
+            hooks = DocumentHostHooks(
+                notebook = { session },
+                // displayedPageId, never session.currentIndex — the R6 torn-read rule: the document
+                // belongs to the page whose strokes are on the paper.
+                displayedPageId = { displayedPageId },
+                notebookName = { notebookName },
+                alive = { opened && !closing && ::session.isInitialized },
+            ),
+        )
+        binding.btnDocument.setOnClickListener { if (opened && !closing) documentEntry.open() }
+        TooltipCompat.setTooltipText(binding.btnDocument, binding.btnDocument.contentDescription)
 
         // Chrome moved/appeared/disappeared: re-push the exclusion rects once the pass settles.
         binding.root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> binding.root.post { pushExclusions() } }
@@ -2116,6 +2157,7 @@ class NotebookActivity : AppCompatActivity() {
         // Re-discovered on every resume: a package can be disabled or replaced under us, and this
         // is also the resume that follows a return from the pad.
         if (::scratchPad.isInitialized) scratchPad.refresh()
+        if (::documentEntry.isInitialized) documentEntry.refresh()
     }
 
     override fun onStop() {
@@ -2187,6 +2229,9 @@ class NotebookActivity : AppCompatActivity() {
         if (::linkPickFlow.isInitialized) linkPickFlow.close()
         // The pad's held bind must not outlive the screen that opened it, result or no result.
         if (::scratchPad.isInitialized) scratchPad.close()
+        // Same rule for the editor's held bind — and it matters more here, because its host binder
+        // reaches back into this session: released before the seal below, never after.
+        if (::documentEntry.isInitialized) documentEntry.close()
         if (::paper.isInitialized) paper.release()
         // A destroy that isn't a normal close (e.g. finish() out of failOpen) still seals.
         if (::session.isInitialized && session.isOpen && !closing) {

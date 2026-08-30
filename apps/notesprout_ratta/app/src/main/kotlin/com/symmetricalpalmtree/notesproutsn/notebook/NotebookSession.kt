@@ -12,6 +12,7 @@ import com.symmetricalpalmtree.notesproutsn.crypto.KeySession
 import com.symmetricalpalmtree.notesproutsn.data.clip.ClipEnvelope
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.index.NotebookFlags
+import com.symmetricalpalmtree.notesproutsn.data.soil.DocumentRepository
 import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookMeta
 import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookMetaStore
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilCompactor
@@ -62,6 +63,16 @@ class NotebookSession(
     lateinit var links: LinkStore
         private set
 
+    /**
+     * The `document` rows' reader and writer (arc 19 / M3 — M2 built it). Not a `*Store` like its
+     * three neighbours because a document is not page content and has no in-memory working copy on
+     * this screen: the extension's editor holds the live text and the host writes what it pushes
+     * back. Reads go straight through it; **writes go through [writeDocument]**, which is what puts
+     * them on the session's one serial queue with everything else.
+     */
+    lateinit var documents: DocumentRepository
+        private set
+
     // @Volatile: the Contents gather reads this on an IO thread outside the page-op mutex — the
     // list itself is immutable and swapped whole, but without the fence its publication to that
     // reader is a JMM data race (unsafe publication, not just staleness).
@@ -103,6 +114,7 @@ class NotebookSession(
         store = StrokeStore(db.dao(), writer)
         headings = HeadingStore(db.dao(), writer)
         links = LinkStore(db.dao(), writer) { block -> db.withTransaction { block() } }
+        documents = DocumentRepository(db.documentDao(), db.dao())
         try {
             val dao = db.dao()
             val root = dao.notebookRow()
@@ -516,6 +528,33 @@ class NotebookSession(
             folderPath = repo.ancestry(row.parentId), appVersionCode = appVersionCode,
             textDocument = ((row.flags ?: 0) and NotebookFlags.TEXT_DOCUMENT) != 0,
         ))
+    }
+
+    /**
+     * Persist a document (arc 19 / M3) — the editor's save, arriving from the extension over the
+     * host callback binder. [parentId] is a page id (a page document) or the notebook root row's id
+     * (the notebook document, M7); blank [text] deletes the row, which is [DocumentRepository]'s
+     * blank-means-absent rule and not a special case here.
+     *
+     * **Through the writer, then drained.** The enqueue is what orders this write against the
+     * strokes and headings the same page may still be committing — one serial queue, the whole
+     * session's rule. The [SoilWriter.drain] after it is the seam's half: the extension's
+     * `saveChunk` is a blocking Binder call and its return is the editor's only "it landed", so a
+     * fire-and-forget enqueue would let the editor finish (and the host seal) over a write still
+     * sitting in the queue. Drain costs one round trip through a queue this screen is not otherwise
+     * hammering, and buys the flush-before-seal invariant across a process boundary.
+     *
+     * [draftWatermark] non-null routes to [DocumentRepository.saveDrafted] — the one write that
+     * moves the source watermark (a seed or a "bring in" refresh, M6/M7). An ordinary edit passes
+     * null and the watermark stays exactly where it was.
+     */
+    suspend fun writeDocument(parentId: String, text: String, draftWatermark: Long?) {
+        check(isOpen) { "notebook closed" }
+        writer.enqueue {
+            if (draftWatermark == null) documents.save(parentId, text)
+            else documents.saveDrafted(parentId, text, draftWatermark)
+        }
+        writer.drain()
     }
 
     /** Wait for queued writes (both stores), then purge + checkpoint + close. Idempotent; never throws. */

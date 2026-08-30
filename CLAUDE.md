@@ -150,11 +150,12 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   Supernote-only rebuild under `apps/notesprout_ratta/`. **Arcs 1–18 complete + frozen**
   (2026-08-30): Ratta Paper · Polish · Headings · Contents · Naming · Links · Pages · Objects ·
   Snap · Recents · Scratch Pad · Paper · Stationery · Scribble · Export · Import · Backup · PDF,
-  plus post-arc fixes F1–F5. Seven modules (host + `:sn-screen` + `:extension-api` + four
-  extension APKs), FOUR extension points (recognizer · scratch pad · exporter · importer — no
-  new point without an explicit user decision), g-paper pin 0.1.23, 966 JVM tests, version
-  `0.1.0-ratta`. **Arc 19 "Document"** planned 2026-08-30 (og's Documents as the FIFTH point —
-  eleven phases M1–M11, not started).
+  plus post-arc fixes F1–F5. Nine modules (host + `:sn-screen` + `:markdown` +
+  `:extension-api` + five extension APKs), FIVE extension points (recognizer · scratch pad ·
+  exporter · importer · document editor — no new point without an explicit user decision),
+  g-paper pin 0.1.23, version `0.1.0-ratta`. **Arc 19 "Document"** in progress (og's Documents
+  as the FIFTH point — eleven phases; M1 `:markdown` + M2 host data layer + M3 the point/AIDL/
+  `:ext-document` done).
   **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for ANY work there** — it holds the working
   protocol, model recipe, standing traps, the per-arc ledger of still-binding decisions, and the
   active arc's full plan. Subsystem detail: `apps/notesprout_ratta/docs/` + that app's CLAUDE.md.

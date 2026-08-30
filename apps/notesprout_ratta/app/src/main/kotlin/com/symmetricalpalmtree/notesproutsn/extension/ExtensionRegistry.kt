@@ -17,7 +17,7 @@ data class ProviderRef(
 )
 
 /**
- * Discovery + trust for SN's four extension points. A candidate `<service>` is kept only if it is
+ * Discovery + trust for SN's five extension points. A candidate `<service>` is kept only if it is
  * exported, its `<meta-data>` API version is in `1..`[ExtensionContract.API_VERSION] (the declared
  * number is what the extension *requires* of the host — the arc-18 / D3 skew guard, reasoned at
  * the constant), and it is signed
@@ -48,6 +48,19 @@ object ExtensionRegistry {
     suspend fun scratchPad(context: Context): ProviderRef? = withContext(Dispatchers.IO) {
         val all = discover(context.applicationContext, ExtensionContract.ACTION_SCRATCH_PAD)
         for (extra in all.drop(1)) Slog.d(TAG) { "ignoring additional scratch pad ${extra.component.flattenToShortString()}" }
+        all.firstOrNull()
+    }
+
+    /**
+     * The one trusted document editor, or null (arc 19 / M3 — SN's **fifth** capability point, and
+     * its second screen-owning one). Same filter and same first-wins rule as [scratchPad]: a second
+     * installed editor is ignored with a `Slog.d`, because choosing between editors is not a
+     * question this arc asks. Re-run on every resume of a screen showing the Document button — a
+     * package can be disabled or replaced under it.
+     */
+    suspend fun documentEditor(context: Context): ProviderRef? = withContext(Dispatchers.IO) {
+        val all = discover(context.applicationContext, DocumentContract.ACTION_DOCUMENT_EDITOR)
+        for (extra in all.drop(1)) Slog.d(TAG) { "ignoring additional document editor ${extra.component.flattenToShortString()}" }
         all.firstOrNull()
     }
 

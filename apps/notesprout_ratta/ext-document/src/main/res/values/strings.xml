@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The extension's own strings. `ok` and `cancel` come from :sn-screen (Dialogs / ActionSheetDialog
+  reference them from inside the module) and are deliberately not repeated here.
+-->
+<resources>
+    <string name="ext_label">NSE · Document</string>
+    <string name="document_title">Document</string>
+
+    <!-- The M3 stub screen's chrome. Every icon button needs a long-press hint naming it, and the
+         hint is its content description. -->
+    <string name="cd_document_close">Close</string>
+    <string name="cd_document_done">Done</string>
+    <string name="document_load_failed">This document could not be read just now.</string>
+    <!-- `n / m` beside the title. Empty for the notebook scope (M7), which is not a page. -->
+    <string name="document_page_indicator">%1$d / %2$d</string>
+</resources>

@@ -50,7 +50,7 @@ All root `CLAUDE.md` rules apply (Kotlin/17, kotlinx-serialization only, no new 
 deps without discussion, no Material Components, no `runBlocking` on main, `Slog.d` not
 `Log.d`, e-ink design system, Tabler icons only). Plus, for this app:
 
-- **Eight modules, own Gradle root** (nine once arc 19's `:ext-document` lands): `:app` (the
+- **Nine modules, own Gradle root**: `:app` (the
   host) · `:markdown` (arc 19 / M1 — the shared markdown engine: parser, renderer, formatter,
   reflow, search, draft, paginator; stdlib only, depends on **nothing** in this project and
   nothing beyond the android SDK its spans use — `:app` and `:ext-document` consume it, one
@@ -64,12 +64,15 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   `pickFirsts` — Paper's Onyx tax, SN has no Onyx) · `:ext-soil` (**NSE · Soil Export** —
   `:extension-api` only; one package, TWO services: `SoilExporterService` + `SoilImporterService`,
   label unchanged on the user's call) · `:ext-pdf` (**NSE · PDF Export** — `:extension-api` only +
-  module-local `com.tom-roush:pdfbox-android:2.0.27.0`, which never leaks into another module).
+  module-local `com.tom-roush:pdfbox-android:2.0.27.0`, which never leaks into another module) ·
+  `:ext-document` (**NSE · Document**, arc 19 / M3 — `:extension-api` + `:sn-screen` +
+  `:markdown`, never `:app`; the document editor screen, no Application class, no drawing
+  engine).
   `gradle.properties` sets `android.nonTransitiveRClass=false` — undoing it breaks every
   `:sn-screen` resource reference from `:app`.
-- **SN has FOUR extension points** — each added on its own explicit user decision, and
-  **no FIFTH may be added without another** (arc 19's `ACTION_DOCUMENT_EDITOR` is that decision,
-  granted 2026-08-30; amend this rule at M3). The full seam — contracts, caps, trust, the
+- **SN has FIVE extension points** — each added on its own explicit user decision, and
+  **no SIXTH may be added without another** (arc 19's `ACTION_DOCUMENT_EDITOR` was the fifth's,
+  granted 2026-08-30). The full seam — contracts, caps, trust, the
   boundary audit — is `docs/extensions.md`; the rules that bind every point:
   - `ACTION_HANDWRITING_RECOGNIZER` (headings + the markdown engine are core, the engine is
     swappable). **Only `prepare()` may start a model download** (host consent dialog first;
@@ -91,7 +94,15 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
     secret/id/path). Probe, unlock (`AttemptLimiter` `"IMPORT"`), the unconditional re-key to
     the device global key, `SafeImportId`, placement, remap and both writes are all host-side;
     the extension only streams bytes. Detail: `docs/import.md`.
-  Cross-point rules: extensions get the **extension store** (`IExtensionStore` — per-package,
+  - `ACTION_DOCUMENT_EDITOR` + `_SCREEN` (arc 19 / M3) — the second screen-owning point, served
+    by `:ext-document`. **The host owns every `.soil` read and write** (og's invariant, enforced
+    by the process boundary): the seam's new piece is `IDocumentHost`, the first **host-side**
+    stub on any SN seam — minted per showing, uid-bound and revoked with the unbind (the store
+    binder's recipe). Document text is the only user content that crosses, **chunked** by the
+    shared `TextChunks` rule under `DocumentContract.MAX_DOCUMENT_CHARS`, and every save names
+    its target `pageKey` (the mode-routing guard, structural). Ink never crosses this seam, and
+    document text is never logged on either side. Nothing rides the screen's Intent — no extras
+    at all. extensions get the **extension store** (`IExtensionStore` — per-package,
   encrypted under the global key at `Garden/<pkg>.db`, minted per bind, uid-bound, revoked with
   the unbind) because **an extension writes nothing to disk itself, ever**; action strings are
   SN-namespaced so Paper's extensions are never discovered; trust is same-signature both ways

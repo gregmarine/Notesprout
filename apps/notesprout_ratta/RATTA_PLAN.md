@@ -632,7 +632,50 @@ FakeObjectDao pins); a Paper-created and pre-arc SN file still open (compat pin)
 **Questions to resolve at phase start:** none expected.
 
 ### M3 — The FIFTH point: AIDL, `:ext-document`, entry button
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (2026-08-30)
+
+**Outcome (code + walk, 2026-08-30):** The FIFTH point is live end to end on the Nomad. Seam
+(`:extension-api`): `DocumentContract` (actions, `MAX_DOCUMENT_CHARS` 10 M, `TEXT_CHUNK_CHARS`
+100 k, `TEXT_MAX_CHUNKS` **computed** 101, `MAX_PAGE_KEY_CHARS` 64, scope/source/direction/close
+constants), `TextChunks` (greedy, **surrogate-pair backoff** — a chunk may run one char short,
+which is the bound's `+ 1`; **empty text is ONE empty chunk**, so a cleared save and an absent
+document ride the same shape), `DocumentPageState` (constructor-validated, compatible-tail wire
+doc), `IDocumentEditor` (`begin(store, host)` / `end()` — the held-bind bracket, **zero Intent
+extras**) and `IDocumentHost` — the first host-side stub on any SN seam, full M3–M8 surface
+declared now (M6+ methods answer `UnsupportedOperationException`, which marshals — the J3
+precedent; their semantics belong to their phases and may reshape before freeze). **The read
+direction is a pull** (every state-answering call parks its text in the host's read window
+atomically with the state; `readChunk` serves it), the write a push (`saveChunk(pageKey, index,
+chunk, last, drafted)` — ordered from 0, cap re-checked on receipt, any refusal resets whole).
+`pageKey` = the page row's id used as an **opaque stable token** (the extension's per-page store
+keys need stability across showings; it opens nothing — no path, no key crosses).
+Host: `DocumentHostSession` (pure, JVM-tested: window + accumulator + **parked-watermark** rule —
+a drafted save consumes a watermark parked at serve-time, an ordinary edit can never invent one;
+wrong-key save refused = og's mode-routing guard made structural), `DocumentHostBinder`
+(uid-gated + revoked like the store binder; hooks run on Binder threads, `runBlocking` allowed
+there; unexpected Throwables funnel to `IllegalStateException(className)` — never a message),
+`DocumentEditorClient`/`DocumentEditorEntry` (the ScratchPad pair minus transfers),
+`DocumentHostHooks` (staleness = M2's sweep vs. the row's watermark; `displayedPageId`, never
+`currentIndex` — the torn-read rule), `NotebookSession.documents` + `writeDocument` (**enqueue
+then `drain()`** — a fire-and-forget enqueue would let the editor's blocking save return before
+the write landed; the drain is flush-before-seal across the process boundary). `:ext-document`
+EIGHTH module (`NSE · Document`, API_VERSION 2, no Application class); stub screen =
+`enforceActivity` first + a read-only proof of the whole seam (title + `n / m` + text pulled
+through the callback binder). Notebook button before Recents (`ic_file_text`), GONE-not-disabled.
+Both CLAUDE.mds amended: **FIVE points, no SIXTH without a user decision**; nine modules.
+**+36 JVM tests → 1197/variant**; release builds green; NUL-scan clean (the trap fired a 5th
+time — a NUL char literal landed as a raw NUL; byte-scan caught it).
+**Walk (Nomad):** discovery/button ✓ · tap → extension-process screen with live title + `12 / 13`
+via `current()`+`readChunk` (25 ms) ✓ · Done → `end`/unbind, services dump empty ✓ · shell
+`am start` → `refused caller (none)` ✓ · `pm disable`/`enable` hides/restores the button ✓ ·
+crash buffer clean ✓. The walk agent's one FAIL (button tap "did nothing") was the standing
+tap-aim trap — refuted by hand at (1100, 65).
+**The EPD question — ANSWERED (user pen check, 2026-08-30): stop-behind is enough.** The
+notebook needs **no `releaseForHandoff()`** around a non-drawing child screen, cross-process
+included: with the Document screen open, pen scribble drew nothing (no daemon ink, no trails),
+and on return ink flowed normally with no ghosting and committed. The arc-13 template-picker
+precedent extends across the process boundary; the editor keeps launching with no handoff, and
+M4–M8 inherit this answer.
 
 The seam (Fable): `IDocumentEditor` (held bind — the operation is the showing:
 `begin(store, host)` / `end()`, session calls for text/state chunks) + **`IDocumentHost`** — the
@@ -653,9 +696,11 @@ answer here.)
 screen opens and returns.
 *Fable seams; Opus client + service skeleton; Sonnet module scaffold/manifest/icon/strings.*
 
-**Questions to resolve at phase start:** Document button icon (og has no glyph — `ic_file_text`
-family?) + top-bar position (before Recents, the scratch-pad precedent?); `MAX_DOCUMENT_CHARS`
-sizing (og's 10 MB import cap as the ceiling?).
+**Questions to resolve at phase start:** ✅ answered 2026-08-30 — icon = **Tabler `file-text`**
+(og's own `ic_file_text` vocabulary, redrawn into `:app`); position = **right cluster, before
+Recents** (`… [space] Document · Recents · Scratch Pad` — page-bound, so leftmost of the
+leave-this-page cluster); **`MAX_DOCUMENT_CHARS` = 10,000,000** (aligned with the M8 import
+cap's 10 MB — UTF-8 chars ≤ bytes, so anything the importer accepts is guaranteed editable).
 
 ### M4 — The real editor: Write/Preview, format bar, autosave
 **Status:** ⬜ Not started
