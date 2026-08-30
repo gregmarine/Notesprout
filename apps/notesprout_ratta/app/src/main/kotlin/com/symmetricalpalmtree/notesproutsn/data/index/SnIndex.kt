@@ -165,14 +165,21 @@ object SnIndex {
     /**
      * Arc 17 / K1: the opportunistic index purge. Bootstrap calls this once the index is open —
      * the one moment it has no other reader, so the `VACUUM` cannot lose to a busy library screen.
-     * The `EXISTS` gate keeps the ordinary launch at one trivial query. Never throws. IO.
+     * The `EXISTS` gate keeps the ordinary launch at one trivial query. On the launch path the
+     * `VACUUM` also waits for [BOOT_MIN_RECLAIM_BYTES] of freelist (K3 review — one soft-deleted
+     * clipboard row must not cost a whole-index rewrite before the library appears); the backup
+     * run passes 0, because a pre-copy compaction wants every byte back. Never throws. IO.
      */
-    suspend fun compactIfNeeded() = withContext(Dispatchers.IO) {
+    suspend fun compactIfNeeded(minReclaimBytes: Long = BOOT_MIN_RECLAIM_BYTES) = withContext(Dispatchers.IO) {
         try {
             val raw = db().openHelper.writableDatabase
-            if (IndexCompactor.hasSoftDeletedRows(raw)) IndexCompactor.compact(raw)
+            if (IndexCompactor.hasSoftDeletedRows(raw)) IndexCompactor.compact(raw, minReclaimBytes)
         } catch (e: Exception) {
             Log.w(TAG, "compact skipped", e)
         }
     }
+
+    /** The bootstrap `VACUUM` floor: below this much reclaimable freelist, deleting the rows is
+     *  enough and the rewrite waits for the backup run (or for the freelist to grow past it). */
+    private const val BOOT_MIN_RECLAIM_BYTES = 256L * 1024
 }

@@ -51,15 +51,23 @@ of the row, before the title — see [Modes](#modes). `btnUp` and `btnCloseMode`
 **Bottom bar** — a `FrameLayout`, not a row:
 
 ```
-                        |<  <  n / n  >  >|                [Import] [Templates] [debug ⋯]
+[Backup] [Import]       |<  <  n / n  >  >|                [Templates] [debug ⋯]
 ```
 
-The pager takes `layout_gravity="center"` so it is centred on the **screen**, and the right-hand
-group (`bottomRight`) takes `layout_gravity="end"`. That is the whole reason the bar is not a
-`LinearLayout`: `DebugMenu.install` appends the ⋯ into `bottomRight` at runtime and is a **no-op in
-release**, so a weight-centred pager would sit in a different place in the two build types. The
-pager stays `INVISIBLE` rather than `GONE` so the row never reflows. Every icon button carries a
+The pager takes `layout_gravity="center"` so it is centred on the **screen**, the left-hand group
+(`bottomLeft`) takes the default start gravity, and the right-hand group (`bottomRight`) takes
+`layout_gravity="end"`. That is the whole reason the bar is not a `LinearLayout`:
+`DebugMenu.install` appends the ⋯ into `bottomRight` at runtime and is a **no-op in release**, so a
+weight-centred pager would sit in a different place in the two build types. The pager stays
+`INVISIBLE` rather than `GONE` so the row never reflows. Every icon button carries a
 `contentDescription` and a `TooltipCompat` long-press hint naming it.
+
+**Backup** (arc 17 / K2), the far-left button — the user's placement call, with Import moved to
+sit right after it. Icon `ic_backup` (Tabler `archive`, drawn in `:sn-screen` — the K3 user call,
+replacing K2's `device-floppy`). A tap opens
+`BackupActivity` — see [`docs/backup.md`](backup.md). It is deliberately **not** latched with
+`launching`: that latch guards the doors onto a `.soil` (two NotebookActivities is two SQLCipher
+writers), and the backup screen opens no notebook.
 
 **Import** (arc 16 / I1), just before Templates — the user's placement call. Icon `ic_import`: the
 `ic_notebook_plus` recipe (the create button's notebook-with-spine-tabs glyph) with an **input
@@ -213,9 +221,17 @@ Main — the shared map is only ever written single-threaded. The page label is 
 the bind, so "n / N" can never name a page before its cards are on screen.
 
 Tap a folder to enter it, a notebook to open it. Long-press either for the action sheet:
-**Pin/Unpin · Rename · Move · Export… · Delete** — the first row is notebooks-only, and its label
-comes from the card's own `pinned` flag (the listing already read the pinned list) rather than a
-fresh query.
+**Pin/Unpin · Rename · Move · Export… · Exclude/Include in backup · Delete** — the first row is
+notebooks-only, and its label comes from the card's own `pinned` flag (the listing already read
+the pinned list) rather than a fresh query.
+
+**Exclude from backup / Include in backup** (arc 17 / K2) is notebooks-only and always there — it
+needs no extension and no destination. The label carries the current state (the Pin/Unpin
+pattern, read from the listing's own `flags`) so the row never moves. The toggle flips notebook
+`flags` bit 1 (`NotebookFlags.EXCLUDE_FROM_BACKUP`) and **never bumps `updatedAt`** — it is both
+the library sort key and the backup's needs-copying flag, so a bump would re-flag the notebook
+the instant the user said not to back it up. Confirmed by toast (it only confirms what already
+happened). See [`docs/backup.md`](backup.md).
 
 **Export…** (arc 15 / E1) is notebooks-only too — a folder's sheet never even asks. Whether it
 shows depends on a trusted exporter extension being installed *right now*: `onCardLongPress` runs

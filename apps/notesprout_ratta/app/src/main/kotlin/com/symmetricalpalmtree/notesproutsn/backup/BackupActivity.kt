@@ -174,6 +174,19 @@ class BackupActivity : AppCompatActivity() {
         val stored = uri.toString()
         val config = store.read()
         val changed = config.treeUri != stored
+        if (changed) config.treeUri?.let { previous ->
+            // Persisted grants are a capped per-app resource (K3 review): without this, enough
+            // re-picks exhaust the cap and takePersistableUriPermission refuses every folder
+            // from then on. Best effort — a grant that will not release just idles.
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    contentResolver.releasePersistableUriPermission(
+                        Uri.parse(previous),
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                    )
+                }.onFailure { Slog.d(TAG) { "previous grant not released: ${it.javaClass.simpleName}" } }
+            }
+        }
         store.write(
             config.copy(treeUri = stored, stamps = if (changed) emptyMap() else config.stamps)
         )
@@ -206,8 +219,15 @@ class BackupActivity : AppCompatActivity() {
             showProgress()
             val result = try {
                 // The engine is IO internally and never throws; the progress callback arrives on
-                // its thread, so every touch of the dialog is posted back to Main.
+                // its thread, so every touch of the dialog is posted back to Main. The catch is
+                // the belt to the engine's own top-level one (K3 review) — a throw here used to
+                // crash the app under the non-cancelable progress dialog.
                 BackupEngine.run(applicationContext) { p -> runOnUiThread { updateProgress(p) } }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "backup run threw", e)
+                BackupEngine.Result(failed = 1)
             } finally {
                 running.set(false)
                 hideProgress()

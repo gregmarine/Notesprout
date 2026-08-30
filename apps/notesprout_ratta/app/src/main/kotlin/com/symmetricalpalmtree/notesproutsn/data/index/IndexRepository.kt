@@ -134,7 +134,12 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
         val row = ObjectEntity(
             id = id, type = ObjectType.NOTEBOOK, name = name, parentId = parentId,
             createdAt = existing?.createdAt ?: createdAt, updatedAt = updatedAt, deletedAt = null,
-            pageCount = pageCount, flags = NotebookFlags.ENCRYPTED, keyScope = KEY_SCOPE_GLOBAL,
+            pageCount = pageCount,
+            // An id-collision Replace lands on a row the user may have flagged "Exclude from
+            // backup" — a wholesale flags rewrite would silently drop that policy (K3 review).
+            flags = NotebookFlags.ENCRYPTED or
+                ((existing?.flags ?: 0) and NotebookFlags.EXCLUDE_FROM_BACKUP),
+            keyScope = KEY_SCOPE_GLOBAL,
             templateKind = templateKind, blob = null,
         )
         dao.upsert(row)

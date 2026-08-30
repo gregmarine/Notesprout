@@ -33,6 +33,10 @@ conditional-deletion rule, the failure table) ·
 `docs/import.md` (arc 16: notebook import as a feature — the library's Import button, the SAF
 picker and extension match, the always-re-key-to-global pipeline, the untrusted manifest, the
 three questions, the remap, the staged-rename Garden write, the failure table) ·
+`docs/backup.md` (arc 17: **compaction + local backup** — the seal-time `.soil` purge and index
+purge, sidecar hygiene and the reopen-waits-on-the-claim rule, the Backup screen, the engine's
+index-last ordering and stamp map, the WAL-alongside rule for both file kinds, the `.part`/`.old`
+destination discipline, the exclude toggle, the failure table) ·
 `docs/scratchpad.md` (arc 11: the Scratch Pad as a feature — screen, tools, pages, store layout,
 both transfers, failure table) ·
 `docs/sn-screen.md` (arc 11 / J1: the shared `:sn-screen` paper-screen library — what may live

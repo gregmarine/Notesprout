@@ -46,6 +46,28 @@ object SoilOpenFiles {
     @Synchronized
     fun isOpen(file: File): Boolean = key(file) in open
 
+    /** How many claims stand on [file] right now (0 when free). */
+    @Synchronized
+    fun openCount(file: File): Int = open[key(file)] ?: 0
+
+    /**
+     * Block (bounded) until no claim holds [file]. The seal that releases a notebook runs
+     * detached (appScope) and since K1 carries a purge + whole-file `VACUUM`, so a prompt reopen
+     * of a large notebook can genuinely arrive while the old claim stands (K3 review) — racing it
+     * is the sticky-lock crash family. IO threads only. True when the file came free; false on
+     * timeout, and the caller decides how brave to be.
+     */
+    fun awaitClosed(file: File, timeoutMs: Long = 15_000L): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (isOpen(file)) {
+            if (System.currentTimeMillis() >= deadline) return false
+            Thread.sleep(POLL_MS)
+        }
+        return true
+    }
+
+    private const val POLL_MS = 50L
+
     /** Canonical where the filesystem will say (the Garden is a flat real dir), absolute otherwise. */
     private fun key(file: File): String =
         try { file.canonicalPath } catch (_: Exception) { file.absolutePath }

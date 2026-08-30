@@ -37,6 +37,13 @@ abstract class SoilDatabase : RoomDatabase() {
 
         /** Open an existing notebook file. Fast raw-key path when cached; see [KeyOpener]. IO thread. */
         fun open(context: Context, notebookId: String, file: File, passphrase: String): SoilDatabase {
+            // K3 review: the seal that freed this file runs detached and carries K1's purge +
+            // VACUUM — a prompt reopen waits for the claim instead of racing the exclusive lock.
+            // Bounded: past the timeout we open anyway and let busy_timeout fight, because
+            // refusing forever would be worse than the (now rare) race this narrows.
+            if (!SoilOpenFiles.awaitClosed(file)) {
+                Log.w(TAG, "opening ${file.name} while a prior claim still stands")
+            }
             SoilCrypto.requireExisting(file)
             val factory = KeyOpener.roomFactoryFor(context, notebookId, file, passphrase)
             // Claimed only once the connection is really up (arc 15 / E1) — a failed open holds
@@ -140,14 +147,19 @@ abstract class SoilDatabase : RoomDatabase() {
         // (close() on appScope racing sealAbandonedOpen), and a bare second decrement would take
         // down a *new* session's claim — isOpen() answering false under a live writer is exactly
         // what this registry exists to prevent.
-        if (claimReleased.compareAndSet(false, true)) SoilOpenFiles.release(file)
-        val journal = File(file.path + "-journal")
-        if (journal.exists() && journal.length() == 0L) journal.delete()
+        val claimWasOurs = claimReleased.compareAndSet(false, true)
         // Arc 17 / K1: with no connection left, a fully-checkpointed WAL and its -shm are noise —
         // the Garden holds only .soil files after a clean close. A non-empty WAL (the checkpoint
-        // above failed) is live data and stays. Gated on the registry: if the one-file-one-
-        // connection rule is ever broken, deleting a -shm under the surviving connection's map is
-        // exactly the kind of damage this pass must not add.
-        if (!SoilOpenFiles.isOpen(file)) SoilCompactor.sweepSidecars(file)
+        // above failed) is live data and stays. The sweep runs BEFORE the claim release (K3
+        // review): openers wait on the claim, so no fresh connection's sidecars can appear under
+        // the deletes — sweeping after the release reopened exactly that window. Gated on the
+        // count being ours alone: if the one-file-one-connection rule is ever broken, deleting a
+        // -shm under the surviving connection's map is damage this pass must not add — and a
+        // second seal of an already-released handle (claimWasOurs false) must never sweep a NEW
+        // session's sidecars.
+        if (claimWasOurs && SoilOpenFiles.openCount(file) == 1) SoilCompactor.sweepSidecars(file)
+        if (claimWasOurs) SoilOpenFiles.release(file)
+        val journal = File(file.path + "-journal")
+        if (journal.exists() && journal.length() == 0L) journal.delete()
     }
 }

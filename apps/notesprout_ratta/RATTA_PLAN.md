@@ -4699,8 +4699,9 @@ Decisions and traps the phase minted:
   and invents a story around it. Give walk agents the `.dev` id for debug builds; the tell was
   `lastUpdateTime` predating the install.
 
-**Phase-start answers (user, 2026-08-28):** icon = **Tabler `device-floppy`** (drawn fresh as
-`ic_backup` in `:sn-screen`); position = **library bottom bar, far left**, with **Import moved to
+**Phase-start answers (user, 2026-08-28):** icon = ~~Tabler `device-floppy`~~ — **superseded at
+K3 (user, 2026-08-30): `ic_backup` is Tabler `archive`** (same file in `:sn-screen`);
+position = **library bottom bar, far left**, with **Import moved to
 sit right after it** (`[Backup] [Import*] … pager … [Templates] [⋯]` — supersedes the wizard's
 "top bar" line, see the locked-decisions table); wording = **plain verbs**: screen title "Backup",
 section "Backup folder" + "Choose…", action "Back up now", status
@@ -4726,13 +4727,60 @@ Haiku the walk.*
 screen section wording.
 
 ### K3 — Review, docs, freeze
-**Status:** ⬜ Not started
+**Status:** ⏳ In progress 2026-08-30 — fixes + docs in, awaiting user all-clear
 
-Arc-range `/code-review` (level asked at phase start), fixes triaged with the user. Docs:
-`docs/backup.md` NEW (feature reference: the screen, the engine ordering, the compaction story,
-failure table), `docs/library.md` (button + sheet row), `docs/notebook.md` (seal-time compaction
-note), both `CLAUDE.md`s, root `CLAUDE.md` arc record, memory. No boundary-audit rows — no seam
-touched (pure core, locked above). Version stamp question to the user; freeze.
-**Gate:** review findings resolved; docs in; user all-clear; statuses flipped.
+**Phase-start answers (user, 2026-08-29):** review level **high**; version stays **0.1.0-ratta**.
 
-**Questions to resolve at phase start:** review level; version stamp.
+**The review** (`/code-review high 43cf637..HEAD`, K1+K2): ~30 candidates across 8 angles → **10
+verified findings, user triage: fix all 10, all fixed**. Conventions found no CLAUDE.md
+violations; NUL-scan clean. The findings and their fixes:
+
+1. **Stamp despite a failed stale-WAL delete** (`copyNotebook`) — the absorbed-WAL branch
+   swallowed a failed listing/delete and stamped anyway, pairing a fresh `.soil` with an old
+   `-wal` forever (corrupts on restore). Now the stale sidecar must be **verifiably** gone or the
+   copy does not count; the branch also routes through `SoilCompactor.sidecarsRemovable` — one
+   predicate decides a sidecar's fate everywhere.
+2. **`.old` pre-sweep could delete the last good copy** (`SafBackupWriter.writeAtomic`) — after a
+   crash mid-swap `.old` can be the only copy; sweeping it up front + a failed write left *none*.
+   A lone `.old` is now renamed back under its real name, never swept; a `.old` beside a complete
+   copy still goes.
+3. **Replace import with an older `updatedAt` read "up to date" forever** — D8 never re-copied
+   the imported content. `BackupStore.clearStamp` now runs from `ImportFlow` after
+   `importNotebookRow` (best-effort).
+4. **Replace import dropped the exclude flag** — `importNotebookRow` rewrote `flags` wholesale to
+   ENCRYPTED. Now preserves the existing row's `EXCLUDE_FROM_BACKUP` bit. Pinned by test.
+5. **The engine's never-throws contract had holes** (unguarded Room writes; the screen had no
+   catch) — disk-full mid-run crashed the app under the non-cancelable progress dialog. Top-level
+   catch in `run` (CancellationException rethrown), stamp writes guarded (a lost stamp only
+   re-copies next run), belt catch in `onRunTap`.
+6. **The index copy could silently miss WAL-resident rows** — a busy checkpoint (one pooled Room
+   reader under the library screen) leaves committed rows in `notesprout.db-wal`, this run's own
+   stamps included, and the main-file-only snapshot passed every probe. The WAL-alongside rule now
+   applies to the index too: a non-empty post-checkpoint index `-wal` is snapshotted and copied
+   alongside, both landing before `indexCopied`; an absorbed WAL verifiably deletes the stale
+   destination sidecar.
+7. **Seal-time VACUUM raced a prompt reopen** — the purge rides the detached appScope seal, and
+   `SoilDatabase.open` never consulted `SoilOpenFiles` (the sticky-lock family). Openers now
+   **wait on the claim** (`SoilOpenFiles.awaitClosed`, bounded 15 s, then proceed and let
+   `busy_timeout` fight), and the sidecar sweep moved **before the claim release**, gated on the
+   handle's claim being the sole one (`openCount == 1` + `claimWasOurs` — a double-seal of a
+   released handle must never sweep a NEW session's sidecars).
+8. **One soft-deleted row cost a whole-index VACUUM at launch** (every clipboard clear arms one) —
+   the bootstrap `VACUUM` now waits for a freelist floor (`BOOT_MIN_RECLAIM_BYTES` 256 KiB; the
+   backup run passes 0 — pre-copy wants every byte), and `SoilCompactor.compact` gained the cheap
+   `EXISTS` probe its index twin had (the common nothing-to-purge close no longer snapshots the
+   whole table).
+9. **Persisted-grant leak** — every folder re-pick took a grant and never released the old one;
+   at Android's cap every future pick fails permanently. `adoptFolder` releases the previous
+   grant on a destination change.
+10. **O(copied × destination-size) SAF listings** — `find()` is a whole-directory query, called
+    3–5× per file. `writeAtomic` now runs on **one** listing + a single-document `COLUMN_SIZE`
+    query, keeping rename-returned URIs; a notebook copy is 2 listings total.
+
+**928 JVM tests** (926 + 2 new: `clearStamp` semantics, Replace-import exclude-bit preservation),
+green both variants; both variants build. Docs: `docs/backup.md` NEW, `docs/library.md` (bar
+diagram + Backup button + sheet row), `docs/notebook.md` (seal-time compaction + reopen rule),
+both `CLAUDE.md`s, root arc record, memory. No boundary-audit rows — no seam touched (pure core).
+No BACKLOG entries — nothing accepted-unfixed. Version stays `0.1.0-ratta`.
+**Gate:** review findings resolved ✅; docs in ✅; Nomad post-fix walk; user all-clear; statuses
+flipped.

@@ -328,6 +328,27 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   user decision). 890 JVM tests; version stays `0.1.0-ratta`; g-paper pin stays 0.1.23.
   Reference: **`apps/notesprout_ratta/docs/import.md`** (feature) + `docs/extensions.md`
   rows 9–11 (seam).
+  **Arc 17 "Backup"** (K1 `73d6490` · K2 `7fb0aa2` · K3 2026-08-30): compaction + local backup,
+  **pure core** on the wizard's lock — no extension, SN stays at four points; Drive backup stays a
+  future arc behind its own capability-point decision. K1: **purge at every close** (the user's
+  explicit call — og never purged user content): `SoilCompactor` hard-deletes every soft-deleted
+  `.soil` row at seal (after the writer closes, before `db.seal` so the checkpoint absorbs the
+  `VACUUM`; cascade only from rows the purge deletes — never "parent missing"; templates exempt
+  both passes; `updatedAt` untouched), `IndexCompactor` twins it for the index (the five template
+  sentinels exempt by name — the arc-13 prune trap), sidecar hygiene never touches a non-empty
+  `-wal`. Nomad-proven 49% shrink on one delete. K2: dedicated **Backup screen** (library bottom
+  bar far left, Import moved after it — the user's placement), manual only, og's D8 stamp rule
+  (stamp = the copied `updatedAt`, equal means backed up, failed copies never stamp), UUID
+  filenames, ciphertext copy, index **last** (purge → checkpoint → snapshot → probe → stream),
+  exclude toggle = notebook flags bit 1, `SafBackupWriter` hand-rolled over `DocumentsContract`
+  (`.part` → `.old` → rename). K3 review (high, arc range): **10/10 findings fixed** — the
+  destination-integrity cluster the headline (a stale destination `-wal` must be *verifiably*
+  gone before the stamp; a lone `.old` is the last good copy and is renamed back, never swept;
+  the WAL-alongside rule extended to the index copy; Replace import clears the stamp and keeps
+  the exclude bit) plus reopen-waits-on-the-`SoilOpenFiles`-claim (the seal's `VACUUM` vs the
+  sticky-lock family), a bootstrap `VACUUM` freelist floor, grant release on folder change, and
+  one-listing-per-write SAF IO. 928 JVM tests; version stays `0.1.0-ratta`; g-paper pin stays
+  0.1.23. Reference: **`apps/notesprout_ratta/docs/backup.md`**.
   **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for any work there** — it holds the
   per-arc status, locked decisions, working protocol, and model recipe.
 - `germination` — previous post-MVP feature branch (reference, not active)

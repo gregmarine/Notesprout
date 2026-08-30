@@ -15,8 +15,9 @@ import java.io.File
  * **[writeAtomic] is the one write path**, og's `.part` discipline made whole: stream to
  * `<name>.part`, verify the landed size, move the previous good copy to `<name>.old`, rename the
  * part in, drop the `.old`. A torn write never replaces a good backup — the worst a crash leaves
- * is a stale `.part`/`.old` pair, both swept before the next write of that name and both invisible
- * to a restore (only `*.soil` / the index name are ever read back).
+ * is a stale `.part`/`.old` pair, both invisible to a restore (only `*.soil` / the index name are
+ * ever read back). The next write of that name sweeps the `.part`; a `.old` standing **alone** is
+ * the last good copy a crash stranded mid-swap and is renamed back, never swept (K3 review).
  *
  * Nothing here throws: every failure logs and answers false/null/empty, and the engine counts it.
  * Content URIs are never logged (a tree URI can carry the folder's display name); file *names*
@@ -110,11 +111,24 @@ class SafBackupWriter(private val resolver: ContentResolver, private val treeUri
         val partName = name + BackupPredicates.PART_SUFFIX
         val oldName = name + BackupPredicates.OLD_SUFFIX
         try {
-            // Sweep leftovers from a killed run first — createDocument over an existing name would
-            // otherwise land as "name (1)" and the rename-in would go to the wrong file.
+            // One listing serves the whole write (a listing is a whole-directory provider query —
+            // K3 review): the leftover sweep, the crash recovery, and the existing-copy lookup.
+            // A stray part is swept — createDocument over an existing name would otherwise land
+            // as "name (1)" and the rename-in would go to the wrong file.
             val before = list(dirUri) ?: return false
             before.firstOrNull { it.name == partName }?.let { delete(it.uri) }
-            before.firstOrNull { it.name == oldName }?.let { delete(it.uri) }
+            var existing = before.firstOrNull { it.name == name }
+            before.firstOrNull { it.name == oldName }?.let { staleOld ->
+                if (existing == null) {
+                    // A crash inside a previous swap: `.old` is the ONLY good copy. It goes back
+                    // under its real name, never into the sweep — "a torn write never replaces a
+                    // good backup" forbids deleting the last one too (K3 review).
+                    val recovered = rename(staleOld.uri, name) ?: return false
+                    existing = Entry(recovered, name, staleOld.size, isDir = false)
+                } else {
+                    delete(staleOld.uri) // a completed swap whose final delete failed — safe now
+                }
+            }
 
             val part = DocumentsContract.createDocument(resolver, dirUri, OCTET_STREAM, partName)
                 ?: return false
@@ -129,18 +143,19 @@ class SafBackupWriter(private val resolver: ContentResolver, private val treeUri
             // The torn-write check: what the stream counted, and — when the provider will say —
             // what the destination now holds. A mismatch deletes the part and keeps the old copy.
             val expected = source.length()
-            val reported = find(dirUri, partName)?.size ?: -1L
+            val reported = sizeOf(part)
             if (landed != expected || (reported >= 0 && reported != expected)) {
                 Log.w(TAG, "short write ($landed streamed, $reported landed, $expected expected)")
-                find(dirUri, partName)?.let { delete(it.uri) }
+                delete(part)
                 return false
             }
 
             // The swap. The previous copy steps aside rather than being deleted, so no window has
             // neither file complete under a name a restore would read.
-            val existing = find(dirUri, name)
-            if (existing != null) {
-                if (rename(existing.uri, oldName) == null) {
+            var oldUri: Uri? = null
+            existing?.let {
+                oldUri = rename(it.uri, oldName)
+                if (oldUri == null) {
                     delete(part)
                     return false
                 }
@@ -148,15 +163,26 @@ class SafBackupWriter(private val resolver: ContentResolver, private val treeUri
             val finalUri = rename(part, name)
             if (finalUri == null) {
                 // Roll the old copy back under its name; the part is swept next run.
-                find(dirUri, oldName)?.let { rename(it.uri, name) }
+                oldUri?.let { rename(it, name) }
                 return false
             }
-            find(dirUri, oldName)?.let { delete(it.uri) }
+            oldUri?.let { delete(it) }
             return true
         } catch (e: Exception) {
             Log.w(TAG, "write failed for $name", e)
             return false
         }
+    }
+
+    /** One document's `COLUMN_SIZE` — a single-document query, never a directory listing. -1 when
+     *  the provider will not say. */
+    private fun sizeOf(uri: Uri): Long = try {
+        resolver.query(
+            uri, arrayOf(DocumentsContract.Document.COLUMN_SIZE), null, null, null
+        )?.use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else -1L } ?: -1L
+    } catch (e: Exception) {
+        Log.w(TAG, "size query failed", e)
+        -1L
     }
 
     private fun rename(uri: Uri, newName: String): Uri? = try {

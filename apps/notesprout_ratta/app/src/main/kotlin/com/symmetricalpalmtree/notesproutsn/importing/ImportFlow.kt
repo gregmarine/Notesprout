@@ -20,6 +20,7 @@ import com.symmetricalpalmtree.notesproutsn.crypto.ImportKeying
 import com.symmetricalpalmtree.notesproutsn.crypto.KeySession
 import com.symmetricalpalmtree.notesproutsn.crypto.SoilCrypto
 import com.symmetricalpalmtree.notesproutsn.crypto.SoilFileKind
+import com.symmetricalpalmtree.notesproutsn.data.backup.BackupStore
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectSummary
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectType
@@ -354,6 +355,12 @@ class ImportFlow(
         )
         // The replaced notebook goes only now — cancelling anywhere above left it untouched.
         naming.retireId?.let { retireNotebook(it) }
+        // A landed import can carry an updatedAt OLDER than the id's standing backup stamp, and
+        // og's D8 would then read "up to date" forever — the stamp is a statement about content
+        // this import just replaced, so it goes (K3 review). Best effort: a failed clear only
+        // delays the re-copy until the next edit.
+        runCatching { BackupStore().clearStamp(identity.notebookId) }
+            .onFailure { Log.w(TAG, "backup stamp clear skipped: ${it.javaClass.simpleName}") }
 
         // 6 · Best effort from here: the notebook is in the library either way.
         ImportOverlay.stage(activity, R.string.import_stage_finishing)

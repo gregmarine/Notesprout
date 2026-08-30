@@ -69,10 +69,14 @@ object IndexCompactor {
     }
 
     /**
-     * Purge [db] (the open index) and `VACUUM` iff anything was deleted. Returns how many rows
-     * went (soft-deleted + swept edges); 0 on any failure — logged, never thrown. IO thread.
+     * Purge [db] (the open index) and `VACUUM` iff anything was deleted **and** the freelist holds
+     * at least [minReclaimBytes] (K3 review: a single soft-deleted row — every clipboard clear —
+     * must not cost the next launch a whole-index rewrite; the index can carry tens of MB of cover
+     * and template blobs). The rows are hard-deleted either way; a skipped `VACUUM` only defers
+     * the space to the backup run, which passes 0. Returns how many rows went (soft-deleted +
+     * swept edges); 0 on any failure — logged, never thrown. IO thread.
      */
-    fun compact(db: SupportSQLiteDatabase): Int {
+    fun compact(db: SupportSQLiteDatabase, minReclaimBytes: Long = 0L): Int {
         val deleted = try {
             var n = 0
             db.beginTransaction()
@@ -103,13 +107,28 @@ object IndexCompactor {
         }
         if (deleted == 0) return 0
         try {
-            db.query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }
-            db.execSQL("VACUUM")
+            if (reclaimableBytes(db) >= minReclaimBytes) {
+                db.query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }
+                db.execSQL("VACUUM")
+            } else {
+                Slog.d(TAG) { "VACUUM deferred — freelist under the reclaim floor" }
+            }
         } catch (e: Exception) {
             // The rows are gone either way; the space comes back on the next successful purge.
             Log.w(TAG, "index VACUUM failed", e)
         }
         Slog.d(TAG) { "purged $deleted index row(s)" }
         return deleted
+    }
+
+    /** What a `VACUUM` would give back right now: freelist pages × page size. 0 when unreadable
+     *  (the caller then vacuums only at a floor of 0 — the pre-copy path, where it must). */
+    private fun reclaimableBytes(db: SupportSQLiteDatabase): Long = try {
+        val pages = db.query("PRAGMA freelist_count").use { c -> if (c.moveToFirst()) c.getLong(0) else 0L }
+        val pageSize = db.query("PRAGMA page_size").use { c -> if (c.moveToFirst()) c.getLong(0) else 0L }
+        pages * pageSize
+    } catch (e: Exception) {
+        Log.w(TAG, "freelist probe failed", e)
+        0L
     }
 }

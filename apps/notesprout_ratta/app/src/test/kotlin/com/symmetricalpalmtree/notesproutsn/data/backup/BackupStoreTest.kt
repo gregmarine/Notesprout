@@ -60,4 +60,39 @@ class BackupStoreTest {
         assertEquals(NotebookFlags.ENCRYPTED, dao.rows["nb"]!!.flags)
         assertEquals(42L, dao.rows["nb"]!!.updatedAt)
     }
+
+    @Test
+    fun `clearStamp forgets one notebook and leaves the rest`() = runBlocking {
+        // The K3-review import rule: an import landing on an existing id can carry an OLDER
+        // updatedAt than the standing stamp, and og's D8 would then read "up to date" forever.
+        val store = BackupStore(FakeObjectDao())
+        store.write(BackupConfig(treeUri = "content://tree/x", stamps = mapOf("a" to 1L, "b" to 2L)))
+        store.clearStamp("a")
+        assertEquals(mapOf("b" to 2L), store.read().stamps)
+        store.clearStamp("never-stamped") // cheap no-op, never an error
+        assertEquals(mapOf("b" to 2L), store.read().stamps)
+    }
+
+    @Test
+    fun `a Replace import preserves the exclude flag`() = runBlocking {
+        // K3 review: importNotebookRow rewrote flags wholesale, silently dropping the user's
+        // "Exclude from backup" on an id-collision Replace.
+        val dao = FakeObjectDao()
+        val repo = IndexRepository(dao)
+        dao.upsert(
+            ObjectEntity(
+                id = "nb", type = ObjectType.NOTEBOOK, name = "N", parentId = null,
+                createdAt = 1L, updatedAt = 42L,
+                flags = NotebookFlags.ENCRYPTED or NotebookFlags.EXCLUDE_FROM_BACKUP,
+            )
+        )
+        repo.importNotebookRow("nb", "N2", null, 3, createdAt = 5L, updatedAt = 6L, templateKind = null)
+        assertEquals(
+            NotebookFlags.ENCRYPTED or NotebookFlags.EXCLUDE_FROM_BACKUP,
+            dao.rows["nb"]!!.flags,
+        )
+        // A fresh import (no existing row) starts unexcluded, as before.
+        repo.importNotebookRow("nb-new", "M", null, 1, createdAt = 5L, updatedAt = 6L, templateKind = null)
+        assertEquals(NotebookFlags.ENCRYPTED, dao.rows["nb-new"]!!.flags)
+    }
 }

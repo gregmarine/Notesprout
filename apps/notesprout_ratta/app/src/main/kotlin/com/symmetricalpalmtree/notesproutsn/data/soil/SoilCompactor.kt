@@ -78,6 +78,17 @@ object SoilCompactor {
      * was deleted. Returns how many rows went; 0 on any failure — logged, never thrown.
      */
     fun compact(db: SupportSQLiteDatabase): Int {
+        // The cheap gate first (K3 review): the common close has nothing soft-deleted — K1 purged
+        // at the previous close — and must not pay a whole-table snapshot to find that out. Exact,
+        // because the cascade only ever starts from a soft-deleted row.
+        try {
+            db.query("SELECT EXISTS(SELECT 1 FROM ${SoilSchema.TABLE} WHERE deletedAt IS NOT NULL)").use { c ->
+                if (!(c.moveToFirst() && c.getInt(0) != 0)) return 0
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "purge probe failed", e)
+            return 0
+        }
         val doomed = try {
             purgeIds(snapshot(db)).toList()
         } catch (e: Exception) {

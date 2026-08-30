@@ -20,6 +20,17 @@ class BackupStore(private val dao: ObjectDao = SnIndex.dao()) {
     suspend fun read(): BackupConfig =
         BackupConfig.decode(runCatching { dao.backupBlob(ListIds.BACKUP_ID) }.getOrNull())
 
+    /**
+     * Forget [notebookId]'s stamp, if one stands. An import that lands on an existing id can
+     * install content whose `updatedAt` is *older* than the stamp — without this, the notebook
+     * reads "up to date" forever and the backup keeps the pre-import bytes (K3 review). Cheap
+     * no-op when the notebook was never stamped.
+     */
+    suspend fun clearStamp(notebookId: String) {
+        val config = read()
+        if (notebookId in config.stamps) write(config.copy(stamps = config.stamps - notebookId))
+    }
+
     /** Persist [config], replacing whatever was there. False if it would not encode (never
      *  expected); nothing is written then and the previous config stands. */
     suspend fun write(config: BackupConfig, now: Long = System.currentTimeMillis()): Boolean {

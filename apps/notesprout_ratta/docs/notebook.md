@@ -1069,10 +1069,19 @@ has no entry to update, and `refreshToPage` finds no index and stays put.
   the link trail first, exactly like a swipe-up; only an empty trail falls through to `close()`) →
   `close()`: `lastOpenNotebookId = null` → app-scoped `NonCancellable`: cover → `saveLastOpened`
   → `refreshMeta` (name + folder path from the index) → `seal()` (`flushTouch` → `drain` →
-  `wal_checkpoint(TRUNCATE)` → close) → `finish()`. Each step guarded; idempotent (`closing`
-  flag; `onStop` stands down once closing). K4 adds `close(andThen)`: a cross-notebook hop
-  launches the next screen **strictly after the seal completes** — the seal/reopen race is not
+  **purge** → `wal_checkpoint(TRUNCATE)` → close) → `finish()`. Each step guarded; idempotent
+  (`closing` flag; `onStop` stands down once closing). K4 adds `close(andThen)`: a cross-notebook
+  hop launches the next screen **strictly after the seal completes** — the seal/reopen race is not
   survivable any other way ([`docs/links.md`](links.md)).
+- **Seal-time compaction (arc 17 / K1)** — the purge above is `SoilCompactor.compact`: after the
+  writer is closed (no queued write can race the deletes), before `db.seal` (the checkpoint
+  absorbs the `VACUUM`), every soft-deleted row is hard-deleted and the space given back. Undo is
+  in-memory and dies with the session, so those rows are unreachable by construction. It never
+  throws, never touches `updatedAt`, exempts template rows, and a cheap `EXISTS` probe keeps the
+  common nothing-to-purge close free. `db.seal` then sweeps a fully-checkpointed `-wal`/`-shm`
+  pair (never a non-empty WAL) **before releasing the `SoilOpenFiles` claim**, and
+  `SoilDatabase.open` waits (bounded) on that claim — a prompt reopen of a large notebook must not
+  race the seal's `VACUUM` (the sticky-lock family). Details: [`docs/backup.md`](backup.md).
 - **Every seal/persist path holds `pageOps` (R6)** — `close()`, `onStop`'s persist, and the
   `onDestroy` fallback all take the same mutex the gesture ops run under. An insert/delete that
   passed the `closing` check before the flag flipped may still be inside its transaction; sealing

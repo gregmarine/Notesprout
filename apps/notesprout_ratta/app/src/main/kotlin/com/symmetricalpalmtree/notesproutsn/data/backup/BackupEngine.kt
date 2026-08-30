@@ -38,7 +38,9 @@ import java.io.File
  *     stamps and retries next run).
  *  4. The index, last, after every stamp: purge ([SnIndex.compactIfNeeded]) + checkpoint, then
  *     **snapshot to a local temp and probe it** before streaming — a torn copy of the live index
- *     is worse than no backup; only a failed snapshot falls back to streaming the live file.
+ *     is worse than no backup; only a failed snapshot falls back to streaming the live file. The
+ *     WAL-alongside rule applies here too: a non-empty post-checkpoint index `-wal` travels with
+ *     the snapshot, both landing before the copy counts (K3 review).
  *  5. `lastRunAt` — only when at least one destination write succeeded — and the stamp map pruned
  *     of purged notebooks.
  *
@@ -94,19 +96,35 @@ object BackupEngine {
         context: Context,
         onProgress: (Progress) -> Unit = {},
     ): Result = withContext(Dispatchers.IO) {
-        val app = context.applicationContext
+        try {
+            runInner(context.applicationContext, onProgress)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // The never-throws contract, held at the top (K3 review): anything that still escapes
+            // the guarded steps — disk full inside a Room write, most likely — becomes a failed
+            // count the dialog can report instead of an app crash under the progress dialog.
+            Log.e(TAG, "backup run failed", e)
+            Result(failed = 1)
+        }
+    }
+
+    private suspend fun runInner(
+        app: Context,
+        onProgress: (Progress) -> Unit,
+    ): Result {
         val store = BackupStore()
         val repo = IndexRepository()
 
         var config = store.read()
-        val treeUri = config.treeUri ?: return@withContext Result(problem = Problem.NO_FOLDER)
-        KeySession.get() ?: return@withContext Result(problem = Problem.NO_KEY)
+        val treeUri = config.treeUri ?: return Result(problem = Problem.NO_FOLDER)
+        KeySession.get() ?: return Result(problem = Problem.NO_KEY)
 
         val writer = SafBackupWriter(app.contentResolver, Uri.parse(treeUri))
-        val root = writer.root() ?: return@withContext Result(problem = Problem.FOLDER_GONE)
+        val root = writer.root() ?: return Result(problem = Problem.FOLDER_GONE)
         val dest = if (BuildConfig.DEBUG) {
             writer.ensureDir(root, BackupPredicates.DEV_SUBDIR)
-                ?: return@withContext Result(problem = Problem.FOLDER_GONE)
+                ?: return Result(problem = Problem.FOLDER_GONE)
         } else root
 
         val notebooks = repo.allNotebooks()
@@ -133,8 +151,11 @@ object BackupEngine {
                         copied++
                         // Stamp per success, immediately — a kill mid-run keeps every stamp
                         // already earned, and a failed copy below never reaches this line.
+                        // Guarded: a stamp that fails to persist only re-copies next run, and
+                        // must not abort the run (the never-throws contract, K3 review).
                         config = config.copy(stamps = config.stamps + (candidate.id to candidate.updatedAt))
-                        store.write(config)
+                        runCatching { store.write(config) }
+                            .onFailure { Log.w(TAG, "stamp write failed", it) }
                     } else failed++
                 }
             }
@@ -163,7 +184,7 @@ object BackupEngine {
             "run: $copied copied, ${result.upToDate} up to date, ${result.excluded} excluded, " +
                 "$held held, $missing missing, $failed failed, index=$indexCopied"
         }
-        result
+        return result
     }
 
     /**
@@ -196,11 +217,17 @@ object BackupEngine {
         val name = BackupPredicates.soilName(notebookId)
         if (!writer.writeAtomic(dest, name, source)) return false
         val wal = File(source.path + BackupPredicates.WAL_SUFFIX)
-        return if (wal.exists() && wal.length() > 0L) {
-            writer.writeAtomic(dest, name + BackupPredicates.WAL_SUFFIX, wal)
+        val walName = name + BackupPredicates.WAL_SUFFIX
+        // One predicate decides the sidecar's fate everywhere ([SoilCompactor.sidecarsRemovable]).
+        return if (!SoilCompactor.sidecarsRemovable(wal.exists(), if (wal.exists()) wal.length() else 0L)) {
+            writer.writeAtomic(dest, walName, wal)
         } else {
-            writer.find(dest, name + BackupPredicates.WAL_SUFFIX)?.let { writer.delete(it.uri) }
-            true
+            // The stale destination sidecar must be VERIFIABLY gone before the stamp (K3 review):
+            // a failed listing or delete here, swallowed, would pair a fresh `.soil` with an old
+            // `-wal` forever — exactly the corruption the alongside rule exists to prevent.
+            val entries = writer.list(dest) ?: return false
+            val stale = entries.firstOrNull { it.name == walName } ?: return true
+            writer.delete(stale.uri)
         }
     }
 
@@ -209,27 +236,61 @@ object BackupEngine {
      * snapshot** (still the encrypted header it claims to be, byte-for-byte the live length), and
      * stream that. Only a failed snapshot streams the live file — a last resort, because a copy of
      * a live database can tear in ways no downstream check would catch.
+     *
+     * **The WAL-alongside rule applies to the index too** (K3 review): a busy checkpoint — a
+     * pooled Room reader under the library screen is enough — leaves committed rows in the `-wal`,
+     * *this run's own stamps included*. A main-file-only copy would pass every probe and silently
+     * miss them, so a non-empty post-checkpoint WAL is snapshotted and written alongside, both
+     * landing before the copy counts; an absorbed WAL deletes the stale destination sidecar.
      */
     private suspend fun copyIndex(context: Context, writer: SafBackupWriter, dest: Uri): Boolean {
-        SnIndex.compactIfNeeded()
-        SnIndex.checkpoint()
+        SnIndex.compactIfNeeded(minReclaimBytes = 0L) // pre-copy: every reclaimable byte matters
+        SnIndex.checkpoint() // best effort; the WAL length below is the honest verdict
         val live = indexFile(context)
+        val liveWal = File(live.path + BackupPredicates.WAL_SUFFIX)
         val dir = File(context.cacheDir, DIR)
-        val snapshot = try {
+        var snapshot: File? = null
+        var walSnapshot: File? = null
+        try {
             dir.deleteRecursively()
             if (!dir.mkdirs()) throw java.io.IOException("could not create the backup cache directory")
             val snap = File(dir, BackupPredicates.INDEX_NAME)
             live.copyTo(snap, overwrite = true)
-            snap.takeIf {
+            // Main first, then the WAL: frames the WAL holds beyond the main copy replay forward
+            // on open. Nothing writes the index between the two copies — the engine is sequential
+            // and the run's remaining config write comes after this call returns.
+            if (liveWal.exists() && liveWal.length() > 0L) {
+                val walSnap = File(dir, BackupPredicates.INDEX_NAME + BackupPredicates.WAL_SUFFIX)
+                liveWal.copyTo(walSnap, overwrite = true)
+                walSnapshot = walSnap
+            }
+            snapshot = snap.takeIf {
                 it.length() > 0L && it.length() == live.length() &&
                     SoilCrypto.probe(it) == SoilFileKind.Encrypted
             } ?: throw java.io.IOException("snapshot failed its probe")
         } catch (e: Exception) {
             Log.w(TAG, "index snapshot failed — falling back to the live file", e)
-            null
+            snapshot = null
+            walSnapshot = null
         }
-        val ok = writer.writeAtomic(dest, BackupPredicates.INDEX_NAME, snapshot ?: live)
+        val mainOk = writer.writeAtomic(dest, BackupPredicates.INDEX_NAME, snapshot ?: live)
+        val walName = BackupPredicates.INDEX_NAME + BackupPredicates.WAL_SUFFIX
+        val walSource = walSnapshot
+            ?: liveWal.takeIf { snapshot == null && it.exists() && it.length() > 0L }
+        val walOk = when {
+            !mainOk -> false
+            walSource != null -> writer.writeAtomic(dest, walName, walSource)
+            else -> {
+                // Absorbed (or absent) WAL: the stale destination sidecar must be verifiably gone,
+                // same as the notebook copy — a fresh index + an old -wal corrupts on restore.
+                val entries = writer.list(dest)
+                when {
+                    entries == null -> false
+                    else -> entries.firstOrNull { it.name == walName }?.let { writer.delete(it.uri) } ?: true
+                }
+            }
+        }
         runCatching { dir.deleteRecursively() }
-        return ok
+        return mainOk && walOk
     }
 }
