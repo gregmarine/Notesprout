@@ -50,7 +50,12 @@ All root `CLAUDE.md` rules apply (Kotlin/17, kotlinx-serialization only, no new 
 deps without discussion, no Material Components, no `runBlocking` on main, `Slog.d` not
 `Log.d`, e-ink design system, Tabler icons only). Plus, for this app:
 
-- **Seven modules, own Gradle root:** `:app` (the host) · `:sn-screen` (the shared paper-screen
+- **Eight modules, own Gradle root** (nine once arc 19's `:ext-document` lands): `:app` (the
+  host) · `:markdown` (arc 19 / M1 — the shared markdown engine: parser, renderer, formatter,
+  reflow, search, draft, paginator; stdlib only, depends on **nothing** in this project and
+  nothing beyond the android SDK its spans use — `:app` and `:ext-document` consume it, one
+  engine, no drift; `:app`'s arc-3 `core/markdown` is its to-be-retired twin until consumers
+  repoint) · `:sn-screen` (the shared paper-screen
   library — depends on g-paper (`api`) + androidx only, **never** on `:app` or `:extension-api`;
   **a fix to shared screen logic goes there, never in a consumer** — breaking that recreates the
   `RattaNotebookView` sibling-copy trap one file at a time) · `:extension-api` (the contract

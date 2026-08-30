@@ -63,11 +63,14 @@ full plan at the end of this file.
   KSP, compileSdk/targetSdk 35, minSdk 29, Java 17 via `org.gradle.java.home` (Temurin-17).
   Repos: `mavenLocal()`, `google()`, `mavenCentral()`. `android.nonTransitiveRClass=false`
   (load-bearing since J1 — undoing it breaks every moved resource reference).
-- **Seven modules:** `:app` (host) · `:sn-screen` (shared paper-screen library — g-paper
-  `api`, design resources, screen helpers; **a fix to shared screen logic goes there, never
-  in a consumer**) · `:extension-api` (contract library, stdlib only) · `:ext-mlkit` ·
-  `:ext-scratchpad` · `:ext-soil` (exporter + importer services, one APK) · `:ext-pdf`
-  (module-local pdfbox-android 2.0.27.0). Full table: app `CLAUDE.md` + `docs/extensions.md`.
+- **Eight modules** (nine once arc 19's `:ext-document` lands): `:app` (host) · `:sn-screen`
+  (shared paper-screen library — g-paper `api`, design resources, screen helpers; **a fix to
+  shared screen logic goes there, never in a consumer**) · `:markdown` (arc 19 / M1 — the
+  shared markdown engine, stdlib only, never depends on `:app`/`:sn-screen`/`:extension-api`;
+  `:app` still carries its arc-3 `core/markdown` twin until consumers repoint) ·
+  `:extension-api` (contract library, stdlib only) · `:ext-mlkit` · `:ext-scratchpad` ·
+  `:ext-soil` (exporter + importer services, one APK) · `:ext-pdf` (module-local
+  pdfbox-android 2.0.27.0). Full table: app `CLAUDE.md` + `docs/extensions.md`.
 - **g-paper pin: 0.1.23** in `sn-screen/build.gradle.kts` — `gpaper-core` + `gpaper-ratta`
   only. No Onyx, no jetifier, no pickFirsts, no `tools:replace`.
 - **FOUR extension points** (each was its own user decision — no FIFTH without another;
@@ -547,7 +550,26 @@ no-new-point rule (amend both CLAUDE.mds at M3: **no SIXTH without another user 
   in the phase that builds their behavior, never before.
 
 ### M1 — `:markdown`, the shared engine
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (2026-08-30)
+
+**Outcome:** The NINTH module exists and is green standalone: `markdown/` (Android library,
+namespace + package `…notesproutsn.markdown`, stdlib + junit only, **no `returnDefaultValues`**
+on purpose — a test straying into android.text fails loudly). Parser / renderer /
+`HeadingTypography` / `MarkdownDraw` + their six test files are the arc-3 `core/markdown`
+files package-renamed (SN code — copyable); `:app`'s copies stay untouched this phase and die
+when consumers repoint (migration rides the phase that first wires `:app` to `:markdown`).
+`MarkdownFormatter` / `TextBuffer` (+`EditableBuffer`) / `MarkdownReflow` / `TextSearch` /
+`DocumentDraft` are fresh og-semantics ports, reviewed line-against-og; og's test surface is
+the floor, with idempotency/neutrality/caret-edge additions above it. `MarkdownPaginator` is
+the new pure piece: caller hands measured `Line(top, bottom)` boxes, pages slice on line
+boundaries, every page starts flush at its first line's top, an oversized line gets a page to
+itself (clipped at draw — progress guaranteed), no lines ⇒ no pages. 160 new JVM tests
+(1126/variant total), NUL-scan clean. **Grammar correction to this plan's own M1 sentence:**
+og's parser has NO fenced-code or table blocks (closed subset; fences matter only to
+reflow/renumber, `|` rows only to reflow) — og's semantics govern, the module keeps og's
+grammar. One naming hazard written down in code: `MarkdownFormatter.Block` (enum) deliberately
+shadows the file-level `Block` sealed class inside the object — from outside, always
+`MarkdownFormatter.Block`.
 
 The NINTH module: pure engine, no app changes, no new deps. `MarkdownParser` (block + inline,
 og's grammar: headings, lists incl. tasks, blockquotes, fenced code, rules, tables, links, the
