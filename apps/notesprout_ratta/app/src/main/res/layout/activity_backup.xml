@@ -2,11 +2,10 @@
 <!-- Backup (arc 17 / K2): one screen — where backups go, the button that runs one, and what the
      last run did.
 
-     The top bar carries the way out and the title and nothing else. Both controls here are *body*
-     controls, not chrome: "Choose…" belongs under the folder it changes, and "Back up now" is the
-     screen's subject rather than an action performed on something shown above it. The bar is a
-     LinearLayout because nothing in it is centred — the weight-centring trap (F2) only bites when
-     something has to *look* centred.
+     The chrome follows F2: "Back up now" is the action and lives in the TOP bar, at its right
+     edge, next to the back arrow and title — the same shape as Export's top bar. "Choose…" stays
+     a body control, under the folder it changes. The bar is a LinearLayout because nothing in it
+     is centred — the weight-centring trap (F2) only bites when something has to *look* centred.
 
      Neither button is ever disabled: on e-ink a disabled control is invisible, so both always look
      live and a tap that cannot work explains itself in a dialog. -->
@@ -43,6 +42,14 @@
             android:textStyle="bold"
             android:singleLine="true"
             android:ellipsize="end" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnRun"
+            style="@style/Widget.Notesprout.ElevatedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
+            android:text="@string/backup_run" />
     </LinearLayout>
 
     <View
@@ -92,19 +99,11 @@
                 android:layout_marginTop="12dp"
                 android:text="@string/backup_choose" />
 
-            <androidx.appcompat.widget.AppCompatButton
-                android:id="@+id/btnRun"
-                style="@style/Widget.Notesprout.ElevatedButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="28dp"
-                android:text="@string/backup_run" />
-
             <TextView
                 android:id="@+id/status"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
+                android:layout_marginTop="28dp"
                 android:textColor="@color/inkBlack"
                 android:textSize="13sp" />
         </LinearLayout>

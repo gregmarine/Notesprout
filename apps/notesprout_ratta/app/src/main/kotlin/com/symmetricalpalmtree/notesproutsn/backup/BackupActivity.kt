@@ -300,7 +300,7 @@ class BackupActivity : AppCompatActivity() {
                 this,
                 R.string.backup_done_title,
                 getString(R.string.backup_done_body, result.copied, skipped),
-            )
+            ) { finish() }
         }
     }
 
