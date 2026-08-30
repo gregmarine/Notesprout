@@ -5088,3 +5088,326 @@ bytes in 2607 ms (~200 ms/page — re-measured because the assembly's shape chan
 `EXPORT_TIMEOUT_MS` unchanged, both numbers recorded in the contract KDoc). **User checklist
 all-pass 2026-08-30**: password PDF opens with the password and refuses without, `qpdf` reports
 AES, template-off bakes white ground, plain PDF fine.
+
+---
+
+## Phases — Arc 19 "Document" (planned 2026-08-30, wizard complete)
+
+**og's Documents feature, as an extension — the biggest arc yet.** The page is the draft; the
+document is the result. A handwritten page's ink flows into a Markdown document once (seeded via
+recognition), and from then on the document is the user's own writing. One document per page, one
+more per notebook (the merged final draft), and **text documents** — notebooks whose primary
+surface *is* the editor. Plus the export half: a Markdown/Text export provider, and PDF export of
+the **rendered preview** through the existing `:ext-pdf`, untouched.
+
+Reading references (read, don't copy): og `docs/documents.md` (the feature bible — four
+invariants, autosave table, flip no-save zone, notebook document, text documents), og
+`docs/proofread.md`, og `DocumentEditorActivity.kt` (1,850 lines) + `core/markdown/*` (~1,330
+lines pure) + `core/proofread/*`. Paper never built documents — og is the only reference.
+
+**This is the FIFTH capability point** — the user's explicit 2026-08-30 decision, satisfying the
+no-new-point rule (amend both CLAUDE.mds at M3: **no SIXTH without another user decision**).
+
+### Locked decisions (arc-19 wizard 2026-08-30 — do not re-ask)
+
+| Decision | Answer |
+|---|---|
+| Fifth capability point | **`ACTION_DOCUMENT_EDITOR`** — screen-owning (tier-2, the scratch-pad recipe): the extension owns the full-screen Markdown editor Activity; **the host owns every `.soil` read and write** (og invariant 3, now enforced by a process boundary). The seam's new piece: a **host-callback binder** (`IDocumentHost`, passed at `begin`) so autosave pushes text to the host live — og's flush-before-seal invariant must hold across the boundary. |
+| Module shape | **`:ext-document`** (EIGHTH module), label **`NSE · Document`** (user's singular call, `… Dev` in debug), package `….ext.document` (`.dev` debug), family puzzle icon, versionName lockstep. One APK, **three registrations**: the editor point + a document exporter on the existing `ACTION_NOTEBOOK_EXPORTER` + a text importer on the existing `ACTION_NOTEBOOK_IMPORTER` (the `:ext-soil` one-APK-many-services precedent). Depends on `:extension-api` + `:sn-screen` + `:markdown`. |
+| Markdown engine | **`:markdown`** (NINTH module) — a shared library holding the whole pure engine (parser, renderer, formatter, reflow, list logic, search, draft/append, pagination). `:app` and `:ext-document` both depend on it: the host renders text-document covers and the PDF preview pages (the arc-18 rule — *the host renders whatever a notebook is*); the extension renders the editor's Preview. One engine, no drift. Never depends on `:app`, `:sn-screen`, or `:extension-api`. |
+| Scope | **Full og parity including Proofread.** Page documents (seed-once, Bring in Replace/Append, staleness line), the full editor (Write/Preview, format bar + overflow, Ctrl shortcuts, list continuation + renumbering, Reflow, find & replace, word count, caret memory, text-size preference, in-editor page flips), the notebook document (scope toggle, auto-merge, notebook-wide staleness), text documents (create radio, straight-to-editor, text cover, rename from title, `.md`/`.txt` import). **Excluded:** open-with/share-to intents (arc-16 single-entry lock stands), images beyond og's source-level placeholder, og's digits-only list rule stands (lettered/roman REJECTED in og — do not re-raise). |
+| Proofread | **In** (user's explicit call). SymSpellKt dependency **approved 2026-08-30, module-local to `:ext-document`** (the pdfbox precedent). Dictionary asset bundled in the extension APK (**never name an asset `.gz`** — AAPT gunzips and strips the extension, the og trap). **User dictionary lives in the extension store** — the extension writes nothing to disk, and the store is exactly this. |
+| Recognition | **In-editor seed flows only** (seed-once on an undocumented page, Bring in, the notebook document's first-toggle auto-merge — cancellable, og behavior). Runs **host-side** via the existing `RecognizerClient`/ML Kit point — ink never crosses the document seam, only text does. `recognizePage` finally gets its consumer. **Export never recognizes**: a text export is documents only — notebook document if present, else per-page documents, undocumented pages skipped. |
+| Export | Document exporter in `:ext-document` on a **new source kind `SOURCE_DOCUMENT`** (`API_VERSION` → **3**; `:ext-document` declares 3, everything else keeps its number — the D3 skew-guard recipe): the host assembles the document text and streams it over the read fd; the extension writes it — one format option **Markdown (.md) / Plain text (.txt)** (strip via the shared engine). Listed in the chooser **only when the notebook has a document**. **PDF-of-preview needs NO `:ext-pdf` change**: the host paginates + renders the markdown preview into the existing `SOURCE_PAGES` page bundle; the Export screen grows a **host-side Source row** (Notebook pages / Document) shown only when a document exists and a `SOURCE_PAGES` exporter is selected. |
+| Text import | Text importer service in `:ext-document`: `ImporterInfo` grows a compatible **result-kind tail** (absent = soil notebook, `RESULT_TEXT_DOCUMENT` = text bytes — the sourceKind recipe mirrored). Extension streams bytes to the host cache exactly as today; the host forks **after** delivery: UTF-8 validation + **10 MB cap** → create a text document in the current folder (name deduped, encrypted like any create) → open into the editor. Entry stays the library's one Import button — arc-16's picker already unions MIME filters and matches by extension, so **no og-style import sheet is needed**. |
+| Data model | **`TYPE_DOCUMENT = "document"`** — third additive row type on the family shape (the heading/link precedent: no version bump, no migration, Paper ignores the rows). `parentId` = page id (page document) or the notebook root row's id (notebook document — og's shape). `text` = the markdown. **The `srcUpdatedAt` watermark rides the free `flags` INTEGER** (SQLite INTEGER is 64-bit; og needed a new column only because its table had no spare 64-bit slot — ours does; NULL = authored by hand, never drafted). **Blank means absent** (no row ⇒ undrafted ⇒ seed offer works with no flag). Index: `NotebookFlags.TEXT_DOCUMENT = 4` (bit 2). `notebook_meta` json gains additive `textDocument` (codec defaults — absent = false). Document rows **excluded** from cover/content-staleness whitelists (a document is a product of the page, not content on it) but **included** in the notebook document's own staleness sweep (og's rule: page ink AND page-document edits both mean "pages have changed"). |
+| Arc shape | **Eleven phases M1–M11** (letter M — D is taken). Each ends green (build + `./gradlew test` + Nomad walk) so the user can `/clear` between phases. Haiku automates everything adb can see; typing-heavy editor flows get a **debug-only automation hook** (M4 phase-start question) so walks aren't blocked by the Supernote IME trap; user checklists only for pen/EPD/SAF/keyboard-feel items. |
+| Staffing | The standing recipe. **Fable the seams**: the AIDL + host-callback contract, the text-chunking rule, the result-kind/source-kind tails, the data-model contract, the pagination contract. Opus the editor + host flows; Sonnet scaffold/layouts/strings; Haiku walks; ≤ 5 background. |
+
+### Arc-19 standing traps (assume they apply)
+
+- **The ~1 MB Binder transaction budget vs. a 10 MB document.** Text crosses the seam **chunked**
+  (the `InkChunks` recipe applied to text — one shared chunking rule, both sides, pinned by test).
+  A whole-document cap (`MAX_DOCUMENT_CHARS`, sized at M3) guards both directions; the host-side
+  cap runs before any bind, the extension re-checks running totals on receipt.
+- **The extension store's 4 MiB value cap is NOT the document's home.** Autosave pushes text to
+  the host via the callback binder; the store holds only small per-device state (caret LRU,
+  text-size, proofread toggle, user dictionary). A draft never lives in the store.
+- **Supernote swallows `adb shell input text` AND `input keyevent` letters** — editor walks
+  cannot type. The debug-only automation hook (M4) exists precisely for this; anything it can't
+  reach is a user checklist item.
+- **The Ratta hardware-keyboard rule carries into the editor from day one** (og's 2026-08-11
+  finding): hardware keys type **only while the IME is shown** — an attached keyboard is never a
+  reason to hide the soft keyboard on Ratta; Supernote keeps the panel off-screen itself. Ctrl
+  chords pass through and work. The og BOOX refuse-the-connection defense is irrelevant here.
+- **The editor is SN's first non-paper full-screen Activity launched over a live
+  `NotebookActivity`.** Whether the notebook must `releaseForHandoff()` around the editor (the
+  scratch-pad ordering) or can simply stop behind it (og's shape — the editor draws no ink) is
+  **answered on the Nomad at M3, not assumed**. If the EPD pipeline needs releasing, the
+  scratch-pad ordering rule applies verbatim; a failure there is fixed in g-paper.
+- **The host is stopped behind the editor** (og): no dialog is ever shown on the stopped host's
+  window; the notebook catches up on page flips only when the editor closes
+  (`navigateToPage(endedOn)` on the result). The flip gap is a **no-save zone** guarded on both
+  sides (og's `flipInFlight` + `documentPageLoading` pair — now with a process boundary between
+  them).
+- **The autosave/teardown table is the feature's soul** (og's four-failure table): flush before
+  seal, process death both sides, config-change recreation, editor recreation. Every path must be
+  re-derived for the two-process shape and pinned. `NotebookActivity` already carries
+  `keyboard|keyboardHidden` awareness lessons from D3 — the notebook must not be destroyed behind
+  the editor by a BT-keyboard attach (og declares `keyboard` in configChanges for exactly this).
+- **`SoilObjectEntity.flags` must hold epoch millis** — if the Room entity types it `Int?`, the
+  watermark overflows; retype to `Long?` (column affinity unchanged — verify the Room identity
+  hash does not move; family compatibility is the whole game). Checked first thing in M2.
+- **Marshalable exceptions only, caller check inside the fd/bind try** (the E1 trap) — and the
+  host-callback binder's stub methods gate on the extension's uid + signature the same way
+  (`HostCallerCheck` runs on BOTH sides of this seam for the first time).
+- **Recognized/document text is never logged on either side** — counts, lengths, durations only
+  (the N-arc privacy rule, now covering the callback direction too).
+- **View-VISIBLE-then-coroutine never draws first** (og overlay trap) — sequence any
+  "Reading this page…" feedback via pre-draw + post before heavy work.
+- **File tools can land a raw NUL byte** (fired 3×) — byte-scan changed files before calling any
+  phase done.
+- **GONE, never disabled; not-built controls do not exist** (J4): descriptors and buttons appear
+  in the phase that builds their behavior, never before.
+
+### M1 — `:markdown`, the shared engine
+**Status:** ⬜ Not started
+
+The NINTH module: pure engine, no app changes, no new deps. `MarkdownParser` (block + inline,
+og's grammar: headings, lists incl. tasks, blockquotes, fenced code, rules, tables, links, the
+image placeholder rendered as italic alt text), `MarkdownRenderer` (spans from a handed paint —
+sizes baked, the og re-render-on-size-change contract), `MarkdownFormatter` (format-bar ops +
+`listEnter` + `renumberOrderedLists` — og's exact semantics: state-of-the-line not key timing,
+runs per indent width, digits only), `MarkdownReflow` (og's conservative table: certain-wrap
+joins only, fences untouched, hard breaks honoured, idempotent), `TextSearch` (case-insensitive,
+non-overlapping, wrap navigation, replace-all caret math), `DocumentDraft` (isUndrafted /
+isStale / append-under-`---`), and **`MarkdownPaginator`** — the arc's one og-less piece: split
+rendered output into page-height slices on line boundaries for M9's PDF preview (design it now,
+test it now, consume it at M9).
+**Gate:** the big JVM suite (og's test surface as the floor: reflow idempotency, renumber
+neutrality, listEnter shapes, search caret math, draft append, paginator line-boundary rule);
+`:markdown` builds standalone; NUL-scan.
+*Fable the module contract + paginator; Sonnet/Opus the engine port-by-inspiration; Haiku runs
+the suites.*
+
+**Questions to resolve at phase start:** none expected — og's semantics are the spec; anything
+ambiguous in og's behavior gets asked as it surfaces.
+
+### M2 — Host data layer
+**Status:** ⬜ Not started
+
+`TYPE_DOCUMENT` in `SoilSchema` (KDoc'd like heading/link), the `flags`-as-watermark contract
+written at the constant, `SoilObjectEntity.flags` retyped `Long?` if needed (identity-hash
+verified against a pre-arc file), `DocumentDao`/`DocumentRepository` (get/save with
+blank-means-absent + drop-unchanged-write, page + notebook-root parents, watermark stamp only at
+seed/refresh), staleness queries (`maxContentUpdatedAt(pageId)` over strokes/headings/links +
+link children; notebook-wide sweep including page-document rows, excluding the notebook document
+itself), `NotebookFlags.TEXT_DOCUMENT`, `notebook_meta.textDocument` (additive codec field,
+index-sourced on rebuild — the og meta-refresh-wipe trap), and the parity sweeps: page
+copy/cut/paste carries the document (SN's page children include it — verify, pin), page delete +
+undo carries it (soft-delete by parent), `SoilCompactor` purges it only via cascade from a
+purged page, export/backup untouched (rows ride the file).
+**Gate:** JVM tests (repository rules, staleness both scopes, clipboard/purge/undo parity —
+FakeObjectDao pins); a Paper-created and pre-arc SN file still open (compat pin); builds; NUL.
+*Fable the contract; Opus the queries + parity sweeps.*
+
+**Questions to resolve at phase start:** none expected.
+
+### M3 — The FIFTH point: AIDL, `:ext-document`, entry button
+**Status:** ⬜ Not started
+
+The seam (Fable): `IDocumentEditor` (held bind — the operation is the showing:
+`begin(store, host)` / `end()`, session calls for text/state chunks) + **`IDocumentHost`** — the
+callback binder the host passes at `begin`, SN's first host-side stub on an extension seam
+(`saveDocument(pageKey, chunked text)`, `requestPage`, `requestSeed`/`requestMerge` answers,
+rename, close-notebook) — every stub method gated by `HostCallerCheck` against the extension's
+uid. Text chunking rule (`TextChunks`, both sides, pinned), `MAX_DOCUMENT_CHARS`,
+`DocumentContract` caps/timeouts. `:ext-document` EIGHTH module (`:extension-api` + `:sn-screen`
++ `:markdown`), manifest + queries entry, `HostCallerCheck.enforceActivity` first thing in the
+stub editor screen, `DocumentEditorClient` host-side (pre-open store on IO → mint store binder →
+hold → begin → launch via `ActivityResultLauncher`; finish from result AND `onDestroy`).
+Notebook top-bar **Document** button. Both CLAUDE.mds amended: FIVE points, no SIXTH without a
+user decision. **The EPD question answered on-device**: does the notebook need
+`releaseForHandoff()` around a non-drawing child screen? (Measure, don't assume; record the
+answer here.)
+**Gate:** JVM tests (chunking, caps, contract pins); walk — bind/begin/launch/refuse-shell
+(`am start` = refused caller), binds = unbinds, disable/enable discovery, crash buffer; stub
+screen opens and returns.
+*Fable seams; Opus client + service skeleton; Sonnet module scaffold/manifest/icon/strings.*
+
+**Questions to resolve at phase start:** Document button icon (og has no glyph — `ic_file_text`
+family?) + top-bar position (before Recents, the scratch-pad precedent?); `MAX_DOCUMENT_CHARS`
+sizing (og's 10 MB import cap as the ceiling?).
+
+### M4 — The real editor: Write/Preview, format bar, autosave
+**Status:** ⬜ Not started
+
+The editor screen in `:ext-document`, og's chrome shape on SN's design system: header (title ·
+`‹ n / m ›` · text-size · Write/Preview/Done as icons — og's P2P lesson pre-applied), source
+strip (words), format bar + **overflow** (og reuses a toolbar overflow manager — SN builds its
+own small one or reuses `:sn-screen`'s if fit), the text surface. `MarkdownFormatter` wired to
+bar + Ctrl shortcuts; list continuation via the text watcher (og: buffer, not key events);
+autosave (2 s idle debounce, mode switch, `onPause`, Done) **through the callback binder,
+chunked**; og's four-failure teardown table re-derived for two processes and pinned (flush
+before seal via `end()`-drain backstop; host process death → editor's buffer survives, flushed
+on reconnect; editor recreation → explicit buffer save). IME: soft keyboard shrinks the layout;
+the Ratta hardware-keyboard rule from day one. The debug automation hook (if approved) lands
+here.
+**Gate:** JVM tests (formatter wiring is M1-tested; here: autosave state machine as pure logic,
+chunk reassembly); walk — open/type-via-hook/mode-switch/Done, autosave lands in the `.soil`
+(adb pulls + opens the file via a debug probe), kill-host-behind-editor recovery, crash buffer;
+**user checklist**: typing feel, soft-keyboard resize, hardware-keyboard typing + Ctrl chords,
+Preview fidelity eye-check.
+*Opus the screen; Fable the autosave/teardown review; Haiku walks.*
+
+**Questions to resolve at phase start:** the **debug-only automation hook** (a debug-build
+receiver that sets/reads editor text so Haiku can walk typing flows — approve?); format-bar
+tool set parity vs. trim.
+
+### M5 — Editor tools: Reflow, find & replace, word count, text size, caret memory
+**Status:** ⬜ Not started
+
+Reflow (selection-grows-to-lines or whole document, `Ctrl+Shift+F`, "Nothing to reflow"), find &
+replace (`Ctrl+F`, two-row bar, selection-as-highlight — e-ink honest, no spans), word count
+(toast — the recorded toast-confirms shape), text-size preference (og's five steps +
+`PREVIEW_BUMP`; stored in the extension store), caret memory (per-page LRU 100 in the extension
+store, device-local by nature — og's deliberate not-in-the-soil call; top when unknown; handed
+over on every save).
+**Gate:** JVM tests (all pure logic already in M1 — here the store key layout + LRU eviction);
+walk — via the hook: search navigation, replace-all one-undo, size persistence across reopen,
+caret restore; **user checklist**: none expected.
+*Opus; Haiku walks.*
+
+**Questions to resolve at phase start:** none expected.
+
+### M6 — Seeding: recognition in, Bring in, staleness, page flips
+**Status:** ⬜ Not started
+
+The host's `openDocumentEditor` seeds **before** launch (og's order): flush ink → document row
+non-blank ⇒ hand over instantly → else `RecognizerClient.recognizePage` behind "Reading this
+page…" (model-consent via the existing `RecognizerReadiness` flow; no recognizer ⇒ open empty,
+page stays seedable). The seed becomes real only when the editor stores it. Source strip states
+(Drafted from this page / Page has changed / Not drafted), `Bring in` → Replace/Append sheet
+**before** recognition runs (no cancel-after-waiting), watermark re-anchored only at seed +
+refresh. **In-editor page flips**: `‹ ›` + `Ctrl+PgUp/PgDn` via `IDocumentHost.requestPage` —
+text stored first, host switches target + clears live state, the no-save zone guarded both
+sides, `requestPage` always answers from a `finally` (null ⇒ revert), editor's own 350 ms-delayed
+"Reading this page…" popup, arrows say First/Last page (never disabled). The notebook catches up
+on close (`navigateToPage(endedOn)`).
+**Gate:** JVM tests (seed decision table, flip state machine, staleness lines); walk — seed a
+hand-inked page (user pre-inks; walk drives open/verify), flip through a notebook via the hook,
+staleness flips after new ink; **user checklist**: seed quality eye-check on real handwriting,
+flip-under-slow-seed feel.
+*Opus features; Fable the flip/no-save-zone review; Haiku walks.*
+
+**Questions to resolve at phase start:** none expected (consent flow reuses `RecognizerReadiness`
+as-is).
+
+### M7 — The notebook document
+**Status:** ⬜ Not started
+
+An ordinary document row parented to the notebook root (M2 built the storage). Header scope
+toggle (page ↔ notebook — a page flip in every way that matters: same guards, same no-save
+zone), notebook-wide staleness ("Pages have changed since this merge"), **first toggle
+auto-merges** (per page: document if non-blank, else recognize — og's loop; blank-line joins;
+empty pages dropped; the ONE reading popup with Cancel — `IDocumentHost.cancelRequest`), Merge =
+Replace/Append (sheet first, before recognition), `Ctrl+PgUp/PgDn` no-ops in notebook mode,
+caret key `nb:<notebookId>`, process-death routing carries the mode flag (og's
+`STATE_DOCUMENT_NOTEBOOK` shape) so notebook text can never land on a page row or vice versa.
+**Gate:** JVM tests (merge assembly, staleness sweep, mode routing); walk — toggle/auto-merge
+via the hook on a documented notebook, cancel mid-merge, mode survives process death
+(`am kill`); **user checklist**: auto-merge over real handwriting.
+*Opus; Fable the mode-routing review; Haiku walks.*
+
+**Questions to resolve at phase start:** og also merges a page *selection* from its Page Index —
+SN has no Page Index; should the Contents dialog grow a selection-merge path, or is
+auto-merge + Merge enough for SN? (Recommend: enough — revisit on demand.)
+
+### M8 — Text documents + `.md`/`.txt` import
+**Status:** ⬜ Not started
+
+The create screen gains a type radio (Notebook / Text document); a flagged notebook
+(`NotebookFlags.TEXT_DOCUMENT` + meta mirror) routes straight into the editor from every entry
+point (lightweight page-id setup, canvas load deferred until ✓ Done asks for it — og's shape:
+✓ Done = show pages, Close = seal to library without touching the canvas,
+`pendingCloseAfterOpen` for the recreated-host race). **Text cover**: the host renders the
+opening lines via `:markdown` onto the family cover canvas at seal-after-flush + at import;
+card center glyph `ic_file_text`. **Rename from the title** (text documents only) via
+`IDocumentHost.renameNotebook` (host validates against siblings, index + meta + title). **Text
+import**: `ImporterInfo` result-kind tail (Fable), text importer service (stream copy — the
+`:ext-soil` idiom), host fork after delivery (UTF-8 + 10 MB cap → create text document, name
+deduped, `srcUpdatedAt` NULL — authored elsewhere → cover → open into the editor). The soil
+importer's pipeline is untouched (tail absent = today's meaning, pinned on real wire like D1).
+**Gate:** JVM tests (routing decision table, tail compat both directions, import fork, name
+dedupe); walk — create/reopen/rename/import via picker where adb allows, `pm disable` hides the
+text importer only; **user checklist**: SAF import of a real `.md` (picker not adb-drivable),
+cover eye-check.
+*Fable the tail; Opus routing + import fork + cover; Sonnet create-screen radio; Haiku walks.*
+
+**Questions to resolve at phase start:** create-screen radio wording; whether a text document
+shows in the library with a distinct badge beyond the cover glyph.
+
+### M9 — Export: `SOURCE_DOCUMENT` + PDF-of-preview
+**Status:** ⬜ Not started
+
+The seam (Fable): `SOURCE_DOCUMENT` on `ExporterContract`, `API_VERSION` → **3**
+(`:ext-document` declares 3; a pre-arc-19 host skips it — the D3 recipe, pinned), per-kind
+verification grown (a text stream is verbatim: the soil equality applies; pinned).
+`DocumentExporterService` in `:ext-document`: descriptor (format option Markdown/.md ·
+Plain text/.txt, MIME `text/markdown`/`text/plain` — the host renames the extension per
+choice), `export()` = read the host-assembled text fd, write verbatim or strip via `:markdown`,
+fsync, honest count. Host: assembles the source (notebook document if non-blank, else per-page
+documents joined by blank lines, undocumented pages skipped; honest EMPTY refusal when no
+document exists — but the chooser already gates), lists the exporter only when a document
+exists. **PDF-of-preview**: the host-side **Source row** (Notebook pages / Document — GONE
+unless a document exists AND the selected exporter is `SOURCE_PAGES`), Document ⇒
+`MarkdownPaginator` + `:markdown` render into the standard `PageBundle` at the notebook's page
+size — `:ext-pdf` receives it none the wiser. Template toggle in Document mode = white ground
+(paper under prose is a phase-start question).
+**Gate:** JVM tests (assembly rules, strip, tail/skew pins, Source-row visibility table,
+paginator-to-bundle); walk — chooser gating (documented vs. not), option swap, `pm disable`
+each exporter, binds = unbinds; **user checklist**: SAF-saved `.md`/`.txt`/preview-PDF opened
+on the Mac, pagination eye-check.
+*Fable seams; Opus host assembly + Source row + exporter service; Haiku walks.*
+
+**Questions to resolve at phase start:** does the Document PDF render on the page template or
+plain white (og never built this — no precedent)? Page size/margins for the preview render;
+`.txt` strip shape sanity (og's `toPlainText`).
+
+### M10 — Proofread
+**Status:** ⬜ Not started
+
+og's subsystem, extension-local: SymSpellKt (module-local dep, approved) + the bundled gzipped
+dictionary asset (og's VarCon-patched dictionary — both US/UK spellings; **asset reuse from og
+is data, not code** — confirm at phase start), pure engine port (Markdown-aware tokenizer,
+line-bounded incremental check, og's five conservative grammar rules — silence over noise),
+dashed/dotted underlines in `onDraw` (spans are position-only markers), span diffing (an
+unchanged screen never repaints — the e-ink rule), tap popup (suggestions / Fix / Ignore / Add
+to dictionary), **user dictionary in the extension store**, global on/off (default on, dictionary
+never loaded while off).
+**Gate:** JVM tests (engine, tokenizer, rules, incremental bounds — og's test surface as the
+floor); walk — via the hook: misspelling underlined, fix applies, ignore persists, add-to-dict
+survives restart; **user checklist**: underline legibility on e-ink.
+*Opus the port; Sonnet the asset pipeline; Haiku walks.*
+
+**Questions to resolve at phase start:** reuse og's patched dictionary asset verbatim (data, not
+code — recommend yes)? Toggle location (editor overflow row vs. library debug-adjacent
+settings)?
+
+### M11 — Review, boundary audit, docs, freeze
+**Status:** ⬜ Not started
+
+`/code-review` on the arc range (level asked at phase start), fix/accept per user call.
+Boundary audit: new rows for the fifth point (the callback binder — the first host-side stub on
+an extension seam — text chunking, the store's small-state layout), the result-kind tail, the
+`SOURCE_DOCUMENT` seam. Docs: **`docs/document.md`** NEW (the feature),
+`docs/extensions.md` (fifth point + seam sections + module table to NINE + identity block +
+API-version 3 rows), `docs/export.md` (Source row + document exporter), `docs/import.md`
+(result-kind tail), `docs/library.md` (text documents), `docs/notebook.md` (Document button),
+`docs/sn-screen.md` if touched, both CLAUDE.mds, root CLAUDE.md arc record, BACKLOG ledger,
+memory. Version stamp question at phase start. Freeze.
+**Gate:** full JVM suite both variants, all nine modules build debug + release, NUL-scan, final
+Nomad walk, user checklist re-run of anything a fix touched.
+*Fable review + audit; Sonnet docs pass; Haiku the final walk.*
+
+**Questions to resolve at phase start:** review level; version stamp (stay `0.1.0-ratta`?).
