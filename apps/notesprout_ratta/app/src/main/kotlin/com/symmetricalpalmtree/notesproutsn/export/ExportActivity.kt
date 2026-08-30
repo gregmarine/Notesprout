@@ -10,7 +10,6 @@ import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.util.Log
 import android.view.View
-import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
@@ -69,8 +68,9 @@ import kotlinx.coroutines.withContext
  *     was actually streamed** — and against the destination where the provider can answer — before
  *     anything says the word "exported". An exporter that died mid-stream must never read as
  *     success.
- *  5. **Toast and finish**, back to the library: a toast only ever confirms something that has
- *     already happened. Every failure instead explains itself in a dialog naming what went wrong —
+ *  5. **Confirm and finish**, back to the library: a dialog, not a toast, because this screen is
+ *     closing under it and a toast would confirm something the user no longer has a screen to read.
+ *     Every failure instead explains itself in a dialog naming what went wrong —
  *     never a path, never a secret — and removes the half-written destination where removing it
  *     cannot cost the user anything: a pre-existing file the picker offered to overwrite is
  *     deleted only after the truncating open has already destroyed its old content, and the
@@ -513,8 +513,9 @@ class ExportActivity : AppCompatActivity() {
 
                 Slog.d(TAG) { "exported $streamBytes bytes" }
                 if (isFinishing || isDestroyed) return@launch
-                Toast.makeText(this@ExportActivity, R.string.export_done_toast, Toast.LENGTH_SHORT).show()
-                finish()
+                Dialogs.confirm(this@ExportActivity, R.string.export_done_title, R.string.export_done_body) {
+                    finish()
+                }
             } finally {
                 // The artifact is a copy of the user's notes; it has no business outliving the
                 // export that made it, whichever way the export ended — a screen destroyed

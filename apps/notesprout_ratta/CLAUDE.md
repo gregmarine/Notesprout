@@ -176,7 +176,16 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   Contents and Recents buttons.
 - **Toast vs. dialog:** a toast only confirms something that already happened; anything
   explaining why a tap *didn't* work is a problem dialog. On e-ink a missed toast reads
-  as "broken".
+  as "broken". **Three recorded exceptions** (post-arc-17 toast review, 2026-08-30,
+  `Dialogs.confirm` — same one-title/one-message/OK shape as `Dialogs.problem`, for a *successful*
+  result that still shouldn't ride a toast): export-done (the screen finishes right under the
+  toast, so it can't survive to be read — `finish()` now runs on the dialog's dismiss),
+  backup-done (the counts are the entire reason the user opened the screen), import-done (names
+  the destination folder when it isn't the current one — a card that never appears on screen reads
+  as an import that did nothing). All three were audited from the full toast inventory; the
+  frequent/reversible/in-context ones (copy, cut, paste, clipboard clear, template import/export,
+  backup-exclude toggle) stayed toasts on purpose — converting those would make routine editing
+  a chain of dismiss taps.
 - Portrait-locked everywhere · one layout per screen · no colour in chrome (ink is fixed
   black — P1 removed the tool panels) · TopGuard is 0 on Ratta — chrome sits flush at the top
   edge · notebook writes go through the session's single serial `SoilWriter` · undo/redo

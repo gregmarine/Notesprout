@@ -152,7 +152,8 @@
     <string name="export_action">Export</string>
     <string name="export_format_caption">Format</string>
     <string name="export_exporting">Exporting…</string>
-    <string name="export_done_toast">Exported</string>
+    <string name="export_done_title">Exported</string>
+    <string name="export_done_body">Your notebook was exported.</string>
     <string name="export_none_title">Nothing to export with</string>
     <string name="export_none_body">No export extension is installed on this device, so there is no format to export to.</string>
     <string name="export_no_picker_title">No file picker</string>
@@ -197,8 +198,9 @@
     <string name="cd_import">Import notebook</string>
     <string name="import_here">Import here</string>
     <string name="import_to_title">Import to…</string>
-    <string name="import_done_toast">Imported</string>
-    <string name="import_done_toast_in">Imported to %1$s</string>
+    <string name="import_done_title">Imported</string>
+    <string name="import_done_body">Your notebook was imported.</string>
+    <string name="import_done_body_in">Your notebook was imported to %1$s.</string>
     <string name="import_stage_reading">Reading…</string>
     <string name="import_stage_unlocking">Unlocking…</string>
     <string name="import_stage_keying">Preparing…</string>
@@ -254,7 +256,8 @@
     <string name="backup_status_never">Never backed up</string>
     <string name="backup_status_last">Last backup: %1$s — %2$d copied, %3$d skipped</string>
     <string name="backup_progress">Backing up… %1$d/%2$d</string>
-    <string name="backup_done_toast">Backed up — %1$d copied, %2$d skipped</string>
+    <string name="backup_done_title">Backup complete</string>
+    <string name="backup_done_body">%1$d copied, %2$d skipped.</string>
     <string name="backup_no_folder_title">No backup folder</string>
     <string name="backup_no_folder_body">Choose a folder to back up to first — nothing has been backed up.</string>
     <string name="backup_folder_gone_title">Backup folder unavailable</string>

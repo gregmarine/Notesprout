@@ -6,7 +6,6 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.DocumentsContract
 import android.util.Log
-import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -41,10 +40,10 @@ import java.util.concurrent.atomic.AtomicBoolean
  *    the flag is cleared from a coroutine continuation.
  *  - **Never a disabled control.** With no folder chosen the button still looks live and the tap
  *    explains itself in a dialog: on e-ink `isEnabled = false` is invisible and reads as broken.
- *  - **Toast confirms, dialog explains.** A clean run gets a toast naming its counts. Anything a
- *    run could not do — a folder that has gone, a locked library, a failed copy, an index that did
- *    not land — is a dialog carrying the honest per-count summary, because on e-ink a missed toast
- *    reads as "nothing happened".
+ *  - **Every outcome is a dialog.** A clean run confirms its counts in one too, not a toast — this
+ *    screen exists to answer "did it work", and the counts are the answer. Anything a run could not
+ *    do — a folder that has gone, a locked library, a failed copy, an index that did not land — gets
+ *    the same treatment with the honest per-count summary.
  *
  * The status line is read back from the config rather than the [BackupEngine.Result], so it says
  * the same thing after a relaunch as it does the moment a run ends.
@@ -259,9 +258,9 @@ class BackupActivity : AppCompatActivity() {
     }
 
     /**
-     * What the run did, in the user's terms. Every branch but the last is a dialog: a run that
-     * could not start, or that finished with something missing, is exactly the case a toast would
-     * lose. The clean case is a toast, because it only confirms what already happened.
+     * What the run did, in the user's terms — every branch a dialog. The clean case still gets one:
+     * this screen is the entire reason the run happened, and "N copied, M skipped" is exactly the
+     * number a toast would let slip past unread.
      *
      * "Skipped" is one number covering four honest reasons — already up to date, deliberately
      * excluded, open elsewhere in the app, or a file no longer on the device. The distinction
@@ -297,11 +296,11 @@ class BackupActivity : AppCompatActivity() {
                 ),
             )
 
-            else -> Toast.makeText(
+            else -> Dialogs.confirm(
                 this,
-                getString(R.string.backup_done_toast, result.copied, skipped),
-                Toast.LENGTH_SHORT,
-            ).show()
+                R.string.backup_done_title,
+                getString(R.string.backup_done_body, result.copied, skipped),
+            )
         }
     }
 

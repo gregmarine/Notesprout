@@ -7,7 +7,6 @@ import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
 import android.util.Log
 import android.view.View
-import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatActivity
@@ -86,7 +85,7 @@ class ImportFlow(
     /** The library button this owns (bottom-right group, before Templates): `VISIBLE` only while
      *  a trusted importer is installed. */
     private val button: View,
-    /** Where the library is standing — used only to decide whether the toast names a folder. */
+    /** Where the library is standing — used only to decide whether the confirm dialog names a folder. */
     private val currentFolder: () -> String?,
     /** Retire a notebook the user chose to replace: the library's own delete (index row, recents,
      *  file, cached key). Runs **after** the import has fully committed, never before. */
@@ -377,7 +376,7 @@ class ImportFlow(
 
         ImportOverlay.hide(activity)
         onImported()
-        toastImported(parentId)
+        confirmImported(parentId)
     }
 
     // ── Step 1: the delivery ─────────────────────────────────────────────────
@@ -665,18 +664,18 @@ class ImportFlow(
 
     // ── Endings ──────────────────────────────────────────────────────────────
 
-    /** A toast only ever confirms something that already happened — and it names the folder when
-     *  the notebook did not land where the user is standing, because a card that is not on screen
-     *  otherwise reads as an import that did nothing. */
-    private suspend fun toastImported(parentId: String?) {
+    /** A dialog, not a toast: it names the folder when the notebook did not land where the user is
+     *  standing, and that's exactly the information a missed toast would take with it — a card that
+     *  is not on screen otherwise reads as an import that did nothing. */
+    private suspend fun confirmImported(parentId: String?) {
         if (activity.isFinishing || activity.isDestroyed) return
         val message = if (parentId == currentFolder()) {
-            activity.getString(R.string.import_done_toast)
+            activity.getString(R.string.import_done_body)
         } else {
             val folder = parentId?.let { repo.alive(it)?.name } ?: activity.getString(R.string.library_root)
-            activity.getString(R.string.import_done_toast_in, folder)
+            activity.getString(R.string.import_done_body_in, folder)
         }
-        Toast.makeText(activity, message, Toast.LENGTH_SHORT).show()
+        Dialogs.confirm(activity, R.string.import_done_title, message)
     }
 
     private fun problem(@StringRes titleRes: Int, message: String) {

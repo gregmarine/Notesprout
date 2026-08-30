@@ -129,10 +129,10 @@ the library itself (a button on its own bar, asking nothing about what is curren
    `notebook_meta` — this id, this name, this ancestry — through the one `SoilDatabase.open` /
    `.seal` door; a failure is logged and the import stands, because the notebook is already in the
    library either way.
-10. **Toast, and stay in the library.** A toast only ever confirms something that already happened;
-    it names the destination folder when the notebook did not land where the user is standing
-    (`toastImported`), because a card that never appears on screen otherwise reads as an import that
-    did nothing.
+10. **Confirm dialog, and stay in the library** (post-arc-17 toast review, 2026-08-30 — was a toast).
+    `Dialogs.confirm` ("Imported") names the destination folder when the notebook did not land where
+    the user is standing (`confirmImported`), because a card that never appears on screen otherwise
+    reads as an import that did nothing — exactly the information a missed toast would take with it.
 
 Every path that ends before step 10 wipes the import cache in a `NonCancellable` `finally`
 (`NotebookImport.clean`) — a screen destroyed mid-import must not leave the incoming copy behind —
@@ -333,10 +333,12 @@ is [`docs/extensions.md`](extensions.md) § "Boundary audit," rows 9–11.
 | The screen was rebuilt behind the folder picker and nothing is waiting for the answer | problem dialog, "interrupted before that folder could be used" | `folderLauncher` result → `import_interrupted_body` |
 | Back / the back arrow tapped while an import runs | "Import in progress" dialog; the flow continues untouched | `showBusyGuard` (`import_busy_body`) |
 | Any other exception escapes the pipeline | problem dialog, generic "couldn't be finished"; exception logged by **class name only** | `runImport` catch-all → `import_generic_body` |
-| Import succeeded | toast, "Imported" (or "Imported to <folder>" when not the current one); library refreshes | `toastImported` |
+| Import succeeded | confirm dialog, "Imported" (body names the folder when it's not the current one) | `confirmImported` |
 
 The rule behind the column is arc 15's, carried over whole: **a toast only confirms something that
-already happened; anything explaining why a tap didn't work is a dialog.** Every failure row deletes
+already happened; anything explaining why a tap didn't work is a dialog.** Import's own success case
+moved off that rule (post-arc-17 toast review, 2026-08-30): the folder name is easy to miss in a
+toast, and it's the one piece of information the row exists to carry. Every failure row deletes
 at most the import cache (`cacheDir/import/`, wiped in a `NonCancellable finally`) — the Garden and
 the index are never touched until the commit step has fully verified, so a failure anywhere before
 then leaves the library exactly as it was.
@@ -361,8 +363,8 @@ then leaves the library exactly as it was.
   unbound.
 - **User checklist**, passed 2026-08-28: all three export keyings (same-device Keep with no prompt,
   plaintext, and a foreign passphrase typed wrong-then-right) imported back; Replace and Keep-both
-  both proven at the id-collision dialog; both placement answers; the folder-naming toast when the
-  destination isn't the current folder.
+  both proven at the id-collision dialog; both placement answers; the folder-naming confirm dialog
+  when the destination isn't the current folder.
 
 ---
 

@@ -102,10 +102,12 @@ a button that runs one, and what the last run did. Wording is plain verbs (the u
   non-cancelable progress dialog covers the e-ink feedback gap.
 - **Never a disabled control**: with no folder chosen the button still looks live and the tap
   explains itself in a dialog.
-- **Toast confirms, dialog explains**: a clean run gets a toast naming its counts; anything the
-  run could not do gets a dialog with the honest per-count summary. "Skipped" is one number
-  covering four honest reasons (up to date · excluded · open elsewhere · file missing) — the
-  distinction matters to the engine, not the reader.
+- **Every outcome is a dialog** (post-arc-17 toast review, 2026-08-30): a clean run confirms its
+  counts in a dialog too, not a toast — this screen exists to answer "did it work," and the counts
+  are the answer a missed toast would take with it. Anything the run could not do gets the same
+  treatment with the honest per-count summary. "Skipped" is one number covering four honest reasons
+  (up to date · excluded · open elsewhere · file missing) — the distinction matters to the engine,
+  not the reader.
 - The status line is read back from the stored config, not the in-memory result, so it says the
   same thing after a relaunch.
 

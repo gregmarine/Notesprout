@@ -50,10 +50,11 @@ top bar's right edge, the bottom of the screen holds nothing.
   actually in flight): *Preparing…* → *Re-keying…* / *Removing encryption…* (only for those two
   keyings) → *Exporting…*. A single unchanging "Exporting…" would read as a stall across stages
   this long on e-ink.
-- **Toast + finish.** A toast only ever confirms something that already happened; every failure is
-  a dialog instead, naming what went wrong — never a path, never a secret — and saying what
-  happened to the destination file: removed, possibly remaining, or untouched (see the
-  [failure table](#failure-table) for when each applies).
+- **Confirm dialog, then finish** (post-arc-17 toast review, 2026-08-30 — was a toast + immediate
+  `finish()`, which risked cutting the toast off under the screen closing). `Dialogs.confirm`
+  ("Exported") finishes on dismiss instead. Every failure is a dialog too, naming what went wrong —
+  never a path, never a secret — and saying what happened to the destination file: removed,
+  possibly remaining, or untouched (see the [failure table](#failure-table) for when each applies).
 - **Both doors out are latched while an export runs** (the back arrow and system back): a Binder
   call cannot be cancelled, so leaving mid-export would skip the verification and cleanup while the
   extension's stream keeps writing — an unverified file standing silently. The tap gets a dialog
@@ -123,9 +124,9 @@ is installed (that would export a different format into a file already named for
    agreeing answer passes; a unanimous disagreement after a fully-streamed, fsynced write gets a
    *check-the-file* dialog and **no delete** — a cloud provider's metadata can lag the write it
    just took, and deleting a fully-written export over a stale answer would destroy the very thing
-   that was just made (the arc-15 review). Only a clean pass fires the toast and finishes.
+   that was just made (the arc-15 review). Only a clean pass reaches the confirm dialog and finishes.
 
-Every path through steps 4–8 that does not reach step 8's toast ends the same way: the cache
+Every path through steps 4–8 that does not reach step 8's confirm dialog ends the same way: the cache
 directory is wiped in a `finally` (`NonCancellable` — a screen destroyed mid-export must not leave
 the artifact behind), the typed passphrase (held only in memory, from the Export tap to here) is
 cleared, and a dialog explains what happened — including what happened to the destination file.
@@ -232,10 +233,13 @@ lifecycle — is [`docs/extensions.md`](extensions.md) § "Boundary audit," rows
 | The byte count the extension reports doesn't match what was streamed | problem dialog, "Only part of the notebook reached that file"; wreckage removed (best-effort, reported honestly) | `runExport` byte-count check → `export_short_body` |
 | The stream completed but every answer the destination provider gives disagrees with it | *check-the-file* dialog, **no delete** — metadata can lag a write it just took, and a fully-written export is never destroyed over a stale answer | `runExport` → `export_verify_body` |
 | Back / the back arrow tapped while an export runs | "Export in progress" dialog; the flow continues untouched | `showBusyGuard` (`export_busy_body`) |
-| Export succeeded | toast, "Exported"; screen finishes | `runExport` success path |
+| Export succeeded | confirm dialog, "Exported"; screen finishes on dismiss | `runExport` success path |
 
 The rule behind the column, family-wide: **a toast only confirms something that already happened;
-anything explaining why a tap didn't work is a dialog.** Every failure row after the picker also
+anything explaining why a tap didn't work is a dialog.** Export's own success case moved off that
+rule (post-arc-17 toast review, 2026-08-30): the screen closes right after, which a toast can't
+survive to be read, and the outcome is worth a deliberate acknowledgment. Every failure row after
+the picker also
 appends what happened to the SAF document — removed where removing it cannot cost the user
 anything (a partial export sitting in the user's files under a name that says "notebook" is worse
 than none at all), left alone where it might be the user's own pre-existing file, and always
