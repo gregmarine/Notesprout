@@ -25,6 +25,7 @@ import com.symmetricalpalmtree.notesproutsn.core.TopGuard
 import com.symmetricalpalmtree.notesproutsn.crypto.ExportKeying
 import com.symmetricalpalmtree.notesproutsn.crypto.KeySession
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
+import com.symmetricalpalmtree.notesproutsn.data.prefs.ExportPrefs
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityExportBinding
 import com.symmetricalpalmtree.notesproutsn.extension.ExporterClient
 import com.symmetricalpalmtree.notesproutsn.extension.ExporterContract
@@ -85,6 +86,7 @@ class ExportActivity : AppCompatActivity() {
     private lateinit var binding: ActivityExportBinding
     private lateinit var panel: ExportPanel
     private val repo by lazy { IndexRepository() }
+    private val exportPrefs by lazy { ExportPrefs(this) }
 
     private lateinit var notebookId: String
     private lateinit var notebookName: String
@@ -207,7 +209,11 @@ class ExportActivity : AppCompatActivity() {
             val standing = kept.firstOrNull { it.ref.packageName == chosenPackage }
             // A re-discovery keeps what the user already answered — the descriptor is usually the
             // same one — and falling back to another exporter starts from its own defaults.
-            select(standing ?: kept.first(), keepValues = standing != null)
+            // A fresh screen defaults to the exporter the last successful export used (the user's
+            // 2026-08-30 call — discovery order is PackageManager's and means nothing); one whose
+            // exporter has since gone falls back to the first listed.
+            val remembered = kept.firstOrNull { it.ref.packageName == exportPrefs.lastExporter }
+            select(standing ?: remembered ?: kept.first(), keepValues = standing != null)
         }
     }
 
@@ -501,6 +507,9 @@ class ExportActivity : AppCompatActivity() {
                 }
 
                 Slog.d(TAG) { "exported ${result.bytesWritten} bytes" }
+                // "Last used" is written by an export that finished, never by a tap the picker
+                // then abandoned — the next fresh Export screen defaults to this format.
+                exportPrefs.lastExporter = c.ref.packageName
                 if (isFinishing || isDestroyed) return@launch
                 Dialogs.confirm(this@ExportActivity, R.string.export_done_title, R.string.export_done_body) {
                     finish()

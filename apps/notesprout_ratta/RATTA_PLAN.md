@@ -4919,9 +4919,14 @@ host render runs before the call starts, so **no PDF-specific timeout** — one 
 kinds, measurement recorded in the contract's KDoc. Container format sanity also settled by the
 same runs: WEBP q100 bundle of 13 pages = 175 KB, render ~1 s — no re-measure needed.
 
-Observation left with the user (not a defect): the chooser lists exporters in PackageManager
-discovery order, so **PDF sat first and default-selected** with both installed; making soil the
-default would be a small deliberate change if wanted.
+**Post-D1 (user, 2026-08-30): the chooser defaults to the LAST-USED exporter.** Discovery order
+(PackageManager's, meaningless) had put PDF first and default-selected; now a fresh Export
+screen defaults to the exporter the last **successful** export used — `data/prefs/ExportPrefs`
+(`sn_export`, the SnapPrefs shape), written only at the OK verdict (a pick abandoned at the
+picker never becomes the default), re-matched against what is installed at discovery (a
+remembered exporter that has gone falls back to the first listed; a standing in-screen pick
+still wins). Radio ORDER stays discovery order — only the default moved. Nomad-verified via a
+planted pref (`run-as` on the debug build): the chooser opened on soil.
 
 Fable: `ExporterInfo`'s compatible tail (`sourceKind`, absent = `SOURCE_SOIL` — old descriptors
 keep their meaning), the export-secret carrier on `ExportSpec` (empty this phase), the per-kind
