@@ -4952,7 +4952,39 @@ measurement; container image format sanity-check (WEBP q100 assumed from F5 — 
 the PDF pass looks slow).
 
 ### D2 — The two options: page-template toggle + password protection
-**Status:** ⬜ Not started
+**Status:** ✅ Complete 2026-08-30 (`ff71644` · post-D2 `57e8413`)
+
+**Phase-start answer (user, 2026-08-30):** the passwordless-PDF honesty line is **silence** — no
+inline note; a PDF is understood to be a plain document, and the line would nag on every export.
+
+**Outcome:** both options end to end, gate met — 965 JVM tests per variant (was 956), all seven
+modules both variants, NUL-clean, **user checklist passed 2026-08-30** (template-off PDF bakes on
+white ground; password PDF opens with the typed password on the Mac and refuses without; plain PDF
+unchanged). The seam grew **two reserved toggle ids** on `ExporterContract` (the `OPTION_KEYING`
+pattern — recognized by id, declared and labeled by the exporter): `OPTION_PAGE_TEMPLATE`
+(**host-executed** — threads `includeTemplate` into `ExportRender`; off skips the template decode
+entirely, never decodes-and-discards) and `OPTION_PROTECT` (**host-collected, extension-executed**
+— arming reveals the one dual masked block re-worded "Password", and the typed secret rides
+`ExportSpec.exportSecret`). `isRenderable` drops a descriptor declaring both a rekey choice and
+the protect toggle: one block, one tenant. `typedExportSecret` mirrors `typedPassphrase`'s
+lifecycle to the letter; a screen rebuilt behind the picker refuses honestly (password-lost body)
+rather than exporting unprotected; > `MAX_EXPORT_SECRET_CHARS` is refused at the tap. `:ext-pdf`:
+pdfbox 2.0.27.0 (module-local; pulls bouncycastle — APK ~16 MB), `PdfDescriptor` pure + pinned,
+`PdfExportSpec` enforces toggle/secret **consistency** in both directions, the protected path is
+`PdfDocument` → in-memory bytes → `PDDocument.load` → `StandardProtectionPolicy(pw, pw)` @128 →
+save through the counting/fsync deliver (the extension writes nothing to disk, so the intermediate
+is a byte array — high-water ~2× the finished document, documented), lazy
+`PDFBoxResourceLoader.init` on the protect path only. **The walk trap fired again**: the Haiku
+agent reported the Export row "broken" (a mis-tap dismissing the sheet — D2 never touched that
+path) — the walk was re-driven by hand and passed whole: toggles at defaults, arm/disarm, the
+empty-fields dialog, the soil swap restoring trio + passphrase wording, defaults on return,
+crash buffer clean, 2 binds / 2 unbinds, no secret content in any log line.
+
+**Post-D2 (user, 2026-08-30): the export progress moved into a dialog** (`57e8413`) — the inline
+status line became the Backup screen's modal non-cancelable `AlertDialog`, its message walking the
+stages (Preparing… / Rendering page N of M… / Exporting… / Encrypting and exporting…); every
+result path dismisses it before its own dialog, the flow's `finally` is the net, and `onDestroy`
+(bounced-guard pattern) dismisses on teardown. The status `TextView` left the layout.
 
 The descriptor flips to the pair. Host: the template toggle threads into the render pipeline
 (off = white ground under the ink); the Password-protect toggle reveals the dual masked fields
