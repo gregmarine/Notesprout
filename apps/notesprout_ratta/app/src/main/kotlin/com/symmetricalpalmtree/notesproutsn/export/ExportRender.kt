@@ -61,8 +61,9 @@ import java.io.IOException
  * before the next one starts, and [PageBundle]'s API is shaped to make anything else awkward.
  *
  * The bake itself is the page as it stands on the glass, minus the chrome: white ground, the
- * template under everything, then the [PagePreview] layering — headings, each link's wrapped
- * children, then the loose ink. No link chrome, no selection chrome; those are the screen's
+ * template under everything (unless the exporter's page-template toggle says otherwise — arc 18 /
+ * D2, the one option this render executes), then the [PagePreview] layering — headings, each link's
+ * wrapped children, then the loose ink. No link chrome, no selection chrome; those are the screen's
  * furniture, not the page's content. Pixels are [Bitmap.Config.RGB_565] over an opaque ground and
  * WEBP lossy q100 ([BuiltInTemplates.toWebp] — the app's one measured encoder, the F5 finding),
  * at the **page's own** size and scale 1: a page authored on another panel keeps its own edge, and
@@ -107,10 +108,15 @@ object ExportRender {
      * name or a path. [progress] is called on IO **before** each page with (page number, page
      * count) so the screen can say which one is under the brush — it may suspend to hop to Main,
      * and a slow one only slows the render.
+     *
+     * [includeTemplate] false bakes the ink on white ground (the arc-18 / D2 toggle). It is the
+     * host's answer to give because the bundle carries finished pixels: once a page is baked there
+     * is no paper left in it for an extension to take out.
      */
     suspend fun render(
         context: Context,
         notebookId: String,
+        includeTemplate: Boolean,
         progress: suspend (Int, Int) -> Unit,
     ): Outcome = withContext(Dispatchers.IO) {
         val source = soilFile(context, notebookId)
@@ -128,7 +134,7 @@ object ExportRender {
             return@withContext Outcome.Failed(Problem.UNREADABLE)
         }
         try {
-            bake(context, db, notebookId, progress)
+            bake(context, db, notebookId, includeTemplate, progress)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -176,6 +182,7 @@ object ExportRender {
         context: Context,
         db: SoilDatabase,
         notebookId: String,
+        includeTemplate: Boolean,
         progress: suspend (Int, Int) -> Unit,
     ): Outcome {
         val dao = db.dao()
@@ -209,7 +216,10 @@ object ExportRender {
             bundleWriter.use { writer ->
                 pages.forEachIndexed { index, page ->
                     progress(index + 1, pages.size)
-                    if (page.templateId != templateId) {
+                    // White ground is the *absence* of the decode, not a decoded bitmap thrown
+                    // away: a template the page will not carry must not cost the page's worth of
+                    // memory on the way past (the one-page-at-a-time rule cuts both ways).
+                    if (includeTemplate && page.templateId != templateId) {
                         template?.recycle()
                         template = null
                         templateId = page.templateId

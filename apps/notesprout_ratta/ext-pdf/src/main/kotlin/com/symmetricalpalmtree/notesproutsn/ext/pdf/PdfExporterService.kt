@@ -7,10 +7,10 @@ import android.os.ParcelFileDescriptor
 import android.util.Log
 import com.symmetricalpalmtree.notesproutsn.extension.ExportResult
 import com.symmetricalpalmtree.notesproutsn.extension.ExportSpec
-import com.symmetricalpalmtree.notesproutsn.extension.ExporterContract
 import com.symmetricalpalmtree.notesproutsn.extension.ExporterInfo
 import com.symmetricalpalmtree.notesproutsn.extension.HostCallerCheck
 import com.symmetricalpalmtree.notesproutsn.extension.INotebookExporter
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 
 /**
  * Notesprout SN's second exporter on arc 15's one `NOTEBOOK_EXPORTER` point (arc 18 / D1) — no new
@@ -19,8 +19,8 @@ import com.symmetricalpalmtree.notesproutsn.extension.INotebookExporter
  * export, not a showing.
  *
  * **The seam: the host renders, the extension assembles.** A PDF exporter can never receive the
- * `.soil` — no key crosses an extension seam — so this service declares
- * [ExporterContract.SOURCE_PAGES] and the host bakes every page full-fidelity into a
+ * `.soil` — no key crosses an extension seam — so this service declares the page-bundle source kind
+ * ([PdfDescriptor]) and the host bakes every page full-fidelity into a
  * [com.symmetricalpalmtree.notesproutsn.extension.PageBundle] container in its own cache. That
  * container arriving on the read fd is **the only inbound**: no `.soil`, no key, no path, no
  * notebook id ever reaches this process, and the only thing this process can write to is the
@@ -34,27 +34,23 @@ import com.symmetricalpalmtree.notesproutsn.extension.INotebookExporter
  * destination's own answers instead. What this side owes is an **honest count**: what was actually
  * written to the destination stream, never a guess and never the container's length.
  *
- * **D1 declares no options.** Not-built controls do not exist (the J4 rule; the E1→E2 precedent for
- * a descriptor that flips when the host work lands): the page-template and password toggles are D2,
- * so until then a spec carrying either is a mismatch this exporter refuses rather than quietly
- * exporting a file that is not what was asked for — see [PdfExportSpec] for why that refusal points
- * the opposite way from the soil exporter's ignore-the-unknown rule.
+ * **Two options, and they are executed on opposite sides** (arc 18 / D2 — [PdfDescriptor]): the
+ * page-template toggle is the host's, because the bundle arrives as finished pixels and paper is
+ * either in a page or was never in it; the password toggle is this side's, and the only thing that
+ * crosses for it is the user-typed export secret on the spec's own carrier. A spec that disagrees
+ * with itself is refused before a byte is read rather than quietly exporting a file that is not
+ * what was asked for — see [PdfExportSpec] for why that refusal points the opposite way from the
+ * soil exporter's ignore-the-unknown rule.
  */
 class PdfExporterService : Service() {
 
     private val binder = object : INotebookExporter.Stub() {
 
+        // No keying: the trio is `.soil`-specific and the device key is the host's business. The
+        // descriptor itself lives in PdfDescriptor, where a JVM test can pin its shape.
         override fun describe(): ExporterInfo {
             enforce()
-            return ExporterInfo(
-                formatLabel = "PDF document",
-                fileExtension = "pdf",
-                mimeType = "application/pdf",
-                // No keying: the trio is `.soil`-specific and the device key is the host's business.
-                // No options at all this phase — D2 lands the pair.
-                options = emptyList(),
-                sourceKind = ExporterContract.SOURCE_PAGES,
-            )
+            return PdfDescriptor.info()
         }
 
         /**
@@ -84,10 +80,12 @@ class PdfExporterService : Service() {
                 val src = source ?: throw IllegalArgumentException("no source descriptor")
                 val dst = destination ?: throw IllegalArgumentException("no destination descriptor")
                 val asked = spec ?: throw IllegalArgumentException("no export spec")
-                // Refused before a single byte is read: an option or a secret this build cannot act
-                // on would otherwise produce a file the user did not ask for.
+                // Refused before a single byte is read: an option this build cannot act on, or a
+                // protect toggle and a secret that disagree, would otherwise produce a file the
+                // user did not ask for — an unprotected one they believe is locked, at worst.
                 PdfExportSpec.require(asked.values, asked.exportSecret)
-                return ExportResult(PdfAssembly.assemble(src, dst, TAG))
+                if (asked.exportSecret != null) readyPdfbox()
+                return ExportResult(PdfAssembly.assemble(src, dst, asked.exportSecret, TAG))
             } catch (e: SecurityException) {
                 throw e
             } catch (e: IllegalArgumentException) {
@@ -108,9 +106,27 @@ class PdfExporterService : Service() {
 
     private fun enforce() = HostCallerCheck.enforce(this, BuildConfig.HOST_PACKAGE)
 
+    /**
+     * pdfbox reads its own resources out of the APK's assets, so it wants the application context
+     * once before first use. Called **only on the protect path**, because that is the only path
+     * that touches pdfbox at all — a plain export must not pay for a library it never enters. The
+     * init is cheap and idempotent; the flag only keeps a repeated export from repeating it, and
+     * the absence of the call is the kind of thing that surfaces as a runtime surprise rather than
+     * a compile error, which is why it is not left to chance.
+     */
+    private fun readyPdfbox() {
+        if (pdfboxReady) return
+        PDFBoxResourceLoader.init(applicationContext)
+        pdfboxReady = true
+    }
+
     override fun onBind(intent: Intent?): IBinder = binder
 
     private companion object {
         const val TAG = "PdfExporter"
+
+        /** Process-wide: the service is constructed per bind, the library initialises once. */
+        @Volatile
+        var pdfboxReady = false
     }
 }

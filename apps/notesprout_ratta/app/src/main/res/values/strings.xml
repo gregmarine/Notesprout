@@ -197,6 +197,20 @@
     <string name="export_rendering">Rendering page %1$d of %2$d…</string>
     <string name="export_empty_body">This notebook has no pages, so there is nothing to export.</string>
     <string name="export_render_failed_body">The notebook\'s pages could not be prepared for this format — the device may be low on memory or space. Nothing was exported and your notebook is untouched.</string>
+    <!-- Password protection (arc 18 / D2). The same dual fields as the keying passphrase, worded
+         for what they actually are here: a password for the file being written, not a Notesprout
+         passphrase. The host collects it; the exporter applies it. -->
+    <string name="export_password_caption">Password</string>
+    <string name="export_password_hint">Password</string>
+    <string name="export_password_confirm_hint">Confirm password</string>
+    <string name="export_password_missing_title">Password needed</string>
+    <string name="export_password_missing_body">Type the password in both fields before exporting.</string>
+    <string name="export_password_mismatch_title">Passwords don\'t match</string>
+    <string name="export_password_mismatch_body">The two fields must hold the same password. Nothing was exported.</string>
+    <string name="export_password_long_title">Password too long</string>
+    <string name="export_password_long_body">The password is too long — 128 characters at most. Nothing was exported.</string>
+    <string name="export_password_lost_body">The typed password was lost while choosing where to save. Nothing was exported — type it and try again.</string>
+    <string name="export_protecting">Encrypting and exporting…</string>
 
     <!-- Import (arc 16 / I1). Export's tone, in the other direction: a toast only confirms an
          import that happened, and every failure is a sentence naming what went wrong — never a

@@ -114,6 +114,12 @@ class ExportActivity : AppCompatActivity() {
      *  collects it, the host consumes it, and nothing about it crosses the exporter seam. */
     private var typedPassphrase: String? = null
 
+    /** The password typed for a *protected* export (arc 18 / D2) — the same lifecycle as
+     *  [typedPassphrase] to the letter, and for the same reasons, with one difference: this one is
+     *  handed to the exporter on [ExportSpec.exportSecret], because protecting the output is the
+     *  extension's work. It is still never saved, never in an Intent, never logged. */
+    private var typedExportSecret: String? = null
+
     private val saveLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -125,6 +131,7 @@ class ExportActivity : AppCompatActivity() {
             // The secret collected at the tap goes with the flow it was collected for — its
             // documented lifetime ends here, not at the next tap (arc-15 review).
             typedPassphrase = null
+            typedExportSecret = null
             busy = false
             Slog.d(TAG) { "destination picker cancelled" }
         }
@@ -314,11 +321,26 @@ class ExportActivity : AppCompatActivity() {
             }
         }
 
-        // The two keying consequences the host owns (E2). Both are XML-static, so a half-typed
-        // passphrase survives the rebuild the options loop above just did.
+        // The consequences the host owns. Both blocks are XML-static, so a half-typed secret
+        // survives the rebuild the options loop above just did — which is why nothing here clears a
+        // field: a mere toggle is not a change of question, and only picking another exporter is
+        // (`select(keepValues = false)`).
         val info = c.info
+        // One block, two tenants (E2's rekey passphrase · D2's export password), never both at
+        // once — isRenderable dropped any exporter that could ask for the pair. The mode is what
+        // the words say, so the caption and both hints are set here rather than in the layout.
+        val protect = ExportOptions.wantsExportSecret(info, values)
         binding.passphraseBlock.visibility =
-            if (ExportOptions.needsPassphrase(info, values)) View.VISIBLE else View.GONE
+            if (ExportOptions.needsPassphrase(info, values) || protect) View.VISIBLE else View.GONE
+        binding.passphraseCaption.setText(
+            if (protect) R.string.export_password_caption else R.string.export_passphrase_caption
+        )
+        binding.editPassphrase.setHint(
+            if (protect) R.string.export_password_hint else R.string.export_passphrase_hint
+        )
+        binding.editPassphraseConfirm.setHint(
+            if (protect) R.string.export_password_confirm_hint else R.string.export_passphrase_confirm_hint
+        )
         binding.plainWarning.visibility =
             if (ExportOptions.showsPlainWarning(info, values)) View.VISIBLE else View.GONE
     }
@@ -343,32 +365,49 @@ class ExportActivity : AppCompatActivity() {
     /**
      * Ask where to put it. The filename is offered, not imposed — the picker's field is the user's.
      *
-     * A rekey's fields are checked **before** the picker, because a passphrase problem found after
-     * the user has named a file is a dialog on top of a document that then has to be deleted. Both
-     * refusals are dialogs, not toasts: each explains why the tap did nothing. The IME is left
+     * The dual fields are checked **before** the picker, because a secret problem found after the
+     * user has named a file is a dialog on top of a document that then has to be deleted. Every
+     * refusal is a dialog, not a toast: each explains why the tap did nothing. The IME is left
      * exactly as it is — on Ratta, hiding it takes the hardware keys with it.
      */
     private fun onExportTap() {
         if (busy) { Slog.d(TAG) { "export tap ignored: already running" }; return }
         val c = current() ?: return
-        if (ExportOptions.needsPassphrase(c.info, values)) {
+        // Exactly one of these can be armed (isRenderable), so the block's contents mean one thing
+        // at a time; whichever is not armed leaves its holder empty rather than stale.
+        val protect = ExportOptions.wantsExportSecret(c.info, values)
+        val rekey = ExportOptions.needsPassphrase(c.info, values)
+        typedPassphrase = null
+        typedExportSecret = null
+        if (rekey || protect) {
             val typed = binding.editPassphrase.text?.toString().orEmpty()
             val confirm = binding.editPassphraseConfirm.text?.toString().orEmpty()
             if (typed.isEmpty() || confirm.isEmpty()) {
                 Dialogs.problem(
-                    this, R.string.export_passphrase_missing_title, R.string.export_passphrase_missing_body
+                    this,
+                    if (protect) R.string.export_password_missing_title else R.string.export_passphrase_missing_title,
+                    if (protect) R.string.export_password_missing_body else R.string.export_passphrase_missing_body,
                 )
                 return
             }
             if (typed != confirm) {
                 Dialogs.problem(
-                    this, R.string.export_passphrase_mismatch_title, R.string.export_passphrase_mismatch_body
+                    this,
+                    if (protect) R.string.export_password_mismatch_title else R.string.export_passphrase_mismatch_title,
+                    if (protect) R.string.export_password_mismatch_body else R.string.export_passphrase_mismatch_body,
                 )
                 return
             }
-            typedPassphrase = typed
-        } else {
-            typedPassphrase = null
+            // The carrier's cap, refused here rather than at the ExportSpec constructor: that
+            // `require` fires behind the picker, where it can only surface as the generic
+            // "didn't finish" over a file the user has already named.
+            if (protect && typed.length > ExporterContract.MAX_EXPORT_SECRET_CHARS) {
+                Dialogs.problem(
+                    this, R.string.export_password_long_title, R.string.export_password_long_body
+                )
+                return
+            }
+            if (protect) typedExportSecret = typed else typedPassphrase = typed
         }
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
             .addCategory(Intent.CATEGORY_OPENABLE)
@@ -416,14 +455,24 @@ class ExportActivity : AppCompatActivity() {
                     failed(R.string.export_failed_title, getString(R.string.export_gone_body))
                     return@launch
                 }
+                // Armed at the tap, checked again here: the fields are saveEnabled=false, so a
+                // screen rebuilt behind the picker comes back with the password gone. Say so —
+                // exporting unprotected in silence would hand the user a file keyed the way they
+                // asked it not to be, which is the same honesty the rekey path owes (E2).
+                val wantsSecret = ExportOptions.wantsExportSecret(c.info, values)
+                if (wantsSecret && typedExportSecret == null) {
+                    failed(R.string.export_failed_title, getString(R.string.export_password_lost_body))
+                    return@launch
+                }
                 // Built before either source kind's preparation: the spec depends on neither, and a
                 // spec the contract rejects has no business costing a cache copy or a page bake
-                // first. `exportSecret` stays absent — D1 collects no export secret, and D2 is
-                // where the host starts sending one.
+                // first. The secret rides its own carrier — never the value map, which is the whole
+                // point of the carrier existing.
                 val spec = try {
                     ExportSpec(
                         values = ExportOptions.specValues(c.info, values),
                         notebookName = ExportNaming.specName(notebookName, notebookId),
+                        exportSecret = if (wantsSecret) typedExportSecret else null,
                     )
                 } catch (e: IllegalArgumentException) {
                     Log.w(TAG, "spec rejected", e)
@@ -434,7 +483,7 @@ class ExportActivity : AppCompatActivity() {
                 // The two source kinds part here and rejoin at the fds — a keyed `.soil` artifact,
                 // or a bundle of pages this host drew. From the open below, nothing asks which.
                 val prepared = if (c.info.sourceKind == ExporterContract.SOURCE_PAGES) {
-                    renderedPages()
+                    renderedPages(includeTemplate = ExportOptions.includeTemplate(c.info, values))
                 } else {
                     keyedArtifact(c)
                 }
@@ -446,7 +495,9 @@ class ExportActivity : AppCompatActivity() {
                     is StreamSource.Ready -> prepared.file
                 }
                 val streamBytes = withContext(Dispatchers.IO) { streamFile.length() }
-                stage(R.string.export_exporting)
+                // A protected export encrypts on the extension's side of the call, so the one line
+                // the user has to look at through it says which of the two is happening.
+                stage(if (spec.exportSecret != null) R.string.export_protecting else R.string.export_exporting)
 
                 val source = withContext(Dispatchers.IO) {
                     runCatching {
@@ -524,6 +575,7 @@ class ExportActivity : AppCompatActivity() {
                 // flow either.
                 withContext(NonCancellable + Dispatchers.IO) { ExportArtifact.clean(applicationContext) }
                 typedPassphrase = null
+                typedExportSecret = null
                 busy = false
                 if (!isFinishing && !isDestroyed) showBusy(false)
             }
@@ -581,13 +633,20 @@ class ExportActivity : AppCompatActivity() {
      * [ExporterContract.SOURCE_PAGES]: the host draws the notebook and hands over the pages.
      *
      * **No keying, and nothing to skip past.** Such an exporter declares no keying option, so
-     * [ExportOptions.needsPassphrase] was false at the tap and there is no typed secret in this
+     * [ExportOptions.needsPassphrase] was false at the tap and there is no typed passphrase in this
      * process to consult — the key is used here only to open the notebook for reading, and never
-     * leaves. The stage line carries the page count because a long notebook is otherwise a long
-     * silence; the callback arrives on IO, so it hops to Main to touch the view.
+     * leaves. A password-protected export is not a keying: the secret goes to the extension whole
+     * and nothing about this render changes.
+     *
+     * [includeTemplate] is the one option the **host** executes for this source kind (D2): off, the
+     * page bakes on white ground. It has to be answered here because there is no paper left in the
+     * bundle for an extension to add or remove afterwards.
+     *
+     * The stage line carries the page count because a long notebook is otherwise a long silence;
+     * the callback arrives on IO, so it hops to Main to touch the view.
      */
-    private suspend fun renderedPages(): StreamSource {
-        val outcome = ExportRender.render(applicationContext, notebookId) { page, count ->
+    private suspend fun renderedPages(includeTemplate: Boolean): StreamSource {
+        val outcome = ExportRender.render(applicationContext, notebookId, includeTemplate) { page, count ->
             withContext(Dispatchers.Main) {
                 if (!isFinishing && !isDestroyed) stage(getString(R.string.export_rendering, page, count))
             }

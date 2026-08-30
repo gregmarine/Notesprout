@@ -189,4 +189,99 @@ class ExportOptionsTest {
         assertFalse(ExportOptions.needsPassphrase(trio, plain))
         assertTrue(ExportOptions.showsPlainWarning(trio, plain))
     }
+
+    // ── The reserved arc-18 toggles (D2) ─────────────────────────────────────
+
+    /** D2's shipped PDF descriptor: the pair, both toggles, no keying at all. */
+    private val pdf = info(
+        toggle(ExporterContract.OPTION_PAGE_TEMPLATE, "1"),
+        toggle(ExporterContract.OPTION_PROTECT, "0"),
+    )
+
+    @Test
+    fun protectArmsTheFieldsOnlyWhenItIsDeclaredAndOn() {
+        assertFalse(ExportOptions.wantsExportSecret(pdf, emptyMap()))
+        assertTrue(ExportOptions.wantsExportSecret(pdf, mapOf(ExporterContract.OPTION_PROTECT to "1")))
+        // Undeclared is never armed — an exporter that asks for no password cannot be given one.
+        assertFalse(
+            ExportOptions.wantsExportSecret(trio, mapOf(ExporterContract.OPTION_PROTECT to "1")),
+        )
+        // The reserved id declared as another kind is not the reserved option.
+        assertFalse(
+            ExportOptions.wantsExportSecret(
+                info(choice(ExporterContract.OPTION_PROTECT, listOf("1", "0"), "1")),
+                emptyMap(),
+            ),
+        )
+        // A value that is neither "0" nor "1" falls back to the default, exactly as specValues would.
+        assertFalse(ExportOptions.wantsExportSecret(pdf, mapOf(ExporterContract.OPTION_PROTECT to "yes")))
+        assertTrue(
+            ExportOptions.wantsExportSecret(
+                info(toggle(ExporterContract.OPTION_PROTECT, "1")),
+                mapOf(ExporterContract.OPTION_PROTECT to "maybe"),
+            ),
+        )
+    }
+
+    @Test
+    fun anExporterThatNeverAskedAboutPaperGetsTheWholePage() {
+        // Undeclared means on: full fidelity is what every render has always produced, and only an
+        // exporter offering the toggle can ever be handed white ground.
+        assertTrue(ExportOptions.includeTemplate(info(), emptyMap()))
+        assertTrue(ExportOptions.includeTemplate(trio, mapOf(ExporterContract.OPTION_PAGE_TEMPLATE to "0")))
+        assertTrue(ExportOptions.includeTemplate(pdf, emptyMap()))
+        assertFalse(ExportOptions.includeTemplate(pdf, mapOf(ExporterContract.OPTION_PAGE_TEMPLATE to "0")))
+        assertTrue(ExportOptions.includeTemplate(pdf, mapOf(ExporterContract.OPTION_PAGE_TEMPLATE to "1")))
+        // Stale or foreign, it is the declared default again.
+        assertTrue(ExportOptions.includeTemplate(pdf, mapOf(ExporterContract.OPTION_PAGE_TEMPLATE to "off")))
+    }
+
+    @Test
+    fun oneFieldBlockCannotServeTwoSecrets() {
+        // The screen has ONE dual masked block, XML-static so a half-typed secret survives a
+        // rebuild. An exporter that could arm the rekey passphrase and the export password at once
+        // has no drawable panel, so it is dropped whole rather than half-drawn.
+        val both = info(
+            choice(
+                ExporterContract.OPTION_KEYING,
+                listOf(ExporterContract.KEYING_KEEP, ExporterContract.KEYING_REKEY),
+                ExporterContract.KEYING_KEEP,
+            ),
+            toggle(ExporterContract.OPTION_PROTECT, "0"),
+        )
+        assertFalse(ExportOptions.isRenderable(both))
+        // Each alone is fine, and so is a keying trio without the rekey choice beside the toggle.
+        assertTrue(ExportOptions.isRenderable(trio))
+        assertTrue(ExportOptions.isRenderable(pdf))
+        assertTrue(
+            ExportOptions.isRenderable(
+                info(
+                    choice(
+                        ExporterContract.OPTION_KEYING,
+                        listOf(ExporterContract.KEYING_KEEP, ExporterContract.KEYING_PLAIN),
+                        ExporterContract.KEYING_KEEP,
+                    ),
+                    toggle(ExporterContract.OPTION_PROTECT, "0"),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun theSecretRidesItsOwnCarrierAndNeverTheValueMap() {
+        // The map is the whole of what the panel can send; the password is handed over separately,
+        // on ExportSpec's carrier. Whatever the screen's state got up to, nothing here can carry it.
+        val armed = ExportOptions.specValues(pdf, mapOf(ExporterContract.OPTION_PROTECT to "1"))
+        assertEquals(
+            mapOf(ExporterContract.OPTION_PAGE_TEMPLATE to "1", ExporterContract.OPTION_PROTECT to "1"),
+            armed,
+        )
+        // A secret smuggled in under any id — the reserved one included — is not a declared option.
+        val smuggled = ExportOptions.specValues(
+            pdf,
+            mapOf(ExporterContract.OPTION_PROTECT to "1", "password" to "hunter2"),
+        )
+        assertEquals(setOf(ExporterContract.OPTION_PAGE_TEMPLATE, ExporterContract.OPTION_PROTECT), smuggled.keys)
+        assertTrue(smuggled.values.none { it == "hunter2" })
+    }
 }

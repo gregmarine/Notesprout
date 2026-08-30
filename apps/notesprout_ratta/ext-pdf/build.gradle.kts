@@ -45,5 +45,10 @@ android {
 
 dependencies {
     implementation(project(":extension-api"))
+    // The arc's one new dependency (Apache-2.0), explicitly discussed and approved 2026-08-30 —
+    // and it lives HERE and nowhere else: the host and every other module stay clean, and a plain
+    // PDF is assembled with the framework's own PdfDocument. pdfbox is used for exactly one thing,
+    // the password path (arc 18 / D2), which the framework cannot do at all.
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     testImplementation("junit:junit:4.13.2")
 }

@@ -19,6 +19,11 @@ package com.symmetricalpalmtree.notesproutsn.extension
  * any [KIND_PASSPHRASE] option: the host collects the secret with its own fields and the spec
  * carries **no entry at all** for it — a passphrase-kind option exists to *ask the host* for a
  * host-executed step, never to receive the secret.
+ *
+ * Two further ids are reserved by arc 18 / D2, both plain toggles the exporter declares and labels
+ * itself: [OPTION_PAGE_TEMPLATE], whose work is the host's render, and [OPTION_PROTECT], whose work
+ * is the extension's — the host only collects the secret and hands it over on
+ * [ExportSpec.exportSecret].
  */
 object ExporterContract {
 
@@ -103,6 +108,32 @@ object ExporterContract {
 
     /** Remove encryption — plaintext output (the host shows the inline plain warning). */
     const val KEYING_PLAIN: String = "plain"
+
+    // ── The reserved arc-18 option ids (D2) ──────
+    // Both are ordinary [KIND_TOGGLE] options an exporter declares for itself — so the user reads
+    // the exporter's own label — but each is recognized by id, because each one names something
+    // the *host* has to do about it. Declaring neither is still a complete descriptor.
+
+    /**
+     * "Render the page's paper under the ink" — reserved for a [SOURCE_PAGES] exporter, and
+     * **executed by the host**: `"1"` bakes each page's template under its content (the D1
+     * behavior), `"0"` bakes the ink on a white ground. The value crosses in the spec map like any
+     * toggle, so the extension still learns what was asked, but the work is entirely the render's:
+     * there is no template left in the bundle for an extension to put back.
+     */
+    const val OPTION_PAGE_TEMPLATE: String = "template"
+
+    /**
+     * "Protect the output with a password" — arming it (`"1"`) makes the host collect an
+     * export-time secret with its **own dual masked fields** and send it on
+     * [ExportSpec.exportSecret]; `"0"` or absent means no secret at all. The protection itself is
+     * the **extension's** work — this is not a host-executed option, only a host-collected secret.
+     *
+     * [KIND_PASSPHRASE] keeps its never-crosses meaning untouched: this is a password for the file
+     * being written, never the global Notesprout passphrase, never derived from it, never the
+     * device key. See [ExportSpec.exportSecret] and [MAX_EXPORT_SECRET_CHARS].
+     */
+    const val OPTION_PROTECT: String = "protect"
 
     // ── Timeouts (host-side, over `ExtensionBinder.call`) ──────
 

@@ -40,11 +40,21 @@ object ExportOptions {
         val keying = info.options.firstOrNull {
             it.id == ExporterContract.OPTION_KEYING && it.kind == ExporterContract.KIND_SINGLE_CHOICE
         } ?: return true
-        return keying.choiceIds.all {
+        val known = keying.choiceIds.all {
             it == ExporterContract.KEYING_KEEP ||
                 it == ExporterContract.KEYING_REKEY ||
                 it == ExporterContract.KEYING_PLAIN
         }
+        if (!known) return false
+        // Two secrets, one pair of fields (D2). The screen's dual masked block is XML-static — that
+        // is what lets a half-typed secret survive an options rebuild — so it can collect the rekey
+        // passphrase *or* the export password, never both, and an exporter asking for the pair has
+        // no drawable panel. Dropped here rather than half-drawn: a second block would need a
+        // second lifecycle for a secret, and no exporter has ever asked for one.
+        val protect = info.options.any {
+            it.id == ExporterContract.OPTION_PROTECT && it.kind == ExporterContract.KIND_TOGGLE
+        }
+        return !(protect && ExporterContract.KEYING_REKEY in keying.choiceIds)
     }
 
     /**
@@ -110,4 +120,37 @@ object ExportOptions {
      *  (og's pattern: a plain inkBlack line, no popup, no extra tap). */
     fun showsPlainWarning(info: ExporterInfo, chosen: Map<String, String>): Boolean =
         keying(info, chosen) == ExporterContract.KEYING_PLAIN
+
+    // ── The reserved arc-18 toggles (D2 — recognized by id, one host-executed, one host-collected) ──
+
+    /**
+     * The armed value of the toggle [id], validated exactly as [specValues] validates it, or null
+     * when this exporter never declared it as a toggle. Sharing the validation is the point: what
+     * these answer is always precisely what the spec would carry, so the screen can never act on a
+     * value the export would not send.
+     */
+    private fun toggle(info: ExporterInfo, chosen: Map<String, String>, id: String): String? {
+        val d = info.options.firstOrNull {
+            it.id == id && it.kind == ExporterContract.KIND_TOGGLE
+        } ?: return null
+        return chosen[d.id]?.takeIf { it == "0" || it == "1" } ?: d.defaultValue
+    }
+
+    /**
+     * True while *Password-protect* is armed — the host shows the same dual masked fields the rekey
+     * uses, and the typed password rides
+     * [com.symmetricalpalmtree.notesproutsn.extension.ExportSpec.exportSecret] to the exporter that
+     * asked for it. Never both this and [needsPassphrase]: [isRenderable] drops an exporter that
+     * could arm the two at once.
+     */
+    fun wantsExportSecret(info: ExporterInfo, chosen: Map<String, String>): Boolean =
+        toggle(info, chosen, ExporterContract.OPTION_PROTECT) == "1"
+
+    /**
+     * Whether the render bakes each page's paper under its ink. **Undeclared means on**: an exporter
+     * that never asked the question gets the full-fidelity page it has always got, and only one that
+     * offers the toggle can ever be handed white ground.
+     */
+    fun includeTemplate(info: ExporterInfo, chosen: Map<String, String>): Boolean =
+        (toggle(info, chosen, ExporterContract.OPTION_PAGE_TEMPLATE) ?: "1") == "1"
 }

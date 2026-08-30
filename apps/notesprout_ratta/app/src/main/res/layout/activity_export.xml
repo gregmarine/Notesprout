@@ -124,11 +124,17 @@
                 android:layout_height="wrap_content"
                 android:orientation="vertical" />
 
-            <!-- The keying fields (arc 15 / E2). Static in the layout, not built by the panel: the
-                 options above are rebuilt whole after every tap, and a field rebuilt under a
-                 half-typed passphrase would lose it. `saveEnabled="false"` on both is not a nicety
-                 — the system may persist an instance-state Bundle to disk, and a typed passphrase
-                 has no business there (the host consumes it and it never reaches the spec). -->
+            <!-- The secret fields (arc 15 / E2, second tenant arc 18 / D2). Static in the layout,
+                 not built by the panel: the options above are rebuilt whole after every tap, and a
+                 field rebuilt under a half-typed secret would lose it. `saveEnabled="false"` on
+                 both is not a nicety — the system may persist an instance-state Bundle to disk,
+                 and a typed secret has no business there.
+
+                 One block, two tenants, never at once: the keying rekey's new passphrase (host
+                 consumed, never crosses) and D2's export password (host collected, crosses on the
+                 spec's own carrier). The caption and both hints are set per mode in code, which is
+                 why the caption carries an id; ExportOptions.isRenderable drops any exporter that
+                 could arm the two together. -->
             <LinearLayout
                 android:id="@+id/passphraseBlock"
                 android:layout_width="match_parent"
@@ -137,6 +143,7 @@
                 android:visibility="gone">
 
                 <TextView
+                    android:id="@+id/passphraseCaption"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
