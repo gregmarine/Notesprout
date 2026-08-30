@@ -50,82 +50,49 @@ All root `CLAUDE.md` rules apply (Kotlin/17, kotlinx-serialization only, no new 
 deps without discussion, no Material Components, no `runBlocking` on main, `Slog.d` not
 `Log.d`, e-ink design system, Tabler icons only). Plus, for this app:
 
-- **Seven modules, own Gradle root:** `:app` (the host), `:sn-screen` (the shared paper-screen
-  library — arc 11 / J1: the design resources and the screen helpers both paper surfaces need,
-  depends on g-paper + androidx only and **never** on `:app` or `:extension-api`; **a fix to shared
-  screen logic goes there, never in a consumer** — that rule is the whole reason the module exists,
-  and breaking it recreates the `RattaNotebookView` sibling-copy trap one file at a time),
-  `:extension-api` (the contract library — depends on nothing in `:app`, stdlib only),
-  `:ext-mlkit` (the **NSE · ML Kit** extension APK), `:ext-scratchpad` (the **NSE · Scratch Pad**
-  extension APK — arc 11 / J3: depends on `:extension-api` **and** `:sn-screen`, never `:app`;
-  no `tools:replace`, no libc++ `pickFirsts` — those are Paper's Onyx tax and SN has no Onyx),
-  `:ext-soil` (the **NSE · Soil Export** extension APK — arc 15 / E1: depends on
-  `:extension-api` only; **arc 16 / I1 made it serve both directions** — one package, two
-  services, `SoilExporterService` + `SoilImporterService`, and the label stays `NSE · Soil
-  Export` on the user's call), and `:ext-pdf` (the **NSE · PDF Export** extension APK — arc 18 /
-  D1: package `….ext.pdf`, depends on `:extension-api` only, and carries the module-local
-  `com.tom-roush:pdfbox-android:2.0.27.0` (Apache-2.0) — the one approved dependency of this arc,
-  used only on the password-protect path, and it never leaks into any other module).
-  `gradle.properties` sets
-  `android.nonTransitiveRClass=false` so `:app`'s `R` keeps seeing the moved resources —
-  the move needed no import sweep, and undoing that flag breaks every one of them.
-- **SN has FOUR extension points** (the arc-16 amendment, on the user's explicit 2026-08-28
-  decision — which is exactly the "new user decision" that rule demanded; arc 11 made the same
-  amendment for the second and arc 15 for the third):
-  `ACTION_HANDWRITING_RECOGNIZER` / `IHandwritingRecognizer`, so other HWR engines can slot in
-  later (headings and the markdown engine are core), `ACTION_SCRATCH_PAD` / `IScratchPad` —
-  the first **screen-owning** point, served by `:ext-scratchpad` (J2 shipped the store and the
-  contract half; **J3 shipped the point**: the AIDL, `WireStroke` / `InkBundle` / `InkChunks`,
-  `ExtensionBinder.hold` + `HeldBinding` — SN's **only** bind held across more than one call,
-  because the operation is the showing of a screen — `ScratchPadClient`, `TransferCaps`, and the
-  APK; **J4 the real screen, both entry buttons and the EPD handoff; J5 the two ink transfers; J6
-  the review, the boundary audit and the docs** — the arc is **complete and frozen**, 2026-08-25).
-  Its screen is exported under
-  `ACTION_SCRATCH_PAD_SCREEN` with `<category DEFAULT>` and refuses any caller that is not a
-  `startActivityForResult` from the host (`HostCallerCheck.enforceActivity`), so the host **must**
-  launch it with an `ActivityResultLauncher`. And `ACTION_NOTEBOOK_EXPORTER` /
-  `INotebookExporter` (arc 15 / E1) — the **generic exporter point**: any number of trusted
-  exporter extensions may register (`ExtensionRegistry.exporters()` is plural), each `describe()`s
-  the one format it offers via a bounded declarative descriptor the host renders with its own
-  widgets, and the host's Export screen lists whatever is installed. **The host keys, the
-  extension delivers via fds**: everything that touches a key (checkpoint, keying transform, SAF
-  destination) runs host-side; the extension receives two `ParcelFileDescriptor`s + an
-  `ExportSpec` (id → value map + display name — no id, no path, no secret) and writes only
-  through the granted write fd. A typed passphrase **never** crosses — the reserved
-  `ExporterContract.OPTION_KEYING` (and any passphrase-kind option) is executed by the host, and
-  the spec carries only the chosen value id. Served by `:ext-soil` (**NSE · Soil Export**) and,
-  since arc 18, by a **second** exporter on the same point, `:ext-pdf` (**NSE · PDF Export**) —
-  no new point, on the arc-15 locked decision cashing in. `ExporterInfo` grew a compatible
-  source-kind tail for this (`SOURCE_SOIL` absent-means-today's-meaning vs. `SOURCE_PAGES`, a
-  host-rendered page bundle a PDF exporter assembles instead of the `.soil` it can never receive),
-  and `ExportSpec` grew one deliberate secret crossing, `exportSecret` — a user-typed,
-  export-scoped password that opens no Notesprout data, never the value map, `KIND_PASSPHRASE`'s
-  never-crosses meaning otherwise unchanged. Detail: `docs/export.md` (the feature) and
-  `docs/extensions.md` §§ "The source-kind tail" / "The export secret" (the seam).
-  And `ACTION_NOTEBOOK_IMPORTER` / `INotebookImporter` (arc 16 / I1) — the **generic importer
-  point**, the exporter's mirror: plural again (`ExtensionRegistry.importers()`), each
-  `describe()`s the formats it accepts (label, file extensions, MIME types), and the library's
-  **Import** button (bottom-right group, before Templates — the user's I1 placement call) is
-  there when at least one trusted importer is installed and GONE
-  when none is. **The host keys, the extension delivers** — the probe, the unlock (foreign
-  passphrase, `AttemptLimiter` bucket `"IMPORT"`), the re-key to this device's global key
-  (`ImportKeying` — every accepted import, no chooser), the manifest's id validation
-  (`SafeImportId`), placement, the in-file remap (`NotebookRemap`) and both writes all run
-  host-side; the extension receives **two `ParcelFileDescriptor`s** (read: the picked document ·
-  write: a host cache file) plus an `ImportSpec` carrying a bounded id → value map (empty this
-  arc) and the picked file's display name — no id, no path, no secret — and streams bytes.
-  Served by `:ext-soil` (`SoilImporterService`, same package, same label).
-  **No FIFTH capability point may be added** without another user decision. Extensions get one host service, the
-  **extension store** (`IExtensionStore`, `data/extstore/`, `docs/extensions.md` § "The extension
-  store"): per-package, encrypted under the global key at `Garden/<pkg>.db`, minted per bind,
-  uid-bound, revoked with the unbind — because **an extension writes nothing to disk itself,
-  ever**. The action strings are SN-namespaced (`…notesproutsn.extension.*`) so
-  Paper's extensions on the same device are never discovered; trust is same-signature both
-  ways (`ExtensionRegistry` at discovery + bind-time re-check, `HostCallerCheck` first thing
-  in every stub method), the ML Kit dependency lives in `:ext-mlkit` only, **only `prepare()`
-  may start a model download** (host consent dialog first — and never at notebook open, which
-  only warms an already-present model), and recognized text is never logged on either side
-  (counts + durations only).
+- **Seven modules, own Gradle root:** `:app` (the host) · `:sn-screen` (the shared paper-screen
+  library — depends on g-paper (`api`) + androidx only, **never** on `:app` or `:extension-api`;
+  **a fix to shared screen logic goes there, never in a consumer** — breaking that recreates the
+  `RattaNotebookView` sibling-copy trap one file at a time) · `:extension-api` (the contract
+  library — stdlib only) · `:ext-mlkit` (**NSE · ML Kit**) · `:ext-scratchpad` (**NSE · Scratch
+  Pad** — `:extension-api` + `:sn-screen`, never `:app`; no `tools:replace`, no libc++
+  `pickFirsts` — Paper's Onyx tax, SN has no Onyx) · `:ext-soil` (**NSE · Soil Export** —
+  `:extension-api` only; one package, TWO services: `SoilExporterService` + `SoilImporterService`,
+  label unchanged on the user's call) · `:ext-pdf` (**NSE · PDF Export** — `:extension-api` only +
+  module-local `com.tom-roush:pdfbox-android:2.0.27.0`, which never leaks into another module).
+  `gradle.properties` sets `android.nonTransitiveRClass=false` — undoing it breaks every
+  `:sn-screen` resource reference from `:app`.
+- **SN has FOUR extension points** — each added on its own explicit user decision, and
+  **no FIFTH may be added without another** (arc 19's `ACTION_DOCUMENT_EDITOR` is that decision,
+  granted 2026-08-30; amend this rule at M3). The full seam — contracts, caps, trust, the
+  boundary audit — is `docs/extensions.md`; the rules that bind every point:
+  - `ACTION_HANDWRITING_RECOGNIZER` (headings + the markdown engine are core, the engine is
+    swappable). **Only `prepare()` may start a model download** (host consent dialog first;
+    notebook open only warms an already-present model). Recognized text is never logged on
+    either side — counts + durations only.
+  - `ACTION_SCRATCH_PAD` + `_SCREEN` — the screen-owning (tier-2) point. Its screen refuses any
+    caller that is not a `startActivityForResult` from the host (`HostCallerCheck.enforceActivity`),
+    so the host **must** launch it with an `ActivityResultLauncher`. `ExtensionBinder.hold` is
+    SN's **only** bind held across more than one call (the operation is the showing).
+  - `ACTION_NOTEBOOK_EXPORTER` — generic, plural (`exporters()`), declarative descriptors the
+    host renders with its own widgets. **The host keys, the extension delivers via two fds**;
+    the spec carries no id, no path, no secret; `OPTION_KEYING` (and any passphrase-kind option)
+    is host-executed — only the choice id crosses. Served by `:ext-soil` and `:ext-pdf`
+    (`sourceKind` tail: `SOURCE_SOIL` absent-means-today / `SOURCE_PAGES` host-rendered page
+    bundle; `ExportSpec.exportSecret` is the ONE deliberate secret that crosses any seam —
+    user-typed, export-scoped, opens no Notesprout data). Detail: `docs/export.md` +
+    `docs/extensions.md` §§ source-kind tail / export secret.
+  - `ACTION_NOTEBOOK_IMPORTER` — the exporter's mirror (plural, two fds, bounded spec, no
+    secret/id/path). Probe, unlock (`AttemptLimiter` `"IMPORT"`), the unconditional re-key to
+    the device global key, `SafeImportId`, placement, remap and both writes are all host-side;
+    the extension only streams bytes. Detail: `docs/import.md`.
+  Cross-point rules: extensions get the **extension store** (`IExtensionStore` — per-package,
+  encrypted under the global key at `Garden/<pkg>.db`, minted per bind, uid-bound, revoked with
+  the unbind) because **an extension writes nothing to disk itself, ever**; action strings are
+  SN-namespaced so Paper's extensions are never discovered; trust is same-signature both ways
+  (discovery + bind-time re-check host-side, `HostCallerCheck` first thing in every stub method);
+  `ExtensionContract.API_VERSION` = 2 and the host accepts `1..N` (the declared number is what
+  the extension *requires* of the host).
 - **The Scratch Pad is not ours to change from here** (arc 11, `docs/scratchpad.md`). It is the
   `:ext-scratchpad` APK: its own process, its own g-paper surface, its own undo stack, and it
   **writes nothing to disk itself** — its pages live in the host store, lent for the showing and
@@ -169,36 +136,20 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   (`~/git/g-paper/docs/host-responsibilities.md`): page swap = `clearForContentSwap` →
   `setPageSize`/`setTemplate` → `loadStrokes`; undo/redo via `addStrokes`/`removeStrokes`;
   chrome via `setExclusionRects`; lifecycle `resumeDrawing`/`releaseForHandoff`/`release`.
-- **Frame-silence rule:** never present an app frame while `paper.isPenActive` — route
-  chrome text/updates through a pen-idle gate. Seven recorded exceptions (listed with their
-  justifications in `docs/notebook.md` § frame-silence): the delete-page sheet at long-press,
-  the selection toolbar's show at lasso completion, the "Opening…" overlay's hide when the
-  page lands, the "Recognizing…" overlay around a heading convert, the selection
-  toolbar's own-tap re-shows (H toggle / level pick / post-edit re-anchor), the Contents
-  dialog's show/hide (C1 — **the arc-10 Recents panel rides this same exception**, it is the same
-  act mirrored), and the object paste's frame at a tap's pen-up plus the lasso popup's
-  show/hide (O1) — all one chrome frame at a deliberate act or a boundary, never
-  under live ink (R3's tool-panel-close exception retired with the panels in P1). B1's
-  paste-placement sub-sheet rides the long-press sheet's exception rather than adding one (it is
-  raised from a row of a dialog already up), **and so does arc 12's page-template sub-sheet** —
-  whose one blob-free read between the tap and the sheet is deliberately *not* re-gated on the pen,
-  because `isPenActive` counts hover. Any new
-  exception needs the same written justification. **Arc 11 / J4 added none**: the pad's own screen
-  (in `:ext-scratchpad`) carries the same rule and its four frames are the notebook's exceptions in
-  scratch-pad form, and the host's "Opening…" box at the pad button rides C1 — the same act as the
-  Contents and Recents buttons.
+- **Frame-silence rule:** never present an app frame while `paper.isPenActive` — route chrome
+  text/updates through a pen-idle gate. The recorded exceptions (each one chrome frame at a
+  deliberate act or a boundary, never under live ink) are **ledgered with their justifications
+  in `docs/notebook.md` § frame-silence** — any new exception needs the same written
+  justification there. Remember `isPenActive` counts **hover** — never idle-gate a hide/show
+  that must answer a deliberate act.
 - **Toast vs. dialog:** a toast only confirms something that already happened; anything
-  explaining why a tap *didn't* work is a problem dialog. On e-ink a missed toast reads
-  as "broken". **Three recorded exceptions** (post-arc-17 toast review, 2026-08-30,
-  `Dialogs.confirm` — same one-title/one-message/OK shape as `Dialogs.problem`, for a *successful*
-  result that still shouldn't ride a toast): export-done (the screen finishes right under the
-  toast, so it can't survive to be read — `finish()` now runs on the dialog's dismiss),
-  backup-done (the counts are the entire reason the user opened the screen), import-done (names
-  the destination folder when it isn't the current one — a card that never appears on screen reads
-  as an import that did nothing). All three were audited from the full toast inventory; the
-  frequent/reversible/in-context ones (copy, cut, paste, clipboard clear, template import/export,
-  backup-exclude toggle) stayed toasts on purpose — converting those would make routine editing
-  a chain of dismiss taps.
+  explaining why a tap *didn't* work is a problem dialog. On e-ink a missed toast reads as
+  "broken". **Three recorded exceptions** use `Dialogs.confirm` (post-arc-17 toast review,
+  2026-08-30 — a successful result that still shouldn't ride a toast): export-done (the screen
+  finishes under the toast — `finish()` runs on the dialog's dismiss), backup-done (the counts
+  are the screen's whole point), import-done (names a non-current destination folder). The
+  frequent/reversible/in-context toasts (copy/cut/paste, clipboard clear, template
+  import/export, backup-exclude) stayed toasts on purpose — do not promote them.
 - Portrait-locked everywhere · one layout per screen · no colour in chrome (ink is fixed
   black — P1 removed the tool panels) · TopGuard is 0 on Ratta — chrome sits flush at the top
   edge · notebook writes go through the session's single serial `SoilWriter` · undo/redo
