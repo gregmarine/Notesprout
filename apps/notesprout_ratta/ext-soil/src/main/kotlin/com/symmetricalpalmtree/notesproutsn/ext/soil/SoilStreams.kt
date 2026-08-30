@@ -1,7 +1,10 @@
 package com.symmetricalpalmtree.notesproutsn.ext.soil
 
 import android.os.ParcelFileDescriptor
+import android.system.Os
+import android.system.OsConstants
 import android.util.Log
+import java.io.IOException
 
 /**
  * The one streamed copy both of this package's services deliver (the I2 review's dedup finding —
@@ -16,9 +19,11 @@ import android.util.Log
  * the stream is accepted on its own terms rather than refused for a number nobody can supply.
  *
  * The `fsync` before the close is what makes the returned count mean something durable: without it
- * the bytes may still be in a page cache when the far side reads them. A destination that cannot
- * be synced (a provider handing back a pipe rather than a file) is not an error — there is nothing
- * to flush to — so that one failure is logged and stepped over.
+ * the bytes may still be in a page cache when the far side reads them. Whether the sync is owed is
+ * answered by what the fd **is** (`fstat`, the arc-18 D3 rule shared with `:ext-pdf`): a regular
+ * file must sync, and a failure there is a real one — `ENOSPC`/`EIO` on the flash — reported as a
+ * delivery failure rather than swallowed into a claimed success; a pipe from a streaming provider
+ * has nothing to force to storage and the sync is skipped rather than attempted-and-excused.
  *
  * [what] names the direction in the short-copy message and the log line ("export" / "import") —
  * never a path, never a payload.
@@ -42,10 +47,18 @@ internal object SoilStreams {
                     total += n
                 }
                 output.flush()
-                try {
-                    output.fd.sync()
+                val regular = try {
+                    OsConstants.S_ISREG(Os.fstat(output.fd).st_mode)
                 } catch (e: Exception) {
-                    Log.w(tag, "destination could not be synced: ${e.javaClass.simpleName}")
+                    Log.w(tag, "destination could not be stat'd: ${e.javaClass.simpleName}")
+                    false
+                }
+                if (regular) {
+                    try {
+                        output.fd.sync()
+                    } catch (e: IOException) {
+                        throw IllegalStateException("syncing the $what failed (${e.javaClass.simpleName})")
+                    }
                 }
             }
             if (expected != null && total != expected) {

@@ -15,9 +15,14 @@
             <intent-filter>
                 <action android:name="com.symmetricalpalmtree.notesproutsn.extension.NOTEBOOK_EXPORTER" />
             </intent-filter>
+            <!-- 2, not 1: the version the host must understand, not the one this was built
+                 against. A pre-arc-18 host reads ExporterInfo's absent sourceKind tail as
+                 SOURCE_SOIL and would truncate the destination before streaming the wrong thing
+                 at this exporter — declaring 2 makes that host skip it at discovery instead
+                 (ExtensionContract.API_VERSION, the D3 skew guard). -->
             <meta-data
                 android:name="com.symmetricalpalmtree.notesproutsn.extension.API_VERSION"
-                android:value="1" />
+                android:value="2" />
         </service>
     </application>
 </manifest>

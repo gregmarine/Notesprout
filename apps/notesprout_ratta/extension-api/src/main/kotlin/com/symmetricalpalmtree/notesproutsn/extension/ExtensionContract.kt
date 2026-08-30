@@ -17,8 +17,23 @@ package com.symmetricalpalmtree.notesproutsn.extension
  */
 object ExtensionContract {
 
-    /** Current API version. An extension is used only if its `<service>` meta-data equals this. */
-    const val API_VERSION: Int = 1
+    /**
+     * Current API version. An extension is used only if its `<service>` meta-data is **between 1
+     * and this**, inclusive — the declared number is the version the extension *requires of the
+     * host*, not merely the one it was built against.
+     *
+     * The range rule is the arc-18 / D3 skew guard. Compatible-tail parcels protect the
+     * new-host/old-extension direction for free (an absent tail keeps its old meaning), but not
+     * the reverse: an old host that lists a new extension reads the tail as absent and acts on
+     * the *old* meaning — for `NSE · PDF Export` that meant truncating the destination and
+     * streaming a `.soil` at a pages-exporter, a guaranteed failure that then deletes the
+     * document it overwrote. So an extension whose descriptor a host must understand *beyond*
+     * the absent-tail default declares the version that introduced it (the PDF exporter declares
+     * 2, for `ExporterInfo.sourceKind`), and an older host skips it at discovery instead of
+     * failing at the destination. Extensions the absent-tail default serves correctly keep
+     * declaring 1 and run against every host.
+     */
+    const val API_VERSION: Int = 2
 
     /** Intent action a handwriting-recognizer `<service>` declares in its intent-filter. */
     const val ACTION_HANDWRITING_RECOGNIZER: String =

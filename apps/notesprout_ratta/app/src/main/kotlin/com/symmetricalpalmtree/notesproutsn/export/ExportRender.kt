@@ -91,6 +91,15 @@ object ExportRender {
          *  is not a document — so this is an honest refusal, never an empty file. */
         EMPTY,
 
+        /** A page row carries no usable size (a damaged or foreign-written file) — a data problem,
+         *  which must not wear [RENDER_FAILED]'s memory-or-space sentence: the user would free
+         *  storage and retry forever against a file that never changes (the D3 review). */
+        DAMAGED,
+
+        /** More pages than [PageBundle.MAX_PAGES] — the container's own cap, refused with its own
+         *  sentence for the same reason as [DAMAGED]. */
+        TOO_LONG,
+
         /** A page would not allocate, draw, encode or write — out of memory, or out of space. */
         RENDER_FAILED,
     }
@@ -174,9 +183,11 @@ object ExportRender {
     }
 
     /**
-     * The bundle write. Throws on anything that means the bundle is not whole — a short write, a
-     * page row with no size, an allocation that failed: a truncated bundle must never reach the
-     * exporter, and [PageBundle.Writer.close] enforces the same thing from its own side.
+     * The bundle write. Throws on anything that means the bundle is not whole — a short write, an
+     * allocation that failed: a truncated bundle must never reach the exporter, and
+     * [PageBundle.Writer.close] enforces the same thing from its own side. The two *data* refusals
+     * (an unsized page row, more pages than the container carries) return their own [Problem]s
+     * instead of throwing, so they never wear the memory-or-space sentence.
      */
     private suspend fun bake(
         context: Context,
@@ -188,7 +199,10 @@ object ExportRender {
         val dao = db.dao()
         val rows = dao.childrenOfType(notebookId, SoilSchema.TYPE_PAGE)
         if (rows.isEmpty()) return Outcome.Failed(Problem.EMPTY)
-        val pages = plan(rows) ?: throw IOException("a page row carries no size")
+        // Each refusal keeps its own Problem — routing either through the generic render catch
+        // would blame memory or space for a data problem (the D3 review).
+        val pages = plan(rows) ?: return Outcome.Failed(Problem.DAMAGED)
+        if (pages.size > PageBundle.MAX_PAGES) return Outcome.Failed(Problem.TOO_LONG)
 
         val dir = File(context.cacheDir, ExportArtifact.DIR)
         dir.deleteRecursively()

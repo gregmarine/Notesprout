@@ -148,10 +148,11 @@ object ExporterContract {
      * DocumentsProvider.
      *
      * One value for both source kinds. A [SOURCE_PAGES] export is a transform, not a copy, so it
-     * was re-measured rather than assumed (arc 18 / D1, Nomad 2026-08-30): PDF assembly of a
-     * 13-page bundle took 3.5 s — ~270 ms a page marginal — so two minutes covers a ~400-page
-     * notebook, far past anything a hand writes. The host's render happens before this call
-     * starts and never counts against it.
+     * was re-measured rather than assumed (arc 18, Nomad 2026-08-30 — twice: at D1 on the
+     * framework assembly, 3.5 s / ~270 ms a page, and again at D3 when the assembly moved onto
+     * pdfbox, 2.6 s / ~200 ms a page for the same 13-page bundle) — two minutes covers a
+     * ~400-page notebook, far past anything a hand writes. The host's render happens before this
+     * call starts and never counts against it.
      */
     const val EXPORT_TIMEOUT_MS: Long = 120_000L
 }

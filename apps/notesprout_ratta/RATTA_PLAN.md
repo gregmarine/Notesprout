@@ -4789,7 +4789,7 @@ user all-clear ✅ 2026-08-30; statuses flipped ✅.
 
 ---
 
-## Phases — Arc 18 "PDF" (planned 2026-08-30, wizard complete)
+## Phases — Arc 18 "PDF" ✅ COMPLETE + FROZEN 2026-08-30 (planned 2026-08-30, wizard complete)
 
 **PDF export as a second exporter extension.** The library's Export screen finally earns its
 chooser: with `NSE · Soil Export` and the new **`NSE · PDF Export`** both installed, the user picks
@@ -5003,16 +5003,88 @@ notebook deserves an inline honesty line like the plain-keying warning — every
 encrypted, so it would show on every passwordless PDF export; user's call on wording vs. silence.
 
 ### D3 — Review, boundary audit, docs, freeze
-**Status:** ⬜ Not started
+**Status:** ✅ Complete 2026-08-30 (user checklist all-pass + all-clear) — **ARC 18 COMPLETE + FROZEN**
 
-Arc-range `/code-review` (level asked at phase start — every arc has frozen at high). Boundary
-audit: `docs/extensions.md` gains the source-kind seam + **the export-secret row** (the one
-deliberate secret crossing, its scope and lifecycle) walked against the code. Docs:
-`docs/export.md` grown (the chooser with two exporters, the source-kind seam, the PDF failure
-rows), `docs/extensions.md` (seventh module, `:ext-pdf` identity), app `CLAUDE.md` (module list),
-root `CLAUDE.md` arc record, memory, BACKLOG ledger for accepted findings. Version-stamp decision.
-Full regression (JVM + both variants + Haiku walk + short user checklist). Commit + push; freeze.
-**Gate:** everything green or explicitly accepted; user all-clear.
-*Review as `/code-review`; fixes per finding; Sonnet the doc pass; Haiku the regression walk.*
+**Phase-start answers (user, 2026-08-30):** review at **high** (the standing rate); version stays
+**0.1.0-ratta**.
 
-**Questions to resolve at phase start:** review level; version stamp.
+**The review** (`/code-review high` on `5705588..8bb6368`): 10 findings — 8 CONFIRMED (the top
+three proven from AOSP source and pdfbox 2.0.27.0 bytecode), 2 PLAUSIBLE — and the user said
+**fix all 10**; all 10 fixed, nothing accepted, no BACKLOG entry. The headline cluster rewrote
+`PdfAssembly` onto **pdfbox for both paths**:
+
+ 1. **The one-page-in-memory rule was broken where it mattered most.** The framework
+    `PdfDocument.finishPage` does *not* serialize the page — it records a picture that keeps
+    referencing the bitmap until `writeTo`, so the per-page `recycle()` freed nothing and a
+    100-page notebook would have accumulated hundreds of MB of native memory (LMK kill on a 3 GB
+    device); the 13-page walk was far too small to show it. Now each page enters the document as
+    its **compressed JPEG q100 stream** (decode → dimension-check → re-encode →
+    `PDImageXObject`/`PDPage` → recycle), so what accumulates is roughly the finished document.
+    The deliberate price: the 13-page PDF grew ~204 KB → ~1.2 MB (~92 KB/page — Skia's deflate
+    over mostly-white ground was smaller, but a photo-templated notebook through a lossless pass
+    balloons where JPEG stays flat). Flagged to the user with the checklist.
+ 2. **No protected export was ever fsynced.** `PDDocument.save` closes the stream it is given
+    (`COSWriter.close` in a `finally`), so the old `fd.sync()` always fired on a closed fd and was
+    swallowed by the same catch that also excused real `ENOSPC`/`EIO` on the plain path. Now the
+    save writes through a **close-shield** (close → flush) and the sync runs on the still-open fd,
+    gated by `fstat`: a **regular file must sync and a failure is a delivery failure**, a pipe has
+    nothing to force and is skipped rather than attempted-and-excused. `SoilStreams` was given the
+    same rule as a rider — the twin idiom stays twins.
+ 3. **"AES-128" was actually RC4-128.** `StandardProtectionPolicy` emits the deprecated PDF-1.4
+    RC4 cipher at keyLength 128 unless `setPreferAES(true)` is called — a file every reader still
+    opens with the password, which is why the D2 Mac checklist could not tell. One line; the D3
+    checklist re-verified with `qpdf --show-encryption` reporting AES.
+ 4. Re-tapping the already-checked exporter radio ran `select(keepValues = false)` — a grazed tap
+    (easy on e-ink) silently reset every option and wiped both secret fields. Now a no-op;
+    verified on-device (protect + fields survive the re-tap).
+ 5. **The password-lost check failed open.** It was gated on the *re-described* descriptor still
+    declaring `OPTION_PROTECT`, so an exporter upgraded in place behind the picker (the recorded
+    trap family) that dropped the toggle exported unprotected with a success dialog. The guard now
+    consults the raw tap-time `protect = "1"` (`armedAtTap`) as well — protect armed then means a
+    secret is owed now, whatever today's descriptor says. The keying path already failed closed;
+    now both do.
+ 6. `ExportActivity` gains `android:configChanges="keyboard|keyboardHidden"` — og's manifest
+    records the device reality (a folio close or BT idle drop is a keyboard config change) and SN
+    never carried it over; a recreate mid-export cancelled the flow past the truncating open with
+    no dialog, no delete, no verification, reachable with zero user action during the export
+    window D2's password fields now invite a keyboard into.
+ 7. An unsized page row and a > `MAX_PAGES` notebook both surfaced as `RENDER_FAILED`, whose
+    dialog blames memory or space — a data problem the user would retry forever. Both now have
+    their own `Problem`s (`DAMAGED` / `TOO_LONG`) and their own honest strings
+    (`export_damaged_body` / `export_too_long_body`).
+ 8. `ExportOptions.isRenderable` gains the reserved-id → source-kind table: keying is the
+    keyed-artifact path's step (`SOURCE_SOIL` only), the template toggle is the render's
+    (`SOURCE_PAGES` only), protect is extension-executed and rides either. A future exporter
+    declaring a step its source kind never executes is dropped whole instead of having its UI
+    drawn, collected, and silently discarded. Pinned by test.
+ 9. **The version-skew guard** (the PLAUSIBLE pair's first): a pre-arc-18 host listing the new
+    `:ext-pdf` reads the absent tail as `SOURCE_SOIL`, truncates the destination, streams the
+    `.soil` at a pages-exporter, and its failure path then deletes the document it overwrote.
+    `ExtensionContract.API_VERSION` is now **2** and the host accepts `1..API_VERSION` — the
+    declared meta-data is the version an extension *requires of the host* — with `:ext-pdf`
+    declaring 2 (`sourceKind` is load-bearing for it) and the other three staying at 1. An old
+    host now skips the PDF exporter at discovery; verified on real wire (registry kept pdf@2 +
+    soil@1, chooser showed both).
+ 10. `INotebookExporter.aidl` still promised the verbatim byte-count verification and "no secret
+    ever crosses" — the contract file a future exporter author reads first. Rewritten: the
+    sourceKind tail, per-kind verification, the trailing-payload rules, the export-secret
+    exception.
+
+**Boundary audit:** `docs/extensions.md` rows **12–13** (the source-kind seam · the export-secret
+crossing), walked against the code; plus the seam sections "The source-kind tail" and "The export
+secret", the seven-module table, the `:ext-pdf` identity block (release APK 14 MB; API version 2),
+and the API-version range rule at all three mentions. **Docs:** `docs/export.md` grown (two-radio
+chooser + last-used default, the progress dialog, the PDF section on the pdfbox-everywhere shape,
+per-kind verification, ~12 new failure rows incl. the fail-closed password row, both timeout
+measurements); app `CLAUDE.md` (seven modules, exporter-point paragraph); root `CLAUDE.md` arc
+record; memory. No BACKLOG entry — nothing accepted.
+
+**Gate met:** 966 JVM tests per variant (was 965; the new source-kind-gate test), all seven
+modules build debug + release, every changed file NUL-scanned clean. **Nomad walk hand-driven**
+(the Haiku walk-trap is three phases running): two radios, re-tap no-op, swap resets + wording
+swap, `pm disable` collapse → re-enable restore, binds = unbinds, crash buffer empty — and a
+**full plain export through the real SAF picker on the new pdfbox path**: 13 pages, 1,193,481
+bytes in 2607 ms (~200 ms/page — re-measured because the assembly's shape changed, the J5 rule;
+`EXPORT_TIMEOUT_MS` unchanged, both numbers recorded in the contract KDoc). **User checklist
+all-pass 2026-08-30**: password PDF opens with the password and refuses without, `qpdf` reports
+AES, template-off bakes white ground, plain PDF fine.

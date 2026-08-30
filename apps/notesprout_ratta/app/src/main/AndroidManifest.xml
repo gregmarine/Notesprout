@@ -91,10 +91,16 @@
             android:screenOrientation="portrait" />
 
         <!-- Export (arc 15 / E1). Reached only from the library's notebook long-press sheet;
-             receives EXTRA_NOTEBOOK_ID / _NAME and nothing else. -->
+             receives EXTRA_NOTEBOOK_ID / _NAME and nothing else.
+             keyboard|keyboardHidden (arc 18 / D3): attaching or detaching a keyboard (the folio,
+             a Bluetooth idle drop) is a config change, and a recreate mid-export would cancel the
+             flow past the truncating open — a partial file standing with no dialog, no delete, no
+             verification. The screen is portrait-locked with one layout; there is nothing a
+             recreate would give it (og's manifest records the same defense). -->
         <activity
             android:name=".export.ExportActivity"
             android:exported="false"
+            android:configChanges="keyboard|keyboardHidden"
             android:screenOrientation="portrait" />
 
         <activity

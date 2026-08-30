@@ -13,7 +13,10 @@ class ExtensionContractTest {
 
     @Test
     fun contractConstants() {
-        assertEquals(1, ExtensionContract.API_VERSION)
+        // 2 since arc 18 / D3: the declared meta-data is the version an extension REQUIRES of the
+        // host (a host accepts 1..API_VERSION), so a pre-arc-18 host skips the PDF exporter whose
+        // sourceKind tail it would misread as SOURCE_SOIL. Bumping this again is a contract event.
+        assertEquals(2, ExtensionContract.API_VERSION)
         assertEquals(2_000, ExtensionContract.MAX_INK_STROKES)
         assertEquals(60_000, ExtensionContract.MAX_INK_POINTS)
         assertEquals(20, ExtensionContract.MAX_PRECONTEXT_CHARS)

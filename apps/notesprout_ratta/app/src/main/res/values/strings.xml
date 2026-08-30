@@ -197,6 +197,8 @@
     <string name="export_rendering">Rendering page %1$d of %2$d…</string>
     <string name="export_empty_body">This notebook has no pages, so there is nothing to export.</string>
     <string name="export_render_failed_body">The notebook\'s pages could not be prepared for this format — the device may be low on memory or space. Nothing was exported and your notebook is untouched.</string>
+    <string name="export_damaged_body">A page in this notebook could not be read at its own size, so it cannot be exported to this format. Nothing was exported and your notebook is untouched.</string>
+    <string name="export_too_long_body">This notebook has more pages than this format can carry. Nothing was exported and your notebook is untouched.</string>
     <!-- Password protection (arc 18 / D2). The same dual fields as the keying passphrase, worded
          for what they actually are here: a password for the file being written, not a Notesprout
          passphrase. The host collects it; the exporter applies it. -->

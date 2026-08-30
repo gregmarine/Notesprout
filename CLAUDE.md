@@ -350,6 +350,35 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   sticky-lock family), a bootstrap `VACUUM` freelist floor, grant release on folder change, and
   one-listing-per-write SAF IO. 928 JVM tests; version stays `0.1.0-ratta`; g-paper pin stays
   0.1.23. Reference: **`apps/notesprout_ratta/docs/backup.md`**.
+  **Arc 18 "PDF"** ✅ **COMPLETE + FROZEN 2026-08-30** (D1 `1844446` · post-D1 `1a18036` ·
+  D2 `ff71644` · post-D2 `57e8413` · D3): PDF export as a **second exporter extension** on arc
+  15's one `ACTION_NOTEBOOK_EXPORTER` point — **no new capability point, SN stays at four** —
+  and the Export chooser finally shows two radios (default = the **last-used** exporter,
+  `ExportPrefs`, written only at the OK verdict). The seam: **the host renders, the extension
+  assembles** — `ExporterInfo` grew a compatible `sourceKind` tail (absent = `SOURCE_SOIL`;
+  `SOURCE_PAGES` = a `PageBundle` of host-baked full-fidelity pages, one page in memory at a
+  time both sides, caps refused before allocation), verification went **per source kind**
+  (`ExportVerification` — the verbatim `bytesWritten == streamBytes` equality is soil's alone; a
+  transform is corroborated against the destination only), and `ExportSpec.exportSecret` is the
+  **one deliberate secret that ever crosses an extension seam**: user-typed, export-scoped, opens
+  no Notesprout data, never the global passphrase or device key, `KIND_PASSPHRASE`'s
+  never-crosses meaning untouched. `:ext-pdf` (the **seventh** module, `NSE · PDF
+  Export`) carries the arc's one approved dependency, pdfbox-android 2.0.27.0, module-local.
+  Options: page-template toggle (host-executed) + password-protect (host-collected dual fields,
+  extension-executed, AES-128). Export progress is a modal dialog (post-D2). The D3 review
+  (high): **10/10 findings fixed** — headline trio all in `PdfAssembly`, now **pdfbox on both
+  paths** (framework `finishPage` held every page's raster to `writeTo` — the OOM finding; pages
+  are compressed JPEG q100 streams now, PDFs ~92 KB/page), fsync through a close-shield on a
+  still-open fd, `fstat`-gated and **failing on a regular file's sync error** (`SoilStreams`
+  matched), and `setPreferAES(true)` — the "AES" was RC4 until D3, `qpdf`-verified after. Plus:
+  checked-radio re-tap no-op, password-lost fails **closed** (raw tap-time `armedAtTap`),
+  `keyboard|keyboardHidden` configChanges on `ExportActivity`, honest `DAMAGED`/`TOO_LONG`
+  render refusals, `isRenderable` gates reserved ids by source kind, and the **API-version skew
+  guard**: `API_VERSION` 2, host accepts `1..N`, `:ext-pdf` declares 2 so a pre-arc-18 host
+  skips it instead of truncating a destination and streaming a `.soil` at it. 966 JVM tests;
+  version stays `0.1.0-ratta`; g-paper pin stays 0.1.23. References:
+  **`apps/notesprout_ratta/docs/export.md`** (feature) + `docs/extensions.md` §§ source-kind
+  tail / export secret + boundary rows 12–13 (seam).
   **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for any work there** — it holds the
   per-arc status, locked decisions, working protocol, and model recipe.
 - `germination` — previous post-MVP feature branch (reference, not active)

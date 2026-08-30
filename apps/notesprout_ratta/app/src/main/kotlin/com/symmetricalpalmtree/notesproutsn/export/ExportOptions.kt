@@ -37,6 +37,21 @@ object ExportOptions {
      *  wrongly (arc-15 review). */
     fun isRenderable(info: ExporterInfo): Boolean {
         if (info.options.any { it.kind == ExporterContract.KIND_PASSPHRASE }) return false
+        // A host-executed reserved option only runs on the source kind whose preparation executes
+        // it (the D3 review): keying is the keyed-artifact path's step and the rendered-pages path
+        // never runs it, so a SOURCE_PAGES exporter declaring the trio would have its keying UI
+        // drawn, collected — and silently discarded. Same the other way for the template toggle,
+        // which only the render answers. An exporter asking for a step the chosen source kind will
+        // never execute is dropped whole, exactly like one asking for a step the host has no
+        // transform for. (OPTION_PROTECT is extension-executed and rides either kind.)
+        for (d in info.options) {
+            val allowed = when (d.id) {
+                ExporterContract.OPTION_KEYING -> ExporterContract.SOURCE_SOIL
+                ExporterContract.OPTION_PAGE_TEMPLATE -> ExporterContract.SOURCE_PAGES
+                else -> continue
+            }
+            if (info.sourceKind != allowed) return false
+        }
         val keying = info.options.firstOrNull {
             it.id == ExporterContract.OPTION_KEYING && it.kind == ExporterContract.KIND_SINGLE_CHOICE
         } ?: return true

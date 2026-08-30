@@ -291,7 +291,12 @@ class ExportActivity : AppCompatActivity() {
             for (candidate in candidates) {
                 val checked = candidate.ref.packageName == chosenPackage
                 binding.chooser.addView(
-                    panel.choice(candidate.info.formatLabel, checked) { select(candidate, keepValues = false) }
+                    // Re-tapping the checked radio is not a change of question: select(keepValues
+                    // = false) would silently reset every option and wipe a typed secret on a
+                    // grazed tap (easy on e-ink) — the D3 review's finding.
+                    panel.choice(candidate.info.formatLabel, checked) {
+                        if (!checked) select(candidate, keepValues = false)
+                    }
                 )
             }
         }
@@ -484,8 +489,17 @@ class ExportActivity : AppCompatActivity() {
                 // screen rebuilt behind the picker comes back with the password gone. Say so —
                 // exporting unprotected in silence would hand the user a file keyed the way they
                 // asked it not to be, which is the same honesty the rekey path owes (E2).
+                //
+                // The check must fail CLOSED (the D3 review): wantsExportSecret validates against
+                // the freshly re-described descriptor, and an exporter upgraded in place behind
+                // the picker (the recorded trap) can come back without the protect toggle — which
+                // would skip the guard and export unprotected with a success dialog. So the raw
+                // tap-time answer is consulted too: protect armed then means a secret is owed now,
+                // whatever today's descriptor says, and a secret in hand that the descriptor can
+                // no longer carry is the same honest refusal rather than a silent drop.
                 val wantsSecret = ExportOptions.wantsExportSecret(c.info, values)
-                if (wantsSecret && typedExportSecret == null) {
+                val armedAtTap = values[ExporterContract.OPTION_PROTECT] == "1"
+                if ((wantsSecret || armedAtTap) && (typedExportSecret == null || !wantsSecret)) {
                     failed(R.string.export_failed_title, getString(R.string.export_password_lost_body))
                     return@launch
                 }
@@ -782,6 +796,8 @@ class ExportActivity : AppCompatActivity() {
             ExportRender.Problem.MISSING -> R.string.export_missing_body
             ExportRender.Problem.UNREADABLE -> R.string.export_unreadable_body
             ExportRender.Problem.EMPTY -> R.string.export_empty_body
+            ExportRender.Problem.DAMAGED -> R.string.export_damaged_body
+            ExportRender.Problem.TOO_LONG -> R.string.export_too_long_body
             ExportRender.Problem.RENDER_FAILED -> R.string.export_render_failed_body
         }
     )

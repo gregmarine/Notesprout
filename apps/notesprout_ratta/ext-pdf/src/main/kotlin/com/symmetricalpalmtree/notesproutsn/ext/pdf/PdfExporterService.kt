@@ -84,7 +84,7 @@ class PdfExporterService : Service() {
                 // protect toggle and a secret that disagree, would otherwise produce a file the
                 // user did not ask for — an unprotected one they believe is locked, at worst.
                 PdfExportSpec.require(asked.values, asked.exportSecret)
-                if (asked.exportSecret != null) readyPdfbox()
+                readyPdfbox()
                 return ExportResult(PdfAssembly.assemble(src, dst, asked.exportSecret, TAG))
             } catch (e: SecurityException) {
                 throw e
@@ -108,11 +108,12 @@ class PdfExporterService : Service() {
 
     /**
      * pdfbox reads its own resources out of the APK's assets, so it wants the application context
-     * once before first use. Called **only on the protect path**, because that is the only path
-     * that touches pdfbox at all — a plain export must not pay for a library it never enters. The
-     * init is cheap and idempotent; the flag only keeps a repeated export from repeating it, and
-     * the absence of the call is the kind of thing that surfaces as a runtime surprise rather than
-     * a compile error, which is why it is not left to chance.
+     * once before first use. Called on **every** export since the D3 review moved the whole
+     * assembly onto pdfbox (the framework's `PdfDocument` held every page's raster until the
+     * write — the memory finding). The init is cheap and idempotent; the flag only keeps a
+     * repeated export from repeating it, and the absence of the call is the kind of thing that
+     * surfaces as a runtime surprise rather than a compile error, which is why it is not left to
+     * chance.
      */
     private fun readyPdfbox() {
         if (pdfboxReady) return

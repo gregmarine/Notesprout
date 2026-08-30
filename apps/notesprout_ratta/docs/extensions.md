@@ -42,15 +42,16 @@ third or fourth; og's `docs/full-notebook-export.md` § Import was the fourth's 
 
 ## Module layout
 
-Six modules, SN's own Gradle root:
+Seven modules, SN's own Gradle root:
 
 | Module | Type | Depends on | Holds |
 |---|---|---|---|
 | `:sn-screen` | Android library | g-paper (`api`) + androidx; **never** `:app`, **never** `:extension-api` | the design resources and the screen helpers both paper surfaces need — see [`sn-screen.md`](sn-screen.md) |
-| `:extension-api` | Android library | nothing in `:app`, no library beyond the Kotlin stdlib (`build.gradle.kts` says so explicitly) | the AIDL (`IHandwritingRecognizer`, `InkStroke.aidl`; `IExtensionStore`, `LargeValue.aidl`; `IScratchPad`, `WireStroke.aidl`, `InkBundle.aidl`; `INotebookExporter`, `ExporterInfo.aidl`, `ExportSpec.aidl`, `ExportResult.aidl`), the hand-written `InkStroke` / `LargeValue` / `WireStroke` / `InkBundle` / `ExporterInfo` / `OptionDescriptor` / `ExportSpec` / `ExportResult` parcelables, `SharedBytes`, `InkChunks`, `RecognizerStatus`, `ExtensionContract`, `ExporterContract`, `HostCallerCheck` |
+| `:extension-api` | Android library | nothing in `:app`, no library beyond the Kotlin stdlib (`build.gradle.kts` says so explicitly) | the AIDL (`IHandwritingRecognizer`, `InkStroke.aidl`; `IExtensionStore`, `LargeValue.aidl`; `IScratchPad`, `WireStroke.aidl`, `InkBundle.aidl`; `INotebookExporter`, `ExporterInfo.aidl`, `ExportSpec.aidl`, `ExportResult.aidl`), the hand-written `InkStroke` / `LargeValue` / `WireStroke` / `InkBundle` / `ExporterInfo` / `OptionDescriptor` / `ExportSpec` / `ExportResult` parcelables, `PageBundle` (the arc-18 page-bundle container — pure `java.io`, no Android types), `SharedBytes`, `InkChunks`, `RecognizerStatus`, `ExtensionContract`, `ExporterContract`, `HostCallerCheck` |
 | `:ext-mlkit` | Android application (its own installable APK) | `:extension-api` + `com.google.mlkit:digital-ink-recognition:19.0.0` | `HandwritingRecognizerService`, `ModelManager`, `MlKitEngine`, `PageText`, `StrokeSegmenter`, `Dots`, `Box` |
 | `:ext-scratchpad` | Android application (its own installable APK) | `:extension-api` + `:sn-screen` (g-paper arrives through its `api`) + androidx; **never** `:app`, no Room / SQLCipher / serialization | `ScratchPadApplication`, `ScratchPadService`, `ScratchPadActivity`, `ScratchSession`, `ScratchStore`, `ScratchPageCodec`, `ScratchPages`, `ScratchInk` |
 | `:ext-soil` | Android application (its own installable APK) | `:extension-api` only | `SoilExporterService`, `SoilExportSpec` — see [`export.md`](export.md); and, arc 16, `SoilImporterService` — see [`import.md`](import.md). One package, two services, one label |
+| `:ext-pdf` | Android application (its own installable APK) | `:extension-api` + `com.tom-roush:pdfbox-android:2.0.27.0` (module-local — approved 2026-08-30, used only on the protect path) | `PdfExporterService`, `PdfDescriptor`, `PdfExportSpec`, `PdfAssembly`, `CountingOutputStream` — arc 18's second exporter on the same point; see [`export.md`](export.md) |
 | `:app` (`extension/` package) | part of the host APK | `:extension-api` | `ExtensionRegistry`, `ExtensionBinder`, `ExtensionCallException`, `InkCaps`, `RecognizerClient`, `RecognizerReadiness`, `ScratchPadClient`, `TransferCaps`, `ExporterClient`, `ImporterClient`; and in `data/extstore/`, the extension store (`ExtensionStores`, `ExtensionStoreDatabase`, `KvEntity`, `KvDao`, `ExtensionStoreGate`, `ExtensionStoreBinder`) — plus, in `export/` and `crypto/`, export's own host-side half (`ExportActivity`, `ExportPanel`, `ExportOptions`, `ExportArtifact`, `ExportNaming`, `ExportKeying`, `SoilOpenFiles`), and in `importing/` and `crypto/`, import's (`ImportFlow`, `NotebookImport`, `ImporterMatch`, `ImportNames`, `AncestryPlan`, `SafeImportId`, `ImportDialogs`, `ImportOverlay`, `ImportKeying`, `NotebookRemap` in `data/soil/`) |
 
 `:sn-screen` is deliberately **not** in that dependency chain: it never sees `:extension-api`, so a
@@ -137,7 +138,7 @@ loading as one busy state), `UNAVAILABLE` (3). The host treats anything outside 
 
 | Constant | Value | Purpose |
 |---|---|---|
-| `API_VERSION` | 1 | must match the extension's `<meta-data>` for discovery to keep it |
+| `API_VERSION` | 2 (arc 18 / D3) | the host accepts an extension whose `<meta-data>` is in `1..API_VERSION` — the declared number is what the extension *requires* of the host, so a new-seam extension (the PDF exporter declares 2, for the `sourceKind` tail) is skipped by an older host instead of misread by it |
 | `ACTION_HANDWRITING_RECOGNIZER` | `…notesproutsn.extension.HANDWRITING_RECOGNIZER` | SN-namespaced action string |
 | `META_API_VERSION` | `…notesproutsn.extension.API_VERSION` | the `<service>` meta-data name |
 | `MAX_INK_STROKES` | 2,000 | most strokes in one recognize call |
@@ -161,8 +162,10 @@ Nothing here is bearer-token or permission-based; trust is the certificate the t
 signed with.
 
 - **Discovery** (`ExtensionRegistry.discover`): `queryIntentServices` for the action, then a
-  candidate survives only if its `<service>` is `exported`, its API-version meta-data equals
-  `ExtensionContract.API_VERSION`, and `PackageManager.checkSignatures(host, candidate) ==
+  candidate survives only if its `<service>` is `exported`, its API-version meta-data is in
+  `1..ExtensionContract.API_VERSION` (the D3 skew guard — the declared number is the version the
+  extension requires of the host, reasoned at the constant), and
+  `PackageManager.checkSignatures(host, candidate) ==
   SIGNATURE_MATCH`. A disabled package or component never appears in the query at all, so `pm
   disable` reads as "uninstalled" from the host's point of view. When more than one candidate
   survives, the first by `(label, package)` is kept and the rest are dropped with a log line —
@@ -317,8 +320,9 @@ of the calls that need it and revoked when the bind ends. The rule it exists to 
 in the host's directory, and it survives the extension being uninstalled.
 
 Six methods, in this order — the base four first, the large pair **appended**, never reordered, so
-the four keep their transaction codes and `API_VERSION` can stay **1** (the family's
-compatible-append recipe, kept even though SN ships all six at once):
+the four keep their transaction codes without an `API_VERSION` bump (the family's
+compatible-append recipe, kept even though SN ships all six at once; the store extensions still
+declare 1 — the arc-18 bump to 2 names the exporter's `sourceKind` seam, which none of them use):
 
 ```
 byte[]     get(String key)
@@ -654,7 +658,9 @@ keeps that seam honest.
 > and what each side is allowed to know.
 
 `ACTION_NOTEBOOK_EXPORTER` is SN's **third** capability point, and its first **plural, call-shaped**
-one: unlike the recognizer and the pad, any number of trusted exporters may register at once, the
+one: unlike the recognizer and the pad, any number of trusted exporters may register at once — since
+arc 18 two actually do (`NSE · Soil Export` and `NSE · PDF Export`), which is when the Export
+screen's chooser first showed two radios — the
 Export screen lists whatever is installed (`ExtensionRegistry.exporters` returns a `List<ProviderRef>`,
 ordered by `(label, package)` — every candidate is kept, none dropped as "additional"), and each
 export is one `ExtensionBinder.call` — there is no held bind, because the operation is a single
@@ -692,8 +698,9 @@ secret, and the reserved keying option is the one such step this arc implements.
 
 ### The two-fd seam
 
-`INotebookExporter.export(source, destination, spec)` is the whole data path: a read fd (the
-host-prepared, already-keyed artifact) and a write fd (the SAF destination the host opened), plus
+`INotebookExporter.export(source, destination, spec)` is the whole data path: a read fd (what the
+descriptor's source kind asked for — the host-prepared, already-keyed artifact, or since arc 18 a
+host-rendered page bundle) and a write fd (the SAF destination the host opened), plus
 the bounded `ExportSpec`. **The extension writes only through the granted write fd** — the
 writes-nothing-to-disk rule every extension in this app keeps, applied to the one point that is
 fundamentally about writing a file. `SoilExporterService.export()` is the reference implementation:
@@ -731,6 +738,78 @@ might guess it (the J5 `PLACE_TIMEOUT_MS` lesson, repeated): it is 120 s, sized 
 flash copy measured on the Nomad at ~0.45 s (~525 MB/s `dd`, ~230 MB/s `cp`) on 2026-08-27 — two
 minutes comfortably covers a 1 GB artifact even through a slow DocumentsProvider at 10 MB/s.
 `DESCRIBE_TIMEOUT_MS` stays short (3 s): a descriptor is a small in-memory answer by construction.
+Arc 18 re-asked the question rather than assuming the answer transferred — a `SOURCE_PAGES` export
+is a transform, not a copy — and the measurement kept the one value: PDF assembly of a 13-page
+bundle took 3.5 s on the Nomad at D1 (~270 ms a page) and 2.6 s (~200 ms a page) after D3 moved
+the assembly onto pdfbox, so 120 s covers a ~400-page
+notebook; the host's render runs *before* the call starts and never counts against it.
+
+### The source-kind tail — the host renders, the extension assembles (arc 18)
+
+An exporter that turns a notebook into a *document* — the PDF exporter — can never receive the
+`.soil` itself: no key crosses an extension seam, and an encrypted artifact without its key is
+noise. So `ExporterInfo` grew a **compatible parcel tail**, `sourceKind`, declaring what the read
+fd should carry: `SOURCE_SOIL` (the prepared artifact, arc 15's original) or `SOURCE_PAGES` (a
+host-rendered page bundle). The tail is read by `dataAvail()` — an old-shape descriptor simply runs
+out and means `SOURCE_SOIL`, so every pre-arc-18 exporter kept its meaning on real wire (proven
+both directions at the D1 walk); an unknown kind fails `ExporterInfo`'s unmarshal and drops that
+exporter like any other bad descriptor. The same tail pattern grew `ExportSpec` its own trailing
+field (the export secret, below) — both hold only because the descriptor is the reply's trailing
+payload and the spec is `export()`'s trailing argument, which both wire docs now state as a rule.
+
+For `SOURCE_PAGES` the host does the reading with the one process that can: `ExportRender` re-runs
+`ExportArtifact.prepare`'s guard order one for one (`SoilOpenFiles` held → IN_USE, missing key,
+missing or unopenable file), opens the notebook **read-only** through the one `SoilDatabase.open`
+door — nothing is stamped, not even `exportedAt`, because a PDF is not the notebook — and bakes
+every page full-fidelity at its **own** pixel size (template under headings, links' wrapped
+children, then ink — `PagePreview.drawContent`, the one layering function) into a `PageBundle` in
+`cacheDir/export/`, which the screen's one `finally` wipes along with the soil artifact. The
+container (`extension-api`, pure `java.io`) is `"NSPB"` magic · version · page count · per-page
+width/height/length/WEBP bytes, with a streaming Writer/Reader that hold **one page at a time** —
+the OOM rule on a 3 GB device is a rule, not an optimisation, and both sides keep it — and caps
+refused before allocation on both sides (`MAX_PAGES` 4096, `MAX_DIMENSION_PX` 32768,
+`MAX_PAGE_BYTES` 32 MiB). The extension re-checks each decode against the bundle's declaration: a
+page that will not decode, or decodes at an undeclared size, is a **delivery failure, never a page
+to skip** — a PDF quietly short of a page would be reported as a success.
+
+**Verification is per source kind** (`ExportVerification`, pure). The `bytesWritten ==
+streamBytes` equality is a *verbatim-streaming contract* — it holds for `SOURCE_SOIL` and nothing
+else (E3's refutation of a "transforming exporter" finding was scoped to soil's verbatim stream;
+the PDF exporter is that exporter arrived for real). A `SOURCE_PAGES` export is corroborated
+against the destination's own answers only, zero bytes is never a document, `SHORT` (failed — the
+flow may delete wreckage under its usual rules) stays distinct from `UNCONFIRMED` (stream complete,
+provider metadata disagrees — a check-the-file dialog, never a delete), and an unknown kind is
+`SHORT`: verification never defaults to trust. "What a notebook is" stays a host question for good
+— a future page kind renders differently host-side and no extension changes.
+
+### The export secret — the one deliberate secret that crosses (arc 18 / D2)
+
+Arc 18's two reserved toggle ids follow `OPTION_KEYING`'s pattern — declared and labeled by the
+exporter, recognized by id, because each names something the *host* must do about it.
+`OPTION_PAGE_TEMPLATE` is **host-executed**: its value threads into `ExportRender` (off = white
+ground, the template decode skipped, never decoded-and-discarded), and the value still crosses in
+the spec map so the extension knows what was asked. `OPTION_PROTECT` is **host-collected,
+extension-executed**: arming it reveals the host's one dual masked block (re-worded "Password"),
+and the typed secret crosses on `ExportSpec.exportSecret` — the **one deliberate secret that ever
+crosses an extension seam**. Its scope is the whole justification: it is user-typed for exactly
+this export, it protects the *output* file, and it opens no Notesprout data — never the global
+passphrase, never derived from it, never the device key. `KIND_PASSPHRASE` keeps its never-crosses
+meaning untouched, and the secret is never in the spec's value map.
+
+Both sides keep the typed-passphrase lifecycle rules verbatim. Host: `typedExportSecret` mirrors
+`typedPassphrase` to the letter — XML-static `saveEnabled="false"` fields, held from the Export tap
+to the end of the flow, cleared at the picker's cancel and in the flow's `finally`, never in
+instance state, an Intent, or a log line; over `MAX_EXPORT_SECRET_CHARS` (128) is refused at the
+tap, where the dialog can still explain; a screen rebuilt behind the picker (the fields gone with
+it) refuses with the honest password-lost body rather than silently exporting unprotected.
+`ExportOptions.isRenderable` drops a descriptor declaring both a rekey choice and the protect
+toggle — one block, one tenant, one secret lifecycle. Extension: `PdfExportSpec` refuses an
+inconsistent delivery in **both** directions (protect armed with no secret would write an
+unprotected file the user believes is locked; a secret nothing asked for would lock a file the user
+never asked to lock), no refusal message ever names, quotes, or measures the secret; `PdfAssembly`
+holds it only for the pdfbox call and drops its reference in `finally` (a `String` cannot be
+zeroed — releasing the reference is the whole of what that side can do, and it is done whichever
+way the assembly ended).
 
 ---
 
@@ -807,7 +886,9 @@ What crosses the process boundary, in which direction, and what guards it. **Re-
 whenever a point is added or a contract field changes.** Rows 1–5 are the scratch-pad point, walked
 against the code at the arc-11 freeze (2026-08-25) on the shape Paper's rows 28–32 established. Rows
 6–8 are the exporter point, walked against the code at the arc-15 freeze (2026-08-27). Rows 9–11 are
-the importer point, walked against the code at the arc-16 freeze (2026-08-28).
+the importer point, walked against the code at the arc-16 freeze (2026-08-28). Rows 12–13 are the
+exporter point's arc-18 growth — the source-kind seam and the one deliberate secret crossing —
+walked against the code at the arc-18 freeze (2026-08-30).
 
 | # | The claim | Where it holds |
 |---|---|---|
@@ -822,6 +903,9 @@ the importer point, walked against the code at the arc-16 freeze (2026-08-28).
 | 9 | **Outward on `importDocument` is two fds and a bounded spec with no secret, no id and no path.** The call's only arguments are a read `ParcelFileDescriptor` on the user's picked document (opened `"r"` from the SAF URI — the extension never sees the URI itself), a write `ParcelFileDescriptor` on `cacheDir/import/incoming.soil` (a host cache file — never a Garden path), and an `ImportSpec` — an id → value map (empty this arc; capped at unmarshal like the exporter's) plus a display-only `displayName` (≤ `MAX_NAME_CHARS`; constructor refuses `/` and NUL, and `ImportNames.specDisplayName` strips to the leaf and drops both before construction — a name the parcelable cannot express degrades to `""` rather than failing the import). **No notebook id, no path, no passphrase has anywhere to ride**: the unlock prompt does not even exist until after the delivery call has fully returned and the fds are closed. | `INotebookImporter.aidl`, `ImportSpec` (constructor `require`s, JVM-tested), `ImportNames.specDisplayName`, `ImportFlow.deliver`, `ImporterClient.importDocument` (both fds closed in `finally`) |
 | 10 | **Inward is a bounded descriptor and a byte count that is corroborated, never believed — and the delivered bytes stay untrusted after both.** `describe()`'s `ImporterInfo` is capped at unmarshal (`MAX_FILE_EXTENSIONS` 8, `MAX_MIME_TYPES` 8, extension charset `[a-z0-9]`, MIME shape, label cap — pinned by `ImporterContractTest` / `ImporterInfoTest`); a failing descriptor drops that importer with a log line, never a crash. `importDocument()`'s `ImportResult.bytesWritten` must equal the length of the file that actually landed, a zero-byte delivery is refused, and the count is checked against every size the source provider will report (`OpenableColumns.SIZE` + fd stat) — **corroboration, not authority**: a provider claiming *more* than landed is a truncated stream and fails; one that says nothing or less (streaming providers report stale/placeholder sizes) never overrules two agreeing first-hand counts. Passing all of that earns the bytes nothing: the probe, the unlock, the re-key with its four-part acceptance (a same-device pass-through still pays a whole-file `integrity_check`), `SafeImportId` on every manifest id, and the create-only `AncestryPlan` all still treat the file as a stranger's — and the acceptance opens ride `SoilCrypto`'s no-op corruption handler, so a hostile file is refused, never deleted. | `ImporterInfo` / `ImportResult` (constructor `require`s, JVM-tested), `ImportFlow.loadCandidates` / `deliver` / `sourceSizes`, `NotebookImport.readManifest`, `ImportKeying.toGlobal`, `SafeImportId`, `AncestryPlan` (all pure parts JVM-tested) |
 | 11 | **The unlock passphrase's whole lifecycle is host-side, and shorter than export's.** A foreign file's passphrase is typed into a dialog field built with `isSaveEnabled = false` (never in a saved instance state — a secret that survives a process death is a secret on disk), returned to the flow as a local, verified on IO (`SoilCrypto.verifyPassphrase`) under the `"IMPORT"` `AttemptLimiter` bucket (its own — a wrong guess at a stranger's file never counts against the library's unlock), consumed by `ImportKeying` as an SQL literal on a local connection (`ExportKeying.sqlLiteral`, pure, pinned by test), and out of scope when the flow ends. It is never in the spec (delivery is already over by then), never in an Intent, never logged — every failure path here logs an exception's **class name only**. The device's global key follows the same path one step shorter: fetched from `KeySession` inside the flow, handed only to `SoilCrypto` / `ImportKeying` / `SoilDatabase.open`, never crossing the seam. | `ImportDialogs.passphrase` (`isSaveEnabled = false`, IME kept up — the Ratta rule), `ImportFlow.unlock` (`ATTEMPT_BUCKET`), `AttemptLimiter`, `ImportKeying` (path-free messages), `ExportKeying.sqlLiteral` (JVM-tested) |
+
+| 12 | **A `SOURCE_PAGES` exporter receives baked pixels, never the notebook — and its success is judged per source kind.** `ExporterInfo.sourceKind` is a compatible parcel tail (`dataAvail()` — absent = `SOURCE_SOIL`, so every pre-arc-18 descriptor keeps its meaning, proven on real wire at the D1 walk; an unknown kind fails unmarshal and drops the exporter). The host does the reading with the one process that can: `ExportRender` runs `ExportArtifact.prepare`'s guard order one for one (`SoilOpenFiles` held → IN_USE, missing key, unopenable), opens **read-only** through the one `SoilDatabase.open` door and stamps nothing (not even `exportedAt`), bakes each page at its own size — template, headings, links' children, ink — one page in memory at a time, into a `PageBundle` in `cacheDir/export/` that the screen's one `finally` wipes. The container is capped before allocation on **both** sides (`MAX_PAGES` 4096 / `MAX_DIMENSION_PX` 32768 / `MAX_PAGE_BYTES` 32 MiB; magic + declared count checked), and the extension re-checks each decode against the declaration — a mismatch is a delivery failure, never a page to skip. The device key opens the notebook for reading and never leaves the host. Verification (`ExportVerification`, pure): the verbatim `bytesWritten == streamBytes` equality runs for `SOURCE_SOIL` only; `SOURCE_PAGES` is corroborated against the destination's own answers, zero bytes is never a document, `SHORT` (may delete wreckage) stays distinct from `UNCONFIRMED` (never a delete), and an unknown kind is `SHORT` — verification never defaults to trust. | `ExporterInfo` (tail + `require`s, JVM-tested), `ExporterContract.SOURCE_*`, `PageBundle` (Writer/Reader caps, round-trip JVM-tested), `ExportRender` (+ pure `plan`, JVM-tested), `ExportVerification` (JVM-tested), `ExportActivity.runExport` / `renderedPages`, `PdfAssembly.addPage` |
+| 13 | **The export secret is the ONE deliberate secret that crosses any extension seam — user-typed, export-scoped, and it opens no Notesprout data.** It is a password for the *output* file (arc 18 / D2's `OPTION_PROTECT`), never the global passphrase, never derived from it, never the device key; `KIND_PASSPHRASE` keeps its never-crosses meaning and the secret is never in the spec's value map — it rides only `ExportSpec.exportSecret`, a compatible tail holding because the spec stays `export()`'s trailing argument. Host lifecycle = `typedPassphrase`'s to the letter: XML-static `saveEnabled="false"` dual fields, held from the Export tap to the flow's end, cleared at the picker's cancel and in the flow's `finally`, never in instance state / an Intent / a log line; > `MAX_EXPORT_SECRET_CHARS` (128) refused at the tap; a screen rebuilt behind the picker refuses with the honest password-lost body rather than exporting unprotected; `isRenderable` drops a descriptor declaring both rekey and protect (one block, one tenant). Extension side: `PdfExportSpec` refuses an inconsistent delivery in both directions (armed-with-no-secret; secret-nothing-asked-for) with messages that never name, quote or measure the secret; `PdfAssembly` holds it only for the pdfbox call and drops its reference in `finally`, whichever way the assembly ended. | `ExporterContract.OPTION_PROTECT` / `MAX_EXPORT_SECRET_CHARS`, `ExportSpec` (constructor `require` + tail, JVM-tested), `ExportOptions.isRenderable` / `wantsExportSecret` (JVM-tested), `ExportActivity` (`typedExportSecret`, `onExportTap`, `runExport`, `saveLauncher` cancel), `activity_export.xml`, `PdfExportSpec.require` (JVM-tested), `PdfAssembly.assemble`, `PdfExporterService.export` |
 
 **One recorded asymmetry.** The host forces inbound colour to opaque black; the extension does not
 force it on the ink the host sends. That is not an oversight and not a hole: SN's ink is fixed
@@ -842,9 +926,10 @@ closest to describing recognized content, explicitly logs geometry and a coarse 
 
 ## Identity
 
-All three extensions share one recipe; only the name and the point differ. (`:ext-soil` serves
+All four extensions share one recipe; only the name and the point differ. (`:ext-soil` serves
 **two** points — exporter and importer — under one identity: the user's arc-16 call was no rename,
-so the label stays `NSE · Soil Export` even though it imports too.)
+so the label stays `NSE · Soil Export` even though it imports too. `:ext-pdf` is the second
+exporter on the same point — arc 18, no new point.)
 
 **`:ext-scratchpad`**
 
@@ -876,6 +961,18 @@ so the label stays `NSE · Soil Export` even though it imports too.)
 | Icon | the same Tabler "puzzle" glyph as `:ext-mlkit` and `:ext-scratchpad`, byte-identical vector — ink-black outline, ×3.1 / 108dp-viewport scale, same family in Settings → Apps |
 | Launcher activity | **None** — the Supernote launcher shows the package anyway; the family recipe |
 | versionName | host lockstep: `0.1.0-ratta` (`-dev` suffixed in debug), bumped together with `:app` at arc freezes |
+
+**`:ext-pdf`** (arc 18 / D1 — `PdfExporterService`, the second exporter on arc 15's one point)
+
+| | |
+|---|---|
+| Label | **"NSE · PDF Export"** (`"NSE · PDF Export Dev"` in debug — a build-type string override, not a suffix) |
+| Package | `com.symmetricalpalmtree.notesproutsn.ext.pdf` (`.dev` in debug) |
+| Icon | the same Tabler "puzzle" glyph as the other three, byte-identical vector — the family mark, the user's D1 phase-start call (no PDF-specific glyph) |
+| Launcher activity | **None** — the Supernote launcher shows the package anyway; the family recipe |
+| versionName | host lockstep: `0.1.0-ratta` (`-dev` suffixed in debug), bumped together with `:app` at arc freezes |
+| Release APK | 14 MB — pdfbox-android pulls bouncycastle; module-local, and since the D3 review it assembles every export (the framework's `PdfDocument` held each page's raster until the write — the memory finding) |
+| API version | declares **2** (`sourceKind` is load-bearing for it) — an older host skips it at discovery rather than streaming a `.soil` at it; the other three extensions stay at 1 |
 
 ---
 

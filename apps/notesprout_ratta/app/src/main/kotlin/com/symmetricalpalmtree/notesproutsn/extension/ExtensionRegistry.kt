@@ -18,7 +18,9 @@ data class ProviderRef(
 
 /**
  * Discovery + trust for SN's four extension points. A candidate `<service>` is kept only if it is
- * exported, its `<meta-data>` API version equals [ExtensionContract.API_VERSION], and it is signed
+ * exported, its `<meta-data>` API version is in `1..`[ExtensionContract.API_VERSION] (the declared
+ * number is what the extension *requires* of the host — the arc-18 / D3 skew guard, reasoned at
+ * the constant), and it is signed
  * with the host's own certificate (`checkSignatures == SIGNATURE_MATCH` — same-signature only).
  * Everything else is skipped with a `Slog.d`. Disabled packages/components are never returned by the
  * query, so `pm disable` == uninstalled from the host's point of view.
@@ -82,8 +84,8 @@ object ExtensionRegistry {
                 continue
             }
             val apiVersion = si.metaData?.getInt(ExtensionContract.META_API_VERSION, -1) ?: -1
-            if (apiVersion != ExtensionContract.API_VERSION) {
-                Slog.d(TAG) { "skip $component: api version $apiVersion != ${ExtensionContract.API_VERSION}" }
+            if (apiVersion !in 1..ExtensionContract.API_VERSION) {
+                Slog.d(TAG) { "skip $component: api version $apiVersion outside 1..${ExtensionContract.API_VERSION}" }
                 continue
             }
             if (pm.checkSignatures(context.packageName, si.packageName) != PackageManager.SIGNATURE_MATCH) {

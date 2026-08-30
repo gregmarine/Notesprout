@@ -27,9 +27,11 @@ notebook it came from) ·
 `docs/extensions.md` (the **seam**: the four extension points — the recognizer, arc 11's
 screen-owning scratch pad, arc 15's generic exporter point and arc 16's generic importer point —
 the extension store, the tier-2 recipe for an extension-owned screen, and **the boundary audit**) ·
-`docs/export.md` (arc 15: notebook export as a feature — the library sheet's Export… row, the
-`ExportActivity` screen, the keying trio and its host-side transforms, `SoilOpenFiles`, the
-conditional-deletion rule, the failure table) ·
+`docs/export.md` (arc 15, grown arc 18: notebook export as a feature — the library sheet's Export…
+row, the `ExportActivity` screen with its now-real two-exporter chooser, the keying trio and its
+host-side transforms, `SoilOpenFiles`, the conditional-deletion rule, **`NSE · PDF Export`** — the
+host-renders/extension-assembles source-kind split, its page-template and password-protect
+options, the passwordless-PDF silence call — and the failure table for both exporters) ·
 `docs/import.md` (arc 16: notebook import as a feature — the library's Import button, the SAF
 picker and extension match, the always-re-key-to-global pipeline, the untrusted manifest, the
 three questions, the remap, the staged-rename Garden write, the failure table) ·
@@ -48,7 +50,7 @@ All root `CLAUDE.md` rules apply (Kotlin/17, kotlinx-serialization only, no new 
 deps without discussion, no Material Components, no `runBlocking` on main, `Slog.d` not
 `Log.d`, e-ink design system, Tabler icons only). Plus, for this app:
 
-- **Six modules, own Gradle root:** `:app` (the host), `:sn-screen` (the shared paper-screen
+- **Seven modules, own Gradle root:** `:app` (the host), `:sn-screen` (the shared paper-screen
   library — arc 11 / J1: the design resources and the screen helpers both paper surfaces need,
   depends on g-paper + androidx only and **never** on `:app` or `:extension-api`; **a fix to shared
   screen logic goes there, never in a consumer** — that rule is the whole reason the module exists,
@@ -57,10 +59,13 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   `:ext-mlkit` (the **NSE · ML Kit** extension APK), `:ext-scratchpad` (the **NSE · Scratch Pad**
   extension APK — arc 11 / J3: depends on `:extension-api` **and** `:sn-screen`, never `:app`;
   no `tools:replace`, no libc++ `pickFirsts` — those are Paper's Onyx tax and SN has no Onyx),
-  and `:ext-soil` (the **NSE · Soil Export** extension APK — arc 15 / E1: depends on
+  `:ext-soil` (the **NSE · Soil Export** extension APK — arc 15 / E1: depends on
   `:extension-api` only; **arc 16 / I1 made it serve both directions** — one package, two
   services, `SoilExporterService` + `SoilImporterService`, and the label stays `NSE · Soil
-  Export` on the user's call).
+  Export` on the user's call), and `:ext-pdf` (the **NSE · PDF Export** extension APK — arc 18 /
+  D1: package `….ext.pdf`, depends on `:extension-api` only, and carries the module-local
+  `com.tom-roush:pdfbox-android:2.0.27.0` (Apache-2.0) — the one approved dependency of this arc,
+  used only on the password-protect path, and it never leaks into any other module).
   `gradle.properties` sets
   `android.nonTransitiveRClass=false` so `:app`'s `R` keeps seeing the moved resources —
   the move needed no import sweep, and undoing that flag breaks every one of them.
@@ -88,7 +93,15 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   `ExportSpec` (id → value map + display name — no id, no path, no secret) and writes only
   through the granted write fd. A typed passphrase **never** crosses — the reserved
   `ExporterContract.OPTION_KEYING` (and any passphrase-kind option) is executed by the host, and
-  the spec carries only the chosen value id. Served by `:ext-soil` (**NSE · Soil Export**).
+  the spec carries only the chosen value id. Served by `:ext-soil` (**NSE · Soil Export**) and,
+  since arc 18, by a **second** exporter on the same point, `:ext-pdf` (**NSE · PDF Export**) —
+  no new point, on the arc-15 locked decision cashing in. `ExporterInfo` grew a compatible
+  source-kind tail for this (`SOURCE_SOIL` absent-means-today's-meaning vs. `SOURCE_PAGES`, a
+  host-rendered page bundle a PDF exporter assembles instead of the `.soil` it can never receive),
+  and `ExportSpec` grew one deliberate secret crossing, `exportSecret` — a user-typed,
+  export-scoped password that opens no Notesprout data, never the value map, `KIND_PASSPHRASE`'s
+  never-crosses meaning otherwise unchanged. Detail: `docs/export.md` (the feature) and
+  `docs/extensions.md` §§ "The source-kind tail" / "The export secret" (the seam).
   And `ACTION_NOTEBOOK_IMPORTER` / `INotebookImporter` (arc 16 / I1) — the **generic importer
   point**, the exporter's mirror: plural again (`ExtensionRegistry.importers()`), each
   `describe()`s the formats it accepts (label, file extensions, MIME types), and the library's

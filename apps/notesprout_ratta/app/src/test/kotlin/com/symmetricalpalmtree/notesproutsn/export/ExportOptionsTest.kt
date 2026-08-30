@@ -33,6 +33,12 @@ class ExportOptionsTest {
     private fun info(vararg options: OptionDescriptor) =
         ExporterInfo("Notesprout notebook", "soil", "application/octet-stream", options.toList())
 
+    private fun pagesInfo(vararg options: OptionDescriptor) =
+        ExporterInfo(
+            "PDF document", "pdf", "application/pdf", options.toList(),
+            ExporterContract.SOURCE_PAGES,
+        )
+
     /** E1's shipped descriptor: the keying option, Keep-only. */
     private val e1 = info(choice(ExporterContract.OPTION_KEYING, listOf(ExporterContract.KEYING_KEEP), ExporterContract.KEYING_KEEP))
 
@@ -192,8 +198,9 @@ class ExportOptionsTest {
 
     // ── The reserved arc-18 toggles (D2) ─────────────────────────────────────
 
-    /** D2's shipped PDF descriptor: the pair, both toggles, no keying at all. */
-    private val pdf = info(
+    /** D2's shipped PDF descriptor: the pair, both toggles, no keying at all — on SOURCE_PAGES,
+     *  where the template toggle is allowed to live (the D3 source-kind gate). */
+    private val pdf = pagesInfo(
         toggle(ExporterContract.OPTION_PAGE_TEMPLATE, "1"),
         toggle(ExporterContract.OPTION_PROTECT, "0"),
     )
@@ -265,6 +272,33 @@ class ExportOptionsTest {
                 ),
             ),
         )
+    }
+
+    @Test
+    fun aReservedOptionOnlyRidesTheSourceKindThatExecutesIt() {
+        // Keying is the keyed-artifact path's step and the rendered-pages path never runs it: a
+        // SOURCE_PAGES exporter declaring the trio would have its keying UI drawn, collected — and
+        // silently discarded (the D3 review). Dropped whole at discovery instead, exactly like a
+        // keying choice the host has no transform for. Same the other way for the template toggle,
+        // which only the render answers.
+        assertFalse(
+            ExportOptions.isRenderable(
+                pagesInfo(
+                    choice(
+                        ExporterContract.OPTION_KEYING,
+                        listOf(ExporterContract.KEYING_KEEP),
+                        ExporterContract.KEYING_KEEP,
+                    ),
+                ),
+            ),
+        )
+        assertFalse(ExportOptions.isRenderable(info(toggle(ExporterContract.OPTION_PAGE_TEMPLATE, "1"))))
+        // Protect is extension-executed and rides either kind.
+        assertTrue(ExportOptions.isRenderable(info(toggle(ExporterContract.OPTION_PROTECT, "0"))))
+        assertTrue(ExportOptions.isRenderable(pagesInfo(toggle(ExporterContract.OPTION_PROTECT, "0"))))
+        // The gate is by reserved id, whatever the kind: even declared as another kind, the id
+        // names a step the chosen source kind will never execute.
+        assertFalse(ExportOptions.isRenderable(pagesInfo(toggle(ExporterContract.OPTION_KEYING, "0"))))
     }
 
     @Test
