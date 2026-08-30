@@ -4727,7 +4727,7 @@ Haiku the walk.*
 screen section wording.
 
 ### K3 — Review, docs, freeze
-**Status:** ⏳ In progress 2026-08-30 — fixes + docs in, awaiting user all-clear
+**Status:** ✅ Complete 2026-08-30 (commit `c12d5d0`) — **Arc 17 COMPLETE + FROZEN**
 
 **Phase-start answers (user, 2026-08-29):** review level **high**; version stays **0.1.0-ratta**.
 
@@ -4782,5 +4782,7 @@ green both variants; both variants build. Docs: `docs/backup.md` NEW, `docs/libr
 diagram + Backup button + sheet row), `docs/notebook.md` (seal-time compaction + reopen rule),
 both `CLAUDE.md`s, root arc record, memory. No boundary-audit rows — no seam touched (pure core).
 No BACKLOG entries — nothing accepted-unfixed. Version stays `0.1.0-ratta`.
-**Gate:** review findings resolved ✅; docs in ✅; Nomad post-fix walk; user all-clear; statuses
-flipped.
+**Gate:** review findings resolved ✅; docs in ✅; Nomad post-fix walk ✅ (launch/reopen/backup
+clean; the walk's UNCLEAR backup step re-driven by hand — engine log honest, destination clean;
+the 8:52 "anomaly" resolved as a user-driven run correctly skipping the excluded notebook);
+user all-clear ✅ 2026-08-30; statuses flipped ✅.

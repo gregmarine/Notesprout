@@ -328,7 +328,8 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   user decision). 890 JVM tests; version stays `0.1.0-ratta`; g-paper pin stays 0.1.23.
   Reference: **`apps/notesprout_ratta/docs/import.md`** (feature) + `docs/extensions.md`
   rows 9–11 (seam).
-  **Arc 17 "Backup"** (K1 `73d6490` · K2 `7fb0aa2` · K3 2026-08-30): compaction + local backup,
+  **Arc 17 "Backup"** ✅ **COMPLETE + FROZEN 2026-08-30** (K1 `73d6490` · K2 `7fb0aa2` ·
+  K3 `c12d5d0`): compaction + local backup,
   **pure core** on the wizard's lock — no extension, SN stays at four points; Drive backup stays a
   future arc behind its own capability-point decision. K1: **purge at every close** (the user's
   explicit call — og never purged user content): `SoilCompactor` hard-deletes every soft-deleted
