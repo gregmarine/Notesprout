@@ -4786,3 +4786,127 @@ No BACKLOG entries — nothing accepted-unfixed. Version stays `0.1.0-ratta`.
 clean; the walk's UNCLEAR backup step re-driven by hand — engine log honest, destination clean;
 the 8:52 "anomaly" resolved as a user-driven run correctly skipping the excluded notebook);
 user all-clear ✅ 2026-08-30; statuses flipped ✅.
+
+---
+
+## Phases — Arc 18 "PDF" (planned 2026-08-30, wizard complete)
+
+**PDF export as a second exporter extension.** The library's Export screen finally earns its
+chooser: with `NSE · Soil Export` and the new **`NSE · PDF Export`** both installed, the user picks
+a format; with one, the chooser stays collapsed to a label — exactly the behavior E1 built and no
+screen rework needed. og's `NotebookExporter` (raster: each page rendered to a bitmap, drawn into
+an `android.graphics.pdf.PdfDocument` page; pdfbox for password protection) is the reading
+reference — no code copied.
+
+**No new capability point.** This rides arc 15's `ACTION_NOTEBOOK_EXPORTER` — the locked arc-15
+decision ("a future PDF exporter is another APK — no new point") cashing in. SN stays at FOUR
+points. The contract does grow a **compatible tail** (`ExporterInfo`'s wire form reserved one for
+exactly this), so host and extensions still ship in lockstep.
+
+### Locked decisions (arc-18 wizard 2026-08-30 — do not re-ask)
+
+| Decision | Answer |
+|---|---|
+| Scope | **Full-notebook PDF, all pages, local SAF only** — the soil exporter's destination shape. No page scope, no share, no Drive this arc. |
+| The seam | **The host renders, the extension assembles** (user's pick over stroke-data crossing and host-built PDF). A PDF exporter can never receive the encrypted `.soil` — no key crosses — so `ExporterInfo` grows a compatible-tail **source-kind** declaration: `SOURCE_SOIL` (absent = today's meaning, the prepared `.soil` artifact) vs `SOURCE_PAGES` (a host-rendered page bundle). For `SOURCE_PAGES` the host renders **every page at its own pixel size, full fidelity** — template layer + headings + links' wrapped children + ink, the `PagePreview`/`StrokeRasterizer` recipe grown to full pages — into a documented length-prefixed container of encoded page images in `cacheDir/export/`; the extension receives that container fd + the destination fd and writes the PDF. **The "what a notebook is" question stays host-side**: when text/markdown document notebooks arrive (og's Documents, not yet in SN), the host renders those to pages too and the extension never changes. A selectable-text PDF would need text to cross — a future decision, deliberately not built now. |
+| Verification seam change | The `bytesWritten == streamBytes` check is a **verbatim-streaming contract** and holds only for `SOURCE_SOIL`. A PDF's size is not the container's, so for `SOURCE_PAGES` the extension reports what it wrote to the destination and the host corroborates **against the destination's own answers only** (the E3 corroboration rule, minus the source-length equality). Per-source-kind verification is D1 seam work, pinned by test. |
+| Keying | The PDF exporter declares **no `OPTION_KEYING`** — the trio is `.soil`-specific. The device key is used host-side only, to open the notebook for rendering. The screen already handles this: no keying option ⇒ no passphrase block, no plain warning. |
+| PDF password | **In v1** (user's explicit 2026-08-30 call). An **independent, export-time passphrase**: typed into the host's dual masked fields (the rekey-fields pattern, XML-static, `saveEnabled=false`), **never the global Notesprout passphrase, never derived from it, never the device key**. It crosses the seam to `:ext-pdf` as a **dedicated export-secret carrier** on `ExportSpec` — *not* the spec value map, and *not* `KIND_PASSPHRASE`, which keeps its never-crosses meaning. pdfbox encrypts (AES-128, og's shape). The boundary audit gains an explicit row: the one secret that ever crosses an extension seam is user-typed, export-scoped, and opens no Notesprout data. The "passphrase was lost" honesty rule (rebuilt screen wipes the fields) applies verbatim. |
+| New dependency | **`com.tom-roush:pdfbox-android:2.0.27.0`** (Apache-2.0, og's exact dep) in **`:ext-pdf` only** — explicitly discussed and approved 2026-08-30. The host and every other module stay clean; plain PDF uses only the framework's `PdfDocument`. |
+| Options | Exactly two, both D2: **Include page template** toggle (default on — renders the paper under the ink; off = white ground) and **Password-protect** toggle (arming reveals the dual fields). D1 ships a bare descriptor — not-built controls do not exist (the E1→E2 precedent: the descriptor flips when the host work lands). |
+| Identity | **`:ext-pdf`**, SEVENTH module, label **`NSE · PDF Export`** (`… Dev` in debug), package `com.symmetricalpalmtree.notesproutsn.ext.pdf` (`.dev` in debug), no launcher activity, versionName lockstep `0.1.0-ratta`, MIME `application/pdf`, extension `pdf`, `ExportNaming` reused as-is. Tabler icon at the family ×3.1 scale (pick at D1 phase start). The `:ext-soil` recipe verbatim; depends on `:extension-api` only. |
+| Staffing | The standing recipe. **Fable writes the seams**: the contract tail (source kind + export-secret carrier + per-kind verification), the page-bundle container format, and the host render pipeline's contract. Opus builds `:ext-pdf` and the host flow wiring; Sonnet scaffold/layouts/strings/icon; Haiku the Nomad walks; ≤ 5 background agents. |
+| Arc shape | **Three phases D1–D3** (phase letter D, unused). Each ends green — build + `./gradlew test` + Nomad — so the user can `/clear` between them. |
+
+### Arc-18 standing traps (assume they apply)
+
+- **A SAF pick cannot be driven by adb** (G4, verbatim): every path through the picker is a user
+  checklist item. The PDF proof is the Mac: pull the saved file, open it in Preview/`qpdf`,
+  password variant refuses without and opens with the typed passphrase.
+- **The verbatim-streaming verification does NOT transfer** — E3 explicitly refuted a
+  "transforming exporter" finding *because* soil streams verbatim. The PDF exporter is that
+  transforming exporter, arrived for real; the per-kind verification decision above is the answer.
+  Do not let the old `streamBytes` equality run against a `SOURCE_PAGES` export.
+- **Memory: one page at a time, both sides.** The host renders and encodes page N, appends it to
+  the container, and recycles before N+1; the extension decodes one image, writes one PDF page,
+  recycles. A whole notebook of full-size bitmaps in memory is an OOM on a 3 GB device. (F4's
+  lesson: byte bounds are re-checked whenever a bitmap grows.)
+- **Page bitmaps are RGB_565, WEBP lossy q100** — the F5 measured findings (Skia lossless ~10×
+  slower and bigger; opaque white-ground pages have no alpha to lose). `LinkComposite` stays
+  ARGB_8888 *on screen*; the export render is a fresh opaque bake, not a reuse of screen bitmaps.
+- **`EXPORT_TIMEOUT_MS` was sized for a byte copy.** PDF assembly (decode + `PdfDocument` encode
+  per page) is heavier — measure a big notebook on the Nomad at D1 before pinning a PDF-specific
+  timeout; never guess (the J5 lesson).
+- **Only marshalable exceptions cross the point**; the fd-receiving stub's caller check runs
+  *inside* the try whose `finally` closes the fds (the E1 trap).
+- **The export-secret carrier is never logged, never in instance state, never in an Intent** —
+  the typed-passphrase lifecycle rules from E2 apply verbatim, plus: the extension holds it only
+  for the pdfbox call and clears its own copy in `finally`.
+- **The host render opens the notebook read-only through the one door** — `SoilOpenFiles` guard
+  first (IN_USE refusal, same as soil export), `SoilCrypto` open, pages in display order, sealed
+  behavior identical to `ExportArtifact.prepare`'s hygiene (cache wiped per export,
+  never-delete-on-corruption on the temp).
+- **File tools can land a raw NUL byte** (fired 3×) — byte-scan changed files for `\x00` before
+  calling any phase done.
+- **GONE, never disabled — and not-built controls do not exist** (the J4 rule): D1's descriptor
+  declares no options; D2 flips it to the pair when the host work exists. No dead rows between.
+
+### D1 — The seam growth + host render pipeline + `NSE · PDF Export` (plain PDF end to end)
+**Status:** ⬜ Not started
+
+Fable: `ExporterInfo`'s compatible tail (`sourceKind`, absent = `SOURCE_SOIL` — old descriptors
+keep their meaning), the export-secret carrier on `ExportSpec` (empty this phase), the per-kind
+verification contract, and the **page-bundle container format** (magic + version + page count +
+per-page width/height/byte-length + WEBP bytes — pinned by round-trip tests). Host: the render
+pipeline (`export/ExportRender.kt` or similar — `SoilOpenFiles` guard, read-only open, per-page
+full-fidelity bake: template + headings + links + ink, one page in memory at a time, staged
+progress "Rendering page N of M…"), `ExportActivity` branching on the chosen exporter's source
+kind (soil path byte-identical to today — pinned by the existing tests staying green). `:ext-pdf`
+(Opus + Sonnet scaffold): seventh module, service with caller check first, bare descriptor
+(`SOURCE_PAGES`, no options), `export()` = container in → framework `PdfDocument` out, one page
+at a time, fsync, honest byte count. Timeout measured on a big notebook before pinning.
+**Gate:** JVM tests (container round trip, tail-compat parcelables — an old-shape descriptor still
+parses, per-kind verification, render-pipeline pure parts); seven modules build debug + release;
+Haiku walk (chooser shows TWO exporters as radios — the first time ever — collapse behavior when
+one is disabled via `pm disable-user`, options panel swaps on selection, crash buffer, binds =
+unbinds); **user checklist** (SAF save of a plain PDF; Mac opens it; page count and fidelity
+eye-check).
+*Fable seams; Opus extension + host flow; Sonnet scaffold/strings/icon; Haiku the walk.*
+
+**Questions to resolve at phase start:** Tabler icon for `:ext-pdf`; PDF timeout after the Nomad
+measurement; container image format sanity-check (WEBP q100 assumed from F5 — re-measure only if
+the PDF pass looks slow).
+
+### D2 — The two options: page-template toggle + password protection
+**Status:** ⬜ Not started
+
+The descriptor flips to the pair. Host: the template toggle threads into the render pipeline
+(off = white ground under the ink); the Password-protect toggle reveals the dual masked fields
+(reusing the XML-static block — visibility keys on the *export-secret* declaration now, not just
+keying), empty/mismatch dialogs before the picker (E2's shape), the typed secret rides the new
+carrier. `:ext-pdf`: pdfbox lands (module-local dep), password path = assemble with `PdfDocument`
+then encrypt via pdfbox (og's post-process shape), secret cleared in `finally`. Staged progress
+grows the encrypting stage.
+**Gate:** JVM tests (option threading, carrier never-in-spec-map pin, descriptor shape); builds;
+Haiku walk (toggle reveal/hide, dialogs, crash buffer); **user checklist** (template-off PDF,
+password PDF opens with the passphrase on the Mac and refuses without, plain PDF still fine).
+*Opus features; Fable the carrier review; Haiku the walk.*
+
+**Questions to resolve at phase start:** whether an unprotected PDF of an (always-encrypted)
+notebook deserves an inline honesty line like the plain-keying warning — every SN notebook is
+encrypted, so it would show on every passwordless PDF export; user's call on wording vs. silence.
+
+### D3 — Review, boundary audit, docs, freeze
+**Status:** ⬜ Not started
+
+Arc-range `/code-review` (level asked at phase start — every arc has frozen at high). Boundary
+audit: `docs/extensions.md` gains the source-kind seam + **the export-secret row** (the one
+deliberate secret crossing, its scope and lifecycle) walked against the code. Docs:
+`docs/export.md` grown (the chooser with two exporters, the source-kind seam, the PDF failure
+rows), `docs/extensions.md` (seventh module, `:ext-pdf` identity), app `CLAUDE.md` (module list),
+root `CLAUDE.md` arc record, memory, BACKLOG ledger for accepted findings. Version-stamp decision.
+Full regression (JVM + both variants + Haiku walk + short user checklist). Commit + push; freeze.
+**Gate:** everything green or explicitly accepted; user all-clear.
+*Review as `/code-review`; fixes per finding; Sonnet the doc pass; Haiku the regression walk.*
+
+**Questions to resolve at phase start:** review level; version stamp.
