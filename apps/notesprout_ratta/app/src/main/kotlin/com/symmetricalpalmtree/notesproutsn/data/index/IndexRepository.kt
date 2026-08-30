@@ -129,6 +129,11 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
         createdAt: Long,
         updatedAt: Long,
         templateKind: String?,
+        /** Whether the imported file describes itself as a text document (arc 19 / M2) — its
+         *  `notebook_meta.textDocument`. It is the arriving file's nature, so it comes from the
+         *  manifest and **replaces** whatever the replaced row said, exactly as [templateKind]
+         *  does. */
+        textDocument: Boolean = false,
     ): ObjectEntity {
         val existing = dao.byId(id)
         val row = ObjectEntity(
@@ -138,7 +143,8 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
             // An id-collision Replace lands on a row the user may have flagged "Exclude from
             // backup" — a wholesale flags rewrite would silently drop that policy (K3 review).
             flags = NotebookFlags.ENCRYPTED or
-                ((existing?.flags ?: 0) and NotebookFlags.EXCLUDE_FROM_BACKUP),
+                ((existing?.flags ?: 0) and NotebookFlags.EXCLUDE_FROM_BACKUP) or
+                (if (textDocument) NotebookFlags.TEXT_DOCUMENT else 0),
             keyScope = KEY_SCOPE_GLOBAL,
             templateKind = templateKind, blob = null,
         )

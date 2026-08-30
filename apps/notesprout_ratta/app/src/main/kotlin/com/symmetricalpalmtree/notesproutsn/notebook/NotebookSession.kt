@@ -11,6 +11,7 @@ import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.crypto.KeySession
 import com.symmetricalpalmtree.notesproutsn.data.clip.ClipEnvelope
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
+import com.symmetricalpalmtree.notesproutsn.data.index.NotebookFlags
 import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookMeta
 import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookMetaStore
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilCompactor
@@ -498,7 +499,13 @@ class NotebookSession(
         repo.touch(notebookId, now)
     }
 
-    /** Refresh `notebook_meta` from the index (name, folder path) — the file stays self-describing. */
+    /** Refresh `notebook_meta` from the index (name, folder path) — the file stays self-describing.
+     *
+     *  `textDocument` is read from the **index bit** and never from [existing] (arc 19 / M2): the
+     *  index is the authority and the meta field only mirrors it, so a refresh that carried the
+     *  previous meta forward would wipe the flag the first time the file was written by anything
+     *  that had not seen it (og's meta-refresh-wipe trap). Every meta writer in this app sources it
+     *  the same way. */
     suspend fun refreshMeta(appVersionCode: Int) = withContext(Dispatchers.IO) {
         if (!isOpen) return@withContext
         val row = repo.get(notebookId) ?: return@withContext
@@ -507,6 +514,7 @@ class NotebookSession(
             notebookId = notebookId, name = row.name,
             createdAt = existing?.createdAt ?: row.createdAt, updatedAt = row.updatedAt,
             folderPath = repo.ancestry(row.parentId), appVersionCode = appVersionCode,
+            textDocument = ((row.flags ?: 0) and NotebookFlags.TEXT_DOCUMENT) != 0,
         ))
     }
 

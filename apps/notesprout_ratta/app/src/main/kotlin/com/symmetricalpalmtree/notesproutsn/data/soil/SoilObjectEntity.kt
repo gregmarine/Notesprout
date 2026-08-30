@@ -42,6 +42,9 @@ data class SoilObjectEntity(
     val color: String? = null,
     val strokeWidth: Float? = null,
     val style: String? = null,
-    val flags: Int? = null,
+    /** Kotlin `Long` since arc 19 — a `document` row's source watermark is epoch millis, which an
+     *  `Int` overflows. The column was always SQLite INTEGER (64-bit) with the same affinity and
+     *  nullability either way, so the Room identity hash — the format contract — is unmoved. */
+    val flags: Long? = null,
     @ColumnInfo(typeAffinity = ColumnInfo.BLOB) val blob: ByteArray? = null,
 )

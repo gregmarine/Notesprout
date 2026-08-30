@@ -364,6 +364,12 @@ object NotebookImport {
         folderPath: List<FolderRef>,
         passphrase: String,
         appVersionCode: Int,
+        /** What the index row this import just wrote says — a parameter rather than a read of the
+         *  previous meta (arc 19 / M2): the index bit is the authority, the meta field mirrors it,
+         *  and the caller is the one side that knows what was written (og's meta-refresh-wipe
+         *  trap). It comes from the imported file's own manifest, so a text document imported from
+         *  another device stays one. */
+        textDocument: Boolean,
         now: Long = System.currentTimeMillis(),
     ) = withContext(Dispatchers.IO) {
         val file = soilFile(context, notebookId)
@@ -387,7 +393,7 @@ object NotebookImport {
                     cover = null,
                     folderPath = folderPath,
                     appVersionCode = appVersionCode,
-                    textDocument = existing?.textDocument ?: false,
+                    textDocument = textDocument,
                 ),
             )
         } catch (e: Exception) {

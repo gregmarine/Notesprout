@@ -50,6 +50,29 @@ object SoilSchema {
      */
     const val TYPE_LINK = "link"
 
+    /**
+     * Document object (arc 19) — the third additive row type, og's model with one deviation:
+     * the watermark rides `flags` instead of og's `srcUpdatedAt` column (og's table had no spare
+     * 64-bit slot; this family's `flags` is a nullable SQLite INTEGER, which is 64-bit — see
+     * [SoilObjectEntity.flags]). No version bump, no migration; Paper ignores the rows.
+     *
+     * `parentId` = the page id (a **page document** — at most one live row per page) or the
+     * notebook root row's id (the **notebook document** — the merged final draft, at most one
+     * live row per notebook, og's shape) · `text` = the markdown, always non-blank ·
+     * `flags` = **the source watermark**: the page's (or notebook's) max content `updatedAt` at
+     * the last seed/refresh, epoch millis; NULL = authored by hand, never drafted from the page.
+     * The watermark moves in exactly two places — the seed and a "Bring in" refresh — which is
+     * what makes "page has changed since this draft" meaningful. Everything else null;
+     * `"order"` = 0 (one row per parent, nothing to order).
+     *
+     * **Blank means absent** (og's rule): a document with no text is never inserted and a save of
+     * blank text deletes the row — which is what lets seed-once work with no "has been seeded"
+     * flag. `document` rows are **excluded** from every content-staleness whitelist (a document
+     * is a product of the page, not content on it) but a page delete / copy / purge cascade
+     * carries them like any child row — a document travels with its page.
+     */
+    const val TYPE_DOCUMENT = "document"
+
     /** The notebook meta row's `parentId` (it is the root). */
     const val ROOT_PARENT = ""
 

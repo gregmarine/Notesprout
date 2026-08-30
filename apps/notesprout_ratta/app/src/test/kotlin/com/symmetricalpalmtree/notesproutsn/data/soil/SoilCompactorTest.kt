@@ -88,6 +88,30 @@ class SoilCompactorTest {
     }
 
     @Test
+    fun aLiveDocumentOnALivePageSurvives() {
+        // A document is a product of the page, not content on it — but it *is* the user's writing,
+        // and the purge only ever removes what is soft-deleted or unreachable (arc 19 / M2).
+        val rows = listOf(
+            root(), page("p1"), stroke("s1", "p1"),
+            Row("doc-p1", "p1", SoilSchema.TYPE_DOCUMENT, deleted = false),
+            Row("doc-nb", nb, SoilSchema.TYPE_DOCUMENT, deleted = false),   // the notebook document
+        )
+        assertTrue(SoilCompactor.purgeIds(rows).isEmpty())
+    }
+
+    @Test
+    fun aPurgedPageTakesItsDocumentWithIt() {
+        // The cascade is untyped on purpose: a document under a dead page is unreachable exactly
+        // like the page's ink, and it goes the same way.
+        val rows = listOf(
+            root(), page("p1", deleted = true),
+            Row("doc-p1", "p1", SoilSchema.TYPE_DOCUMENT, deleted = false),
+            page("p2"), Row("doc-p2", "p2", SoilSchema.TYPE_DOCUMENT, deleted = false),
+        )
+        assertEquals(setOf("p1", "doc-p1"), SoilCompactor.purgeIds(rows))
+    }
+
+    @Test
     fun emptyInputIsEmptyOutput() {
         assertTrue(SoilCompactor.purgeIds(emptyList()).isEmpty())
     }

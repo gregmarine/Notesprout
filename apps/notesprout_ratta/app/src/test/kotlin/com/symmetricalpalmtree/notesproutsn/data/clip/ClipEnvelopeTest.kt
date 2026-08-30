@@ -49,10 +49,10 @@ class ClipEnvelopeTest {
 
     @Test
     fun `a row with no blob decodes to no bytes`() {
-        val row = ClipRow(id = "h-1", parentId = "page-1", type = "heading", text = "## Title", flags = 2)
+        val row = ClipRow(id = "h-1", parentId = "page-1", type = "heading", text = "## Title", flags = 2L)
         val back = ClipEnvelope.decode(ClipEnvelope.encode(envelope(listOf(row))))!!
         assertNull(back.rows.single().blobBytes())
-        assertEquals(2, back.rows.single().flags)
+        assertEquals(2L, back.rows.single().flags)
     }
 
     @Test

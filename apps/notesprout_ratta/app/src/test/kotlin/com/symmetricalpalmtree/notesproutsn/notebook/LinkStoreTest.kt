@@ -2,6 +2,8 @@ package com.symmetricalpalmtree.notesproutsn.notebook
 
 import com.symmetricalpalmtree.gpaper.core.model.Stroke
 import com.symmetricalpalmtree.gpaper.core.model.StrokePoint
+import com.symmetricalpalmtree.notesproutsn.data.soil.DocumentRepository
+import com.symmetricalpalmtree.notesproutsn.data.soil.FakeDocumentDao
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -64,6 +66,25 @@ class LinkStoreTest {
         assertTrue(dao.liveContentIds("page").isEmpty())
         // …but the deep set carries link + grandchildren.
         assertEquals(setOf("l1", "s1", "s2", "h1"), links.deepChildIds("page").toSet())
+        writer.close()
+    }
+
+    /**
+     * The page's `document` row is in the deep set (arc 19 / M2) — which is what makes a page
+     * delete, its undo, and a page copy carry the user's draft with the page it belongs to. It
+     * joins at the **page** level only: a link never wraps a document.
+     */
+    @Test
+    fun `the deep set carries the page's document`() = runBlocking {
+        val dao = FakeSoilDao()
+        val (links, writer, stores) = make(dao)
+        seed(dao, writer, stores)
+        val docs = DocumentRepository(FakeDocumentDao(dao), dao) { "doc-1" }
+        docs.saveDrafted("page", "# Draft", srcUpdatedAt = 1_756_500_000_000L)
+
+        assertTrue("doc-1" in links.deepChildIds("page"))
+        // Still only the page's own loose ink at one level — the document is not "content on it".
+        assertEquals(setOf("s1", "s2", "h1"), dao.liveContentIds("page").toSet())
         writer.close()
     }
 

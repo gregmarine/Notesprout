@@ -343,6 +343,11 @@ class ImportFlow(
             }
         }
         val now = System.currentTimeMillis()
+        // The arriving file's own nature (arc 19 / M2), read once and used for both writes — the
+        // index row (the authority) and the meta refresh (its mirror). Untrusted like the rest of
+        // the manifest, and harmless if wrong: the worst it costs is a notebook that opens on the
+        // wrong one of its two surfaces.
+        val textDocument = manifest.meta?.textDocument == true
         repo.importNotebookRow(
             id = identity.notebookId,
             name = naming.name,
@@ -351,6 +356,7 @@ class ImportFlow(
             createdAt = manifest.meta?.createdAt ?: now,
             updatedAt = manifest.meta?.updatedAt ?: now,
             templateKind = manifest.templateKind,
+            textDocument = textDocument,
         )
         // The replaced notebook goes only now — cancelling anywhere above left it untouched.
         naming.retireId?.let { retireNotebook(it) }
@@ -371,6 +377,7 @@ class ImportFlow(
                 folderPath = repo.ancestry(parentId),
                 passphrase = global,
                 appVersionCode = versionCode(),
+                textDocument = textDocument,
             )
         }.onFailure { Log.w(TAG, "meta refresh skipped: ${it.javaClass.simpleName}") }
 

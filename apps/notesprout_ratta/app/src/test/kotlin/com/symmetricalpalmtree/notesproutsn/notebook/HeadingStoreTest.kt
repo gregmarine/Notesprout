@@ -61,7 +61,7 @@ class HeadingStoreTest {
         val row = dao.rows["a"]!!
         assertNull(row.deletedAt)
         assertEquals(0, row.order)
-        assertEquals(3, row.flags)
+        assertEquals(3L, row.flags)
         assertEquals(1f, row.x)
         writer.close()
     }
@@ -96,7 +96,7 @@ class HeadingStoreTest {
         writer.drain()
         val row = dao.rows["a"]!!
         assertEquals("##### New", row.text)
-        assertEquals(5, row.flags)
+        assertEquals(5L, row.flags)
         assertEquals(200f, row.width)
         assertEquals(80f, row.height)
         assertEquals(1f, row.x)

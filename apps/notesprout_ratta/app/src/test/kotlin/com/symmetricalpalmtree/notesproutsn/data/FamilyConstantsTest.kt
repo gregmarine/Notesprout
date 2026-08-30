@@ -23,6 +23,8 @@ class FamilyConstantsTest {
         assertEquals("list", ObjectType.LIST)
         assertEquals("list_item", ObjectType.LIST_ITEM)
         assertEquals(1, NotebookFlags.ENCRYPTED)
+        assertEquals(2, NotebookFlags.EXCLUDE_FROM_BACKUP)
+        assertEquals(4, NotebookFlags.TEXT_DOCUMENT)
         assertEquals("__notesprout_index__", KeyMaterial.INDEX_FILE_ID)
     }
 
@@ -35,6 +37,10 @@ class FamilyConstantsTest {
         assertEquals("page", SoilSchema.TYPE_PAGE)
         assertEquals("template", SoilSchema.TYPE_TEMPLATE)
         assertEquals("stroke", SoilSchema.TYPE_STROKE)
+        assertEquals("heading", SoilSchema.TYPE_HEADING)
+        assertEquals("link", SoilSchema.TYPE_LINK)
+        // Arc 19: og's row type, verbatim — a `.soil` written here must read as a document there.
+        assertEquals("document", SoilSchema.TYPE_DOCUMENT)
         assertEquals("", SoilSchema.ROOT_PARENT)
         assertEquals("BLANK", SoilSchema.TEMPLATE_BLANK)
         assertEquals("GLOBAL", KEY_SCOPE_GLOBAL)

@@ -29,6 +29,10 @@ abstract class SoilDatabase : RoomDatabase() {
 
     abstract fun dao(): SoilDao
 
+    /** The `document` row's own queries (arc 19). A second DAO over the same one entity — the
+     *  entity set is what Room hashes, so this adds no schema drift and needs no migration. */
+    abstract fun documentDao(): DocumentDao
+
     /** The raw connection, for `notebook_meta` and PRAGMAs. */
     fun raw(): SupportSQLiteDatabase = openHelper.writableDatabase
 

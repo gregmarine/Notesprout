@@ -5,6 +5,7 @@ import android.util.Log
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.crypto.KeySession
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
+import com.symmetricalpalmtree.notesproutsn.data.index.NotebookFlags
 import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookMeta
 import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookMetaStore
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilDatabase
@@ -170,7 +171,10 @@ object ExportArtifact {
                     folderPath = repo.ancestry(row.parentId),
                     exportedAt = System.currentTimeMillis(),
                     appVersionCode = appVersionCode,
-                    textDocument = existing?.textDocument ?: false,
+                    // From the index bit, never from `existing` (arc 19 / M2): the index is the
+                    // authority and the meta field mirrors it, so carrying the previous meta
+                    // forward is how the flag gets silently wiped (og's meta-refresh-wipe trap).
+                    textDocument = ((row.flags ?: 0) and NotebookFlags.TEXT_DOCUMENT) != 0,
                 ),
             )
         } catch (e: Exception) {

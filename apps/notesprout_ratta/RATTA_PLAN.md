@@ -592,7 +592,27 @@ the suites.*
 ambiguous in og's behavior gets asked as it surfaces.
 
 ### M2 — Host data layer
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (2026-08-30)
+
+**Outcome:** The document data layer is in, green (1161 JVM tests/variant, +35), and a pre-phase
+file opens on the Nomad (the identity-hash proof — crash buffer clean). `TYPE_DOCUMENT` KDoc'd in
+`SoilSchema` with the flags-as-watermark contract; `SoilObjectEntity.flags` **and `ClipRow.flags`**
+retyped `Int?`→`Long?` (same INTEGER affinity — hash unmoved; ClipRow rides along so a page copy
+carries the watermark verbatim). `DocumentDao` (documentFor / two staleness sweeps / the
+setDocumentText·setDocumentDrafted pair — **exactly one of them moves `flags`**, structural) +
+`DocumentRepository` (blank-means-absent enforced on read AND as soft-delete on write — stricter
+than og's write-the-blank, deliberate; drop-unchanged-write; `save` cannot touch the watermark,
+only `saveDrafted` can — og's single-method+caller-discipline made structural). **Staleness sweeps
+count soft-deleted rows (og's rule — an erase IS a page change)**; the SN-only wrinkle is KDoc'd
+on the query: the arc-17 close purge hard-deletes those rows, so erase-raised staleness lasts
+until the next close, then the max honestly describes what remains — accepted, do not "fix".
+`liveDescendantIds` gained `'document'` at the page level only (delete/undo/copy carry the page
+document; a link never wraps one). `NotebookFlags.TEXT_DOCUMENT = 4`; all THREE meta-refresh
+sites source `textDocument` from the index bit, never the previous meta (the wipe trap);
+import reads the probed manifest's flag once and feeds both writes (a text document imported
+from another device stays one). Purge parity pinned: a document dies only via cascade from its
+purged page. Create paths untouched (the type radio is M8). `:app` still does not depend on
+`:markdown`; the isStale comparison stays with the consumer phases.
 
 `TYPE_DOCUMENT` in `SoilSchema` (KDoc'd like heading/link), the `flags`-as-watermark contract
 written at the constant, `SoilObjectEntity.flags` retyped `Long?` if needed (identity-hash

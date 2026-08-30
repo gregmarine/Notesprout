@@ -76,6 +76,13 @@ object NotebookFlags {
      *  ignores unknown bits. Setting or clearing it never bumps `updatedAt` (policy, not content —
      *  og's rule: a bump would re-flag the notebook the moment it was toggled). */
     const val EXCLUDE_FROM_BACKUP = 2
+
+    /** Arc 19 / M2 — a **text document**: a notebook whose primary surface is the Markdown editor,
+     *  not paper (og's `flags` bit 2). Format-safe like [EXCLUDE_FROM_BACKUP]: Paper ignores
+     *  unknown bits. The bit is the index's authority; `notebook_meta.textDocument` mirrors it so
+     *  the file stays self-describing — every meta refresh sources the field from **this bit**,
+     *  never from the previous meta row (the og meta-refresh-wipe trap). */
+    const val TEXT_DOCUMENT = 4
 }
 
 /**

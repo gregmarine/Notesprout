@@ -59,7 +59,8 @@ class FakeSoilDao : SoilDao {
             .toSet()
         return rows.values.filter {
             it.deletedAt == null && (
-                (it.parentId == pageId && (it.type == "stroke" || it.type == "heading" || it.type == "link")) ||
+                (it.parentId == pageId &&
+                    (it.type == "stroke" || it.type == "heading" || it.type == "link" || it.type == "document")) ||
                     it.parentId in linkIds
                 )
         }.map { it.id }
@@ -105,7 +106,9 @@ class FakeSoilDao : SoilDao {
         events += "setPosition:$id"
     }
     override suspend fun setHeadingContent(id: String, text: String, flags: Int, width: Float, height: Float, at: Long) {
-        rows[id]?.let { rows[id] = it.copy(text = text, flags = flags, width = width, height = height, updatedAt = at) }
+        // The DAO takes a heading level as an `Int`; the column is the family's 64-bit `flags`
+        // (arc 19 retype) — SQLite widens it on the way in, and so does the fake.
+        rows[id]?.let { rows[id] = it.copy(text = text, flags = flags.toLong(), width = width, height = height, updatedAt = at) }
         events += "setHeadingContent:$id"
     }
     override suspend fun maxOrder(parentId: String, type: String) =

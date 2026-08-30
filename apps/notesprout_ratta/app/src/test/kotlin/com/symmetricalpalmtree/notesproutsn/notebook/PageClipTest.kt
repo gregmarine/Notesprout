@@ -24,7 +24,7 @@ class PageClipTest {
     private fun row(
         id: String, parentId: String, type: String, order: Int = 0,
         refId: String? = null, text: String? = null, blob: ByteArray? = null,
-        width: Float? = null, height: Float? = null, flags: Int? = null,
+        width: Float? = null, height: Float? = null, flags: Long? = null,
     ) = SoilObjectEntity(
         id = id, parentId = parentId, type = type, order = order,
         createdAt = 1L, updatedAt = 2L, deletedAt = null,
@@ -36,13 +36,18 @@ class PageClipTest {
     private val pageRow = row(pageId, notebookId, SoilSchema.TYPE_PAGE, order = 2,
         refId = templateId, width = 1404f, height = 1872f)
 
-    /** A page with loose ink, a heading, and a link wrapping a stroke of its own (two levels). */
+    /** A watermark past `Int.MAX_VALUE` — epoch millis, the value the arc-19 retype exists for. */
+    private val watermark = 1_756_500_000_000L
+
+    /** A page with loose ink, a heading, a link wrapping a stroke of its own (two levels), and the
+     *  page's document — `SoilDao.liveDescendantIds` carries all five, so a copy captures all five. */
     private fun content() = listOf(
         row("s-loose", pageId, SoilSchema.TYPE_STROKE, order = 0, blob = byteArrayOf(9, 8, 7)),
-        row("h-1", pageId, SoilSchema.TYPE_HEADING, order = 1, text = "## Title", flags = 2),
+        row("h-1", pageId, SoilSchema.TYPE_HEADING, order = 1, text = "## Title", flags = 2L),
         row("lnk-1", pageId, SoilSchema.TYPE_LINK, order = 0,
             text = LinkPayload.encode(LinkPayload.CHROME_UNDERLINE, LinkPayload.KIND_PAGE, null, "page-9")),
         row("s-wrapped", "lnk-1", SoilSchema.TYPE_STROKE, order = 5, blob = byteArrayOf(4, 5)),
+        row("doc-1", pageId, SoilSchema.TYPE_DOCUMENT, order = 0, text = "# Draft", flags = watermark),
     )
 
     private fun envelope() = PageClip.capture(pageRow, templateRow, content(), notebookId, now)
@@ -63,7 +68,7 @@ class PageClipTest {
         assertEquals(notebookId, env.sourceNotebookId)
         assertEquals(now, env.copiedAt)
         assertEquals(
-            listOf(templateId, pageId, "s-loose", "h-1", "lnk-1", "s-wrapped"),
+            listOf(templateId, pageId, "s-loose", "h-1", "lnk-1", "s-wrapped", "doc-1"),
             env.rows.map { it.id },
         )
         assertArrayEquals(byteArrayOf(1, 2, 3, 4), env.rows.first { it.type == "template" }.blobBytes())
@@ -94,10 +99,10 @@ class PageClipTest {
     fun `every row gets a fresh id and nothing keeps a source id`() {
         val env = envelope()
         val plan = PageClip.plan(env, "nb-dest", 4, PageClip.Template.Reuse(templateId), now, ids())!!
-        val sourceIds = setOf(pageId, "s-loose", "h-1", "lnk-1", "s-wrapped")
+        val sourceIds = setOf(pageId, "s-loose", "h-1", "lnk-1", "s-wrapped", "doc-1")
         for (r in plan.rows) assertTrue("$r kept a source id", r.id !in sourceIds)
         assertNotEquals(pageId, plan.pageId)
-        assertEquals(4, plan.contentIds.size)
+        assertEquals(5, plan.contentIds.size)
     }
 
     @Test
@@ -122,9 +127,9 @@ class PageClipTest {
         val env = envelope()
         val plan = PageClip.plan(env, "nb-dest", 7, PageClip.Template.Reuse(templateId), now, ids())!!
         assertEquals(7, plan.rows.first { it.type == SoilSchema.TYPE_PAGE }.order)
-        // Loose stroke 0, heading 1, link 0, wrapped stroke 5 — all verbatim, in capture order.
+        // Loose stroke 0, heading 1, link 0, wrapped stroke 5, document 0 — verbatim, capture order.
         assertEquals(
-            listOf(0, 1, 0, 5),
+            listOf(0, 1, 0, 5, 0),
             plan.rows
                 .filter { it.type != SoilSchema.TYPE_PAGE && it.type != SoilSchema.TYPE_TEMPLATE }
                 .map { it.order },
@@ -137,7 +142,7 @@ class PageClipTest {
         val plan = PageClip.plan(env, "nb-dest", 0, PageClip.Template.Reuse(templateId), now, ids())!!
         val heading = plan.rows.first { it.type == SoilSchema.TYPE_HEADING }
         assertEquals("## Title", heading.text)
-        assertEquals(2, heading.flags)
+        assertEquals(2L, heading.flags)
         val wrapped = plan.rows.first { it.type == SoilSchema.TYPE_STROKE && it.order == 5 }
         assertArrayEquals(byteArrayOf(4, 5), wrapped.blob)
         val page = plan.rows.first { it.type == SoilSchema.TYPE_PAGE }
@@ -167,6 +172,27 @@ class PageClipTest {
             }.map { it.id },
             plan.contentIds,
         )
+    }
+
+    /**
+     * The page's `document` row rides its page (arc 19 / M2): a fresh id, re-parented onto the
+     * copied page, text intact, and the **watermark carried verbatim as a `Long`** — the value is
+     * epoch millis and would have been truncated by the old `Int` column type.
+     *
+     * The carried watermark is deliberately stale on landing, and that is correct: every content
+     * row is restamped `updatedAt = now` at paste, so the copied page's content maximum is newer
+     * than the watermark and the document honestly reads "the page has changed since this draft" —
+     * which, for a page that has just been rebuilt row by row, it has.
+     */
+    @Test
+    fun `the page document travels with the page, watermark and all`() {
+        val plan = PageClip.plan(envelope(), "nb-dest", 0, PageClip.Template.Reuse(templateId), now, ids())!!
+        val doc = plan.rows.single { it.type == SoilSchema.TYPE_DOCUMENT }
+        assertNotEquals("doc-1", doc.id)
+        assertEquals(plan.pageId, doc.parentId)
+        assertEquals("# Draft", doc.text)
+        assertEquals(watermark, doc.flags)
+        assertTrue(doc.id in plan.contentIds)
     }
 
     // ── plan: templates ──────────────────────────────────────────────────────
@@ -224,8 +250,8 @@ class PageClipTest {
         val orphan = row("s-orphan", "lnk-gone", SoilSchema.TYPE_STROKE, blob = byteArrayOf(1))
         val env = PageClip.capture(pageRow, null, content() + orphan, notebookId, now)
         val plan = PageClip.plan(env, "nb-dest", 0, PageClip.Template.None, now, ids())!!
-        // Four descendants travelled, the orphan did not.
-        assertEquals(4, plan.contentIds.size)
+        // Five descendants travelled (ink, heading, link, wrapped ink, document); the orphan did not.
+        assertEquals(5, plan.contentIds.size)
         assertEquals(3, plan.rows.count { it.type == SoilSchema.TYPE_STROKE || it.type == SoilSchema.TYPE_HEADING })
     }
 

@@ -28,7 +28,9 @@ data class ClipRow(
     val color: String? = null,
     val strokeWidth: Float? = null,
     val style: String? = null,
-    val flags: Int? = null,
+    /** `Long` since arc 19, mirroring the entity: a `document` row's watermark is epoch millis.
+     *  JSON-compatible both ways — an older envelope's small ints decode as longs unchanged. */
+    val flags: Long? = null,
     val blob: String? = null,
 ) {
     /** The decoded blob, or null when there is none **or it is unusable** — a malformed stroke

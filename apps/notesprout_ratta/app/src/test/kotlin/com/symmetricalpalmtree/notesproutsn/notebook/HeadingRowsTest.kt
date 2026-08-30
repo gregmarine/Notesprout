@@ -24,7 +24,7 @@ class HeadingRowsTest {
         assertEquals(123L, row.createdAt)
         assertEquals(123L, row.updatedAt)
         assertEquals("## Title", row.text)
-        assertEquals(2, row.flags)
+        assertEquals(2L, row.flags)
         assertEquals(10f, row.x)
         assertEquals(20f, row.y)
         assertEquals(300f, row.width)

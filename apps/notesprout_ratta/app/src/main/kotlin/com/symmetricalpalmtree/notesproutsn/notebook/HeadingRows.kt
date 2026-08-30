@@ -37,7 +37,7 @@ object HeadingRows {
     fun toRow(heading: Heading, pageId: String, now: Long): SoilObjectEntity = SoilObjectEntity(
         id = heading.id, parentId = pageId, type = SoilSchema.TYPE_HEADING, order = heading.order,
         createdAt = now, updatedAt = now,
-        text = heading.text, flags = heading.level,
+        text = heading.text, flags = heading.level.toLong(),
         x = heading.x, y = heading.y, width = heading.width, height = heading.height,
     )
 
@@ -50,7 +50,7 @@ object HeadingRows {
         val text = row.text ?: return null
         return Heading(
             id = row.id, text = text,
-            level = (row.flags ?: 1).coerceIn(1, 6),
+            level = (row.flags ?: 1L).coerceIn(1L, 6L).toInt(),
             x = row.x ?: 0f, y = row.y ?: 0f,
             width = row.width ?: 0f, height = row.height ?: 0f,
             order = row.order,

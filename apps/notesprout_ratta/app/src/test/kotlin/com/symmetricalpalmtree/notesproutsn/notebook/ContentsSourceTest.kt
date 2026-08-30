@@ -17,7 +17,7 @@ class ContentsSourceTest {
         id: String,
         pageId: String,
         text: String? = "# $id",
-        level: Int? = 1,
+        level: Long? = 1L,
         y: Float = 0f,
         x: Float = 0f,
     ) = SoilObjectEntity(
@@ -31,7 +31,7 @@ class ContentsSourceTest {
     @Test
     fun `an item takes the stripped label and the row's level`() {
         val (items, truncated) = ContentsSource.items(
-            listOf(row("a", "p1", text = "### Meeting notes", level = 3, y = 12f, x = 34f)),
+            listOf(row("a", "p1", text = "### Meeting notes", level = 3L, y = 12f, x = 34f)),
             pages,
         )
         assertFalse(truncated)
@@ -49,7 +49,7 @@ class ContentsSourceTest {
     @Test
     fun `the level is clamped the way the row mapping clamps it`() {
         val (items, _) = ContentsSource.items(
-            listOf(row("deep", "p0", level = 9), row("shallow", "p0", level = 0, y = 10f)),
+            listOf(row("deep", "p0", level = 9L), row("shallow", "p0", level = 0L, y = 10f)),
             pages,
         )
         assertEquals(listOf(6, 1), items.map { it.level })
@@ -77,7 +77,7 @@ class ContentsSourceTest {
     fun `a label that strips to blank is dropped`() {
         val (items, _) = ContentsSource.items(
             listOf(
-                row("emptyH2", "p0", text = "## ", level = 2),
+                row("emptyH2", "p0", text = "## ", level = 2L),
                 row("spaceOnly", "p0", text = "#  ", y = 10f),
                 row("blank", "p0", text = "", y = 20f),
                 row("kept", "p0", text = "# Real", y = 30f),
@@ -142,7 +142,7 @@ class ContentsSourceTest {
     @Test
     fun `a heading wrapped in a link is listed on the link's page`() {
         val (items, _) = ContentsSource.items(
-            listOf(row("wrapped", "lnk", text = "## Inside", level = 2, y = 50f)),
+            listOf(row("wrapped", "lnk", text = "## Inside", level = 2L, y = 50f)),
             pages,
             mapOf("lnk" to "p2"),
         )

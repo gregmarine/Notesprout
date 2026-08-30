@@ -68,12 +68,17 @@ interface SoilDao {
     suspend fun reparent(ids: List<String>, newParentId: String, at: Long)
 
     /** Live content ids of a page **one level deeper than [liveContentIds]** (arc 6 / K1): strokes,
-     *  headings and links of the page, plus the links' own children (the page's grandchildren) —
-     *  what a page delete / undo must carry so a wrapped selection rides its page. Paper's
-     *  `liveDescendantIds` with `'heading'` in place of `'object'` (the SN child types). */
+     *  headings, links and the page's `document` (arc 19), plus the links' own children (the page's
+     *  grandchildren) — what a page delete / undo must carry so a wrapped selection rides its page.
+     *  Paper's `liveDescendantIds` with `'heading'` in place of `'object'` (the SN child types).
+     *
+     *  A `document` is a *product* of the page, not content on it (it is excluded from every
+     *  staleness whitelist — [DocumentDao.maxContentUpdatedAt]), but it is still the user's writing
+     *  and it belongs to that page: a delete, its undo, and a page copy must all carry it. Only the
+     *  page level gains it — a link never wraps a document, so the grandchild branch is unchanged. */
     @Query(
         """SELECT id FROM notebook WHERE deletedAt IS NULL AND (
-             (parentId = :pageId AND type IN ('stroke', 'heading', 'link'))
+             (parentId = :pageId AND type IN ('stroke', 'heading', 'link', 'document'))
              OR parentId IN (SELECT id FROM notebook WHERE parentId = :pageId AND type = 'link' AND deletedAt IS NULL))""",
     )
     suspend fun liveDescendantIds(pageId: String): List<String>
