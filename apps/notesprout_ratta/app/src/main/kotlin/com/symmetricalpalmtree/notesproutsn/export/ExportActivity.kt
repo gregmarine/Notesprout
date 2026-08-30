@@ -37,6 +37,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * **Export** (arc 15 / E1) — the host's whole side of getting a notebook out of the app.
@@ -61,13 +62,16 @@ import kotlinx.coroutines.withContext
  *     filename [ExportNaming] made from the index name. (An `ActivityResultContracts.CreateDocument`
  *     takes its MIME at *registration*, and this screen does not know it until `describe()` has
  *     answered — so it is the family's explicit-Intent form, as the templates screen uses.)
- *  4. **Prepare, key, hand over, verify.** [ExportArtifact] seals a cold copy into the cache;
- *     [ExportKeying] runs the reserved keying option's transform on that copy (E2 — the exporter
- *     never learns which, and the typed passphrase stays in this process); the fds are opened;
- *     `export()` runs under its own timeout; and the byte count is checked against **the file that
- *     was actually streamed** — and against the destination where the provider can answer — before
- *     anything says the word "exported". An exporter that died mid-stream must never read as
- *     success.
+ *  4. **Prepare, key, hand over, verify.** What gets prepared depends on the exporter's declared
+ *     source kind, and that is the only place the two kinds differ (arc 18 / D1): a
+ *     [ExporterContract.SOURCE_SOIL] exporter streams the `.soil` — [ExportArtifact] seals a cold
+ *     copy into the cache and [ExportKeying] runs the reserved keying option's transform on it (E2
+ *     — the exporter never learns which, and the typed passphrase stays in this process) — while a
+ *     [ExporterContract.SOURCE_PAGES] exporter never could (no key crosses), so [ExportRender]
+ *     draws every page here and hands over a bundle of images, with no keying step at all. From
+ *     the fds on, the flow does not ask which it was. Then `export()` runs under its own timeout
+ *     and [ExportVerification] judges the result **per source kind** before anything says the word
+ *     "exported". An exporter that died mid-stream must never read as success.
  *  5. **Confirm and finish**, back to the library: a dialog, not a toast, because this screen is
  *     closing under it and a toast would confirm something the user no longer has a screen to read.
  *     Every failure instead explains itself in a dialog naming what went wrong —
@@ -323,6 +327,11 @@ class ExportActivity : AppCompatActivity() {
         binding.status.setText(textRes)
     }
 
+    /** The same line with a count in it — the render's per-page commentary. Main thread only. */
+    private fun stage(text: String) {
+        binding.status.text = text
+    }
+
     // ── The export ───────────────────────────────────────────────────────────
 
     /**
@@ -401,13 +410,10 @@ class ExportActivity : AppCompatActivity() {
                     failed(R.string.export_failed_title, getString(R.string.export_gone_body))
                     return@launch
                 }
-                val prepared = ExportArtifact.prepare(applicationContext, notebookId, repo, versionCode())
-                if (prepared is ExportArtifact.Outcome.Failed) {
-                    failed(R.string.export_failed_title, prepareMessage(prepared.problem))
-                    return@launch
-                }
-                val artifact = (prepared as ExportArtifact.Outcome.Ready)
-
+                // Built before either source kind's preparation: the spec depends on neither, and a
+                // spec the contract rejects has no business costing a cache copy or a page bake
+                // first. `exportSecret` stays absent — D1 collects no export secret, and D2 is
+                // where the host starts sending one.
                 val spec = try {
                     ExportSpec(
                         values = ExportOptions.specValues(c.info, values),
@@ -419,40 +425,19 @@ class ExportActivity : AppCompatActivity() {
                     return@launch
                 }
 
-                // The host-executed keying step (E2). It runs on the cache artifact, beside the
-                // crypto, and produces the file the exporter will stream — which from here on is
-                // the only file this flow talks about.
-                val keying = ExportOptions.keying(c.info, values)
-                val plan = try {
-                    ExportKeying.plan(keying, typedPassphrase != null)
-                } catch (e: IllegalArgumentException) {
-                    // Rekey armed with nothing in hand: the screen was rebuilt behind the picker
-                    // and the fields went with it (saveEnabled=false, deliberately). Say so — a
-                    // silent Keep would hand the user a file keyed the way they asked it not to be.
-                    Log.w(TAG, "keying plan rejected: ${e.javaClass.simpleName}")
-                    failed(R.string.export_failed_title, getString(R.string.export_passphrase_lost_body))
-                    return@launch
+                // The two source kinds part here and rejoin at the fds — a keyed `.soil` artifact,
+                // or a bundle of pages this host drew. From the open below, nothing asks which.
+                val prepared = if (c.info.sourceKind == ExporterContract.SOURCE_PAGES) {
+                    renderedPages()
+                } else {
+                    keyedArtifact(c)
                 }
-                val streamFile = if (plan == ExportKeying.Plan.KEEP) artifact.file else {
-                    // Both transforms read the artifact, so both need the device key. Keep needs
-                    // none, which is why the session is only asked here.
-                    val devicePassphrase = KeySession.get()
-                    if (devicePassphrase == null) {
-                        failed(R.string.export_failed_title, getString(R.string.export_locked_body))
+                val streamFile = when (prepared) {
+                    is StreamSource.Failed -> {
+                        failed(R.string.export_failed_title, prepared.message)
                         return@launch
                     }
-                    stage(if (plan == ExportKeying.Plan.REKEY) R.string.export_rekeying else R.string.export_decrypting)
-                    try {
-                        ExportKeying.apply(artifact.file, devicePassphrase, plan, typedPassphrase)
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        // The class name only: a transform message can carry a path, and a
-                        // passphrase is never anywhere near a log line.
-                        Log.w(TAG, "keying transform failed: ${e.javaClass.simpleName}")
-                        failed(R.string.export_failed_title, getString(R.string.export_transform_body))
-                        return@launch
-                    }
+                    is StreamSource.Ready -> prepared.file
                 }
                 val streamBytes = withContext(Dispatchers.IO) { streamFile.length() }
                 stage(R.string.export_exporting)
@@ -488,30 +473,34 @@ class ExportActivity : AppCompatActivity() {
                     return@launch
                 }
 
-                // Verification is against what was actually handed over — the transform's output
-                // when there was one, whose length is not the artifact's.
-                if (result.bytesWritten != streamBytes) {
-                    Log.w(TAG, "short export: ${result.bytesWritten} of $streamBytes bytes")
-                    failed(R.string.export_failed_title, getString(R.string.export_short_body))
-                    return@launch
-                }
-                // The stream itself completed and was fsynced, so the destination's own account is
-                // corroboration, not authority (arc-15 review): a cloud provider's metadata can lag
-                // the write it just took, and deleting a fully-written export over a stale answer
-                // would destroy the very thing that was just made. Any agreeing answer is enough;
-                // a unanimous disagreement is an honest check-the-file dialog, never a delete.
+                // What "exported" is allowed to mean lives in ExportVerification, per source kind
+                // (arc 18 / D1): the verbatim-streaming equality against the file actually handed
+                // over is the soil contract and no other, while the destination's own account is
+                // corroboration for both — never authority (arc-15 review). A cloud provider's
+                // metadata can lag the write it just took, and deleting a fully-written export
+                // over a stale answer would destroy the very thing that was just made; any
+                // agreeing answer is enough, and a unanimous disagreement is an honest
+                // check-the-file dialog rather than a delete.
                 val onDisk = withContext(Dispatchers.IO) { destinationSizes(uri) }
-                if (onDisk.isNotEmpty() && onDisk.none { it == streamBytes }) {
-                    Log.w(TAG, "destination reports $onDisk for $streamBytes bytes")
-                    if (!isFinishing && !isDestroyed) {
-                        Dialogs.problem(
-                            this@ExportActivity, R.string.export_verify_title, getString(R.string.export_verify_body)
-                        )
+                when (ExportVerification.verdict(c.info.sourceKind, result.bytesWritten, streamBytes, onDisk)) {
+                    ExportVerification.Verdict.SHORT -> {
+                        Log.w(TAG, "short export: ${result.bytesWritten} written, $streamBytes streamed, destination $onDisk")
+                        failed(R.string.export_failed_title, getString(R.string.export_short_body))
+                        return@launch
                     }
-                    return@launch
+                    ExportVerification.Verdict.UNCONFIRMED -> {
+                        Log.w(TAG, "destination reports $onDisk for ${result.bytesWritten} bytes")
+                        if (!isFinishing && !isDestroyed) {
+                            Dialogs.problem(
+                                this@ExportActivity, R.string.export_verify_title, getString(R.string.export_verify_body)
+                            )
+                        }
+                        return@launch
+                    }
+                    ExportVerification.Verdict.OK -> Unit
                 }
 
-                Slog.d(TAG) { "exported $streamBytes bytes" }
+                Slog.d(TAG) { "exported ${result.bytesWritten} bytes" }
                 if (isFinishing || isDestroyed) return@launch
                 Dialogs.confirm(this@ExportActivity, R.string.export_done_title, R.string.export_done_body) {
                     finish()
@@ -529,6 +518,74 @@ class ExportActivity : AppCompatActivity() {
                 busy = false
                 if (!isFinishing && !isDestroyed) showBusy(false)
             }
+        }
+    }
+
+    /** The file the exporter will actually stream, or the sentence saying why there is none. The
+     *  two source kinds answer with the same two shapes, which is what lets the flow stop caring
+     *  which one it asked at the line after this. */
+    private sealed class StreamSource {
+        class Ready(val file: File) : StreamSource()
+        class Failed(val message: String) : StreamSource()
+    }
+
+    /**
+     * [ExporterContract.SOURCE_SOIL]: the cold cache copy, then the host-executed keying step (E2).
+     * The transform runs on the artifact, beside the crypto, and produces the file the exporter
+     * will stream — which from there on is the only file this flow talks about.
+     */
+    private suspend fun keyedArtifact(c: Candidate): StreamSource {
+        val prepared = ExportArtifact.prepare(applicationContext, notebookId, repo, versionCode())
+        if (prepared is ExportArtifact.Outcome.Failed) {
+            return StreamSource.Failed(prepareMessage(prepared.problem))
+        }
+        val artifact = prepared as ExportArtifact.Outcome.Ready
+        val keying = ExportOptions.keying(c.info, values)
+        val plan = try {
+            ExportKeying.plan(keying, typedPassphrase != null)
+        } catch (e: IllegalArgumentException) {
+            // Rekey armed with nothing in hand: the screen was rebuilt behind the picker and the
+            // fields went with it (saveEnabled=false, deliberately). Say so — a silent Keep would
+            // hand the user a file keyed the way they asked it not to be.
+            Log.w(TAG, "keying plan rejected: ${e.javaClass.simpleName}")
+            return StreamSource.Failed(getString(R.string.export_passphrase_lost_body))
+        }
+        if (plan == ExportKeying.Plan.KEEP) return StreamSource.Ready(artifact.file)
+        // Both transforms read the artifact, so both need the device key. Keep needs none, which is
+        // why the session is only asked here.
+        val devicePassphrase = KeySession.get()
+            ?: return StreamSource.Failed(getString(R.string.export_locked_body))
+        stage(if (plan == ExportKeying.Plan.REKEY) R.string.export_rekeying else R.string.export_decrypting)
+        return try {
+            StreamSource.Ready(ExportKeying.apply(artifact.file, devicePassphrase, plan, typedPassphrase))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // The class name only: a transform message can carry a path, and a passphrase is never
+            // anywhere near a log line.
+            Log.w(TAG, "keying transform failed: ${e.javaClass.simpleName}")
+            StreamSource.Failed(getString(R.string.export_transform_body))
+        }
+    }
+
+    /**
+     * [ExporterContract.SOURCE_PAGES]: the host draws the notebook and hands over the pages.
+     *
+     * **No keying, and nothing to skip past.** Such an exporter declares no keying option, so
+     * [ExportOptions.needsPassphrase] was false at the tap and there is no typed secret in this
+     * process to consult — the key is used here only to open the notebook for reading, and never
+     * leaves. The stage line carries the page count because a long notebook is otherwise a long
+     * silence; the callback arrives on IO, so it hops to Main to touch the view.
+     */
+    private suspend fun renderedPages(): StreamSource {
+        val outcome = ExportRender.render(applicationContext, notebookId) { page, count ->
+            withContext(Dispatchers.Main) {
+                if (!isFinishing && !isDestroyed) stage(getString(R.string.export_rendering, page, count))
+            }
+        }
+        return when (outcome) {
+            is ExportRender.Outcome.Ready -> StreamSource.Ready(outcome.file)
+            is ExportRender.Outcome.Failed -> StreamSource.Failed(renderMessage(outcome.problem))
         }
     }
 
@@ -615,6 +672,19 @@ class ExportActivity : AppCompatActivity() {
             ExportArtifact.Problem.MISSING -> R.string.export_missing_body
             ExportArtifact.Problem.UNREADABLE -> R.string.export_unreadable_body
             ExportArtifact.Problem.COPY_FAILED -> R.string.export_prepare_failed_body
+        }
+    )
+
+    /** The render's problems in the same voice — what went wrong, and that the notebook is as it
+     *  was. Four of the six are the prepare's own refusals by another road, and say the same thing. */
+    private fun renderMessage(problem: ExportRender.Problem): String = getString(
+        when (problem) {
+            ExportRender.Problem.IN_USE -> R.string.export_in_use_body
+            ExportRender.Problem.NO_KEY -> R.string.export_locked_body
+            ExportRender.Problem.MISSING -> R.string.export_missing_body
+            ExportRender.Problem.UNREADABLE -> R.string.export_unreadable_body
+            ExportRender.Problem.EMPTY -> R.string.export_empty_body
+            ExportRender.Problem.RENDER_FAILED -> R.string.export_render_failed_body
         }
     )
 

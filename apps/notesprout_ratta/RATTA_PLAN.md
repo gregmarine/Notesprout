@@ -4852,7 +4852,76 @@ exactly this), so host and extensions still ship in lockstep.
   declares no options; D2 flips it to the pair when the host work exists. No dead rows between.
 
 ### D1 — The seam growth + host render pipeline + `NSE · PDF Export` (plain PDF end to end)
-**Status:** ⬜ Not started
+**Status:** ✅ Complete 2026-08-30
+
+**Phase-start answers (user, 2026-08-30):** icon = the family Tabler "puzzle" glyph, same as every
+extension (the three existing extensions share it as a family mark — no PDF-specific glyph).
+
+**Outcome:** plain PDF end to end, gate met — 956 JVM tests per variant green (was 928), all
+seven modules build debug + release, NUL-scans clean, Nomad walk passed, **user checklist passed
+2026-08-30**: two SAF-saved PDFs verified on the Mac (a 1-page notebook and the 13-page Headings
+notebook — valid PDF 1.4, `MediaBox` = the page's own 1404×1872, lined template under the ink,
+headings rendered, honest byte counts matching the destination).
+
+The seams (Fable): `ExporterContract.SOURCE_SOIL`/`SOURCE_PAGES` + `MAX_EXPORT_SECRET_CHARS`;
+`ExporterInfo.sourceKind` as the compatible parcel tail (absent = `SOURCE_SOIL`; the tail is
+detected by `dataAvail()`, which holds because the descriptor is the reply's trailing payload);
+`ExportSpec.exportSecret` as the export-secret carrier tail (null all of D1; the spec must stay
+`export()`'s **trailing** argument for the tail pattern to hold — written into both wire docs);
+`PageBundle` (extension-api, pure `java.io` — `"NSPB"` magic · version 1 · page count · per-page
+width/height/length/image; streaming Writer/Reader that hold one page at a time; caps
+`MAX_PAGES` 4096 / `MAX_DIMENSION_PX` 32768 / `MAX_PAGE_BYTES` 32 MiB, all refused before
+allocation; a Writer closed short of its declared count throws); `export/ExportVerification`
+(pure) — the per-kind verdict split: `SOURCE_SOIL` keeps the verbatim `bytesWritten ==
+streamBytes` equality, `SOURCE_PAGES` drops it (a PDF's size is not the container's) and
+corroborates the extension's report against the destination only, with SHORT (failed — may
+delete wreckage) kept distinct from UNCONFIRMED (check-the-file dialog, never a delete).
+
+Host (Opus): `export/ExportRender.kt` — `ExportArtifact.prepare`'s guard order one for one
+(held → IN_USE, no key, missing, unreadable), **read-only open, no `exportedAt` stamp** (a PDF
+is not the notebook), pages in display order at each page's **own** size via the pure
+`ExportRender.plan` (JVM-pinned: order, own-size, blank = `""`, any unsized row refuses
+wholesale), template decoded from the page's `refId` row and held across pages sharing it,
+content drawn by the extracted **`PagePreview.drawContent`** (one layering function now — the
+sibling-copy trap pre-empted; the preview keeps its scale + card border around it), RGB_565 +
+`BuiltInTemplates.toWebp` per page, recycled before the next, bundle written into the same
+`cacheDir/export/` dir so the screen's one `finally` (`ExportArtifact.clean`) wipes both kinds.
+`ExportActivity` parts the two kinds at preparation behind a private `StreamSource`
+(`keyedArtifact` = the old prepare+keying path verbatim; `renderedPages` = render with
+"Rendering page N of M…" progress) and rejoins at the fds; verification now routes through
+`ExportVerification` for both kinds (soil behavior pinned by the existing tests staying green).
+EMPTY (no pages) is an honest refusal with its own string, never an empty file.
+
+Extension (Opus, on Sonnet's scaffold): `:ext-pdf` SEVENTH module, `NSE · PDF Export`
+(`… Dev` debug), pkg `….ext.pdf`, `:extension-api` only, the ext-soil recipe verbatim
+(HostCallerCheck first inside the fd-closing try, three marshalable exceptions only).
+`describe()` = bare descriptor (`SOURCE_PAGES`, **no options** — the J4 rule; D2 flips it).
+`PdfAssembly`: `PageBundle.Reader` → per page decode (RGB_565 preferred) → dimension checked
+against the bundle's declaration (a mismatch is a delivery failure, never a page to skip) →
+`PageInfo` at the page's own size → draw → `finishPage` → recycle before the next; one
+`writeTo` through a `CountingOutputStream` + fsync (`SoilStreams`' idiom); the honest measured
+count crosses back. `PdfExportSpec` **refuses** unknown option values and any `exportSecret`
+in D1 — deliberately opposite to soil's ignore-unknown rule (soil's options were host-executed;
+these name work this side must do, and ignoring one ships a file that isn't what was asked).
+
+**The walk** (hand-driven after the Haiku agent long-pressed a *folder* card — folders have no
+Export row — and invented a "stale install" story; the K1/K2 walk-trap pattern again): the
+chooser showed **two exporter radios for the first time**; the **pre-tail ext-soil descriptor
+parsed against the new host on real wire** (absent tail = SOURCE_SOIL) before the rebuilt
+ext-soil went on, and the new-tail form after; PDF selected = zero options / no passphrase
+block / no plain warning, swap restores the keying trio; `pm disable` collapses the chooser to
+a label and re-enable restores it (counts logged 2 → 1 → 2); 6 binds / 6 unbinds all matched;
+no dropped descriptors; crash buffer clean.
+
+**The timeout question answered by measurement** (never guess — J5): 1-page assembly 303 ms,
+13-page 3508 ms → ~270 ms/page marginal; `EXPORT_TIMEOUT_MS` 120 s covers ~400 pages and the
+host render runs before the call starts, so **no PDF-specific timeout** — one value for both
+kinds, measurement recorded in the contract's KDoc. Container format sanity also settled by the
+same runs: WEBP q100 bundle of 13 pages = 175 KB, render ~1 s — no re-measure needed.
+
+Observation left with the user (not a defect): the chooser lists exporters in PackageManager
+discovery order, so **PDF sat first and default-selected** with both installed; making soil the
+default would be a small deliberate change if wanted.
 
 Fable: `ExporterInfo`'s compatible tail (`sourceKind`, absent = `SOURCE_SOIL` — old descriptors
 keep their meaning), the export-secret carrier on `ExportSpec` (empty this phase), the per-kind

@@ -41,8 +41,10 @@ object ExportArtifact {
 
     private const val TAG = "ExportArtifact"
 
-    /** The cache subdirectory, wiped and recreated per export — og's `exported_notebooks` hygiene. */
-    private const val DIR = "export"
+    /** The cache subdirectory, wiped and recreated per export — og's `exported_notebooks` hygiene.
+     *  **One directory for both source kinds** (arc 18 / D1): [ExportRender]'s page bundle lands
+     *  here too, so the screen's single [clean] in its `finally` takes whichever artifact was made. */
+    internal const val DIR = "export"
 
     /** Why a prepare could not produce an artifact. Each maps to one sentence on screen. */
     enum class Problem {

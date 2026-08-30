@@ -52,6 +52,25 @@ class ExporterInfoTest {
     }
 
     @Test
+    fun sourceKindDefaultsToSoil() {
+        // The old constructor shape still compiles and still means the prepared `.soil` — the same
+        // statement the wire tail makes for an old-shape parcel (absent tail = SOURCE_SOIL).
+        assertEquals(ExporterContract.SOURCE_SOIL, info().sourceKind)
+    }
+
+    @Test
+    fun acceptsPagesAndRejectsUnknownSourceKinds() {
+        val pages = ExporterInfo("PDF document", "pdf", "application/pdf", emptyList(), ExporterContract.SOURCE_PAGES)
+        assertEquals(ExporterContract.SOURCE_PAGES, pages.sourceKind)
+        assertThrows(IllegalArgumentException::class.java) {
+            ExporterInfo("PDF document", "pdf", "application/pdf", emptyList(), 2)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            ExporterInfo("PDF document", "pdf", "application/pdf", emptyList(), -1)
+        }
+    }
+
+    @Test
     fun rejectsTooManyOrDuplicateOptions() {
         val many = (0..ExporterContract.MAX_OPTIONS).map {
             OptionDescriptor("o$it", "Option $it", ExporterContract.KIND_TOGGLE, emptyList(), emptyList(), "0")

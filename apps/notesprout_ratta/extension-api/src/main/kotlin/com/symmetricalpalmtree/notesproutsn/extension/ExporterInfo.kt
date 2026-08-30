@@ -10,17 +10,23 @@ import android.os.Parcelable
  * rule), and a descriptor that fails them drops that exporter with a log line, never a crash.
  *
  * Wire form: `String formatLabel · String fileExtension · String mimeType ·
- * typed OptionDescriptor[]` (a compatible tail may be appended in a later version; readers of this
- * version stop after the option list).
+ * typed OptionDescriptor[] · int sourceKind` — the last is the arc-18 compatible tail: an
+ * old-shape descriptor ends after the option list and reads as [ExporterContract.SOURCE_SOIL]
+ * (the tail changed nothing for existing exporters), and an old reader stops before it. A further
+ * tail may be appended in a later version; readers of this version stop after `sourceKind`.
  */
 class ExporterInfo(
     val formatLabel: String,
     val fileExtension: String,
     val mimeType: String,
     val options: List<OptionDescriptor>,
+    val sourceKind: Int = ExporterContract.SOURCE_SOIL,
 ) : Parcelable {
 
     init {
+        require(sourceKind == ExporterContract.SOURCE_SOIL || sourceKind == ExporterContract.SOURCE_PAGES) {
+            "unknown source kind $sourceKind"
+        }
         OptionDescriptor.requireLabel(formatLabel, "format label")
         require(
             fileExtension.isNotEmpty() &&
@@ -43,6 +49,7 @@ class ExporterInfo(
         dest.writeString(fileExtension)
         dest.writeString(mimeType)
         dest.writeTypedList(options)
+        dest.writeInt(sourceKind)
     }
 
     override fun describeContents(): Int = 0
@@ -53,7 +60,11 @@ class ExporterInfo(
             val fileExtension = parcel.readString() ?: ""
             val mimeType = parcel.readString() ?: ""
             val options = parcel.createTypedArrayList(OptionDescriptor.CREATOR) ?: arrayListOf()
-            return ExporterInfo(formatLabel, fileExtension, mimeType, options)
+            // The compatible tail: the descriptor is the reply's whole payload, so an old-shape
+            // parcel simply runs out here and the absent tail means SOURCE_SOIL.
+            val sourceKind =
+                if (parcel.dataAvail() > 0) parcel.readInt() else ExporterContract.SOURCE_SOIL
+            return ExporterInfo(formatLabel, fileExtension, mimeType, options, sourceKind)
         }
 
         @JvmField

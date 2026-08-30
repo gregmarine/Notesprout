@@ -191,6 +191,12 @@
     <string name="export_preparing">Preparing…</string>
     <string name="export_rekeying">Re-keying…</string>
     <string name="export_decrypting">Removing encryption…</string>
+    <!-- The page-rendering source kind (arc 18 / D1): a format the host draws the pages for. The
+         count is the whole point of the line — a notebook of eighty pages is a long silence
+         otherwise, and on e-ink an unchanging stage reads as a stall. -->
+    <string name="export_rendering">Rendering page %1$d of %2$d…</string>
+    <string name="export_empty_body">This notebook has no pages, so there is nothing to export.</string>
+    <string name="export_render_failed_body">The notebook\'s pages could not be prepared for this format — the device may be low on memory or space. Nothing was exported and your notebook is untouched.</string>
 
     <!-- Import (arc 16 / I1). Export's tone, in the other direction: a toast only confirms an
          import that happened, and every failure is a sentence naming what went wrong — never a

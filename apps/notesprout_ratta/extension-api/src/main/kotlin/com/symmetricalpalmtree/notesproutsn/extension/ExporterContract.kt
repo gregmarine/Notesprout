@@ -64,6 +64,29 @@ object ExporterContract {
     /** A secret the host collects and consumes itself. **No entry ever crosses in the spec.** */
     const val KIND_PASSPHRASE: Int = 2
 
+    // ── Source kinds (arc 18 — `ExporterInfo`'s compatible tail) ──────
+    // What an exporter asks the host to hand it through the read fd. Absent on an old-shape
+    // descriptor, which means SOURCE_SOIL — the tail changed nothing for existing exporters.
+
+    /** The prepared `.soil` artifact, streamed verbatim (arc 15's original, and the default). */
+    const val SOURCE_SOIL: Int = 0
+
+    /**
+     * A host-rendered page bundle ([PageBundle]) — every page baked full-fidelity into encoded
+     * images, for an exporter that could never receive the `.soil` itself (no key ever crosses).
+     * The output is a *transform* of the source, so the host's verbatim byte-count check does not
+     * apply; verification is per source kind (destination corroboration only).
+     */
+    const val SOURCE_PAGES: Int = 1
+
+    /**
+     * Longest export secret ([ExportSpec.exportSecret], chars) — the ONE deliberate secret that
+     * ever crosses an extension seam: user-typed, export-scoped, opens no Notesprout data (a PDF
+     * password, say). Never the global passphrase, never the device key, never [KIND_PASSPHRASE]
+     * (whose never-crosses meaning is unchanged).
+     */
+    const val MAX_EXPORT_SECRET_CHARS: Int = 128
+
     // ── The reserved keying option ──────
     // Declared by an exporter like any single-choice option, but recognized by id and EXECUTED BY
     // THE HOST: the transform (`SoilCrypto`) runs host-side on the cache temp before the fds are
@@ -92,6 +115,12 @@ object ExporterContract {
      * lesson): measured on the Nomad 2026-08-27, a 100 MB flash copy lands in ~0.45 s (~525 MB/s
      * dd, ~230 MB/s cp) — two minutes covers a 1 GB artifact even at 10 MB/s through a slow
      * DocumentsProvider.
+     *
+     * One value for both source kinds. A [SOURCE_PAGES] export is a transform, not a copy, so it
+     * was re-measured rather than assumed (arc 18 / D1, Nomad 2026-08-30): PDF assembly of a
+     * 13-page bundle took 3.5 s — ~270 ms a page marginal — so two minutes covers a ~400-page
+     * notebook, far past anything a hand writes. The host's render happens before this call
+     * starts and never counts against it.
      */
     const val EXPORT_TIMEOUT_MS: Long = 120_000L
 }

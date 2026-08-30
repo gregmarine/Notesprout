@@ -13,12 +13,26 @@ import android.os.Parcelable
  * The constructor `require`s are the validation (unmarshal is validation — the family rule); the
  * extension re-checks by construction.
  *
- * Wire form: `int n · n × (String key · String value) · String notebookName` (a compatible tail may
- * be appended in a later version; readers of this version stop after `notebookName`).
+ * **[exportSecret] (arc 18) is the ONE deliberate exception to no-secret** — and it is not an
+ * exception to the rule's point. It is a user-typed, **export-scoped** secret that opens no
+ * Notesprout data: a password for the *output* file (a PDF password, say), collected by the host's
+ * own fields for exactly this export. It is **never** the global Notesprout passphrase, never
+ * derived from it, never the device key — and [ExporterContract.KIND_PASSPHRASE] keeps its
+ * never-crosses meaning untouched: a keying passphrase still has no entry anywhere here. Rules on
+ * both sides: never logged, never saved into instance state, never put in an Intent; the extension
+ * holds it only for the protect step and clears its own copy in `finally`. `null` = no secret
+ * (every export today — the host starts sending it in arc 18 / D2).
+ *
+ * Wire form: `int n · n × (String key · String value) · String notebookName · String? exportSecret`
+ * — the last is the arc-18 compatible tail: an old-shape spec ends after `notebookName` and reads
+ * as no secret, and an old reader stops before it. The spec must stay `export()`'s **trailing**
+ * argument for that to hold. A further tail may be appended in a later version; readers of this
+ * version stop after `exportSecret`.
  */
 class ExportSpec(
     val values: Map<String, String>,
     val notebookName: String,
+    val exportSecret: String? = null,
 ) : Parcelable {
 
     init {
@@ -37,6 +51,12 @@ class ExportSpec(
         require('/' !in notebookName && '\u0000' !in notebookName) {
             "notebook name is a display name, never a path"
         }
+        exportSecret?.let {
+            require(it.isNotEmpty() && it.length <= ExporterContract.MAX_EXPORT_SECRET_CHARS) {
+                // Never the secret itself in a failure message.
+                "export secret empty or over ${ExporterContract.MAX_EXPORT_SECRET_CHARS} chars"
+            }
+        }
     }
 
     override fun writeToParcel(dest: Parcel, flags: Int) {
@@ -46,6 +66,7 @@ class ExportSpec(
             dest.writeString(value)
         }
         dest.writeString(notebookName)
+        dest.writeString(exportSecret)
     }
 
     override fun describeContents(): Int = 0
@@ -62,7 +83,10 @@ class ExportSpec(
                 values[key] = value
             }
             val notebookName = parcel.readString() ?: ""
-            return ExportSpec(values, notebookName)
+            // The compatible tail: the spec is export()'s trailing argument, so an old-shape
+            // parcel simply runs out here and the absent tail means no secret.
+            val exportSecret = if (parcel.dataAvail() > 0) parcel.readString() else null
+            return ExportSpec(values, notebookName, exportSecret)
         }
 
         @JvmField

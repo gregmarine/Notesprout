@@ -38,6 +38,25 @@ class ExportSpecTest {
     }
 
     @Test
+    fun exportSecretDefaultsAbsent() {
+        // The old constructor shape still compiles and still means no secret — the same statement
+        // the wire tail makes for an old-shape parcel.
+        val s = ExportSpec(emptyMap(), "n")
+        assertEquals(null, s.exportSecret)
+    }
+
+    @Test
+    fun exportSecretBounds() {
+        assertEquals("pw", ExportSpec(emptyMap(), "n", "pw").exportSecret)
+        ExportSpec(emptyMap(), "n", "x".repeat(ExporterContract.MAX_EXPORT_SECRET_CHARS))
+        // An empty secret is a bug at the call site, never "no secret" — null says that.
+        assertThrows(IllegalArgumentException::class.java) { ExportSpec(emptyMap(), "n", "") }
+        assertThrows(IllegalArgumentException::class.java) {
+            ExportSpec(emptyMap(), "n", "x".repeat(ExporterContract.MAX_EXPORT_SECRET_CHARS + 1))
+        }
+    }
+
+    @Test
     fun notebookNameIsDisplayOnly() {
         // Spaces are fine — og's sanitize rule preserves them; a path separator never is.
         ExportSpec(emptyMap(), "My daily notes")

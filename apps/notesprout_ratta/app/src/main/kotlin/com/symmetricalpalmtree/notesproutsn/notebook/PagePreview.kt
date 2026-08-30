@@ -21,6 +21,9 @@ import com.symmetricalpalmtree.gpaper.core.render.StrokeRasterizer
  *
  * Thread-safe off Main (StaticLayout + plain canvas — the [HeadingRenderer] contract), which is
  * where the picker calls it: previews render async per grid page, behind placeholder cards.
+ *
+ * The layering itself lives in [drawContent], which the export bake shares (arc 18 / D1) — the
+ * preview adds the scale and the card's edge around it.
  */
 object PagePreview {
 
@@ -50,12 +53,7 @@ object PagePreview {
         val scale = outWidth / page.width.toFloat()
         canvas.save()
         canvas.scale(scale, scale)
-        for (h in content.headings) HeadingRenderer.drawHeading(canvas, h, density, paint)
-        for (l in content.links) {
-            for (h in l.headings) HeadingRenderer.drawHeading(canvas, h, density, paint)
-            StrokeRasterizer.draw(canvas, l.strokes)
-        }
-        StrokeRasterizer.draw(canvas, content.strokes)
+        drawContent(canvas, content, density, paint)
         canvas.restore()
         // The page's own edge, drawn ON the bitmap (eye-check #7): the miniature is fit-centred
         // into a band it rarely fills exactly, so a border on the ImageView gets overpainted by
@@ -63,6 +61,27 @@ object PagePreview {
         // Unscaled, inset half a stroke so all four 1 px edges land inside the bitmap.
         canvas.drawRect(0.5f, 0.5f, outWidth - 0.5f, outHeight - 0.5f, border)
         return bmp
+    }
+
+    /**
+     * **The page's content in the paper's own layering** — headings, then each link's wrapped
+     * children, then the loose ink, with content renderers sitting
+     * [below the strokes][com.symmetricalpalmtree.gpaper.core.render.ContentLayer.BELOW_STROKES].
+     * Draws into [canvas] wherever it stands: the preview scales it into a card, and the export
+     * bake ([com.symmetricalpalmtree.notesproutsn.export.ExportRender]) takes it at scale 1 over a
+     * whole page.
+     *
+     * It is one function because the order is one decision. A second copy of these four lines that
+     * drifted would mean a page that exports differently from the way it previews — the
+     * sibling-copy trap, in miniature. Chrome is deliberately not here: neither caller draws it.
+     */
+    fun drawContent(canvas: Canvas, content: PageContent, density: Float, paint: TextPaint) {
+        for (h in content.headings) HeadingRenderer.drawHeading(canvas, h, density, paint)
+        for (l in content.links) {
+            for (h in l.headings) HeadingRenderer.drawHeading(canvas, h, density, paint)
+            StrokeRasterizer.draw(canvas, l.strokes)
+        }
+        StrokeRasterizer.draw(canvas, content.strokes)
     }
 
     private val border = Paint().apply {
