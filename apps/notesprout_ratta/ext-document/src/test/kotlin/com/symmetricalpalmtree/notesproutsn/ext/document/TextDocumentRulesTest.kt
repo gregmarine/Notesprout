@@ -18,13 +18,11 @@ class TextDocumentRulesTest {
     // ── Show pages ────────────────────────────────────────────────────────────
 
     @Test
-    fun `a text document standing on its notebook document shows the button`() {
+    fun `a text document shows the button in either scope`() {
+        // The user's 2026-08-31 call (og parity — og's ✓ was show-pages in both scopes): a page
+        // document's writer is one tap from the canvas too, and it lands on that page.
         assertTrue(TextDocumentRules.showsPages(textDocument = true, scope = notebook))
-    }
-
-    @Test
-    fun `the page scope has no room for it — the flip cluster is there`() {
-        assertFalse(TextDocumentRules.showsPages(textDocument = true, scope = page))
+        assertTrue(TextDocumentRules.showsPages(textDocument = true, scope = page))
     }
 
     @Test
