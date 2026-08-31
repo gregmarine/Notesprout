@@ -1138,7 +1138,7 @@ arrow stays the ONE leave door (→ library, M6's rule holds for text documents 
 button opens the canvas.
 
 ### M9 — Export: `SOURCE_DOCUMENT` + PDF-of-preview
-**Status:** 🧪 Awaiting user checklist (code + full walk green, 2026-08-31)
+**Status:** ✅ Complete (commit 62964e6 — checklist passed 2026-08-31, "All tests pass")
 
 **Outcome (code + walk):** All three shapes live and Nomad-proven end-to-end: a real `.md`
 export, a real `.txt` export, and a real Document-source PDF (3 pages of the "Blog 20251008"
