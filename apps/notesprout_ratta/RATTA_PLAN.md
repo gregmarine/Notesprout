@@ -1056,8 +1056,10 @@ whole-diff NUL-scan clean, walk 10/10. og semantics throughout; what is SN-shape
   `!canvasShown` (opened-with-no-page must not take ink). Cover fork `captureCover`: a text
   document renders `TextCover` (DB-truthful text) at BOTH seal sites — `CoverSnapshot.capture`
   there would snapshot a surface that never loaded.
-- **Editor:** `btnShowPages` far trailing end, visible ONLY in notebook scope of a text document
-  (og's width rule — page scope needs the flip cluster's room); icon `ic_pages` = og's Tabler
+- **Editor:** `btnShowPages` far trailing end, visible in **either scope** of a text document
+  (checklist fix 1051cba — the user's call, and true og parity: og's ✓ was show-pages in BOTH
+  scopes, only og's extra Close was nb-mode-only, a slot SN's back arrow already fills; the
+  page-scope header holds the extra 62 dp on the Nomad); icon `ic_pages` = og's Tabler
   "files". Tap = `closeNotebook(CLOSE_SHOW_PAGES)` on IO (failure Slog'd, leave proceeds) then
   `leave(RESULT_OK)`; **the back arrow calls nothing** — silence is the library door. Rename =
   tap the title (clickable only for a text document, bar-height target): the family NameDialog
