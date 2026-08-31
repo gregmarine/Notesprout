@@ -925,7 +925,7 @@ flip-under-slow-seed feel.
 as-is).
 
 ### M7 — The notebook document
-**Status:** ✅ Complete (2026-08-30 — user checklist passed: auto-merge over real handwriting,
+**Status:** ✅ Complete (commit 7ef2926, 2026-08-30 — user checklist passed: auto-merge over real handwriting,
 cancel feel, ink-staleness and notebook-scope header all confirmed on the Nomad, "All good".
 Checklist prep note: the "Document" test notebook was reset OFF-DEVICE — sqlcipher CLI +
 the debug menu's recovery key: 16 page copies added → 20 pages / 5073 strokes, all document
