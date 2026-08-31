@@ -1,8 +1,8 @@
 package com.symmetricalpalmtree.notesproutsn.ext.document
 
 /**
- * The debug automation seam — **one nullable static and an interface of accessors, and nothing
- * else**.
+ * The debug automation seam — **nullable statics and interfaces of accessors, and nothing else**
+ * (one of each until M10 added the proofread layer's, which the controller implements itself).
  *
  * It exists because the Supernote's IME swallows `adb shell input text`, so a walk agent cannot type
  * into this screen at all. The commands that drive it live entirely in `src/debug/` (the receiver);
@@ -135,8 +135,48 @@ internal interface AutomationPeer {
     fun title(): String
 }
 
-/** The live screen's peer, or null when no screen is up (and always null in release). */
+/**
+ * The proofread layer's own accessors (arc 19 / M10) — a **second** interface rather than more
+ * members on [AutomationPeer], because [ProofreadController] implements this one itself. The
+ * commands act on flags in the buffer, and the controller is the only thing that knows where they
+ * are; routing them through the screen would have been six lines of forwarding in a file that has no
+ * room for them.
+ *
+ * Called **on the main thread**, like every member of [AutomationPeer], and reporting **no word and
+ * no line** — counts, offsets and whether an act landed.
+ */
+internal interface ProofreadPeer {
+
+    /** `enabled=… ready=… suggestions=… spelling=… grammar=…` — the toggle, whether the dictionary
+     *  is loaded, whether the suggestion index has finished building, and how many flags of each
+     *  kind the live buffer carries. */
+    fun proofreadStatus(): String
+
+    /** Force a whole-document pass — the sheet's "Check document" without the sheet. */
+    fun proofreadCheck()
+
+    /** The editor's tap hook at [offset], opening the real popup for whatever flag is there. */
+    fun proofreadTap(offset: Int)
+
+    /** Apply the first suggestion (spelling) or the finding's own fix (grammar) at [offset].
+     *  False when there is no flag there, no fix, or the suggestion index is still building. */
+    fun proofreadFix(offset: Int): Boolean
+
+    /** Ignore the flag at [offset] for this session. False when there is none. */
+    fun proofreadIgnore(offset: Int): Boolean
+
+    /** Add the spelling flag's word at [offset] to the durable user dictionary. False when there is
+     *  no spelling flag there. */
+    fun proofreadAdd(offset: Int): Boolean
+}
+
+/** The live screen's peers, or null when no screen is up (and always null in release). */
 internal object EditorAutomation {
     @Volatile
     var peer: AutomationPeer? = null
+
+    /** The live screen's proofread layer (arc 19 / M10). Registered by
+     *  `ProofreadController.install` and cleared by its `dispose`, both by identity. */
+    @Volatile
+    var proofread: ProofreadPeer? = null
 }

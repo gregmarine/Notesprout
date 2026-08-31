@@ -6,8 +6,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /**
- * The editor's small per-device state — the text size and the caret memory — over the host's
- * extension store (arc 19 / M5).
+ * The editor's small per-device state — the text size, the caret memory, and since M10 the
+ * proofread toggle and the user dictionary — over the host's extension store (arc 19 / M5).
  *
  * **The extension writes nothing to disk itself, ever.** This is the host's store, minted per bind
  * and revoked with the unbind, so everything here goes through the binder parked in
@@ -33,6 +33,12 @@ object EditorPrefs {
 
     /** The caret LRU as [CaretMemory]'s line blob. */
     const val KEY_CARETS = "carets"
+
+    /** Proofread on/off as `"1"`/`"0"` in UTF-8; absent means on (arc 19 / M10 — default on). */
+    const val KEY_PROOFREAD = "proofread"
+
+    /** The user dictionary as [UserWords]' line blob (arc 19 / M10). */
+    const val KEY_USER_WORDS = "dict"
 
     /** What the editor opens at before anything has been chosen. */
     const val DEFAULT_TEXT_SIZE = 16f
@@ -81,6 +87,82 @@ object EditorPrefs {
             store.put(KEY_TEXT_SIZE, sp.toString().toByteArray(Charsets.UTF_8))
         } catch (e: Exception) {
             // Unavailable: the size still applies to this showing, it just will not outlive it.
+        }
+    }
+
+    // ── Proofread (arc 19 / M10) ──────────────────────────────────────────────
+
+    /** Whether proofread is on. Absent = on — the feature defaults on. **Blocking — never on
+     *  Main.** Unavailable reads answer `true`: the default must not flip because the store
+     *  hiccuped, and a wrongly-on proofread costs heap while a wrongly-off one silently
+     *  removes a feature. */
+    fun proofreadEnabled(): Boolean {
+        return try {
+            val raw = (EditorSession.store ?: return true).get(KEY_PROOFREAD) ?: return true
+            raw.toString(Charsets.UTF_8).trim() != "0"
+        } catch (e: Exception) {
+            true
+        }
+    }
+
+    /** Remember the proofread toggle. **Blocking — never on Main.** */
+    fun saveProofreadEnabled(on: Boolean) {
+        try {
+            val store = EditorSession.store ?: return
+            store.put(KEY_PROOFREAD, (if (on) "1" else "0").toByteArray(Charsets.UTF_8))
+        } catch (e: Exception) {
+            // Unavailable: the choice still applies to this showing.
+        }
+    }
+
+    // ── The user dictionary (arc 19 / M10) ────────────────────────────────────
+
+    /** Writes are read-modify-write; two must not interleave into a lost word. */
+    private val wordsLock = Any()
+
+    /** The stored user dictionary, oldest first — empty when unavailable. Words are the
+     *  normalized form. **Blocking — never on Main.** */
+    fun userWords(): LinkedHashSet<String> {
+        return try {
+            val store = EditorSession.store ?: return LinkedHashSet()
+            UserWords.decode(store.get(KEY_USER_WORDS))
+        } catch (e: Exception) {
+            LinkedHashSet()
+        }
+    }
+
+    /** Add [word] (already normalized) to the user dictionary. Re-adding is not an error and
+     *  does not move the word. Answers whether the write landed — the caller's in-memory
+     *  mirror updates regardless (the session should honor the vouch even if it will not
+     *  outlive it). **Blocking — never on Main.** */
+    fun addUserWord(word: String): Boolean {
+        if (word.isEmpty()) return false
+        synchronized(wordsLock) {
+            return try {
+                val store = EditorSession.store ?: return false
+                val words = UserWords.decode(store.get(KEY_USER_WORDS))
+                if (!words.add(word)) return true
+                store.put(KEY_USER_WORDS, UserWords.encode(words))
+                true
+            } catch (e: Exception) {
+                false
+            }
+        }
+    }
+
+    /** Remove [word] from the user dictionary — a hard drop, effective immediately.
+     *  **Blocking — never on Main.** */
+    fun removeUserWord(word: String) {
+        if (word.isEmpty()) return
+        synchronized(wordsLock) {
+            try {
+                val store = EditorSession.store ?: return
+                val words = UserWords.decode(store.get(KEY_USER_WORDS))
+                if (!words.remove(word)) return
+                store.put(KEY_USER_WORDS, UserWords.encode(words))
+            } catch (e: Exception) {
+                // Unavailable: the removal holds for this showing via the caller's mirror.
+            }
         }
     }
 

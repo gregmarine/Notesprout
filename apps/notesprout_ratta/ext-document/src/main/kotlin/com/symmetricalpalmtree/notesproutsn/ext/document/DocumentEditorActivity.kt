@@ -74,7 +74,9 @@ import java.util.concurrent.atomic.AtomicReference
  * no library card on screen to long-press). Both are absent for every other notebook, both are drawn
  * from [lastState], and neither touches M6's rule that the back arrow is the ONE leave door.
  *
- * Not built at M7, rather than built and hidden: proofread (M10).
+ * **M10 gave it a reader over the writer's shoulder** — [ProofreadController], which owns the
+ * dictionary, the debounce, the flags and its sheets. Four lines of it are here: where it is built,
+ * where Preview pauses it, where an adopted buffer is re-checked, and where it is let go.
  */
 class DocumentEditorActivity : AppCompatActivity() {
 
@@ -93,7 +95,9 @@ class DocumentEditorActivity : AppCompatActivity() {
     )
 
     private var overflow: FormatBarOverflow? = null
-    private var lastBarWidth = 0
+
+    /** Spelling and grammar over the buffer, and everything that surrounds them (M10). */
+    private lateinit var proofread: ProofreadController
 
     /** The find bar's own wiring — its query, its count, and the five controls that act on the
      *  editor's selection. Built with the rest of the chrome. */
@@ -176,6 +180,8 @@ class DocumentEditorActivity : AppCompatActivity() {
 
         buildChrome()
         installWatcher()
+        // After the screen's own watcher, so proofread's runs second — never mid-list-continuation.
+        proofread = ProofreadController.install(this, binding.editor, lifecycleScope)
 
         // Registered by identity so a recreated screen's hooks — installed in ITS onCreate, which
         // runs BEFORE this instance's onDestroy — are never cleared by the instance going away.
@@ -231,6 +237,7 @@ class DocumentEditorActivity : AppCompatActivity() {
         // hide those paths can no longer run. A refused caller never built the chrome.
         if (this::flips.isInitialized) flips.close()
         if (this::strip.isInitialized) strip.close()
+        if (this::proofread.isInitialized) proofread.dispose()
     }
 
     // ── Chrome ────────────────────────────────────────────────────────────────
@@ -262,6 +269,7 @@ class DocumentEditorActivity : AppCompatActivity() {
             isPreviewing = { previewing },
             onSearch = { find.open() },
             onWordCount = { tools.showWordCount() },
+            onProofread = { proofread.promptProofread() },
         )
         textSize = TextSizeControl(
             context = this,
@@ -359,11 +367,9 @@ class DocumentEditorActivity : AppCompatActivity() {
             reflow = { tools.reflow() },
         )
 
-        // A shorter editing surface can leave the caret below the fold, which is precisely what the
-        // keyboard appearing does. Only a real height change is worth reacting to.
-        binding.editor.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
-            if (bottom - top != oldBottom - oldTop) binding.editor.post { tools.keepCaretVisible() }
-        }
+        // The caret must survive the keyboard taking the room it was sitting in; the scroll that
+        // does it, and the watch that triggers it, are both EditorTools'.
+        tools.watchHeight()
 
         val controls = FormatBar.build(
             bar = binding.formatBar,
@@ -371,20 +377,10 @@ class DocumentEditorActivity : AppCompatActivity() {
             onToolUsed = { overflow?.close() },
             onOverflow = { overflow?.toggle() },
         )
-        val manager = FormatBarOverflow(
+        // The bar re-cuts itself whenever its width changes; the manager owns that watch.
+        overflow = FormatBarOverflow(
             binding.formatBar, binding.overflowPanel, controls.dividerOverflow, controls.btnOverflow,
-        )
-        overflow = manager
-        // Work out what fits once the bar has a width, and again whenever that width changes.
-        // Guarded on the width itself: the listener also fires for layout passes that change
-        // nothing, and a recalc rebuilds the bar, which would loop.
-        binding.formatBar.addOnLayoutChangeListener { _, left, _, right, _, _, _, _, _ ->
-            val width = right - left
-            if (width > 0 && width != lastBarWidth) {
-                lastBarWidth = width
-                binding.formatBar.post { manager.recalc() }
-            }
-        }
+        ).apply { watchWidth() }
     }
 
     /** A tap outside the format bar and its panel puts the overflow away; the touch still lands. */
@@ -511,6 +507,8 @@ class DocumentEditorActivity : AppCompatActivity() {
         applyingEdit = true
         binding.editor.setText(text)
         applyingEdit = false
+        // setText dropped the old spans with the old Editable, so every adoption re-flags in full.
+        proofread.checkDocument()
     }
 
     /**
@@ -547,6 +545,8 @@ class DocumentEditorActivity : AppCompatActivity() {
     private fun setPreviewing(on: Boolean) {
         if (previewing == on) return
         previewing = on
+        // Preview is read-only prose: no checking there, and no popup — the editor is gone.
+        proofread.setPaused(on)
         if (on) {
             // Switching to reading is a natural save point, and the writing chrome goes with it.
             saver.saveNow()

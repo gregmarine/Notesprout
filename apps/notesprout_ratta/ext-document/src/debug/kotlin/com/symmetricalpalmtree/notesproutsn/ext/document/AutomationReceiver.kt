@@ -57,6 +57,16 @@ import java.util.concurrent.atomic.AtomicReference
  *   notebook without the dialog. Text documents only; replies `ERR:rename refused` when it did not
  *   start, and is asynchronous: poll `get_title`.
  * - `get_title` — the header's title alone.
+ * - `proofread_status` — `enabled=… ready=… suggestions=… spelling=… grammar=…` (M10). The counts
+ *   are the flags in the live buffer; no word is ever reported.
+ * - `proofread_check` — a full pass now, the sheet's "Check document" without the sheet. Replies
+ *   `OK` when it *started*: the pass is debounced and off-thread, so poll `proofread_status`.
+ * - `proofread_tap --ei pos <n>` — the editor's tap hook at that offset; opens the real popup.
+ * - `proofread_fix --ei pos <n>` — first suggestion (spelling) or the finding's fix (grammar).
+ *   `ERR:no fix here` when there is no flag, no fix, or the suggestion index is still building —
+ *   poll `proofread_status` for `suggestions=true` first.
+ * - `proofread_ignore --ei pos <n>` · `proofread_add --ei pos <n>` — the popup's other two rows.
+ *   Both reply `ERR:no flag here` when nothing is flagged at the offset.
  *
  * **It never logs the document, and never the find query either.** Result data carries text back to
  * the shell because that is the whole point of `get_text`; nothing is written to logcat on any path
@@ -171,8 +181,31 @@ class AutomationReceiver : BroadcastReceiver() {
 
         "get_title" -> peer.title()
 
+        // ── M10's proofread. Its own peer: the flags live in the controller, not in the screen. ──
+
+        "proofread_status" -> proofread()?.proofreadStatus() ?: NO_PROOFREAD
+
+        "proofread_check" -> proofread()?.let { it.proofreadCheck(); "OK" } ?: NO_PROOFREAD
+
+        "proofread_tap" -> proofread()?.let { it.proofreadTap(pos(intent)); "OK" } ?: NO_PROOFREAD
+
+        "proofread_fix" -> proofread()
+            ?.let { if (it.proofreadFix(pos(intent))) "OK" else "ERR:no fix here" } ?: NO_PROOFREAD
+
+        "proofread_ignore" -> proofread()
+            ?.let { if (it.proofreadIgnore(pos(intent))) "OK" else NO_FLAG } ?: NO_PROOFREAD
+
+        "proofread_add" -> proofread()
+            ?.let { if (it.proofreadAdd(pos(intent))) "OK" else NO_FLAG } ?: NO_PROOFREAD
+
         else -> "ERR:unknown cmd"
     }
+
+    /** The proofread layer, which exists only once the screen has built it. */
+    private fun proofread(): ProofreadPeer? = EditorAutomation.proofread
+
+    /** The character offset a proofread command acts at; -1 can match no span. */
+    private fun pos(intent: Intent): Int = intent.getIntExtra("pos", -1)
 
     /** `--es text` wins; `--es file` reads UTF-8 from the shell's own scratch directory. */
     private fun payload(intent: Intent): String {
@@ -203,6 +236,8 @@ class AutomationReceiver : BroadcastReceiver() {
     }
 
     private companion object {
+        const val NO_PROOFREAD = "ERR:no proofread"
+        const val NO_FLAG = "ERR:no flag here"
         const val SHELL_DIR = "/data/local/tmp/"
         const val MAX_REPLY_CHARS = 50_000
         const val HOP_TIMEOUT_MS = 2_000L

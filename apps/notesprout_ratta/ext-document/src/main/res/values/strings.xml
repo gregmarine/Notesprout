@@ -103,7 +103,45 @@
     <string name="fmt_rule">Horizontal rule  ·  Ctrl+Shift+−</string>
     <string name="fmt_search">Find &amp; replace  ·  Ctrl+F</string>
     <string name="fmt_word_count">Word count</string>
+    <string name="fmt_proofread">Proofread</string>
     <string name="fmt_more">More tools</string>
+
+    <!-- Proofread (M10). A check runs on its own as the writer types; this sheet is for the
+         occasional full pass, the dictionary, and the switch. When the feature is off the sheet
+         offers only "Turn on" — the other rows are absent rather than greyed, because a disabled
+         control is visually silent on e-ink. -->
+    <string name="proofread_title">Proofread</string>
+    <string name="proofread_check">Check document</string>
+    <string name="proofread_dictionary">User dictionary</string>
+    <string name="proofread_off">Turn off proofread</string>
+    <string name="proofread_on">Turn on proofread</string>
+
+    <!-- Tapped "Check document" before the dictionary finished loading. A dialog, not a toast: the
+         pass is queued and will run, but nothing appears on screen yet, and on e-ink a tap that
+         paints nothing reads as broken. -->
+    <string name="proofread_loading_title">Still loading the dictionary</string>
+    <string name="proofread_loading_body">Proofread will check the whole document as soon as the dictionary is ready.</string>
+
+    <!-- The tap popup. The word is quoted rather than labelled: the sheet is about that word, and a
+         caption naming it twice would be noise. -->
+    <string name="proofread_word">“%1$s”</string>
+    <string name="proofread_word_loading">“%1$s” — suggestions are loading</string>
+    <string name="proofread_word_none">No suggestions for “%1$s”</string>
+    <string name="proofread_add">Add to dictionary</string>
+    <string name="proofread_ignore">Ignore for now</string>
+
+    <!-- A grammar finding: what the rule saw, and its one-tap fix when the rule has one. -->
+    <string name="proofread_grammar_title">%1$s — “%2$s”</string>
+    <string name="proofread_fix">Fix: “%1$s”</string>
+
+    <!-- The dictionary manager. Both "nothing to show" cases are dialogs — each explains why a tap
+         produced no list — while the removal is a toast: it confirms something that just happened. -->
+    <string name="proofread_dict_title">User dictionary — tap a word to remove it</string>
+    <string name="proofread_dict_empty_title">No words yet</string>
+    <string name="proofread_dict_empty_body">Words added from a flagged word\'s popup are kept here, and stop being flagged everywhere.</string>
+    <string name="proofread_dict_unavailable_title">The dictionary isn\'t available</string>
+    <string name="proofread_dict_unavailable_body">The saved words could not be read just now. Nothing was changed — try again in a moment.</string>
+    <string name="proofread_removed">Removed “%1$s”</string>
 
     <!-- Find &amp; replace. The count reads as a bare total until a match is stepped onto, and as
          `n of m` after that — where you are only exists once you are somewhere. -->

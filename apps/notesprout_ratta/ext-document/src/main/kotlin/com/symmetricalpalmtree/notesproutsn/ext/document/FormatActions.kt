@@ -15,8 +15,9 @@ import com.symmetricalpalmtree.notesproutsn.markdown.TextBuffer
  * characters in front of the line has to move the caret with them or the writer's next keystroke
  * lands in the marker.
  *
- * Two members of the enum are not formatter operations at all: Search and Word count act on the
- * screen rather than on the buffer, and are routed straight back out through the callbacks.
+ * Three members of the enum are not formatter operations at all: Search, Word count and Proofread
+ * act on the screen rather than on the buffer, and are routed straight back out through the
+ * callbacks.
  */
 internal class FormatActions(
     private val binding: ActivityDocumentEditorBinding,
@@ -24,6 +25,7 @@ internal class FormatActions(
     private val isPreviewing: () -> Boolean,
     private val onSearch: () -> Unit,
     private val onWordCount: () -> Unit,
+    private val onProofread: () -> Unit,
 ) {
 
     fun run(tool: FormatTool) {
@@ -42,9 +44,10 @@ internal class FormatActions(
             FormatTool.LINK -> apply(MarkdownFormatter::insertLink)
             FormatTool.IMAGE -> apply(MarkdownFormatter::insertImage)
             FormatTool.RULE -> apply(MarkdownFormatter::insertRule)
-            // Not formatter operations: these two act on the screen, not on the buffer.
+            // Not formatter operations: these three act on the screen, not on the buffer.
             FormatTool.SEARCH -> onSearch()
             FormatTool.WORD_COUNT -> onWordCount()
+            FormatTool.PROOFREAD -> onProofread()
         }
     }
 

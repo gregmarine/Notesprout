@@ -177,6 +177,19 @@ internal class EditorTools(
     // ── Keeping the caret above the keyboard ──────────────────────────────────
 
     /**
+     * Keep [keepCaretVisible] honest as the surface resizes — the watch lives here because the
+     * scroll it triggers does.
+     *
+     * A shorter editing surface can leave the caret below the fold, which is precisely what the
+     * keyboard appearing does. Only a real height change is worth reacting to.
+     */
+    fun watchHeight() {
+        binding.editor.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
+            if (bottom - top != oldBottom - oldTop) binding.editor.post { keepCaretVisible() }
+        }
+    }
+
+    /**
      * Scroll the editing surface just enough to keep the caret's line in view.
      *
      * The layout shrinking is only half the fix: the room the keyboard takes is the room the caret

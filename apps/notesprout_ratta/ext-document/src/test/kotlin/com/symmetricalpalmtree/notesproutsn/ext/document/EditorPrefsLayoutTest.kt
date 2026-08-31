@@ -7,7 +7,7 @@ import org.junit.Test
 /**
  * The store's key layout, pinned.
  *
- * These are not behaviour tests — they are a lock on a **persistence format**. The two keys name
+ * These are not behaviour tests — they are a lock on a **persistence format**. The keys name
  * values already written to a real user's extension store, and a silent rename would not fail
  * anywhere: it would quietly orphan what is there and start again from the defaults, which reads as
  * "the app forgot" rather than as a bug.
@@ -21,6 +21,8 @@ class EditorPrefsLayoutTest {
     fun `the store keys are what is already on disk`() {
         assertEquals("size", EditorPrefs.KEY_TEXT_SIZE)
         assertEquals("carets", EditorPrefs.KEY_CARETS)
+        assertEquals("proofread", EditorPrefs.KEY_PROOFREAD)
+        assertEquals("dict", EditorPrefs.KEY_USER_WORDS)
     }
 
     @Test

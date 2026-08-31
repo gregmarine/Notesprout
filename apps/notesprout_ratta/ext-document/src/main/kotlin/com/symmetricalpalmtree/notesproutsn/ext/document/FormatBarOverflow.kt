@@ -40,6 +40,26 @@ class FormatBarOverflow(
     private var originalOrder: List<View> = emptyList()
     private var initialized = false
 
+    /** The bar width the current arrangement was cut for. */
+    private var lastWidth = 0
+
+    /**
+     * Work out what fits once the bar has a width, and again whenever that width changes — the watch
+     * belongs here rather than in the host because what it guards is this class's own arithmetic.
+     *
+     * Guarded on the width itself: the listener also fires for layout passes that change nothing,
+     * and a recalc rebuilds the bar, which would loop.
+     */
+    fun watchWidth() {
+        bar.addOnLayoutChangeListener { _, left, _, right, _, _, _, _, _ ->
+            val width = right - left
+            if (width > 0 && width != lastWidth) {
+                lastWidth = width
+                bar.post { recalc() }
+            }
+        }
+    }
+
     // ── The panel ─────────────────────────────────────────────────────────────
 
     fun open() { panel.visibility = View.VISIBLE }

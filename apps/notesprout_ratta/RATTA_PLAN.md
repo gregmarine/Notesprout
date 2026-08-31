@@ -1209,7 +1209,40 @@ notebook's own page size. `.txt` strip = **og's `MarkdownText.toPlainText` verba
 into `:markdown` and pinned by og's tests (incl. the never-collapse-blocks repro rule).
 
 ### M10 — Proofread
-**Status:** ⬜ Not started
+**Status:** 🧪 Awaiting device verification (2026-08-31 — code + walk done, user checklist pending)
+
+**Outcome (code + walk):** og's proofread, extension-local, all og semantics. Phase-start answers:
+**dictionary asset reused verbatim** (sha256-identical copy of og's VarCon-patched
+`proofread/en_82765.dict` + NOTICE.txt into `:ext-document` assets — data, not code); **toggle in
+the editor** (format bar tail "Proofread" → sheet: Check document / User dictionary / Turn off —
+GONE-not-greyed when off). Pure port `…ext.document.proofread/` (SpellEngine / ProofreadTokenizer
+/ ProofreadCheck / GrammarRules): **normalized diff against og = zero lines in all four**; og's 55
+test methods + 16 hole-fillers; the asset rides the test classpath via a `sourceSets` test-resource
+mount of `src/main/assets`. Two og subtleties pinned: `misspelled`'s intersection means a
+**zero-width region still judges the word it sits inside** (grammar early-returns on empty — og's
+asymmetry, preserved); og's `articleAgreement` KDoc claimed a capitalized-after-capitalized guard
+the code never had (KDoc corrected, code untouched). **Locks:** user dictionary lives in the
+extension store as `UserWords`' line blob under `EditorPrefs.KEY_USER_WORDS` = `"dict"`
+(normalized form is the storage form; hard drop on remove; insertion order = og's addedAt with the
+clock removed); toggle under `KEY_PROOFREAD` = `"proofread"`, **absent = on**, read async in
+`start()` (the store is Binder I/O — no sync constructor read; dictionary never loaded while off);
+suggestion-index build on a **process-level scope** (no Application class in the module — a
+lifecycle scope would restart the ~40 s build every open); og's words-before-engine publish order
+kept across the store seam; og's three informational toasts → `Dialogs.problem` per the SN
+toast-vs-dialog rule ("Removed “word”" stays a toast); `ProofreadPeer` = a SECOND automation
+interface implemented by the controller (kept the activity at exactly 800 lines, with
+`watchHeight`/`watchWidth` extracted to EditorTools/FormatBarOverflow to make room);
+`proofread_fix` never blocks on the index — walks poll `proofread_status` for `suggestions=true`;
+og's `suppressImeSession` deliberately NOT ported (Ratta IME rule). Controller 710 + Sheets 155 +
+EditText subclass 141 + Spans 26; no word/text logged anywhere. **1482 JVM tests/variant** (+118);
+debug + release build green; NUL-scans clean. Walk 10/10 on the Nomad via the hook (fix applies
+spelling + grammar, ignore session-only, **add-to-dictionary survived `am force-stop`** — the
+store-persistence proof; popup titles "suggestions are loading" honestly; crash buffer clean).
+Walk-expectation correction worth keeping: "the cat sat. the dog barked." raises NO
+sentence-capital flag — **"sat" is in ABBREVIATIONS (Saturday)**, precision over recall, og
+behavior confirmed live; a walk that wants that rule to fire must not end the prior sentence in a
+weekday/month word. Pending user checklist: underline legibility/texture on e-ink, popup feel,
+toggle round-trip.
 
 og's subsystem, extension-local: SymSpellKt (module-local dep, approved) + the bundled gzipped
 dictionary asset (og's VarCon-patched dictionary — both US/UK spellings; **asset reuse from og

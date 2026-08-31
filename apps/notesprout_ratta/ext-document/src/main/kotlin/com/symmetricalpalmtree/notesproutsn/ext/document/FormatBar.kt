@@ -18,9 +18,9 @@ import androidx.core.content.ContextCompat
  * keyboard chord as well as the name, because an icon bar has no labels and a long-press is the
  * only place either can be learned.
  *
- * The last two are not formatter operations at all — [SEARCH] opens the find bar and [WORD_COUNT]
- * reports. They ride the same bar because that is where a writer looks for a tool, and the caller
- * routes them past the formatter.
+ * The last three are not formatter operations at all — [SEARCH] opens the find bar, [WORD_COUNT]
+ * reports, and [PROOFREAD] opens the spelling layer's sheet. They ride the same bar because that is
+ * where a writer looks for a tool, and the caller routes them past the formatter.
  */
 enum class FormatTool(val icon: Int, val hint: Int) {
     H1(R.drawable.ic_h_1, R.string.fmt_h1),
@@ -39,6 +39,7 @@ enum class FormatTool(val icon: Int, val hint: Int) {
     RULE(R.drawable.ic_separator_horizontal, R.string.fmt_rule),
     SEARCH(R.drawable.ic_search, R.string.fmt_search),
     WORD_COUNT(R.drawable.ic_letter_case, R.string.fmt_word_count),
+    PROOFREAD(R.drawable.ic_text_spellcheck, R.string.fmt_proofread),
 }
 
 /**
@@ -49,7 +50,7 @@ enum class FormatTool(val icon: Int, val hint: Int) {
  * arrangement that stops being true the moment the bar is narrower than its contents.
  *
  * Groups are separated by a 1dp × 28dp inkBlack rule — heading / inline / block / insertion / the
- * two text tools, og's five groups unchanged. The overflow controls are built last so they pin to
+ * two text tools / proofread, og's six groups unchanged. The overflow controls are built last so they pin to
  * the trailing edge, and they are handed back to the caller because the overflow manager needs them
  * by identity.
  */
@@ -82,6 +83,11 @@ object FormatBar {
         tool(FormatTool.LINK); tool(FormatTool.IMAGE); tool(FormatTool.RULE)
         divider()
         tool(FormatTool.SEARCH); tool(FormatTool.WORD_COUNT)
+        divider()
+        // Last on the bar, so on a narrow screen it is the first thing to live in the overflow
+        // panel — a check runs on its own; this button is for the occasional full pass and the
+        // on/off switch (og's position).
+        tool(FormatTool.PROOFREAD)
 
         // Pinned at the trailing edge and hidden whenever everything fits. The overflow button is
         // the one control that does NOT dismiss the panel first — it would close then re-open.

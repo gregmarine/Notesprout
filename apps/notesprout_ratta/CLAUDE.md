@@ -69,7 +69,10 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   `:markdown`, never `:app`; one package, TWO services + a screen: `DocumentEditorService` +
   the editor Activity, and `TextImporterService` on the importer point (declares API version 3
   for its `ImporterInfo.resultKind` tail — per-service meta-data, the editor keeps 2); no
-  Application class, no drawing engine).
+  Application class, no drawing engine; module-local `com.darkrockstudios:symspellkt:3.4.0`
+  (arc 19 / M10 — the pdfbox precedent, never leaks into another module) with the bundled
+  dictionary asset `assets/proofread/en_82765.dict` — gzip content behind an opaque extension
+  on purpose: AAPT gunzips any `.gz` asset and strips the extension).
   `gradle.properties` sets `android.nonTransitiveRClass=false` — undoing it breaks every
   `:sn-screen` resource reference from `:app`.
 - **SN has FIVE extension points** — each added on its own explicit user decision, and

@@ -1,0 +1,33 @@
+English frequency dictionary (en_82765.txt.gz)
+================================================
+
+Source: the SymSpell project by Wolf Garbe
+  https://github.com/wolfgarbe/SymSpell
+  (SymSpell/frequency_dictionary_en_82_765.txt, repository licensed MIT)
+
+The dictionary was created by intersecting two data sources, and their
+terms apply to the word/frequency data itself:
+
+  - Google Books Ngram data — word frequencies.
+    Licensed under Creative Commons Attribution 3.0 (CC BY 3.0):
+    https://creativecommons.org/licenses/by/3.0/
+    Attribution: Google Books Ngram Viewer / Google Inc.
+
+  - SCOWL (Spell Checker Oriented Word Lists) by Kevin Atkinson —
+    genuine-vocabulary filter. Permissive license:
+    http://wordlist.aspell.net/scowl-readme/
+
+Modifications made here: removed the UTF-8 byte-order mark,
+gzip-compressed the file, and added 793 missing spelling variants
+(US/UK/CA/AU) so both spellings of every standard pair are accepted —
+the upstream list carried e.g. "favourite" but not "favorite". Each
+added form takes the frequency of its counterpart already in the list,
+matching the upstream convention for the pairs it did merge. The
+variant mapping comes from VarCon (Variant Conversion Info), part of
+the SCOWL project by Kevin Atkinson — permissive license:
+  http://wordlist.aspell.net/varcon-readme/
+Regeneration script: tools/proofread/patch_dictionary.py (monorepo).
+
+The SymSpellKt library (com.darkrockstudios:symspellkt) that consumes
+this dictionary is licensed MIT:
+  https://github.com/Darkrock-Studios/SymSpellKt

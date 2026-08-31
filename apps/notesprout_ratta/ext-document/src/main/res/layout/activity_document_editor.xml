@@ -434,8 +434,13 @@
         android:layout_height="1dp"
         android:background="@color/inkBlack" />
 
-    <!-- The source. Monospace because this is Markdown and columns carry meaning here. -->
-    <androidx.appcompat.widget.AppCompatEditText
+    <!-- The source. Monospace because this is Markdown and columns carry meaning here.
+
+         A ProofreadEditText rather than a plain field (M10): the spelling and grammar underlines
+         are dashed and dotted, which no CharacterStyle can draw, so they are painted by the view
+         itself — and the tap that opens a flagged word's popup is read from the same touch stream
+         the caret is placed from. The find bar's two fields stay plain: nothing is checked there. -->
+    <com.symmetricalpalmtree.notesproutsn.ext.document.ProofreadEditText
         android:id="@+id/editor"
         android:layout_width="match_parent"
         android:layout_height="0dp"

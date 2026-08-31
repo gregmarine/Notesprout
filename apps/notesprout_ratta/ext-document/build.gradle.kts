@@ -38,6 +38,12 @@ android {
         viewBinding = true
     }
 
+    sourceSets {
+        // The proofread JVM tests load the real gzipped dictionary this APK ships, so the asset
+        // directory doubles as a test-resource root (classpath: proofread/en_82765.dict).
+        getByName("test") { resources.srcDir("src/main/assets") }
+    }
+
     // The editor's production code logs through Slog → android.util.Log; on the JVM the framework
     // stubs must return defaults instead of throwing "not mocked".
     testOptions {
@@ -70,5 +76,11 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    // SymSpellKt — pure-Kotlin spell checker for the editor's proofread (arc 19 / M10; approved
+    // 2026-08-30, module-local like :ext-pdf's pdfbox — it never leaks into another module).
+    // The bundled dictionary asset is assets/proofread/en_82765.dict (gzip content, opaque
+    // extension on purpose — AAPT gunzips any `.gz` asset and strips the extension) with its
+    // attribution in NOTICE.txt beside it.
+    implementation("com.darkrockstudios:symspellkt:3.4.0")
     testImplementation("junit:junit:4.13.2")
 }
