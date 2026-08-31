@@ -47,6 +47,18 @@ class ExporterContractTest {
     }
 
     @Test
+    fun sourceKindsAndTheTextFormatIds() {
+        // The kinds are wire values (ExporterInfo's compatible tail) and the format ids are
+        // host-executed twice over (assembly + destination naming) — all pinned (arc 19 / M9).
+        assertEquals(0, ExporterContract.SOURCE_SOIL)
+        assertEquals(1, ExporterContract.SOURCE_PAGES)
+        assertEquals(2, ExporterContract.SOURCE_DOCUMENT)
+        assertEquals("textFormat", ExporterContract.OPTION_TEXT_FORMAT)
+        assertEquals("md", ExporterContract.TEXT_FORMAT_MARKDOWN)
+        assertEquals("txt", ExporterContract.TEXT_FORMAT_PLAIN)
+    }
+
+    @Test
     fun timeouts() {
         assertEquals(3_000L, ExporterContract.DESCRIBE_TIMEOUT_MS)
         // Generous by design — a Binder call cannot be cancelled (measured: ~0.45 s per 100 MB on

@@ -1138,7 +1138,46 @@ arrow stays the ONE leave door (→ library, M6's rule holds for text documents 
 button opens the canvas.
 
 ### M9 — Export: `SOURCE_DOCUMENT` + PDF-of-preview
-**Status:** ⬜ Not started
+**Status:** 🧪 Awaiting user checklist (code + full walk green, 2026-08-31)
+
+**Outcome (code + walk):** All three shapes live and Nomad-proven end-to-end: a real `.md`
+export, a real `.txt` export, and a real Document-source PDF (3 pages of the "Blog 20251008"
+text document — white ground, Preview metrics, no line cut by a page edge; rendered and
+eyeballed off-device). 1364 JVM tests/variant (+43), both builds compile, NUL-scan clean.
+**One plan-sentence contradiction resolved at the seam:** the M9 blurb's "extension strips via
+`:markdown`" could not coexist with the pinned "text stream is verbatim" verification — resolved
+in the verification's favour: **the HOST assembles the FINAL bytes** (`.txt` strip runs
+host-side through `MarkdownText`, og's `toPlainText` ported into `:markdown`), and
+`DocumentExporterService` is a pure verbatim streamer (`TextStreams.streamCopy` reused), so
+`ExportVerification` holds `SOURCE_DOCUMENT` to the soil equality. **Locks:**
+`SOURCE_DOCUMENT = 2` (`ExporterInfo` accepts it; the service's manifest declares API version 3
+per-service — a version-2 host fails the unmarshal, 3 moves the skip to discovery) · reserved
+`OPTION_TEXT_FORMAT` ("textFormat", choices `md`/`txt`) is **host-executed twice over** —
+assembly AND destination naming (extension + picker MIME follow the choice via
+`ExportDocumentRules.fileExtension`/`mimeType`); `isRenderable` gates it to `SOURCE_DOCUMENT`
+only, known choice ids only, and keying can never ride the document kind ·
+`ExportText.markdownOf` is **the one read both document exports share** (notebook document
+wins whole if non-blank, else page documents in page order, M7's merge join verbatim —
+`ExportDocumentRules.assemble`; a text document's row is notebook-parented, covered free) ·
+`hasDocument` = `SoilDatabase.readOnce` + `SoilDao.hasLiveDocument()` (blank-means-absent in
+SQL) at the top of `loadCandidates()` — feeds both `listed()` (chooser gate) and
+`sourceRowVisible()` (Source row = hasDocument AND SOURCE_PAGES); `documentSource` is forced
+false whenever the row is not on screen · Document mode: template toggle row HIDDEN (GONE) and
+the render is white-always (phase answer); `DocumentPdfRender` = Preview metrics
+(`DocumentPdfMetrics` mirrors `EditorPrefs` — KDoc names `EditorPrefsLayoutTest` as the pinned
+key-layout source), saved editor text size read from the editor extension's store **only if the
+store file already exists** (an export never mints a store), page size = first live page row's
+own, one `StaticLayout` sliced by `MarkdownPaginator`, RGB_565/WEBP one page at a time into a
+standard `PageBundle` — `:ext-pdf` untouched and unaware · problem→string tables lifted to
+`ExportMessages` (one table read four ways). **`ExportActivity` is 924 lines — written reason:**
+the screen now hosts four prepare paths + the host-owned Source row, all needing its state
+(`values`, `busy`, `stage`, the binding); the liftable halves already left (ExportMessages,
+ExportDocumentRules, the two preparers); next candidate if it grows again = the ~50-line SAF
+destination unit (arc-15-reviewed code, deliberately not churned). Walk extras: with ALL
+exporters disabled the library sheet's Export… row itself is GONE (arc-15 gating, one level
+above the no-exporter dialog); re-enable restores all three rows and the last-used default.
+**Cosmetic flag for the user:** the chooser caption and the document exporter's option are both
+labelled "Format" — two "Format" captions stack when the document exporter is selected.
 
 The seam (Fable): `SOURCE_DOCUMENT` on `ExporterContract`, `API_VERSION` → **3**
 (`:ext-document` declares 3; a pre-arc-19 host skips it — the D3 recipe, pinned), per-kind
@@ -1163,6 +1202,11 @@ on the Mac, pagination eye-check.
 **Questions to resolve at phase start:** does the Document PDF render on the page template or
 plain white (og never built this — no precedent)? Page size/margins for the preview render;
 `.txt` strip shape sanity (og's `toPlainText`).
+**Phase-start answers (2026-08-31):** Document PDF ground = **plain white, always** — the
+template toggle is hidden/inert in Document mode. Metrics = **editor Preview's** (its padding
+and the user's saved text-size preference; the PDF matches what Preview shows), at the
+notebook's own page size. `.txt` strip = **og's `MarkdownText.toPlainText` verbatim**, ported
+into `:markdown` and pinned by og's tests (incl. the never-collapse-blocks repro rule).
 
 ### M10 — Proofread
 **Status:** ⬜ Not started

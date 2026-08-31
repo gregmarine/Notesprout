@@ -24,9 +24,11 @@ class ExporterInfo(
 ) : Parcelable {
 
     init {
-        require(sourceKind == ExporterContract.SOURCE_SOIL || sourceKind == ExporterContract.SOURCE_PAGES) {
-            "unknown source kind $sourceKind"
-        }
+        require(
+            sourceKind == ExporterContract.SOURCE_SOIL ||
+                sourceKind == ExporterContract.SOURCE_PAGES ||
+                sourceKind == ExporterContract.SOURCE_DOCUMENT,
+        ) { "unknown source kind $sourceKind" }
         OptionDescriptor.requireLabel(formatLabel, "format label")
         require(
             fileExtension.isNotEmpty() &&

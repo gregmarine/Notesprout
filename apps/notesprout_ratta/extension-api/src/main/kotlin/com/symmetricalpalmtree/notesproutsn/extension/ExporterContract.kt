@@ -85,6 +85,24 @@ object ExporterContract {
     const val SOURCE_PAGES: Int = 1
 
     /**
+     * The notebook's **document** — the authored Markdown draft (arc 19 / M9) — assembled by the
+     * host into final UTF-8 text bytes and streamed through the read fd. **Final** is the word
+     * that carries the seam: the host executes the reserved [OPTION_TEXT_FORMAT] choice before
+     * the stream (a plain-text export is stripped host-side, through the shared `:markdown`
+     * engine), so the extension is a verbatim streamer exactly like the soil exporter and the
+     * verbatim `bytesWritten == streamBytes` equality applies to this kind too. What the host
+     * assembles: the notebook document when one exists, else the per-page documents in page
+     * order joined by blank lines, undocumented pages skipped — and **never** recognition
+     * (export never recognizes; a notebook with no document at all is refused host-side, and
+     * the Export screen does not list such an exporter for it).
+     *
+     * Declaring this kind requires API version 3 of the host (the D3 skew-guard recipe): a
+     * version-2 host would fail the descriptor's unmarshal on the unknown kind — a silent drop —
+     * but the declared 3 makes the skip happen at discovery, before any bind.
+     */
+    const val SOURCE_DOCUMENT: Int = 2
+
+    /**
      * Longest export secret ([ExportSpec.exportSecret], chars) — the ONE deliberate secret that
      * ever crosses an extension seam: user-typed, export-scoped, opens no Notesprout data (a PDF
      * password, say). Never the global passphrase, never the device key, never [KIND_PASSPHRASE]
@@ -134,6 +152,27 @@ object ExporterContract {
      * device key. See [ExportSpec.exportSecret] and [MAX_EXPORT_SECRET_CHARS].
      */
     const val OPTION_PROTECT: String = "protect"
+
+    /**
+     * "Which text format" — reserved for a [SOURCE_DOCUMENT] exporter (arc 19 / M9) and
+     * **executed by the host** twice over: the chosen choice id decides what the host assembles
+     * into the stream (Markdown verbatim, or the `:markdown` engine's plain-text strip), and it
+     * renames the destination — the suggested filename's extension and the picker's MIME type
+     * follow the choice, not the descriptor's defaults. The value still crosses in the spec map
+     * like any single-choice, so the extension learns what was asked, but by then there is
+     * nothing left for it to do about it: the bytes on the read fd are already final.
+     *
+     * A declaring exporter's choice ids must all be known ones ([TEXT_FORMAT_MARKDOWN] /
+     * [TEXT_FORMAT_PLAIN]) — a choice the host has no assembly for takes the exporter out of the
+     * list at discovery, exactly like an unknown keying choice.
+     */
+    const val OPTION_TEXT_FORMAT: String = "textFormat"
+
+    /** Markdown, verbatim — `.md`, `text/markdown`. */
+    const val TEXT_FORMAT_MARKDOWN: String = "md"
+
+    /** Plain text — Markdown syntax stripped host-side, structure kept — `.txt`, `text/plain`. */
+    const val TEXT_FORMAT_PLAIN: String = "txt"
 
     // ── Timeouts (host-side, over `ExtensionBinder.call`) ──────
 

@@ -59,11 +59,15 @@ class ExporterInfoTest {
     }
 
     @Test
-    fun acceptsPagesAndRejectsUnknownSourceKinds() {
+    fun acceptsPagesAndDocumentAndRejectsUnknownSourceKinds() {
         val pages = ExporterInfo("PDF document", "pdf", "application/pdf", emptyList(), ExporterContract.SOURCE_PAGES)
         assertEquals(ExporterContract.SOURCE_PAGES, pages.sourceKind)
+        // Arc 19 / M9: kind 2 is the document text — accepting it here is exactly what a pre-M9
+        // host could not do, which is why the declaring service requires API version 3.
+        val document = ExporterInfo("Markdown / text document", "md", "text/markdown", emptyList(), ExporterContract.SOURCE_DOCUMENT)
+        assertEquals(ExporterContract.SOURCE_DOCUMENT, document.sourceKind)
         assertThrows(IllegalArgumentException::class.java) {
-            ExporterInfo("PDF document", "pdf", "application/pdf", emptyList(), 2)
+            ExporterInfo("PDF document", "pdf", "application/pdf", emptyList(), 3)
         }
         assertThrows(IllegalArgumentException::class.java) {
             ExporterInfo("PDF document", "pdf", "application/pdf", emptyList(), -1)

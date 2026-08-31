@@ -26,6 +26,7 @@ import com.symmetricalpalmtree.notesproutsn.crypto.ExportKeying
 import com.symmetricalpalmtree.notesproutsn.crypto.KeySession
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.prefs.ExportPrefs
+import com.symmetricalpalmtree.notesproutsn.data.soil.SoilDatabase
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityExportBinding
 import com.symmetricalpalmtree.notesproutsn.extension.ExporterClient
 import com.symmetricalpalmtree.notesproutsn.extension.ExporterContract
@@ -64,15 +65,21 @@ import java.io.File
  *     takes its MIME at *registration*, and this screen does not know it until `describe()` has
  *     answered — so it is the family's explicit-Intent form, as the templates screen uses.)
  *  4. **Prepare, key, hand over, verify.** What gets prepared depends on the exporter's declared
- *     source kind, and that is the only place the two kinds differ (arc 18 / D1): a
+ *     source kind, and that is the only place the kinds differ (arc 18 / D1): a
  *     [ExporterContract.SOURCE_SOIL] exporter streams the `.soil` — [ExportArtifact] seals a cold
  *     copy into the cache and [ExportKeying] runs the reserved keying option's transform on it (E2
  *     — the exporter never learns which, and the typed passphrase stays in this process) — while a
  *     [ExporterContract.SOURCE_PAGES] exporter never could (no key crosses), so [ExportRender]
- *     draws every page here and hands over a bundle of images, with no keying step at all. From
- *     the fds on, the flow does not ask which it was. Then `export()` runs under its own timeout
- *     and [ExportVerification] judges the result **per source kind** before anything says the word
- *     "exported". An exporter that died mid-stream must never read as success.
+ *     draws every page here and hands over a bundle of images, with no keying step at all. Arc 19 /
+ *     M9 adds the notebook's **document** to both halves of that: a
+ *     [ExporterContract.SOURCE_DOCUMENT] exporter receives the final text bytes [ExportText]
+ *     assembles (host-executed format choice and all), and a page exporter can be pointed at the
+ *     document instead of the ink by the host's own Source row — [DocumentPdfRender] lays the
+ *     Markdown out on white pages and hands over an ordinary bundle, so the extension never learns
+ *     a second kind of page exists. From the fds on, the flow does not ask which it was. Then
+ *     `export()` runs under its own timeout and [ExportVerification] judges the result **per source
+ *     kind** before anything says the word "exported". An exporter that died mid-stream must never
+ *     read as success.
  *  5. **Confirm and finish**, back to the library: a dialog, not a toast, because this screen is
  *     closing under it and a toast would confirm something the user no longer has a screen to read.
  *     Every failure instead explains itself in a dialog naming what went wrong —
@@ -101,6 +108,19 @@ class ExportActivity : AppCompatActivity() {
 
     /** Option id → chosen value, for the exporter in [chosenPackage]. Validated again at spec time. */
     private val values = LinkedHashMap<String, String>()
+
+    /** Whether this notebook has anything written in it (arc 19 / M9) — answered once per
+     *  discovery, because it decides both what is listed and whether the Source row exists. Not
+     *  saved into instance state: a restored screen re-discovers anyway, and a stale "yes" would
+     *  offer a document that has since been deleted. */
+    private var hasDocument = false
+
+    /** The host's own Source answer for a [ExporterContract.SOURCE_PAGES] exporter: false = the
+     *  notebook's pages (what this screen has always exported), true = the document laid out on
+     *  paper. Saved and restored like the pick, and forced back to false whenever the row that
+     *  asks the question is not on screen — a standing true must not survive a switch to an
+     *  exporter that never offered it. */
+    private var documentSource = false
 
     /** True from the Export tap until the flow ends. A second tap in the e-ink feedback gap does
      *  nothing — and it also stands down the resume-time re-discovery, which would otherwise
@@ -167,6 +187,7 @@ class ExportActivity : AppCompatActivity() {
 
         savedInstanceState?.let { state ->
             chosenPackage = state.getString(KEY_PACKAGE)
+            documentSource = state.getBoolean(KEY_SOURCE)
             state.getBundle(KEY_VALUES)?.let { b -> b.keySet().forEach { k -> b.getString(k)?.let { values[k] = it } } }
         }
         discover()
@@ -190,6 +211,7 @@ class ExportActivity : AppCompatActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putString(KEY_PACKAGE, chosenPackage)
+        outState.putBoolean(KEY_SOURCE, documentSource)
         outState.putBundle(KEY_VALUES, Bundle().also { b -> values.forEach { (k, v) -> b.putString(k, v) } })
     }
 
@@ -233,14 +255,25 @@ class ExportActivity : AppCompatActivity() {
     }
 
     /** Discovery + `describe()` with nothing of the screen in it, so the export flow can run it too
-     *  when it finds itself rebuilt behind the picker with no descriptors in hand. */
+     *  when it finds itself rebuilt behind the picker with no descriptors in hand.
+     *
+     *  It is also the shared door for the **document question** (arc 19 / M9), asked here rather
+     *  than in `discover()` for exactly that reason: the flow's own re-discovery must come back
+     *  knowing the same thing the panel did. [SoilDatabase.readOnce] is safe from this screen —
+     *  Export is only ever entered from the library, with the notebook closed — and its null means
+     *  "cannot answer", which is not an answer to build a chooser row on. */
     private suspend fun loadCandidates(): List<Candidate> {
+        hasDocument = SoilDatabase.readOnce(this, notebookId) { it.hasLiveDocument() } ?: false
         val refs = ExtensionRegistry.exporters(this)
         val kept = ArrayList<Candidate>(refs.size)
         for (ref in refs) {
             val info = describe(ref) ?: continue
             if (!ExportOptions.isRenderable(info)) {
                 Slog.d(TAG) { "dropping ${ref.packageName}: an option kind this build cannot draw" }
+                continue
+            }
+            if (!ExportDocumentRules.listed(info.sourceKind, hasDocument)) {
+                Slog.d(TAG) { "dropping ${ref.packageName}: a document format, and this notebook has none" }
                 continue
             }
             kept += Candidate(ref, info)
@@ -302,7 +335,33 @@ class ExportActivity : AppCompatActivity() {
         }
 
         binding.options.removeAllViews()
+        // The host's own question (arc 19 / M9), above the exporter's: this notebook's pages, or
+        // the document written in it. It is not an OptionDescriptor because no extension declared
+        // it and none may — both answers reach the exporter as the same page bundle.
+        if (ExportDocumentRules.sourceRowVisible(hasDocument, c.info.sourceKind)) {
+            binding.options.addView(panel.caption(getString(R.string.export_source_caption)))
+            for ((labelRes, isDocument) in SOURCE_ROWS) {
+                val checked = documentSource == isDocument
+                binding.options.addView(
+                    // Re-tapping the checked radio is a no-op, the chooser's rule for the same
+                    // reason: a grazed tap on e-ink must not rebuild the panel under a half-typed
+                    // secret.
+                    panel.choice(getString(labelRes), checked) {
+                        if (!checked) { documentSource = isDocument; render() }
+                    }
+                )
+            }
+        } else {
+            // The row that asks the question is gone, so the answer goes with it — a standing true
+            // must never survive into an exporter that never offered the choice.
+            documentSource = false
+        }
+
         for (d in c.info.options) {
+            // The page-template toggle is the render's own step, and the document render draws on
+            // plain white always (the M9 call). GONE rather than disabled — the family rule — and
+            // its value still crosses in the spec, where it is simply inert.
+            if (documentSource && d.id == ExporterContract.OPTION_PAGE_TEMPLATE) continue
             when {
                 ExportOptions.isFixed(d) -> {
                     binding.options.addView(panel.caption(d.label))
@@ -440,12 +499,18 @@ class ExportActivity : AppCompatActivity() {
             }
             if (protect) typedExportSecret = typed else typedPassphrase = typed
         }
+        // Both the type and the name come from ExportDocumentRules, not from the descriptor: a
+        // document exporter's format choice is host-executed, and a `.txt` export must not be
+        // offered to the picker as `text/markdown` under a `.md` name (arc 19 / M9). Every other
+        // source kind keeps its descriptor's own answers.
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
             .addCategory(Intent.CATEGORY_OPENABLE)
-            .setType(c.info.mimeType)
+            .setType(ExportDocumentRules.mimeType(c.info, values))
             .putExtra(
                 Intent.EXTRA_TITLE,
-                ExportNaming.suggestedFileName(notebookName, notebookId, c.info.fileExtension),
+                ExportNaming.suggestedFileName(
+                    notebookName, notebookId, ExportDocumentRules.fileExtension(c.info, values),
+                ),
             )
         busy = true
         try {
@@ -519,12 +584,17 @@ class ExportActivity : AppCompatActivity() {
                     return@launch
                 }
 
-                // The two source kinds part here and rejoin at the fds — a keyed `.soil` artifact,
-                // or a bundle of pages this host drew. From the open below, nothing asks which.
-                val prepared = if (c.info.sourceKind == ExporterContract.SOURCE_PAGES) {
-                    renderedPages(includeTemplate = ExportOptions.includeTemplate(c.info, values))
-                } else {
-                    keyedArtifact(c)
+                // The source kinds part here and rejoin at the fds — a keyed `.soil` artifact, the
+                // document's final text bytes, or a bundle of pages this host drew (of the
+                // notebook, or of the document laid out on paper). From the open below, nothing
+                // asks which. The document branch is gated on hasDocument as well as the answer:
+                // a document deleted under a standing screen leaves the Source row's true behind,
+                // and rendering nothing is not what the tap asked for.
+                val prepared = when {
+                    c.info.sourceKind == ExporterContract.SOURCE_DOCUMENT -> assembledDocument(c)
+                    c.info.sourceKind != ExporterContract.SOURCE_PAGES -> keyedArtifact(c)
+                    documentSource && hasDocument -> renderedDocumentPages()
+                    else -> renderedPages(includeTemplate = ExportOptions.includeTemplate(c.info, values))
                 }
                 val streamFile = when (prepared) {
                     is StreamSource.Failed -> {
@@ -641,7 +711,7 @@ class ExportActivity : AppCompatActivity() {
     private suspend fun keyedArtifact(c: Candidate): StreamSource {
         val prepared = ExportArtifact.prepare(applicationContext, notebookId, repo, versionCode())
         if (prepared is ExportArtifact.Outcome.Failed) {
-            return StreamSource.Failed(prepareMessage(prepared.problem))
+            return StreamSource.Failed(getString(ExportMessages.of(prepared.problem)))
         }
         val artifact = prepared as ExportArtifact.Outcome.Ready
         val keying = ExportOptions.keying(c.info, values)
@@ -684,19 +754,55 @@ class ExportActivity : AppCompatActivity() {
      * [includeTemplate] is the one option the **host** executes for this source kind (D2): off, the
      * page bakes on white ground. It has to be answered here because there is no paper left in the
      * bundle for an extension to add or remove afterwards.
-     *
-     * The stage line carries the page count because a long notebook is otherwise a long silence;
-     * the callback arrives on IO, so it hops to Main to touch the view.
      */
     private suspend fun renderedPages(includeTemplate: Boolean): StreamSource {
-        val outcome = ExportRender.render(applicationContext, notebookId, includeTemplate) { page, count ->
-            withContext(Dispatchers.Main) {
-                if (!isFinishing && !isDestroyed) stage(getString(R.string.export_rendering, page, count))
-            }
-        }
+        val outcome = ExportRender.render(applicationContext, notebookId, includeTemplate, pageProgress())
         return when (outcome) {
             is ExportRender.Outcome.Ready -> StreamSource.Ready(outcome.file)
-            is ExportRender.Outcome.Failed -> StreamSource.Failed(renderMessage(outcome.problem))
+            is ExportRender.Outcome.Failed -> StreamSource.Failed(getString(ExportMessages.of(outcome.problem)))
+        }
+    }
+
+    /**
+     * [ExporterContract.SOURCE_DOCUMENT]: the host assembles what was *written*, and the exporter
+     * copies it. Nothing is drawn, nothing is keyed, and the format choice is executed here rather
+     * than sent — [ExportText] hands over final bytes, which is the whole reason
+     * [ExportVerification] can hold this kind to the same verbatim equality the soil path answers.
+     */
+    private suspend fun assembledDocument(c: Candidate): StreamSource {
+        stage(R.string.export_assembling)
+        val outcome = ExportText.assemble(
+            applicationContext, notebookId, ExportOptions.textFormat(c.info, values),
+        )
+        return when (outcome) {
+            is ExportText.Outcome.Ready -> StreamSource.Ready(outcome.file)
+            is ExportText.Outcome.Failed -> StreamSource.Failed(getString(ExportMessages.of(outcome.problem)))
+        }
+    }
+
+    /**
+     * [ExporterContract.SOURCE_PAGES] with the Source row answered *Document*: the same bundle of
+     * images, of the document laid out on white paper instead of the notebook's pages
+     * ([DocumentPdfRender]). The exporter is not told, and there is nothing it could do with the
+     * knowledge — a page bundle is a page bundle.
+     *
+     * The template toggle takes no part: Document mode is white ground always, which is why its
+     * row is not even on screen while this branch is the live one.
+     */
+    private suspend fun renderedDocumentPages(): StreamSource {
+        val outcome = DocumentPdfRender.render(applicationContext, notebookId, pageProgress())
+        return when (outcome) {
+            is DocumentPdfRender.Outcome.Ready -> StreamSource.Ready(outcome.file)
+            is DocumentPdfRender.Outcome.Failed -> StreamSource.Failed(getString(ExportMessages.of(outcome.problem)))
+        }
+    }
+
+    /** The per-page stage line both renders report through. The callback arrives on IO, so it hops
+     *  to Main to touch the view; the count is the point of the line — a long notebook is otherwise
+     *  a long silence, and on e-ink an unchanging stage reads as a stall. */
+    private fun pageProgress(): suspend (Int, Int) -> Unit = { page, count ->
+        withContext(Dispatchers.Main) {
+            if (!isFinishing && !isDestroyed) stage(getString(R.string.export_rendering, page, count))
         }
     }
 
@@ -777,31 +883,6 @@ class ExportActivity : AppCompatActivity() {
         Dialogs.problem(this, titleRes, "$message $note")
     }
 
-    private fun prepareMessage(problem: ExportArtifact.Problem): String = getString(
-        when (problem) {
-            ExportArtifact.Problem.IN_USE -> R.string.export_in_use_body
-            ExportArtifact.Problem.NO_KEY -> R.string.export_locked_body
-            ExportArtifact.Problem.MISSING -> R.string.export_missing_body
-            ExportArtifact.Problem.UNREADABLE -> R.string.export_unreadable_body
-            ExportArtifact.Problem.COPY_FAILED -> R.string.export_prepare_failed_body
-        }
-    )
-
-    /** The render's problems in the same voice — what went wrong, and that the notebook is as it
-     *  was. Four of the six are the prepare's own refusals by another road, and say the same thing. */
-    private fun renderMessage(problem: ExportRender.Problem): String = getString(
-        when (problem) {
-            ExportRender.Problem.IN_USE -> R.string.export_in_use_body
-            ExportRender.Problem.NO_KEY -> R.string.export_locked_body
-            ExportRender.Problem.MISSING -> R.string.export_missing_body
-            ExportRender.Problem.UNREADABLE -> R.string.export_unreadable_body
-            ExportRender.Problem.EMPTY -> R.string.export_empty_body
-            ExportRender.Problem.DAMAGED -> R.string.export_damaged_body
-            ExportRender.Problem.TOO_LONG -> R.string.export_too_long_body
-            ExportRender.Problem.RENDER_FAILED -> R.string.export_render_failed_body
-        }
-    )
-
     /** A dialog that explains why there is nothing to do here, and closes the screen behind it. */
     private fun problemAndClose(@StringRes titleRes: Int, @StringRes bodyRes: Int) {
         if (isFinishing || isDestroyed) { finish(); return }
@@ -822,6 +903,14 @@ class ExportActivity : AppCompatActivity() {
         private const val TAG = "ExportActivity"
         private const val KEY_PACKAGE = "export.package"
         private const val KEY_VALUES = "export.values"
+        private const val KEY_SOURCE = "export.documentSource"
+
+        /** The Source row's two answers, in the order they read: the notebook first, because that
+         *  is what this screen has always exported and what the default false means. */
+        private val SOURCE_ROWS = listOf(
+            R.string.export_source_pages to false,
+            R.string.export_source_document to true,
+        )
 
         /** Identity travels as id + name — never a `File`, never a path (the family rule). */
         const val EXTRA_NOTEBOOK_ID = "notebookId"

@@ -218,6 +218,14 @@
     <string name="export_password_long_body">The password is too long — 128 characters at most. Nothing was exported.</string>
     <string name="export_password_lost_body">The typed password was lost while choosing where to save. Nothing was exported — type it and try again.</string>
     <string name="export_protecting">Encrypting and exporting…</string>
+    <!-- The document source kind (arc 19 / M9). Source is the host's own question — the notebook's
+         pages, or what was written in it — and both answers are prepared here, so these are host
+         sentences: an unwritten notebook is an honest refusal rather than an empty file. -->
+    <string name="export_source_caption">Source</string>
+    <string name="export_source_pages">Notebook pages</string>
+    <string name="export_source_document">Document</string>
+    <string name="export_assembling">Assembling the document…</string>
+    <string name="export_no_document_body">Nothing has been written in this notebook yet, so there is no document to export. Nothing was exported and your notebook is untouched.</string>
 
     <!-- Import (arc 16 / I1). Export's tone, in the other direction: a toast only confirms an
          import that happened, and every failure is a sentence naming what went wrong — never a

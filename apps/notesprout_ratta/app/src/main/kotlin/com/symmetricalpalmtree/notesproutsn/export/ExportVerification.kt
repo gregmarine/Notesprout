@@ -49,7 +49,10 @@ object ExportVerification {
         streamBytes: Long,
         destinationSizes: List<Long>,
     ): Verdict = when (sourceKind) {
-        ExporterContract.SOURCE_SOIL -> when {
+        // SOURCE_DOCUMENT rides the verbatim rule on purpose (arc 19 / M9): the host assembles
+        // the FINAL text bytes — the plain-text strip runs host-side, before the stream — so the
+        // extension is a byte-for-byte copier exactly like soil's and owes the same equality.
+        ExporterContract.SOURCE_SOIL, ExporterContract.SOURCE_DOCUMENT -> when {
             bytesWritten != streamBytes -> Verdict.SHORT
             destinationSizes.isNotEmpty() && destinationSizes.none { it == streamBytes } -> Verdict.UNCONFIRMED
             else -> Verdict.OK

@@ -301,6 +301,74 @@ class ExportOptionsTest {
         assertFalse(ExportOptions.isRenderable(pagesInfo(toggle(ExporterContract.OPTION_KEYING, "0"))))
     }
 
+    // ── The reserved arc-19 format choice (M9) ──
+
+    private fun documentInfo(vararg options: OptionDescriptor) =
+        ExporterInfo(
+            "Markdown / text document", "md", "text/markdown", options.toList(),
+            ExporterContract.SOURCE_DOCUMENT,
+        )
+
+    private val textFormat = choice(
+        ExporterContract.OPTION_TEXT_FORMAT,
+        listOf(ExporterContract.TEXT_FORMAT_MARKDOWN, ExporterContract.TEXT_FORMAT_PLAIN),
+        ExporterContract.TEXT_FORMAT_MARKDOWN,
+    )
+
+    @Test
+    fun textFormatRidesOnlyTheDocumentKindAndOnlyKnownChoices() {
+        assertTrue(ExportOptions.isRenderable(documentInfo(textFormat)))
+        // A bare document exporter (no options at all) is renderable too — the option is offered,
+        // not owed.
+        assertTrue(ExportOptions.isRenderable(documentInfo()))
+        // The format choice is host-executed (assembly + destination naming): on another source
+        // kind there is no assembly to choose, and an unknown choice id is a step the host cannot
+        // take — both dropped whole at discovery, the keying precedent.
+        assertFalse(ExportOptions.isRenderable(info(textFormat)))
+        assertFalse(ExportOptions.isRenderable(pagesInfo(textFormat)))
+        assertFalse(
+            ExportOptions.isRenderable(
+                documentInfo(
+                    choice(
+                        ExporterContract.OPTION_TEXT_FORMAT,
+                        listOf(ExporterContract.TEXT_FORMAT_MARKDOWN, "rtf"),
+                        ExporterContract.TEXT_FORMAT_MARKDOWN,
+                    ),
+                ),
+            ),
+        )
+        // Keying can never ride the document kind — its transforms belong to the `.soil` path.
+        assertFalse(
+            ExportOptions.isRenderable(
+                documentInfo(
+                    choice(
+                        ExporterContract.OPTION_KEYING,
+                        listOf(ExporterContract.KEYING_KEEP),
+                        ExporterContract.KEYING_KEEP,
+                    ),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun textFormatAnswersLikeTheSpecAndDefaultsToMarkdown() {
+        val i = documentInfo(textFormat)
+        assertEquals(ExporterContract.TEXT_FORMAT_MARKDOWN, ExportOptions.textFormat(i, emptyMap()))
+        assertEquals(
+            ExporterContract.TEXT_FORMAT_PLAIN,
+            ExportOptions.textFormat(i, mapOf(ExporterContract.OPTION_TEXT_FORMAT to ExporterContract.TEXT_FORMAT_PLAIN)),
+        )
+        // A stale or foreign value falls back to the declared default — exactly what the spec
+        // would carry.
+        assertEquals(
+            ExporterContract.TEXT_FORMAT_MARKDOWN,
+            ExportOptions.textFormat(i, mapOf(ExporterContract.OPTION_TEXT_FORMAT to "rtf")),
+        )
+        // Undeclared means Markdown: an exporter that never asked gets the document as it is.
+        assertEquals(ExporterContract.TEXT_FORMAT_MARKDOWN, ExportOptions.textFormat(documentInfo(), emptyMap()))
+    }
+
     @Test
     fun theSecretRidesItsOwnCarrierAndNeverTheValueMap() {
         // The map is the whole of what the panel can send; the password is handed over separately,

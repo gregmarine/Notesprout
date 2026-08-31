@@ -109,6 +109,18 @@ interface SoilDao {
     )
     suspend fun anyLiveHeadingOnLivePage(): Boolean
 
+    /** Does this notebook hold **any** live document with real text? — the Export screen's gate
+     *  (arc 19 / M9): a `SOURCE_DOCUMENT` exporter is listed, and the PDF Source row shown, only
+     *  when this answers true. Blank text counts as absent (the repository's blank-means-absent
+     *  rule, asked in SQL so a foreign-written blank row cannot open a chooser entry that can
+     *  only refuse). Deliberately parent-agnostic: a notebook document or any page document both
+     *  make the notebook exportable as text. */
+    @Query(
+        "SELECT EXISTS(SELECT 1 FROM notebook WHERE type = 'document' AND deletedAt IS NULL " +
+            "AND TRIM(COALESCE(text, '')) != '')",
+    )
+    suspend fun hasLiveDocument(): Boolean
+
     /**
      * Every live link row as `id → its page`: the Contents gather's one link → page hop. A wrap
      * re-parents its children page → link but leaves their **coordinates page-absolute**, so this

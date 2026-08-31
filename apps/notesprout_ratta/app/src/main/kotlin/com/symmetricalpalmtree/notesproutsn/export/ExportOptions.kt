@@ -48,10 +48,21 @@ object ExportOptions {
             val allowed = when (d.id) {
                 ExporterContract.OPTION_KEYING -> ExporterContract.SOURCE_SOIL
                 ExporterContract.OPTION_PAGE_TEMPLATE -> ExporterContract.SOURCE_PAGES
+                ExporterContract.OPTION_TEXT_FORMAT -> ExporterContract.SOURCE_DOCUMENT
                 else -> continue
             }
             if (info.sourceKind != allowed) return false
         }
+        // The text-format choice is host-executed twice over (the assembly and the destination's
+        // name), so a choice id the host has no assembly for is a step it cannot take — dropped
+        // at discovery, exactly like an unknown keying choice (arc 19 / M9).
+        val textFormat = info.options.firstOrNull {
+            it.id == ExporterContract.OPTION_TEXT_FORMAT && it.kind == ExporterContract.KIND_SINGLE_CHOICE
+        }
+        if (textFormat != null && !textFormat.choiceIds.all {
+                it == ExporterContract.TEXT_FORMAT_MARKDOWN || it == ExporterContract.TEXT_FORMAT_PLAIN
+            }
+        ) return false
         val keying = info.options.firstOrNull {
             it.id == ExporterContract.OPTION_KEYING && it.kind == ExporterContract.KIND_SINGLE_CHOICE
         } ?: return true
@@ -168,4 +179,20 @@ object ExportOptions {
      */
     fun includeTemplate(info: ExporterInfo, chosen: Map<String, String>): Boolean =
         (toggle(info, chosen, ExporterContract.OPTION_PAGE_TEMPLATE) ?: "1") == "1"
+
+    // ── The reserved arc-19 format choice (M9 — recognized by id, executed by the host) ──
+
+    /**
+     * The armed text-format choice for a [ExporterContract.SOURCE_DOCUMENT] exporter — what the
+     * host assembles (Markdown verbatim vs. the plain-text strip) *and* what it names the
+     * destination (extension + picker MIME). Validated exactly as [specValues] validates, so what
+     * this answers is always precisely what the spec will carry. **Undeclared means Markdown**: an
+     * exporter that never asked the question gets the document as it is.
+     */
+    fun textFormat(info: ExporterInfo, chosen: Map<String, String>): String {
+        val d = info.options.firstOrNull {
+            it.id == ExporterContract.OPTION_TEXT_FORMAT && it.kind == ExporterContract.KIND_SINGLE_CHOICE
+        } ?: return ExporterContract.TEXT_FORMAT_MARKDOWN
+        return chosen[d.id]?.takeIf { it in d.choiceIds } ?: d.defaultValue
+    }
 }

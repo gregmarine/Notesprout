@@ -51,4 +51,21 @@ class ExportVerificationTest {
     fun unknownKindNeverDefaultsToTrust() {
         assertEquals(Verdict.SHORT, ExportVerification.verdict(99, 100L, 100L, listOf(100L)))
     }
+
+    // ── SOURCE_DOCUMENT (arc 19 / M9): the verbatim rule on purpose — the host assembles the
+    // FINAL text bytes (the plain-text strip runs host-side, before the stream), so the extension
+    // is a byte-for-byte copier and owes exactly what the soil exporter owes.
+
+    private fun document(bytesWritten: Long, streamBytes: Long, dest: List<Long>) =
+        ExportVerification.verdict(ExporterContract.SOURCE_DOCUMENT, bytesWritten, streamBytes, dest)
+
+    @Test
+    fun documentKeepsTheVerbatimEquality() {
+        assertEquals(Verdict.OK, document(100L, 100L, listOf(100L)))
+        assertEquals(Verdict.OK, document(100L, 100L, emptyList()))
+        assertEquals(Verdict.SHORT, document(99L, 100L, listOf(100L)))
+        assertEquals(Verdict.SHORT, document(0L, 100L, emptyList()))
+        assertEquals(Verdict.UNCONFIRMED, document(100L, 100L, listOf(37L, 38L)))
+        assertEquals(Verdict.OK, document(100L, 100L, listOf(37L, 100L)))
+    }
 }

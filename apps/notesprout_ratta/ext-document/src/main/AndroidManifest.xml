@@ -42,6 +42,25 @@
                 android:value="3" />
         </service>
 
+        <!-- The NOTEBOOK_EXPORTER point (arc 15 / E1), served here too since arc 19 / M9: the
+             notebook's document out, as Markdown or plain text. The third exporter on the one
+             point, beside `:ext-soil` and `:ext-pdf` — the host assembles the final text bytes and
+             this service streams them verbatim.
+             API version 3 on THIS service (metadata is per-service; the editor above keeps its 2):
+             the descriptor declares the SOURCE_DOCUMENT source kind, and a version-2 host would
+             fail its unmarshal on that unknown kind — a silent drop. Declaring 3 makes the skip
+             happen at discovery instead, before any bind. -->
+        <service
+            android:name=".DocumentExporterService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.symmetricalpalmtree.notesproutsn.extension.NOTEBOOK_EXPORTER" />
+            </intent-filter>
+            <meta-data
+                android:name="com.symmetricalpalmtree.notesproutsn.extension.API_VERSION"
+                android:value="3" />
+        </service>
+
         <!-- The extension-owned screen: exported, custom action, NO launcher filter; launched only
              by the host via startActivityForResult — it refuses any other caller first thing in
              onCreate. <category DEFAULT> is required or implicit resolution will not match it. -->

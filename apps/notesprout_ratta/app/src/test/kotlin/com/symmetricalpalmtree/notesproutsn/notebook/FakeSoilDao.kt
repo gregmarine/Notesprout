@@ -86,6 +86,8 @@ class FakeSoilDao : SoilDao {
                         )
                 } == true
         }
+    override suspend fun hasLiveDocument() =
+        rows.values.any { it.type == "document" && it.deletedAt == null && !it.text.isNullOrBlank() }
     override suspend fun liveLinkPages() =
         rows.values.filter { it.type == "link" && it.deletedAt == null }
             .map { LinkPage(it.id, it.parentId) }
