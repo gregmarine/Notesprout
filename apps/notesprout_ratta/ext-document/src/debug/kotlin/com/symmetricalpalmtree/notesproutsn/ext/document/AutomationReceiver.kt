@@ -32,9 +32,16 @@ import java.util.concurrent.atomic.AtomicReference
  *   travel through `am`'s reply.
  * - `get_state` — `mode=… caret=… dirty=… page=… chars=…`.
  * - `set_caret --ei pos <n>` · `mode --es mode write|preview` · `save` · `done` · `close`.
+ * - `find_open --es query <q>` — opens the find bar on the query; replies `OK:<matches>`.
+ * - `find_next` / `find_prev` — steps; replies `OK:<count label>` (`OK:none` when it reads empty).
+ * - `replace_all --es with <r>` — replies `OK:<replaced>`.
+ * - `find_close` · `reflow` · `undo` (the editor's own Ctrl+Z).
+ * - `word_count` — `words=<n> chars=<m>`, selection-aware like the toast.
+ * - `set_size --ef sp <f>` · `get_size` — the size **preference** in sp, not the view's px.
  *
- * **It never logs the document.** Result data carries text back to the shell because that is the
- * whole point of `get_text`; nothing is written to logcat on any path here.
+ * **It never logs the document, and never the find query either.** Result data carries text back to
+ * the shell because that is the whole point of `get_text`; nothing is written to logcat on any path
+ * here.
  */
 class AutomationReceiver : BroadcastReceiver() {
 
@@ -90,6 +97,34 @@ class AutomationReceiver : BroadcastReceiver() {
         "close" -> {
             peer.close(); "OK"
         }
+
+        "find_open" -> "OK:" + peer.findOpen(intent.getStringExtra("query").orEmpty())
+
+        "find_next" -> "OK:" + peer.findStep(backwards = false).ifEmpty { "none" }
+
+        "find_prev" -> "OK:" + peer.findStep(backwards = true).ifEmpty { "none" }
+
+        "replace_all" -> "OK:" + peer.findReplaceAll(intent.getStringExtra("with").orEmpty())
+
+        "find_close" -> {
+            peer.findClose(); "OK"
+        }
+
+        "reflow" -> {
+            peer.reflow(); "OK"
+        }
+
+        "word_count" -> peer.wordCount().let { (words, chars) -> "words=$words chars=$chars" }
+
+        "undo" -> {
+            peer.undo(); "OK"
+        }
+
+        "set_size" -> {
+            peer.setTextSize(intent.getFloatExtra("sp", peer.textSize())); "OK"
+        }
+
+        "get_size" -> peer.textSize().toString()
 
         else -> "ERR:unknown cmd"
     }

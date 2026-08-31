@@ -11,6 +11,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.TooltipCompat
 import androidx.lifecycle.lifecycleScope
+import com.symmetricalpalmtree.notesproutsn.core.ActionSheetDialog
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.core.TopGuard
 import com.symmetricalpalmtree.notesproutsn.ext.document.databinding.ActivityDocumentEditorBinding
@@ -53,18 +54,40 @@ import java.util.concurrent.atomic.AtomicReference
  * included. So nothing here calls an IME-hide API; the window takes `adjustResize` and lets the
  * keyboard have its room.
  *
- * Not built at M4, rather than built and hidden: the text-size control (M5), the page arrows and
- * source strip (M6), the scope toggle (M7), find and word count (M5) and proofread (M10).
+ * **M5 added the editor's tools** — find and replace, word count, reflow, text size, and the caret
+ * memory that opens a document where it was left. All of them are og's semantics; the only thing
+ * that is different here is where the small state lives: not `SharedPreferences` but the host's
+ * extension store, through [EditorPrefs], because an extension writes nothing to disk itself.
+ *
+ * Not built at M5, rather than built and hidden: the page arrows and source strip (M6), the scope
+ * toggle (M7) and proofread (M10). Reflow has no button for the same reason — its home is M6's
+ * source strip, so until then `Ctrl+Shift+F` is the whole of it.
  */
 class DocumentEditorActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityDocumentEditorBinding
 
-    /** Timers, threads and the binder; every decision inside it is [AutosaveGovernor]'s. */
-    private val saver = DocumentSaver { currentText() }
+    /** Timers, threads and the binder; every decision inside it is [AutosaveGovernor]'s. The caret
+     *  rides along with every save trigger — see [DocumentSaver]'s `caretSink`. */
+    private val saver = DocumentSaver(
+        snapshot = { currentText() },
+        caretSnapshot = { if (this::binding.isInitialized) binding.editor.selectionEnd else 0 },
+        caretSink = { key, caret -> EditorPrefs.rememberCaretAsync(key, caret) },
+    )
 
     private var overflow: FormatBarOverflow? = null
     private var lastBarWidth = 0
+
+    /** The find bar's own wiring — its query, its count, and the five controls that act on the
+     *  editor's selection. Built with the rest of the chrome. */
+    private lateinit var find: FindReplaceBar
+
+    /** Reflow, list renumbering, word count and the caret scroll — the tools that take the buffer
+     *  and the selection and nothing else. */
+    private lateinit var tools: EditorTools
+
+    /** The size in force, which both surfaces are drawn at. Loaded from the store, not the XML. */
+    private var textSizeSp = EditorPrefs.DEFAULT_TEXT_SIZE
 
     private var previewing = false
 
@@ -85,7 +108,11 @@ class DocumentEditorActivity : AppCompatActivity() {
     private val targetKey: String? get() = saver.pageKey
 
     private var restoredText: String? = null
-    private var restoredCaret = 0
+
+    /** The bundle's caret, or −1 for "there was no bundle". The distinction matters: 0 is a real
+     *  caret (the top of the document) and would otherwise beat the remembered one on every
+     *  recreation. `onSaveInstanceState` always writes the key, so a bundle implies a value. */
+    private var restoredCaret = NO_CARET
     private var restoredPreviewing = false
 
     /** This instance's session hooks, held by identity so `onDestroy` can only clear its own. */
@@ -108,7 +135,7 @@ class DocumentEditorActivity : AppCompatActivity() {
         TopGuard.applyInsetPadding(binding.root, followIme = true)
 
         restoredText = savedInstanceState?.getString(STATE_TEXT)
-        restoredCaret = savedInstanceState?.getInt(STATE_CARET) ?: 0
+        restoredCaret = savedInstanceState?.getInt(STATE_CARET, NO_CARET) ?: NO_CARET
         restoredPreviewing = savedInstanceState?.getBoolean(STATE_PREVIEWING) == true
 
         buildChrome()
@@ -171,10 +198,37 @@ class DocumentEditorActivity : AppCompatActivity() {
         binding.btnDone.setOnClickListener { leave(Activity.RESULT_OK) }
         binding.btnWrite.setOnClickListener { setPreviewing(false) }
         binding.btnPreview.setOnClickListener { setPreviewing(true) }
-        for (button in listOf(binding.btnClose, binding.btnDone, binding.btnWrite, binding.btnPreview)) {
+        // Live in Preview too: reading comfort is most of what a text size is for.
+        binding.btnTextSize.setOnClickListener { promptTextSize() }
+        for (button in listOf(
+            binding.btnClose, binding.btnDone, binding.btnTextSize, binding.btnWrite, binding.btnPreview,
+        )) {
             TooltipCompat.setTooltipText(button, button.contentDescription)
         }
         updateModeButtons()
+
+        tools = EditorTools(
+            context = this,
+            binding = binding,
+            isPreviewing = { previewing },
+            leavePreview = { setPreviewing(false) },
+            onEdited = { saver.saveNow() },
+        )
+        find = FindReplaceBar(
+            context = this,
+            binding = binding,
+            isPreviewing = { previewing },
+            leavePreview = { setPreviewing(false) },
+            keepCaretVisible = { tools.keepCaretVisible() },
+            onReplacedAll = { saver.saveNow() },
+        )
+        find.install()
+
+        // A shorter editing surface can leave the caret below the fold, which is precisely what the
+        // keyboard appearing does. Only a real height change is worth reacting to.
+        binding.editor.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
+            if (bottom - top != oldBottom - oldTop) binding.editor.post { tools.keepCaretVisible() }
+        }
 
         val controls = FormatBar.build(
             bar = binding.formatBar,
@@ -227,6 +281,9 @@ class DocumentEditorActivity : AppCompatActivity() {
      * one IO hop: the state names how many `readChunk` calls serve the window it just parked, so
      * they must not be separated by anything that could let a new window be loaded between them —
      * at M4 nothing can, and at M6 the flip guards make that explicit.
+     *
+     * The editor's own state ([EditorPrefs]) is read in the same hop — the store is a blocking
+     * Binder call like the rest, and both are wanted before the first frame with text in it.
      */
     private fun load() {
         lifecycleScope.launch {
@@ -237,7 +294,10 @@ class DocumentEditorActivity : AppCompatActivity() {
                     val text = buildString {
                         for (i in 0 until state.textChunks) append(host.readChunk(i))
                     }
-                    Loaded(state, text)
+                    // Only worth asking when the bundle has no answer — a recreated screen's own
+                    // caret always wins, so a lookup then would be read and thrown away.
+                    val caret = if (restoredCaret == NO_CARET) EditorPrefs.caret(state.pageKey) else 0
+                    Loaded(state, text, EditorPrefs.textSize(), caret)
                 } catch (e: Exception) {
                     // The class name only: an exception's message from either side of this seam
                     // could carry a path, and its content certainly could.
@@ -266,6 +326,10 @@ class DocumentEditorActivity : AppCompatActivity() {
             getString(R.string.document_page_indicator, state.pageIndex + 1, state.pageCount)
         } else ""
 
+        // Both surfaces are sized before the text lands, so nothing is laid out twice. Not persisted
+        // — this is the value that was just read back.
+        applyTextSize(loaded.textSizeSp, persist = false)
+
         // A recreated editor prefers its own saved buffer over the pull, and treats it as UNSAVED:
         // `savedText` stays what the host handed over, so the first debounce writes the difference.
         val restored = restoredText
@@ -273,9 +337,11 @@ class DocumentEditorActivity : AppCompatActivity() {
         applyingEdit = true
         binding.editor.setText(opening)
         applyingEdit = false
-        // Open where the writer left off. Falling back to the TOP rather than the end: a document is
-        // usually read before it is added to, and landing at the bottom hides everything written.
-        binding.editor.setSelection(restoredCaret.coerceIn(0, opening.length))
+        // Open where the writer left off — the bundle's caret on a recreation, the remembered one
+        // otherwise. Falling back to the TOP rather than the end: a document is usually read before
+        // it is added to, and landing at the bottom hides everything written.
+        val caret = if (restoredCaret != NO_CARET) restoredCaret else loaded.caret
+        binding.editor.setSelection(caret.coerceIn(0, opening.length))
         restoredText = null
 
         if (restoredPreviewing) setPreviewing(true)
@@ -299,8 +365,14 @@ class DocumentEditorActivity : AppCompatActivity() {
         binding.btnPreview.visibility = View.GONE
     }
 
-    /** What one load brought back — the state and the reassembled text, materialised off Main. */
-    private class Loaded(val state: DocumentPageState, val text: String)
+    /** What one load brought back — the state, the reassembled text and the editor's own stored
+     *  state, all materialised off Main. */
+    private class Loaded(
+        val state: DocumentPageState,
+        val text: String,
+        val textSizeSp: Float,
+        val caret: Int,
+    )
 
     // ── Write / Preview ───────────────────────────────────────────────────────
 
@@ -371,6 +443,9 @@ class DocumentEditorActivity : AppCompatActivity() {
             FormatTool.LINK -> runFormat(MarkdownFormatter::insertLink)
             FormatTool.IMAGE -> runFormat(MarkdownFormatter::insertImage)
             FormatTool.RULE -> runFormat(MarkdownFormatter::insertRule)
+            // Not formatter operations: these two act on the screen, not on the buffer.
+            FormatTool.SEARCH -> find.open()
+            FormatTool.WORD_COUNT -> tools.showWordCount()
         }
     }
 
@@ -444,26 +519,36 @@ class DocumentEditorActivity : AppCompatActivity() {
             null -> return
         }
         // An item added in the middle leaves the ones below it claiming numbers they no longer have.
-        renumberLists(text)
+        tools.renumberLists(text)
     }
 
-    /**
-     * Make the ordered lists in the buffer read the way Markdown renders them.
-     *
-     * Rewrites are applied back-to-front so offsets computed against the old text stay valid, and
-     * the caret is carried by the change in length of everything that ends before it — a marker
-     * rewrite must not shuffle the caret out of the words it was sitting in.
-     */
-    private fun renumberLists(text: Editable) {
-        val changes = MarkdownFormatter.renumberOrderedLists(text)
-        if (changes.isEmpty()) return
-        val caret = binding.editor.selectionEnd
-        var delta = 0
-        for (c in changes) if (c.at + c.length <= caret) delta += c.marker.length - c.length
-        for (c in changes.asReversed()) {
-            text.replace(c.at, (c.at + c.length).coerceAtMost(text.length), c.marker)
+    // ── Text size ─────────────────────────────────────────────────────────────
+
+    /** Pick a text size. The tick marks the one in force; the choice outlives the showing. */
+    private fun promptTextSize() {
+        overflow?.close()
+        val sheet = ActionSheetDialog(this).title(getString(R.string.text_size_title))
+        for ((labelRes, size) in EditorPrefs.SIZES) {
+            val label = getString(labelRes)
+            sheet.addAction(
+                null,
+                if (size == textSizeSp) getString(R.string.text_size_current, label) else label,
+            ) { applyTextSize(size) }
         }
-        binding.editor.setSelection((caret + delta).coerceIn(0, text.length))
+        sheet.show()
+    }
+
+    /** Draw both surfaces at [sp]. [persist] is false only at load, where the value came *from* the
+     *  store and writing it back would be a Binder round trip that changes nothing. */
+    private fun applyTextSize(sp: Float, persist: Boolean = true) {
+        textSizeSp = sp
+        binding.editor.textSize = sp
+        binding.previewText.textSize = sp + EditorPrefs.PREVIEW_BUMP
+        if (persist) lifecycleScope.launch(Dispatchers.IO) { EditorPrefs.saveTextSize(sp) }
+        // The renderer bakes sizes into spans from the paint it was handed, so the preview has to be
+        // rebuilt rather than just re-measured.
+        if (previewing) renderPreview()
+        Slog.d(TAG) { "text size → ${sp}sp" }
     }
 
     // ── Keyboard ──────────────────────────────────────────────────────────────
@@ -513,6 +598,13 @@ class DocumentEditorActivity : AppCompatActivity() {
             KeyEvent.KEYCODE_9 -> if (shift) return tool(FormatTool.TASK)
             KeyEvent.KEYCODE_K -> return tool(if (shift) FormatTool.IMAGE else FormatTool.LINK)
             KeyEvent.KEYCODE_MINUS -> if (shift) return tool(FormatTool.RULE)
+            // Find, and its shifted sibling: reflow has no button until M6, so this is its only
+            // entry point besides the debug hook.
+            KeyEvent.KEYCODE_F -> {
+                overflow?.close()
+                if (shift) tools.reflow() else find.open()
+                return true
+            }
         }
         return false
     }
@@ -615,10 +707,40 @@ class DocumentEditorActivity : AppCompatActivity() {
         override fun saveNow() = saver.saveNow()
         override fun done() = leave(Activity.RESULT_OK)
         override fun close() = leave(Activity.RESULT_CANCELED)
+
+        override fun findOpen(query: String): Int {
+            find.open()
+            find.setQuery(query)
+            return find.matchCount()
+        }
+
+        override fun findStep(backwards: Boolean): String {
+            find.step(backwards)
+            return find.countLabel()
+        }
+
+        override fun findReplaceAll(replacement: String): Int {
+            find.setReplacement(replacement)
+            return find.replaceAll()
+        }
+
+        override fun findClose() = find.close()
+        override fun reflow() = tools.reflow()
+        override fun wordCount(): Pair<Int, Int> = tools.wordCount()
+
+        override fun undo() {
+            binding.editor.onTextContextMenuItem(android.R.id.undo)
+        }
+
+        override fun textSize(): Float = textSizeSp
+        override fun setTextSize(sp: Float) = applyTextSize(sp)
     }
 
     private companion object {
         const val TAG = "DocumentEditor"
+
+        /** "The bundle had no caret" — see [restoredCaret]. */
+        const val NO_CARET = -1
 
         const val STATE_TEXT = "doc_text"
         const val STATE_CARET = "doc_caret"

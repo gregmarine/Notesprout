@@ -36,6 +36,17 @@ import kotlinx.coroutines.sync.withLock
 class DocumentSaver(
     /** Reads the live buffer. **Main thread only** — this class never calls it from anywhere else. */
     private val snapshot: () -> String,
+    /** Reads the caret. **Main thread only**, like [snapshot]. */
+    private val caretSnapshot: () -> Int,
+    /**
+     * Where the caret goes at every save trigger (M5). Fire-and-forget: it is called on Main and
+     * must not block, and nothing here waits on it or cares whether it landed.
+     *
+     * It fires on **every** trigger, including one where the words are unchanged — og's rule. A
+     * writer who reads to the bottom of a page and leaves without typing has still moved, and the
+     * next open should land where they were looking.
+     */
+    private val caretSink: (String, Int) -> Unit,
 ) {
 
     private val main = Handler(Looper.getMainLooper())
@@ -89,6 +100,7 @@ class DocumentSaver(
         main.removeCallbacks(debounceTick)
         main.removeCallbacks(retryTick)
         val key = pageKey ?: return
+        caretSink(key, caretSnapshot())
         when (val action = governor.request(snapshot())) {
             is AutosaveGovernor.SaveAction.Push -> launchPush(key, action.text)
             // Wait: a push is in flight and this snapshot is queued behind it — nothing to start.
@@ -116,6 +128,8 @@ class DocumentSaver(
         leaving = true
         val key = pageKey
         val text = snapshot()
+        // Before the early return: leaving without typing is still a move worth remembering.
+        if (key != null) caretSink(key, caretSnapshot())
         if (key == null || !governor.isDirty(text)) {
             then()
             return

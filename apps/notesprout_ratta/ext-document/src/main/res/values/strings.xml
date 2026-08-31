@@ -13,6 +13,7 @@
     <string name="cd_document_done">Done</string>
     <string name="cd_document_write">Write</string>
     <string name="cd_document_preview">Preview</string>
+    <string name="cd_document_text_size">Text size</string>
     <string name="document_load_failed">This document could not be read just now.</string>
     <!-- `n / m` beside the title. Empty for the notebook scope (M7), which is not a page. -->
     <string name="document_page_indicator">%1$d / %2$d</string>
@@ -34,5 +35,39 @@
     <string name="fmt_link">Link  ·  Ctrl+K</string>
     <string name="fmt_image">Image  ·  Ctrl+Shift+K</string>
     <string name="fmt_rule">Horizontal rule  ·  Ctrl+Shift+−</string>
+    <string name="fmt_search">Find &amp; replace  ·  Ctrl+F</string>
+    <string name="fmt_word_count">Word count</string>
     <string name="fmt_more">More tools</string>
+
+    <!-- Find &amp; replace. The count reads as a bare total until a match is stepped onto, and as
+         `n of m` after that — where you are only exists once you are somewhere. -->
+    <string name="find_hint">Find</string>
+    <string name="find_replace_hint">Replace with</string>
+    <string name="find_count">%1$d of %2$d</string>
+    <string name="cd_find_prev">Previous match</string>
+    <string name="cd_find_next">Next match  ·  Enter</string>
+    <string name="cd_find_close">Close find</string>
+    <string name="find_replace_one">Replace</string>
+    <string name="cd_find_replace_one">Replace the current match, then find the next</string>
+    <string name="find_replace_all">All</string>
+    <string name="cd_find_replace_all">Replace every match — one edit, one Ctrl+Z</string>
+    <string name="find_no_matches">No matches.</string>
+    <string name="find_replaced">Replaced %1$d.</string>
+
+    <!-- Word count. A toast, because it confirms a result that already exists — nothing failed. -->
+    <string name="word_count_selection_prefix">"Selection: "</string>
+    <string name="word_count_format">%1$,d words  ·  %2$,d characters</string>
+
+    <!-- Reflow. No control until M6's source strip has a home for one; the chord is the whole of
+         it. The message is the only thing it says when there was nothing to join. -->
+    <string name="reflow_nothing">Nothing to reflow.</string>
+
+    <!-- Text size. The tick marks the size in force; the choice outlives the showing. -->
+    <string name="text_size_title">Text size</string>
+    <string name="text_size_current">%1$s  ✓</string>
+    <string name="text_size_small">Small</string>
+    <string name="text_size_medium">Medium</string>
+    <string name="text_size_large">Large</string>
+    <string name="text_size_larger">Larger</string>
+    <string name="text_size_largest">Largest</string>
 </resources>

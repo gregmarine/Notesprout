@@ -16,7 +16,8 @@ import com.symmetricalpalmtree.notesproutsn.extension.IExtensionStore
  *   screen that is still standing.
  *
  * **Nothing here is ever written to disk by the extension itself** — the document lives in the
- * host's `.soil` and the editor's small per-device state in the host's extension store (M5). Both
+ * host's `.soil` and the editor's small per-device state in the host's extension store
+ * ([EditorPrefs], M5: the text size and the caret memory). Both
  * binders are revoked by the host alongside the unbind, so a reference kept past `end()` would not
  * be a leak of anything usable — it would just be a binder that throws `SecurityException` on every
  * call. Clearing them is still the honest thing: it is what makes "there is no showing" a state the
@@ -69,8 +70,8 @@ object EditorSession {
     val host: IDocumentHost?
         get() = hostBinder
 
-    /** The host's extension store for this showing, or null when there is no showing. Unread until
-     *  M5 gives the editor state worth keeping (caret memory, text size, the proofread toggle). */
+    /** The host's extension store for this showing, or null when there is no showing. Read through
+     *  [EditorPrefs] only — and **fetched per call** there, because a host restart replaces it. */
     @get:Synchronized
     val store: IExtensionStore?
         get() = storeBinder

@@ -42,6 +42,33 @@ internal interface AutomationPeer {
     /** The Done path (final save, `RESULT_OK`, finish) and the Close path (`RESULT_CANCELED`). */
     fun done()
     fun close()
+
+    // ── M5's tools ────────────────────────────────────────────────────────────
+    // The find query is user content too: it crosses here and is never logged either.
+
+    /** Open the find bar on [query]; returns how many matches it has. */
+    fun findOpen(query: String): Int
+
+    /** Step to the next / previous match; returns the count field as it now reads. */
+    fun findStep(backwards: Boolean): String
+
+    /** Replace every match with [replacement]; returns how many were replaced. */
+    fun findReplaceAll(replacement: String): Int
+
+    fun findClose()
+
+    /** Join wrapped lines — the selection's, or the document's. */
+    fun reflow()
+
+    /** (words, characters) over the same slice the toast reports on. */
+    fun wordCount(): Pair<Int, Int>
+
+    /** The editor's own undo — what Ctrl+Z does, which a walk cannot press. */
+    fun undo()
+
+    /** The size preference in sp (**not** `editor.textSize`, which is px). */
+    fun textSize(): Float
+    fun setTextSize(sp: Float)
 }
 
 /** The live screen's peer, or null when no screen is up (and always null in release). */

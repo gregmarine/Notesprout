@@ -17,6 +17,10 @@ import androidx.core.content.ContextCompat
  * writer would have typed by hand — none of them is a "rich text" state. The hint carries the
  * keyboard chord as well as the name, because an icon bar has no labels and a long-press is the
  * only place either can be learned.
+ *
+ * The last two are not formatter operations at all — [SEARCH] opens the find bar and [WORD_COUNT]
+ * reports. They ride the same bar because that is where a writer looks for a tool, and the caller
+ * routes them past the formatter.
  */
 enum class FormatTool(val icon: Int, val hint: Int) {
     H1(R.drawable.ic_h_1, R.string.fmt_h1),
@@ -33,6 +37,8 @@ enum class FormatTool(val icon: Int, val hint: Int) {
     LINK(R.drawable.ic_link, R.string.fmt_link),
     IMAGE(R.drawable.ic_photo, R.string.fmt_image),
     RULE(R.drawable.ic_separator_horizontal, R.string.fmt_rule),
+    SEARCH(R.drawable.ic_search, R.string.fmt_search),
+    WORD_COUNT(R.drawable.ic_letter_case, R.string.fmt_word_count),
 }
 
 /**
@@ -42,9 +48,10 @@ enum class FormatTool(val icon: Int, val hint: Int) {
  * views between the bar and the panel, and a layout that declared them would be describing a
  * arrangement that stops being true the moment the bar is narrower than its contents.
  *
- * Groups are separated by a 1dp × 28dp inkBlack rule — heading / inline / block / insertion, og's
- * four groups unchanged. The overflow controls are built last so they pin to the trailing edge, and
- * they are handed back to the caller because the overflow manager needs them by identity.
+ * Groups are separated by a 1dp × 28dp inkBlack rule — heading / inline / block / insertion / the
+ * two text tools, og's five groups unchanged. The overflow controls are built last so they pin to
+ * the trailing edge, and they are handed back to the caller because the overflow manager needs them
+ * by identity.
  */
 object FormatBar {
 
@@ -73,6 +80,8 @@ object FormatBar {
         tool(FormatTool.ORDERED); tool(FormatTool.TASK)
         divider()
         tool(FormatTool.LINK); tool(FormatTool.IMAGE); tool(FormatTool.RULE)
+        divider()
+        tool(FormatTool.SEARCH); tool(FormatTool.WORD_COUNT)
 
         // Pinned at the trailing edge and hidden whenever everything fits. The overflow button is
         // the one control that does NOT dismiss the panel first — it would close then re-open.

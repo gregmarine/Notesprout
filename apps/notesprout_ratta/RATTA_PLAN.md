@@ -770,7 +770,43 @@ parity** (all 13 formatting tools, og's four groups + Ctrl chords; Find/Word-cou
 land in M5/M10 per the not-built-controls rule).
 
 ### M5 — Editor tools: Reflow, find & replace, word count, text size, caret memory
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (2026-08-30)
+
+**Outcome (code + walk, 2026-08-30):** All five tools live on the Nomad; 1241 JVM tests/variant
+(+14), debug+release green, NUL-clean, walk 10/10 (find wrap-around, replace-all-then-ONE-undo,
+reflow paragraph joins, size + caret both surviving a close/reopen, crash buffer empty, service
+unbound after Done). All og semantics; what is SN-shaped:
+- **The store key layout is a persistence format, pinned by test:** `size` (the sp float's
+  toString, UTF-8) + `carets` (`CaretMemory`'s line blob `<key>\t<offset>\n`, oldest first,
+  LRU 100 least-recently-written). Deliberately **no JSON** — the module carries no serialization
+  dependency; the hand codec degrades every bad decode to an empty map (losing a caret costs a
+  scroll, refusing to open costs the document).
+- **`EditorPrefs` fetches `EditorSession.store` per call, never caches** (a host restart replaces
+  the binder); every method is blocking-IO-only and treats every exception as "store unavailable";
+  caret RMW is lock-serialized with a skip-unchanged write; `rememberCaretAsync` runs on its own
+  non-lifecycle scope so the leave-path handover lands after `finish()` starts.
+- **Caret handover on EVERY save trigger** (og's even-when-unchanged rule): `DocumentSaver` gained
+  `caretSnapshot`+`caretSink`, fired at the top of `saveNow()` and in `flushAndThen` before its
+  clean-buffer early return. Restore order: bundle (`NO_CARET = -1` distinguishes absence — 0 is a
+  real caret) → store → top.
+- **Reflow has NO visible control this phase** — its og home is M6's source strip; `Ctrl+Shift+F`
+  + the debug hook are the entries until then (not-built-controls rule). `renumberLists` now
+  returns Boolean (reflow's "nothing" check needs it).
+- Format bar grew og's fifth group (Search · Word count) — SEARCH/WORD_COUNT are FormatTool
+  entries routed past the formatter. Find bar = og's two rows in `writingChrome` (Preview hides it
+  as one piece), selection-as-highlight, per-action recompute, replaces through the `Editable`
+  (one Ctrl+Z), Enter-in-field navigation; buttons all focusable=false (the selection IS the
+  match). Text size = header button LEFT of Write (live in Preview), `ActionSheetDialog`, og's
+  ladder 14/16/18/21/25 default 16, preview +2, load applies with `persist=false` (no write-back
+  of the just-read value). `keepCaretVisible` ported incl. the editor height-change hook. Activity
+  stayed under the size rule by extracting `FindReplaceBar` (192) + `EditorTools` (157);
+  automation hook grew 10 commands (find/replace/reflow/word_count/undo/size — `get_size` reports
+  the sp preference, not the view's px).
+- **Handoff notes for M6 (the flip phase):** `caretSink` fires with `saver.pageKey` — a flip must
+  fire its save trigger BEFORE reassigning `pageKey` or the outgoing caret files under the
+  incoming page; the load-time caret lookup runs only in `load()`, so the flip path needs its own
+  `EditorPrefs.caret()` call; the find count goes stale across a buffer swap (re-count or close
+  the bar on flip); the find query deliberately survives Preview and would survive a flip too.
 
 Reflow (selection-grows-to-lines or whole document, `Ctrl+Shift+F`, "Nothing to reflow"), find &
 replace (`Ctrl+F`, two-row bar, selection-as-highlight — e-ink honest, no spans), word count

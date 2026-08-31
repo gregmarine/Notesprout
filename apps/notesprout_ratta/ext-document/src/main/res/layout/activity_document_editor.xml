@@ -5,9 +5,9 @@
   enough, the notebook needs no handoff around this screen).
 
   Shape, top to bottom:
-    header  — Close · [title · n / m] · Write · Preview · Done
+    header  — Close · [title · n / m] · Text size · Write · Preview · Done
     rule    — 1dp inkBlack
-    writing chrome (format bar + overflow panel), hidden as ONE piece in Preview
+    writing chrome (format bar + overflow panel + find bar), hidden as ONE piece in Preview
     rule    — 1dp inkBlack
     editor  — the Markdown source, or the rendered preview in its place
 
@@ -16,8 +16,9 @@
   true the moment the bar is narrower than its contents. Both containers are in flow — the panel
   pushes the text down rather than floating over it, because an overlay ghosts on e-ink.
 
-  M5+ controls (text size, find, word count), M6's page arrows and source strip and M7's scope
-  toggle do not exist here at all: not built, rather than built and hidden.
+  M6's page arrows and source strip and M7's scope toggle do not exist here at all: not built,
+  rather than built and hidden. Reflow (M5) has no control either — its home is M6's source strip,
+  and until that exists the Ctrl+Shift+F chord is the whole of it.
 
   Chrome sits flush at the top edge — the top guard is 0 on Ratta; the Activity still applies it,
   because the guard, not this file, is where that decision lives.
@@ -77,16 +78,23 @@
             android:contentDescription="@string/cd_document_close"
             android:src="@drawable/ic_arrow_left" />
 
-        <!-- Write / Preview / Done, in that order, at the trailing edge — the SN rule: action
-             buttons on the TOP bar, after the cancel side. The armed mode's button carries the
-             selected state of bg_toolbar_button (a 1dp inkBlack box), which is how every armed
-             tool in this app reads. -->
+        <!-- Text size / Write / Preview / Done, in that order, at the trailing edge — the SN rule:
+             action buttons on the TOP bar, after the cancel side. The armed mode's button carries
+             the selected state of bg_toolbar_button (a 1dp inkBlack box), which is how every armed
+             tool in this app reads. Text size stays live in Preview: reading comfort is what it is
+             mostly for. -->
         <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="match_parent"
             android:layout_gravity="end|center_vertical"
             android:gravity="center_vertical"
             android:orientation="horizontal">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnTextSize"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_document_text_size"
+                android:src="@drawable/ic_text_size" />
 
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnWrite"
@@ -144,6 +152,167 @@
             android:background="@drawable/shape_bordered"
             android:orientation="vertical"
             android:visibility="gone" />
+
+        <!-- Find & replace, hidden until Ctrl+F or the bar's search tool asks for it. Two rows:
+             `[find][n of m][‹][›][✕]` over `[replace][Replace][All]`. Inside the writing chrome, so
+             Preview takes it away with the rest of the writing tools.
+
+             Every button here is focusable="false": the editor must keep the caret and the
+             selection these act on — the selection IS the current match, and a button that stole
+             the focus would take the highlight with it. -->
+        <LinearLayout
+            android:id="@+id/findBar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/inkBlack" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="12dp"
+                android:paddingTop="6dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="2dp">
+
+                <androidx.appcompat.widget.AppCompatEditText
+                    android:id="@+id/findField"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:background="@drawable/shape_bordered"
+                    android:hint="@string/find_hint"
+                    android:imeOptions="actionSearch|flagNoFullscreen|flagNoExtractUi"
+                    android:inputType="text|textNoSuggestions"
+                    android:paddingStart="10dp"
+                    android:paddingTop="6dp"
+                    android:paddingEnd="10dp"
+                    android:paddingBottom="6dp"
+                    android:singleLine="true"
+                    android:textColor="@color/inkBlack"
+                    android:textColorHint="@color/inkLight"
+                    android:textSize="14sp" />
+
+                <!-- The running count. inkBlack and small rather than grey: it carries
+                     information. minWidth so the row does not shuffle as the digits change. -->
+                <TextView
+                    android:id="@+id/findCount"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:minWidth="48dp"
+                    android:paddingStart="4dp"
+                    android:paddingEnd="4dp"
+                    android:singleLine="true"
+                    android:textColor="@color/inkBlack"
+                    android:textSize="12sp" />
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnFindPrev"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:contentDescription="@string/cd_find_prev"
+                    android:focusable="false"
+                    android:focusableInTouchMode="false"
+                    android:src="@drawable/ic_page_prev" />
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnFindNext"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:contentDescription="@string/cd_find_next"
+                    android:focusable="false"
+                    android:focusableInTouchMode="false"
+                    android:src="@drawable/ic_page_next" />
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnFindClose"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:contentDescription="@string/cd_find_close"
+                    android:focusable="false"
+                    android:focusableInTouchMode="false"
+                    android:src="@drawable/ic_x" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="12dp"
+                android:paddingTop="2dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="6dp">
+
+                <androidx.appcompat.widget.AppCompatEditText
+                    android:id="@+id/replaceField"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:background="@drawable/shape_bordered"
+                    android:hint="@string/find_replace_hint"
+                    android:imeOptions="actionSearch|flagNoFullscreen|flagNoExtractUi"
+                    android:inputType="text|textNoSuggestions"
+                    android:paddingStart="10dp"
+                    android:paddingTop="6dp"
+                    android:paddingEnd="10dp"
+                    android:paddingBottom="6dp"
+                    android:singleLine="true"
+                    android:textColor="@color/inkBlack"
+                    android:textColorHint="@color/inkLight"
+                    android:textSize="14sp" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnReplace"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="4dp"
+                    android:background="@drawable/bg_toolbar_button"
+                    android:contentDescription="@string/cd_find_replace_one"
+                    android:focusable="false"
+                    android:focusableInTouchMode="false"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="10dp"
+                    android:paddingTop="4dp"
+                    android:paddingEnd="10dp"
+                    android:paddingBottom="4dp"
+                    android:stateListAnimator="@null"
+                    android:text="@string/find_replace_one"
+                    android:textAllCaps="false"
+                    android:textColor="@color/inkBlack"
+                    android:textSize="12sp" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnReplaceAll"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="4dp"
+                    android:background="@drawable/bg_toolbar_button"
+                    android:contentDescription="@string/cd_find_replace_all"
+                    android:focusable="false"
+                    android:focusableInTouchMode="false"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="10dp"
+                    android:paddingTop="4dp"
+                    android:paddingEnd="10dp"
+                    android:paddingBottom="4dp"
+                    android:stateListAnimator="@null"
+                    android:text="@string/find_replace_all"
+                    android:textAllCaps="false"
+                    android:textColor="@color/inkBlack"
+                    android:textSize="12sp" />
+
+            </LinearLayout>
+
+        </LinearLayout>
 
     </LinearLayout>
 
