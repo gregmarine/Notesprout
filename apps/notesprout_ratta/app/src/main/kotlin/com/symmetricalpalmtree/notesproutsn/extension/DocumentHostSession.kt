@@ -125,8 +125,20 @@ class DocumentHostSession {
         } else null
         val text = saveParts.toString()
         resetSaveLocked()
-        if (drafted) parkedWatermark = null   // consumed — reset keeps it for a retry of the same draft
+        // The park is NOT consumed here: the commit hook has not run yet, and a transient commit
+        // failure must leave the draft retryable — the editor re-sends the same drafted save and
+        // the anchor still lands. [consumeParkedWatermark] is the consume, after the commit.
         Commit(pageKey, text, watermark)
+    }
+
+    /**
+     * A drafted [Commit] carrying [watermark] has been persisted — consume the park it was built
+     * from. Value-matched, not blind: a window swap between the accept and the commit may already
+     * have cleared or replaced the park, and clearing someone else's would re-mint the M3 bug this
+     * split exists to avoid.
+     */
+    fun consumeParkedWatermark(watermark: Long): Unit = synchronized(lock) {
+        if (parkedWatermark == watermark) parkedWatermark = null
     }
 
     /** Drop everything — the showing is over ([IDocumentEditor.end] / revoke). */

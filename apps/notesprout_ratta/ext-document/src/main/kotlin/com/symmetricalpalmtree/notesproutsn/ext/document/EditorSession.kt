@@ -82,8 +82,14 @@ object EditorSession {
         fun onHostBegan()
     }
 
-    /** The live screen's unsaved snapshot as `pageKey to text`, or null when it has nothing owed. */
-    fun interface FlushHook {
+    /** The live screen's half of the teardown flush (M11: two methods, so the service's push can
+     *  ride the saver's own push lock instead of interleaving with an in-flight autosave). */
+    interface FlushHook {
+        /** The unsaved buffer as `pageKey to text`, or null when nothing is owed. */
         fun unsavedSnapshot(): Pair<String, String>?
+
+        /** Push [pageKey]/[text] through the saver's push lock, blocking the calling Binder
+         *  thread; throws on failure (the caller parks). */
+        fun pushBlocking(pageKey: String, text: String)
     }
 }

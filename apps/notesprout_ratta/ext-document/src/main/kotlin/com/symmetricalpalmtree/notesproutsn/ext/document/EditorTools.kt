@@ -40,21 +40,19 @@ internal class EditorTools(
      * Make the ordered lists in the buffer read the way Markdown renders them.
      *
      * Rewrites are applied back-to-front so offsets computed against the old text stay valid, and
-     * the caret is carried by the change in length of everything that ends before it — a marker
-     * rewrite must not shuffle the caret out of the words it was sitting in.
+     * the caret is carried by [caretAfterRenumber] — a marker rewrite must not shuffle the caret
+     * out of the words it was sitting in.
      *
      * Returns whether anything was rewritten, which is half of what [reflow] reports.
      */
     fun renumberLists(text: Editable): Boolean {
         val changes = MarkdownFormatter.renumberOrderedLists(text)
         if (changes.isEmpty()) return false
-        val caret = binding.editor.selectionEnd
-        var delta = 0
-        for (c in changes) if (c.at + c.length <= caret) delta += c.marker.length - c.length
+        val caret = caretAfterRenumber(changes, binding.editor.selectionEnd)
         for (c in changes.asReversed()) {
             text.replace(c.at, (c.at + c.length).coerceAtMost(text.length), c.marker)
         }
-        binding.editor.setSelection((caret + delta).coerceIn(0, text.length))
+        binding.editor.setSelection(caret.coerceIn(0, text.length))
         return true
     }
 
@@ -207,7 +205,26 @@ internal class EditorTools(
         if (below > 0) binding.editor.scrollBy(0, below)
     }
 
-    private companion object {
-        const val TAG = "DocumentEditor"
+    internal companion object {
+        private const val TAG = "DocumentEditor"
+
+        /**
+         * Where [caret] ends up once [changes] — ascending, non-overlapping marker rewrites — have
+         * been applied.
+         *
+         * A caret standing *inside* a marker being rewritten has nothing to be carried by: the
+         * characters it sat between may not exist afterwards, and a shrinking marker (`10.` → `3.`)
+         * would otherwise leave it inside the item's text. It is put at the end of the new marker,
+         * which is where the content starts — the one position a rewritten marker can promise.
+         */
+        fun caretAfterRenumber(changes: List<MarkdownFormatter.Renumber>, caret: Int): Int {
+            var delta = 0
+            for (c in changes) {
+                if (c.at + c.length <= caret) delta += c.marker.length - c.length
+                else if (c.at < caret) return c.at + delta + c.marker.length
+                else break
+            }
+            return caret + delta
+        }
     }
 }

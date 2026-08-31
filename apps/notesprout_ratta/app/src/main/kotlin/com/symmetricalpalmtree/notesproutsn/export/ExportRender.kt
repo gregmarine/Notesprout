@@ -10,13 +10,10 @@ import android.text.TextPaint
 import android.util.Log
 import com.symmetricalpalmtree.notesproutsn.core.Bitmaps
 import com.symmetricalpalmtree.notesproutsn.core.Slog
-import com.symmetricalpalmtree.notesproutsn.crypto.KeySession
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilDao
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilDatabase
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilObjectEntity
-import com.symmetricalpalmtree.notesproutsn.data.soil.SoilOpenFiles
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilSchema
-import com.symmetricalpalmtree.notesproutsn.data.soilFile
 import com.symmetricalpalmtree.notesproutsn.data.template.BuiltInTemplates
 import com.symmetricalpalmtree.notesproutsn.extension.PageBundle
 import com.symmetricalpalmtree.notesproutsn.notebook.HeadingRenderer
@@ -43,18 +40,16 @@ import java.io.IOException
  * pixels. The "what a notebook is" question stays host-side for good: when a kind of page arrives
  * that draws differently, it draws differently here and no extension changes.
  *
- * The order is [ExportArtifact.prepare]'s, one guard for one guard, because the same things are at
- * stake — a live writer, a missing key, a file that will not open:
+ * The guards are [ExportOpen]'s — the family's one door, in the order that *is* the invariant (the
+ * file is there, the file is not held, there is a key, the open is sealed in a `finally`), because
+ * the same things are at stake here as in [ExportArtifact.prepare]: a live writer, a missing key, a
+ * file that will not open. What is this file's own:
  *
- *  1. **Assert the file is not held.** One file, one connection; [SoilOpenFiles] is the door
- *     written down, so this checks rather than assumes.
- *  2. **Read-only open** through the one [SoilDatabase.open] door. Nothing is written — not even
- *     `notebook_meta`'s `exportedAt`, which the soil path stamps because *that file* is the thing
- *     travelling. A PDF is not the notebook, and a render must not mutate what it renders.
- *  3. **Bake page by page** into `cacheDir/export/` — the same directory [ExportArtifact] uses and
- *     [ExportArtifact.clean] wipes, so one `finally` in the screen takes both artifacts away.
- *  4. **Seal**, always, in a `finally` — an unsealed open strands the connection and its WAL
- *     sidecar for the process lifetime (the R6 lesson).
+ *  1. **Nothing is written** — not even `notebook_meta`'s `exportedAt`, which the soil path stamps
+ *     because *that file* is the thing travelling. A PDF is not the notebook, and a render must not
+ *     mutate what it renders.
+ *  2. **Bake page by page** into [ExportArtifact.freshDir] — the same directory the soil copy uses
+ *     and [ExportArtifact.clean] wipes, so one `finally` in the screen takes both artifacts away.
  *
  * **One page in memory at a time** is a rule, not an optimisation: a whole notebook of full-size
  * bitmaps is an OOM on a 3 GB device. Each page is allocated, drawn, encoded, appended and recycled
@@ -128,36 +123,36 @@ object ExportRender {
         includeTemplate: Boolean,
         progress: suspend (Int, Int) -> Unit,
     ): Outcome = withContext(Dispatchers.IO) {
-        val source = soilFile(context, notebookId)
-        if (!source.exists() || source.length() == 0L) return@withContext Outcome.Failed(Problem.MISSING)
-        if (SoilOpenFiles.isOpen(source)) {
-            Log.w(TAG, "refusing to render a notebook that is open in this process")
-            return@withContext Outcome.Failed(Problem.IN_USE)
+        // The bake's own failures are caught inside the open, not around it: they mean the *render*
+        // failed, which is a different sentence from the file not opening — and the seal still runs.
+        val opened = ExportOpen.readOnly(context, notebookId, "render") { db ->
+            try {
+                bake(context, db, notebookId, includeTemplate, progress)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // The class and message only — a render failure's message can carry a path.
+                Log.w(TAG, "page render failed: ${e.javaClass.simpleName}")
+                Outcome.Failed(Problem.RENDER_FAILED)
+            } catch (e: OutOfMemoryError) {
+                // A page allocation that the per-page recycle could not save. Not a crash: the
+                // notebook is untouched and the screen has a sentence for it.
+                Log.w(TAG, "page render ran out of memory")
+                Outcome.Failed(Problem.RENDER_FAILED)
+            }
         }
-        val passphrase = KeySession.get() ?: return@withContext Outcome.Failed(Problem.NO_KEY)
+        when (opened) {
+            is ExportOpen.Opened.Read -> opened.value
+            is ExportOpen.Opened.Blocked -> Outcome.Failed(problemOf(opened.guard))
+        }
+    }
 
-        val db = try {
-            SoilDatabase.open(context, notebookId, source, passphrase)
-        } catch (e: Exception) {
-            Log.w(TAG, "render open failed", e)
-            return@withContext Outcome.Failed(Problem.UNREADABLE)
-        }
-        try {
-            bake(context, db, notebookId, includeTemplate, progress)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            // The class and message only — a render failure's message can carry a path.
-            Log.w(TAG, "page render failed: ${e.javaClass.simpleName}")
-            Outcome.Failed(Problem.RENDER_FAILED)
-        } catch (e: OutOfMemoryError) {
-            // A page allocation that the per-page recycle could not save. Not a crash: the notebook
-            // is untouched and the screen has a sentence for it.
-            Log.w(TAG, "page render ran out of memory")
-            Outcome.Failed(Problem.RENDER_FAILED)
-        } finally {
-            db.seal(source)
-        }
+    /** The family's guards in this render's own words — the bake's reasons, one for one. */
+    private fun problemOf(guard: ExportOpen.Guard): Problem = when (guard) {
+        ExportOpen.Guard.MISSING -> Problem.MISSING
+        ExportOpen.Guard.IN_USE -> Problem.IN_USE
+        ExportOpen.Guard.NO_KEY -> Problem.NO_KEY
+        ExportOpen.Guard.UNREADABLE -> Problem.UNREADABLE
     }
 
     /** One page as the bake takes it: identity, its **own** pixel size, and the paper under it. */
@@ -204,10 +199,7 @@ object ExportRender {
         val pages = plan(rows) ?: return Outcome.Failed(Problem.DAMAGED)
         if (pages.size > PageBundle.MAX_PAGES) return Outcome.Failed(Problem.TOO_LONG)
 
-        val dir = File(context.cacheDir, ExportArtifact.DIR)
-        dir.deleteRecursively()
-        if (!dir.mkdirs()) throw IOException("could not create the export cache directory")
-        val bundle = File(dir, "$notebookId.pages")
+        val bundle = File(ExportArtifact.freshDir(context), "$notebookId.pages")
 
         val metrics = context.resources.displayMetrics
         val paint = HeadingRenderer.basePaint(metrics.scaledDensity)

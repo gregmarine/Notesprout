@@ -35,7 +35,7 @@ deliberate differences are listed at the end.
 | `core/RecognizingOverlay` (N2) | the "Recognizing…" box during a convert — `OpeningOverlay`'s smaller, dialog-free sibling |
 | `notebook/InkPayload` (N2) | `Stroke` (g-paper) → `InkStroke` (extension-api) in writing order — the one place a page's ink is reduced to bare geometry for the recognizer |
 | `CoverSnapshot` | `paper.renderToBitmap()` → ≤ 512 px long edge → WEBP q100 → `IndexRepository.setCover`; headings ride along for free (`HeadingRenderer` is part of the same committed-layer render) |
-| `NotebookToolbar` | `[←] [contents] [pen] [eraser] [lasso] … [recents] [scratch pad]` — arming only; owns the fixed tool values (the Contents and Recents buttons belong to their flows, not to it). Back goes through `backPressed()`, never straight to `close()` (K4 — both Backs walk the link trail in a via-link notebook). O1: a second tap on the **armed lasso** calls back to the screen (the clipboard popup), and `showClipboardLoaded()` swaps that button's icon |
+| `NotebookToolbar` | `[←] [contents] [pen] [eraser] [lasso] … [document] [recents] [scratch pad]` — arming only; owns the fixed tool values (the Contents, Document and Recents buttons belong to their own flows, not to it). Back goes through `backPressed()`, never straight to `close()` (K4 — both Backs walk the link trail in a via-link notebook). O1: a second tap on the **armed lasso** calls back to the screen (the clipboard popup), and `showClipboardLoaded()` swaps that button's icon |
 | `SelectionToolbar` | the floating bar over a live lasso selection: Delete (always) + H, plus (K1) **Link** / **Edit** / **Unlink** by `SelectionMode` (five modes since K1), plus (O1) **Copy** / **Cut** in every mode, plus (N2) the H1–H6 level sub-toolbar it can open |
 | `LassoPopup` (O1) | the small bordered bar under the **armed** lasso button: **Paste** + **Clear** for the object clipboard. Opens only while the clipboard holds objects; the screen owns every dismissal |
 | `ObjectClip` (O1) | pure selection ⇄ clipboard payload — capture, fresh ids, parent rewiring, the per-type `"order"` rebase, geometry translation (stroke = decode/translate/re-encode). JVM-tested. [`docs/clipboard.md`](clipboard.md) |
@@ -52,6 +52,7 @@ deliberate differences are listed at the end.
 | `RecentsSource` (T1) | the Recents gather (IO): `sn_recents` → one blob-free batch index read (`aliveNotebooks`) → prune → one ancestry walk per distinct parent → display rows. Touches no `.soil` |
 | `RecentsFlow` (T1) | what the clock button and the two-finger swipe-down both call: busy guard, pen-gated `releaseRender`, gather → `RecentsDialog`, `showing` (drives BLOCK_ALL), `dismissIfShowing()`. Owns `btnRecents` outright |
 | `RecentsDialog` (T1) | the Recents screen: `dialog_contents.xml` mirrored to the right (2 dp rule on the left edge), three-line rows, measured pagination, tap = switch notebooks |
+| `DocumentEditorEntry` / `DocumentSeedFlow` / `DocumentHostHooks` (arc 19 / M3–M8) | what `btnDocument` opens: the fifth extension point's client, the seed-before-launch flow, and the host-side callback binder every read/write from the editor comes back through. Full detail — data model, seeding, flips, the notebook document, text documents — is [`docs/document.md`](document.md); see [Document](#document-arc-19) below for this screen's own slice |
 
 ## Layout (`activity_notebook.xml`)
 
@@ -65,8 +66,10 @@ frame). Immersive: system bars hidden, transient by swipe. Portrait-locked.
 
 The `topBarRow` is left-packed — Back, then Contents / Pen / Eraser / Lasso, all butted together
 (the same spacing the scratch pad's row uses) — with a **weighted spacer** after the Lasso holding
-the row's free space, so `btnRecents` (T1) and the Scratch Pad button sit flush at the right edge
-and everything to their left keeps its position whatever the screen width.
+the row's free space, so `btnDocument` (arc 19), `btnRecents` (T1) and the Scratch Pad button sit
+flush at the right edge, in that order — Document immediately before Recents (the user's placement
+call, M3 phase start: page-bound, so leftmost of the "leave this page" cluster) — and everything to
+their left keeps its position whatever the screen width.
 
 Both bars — and both selection bars while they are up — are pushed to `paper.setExclusionRects`
 after every root layout pass, translated into the paper view's coordinates, so the stylus can never
@@ -743,9 +746,10 @@ tap. Nothing about it is stored anywhere new: it reads the same device-local `sn
 only**, so a notebook's name never reaches plaintext prefs), and resolves names and folder paths from
 the global index at gather time. No schema change, nothing in any `.soil`.
 
-**Entry points:** `btnRecents` (Tabler `clock`) **at the top bar's right edge**, with the Scratch
-Pad button after it — a weighted spacer after the Lasso puts them there, because neither is a tool
-and the Recents panel comes in from that side
+**Entry points:** `btnRecents` (Tabler `clock`) **at the top bar's right edge**, with the Document
+button (arc 19) just before it and the Scratch Pad button after it — a weighted spacer after the
+Lasso puts the three there, because none of them is a tool and the Recents panel comes in from that
+side
 — and a **two-finger swipe down** on the paper. Unlike the Contents, neither is gated: the button is
 always visible and the swipe always acts, because "nothing recent" is a real answer the panel gives
 ("No recent notebooks") rather than a reason to hide a control.
@@ -796,6 +800,37 @@ branch; `close()` and the `onDestroy` fallback both call `RecentsFlow.dismissIfS
 current notebook dropped (including a duplicate of it), dead ids dropped, duplicates collapsed,
 nothing invented, the breadcrumb's root-only and nested forms, and `itemsPerPage` (whole rows, ≥ 1,
 and no divide-by-zero on an unmeasured row).
+
+## Document (arc 19)
+
+The notebook's own door into og's Documents feature — the fifth extension point
+([`docs/extensions.md`](extensions.md); [`docs/document.md`](document.md) is the feature bible for
+everything past this screen). `btnDocument` (icon `ic_file_text`) sits in the top bar's right
+cluster, immediately before Recents (see [Layout](#layout-activity_notebookxml) above). A tap runs
+`DocumentSeedFlow.start()` — flush this page's ink, then hand the page's stored document straight
+to the editor, or, on an undocumented page, recognize it behind a "Reading this page…" popup and a
+consent flow first — and only then launches the editor through `DocumentEditorEntry`, the
+scratch-pad-shaped client for the fifth point.
+
+**The notebook is STOPPED behind the editor, not sealed.** Unlike a page flip or a plain close, the
+Document button calls **no `releaseForHandoff()`**: the editor draws no ink of its own, so the EPD
+pipeline stays here exactly as it does for the arc-13 template picker — measured, not assumed, on
+the Nomad at M3 (pen scribble under the live editor drew nothing; ink resumed cleanly, with no
+ghosting, on return). Every read and write the editor makes crosses back through the held callback
+binder (`DocumentHostHooks`), never a `.soil` open of its own — the notebook's own `SoilDatabase`
+stays the only writer.
+
+**Page flips made inside the editor are caught up on close.** `IDocumentHost.requestPage` lets the
+editor flip without touching the canvas; the notebook only catches up once the showing ends
+(`documentShowingEnded`, `DocumentEditorEntry.onClosed`), landing on the page the editor was
+showing (an ordinary notebook) or routing per `TextDocRouting`'s table (a text document — see
+[`docs/library.md`](library.md) § Text documents). **The flip gap is a no-save zone**, guarded on
+both sides of the process boundary; full detail lives in [`docs/document.md`](document.md).
+
+`NotebookActivity` declares `keyboard|keyboardHidden` in `configChanges` (added at M4): the editor
+runs in the extension's own process on top of this screen, and a Bluetooth-keyboard attach or
+detach is a config change reaching all the way down here too — a recreate behind a live editor
+would tear down the host binder mid-edit, the exact failure M4 exists to close.
 
 ## Pages
 
@@ -1163,6 +1198,12 @@ already present.
 overlay, the dead-target dialog, the swipe-up walk-back) enters through a finger gesture behind
 `PageGestures`' pen gate, and the picker and the selection toolbar's link buttons ride the
 existing selection-toolbar exceptions (2 and 5).
+
+**Arc 19 added no new exception**: the Document button's own "Reading this page…" dialog
+(`DocumentSeedFlow.seed`, an undocumented page's open-time recognition) and the editor's launch
+both follow a deliberate chrome tap on `btnDocument` — exception 1's justification exactly (the
+page-template picker's own Activity launch, extended to a cross-process one at M3): the tap has
+already passed the gate before either can show, and nothing here repaints while the pen writes.
 
 Any new exception needs the same written justification.
 

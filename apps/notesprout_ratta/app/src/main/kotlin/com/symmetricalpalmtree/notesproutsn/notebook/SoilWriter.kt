@@ -38,11 +38,14 @@ class SoilWriter(
         }
     }
 
-    /** Queue one write. Safe from any thread; a closed writer drops the job with a warning. */
-    fun enqueue(job: suspend () -> Unit) {
+    /** Queue one write. Safe from any thread; a closed writer drops the job with a warning.
+     *  Answers whether the job was accepted — a caller that must not report success for a write
+     *  that will never run (the document seam) checks it; ink callers may ignore it. */
+    fun enqueue(job: suspend () -> Unit): Boolean {
         val r = queue.trySend(job)
         if (r.isFailure) Log.w(TAG, "write dropped: writer closed")
         else scheduleTouch()
+        return r.isSuccess
     }
 
     /** Suspends until every write queued before this call has been applied. */

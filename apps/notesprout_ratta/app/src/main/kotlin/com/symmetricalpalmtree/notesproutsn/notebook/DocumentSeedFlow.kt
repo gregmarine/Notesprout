@@ -144,6 +144,16 @@ class DocumentSeedFlow(
      * Runs on a Binder thread inside the hook's `runBlocking`.
      */
     suspend fun recognize(pageId: String): String? {
+        val client = recognizerReady() ?: return null
+        return recognizeWith(client, pageId)
+    }
+
+    /**
+     * The one-time half of [recognize] (M11 — hoisted so the notebook-wide merge pays the
+     * registry lookup, the READY probe and the writer drain once, not per page): null =
+     * recognition is not there to run.
+     */
+    suspend fun recognizerReady(): RecognizerClient? {
         val ref = ExtensionRegistry.handwritingRecognizer(activity) ?: return null
         val client = RecognizerClient(activity, ref)
         // READY or nothing: `prepare()` is the only thing that may start a download, and it needs a
@@ -155,8 +165,16 @@ class DocumentSeedFlow(
             false
         }
         if (!ready) return null
+        // Once per acquisition, not per page: no new ink can arrive while the host is stopped
+        // behind the editor, so one drain covers every page the caller then reads.
+        session().store.drain()
+        return client
+    }
+
+    /** The per-page half — [client] came from [recognizerReady], bind and drain already paid.
+     *  null = the read or the call failed; "" = it ran and the page had nothing to give. */
+    suspend fun recognizeWith(client: RecognizerClient, pageId: String): String? {
         val nb = session()
-        nb.store.drain()
         val strokes = nb.store.loadPage(pageId)
         if (strokes.isEmpty()) return ""
         val page = nb.pages.firstOrNull { it.id == pageId } ?: return null

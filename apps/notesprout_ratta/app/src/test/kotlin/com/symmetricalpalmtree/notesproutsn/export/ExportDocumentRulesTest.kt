@@ -12,8 +12,8 @@ import org.junit.Test
 /**
  * The document export's decision core, pinned (arc 19 / M9): the assembly (notebook document
  * first, else the M7 merge join over page documents — never recognition), the host-executed
- * format strip, the per-choice destination naming, and the two visibility tables the Export
- * screen stands on.
+ * format strip **and its refusal when the strip leaves nothing** (M11), the per-choice destination
+ * naming, and the two visibility tables the Export screen stands on.
  */
 class ExportDocumentRulesTest {
 
@@ -69,6 +69,21 @@ class ExportDocumentRulesTest {
         // The strip itself is MarkdownText's and pinned in :markdown — one case here proves the
         // routing, not the grammar.
         assertEquals("Title\n\nSome bold text.", ExportDocumentRules.finalText(md, ExporterContract.TEXT_FORMAT_PLAIN))
+    }
+
+    @Test
+    fun aDocumentThatStripsToNothingIsRefusedRatherThanWrittenEmpty() {
+        // All syntax, no words: a document in Markdown, and no text file at all. Every NO_DOCUMENT
+        // gate upstream passes it (there IS a document), so this is where the "honest refusal,
+        // never an empty file" rule has to hold — a 0-byte .txt would even pass the verbatim
+        // check downstream, 0 streamed against 0 written.
+        val rule = "---"
+        assertEquals(rule, ExportDocumentRules.finalText(rule, ExporterContract.TEXT_FORMAT_MARKDOWN))
+        assertNull(ExportDocumentRules.finalText(rule, ExporterContract.TEXT_FORMAT_PLAIN))
+        assertNull(ExportDocumentRules.finalText("---\n\n---\n", ExporterContract.TEXT_FORMAT_PLAIN))
+        // The Markdown branch cannot answer null from an assembled document (assemble trims and
+        // returns null rather than blank), but it answers the same way if ever handed one.
+        assertNull(ExportDocumentRules.finalText("   \n ", ExporterContract.TEXT_FORMAT_MARKDOWN))
     }
 
     // ── destination naming ────────────────────────────────────────────────────

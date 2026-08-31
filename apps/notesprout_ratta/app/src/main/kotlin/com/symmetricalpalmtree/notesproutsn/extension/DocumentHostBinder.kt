@@ -161,6 +161,8 @@ class DocumentHostBinder(
         val commit = session.acceptChunk(pageKey, chunkIndex, chunk, last, drafted) ?: return
         val t0 = SystemClock.elapsedRealtime()
         hook { hooks.commit(commit) }
+        // Only a commit that RETURNED consumes the park — a throw above leaves the draft retryable.
+        commit.draftWatermark?.let { session.consumeParkedWatermark(it) }
         Slog.d(TAG) {
             "saveChunk: committed ${commit.text.length} chars over ${chunkIndex + 1} chunk(s)" +
                 "${if (commit.draftWatermark != null) " (drafted)" else ""} in ${SystemClock.elapsedRealtime() - t0} ms"

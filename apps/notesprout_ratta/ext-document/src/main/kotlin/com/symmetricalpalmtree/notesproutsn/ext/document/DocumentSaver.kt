@@ -162,7 +162,20 @@ class DocumentSaver(
      * A save trigger: the debounce, a mode switch, `onPause`, a retry. Snapshots the buffer and asks
      * the governor what to do with it. **Main thread only.**
      */
-    fun saveNow() {
+    fun saveNow() = saveTrigger(forceDraft = false)
+
+    /**
+     * A **Bring in** just armed the draft claim: push the buffer NOW, even when its text is
+     * unchanged — og's rule, and the reason [AutosaveGovernor.requestDraft] exists: both Bring in
+     * choices re-anchor the watermark to the state just recognized, *even when the draft came out
+     * identical*. The ordinary [saveNow] would drop the unchanged text, the host's parked watermark
+     * would never be consumed, and the strip would claim a provenance the row does not carry.
+     * **Main thread only.**
+     */
+    fun saveDraftNow() = saveTrigger(forceDraft = true)
+
+    /** The one trigger body — [forceDraft] picks the governor door (unchanged-drop vs push-anyway). */
+    private fun saveTrigger(forceDraft: Boolean) {
         // The flip gap: the outgoing page's text went as the flip began, and what is in the buffer
         // now is nobody's until the incoming page lands.
         if (suspended) return
@@ -173,30 +186,12 @@ class DocumentSaver(
         // Snapshotted with the text, at the trigger: a Bring in that arms the claim after this
         // point belongs to the push it triggers itself, not to this one.
         val drafted = anchor.pending
-        when (val action = governor.request(snapshot())) {
+        val text = snapshot()
+        val action = if (forceDraft) governor.requestDraft(text) else governor.request(text)
+        when (action) {
             is AutosaveGovernor.SaveAction.Push -> launchPush(key, action.text, drafted)
             // Wait: a push is in flight and this snapshot is queued behind it — nothing to start.
             // Idle / Retry: nothing new to write.
-            else -> Unit
-        }
-    }
-
-    /**
-     * A **Bring in** just armed the draft claim: push the buffer NOW, even when its text is
-     * unchanged — og's rule, and the reason [AutosaveGovernor.requestDraft] exists: both Bring in
-     * choices re-anchor the watermark to the state just recognized, *even when the draft came out
-     * identical*. The ordinary [saveNow] would drop the unchanged text, the host's parked watermark
-     * would never be consumed, and the strip would claim a provenance the row does not carry.
-     * **Main thread only.**
-     */
-    fun saveDraftNow() {
-        if (suspended) return
-        main.removeCallbacks(debounceTick)
-        main.removeCallbacks(retryTick)
-        val key = pageKey ?: return
-        caretSink(key, caretSnapshot())
-        when (val action = governor.requestDraft(snapshot())) {
-            is AutosaveGovernor.SaveAction.Push -> launchPush(key, action.text, anchor.pending)
             else -> Unit
         }
     }
@@ -236,12 +231,7 @@ class DocumentSaver(
         }
         val drafted = anchor.pending
         scope.launch {
-            val error = try {
-                pushLock.withLock { pushBlocking(key, text, drafted) }
-                null
-            } catch (e: Exception) {
-                e
-            }
+            val error = runPush(key, text, drafted)
             main.post {
                 settleDraft(drafted, error)
                 if (error == null) {
@@ -299,12 +289,7 @@ class DocumentSaver(
         // would leave a stale park for this key that the teardown flush then writes OVER the words
         // that just landed.
         val error = withContext(NonCancellable) {
-            try {
-                pushLock.withLock { pushBlocking(snapshot.pageKey, snapshot.text, snapshot.drafted) }
-                null
-            } catch (e: Exception) {
-                e
-            }
+            runPush(snapshot.pageKey, snapshot.text, snapshot.drafted)
         }
         withContext(Dispatchers.Main + NonCancellable) {
             finishPush(snapshot.pageKey, snapshot.text, snapshot.drafted, error, fromFlip = true)
@@ -319,13 +304,31 @@ class DocumentSaver(
 
     private fun launchPush(key: String, text: String, drafted: Boolean) {
         scope.launch {
-            val error = try {
-                pushLock.withLock { pushBlocking(key, text, drafted) }
-                null
-            } catch (e: Exception) {
-                e
-            }
+            val error = runPush(key, text, drafted)
             main.post { finishPush(key, text, drafted, error) }
+        }
+    }
+
+    /** The one push-under-the-lock, error-captured — every path's shared middle (the completion
+     *  bookkeeping deliberately stays per-path: the three callers end differently on purpose). */
+    private suspend fun runPush(key: String, text: String, drafted: Boolean): Exception? =
+        try {
+            pushLock.withLock { pushBlocking(key, text, drafted) }
+            null
+        } catch (e: Exception) {
+            e
+        }
+
+    /**
+     * The service's teardown push (M11): [key]/[text] through the SAME lock every other save
+     * takes, blocking the calling **Binder** thread until it landed or threw. Without the lock the
+     * `end()` backstop could interleave its chunks with an in-flight autosave push on the host's
+     * one accumulator — out-of-order refusals, or an older snapshot committing after a newer one.
+     * No bookkeeping: the showing is over, and the caller parks on a throw.
+     */
+    fun pushLockedBlocking(key: String, text: String) {
+        kotlinx.coroutines.runBlocking {
+            pushLock.withLock { pushBlocking(key, text, drafted = false) }
         }
     }
 

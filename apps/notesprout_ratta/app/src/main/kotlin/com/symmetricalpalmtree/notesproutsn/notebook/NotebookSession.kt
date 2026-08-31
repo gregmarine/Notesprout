@@ -23,6 +23,7 @@ import com.symmetricalpalmtree.notesproutsn.data.template.BuiltInTemplates
 import com.symmetricalpalmtree.notesproutsn.data.template.PagePaper
 import com.symmetricalpalmtree.notesproutsn.data.template.PaperSource
 import com.symmetricalpalmtree.notesproutsn.data.soilFile
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
@@ -554,13 +555,17 @@ class NotebookSession(
      * (the notebook document, M7); blank [text] deletes the row, which is [DocumentRepository]'s
      * blank-means-absent rule and not a special case here.
      *
-     * **Through the writer, then drained.** The enqueue is what orders this write against the
-     * strokes and headings the same page may still be committing — one serial queue, the whole
-     * session's rule. The [SoilWriter.drain] after it is the seam's half: the extension's
-     * `saveChunk` is a blocking Binder call and its return is the editor's only "it landed", so a
-     * fire-and-forget enqueue would let the editor finish (and the host seal) over a write still
-     * sitting in the queue. Drain costs one round trip through a queue this screen is not otherwise
-     * hammering, and buys the flush-before-seal invariant across a process boundary.
+     * **Through the writer, then awaited — exceptionally if the write threw.** The enqueue is what
+     * orders this write against the strokes and headings the same page may still be committing —
+     * one serial queue, the whole session's rule. The await after it is the seam's half: the
+     * extension's `saveChunk` is a blocking Binder call and its return is the editor's only
+     * "it landed", so a fire-and-forget enqueue would let the editor finish (and the host seal)
+     * over a write still sitting in the queue. And because that return IS the contract, a failed
+     * write must **throw** here, not be swallowed by [SoilWriter]'s drain loop the way an ink
+     * write's failure is: a disk-full save reported as success would mark the editor's buffer
+     * clean over words that never landed, and the seal would take them. The job carries its own
+     * outcome through a [CompletableDeferred]; ordering is unchanged (completing our own job means
+     * everything queued before it ran).
      *
      * [draftWatermark] non-null routes to [DocumentRepository.saveDrafted] — the one write that
      * moves the source watermark (a seed or a "bring in" refresh, M6/M7). An ordinary edit passes
@@ -568,11 +573,19 @@ class NotebookSession(
      */
     suspend fun writeDocument(parentId: String, text: String, draftWatermark: Long?) {
         check(isOpen) { "notebook closed" }
-        writer.enqueue {
-            if (draftWatermark == null) documents.save(parentId, text)
-            else documents.saveDrafted(parentId, text, draftWatermark)
+        val done = CompletableDeferred<Unit>()
+        val queued = writer.enqueue {
+            try {
+                if (draftWatermark == null) documents.save(parentId, text)
+                else documents.saveDrafted(parentId, text, draftWatermark)
+                done.complete(Unit)
+            } catch (e: Exception) {
+                done.completeExceptionally(e)
+            }
         }
-        writer.drain()
+        // A closed writer never runs the job — awaiting its deferred would hang the Binder thread.
+        check(queued) { "notebook closed" }
+        done.await()
     }
 
     /** Wait for queued writes (both stores), then purge + checkpoint + close. Idempotent; never throws. */

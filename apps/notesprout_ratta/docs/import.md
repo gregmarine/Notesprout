@@ -7,19 +7,30 @@ unlocking, re-keying to this device, asking three questions and writing the note
 Garden and the index. The extension only ever streams bytes between two file descriptors — it never
 learns what it just delivered.
 
-The first — and so far only — importer is **`NSE · Soil Export`**, the same package (and the same
-label, on the user's call — no rename) that exports: `:ext-soil` grew a second service,
-`SoilImporterService`, beside `SoilExporterService`. og's `docs/full-notebook-export.md` § Import
-(monorepo root) was the reading reference for the pipeline shape; no code was copied.
+The first importer is **`NSE · Soil Export`**, the same package (and the same label, on the user's
+call — no rename) that exports: `:ext-soil` grew a second service, `SoilImporterService`, beside
+`SoilExporterService`. og's `docs/full-notebook-export.md` § Import (monorepo root) was the reading
+reference for the pipeline shape; no code was copied. Arc 19 grew a **second** importer on the same
+point: `:ext-document`'s `TextImporterService`, which delivers a `.md`/`.txt` file's bytes exactly
+the same way and forks the host into a wholly different, `.soil`-free path afterward — see
+[The text importer](#the-text-importer-arc-19) below.
 
 This is the feature doc. The seam it rides on — the point, the AIDL, the trust boundary — is
 [`docs/extensions.md`](extensions.md) § "The importer point (arc 16)"; the button it hangs off is
-[`docs/library.md`](library.md).
+[`docs/library.md`](library.md); the feature the text importer lands into is
+[`docs/document.md`](document.md).
 
 **Status: arc 16 complete + frozen 2026-08-28** — I1 the point + the whole pipeline, all keyings,
 placement and the remap (`ecf0443`, user checklist passed) · I2 review fixes (9/10, the two
 Replace data-loss paths the headline), boundary audit, this doc (`20b6306`, checklist re-run
-passed against the fixed build).
+passed against the fixed build). **Arc 19 "Document" M8 complete** — the text importer + the
+result-kind tail + text documents end to end on the Nomad, user checklist passed (commits
+`70e0218` + `1051cba`).
+
+Entry stays the library's **one** Import button (arc-16's single-entry lock): the picker's MIME
+union and extension-match discovery, [below](#the-button), already cover `.md`/`.txt` with no
+separate import sheet needed — a second importer is just a new candidate `describe()` answers
+with.
 
 ---
 
@@ -293,6 +304,59 @@ behind it; an import refuses to write a target with the same problem in front of
 
 ---
 
+## The text importer (arc 19)
+
+A second importer arrived on the same point: `:ext-document`'s `TextImporterService`, a third
+registration inside that package (beside the editor point and the document exporter) — the
+`SoilImporterService` shape line for line, its own `TextStreams.streamCopy`. It streams the picked
+document's bytes to the host cache exactly as the soil importer does; the extension never opens
+the delivered bytes or learns what they are — the fork into text handling happens **after**
+delivery, entirely host-side.
+
+**The seam grew a compatible result-kind tail**, `ImporterInfo.resultKind` — absent means
+`RESULT_NOTEBOOK` (today's meaning, unchanged on real wire, the `sourceKind` recipe mirrored
+verbatim: written unconditionally last, an unknown value refused at unmarshal so an unreachable
+kind can never arrive here), `RESULT_TEXT_DOCUMENT = 1` says the delivered bytes are text, not a
+`.soil`. The text importer's service manifest declares `API_VERSION` **3** for exactly the reason
+the document exporter does: a version-2 host reading an absent tail would run the bytes through the
+`.soil` probe, and text is never going to pass `Invalid`/`Plaintext`/`Encrypted` cleanly.
+
+**`ImportRouting` forks right after `deliver()`** (pure, so the decision itself is provable off
+device). Delivery is identical for every importer — two fds, a verbatim stream, a byte count
+checked twice — and `resultKind` is the only thing that separates what happens next. A
+`RESULT_TEXT_DOCUMENT` answer skips the whole `.soil` pipeline — no probe, no unlock, no keying, no
+manifest, no three questions — and instead:
+
+1. The delivered length is checked against `TextImport.MAX_TEXT_BYTES` (10 MB) first-hand, before
+   the bytes are even read into memory (the arc-16 corroboration discipline, applied to the new
+   cap). `TextImport.decode` then reads the cached bytes under **strict UTF-8**
+   (`CodingErrorAction.REPORT`, never the stdlib's lossy decode): a malformed byte sequence, or any
+   `U+0000` in the decoded text, refuses the import outright (`Problem.NOT_TEXT`) — a NUL byte is
+   binary wearing a text extension. What survives is normalized, not rewritten: a leading BOM
+   (`U+FEFF`) is dropped and `\r\n`/lone `\r` fold to `\n` (`:markdown`'s own line ending). The
+   decoded length is then re-checked against `DocumentContract.MAX_DOCUMENT_CHARS`
+   (`Problem.TEXT_TOO_LONG`) — the byte cap alone does not bound characters, and this is the cap
+   the editor itself enforces, deliberately aligned with the byte cap so nothing under it can be
+   unconditionally over the other.
+2. **Silent name dedupe** (`ImportNames.freeName`, one sibling read in the current folder) — no
+   name-conflict question, ever: the text path always creates a new notebook, og's rule.
+3. `TextDocumentCreate` writes the notebook — the same create contract the library's own Text-radio
+   create uses ([`docs/library.md`](library.md)) — with the document row's `srcUpdatedAt` left
+   **NULL** ("authored elsewhere," never a draft an in-editor Bring-in could stamp over). **A blank
+   `.txt` writes no document row at all** (blank means absent, the M2 rule): an empty text file is
+   a legal import that lands as a genuinely empty text document, never a refusal — where a
+   zero-byte `.soil` still refuses (`Problem.NOT_A_NOTEBOOK`); `ImportRouting.rejectsEmptyDelivery`
+   is the one place that asymmetry is written down and provable.
+4. Cover, then straight into the editor (`openImported`) — the same landing a create-flow text
+   document gets.
+
+**No questions anywhere on this path** — not id collision, not placement, not name conflict: a
+text import always creates fresh, always in the folder the library is standing in, and is
+encrypted like any other create. New refusals: `Problem.NOT_TEXT` (failed the UTF-8/NUL check) and
+`Problem.TEXT_TOO_LONG` (over either cap) — see the [failure table](#failure-table).
+
+---
+
 ## Timeouts
 
 `ImporterContract` shares `ExporterContract`'s timeouts **by reference** rather than re-deriving
@@ -323,7 +387,9 @@ is [`docs/extensions.md`](extensions.md) § "Boundary audit," rows 9–11.
 | No installed importer's declared extensions match the picked document | problem dialog, "Can't import that file" | `chooseImporter` → `import_unsupported_*` |
 | The delivery call fails, times out, or the extension dies mid-stream | problem dialog naming the extension's failure | `deliver` → `Problem.DELIVERY` → `import_delivery_body` |
 | The landed byte count doesn't match what the importer reported, or the source claims more bytes than arrived | problem dialog, "Only part of that file arrived" | `deliver` → `Problem.SHORT` → `import_short_body` |
-| The delivered file is zero bytes, or the probe/manifest finds no `notebook` table | problem dialog, "not a Notesprout notebook" | `Problem.NOT_A_NOTEBOOK` → `import_not_a_notebook_body` |
+| The delivered file is zero bytes, or the probe/manifest finds no `notebook` table (`.soil` path; an empty `.txt` is legal, arc 19) | problem dialog, "not a Notesprout notebook" | `Problem.NOT_A_NOTEBOOK` → `import_not_a_notebook_body` |
+| The delivered text fails strict UTF-8 decoding, or a decoded NUL byte proves it isn't text (arc 19 / M8, `RESULT_TEXT_DOCUMENT`) | problem dialog, "isn't valid text" | `TextImport.decode` → `Problem.NOT_TEXT` → `import_not_text_body` |
+| The delivered text is over 10 MB, or over 10,000,000 characters after decode (arc 19 / M8) | problem dialog naming the 10 MB limit | `TextImport.decode` → `Problem.TEXT_TOO_LONG` → `import_text_too_long_body` |
 | No device key session (process killed, nothing unlocked since) | problem dialog, "The library is locked" | `Problem.NO_KEY` → `import_locked_body` |
 | Too many wrong passphrase guesses on this file | problem dialog naming the wait, "Too many tries" | `unlock` → `AttemptLimiter` → `import_locked_out_*` |
 | The re-key transform fails, or its output fails acceptance | problem dialog, "could not be prepared for this device" | `Problem.KEYING` → `import_keying_body` |
@@ -352,7 +418,9 @@ then leaves the library exactly as it was.
   `ExportKeyingTest`'s shared pure pieces (`sqlLiteral`, `restampedJson` — the import transform
   rides the same core), and the parcelable round-trip / `require` rejection tests for
   `ImporterInfo`, `ImportSpec`, `ImportResult` — 890 JVM tests total across the arc-16 freeze
-  point.
+  point. Arc 19 / M8 added `TextImportTest` (strict UTF-8, the NUL refusal, BOM strip, `\r\n`/`\r`
+  folding, both caps) and `ImportRoutingTest` (the result-kind fork and the empty-delivery rule,
+  provable as pure logic rather than a device walk).
 - **Device.** A SAF pick cannot be driven by `adb` (the standing G4 trap) — everything through the
   picker is a human checklist item; agents verify up to the picker's launch and inspect pulled
   results afterward. The foreign-passphrase prompt is typed by a person for the same reason
@@ -364,19 +432,26 @@ then leaves the library exactly as it was.
 - **User checklist**, passed 2026-08-28: all three export keyings (same-device Keep with no prompt,
   plaintext, and a foreign passphrase typed wrong-then-right) imported back; Replace and Keep-both
   both proven at the id-collision dialog; both placement answers; the folder-naming confirm dialog
-  when the destination isn't the current folder.
+  when the destination isn't the current folder. Arc 19 / M8's own checklist (passed) added a real
+  SAF import of a `.md` file — the picker is not `adb`-drivable — landing straight in the editor
+  with no questions asked.
 
 ---
 
 ## Related
 
 - [`docs/extensions.md`](extensions.md) — the seam: `INotebookImporter`, `ImporterContract`, the
-  two-fd handshake, the boundary audit rows 9–11, `:ext-soil`'s shared identity with the exporter.
+  two-fd handshake, the boundary audit rows 9–11, `:ext-soil`'s shared identity with the exporter,
+  the result-kind tail's own write-up.
+- [`docs/document.md`](document.md) — the feature the text importer lands into: text documents,
+  the data model, the create contract `TextDocumentCreate` shares with the library's own
+  Text-radio create.
 - [`docs/export.md`](export.md) — the mirror-image feature, and `ExportKeying`, whose mechanism and
-  acceptance rules `ImportKeying` reuses in the inward direction.
+  acceptance rules `ImportKeying` reuses in the inward direction; also `SOURCE_DOCUMENT`, the
+  export half's own arc-19 addition on the sibling point.
 - [`docs/library.md`](library.md) — the bottom bar, where the Import button sits.
-- `apps/notesprout_ratta/RATTA_PLAN.md` § "Phases — Arc 16 \"Import\"" — the wizard's locked
-  decisions and I1's outcome, in full.
+- `apps/notesprout_ratta/RATTA_PLAN.md` §§ "Phases — Arc 16 \"Import\"" and "Phases — Arc 19
+  \"Document\"" (phase M8) — the wizard's locked decisions and each phase's outcome, in full.
 - og's `docs/full-notebook-export.md` § Import (monorepo root) — the reading reference for the
   pipeline shape; SN's import screen implements a fresh, format-compatible version and imports
   nothing from it.

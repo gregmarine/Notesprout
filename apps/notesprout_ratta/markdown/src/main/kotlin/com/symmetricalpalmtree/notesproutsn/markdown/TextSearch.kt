@@ -66,15 +66,20 @@ object TextSearch {
         if (ms.isEmpty()) return ReplaceAllResult(text, 0, caret)
         val sb = StringBuilder(text.length + ms.size * (replacement.length - query.length).coerceAtLeast(0))
         var last = 0
-        var newCaret = caret
-        val delta = replacement.length - query.length
+        val step = replacement.length - query.length
+        // Every hit that ends before the caret shifts it; the running total is what turns the
+        // containing hit's old start into a new-text offset. Without it, a caret inside anything
+        // but the first hit lands wherever the *unshifted* text used to be.
+        var carried = 0
+        var inside = -1
         for (m in ms) {
             sb.append(text, last, m.start).append(replacement)
             last = m.end
-            if (m.end <= caret) newCaret += delta
-            else if (m.start < caret) newCaret = m.start + replacement.length
+            if (m.end <= caret) carried += step
+            else if (m.start < caret && inside < 0) inside = m.start + carried + replacement.length
         }
         sb.append(text, last, text.length)
+        val newCaret = if (inside >= 0) inside else caret + carried
         return ReplaceAllResult(sb.toString(), ms.size, newCaret.coerceIn(0, sb.length))
     }
 

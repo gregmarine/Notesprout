@@ -62,8 +62,11 @@ object EditorPrefs {
     private val caretLock = Any()
 
     /** For the fire-and-forget caret handover, which must land even after `finish()` has started —
-     *  so it cannot ride the screen's lifecycle scope. */
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+     *  so it cannot ride the screen's lifecycle scope. Parallelism 1 (M11): the lock alone gives
+     *  exclusion but not ORDER, and two launches acquiring it in reverse could store a stale caret
+     *  over the leave-path's newer one; a single lane runs them in launch order. */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
 
     // ── Text size ─────────────────────────────────────────────────────────────
 

@@ -82,6 +82,13 @@ import java.util.UUID
  * Every failure after the picker is a **dialog** naming what went wrong — never a path, never a
  * secret — and the only thing any of them deletes is the import cache (the toast-vs-dialog rule,
  * and arc 15's honesty rules carried over whole).
+ *
+ * **Over the ~800-line rule, with reason (arc 19 / M8):** the growth is step 2b's text-import fork
+ * — decode, create, open — and it belongs beside the pipeline it forks from. It shares the delivery
+ * that precedes it, the cache and its wipe, the corroboration of what the extension claims it wrote,
+ * the candidate/descriptor machinery and every dialog and failure sentence around it; split out, the
+ * two halves would still have to agree on all of that across a seam, and the one thing a reader most
+ * needs to see — *where* the bytes stop being a notebook — would be in the other file.
  */
 class ImportFlow(
     private val activity: AppCompatActivity,

@@ -57,8 +57,17 @@ class DocumentHostHooks(
     private val displayedPageId: () -> String,
     /** The notebook's display name for the editor's header — display only, never a path. */
     private val notebookName: () -> String,
-    /** False once the screen is finishing/closing — see the class doc. */
+    /** False once the screen's session has begun sealing (or the screen will never open one) —
+     *  see the class doc. Deliberately NOT the screen's `opened && !closing` gate: the whole
+     *  point of [openSession]'s wait is the reconnect window where the recreated screen's `.soil`
+     *  is still opening (`opened` false), and the editor's teardown flush must land while the
+     *  screen is closing but the seal has not started — flush-before-seal, the M4 invariant. */
     private val alive: () -> Boolean,
+    /** Whether the session lateinit is constructed and open — [alive] says the screen still takes
+     *  document writes; this says the `.soil` is there to take them. [openSession]'s wait runs in
+     *  the gap between the two. Separate from [notebook] because only the screen knows whether
+     *  its `lateinit` session exists yet — calling [notebook] first would throw. */
+    private val sessionOpen: () -> Boolean,
     /**
      * Recognize a page, silently (M6). **null** = recognition is not there to run (no extension
      * installed, the model not READY, or the call failed) — the typed
@@ -71,6 +80,14 @@ class DocumentHostHooks(
      * belongs to the open-time seed, where the notebook is front-most ([DocumentSeedFlow]).
      */
     private val recognizePageText: suspend (pageId: String) -> String?,
+    /**
+     * M11: [recognizePageText]'s batch sibling for the notebook merge — one acquisition (the
+     * registry lookup, the READY probe, the writer drain) answering a per-page recognize with all
+     * of that already paid, where the per-page path re-paid it for every undocumented page of a
+     * merge the user is watching. null = recognition is not there to run, and the merge proceeds
+     * on page documents alone (the merge-without-recognizer lock).
+     */
+    private val recognizeBatch: suspend () -> (suspend (pageId: String) -> String?)? = { null },
     /** M8: whether this notebook is a text document ([NotebookFlags.TEXT_DOCUMENT] — the index
      *  bit, read once at session open). Gates the rename/close calls and rides every state. */
     private val isTextDocument: () -> Boolean = { false },
@@ -293,27 +310,7 @@ class DocumentHostHooks(
                 val newIndex = DocumentTargetRules.flipIndex(index, direction, pages.size)
                     ?: return@withContext null
                 val page = pages[newIndex]
-                val doc = nb.documents.get(page.id)
-                // Before recognition, always: a stroke drawn while it runs must read as "changed
-                // since this draft", never as the state the draft was built from.
-                val pageMax = nb.db.documentDao().maxContentUpdatedAt(page.id)
-                val recognized = if (doc == null) recognizePageText(page.id) else null
-                when (val serve = DocumentTargetRules.flipDecision(doc?.text, recognized)) {
-                    is DocumentTargetRules.Serve.Seed -> {
-                        val state = pageState(session, page.id, newIndex, pages.size, serve.text, DocumentContract.SOURCE_DRAFTED, seeded = true)
-                        session.parkWatermark(pageMax)
-                        target = page.id
-                        state
-                    }
-                    is DocumentTargetRules.Serve.Stored -> {
-                        val state = pageState(
-                            session, page.id, newIndex, pages.size, serve.text,
-                            DocumentTargetRules.source(doc?.srcUpdatedAt, pageMax), seeded = false,
-                        )
-                        target = page.id
-                        state
-                    }
-                }
+                servePageTarget(session, nb, page.id, newIndex, pages.size, setScope = false)
             } catch (e: Exception) {
                 // The class name and nothing else — a message here could carry a path or a slice of
                 // the user's document, and this is one log line away from a bug report.
@@ -408,27 +405,7 @@ class DocumentHostHooks(
                     val pageId = DocumentTargetRules.resolveTarget(target, pageIds, displayedPageId())
                     val index = pageIds.indexOf(pageId)
                     check(index >= 0) { "page is not in the notebook" }
-                    val doc = nb.documents.get(pageId)
-                    val pageMax = nb.db.documentDao().maxContentUpdatedAt(pageId)
-                    val recognized = if (doc == null) recognizePageText(pageId) else null
-                    when (val serve = DocumentTargetRules.flipDecision(doc?.text, recognized)) {
-                        is DocumentTargetRules.Serve.Seed -> {
-                            val state = pageState(session, pageId, index, pages.size, serve.text, DocumentContract.SOURCE_DRAFTED, seeded = true)
-                            session.parkWatermark(pageMax)
-                            target = pageId
-                            targetScope = DocumentContract.SCOPE_PAGE
-                            state
-                        }
-                        is DocumentTargetRules.Serve.Stored -> {
-                            val state = pageState(
-                                session, pageId, index, pages.size, serve.text,
-                                DocumentTargetRules.source(doc?.srcUpdatedAt, pageMax), seeded = false,
-                            )
-                            target = pageId
-                            targetScope = DocumentContract.SCOPE_PAGE
-                            state
-                        }
-                    }
+                    servePageTarget(session, nb, pageId, index, pages.size, setScope = true)
                 }
             } catch (e: Exception) {
                 // MERGE_CANCELLED funnels here too — a cancelled switch is a switch that did not
@@ -508,12 +485,21 @@ class DocumentHostHooks(
         val pages = nb.pages
         val parts = ArrayList<String?>(pages.size)
         var recognized = 0
+        // Acquired lazily at the FIRST undocumented page and reused for the rest (M11): a merge
+        // over fully-documented pages pays nothing, and one over N undocumented pages pays one
+        // bind + probe + drain instead of N.
+        var recognizer: (suspend (String) -> String?)? = null
+        var recognizerAsked = false
         for (page in pages) {
             if (cancelled) throw IllegalStateException(DocumentContract.MERGE_CANCELLED)
             val docText = nb.documents.get(page.id)?.text
             val read = if (docText.isNullOrBlank()) {
+                if (!recognizerAsked) {
+                    recognizerAsked = true
+                    recognizer = recognizeBatch()
+                }
                 recognized++
-                recognizePageText(page.id)
+                recognizer?.invoke(page.id)
             } else null
             parts += DocumentTargetRules.mergePagePart(docText, read)
         }
@@ -522,6 +508,48 @@ class DocumentHostHooks(
             "merge: ${pages.size} pages ($recognized recognized) → ${text.length} chars"
         }
         return text
+    }
+
+    /**
+     * The one serve of a page target (M11 — [requestPage] and [requestScope]'s leaving branch had
+     * this block as near-verbatim siblings, the sibling-copy trap): the document read, the
+     * watermark read **before** recognition (a stroke drawn while it runs must read as "changed
+     * since this draft"), the flip decision, and the two mutating writes LAST — a failure that had
+     * already swapped the window would leave the editor's next save refused by key. [setScope] is
+     * the scope switch's one extra write; a plain flip never touches [targetScope].
+     */
+    private suspend fun servePageTarget(
+        session: DocumentHostSession,
+        nb: NotebookSession,
+        pageId: String,
+        index: Int,
+        pageCount: Int,
+        setScope: Boolean,
+    ): DocumentPageState {
+        val doc = nb.documents.get(pageId)
+        val pageMax = nb.db.documentDao().maxContentUpdatedAt(pageId)
+        val recognized = if (doc == null) recognizePageText(pageId) else null
+        return when (val serve = DocumentTargetRules.flipDecision(doc?.text, recognized)) {
+            is DocumentTargetRules.Serve.Seed -> {
+                val state = pageState(
+                    session, pageId, index, pageCount, serve.text,
+                    DocumentContract.SOURCE_DRAFTED, seeded = true,
+                )
+                session.parkWatermark(pageMax)
+                target = pageId
+                if (setScope) targetScope = DocumentContract.SCOPE_PAGE
+                state
+            }
+            is DocumentTargetRules.Serve.Stored -> {
+                val state = pageState(
+                    session, pageId, index, pageCount, serve.text,
+                    DocumentTargetRules.source(doc?.srcUpdatedAt, pageMax), seeded = false,
+                )
+                target = pageId
+                if (setScope) targetScope = DocumentContract.SCOPE_PAGE
+                state
+            }
+        }
     }
 
     /** A page target's state — [state] with the page's own key and index. */
@@ -603,15 +631,15 @@ class DocumentHostHooks(
     private fun openSession(): NotebookSession {
         if (!ready()) {
             check(alive()) { "notebook closed" }
-            BoundedWait.until(OPEN_WAIT_MS, OPEN_POLL_MS) { !alive() || notebook().isOpen }
+            BoundedWait.until(OPEN_WAIT_MS, OPEN_POLL_MS) { !alive() || sessionOpen() }
             check(ready()) { "notebook closed" }
         }
         return notebook()
     }
 
-    /** [alive] first, always: the session is `lateinit` on the screen and only [alive] knows
-     *  whether it has been constructed yet. */
-    private fun ready(): Boolean = alive() && notebook().isOpen
+    /** [sessionOpen], never `notebook().isOpen`: the session is `lateinit` on the screen and only
+     *  the screen knows whether it has been constructed yet. */
+    private fun ready(): Boolean = alive() && sessionOpen()
 
     private companion object {
         const val TAG = "DocumentHostHooks"

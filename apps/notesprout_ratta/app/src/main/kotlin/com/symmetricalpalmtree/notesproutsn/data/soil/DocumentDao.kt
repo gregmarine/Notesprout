@@ -4,7 +4,7 @@ import androidx.room.Dao
 import androidx.room.Query
 
 /**
- * The `document` row's own queries (arc 19 / M2) — the read, the two writes, and the two staleness
+ * The `document` row's own queries (arc 19 / M2) — the reads, the two writes, and the two staleness
  * sweeps the watermark is compared against. Kept apart from [SoilDao] because the pair of writes
  * carries an invariant that only reads as one rule when they sit together: **exactly one of them
  * moves `flags`**. Higher-level logic lives in [DocumentRepository].
@@ -32,6 +32,27 @@ interface DocumentDao {
            WHERE type = 'document' AND parentId = :parentId AND deletedAt IS NULL LIMIT 1"""
     )
     suspend fun documentFor(parentId: String): SoilObjectEntity?
+
+    /**
+     * Every live page document of [rootId]'s notebook, in one read — [documentFor] asked of every
+     * page at once, for a caller that wants them all (the text export's assembly, arc 19 / M11).
+     * Unordered on purpose: the caller already holds the page rows in page order and keys these by
+     * `parentId`, so an `ORDER BY` here would be a sort nobody reads.
+     *
+     * **Page documents only.** The notebook document is excluded structurally rather than by a
+     * clause — it is parented to [rootId], and [rootId] is not one of its own pages — which is the
+     * same shape [notebookMaxContentUpdatedAt] leans on.
+     *
+     * `deletedAt IS NULL` is [documentFor]'s own rule, carried over whole: a soft-deleted document
+     * is an absent document. The page subselect carries no such clause, because it does not need
+     * one — the caller reads live pages, so a deleted page's document is a row nobody looks up.
+     */
+    @Query(
+        """SELECT * FROM notebook
+           WHERE type = 'document' AND deletedAt IS NULL
+             AND parentId IN (SELECT id FROM notebook WHERE type = 'page' AND parentId = :rootId)"""
+    )
+    suspend fun pageDocumentsIn(rootId: String): List<SoilObjectEntity>
 
     /**
      * The page's content watermark: `MAX(updatedAt)` over everything **on** [pageId] — its strokes,

@@ -101,8 +101,11 @@ object MarkdownReflow {
             }
 
             if (kind == Kind.PLAIN && open && !pendingBlank) {
-                // The wrapped continuation: this is the break the whole pass exists to remove.
-                out.append(' ').append(body)
+                // The wrapped continuation: this is the break the whole pass exists to remove. A
+                // joined line still ends the paragraph line it joined into, so its own hard break
+                // is written back out here as well — dropping it would delete the break on exactly
+                // the lines a wrap touched, and reflowing twice would then join further.
+                out.append(' ').append(if (hardBreak) "$body  " else body)
             } else {
                 startLine(out, pendingBlank)
                 pendingBlank = false

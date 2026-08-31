@@ -206,6 +206,10 @@ no folder would ever look empty again once a card had rendered.
   (arc 12, [`notebook.md`](notebook.md)) deliberately does not write it, because with per-page
   paper there is no longer one true answer for a whole notebook — and a real cover snapshot, minted
   on every close, supersedes the placeholder anyway.
+- **Text-document cover** (arc 19) → `TextCover`'s own render of the document's opening text takes
+  this slot instead, never the paper placeholder above (`LibraryCards.isTextDocument(flags)`
+  branches before the placeholder is ever reached); a not-yet-rendered or undecodable one falls back
+  to a centered `ic_file_text` glyph, no badge. See [Text documents](#text-documents-arc-19) below.
 - **Selection** (arc 6 / K2) — `LibraryGrid.bind` takes an optional `selectedId`; the matching
   card gets `state_selected` on its background (`bg_selectable_card`: the 1 dp border thickens to
   3 dp — never a colour, never a grey). It exists for the link picker, where browsing *is*
@@ -452,6 +456,13 @@ Deleting the folder you are standing in navigates out to its parent.
 breadcrumbs, folders, shelves, import, both long-press sheets ([`templates.md`](templates.md)). The
 four radios are gone (arc 13 / G3); a tap ticks a card and the screen waits for Create.
 
+**A second, two-way radio — Handwritten / Text (arc 19)** — sits under the name bar: *Handwritten*
+is the default, *Text* flags the notebook as a [text document](#text-documents-arc-19), a notebook
+that opens straight into the document editor instead of onto paper. It is one bit, not a second
+screen, because the rest of the screen is identical either way: the template browser stays live for
+a text document too — its pages underneath are still pages, just ones nothing writes on until
+**Show pages** is asked for.
+
 The screen is **`adjustNothing`**, not `adjustResize`: it has a page on it, and resizing for the
 keyboard would squash the grid it measured itself against. The name field sits in the top row where
 the IME cannot reach it — which is also why the header is one row and not a title plus a field.
@@ -473,7 +484,8 @@ The order is the format contract:
    portable on its own;
 7. `db.seal(file)` — WAL checkpoint back into the file, close;
 8. **then** `IndexRepository.createNotebook(...)` (pageCount 1, `templateKind` =
-   `TemplatePicks.birthKind` — the kind's name, or `IMAGE` for an imported template).
+   `TemplatePicks.birthKind` — the kind's name, or `IMAGE` for an imported template, plus
+   `textDocument = true` when the Text radio was armed — see [Text documents](#text-documents-arc-19)).
 
 The index row is last on purpose: the index is the library's truth, so a crash anywhere earlier
 leaves an orphan file in `Garden/` — never a card pointing at nothing. A failure mid-way still
@@ -486,6 +498,54 @@ The whole thing runs on `Dispatchers.IO`. Create is guarded by a `creating` flag
 The passphrase comes from `KeySession` (process RAM only). If it is somehow absent the screen
 bounces back through `BootstrapActivity` the way `IndexGuard` does, rather than reaching step 2 and
 throwing with a half-typed name on screen.
+
+---
+
+## Text documents (arc 19)
+
+A **text document** is an ordinary notebook the library flagged at birth (or at import,
+[`docs/import.md`](import.md) § "The text importer") — same `.soil`, same pages underneath, same
+place in the folder tree — with one bit set that says its primary surface is the document editor,
+not paper. The feature itself, the editor, and the data model live in
+[`docs/document.md`](document.md); this is only the library's own half: how one gets created, how
+its card looks, and how it opens.
+
+**The flag rides two places, in step**: index row `flags` bit 2 (`NotebookFlags.TEXT_DOCUMENT = 4`)
+and `notebook_meta.textDocument` (an additive, codec-defaulting-`false` field — no `.soil` schema
+change). All three sites that ever refresh `notebook_meta` source `textDocument` from the index bit,
+never from whatever the previous meta happened to say — the same wipe-trap discipline every other
+meta field already follows. An import carries the bit across devices, so a text document stays one
+wherever it lands.
+
+**The cover is `TextCover`, not `CoverSnapshot`.** A handwritten notebook's card shows a snapshot of
+its paper; a text document has no paper surface to snapshot, so its card shows its own opening text
+instead — rendered at a fixed 600×800 canvas and constant density (never the device's own, so the
+same document's card reads the same size on the Nomad and the Manta), through `:markdown` onto a
+white page, legibility over fidelity: text simply clips at the bottom edge, no fade, no ellipsis.
+Both the create flow (an empty render, `""`, the instant the notebook exists — a card with no cover
+reads as an empty notebook for weeks otherwise) and the import path render one immediately; the
+editor's own close path re-renders it after a flush. A cover that has not landed yet, or would not
+decode, falls back to a centered `ic_file_text` glyph — **never** the paper placeholder a
+handwritten notebook's missing-cover state uses, which would picture the one thing a text document
+is not. **No badge** beyond the glyph itself (the user's call) — the cover alone is the card's whole
+identity.
+
+**Routing.** Opening a text document from any entry point — a card tap, Recents, Pinned, a cold
+relaunch — goes straight into the document editor; the canvas underneath is not loaded until asked
+for. The back arrow is the *one* leave door and always means "to the library" (the same rule a page
+document's editor follows, [`docs/notebook.md`](notebook.md) § Close & lifecycle) — a text document
+gets no exception from it. A header **Show pages** button, present in either editor scope, is the
+text-document-only way to the paper canvas: tapping it seals the notebook forward and lands the
+canvas on the page the editor was showing. An ordinary (handwritten) notebook never shows this
+button, and a text document opened this way never hijacks an unrelated notebook's own open.
+
+**Rename** happens from the editor, not the card: a text document's header title is tappable
+(nothing else here is), opening the family's own `NameDialog` recipe. The typed name crosses the
+extension seam to `IDocumentHost.renameNotebook`, and the **host** is the only judge of it — the
+same `NameRules` charset and the same sibling-uniqueness check (`IndexRepository.nameTaken`) every
+other rename in this file answers to. A refusal comes back as the exact sentence the library itself
+would show, and (the `NameDialog` pattern — positive button wired after `show()`) the dialog stays
+up with the typed text intact rather than dismissing on a rejected name.
 
 ---
 
@@ -607,3 +667,4 @@ library falls back to the root. Nothing in prefs is trusted as still existing.
 | `library/RecentsAssemblyTest` | stored order survives (anti-alphabetical, anti-chronological fixtures), dead ids dropped, duplicates collapsed to their newest position, empty inputs, and that an alive id never visited is not invented |
 | `library/SchemePrefillTest` (K3) | no-scheme/unparseable/refused expansions all fall back to null, siblings fetched only when the scheme holds a counter, a throwing sibling fetch never escapes, valid expansions pass through |
 | `data/TemplateGeometryTest` | 8 mm spacing at dpi, density-scaled feature sizes with the 1 px floor, lined top margin, grid symmetry, grid-≠-lined, dot intersections, Nomad-page counts |
+| `library/LibraryCardsTest` (arc 19 / M8) | `NotebookFlags.TEXT_DOCUMENT`'s card-level read — the one bit of the text-document card path that is pure |

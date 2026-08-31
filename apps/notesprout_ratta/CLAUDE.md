@@ -24,9 +24,10 @@ table, and the abandoned generator idea) ·
 half's long-press sheet and the object half's Copy/Cut, tap-to-place and lasso popup, both
 within and **across notebooks**, where a copied link's own-notebook target is re-pointed at the
 notebook it came from) ·
-`docs/extensions.md` (the **seam**: the four extension points — the recognizer, arc 11's
-screen-owning scratch pad, arc 15's generic exporter point and arc 16's generic importer point —
-the extension store, the tier-2 recipe for an extension-owned screen, and **the boundary audit**) ·
+`docs/extensions.md` (the **seam**: the five extension points — the recognizer, arc 11's
+screen-owning scratch pad, arc 15's generic exporter point, arc 16's generic importer point and
+arc 19's screen-owning document editor with its host-callback binder — the extension store, the
+tier-2 recipe for an extension-owned screen, and **the boundary audit**) ·
 `docs/export.md` (arc 15, grown arc 18: notebook export as a feature — the library sheet's Export…
 row, the `ExportActivity` screen with its now-real two-exporter chooser, the keying trio and its
 host-side transforms, `SoilOpenFiles`, the conditional-deletion rule, **`NSE · PDF Export`** — the
@@ -39,6 +40,10 @@ three questions, the remap, the staged-rename Garden write, the failure table) �
 purge, sidecar hygiene and the reopen-waits-on-the-claim rule, the Backup screen, the engine's
 index-last ordering and stamp map, the WAL-alongside rule for both file kinds, the `.part`/`.old`
 destination discipline, the exclude toggle, the failure table) ·
+`docs/document.md` (arc 19: **Documents** as a feature — the page is the draft, the document is
+the result: the data model and flags-as-watermark, the extension editor and its two-process
+autosave/teardown table, seeding and Bring in, the notebook document, text documents, the export
+half, Proofread, the failure table) ·
 `docs/scratchpad.md` (arc 11: the Scratch Pad as a feature — screen, tools, pages, store layout,
 both transfers, failure table) ·
 `docs/sn-screen.md` (arc 11 / J1: the shared `:sn-screen` paper-screen library — what may live
@@ -54,8 +59,8 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   host) · `:markdown` (arc 19 / M1 — the shared markdown engine: parser, renderer, formatter,
   reflow, search, draft, paginator; stdlib only, depends on **nothing** in this project and
   nothing beyond the android SDK its spans use — `:app` and `:ext-document` consume it, one
-  engine, no drift; `:app`'s arc-3 `core/markdown` is its to-be-retired twin until consumers
-  repoint) · `:sn-screen` (the shared paper-screen
+  engine, no drift; `:app`'s arc-3 `core/markdown` twin was repointed and deleted at M8) ·
+  `:sn-screen` (the shared paper-screen
   library — depends on g-paper (`api`) + androidx only, **never** on `:app` or `:extension-api`;
   **a fix to shared screen logic goes there, never in a consumer** — breaking that recreates the
   `RattaNotebookView` sibling-copy trap one file at a time) · `:extension-api` (the contract

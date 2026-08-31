@@ -101,6 +101,22 @@ class TextSearchTest {
     }
 
     @Test
+    fun aCaretInsideALaterHitIsMeasuredInTheNewText() {
+        // The hit the caret is in starts at 4 in the old text and at 9 in the new one; the end of
+        // its replacement is the only position that means anything afterwards.
+        val r = TextSearch.replaceAll("cat cat", "cat", "elephant", caret = 5)
+        assertEquals("elephant elephant", r.text)
+        assertEquals(17, r.caret)
+    }
+
+    @Test
+    fun aCaretInsideALaterHitFollowsAShrinkingReplacementToo() {
+        val r = TextSearch.replaceAll("elephant elephant", "elephant", "cat", caret = 12)
+        assertEquals("cat cat", r.text)
+        assertEquals(7, r.caret)
+    }
+
+    @Test
     fun aCaretPastTheEndOfAShrunkenTextIsPulledBackIn() {
         // Deleting every hit can leave the carried caret beyond the new length; it is coerced.
         val r = TextSearch.replaceAll("cat cat", "cat", "", caret = 7)

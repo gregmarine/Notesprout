@@ -16,6 +16,11 @@ import org.junit.Test
  * Every case runs against both parents — a page id and the notebook root id — because the notebook
  * document is the same row shape one level up, and a rule that held for only one of them would be a
  * feature that worked on pages and quietly misbehaved on the merged draft.
+ *
+ * The last section pins the **batch read** the text export assembles through
+ * ([DocumentDao.pageDocumentsIn], arc 19 / M11) against the same rows: it must answer exactly what
+ * asking [DocumentDao.documentFor] page by page answered, or an export would quietly lose a page's
+ * writing.
  */
 class DocumentRepositoryTest {
 
@@ -63,6 +68,27 @@ class DocumentRepositoryTest {
             f.seed(p, "   \n ", flags = watermark)
             assertNull("blank text must read as no document", f.repo.get(p))
         }
+    }
+
+    @Test
+    fun `the SQL blank gate trims what Kotlin isBlank calls whitespace`() {
+        // `SoilDao.hasLiveDocument` asks the blank-means-absent question in SQL, and SQLite's
+        // one-argument TRIM strips spaces only — so the trim set has to be spelled out, or a
+        // foreign-written row holding one newline opens an exporter entry that can only refuse.
+        // Anything ASCII that Kotlin calls blank and this does not is listed as accepted, in one
+        // place, rather than discovered later on a device.
+        val accepted = setOf('\u001C', '\u001D', '\u001E', '\u001F')   // the ASCII separators
+        for (code in 0..127) {
+            val ch = code.toChar()
+            if (!ch.isWhitespace() || ch in accepted) continue
+            val named = if (ch == ' ') "' '" else "char($code)"
+            assertTrue(
+                "TRIM must strip U+%04X, which isBlank() counts".format(code),
+                SoilSql.BLANK_CHARS.contains(named),
+            )
+        }
+        // And nothing beyond that set: an over-wide trim would eat real content off the ends.
+        assertEquals(6, Regex("""char\(\d+\)|' '""").findAll(SoilSql.BLANK_CHARS).count())
     }
 
     @Test
@@ -243,5 +269,61 @@ class DocumentRepositoryTest {
         val far = 4_100_000_000L   // > Int.MAX_VALUE: the value the flags retype exists for
         f.repo.saveDrafted(pageId, "# Seeded", srcUpdatedAt = far, now = 100L)
         assertEquals(far, f.repo.get(pageId)!!.srcUpdatedAt)
+    }
+
+    // ── The page-document batch read ─────────────────────────────────────────
+
+    /** A live page of [rootId]. The batch read reaches its document through this row. */
+    private suspend fun Fixture.page(id: String, order: Int) {
+        soil.upsert(
+            SoilObjectEntity(
+                id = id, parentId = rootId, type = SoilSchema.TYPE_PAGE,
+                order = order, createdAt = 10L, updatedAt = 10L,
+            )
+        )
+    }
+
+    @Test
+    fun `the batch read answers every page's document and never the notebook's`() = runBlocking {
+        val f = fixture()
+        f.page("p1", 0)
+        f.page("p2", 1)
+        f.repo.saveDrafted("p1", "# One", srcUpdatedAt = watermark, now = 100L)
+        f.repo.save("p2", "# Two", now = 100L)
+        // The merged draft hangs off the root, not off a page — the exclusion is structural, and
+        // the text export reads it separately.
+        f.repo.save(rootId, "# Merged", now = 100L)
+
+        val byPage = f.docs.pageDocumentsIn(rootId).associate { it.parentId to it.text }
+        assertEquals(mapOf("p1" to "# One", "p2" to "# Two"), byPage)
+    }
+
+    @Test
+    fun `the batch read skips soft-deleted documents and undocumented pages`() = runBlocking {
+        val f = fixture()
+        f.page("p1", 0)
+        f.page("p2", 1)   // never written on
+        f.page("p3", 2)
+        f.repo.save("p1", "# One", now = 100L)
+        f.repo.save("p3", "# Three", now = 100L)
+        f.repo.save("p3", "", now = 200L)   // cleared: soft-deleted, and absent from here on
+
+        assertEquals(listOf("p1"), f.docs.pageDocumentsIn(rootId).map { it.parentId })
+    }
+
+    @Test
+    fun `a page of another notebook is not this notebook's document`() = runBlocking {
+        val f = fixture()
+        f.page("p1", 0)
+        f.repo.save("p1", "# One", now = 100L)
+        f.soil.upsert(
+            SoilObjectEntity(
+                id = "other-page", parentId = "nb-other", type = SoilSchema.TYPE_PAGE,
+                order = 0, createdAt = 10L, updatedAt = 10L,
+            )
+        )
+        f.repo.save("other-page", "# Elsewhere", now = 100L)
+
+        assertEquals(listOf("p1"), f.docs.pageDocumentsIn(rootId).map { it.parentId })
     }
 }

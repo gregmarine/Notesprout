@@ -977,3 +977,32 @@ shared code (`ExportKeying.exportAndKeyToPrimary`, `SoilStreams.streamCopy`). On
 Deferred by the arc-16 wizard (not findings):
 - **No open-with / share-to intent filters** for `.soil` on SN — the library Import button is the
   only entry this arc; a future arc may add the receive-intent path (og has one).
+
+## Notesprout SN — arc 19 "Document" M11 (2026-08-31): review ledger + og upstream bugs
+
+The M11 `/code-review high` pass (arc range `17b0b9f..HEAD`, ~20.5k insertions) confirmed 15
+correctness findings + 6 cleanup items; the user chose **fix everything** and all 21 were fixed
+(one candidate was refuted — the proofread double-sheet, blocked by the modal dialog). Nothing
+was accepted-instead-of-fixed this arc. Ledger items that outlive the arc:
+
+- **og carries two markdown-engine bugs SN now deliberately diverges from** (found at M11,
+  verified byte-identical in og's `core/markdown/`):
+  1. `MarkdownReflow`'s **join branch drops a hard break's two trailing spaces** — a wrapped
+     line ending in an explicit Markdown line break loses it on reflow, and reflow stops being
+     idempotent (`reflow(reflow(x)) != reflow(x)`). og's own class doc says trimming it "would
+     silently delete the very thing this rule exists to protect".
+  2. `MarkdownFormatter.toggleBlock` (og: the format-bar block toggles) **stamps the block
+     marker onto blank separator lines** inside a multi-line selection — "alpha\n\nbeta" +
+     numbered list → "1. alpha\n2. \n3. beta", an empty item the user never asked for.
+  Both are fixed in SN's `:markdown` (pinned by test). Fixing og means porting the same two
+  changes into `apps/notesprout_android/.../core/markdown/` — small, test-covered, worth doing
+  next time og's markdown engine is touched.
+- **`SoilDao.hasLiveDocument` blankness — accepted residual mismatch** (recorded in the query
+  KDoc): the SQL TRIM set covers ASCII whitespace (space/tab/LF/VT/FF/CR) but not U+001C–U+001F
+  or Unicode spaces Kotlin's `isBlank()` accepts; a foreign-written document row whose text is
+  only those exotic characters would list an exporter that then refuses honestly. Nothing in the
+  family writes such rows.
+- **Deferred by the arc-19 wizard** (not findings): Page-Index-style selection-merge for the
+  notebook document (SN has no Page Index; auto-merge + the Merge sheet cover it — revisit on
+  demand); open-with/share-to for `.md`/`.txt` (the arc-16 single-entry lock stands); images
+  beyond og's source-level placeholder.

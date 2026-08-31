@@ -168,6 +168,21 @@ class MarkdownReflowTest {
         assertEquals("line one line two", MarkdownReflow.reflow("line one \nline two"))
     }
 
+    @Test
+    fun aJoinedLineKeepsItsOwnHardBreak() {
+        // "beta  " is a wrap onto "alpha" *and* a hard break before "gamma". Joining must not be
+        // what deletes the break — the joined line still ends the paragraph line it joined into.
+        assertEquals("alpha beta  \ngamma", MarkdownReflow.reflow("alpha\nbeta  \ngamma"))
+        assertEquals("- item wraps  \nnext", MarkdownReflow.reflow("- item\nwraps  \nnext"))
+    }
+
+    @Test
+    fun aJoinedHardBreakSurvivesASecondPass() {
+        // The break the first pass keeps is the break that stops the second pass joining "gamma".
+        val once = MarkdownReflow.reflow("alpha\nbeta  \ngamma")
+        assertEquals(once, MarkdownReflow.reflow(once))
+    }
+
     // ── Settled input ─────────────────────────────────────────────────────────
 
     @Test
@@ -179,6 +194,7 @@ class MarkdownReflowTest {
             "before\n```\ncode\n\nmore\n```\nafter one\nafter two",
             "| a | b |\n| 1 | 2 |\nprose after",
             "line one  \nline two\n\n    indented\nplain",
+            "alpha\nbeta  \ngamma",
             "> quoted that\nwraps\n\n---\ntail",
         )
         for (src in corpus) {

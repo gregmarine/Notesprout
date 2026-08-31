@@ -14,14 +14,21 @@ the keying shapes; no code was copied, and Paper never built export, so it has n
 here); **`NSE · PDF Export`** produces a full-fidelity PDF of every page, no `.soil` and no key
 involved at all — og's `NotebookExporter` (raster: each page to a bitmap, drawn into a
 `PdfDocument` page; pdfbox for the password) is the reading reference there, again with no code
-copied. The two exporters differ enough — one streams a file verbatim, the other renders and
-assembles one — that the seam itself grew a second shape to carry both; see
+copied. Arc 19 grew a third: **`NSE · Document`**'s document exporter produces the notebook's
+Markdown or plain-text document, streamed verbatim like the soil exporter but assembled from
+`.soil` document rows rather than the file itself — plus a Document mode for the PDF exporter
+that renders the editor's own preview instead of the page canvas, with no change to `:ext-pdf`
+at all. See [The document exporter](#the-document-exporter-arc-19) below. The three exporters
+split into two behavioral shapes — a verbatim byte stream (`.soil`, and now the document text) or
+a host-rendered page bundle the extension only assembles (PDF, in either of its two modes) — which
+is why the seam itself grew a second shape to carry both; see
 [The source-kind seam](#the-source-kind-seam-arc-18) below.
 
 This is the feature doc. The seam it rides on — the point, the AIDL, the fd handshake, the
 source-kind tail, the export-secret carrier, trust — is [`docs/extensions.md`](extensions.md)
 §§ "The exporter point (arc 15)," "The source-kind tail," and "The export secret"; the sheet row
-it hangs off is [`docs/library.md`](library.md).
+it hangs off is [`docs/library.md`](library.md); the document/editor feature the document exporter
+reads from is [`docs/document.md`](document.md).
 
 **Status: arc 15 complete** — E1 the point + `NSE · Soil Export` + the screen (Keep path, commit
 `c5fb23b`) · E2 the keying transforms (New passphrase · Remove encryption, commit `1860da3`) · E3
@@ -29,7 +36,9 @@ review, boundary audit, docs, freeze. **Arc 18 "PDF" complete** — D1 the sourc
 render pipeline + `NSE · PDF Export` end to end (plain PDF, commit `1844446`) · post-D1 the chooser
 defaults to the last-used exporter (`1a18036`) · D2 the two options — page-template toggle +
 password protection (`ff71644`) + post-D2 the progress dialog (`57e8413`) · D3 this documentation
-pass.
+pass. **Arc 19 "Document" M9 complete** — the document exporter (`SOURCE_DOCUMENT`, `NSE ·
+Document`) + the host-side Source row + Document-mode PDF-of-preview, all end to end on the Nomad
+(commit `62964e6`).
 
 ---
 
@@ -88,6 +97,10 @@ top bar's right edge, the bottom of the screen holds nothing.
   call cannot be cancelled, so leaving mid-export would skip the verification and cleanup while the
   extension's stream keeps writing — an unverified file standing silently. The tap gets a dialog
   saying why it did nothing (the toast-vs-dialog rule), never a silent ignore.
+- **The Source row (arc 19).** When the notebook has a document and the chosen exporter is
+  `SOURCE_PAGES` (today, `NSE · PDF Export`), the panel grows a host-owned Notebook pages / Document
+  choice deciding what gets rendered into the page bundle. It is `GONE`, not disabled, the moment
+  either condition stops holding. See [The document exporter](#the-document-exporter-arc-19) below.
 
 Discovery re-runs on every `onResume` while not busy (a package can be disabled or replaced under a
 standing screen) and again, from scratch, if the flow finds itself running with no descriptors in
@@ -317,26 +330,104 @@ page's content, never the secret.
 
 ---
 
+## The document exporter (arc 19)
+
+`:ext-document` (**`NSE · Document`**) grew a third exporter on the same point:
+`DocumentExporterService`, declaring `ExporterContract.SOURCE_DOCUMENT = 2` and one format option
+**Markdown (.md) / Plain text (.txt)** (`OPTION_TEXT_FORMAT`, `"textFormat"`, choices
+`ExporterContract.TEXT_FORMAT_PLAIN`/its Markdown counterpart). Its service manifest declares
+`API_VERSION` **3** — a version-2 host reading its `sourceKind` tail as absent would run this
+exporter the way it always ran `SOURCE_SOIL`, which is why the number moved rather than the
+descriptor's shape (the D3 skew-guard recipe, repeated; `:ext-document`'s editor service keeps
+declaring 2, the D3 lesson that API version is per-service metadata, not per-package).
+
+**The host assembles the final bytes; the extension only streams them.** M9's own phase-start
+contradiction — the plan's "extension strips via `:markdown`" could not coexist with the pinned
+"a text stream is verbatim" verification — resolved in the verification's favour: the `.txt` strip
+runs **host-side**, through `MarkdownText.toPlainText` (og's function, ported into `:markdown`
+whole and pinned by og's tests), inside `ExportText.assemble`/`write`
+(`ExportDocumentRules.finalText`). `DocumentExporterService.export()` is therefore a pure
+byte-for-byte copier, the same shape `SoilExporterService` already is, and `ExportVerification`
+holds `SOURCE_DOCUMENT` to the identical `bytesWritten == streamBytes` equality `SOURCE_SOIL` gets
+— a text export really is a copy of what the host handed it, unlike a `SOURCE_PAGES` render.
+
+`OPTION_TEXT_FORMAT` is **host-executed twice over**: once at assembly (which strip runs, if any)
+and again at destination naming (`ExportDocumentRules.fileExtension`/`mimeType` pick the `.md`/
+`text/markdown` or `.txt`/`text/plain` pair the SAF picker and the suggested filename see —
+every other source kind keeps its descriptor's own answers). `ExportOptions.isRenderable` gates the
+option to `SOURCE_DOCUMENT` only and to its two known choice ids, and keying can never ride the
+document kind — the same "one secret's lifecycle at a time" rule `OPTION_PROTECT` and the rekey
+trio already share.
+
+**`ExportText.markdownOf`** is the one read both document exports share with `DocumentPdfRender`
+below — the notebook document if it is non-blank, else the per-page documents joined in page order
+(M7's merge join, verbatim: `"\n\n"` between parts, parts untrimmed, the whole trimmed;
+undocumented pages skipped). A text document's row is notebook-parented, so it rides the same read
+for free. **Export never recognizes** — a text export is documents only, and a notebook with
+nothing written in it at all is `Problem.NO_DOCUMENT`, an honest refusal rather than an empty file
+(unreachable through the UI in the ordinary case, because the chooser already gates it away —
+see below).
+
+**Chooser gating.** The document exporter is listed only when the notebook actually has a document:
+`hasDocument` (`SoilDatabase.readOnce` + `SoilDao.hasLiveDocument()`, blank-means-absent in SQL) is
+read once at the top of `loadCandidates()` and feeds both `ExportDocumentRules.listed()` (whether
+the exporter appears in the chooser at all) and `sourceRowVisible()` (the Source row, below).
+
+### The Source row (arc 19)
+
+PDF-of-preview needed **no `:ext-pdf` change at all**: the host paginates and renders the editor's
+Markdown *preview* into the existing `SOURCE_PAGES` `PageBundle`, so `:ext-pdf` receives ordinary
+page pixels and assembles a PDF with no idea it was never a notebook's ink. What the Export screen
+grows instead is the host-owned **Source** row from [The screen](#the-screen) above — Notebook
+pages / Document — visible only when `hasDocument` is true **and** the selected exporter is
+`SOURCE_PAGES` (`ExportDocumentRules.sourceRowVisible`); `documentSource` is forced `false`
+whenever the row is off-screen, so switching to `SOURCE_DOCUMENT`, or to a notebook with no
+document, can never leave a stale "render the document" choice armed.
+
+Choosing Document renders `DocumentPdfRender` into the standard `PageBundle` at the notebook's own
+page size: `ExportText.markdownOf`'s same read, laid out through `:markdown`'s `MarkdownParser` +
+`MarkdownRenderer` and sliced page-by-page by `MarkdownPaginator` (M1), one `StaticLayout` per
+page, RGB_565/WEBP-encoded the same way `ExportRender` encodes ink. **Document mode is plain
+white, always** — the template-toggle row goes `GONE` in Document mode (paper under prose was
+never built, and the phase-start answer declined it). Metrics are the editor Preview's own,
+exactly: `DocumentPdfMetrics` mirrors `EditorPrefs`'s 16/16/16/32 dp padding, 1.15 line spacing,
+8 dp block gap, and the saved text-size preference **plus `PREVIEW_BUMP`** (Preview's own step up)
+— read from the editor extension's store **only if that store file already exists** (an export
+must never mint one; an unopened editor's default applies otherwise). A notebook with nothing
+written renders `Problem.NO_DOCUMENT` the same as the text exporter; a page row with no usable
+size, more pages than the bundle carries, or a page that will not render still answer
+`ExportRender`'s own `DAMAGED`/`TOO_LONG`/`RENDER_FAILED` sentences — `DocumentPdfRender` is a
+second preparer with its own `Problem` enum, but `ExportMessages` maps both onto the same strings
+(one table read four ways — see the [failure table](#failure-table)).
+
+---
+
 ## The source-kind seam (arc 18)
 
-The two exporters differ in one structural way — one streams a file verbatim, the other renders
-and assembles a new one — and that difference had to become part of the contract, not just this
+The exporters differ in one structural way — some stream a file verbatim, one renders and
+assembles a new one — and that difference had to become part of the contract, not just this
 screen's private branching. `ExporterInfo` grew a compatible parcel tail, `sourceKind`:
 `ExporterContract.SOURCE_SOIL` (absent on an old-shape descriptor means this, so every exporter
-built before arc 18 kept its meaning on real wire) or `SOURCE_PAGES`. `ExportActivity` reads it
-once, right after `describe()` answers, and everything downstream — which preparation runs, what
-verification means, whether keying chrome can even appear — follows from that one value; the flow
-never asks a second time which kind it is dealing with. The full write-up of the tail, the
-`PageBundle` container format, and the caps that bound it (`MAX_PAGES` 4096, `MAX_DIMENSION_PX`
-32768, `MAX_PAGE_BYTES` 32 MiB) lives in [`docs/extensions.md`](extensions.md) § "The source-kind
-tail" — this doc only needs the consequence: `ExportRender` produces the bundle for `SOURCE_PAGES`
-where `ExportArtifact.prepare` + `ExportKeying` produce the artifact for `SOURCE_SOIL`, and
-`ExportActivity`'s private `StreamSource` sealed class (`Ready`/`Failed`) is what lets everything
-from the two fds onward stop caring which one it got.
+built before arc 18 kept its meaning on real wire), `SOURCE_PAGES`, or — arc 19 / M9 —
+`SOURCE_DOCUMENT = 2`, declared only by a service whose manifest raises `API_VERSION` to 3, so a
+pre-arc-19 host (still reading version 2) never even sees a descriptor shaped this way.
+`ExportActivity` reads it once, right after `describe()` answers, and everything downstream —
+which preparation runs, what verification means, whether keying chrome can even appear — follows
+from that one value; the flow never asks a second time which kind it is dealing with. The full
+write-up of the tail, the `PageBundle` container format, and the caps that bound it (`MAX_PAGES`
+4096, `MAX_DIMENSION_PX` 32768, `MAX_PAGE_BYTES` 32 MiB) lives in [`docs/extensions.md`](extensions.md)
+§ "The source-kind tail" — this doc only needs the consequence: `ExportRender` produces the bundle
+for `SOURCE_PAGES` where `ExportArtifact.prepare` + `ExportKeying` produce the artifact for
+`SOURCE_SOIL` and `ExportText.assemble` produces the file for `SOURCE_DOCUMENT` (or
+`DocumentPdfRender` produces a `SOURCE_PAGES` bundle when the Source row picks Document — see
+[The document exporter](#the-document-exporter-arc-19) above), and `ExportActivity`'s private
+`StreamSource` sealed class (`Ready`/`Failed`) is what lets everything from the two fds onward stop
+caring which one it got.
 
 **Verification is per source kind** too (`ExportVerification`, pure — pinned by test). The
 `bytesWritten == streamBytes` equality the arc-15 review built is a *verbatim-streaming contract*:
-it holds for `SOURCE_SOIL`, because the soil exporter really does copy the artifact byte-for-byte,
+it holds for `SOURCE_SOIL` and, since arc 19, for `SOURCE_DOCUMENT` too (the host already
+assembled the final bytes, so the document exporter is a byte-for-byte copier exactly like soil's),
 and it would fail every honest `SOURCE_PAGES` export, because a PDF's size is never the bundle's.
 So a `SOURCE_PAGES` verdict drops the source-length equality and keeps only the
 destination-corroboration half: zero bytes reported is never a document (`Verdict.SHORT`
@@ -344,7 +435,7 @@ immediately), and otherwise the extension's own reported count is checked agains
 the destination provider will give** — the same "corroboration, not authority" rule step 8 above
 already uses for soil, unchanged. `SHORT` (a failed export — the flow may delete wreckage under
 its usual rules) stays distinct from `UNCONFIRMED` (the stream completed; only the provider's
-metadata disagrees — a check-the-file dialog, never a delete) for both source kinds alike. An
+metadata disagrees — a check-the-file dialog, never a delete) for every source kind alike. An
 unknown `sourceKind` value is unreachable in practice (`ExporterInfo`'s unmarshal already rejects
 it, dropping that exporter at discovery like any other bad descriptor) but still resolves to
 `SHORT` rather than `OK` — verification never defaults to trust.
@@ -409,16 +500,17 @@ secret's own row — is [`docs/extensions.md`](extensions.md) § "Boundary audit
 | The `.soil` won't open or won't read | problem dialog, "could not be read just now" | `Problem.UNREADABLE` (both prepare paths) |
 | The cache copy failed, or came out short (`SOURCE_SOIL`) | problem dialog, "device may be out of space" | `Problem.COPY_FAILED` |
 | The notebook has no pages to render (`SOURCE_PAGES`, arc 18) | problem dialog, "This notebook has no pages" — an honest refusal, never a zero-page PDF | `ExportRender.Problem.EMPTY` → `export_empty_body` |
-| A page row carries no usable size — a damaged or foreign-written file (`SOURCE_PAGES`, D3) | problem dialog, "could not be read at its own size" — its own sentence, **never** the memory-or-space one: a data problem blamed on storage would be retried forever | `ExportRender.Problem.DAMAGED` → `export_damaged_body` |
-| More pages than the bundle carries (> 4096, `SOURCE_PAGES`, D3) | problem dialog, "more pages than this format can carry" | `ExportRender.Problem.TOO_LONG` → `export_too_long_body` |
-| A page will not allocate, draw or encode — low memory or space (`SOURCE_PAGES`, arc 18) | problem dialog, "could not be prepared for this format"; the notebook itself is untouched | `ExportRender.Problem.RENDER_FAILED` → `export_render_failed_body` |
+| A page row carries no usable size — a damaged or foreign-written file (`SOURCE_PAGES`, D3; also `DocumentPdfRender.Problem.DAMAGED` in Document mode, arc 19) | problem dialog, "could not be read at its own size" — its own sentence, **never** the memory-or-space one: a data problem blamed on storage would be retried forever | `ExportRender.Problem.DAMAGED` → `export_damaged_body` |
+| More pages than the bundle carries (> 4096, `SOURCE_PAGES`, D3; also `DocumentPdfRender.Problem.TOO_LONG` in Document mode, arc 19) | problem dialog, "more pages than this format can carry" | `ExportRender.Problem.TOO_LONG` → `export_too_long_body` |
+| A page will not allocate, draw or encode — low memory or space (`SOURCE_PAGES`, arc 18; also `DocumentPdfRender.Problem.RENDER_FAILED` in Document mode, arc 19) | problem dialog, "could not be prepared for this format"; the notebook itself is untouched | `ExportRender.Problem.RENDER_FAILED` → `export_render_failed_body` |
+| Nothing has been written in this notebook at all — no notebook document and no page document (`SOURCE_DOCUMENT`, or a Source-row Document pick under `SOURCE_PAGES`; arc 19 / M9) | problem dialog, "no document to export"; an honest refusal, never an empty file — unreachable through the chooser in the ordinary case, since a document-less notebook never lists the document exporter | `ExportText.Problem.NO_DOCUMENT` / `DocumentPdfRender.Problem.NO_DOCUMENT` → `export_no_document_body` |
 | The screen was rebuilt behind the picker and the chosen exporter is gone | problem dialog naming the format unavailable; destination per the deletion rule (nothing was written — a pre-existing overwrite target is left untouched) | `reselectAfterRestore` → `export_gone_body` |
 | The `ExportSpec` itself is rejected (a value out of bounds) | problem dialog; destination per the deletion rule | `runExport` catch on `ExportSpec` construction |
 | Rekey was armed but the typed passphrase was lost (screen rebuilt behind the picker — `saveEnabled=false` wiped the fields) | **honest "passphrase was lost" dialog — never a silent Keep**; destination per the deletion rule | `ExportKeying.plan` throws `IllegalArgumentException` → `export_passphrase_lost_body` |
 | Protect was armed but the typed password was lost the same way (arc 18 / D2) | **honest "password was lost" dialog — never a silent unprotected export**; destination per the deletion rule. Fails **closed** (D3): the guard consults the raw tap-time `protect = 1` as well as the re-described descriptor, so an exporter upgraded in place behind the picker that dropped the protect toggle still refuses rather than silently exporting unprotected | `runExport` (`armedAtTap`) → `export_password_lost_body` |
 | The keying transform itself fails (plain or rekey, `SOURCE_SOIL`) | problem dialog, "could not be converted for this export"; destination per the deletion rule | `ExportKeying.apply` throws → `export_transform_body` |
 | The `export()` call fails, times out, or the exporter dies mid-stream — including a PDF page that won't decode, decodes at the wrong size, an inconsistent spec (`PdfExportSpec.require`), or any assembly `IOException`, each an `IllegalStateException`/`IllegalArgumentException` naming the stage | problem dialog, "didn't finish writing the file"; the truncating open already ran, so the wreckage is removed (best-effort, reported honestly) | `ExporterClient.export` throws → `export_failed_body` |
-| The byte count the extension reports doesn't match what was streamed (`SOURCE_SOIL`), or is zero or disagrees with the destination (`SOURCE_PAGES`) | problem dialog, "Only part of the notebook reached that file"; wreckage removed (best-effort, reported honestly) | `ExportVerification.verdict` → `SHORT` → `export_short_body` |
+| The byte count the extension reports doesn't match what was streamed (`SOURCE_SOIL`/`SOURCE_DOCUMENT`), or is zero or disagrees with the destination (`SOURCE_PAGES`) | problem dialog, "Only part of the notebook reached that file"; wreckage removed (best-effort, reported honestly) | `ExportVerification.verdict` → `SHORT` → `export_short_body` |
 | The stream completed but every answer the destination provider gives disagrees with it (either source kind) | *check-the-file* dialog, **no delete** — metadata can lag a write it just took, and a fully-written export is never destroyed over a stale answer | `ExportVerification.verdict` → `UNCONFIRMED` → `export_verify_body` |
 | Back / the back arrow tapped while an export runs | "Export in progress" dialog; the flow continues untouched | `showBusyGuard` (`export_busy_body`) |
 | Export succeeded | confirm dialog, "Exported"; screen finishes on dismiss | `runExport` success path |
@@ -461,17 +553,32 @@ reported honestly, because the delete is best-effort.
 - **A raw NUL byte can land from file tools mid-edit** (fired 3× by arc 16, standing since) —
   byte-scan any file a tool just wrote before calling a phase done; it is invisible to a normal
   diff read.
+- **A plan sentence and a pinned verification requirement contradicted each other at M9** — the
+  arc-19 plan's "the extension strips via `:markdown`" could not coexist with "the text stream is
+  verbatim," which the seam had already committed to (`ExportVerification` needed
+  `SOURCE_DOCUMENT` to hold the soil equality). Resolved in the verification's favour: the strip
+  moved host-side, into `ExportText`/`ExportDocumentRules`, before the extension ever sees the
+  bytes. Worth remembering the next time a plan blurb and an already-pinned contract disagree —
+  the contract wins.
+- **Known cosmetic, not fixed (arc 19 / M9):** with the document exporter selected, the chooser's
+  own format caption and the document exporter's `OPTION_TEXT_FORMAT` radio are both labelled
+  "Format" — two "Format" captions stack in the options panel. Recorded at M9's checklist, left as
+  is.
 
 ---
 
 ## Related
 
 - [`docs/extensions.md`](extensions.md) — the seam: `INotebookExporter`, `ExporterContract`, the
-  two-fd handshake, the source-kind tail, the export secret, the boundary audit, `:ext-soil`'s and
-  `:ext-pdf`'s identities.
+  two-fd handshake, the source-kind tail, the export secret, the boundary audit, `:ext-soil`'s,
+  `:ext-pdf`'s and `:ext-document`'s identities.
+- [`docs/document.md`](document.md) — the feature the document exporter reads from: the data
+  model, the notebook document's merge join `ExportText.markdownOf` reuses, the editor Preview
+  metrics `DocumentPdfMetrics` mirrors, text documents.
 - [`docs/library.md`](library.md) — the notebook long-press sheet, where the **Export…** row sits.
-- `apps/notesprout_ratta/RATTA_PLAN.md` §§ "Phases — Arc 15 \"Export\"" and "Phases — Arc 18
-  \"PDF\"" — the wizard's locked decisions and each phase's outcome, in full.
+- `apps/notesprout_ratta/RATTA_PLAN.md` §§ "Phases — Arc 15 \"Export\"," "Phases — Arc 18 \"PDF\","
+  and "Phases — Arc 19 \"Document\"" (phase M9) — the wizard's locked decisions and each phase's
+  outcome, in full.
 - og's `docs/full-notebook-export.md` (monorepo root) — the reading reference for the filename
   sanitize rule and the keying shapes; SN's export screen implements a fresh, format-compatible
   version, and imports nothing from it (Paper never built export). og's `NotebookExporter` (raster

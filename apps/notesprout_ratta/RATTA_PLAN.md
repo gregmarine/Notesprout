@@ -8,11 +8,12 @@ A from-scratch, Supernote-only rebuild of Notesprout in the spirit of the Paper 
 Original Notesprout (`apps/notesprout_android`) and Notesprout Paper (`apps/notesprout_paper`)
 are **reading references — no app code is copied**.
 
-**Arcs 1–18 are complete and frozen.** Their entries below are compact ledgers: status, what
+**Arcs 1–19 are complete and frozen.** Their entries below are compact ledgers: status, what
 still binds, and the reference doc. **The full phase-by-phase records (outcomes, findings,
-walk logs) live in git history — `git show 90a9198:apps/notesprout_ratta/RATTA_PLAN.md`** —
-and each feature's authoritative reference is its `docs/` file. The active arc (19) keeps its
-full plan at the end of this file.
+walk logs) live in git history — arcs 1–18 at `git show 90a9198:apps/notesprout_ratta/RATTA_PLAN.md`,
+arc 19's full phase records at the end of this file until the next compaction** — and each
+feature's authoritative reference is its `docs/` file. **No next arc is planned — ask the user
+before starting anything.**
 
 ---
 
@@ -57,30 +58,35 @@ full plan at the end of this file.
 | App icon | Tabler seedling **mirrored** (outermost group `scaleX="-1"`, pivot 54), black outline on white adaptive icon; all icons Tabler outline. |
 | Crypto UX | Identical to Paper v0: `NSPT-` recovery key = the immutable global passphrase, attempt-limiter thresholds (1–2 free · 3–4 → 30 s · 5–9 → 5 min · ≥10 → 1 h), confusable-folding unlock, 450 ms "Preparing…". Unlock never hides the IME while the key field has focus (Ratta rule). |
 
-## Architecture (current — after arc 18)
+## Architecture (current — after arc 19)
 
 - **Own Gradle root** at `apps/notesprout_ratta/`. Gradle 8.14, AGP 8.11.1, Kotlin 2.2.20,
   KSP, compileSdk/targetSdk 35, minSdk 29, Java 17 via `org.gradle.java.home` (Temurin-17).
   Repos: `mavenLocal()`, `google()`, `mavenCentral()`. `android.nonTransitiveRClass=false`
   (load-bearing since J1 — undoing it breaks every moved resource reference).
-- **Eight modules** (nine once arc 19's `:ext-document` lands): `:app` (host) · `:sn-screen`
+- **Nine modules**: `:app` (host) · `:sn-screen`
   (shared paper-screen library — g-paper `api`, design resources, screen helpers; **a fix to
-  shared screen logic goes there, never in a consumer**) · `:markdown` (arc 19 / M1 — the
-  shared markdown engine, stdlib only, never depends on `:app`/`:sn-screen`/`:extension-api`;
-  `:app` still carries its arc-3 `core/markdown` twin until consumers repoint) ·
+  shared screen logic goes there, never in a consumer**) · `:markdown` (arc 19 — the shared
+  markdown engine, stdlib only, never depends on `:app`/`:sn-screen`/`:extension-api`; host +
+  `:ext-document` both consume it, one engine, no drift) ·
   `:extension-api` (contract library, stdlib only) · `:ext-mlkit` · `:ext-scratchpad` ·
   `:ext-soil` (exporter + importer services, one APK) · `:ext-pdf` (module-local
-  pdfbox-android 2.0.27.0). Full table: app `CLAUDE.md` + `docs/extensions.md`.
+  pdfbox-android 2.0.27.0) · `:ext-document` (**NSE · Document** — editor point + document
+  exporter + text importer, one APK, three registrations; module-local SymSpellKt 3.4.0 + the
+  bundled proofread dictionary). Full table: app `CLAUDE.md` + `docs/extensions.md`.
 - **g-paper pin: 0.1.23** in `sn-screen/build.gradle.kts` — `gpaper-core` + `gpaper-ratta`
   only. No Onyx, no jetifier, no pickFirsts, no `tools:replace`.
-- **FOUR extension points** (each was its own user decision — no FIFTH without another;
-  arc 19's `ACTION_DOCUMENT_EDITOR` is that decision, granted 2026-08-30):
+- **FIVE extension points** (each was its own user decision — no SIXTH without another;
+  arc 19's `ACTION_DOCUMENT_EDITOR` was the fifth's, granted 2026-08-30):
   `HANDWRITING_RECOGNIZER` · `SCRATCH_PAD` (+`_SCREEN`, tier-2 screen-owning) ·
-  `NOTEBOOK_EXPORTER` (plural; soil + pdf) · `NOTEBOOK_IMPORTER`. `ExtensionContract.API_VERSION`
-  = 2; the host accepts `1..N`; an extension declares what it *requires* of the host.
+  `NOTEBOOK_EXPORTER` (plural; soil + pdf + document) · `NOTEBOOK_IMPORTER` (soil + text) ·
+  `DOCUMENT_EDITOR` (+`_SCREEN`, the second tier-2 — the first host-side callback stub,
+  `IDocumentHost`). `ExtensionContract.API_VERSION` = 3; the host accepts `1..N`; meta-data is
+  **per service** — an extension declares what each service *requires* of the host.
 - **Data model:** index `objects` table (user_version 1) + `Garden/<uuid>.soil` universal
   `notebook` table v1 + `notebook_meta`. Row types SN writes: notebook/page/template/stroke +
-  additive heading/link. StrokeCodec format B; encrypt-by-default global key; SQLCipher stock
+  additive heading/link/document (arc 19 — `flags` carries the document's source watermark;
+  index flag bit 2 = text document). StrokeCodec format B; encrypt-by-default global key; SQLCipher stock
   defaults; `SoilFile.kt` the only path constructor (`extensionStoreFile` included);
   `SoilOpenFiles` = the one-file-one-connection rule; `SoilCrypto` the one crypto door;
   never-delete-on-corruption everywhere. References: `apps/notesprout_paper/docs/data.md`,
@@ -425,6 +431,31 @@ written only at the OK verdict); checked-radio re-tap is a no-op; password-lost 
 Export progress is a modal dialog (post-D2). Timings: ~200 ms/page assembly; `EXPORT_TIMEOUT_MS`
 120 s covers ~400 pages. Refs: `docs/export.md`, `docs/extensions.md` §§ source-kind tail /
 export secret + boundary rows 12–13.
+
+### Arc 19 "Document" ✅ frozen 2026-08-31 (M1 45943f9 · M2 e828886 · M3 ced73b2 · M4 7822553 · M5 766a3a7 · M6 681d99e · M7 7ef2926 · M8 70e0218+1051cba · M9 62964e6 · M10 2fcc980 · M11)
+og's Documents as the FIFTH point (`ACTION_DOCUMENT_EDITOR` + `_SCREEN`, `NSE · Document`,
+`:ext-document` — one APK, THREE registrations: editor + `SOURCE_DOCUMENT` exporter + text
+importer) plus `:markdown`, the shared engine. The page is the draft, the document the result:
+page documents (seed-once, Bring in, staleness), the full editor (two-process autosave — its
+four-failure table re-derived across the boundary and hardened at M11), the notebook document
+(scope toggle, auto-merge, `nb:<id>` key), text documents (create radio, straight-to-editor,
+TextCover, rename, `.md`/`.txt` import), export (.md/.txt host-assembled + PDF-of-preview via
+`SOURCE_PAGES`, `:ext-pdf` untouched), Proofread (extension-local og port, user dictionary in
+the store). Still binding: **the host owns every `.soil` read and write**; `IDocumentHost` is
+the only host-side stub (uid-gated per showing, revoke clears the session); text crosses only
+chunked (`TextChunks`, `MAX_DOCUMENT_CHARS` 10 M) and every save names its `pageKey` (the
+mode-routing guard, structural); nothing rides the screen's Intent; the store holds small state
+only (`size`/`carets`/`proofread`/`dict`), never a draft; **flush-before-seal is enforced** —
+every seal path joins the entry's `finish()` Job, the hooks' gate is `documentWritesClosed`
+(never `closing`/`opened`), the teardown flush asks `current()` first and rides the saver's
+push lock, failures park; the watermark park is consumed only after the commit hook returns;
+blank-means-absent; staleness counts soft-deleted rows (the arc-17 purge wrinkle stands — do
+not "fix"); export never recognizes; `API_VERSION` 3 is per-service; **two deliberate og
+divergences** (reflow keeps a joined hard break; block toggles skip blank lines — og carries
+both bugs, see monorepo `BACKLOG.md`). M11 review: high, 21/21 fixed (15 correctness + 6
+cleanup; 1 refuted), version stays `0.1.0-ratta`. 1503 JVM tests/variant. Refs:
+`docs/document.md` (the feature), `docs/extensions.md` §§ fifth point + boundary rows 14–18,
+`docs/export.md`, `docs/import.md`, `docs/library.md`, `docs/notebook.md`.
 
 ---
 
@@ -1262,7 +1293,51 @@ code — recommend yes)? Toggle location (editor overflow row vs. library debug-
 settings)?
 
 ### M11 — Review, boundary audit, docs, freeze
-**Status:** ⬜ Not started
+**Status:** 🧪 Awaiting device verification + user checklist
+
+**Outcome (running record):** Phase-start answers: review level **high**, version stays
+`0.1.0-ratta`. `/code-review high 17b0b9f..HEAD` → 15 CONFIRMED correctness + 6 cleanup (1
+refuted: proofread double-sheet, blocked by the modal dialog); the user chose **fix everything**
+— all 21 fixed, all pinned by test where a pure seam exists (1503 JVM tests/variant, +21).
+The dominant family: save durability on the host-restart reconnect seam —
+(1) hooks' `alive` gate made the M4 BoundedWait unreachable → new `documentWritesClosed` flag
+(flipped only at the seal; NOT `closing`/`opened`) + separate `sessionOpen` lambda;
+(2) `onHostBegan` single-shot probe → 10×500 ms ladder; (3) `flushBeforeRevoke` → `current()`
+first, live buffer through the saver's push lock (`FlushHook.pushBlocking`), parks resolve by
+key, failures re-park; (4) `writeDocument` swallowed write failures (SoilWriter drain-loop
+catch) → per-job `CompletableDeferred`, `enqueue` reports acceptance; (5) governor's stale-queue
+drop was dead code → while pushing, the newest snapshot ALWAYS queues (an undo back to saved
+text supersedes); (6) `isShowing` latched before launch → latched AT the launch + the reconnect
+route gets the watchdog (RESUMED-at-deadline = no editor on top); (7) onDestroy seal raced the
+detached `end()` flush → every seal path joins the entry's `finish()` Job (LAZY-started at
+onResult, `close()` returns its Job). Below-the-line six: watermark park consumed only after
+the commit hook returns (`consumeParkedWatermark`, value-matched); `ParkedClose` carries
+`endedOn` (the replay lands on the page the editor ended on); `TextSearch.replaceAll` caret
+carries the running delta; `SoilDao.hasLiveDocument` TRIM set = ASCII whitespace (Kotlin
+`isBlank` parity; residual Unicode mismatch KDoc'd + BACKLOG); caret writes serialized
+(`limitedParallelism(1)`); `renumberLists` clamps a caret inside a rewritten marker. Engine:
+reflow keeps a joined line's hard break + block toggles skip blank lines — **og carries both
+bugs; SN deliberately diverges** (BACKLOG has the upstream note); `ExportText` refuses a
+document that strips to nothing (no more 0-byte `.txt`). Cleanups: `ExportOpen.readOnly` +
+`freshDir` (the quadruplicated guard preamble — order preserved, per-caller Problem mapping);
+`servePageTarget` (the requestPage/requestScope sibling copy); merge acquires the recognizer
+lazily ONCE (`recognizeBatch` / `DocumentSeedFlow.recognizerReady`+`recognizeWith`);
+`DocumentDao.pageDocumentsIn` batch read for `ExportText.markdownOf`; `hasDocument` cached per
+Export screen (extension re-discovery kept per-resume); `runPush` extraction + the
+saveNow/saveDraftNow fold; ImportFlow + ExportActivity got their over-800 written reasons.
+Docs: `docs/document.md` NEW (the feature bible); `docs/extensions.md` fifth-point seam section
++ module table to NINE + API-3 rows + identity block + **boundary-audit rows 14–18**;
+export/import/library/notebook docs updated; both CLAUDE.mds; BACKLOG arc-19 ledger. Gates:
+full `./gradlew test` green both variants, all nine modules assembleDebug+assembleRelease,
+release signed, NUL-sweep clean. **Nomad walk PASSED** (agent walk: kill-host reconnect live,
+crash buffer empty; its "automation hook blocked" FAIL was the walk-agent trap's ~15th firing —
+the broadcast needs `-p <package>`; re-driven by hand: hook set_text/get_text round trip, host
+killed under a live editor with unsaved words → DeadObjectException park + 2-s retry beats
+observed → editor closed → Bootstrap bounce relaunch → reopened editor served
+"…AFTER-KILL" — **the words typed while the host was dead landed in the `.soil`**, the exact
+family the fixes closed; scope toggle round trip 0→1→0; crash buffer empty). The walk-agent
+prompt must say `append_text` (not `append`) and include `-p` in every broadcast. User
+checklist pending.
 
 `/code-review` on the arc range (level asked at phase start), fix/accept per user call.
 Boundary audit: new rows for the fifth point (the callback binder — the first host-side stub on

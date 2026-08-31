@@ -83,6 +83,34 @@ class AutosaveGovernorTest {
         assertFalse(g.isDirty("ab"))
     }
 
+    /** M11: an undo back to the last SAVED text, while a push is in flight, must supersede the
+     *  queue — the old clean-check judged dirtiness against a savedText the in-flight push was
+     *  about to replace, left the stale queue standing, and pushed undone words over the undo. */
+    @Test
+    fun `an undo back to saved text during a push supersedes the stale queue`() {
+        val g = AutosaveGovernor()
+        g.markLoaded("X")
+        assertEquals(SaveAction.Push("XY"), g.request("XY"))    // in flight
+        assertEquals(SaveAction.Wait, g.request("XYZ"))         // queued
+        assertEquals(SaveAction.Wait, g.request("X"))           // undo — newest snapshot, queued
+        // The in-flight push lands: what goes next is the UNDO ("X" is dirty against the new
+        // savedText "XY"), never the undone "XYZ".
+        assertEquals(SaveAction.Push("X"), g.onSaved("XY"))
+        assertEquals(SaveAction.Idle, g.onSaved("X"))
+        assertEquals("X", g.savedText)
+    }
+
+    /** M11: the clean-while-pushing snapshot is queued, not judged — its dirtiness cannot be
+     *  known until the in-flight push has moved savedText. */
+    @Test
+    fun `a clean-looking snapshot during a push is still queued`() {
+        val g = AutosaveGovernor()
+        g.markLoaded("a")
+        g.request("ab")
+        assertEquals(SaveAction.Wait, g.request("a"))   // equals savedText, but a push is in flight
+        assertEquals(SaveAction.Push("a"), g.onSaved("ab"))
+    }
+
     @Test
     fun `a failed push keeps the buffer dirty and savedText where it was`() {
         val g = AutosaveGovernor()

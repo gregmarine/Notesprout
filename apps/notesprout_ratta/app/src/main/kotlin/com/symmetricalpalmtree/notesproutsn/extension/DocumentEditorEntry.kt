@@ -10,6 +10,7 @@ import com.symmetricalpalmtree.notesproutsn.R
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
 import com.symmetricalpalmtree.notesproutsn.core.OpeningOverlay
 import com.symmetricalpalmtree.notesproutsn.core.Slog
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
@@ -82,8 +83,19 @@ class DocumentEditorEntry(
     private var reconnectJob: Job? = null
 
     /** Whether a showing is live right now. The caller persists this in `onSaveInstanceState` and
-     *  hands it back to [reconnect] — it is the whole of what survives the host's death. */
+     *  hands it back to [reconnect] — it is the whole of what survives the host's death. [open]
+     *  assigns [client] only at the launch itself (M11): a saved state written during the slow
+     *  store-open/begin window must not record a showing that never reached the screen — a
+     *  recreated host would route EDITOR_RECONNECT and sit under its overlay for an editor that
+     *  does not exist. */
     val isShowing: Boolean get() = client != null
+
+    /** The result path's teardown — `end()`, unbind, both revokes — as a joinable [Job] (M11).
+     *  The caller's seal awaits it so the extension's final flush lands before the `.soil` seals;
+     *  assigned (LAZY, unstarted) before [onClosed] runs so a close decided inside that callback
+     *  can already see it. Null until the first result. */
+    var finishJob: Job? = null
+        private set
 
     /**
      * Re-discover and show or hide the button. Called from the caller's `onResume` and after a
@@ -119,16 +131,19 @@ class DocumentEditorEntry(
         OpeningOverlay.showThen(activity) {
             activity.lifecycleScope.launch {
                 val fresh = DocumentEditorClient(activity, provider)
-                client = fresh
                 val intent = fresh.open(hooks)
                 if (activity.isFinishing || activity.isDestroyed) {
-                    client = null; opening = false; fresh.finish(); return@launch
+                    opening = false; fresh.finish(); return@launch
                 }
                 if (intent == null) {
                     fail(fresh)
                     return@launch
                 }
                 beforeLaunch()
+                // The latch and the launch move together (M11): [client] set any earlier makes
+                // [isShowing] true through the slow store-open/begin window, and a saved state
+                // written there records a showing that never launched.
+                client = fresh
                 launcher.launch(intent)
             }
         }
@@ -191,12 +206,10 @@ class DocumentEditorEntry(
     private fun onResult(result: ActivityResult) {
         val pending = reconnectJob
         Slog.d(TAG) { "document editor returned: resultCode=${result.resultCode}" }
-        // First, synchronously: the caller still needs the showing's target, and the `finish()`
-        // below is detached — a callback sequenced after it would race the teardown.
-        onClosed()
         // A detached scope: `finish` has an `end()` call plus an unbind and two revokes to run, and
-        // the caller may be on its way out.
-        MainScope().launch {
+        // the caller may be on its way out. Built LAZY and assigned BEFORE [onClosed] runs, so a
+        // close the callback decides on can join it (the seal-vs-flush race, M11); started after.
+        val job = MainScope().launch(start = CoroutineStart.LAZY) {
             try {
                 // **Join, never cancel.** A result can land moments after `onCreate` — before the
                 // reconnect above has finished its `open()` — and this is precisely the case the
@@ -213,19 +226,25 @@ class DocumentEditorEntry(
                 opening = false
             }
         }
+        finishJob = job
+        // Synchronously, before the teardown starts: the caller still needs the showing's target.
+        onClosed()
+        job.start()
     }
 
     /** The backstop: the bind must not outlive the screen that opened it, result or no result.
-     *  Called from the caller's `onDestroy`. */
-    fun close() {
+     *  Called from the caller's `onDestroy`. Returns the teardown's [Job] (null when there was
+     *  nothing to close) so the caller's fallback seal can wait for the extension's `end()` flush
+     *  — flush-before-seal, on the destroy path too (M11). */
+    fun close(): Job? {
         opening = false
         // A destroy is the one place the reconnect is cancelled rather than joined: there is no
         // showing left to serve, and a bind opened after this point would outlive its screen.
         reconnectJob?.cancel()
         reconnectJob = null
-        val open = client ?: return
+        val open = client ?: return finishJob
         client = null
-        MainScope().launch { open.finish() }
+        return MainScope().launch { open.finish() }.also { finishJob = it }
     }
 
     private companion object {

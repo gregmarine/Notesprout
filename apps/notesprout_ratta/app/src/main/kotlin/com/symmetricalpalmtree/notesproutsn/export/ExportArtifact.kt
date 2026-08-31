@@ -3,17 +3,16 @@ package com.symmetricalpalmtree.notesproutsn.export
 import android.content.Context
 import android.util.Log
 import com.symmetricalpalmtree.notesproutsn.core.Slog
-import com.symmetricalpalmtree.notesproutsn.crypto.KeySession
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.index.NotebookFlags
 import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookMeta
 import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookMetaStore
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilDatabase
-import com.symmetricalpalmtree.notesproutsn.data.soil.SoilOpenFiles
 import com.symmetricalpalmtree.notesproutsn.data.soilFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.IOException
 
 /**
  * **The thing that gets exported** (arc 15 / E1): a cold, checkpointed copy of the notebook's
@@ -22,17 +21,16 @@ import java.io.File
  * Everything that touches a key happens here, in the host, and the exporter never learns any of it
  * — that is the seam. The order below *is* the design:
  *
- *  1. **Assert the file is not held.** One file, one connection. The library context means no
- *     notebook session has it open, but [SoilOpenFiles] is the door written down, so the code
- *     checks rather than assumes and a held file is a problem dialog, not a copy.
- *  2. **Transient open** through the one [SoilDatabase.open] door, and a **best-effort**
- *     `notebook_meta` refresh with `exportedAt` stamped — the file stays self-describing, and a
- *     meta that will not write is not worth failing an export over (og's upkeep rule).
- *  3. **Seal** — `PRAGMA wal_checkpoint(TRUNCATE)` then close, which is exactly what
- *     [SoilDatabase.seal] is. After it the whole notebook is in the main file.
- *  4. **Copy the main file only** into `cacheDir/export/`, wiped and recreated per export. Never
- *     `-wal`, never `-shm`: after the checkpoint they hold nothing, and a copy that took them
- *     would export a second, stale story of the same data.
+ *  1. **Open behind the family's guards** ([ExportOpen] — the file is there, the file is not held,
+ *     there is a key, and the open is sealed in a `finally`), and inside them a **best-effort**
+ *     `notebook_meta` refresh with `exportedAt` stamped: the file stays self-describing, and a meta
+ *     that will not write is not worth failing an export over (og's upkeep rule).
+ *  2. **Seal** — `PRAGMA wal_checkpoint(TRUNCATE)` then close, which is exactly what
+ *     [SoilDatabase.seal] is, and which [ExportOpen] does on the way out. After it the whole
+ *     notebook is in the main file.
+ *  3. **Copy the main file only** into [freshDir], wiped and recreated per export. Never `-wal`,
+ *     never `-shm`: after the checkpoint they hold nothing, and a copy that took them would export
+ *     a second, stale story of the same data.
  *
  * **The Garden file is never mutated beyond the meta refresh.** Every transform (E2's keying) runs
  * on the cache copy, so a failure anywhere leaves the source byte-identical — and the cache copy is
@@ -83,27 +81,12 @@ object ExportArtifact {
         appVersionCode: Int,
     ): Outcome = withContext(Dispatchers.IO) {
         val source = soilFile(context, notebookId)
-        if (!source.exists() || source.length() == 0L) return@withContext Outcome.Failed(Problem.MISSING)
-        if (SoilOpenFiles.isOpen(source)) {
-            Log.w(TAG, "refusing to export a notebook that is open in this process")
-            return@withContext Outcome.Failed(Problem.IN_USE)
-        }
-        val passphrase = KeySession.get() ?: return@withContext Outcome.Failed(Problem.NO_KEY)
-
-        val db = try {
-            SoilDatabase.open(context, notebookId, source, passphrase)
-        } catch (e: Exception) {
-            Log.w(TAG, "export open failed", e)
-            return@withContext Outcome.Failed(Problem.UNREADABLE)
-        }
-        try {
+        // The stamp runs inside the open and the copy after it: the seal is what makes the whole
+        // notebook be in the main file, so nothing may be copied while the connection still stands.
+        val opened = ExportOpen.readOnly(context, notebookId, "export") { db ->
             stampExportedAt(db, notebookId, repo, appVersionCode)
-        } finally {
-            // Checkpoint + close, always — an unsealed open would strand the connection and its WAL
-            // sidecar for the process lifetime (the R6 lesson) and the copy would be of a file that
-            // is still being written back into.
-            db.seal(source)
         }
+        if (opened is ExportOpen.Opened.Blocked) return@withContext Outcome.Failed(problemOf(opened.guard))
         // seal() swallows a failed checkpoint by contract (a claim must never be left standing),
         // so the copy re-checks the one thing the copy depends on: everything is in the main file.
         // A `-wal` still holding frames means the newest writes never made it across — a copy now
@@ -115,11 +98,8 @@ object ExportArtifact {
             return@withContext Outcome.Failed(Problem.COPY_FAILED)
         }
 
-        val dir = File(context.cacheDir, DIR)
         val artifact = try {
-            dir.deleteRecursively()
-            if (!dir.mkdirs()) throw java.io.IOException("could not create the export cache directory")
-            val out = File(dir, "$notebookId.soil")
+            val out = File(freshDir(context), "$notebookId.soil")
             source.copyTo(out, overwrite = true)
             out
         } catch (e: Exception) {
@@ -141,6 +121,25 @@ object ExportArtifact {
      *  has no business outliving the export that made it. Best effort by design. */
     fun clean(context: Context) {
         runCatching { File(context.cacheDir, DIR).deleteRecursively() }
+    }
+
+    /** [DIR], emptied and remade — the hygiene every artifact writer shares (this copy,
+     *  [ExportRender]'s bundle, [ExportText]'s text file, [DocumentPdfRender]'s bundle), so a
+     *  previous export's leftovers can never travel with this one. Throws when the directory cannot
+     *  be made: a write into a directory that is not there fails later and says less. */
+    internal fun freshDir(context: Context): File {
+        val dir = File(context.cacheDir, DIR)
+        dir.deleteRecursively()
+        if (!dir.mkdirs()) throw IOException("could not create the export cache directory")
+        return dir
+    }
+
+    /** The family's guards in this preparer's own words — the copy's reasons, one for one. */
+    private fun problemOf(guard: ExportOpen.Guard): Problem = when (guard) {
+        ExportOpen.Guard.MISSING -> Problem.MISSING
+        ExportOpen.Guard.IN_USE -> Problem.IN_USE
+        ExportOpen.Guard.NO_KEY -> Problem.NO_KEY
+        ExportOpen.Guard.UNREADABLE -> Problem.UNREADABLE
     }
 
     /**

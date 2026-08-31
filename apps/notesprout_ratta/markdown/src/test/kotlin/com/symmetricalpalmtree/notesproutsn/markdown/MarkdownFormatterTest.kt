@@ -215,6 +215,53 @@ class MarkdownFormatterTest {
     }
 
     @Test
+    fun blankSeparatorsInsideASelectionTakeNoMarkerAndNoOrdinal() {
+        // A marker on the separator would mint an empty item and push every number below it along.
+        val buf = Buf("alpha\n\nbeta")
+        MarkdownFormatter.toggleBlock(buf, 0, 11, MarkdownFormatter.Block.ORDERED)
+
+        assertEquals("1. alpha\n\n2. beta", buf.str())
+    }
+
+    @Test
+    fun blankSeparatorsAreSkippedByEveryBlockKind() {
+        for ((block, marked) in listOf(
+            MarkdownFormatter.Block.BULLET to "- alpha\n\n- beta",
+            MarkdownFormatter.Block.TASK to "- [ ] alpha\n\n- [ ] beta",
+            MarkdownFormatter.Block.QUOTE to "> alpha\n\n> beta",
+        )) {
+            val buf = Buf("alpha\n\nbeta")
+            MarkdownFormatter.toggleBlock(buf, 0, 11, block)
+            assertEquals(marked, buf.str())
+        }
+    }
+
+    @Test
+    fun aBlankSeparatorDoesNotHoldTheSelectionOpen() {
+        // The blank line is not "a line lacking the marker", so every real line already carrying it
+        // means the press is a toggle *off* — otherwise the second press would be a no-op.
+        for ((block, marked) in listOf(
+            MarkdownFormatter.Block.ORDERED to "1. alpha\n\n2. beta",
+            MarkdownFormatter.Block.BULLET to "- alpha\n\n- beta",
+            MarkdownFormatter.Block.TASK to "- [ ] alpha\n\n- [ ] beta",
+            MarkdownFormatter.Block.QUOTE to "> alpha\n\n> beta",
+        )) {
+            val buf = Buf(marked)
+            MarkdownFormatter.toggleBlock(buf, 0, marked.length, block)
+            assertEquals("alpha\n\nbeta", buf.str())
+        }
+    }
+
+    @Test
+    fun anAllBlankSelectionStillTakesTheMarker() {
+        // The empty line a list is started on: there is no separator to protect, only an invitation.
+        val buf = Buf("")
+        MarkdownFormatter.toggleBlock(buf, 0, 0, MarkdownFormatter.Block.BULLET)
+
+        assertEquals("- ", buf.str())
+    }
+
+    @Test
     fun aHeadingLevelOutsideOneToSixIsClamped() {
         val buf = Buf("Title")
         MarkdownFormatter.toggleBlock(buf, 0, 0, MarkdownFormatter.Block.HEADING, 9)

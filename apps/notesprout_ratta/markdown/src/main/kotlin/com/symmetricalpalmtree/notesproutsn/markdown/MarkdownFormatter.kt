@@ -88,6 +88,11 @@ object MarkdownFormatter {
      * When *all* of those lines already carry precisely this block (and, for a heading, precisely
      * this [level]), the markers come off instead. "All" is the right bar: with a mixed selection
      * the writer is asking to make it uniform, not to clear it.
+     *
+     * A blank line inside the selection is a separator, not an item: it takes no marker, consumes
+     * no ordinal, and does not count towards "all lines already carry this". A selection that is
+     * *nothing but* blank is the other case — the empty line a list is being started on — and there
+     * the marker is written.
      */
     fun toggleBlock(
         buf: TextBuffer,
@@ -102,7 +107,12 @@ object MarkdownFormatter {
         val last = lineEnd(buf, hi)
         val lines = buf.substring(first, last).split("\n")
 
-        val allMatch = lines.all { line ->
+        // Separator blanks are skipped, but only while there is something else to mark — an
+        // all-blank selection is the caret on an empty line, which is where a list gets started.
+        val skipBlanks = lines.any { it.isNotBlank() }
+        val marked = if (skipBlanks) lines.filter { it.isNotBlank() } else lines
+
+        val allMatch = marked.all { line ->
             val parts = parseLine(line)
             parts.block == block && (block != Block.HEADING || parts.level == level)
         }
@@ -116,6 +126,13 @@ object MarkdownFormatter {
 
         for ((index, line) in lines.withIndex()) {
             if (index > 0) rebuilt.append('\n')
+            if (skipBlanks && line.isBlank()) {
+                // Kept verbatim: a marker here would mint an empty item, and its length is unchanged
+                // so neither caret moves across it.
+                rebuilt.append(line)
+                origin += line.length + 1
+                continue
+            }
             val parts = parseLine(line)
             val prefix = when (target) {
                 Block.PARAGRAPH -> ""

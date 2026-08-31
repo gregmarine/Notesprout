@@ -73,36 +73,89 @@ class DocumentEditorService : Service() {
     }
 
     /**
-     * The teardown backstop. The live screen's snapshot is the newest text there is, so it goes
-     * last: a park for the *same* target can only be an older copy of it and is dropped rather than
-     * written over the top. A park for a *different* target is still owed its write and goes first.
+     * The teardown backstop (reshaped at M11). Three rules, each a review find:
+     *
+     * 1. **`current()` first.** A reconnect-minted host session serves no window until a state
+     *    call loads one — a push into that void throws "save target is not the current one" with
+     *    the park already taken. So the host is asked what it can take before anything moves, and
+     *    a host that cannot answer leaves everything **parked**, never lost.
+     * 2. **Through the saver's lock when a screen is alive** ([EditorSession.FlushHook.pushBlocking]).
+     *    A debounced autosave push may be mid-flight on the host's one accumulator; a second
+     *    ChunkPush stream interleaving with it is out-of-order refusals or an older snapshot
+     *    committing after a newer one.
+     * 3. **A failed or unpushable snapshot parks** — the next `begin`'s pending path retries it,
+     *    and [PendingPark]'s key rule still guarantees it can never land on a stranger.
+     *
+     * The live screen's snapshot is the newest text there is; a park for the same target is an
+     * older copy of it and is skipped rather than written over the top.
      */
     private fun flushBeforeRevoke(host: IDocumentHost) {
-        // The read (the screen's buffer) comes before the write ordering is decided — the park is
-        // only resolvable once it is known whether the screen has something newer for that target.
+        val hook = EditorSession.flushHook
         val live = try {
-            EditorSession.flushHook?.unsavedSnapshot()
+            hook?.unsavedSnapshot()
         } catch (e: Exception) {
             Slog.d(TAG) { "flush hook failed: ${e.javaClass.simpleName}" }
             null
         }
-        val parked = EditorSession.pending.take()
-        if (parked != null && parked.first != live?.first) {
-            pushOrDrop(host, parked.first, parked.second)
+        val currentKey = currentKeyOrNull(host)
+        if (currentKey == null) {
+            if (live != null) EditorSession.pending.park(live.first, live.second)
+            Slog.d(TAG) { "teardown: no state — ${if (live != null) "live buffer parked" else "nothing owed"}" }
+            return
         }
-        if (live != null) pushOrDrop(host, live.first, live.second)
+        when (val r = EditorSession.pending.resolve(currentKey)) {
+            is PendingPark.Resolution.Push ->
+                if (r.pageKey != live?.first) pushOrPark(host, hook, r.pageKey, r.text)
+            PendingPark.Resolution.Drop -> Slog.d(TAG) { "teardown: park dropped — target changed" }
+            PendingPark.Resolution.Nothing -> Unit
+        }
+        if (live != null) {
+            if (live.first == currentKey) {
+                pushOrPark(host, hook, live.first, live.second)
+            } else {
+                // A flip-gap edge: the buffer's target is not what the host is showing, and the
+                // push would be refused by key. Parked — a later showing of that target takes it.
+                EditorSession.pending.park(live.first, live.second)
+                Slog.d(TAG) { "teardown: live buffer parked — target differs" }
+            }
+        }
     }
 
-    /** One synchronous push, on whatever thread the caller is. The host is revoking regardless, so a
-     *  failure here is logged and dropped — there is nothing left to retry against. */
-    private fun pushOrDrop(host: IDocumentHost, pageKey: String, text: String) {
+    /** The host's current target, or null when it cannot answer inside the teardown's budget. One
+     *  short retry only: with the host-side reconnect wait in place, one call already rides out a
+     *  still-opening `.soil`, and this whole method sits inside the client's 15 s `end()` clock. */
+    private fun currentKeyOrNull(host: IDocumentHost): String? {
+        repeat(TEARDOWN_STATE_ATTEMPTS) { attempt ->
+            try {
+                return host.current().pageKey
+            } catch (e: Exception) {
+                Slog.d(TAG) { "teardown state attempt ${attempt + 1} failed: ${e.javaClass.simpleName}" }
+            }
+            if (attempt < TEARDOWN_STATE_ATTEMPTS - 1) Thread.sleep(TEARDOWN_RETRY_MS)
+        }
+        return null
+    }
+
+    /** One synchronous push — through the live screen's saver lock when there is one, else the
+     *  bare chunk stream (no saver exists to race). A failure parks; nothing is silently lost. */
+    private fun pushOrPark(
+        host: IDocumentHost,
+        hook: EditorSession.FlushHook?,
+        pageKey: String,
+        text: String,
+    ) {
         try {
-            ChunkPush.push({ key, index, chunk, last, drafted ->
-                host.saveChunk(key, index, chunk, last, drafted)
-            }, pageKey, text)
+            if (hook != null) {
+                hook.pushBlocking(pageKey, text)
+            } else {
+                ChunkPush.push({ key, index, chunk, last, drafted ->
+                    host.saveChunk(key, index, chunk, last, drafted)
+                }, pageKey, text)
+            }
             Slog.d(TAG) { "teardown flush pushed ${text.length} chars" }
         } catch (e: Exception) {
-            Slog.d(TAG) { "teardown flush failed: ${e.javaClass.simpleName} (${text.length} chars)" }
+            EditorSession.pending.park(pageKey, text)
+            Slog.d(TAG) { "teardown flush failed: ${e.javaClass.simpleName} (${text.length} chars) — parked" }
         }
     }
 
@@ -128,7 +181,10 @@ class DocumentEditorService : Service() {
                     continue
                 }
                 when (val resolution = EditorSession.pending.resolve(key)) {
-                    is PendingPark.Resolution.Push -> pushOrDrop(host, resolution.pageKey, resolution.text)
+                    // No screen is alive here, so there is no saver lock to ride — the bare
+                    // chunk stream is the only writer. A failure re-parks (pushOrPark).
+                    is PendingPark.Resolution.Push ->
+                        pushOrPark(host, hook = null, pageKey = resolution.pageKey, text = resolution.text)
                     // A key that differs is another document: these words are not its, and writing
                     // them there would be corruption. Dropped, deliberately.
                     PendingPark.Resolution.Drop -> Slog.d(TAG) { "pending dropped — target changed" }
@@ -148,5 +204,9 @@ class DocumentEditorService : Service() {
         /** ~5 s of ladder: a recreated host's database open is asynchronous. */
         const val PENDING_ATTEMPTS = 10
         const val PENDING_RETRY_MS = 500L
+
+        /** The teardown's own, shorter ask — see [currentKeyOrNull]. */
+        const val TEARDOWN_STATE_ATTEMPTS = 2
+        const val TEARDOWN_RETRY_MS = 500L
     }
 }

@@ -15,9 +15,11 @@ import com.symmetricalpalmtree.notesproutsn.markdown.MarkdownText
  *    on purpose — `"\n\n"` between parts, parts untrimmed, the whole trimmed — so the text export
  *    of a never-merged notebook reads exactly like the merge the editor would have shown.
  *  - **What the stream holds** ([finalText]): the reserved [ExporterContract.OPTION_TEXT_FORMAT]
- *    choice, executed host-side — Markdown verbatim, or the `:markdown` engine's plain-text strip.
- *    The extension receives *final* bytes and streams them verbatim, which is what lets
- *    [ExportVerification] hold [ExporterContract.SOURCE_DOCUMENT] to the soil equality.
+ *    choice, executed host-side — Markdown verbatim, or the `:markdown` engine's plain-text strip —
+ *    and null when that leaves nothing, so the "honest refusal, never an empty file" rule survives
+ *    the strip as well as the assembly. The extension receives *final* bytes and streams them
+ *    verbatim, which is what lets [ExportVerification] hold [ExporterContract.SOURCE_DOCUMENT] to
+ *    the soil equality.
  *  - **What the destination is called** ([fileExtension] / [mimeType]): the same choice, again
  *    host-executed — a `.txt` export must not be offered to the picker as `text/markdown` with a
  *    `.md` name. Every other source kind keeps its descriptor's own answers.
@@ -44,10 +46,18 @@ object ExportDocumentRules {
 
     /** The bytes-to-stream for [markdown] under the armed format choice — verbatim, or the shared
      *  engine's strip (og's `toPlainText`, ported). Any unknown value reads as Markdown, but an
-     *  unknown value cannot be armed: [ExportOptions.isRenderable] dropped its exporter. */
-    fun finalText(markdown: String, format: String): String =
-        if (format == ExporterContract.TEXT_FORMAT_PLAIN) MarkdownText.toPlainText(markdown)
-        else markdown
+     *  unknown value cannot be armed: [ExportOptions.isRenderable] dropped its exporter.
+     *
+     *  **Null when the strip leaves nothing** — a document of pure syntax (`---` alone) is a
+     *  document in Markdown and no text file at all, and the honest answer is the same refusal
+     *  [assemble] gives, never a 0-byte file under a success dialog. The Markdown branch cannot
+     *  answer null: [assemble] trims and returns null rather than blank. */
+    fun finalText(markdown: String, format: String): String? =
+        if (format == ExporterContract.TEXT_FORMAT_PLAIN) {
+            MarkdownText.toPlainText(markdown).takeIf { it.isNotBlank() }
+        } else {
+            markdown.takeIf { it.isNotBlank() }
+        }
 
     /** The suggested filename's extension — the armed format's for a document exporter, the
      *  descriptor's own for everything else. */

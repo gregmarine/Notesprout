@@ -24,35 +24,47 @@ riding the same seam, so SN gains a **fourth** capability point — `ACTION_NOTE
 exporter's mirror: generic, plural, and served by the **same** `:ext-soil` APK under the **same**
 label (`NSE · Soil Export` — the user declined a rename; one package, two directions of one
 format). I1 landed the point, the second service and the host's whole pipeline; I2 the review
-fixes, this doc's rows 9–11 and the freeze. The arc is complete and frozen. The rule survives,
-one word wider each time: **no *fifth* capability point without another user decision**
-(`apps/notesprout_ratta/CLAUDE.md`).
+fixes, this doc's rows 9–11 and the freeze. The arc is complete and frozen.
+
+**Arc 19 is the fourth fresh user decision, on 2026-08-30.** The user asked for og's Documents
+feature with the editor as an extension, so SN gains a **fifth** capability point —
+`ACTION_DOCUMENT_EDITOR`, the second screen-owning one — served by **`NSE · Document`**
+(`:ext-document`), one APK carrying **three registrations**: the editor point plus a document
+exporter on arc 15's exporter point and a text importer on arc 16's importer point (the
+`:ext-soil` one-APK-many-services precedent). The seam's new piece is `IDocumentHost` — the
+first **host-side** stub on any SN extension seam, minted per showing so the editor's autosave
+pushes text back to the host live. M3 landed the point; M9 the `SOURCE_DOCUMENT` source kind;
+M8 the `resultKind` descriptor tail. The rule survives, one word wider each time: **no *sixth*
+capability point without another user decision** (`apps/notesprout_ratta/CLAUDE.md`).
 
 The pad as a **feature** has its own reference — [`docs/scratchpad.md`](scratchpad.md); export has
-its own — [`docs/export.md`](export.md); import has its own too — [`docs/import.md`](import.md).
-This doc is the seam for all four points.
+its own — [`docs/export.md`](export.md); import has its own too — [`docs/import.md`](import.md);
+documents likewise — [`docs/document.md`](document.md). This doc is the seam for all five points.
 
 Fresh code. Paper's own extension arcs (`PAPER_EXTENSIONS_PLAN.md`, `PAPER_RECOGNITION_PLAN.md`,
 `PAPER_SCRATCHPAD_PLAN.md`, its `:extension-api` / `:ext-mlkit` / `:ext-scratchpad`) are the shape
-reference — nothing is copied, and SN's AIDL is scoped to its **four** points rather than Paper's
-broader capability set. Paper never built export or import, so it has nothing to say about the
-third or fourth; og's `docs/full-notebook-export.md` § Import was the fourth's reading reference.
+reference — nothing is copied, and SN's AIDL is scoped to its **five** points rather than Paper's
+broader capability set. Paper never built export, import or documents, so it has nothing to say
+about the third, fourth or fifth; og's `docs/full-notebook-export.md` § Import was the fourth's
+reading reference and og's `docs/documents.md` the fifth's.
 
 ---
 
 ## Module layout
 
-Seven modules, SN's own Gradle root:
+Nine modules, SN's own Gradle root:
 
 | Module | Type | Depends on | Holds |
 |---|---|---|---|
 | `:sn-screen` | Android library | g-paper (`api`) + androidx; **never** `:app`, **never** `:extension-api` | the design resources and the screen helpers both paper surfaces need — see [`sn-screen.md`](sn-screen.md) |
-| `:extension-api` | Android library | nothing in `:app`, no library beyond the Kotlin stdlib (`build.gradle.kts` says so explicitly) | the AIDL (`IHandwritingRecognizer`, `InkStroke.aidl`; `IExtensionStore`, `LargeValue.aidl`; `IScratchPad`, `WireStroke.aidl`, `InkBundle.aidl`; `INotebookExporter`, `ExporterInfo.aidl`, `ExportSpec.aidl`, `ExportResult.aidl`), the hand-written `InkStroke` / `LargeValue` / `WireStroke` / `InkBundle` / `ExporterInfo` / `OptionDescriptor` / `ExportSpec` / `ExportResult` parcelables, `PageBundle` (the arc-18 page-bundle container — pure `java.io`, no Android types), `SharedBytes`, `InkChunks`, `RecognizerStatus`, `ExtensionContract`, `ExporterContract`, `HostCallerCheck` |
+| `:markdown` | Android library | nothing in this project — stdlib + the android SDK its spans use (arc 19 / M1) | the shared pure markdown engine `:app` and `:ext-document` both consume — parser, renderer, `HeadingTypography`, `MarkdownDraw`, `MarkdownFormatter`, `TextBuffer`, `MarkdownReflow`, `TextSearch`, `DocumentDraft`, `MarkdownText`, `MarkdownPaginator`. One engine, no drift: the host renders text-document covers and the PDF preview, the extension renders the editor's Preview |
+| `:extension-api` | Android library | nothing in `:app`, no library beyond the Kotlin stdlib (`build.gradle.kts` says so explicitly) | the AIDL (`IHandwritingRecognizer`, `InkStroke.aidl`; `IExtensionStore`, `LargeValue.aidl`; `IScratchPad`, `WireStroke.aidl`, `InkBundle.aidl`; `INotebookExporter`, `ExporterInfo.aidl`, `ExportSpec.aidl`, `ExportResult.aidl`; `INotebookImporter`, `ImporterInfo.aidl`, `ImportSpec.aidl`, `ImportResult.aidl`; `IDocumentEditor`, `IDocumentHost`, `DocumentPageState.aidl`), the hand-written `InkStroke` / `LargeValue` / `WireStroke` / `InkBundle` / `ExporterInfo` / `OptionDescriptor` / `ExportSpec` / `ExportResult` / `ImporterInfo` / `ImportSpec` / `ImportResult` / `DocumentPageState` parcelables, `PageBundle` (the arc-18 page-bundle container — pure `java.io`, no Android types), `SharedBytes`, `InkChunks`, `TextChunks`, `RecognizerStatus`, `ExtensionContract`, `ExporterContract`, `ImporterContract`, `DocumentContract`, `HostCallerCheck` |
 | `:ext-mlkit` | Android application (its own installable APK) | `:extension-api` + `com.google.mlkit:digital-ink-recognition:19.0.0` | `HandwritingRecognizerService`, `ModelManager`, `MlKitEngine`, `PageText`, `StrokeSegmenter`, `Dots`, `Box` |
 | `:ext-scratchpad` | Android application (its own installable APK) | `:extension-api` + `:sn-screen` (g-paper arrives through its `api`) + androidx; **never** `:app`, no Room / SQLCipher / serialization | `ScratchPadApplication`, `ScratchPadService`, `ScratchPadActivity`, `ScratchSession`, `ScratchStore`, `ScratchPageCodec`, `ScratchPages`, `ScratchInk` |
 | `:ext-soil` | Android application (its own installable APK) | `:extension-api` only | `SoilExporterService`, `SoilExportSpec` — see [`export.md`](export.md); and, arc 16, `SoilImporterService` — see [`import.md`](import.md). One package, two services, one label |
 | `:ext-pdf` | Android application (its own installable APK) | `:extension-api` + `com.tom-roush:pdfbox-android:2.0.27.0` (module-local — approved 2026-08-30, used only on the protect path) | `PdfExporterService`, `PdfDescriptor`, `PdfExportSpec`, `PdfAssembly`, `CountingOutputStream` — arc 18's second exporter on the same point; see [`export.md`](export.md) |
-| `:app` (`extension/` package) | part of the host APK | `:extension-api` | `ExtensionRegistry`, `ExtensionBinder`, `ExtensionCallException`, `InkCaps`, `RecognizerClient`, `RecognizerReadiness`, `ScratchPadClient`, `TransferCaps`, `ExporterClient`, `ImporterClient`; and in `data/extstore/`, the extension store (`ExtensionStores`, `ExtensionStoreDatabase`, `KvEntity`, `KvDao`, `ExtensionStoreGate`, `ExtensionStoreBinder`) — plus, in `export/` and `crypto/`, export's own host-side half (`ExportActivity`, `ExportPanel`, `ExportOptions`, `ExportArtifact`, `ExportNaming`, `ExportKeying`, `SoilOpenFiles`), and in `importing/` and `crypto/`, import's (`ImportFlow`, `NotebookImport`, `ImporterMatch`, `ImportNames`, `AncestryPlan`, `SafeImportId`, `ImportDialogs`, `ImportOverlay`, `ImportKeying`, `NotebookRemap` in `data/soil/`) |
+| `:ext-document` | Android application (its own installable APK) | `:extension-api` + `:sn-screen` + `:markdown` + `com.darkrockstudios:symspellkt:3.4.0` (module-local — approved 2026-08-30, the pdfbox precedent); **never** `:app`, no Application class, no drawing engine | one package, TWO services + a screen: `DocumentEditorService` + `DocumentEditorActivity` (the editor — arc 19 / M3–M7, with `EditorSession`, `DocumentSaver`, `AutosaveGovernor`, `ChunkPush`, `PendingPark`, `EditorPrefs`, the format bar, find & replace, and the `proofread/` engine over the bundled `assets/proofread/en_82765.dict`), `TextImporterService` (M8, on the importer point) and `DocumentExporterService` (M9, on the exporter point) — see [`document.md`](document.md) |
+| `:app` (`extension/` package) | part of the host APK | `:extension-api` | `ExtensionRegistry`, `ExtensionBinder`, `ExtensionCallException`, `InkCaps`, `RecognizerClient`, `RecognizerReadiness`, `ScratchPadClient`, `TransferCaps`, `ExporterClient`, `ImporterClient`, `DocumentEditorClient`, `DocumentEditorEntry`, `DocumentHostBinder`, `DocumentHostSession`; and in `data/extstore/`, the extension store (`ExtensionStores`, `ExtensionStoreDatabase`, `KvEntity`, `KvDao`, `ExtensionStoreGate`, `ExtensionStoreBinder`) — plus, in `export/` and `crypto/`, export's own host-side half (`ExportActivity`, `ExportPanel`, `ExportOptions`, `ExportArtifact`, `ExportNaming`, `ExportKeying`, `SoilOpenFiles`, and arc 19's `ExportText`, `ExportDocumentRules`, `DocumentPdfRender`, `DocumentPdfMetrics`), and in `importing/` and `crypto/`, import's (`ImportFlow`, `NotebookImport`, `ImporterMatch`, `ImportNames`, `AncestryPlan`, `SafeImportId`, `ImportDialogs`, `ImportOverlay`, `ImportKeying`, `NotebookRemap` in `data/soil/`, and arc 19's `TextImport`) |
 
 `:sn-screen` is deliberately **not** in that dependency chain: it never sees `:extension-api`, so a
 shared screen helper can never quietly become part of the wire contract. `:ext-scratchpad` depends on
@@ -89,12 +101,19 @@ The host's `AndroidManifest.xml` declares package-visibility for the point (API 
     <intent>
         <action android:name="…extension.NOTEBOOK_IMPORTER" />
     </intent>
+    <intent>
+        <action android:name="…extension.DOCUMENT_EDITOR" />
+    </intent>
+    <intent>
+        <action android:name="…extension.DOCUMENT_EDITOR_SCREEN" />
+    </intent>
 </queries>
 ```
 
-The scratch pad needs **both** of its actions listed: one to discover and bind the service, one to
-resolve and launch the screen. The exporter and importer points need only one each — `describe()`
-and the delivery call both ride the same bind-per-call service. Plus `ACCESS_NETWORK_STATE`, for
+The two screen-owning points (scratch pad, document editor) need **both** of their actions
+listed: one to discover and bind the service, one to resolve and launch the screen. The exporter
+and importer points need only one each — `describe()` and the delivery call both ride the same
+bind-per-call service. Plus `ACCESS_NETWORK_STATE`, for
 the readiness flow's offline pre-check (below).
 
 ---
@@ -138,7 +157,7 @@ loading as one busy state), `UNAVAILABLE` (3). The host treats anything outside 
 
 | Constant | Value | Purpose |
 |---|---|---|
-| `API_VERSION` | 2 (arc 18 / D3) | the host accepts an extension whose `<meta-data>` is in `1..API_VERSION` — the declared number is what the extension *requires* of the host, so a new-seam extension (the PDF exporter declares 2, for the `sourceKind` tail) is skipped by an older host instead of misread by it |
+| `API_VERSION` | 3 (arc 19 / M8) | the host accepts an extension whose `<meta-data>` is in `1..API_VERSION` — the declared number is what the extension *requires* of the host, so a new-seam extension is skipped by an older host instead of misread by it. Meta-data is **per service**: the PDF exporter declares 2 (the `sourceKind` tail), `:ext-document`'s text importer and document exporter declare 3 (the `resultKind` tail / `SOURCE_DOCUMENT`), its editor service stays at 2, everything else at 1 |
 | `ACTION_HANDWRITING_RECOGNIZER` | `…notesproutsn.extension.HANDWRITING_RECOGNIZER` | SN-namespaced action string |
 | `META_API_VERSION` | `…notesproutsn.extension.API_VERSION` | the `<service>` meta-data name |
 | `MAX_INK_STROKES` | 2,000 | most strokes in one recognize call |
@@ -880,6 +899,108 @@ and the index-last commit. The extension never learns any of it happened.
 
 ---
 
+## The document-editor point (arc 19)
+
+`ACTION_DOCUMENT_EDITOR` + `_SCREEN` — the fifth point, the second screen-owning one, served by
+`:ext-document` (**NSE · Document**). The extension owns the full-screen Markdown editor
+Activity; **the host owns every `.soil` read and write** (og's invariant 3, now enforced by a
+process boundary). The feature is [`document.md`](document.md); this section is the seam.
+
+### The held bind, and the seam's new piece
+
+The shape is the scratch pad's — SN's second **held** bind, because the operation is the showing:
+`DocumentEditorClient.open` pre-opens the store on IO, mints one uid-bound `ExtensionStoreBinder`
+**and** one uid-bound `DocumentHostBinder`, holds the bind (signature re-checked), calls
+`begin(store, host)` and hands back the screen Intent; `finish` calls `end()` best-effort and, in
+`finally`, unbinds and revokes both binders on every path — result, cancel, caller death, failed
+`begin`.
+
+What is new is the second argument. **`IDocumentHost` is the first host-side stub on any SN
+extension seam**: every other binder in the app is one the host *calls*; this one the extension
+calls, so it carries the same trust discipline an extension's own service does, mirrored. The
+host mints one per showing, bound to the extension's uid; `gate()` is the first statement of
+every method (wrong uid, or anything after the revoke, is a `SecurityException` that says nothing
+about what is here), and the revoke — in the same `finally` as the unbind — also clears the
+session, so the showing's read window and any half-received save never outlive the bind. The
+binder is deliberately **thin**: everything worth getting right — the read window, the ordered
+save accumulator, the target-key guard, the caps, the parked watermark — lives in
+`DocumentHostSession`, pure and JVM-tested. Hooks into the open notebook
+(`DocumentHostBinder.Hooks`) run **blocking on Binder threads**, never Main, and every hook
+invocation is funnelled: only `SecurityException` / `IllegalArgumentException` /
+`IllegalStateException` (plus `UnsupportedOperationException`, the J3 precedent) cross; any other
+`Throwable` becomes `IllegalStateException(className)` — the class name and nothing else, because
+a message here could carry a path or a fragment of the user's document.
+
+### Text crosses chunked, in both directions — and nothing rides the Intent
+
+Document text is the only user content that crosses this seam, and it crosses **chunked** by the
+shared `TextChunks` rule (`TEXT_CHUNK_CHARS` 100k per Binder call under the ~1 MB transaction
+budget; a chunk never splits a surrogate pair; **empty text is one empty chunk**, so "save blank"
+rides the same shape as everything else) under `MAX_DOCUMENT_CHARS` (10 M — aligned with the text
+importer's 10 MB byte cap, so any file import admits stays editable). The read direction is a
+**pull**: every state-answering call (`current`, `requestPage`, `requestScope`, `requestSeed`,
+`requestMerge`) parks its text in the host's read window atomically with the `DocumentPageState`
+it returns, and `readChunk` serves that window. The write direction is a **push**: `saveChunk`
+accumulates in order from 0, the host re-checks the running total on receipt, the last chunk
+commits, and a refused chunk resets the whole accumulation. **Every save names its target
+`pageKey`** — a host-minted opaque token (≤ 64 chars, no `/`, no NUL; never a path, opens
+nothing) that must be the *current* target's key, which is what makes the mode-routing guard
+structural: notebook-document text can never land on a page row or vice versa, and a save landing
+in a flip gap is refused by key rather than written onto the wrong page.
+
+The screen Intent carries **nothing** — not one extra. (The scratch pad's two booleans were the
+last thing to ride an Intent on any SN seam; this point starts with none.) Everything moves
+through the two binders, which is what makes the whole of it uid-gated and revocable.
+`DocumentEditorActivity` is exported under its own action with `<category DEFAULT>` and no
+launcher filter, refuses any caller that is not the host's `startActivityForResult`
+(`HostCallerCheck.enforceActivity` first thing in `onCreate`), and the host launches it only
+through an `ActivityResultLauncher` with `setPackage` — the tier-2 recipe, verbatim.
+
+Three typed refusals cross as exact `IllegalStateException` messages, `==`-matched (the
+`RECOGNIZER_NOT_READY` recipe): `SEED_UNAVAILABLE` (recognition is not there to run),
+`NO_DRAFT_PENDING` (a drafted commit with no watermark parked — nothing written; the editor
+retries the same text as an ordinary save) and `MERGE_CANCELLED` (the editor's own cancel —
+nothing written, target and scope untouched).
+
+### Timeouts, and the flush that rides `end()`
+
+`begin` gets `CALL_TIMEOUT_MS` (2 s — a state read and nothing else). `end()` gets its own
+`END_TIMEOUT_MS` (15 s), because it is not a question: it is the editor's last chance to push
+unsaved text, and the extension's handler flushes synchronously through the host binder before
+answering — the live buffer's snapshot plus anything parked, ordered so a park for the same
+target (an older copy by construction) is dropped rather than written over the newer text. On
+the other side, `begin` arriving while a showing already exists means **the host restarted**
+underneath a live screen: the screen re-confirms the target through `current()` before any text
+moves, and a parked save whose key no longer matches is **dropped, deliberately** — those words
+are another document's, and writing them there would be corruption.
+
+### The store is small per-device state, never the document
+
+The editor's extension-store layout is a persistence format, pinned by test: `size` (text size
+sp), `carets` (the caret LRU as `CaretMemory`'s line blob, cap 100), and since M10 `proofread`
+(`"1"`/`"0"`, absent = on) and `dict` (the user dictionary as `UserWords`' line blob — normalized
+form, insertion order, hard drop on remove). **A draft never lives in the store** — autosave
+pushes text to the host through the callback binder; the store holds comfort, not content, and
+every store failure degrades silently to a default. The extension fetches the store binder from
+`EditorSession` **per call**, never caching it, because a restarted host lends a new one.
+
+### The sibling registrations
+
+The same APK registers on the two generic points, one service each — no new point either way:
+
+- **`DocumentExporterService`** (M9) declares `SOURCE_DOCUMENT` (API version 3 on its service
+  meta-data): the **host assembles the final UTF-8 text bytes** — the format choice executed
+  host-side, a `.txt` stripped through `:markdown` — and the extension is a verbatim streamer,
+  held to the same `bytesWritten == streamBytes` equality as `NSE · Soil Export`. Detail:
+  [`export.md`](export.md).
+- **`TextImporterService`** (M8) declares `resultKind = RESULT_TEXT_DOCUMENT` — `ImporterInfo`'s
+  compatible tail (absent = `RESULT_NOTEBOOK`), API version 3 likewise: the extension streams the
+  picked file verbatim exactly like the soil importer, and the host forks **after** delivery into
+  strict UTF-8 validation + text-document create instead of the `.soil` probe. Detail:
+  [`import.md`](import.md).
+
+---
+
 ## Boundary audit
 
 What crosses the process boundary, in which direction, and what guards it. **Re-walk this table
@@ -888,7 +1009,9 @@ against the code at the arc-11 freeze (2026-08-25) on the shape Paper's rows 28�
 6–8 are the exporter point, walked against the code at the arc-15 freeze (2026-08-27). Rows 9–11 are
 the importer point, walked against the code at the arc-16 freeze (2026-08-28). Rows 12–13 are the
 exporter point's arc-18 growth — the source-kind seam and the one deliberate secret crossing —
-walked against the code at the arc-18 freeze (2026-08-30).
+walked against the code at the arc-18 freeze (2026-08-30). Rows 14–18 are the document-editor
+point and `:ext-document`'s two sibling registrations, walked against the code at the arc-19
+freeze (2026-08-31).
 
 | # | The claim | Where it holds |
 |---|---|---|
@@ -907,6 +1030,12 @@ walked against the code at the arc-18 freeze (2026-08-30).
 | 12 | **A `SOURCE_PAGES` exporter receives baked pixels, never the notebook — and its success is judged per source kind.** `ExporterInfo.sourceKind` is a compatible parcel tail (`dataAvail()` — absent = `SOURCE_SOIL`, so every pre-arc-18 descriptor keeps its meaning, proven on real wire at the D1 walk; an unknown kind fails unmarshal and drops the exporter). The host does the reading with the one process that can: `ExportRender` runs `ExportArtifact.prepare`'s guard order one for one (`SoilOpenFiles` held → IN_USE, missing key, unopenable), opens **read-only** through the one `SoilDatabase.open` door and stamps nothing (not even `exportedAt`), bakes each page at its own size — template, headings, links' children, ink — one page in memory at a time, into a `PageBundle` in `cacheDir/export/` that the screen's one `finally` wipes. The container is capped before allocation on **both** sides (`MAX_PAGES` 4096 / `MAX_DIMENSION_PX` 32768 / `MAX_PAGE_BYTES` 32 MiB; magic + declared count checked), and the extension re-checks each decode against the declaration — a mismatch is a delivery failure, never a page to skip. The device key opens the notebook for reading and never leaves the host. Verification (`ExportVerification`, pure): the verbatim `bytesWritten == streamBytes` equality runs for `SOURCE_SOIL` only; `SOURCE_PAGES` is corroborated against the destination's own answers, zero bytes is never a document, `SHORT` (may delete wreckage) stays distinct from `UNCONFIRMED` (never a delete), and an unknown kind is `SHORT` — verification never defaults to trust. | `ExporterInfo` (tail + `require`s, JVM-tested), `ExporterContract.SOURCE_*`, `PageBundle` (Writer/Reader caps, round-trip JVM-tested), `ExportRender` (+ pure `plan`, JVM-tested), `ExportVerification` (JVM-tested), `ExportActivity.runExport` / `renderedPages`, `PdfAssembly.addPage` |
 | 13 | **The export secret is the ONE deliberate secret that crosses any extension seam — user-typed, export-scoped, and it opens no Notesprout data.** It is a password for the *output* file (arc 18 / D2's `OPTION_PROTECT`), never the global passphrase, never derived from it, never the device key; `KIND_PASSPHRASE` keeps its never-crosses meaning and the secret is never in the spec's value map — it rides only `ExportSpec.exportSecret`, a compatible tail holding because the spec stays `export()`'s trailing argument. Host lifecycle = `typedPassphrase`'s to the letter: XML-static `saveEnabled="false"` dual fields, held from the Export tap to the flow's end, cleared at the picker's cancel and in the flow's `finally`, never in instance state / an Intent / a log line; > `MAX_EXPORT_SECRET_CHARS` (128) refused at the tap; a screen rebuilt behind the picker refuses with the honest password-lost body rather than exporting unprotected; `isRenderable` drops a descriptor declaring both rekey and protect (one block, one tenant). Extension side: `PdfExportSpec` refuses an inconsistent delivery in both directions (armed-with-no-secret; secret-nothing-asked-for) with messages that never name, quote or measure the secret; `PdfAssembly` holds it only for the pdfbox call and drops its reference in `finally`, whichever way the assembly ended. | `ExporterContract.OPTION_PROTECT` / `MAX_EXPORT_SECRET_CHARS`, `ExportSpec` (constructor `require` + tail, JVM-tested), `ExportOptions.isRenderable` / `wantsExportSecret` (JVM-tested), `ExportActivity` (`typedExportSecret`, `onExportTap`, `runExport`, `saveLauncher` cancel), `activity_export.xml`, `PdfExportSpec.require` (JVM-tested), `PdfAssembly.assemble`, `PdfExporterService.export` |
 
+| 14 | **Outward on the editor's `begin` is two uid-bound binders and nothing else — and nothing rides the screen's Intent at all.** `begin(store, host)` is the held bind's opening call: an `ExtensionStoreBinder` minted in `DocumentEditorClient.open` **after** `ExtensionStores.open` on IO (the pre-open rule) and a `DocumentHostBinder` over a fresh `DocumentHostSession`, both bound to `getPackageUid(ref.packageName)`, both revoked in the same `finally` as the unbind — on every path: result, cancel, caller `onDestroy`, failed `begin`. Revoking the host binder also **clears its session**: the read window and any half-received save go with the bind, never outlive it. The screen Intent is the action + `setPackage` and **not one extra** — no id, key, text, name or path; the scratch pad's two booleans were the last thing to ride an Intent on any SN seam, and this point starts with none. `begin`/`end` in the extension: `HostCallerCheck.enforce` first, marshalable exceptions only. | `DocumentEditorClient.open/finish`, `ExtensionBinder.hold`, `ExtensionStoreBinder`, `DocumentHostBinder.revoke`, `DocumentHostSession.clear` (JVM-tested), `DocumentEditorService.begin/end`, `EditorSession` |
+| 15 | **The host-side stub answers only the bound extension, and text crosses it chunked, capped and target-keyed in both directions.** `IDocumentHost` is the first host-side stub on any SN seam; `gate()` — the bound uid, and not revoked — is the first statement of **every** method, so a stranger never learns which calls exist by the exception it gets back. Reads are a pull: every state-answering call loads the read window **atomically** with the `DocumentPageState` it returns (`setWindow` under one monitor), and `readChunk` refuses an index outside it. Writes are a push: `saveChunk` chunks arrive in order from 0, each ≤ `TEXT_CHUNK_CHARS`, the running total re-checked against `MAX_DOCUMENT_CHARS` on receipt (the untrusted-inward re-check — the receiveInk recipe), and **a save whose `pageKey` is not the current target's never accumulates a single chunk** (the mode-routing guard, structural: notebook text can never land on a page row, a flip-gap save is refused by key). Any refusal resets the whole accumulation. The watermark moves only through a drafted commit consuming a host-parked value — `NO_DRAFT_PENDING` otherwise, typed and `==`-matched; a different-key window swap clears the park (a cross-target draft anchor is unreachable). Hooks run blocking on Binder threads, funnelled to the marshalable set with **class name only** — a message could carry a path or a fragment of the document. | `DocumentHostBinder` (`gate`, `hook`, every override), `DocumentHostSession` (`setWindow` / `readChunk` / `acceptChunk` / `parkWatermark`, JVM-tested), `TextChunks` (JVM-tested both sides), `DocumentContract` caps + typed messages, `ChunkPush` (extension side, JVM-tested) |
+| 16 | **The editor screen is the extension's, launched only by the core for a result — and the store holds small per-device state, never the document.** `DocumentEditorActivity` is exported under `ACTION_DOCUMENT_EDITOR_SCREEN` with `<category DEFAULT>` and no launcher filter; `HostCallerCheck.enforceActivity` runs first thing in `onCreate` (host package **and** signature, else `finish()` before anything is inflated), and the host launches only through an `ActivityResultLauncher` with `setPackage` from a trusted `ProviderRef` after `begin` succeeded — the tier-2 recipe, its second use. The extension writes nothing to disk: its whole persistent surface is four store keys — `size`, `carets` (LRU 100), `proofread`, `dict` — comfort, not content; a draft never lives in the store (autosave pushes through the host binder), every store failure degrades to a default silently, and the store binder is fetched per call because a restarted host lends a new one. The `end()` flush is the teardown backstop: the host is asked `current()` first (a host that cannot answer leaves everything **parked**, never lost), the live buffer rides the saver's own push lock so it can never interleave with an in-flight autosave, a same-key park is skipped as the older copy, and a park or buffer whose key is not the host's current target is parked or **dropped by `PendingPark`'s key rule** — writing it elsewhere would be corruption. | `DocumentEditorActivity.onCreate`, `HostCallerCheck.enforceActivity`, the `:ext-document` manifest, `DocumentEditorEntry`, `EditorPrefs` (+ `CaretMemory` / `UserWords`, JVM-tested), `DocumentEditorService.flushBeforeRevoke` / `pushPendingInBackground`, `DocumentSaver.pushLockedBlocking`, `PendingPark` (JVM-tested) |
+| 17 | **A `SOURCE_DOCUMENT` exporter receives final bytes the host assembled — and is held to the verbatim equality.** The host does the assembly *and* the format strip (`ExportText` — read-only open through the one `SoilDatabase.open` door after the `SoilOpenFiles` guard, stamps nothing, not even `exportedAt`; a `.txt` stripped through `:markdown`; **export never recognizes** — no document is an honest refusal, never an empty file), so what crosses the read fd is already the file the user asked for and the extension is a byte-for-byte streamer with no decode and no charset sniff. The reserved `OPTION_TEXT_FORMAT` is host-executed (assembly + destination naming); the spec that crosses carries the choice id and nothing new. Because the output is a copy and not a transform, `ExportVerification` holds this kind to the same `bytesWritten == streamBytes` equality as `SOURCE_SOIL` — the per-kind verification rule doing its job. The exporter is listed only when the notebook has a document (`ExportDocumentRules.listed`), its service meta-data declares API 3, and an unknown source kind still fails unmarshal and drops the exporter. | `ExportText` (guard order in KDoc), `ExportDocumentRules` (JVM-tested), `ExporterContract.SOURCE_DOCUMENT` / `OPTION_TEXT_FORMAT`, `ExportVerification` (JVM-tested), `DocumentExporterService.export` (E1-shaped fd `finally`), `DocumentExporterDescriptor` (JVM-tested), `TextStreams.streamCopy` |
+| 18 | **A `RESULT_TEXT_DOCUMENT` importer streams verbatim, and the host decides what the bytes are — after delivery, under its own caps.** `ImporterInfo.resultKind` is a compatible parcel tail (absent = `RESULT_NOTEBOOK`, the arc-18 `sourceKind` recipe mirrored; an unknown kind fails unmarshal and drops the importer), and the service's API-3 meta-data is what keeps a version-2 host — which would read the absent tail as `.soil` and run Markdown through the notebook probe — from ever pairing with it. `TextImporterService` is `SoilImporterService` in shape down to the line: caller check inside the fd `try`, verbatim `streamCopy`, no decode, no cap of its own — recognising the bytes is the job of the side that owns the data. Host side, after delivery: byte cap first (10 MB, first-hand `File.length()`), **strict UTF-8** with `CodingErrorAction.REPORT` (mojibake refused, not landed), NUL = binary wearing a text extension, the char cap re-checked after decode, BOM and CRLF normalized and nothing else touched. What survives becomes an ordinary encrypted text-document create — the delivered bytes never name a path, an id or a destination. | `ImporterInfo` (tail + `require`s, JVM-tested), `ImporterContract.RESULT_*`, `TextImporterService` (API 3 meta-data in the manifest), `TextImport.decode` (JVM-tested), `ImportFlow` (the fork after delivery), `TextStreams.streamCopy` |
+
 **One recorded asymmetry.** The host forces inbound colour to opaque black; the extension does not
 force it on the ink the host sends. That is not an oversight and not a hole: SN's ink is fixed
 black, so the host has no other colour to send, and the sender is signature-matched. The *untrusted*
@@ -922,14 +1051,24 @@ counts, character lengths, and durations. `Dots.describeLine`, the one debug-onl
 closest to describing recognized content, explicitly logs geometry and a coarse punctuation class
 ("period"/"comma"/"other") rather than the text itself.
 
+**Document text is under the same rule, now covering the callback direction too** (arc 19):
+`DocumentHostBinder`, `DocumentEditorClient`, `DocumentEditorService`, the editor, `ExportText`
+and `TextImport` log counts, chunk counts, lengths and durations — never a character of the
+document. Exception funnels on both sides of the seam carry a **class name only**, on the
+recorded principle that an exception's own message could hold a path or a slice of the user's
+text. The proofread engine extends it further: the user dictionary's words are the writer's own
+vocabulary, so `UserWords` / `EditorPrefs` log nothing at all — not even key names, which name
+pages.
+
 ---
 
 ## Identity
 
-All four extensions share one recipe; only the name and the point differ. (`:ext-soil` serves
+All five extensions share one recipe; only the name and the point differ. (`:ext-soil` serves
 **two** points — exporter and importer — under one identity: the user's arc-16 call was no rename,
 so the label stays `NSE · Soil Export` even though it imports too. `:ext-pdf` is the second
-exporter on the same point — arc 18, no new point.)
+exporter on the same point — arc 18, no new point. `:ext-document` serves **three** points under
+one identity — its own editor point plus one service each on the exporter and importer points.)
 
 **`:ext-scratchpad`**
 
@@ -972,7 +1111,19 @@ exporter on the same point — arc 18, no new point.)
 | Launcher activity | **None** — the Supernote launcher shows the package anyway; the family recipe |
 | versionName | host lockstep: `0.1.0-ratta` (`-dev` suffixed in debug), bumped together with `:app` at arc freezes |
 | Release APK | 14 MB — pdfbox-android pulls bouncycastle; module-local, and since the D3 review it assembles every export (the framework's `PdfDocument` held each page's raster until the write — the memory finding) |
-| API version | declares **2** (`sourceKind` is load-bearing for it) — an older host skips it at discovery rather than streaming a `.soil` at it; the other three extensions stay at 1 |
+| API version | declares **2** (`sourceKind` is load-bearing for it) — an older host skips it at discovery rather than streaming a `.soil` at it; `:ext-mlkit`, `:ext-scratchpad` and `:ext-soil` stay at 1 |
+
+**`:ext-document`** (arc 19 / M3, grown M8–M10 — `DocumentEditorService` + the editor screen, `TextImporterService`, `DocumentExporterService`, one APK on three points)
+
+| | |
+|---|---|
+| Label | **"NSE · Document"** (`"NSE · Document Dev"` in debug — a build-type string override, not a suffix; **singular** — the user's M3 call) |
+| Package | `com.symmetricalpalmtree.notesproutsn.ext.document` (`.dev` in debug) |
+| Icon | the same Tabler "puzzle" glyph as the other four, byte-identical vector — the family mark |
+| Launcher activity | **None** — the editor `<activity>` is exported under its own action with `<category DEFAULT>` and is refused unless launched for a result by the host; the Supernote launcher shows the package anyway, the family recipe |
+| versionName | host lockstep: `0.1.0-ratta` (`-dev` suffixed in debug), bumped together with `:app` at arc freezes |
+| Release APK | 7.8 MB — SymSpellKt is module-local (the pdfbox precedent), and the bundled proofread dictionary asset (`assets/proofread/en_82765.dict` — gzip content behind an opaque extension, because AAPT gunzips any `.gz` asset and strips the extension) rides inside |
+| API version | **per service**: the editor declares 2, the text importer and document exporter declare **3** (the `resultKind` tail / `SOURCE_DOCUMENT` are load-bearing for them — an older host skips those two services at discovery and still binds nothing it would misread) |
 
 ---
 

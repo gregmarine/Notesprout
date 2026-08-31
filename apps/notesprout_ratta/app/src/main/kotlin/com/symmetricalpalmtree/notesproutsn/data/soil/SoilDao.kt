@@ -113,11 +113,14 @@ interface SoilDao {
      *  (arc 19 / M9): a `SOURCE_DOCUMENT` exporter is listed, and the PDF Source row shown, only
      *  when this answers true. Blank text counts as absent (the repository's blank-means-absent
      *  rule, asked in SQL so a foreign-written blank row cannot open a chooser entry that can
-     *  only refuse). Deliberately parent-agnostic: a notebook document or any page document both
-     *  make the notebook exportable as text. */
+     *  only refuse). The reader that follows is Kotlin `isBlank()`, so the trim set here is
+     *  [SoilSql.BLANK_CHARS] rather than SQLite's default space-only `TRIM` — a row holding one
+     *  newline is exactly the foreign-written shape this gate exists to catch. Deliberately
+     *  parent-agnostic: a notebook document or any page document both make the notebook
+     *  exportable as text. */
     @Query(
         "SELECT EXISTS(SELECT 1 FROM notebook WHERE type = 'document' AND deletedAt IS NULL " +
-            "AND TRIM(COALESCE(text, '')) != '')",
+            "AND TRIM(COALESCE(text, ''), " + SoilSql.BLANK_CHARS + ") != '')",
     )
     suspend fun hasLiveDocument(): Boolean
 
@@ -155,6 +158,24 @@ interface SoilDao {
      *  stroke un-deleted in place never ties with one committed after its erase). */
     @Query("SELECT COALESCE(MAX(`order`), -1) FROM notebook WHERE parentId = :parentId AND type = :type")
     suspend fun maxOrder(parentId: String, type: String): Int
+}
+
+/** Literals spliced into [SoilDao]'s queries. `const` because an annotation argument has to be
+ *  one — the value is folded into the SQL at compile time, so what Room sees is still a string. */
+object SoilSql {
+
+    /**
+     * The character set a `TRIM(x, …)` needs to agree with Kotlin `isBlank()`: space, tab, newline,
+     * vertical tab, form feed, carriage return. SQLite's one-argument `TRIM` strips only spaces,
+     * which would let a row holding `"\n"` read as non-blank in SQL and blank in Kotlin.
+     *
+     * Accepted residual mismatch: Kotlin also calls the ASCII separators `U+001C`–`U+001F` and the
+     * Unicode spaces (`U+00A0`, `U+2000`…) blank, and this does not. Nothing in this app writes
+     * one; a foreign row that does is answered true here and refused by the reader — the same
+     * outcome as before this trim set existed, for a far narrower set of inputs.
+     */
+    const val BLANK_CHARS =
+        "' ' || char(9) || char(10) || char(11) || char(12) || char(13)"
 }
 
 /** A live link's page — [SoilDao.liveLinkPages]. `parentId` is the page the link sits on. */

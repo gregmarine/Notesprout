@@ -150,6 +150,16 @@ class NotebookActivity : AppCompatActivity() {
     private var closing = false
 
     /**
+     * The document hooks' `alive` gate (arc 19 / M11): flipped immediately before this screen's
+     * session seal is committed, on every seal path. Deliberately NOT `closing` — the editor's
+     * teardown flush must still land while the screen is closing (flush-before-seal, the M4
+     * invariant), and the reconnect wait must run while the session is still opening (`opened`
+     * false). `@Volatile`: written on the seal coroutine, read on Binder threads.
+     */
+    @Volatile
+    private var documentWritesClosed = false
+
+    /**
      * M8 — the text-document latch: the canvas has been loaded in this incarnation, so this screen
      * is an ordinary notebook for the rest of its life ([TextDocRouting] holds the rules). One-way:
      * set by [loadCanvas], carried across a recreate in the saved state, and never cleared. It is
@@ -163,8 +173,10 @@ class NotebookActivity : AppCompatActivity() {
 
     /** A showing that ended while [openSession] was still on IO — see [TextDocRouting.parkClose].
      *  A class rather than a bare `Int?` so that "no result yet" and "a result whose editor never
-     *  said how it ended" stay two different answers. */
-    private class ParkedClose(val mode: Int?)
+     *  said how it ended" stay two different answers. [endedOn] rides along because the replay's
+     *  canvas load must land on the page the editor ended on, and `resetTarget()` has cleared the
+     *  hooks' copy by the time the open re-decides (the M11 review find). */
+    private class ParkedClose(val mode: Int?, val endedOn: String?)
 
     private var pendingCloseAfterOpen: ParkedClose? = null
 
@@ -448,8 +460,16 @@ class NotebookActivity : AppCompatActivity() {
             // for the editor's own target, which a flip moves and the notebook does not follow.
             displayedPageId = { displayedPageId },
             notebookName = { notebookName },
-            alive = { opened && !closing && ::session.isInitialized },
+            // NOT the seed flow's `opened && !closing` gate — see the field's doc: the reconnect
+            // wait needs the still-opening window, the teardown flush needs the closing one.
+            alive = { !documentWritesClosed },
+            sessionOpen = { ::session.isInitialized && session.isOpen },
             recognizePageText = { pageId -> documentSeedFlow.recognize(pageId) },
+            recognizeBatch = {
+                documentSeedFlow.recognizerReady()?.let { client ->
+                    { pageId: String -> documentSeedFlow.recognizeWith(client, pageId) }
+                }
+            },
             // M8: the flag both editor-only hooks are gated on, and the flag every state carries.
             isTextDocument = { isTextDocument() },
             rename = { name -> renameTextDocument(name) },
@@ -555,8 +575,9 @@ class NotebookActivity : AppCompatActivity() {
             // M8 — the route. A showing that ended while all of the above was on IO is re-decided
             // first and outranks everything (the S2 trap, [TextDocRouting.parkClose]); after that a
             // text document opens into its editor and leaves the paper alone.
-            val parked = pendingCloseAfterOpen?.let {
-                pendingCloseAfterOpen = null
+            val parkedBox = pendingCloseAfterOpen
+            pendingCloseAfterOpen = null
+            val parked = parkedBox?.let {
                 TextDocRouting.closeDecision(session.isTextDocument, canvasShown, it.mode)
             }
             when (
@@ -568,7 +589,9 @@ class NotebookActivity : AppCompatActivity() {
                 )
             ) {
                 TextDocRouting.Open.CANVAS -> {
-                    loadCanvas(session.currentPage.id)
+                    // A parked close replays onto the page the editor ended on — the catch-up (or
+                    // the ✓-Done canvas) it would have been, had the open finished in time.
+                    loadCanvas(parkedBox?.endedOn ?: session.currentPage.id)
                 }
                 TextDocRouting.Open.SEAL_AND_LEAVE -> {
                     // The editor left toward the library while we were still opening: seal what we
@@ -660,7 +683,14 @@ class NotebookActivity : AppCompatActivity() {
         }
         opened = true
         pushExclusions()
-        if (!launch) { Slog.d(TAG) { "text document: reconnected to the showing already on screen" }; return }
+        if (!launch) {
+            Slog.d(TAG) { "text document: reconnected to the showing already on screen" }
+            // The editor is *believed* to be on screen — but the belief is saved state, and the
+            // system may have dropped the editor task-mate along with us. If this screen is still
+            // the thing on the glass at the deadline, the belief was wrong (M11 review find).
+            watchForAnEditorThatNeverOpens(reconnect = true)
+            return
+        }
         if (!documentEntry.isAvailable) {
             // Nothing to route into — no editor installed, or discovery has not answered yet. The
             // pages are the honest fallback: a text document is an ordinary notebook underneath,
@@ -688,11 +718,15 @@ class NotebookActivity : AppCompatActivity() {
      * A launch that DID happen leaves this screen stopped, and a showing that has already ended has
      * either loaded the canvas or started closing — three checks that each cost nothing.
      */
-    private fun watchForAnEditorThatNeverOpens() {
+    private fun watchForAnEditorThatNeverOpens(reconnect: Boolean = false) {
         lifecycleScope.launch {
             delay(EDITOR_LAUNCH_WATCHDOG_MS)
             if (closing || isFinishing || isDestroyed || canvasShown) return@launch
-            if (documentEntry.isShowing) return@launch
+            // On the reconnect route [DocumentEntry.isShowing] is true by construction (the binder
+            // was re-minted), so it proves nothing there — RESUMED is the check that can: a live
+            // editor on top means this screen is STOPPED, and a screen still RESUMED at the
+            // deadline is a screen with no editor over it, whatever the saved state believed.
+            if (!reconnect && documentEntry.isShowing) return@launch
             if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@launch
             Slog.d(TAG) { "text document: the editor never opened — showing the pages" }
             runPageOp { loadCanvas(displayedPageId) }
@@ -722,8 +756,10 @@ class NotebookActivity : AppCompatActivity() {
         }
     }
 
-    /** Seal a session the screen will never use — on [appScope], because our own scope is dying. */
+    /** Seal a session the screen will never use — on [appScope], because our own scope is dying.
+     *  The document gate flips first: nothing may write into a seal already decided. */
     private fun sealAbandonedOpen() {
+        documentWritesClosed = true
         val s = session
         appScope.launch { withContext(NonCancellable) { runCatching { s.seal() } } }
     }
@@ -768,7 +804,7 @@ class NotebookActivity : AppCompatActivity() {
         documentHooks.resetTarget()
         if (TextDocRouting.parkClose(opened)) {
             // Nothing to act on yet — see [TextDocRouting.parkClose]. openSession re-decides it.
-            pendingCloseAfterOpen = ParkedClose(mode)
+            pendingCloseAfterOpen = ParkedClose(mode, endedOn)
             return
         }
         when (TextDocRouting.closeDecision(isTextDocument(), canvasShown, mode)) {
@@ -2519,6 +2555,12 @@ class NotebookActivity : AppCompatActivity() {
         val versionCode = packageManager.getPackageInfo(packageName, 0).longVersionCode.toInt()
         appScope.launch {
             withContext(NonCancellable) {
+                // The editor's teardown first (M11): a showing that just ended has an `end()` flush
+                // in flight on the entry's detached scope, and the seal below must not start under
+                // it — flush-before-seal, across the process boundary. A finished (or absent) job
+                // joins instantly; `documentWritesClosed` is what refuses anything after this line.
+                if (::documentEntry.isInitialized) documentEntry.finishJob?.join()
+                documentWritesClosed = true
                 // The page-op mutex first: an insert/delete that passed the `closing` check before
                 // it flipped may still be inside its transaction — sealing under it would fail the
                 // transaction silently (runPageOp swallows) or split the .soil from its index
@@ -2547,8 +2589,10 @@ class NotebookActivity : AppCompatActivity() {
         // The pad's held bind must not outlive the screen that opened it, result or no result.
         if (::scratchPad.isInitialized) scratchPad.close()
         // Same rule for the editor's held bind — and it matters more here, because its host binder
-        // reaches back into this session: released before the seal below, never after.
-        if (::documentEntry.isInitialized) documentEntry.close()
+        // reaches back into this session: released before the seal below, never after. The close's
+        // Job is what enforces "never after" (M11): the seal coroutine joins it, so the extension's
+        // `end()` flush lands on a session that is still open.
+        val documentClose = if (::documentEntry.isInitialized) documentEntry.close() else null
         if (::paper.isInitialized) paper.release()
         // A destroy that isn't a normal close (e.g. finish() out of failOpen) still seals.
         if (::session.isInitialized && session.isOpen && !closing) {
@@ -2558,6 +2602,8 @@ class NotebookActivity : AppCompatActivity() {
             val s = session
             appScope.launch {
                 withContext(NonCancellable) {
+                    documentClose?.join()
+                    documentWritesClosed = true
                     pageOps.withLock { try { s.seal() } catch (e: Exception) { Log.w(TAG, "seal failed", e) } }
                 }
             }

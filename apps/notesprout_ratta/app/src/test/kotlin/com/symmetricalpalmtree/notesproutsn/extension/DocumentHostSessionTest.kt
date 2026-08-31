@@ -172,15 +172,36 @@ class DocumentHostSessionTest {
         }
     }
 
+    /** M11: the accept does NOT consume the park — the commit hook has not run yet, and a
+     *  transient commit failure must leave the same drafted save retryable with its anchor. */
     @Test
-    fun aDraftedSaveConsumesTheParkedWatermark() {
+    fun theParkSurvivesTheAcceptUntilTheCommitIsConsumed() {
         val s = session()
         s.parkWatermark(1234L)
         val commit = s.acceptChunk("page-1", 0, "seeded", last = true, drafted = true)
         assertEquals(1234L, commit!!.draftWatermark)
-        // Consumed: a second drafted save without a fresh park is refused.
+        // The commit hook threw: the editor's retry of the same drafted save still anchors.
+        val retry = s.acceptChunk("page-1", 0, "seeded", last = true, drafted = true)
+        assertEquals(1234L, retry!!.draftWatermark)
+        // The commit landed: NOW it is consumed, and the next drafted save is refused.
+        s.consumeParkedWatermark(1234L)
         try { s.acceptChunk("page-1", 0, "again", last = true, drafted = true); fail() }
         catch (expected: IllegalStateException) {}
+    }
+
+    /** M11: the consume is value-matched — a window swap between accept and commit may already
+     *  have replaced the park, and clearing someone else's would re-mint the cross-target bug. */
+    @Test
+    fun theConsumeIsValueMatched() {
+        val s = session()
+        s.parkWatermark(1234L)
+        val commit = s.acceptChunk("page-1", 0, "seeded", last = true, drafted = true)
+        assertEquals(1234L, commit!!.draftWatermark)
+        // A fresh seed re-parked before the old commit's consume arrived: the new park stands.
+        s.parkWatermark(5678L)
+        s.consumeParkedWatermark(1234L)
+        val next = s.acceptChunk("page-1", 0, "seeded again", last = true, drafted = true)
+        assertEquals(5678L, next!!.draftWatermark)
     }
 
     @Test

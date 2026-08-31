@@ -50,15 +50,18 @@ class AutosaveGovernor {
      * do next and nothing else — no work is started here.
      */
     fun request(text: String): SaveAction {
-        if (!isDirty(text)) {
-            // Nothing to write. Any queue is stale by definition: it can only hold text this
-            // snapshot has already superseded.
-            if (!isPushing) queued = null
-            return SaveAction.Idle
-        }
         if (isPushing) {
+            // ALWAYS queue the newest snapshot while a push is in flight — dirty or not. This
+            // snapshot supersedes anything queued, and its dirtiness cannot be judged yet:
+            // [savedText] is about to become the in-flight push's text, against which a
+            // "clean-looking" snapshot (an undo back to the last save) is dirty again. Judging
+            // here left an undone snapshot queued and pushed it over the undo (the M11 find).
             queued = text
             return SaveAction.Wait
+        }
+        if (!isDirty(text)) {
+            queued = null   // nothing in flight, so any leftover queue is stale by definition
+            return SaveAction.Idle
         }
         isPushing = true
         return SaveAction.Push(text)

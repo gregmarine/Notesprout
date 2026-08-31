@@ -25,6 +25,18 @@ class FakeDocumentDao(private val soil: FakeSoilDao) : DocumentDao {
             it.type == SoilSchema.TYPE_DOCUMENT && it.parentId == parentId && it.deletedAt == null
         }
 
+    /** Page documents only, live only — the notebook document is excluded by its parent being the
+     *  root rather than a page, exactly as the query's subselect excludes it. */
+    override suspend fun pageDocumentsIn(rootId: String): List<SoilObjectEntity> {
+        val pageIds = rows.values
+            .filter { it.type == SoilSchema.TYPE_PAGE && it.parentId == rootId }
+            .map { it.id }
+            .toSet()
+        return rows.values.filter {
+            it.type == SoilSchema.TYPE_DOCUMENT && it.deletedAt == null && it.parentId in pageIds
+        }
+    }
+
     // Both sweeps count soft-deleted rows — the queries carry no `deletedAt` clause at any level,
     // and neither does the fake: a soft-delete stamps `updatedAt` with the deletion time, which is
     // how an erase (or a deleted page) reaches the draft written from it.

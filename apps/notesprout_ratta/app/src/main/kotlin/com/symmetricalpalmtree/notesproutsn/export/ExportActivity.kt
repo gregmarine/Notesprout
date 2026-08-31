@@ -44,6 +44,13 @@ import java.io.File
 /**
  * **Export** (arc 15 / E1) — the host's whole side of getting a notebook out of the app.
  *
+ * **Over the ~800-line rule, with reason (arc 19 / M9):** the growth is the third source kind —
+ * the Source row, the `hasDocument` gate and the document/preview branches of the prepare step.
+ * It stays here because the screen's one `runExport` flow is the invariant: the guard order, the
+ * keying lifecycle, the conditional-deletion rule and the per-kind verification all run in one
+ * sequence that must not be split across files to be auditable — every reviewer of a keying or
+ * deletion change reads the whole flow, and a split would hide half of it.
+ *
  * The seam in one sentence: *the host keys, the extension delivers.* This screen owns the entry, the
  * choice of format, the options panel, the transient checkpoint, the cache copy and the SAF
  * destination; an exporter extension receives two `ParcelFileDescriptor`s and an [ExportSpec] and
@@ -109,11 +116,19 @@ class ExportActivity : AppCompatActivity() {
     /** Option id → chosen value, for the exporter in [chosenPackage]. Validated again at spec time. */
     private val values = LinkedHashMap<String, String>()
 
-    /** Whether this notebook has anything written in it (arc 19 / M9) — answered once per
-     *  discovery, because it decides both what is listed and whether the Source row exists. Not
-     *  saved into instance state: a restored screen re-discovers anyway, and a stale "yes" would
-     *  offer a document that has since been deleted. */
+    /** Whether this notebook has anything written in it (arc 19 / M9) — it decides both what is
+     *  listed and whether the Source row exists. Not saved into instance state: a restored screen
+     *  asks again, and a stale "yes" would offer a document that has since been deleted. */
     private var hasDocument = false
+
+    /** [hasDocument]'s answer, kept for the life of the screen (M11 review). The re-discovery on
+     *  every resume is deliberate — a package can be disabled or replaced under a standing screen —
+     *  but *this* answer cannot change while the screen stands: Export is only ever entered from
+     *  the library with the notebook closed, and there is no way from here into the notebook or the
+     *  document editor. Re-asking was a full SQLCipher open (KDF and all) per resume for a boolean
+     *  that was already known. Null while unanswered, which includes a read that could not answer —
+     *  "cannot answer" is not an answer worth remembering. */
+    private var documentAnswer: Boolean? = null
 
     /** The host's own Source answer for a [ExporterContract.SOURCE_PAGES] exporter: false = the
      *  notebook's pages (what this screen has always exported), true = the document laid out on
@@ -261,9 +276,14 @@ class ExportActivity : AppCompatActivity() {
      *  than in `discover()` for exactly that reason: the flow's own re-discovery must come back
      *  knowing the same thing the panel did. [SoilDatabase.readOnce] is safe from this screen —
      *  Export is only ever entered from the library, with the notebook closed — and its null means
-     *  "cannot answer", which is not an answer to build a chooser row on. */
+     *  "cannot answer", which is not an answer to build a chooser row on. Asked **once** and then
+     *  remembered ([documentAnswer]): the exporters can change under a standing screen, the
+     *  document cannot. */
     private suspend fun loadCandidates(): List<Candidate> {
-        hasDocument = SoilDatabase.readOnce(this, notebookId) { it.hasLiveDocument() } ?: false
+        hasDocument = documentAnswer
+            ?: SoilDatabase.readOnce(this, notebookId) { it.hasLiveDocument() }
+                ?.also { documentAnswer = it }
+            ?: false
         val refs = ExtensionRegistry.exporters(this)
         val kept = ArrayList<Candidate>(refs.size)
         for (ref in refs) {

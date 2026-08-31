@@ -20,6 +20,7 @@ import com.symmetricalpalmtree.notesproutsn.extension.DocumentContract
 import com.symmetricalpalmtree.notesproutsn.extension.DocumentPageState
 import com.symmetricalpalmtree.notesproutsn.extension.HostCallerCheck
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.CountDownLatch
@@ -159,7 +160,13 @@ class DocumentEditorActivity : AppCompatActivity() {
 
     /** This instance's session hooks, held by identity so `onDestroy` can only clear its own. */
     private val beginListener = EditorSession.BeginListener { onHostBegan() }
-    private val flushHook = EditorSession.FlushHook { unsavedSnapshotBlocking() }
+    private val flushHook = object : EditorSession.FlushHook {
+        override fun unsavedSnapshot(): Pair<String, String>? = unsavedSnapshotBlocking()
+
+        // The service's teardown push rides the saver's own lock (M11) — see DocumentSaver.
+        override fun pushBlocking(pageKey: String, text: String) =
+            saver.pushLockedBlocking(pageKey, text)
+    }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -668,13 +675,25 @@ class DocumentEditorActivity : AppCompatActivity() {
         runOnUiThread {
             if (isFinishing || isDestroyed || targetKey == null) return@runOnUiThread
             lifecycleScope.launch {
+                // A ladder, not one shot (M11): the recreated host's `.soil` open is asynchronous,
+                // and a single failed probe left the fresh session's window forever unestablished —
+                // every later save refused by key until the words died at teardown. The no-screen
+                // path (the service's pending push) always had this ladder; the live screen gets
+                // the same one.
                 val key = withContext(Dispatchers.IO) {
-                    try {
-                        EditorSession.host?.current()?.pageKey
-                    } catch (e: Exception) {
-                        Slog.d(TAG) { "reconnect state failed: ${e.javaClass.simpleName}" }
-                        null
+                    var got: String? = null
+                    for (attempt in 1..RECONNECT_STATE_ATTEMPTS) {
+                        val host = EditorSession.host ?: break   // no showing — nothing to ask
+                        got = try {
+                            host.current().pageKey
+                        } catch (e: Exception) {
+                            Slog.d(TAG) { "reconnect state attempt $attempt failed: ${e.javaClass.simpleName}" }
+                            null
+                        }
+                        if (got != null) break
+                        if (attempt < RECONNECT_STATE_ATTEMPTS) delay(RECONNECT_STATE_RETRY_MS)
                     }
+                    got
                 }
                 if (key == null || isFinishing || isDestroyed) return@launch
                 Slog.d(TAG) { "host reconnected (target ${if (key == targetKey) "matches" else "differs"})" }
@@ -796,5 +815,10 @@ class DocumentEditorActivity : AppCompatActivity() {
 
         /** How long the teardown backstop waits for Main to hand over the buffer. */
         const val FLUSH_HOP_MS = 1_000L
+
+        /** The reconnect probe's ladder (M11) — the service's pending-push numbers, shared shape:
+         *  ~5 s covers a recreated host's asynchronous database open. */
+        const val RECONNECT_STATE_ATTEMPTS = 10
+        const val RECONNECT_STATE_RETRY_MS = 500L
     }
 }
