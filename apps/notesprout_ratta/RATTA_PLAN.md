@@ -822,7 +822,8 @@ caret restore; **user checklist**: none expected.
 **Questions to resolve at phase start:** none expected.
 
 ### M6 — Seeding: recognition in, Bring in, staleness, page flips
-**Status:** 🧪 Awaiting device verification (code + walk ✅ 2026-08-30 — user checklist below)
+**Status:** ✅ Complete (commit 681d99e, 2026-08-30 — user checklist passed; three chrome calls
+applied same-day, see the checklist-outcome bullet)
 
 **Outcome (code + walk, 2026-08-30):** Seeding, the source strip, Bring in and in-editor page
 flips are live on the Nomad; 1283 JVM tests/variant (+42), debug+release green, NUL-clean.
