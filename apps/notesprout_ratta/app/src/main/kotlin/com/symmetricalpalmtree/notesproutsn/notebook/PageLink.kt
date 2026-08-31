@@ -2,7 +2,7 @@ package com.symmetricalpalmtree.notesproutsn.notebook
 
 import com.symmetricalpalmtree.gpaper.core.model.Bounds
 import com.symmetricalpalmtree.gpaper.core.model.Stroke
-import com.symmetricalpalmtree.notesproutsn.core.markdown.HeadingTypography
+import com.symmetricalpalmtree.notesproutsn.markdown.HeadingTypography
 import kotlin.math.max
 
 /**

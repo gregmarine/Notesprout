@@ -29,11 +29,13 @@ object ExtensionContract {
      * streaming a `.soil` at a pages-exporter, a guaranteed failure that then deletes the
      * document it overwrote. So an extension whose descriptor a host must understand *beyond*
      * the absent-tail default declares the version that introduced it (the PDF exporter declares
-     * 2, for `ExporterInfo.sourceKind`), and an older host skips it at discovery instead of
-     * failing at the destination. Extensions the absent-tail default serves correctly keep
-     * declaring 1 and run against every host.
+     * 2, for `ExporterInfo.sourceKind`; the text importer declares 3, for
+     * `ImporterInfo.resultKind` — an old host reading that tail as absent would run text bytes
+     * through the `.soil` probe, a guaranteed refusal after the work), and an older host skips it
+     * at discovery instead of failing at the destination. Extensions the absent-tail default
+     * serves correctly keep declaring 1 and run against every host.
      */
-    const val API_VERSION: Int = 2
+    const val API_VERSION: Int = 3
 
     /** Intent action a handwriting-recognizer `<service>` declares in its intent-filter. */
     const val ACTION_HANDWRITING_RECOGNIZER: String =

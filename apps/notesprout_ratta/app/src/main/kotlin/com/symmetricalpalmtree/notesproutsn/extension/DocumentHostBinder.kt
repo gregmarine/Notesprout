@@ -95,6 +95,22 @@ class DocumentHostBinder(
 
         /** M7: the editor's Cancel — flag the in-flight merge to abandon between pages. */
         fun cancelRequest()
+
+        /**
+         * M8, text documents only: rename the notebook from the edited title. The implementation
+         * validates (the name rules, sibling collisions, and that this notebook IS a text
+         * document) and refuses with `IllegalArgumentException` — its message is shown as the
+         * refusal reason, so it must never carry a path or document text.
+         */
+        fun renameNotebook(name: String)
+
+        /**
+         * M8, text documents only: record how the showing should end —
+         * [DocumentContract.CLOSE_SHOW_PAGES] / [DocumentContract.CLOSE_TO_LIBRARY]. Advisory
+         * state the host reads when the result lands; the editor still finishes normally.
+         * Refused with `IllegalArgumentException` when the notebook is not a text document.
+         */
+        fun closeNotebook(mode: Int)
     }
 
     /**
@@ -151,12 +167,9 @@ class DocumentHostBinder(
         }
     }
 
-    // ── M6's two (flips, Bring in) and M7's three (scope, merge, cancel) ──────
-    // The M8 calls below still answer UnsupportedOperationException — it marshals across Binder
-    // intact (the arc-11 / J3 precedent), so an extension built ahead of the host gets an honest
-    // refusal naming the phase rather than a silently-killed transaction it would read as success.
-    // Every one is still gated first: a stranger must never learn which calls exist by the
-    // exception it gets back.
+    // ── M6's two (flips, Bring in), M7's three (scope, merge, cancel), M8's two (rename,
+    //    close). Every one is gated first: a stranger must never learn which calls exist by
+    //    the exception it gets back.
 
     override fun requestPage(direction: Int): DocumentPageState? {
         gate()
@@ -227,12 +240,23 @@ class DocumentHostBinder(
 
     override fun renameNotebook(name: String?) {
         gate()
-        throw UnsupportedOperationException("renameNotebook lands in M8")
+        requireNotNull(name) { "name is null" }
+        require(name.length <= DocumentContract.MAX_TITLE_CHARS) {
+            "name over ${DocumentContract.MAX_TITLE_CHARS} chars"
+        }
+        val t0 = SystemClock.elapsedRealtime()
+        hook { hooks.renameNotebook(name) }
+        // The name is user content — length only, never the text.
+        Slog.d(TAG) { "renameNotebook: ${name.length} chars in ${SystemClock.elapsedRealtime() - t0} ms" }
     }
 
     override fun closeNotebook(mode: Int) {
         gate()
-        throw UnsupportedOperationException("closeNotebook lands in M8")
+        require(
+            mode == DocumentContract.CLOSE_SHOW_PAGES || mode == DocumentContract.CLOSE_TO_LIBRARY,
+        ) { "unknown close mode $mode" }
+        hook { hooks.closeNotebook(mode) }
+        Slog.d(TAG) { "closeNotebook: mode=$mode" }
     }
 
     // ── The gate and the funnel ──────

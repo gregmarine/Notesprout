@@ -60,6 +60,10 @@ import java.util.UUID
  *  2. **Deliver into the cache.** `cacheDir/import/` is wiped per import and is the only place
  *     anything happens until step 7 — the Garden and the index cannot be harmed by a failure before
  *     then, by construction rather than by care.
+ *  2b. **Fork on what the bytes are** (arc 19 / M8). Delivery is the same for every importer; the
+ *     descriptor's `resultKind` says what arrived. Text (`.md`/`.txt`) takes its own three-step
+ *     branch — decode, create, open — and never reaches the pipeline below. An absent tail means
+ *     a notebook, so every pre-arc-19 importer keeps exactly the behaviour it had.
  *  3. **Probe, then unlock.** The bytes are a stranger's. Plaintext or encrypted is decided by the
  *     header; an encrypted file is tried against this device's key **first** (a same-device Keep
  *     export just opens), and only a foreign one raises the passphrase prompt — rate-limited on its
@@ -92,6 +96,14 @@ class ImportFlow(
     private val retireNotebook: suspend (id: String) -> Unit,
     /** Rebuild the library listing — the import landed. */
     private val onImported: suspend () -> Unit,
+    /**
+     * Open what a **text import** just created (arc 19 / M8). A `.soil` import ends with a
+     * confirming dialog and leaves the user in the library — it may have landed in another folder,
+     * and that is the information worth showing. A text document ends the other way: it is one
+     * document, the user picked it seconds ago, and og opens straight into the editor. So there is
+     * no confirm dialog on this path; the screen that appears *is* the confirmation.
+     */
+    private val openImported: (id: String, name: String) -> Unit,
 ) {
 
     /** One installed importer and what it said it accepts. */
@@ -298,6 +310,16 @@ class ImportFlow(
         val incoming = withContext(Dispatchers.IO) { NotebookImport.prepareCache(activity) }
         deliver(chosen, uri, incoming, displayName)
 
+        // 1b · The fork (arc 19 / M8). Delivery is identical for every importer — two fds, a
+        //      verbatim stream, a count checked twice — and the descriptor's result kind is the
+        //      only thing that decides what the bytes then ARE. Text takes its own short pipeline
+        //      and returns; everything below is the `.soil` one, untouched (an absent tail means
+        //      RESULT_NOTEBOOK, so a pre-arc-19 importer lands there exactly as it always did).
+        if (ImportRouting.isTextDocument(chosen.info.resultKind)) {
+            importTextDocument(incoming, displayName)
+            return
+        }
+
         // 2 · Probe, unlock, re-key to this device's key. Every accepted import ends up under it.
         val global = KeySession.get() ?: throw NotebookImport.ImportProblem(NotebookImport.Problem.NO_KEY)
         val opening = unlock(incoming, global) ?: return
@@ -386,6 +408,67 @@ class ImportFlow(
         confirmImported(parentId)
     }
 
+    // ── The text branch (arc 19 / M8) ────────────────────────────────────────
+
+    /**
+     * A `.md` / `.markdown` / `.txt` delivery: decode it, name it, create a text document in the
+     * folder the library is standing in, and open it.
+     *
+     * Short by design, and short because of what it does **not** do. There is no probe, no unlock
+     * and no re-key (the bytes are text, not a database), and — the rule — **no question**. A text
+     * import always creates something new: it never replaces, so it never asks whether to; a name
+     * that clashes with a sibling is deduped silently to `… Copy` ([ImportNames.freeName], the
+     * siblings read once). og's rule, and the honest one: the user picked a file to import, not a
+     * notebook to overwrite.
+     *
+     * The cap is checked **first-hand and before the read** — `File.length()` on what actually
+     * landed, the arc-16 corroboration discipline — so a 400 MB text file is refused rather than
+     * pulled into memory to be measured. [TextImport] then owns everything about the bytes.
+     *
+     * The text is the user's content: never logged, lengths only.
+     */
+    private suspend fun importTextDocument(incoming: File, displayName: String) {
+        val landed = withContext(Dispatchers.IO) { incoming.length() }
+        if (landed > TextImport.MAX_TEXT_BYTES) {
+            Log.w(TAG, "text import refused: $landed bytes over the cap")
+            throw NotebookImport.ImportProblem(NotebookImport.Problem.TEXT_TOO_LONG)
+        }
+        // The library's own key — a text document is a `.soil` like any other and is encrypted
+        // under it. Absent means nothing has unlocked since a process kill.
+        val global = KeySession.get() ?: throw NotebookImport.ImportProblem(NotebookImport.Problem.NO_KEY)
+        val text = try {
+            TextImport.decode(withContext(Dispatchers.IO) { incoming.readBytes() })
+        } catch (e: TextImport.TextProblem) {
+            throw NotebookImport.ImportProblem(
+                when (e.refusal) {
+                    TextImport.Refusal.NOT_TEXT -> NotebookImport.Problem.NOT_TEXT
+                    TextImport.Refusal.TOO_LONG -> NotebookImport.Problem.TEXT_TOO_LONG
+                },
+                e,
+            )
+        }
+
+        // Where the user is standing, and a name free among its siblings — decided from one read.
+        val parentId = currentFolder()
+        val taken = repo.notebooks(parentId).map { it.name }.toHashSet()
+        val name = ImportNames.freeName(ImportNames.fromDisplayName(displayName), { it in taken })
+
+        ImportOverlay.stage(activity, R.string.import_stage_importing)
+        val id = TextDocumentCreate.create(
+            context = activity,
+            repo = repo,
+            name = name,
+            parentFolderId = parentId,
+            text = text,
+            passphrase = global,
+        )
+        Slog.d(TAG) { "imported ${text.length} chars as a text document" }
+        ImportOverlay.hide(activity)
+        onImported()
+        if (activity.isFinishing || activity.isDestroyed) return
+        openImported(id, name)
+    }
+
     // ── Step 1: the delivery ─────────────────────────────────────────────────
 
     /** One match is no question; several is a chooser; none is a dialog — an importer picked at
@@ -456,7 +539,12 @@ class ImportFlow(
             Log.w(TAG, "delivery landed $landed of ${result.bytesWritten} reported bytes")
             throw NotebookImport.ImportProblem(NotebookImport.Problem.SHORT)
         }
-        if (landed == 0L) throw NotebookImport.ImportProblem(NotebookImport.Problem.NOT_A_NOTEBOOK)
+        // Empty is a refusal for a notebook and a legal file for text (arc 19 / M8): no `.soil` is
+        // zero bytes, but an empty `.txt` imports as an empty text document, which is exactly what
+        // it is. [ImportRouting] holds the rule so it is provable off-device.
+        if (landed == 0L && ImportRouting.rejectsEmptyDelivery(chosen.info.resultKind)) {
+            throw NotebookImport.ImportProblem(NotebookImport.Problem.NOT_A_NOTEBOOK)
+        }
         // Corroboration, not authority (arc 15's verify lesson, honoured in both halves): a
         // provider claiming MORE than landed describes bytes that never arrived — a truncated
         // stream both first-hand counts agreed on — and fails. A provider claiming less or zero is
@@ -700,6 +788,8 @@ class ImportFlow(
         NotebookImport.Problem.UNREADABLE -> R.string.import_unreadable_body
         NotebookImport.Problem.IN_USE -> R.string.import_in_use_body
         NotebookImport.Problem.WRITE -> R.string.import_write_body
+        NotebookImport.Problem.NOT_TEXT -> R.string.import_not_text_body
+        NotebookImport.Problem.TEXT_TOO_LONG -> R.string.import_text_too_long_body
     }
 
     // ── Provider questions ───────────────────────────────────────────────────

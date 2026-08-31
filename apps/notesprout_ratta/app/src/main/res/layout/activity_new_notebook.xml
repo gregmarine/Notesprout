@@ -59,6 +59,59 @@
         android:layout_height="1dp"
         android:background="@color/inkBlack" />
 
+    <!-- The kind of notebook (arc 19 / M8) — the Export screen's radio idiom, in a layout rather
+         than in code because the choice count here is fixed at two: a caption at 13sp (inkBlack
+         made smaller, never inkLight — it carries information) and the family's radio style, whose
+         button drawable is a tick-less ring/dot pair, no colour and no ripple.
+
+         The browser below stays live for BOTH kinds: a text document's pages underneath are still
+         paper, and the type changes only what the create writes. -->
+    <LinearLayout
+        android:id="@+id/typeRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="12dp"
+            android:text="@string/new_notebook_type_label"
+            android:textSize="13sp"
+            android:textColor="@color/inkBlack" />
+
+        <RadioGroup
+            android:id="@+id/typeGroup"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <androidx.appcompat.widget.AppCompatRadioButton
+                android:id="@+id/typeHandwritten"
+                style="@style/Widget.Notesprout.RadioButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="12dp"
+                android:checked="true"
+                android:text="@string/new_notebook_type_handwritten" />
+
+            <androidx.appcompat.widget.AppCompatRadioButton
+                android:id="@+id/typeText"
+                style="@style/Widget.Notesprout.RadioButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/new_notebook_type_text" />
+        </RadioGroup>
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
     <include
         android:id="@+id/browser"
         layout="@layout/view_template_browser"

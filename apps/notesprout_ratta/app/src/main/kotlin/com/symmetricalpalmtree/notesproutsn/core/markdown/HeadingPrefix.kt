@@ -8,6 +8,9 @@ package com.symmetricalpalmtree.notesproutsn.core.markdown
  * discover it. [stripHeadingPrefix] is the display direction — the edit dialog shows the bare
  * title, and Save goes back through [applyLevel].
  *
+ * Deliberately stays host-side (arc 19 / M8) — it is the `TYPE_HEADING` storage contract, not
+ * part of the shared `:markdown` engine, and `:ext-document` has no use for it.
+ *
  * Pure Kotlin — JVM-tested.
  */
 object HeadingPrefix {

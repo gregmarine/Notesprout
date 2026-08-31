@@ -55,6 +55,11 @@
     <string name="new_notebook_duplicate">A notebook named \"%1$s\" already exists here.</string>
     <string name="new_notebook_failed_title">Couldn\'t create the notebook</string>
     <string name="new_notebook_failed_body">%1$s\n\nNothing was added to your library.</string>
+    <!-- The kind of notebook (arc 19 / M8). Handwritten is the default and always will be; Text
+         opens straight into the document editor. Both still pick paper below. -->
+    <string name="new_notebook_type_label">Type</string>
+    <string name="new_notebook_type_handwritten">Handwritten</string>
+    <string name="new_notebook_type_text">Text</string>
     <string name="template_blank">Blank</string>
     <string name="template_lined">Lined</string>
     <string name="template_dotted">Dotted</string>
@@ -245,6 +250,8 @@
     <string name="import_unreadable_body">That notebook could not be read — it may be damaged. Nothing was imported.</string>
     <string name="import_in_use_body">The notebook you chose to replace is open somewhere else in the app. Close it, then import again.</string>
     <string name="import_write_body">The notebook could not be written — the device may be out of space. Nothing was imported.</string>
+    <string name="import_not_text_body">That file isn\'t readable text. Nothing was imported.</string>
+    <string name="import_text_too_long_body">That text file is too big. Text files up to 10 MB can be imported. Nothing was imported.</string>
     <string name="import_interrupted_body">The import was interrupted before that folder could be used. Nothing was imported — try again.</string>
     <string name="import_busy_title">Import in progress</string>
     <string name="import_busy_body">Wait for the import to finish — leaving now could leave a half-imported notebook behind.</string>

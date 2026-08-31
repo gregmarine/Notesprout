@@ -90,6 +90,16 @@ class NotebookSession(
 
     val isOpen: Boolean get() = ::db.isInitialized && db.isOpen
 
+    /**
+     * Whether this notebook is a **text document** (arc 19 / M8) — the index bit, read once at
+     * [open] and never again: the flag is set when the notebook is created or imported and nothing
+     * flips it afterwards, while the screen asks about it on every route it takes (the open's
+     * routing, the seal's cover, the editor's rename and close hooks). False before [open], which
+     * is the honest answer for a session that has not read the index yet.
+     */
+    var isTextDocument: Boolean = false
+        private set
+
     sealed class OpenResult {
         object Ok : OpenResult()
         class Failed(val reason: String) : OpenResult()
@@ -116,6 +126,9 @@ class NotebookSession(
         links = LinkStore(db.dao(), writer) { block -> db.withTransaction { block() } }
         documents = DocumentRepository(db.documentDao(), db.dao())
         try {
+            // The index bit, once (M8): blob-free, and before anything can ask — the screen's very
+            // first decision after this call is which route the open takes.
+            isTextDocument = textDocumentBit(repo.summary(notebookId)?.flags)
             val dao = db.dao()
             val root = dao.notebookRow()
             val pageRows = dao.childrenOfType(notebookId, SoilSchema.TYPE_PAGE)
@@ -526,9 +539,14 @@ class NotebookSession(
             notebookId = notebookId, name = row.name,
             createdAt = existing?.createdAt ?: row.createdAt, updatedAt = row.updatedAt,
             folderPath = repo.ancestry(row.parentId), appVersionCode = appVersionCode,
-            textDocument = ((row.flags ?: 0) and NotebookFlags.TEXT_DOCUMENT) != 0,
+            textDocument = textDocumentBit(row.flags),
         ))
     }
+
+    /** The one reading of [NotebookFlags.TEXT_DOCUMENT] (M8) — [open]'s and [refreshMeta]'s, so the
+     *  session's own answer and the one written into the file can never drift apart. */
+    private fun textDocumentBit(flags: Int?): Boolean =
+        ((flags ?: 0) and NotebookFlags.TEXT_DOCUMENT) != 0
 
     /**
      * Persist a document (arc 19 / M3) — the editor's save, arriving from the extension over the

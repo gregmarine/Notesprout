@@ -49,6 +49,14 @@ import java.util.concurrent.atomic.AtomicReference
  *   scope can auto-merge the whole notebook, so poll `get_scope` / `get_state` after it.
  * - `merge --ei mode <0|1>` — Replace (0) / Append (1) of the notebook-wide merge. Notebook scope
  *   only; replies `ERR:not notebook scope` otherwise, and is asynchronous like `bring_in`.
+ * - `show_pages` — the text document's "Show pages" button (M8). Replies `ERR:no show pages button`
+ *   when it is not on screen (not a text document, or not the notebook scope); otherwise it leaves
+ *   the screen, exactly as `close` does, after telling the host to open the pages.
+ * - `rename --es text <name>` (or `--es file …`, the `set_text` mechanism — the Supernote swallows
+ *   nothing here, but a name with spaces or non-ASCII travels better in a file) — renames the
+ *   notebook without the dialog. Text documents only; replies `ERR:rename refused` when it did not
+ *   start, and is asynchronous: poll `get_title`.
+ * - `get_title` — the header's title alone.
  *
  * **It never logs the document, and never the find query either.** Result data carries text back to
  * the shell because that is the whole point of `get_text`; nothing is written to logcat on any path
@@ -156,6 +164,12 @@ class AutomationReceiver : BroadcastReceiver() {
         }
 
         "merge" -> if (peer.merge(intent.getIntExtra("mode", 0))) "OK" else "ERR:not notebook scope"
+
+        "show_pages" -> if (peer.showPages()) "OK" else "ERR:no show pages button"
+
+        "rename" -> if (peer.rename(payload(intent))) "OK" else "ERR:rename refused"
+
+        "get_title" -> peer.title()
 
         else -> "ERR:unknown cmd"
     }

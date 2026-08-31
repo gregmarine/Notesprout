@@ -6,8 +6,8 @@ import android.text.TextPaint
 import com.symmetricalpalmtree.gpaper.core.render.ContentLayer
 import com.symmetricalpalmtree.gpaper.core.render.ContentRenderer
 import com.symmetricalpalmtree.gpaper.core.render.HitTarget
-import com.symmetricalpalmtree.notesproutsn.core.markdown.HeadingTypography
-import com.symmetricalpalmtree.notesproutsn.core.markdown.MarkdownDraw
+import com.symmetricalpalmtree.notesproutsn.markdown.HeadingTypography
+import com.symmetricalpalmtree.notesproutsn.markdown.MarkdownDraw
 import kotlin.math.roundToInt
 
 /**

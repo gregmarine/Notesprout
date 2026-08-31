@@ -72,6 +72,21 @@ object ImportNames {
         return candidate
     }
 
+    /**
+     * The name something that is **always new** lands under (arc 19 / M8, the text import): the
+     * name itself when no sibling has it, the first free `… Copy` when one does.
+     *
+     * A text import never asks the Replace / Keep-both question — it creates a new document, always
+     * (og's rule) — so the dedupe is **silent**: there is nothing to decide, and a dialog offering
+     * to replace a notebook the user did not mention would be inviting a mistake, not preventing
+     * one. [isTaken] is the caller's sibling set, read once so the "already taken?" question and
+     * the "which Copy is free?" question can never disagree.
+     */
+    fun freeName(name: String, isTaken: (String) -> Boolean): String {
+        val base = clean(name).ifEmpty { FALLBACK }
+        return if (!isTaken(base)) base else keepBothName(base, isTaken)
+    }
+
     /** The suffix must survive the cap — it is the whole meaning of the name — so it is the base
      *  that gets shortened, from its end, never the " Copy". */
     private fun withSuffix(base: String, suffix: String): String {

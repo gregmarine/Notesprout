@@ -32,6 +32,21 @@ object ImporterContract {
     /** Most MIME types one importer may declare (they seed the OPEN_DOCUMENT filter). */
     const val MAX_MIME_TYPES: Int = 8
 
+    // ── Result kinds (`ImporterInfo.resultKind` — arc 19 / M8, the sourceKind recipe mirrored) ──
+    // What the bytes an importer delivers to the host cache ARE, so the host knows which pipeline
+    // runs after delivery. The extension's job is identical either way: stream the picked
+    // document's bytes through the write fd, verbatim.
+
+    /** The delivered bytes are a `.soil` notebook — the arc-16 pipeline (probe, unlock, re-key,
+     *  manifest, placement, remap, Garden + index writes). The absent-tail default. */
+    const val RESULT_NOTEBOOK: Int = 0
+
+    /** The delivered bytes are document text (UTF-8, validated host-side): the host creates a NEW
+     *  text document in the current folder — name deduped, capped, `srcUpdatedAt` NULL — and opens
+     *  it into the editor. An importer declaring this must declare API version ≥ 3 (see
+     *  [ExtensionContract.API_VERSION]). */
+    const val RESULT_TEXT_DOCUMENT: Int = 1
+
     // ── Timeouts (host-side, over `ExtensionBinder.call`) ──────
 
     /** `describe()` returns a small in-memory descriptor — fast. */

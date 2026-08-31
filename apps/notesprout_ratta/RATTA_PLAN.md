@@ -1022,7 +1022,92 @@ SN has no Page Index; should the Contents dialog grow a selection-merge path, or
 auto-merge + Merge enough for SN? (Recommend: enough — revisit on demand.)
 
 ### M8 — Text documents + `.md`/`.txt` import
-**Status:** ⬜ Not started
+**Status:** 🧪 Awaiting device verification (code + walk complete 2026-08-31 — user checklist open)
+
+**Outcome (code + walk, 2026-08-31):** Text documents are live end to end on the Nomad; 1321 JVM
+tests/variant (+6 net of the twin deletion below), all nine modules build debug + release,
+whole-diff NUL-scan clean, walk 10/10. og semantics throughout; what is SN-shaped, and the locks:
+- **Seam:** `ImporterInfo.resultKind` **compatible tail** (the sourceKind recipe verbatim:
+  written unconditionally last, absent = `RESULT_NOTEBOOK`, unknown refused at unmarshal; holds
+  only while the descriptor stays `describe()`'s trailing payload). **`API_VERSION` = 3 now**
+  (M9's `SOURCE_DOCUMENT` shares it): the text importer's `<service>` declares 3 — a version-2
+  host reading its tail as absent would run text bytes through the `.soil` probe — while every
+  other service keeps its number; the D3 version-pin test moved 2→3 with the contract-event note.
+  `IDocumentHost.renameNotebook`/`closeNotebook` are live: rename refuses with
+  `IllegalArgumentException` whose MESSAGE is the user-readable reason (the library's own rename
+  strings, verbatim); **closeNotebook is advisory state** recorded host-side, consumed ONCE via
+  `takeCloseMode()` (taken BEFORE `resetTarget()`, which clears it), and **null advisory =
+  TO-LIBRARY** — the fail-safe: a wrongly-sealed notebook reopens, a wrongly-loaded canvas cannot
+  un-load. `DocumentPageState.textDocument` is real (the index bit via the hooks).
+- **Routing** (pure `TextDocRouting`, 13 tests): `openDecision` →
+  CANVAS / SEAL_AND_LEAVE / EDITOR_LAUNCH / EDITOR_RECONNECT; `closeDecision` →
+  CATCH_UP / LOAD_CANVAS / SEAL_TO_LIBRARY; `parkClose(opened)` names the S2 rule
+  (`ParkedClose` is a box, not a bare Int? — "no result yet" ≠ "result with no advisory";
+  openSession re-decides a parked close after the open and it OUTRANKS the route). The flag is
+  read once at `NotebookSession.open()` (`isTextDocument`, blob-free summary read; `refreshMeta`
+  shares the hoisted bit-helper). `loadCanvas(pageId)` is the extracted open-second-half — the
+  ONE place `canvasShown` is set (one-way latch, saved as `KEY_CANVAS_SHOWN`; once the pages have
+  shown, the notebook is ordinary for the incarnation). `openIntoEditor`: lightweight setup only
+  (no stroke deserialization), scope set to notebook **only on a fresh open** (a restored target
+  or live reconnect is the editor's own memory), **no seed flow** (nb scope serves the STORED doc
+  — the M7 lock; an empty text document opens instantly), overlay HANDED OVER to the entry's own
+  box in one Main message (no stack, no gap), no-editor-installed fallback = `loadCanvas`, plus a
+  10 s watchdog for an editor that never appears. `pushExclusions` blocks the whole surface while
+  `!canvasShown` (opened-with-no-page must not take ink). Cover fork `captureCover`: a text
+  document renders `TextCover` (DB-truthful text) at BOTH seal sites — `CoverSnapshot.capture`
+  there would snapshot a surface that never loaded.
+- **Editor:** `btnShowPages` far trailing end, visible ONLY in notebook scope of a text document
+  (og's width rule — page scope needs the flip cluster's room); icon `ic_pages` = og's Tabler
+  "files". Tap = `closeNotebook(CLOSE_SHOW_PAGES)` on IO (failure Slog'd, leave proceeds) then
+  `leave(RESULT_OK)`; **the back arrow calls nothing** — silence is the library door. Rename =
+  tap the title (clickable only for a text document, bar-height target): the family NameDialog
+  recipe, `MAX_TITLE_CHARS` filter, NO IME API call (the Ratta rule), refusal dialog shows the
+  host's message verbatim and the rename dialog STAYS UP for correction. Pure
+  `TextDocumentRules` (10 tests); `PreviewRender` extraction holds the Activity at exactly 800
+  lines; hook +3 commands (`show_pages`, `rename`, `get_title`).
+- **Import:** `TextImporterService` in `:ext-document` (third registration, `SoilImporterService`
+  shape line for line, own `TextStreams`; streams VERBATIM — the bytes are as untrusted as a
+  `.soil`'s and validation is the host's). `ImportFlow` forks right after `deliver()` on pure
+  `ImportRouting`; the text branch: first-hand byte cap → `KeySession` → **`TextImport.decode`**
+  (strict UTF-8 `CodingErrorAction.REPORT` — never the stdlib's lossy decode; NUL chars = binary
+  wearing a text extension; leading-BOM strip; CRLF/CR→LF; byte cap 10 MB and
+  `MAX_DOCUMENT_CHARS` both enforced, deliberately aligned) → silent name dedupe
+  (`ImportNames.freeName`, one sibling read) → `TextDocumentCreate` (the 8-step create contract,
+  blank-template case, document row `srcUpdatedAt` NULL = authored elsewhere; blank text writes
+  NO row) → cover → `openImported` = straight into the editor. **No questions on the text path**
+  (always creates new — og's rule). Empty-delivery check is kind-aware: an empty `.txt` is a
+  legal import landing as a genuinely empty text document; a zero-byte `.soil` still refuses.
+  New problems `NOT_TEXT` / `TEXT_TOO_LONG`.
+- **Create + library:** "Handwritten / Text" radio (wizard wording; Export-screen radio idiom +
+  a `Type` caption; second 1 dp rule below so the row reads as chrome), template browser stays
+  live for both types, `createNotebook` writes meta `textDocument` + index bit
+  (`IndexRepository.createNotebook` grew the param) + renders the empty cover at create. Card
+  fallback: `ic_file_text` centered when a text document has no cover (flags already rode
+  `ObjectSummary` — zero extra reads); ordinary cards byte-identical.
+- **`:app` → `:markdown` repoint done** (the M1 lock's rider): 4 twins + 6 test twins deleted
+  (byte-identical verified before deletion), 3 consumers repointed. **`HeadingPrefix.kt`
+  deliberately stays host-side** — it is the TYPE_HEADING storage contract, not the engine, and
+  `:ext-document` has no use for it (KDoc'd).
+- **Walk (Nomad, agent, 10/10 first try):** create-radio → straight into the editor (verified by
+  `mResumedActivity`), notebook scope + no arrows · set/save/get by length arithmetic ·
+  close = library, card shows the text cover · reopen = stored doc, no re-merge · `show_pages` →
+  canvas → Document button → editor → close = CANVAS (the latch) · rename lands + duplicate
+  refused with title unchanged · ordinary "Document" notebook opens canvas-first (no hijack) ·
+  `pm disable`/`enable` clean · binds 0, crash buffer empty.
+- **Traps (new this phase):** a gradle gate piped through `| tail` reports the PIPE's exit code —
+  a failing version-pin test rode a "green" gate for two runs; run gates unpiped and read
+  `$?` (or check the XML), always. The NUL trap fired a **7th** time — a `' '` char literal
+  and a `"﻿"` string landed as RAW bytes; python-rewrite with escapes, then byte-scan.
+
+**User checklist (M8):** 1. **SAF import of a real `.md`** (the picker is not adb-drivable):
+library → Import → pick a Markdown file — it should land straight in the editor with the
+content, no questions asked; back arrow → the card shows the file's opening lines ·
+2. **cover eye-check** — a text document's card (opening lines legible? the empty-document card
+with the centered file glyph read right?) · 3. **create-screen feel** — the Type row
+(Handwritten default, Text) under the name bar · 4. **rename from the title** with the real
+keyboard — typing feel, and a duplicate name's refusal wording · 5. **Show pages** — button
+legibility at 62 dp in notebook scope; flip to a page document, then Show pages: the canvas
+should land on the page the editor was on.
 
 The create screen gains a type radio (Notebook / Text document); a flagged notebook
 (`NotebookFlags.TEXT_DOCUMENT` + meta mirror) routes straight into the editor from every entry
@@ -1042,11 +1127,12 @@ text importer only; **user checklist**: SAF import of a real `.md` (picker not a
 cover eye-check.
 *Fable the tail; Opus routing + import fork + cover; Sonnet create-screen radio; Haiku walks.*
 
-**Questions to resolve at phase start:** create-screen radio wording; whether a text document
-shows in the library with a distinct badge beyond the cover glyph; **and the show-pages exit's
-control** — M6's review removed the header's ✓ Done (the back arrow is the one leave door for
-ordinary notebooks), so the og shape "✓ = show pages / Close = library" needs a fresh answer
-for text documents (a text-document-only button? a Close sub-choice? a library route only?).
+**Questions to resolve at phase start:** ✅ answered 2026-08-30 — radio wording =
+**Handwritten / Text**; library badge = **none** beyond the text-preview cover + its
+`ic_file_text` center glyph; show-pages exit = **a text-document-only header button**
+("Show pages", its own icon — NOT `ic_notebook`, the scope toggle already owns it): the back
+arrow stays the ONE leave door (→ library, M6's rule holds for text documents too), the
+button opens the canvas.
 
 ### M9 — Export: `SOURCE_DOCUMENT` + PDF-of-preview
 **Status:** ⬜ Not started

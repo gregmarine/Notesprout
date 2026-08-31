@@ -15,6 +15,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.TooltipCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import com.symmetricalpalmtree.gpaper.core.PaperListener
 import com.symmetricalpalmtree.gpaper.core.PaperView
@@ -36,6 +37,7 @@ import com.symmetricalpalmtree.notesproutsn.data.clip.ClipEnvelope
 import com.symmetricalpalmtree.notesproutsn.data.clip.ClipStore
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilSchema
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
+import com.symmetricalpalmtree.notesproutsn.data.index.ObjectType
 import com.symmetricalpalmtree.notesproutsn.data.prefs.BrowseState
 import com.symmetricalpalmtree.notesproutsn.data.prefs.LinkTrail
 import com.symmetricalpalmtree.notesproutsn.data.prefs.RecentsPrefs
@@ -50,6 +52,8 @@ import com.symmetricalpalmtree.notesproutsn.extension.RecognizerClient
 import com.symmetricalpalmtree.notesproutsn.extension.ScratchPadClient
 import com.symmetricalpalmtree.notesproutsn.extension.ScratchPadEntry
 import com.symmetricalpalmtree.notesproutsn.extension.TransferCaps
+import com.symmetricalpalmtree.notesproutsn.library.NameDialog
+import com.symmetricalpalmtree.notesproutsn.library.NameRules
 import com.symmetricalpalmtree.notesproutsn.notebook.NotebookUndo.Action
 import com.symmetricalpalmtree.notesproutsn.templates.TemplatePick
 import com.symmetricalpalmtree.notesproutsn.templates.TemplatePicks
@@ -59,7 +63,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -142,6 +148,25 @@ class NotebookActivity : AppCompatActivity() {
 
     private var opened = false
     private var closing = false
+
+    /**
+     * M8 — the text-document latch: the canvas has been loaded in this incarnation, so this screen
+     * is an ordinary notebook for the rest of its life ([TextDocRouting] holds the rules). One-way:
+     * set by [loadCanvas], carried across a recreate in the saved state, and never cleared. It is
+     * what keeps a later editor showing from sealing a notebook whose pages are on the glass.
+     */
+    private var canvasShown = false
+
+    /** M8 — saved state said the editor was showing, so [DocumentEditorEntry.reconnect] has already
+     *  run in `onCreate` and the open must not launch a second showing over the same one. */
+    private var documentShowingRestored = false
+
+    /** A showing that ended while [openSession] was still on IO — see [TextDocRouting.parkClose].
+     *  A class rather than a bare `Int?` so that "no result yet" and "a result whose editor never
+     *  said how it ended" stay two different answers. */
+    private class ParkedClose(val mode: Int?)
+
+    private var pendingCloseAfterOpen: ParkedClose? = null
 
     /** Arrived by following a link (K4): the persisted trail survives and both Backs walk it. */
     private var viaLink = false
@@ -425,6 +450,9 @@ class NotebookActivity : AppCompatActivity() {
             notebookName = { notebookName },
             alive = { opened && !closing && ::session.isInitialized },
             recognizePageText = { pageId -> documentSeedFlow.recognize(pageId) },
+            // M8: the flag both editor-only hooks are gated on, and the flag every state carries.
+            isTextDocument = { isTextDocument() },
+            rename = { name -> renameTextDocument(name) },
         )
         // Before the reconnect below, and before anything can ask for state: a host killed behind
         // the editor must come back pointing at the page — and, since M7, the scope — the editor
@@ -437,14 +465,10 @@ class NotebookActivity : AppCompatActivity() {
             activity = this,
             button = binding.btnDocument,
             hooks = documentHooks,
-            // The notebook catches up on close (og's `navigateToPage(endedOn)`): the editor may have
-            // flipped several pages while this screen stayed where it was, and coming back to a
-            // different page than the one you were just reading would be a lie about where you are.
-            onClosed = {
-                val endedOn = documentHooks.targetPageId
-                documentHooks.resetTarget()
-                if (endedOn != null && endedOn != displayedPageId) runPageOp { refreshToPage(endedOn) }
-            },
+            // The showing is over — see [documentShowingEnded]. For an ordinary notebook that is the
+            // catch-up (og's `navigateToPage(endedOn)`); since M8 a text document can also mean
+            // "now show me the pages" or "seal and go".
+            onClosed = { documentShowingEnded() },
         )
         // The tap goes to the seed flow, not straight to the entry: og's order is flush → stored
         // document? → recognize → stage → open, and the editor is opened by its last step.
@@ -455,7 +479,13 @@ class NotebookActivity : AppCompatActivity() {
         // client here, in onCreate, so the fresh `begin` reaches the editor as its flush signal.
         // It must happen now and not in onResume: a pending ActivityResult is delivered BEFORE
         // onResume, and the entry joins the reconnect from there rather than racing it.
-        if (savedInstanceState?.getBoolean(KEY_DOCUMENT_SHOWING) == true) documentEntry.reconnect()
+        documentShowingRestored = savedInstanceState?.getBoolean(KEY_DOCUMENT_SHOWING) == true
+        if (documentShowingRestored) documentEntry.reconnect()
+        // M8: and whether the pages were already on the glass when we died — a text document that
+        // has shown its canvas comes back an ordinary notebook (see [TextDocRouting]). Read here,
+        // before openSession is launched at the end of this method, because it is the first thing
+        // the route asks about.
+        canvasShown = savedInstanceState?.getBoolean(KEY_CANVAS_SHOWN) == true
 
         // Chrome moved/appeared/disappeared: re-push the exclusion rects once the pass settles.
         binding.root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> binding.root.post { pushExclusions() } }
@@ -522,34 +552,34 @@ class NotebookActivity : AppCompatActivity() {
             // clipboard survives a force-stop, so a notebook opened tomorrow must still say that a
             // tap will paste.
             toolbar.showClipboardLoaded(SnClipboard.hasObjects)
-            val page = session.currentPage
-            val strokes = session.store.loadPage(page.id)
-            val headings = remeasureForDevice(session.headings.loadPage(page.id))
-            val links = withUnderlineBand(session.links.loadPage(page.id))
-            val linkBitmaps = linkRenderer.prebuild(links)   // raster off Main, in the load phase
-            paper.setPageSize(page.width, page.height)
-            paper.setTemplate(session.template)
-            // Renderers before loadStrokes: the load's re-record is the frame that paints them, and
-            // a link's composite must exist by then — building it later, behind a pen-idle gate, is
-            // the arc's standing hover-repaint trap (chrome invisible while the pen hovers).
-            liveHeadings = headings.associateByTo(linkedMapOf()) { it.id }
-            headingRenderer.headings = headings
-            liveLinks = links.associateByTo(linkedMapOf()) { it.id }
-            linkRenderer.update(links, linkBitmaps)
-            paper.loadStrokes(strokes)
-            liveStrokes = strokes.associateBy { it.id }.toMutableMap()
-            displayedPageId = page.id
-            opened = true
-            pushExclusions()   // swap the block-all rect for the real chrome rects
-            // The page is on the paper — take the "Opening…" box down. Deliberately **not**
-            // pen-idle-gated: `isPenActive` counts hover, and the user's pen is already over the
-            // glass on the way to writing, which would hold the box up over the page they asked for.
-            // This is a boundary frame, not a frame during writing (nothing has been drawn yet).
-            binding.openingOverlay.root.visibility = View.GONE
-            setPageIndicator(session.currentIndex + 1, session.pages.size)
-            contentsFlow.refresh()
-            Slog.d(TAG) { "page ${page.id} loaded: ${strokes.size} strokes, ${page.width}x${page.height}" }
-            warmUpRecognizer()
+            // M8 — the route. A showing that ended while all of the above was on IO is re-decided
+            // first and outranks everything (the S2 trap, [TextDocRouting.parkClose]); after that a
+            // text document opens into its editor and leaves the paper alone.
+            val parked = pendingCloseAfterOpen?.let {
+                pendingCloseAfterOpen = null
+                TextDocRouting.closeDecision(session.isTextDocument, canvasShown, it.mode)
+            }
+            when (
+                val route = TextDocRouting.openDecision(
+                    isTextDocument = session.isTextDocument,
+                    canvasShown = canvasShown,
+                    reconnectPending = documentShowingRestored,
+                    parkedClose = parked,
+                )
+            ) {
+                TextDocRouting.Open.CANVAS -> {
+                    loadCanvas(session.currentPage.id)
+                }
+                TextDocRouting.Open.SEAL_AND_LEAVE -> {
+                    // The editor left toward the library while we were still opening: seal what we
+                    // opened and go, without ever putting a page on the paper.
+                    Slog.d(TAG) { "text document: the showing ended before the open did — sealing" }
+                    close()
+                }
+                TextDocRouting.Open.EDITOR_LAUNCH, TextDocRouting.Open.EDITOR_RECONNECT -> {
+                    openIntoEditor(launch = route == TextDocRouting.Open.EDITOR_LAUNCH)
+                }
+            }
         } catch (t: Throwable) {
             // Back during the open window cancels this scope; the session may have opened its
             // handle between our suspensions. Nothing else will ever seal it (close() early-exited
@@ -559,6 +589,113 @@ class NotebookActivity : AppCompatActivity() {
             // Anything else mid-open is a failed open, not a crash — explain and leave.
             Log.e(TAG, "open crashed", t)
             failOpen(t.message ?: t.javaClass.simpleName)
+        }
+    }
+
+    /**
+     * Put [pageId] on the paper: the loads, the renderers, `loadStrokes`, and the chrome that
+     * describes them. The open's second half, extracted at M8 because a **text document defers it** —
+     * the canvas is loaded when ✓ Done asks for the pages, on the page the editor ended on, and on a
+     * close it is never loaded at all. Everything above this line is cheap; everything in it is not.
+     *
+     * Safe to run twice (the deferred path re-affirms `opened` and re-pushes the exclusions), and it
+     * is the one place [canvasShown] is set — the latch that makes a text document ordinary.
+     */
+    private suspend fun loadCanvas(pageId: String) {
+        // The editor may have ended on another page; the session is still on the one it opened at.
+        val idx = session.pages.indexOfFirst { it.id == pageId }
+        val page = if (idx >= 0 && idx != session.currentIndex) session.goTo(idx) else session.currentPage
+        val strokes = session.store.loadPage(page.id)
+        val headings = remeasureForDevice(session.headings.loadPage(page.id))
+        val links = withUnderlineBand(session.links.loadPage(page.id))
+        val linkBitmaps = linkRenderer.prebuild(links)   // raster off Main, in the load phase
+        paper.setPageSize(page.width, page.height)
+        paper.setTemplate(session.template)
+        // Renderers before loadStrokes: the load's re-record is the frame that paints them, and
+        // a link's composite must exist by then — building it later, behind a pen-idle gate, is
+        // the arc's standing hover-repaint trap (chrome invisible while the pen hovers).
+        liveHeadings = headings.associateByTo(linkedMapOf()) { it.id }
+        headingRenderer.headings = headings
+        liveLinks = links.associateByTo(linkedMapOf()) { it.id }
+        linkRenderer.update(links, linkBitmaps)
+        paper.loadStrokes(strokes)
+        liveStrokes = strokes.associateBy { it.id }.toMutableMap()
+        displayedPageId = page.id
+        opened = true
+        canvasShown = true
+        pushExclusions()   // swap the block-all rect for the real chrome rects
+        // The page is on the paper — take the "Opening…" box down. Deliberately **not**
+        // pen-idle-gated: `isPenActive` counts hover, and the user's pen is already over the
+        // glass on the way to writing, which would hold the box up over the page they asked for.
+        // This is a boundary frame, not a frame during writing (nothing has been drawn yet).
+        binding.openingOverlay.root.visibility = View.GONE
+        setPageIndicator(session.currentIndex + 1, session.pages.size)
+        contentsFlow.refresh()
+        Slog.d(TAG) { "page ${page.id} loaded: ${strokes.size} strokes, ${page.width}x${page.height}" }
+        warmUpRecognizer()
+    }
+
+    /**
+     * The text-document open (M8): the **lightweight** setup and the editor, with no stroke
+     * deserialization anywhere in it. All it establishes is the page the hooks fall back to, the
+     * scope they answer in, and the `opened` flag their `alive` gate reads — the editor's `begin`
+     * asks for state before the launch, so all three have to be true by then.
+     *
+     * The scope is set to the notebook document **only on a fresh open**: a restored target (or a
+     * live showing being reconnected to) is the editor's own memory of where it is, and overwriting
+     * it would answer a reconnecting editor's `current()` about the wrong document.
+     *
+     * [launch] false is the reconnect: the editor is already on screen and
+     * [DocumentEditorEntry.reconnect] has re-minted its binder, so launching would bind twice over
+     * one showing. The "Opening…" box stays up behind it — nothing else will take it down, and this
+     * screen is not what the user is looking at.
+     *
+     * **No seed flow.** Notebook scope serves the STORED document and nothing else (the M7 lock), so
+     * an empty text document opens instantly instead of paying a recognition it would throw away.
+     */
+    private suspend fun openIntoEditor(launch: Boolean) {
+        displayedPageId = session.currentPage.id
+        if (launch && !documentShowingRestored && documentHooks.targetPageId == null) {
+            documentHooks.restoreTarget(session.currentPage.id, notebookScope = true)
+        }
+        opened = true
+        pushExclusions()
+        if (!launch) { Slog.d(TAG) { "text document: reconnected to the showing already on screen" }; return }
+        if (!documentEntry.isAvailable) {
+            // Nothing to route into — no editor installed, or discovery has not answered yet. The
+            // pages are the honest fallback: a text document is an ordinary notebook underneath,
+            // and a screen of chrome over an unloaded surface is not a screen.
+            Slog.d(TAG) { "text document: no editor extension — showing the pages" }
+            loadCanvas(session.currentPage.id)
+            return
+        }
+        // Hand the box over rather than stack a second one: the entry raises its own
+        // [OpeningOverlay] and runs the launch strictly after that frame is on the glass (its
+        // pre-draw + post — the trap that overlay exists for). Both are the same layout and both
+        // moves happen in this one Main message, so the swap costs no frame and shows no gap.
+        binding.openingOverlay.root.visibility = View.GONE
+        documentEntry.open()
+        watchForAnEditorThatNeverOpens()
+    }
+
+    /**
+     * The one thing the text route may not leave to chance: an editor that never appears. A bind or
+     * a `begin` can fail (a package replaced under us, a document over the cap) and the entry
+     * answers that with its own problem dialog — which would leave this screen sitting on chrome
+     * over a paper surface that was never loaded. So: one bounded look, and if no showing is up and
+     * we are still the thing on the glass, the pages come up instead.
+     *
+     * A launch that DID happen leaves this screen stopped, and a showing that has already ended has
+     * either loaded the canvas or started closing — three checks that each cost nothing.
+     */
+    private fun watchForAnEditorThatNeverOpens() {
+        lifecycleScope.launch {
+            delay(EDITOR_LAUNCH_WATCHDOG_MS)
+            if (closing || isFinishing || isDestroyed || canvasShown) return@launch
+            if (documentEntry.isShowing) return@launch
+            if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@launch
+            Slog.d(TAG) { "text document: the editor never opened — showing the pages" }
+            runPageOp { loadCanvas(displayedPageId) }
         }
     }
 
@@ -607,6 +744,88 @@ class NotebookActivity : AppCompatActivity() {
                 .setOnCancelListener { finish() }
                 .create()
         ).show()
+    }
+
+    // ── The document editor's showing ────────────────────────────────────────
+
+    /** Whether the open notebook is a text document (M8) — false until the session has read the
+     *  index bit, which is also the honest answer for every question asked before then. */
+    private fun isTextDocument(): Boolean = ::session.isInitialized && session.isTextDocument
+
+    /**
+     * The showing ended (M6, grown at M8). Runs on Main from the entry's result callback, which is
+     * **before** `onResume` and can therefore be before the open has even finished.
+     *
+     * The advisory is taken **first**, because `resetTarget()` clears it along with everything else
+     * the showing owned. What it means is [TextDocRouting.closeDecision]'s table: an ordinary
+     * notebook (and a text document whose pages are already up) catches up to the page the editor
+     * ended on; a text document that has never shown its canvas either loads it now (✓ Done) or
+     * seals to the library (the leave door, and every silence).
+     */
+    private fun documentShowingEnded() {
+        val mode = documentHooks.takeCloseMode()
+        val endedOn = documentHooks.targetPageId
+        documentHooks.resetTarget()
+        if (TextDocRouting.parkClose(opened)) {
+            // Nothing to act on yet — see [TextDocRouting.parkClose]. openSession re-decides it.
+            pendingCloseAfterOpen = ParkedClose(mode)
+            return
+        }
+        when (TextDocRouting.closeDecision(isTextDocument(), canvasShown, mode)) {
+            TextDocRouting.Close.CATCH_UP ->
+                if (endedOn != null && endedOn != displayedPageId) runPageOp { refreshToPage(endedOn) }
+            TextDocRouting.Close.LOAD_CANVAS -> {
+                // The box goes back up for a load the user asked for and cannot see the cost of:
+                // the page comes off the `.soil` and the surface is set up from nothing. No
+                // [OpeningOverlay.showThen] wait is owed here — nothing pauses this screen, so the
+                // traversal that paints the box runs while the load is out on IO.
+                binding.openingOverlay.root.visibility = View.VISIBLE
+                runPageOp { loadCanvas(endedOn ?: session.currentPage.id) }
+            }
+            TextDocRouting.Close.SEAL_TO_LIBRARY -> close()
+        }
+    }
+
+    /**
+     * The editor's tap-the-title rename (M8), text documents only — [DocumentHostHooks] has already
+     * gated on that. Runs on a **Binder thread**, where blocking is the contract (see that class's
+     * threading note), and every refusal is an `IllegalArgumentException` whose message the editor
+     * shows verbatim: the words are the library's own, so a name refused here reads exactly as one
+     * refused in the rename dialog.
+     *
+     * The name is user content — never logged, length only.
+     */
+    private fun renameTextDocument(requested: String) {
+        val name = requested.trim()
+        NameRules.validate(name)?.let {
+            throw IllegalArgumentException(NameDialog.problemMessage(this, it))
+        }
+        val versionCode = runCatching {
+            packageManager.getPackageInfo(packageName, 0).longVersionCode.toInt()
+        }.getOrNull()
+        runBlocking {
+            withContext(Dispatchers.IO) {
+                // Blob-free: the row's cover has no business being read to answer a rename.
+                val row = repo.summary(notebookId) ?: throw IllegalStateException("notebook closed")
+                if (name == row.name) return@withContext   // the library's rule: not a collision
+                // Excluding the row itself: re-casing its own name is a rename, not a collision.
+                if (repo.nameTaken(row.parentId, ObjectType.NOTEBOOK, name, notebookId)) {
+                    throw IllegalArgumentException(getString(R.string.rename_duplicate_notebook, name))
+                }
+                repo.rename(notebookId, name)
+                notebookName = name   // what the editor's own header asks for, from a Binder thread
+                // Posted, never awaited: this thread is inside a Binder transaction and must not
+                // wait on Main. No pen-idle gate either — the editor is on top of this screen, so
+                // there is no frame to present and nothing to interrupt.
+                runOnUiThread { if (!isFinishing && !isDestroyed) binding.notebookName.text = name }
+                // og refreshes the meta at a rename — the `.soil` stays self-describing.
+                if (versionCode != null && ::session.isInitialized && session.isOpen) {
+                    runCatching { session.refreshMeta(versionCode) }
+                        .onFailure { Log.w(TAG, "refreshMeta after rename failed", it) }
+                }
+            }
+        }
+        Slog.d(TAG) { "renamed: ${name.length} chars" }
     }
 
     // ── g-paper → store ──────────────────────────────────────────────────────
@@ -2082,10 +2301,15 @@ class NotebookActivity : AppCompatActivity() {
         // rule. Take the bar's real laid-out height instead, here because this runs on every chrome
         // layout change and so can never drift from the thing it is measuring.
         binding.topBar.height.takeIf { it > 0 }?.let { paper.snapMarginPx = it.toFloat() }
-        if (!opened) {
+        if (!opened || !canvasShown) {
             // The toolbar arms the pen from the first frame, but the page isn't on the paper yet —
             // a stroke committed now would hit the listener's `opened` guard, never reach the
             // store, and be silently wiped by loadStrokes. Block the whole surface until then.
+            //
+            // [canvasShown], not just `opened` (M8): a text document is *open* — its hooks answer,
+            // its rename works — while its paper has never been loaded at all. Ink onto that
+            // surface would be ink at no page's size, and the Ratta daemon draws it beneath every
+            // window this route puts on top.
             paper.setExclusionRects(listOf(BLOCK_ALL))
             return
         }
@@ -2229,6 +2453,24 @@ class NotebookActivity : AppCompatActivity() {
             KEY_DOCUMENT_SCOPE,
             ::documentHooks.isInitialized && documentHooks.scopeIsNotebook,
         )
+        // M8: and whether this incarnation ever put the pages on the glass — a recreated text
+        // document that had must come back as an ordinary notebook, not into the editor again.
+        outState.putBoolean(KEY_CANVAS_SHOWN, canvasShown)
+    }
+
+    /**
+     * The cover this notebook's card shows, at both durability points (M8). A **text document**
+     * renders its own opening lines through `:markdown` ([TextCover]) instead of snapshotting the
+     * paper: on that route the surface may never have been loaded at all, and a snapshot of an
+     * unloaded surface is a blank card where a page used to be.
+     *
+     * What it renders is the **stored** document. The editor may still be holding unsaved text, and
+     * the `.soil`'s copy is the only picture this side can honestly draw — og renders at
+     * seal-after-flush, and `onStop`'s mid-session capture is a bonus on the same terms.
+     */
+    private suspend fun captureCover(p: PaperView, s: NotebookSession, id: String) {
+        if (s.isTextDocument) TextCover.render(repo, id, s.documents.get(id)?.text.orEmpty())
+        else if (opened) CoverSnapshot.capture(p, id, repo)
     }
 
     override fun onStop() {
@@ -2241,7 +2483,9 @@ class NotebookActivity : AppCompatActivity() {
                 // Under the page-op mutex: saveLastOpened reads currentPage, which a still-running
                 // insert/delete mutates on IO.
                 pageOps.withLock {
-                    if (!closing) CoverSnapshot.capture(p, id, repo)
+                    // The editor launching over us is one of the ways we get here — and it is
+                    // exactly when a text document's cover should be re-rendered.
+                    if (!closing) captureCover(p, s, id)
                     if (!closing && s.isOpen) s.saveLastOpened()
                 }
             } catch (e: Exception) { Log.w(TAG, "onStop persist failed", e) }
@@ -2280,7 +2524,9 @@ class NotebookActivity : AppCompatActivity() {
                 // transaction silently (runPageOp swallows) or split the .soil from its index
                 // mirror. New ops can't start (`closing` is set), so this only waits, never races.
                 pageOps.withLock {
-                    if (opened) try { CoverSnapshot.capture(p, id, repo) } catch (e: Exception) { Log.w(TAG, "cover failed", e) }
+                    // Before the seal, always — and for a text document before the paper has
+                    // necessarily ever been loaded (captureCover is what knows the difference).
+                    try { captureCover(p, s, id) } catch (e: Exception) { Log.w(TAG, "cover failed", e) }
                     try { s.saveLastOpened() } catch (e: Exception) { Log.w(TAG, "saveLastOpened failed", e) }
                     try { s.refreshMeta(versionCode) } catch (e: Exception) { Log.w(TAG, "refreshMeta failed", e) }
                     try { s.seal() } catch (e: Exception) { Log.w(TAG, "seal failed", e) }
@@ -2332,6 +2578,16 @@ class NotebookActivity : AppCompatActivity() {
         /** Saved state (M7): that showing was on the NOTEBOOK document (og's
          *  `STATE_DOCUMENT_NOTEBOOK`) — the mode-routing flag's host half. */
         private const val KEY_DOCUMENT_SCOPE = "notebook.documentScope"
+
+        /** Saved state (M8): this incarnation has put the pages on the paper, so a text document
+         *  comes back an ordinary notebook — [TextDocRouting]'s one-way latch. */
+        private const val KEY_CANVAS_SHOWN = "notebook.canvasShown"
+
+        /** How long a text document waits for the editor it launched before deciding it is not
+         *  coming and showing the pages instead. Comfortably past a cold bind's KDF (≈3 s on the
+         *  Nomad) — this is a backstop, not a timeout anyone should ever see. */
+        private const val EDITOR_LAUNCH_WATCHDOG_MS = 10_000L
+
         /** Covers any screen; deliberately not MAX_VALUE (engine-side rect math must not overflow). */
         private val BLOCK_ALL = Rect(0, 0, 100_000, 100_000)
         const val EXTRA_NOTEBOOK_ID = "notebookId"

@@ -32,6 +32,18 @@
     <string name="cd_document_scope_notebook">Notebook document</string>
     <string name="cd_document_scope_page">Page document</string>
 
+    <!-- Text documents (M8). "Show pages" is the text document's own exit to the canvas — its own
+         header button rather than a ✓ Done, because the back arrow is still the ONE leave door and
+         still means "to the library". The title carries the rename: no visual affordance beyond the
+         long-press hint, since on e-ink there is no ripple to promise one anyway. -->
+    <string name="document_show_pages">Show pages</string>
+    <string name="document_rename_hint">Rename</string>
+    <string name="document_rename_title">Rename</string>
+    <string name="document_rename_field_hint">Name</string>
+    <string name="document_rename_confirm">Rename</string>
+    <string name="document_rename_problem_title">Couldn\'t rename this.</string>
+    <string name="document_rename_failed_body">The name was not changed. Try again in a moment.</string>
+
     <!-- The source strip (M6): where this document came from, and its two acts. -->
     <string name="document_source_drafted">Drafted from this page</string>
     <string name="document_source_stale">Page has changed since this draft</string>

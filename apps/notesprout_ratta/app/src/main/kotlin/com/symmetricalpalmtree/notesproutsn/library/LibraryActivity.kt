@@ -151,6 +151,9 @@ class LibraryActivity : AppCompatActivity() {
             currentFolder = { folderId },
             retireNotebook = { id -> retireNotebook(id) },
             onImported = { refresh() },
+            // A text import ends in the editor, not in the library (arc 19 / M8): the same door
+            // every other open goes through, latch and overlay included.
+            openImported = { id, name -> openNotebook(id, name) },
         )
         binding.btnImport.setOnClickListener { importFlow.onTap() }
         TooltipCompat.setTooltipText(binding.btnImport, binding.btnImport.contentDescription)

@@ -68,15 +68,18 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
         return row
     }
 
-    /** Insert the index row for a notebook whose `.soil` already exists (the caller minted [id]). */
+    /** Insert the index row for a notebook whose `.soil` already exists (the caller minted [id]).
+     *  [textDocument] sets [NotebookFlags.TEXT_DOCUMENT] (arc 19 / M8) — the index bit is the
+     *  authority; the caller mirrors it into `notebook_meta` at create. */
     suspend fun createNotebook(
         id: String, name: String, parentId: String?, templateKind: String, pageCount: Int = 1,
-        now: Long = System.currentTimeMillis(),
+        textDocument: Boolean = false, now: Long = System.currentTimeMillis(),
     ): ObjectEntity {
         val row = ObjectEntity(
             id = id, type = ObjectType.NOTEBOOK, name = name, parentId = parentId,
             createdAt = now, updatedAt = now, pageCount = pageCount,
-            flags = NotebookFlags.ENCRYPTED, keyScope = KEY_SCOPE_GLOBAL, templateKind = templateKind,
+            flags = NotebookFlags.ENCRYPTED or (if (textDocument) NotebookFlags.TEXT_DOCUMENT else 0),
+            keyScope = KEY_SCOPE_GLOBAL, templateKind = templateKind,
         )
         dao.upsert(row)
         return row

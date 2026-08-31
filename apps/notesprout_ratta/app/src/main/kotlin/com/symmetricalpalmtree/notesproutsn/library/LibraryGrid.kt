@@ -11,10 +11,27 @@ import android.widget.ImageView
 import android.widget.TextView
 import com.symmetricalpalmtree.notesproutsn.R
 import com.symmetricalpalmtree.notesproutsn.core.Bitmaps
+import com.symmetricalpalmtree.notesproutsn.data.index.NotebookFlags
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectSummary
 import com.symmetricalpalmtree.notesproutsn.data.template.BuiltInTemplates
 import com.symmetricalpalmtree.notesproutsn.data.template.TemplateKind
 import java.util.Date
+
+/**
+ * The card-level rules that are pure arithmetic on an index row — kept out of [LibraryGrid] so they
+ * can be reasoned about (and tested) without a `View` in sight.
+ */
+object LibraryCards {
+
+    /**
+     * Does this notebook's `flags` carry [NotebookFlags.TEXT_DOCUMENT]?
+     *
+     * A null or absent value is **not** a text document: every row this predicate sees was written
+     * by a build that sets the bit when it means it, and an unreadable one is a handwritten
+     * notebook — the family's default, and the only safe way to be wrong.
+     */
+    fun isTextDocument(flags: Int?): Boolean = ((flags ?: 0) and NotebookFlags.TEXT_DOCUMENT) != 0
+}
 
 /** What a card stands for. Folders and notebooks share the grid but not the card layout. */
 sealed class CardItem(val summary: ObjectSummary) {
@@ -153,6 +170,16 @@ class LibraryGrid(
         if (bmp != null) {
             cover.scaleType = ImageView.ScaleType.CENTER_CROP
             cover.setImageBitmap(bmp)
+        } else if (LibraryCards.isTextDocument(s.flags)) {
+            // A text document with nothing to show yet — or a cover that would not decode. Both the
+            // create and the import render a text cover the moment the document exists, so this is
+            // a safety net rather than a normal state; what it must not do is fall through to a
+            // paper placeholder, which would picture the one thing a text document is not. The
+            // glyph alone is the card's whole identity here — no badge, no label (arc 19 / M8).
+            val inset = (cardWidth * GLYPH_INSET_FRACTION).toInt()
+            cover.setPadding(inset, inset, inset, inset)
+            cover.scaleType = ImageView.ScaleType.FIT_CENTER
+            cover.setImageResource(R.drawable.ic_file_text)
         } else {
             // No snapshot yet (never opened, or R3 hasn't written one): show what the paper looks
             // like. Blank stays blank — an empty card is the honest picture of a blank notebook.
@@ -177,5 +204,10 @@ class LibraryGrid(
 
         /** Roughly how much of a card's height the cover band gets (the rest is name + date). */
         const val COVER_BAND_FRACTION = 0.75f
+
+        /** White space each side of the coverless text-document glyph, as a fraction of the card's
+         *  width — it leaves the icon at roughly 40% of the card, small enough to read as a mark on
+         *  a page rather than as a picture that fills it. */
+        const val GLYPH_INSET_FRACTION = 0.3f
     }
 }

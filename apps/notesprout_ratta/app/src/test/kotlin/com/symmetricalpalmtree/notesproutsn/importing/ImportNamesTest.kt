@@ -77,6 +77,30 @@ class ImportNamesTest {
     }
 
     @Test
+    fun aTextImportKeepsItsOwnNameUntilSomethingElseHasIt() {
+        // The silent dedupe (arc 19 / M8): a text import always creates something new, so it never
+        // asks Replace/Keep-both — it just takes a free name.
+        assertEquals("Notes", ImportNames.freeName("Notes") { false })
+        assertEquals("Notes Copy", ImportNames.freeName("Notes") { it == "Notes" })
+        val taken = setOf("Notes", "Notes Copy")
+        assertEquals("Notes Copy 2", ImportNames.freeName("Notes") { it in taken })
+    }
+
+    @Test
+    fun aTextImportWithNoUsableNameStillGetsOne() {
+        assertEquals(ImportNames.FALLBACK, ImportNames.freeName("   ") { false })
+        assertEquals("${ImportNames.FALLBACK} Copy", ImportNames.freeName("") { it == ImportNames.FALLBACK })
+    }
+
+    @Test
+    fun aTextFileNameLosesItsExtensionLikeAnyOther() {
+        // The text branch names the document with the same rule the `.soil` branch falls back to.
+        assertEquals("Meeting notes", ImportNames.fromDisplayName("Meeting notes.md"))
+        assertEquals("Meeting notes", ImportNames.fromDisplayName("Meeting notes.txt"))
+        assertEquals("readme.v2", ImportNames.fromDisplayName("readme.v2.markdown"))
+    }
+
+    @Test
     fun theSpecNameIsADisplayNameNeverAPath() {
         // ImportSpec refuses a separator by construction; dropping it here means a document with an
         // odd name still imports.

@@ -19,8 +19,6 @@ import com.symmetricalpalmtree.notesproutsn.ext.document.databinding.ActivityDoc
 import com.symmetricalpalmtree.notesproutsn.extension.DocumentContract
 import com.symmetricalpalmtree.notesproutsn.extension.DocumentPageState
 import com.symmetricalpalmtree.notesproutsn.extension.HostCallerCheck
-import com.symmetricalpalmtree.notesproutsn.markdown.MarkdownParser
-import com.symmetricalpalmtree.notesproutsn.markdown.MarkdownRenderer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -71,6 +69,11 @@ import java.util.concurrent.atomic.AtomicReference
  * screen's buffer is adopted only when the bundle's key is the key the load landed on, so notebook
  * text can never be pushed under a page key or the other way round.
  *
+ * **M8 gave the text document its two controls** — [ShowPagesButton] (the exit to the pages this
+ * screen opened *instead of*) and [RenameControl] (the title, tappable, because a text document has
+ * no library card on screen to long-press). Both are absent for every other notebook, both are drawn
+ * from [lastState], and neither touches M6's rule that the back arrow is the ONE leave door.
+ *
  * Not built at M7, rather than built and hidden: proofread (M10).
  */
 class DocumentEditorActivity : AppCompatActivity() {
@@ -109,6 +112,11 @@ class DocumentEditorActivity : AppCompatActivity() {
 
     /** The header's page ↔ notebook control, and the chrome that follows it (M7). */
     private lateinit var scopeToggle: ScopeToggle
+
+    /** The text document's exit to its pages, and its rename-from-the-title (M8). Both are drawn
+     *  from [lastState] and both are absent for every other kind of notebook. */
+    private lateinit var showPages: ShowPagesButton
+    private lateinit var rename: RenameControl
 
     /** The format bar's fourteen tools and the four chord-only ones, over the buffer. */
     private lateinit var format: FormatActions
@@ -311,6 +319,26 @@ class DocumentEditorActivity : AppCompatActivity() {
             switchTo = { flips.switchScope(it) },
         )
         scopeToggle.install()
+        // M8's two text-document controls. Both read `lastState`, so both are silent — and, for the
+        // button, GONE — until the host has said what kind of notebook this is.
+        showPages = ShowPagesButton(
+            binding = binding,
+            scope = lifecycleScope,
+            stateNow = { lastState },
+            busy = { flips.inFlight || strip.inFlight },
+            leaving = { leaving },
+            leave = { leave(Activity.RESULT_OK) },
+        )
+        showPages.install()
+        rename = RenameControl(
+            activity = this,
+            binding = binding,
+            scope = lifecycleScope,
+            stateNow = { lastState },
+            leaving = { leaving },
+            onRetitled = { lastState = it },
+        )
+        rename.install()
         find = FindReplaceBar(
             context = this,
             binding = binding,
@@ -471,6 +499,9 @@ class DocumentEditorActivity : AppCompatActivity() {
             getString(R.string.document_page_indicator, state.pageIndex + 1, state.pageCount)
         } else ""
         scopeToggle.apply(state.scope)
+        // M8: the two text-document controls, from the same state as everything else in this header.
+        showPages.apply()
+        rename.apply()
         strip.show(if (saver.draftPending) DocumentContract.SOURCE_DRAFTED else state.source)
     }
 
@@ -541,26 +572,9 @@ class DocumentEditorActivity : AppCompatActivity() {
         binding.btnPreview.isSelected = previewing
     }
 
-    /** Render the current Markdown through the shared engine, once, on entering Preview. */
-    private fun renderPreview() {
-        if (binding.previewScroll.visibility != View.VISIBLE) return
-        val view = binding.previewText
-        val width = view.width - view.paddingLeft - view.paddingRight
-        if (width <= 0) {
-            // First show: no measured width yet, and the horizontal rule's span needs one.
-            view.post { renderPreview() }
-            return
-        }
-        val markdown = currentText()
-        view.text = if (markdown.isBlank()) "" else MarkdownRenderer.render(
-            MarkdownParser.parse(markdown),
-            availableWidthPx = width,
-            paint = view.paint,
-            density = resources.displayMetrics.density,
-            blockGapPx = (8f * resources.displayMetrics.density).toInt(),
-        )
-        binding.previewScroll.scrollTo(0, 0)
-    }
+    /** Render the current Markdown through the shared engine, once, on entering Preview. The render
+     *  itself is [PreviewRender]'s — it needs the two views and the display, and nothing else here. */
+    private fun renderPreview() = PreviewRender.render(binding, resources)
 
     // ── Page flips ────────────────────────────────────────────────────────────
 
@@ -761,6 +775,16 @@ class DocumentEditorActivity : AppCompatActivity() {
         override fun toggleScope() = scopeToggle.tap()
         override fun merge(mode: Int): Boolean =
             (lastState?.scope == DocumentContract.SCOPE_NOTEBOOK).also { if (it) strip.bringIn(mode) }
+
+        // ── M8 ────────────────────────────────────────────────────────────────
+        // The notebook's NAME is user content like the document is: it crosses here and is never
+        // logged either.
+
+        // Qualified: the peer's own members are named after the controls they drive, and an
+        // unqualified `showPages` inside this object would read as the method, not the button.
+        override fun showPages(): Boolean = this@DocumentEditorActivity.showPages.tap()
+        override fun rename(name: String): Boolean = this@DocumentEditorActivity.rename.rename(name)
+        override fun title(): String = binding.title.text.toString()
     }
 
     private companion object {

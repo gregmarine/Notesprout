@@ -10,16 +10,26 @@ import android.os.Parcelable
  * filter). The constructor `require`s are the validation — unmarshal is validation (the family
  * rule), and a descriptor that fails them drops that importer with a log line, never a crash.
  *
- * Wire form: `String formatLabel · String[] fileExtensions · String[] mimeTypes` (a compatible
- * tail may be appended in a later version; readers of this version stop after the MIME list).
+ * Wire form: `String formatLabel · String[] fileExtensions · String[] mimeTypes ·
+ * int resultKind` — the result kind is a **compatible tail** (arc 19 / M8, the
+ * `ExporterInfo.sourceKind` recipe): the descriptor is `describe()`'s whole reply, so an
+ * old-shape parcel simply runs out after the MIME list and the absent tail means
+ * [ImporterContract.RESULT_NOTEBOOK]. The tail holds only while the descriptor stays the reply's
+ * trailing payload. A further tail may be appended in a later version; readers of this version
+ * stop after the result kind.
  */
 class ImporterInfo(
     val formatLabel: String,
     val fileExtensions: List<String>,
     val mimeTypes: List<String>,
+    val resultKind: Int = ImporterContract.RESULT_NOTEBOOK,
 ) : Parcelable {
 
     init {
+        require(
+            resultKind == ImporterContract.RESULT_NOTEBOOK ||
+                resultKind == ImporterContract.RESULT_TEXT_DOCUMENT,
+        ) { "unknown result kind $resultKind" }
         OptionDescriptor.requireLabel(formatLabel, "format label")
         require(fileExtensions.size in 1..ImporterContract.MAX_FILE_EXTENSIONS) {
             "${fileExtensions.size} file extensions outside 1..${ImporterContract.MAX_FILE_EXTENSIONS}"
@@ -49,6 +59,7 @@ class ImporterInfo(
         dest.writeString(formatLabel)
         dest.writeStringList(fileExtensions)
         dest.writeStringList(mimeTypes)
+        dest.writeInt(resultKind)
     }
 
     override fun describeContents(): Int = 0
@@ -58,7 +69,11 @@ class ImporterInfo(
             val formatLabel = parcel.readString() ?: ""
             val fileExtensions = parcel.createStringArrayList() ?: arrayListOf()
             val mimeTypes = parcel.createStringArrayList() ?: arrayListOf()
-            return ImporterInfo(formatLabel, fileExtensions, mimeTypes)
+            // The compatible tail: an old-shape parcel runs out here, and the absent tail
+            // means a `.soil` notebook — today's meaning, unchanged.
+            val resultKind =
+                if (parcel.dataAvail() > 0) parcel.readInt() else ImporterContract.RESULT_NOTEBOOK
+            return ImporterInfo(formatLabel, fileExtensions, mimeTypes, resultKind)
         }
 
         @JvmField

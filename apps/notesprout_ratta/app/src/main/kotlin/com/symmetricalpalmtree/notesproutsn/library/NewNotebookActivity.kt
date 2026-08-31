@@ -27,6 +27,7 @@ import com.symmetricalpalmtree.notesproutsn.data.template.BuiltInTemplates
 import com.symmetricalpalmtree.notesproutsn.data.template.PagePaper
 import com.symmetricalpalmtree.notesproutsn.data.template.PaperSource
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityNewNotebookBinding
+import com.symmetricalpalmtree.notesproutsn.notebook.TextCover
 import com.symmetricalpalmtree.notesproutsn.templates.TemplateBrowser
 import com.symmetricalpalmtree.notesproutsn.templates.TemplatePick
 import com.symmetricalpalmtree.notesproutsn.templates.TemplatePicks
@@ -40,7 +41,12 @@ import java.util.Locale
 import java.util.UUID
 
 /**
- * Name the notebook, pick its paper, create it.
+ * Name the notebook, pick its kind and its paper, create it.
+ *
+ * **The kind is a two-way radio** (arc 19 / M8): *Handwritten*, the default, and *Text* — a notebook
+ * that opens straight into the document editor. It is a radio and not a second screen because the
+ * choice is one bit and the rest of the screen is identical for both: the paper browser stays live
+ * either way, since a text document's pages underneath are still pages.
  *
  * **The paper is picked from the template library itself** (arc 13 / G3), not from four radios: the
  * whole [TemplateBrowser] lives under this screen's header, with the same folders, the same
@@ -75,6 +81,11 @@ class NewNotebookActivity : AppCompatActivity() {
      *  notebook nobody has told anything about yet, and the one every other paper is measured
      *  against. */
     private var pick: TemplatePick = TemplatePick.Blank
+
+    /** The kind the user has chosen (arc 19 / M8). **Handwritten is the default** — this is a
+     *  handwriting-first app, and a text document is the deliberate exception. It changes only what
+     *  the create writes: the paper below is picked, and written, exactly the same way either way. */
+    private var textDocument = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -129,11 +140,22 @@ class NewNotebookActivity : AppCompatActivity() {
         savedInstanceState?.getString(KEY_PICK)
             ?.let { TemplatePick.decode(it) }
             ?.let { pick = it }
+
+        // The type survives the same death, and for the same reason: coming back from SAF with the
+        // radio silently reset to Handwritten would make a handwritten notebook out of a text
+        // document the user had already asked for. Restore first, check the group, and only THEN
+        // listen — `check()` fires the listener, and wiring it first would just re-set what we set.
+        textDocument = savedInstanceState?.getBoolean(KEY_TEXT_DOCUMENT, false) ?: false
+        binding.typeGroup.check(if (textDocument) R.id.typeText else R.id.typeHandwritten)
+        binding.typeGroup.setOnCheckedChangeListener { _, checkedId ->
+            textDocument = checkedId == R.id.typeText
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putString(KEY_PICK, pick.encode())
+        outState.putBoolean(KEY_TEXT_DOCUMENT, textDocument)
         if (::browser.isInitialized) browser.saveState(outState)
     }
 
@@ -162,6 +184,9 @@ class NewNotebookActivity : AppCompatActivity() {
             return
         }
         val chosen = pick
+        // Read once, here, alongside the paper: everything after this point is the create, and it
+        // must be the create the user was looking at when they tapped.
+        val asText = textDocument
         setCreating(true)
 
         lifecycleScope.launch {
@@ -185,7 +210,7 @@ class NewNotebookActivity : AppCompatActivity() {
                 )
                 return@launch
             }
-            val result = runCatching { withContext(Dispatchers.IO) { createNotebook(name, chosen, paper) } }
+            val result = runCatching { withContext(Dispatchers.IO) { createNotebook(name, chosen, paper, asText) } }
             result.onSuccess { id ->
                 // Baking page 1 is an apply, and an apply is the only thing that makes paper
                 // recent (arc 13 / G5). After the create, never before: a notebook that failed to
@@ -215,8 +240,26 @@ class NewNotebookActivity : AppCompatActivity() {
         binding.btnCreate.isClickable = !value
     }
 
-    /** Everything from step 2 to step 8 of the class note. Runs on IO; throws on failure. */
-    private suspend fun createNotebook(name: String, pick: TemplatePick, paper: PaperSource): String {
+    /**
+     * Everything from step 2 to step 8 of the class note. Runs on IO; throws on failure.
+     *
+     * **Its pair is
+     * [com.symmetricalpalmtree.notesproutsn.importing.TextDocumentCreate.create]** (arc 19 / M8),
+     * which is this contract's Blank-template case plus a `document` row and the text-document
+     * flag — the two must be changed together.
+     *
+     * [asText] is the type radio (arc 19 / M8) and touches exactly two of the eight steps: step 6's
+     * `notebook_meta.textDocument` and step 8's `NotebookFlags.TEXT_DOCUMENT` bit. Nothing else
+     * changes — **the paper is written the same way for both kinds**, because a text document's
+     * pages underneath are still pages. It writes no `document` row either: a brand-new text
+     * document has no text, and blank text is an absent row in this format.
+     */
+    private suspend fun createNotebook(
+        name: String,
+        pick: TemplatePick,
+        paper: PaperSource,
+        asText: Boolean,
+    ): String {
         val notebookId = UUID.randomUUID().toString()
         // The passphrase lives only in process RAM (KeySession) — never an extra, never the index.
         // Absent means this process never went through bootstrap; bounce the way IndexGuard does.
@@ -271,6 +314,8 @@ class NewNotebookActivity : AppCompatActivity() {
                 notebookId = notebookId, name = name, createdAt = now, updatedAt = now,
                 folderPath = repo.ancestry(parentFolderId),
                 appVersionCode = packageManager.getPackageInfo(packageName, 0).longVersionCode.toInt(),
+                // The mirror of the index bit, so the file stays self-describing on import.
+                textDocument = asText,
             ))
             db.seal(file)
         } catch (e: Exception) {
@@ -280,13 +325,23 @@ class NewNotebookActivity : AppCompatActivity() {
             throw e
         }
 
-        repo.createNotebook(notebookId, name, parentFolderId, TemplatePicks.birthKind(pick), pageCount = 1, now = now)
+        repo.createNotebook(
+            notebookId, name, parentFolderId, TemplatePicks.birthKind(pick), pageCount = 1,
+            textDocument = asText, now = now,
+        )
+
+        // A text document's cover is its text, so an empty one's cover is an empty page — rendered
+        // here, at the create, rather than left to the first close ([TextDocumentCreate] does the
+        // same on import, for the same reason): the notebook may not be opened for weeks, and a
+        // coverless card among text-document cards reads as a card that failed. Never throws.
+        if (asText) TextCover.render(repo, notebookId, "")
         return notebookId
     }
 
     companion object {
         private const val TAG = "NewNotebook"
         private const val KEY_PICK = "templatePick"
+        private const val KEY_TEXT_DOCUMENT = "textDocument"
         const val EXTRA_PARENT_FOLDER_ID = "parentFolderId"
         const val EXTRA_NOTEBOOK_ID = "notebookId"
         const val EXTRA_NOTEBOOK_NAME = "notebookName"

@@ -65,9 +65,11 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   `:extension-api` only; one package, TWO services: `SoilExporterService` + `SoilImporterService`,
   label unchanged on the user's call) · `:ext-pdf` (**NSE · PDF Export** — `:extension-api` only +
   module-local `com.tom-roush:pdfbox-android:2.0.27.0`, which never leaks into another module) ·
-  `:ext-document` (**NSE · Document**, arc 19 / M3 — `:extension-api` + `:sn-screen` +
-  `:markdown`, never `:app`; the document editor screen, no Application class, no drawing
-  engine).
+  `:ext-document` (**NSE · Document**, arc 19 / M3, grown M8 — `:extension-api` + `:sn-screen` +
+  `:markdown`, never `:app`; one package, TWO services + a screen: `DocumentEditorService` +
+  the editor Activity, and `TextImporterService` on the importer point (declares API version 3
+  for its `ImporterInfo.resultKind` tail — per-service meta-data, the editor keeps 2); no
+  Application class, no drawing engine).
   `gradle.properties` sets `android.nonTransitiveRClass=false` — undoing it breaks every
   `:sn-screen` resource reference from `:app`.
 - **SN has FIVE extension points** — each added on its own explicit user decision, and
@@ -93,7 +95,10 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   - `ACTION_NOTEBOOK_IMPORTER` — the exporter's mirror (plural, two fds, bounded spec, no
     secret/id/path). Probe, unlock (`AttemptLimiter` `"IMPORT"`), the unconditional re-key to
     the device global key, `SafeImportId`, placement, remap and both writes are all host-side;
-    the extension only streams bytes. Detail: `docs/import.md`.
+    the extension only streams bytes. `ImporterInfo.resultKind` (arc 19 / M8, compatible tail —
+    absent = `RESULT_NOTEBOOK`) says what the delivered bytes ARE: `RESULT_TEXT_DOCUMENT` forks
+    the host after delivery into strict-UTF-8 validation + text-document create instead of the
+    `.soil` probe. Detail: `docs/import.md`.
   - `ACTION_DOCUMENT_EDITOR` + `_SCREEN` (arc 19 / M3) — the second screen-owning point, served
     by `:ext-document`. **The host owns every `.soil` read and write** (og's invariant, enforced
     by the process boundary): the seam's new piece is `IDocumentHost`, the first **host-side**
@@ -107,8 +112,9 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   the unbind) because **an extension writes nothing to disk itself, ever**; action strings are
   SN-namespaced so Paper's extensions are never discovered; trust is same-signature both ways
   (discovery + bind-time re-check host-side, `HostCallerCheck` first thing in every stub method);
-  `ExtensionContract.API_VERSION` = 2 and the host accepts `1..N` (the declared number is what
-  the extension *requires* of the host).
+  `ExtensionContract.API_VERSION` = 3 (arc 19 / M8 — the result-kind tail; 2 was arc 18's
+  sourceKind tail) and the host accepts `1..N` (the declared number is what the extension
+  *requires* of the host).
 - **The Scratch Pad is not ours to change from here** (arc 11, `docs/scratchpad.md`). It is the
   `:ext-scratchpad` APK: its own process, its own g-paper surface, its own undo stack, and it
   **writes nothing to disk itself** — its pages live in the host store, lent for the showing and

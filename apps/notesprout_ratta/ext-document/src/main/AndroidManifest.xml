@@ -23,6 +23,25 @@
                 android:value="2" />
         </service>
 
+        <!-- The NOTEBOOK_IMPORTER point (arc 16 / I1), served here too since arc 19 / M8: `.md` /
+             `.markdown` / `.txt` in, as a text document. A sibling of `:ext-soil`'s importer — same
+             action, same stateless bind, different declared formats — and the host lists whatever
+             is installed.
+             API version 3 on THIS service alone (metadata is per-service; the editor above keeps
+             its 2): the descriptor's result-kind tail is what tells the host these bytes are text,
+             and a version-2 host would read the absent tail as ".soil" and run a Markdown file
+             through the notebook probe. -->
+        <service
+            android:name=".TextImporterService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.symmetricalpalmtree.notesproutsn.extension.NOTEBOOK_IMPORTER" />
+            </intent-filter>
+            <meta-data
+                android:name="com.symmetricalpalmtree.notesproutsn.extension.API_VERSION"
+                android:value="3" />
+        </service>
+
         <!-- The extension-owned screen: exported, custom action, NO launcher filter; launched only
              by the host via startActivityForResult — it refuses any other caller first thing in
              onCreate. <category DEFAULT> is required or implicit resolution will not match it. -->

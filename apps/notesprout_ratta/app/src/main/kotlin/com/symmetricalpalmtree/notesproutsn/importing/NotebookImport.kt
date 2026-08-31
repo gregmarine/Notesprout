@@ -81,6 +81,14 @@ object NotebookImport {
 
         /** The Garden write failed or came out short — no room, or IO died mid-copy. */
         WRITE,
+
+        /** A text import's bytes are not text (arc 19 / M8): they will not decode as strict UTF-8,
+         *  or they decode and hold a NUL — binary wearing a text extension. */
+        NOT_TEXT,
+
+        /** A text import's file is over [TextImport.MAX_TEXT_BYTES] (or its decoded text is over
+         *  the document char cap). */
+        TEXT_TOO_LONG,
     }
 
     /** An engine failure with a [Problem] the screen can turn into one honest sentence. Messages

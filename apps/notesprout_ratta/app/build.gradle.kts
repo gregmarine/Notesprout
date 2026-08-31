@@ -60,6 +60,9 @@ dependencies {
     implementation(project(":extension-api"))
     // g-paper arrives transitively: `:sn-screen` declares both artifacts as `api` (arc 11 / J1).
     implementation(project(":sn-screen"))
+    // Arc 19 / M8 — the shared markdown engine: the host renders whatever a notebook is (text
+    // covers here; the M9 PDF preview next). Wiring this is what retires `core/markdown`.
+    implementation(project(":markdown"))
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.room:room-runtime:2.7.0")

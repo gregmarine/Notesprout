@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tabler "files" icon: two stacked document outlines — the pages behind this document. The
+     text-document-only "Show pages" button's face (M8). Deliberately NOT ic_notebook (the scope
+     toggle owns it) and not ic_file_text (the toggle's other face): a header cannot say two things
+     with one glyph. Same vector as og's own `ic_files`. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- The front sheet's folded corner -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M15 3v4a1 1 0 0 0 1 1h4"
+        android:strokeColor="@color/inkBlack"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+    <!-- The front sheet -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M18 17h-7a2 2 0 0 1 -2 -2v-10a2 2 0 0 1 2 -2h4l5 5v7a2 2 0 0 1 -2 2z"
+        android:strokeColor="@color/inkBlack"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+    <!-- The sheet behind it, down and to the left -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M16 17v2a2 2 0 0 1 -2 2h-7a2 2 0 0 1 -2 -2v-10a2 2 0 0 1 2 -2h2"
+        android:strokeColor="@color/inkBlack"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+</vector>

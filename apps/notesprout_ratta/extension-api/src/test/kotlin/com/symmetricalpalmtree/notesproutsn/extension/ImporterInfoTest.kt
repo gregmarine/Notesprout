@@ -74,4 +74,33 @@ class ImporterInfoTest {
             info(mimeTypes = listOf("application/octet-stream", "application/octet-stream"))
         }
     }
+
+    // ── The result-kind compatible tail (arc 19 / M8 — the ExporterInfo.sourceKind recipe).
+    //    The default is the wire pin: an old-shape parcel's absent tail must land here, so the
+    //    constructor default and the parcel-read fallback are one constant. The device walk
+    //    covers the live Binder round trip (this module runs no Robolectric).
+
+    @Test
+    fun resultKindDefaultsToNotebook() {
+        assertEquals(ImporterContract.RESULT_NOTEBOOK, info().resultKind)
+    }
+
+    @Test
+    fun acceptsTextDocumentAndRejectsUnknownResultKinds() {
+        assertEquals(
+            ImporterContract.RESULT_TEXT_DOCUMENT,
+            ImporterInfo(
+                "Text or Markdown",
+                listOf("md", "markdown", "txt"),
+                listOf("text/markdown", "text/plain"),
+                ImporterContract.RESULT_TEXT_DOCUMENT,
+            ).resultKind,
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            ImporterInfo("Text", listOf("txt"), listOf("text/plain"), 2)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            ImporterInfo("Text", listOf("txt"), listOf("text/plain"), -1)
+        }
+    }
 }

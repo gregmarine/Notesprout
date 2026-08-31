@@ -5,8 +5,8 @@
   enough, the notebook needs no handoff around this screen).
 
   Shape, top to bottom:
-    header  — Close · title · ‹ n / m › · Scope · Text size · Write · Preview
-              (no ✓ Done — see topBarRow)
+    header  — Close · title · ‹ n / m › · Scope · Text size · Write · Preview · [Show pages]
+              (no ✓ Done — see topBarRow; Show pages is text-document-only, M8)
     rule    — 1dp inkBlack
     writing chrome (source strip + format bar + overflow panel + find bar), hidden as ONE piece
               in Preview
@@ -40,8 +40,9 @@
 
          There is NO ✓ Done (user call, 2026-08-30): writing here is not cancellable and every way
          out saves, so the back arrow IS the leave door — a second button that did the same thing
-         read as redundant. og keeps its ✓; SN diverges deliberately. (M8's text documents want a
-         "show the pages" exit — that phase decides its own control, and it is not this one.) -->
+         read as redundant. og keeps its ✓; SN diverges deliberately. M8's "show the pages" exit for
+         text documents is therefore its OWN button at the trailing edge (btnShowPages), not a ✓:
+         the back arrow still means "to the library", and that one means "open the pages". -->
     <LinearLayout
         android:id="@+id/topBarRow"
         android:layout_width="match_parent"
@@ -57,12 +58,18 @@
             android:contentDescription="@string/cd_document_close"
             android:src="@drawable/ic_arrow_left" />
 
+        <!-- Also the rename control for a text document (M8): it is made clickable from code, and
+             takes the row's full height so that the tap target is hand-sized rather than
+             text-sized. No box, no underline — on e-ink there is no ripple to promise an
+             affordance with, and a boxed title would read as a field rather than a heading; the
+             long-press hint is what teaches it. -->
         <TextView
             android:id="@+id/title"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:layout_weight="1"
             android:ellipsize="end"
+            android:gravity="center_vertical"
             android:paddingStart="8dp"
             android:paddingEnd="8dp"
             android:singleLine="true"
@@ -132,6 +139,18 @@
             style="@style/Widget.Notesprout.ToolbarButton"
             android:contentDescription="@string/cd_document_preview"
             android:src="@drawable/ic_eye" />
+
+        <!-- Show pages (M8) — text documents only, and only in the notebook scope, which is where
+             the page cluster is GONE and the width exists. It is NOT a second leave door: the back
+             arrow still leaves to the library, and this one asks the host to open the pages behind
+             the document instead. GONE by default and set from code, because before the first state
+             lands there is no notebook to know anything about. -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnShowPages"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:contentDescription="@string/document_show_pages"
+            android:src="@drawable/ic_pages"
+            android:visibility="gone" />
 
     </LinearLayout>
 

@@ -71,6 +71,16 @@ class DocumentHostHooks(
      * belongs to the open-time seed, where the notebook is front-most ([DocumentSeedFlow]).
      */
     private val recognizePageText: suspend (pageId: String) -> String?,
+    /** M8: whether this notebook is a text document ([NotebookFlags.TEXT_DOCUMENT] — the index
+     *  bit, read once at session open). Gates the rename/close calls and rides every state. */
+    private val isTextDocument: () -> Boolean = { false },
+    /**
+     * M8: apply a validated rename (text documents only — already gated here). Runs on a Binder
+     * thread; the implementation validates against the name rules and siblings and refuses with
+     * `IllegalArgumentException` whose message is shown as the refusal reason (never a path,
+     * never document text), then writes index + meta + its own header.
+     */
+    private val rename: (String) -> Unit = { throw IllegalArgumentException("Not a text document.") },
 ) : DocumentHostBinder.Hooks {
 
     /** A seed the notebook built **before** the launch and handed over for the first `current()`
@@ -97,6 +107,17 @@ class DocumentHostHooks(
     @Volatile
     private var staged: StagedSeed? = null
 
+    /**
+     * M8: how the editor asked the showing to end ([DocumentContract.CLOSE_SHOW_PAGES] /
+     * [DocumentContract.CLOSE_TO_LIBRARY]) — advisory state written from a Binder thread by
+     * [closeNotebook] and read on Main when the result lands. null = the editor never said
+     * (process-death edges, the debug hook), which a text document treats as to-library —
+     * the fail-safe direction: a wrongly-sealed notebook reopens, a wrongly-loaded canvas
+     * cannot un-load.
+     */
+    @Volatile
+    private var closeMode: Int? = null
+
     /** The page the editor is on, for the screen's saved state and its catch-up on close. Retained
      *  through a notebook-scope visit — the editor is still "at" that page for the way back. */
     val targetPageId: String? get() = target
@@ -122,6 +143,14 @@ class DocumentHostHooks(
         targetScope = DocumentContract.SCOPE_PAGE
         staged = null
         cancelled = false
+        closeMode = null
+    }
+
+    /** M8: the close advisory, consumed once by the result path (`onClosed`). */
+    fun takeCloseMode(): Int? {
+        val mode = closeMode
+        closeMode = null
+        return mode
     }
 
     /**
@@ -140,7 +169,7 @@ class DocumentHostHooks(
 
     /**
      * The current target's state, with its text parked in the read window ([DocumentHostSession] is
-     * the window). [DocumentPageState.textDocument] is M8's.
+     * the window).
      *
      * M6 added the staged seed: with no stored document and a stage naming this page, the window
      * holds recognized text the host has **not** written ([DocumentPageState.seeded] true,
@@ -454,6 +483,20 @@ class DocumentHostHooks(
         cancelled = true
     }
 
+    /** M8, text documents only: validation and the writes live in [rename] (the screen's half);
+     *  the gate here is the seam's — a call against an ordinary notebook is a contract breach. */
+    override fun renameNotebook(name: String) {
+        require(isTextDocument()) { "Not a text document." }
+        rename(name)
+    }
+
+    /** M8, text documents only: record the advisory — the editor still finishes normally and
+     *  the result path reads this via [takeCloseMode]. */
+    override fun closeNotebook(mode: Int) {
+        require(isTextDocument()) { "Not a text document." }
+        closeMode = mode
+    }
+
     /**
      * og's per-page loop ([DocumentTargetRules.mergePagePart] is the row, [mergeText] the join):
      * a page's own document wins, an undocumented page contributes its silent recognition when one
@@ -530,8 +573,7 @@ class DocumentHostHooks(
             // Truncated rather than refused: a name too long for the header is a display problem,
             // and failing the whole open over one would be absurd.
             title = notebookName().take(DocumentContract.MAX_TITLE_CHARS),
-            // Still false: the flag is M8's (`NotebookFlags.TEXT_DOCUMENT` / `notebook_meta`).
-            textDocument = false,
+            textDocument = isTextDocument(),
             source = source,
             textChars = text.length,
             textChunks = chunks,

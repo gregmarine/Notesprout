@@ -2,7 +2,7 @@ package com.symmetricalpalmtree.notesproutsn.notebook
 
 import com.symmetricalpalmtree.gpaper.core.model.Stroke
 import com.symmetricalpalmtree.gpaper.core.model.StrokePoint
-import com.symmetricalpalmtree.notesproutsn.core.markdown.HeadingTypography
+import com.symmetricalpalmtree.notesproutsn.markdown.HeadingTypography
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilObjectEntity
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilSchema
 import org.junit.Assert.assertEquals

@@ -111,6 +111,28 @@ internal interface AutomationPeer {
      * asynchronous: poll [text] and [sourceLabel].
      */
     fun merge(mode: Int): Boolean
+
+    // ── M8's text documents ───────────────────────────────────────────────────
+    // The notebook's name is user content too: it crosses here and is never logged.
+
+    /**
+     * The "Show pages" button's tap — the text document's exit to its canvas. Returns false, having
+     * done nothing, when the button is not on screen (not a text document, or not the notebook
+     * scope): a walk that thinks it opened the pages when there was no button would report the wrong
+     * thing. Leaves the screen like every other exit, flushing first.
+     */
+    fun showPages(): Boolean
+
+    /**
+     * Rename the notebook, **without the dialog** — a walk cannot type into an `AlertDialog` any
+     * more than it can type into the editor. Same guards and same host call as the title's tap.
+     * Returns false when it did not start (not a text document, one already running, blank, or the
+     * name it already has). Asynchronous: poll [title].
+     */
+    fun rename(name: String): Boolean
+
+    /** The header's title as it now reads. */
+    fun title(): String
 }
 
 /** The live screen's peer, or null when no screen is up (and always null in release). */
