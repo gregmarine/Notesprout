@@ -432,7 +432,7 @@ Export progress is a modal dialog (post-D2). Timings: ~200 ms/page assembly; `EX
 120 s covers ~400 pages. Refs: `docs/export.md`, `docs/extensions.md` §§ source-kind tail /
 export secret + boundary rows 12–13.
 
-### Arc 19 "Document" ✅ frozen 2026-08-31 (M1 45943f9 · M2 e828886 · M3 ced73b2 · M4 7822553 · M5 766a3a7 · M6 681d99e · M7 7ef2926 · M8 70e0218+1051cba · M9 62964e6 · M10 2fcc980 · M11)
+### Arc 19 "Document" ✅ frozen 2026-08-31 (M1 45943f9 · M2 e828886 · M3 ced73b2 · M4 7822553 · M5 766a3a7 · M6 681d99e · M7 7ef2926 · M8 70e0218+1051cba · M9 62964e6 · M10 2fcc980 · M11 56f8975)
 og's Documents as the FIFTH point (`ACTION_DOCUMENT_EDITOR` + `_SCREEN`, `NSE · Document`,
 `:ext-document` — one APK, THREE registrations: editor + `SOURCE_DOCUMENT` exporter + text
 importer) plus `:markdown`, the shared engine. The page is the draft, the document the result:
@@ -1293,7 +1293,7 @@ code — recommend yes)? Toggle location (editor overflow row vs. library debug-
 settings)?
 
 ### M11 — Review, boundary audit, docs, freeze
-**Status:** 🧪 Awaiting device verification + user checklist
+**Status:** ✅ Complete (commit 56f8975 — user checklist passed all 4, 2026-08-31). **Arc 19 is frozen.**
 
 **Outcome (running record):** Phase-start answers: review level **high**, version stays
 `0.1.0-ratta`. `/code-review high 17b0b9f..HEAD` → 15 CONFIRMED correctness + 6 cleanup (1
