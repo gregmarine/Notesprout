@@ -1,5 +1,6 @@
 package com.symmetricalpalmtree.notesproutsn.notebook
 
+import com.symmetricalpalmtree.notesproutsn.core.BoundedWait
 import com.symmetricalpalmtree.notesproutsn.extension.DocumentContract
 import com.symmetricalpalmtree.notesproutsn.extension.DocumentHostBinder
 import com.symmetricalpalmtree.notesproutsn.extension.DocumentHostSession
@@ -22,7 +23,8 @@ import kotlinx.coroutines.withContext
  * **A sealed session is never written to.** Both hooks check [alive] and [NotebookSession.isOpen]
  * first and throw `IllegalStateException` otherwise (one of the three that cross Binder intact) —
  * the host may have been closing behind the editor, and a write onto a sealed session would be
- * lost at best.
+ * lost at best. A session that is merely **not open yet** is waited for, briefly and boundedly —
+ * see [openSession] for why the reconnect path needs that.
  *
  * Document text is never logged here; the binder above logs the counts.
  */
@@ -102,11 +104,44 @@ class DocumentHostHooks(
         }
     }
 
-    /** The open session, or the one marshalable refusal — never a write onto a sealed session. */
+    /**
+     * The open session, or the one marshalable refusal — never a write onto a sealed session.
+     *
+     * **Why this waits (M4).** The host process can be killed or config-destroyed while the
+     * extension's editor is up; the recreated screen re-opens the client without launching
+     * anything, and the fresh `begin` is the extension's signal to flush the text it still holds.
+     * That `current()`/`saveChunk` lands on a Binder thread within milliseconds — while this
+     * screen's own `openSession()` is still on IO opening the `.soil`. Refusing there would throw
+     * away the one save the reconnect exists to land, so we wait for it instead: the same
+     * pendingDocumentFlush staging og does inside one process, in its two-process form.
+     *
+     * [OPEN_WAIT_MS] sits inside both clocks that bound this call — the extension's own retry
+     * window and the client's 15 s `end()` timeout — so a wait that runs its full length still
+     * answers before anything above it gives up. Blocking is allowed here (see the class doc), and
+     * the happy path pays nothing: the check runs before any sleep.
+     *
+     * [alive] false is **not** waited on. A screen that is finishing or destroyed never opens its
+     * DB again, so there is nothing to wait for; the refusal is immediate.
+     */
     private fun openSession(): NotebookSession {
-        check(alive()) { "notebook closed" }
-        val nb = notebook()
-        check(nb.isOpen) { "notebook closed" }
-        return nb
+        if (!ready()) {
+            check(alive()) { "notebook closed" }
+            BoundedWait.until(OPEN_WAIT_MS, OPEN_POLL_MS) { !alive() || notebook().isOpen }
+            check(ready()) { "notebook closed" }
+        }
+        return notebook()
+    }
+
+    /** [alive] first, always: the session is `lateinit` on the screen and only [alive] knows
+     *  whether it has been constructed yet. */
+    private fun ready(): Boolean = alive() && notebook().isOpen
+
+    private companion object {
+        /** The whole wait, end to end. */
+        const val OPEN_WAIT_MS = 8_000L
+
+        /** One poll step. Long enough to cost nothing, short enough that a save landing just after
+         *  the open does not sit visibly waiting. */
+        const val OPEN_POLL_MS = 200L
     }
 }

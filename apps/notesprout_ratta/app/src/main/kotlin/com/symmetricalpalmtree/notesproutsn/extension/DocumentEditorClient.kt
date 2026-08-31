@@ -27,7 +27,7 @@ import kotlinx.coroutines.withContext
  * this point starts with none.) The caller launches with an `ActivityResultLauncher` — a plain
  * `startActivity` leaves the extension's `callingPackage` null and its screen refuses it.
  *
- * [finish]: `end()` ≤ [CALL_TIMEOUT_MS] in a `try`, then in `finally` unbind, revoke the store
+ * [finish]: `end()` ≤ [END_TIMEOUT_MS] in a `try`, then in `finally` unbind, revoke the store
  * binder and revoke the host binder (which drops the showing's read window and any half-received
  * save with it). Every path: result, cancel, the caller's death, a failed `begin`.
  *
@@ -95,7 +95,19 @@ class DocumentEditorClient(context: Context, val ref: ProviderRef) {
         return Intent(DocumentContract.ACTION_DOCUMENT_EDITOR_SCREEN).setPackage(ref.packageName)
     }
 
-    /** `end()` (best effort, ≤ [CALL_TIMEOUT_MS]), then unbind + both revokes in `finally`. Idempotent. */
+    /**
+     * `end()` (best effort, ≤ [END_TIMEOUT_MS]), then unbind + both revokes in `finally`. Idempotent.
+     *
+     * **Why `end()` gets its own, longer clock (M4).** `end()` is not a question — it is the
+     * editor's last chance to push text it has not saved yet, and the extension's handler flushes
+     * it synchronously through the host binder before answering. So the wait here has to cover a
+     * full-size document's chunks *plus* whatever the host's own side of those saves costs, which
+     * on the reconnect path includes `DocumentHostHooks`' bounded wait for a `.soil` that is still
+     * opening. [CALL_TIMEOUT_MS] is right for `begin` (nothing but a state read behind it) and far
+     * too tight for that. A Binder call cannot be cancelled in any case — the timeout only bounds
+     * how long we *wait* for it, so the cost of it being generous is nothing, and the cost of it
+     * being short is the user's last edit.
+     */
     suspend fun finish() {
         val binding = held ?: return
         held = null
@@ -104,7 +116,7 @@ class DocumentEditorClient(context: Context, val ref: ProviderRef) {
         val host = hostBinder
         hostBinder = null
         try {
-            if (!binding.isDead) binding.call(CALL_TIMEOUT_MS) { it.end() }
+            if (!binding.isDead) binding.call(END_TIMEOUT_MS) { it.end() }
             Slog.d(TAG) { "finish: end ok" }
         } catch (e: CancellationException) {
             throw e   // the caller's scope is gone — the finally below still releases the bind
@@ -121,6 +133,11 @@ class DocumentEditorClient(context: Context, val ref: ProviderRef) {
 
     companion object {
         const val TAG = "DocumentEditorClient"
+
+        /** `begin` — a state read and nothing else. */
         const val CALL_TIMEOUT_MS = 2_000L
+
+        /** `end` only — the extension's final flush rides it. See [finish]. */
+        const val END_TIMEOUT_MS = 15_000L
     }
 }

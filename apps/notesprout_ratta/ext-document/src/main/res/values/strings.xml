@@ -7,11 +7,32 @@
     <string name="ext_label">NSE · Document</string>
     <string name="document_title">Document</string>
 
-    <!-- The M3 stub screen's chrome. Every icon button needs a long-press hint naming it, and the
-         hint is its content description. -->
+    <!-- The editor's chrome. Every icon button needs a long-press hint naming it, and the hint is
+         its content description. -->
     <string name="cd_document_close">Close</string>
     <string name="cd_document_done">Done</string>
+    <string name="cd_document_write">Write</string>
+    <string name="cd_document_preview">Preview</string>
     <string name="document_load_failed">This document could not be read just now.</string>
     <!-- `n / m` beside the title. Empty for the notebook scope (M7), which is not a page. -->
     <string name="document_page_indicator">%1$d / %2$d</string>
+    <string name="document_hint">Start writing…</string>
+
+    <!-- Format-bar hints: the tool's name and its chord, which is all an icon bar can teach. The
+         separator is a spaced middle dot, matching every other hint in this family. -->
+    <string name="fmt_h1">Heading 1  ·  Ctrl+1</string>
+    <string name="fmt_h2">Heading 2  ·  Ctrl+2</string>
+    <string name="fmt_h3">Heading 3  ·  Ctrl+3</string>
+    <string name="fmt_bold">Bold  ·  Ctrl+B</string>
+    <string name="fmt_italic">Italic  ·  Ctrl+I</string>
+    <string name="fmt_strikethrough">Strikethrough  ·  Ctrl+Shift+X</string>
+    <string name="fmt_code">Inline code  ·  Ctrl+E</string>
+    <string name="fmt_quote">Blockquote  ·  Ctrl+Shift+Q</string>
+    <string name="fmt_bullet">Bullet list  ·  Ctrl+Shift+8</string>
+    <string name="fmt_ordered">Numbered list  ·  Ctrl+Shift+7</string>
+    <string name="fmt_task">Task list  ·  Ctrl+Shift+9</string>
+    <string name="fmt_link">Link  ·  Ctrl+K</string>
+    <string name="fmt_image">Image  ·  Ctrl+Shift+K</string>
+    <string name="fmt_rule">Horizontal rule  ·  Ctrl+Shift+−</string>
+    <string name="fmt_more">More tools</string>
 </resources>

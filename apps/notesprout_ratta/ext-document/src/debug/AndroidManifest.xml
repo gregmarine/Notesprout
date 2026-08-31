@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug-only manifest additions. The automation receiver is how a walk agent types into the editor
+  at all — the Supernote's IME swallows `adb shell input text` — and it exists in the debug variant
+  ONLY: a release APK has neither this entry nor the receiver class.
+
+  Exported because `am broadcast` from the shell is the whole point. Nothing it can do is anything
+  the person holding the device could not do by tapping, and it can only reach an editor that is
+  already open (the screen registers its peer in onCreate and clears it in onDestroy).
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <receiver
+            android:name=".AutomationReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.symmetricalpalmtree.notesproutsn.ext.document.AUTOMATION" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

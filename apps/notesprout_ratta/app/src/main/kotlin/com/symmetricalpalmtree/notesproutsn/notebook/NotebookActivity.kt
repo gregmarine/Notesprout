@@ -411,6 +411,12 @@ class NotebookActivity : AppCompatActivity() {
         )
         binding.btnDocument.setOnClickListener { if (opened && !closing) documentEntry.open() }
         TooltipCompat.setTooltipText(binding.btnDocument, binding.btnDocument.contentDescription)
+        // We died with the editor still on screen (M4): the extension's process — and its unsaved
+        // text — outlived us, holding a host binder that went with the old instance. Re-open the
+        // client here, in onCreate, so the fresh `begin` reaches the editor as its flush signal.
+        // It must happen now and not in onResume: a pending ActivityResult is delivered BEFORE
+        // onResume, and the entry joins the reconnect from there rather than racing it.
+        if (savedInstanceState?.getBoolean(KEY_DOCUMENT_SHOWING) == true) documentEntry.reconnect()
 
         // Chrome moved/appeared/disappeared: re-push the exclusion rects once the pass settles.
         binding.root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> binding.root.post { pushExclusions() } }
@@ -2160,6 +2166,20 @@ class NotebookActivity : AppCompatActivity() {
         if (::documentEntry.isInitialized) documentEntry.refresh()
     }
 
+    /**
+     * The one thing this screen carries across its own death (M4): whether the document editor was
+     * showing. Everything else it needs is in the Intent or the `.soil` — but a live showing lives
+     * only in another process, and without this flag the recreated instance would have no way to
+     * know a bind is owed one. See [DocumentEditorEntry.reconnect].
+     */
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(
+            KEY_DOCUMENT_SHOWING,
+            ::documentEntry.isInitialized && documentEntry.isShowing,
+        )
+    }
+
     override fun onStop() {
         super.onStop()
         if (!opened || closing || !session.isOpen) return
@@ -2250,6 +2270,9 @@ class NotebookActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "NotebookActivity"
+
+        /** Saved state (M4): the document editor was showing when this instance went down. */
+        private const val KEY_DOCUMENT_SHOWING = "notebook.documentShowing"
         /** Covers any screen; deliberately not MAX_VALUE (engine-side rect math must not overflow). */
         private val BLOCK_ALL = Rect(0, 0, 100_000, 100_000)
         const val EXTRA_NOTEBOOK_ID = "notebookId"

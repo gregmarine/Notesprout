@@ -703,7 +703,47 @@ leave-this-page cluster); **`MAX_DOCUMENT_CHARS` = 10,000,000** (aligned with th
 cap's 10 MB — UTF-8 chars ≤ bytes, so anything the importer accepts is guaranteed editable).
 
 ### M4 — The real editor: Write/Preview, format bar, autosave
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (2026-08-30 — user checklist passed: typing feel, IME resize, hardware
+keyboard + chords, Preview fidelity all confirmed on the Nomad)
+
+**Outcome (code + walk, 2026-08-30):** The real editor is live on the Nomad; 1227 JVM
+tests/variant (+30), debug+release green, NUL-clean. Wizard answers: **automation hook APPROVED**
+(extension-side `src/debug/` receiver — `AutomationReceiver`, action `….ext.document.AUTOMATION`,
+set/append/get text via `/data/local/tmp` files, get_state/set_caret/mode/save/done/close; absent
+from release, `EditorAutomation.peer` never assigned there); **format bar = FULL og parity**
+(13 tools, og's four groups + dividers, og hint strings with chords) plus og's chord-only four
+(Ctrl+P mode toggle — the one chord live in Preview, Ctrl+0 paragraph, Ctrl+4–6). Editor:
+header Close · centred title+`n / m` · Write/Preview/Done (armed mode = `isSelected` box),
+`writingChrome` hidden as one piece in Preview, `FormatBarOverflow` (og semantics: moves REAL
+views, in-flow bordered panel, outside tap closes but is NOT consumed, dots never auto-dismisses,
+never leaves a divider last), watcher-based list continuation (`newlineAt` read-and-clear = the
+re-entrancy guard) + back-to-front renumber with caret delta, Back = Close path (both leave paths
+save — no cancel exists).
+**The two-process autosave/teardown table (the phase's soul — Fable design, pinned):**
+pure `AutosaveGovernor` (savedText/dirty/one-push-in-flight/newest-wins queue) + `ChunkPush`
+(fun-interface sink) + `PendingPark` (failed saves parked keyed by target; **key mismatch =
+deliberate drop** — page UUIDs globally unique, wrong-key write is corruption) + `DocumentSaver`
+(snapshot on Main, push on IO under a Mutex, 2 s debounce + 2 s retry, scope never cancelled so
+the onPause save lands). Four failures closed: (1) flush-before-seal = `end()` backstop
+(service flushes live buffer via latch-hopped `flushHook`, then park; host's `end()` gets its own
+**END_TIMEOUT_MS 15 s**); (2) host death behind the editor = host-driven **reconnect**
+(`KEY_DOCUMENT_SHOWING` saved state → `DocumentEditorEntry.reconnect()` opens WITHOUT launching;
+`onResult` **joins, never cancels** the in-flight reconnect; ext side: `begin` while held = "host
+restarted" → live screen re-`current()`s + flushes on key match, no screen → daemon-thread pending
+push, 10×500 ms behind `current()`; `DocumentHostHooks.openSession` now **waits bounded 8 s** for
+the recreated host's async DB open — og's pendingDocumentFlush staging, two-process form, pure
+`BoundedWait` in `core/`); (3) config change = `keyboard|keyboardHidden` on **both** NotebookActivity
+and the editor (+ `stateUnchanged|adjustResize`, and NO IME-hide call anywhere — the Ratta rule);
+(4) editor recreation = explicit buffer in saved state, **capped 256 k chars** (a Bundle is a
+Binder transaction), restored buffer treated as unsaved.
+**Walk (Nomad):** open/state/type/save/preview/persistence/shell-refusal/cleanup all ✓; the
+**kill-host recovery ✓** (`am kill` under the live editor → DeadObjectException parked → Done →
+"begin (host restarted)" → reconnect begin ok 118 ms → "teardown flush pushed 63 chars" → text in
+the `.soil`). The walk's two FAILs both **refuted by hand** (the standing trap's ~11th firing):
+list continuation works (walk's newline file was bad; one real find — the hook's append clobbered
+a watcher-moved caret, fixed: append no longer calls setSelection); overflow works (agent tapped
+the bar's empty right edge — the dots sit right after the last fitting tool). Blank-save cleanup
+verified live (chars=0 → row soft-deleted). User checklist passed 2026-08-30.
 
 The editor screen in `:ext-document`, og's chrome shape on SN's design system: header (title ·
 `‹ n / m ›` · text-size · Write/Preview/Done as icons — og's P2P lesson pre-applied), source
@@ -723,9 +763,11 @@ chunk reassembly); walk — open/type-via-hook/mode-switch/Done, autosave lands 
 Preview fidelity eye-check.
 *Opus the screen; Fable the autosave/teardown review; Haiku walks.*
 
-**Questions to resolve at phase start:** the **debug-only automation hook** (a debug-build
-receiver that sets/reads editor text so Haiku can walk typing flows — approve?); format-bar
-tool set parity vs. trim.
+**Questions to resolve at phase start:** ✅ answered 2026-08-30 — the **debug-only automation
+hook is APPROVED** (extension-side: a `src/debug/`-only receiver in `:ext-document` that
+sets/reads the editor buffer + caret/mode; never compiled into release); format bar = **full og
+parity** (all 13 formatting tools, og's four groups + Ctrl chords; Find/Word-count/Proofread
+land in M5/M10 per the not-built-controls rule).
 
 ### M5 — Editor tools: Reflow, find & replace, word count, text size, caret memory
 **Status:** ⬜ Not started

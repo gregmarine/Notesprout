@@ -94,8 +94,16 @@
             android:exported="false"
             android:screenOrientation="portrait" />
 
+        <!-- keyboard|keyboardHidden (arc 19 / M4): the document editor runs in the extension's
+             process on top of this screen, and attaching a Bluetooth keyboard to type in it is a
+             config change down here. A recreate behind the live editor would tear down the host
+             binder it is holding mid-edit — the exact failure M4 exists to close, provoked by the
+             one act most likely to precede a long piece of writing. The screen is portrait-locked
+             with one layout; there is nothing a recreate would give it (og's manifest records the
+             same defense, and ExportActivity below carries it for its own reason). -->
         <activity
             android:name=".notebook.NotebookActivity"
+            android:configChanges="keyboard|keyboardHidden"
             android:exported="false"
             android:screenOrientation="portrait" />
 

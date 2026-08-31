@@ -1,12 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The document editor screen (arc 19 / M3) — the STUB the M4 editor replaces. Chrome, not paper:
-  no PaperView, no exclusion rects, nothing to hand the EPD pipeline to.
+  The document editor screen (arc 19 / M4) — the real editor. Chrome, not paper: no PaperView, no
+  exclusion rects, nothing to hand the EPD pipeline to (the M3 on-device answer: stop-behind is
+  enough, the notebook needs no handoff around this screen).
 
-  Shape: one top bar (Close · title · page indicator · Done) over a scrolling read-only text view.
-  The bar takes @dimen/toolbar_bar_thickness and its buttons Widget.Notesprout.ToolbarButton, so
-  every tap target is the tier's — never a hardcoded size. The Done button sits at the far end of
-  the TOP bar (the SN rule: action buttons on the top bar, after the cancel side).
+  Shape, top to bottom:
+    header  — Close · [title · n / m] · Write · Preview · Done
+    rule    — 1dp inkBlack
+    writing chrome (format bar + overflow panel), hidden as ONE piece in Preview
+    rule    — 1dp inkBlack
+    editor  — the Markdown source, or the rendered preview in its place
+
+  The format bar's buttons are NOT declared here: the overflow manager moves the real views between
+  the bar and the panel, so a layout that listed them would describe an arrangement that stops being
+  true the moment the bar is narrower than its contents. Both containers are in flow — the panel
+  pushes the text down rather than floating over it, because an overlay ghosts on e-ink.
+
+  M5+ controls (text size, find, word count), M6's page arrows and source strip and M7's scope
+  toggle do not exist here at all: not built, rather than built and hidden.
 
   Chrome sits flush at the top edge — the top guard is 0 on Ratta; the Activity still applies it,
   because the guard, not this file, is where that decision lives.
@@ -66,12 +77,37 @@
             android:contentDescription="@string/cd_document_close"
             android:src="@drawable/ic_arrow_left" />
 
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnDone"
-            style="@style/Widget.Notesprout.ToolbarButton"
+        <!-- Write / Preview / Done, in that order, at the trailing edge — the SN rule: action
+             buttons on the TOP bar, after the cancel side. The armed mode's button carries the
+             selected state of bg_toolbar_button (a 1dp inkBlack box), which is how every armed
+             tool in this app reads. -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
             android:layout_gravity="end|center_vertical"
-            android:contentDescription="@string/cd_document_done"
-            android:src="@drawable/ic_check" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnWrite"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_document_write"
+                android:src="@drawable/ic_pen" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnPreview"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_document_preview"
+                android:src="@drawable/ic_eye" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnDone"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="8dp"
+                android:contentDescription="@string/cd_document_done"
+                android:src="@drawable/ic_check" />
+
+        </LinearLayout>
 
     </FrameLayout>
 
@@ -81,22 +117,83 @@
         android:layout_height="1dp"
         android:background="@color/inkBlack" />
 
-    <ScrollView
+    <!-- Writing chrome: hidden as one piece in Preview, where there is nothing to format. -->
+    <LinearLayout
+        android:id="@+id/writingChrome"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:id="@+id/formatBar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="8dp"
+            android:paddingTop="6dp"
+            android:paddingEnd="8dp"
+            android:paddingBottom="6dp" />
+
+        <!-- Where the bar's tail lands when it does not fit. Bordered, in flow, collapsed until
+             asked for. -->
+        <LinearLayout
+            android:id="@+id/overflowPanel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/shape_bordered"
+            android:orientation="vertical"
+            android:visibility="gone" />
+
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!-- The source. Monospace because this is Markdown and columns carry meaning here. -->
+    <androidx.appcompat.widget.AppCompatEditText
+        android:id="@+id/editor"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:fillViewport="true">
+        android:background="@color/paperWhite"
+        android:gravity="top|start"
+        android:hint="@string/document_hint"
+        android:imeOptions="flagNoFullscreen|flagNoExtractUi"
+        android:inputType="textMultiLine|textCapSentences|textNoSuggestions"
+        android:lineSpacingMultiplier="1.2"
+        android:paddingStart="16dp"
+        android:paddingTop="16dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="32dp"
+        android:scrollbars="vertical"
+        android:textColor="@color/inkBlack"
+        android:textColorHint="@color/inkLight"
+        android:textSize="15sp"
+        android:typeface="monospace" />
 
-        <!-- Read-only at M3: this screen exists to prove the callback seam carries state and
-             chunked text, not to edit anything. M4 turns it into the real editor. -->
+    <ScrollView
+        android:id="@+id/previewScroll"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true"
+        android:visibility="gone">
+
         <TextView
-            android:id="@+id/text"
+            android:id="@+id/previewText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:padding="16dp"
+            android:lineSpacingMultiplier="1.15"
+            android:paddingStart="16dp"
+            android:paddingTop="16dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="32dp"
             android:textColor="@color/inkBlack"
-            android:textIsSelectable="false"
-            android:textSize="15sp" />
+            android:textIsSelectable="true"
+            android:textSize="16sp" />
 
     </ScrollView>
 
