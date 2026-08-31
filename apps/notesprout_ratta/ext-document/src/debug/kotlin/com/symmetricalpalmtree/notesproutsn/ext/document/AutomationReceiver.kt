@@ -43,7 +43,12 @@ import java.util.concurrent.atomic.AtomicReference
  * - `bring_in --ei mode <0|1>` — Replace (0) / Append (1), the sheet's two rows without the sheet.
  *   Also asynchronous: poll `get_text` / `source_label`.
  * - `page_label` — the header's `n / m` alone (`-` when the target is not a page).
- * - `source_label` — the source strip's line.
+ * - `source_label` — the source strip's line (empty in the notebook scope with no merge behind it).
+ * - `get_scope` — `0` (this page's document) or `1` (the notebook document) (M7).
+ * - `toggle_scope` — the header toggle's tap. Replies `OK` when it *started*: entering the notebook
+ *   scope can auto-merge the whole notebook, so poll `get_scope` / `get_state` after it.
+ * - `merge --ei mode <0|1>` — Replace (0) / Append (1) of the notebook-wide merge. Notebook scope
+ *   only; replies `ERR:not notebook scope` otherwise, and is asynchronous like `bring_in`.
  *
  * **It never logs the document, and never the find query either.** Result data carries text back to
  * the shell because that is the whole point of `get_text`; nothing is written to logcat on any path
@@ -143,6 +148,14 @@ class AutomationReceiver : BroadcastReceiver() {
         "page_label" -> peer.pageLabel().ifEmpty { "-" }
 
         "source_label" -> peer.sourceLabel()
+
+        "get_scope" -> peer.scope().toString()
+
+        "toggle_scope" -> {
+            peer.toggleScope(); "OK"
+        }
+
+        "merge" -> if (peer.merge(intent.getIntExtra("mode", 0))) "OK" else "ERR:not notebook scope"
 
         else -> "ERR:unknown cmd"
     }

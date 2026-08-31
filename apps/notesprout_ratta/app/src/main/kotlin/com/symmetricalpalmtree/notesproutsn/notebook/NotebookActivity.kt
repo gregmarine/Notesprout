@@ -427,8 +427,12 @@ class NotebookActivity : AppCompatActivity() {
             recognizePageText = { pageId -> documentSeedFlow.recognize(pageId) },
         )
         // Before the reconnect below, and before anything can ask for state: a host killed behind
-        // the editor must come back pointing at the page the editor is still showing.
-        documentHooks.restoreTarget(savedInstanceState?.getString(KEY_DOCUMENT_TARGET))
+        // the editor must come back pointing at the page — and, since M7, the scope — the editor
+        // is still showing (og's STATE_DOCUMENT_NOTEBOOK, the mode-routing flag).
+        documentHooks.restoreTarget(
+            savedInstanceState?.getString(KEY_DOCUMENT_TARGET),
+            savedInstanceState?.getBoolean(KEY_DOCUMENT_SCOPE) == true,
+        )
         documentEntry = DocumentEditorEntry(
             activity = this,
             button = binding.btnDocument,
@@ -2202,12 +2206,14 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     /**
-     * The two things this screen carries across its own death (M4, grown at M6): whether the
-     * document editor was showing, and which page it was on. Everything else it needs is in the
-     * Intent or the `.soil` — but a live showing lives only in another process, and without these
-     * the recreated instance would have no way to know a bind is owed one, nor which page the
-     * editor's next `current()` is asking about. See [DocumentEditorEntry.reconnect] and
-     * [DocumentHostHooks.restoreTarget].
+     * The three things this screen carries across its own death (M4, grown at M6/M7): whether the
+     * document editor was showing, which page it was on, and whether it was on the NOTEBOOK
+     * document (og's `STATE_DOCUMENT_NOTEBOOK` — the mode-routing flag that keeps a recreated host
+     * from serving a page document to an editor whose buffer holds the notebook one). Everything
+     * else it needs is in the Intent or the `.soil` — but a live showing lives only in another
+     * process, and without these the recreated instance would have no way to know a bind is owed
+     * one, nor which document the editor's next `current()` is asking about. See
+     * [DocumentEditorEntry.reconnect] and [DocumentHostHooks.restoreTarget].
      */
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
@@ -2218,6 +2224,10 @@ class NotebookActivity : AppCompatActivity() {
         outState.putString(
             KEY_DOCUMENT_TARGET,
             if (::documentHooks.isInitialized) documentHooks.targetPageId else null,
+        )
+        outState.putBoolean(
+            KEY_DOCUMENT_SCOPE,
+            ::documentHooks.isInitialized && documentHooks.scopeIsNotebook,
         )
     }
 
@@ -2318,6 +2328,10 @@ class NotebookActivity : AppCompatActivity() {
         /** Saved state (M6): the page that showing had flipped to — the host's target, which the
          *  notebook underneath does not follow until the showing ends. */
         private const val KEY_DOCUMENT_TARGET = "notebook.documentTarget"
+
+        /** Saved state (M7): that showing was on the NOTEBOOK document (og's
+         *  `STATE_DOCUMENT_NOTEBOOK`) — the mode-routing flag's host half. */
+        private const val KEY_DOCUMENT_SCOPE = "notebook.documentScope"
         /** Covers any screen; deliberately not MAX_VALUE (engine-side rect math must not overflow). */
         private val BLOCK_ALL = Rect(0, 0, 100_000, 100_000)
         const val EXTRA_NOTEBOOK_ID = "notebookId"

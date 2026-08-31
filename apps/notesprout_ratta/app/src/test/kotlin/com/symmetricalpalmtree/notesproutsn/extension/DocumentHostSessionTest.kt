@@ -214,4 +214,44 @@ class DocumentHostSessionTest {
         catch (expected: IllegalArgumentException) {}
         assertNull(s.currentKey)
     }
+
+    // ── M7: the notebook document's key rides the same guards ──────
+
+    @Test
+    fun theNotebookKeyIsATargetLikeAnyOther() {
+        // The mode-routing guard, notebook form: with the notebook window loaded, a save under a
+        // PAGE key is refused — and vice versa — by the accumulator itself.
+        val s = session(key = "nb:notebook-1", text = "the final draft")
+        try { s.acceptChunk("page-1", 0, "words", last = true, drafted = false); fail() }
+        catch (expected: IllegalArgumentException) {}
+        val commit = s.acceptChunk("nb:notebook-1", 0, "the final draft, edited", last = true, drafted = false)
+        assertEquals("nb:notebook-1", commit!!.pageKey)
+    }
+
+    @Test
+    fun aScopeSwitchClearsAPageDraftsPark() {
+        // A parked page watermark must never anchor the notebook document: the different-key
+        // window swap a scope switch does drops it, so a drafted commit there refuses typed.
+        val s = session(key = "page-1")
+        s.parkWatermark(555L)
+        s.setWindow("nb:notebook-1", "merged")
+        try {
+            s.acceptChunk("nb:notebook-1", 0, "merged", last = true, drafted = true)
+            fail()
+        } catch (expected: IllegalStateException) {
+            assertEquals(DocumentContract.NO_DRAFT_PENDING, expected.message)
+        }
+    }
+
+    @Test
+    fun aMergeDraftAnchorsUnderTheNotebookKey() {
+        // The serve order the hooks use: setWindow(nb key) then park(notebookMax) — the drafted
+        // commit that stores the merge consumes exactly that park.
+        val s = session(key = "page-1")
+        s.setWindow("nb:notebook-1", "merged pages")
+        s.parkWatermark(777L)
+        val commit = s.acceptChunk("nb:notebook-1", 0, "merged pages", last = true, drafted = true)
+        assertEquals(777L, commit!!.draftWatermark)
+        assertEquals("nb:notebook-1", commit.pageKey)
+    }
 }

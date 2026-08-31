@@ -77,6 +77,24 @@ class DocumentHostBinder(
          * [DocumentContract.SEED_UNAVAILABLE].
          */
         fun requestSeed(session: DocumentHostSession, mode: Int): DocumentPageState
+
+        /**
+         * M7: switch the target between the page document and the notebook document — a flip's
+         * contract ([requestPage]'s null safety net) with the first-toggle auto-merge inside.
+         * null = nothing moved (failure, a cancelled merge, or the scope already current).
+         */
+        fun requestScope(session: DocumentHostSession, scope: Int): DocumentPageState?
+
+        /**
+         * M7: the notebook-wide merge into the window (`seeded = true`, notebook watermark
+         * parked; document row untouched) — [requestSeed]'s throw-not-null asymmetry. A cancel
+         * is `IllegalStateException` carrying exactly [DocumentContract.MERGE_CANCELLED]; a merge
+         * with nothing to give answers an empty un-seeded window.
+         */
+        fun requestMerge(session: DocumentHostSession, mode: Int): DocumentPageState
+
+        /** M7: the editor's Cancel — flag the in-flight merge to abandon between pages. */
+        fun cancelRequest()
     }
 
     /**
@@ -133,8 +151,8 @@ class DocumentHostBinder(
         }
     }
 
-    // ── M6's two: flips and Bring in ──────
-    // The M7/M8 calls below still answer UnsupportedOperationException — it marshals across Binder
+    // ── M6's two (flips, Bring in) and M7's three (scope, merge, cancel) ──────
+    // The M8 calls below still answer UnsupportedOperationException — it marshals across Binder
     // intact (the arc-11 / J3 precedent), so an extension built ahead of the host gets an honest
     // refusal naming the phase rather than a silently-killed transaction it would read as success.
     // Every one is still gated first: a stranger must never learn which calls exist by the
@@ -157,9 +175,20 @@ class DocumentHostBinder(
         return state
     }
 
-    override fun requestScope(scope: Int): DocumentPageState {
+    override fun requestScope(scope: Int): DocumentPageState? {
         gate()
-        throw UnsupportedOperationException("requestScope lands in M7")
+        require(scope == DocumentContract.SCOPE_PAGE || scope == DocumentContract.SCOPE_NOTEBOOK) {
+            "unknown scope $scope"
+        }
+        val t0 = SystemClock.elapsedRealtime()
+        val state = hook { hooks.requestScope(session, scope) }
+        Slog.d(TAG) {
+            if (state == null) "requestScope($scope): stayed " +
+                "in ${SystemClock.elapsedRealtime() - t0} ms"
+            else "requestScope($scope): ${state.textChars} chars" +
+                "${if (state.seeded) " (seeded)" else ""} in ${SystemClock.elapsedRealtime() - t0} ms"
+        }
+        return state
     }
 
     override fun requestSeed(mode: Int): DocumentPageState {
@@ -178,12 +207,22 @@ class DocumentHostBinder(
 
     override fun requestMerge(mode: Int): DocumentPageState {
         gate()
-        throw UnsupportedOperationException("requestMerge lands in M7")
+        require(mode == DocumentContract.BRING_REPLACE || mode == DocumentContract.BRING_APPEND) {
+            "unknown mode $mode"
+        }
+        val t0 = SystemClock.elapsedRealtime()
+        val state = hook { hooks.requestMerge(session, mode) }
+        Slog.d(TAG) {
+            "requestMerge($mode): ${state.textChars} chars in ${state.textChunks} chunk(s) " +
+                "in ${SystemClock.elapsedRealtime() - t0} ms"
+        }
+        return state
     }
 
     override fun cancelRequest() {
         gate()
-        throw UnsupportedOperationException("cancelRequest lands in M7")
+        hook { hooks.cancelRequest() }
+        Slog.d(TAG) { "cancelRequest" }
     }
 
     override fun renameNotebook(name: String?) {

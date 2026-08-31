@@ -19,9 +19,9 @@ import com.symmetricalpalmtree.notesproutsn.extension.DocumentPageState;
  * cross; a method whose phase has not landed yet answers UnsupportedOperationException (it
  * marshals intact -- the J3 precedent).
  *
- * M7..M8 own the semantics of the calls their phases land (requestScope/requestMerge/
- * cancelRequest: M7; renameNotebook/closeNotebook: M8) and may reshape them before the arc
- * freezes; begin/current/readChunk/saveChunk are M3's and requestPage/requestSeed M6's — stable.
+ * M8 owns the semantics of the calls its phase lands (renameNotebook/closeNotebook) and may
+ * reshape them before the arc freezes; begin/current/readChunk/saveChunk are M3's,
+ * requestPage/requestSeed M6's and requestScope/requestMerge/cancelRequest M7's — stable.
  */
 interface IDocumentHost {
     /** The current target's state; parks its document text in the read window. */
@@ -51,7 +51,20 @@ interface IDocumentHost {
      */
     DocumentPageState requestPage(int direction);
 
-    /** M7: switch the target between SCOPE_PAGE and SCOPE_NOTEBOOK. Same guards as a flip. */
+    /**
+     * M7: switch the target between SCOPE_PAGE and SCOPE_NOTEBOOK — a page flip in every way that
+     * matters: the editor pushes its text FIRST, this call then moves the host's target and swaps
+     * the read window atomically, and null means nothing moved (the editor stays, silently —
+     * a failed load, a cancelled auto-merge, or a request for the scope already current).
+     *
+     * Entering SCOPE_NOTEBOOK with no stored notebook document runs the FIRST-toggle auto-merge
+     * (per page: its document if non-blank, else its silent recognition when one is READY; pages
+     * with nothing are dropped; blank-line joins) and serves the result `seeded = true` with the
+     * notebook-wide watermark parked — stored only when the editor's drafted save lands, like any
+     * seed. A merge with nothing to give still lands the toggle on an empty, seedable window.
+     * The page target is RETAINED through the notebook visit: switching back serves that page
+     * (seeding it exactly as a flip would), and the notebook's close catch-up still names it.
+     */
     DocumentPageState requestScope(int scope);
 
     /**
@@ -65,10 +78,22 @@ interface IDocumentHost {
      */
     DocumentPageState requestSeed(int mode);
 
-    /** M7: load the read window with the notebook-wide merge (same modes, same not-stored rule). */
+    /**
+     * M7: load the read window with the notebook-wide merge (same modes as requestSeed, same
+     * not-stored rule — the notebook-wide watermark is parked and the document row untouched
+     * until the editor's drafted save lands). SCOPE_NOTEBOOK only. Mirrors requestSeed's
+     * throw-not-null asymmetry DELIBERATELY: a cancelled merge is an IllegalStateException
+     * carrying exactly DocumentContract.MERGE_CANCELLED (nothing written, window untouched);
+     * recognition never blocks a merge — page documents merge without one, and a merge with
+     * nothing to give answers honestly with an empty window (the editor's call what to do).
+     */
     DocumentPageState requestMerge(int mode);
 
-    /** M7: abandon an in-flight seed/merge the editor no longer wants (its Cancel). */
+    /**
+     * M7: abandon an in-flight merge the editor no longer wants (its Cancel). The loop stops
+     * between pages; the in-flight requestScope answers null / requestMerge throws
+     * MERGE_CANCELLED. A cancel with nothing running is a harmless no-op.
+     */
     void cancelRequest();
 
     /** M8, text documents only: rename the notebook from the edited title. The host validates

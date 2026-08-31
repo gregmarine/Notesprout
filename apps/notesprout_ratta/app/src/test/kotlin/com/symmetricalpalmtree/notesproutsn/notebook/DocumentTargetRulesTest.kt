@@ -156,4 +156,105 @@ class DocumentTargetRulesTest {
         assertEquals(DocumentTargetRules.Serve.Stored(""), DocumentTargetRules.flipDecision(null, ""))
         assertEquals(DocumentTargetRules.Serve.Stored(""), DocumentTargetRules.flipDecision(null, " \n "))
     }
+
+    // ── M7: the notebook document's key ──────
+
+    @Test
+    fun theNotebookKeyIsPrefixedAndResolvesToTheRoot() {
+        val nbId = "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
+        val key = DocumentTargetRules.notebookKey(nbId)
+        assertEquals("nb:$nbId", key)
+        // Well inside the wire cap, and carries no path character the state's require would refuse.
+        assert(key.length <= DocumentContract.MAX_PAGE_KEY_CHARS)
+        assertEquals(nbId, DocumentTargetRules.parentFor(key, nbId))
+    }
+
+    @Test
+    fun aPageKeyResolvesToItself() {
+        // The mode-routing floor: a page's key IS its parent, and only the one minted token maps
+        // to the root — equality, never a parse, so a page whose id happened to start "nb" is safe.
+        assertEquals("p1", DocumentTargetRules.parentFor("p1", "notebook-id"))
+        assertEquals("nb", DocumentTargetRules.parentFor("nb", "notebook-id"))
+        assertEquals("nb:other", DocumentTargetRules.parentFor("nb:other", "notebook-id"))
+    }
+
+    // ── M7: what one page contributes to a merge ──────
+
+    @Test
+    fun aPageDocumentWinsOverItsInk() {
+        assertEquals("the doc", DocumentTargetRules.mergePagePart("the doc", "the ink"))
+    }
+
+    @Test
+    fun anUndocumentedPageContributesItsRecognition() {
+        assertEquals("the ink", DocumentTargetRules.mergePagePart(null, "the ink"))
+        assertEquals("the ink", DocumentTargetRules.mergePagePart("  ", "the ink"))
+    }
+
+    @Test
+    fun aPageWithNothingToGiveIsDroppedWhole() {
+        // null recognition = could not run (the user's "fix it" call: it never blocks the merge —
+        // the page just contributes nothing); blank = ran and found nothing. Same drop.
+        assertNull(DocumentTargetRules.mergePagePart(null, null))
+        assertNull(DocumentTargetRules.mergePagePart(null, "  \n"))
+        assertNull(DocumentTargetRules.mergePagePart("", null))
+    }
+
+    // ── M7: the merge join ──────
+
+    @Test
+    fun pagesJoinWithExactlyOneBlankLine() {
+        // og's assembleMarkdown: joinToString("\n\n") then trim — NOT the `---` append rule.
+        assertEquals("one\n\ntwo\n\nthree", DocumentTargetRules.mergeText(listOf("one", "two", "three")))
+    }
+
+    @Test
+    fun droppedPagesLeaveNoSeparatorBehind() {
+        assertEquals("one\n\nthree", DocumentTargetRules.mergeText(listOf("one", null, "three")))
+        assertEquals("only", DocumentTargetRules.mergeText(listOf(null, "only", null)))
+    }
+
+    @Test
+    fun anEmptyMergeIsEmpty() {
+        assertEquals("", DocumentTargetRules.mergeText(emptyList()))
+        assertEquals("", DocumentTargetRules.mergeText(listOf(null, null)))
+    }
+
+    @Test
+    fun theWholeMergeIsTrimmedButPartsAreNot() {
+        // og verbatim: only the ENDS of the whole are trimmed — a part's own trailing newline
+        // survives into the join (og never normalises per page, and neither do we).
+        assertEquals("one\n\n\ntwo", DocumentTargetRules.mergeText(listOf("one\n", "two\n")))
+    }
+
+    // ── M7: entering the notebook scope ──────
+
+    @Test
+    fun aStoredNotebookDocumentIsServedAndNeverMergedOver() {
+        // Seed once, notebook form: a document exists, the merge (which was not even run — the
+        // caller passes null) loses to it.
+        assertEquals(
+            DocumentTargetRules.Serve.Stored("the final draft"),
+            DocumentTargetRules.scopeDecision("the final draft", null),
+        )
+    }
+
+    @Test
+    fun anUndocumentedNotebookServesTheMergeAsADraft() {
+        assertEquals(
+            DocumentTargetRules.Serve.Seed("merged pages"),
+            DocumentTargetRules.scopeDecision(null, "merged pages"),
+        )
+        // Blank-means-absent reaches this table too.
+        assertEquals(
+            DocumentTargetRules.Serve.Seed("merged pages"),
+            DocumentTargetRules.scopeDecision("  ", "merged pages"),
+        )
+    }
+
+    @Test
+    fun aMergeWithNothingToGiveStillLandsTheToggle() {
+        assertEquals(DocumentTargetRules.Serve.Stored(""), DocumentTargetRules.scopeDecision(null, null))
+        assertEquals(DocumentTargetRules.Serve.Stored(""), DocumentTargetRules.scopeDecision(null, " \n "))
+    }
 }

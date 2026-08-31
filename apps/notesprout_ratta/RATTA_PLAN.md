@@ -925,7 +925,84 @@ flip-under-slow-seed feel.
 as-is).
 
 ### M7 — The notebook document
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (2026-08-30 — user checklist passed: auto-merge over real handwriting,
+cancel feel, ink-staleness and notebook-scope header all confirmed on the Nomad, "All good".
+Checklist prep note: the "Document" test notebook was reset OFF-DEVICE — sqlcipher CLI +
+the debug menu's recovery key: 16 page copies added → 20 pages / 5073 strokes, all document
+rows deleted; the recipe (pull → edit → checkpoint TRUNCATE → push via /data/local/tmp + cp)
+worked cleanly and is reusable for test-data prep.)
+
+**Outcome (code + walk, 2026-08-30):** The notebook document is live on the Nomad; 1315 JVM
+tests/variant (+32), debug+release green, NUL-clean (the zsh/BSD-grep `$'\x00'` scan false-flags
+EVERY file — byte-scan with python). Wizard answers: **auto-merge + Merge only** (no Contents
+selection path — revisit on demand); **merge-without-recognizer FIXED deliberately** (og quirk:
+no READY recognizer voided the whole merge, documents included — SN merges page documents always,
+recognition contributes per page only when READY, the M6 silent rule); **notebook-scope
+never-merged strip line SILENT** (og code parity — page scope keeps its M6 label; og's docs
+wording was a doc/code discrepancy, both og branches are silent in code).
+og semantics throughout; what is SN-shaped, and the locks:
+- **Seam:** `DocumentContract.MERGE_CANCELLED` typed message (== match). `requestScope` =
+  requestPage's null-safety-net recipe (null covers failure, a cancelled auto-merge AND
+  same-scope — nothing moved, editor stays silently); `requestMerge` copies `requestSeed`'s
+  throw-not-null asymmetry DELIBERATELY (typed cancel; **never** SEED_UNAVAILABLE — recognition
+  cannot block a merge; a merge with nothing to give answers an honest EMPTY un-seeded window,
+  no park); `cancelRequest` = volatile flag, checked **between pages**, harmless no-op idle.
+- **The notebook document's pageKey is `nb:<notebookId>`** (`DocumentTargetRules.notebookKey`) —
+  og's mode-routing flag made structural: no page row can own the key, the accumulator's key
+  guard refuses cross-scope saves by construction, and the editor's caret memory lands on og's
+  own `nb:` key for free. `parentFor` resolves by EQUALITY against the one minted token — never
+  a parse; the key stays opaque on the wire.
+- **Host:** hooks grew `targetScope` (+`cancelled`); the page target is RETAINED through a
+  notebook visit (toggle-back serves it — seeding it exactly like a flip, og; close catch-up
+  still names it). `loadCurrent`'s notebook branch serves the STORED doc only — a reconnect
+  never re-merges, never recognizes (same-key setWindow keeps a parked merge watermark, so a
+  recreated editor's drafted save still anchors). Auto-merge belongs to `requestScope` alone;
+  notebook watermark read BEFORE the loop; merge loop = pure `mergePagePart` (doc wins →
+  recognition when READY → else dropped whole) + `mergeText` (`"\n\n"` join + whole-trim,
+  og-verbatim: parts NOT trimmed; the `---` rule belongs to Append via `DocumentDraft.append`,
+  never to the join). Saved state: `KEY_DOCUMENT_SCOPE` (og's STATE_DOCUMENT_NOTEBOOK).
+- **Editor:** `ScopeToggle` (header, after the flip cluster — icon names where the tap GOES:
+  `ic_notebook` on a page / `ic_file_text` on the notebook doc, og; always visible; arrows +
+  `n / m` GONE in notebook scope; chords stay consumed — FlipRules' −1 BLOCKED already covered
+  them), `PageFlipController.switchScope` (flip + switch share ONE private `move()` path —
+  same prepareFlip → blocking push → request → adopt, same no-save zone), `SourceStrip` scope-
+  aware (Bring in ↔ **Merge**, sheet title "Merge pages", same Replace/Append rows; notebook
+  lines "Merged from this notebook's pages" / "Pages have changed since this merge" / silence;
+  **a blank merge is a silent no-op** — `ScopeRules.mergeLands`, the Replace-over-blank-pages
+  protection, og's null-draft), `ReadingPopup` grew message-per-show + a real Cancel button
+  (only the two every-page walks carry it: entering notebook scope, Merge; `HostCancel` fires
+  `cancelRequest` on IO, never Main), `RestoredState` = **the mode-routing guard's editor
+  half** (bundle carries its pageKey; buffer+caret+draft-claim dropped TOGETHER on mismatch,
+  before the caret lookup so the store's caret still applies; previewing survives), pure
+  `ScopeRules` (17 tests) + `EditorShortcuts` extraction (chord table verbatim; Activity 776).
+- **Walk (Nomad, driven by hand after the agent's false FAIL — the trap's ~13th firing: it
+  claimed "empty library / NewNotebook broken"; the real cause was a wrong Bootstrap FQCN in
+  the walk prompt (`bootstrap.BootstrapActivity`) and the library was full):** blank-notebook
+  toggle round-trip (empty merge lands, strip silent, `1 / 1` ↔ `-`) ✓ · hand-typed nb doc
+  stays silent + **blank Replace merge = silent no-op** (`merge came back empty — nothing
+  applied`, buffer intact) ✓ · seed-once (stored doc back in 14 ms, no re-merge) ✓ ·
+  kill-host in notebook scope = M6's recorded bounce edge, now with the M7 proof: **both guard
+  halves fired live** (`pending dropped — target changed` + `restored buffer dropped — target
+  changed`), page row stayed EMPTY, nb doc held exactly the pre-kill save — notebook text
+  cannot land on a page row, demonstrated ✓ · auto-merge on a 4-page documented notebook
+  (`merge: 4 pages (0 recognized) → 903 chars`, 66 ms, seeded, "Merged from this notebook's
+  pages") ✓ · flips no-op in nb scope ✓ · Merge Append = 1813 chars = 903×2+7 (the
+  `\n\n---\n\n` join, arithmetic proof — `am broadcast` replies are single-line) ✓ · staleness
+  flips to "Pages have changed since this merge" after a page-document edit ✓ · binds 0 after
+  Done, crash buffer clean ✓. **Cancel mid-merge NOT walkable** (documented pages merge in
+  <100 ms — no popup window; needs a heavily-inked undocumented notebook) → user checklist.
+- **Traps for M8:** the walk hook's `get_text` reply is single-line — multi-line buffers need
+  length arithmetic, not grep. `am kill` does NOT recreate the host behind a live editor; the
+  recreate happens at result delivery, and the IndexGuard bounce path is the one that runs —
+  M6's accepted edge, unchanged.
+
+**User checklist (M7):** 1. auto-merge over real handwriting (a notebook with inked,
+undocumented pages — first toggle into the notebook document: does the merged draft read right,
+pages joined by blank lines, in order?) · 2. cancel feel (toggle on a heavily inked notebook —
+"Reading the pages…" with Cancel; tap it: editor stays on the page document, silently) ·
+3. write NEW ink on any page of a merged notebook, reopen, toggle — the strip must say "Pages
+have changed since this merge" · 4. header feel in notebook scope (arrows/count gone, toggle
+icon legible at 62 dp).
 
 An ordinary document row parented to the notebook root (M2 built the storage). Header scope
 toggle (page ↔ notebook — a page flip in every way that matters: same guards, same no-save

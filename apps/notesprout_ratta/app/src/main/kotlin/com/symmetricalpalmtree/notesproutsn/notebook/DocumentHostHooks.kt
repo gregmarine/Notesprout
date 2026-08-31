@@ -34,6 +34,15 @@ import kotlinx.coroutines.withContext
  * death through the screen's saved state ([restoreTarget]), and a target naming a page that is no
  * longer in the notebook falls back to the displayed one ([DocumentTargetRules.resolveTarget]).
  *
+ * **The scope is the target's second half** (M7). [targetScope] says whether the editor is on the
+ * page target's document or the NOTEBOOK document (the merged final draft, a `document` row
+ * parented to the notebook root). A scope switch moves it and nothing else does; the page target
+ * is **retained** through a notebook-scope visit — switching back serves that page, and the close
+ * catch-up still names it. It rides the same saved state ([restoreTarget]'s second argument —
+ * og's `STATE_DOCUMENT_NOTEBOOK`), which is one half of the mode-routing guarantee; the other
+ * half is structural: the notebook document's save key is [DocumentTargetRules.notebookKey],
+ * which no page row can ever own.
+ *
  * **The decision tables live in [DocumentTargetRules]**, which is pure and JVM-tested; this class
  * is the `.soil` work around them and holds no rule of its own.
  *
@@ -75,24 +84,44 @@ class DocumentHostHooks(
     @Volatile
     private var target: String? = null
 
+    /** Which document the editor is on — [DocumentContract.SCOPE_PAGE] (the [target] page's) or
+     *  [DocumentContract.SCOPE_NOTEBOOK] (the notebook document). Same writers as [target]. */
+    @Volatile
+    private var targetScope: Int = DocumentContract.SCOPE_PAGE
+
+    /** The editor asked to abandon the merge in flight ([cancelRequest]) — read between pages by
+     *  the merge loop, cleared at the start of every merge-running request. */
+    @Volatile
+    private var cancelled = false
+
     @Volatile
     private var staged: StagedSeed? = null
 
-    /** The page the editor is on, for the screen's saved state and its catch-up on close. */
+    /** The page the editor is on, for the screen's saved state and its catch-up on close. Retained
+     *  through a notebook-scope visit — the editor is still "at" that page for the way back. */
     val targetPageId: String? get() = target
 
+    /** The scope half of the saved state (M7 — og's `STATE_DOCUMENT_NOTEBOOK`). */
+    val scopeIsNotebook: Boolean get() = targetScope == DocumentContract.SCOPE_NOTEBOOK
+
     /** Hand back what saved state carried, **before** the reconnect's `begin` can ask for state
-     *  (`onCreate`): a host killed behind the editor must come back pointing at the page the editor
-     *  is still showing, not at the page the notebook happens to be on. */
-    fun restoreTarget(pageId: String?) {
+     *  (`onCreate`): a host killed behind the editor must come back pointing at the page — and,
+     *  since M7, the scope — the editor is still showing, not at the page the notebook happens to
+     *  be on. Restoring the scope is what keeps a recreated host from serving (and accepting) a
+     *  page document to an editor whose buffer holds the notebook one. */
+    fun restoreTarget(pageId: String?, notebookScope: Boolean) {
         target = pageId
+        targetScope = if (notebookScope) DocumentContract.SCOPE_NOTEBOOK else DocumentContract.SCOPE_PAGE
     }
 
-    /** The showing is over: the next one starts from the displayed page again, and an unconsumed
-     *  stage must not survive into it (an open that failed before `current()` leaves one). */
+    /** The showing is over: the next one starts from the displayed page again, in page scope, and
+     *  an unconsumed stage must not survive into it (an open that failed before `current()` leaves
+     *  one). */
     fun resetTarget() {
         target = null
+        targetScope = DocumentContract.SCOPE_PAGE
         staged = null
+        cancelled = false
     }
 
     /**
@@ -111,13 +140,18 @@ class DocumentHostHooks(
 
     /**
      * The current target's state, with its text parked in the read window ([DocumentHostSession] is
-     * the window). The target is a **page** — [DocumentContract.SCOPE_NOTEBOOK] is M7's and
-     * [DocumentPageState.textDocument] is M8's.
+     * the window). [DocumentPageState.textDocument] is M8's.
      *
      * M6 added the staged seed: with no stored document and a stage naming this page, the window
      * holds recognized text the host has **not** written ([DocumentPageState.seeded] true,
      * [DocumentContract.SOURCE_DRAFTED], the watermark parked for the drafted save that stores it).
-     * Everything else is M3's path unchanged.
+     *
+     * M7 added the notebook branch: a showing restored in notebook scope serves the **stored**
+     * notebook document (or an empty window) — never a merge, never a recognition. The auto-merge
+     * belongs to the scope *switch*, where the editor is showing a popup for it; a reconnect's
+     * `current()` must answer in milliseconds, and the recreated editor prefers its own buffer
+     * anyway. A same-key `setWindow` keeps any parked watermark, so a recreated editor still
+     * holding an unstored merge draft can land its drafted save.
      *
      * `setWindow` is the last thing done and its answer is the state's `textChunks`: window and
      * state are loaded together, which is the contract's atomicity. It also enforces
@@ -127,15 +161,30 @@ class DocumentHostHooks(
     override fun loadCurrent(session: DocumentHostSession): DocumentPageState = runBlocking {
         withContext(Dispatchers.IO) {
             val nb = openSession()
+            // Consume-once, whatever it holds: a stage that named another page is dropped here —
+            // and one can never serve the notebook scope, whose branch drops it unread.
+            val stage = staged
+            staged = null
+            if (scopeIsNotebook) {
+                val doc = nb.documents.get(nb.notebookId)
+                val nbMax = nb.db.documentDao().notebookMaxContentUpdatedAt(nb.notebookId)
+                return@withContext state(
+                    session,
+                    pageKey = DocumentTargetRules.notebookKey(nb.notebookId),
+                    scope = DocumentContract.SCOPE_NOTEBOOK,
+                    index = -1,
+                    pageCount = nb.pages.size,
+                    text = doc?.text.orEmpty(),
+                    source = DocumentTargetRules.source(doc?.srcUpdatedAt, nbMax),
+                    seeded = false,
+                )
+            }
             val pages = nb.pages
             val pageIds = pages.map { it.id }
             val pageId = DocumentTargetRules.resolveTarget(target, pageIds, displayedPageId())
             val index = pageIds.indexOf(pageId)
             check(index >= 0) { "page is not in the notebook" }
             target = pageId
-            // Consume-once, whatever it holds: a stage that named another page is dropped here.
-            val stage = staged
-            staged = null
             val doc = nb.documents.get(pageId)
             when (
                 val serve = DocumentTargetRules.openDecision(
@@ -146,7 +195,7 @@ class DocumentHostHooks(
                 )
             ) {
                 is DocumentTargetRules.Serve.Seed -> {
-                    val state = state(session, pageId, index, pages.size, serve.text, DocumentContract.SOURCE_DRAFTED, seeded = true)
+                    val state = pageState(session, pageId, index, pages.size, serve.text, DocumentContract.SOURCE_DRAFTED, seeded = true)
                     // After setWindow, always: a window swap to a new key clears the park. Only a
                     // non-null stage can produce a Seed here; the safe call is so that a rule
                     // changed later costs a lost anchor (the editor's own NO_DRAFT_PENDING
@@ -159,7 +208,7 @@ class DocumentHostHooks(
                         doc?.srcUpdatedAt,
                         nb.db.documentDao().maxContentUpdatedAt(pageId),
                     )
-                    state(session, pageId, index, pages.size, serve.text, source, seeded = false)
+                    pageState(session, pageId, index, pages.size, serve.text, source, seeded = false)
                 }
             }
         }
@@ -170,10 +219,19 @@ class DocumentHostHooks(
      * ([NotebookSession.writeDocument] — see its KDoc for why the write is drained rather than
      * fire-and-forget). `draftWatermark` non-null is a seed/merge anchoring itself, and an ordinary
      * edit can never invent one — the accumulator refuses a drafted commit with nothing parked.
+     *
+     * [DocumentTargetRules.parentFor] is the M7 routing: the notebook document's key resolves to
+     * the root row, every other key IS the page it names. The accumulator already refused any key
+     * that is not the current window's, so this is resolution, not a second guard.
      */
     override fun commit(commit: DocumentHostSession.Commit) = runBlocking {
         withContext(Dispatchers.IO) {
-            openSession().writeDocument(commit.pageKey, commit.text, commit.draftWatermark)
+            val nb = openSession()
+            nb.writeDocument(
+                DocumentTargetRules.parentFor(commit.pageKey, nb.notebookId),
+                commit.text,
+                commit.draftWatermark,
+            )
         }
     }
 
@@ -195,6 +253,9 @@ class DocumentHostHooks(
     override fun requestPage(session: DocumentHostSession, direction: Int): DocumentPageState? = runBlocking {
         withContext(Dispatchers.IO) {
             try {
+                // The notebook scope has no neighbours (the editor's FlipRules already block the
+                // tap; this is the seam's own answer to a caller that asked anyway).
+                if (scopeIsNotebook) return@withContext null
                 val nb = openSession()
                 val pages = nb.pages
                 val pageIds = pages.map { it.id }
@@ -210,13 +271,13 @@ class DocumentHostHooks(
                 val recognized = if (doc == null) recognizePageText(page.id) else null
                 when (val serve = DocumentTargetRules.flipDecision(doc?.text, recognized)) {
                     is DocumentTargetRules.Serve.Seed -> {
-                        val state = state(session, page.id, newIndex, pages.size, serve.text, DocumentContract.SOURCE_DRAFTED, seeded = true)
+                        val state = pageState(session, page.id, newIndex, pages.size, serve.text, DocumentContract.SOURCE_DRAFTED, seeded = true)
                         session.parkWatermark(pageMax)
                         target = page.id
                         state
                     }
                     is DocumentTargetRules.Serve.Stored -> {
-                        val state = state(
+                        val state = pageState(
                             session, page.id, newIndex, pages.size, serve.text,
                             DocumentTargetRules.source(doc?.srcUpdatedAt, pageMax), seeded = false,
                         )
@@ -249,6 +310,9 @@ class DocumentHostHooks(
      */
     override fun requestSeed(session: DocumentHostSession, mode: Int): DocumentPageState = runBlocking {
         withContext(Dispatchers.IO) {
+            // The strip routes a notebook-scope refresh to requestMerge; a Bring in here would
+            // recognize a page the editor is not showing.
+            check(!scopeIsNotebook) { "not in page scope" }
             val nb = openSession()
             val pages = nb.pages
             val pageIds = pages.map { it.id }
@@ -259,19 +323,166 @@ class DocumentHostHooks(
             val pageMax = nb.db.documentDao().maxContentUpdatedAt(pageId)
             val text = recognizePageText(pageId)
                 ?: throw IllegalStateException(DocumentContract.SEED_UNAVAILABLE)
-            val state = state(session, pageId, index, pages.size, text, DocumentContract.SOURCE_DRAFTED, seeded = true)
+            val state = pageState(session, pageId, index, pages.size, text, DocumentContract.SOURCE_DRAFTED, seeded = true)
             session.parkWatermark(pageMax)
             state
         }
     }
 
     /**
-     * The one place a [DocumentPageState] is built, so the three window-loading hooks cannot drift
-     * on the chrome facts. [DocumentHostSession.setWindow] runs here and its answer is the state's
-     * `textChunks` — the window and the state that describes it are loaded together, which is the
-     * contract's atomicity.
+     * M7: switch the target between the page document and the notebook document — a flip in every
+     * way that matters, [requestPage]'s recipe held to the letter: **null is the safety net**
+     * (anything at all going wrong — a failed load, a merge the editor cancelled, a request for
+     * the scope already current — and the editor stays exactly where it was), so nothing here
+     * moves [targetScope] or touches the window until everything that can fail has succeeded, and
+     * the whole body funnels through one catch.
+     *
+     * **Entering the notebook scope** serves the stored notebook document, or — when there is
+     * none — runs the FIRST-toggle auto-merge ([mergeNotebook]) and serves the result as a seed:
+     * unstored, `seeded = true`, the notebook-wide watermark (read **before** the loop) parked for
+     * the drafted save that makes it real. A merge with nothing to give still lands the toggle on
+     * an empty, seedable window. The page [target] is retained, untouched.
+     *
+     * **Leaving it** serves the retained page target exactly as a flip would — including seeding
+     * an undocumented page, silently (og: toggling back can itself seed).
      */
-    private fun state(
+    override fun requestScope(session: DocumentHostSession, scope: Int): DocumentPageState? = runBlocking {
+        withContext(Dispatchers.IO) {
+            try {
+                if ((scope == DocumentContract.SCOPE_NOTEBOOK) == scopeIsNotebook) {
+                    return@withContext null   // already there — nothing moves
+                }
+                val nb = openSession()
+                if (scope == DocumentContract.SCOPE_NOTEBOOK) {
+                    val doc = nb.documents.get(nb.notebookId)
+                    // Before the merge, always (the watermark-before-recognition rule, notebook-wide):
+                    // a stroke drawn while the loop runs must read as "changed since this merge".
+                    val nbMax = nb.db.documentDao().notebookMaxContentUpdatedAt(nb.notebookId)
+                    val merged = if (doc == null) mergeNotebook(nb) else null
+                    when (val serve = DocumentTargetRules.scopeDecision(doc?.text, merged)) {
+                        is DocumentTargetRules.Serve.Seed -> {
+                            val state = notebookState(session, nb, serve.text, DocumentContract.SOURCE_DRAFTED, seeded = true)
+                            session.parkWatermark(nbMax)
+                            targetScope = DocumentContract.SCOPE_NOTEBOOK
+                            state
+                        }
+                        is DocumentTargetRules.Serve.Stored -> {
+                            val source = DocumentTargetRules.source(doc?.srcUpdatedAt, nbMax)
+                            val state = notebookState(session, nb, serve.text, source, seeded = false)
+                            targetScope = DocumentContract.SCOPE_NOTEBOOK
+                            state
+                        }
+                    }
+                } else {
+                    val pages = nb.pages
+                    val pageIds = pages.map { it.id }
+                    val pageId = DocumentTargetRules.resolveTarget(target, pageIds, displayedPageId())
+                    val index = pageIds.indexOf(pageId)
+                    check(index >= 0) { "page is not in the notebook" }
+                    val doc = nb.documents.get(pageId)
+                    val pageMax = nb.db.documentDao().maxContentUpdatedAt(pageId)
+                    val recognized = if (doc == null) recognizePageText(pageId) else null
+                    when (val serve = DocumentTargetRules.flipDecision(doc?.text, recognized)) {
+                        is DocumentTargetRules.Serve.Seed -> {
+                            val state = pageState(session, pageId, index, pages.size, serve.text, DocumentContract.SOURCE_DRAFTED, seeded = true)
+                            session.parkWatermark(pageMax)
+                            target = pageId
+                            targetScope = DocumentContract.SCOPE_PAGE
+                            state
+                        }
+                        is DocumentTargetRules.Serve.Stored -> {
+                            val state = pageState(
+                                session, pageId, index, pages.size, serve.text,
+                                DocumentTargetRules.source(doc?.srcUpdatedAt, pageMax), seeded = false,
+                            )
+                            target = pageId
+                            targetScope = DocumentContract.SCOPE_PAGE
+                            state
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                // MERGE_CANCELLED funnels here too — a cancelled switch is a switch that did not
+                // happen, and og answers it with silence. Class name only, as everywhere.
+                Slog.d(TAG) { "requestScope($scope) failed: ${e.javaClass.simpleName}" }
+                null
+            }
+        }
+    }
+
+    /**
+     * M7: the editor's **Merge** — the notebook-wide merge into the read window, [requestSeed]'s
+     * asymmetry copied DELIBERATELY: non-null or a marshalable throw, mutations last, the document
+     * row untouched (the draft becomes real only when the editor stores it). A cancelled merge is
+     * `IllegalStateException` carrying exactly [DocumentContract.MERGE_CANCELLED] — nothing
+     * written, window untouched, the editor silent.
+     *
+     * A merge with nothing to give answers **honestly with an empty window** — no park, no claim,
+     * `seeded = false`, the stored row's own source — and the editor's call is a silent no-op
+     * (og's null-draft), which is what keeps Replace-over-blank-pages from blanking a document.
+     * Recognition never blocks: [mergeNotebook] takes page documents with or without a recognizer.
+     *
+     * [mode] is advisory here exactly as it is on [requestSeed] — the sheet ran editor-side.
+     */
+    override fun requestMerge(session: DocumentHostSession, mode: Int): DocumentPageState = runBlocking {
+        withContext(Dispatchers.IO) {
+            check(scopeIsNotebook) { "not in notebook scope" }
+            val nb = openSession()
+            val doc = nb.documents.get(nb.notebookId)
+            // Before the loop, always — see requestScope.
+            val nbMax = nb.db.documentDao().notebookMaxContentUpdatedAt(nb.notebookId)
+            val merged = mergeNotebook(nb)
+            if (merged.isBlank()) {
+                notebookState(
+                    session, nb, "",
+                    DocumentTargetRules.source(doc?.srcUpdatedAt, nbMax), seeded = false,
+                )
+            } else {
+                val state = notebookState(session, nb, merged, DocumentContract.SOURCE_DRAFTED, seeded = true)
+                session.parkWatermark(nbMax)
+                state
+            }
+        }
+    }
+
+    /**
+     * M7: the editor's Cancel, arriving on its own Binder thread while a merge holds another. The
+     * loop reads the flag between pages and abandons; with nothing running this is a no-op (the
+     * next merge clears it first thing).
+     */
+    override fun cancelRequest() {
+        cancelled = true
+    }
+
+    /**
+     * og's per-page loop ([DocumentTargetRules.mergePagePart] is the row, [mergeText] the join):
+     * a page's own document wins, an undocumented page contributes its silent recognition when one
+     * can run, a page with nothing to give is dropped whole. Cancellation is checked **between
+     * pages** — the one recognition in flight finishes, nothing after it starts.
+     */
+    private suspend fun mergeNotebook(nb: NotebookSession): String {
+        cancelled = false
+        val pages = nb.pages
+        val parts = ArrayList<String?>(pages.size)
+        var recognized = 0
+        for (page in pages) {
+            if (cancelled) throw IllegalStateException(DocumentContract.MERGE_CANCELLED)
+            val docText = nb.documents.get(page.id)?.text
+            val read = if (docText.isNullOrBlank()) {
+                recognized++
+                recognizePageText(page.id)
+            } else null
+            parts += DocumentTargetRules.mergePagePart(docText, read)
+        }
+        val text = DocumentTargetRules.mergeText(parts)
+        Slog.d(TAG) {
+            "merge: ${pages.size} pages ($recognized recognized) → ${text.length} chars"
+        }
+        return text
+    }
+
+    /** A page target's state — [state] with the page's own key and index. */
+    private fun pageState(
         session: DocumentHostSession,
         pageId: String,
         index: Int,
@@ -279,11 +490,41 @@ class DocumentHostHooks(
         text: String,
         source: Int,
         seeded: Boolean,
+    ): DocumentPageState =
+        state(session, pageId, DocumentContract.SCOPE_PAGE, index, pageCount, text, source, seeded)
+
+    /** The notebook document's state — the minted [DocumentTargetRules.notebookKey], index −1. */
+    private fun notebookState(
+        session: DocumentHostSession,
+        nb: NotebookSession,
+        text: String,
+        source: Int,
+        seeded: Boolean,
+    ): DocumentPageState = state(
+        session, DocumentTargetRules.notebookKey(nb.notebookId), DocumentContract.SCOPE_NOTEBOOK,
+        index = -1, pageCount = nb.pages.size, text = text, source = source, seeded = seeded,
+    )
+
+    /**
+     * The one place a [DocumentPageState] is built, so the window-loading hooks cannot drift on
+     * the chrome facts. [DocumentHostSession.setWindow] runs here and its answer is the state's
+     * `textChunks` — the window and the state that describes it are loaded together, which is the
+     * contract's atomicity.
+     */
+    private fun state(
+        session: DocumentHostSession,
+        pageKey: String,
+        scope: Int,
+        index: Int,
+        pageCount: Int,
+        text: String,
+        source: Int,
+        seeded: Boolean,
     ): DocumentPageState {
-        val chunks = session.setWindow(pageId, text)
+        val chunks = session.setWindow(pageKey, text)
         return DocumentPageState(
-            pageKey = pageId,
-            scope = DocumentContract.SCOPE_PAGE,
+            pageKey = pageKey,
+            scope = scope,
             pageIndex = index,
             pageCount = pageCount,
             // Truncated rather than refused: a name too long for the header is a display problem,

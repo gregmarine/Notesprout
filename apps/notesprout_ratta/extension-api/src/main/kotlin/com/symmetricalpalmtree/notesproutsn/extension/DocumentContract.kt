@@ -122,4 +122,14 @@ object DocumentContract {
      * the provenance anchor is lost (the strip reads "not drafted" until the next Bring in).
      */
     const val NO_DRAFT_PENDING: String = "NO_DRAFT_PENDING"
+
+    /**
+     * A notebook merge (`requestMerge`, M7) the editor cancelled via `cancelRequest` — the host
+     * abandoned the per-page loop between pages, **nothing was written**, and the target and scope
+     * are exactly what they were. The editor stays silent: the user just said no, and a dialog
+     * explaining a cancellation they asked for would be noise. (A cancelled `requestScope`
+     * auto-merge answers null like any other failed scope switch — this message crosses only from
+     * `requestMerge`, which mirrors `requestSeed`'s throw-not-null asymmetry.)
+     */
+    const val MERGE_CANCELLED: String = "MERGE_CANCELLED"
 }

@@ -10,7 +10,7 @@ import com.symmetricalpalmtree.notesproutsn.extension.DocumentContract
  * restating them (the [com.symmetricalpalmtree.notesproutsn.extension.DocumentHostSession] recipe:
  * the untestable shell stays thin over a tested core).
  *
- * Four rules, each pinned by test:
+ * The rules, each pinned by test:
  *  - **Which page the editor is on** ([resolveTarget]). The target is the host's own memory of
  *    where the editor flipped to; the displayed page is the fallback whenever that memory is
  *    absent or names a page that is no longer in the notebook (deleted under the editor, or a
@@ -18,14 +18,24 @@ import com.symmetricalpalmtree.notesproutsn.extension.DocumentContract
  *  - **What the source strip says** ([source]) — M2's staleness comparison, unchanged.
  *  - **Where a flip lands** ([flipIndex]) — bounds only; there is no wrap, because the first and
  *    last page are where the editor's arrows say "First page" / "Last page".
- *  - **What the read window is loaded with** ([openDecision] / [flipDecision]): a stored document,
- *    or a **fresh draft the host has not stored** ([Serve.Seed] — the `seeded = true` answer whose
- *    watermark the host parks and whose text becomes real only when the editor saves it).
+ *  - **What the read window is loaded with** ([openDecision] / [flipDecision] / [scopeDecision]):
+ *    a stored document, or a **fresh draft the host has not stored** ([Serve.Seed] — the
+ *    `seeded = true` answer whose watermark the host parks and whose text becomes real only when
+ *    the editor saves it).
+ *  - **The notebook document's key and parent** ([notebookKey] / [parentFor], M7). The notebook
+ *    document's `pageKey` is `nb:` + the notebook id — page keys are page-row UUIDs, so the two
+ *    namespaces can never collide and a save's key alone names its scope (og's mode-routing flag,
+ *    made structural: notebook text physically cannot land on a page row, because the key it must
+ *    carry is not any page's). The prefix is the HOST's private knowledge — on the wire the key
+ *    stays an opaque token, and [parentFor] resolves by equality, never by parsing.
+ *  - **What one page contributes to a merge and how the parts join**
+ *    ([mergePagePart] / [mergeText], M7) — og's per-page loop as a pure table.
  *
- * The two decisions are deliberately separate functions rather than one with a flag: opening
+ * The window decisions are deliberately separate functions rather than one with a flag: opening
  * consumes a seed the host staged *before* the launch (the notebook ran recognition with the user
- * watching, behind "Reading this page…"), while a flip recognizes inline, silently, behind a
- * stopped host. Same outcome type, different inputs — and a reader can see both tables at once.
+ * watching, behind "Reading this page…"), a flip recognizes inline, silently, behind a stopped
+ * host, and a scope switch serves a merge. Same outcome type, different inputs — and a reader can
+ * see every table at once.
  */
 object DocumentTargetRules {
 
@@ -122,5 +132,64 @@ object DocumentTargetRules {
         if (!docText.isNullOrBlank()) return Serve.Stored(docText)
         if (recognized.isNullOrBlank()) return Serve.Stored("")
         return Serve.Seed(recognized)
+    }
+
+    // ── M7: the notebook document ─────────────────────────────────────────────
+
+    /**
+     * The notebook document's `pageKey` — `nb:` + the notebook id. Page keys are page-row UUIDs,
+     * so the prefix keeps the two namespaces from ever colliding, a save's key alone names its
+     * scope, and the editor's caret memory (keyed by `pageKey`) lands on og's own `nb:<id>` key
+     * for free. Well inside [DocumentContract.MAX_PAGE_KEY_CHARS] and carries no path character.
+     */
+    fun notebookKey(notebookId: String): String = "nb:$notebookId"
+
+    /**
+     * The `.soil` parent a committed save's [pageKey] names: the notebook root row (whose id IS
+     * the notebook id) when the key is the notebook document's, else the page the key already is.
+     * Equality against the one minted token, never a parse — the key stays opaque everywhere but
+     * the two host-side points that mint and resolve it.
+     */
+    fun parentFor(pageKey: String, notebookId: String): String =
+        if (pageKey == notebookKey(notebookId)) notebookId else pageKey
+
+    /**
+     * What one page contributes to a notebook merge — og's loop body: the page's own document
+     * when it holds one, else what recognition read off the ink ([recognized] null when
+     * recognition could not run — no extension, model not READY, the call failed — and that
+     * never blocks the merge: the page simply contributes nothing, which is the user's 2026-08-30
+     * "fix it" call on og's whole-merge-refuses quirk). null = the page has nothing to give and
+     * is dropped whole (no join, no blank line).
+     */
+    fun mergePagePart(docText: String?, recognized: String?): String? = when {
+        !docText.isNullOrBlank() -> docText
+        !recognized.isNullOrBlank() -> recognized
+        else -> null
+    }
+
+    /**
+     * The merge's join — og's `assembleMarkdown` tail verbatim: the non-null parts in page order,
+     * exactly one blank line between pages, the whole thing trimmed. Deliberately NOT the `---`
+     * rule: that join belongs to *appending* a draft onto an existing document
+     * (`DocumentDraft.append`), not to the pages inside one merge.
+     */
+    fun mergeText(parts: List<String?>): String =
+        parts.filterNotNull().joinToString("\n\n").trim()
+
+    /**
+     * Entering the notebook scope. [docText] is the stored notebook document (null when absent or
+     * blank — the repository's rule), [merged] the auto-merge's result for an undocumented one
+     * (null when the merge was not run because a document exists; the caller runs it only when
+     * needed, the loop is expensive).
+     *
+     * A stored document is served as itself. An undocumented notebook serves the merge as a seed
+     * — unstored, watermark parked, real only when the editor saves it. A merge with nothing to
+     * give still lands the toggle: an empty window, [DocumentContract.SOURCE_NONE], and the
+     * notebook stays mergeable — og's shape (a failed seed never blocks the editor).
+     */
+    fun scopeDecision(docText: String?, merged: String?): Serve {
+        if (!docText.isNullOrBlank()) return Serve.Stored(docText)
+        if (merged.isNullOrBlank()) return Serve.Stored("")
+        return Serve.Seed(merged)
     }
 }

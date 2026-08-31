@@ -19,7 +19,6 @@ import com.symmetricalpalmtree.notesproutsn.ext.document.databinding.ActivityDoc
 import com.symmetricalpalmtree.notesproutsn.extension.DocumentContract
 import com.symmetricalpalmtree.notesproutsn.extension.DocumentPageState
 import com.symmetricalpalmtree.notesproutsn.extension.HostCallerCheck
-import com.symmetricalpalmtree.notesproutsn.markdown.MarkdownFormatter
 import com.symmetricalpalmtree.notesproutsn.markdown.MarkdownParser
 import com.symmetricalpalmtree.notesproutsn.markdown.MarkdownRenderer
 import kotlinx.coroutines.Dispatchers
@@ -65,7 +64,14 @@ import java.util.concurrent.atomic.AtomicReference
  * module's size rule exists; what this class keeps is the wiring, the header, and [lastState] — the
  * last answer the host gave, which is what the arrows' edge check reads instead of asking again.
  *
- * Not built at M6, rather than built and hidden: the scope toggle (M7) and proofread (M10).
+ * **M7 gave it a second place to stand** — the notebook document, one merged final draft per
+ * notebook, reached by the header's [ScopeToggle]. A scope switch is a page flip in every way that
+ * matters and runs through the flip controller's own machinery; the strip changes its words rather
+ * than its shape; and [RestoredState] carries the **mode-routing guard's editor half** — a recreated
+ * screen's buffer is adopted only when the bundle's key is the key the load landed on, so notebook
+ * text can never be pushed under a page key or the other way round.
+ *
+ * Not built at M7, rather than built and hidden: proofread (M10).
  */
 class DocumentEditorActivity : AppCompatActivity() {
 
@@ -97,11 +103,18 @@ class DocumentEditorActivity : AppCompatActivity() {
     /** Provenance, Reflow and Bring in (M6). */
     private lateinit var strip: SourceStrip
 
-    /** The page arrows' machinery, and the no-save zone they open (M6). */
+    /** The page arrows' machinery, and the no-save zone they open (M6) — and, since M7, the scope
+     *  switch, which runs the same path for the same reasons. */
     private lateinit var flips: PageFlipController
+
+    /** The header's page ↔ notebook control, and the chrome that follows it (M7). */
+    private lateinit var scopeToggle: ScopeToggle
 
     /** The format bar's fourteen tools and the four chord-only ones, over the buffer. */
     private lateinit var format: FormatActions
+
+    /** Every `Ctrl` chord this screen answers, and the ones it deliberately does not. */
+    private lateinit var shortcuts: EditorShortcuts
 
     /** The size both surfaces are drawn at, and the sheet that picks it. */
     private lateinit var textSize: TextSizeControl
@@ -128,17 +141,9 @@ class DocumentEditorActivity : AppCompatActivity() {
      *  simplest possible guarantee that nothing is written to a target this screen never learned. */
     private val targetKey: String? get() = saver.pageKey
 
-    private var restoredText: String? = null
-
-    /** The bundle's caret, or −1 for "there was no bundle". The distinction matters: 0 is a real
-     *  caret (the top of the document) and would otherwise beat the remembered one on every
-     *  recreation. `onSaveInstanceState` always writes the key, so a bundle implies a value. */
-    private var restoredCaret = NO_CARET
-    private var restoredPreviewing = false
-
-    /** A recreated screen may be holding an unstored seed: the claim has to come back with it, or
-     *  the save that lands those words would be an ordinary one and the provenance would be lost. */
-    private var restoredDraftPending = false
+    /** The bundle this instance woke up holding, and the guard that decides whether any of it may
+     *  be adopted. Built in `onCreate`, consumed at the end of the load. */
+    private lateinit var restored: RestoredState
 
     /** This instance's session hooks, held by identity so `onDestroy` can only clear its own. */
     private val beginListener = EditorSession.BeginListener { onHostBegan() }
@@ -159,10 +164,7 @@ class DocumentEditorActivity : AppCompatActivity() {
         // rather than letting it cover the lines being written.
         TopGuard.applyInsetPadding(binding.root, followIme = true)
 
-        restoredText = savedInstanceState?.getString(STATE_TEXT)
-        restoredCaret = savedInstanceState?.getInt(STATE_CARET, NO_CARET) ?: NO_CARET
-        restoredPreviewing = savedInstanceState?.getBoolean(STATE_PREVIEWING) == true
-        restoredDraftPending = savedInstanceState?.getBoolean(STATE_DRAFT_PENDING) == true
+        restored = RestoredState(savedInstanceState)
 
         buildChrome()
         installWatcher()
@@ -192,21 +194,22 @@ class DocumentEditorActivity : AppCompatActivity() {
     }
 
     /**
-     * The buffer rides the bundle only while it is small enough to survive the trip: a `Bundle` goes
-     * home through a Binder transaction, and one over the ~1 MB budget takes the whole process down
-     * with `TransactionTooLargeException`. Above the cap the unsaved tail is at worst one debounce
-     * — and the park and the teardown flush are both still standing behind it.
+     * The bundle's shape, its size rule and its keys are all [RestoredState]'s — including the
+     * **target key** (M7), which is what lets the restore refuse a buffer belonging to another
+     * document. What this method owns is only the four live values.
      */
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        outState.putBoolean(STATE_PREVIEWING, previewing)
-        outState.putBoolean(STATE_DRAFT_PENDING, saver.draftPending)
-        if (!this::binding.isInitialized) return
-        val text = currentText()
-        outState.putInt(STATE_CARET, binding.editor.selectionEnd)
-        if (saver.isDirty(text) && text.length <= MAX_BUNDLED_CHARS) {
-            outState.putString(STATE_TEXT, text)
-        }
+        val built = this::binding.isInitialized
+        val text = if (built) currentText() else null
+        RestoredState.save(
+            outState,
+            key = saver.pageKey,
+            text = text?.takeIf { saver.isDirty(it) && it.length <= MAX_BUNDLED_CHARS },
+            caret = if (built) binding.editor.selectionEnd else RestoredState.NO_CARET,
+            previewing = previewing,
+            draftPending = saver.draftPending,
+        )
     }
 
     override fun onDestroy() {
@@ -241,6 +244,7 @@ class DocumentEditorActivity : AppCompatActivity() {
             binding.btnClose, binding.btnTextSize, binding.btnWrite,
             binding.btnPreview, binding.btnPagePrev, binding.btnPageNext,
         )) {
+            // btnScope's hint is ScopeToggle's — it changes with the face.
             TooltipCompat.setTooltipText(button, button.contentDescription)
         }
         updateModeButtons()
@@ -270,6 +274,9 @@ class DocumentEditorActivity : AppCompatActivity() {
             binding = binding,
             saver = saver,
             scope = lifecycleScope,
+            // Before the first state there is no notebook document to be in: the page scope is
+            // what the strip and the button are drawn for until the host says otherwise.
+            documentScope = { lastState?.scope ?: DocumentContract.SCOPE_PAGE },
             canBringIn = { !flips.inFlight && !leaving },
             onReflow = { overflow?.close(); tools.reflow() },
             onBroughtIn = { state ->
@@ -294,6 +301,16 @@ class DocumentEditorActivity : AppCompatActivity() {
                 tools.keepCaretVisible()
             },
         )
+        scopeToggle = ScopeToggle(
+            activity = this,
+            binding = binding,
+            scopeNow = { lastState?.scope },
+            busy = { flips.inFlight || strip.inFlight },
+            leaving = { leaving },
+            onTapped = { overflow?.close() },
+            switchTo = { flips.switchScope(it) },
+        )
+        scopeToggle.install()
         find = FindReplaceBar(
             context = this,
             binding = binding,
@@ -303,6 +320,16 @@ class DocumentEditorActivity : AppCompatActivity() {
             onReplacedAll = { saver.saveNow() },
         )
         find.install()
+        // Last: every act it runs belongs to something built above it.
+        shortcuts = EditorShortcuts(
+            format = format,
+            isPreviewing = { previewing },
+            setPreviewing = { setPreviewing(it) },
+            flipPage = { flipPage(it) },
+            closeOverflow = { overflow?.close() },
+            openFind = { find.open() },
+            reflow = { tools.reflow() },
+        )
 
         // A shorter editing surface can leave the caret below the fold, which is precisely what the
         // keyboard appearing does. Only a real height change is worth reacting to.
@@ -358,11 +385,17 @@ class DocumentEditorActivity : AppCompatActivity() {
                     val text = buildString {
                         for (i in 0 until state.textChunks) append(host.readChunk(i))
                     }
+                    // The mode-routing guard, FIRST — before the caret lookup, so a bundle dropped
+                    // for naming another target still gets the stored caret rather than the top.
+                    // Never the text: only that it went.
+                    if (!restored.bind(state.pageKey)) {
+                        Slog.d(TAG) { "restored buffer dropped — target changed" }
+                    }
                     // Only worth asking when the bundle has no answer — a recreated screen's own
                     // caret always wins, so a lookup then would be read and thrown away. A fresh
                     // seed opens at the top too: there is no "where you left off" for text that has
                     // never been on screen.
-                    val caret = if (restoredCaret == NO_CARET && !state.seeded) {
+                    val caret = if (restored.caret == RestoredState.NO_CARET && !state.seeded) {
                         EditorPrefs.caret(state.pageKey)
                     } else {
                         0
@@ -393,8 +426,10 @@ class DocumentEditorActivity : AppCompatActivity() {
         // parked. Opening the editor on a written page IS the act of drafting it (og), and this is
         // where that becomes true.
         saver.adoptWindow(loaded.text, state.seeded)
-        // A recreation can be holding an unstored seed of its own — see [restoredDraftPending].
-        if (restoredDraftPending) saver.armDraft()
+        // A recreation can be holding an unstored seed of its own — and only if the guard in
+        // `load()` kept it, because a claim from another document would stamp a watermark this one
+        // never earned.
+        if (restored.draftPending) saver.armDraft()
         showTarget(state)
 
         // Both surfaces are sized before the text lands, so nothing is laid out twice. Not persisted
@@ -403,17 +438,17 @@ class DocumentEditorActivity : AppCompatActivity() {
 
         // A recreated editor prefers its own saved buffer over the pull, and treats it as UNSAVED:
         // `savedText` stays what the host handed over, so the first debounce writes the difference.
-        val restored = restoredText
-        val opening = restored ?: loaded.text
+        val opening = restored.takeText() ?: loaded.text
         installLoadedText(opening)
         // Open where the writer left off — the bundle's caret on a recreation, the remembered one
         // otherwise. Falling back to the TOP rather than the end: a document is usually read before
         // it is added to, and landing at the bottom hides everything written.
-        val caret = if (restoredCaret != NO_CARET) restoredCaret else loaded.caret
+        val caret = if (restored.caret != RestoredState.NO_CARET) restored.caret else loaded.caret
         binding.editor.setSelection(caret.coerceIn(0, opening.length))
-        restoredText = null
 
-        if (restoredPreviewing) setPreviewing(true)
+        // Which surface was up outlives a dropped bundle: it is a fact about the reader, not the
+        // document.
+        if (restored.previewing) setPreviewing(true)
         if (saver.isDirty(opening)) saver.schedule()
         if (!previewing) binding.editor.requestFocus()
         Slog.d(TAG) { "loaded ${loaded.text.length} chars in ${state.textChunks} chunk(s)" }
@@ -425,6 +460,8 @@ class DocumentEditorActivity : AppCompatActivity() {
      *
      * The strip's line comes from the host's answer *unless* an unstored draft is on screen: the
      * host is describing what it holds, and a seed in the buffer is not that yet.
+     *
+     * [lastState] is set FIRST: the toggle and the strip both read the scope from it.
      */
     private fun showTarget(state: DocumentPageState) {
         lastState = state
@@ -433,6 +470,7 @@ class DocumentEditorActivity : AppCompatActivity() {
         binding.pageIndicator.text = if (state.pageIndex >= 0) {
             getString(R.string.document_page_indicator, state.pageIndex + 1, state.pageCount)
         } else ""
+        scopeToggle.apply(state.scope)
         strip.show(if (saver.draftPending) DocumentContract.SOURCE_DRAFTED else state.source)
     }
 
@@ -458,9 +496,10 @@ class DocumentEditorActivity : AppCompatActivity() {
         binding.btnWrite.visibility = View.GONE
         binding.btnPreview.visibility = View.GONE
         // GONE, never disabled: a disabled button is visually silent on e-ink, and there is no
-        // notebook to walk when nothing could be read.
+        // notebook to walk — or second place to stand — when nothing could be read.
         binding.btnPagePrev.visibility = View.GONE
         binding.btnPageNext.visibility = View.GONE
+        binding.btnScope.visibility = View.GONE
     }
 
     /** What one load brought back — the state, the reassembled text and the editor's own stored
@@ -582,74 +621,11 @@ class DocumentEditorActivity : AppCompatActivity() {
 
     // ── Keyboard ──────────────────────────────────────────────────────────────
 
+    /** The whole chord table is [EditorShortcuts]' — including which chords are deliberately NOT
+     *  claimed (Ctrl+Z/Y/A/C/V/X belong to the `EditText`). */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (this::binding.isInitialized &&
-            event.action == KeyEvent.ACTION_DOWN && event.isCtrlPressed && handleShortcut(event)
-        ) {
-            return true
-        }
+        if (this::shortcuts.isInitialized && shortcuts.handle(event)) return true
         return super.dispatchKeyEvent(event)
-    }
-
-    /**
-     * The format bar's chords plus og's chord-only four (Ctrl+P mode toggle, Ctrl+0 paragraph,
-     * Ctrl+4–6 the headings the bar has no room for). Ctrl+Z/Y/A/C/V/X must fall through to the EditText,
-     * which already implements undo, redo, select-all and the clipboard.
-     *
-     * On Ratta the IME stays connected (hardware keys arrive only through it), so an input method
-     * sits upstream in the key path and may claim a chord before this sees it — which is a reason to
-     * keep the set small, not a reason to hide the keyboard.
-     */
-    private fun handleShortcut(event: KeyEvent): Boolean {
-        val shift = event.isShiftPressed
-        // Preview is read-only; the mode toggle stays live there (og's rule) and so do the page
-        // flips, which are as much a reading act as a writing one.
-        if (previewing) {
-            when (event.keyCode) {
-                KeyEvent.KEYCODE_P -> if (!shift) { setPreviewing(false); return true }
-                KeyEvent.KEYCODE_PAGE_UP -> { flipPage(DocumentContract.PAGE_PREV); return true }
-                KeyEvent.KEYCODE_PAGE_DOWN -> { flipPage(DocumentContract.PAGE_NEXT); return true }
-            }
-            return false
-        }
-        when (event.keyCode) {
-            KeyEvent.KEYCODE_P -> if (!shift) { setPreviewing(true); return true }
-            KeyEvent.KEYCODE_PAGE_UP -> { overflow?.close(); flipPage(DocumentContract.PAGE_PREV); return true }
-            KeyEvent.KEYCODE_PAGE_DOWN -> { overflow?.close(); flipPage(DocumentContract.PAGE_NEXT); return true }
-            // Paragraph and H4–H6 are chord-only, as in og: the bar stops at H3, the grammar does not.
-            KeyEvent.KEYCODE_0 -> if (!shift) { overflow?.close(); format.block(MarkdownFormatter.Block.PARAGRAPH); return true }
-            KeyEvent.KEYCODE_4 -> if (!shift) { overflow?.close(); format.block(MarkdownFormatter.Block.HEADING, 4); return true }
-            KeyEvent.KEYCODE_5 -> if (!shift) { overflow?.close(); format.block(MarkdownFormatter.Block.HEADING, 5); return true }
-            KeyEvent.KEYCODE_6 -> if (!shift) { overflow?.close(); format.block(MarkdownFormatter.Block.HEADING, 6); return true }
-            KeyEvent.KEYCODE_1 -> if (!shift) return tool(FormatTool.H1)
-            KeyEvent.KEYCODE_2 -> if (!shift) return tool(FormatTool.H2)
-            KeyEvent.KEYCODE_3 -> if (!shift) return tool(FormatTool.H3)
-            KeyEvent.KEYCODE_B -> if (!shift) return tool(FormatTool.BOLD)
-            KeyEvent.KEYCODE_I -> if (!shift) return tool(FormatTool.ITALIC)
-            KeyEvent.KEYCODE_X -> if (shift) return tool(FormatTool.STRIKETHROUGH)
-            KeyEvent.KEYCODE_E -> if (!shift) return tool(FormatTool.CODE)
-            KeyEvent.KEYCODE_Q -> if (shift) return tool(FormatTool.QUOTE)
-            KeyEvent.KEYCODE_8 -> if (shift) return tool(FormatTool.BULLET)
-            KeyEvent.KEYCODE_7 -> if (shift) return tool(FormatTool.ORDERED)
-            KeyEvent.KEYCODE_9 -> if (shift) return tool(FormatTool.TASK)
-            KeyEvent.KEYCODE_K -> return tool(if (shift) FormatTool.IMAGE else FormatTool.LINK)
-            KeyEvent.KEYCODE_MINUS -> if (shift) return tool(FormatTool.RULE)
-            // Find, and its shifted sibling: the same reflow the source strip's button runs, from
-            // the keyboard.
-            KeyEvent.KEYCODE_F -> {
-                overflow?.close()
-                if (shift) tools.reflow() else find.open()
-                return true
-            }
-        }
-        return false
-    }
-
-    /** Run a tool from a chord and claim the key. */
-    private fun tool(tool: FormatTool): Boolean {
-        overflow?.close()
-        format.run(tool)
-        return true
     }
 
     // ── Saving, and the two ways a showing comes apart ────────────────────────
@@ -778,18 +754,17 @@ class DocumentEditorActivity : AppCompatActivity() {
         override fun flip(direction: Int) = flipPage(direction)
         override fun bringIn(mode: Int) = strip.bringIn(mode)
         override fun sourceLabel(): String = strip.label()
+
+        // ── M7 ────────────────────────────────────────────────────────────────
+
+        override fun scope(): Int = lastState?.scope ?: DocumentContract.SCOPE_PAGE
+        override fun toggleScope() = scopeToggle.tap()
+        override fun merge(mode: Int): Boolean =
+            (lastState?.scope == DocumentContract.SCOPE_NOTEBOOK).also { if (it) strip.bringIn(mode) }
     }
 
     private companion object {
         const val TAG = "DocumentEditor"
-
-        /** "The bundle had no caret" — see [restoredCaret]. */
-        const val NO_CARET = -1
-
-        const val STATE_TEXT = "doc_text"
-        const val STATE_CARET = "doc_caret"
-        const val STATE_PREVIEWING = "doc_previewing"
-        const val STATE_DRAFT_PENDING = "doc_draft_pending"
 
         /** The buffer rides `onSaveInstanceState` only below this: a bundle is a Binder transaction
          *  and the budget is ~1 MB. 256k chars is half of it as UTF-16, with room for the rest. */

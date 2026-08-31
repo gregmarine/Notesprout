@@ -5,7 +5,8 @@
   enough, the notebook needs no handoff around this screen).
 
   Shape, top to bottom:
-    header  — Close · title · ‹ n / m › · Text size · Write · Preview   (no ✓ Done — see topBarRow)
+    header  — Close · title · ‹ n / m › · Scope · Text size · Write · Preview
+              (no ✓ Done — see topBarRow)
     rule    — 1dp inkBlack
     writing chrome (source strip + format bar + overflow panel + find bar), hidden as ONE piece
               in Preview
@@ -17,7 +18,9 @@
   true the moment the bar is narrower than its contents. Both containers are in flow — the panel
   pushes the text down rather than floating over it, because an overlay ghosts on e-ink.
 
-  M7's scope toggle does not exist here at all: not built, rather than built and hidden.
+  M7 added the scope toggle to the header — page document ↔ the notebook's one merged draft. It is
+  always visible; the page cluster it sits after is what goes GONE in the notebook scope, because
+  `‹ n / m ›` numbers nothing there.
 
   Chrome sits flush at the top edge — the top guard is 0 on Ratta; the Activity still applies it,
   because the guard, not this file, is where that decision lives.
@@ -92,6 +95,20 @@
             style="@style/Widget.Notesprout.ToolbarButton"
             android:contentDescription="@string/cd_document_page_next"
             android:src="@drawable/ic_page_next" />
+
+        <!-- The scope toggle (M7): this page's document ↔ the notebook's one merged final draft.
+             Immediately after the page cluster it replaces, because that is what it is an
+             alternative to. ALWAYS visible — both scopes, Write and Preview: it is how the reader
+             gets back, and a way back that vanishes in one of the two places is not one.
+
+             The icon names WHERE THE TAP GOES, not where you are: a notebook while a page is open,
+             a page while the notebook document is. Both faces are set from code, so this is only
+             the page-scope starting state. -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnScope"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:contentDescription="@string/cd_document_scope_notebook"
+            android:src="@drawable/ic_notebook" />
 
         <!-- Text size / Write / Preview at the trailing edge — the SN rule: action buttons on the
              TOP bar, after the cancel side. The armed mode's button carries the selected state of

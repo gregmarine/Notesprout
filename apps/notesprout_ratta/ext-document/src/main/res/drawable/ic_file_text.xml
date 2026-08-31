@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tabler "file-text" icon: a document outline with three text lines. The header scope toggle's
+     notebook-scope face (M7) — the tap goes back to this page's document.
+
+     `:app` carries a byte-identical copy for its own screens; an extension APK cannot reference the
+     host's resources, so the icon travels with the module that draws it. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Fold corner -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M14 3v4a1 1 0 0 0 1 1h4"
+        android:strokeColor="@color/inkBlack"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+    <!-- Document body -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2z"
+        android:strokeColor="@color/inkBlack"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+    <!-- Text lines -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M9 9h1"
+        android:strokeColor="@color/inkBlack"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M9 13h6"
+        android:strokeColor="@color/inkBlack"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M9 17h6"
+        android:strokeColor="@color/inkBlack"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+</vector>

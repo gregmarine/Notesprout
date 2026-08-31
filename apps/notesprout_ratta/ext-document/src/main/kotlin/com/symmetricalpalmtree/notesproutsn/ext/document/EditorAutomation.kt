@@ -89,6 +89,28 @@ internal interface AutomationPeer {
 
     /** The source strip's line as it now reads. */
     fun sourceLabel(): String
+
+    // ── M7's scope toggle and the notebook merge ──────────────────────────────
+
+    /** The adopted target's scope — `SCOPE_PAGE` / `SCOPE_NOTEBOOK`, and `SCOPE_PAGE` before the
+     *  first state has landed. */
+    fun scope(): Int
+
+    /**
+     * The header toggle's tap: page ↔ notebook document. Asynchronous like a flip — it pushes the
+     * outgoing text and reads the incoming target, and entering the notebook scope may auto-merge
+     * the whole notebook — so poll [scope] / [pageLabel] / [text] afterwards. Silent when the
+     * guards refuse it, exactly as the button is.
+     */
+    fun toggleScope()
+
+    /**
+     * The notebook Merge — `BRING_REPLACE` / `BRING_APPEND`, the sheet's two rows without the
+     * sheet. Returns false, having done nothing, when the target is not the notebook document: a
+     * walk that thinks it merged when it brought a page in would report the wrong thing. Also
+     * asynchronous: poll [text] and [sourceLabel].
+     */
+    fun merge(mode: Int): Boolean
 }
 
 /** The live screen's peer, or null when no screen is up (and always null in release). */

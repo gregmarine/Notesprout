@@ -26,6 +26,12 @@
     <string name="document_first_page">First page.</string>
     <string name="document_last_page">Last page.</string>
 
+    <!-- The scope toggle (M7). The label names WHERE THE TAP GOES, not where the reader is: a
+         two-state control that described its own state would need a second control to explain it,
+         and this header has no room for one. -->
+    <string name="cd_document_scope_notebook">Notebook document</string>
+    <string name="cd_document_scope_page">Page document</string>
+
     <!-- The source strip (M6): where this document came from, and its two acts. -->
     <string name="document_source_drafted">Drafted from this page</string>
     <string name="document_source_stale">Page has changed since this draft</string>
@@ -35,17 +41,30 @@
     <string name="document_bring_in">Bring in</string>
     <string name="cd_document_bring_in">Bring this page\'s text into the document</string>
 
+    <!-- The same strip in the notebook scope (M7). "Not merged from these pages" has no line at
+         all: the notebook document exists because the writer asked for it, and naming the absence
+         of a merge would be noise about something they did on purpose. A page's document is the
+         opposite case — it is normally drafted, so its absence is worth saying. -->
+    <string name="document_source_merged">Merged from this notebook\'s pages</string>
+    <string name="document_source_pages_stale">Pages have changed since this merge</string>
+    <string name="document_merge">Merge</string>
+    <string name="cd_document_merge">Merge the pages\' text into this document</string>
+
     <!-- Bring in: the choice is made BEFORE recognition runs, so there is never a "cancel after
          waiting" state. Both situations are real — a false start, and more ink written after the
-         editing began. -->
+         editing began. The notebook scope takes the same two rows under its own title. -->
     <string name="bring_in_title">Bring in</string>
     <string name="bring_in_replace">Replace this document</string>
     <string name="bring_in_append">Add below the current text</string>
+    <string name="merge_title">Merge pages</string>
 
-    <!-- Shown while the host reads a page: immediately for a Bring in (which always recognizes in
-         full) and only after 350 ms for a page flip, so a page that is already drafted flips with
-         no dialog flash. Not cancelable — the read is already under way host-side. -->
+    <!-- Shown while the host reads: immediately for a Bring in / Merge (which always read in full)
+         and only after 350 ms for a page flip or a scope switch, so a target that is already
+         drafted arrives with no dialog flash. Never `cancelable` — back and an outside tap must
+         not leave a read running unwatched — but the two that walk EVERY page (entering the
+         notebook scope, and Merge) carry a real Cancel button. -->
     <string name="document_reading_page">Reading this page…</string>
+    <string name="document_reading_pages">Reading the pages…</string>
 
     <!-- Bring in could not read the page. Two dialogs rather than one, because "there is no
          recognizer here" is something the reader can act on and "it failed" is not. -->
