@@ -100,6 +100,11 @@ class NotebookActivity : AppCompatActivity() {
     private lateinit var scratchPad: ScratchPadEntry
     /** The Document editor's entry button (arc 19 / M3) — the fifth extension point's door. */
     private lateinit var documentEntry: DocumentEditorEntry
+    /** The `.soil` half of that door: the four hooks the editor's callback binder reaches back
+     *  through, and (since M6) the host's memory of which page the editor is on. */
+    private lateinit var documentHooks: DocumentHostHooks
+    /** The open-time seed and the editor's silent recognitions (arc 19 / M6). */
+    private lateinit var documentSeedFlow: DocumentSeedFlow
     private val repo by lazy { IndexRepository() }
 
     /** The global clipboard's one index row (arc 7) — the payload, read and written only here. */
@@ -397,19 +402,49 @@ class NotebookActivity : AppCompatActivity() {
         // what decides whether it holds. If the Ratta ink daemon draws beneath the editor, the fix
         // is the scratch pad's ordering (releaseForHandoff immediately before the launch, the
         // extension reclaiming in its own onResume) — never a repaint, and never a workaround here.
+        //
+        // The three pieces are wired to each other, so each reaches the next through a lambda
+        // rather than a constructor argument: the seed flow stages onto the hooks and opens the
+        // entry, the hooks call the seed flow for the editor's own recognitions, and the entry
+        // holds the hooks. Every one of those reads a `lateinit` that is assigned by the time it
+        // can fire (a tap, or a Binder call from a showing that does not exist yet).
+        documentSeedFlow = DocumentSeedFlow(
+            activity = this,
+            session = { session },
+            displayedPageId = { displayedPageId },
+            alive = { opened && !closing && ::session.isInitialized },
+            hooks = { documentHooks },
+            openEditor = { documentEntry.open() },
+        )
+        documentHooks = DocumentHostHooks(
+            notebook = { session },
+            // displayedPageId, never session.currentIndex — the R6 torn-read rule: the document
+            // belongs to the page whose strokes are on the paper. Since M6 this is the fallback
+            // for the editor's own target, which a flip moves and the notebook does not follow.
+            displayedPageId = { displayedPageId },
+            notebookName = { notebookName },
+            alive = { opened && !closing && ::session.isInitialized },
+            recognizePageText = { pageId -> documentSeedFlow.recognize(pageId) },
+        )
+        // Before the reconnect below, and before anything can ask for state: a host killed behind
+        // the editor must come back pointing at the page the editor is still showing.
+        documentHooks.restoreTarget(savedInstanceState?.getString(KEY_DOCUMENT_TARGET))
         documentEntry = DocumentEditorEntry(
             activity = this,
             button = binding.btnDocument,
-            hooks = DocumentHostHooks(
-                notebook = { session },
-                // displayedPageId, never session.currentIndex — the R6 torn-read rule: the document
-                // belongs to the page whose strokes are on the paper.
-                displayedPageId = { displayedPageId },
-                notebookName = { notebookName },
-                alive = { opened && !closing && ::session.isInitialized },
-            ),
+            hooks = documentHooks,
+            // The notebook catches up on close (og's `navigateToPage(endedOn)`): the editor may have
+            // flipped several pages while this screen stayed where it was, and coming back to a
+            // different page than the one you were just reading would be a lie about where you are.
+            onClosed = {
+                val endedOn = documentHooks.targetPageId
+                documentHooks.resetTarget()
+                if (endedOn != null && endedOn != displayedPageId) runPageOp { refreshToPage(endedOn) }
+            },
         )
-        binding.btnDocument.setOnClickListener { if (opened && !closing) documentEntry.open() }
+        // The tap goes to the seed flow, not straight to the entry: og's order is flush → stored
+        // document? → recognize → stage → open, and the editor is opened by its last step.
+        binding.btnDocument.setOnClickListener { if (opened && !closing) documentSeedFlow.start() }
         TooltipCompat.setTooltipText(binding.btnDocument, binding.btnDocument.contentDescription)
         // We died with the editor still on screen (M4): the extension's process — and its unsaved
         // text — outlived us, holding a host binder that went with the old instance. Re-open the
@@ -2167,16 +2202,22 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     /**
-     * The one thing this screen carries across its own death (M4): whether the document editor was
-     * showing. Everything else it needs is in the Intent or the `.soil` — but a live showing lives
-     * only in another process, and without this flag the recreated instance would have no way to
-     * know a bind is owed one. See [DocumentEditorEntry.reconnect].
+     * The two things this screen carries across its own death (M4, grown at M6): whether the
+     * document editor was showing, and which page it was on. Everything else it needs is in the
+     * Intent or the `.soil` — but a live showing lives only in another process, and without these
+     * the recreated instance would have no way to know a bind is owed one, nor which page the
+     * editor's next `current()` is asking about. See [DocumentEditorEntry.reconnect] and
+     * [DocumentHostHooks.restoreTarget].
      */
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putBoolean(
             KEY_DOCUMENT_SHOWING,
             ::documentEntry.isInitialized && documentEntry.isShowing,
+        )
+        outState.putString(
+            KEY_DOCUMENT_TARGET,
+            if (::documentHooks.isInitialized) documentHooks.targetPageId else null,
         )
     }
 
@@ -2273,6 +2314,10 @@ class NotebookActivity : AppCompatActivity() {
 
         /** Saved state (M4): the document editor was showing when this instance went down. */
         private const val KEY_DOCUMENT_SHOWING = "notebook.documentShowing"
+
+        /** Saved state (M6): the page that showing had flipped to — the host's target, which the
+         *  notebook underneath does not follow until the showing ends. */
+        private const val KEY_DOCUMENT_TARGET = "notebook.documentTarget"
         /** Covers any screen; deliberately not MAX_VALUE (engine-side rect math must not overflow). */
         private val BLOCK_ALL = Rect(0, 0, 100_000, 100_000)
         const val EXTRA_NOTEBOOK_ID = "notebookId"

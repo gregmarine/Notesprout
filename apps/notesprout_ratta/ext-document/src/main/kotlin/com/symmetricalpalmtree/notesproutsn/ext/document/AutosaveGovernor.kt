@@ -65,6 +65,26 @@ class AutosaveGovernor {
     }
 
     /**
+     * A **Bring in's** trigger (M6): push [text] even when it matches [savedText]. og's rule — both
+     * Bring in choices re-anchor `srcUpdatedAt` to the state just recognized, *even when the draft
+     * came out identical*, because the re-anchoring is the whole act. The ordinary [request] would
+     * drop the unchanged text and the parked watermark would never be consumed: the strip would
+     * claim "drafted from this page" while the row still carried the old anchor.
+     *
+     * A push already in flight queues it like any other; the queued copy can still be dropped by
+     * [onSaved]'s unchanged check — an accepted edge (two overlapping Bring ins), the next one
+     * re-parks and re-anchors.
+     */
+    fun requestDraft(text: String): SaveAction {
+        if (isPushing) {
+            queued = text
+            return SaveAction.Wait
+        }
+        isPushing = true
+        return SaveAction.Push(text)
+    }
+
+    /**
      * The push of [text] landed. [savedText] advances **only here** — a push that threw leaves it
      * where it was, which is what keeps the next debounce writing the same words again.
      */
@@ -84,6 +104,19 @@ class AutosaveGovernor {
         isPushing = false
         queued = null
         return SaveAction.Retry
+    }
+
+    /**
+     * Drop a queued snapshot without pushing it, and stop believing a push is in flight (M6).
+     *
+     * The one caller is the outgoing push of a **page flip**: anything queued behind it is the
+     * *outgoing* page's words, and the target is about to become another page's, so those words can
+     * never be written now — but leaving [isPushing] set would make every later save queue behind a
+     * push that will never finish. [savedText] is untouched: what landed, landed.
+     */
+    fun abandonQueue() {
+        isPushing = false
+        queued = null
     }
 
     /**

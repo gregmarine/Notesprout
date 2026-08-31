@@ -38,6 +38,12 @@ import java.util.concurrent.atomic.AtomicReference
  * - `find_close` · `reflow` · `undo` (the editor's own Ctrl+Z).
  * - `word_count` — `words=<n> chars=<m>`, selection-aware like the toast.
  * - `set_size --ef sp <f>` · `get_size` — the size **preference** in sp, not the view's px.
+ * - `flip --ei dir <-1|1>` — a page flip (M6). Replies `OK` when it *started*: the flip pushes the
+ *   outgoing page and reads the incoming one, so poll `get_state` / `page_label` after it.
+ * - `bring_in --ei mode <0|1>` — Replace (0) / Append (1), the sheet's two rows without the sheet.
+ *   Also asynchronous: poll `get_text` / `source_label`.
+ * - `page_label` — the header's `n / m` alone (`-` when the target is not a page).
+ * - `source_label` — the source strip's line.
  *
  * **It never logs the document, and never the find query either.** Result data carries text back to
  * the shell because that is the whole point of `get_text`; nothing is written to logcat on any path
@@ -125,6 +131,18 @@ class AutomationReceiver : BroadcastReceiver() {
         }
 
         "get_size" -> peer.textSize().toString()
+
+        "flip" -> {
+            peer.flip(intent.getIntExtra("dir", 0)); "OK"
+        }
+
+        "bring_in" -> {
+            peer.bringIn(intent.getIntExtra("mode", 0)); "OK"
+        }
+
+        "page_label" -> peer.pageLabel().ifEmpty { "-" }
+
+        "source_label" -> peer.sourceLabel()
 
         else -> "ERR:unknown cmd"
     }

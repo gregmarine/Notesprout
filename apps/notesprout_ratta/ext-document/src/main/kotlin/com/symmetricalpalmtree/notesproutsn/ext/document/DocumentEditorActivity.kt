@@ -7,21 +7,21 @@ import android.text.TextWatcher
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
+import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.TooltipCompat
 import androidx.lifecycle.lifecycleScope
-import com.symmetricalpalmtree.notesproutsn.core.ActionSheetDialog
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.core.TopGuard
 import com.symmetricalpalmtree.notesproutsn.ext.document.databinding.ActivityDocumentEditorBinding
+import com.symmetricalpalmtree.notesproutsn.extension.DocumentContract
 import com.symmetricalpalmtree.notesproutsn.extension.DocumentPageState
 import com.symmetricalpalmtree.notesproutsn.extension.HostCallerCheck
-import com.symmetricalpalmtree.notesproutsn.markdown.EditableBuffer
 import com.symmetricalpalmtree.notesproutsn.markdown.MarkdownFormatter
 import com.symmetricalpalmtree.notesproutsn.markdown.MarkdownParser
 import com.symmetricalpalmtree.notesproutsn.markdown.MarkdownRenderer
-import com.symmetricalpalmtree.notesproutsn.markdown.TextBuffer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -59,9 +59,13 @@ import java.util.concurrent.atomic.AtomicReference
  * that is different here is where the small state lives: not `SharedPreferences` but the host's
  * extension store, through [EditorPrefs], because an extension writes nothing to disk itself.
  *
- * Not built at M5, rather than built and hidden: the page arrows and source strip (M6), the scope
- * toggle (M7) and proofread (M10). Reflow has no button for the same reason — its home is M6's
- * source strip, so until then `Ctrl+Shift+F` is the whole of it.
+ * **M6 gave the screen its provenance and its legs** — the [SourceStrip] (where this document came
+ * from, Reflow, and Bring in) and [PageFlipController] (the arrows, `Ctrl+PgUp` / `Ctrl+PgDn`, and
+ * the no-save zone a flip opens). Both are collaborators rather than methods here for the reason the
+ * module's size rule exists; what this class keeps is the wiring, the header, and [lastState] — the
+ * last answer the host gave, which is what the arrows' edge check reads instead of asking again.
+ *
+ * Not built at M6, rather than built and hidden: the scope toggle (M7) and proofread (M10).
  */
 class DocumentEditorActivity : AppCompatActivity() {
 
@@ -73,6 +77,10 @@ class DocumentEditorActivity : AppCompatActivity() {
         snapshot = { currentText() },
         caretSnapshot = { if (this::binding.isInitialized) binding.editor.selectionEnd else 0 },
         caretSink = { key, caret -> EditorPrefs.rememberCaretAsync(key, caret) },
+        // The strip may only claim provenance the host has actually stored, and must stop claiming
+        // it the moment the host says the claim died with its process.
+        onDraftAnchored = { if (this::strip.isInitialized) strip.show(DocumentContract.SOURCE_DRAFTED) },
+        onDraftDowngraded = { if (this::strip.isInitialized) strip.show(DocumentContract.SOURCE_NONE) },
     )
 
     private var overflow: FormatBarOverflow? = null
@@ -86,8 +94,21 @@ class DocumentEditorActivity : AppCompatActivity() {
      *  and the selection and nothing else. */
     private lateinit var tools: EditorTools
 
-    /** The size in force, which both surfaces are drawn at. Loaded from the store, not the XML. */
-    private var textSizeSp = EditorPrefs.DEFAULT_TEXT_SIZE
+    /** Provenance, Reflow and Bring in (M6). */
+    private lateinit var strip: SourceStrip
+
+    /** The page arrows' machinery, and the no-save zone they open (M6). */
+    private lateinit var flips: PageFlipController
+
+    /** The format bar's fourteen tools and the four chord-only ones, over the buffer. */
+    private lateinit var format: FormatActions
+
+    /** The size both surfaces are drawn at, and the sheet that picks it. */
+    private lateinit var textSize: TextSizeControl
+
+    /** The last state the host answered with — what the arrows' edge check and the strip's line are
+     *  read from, so neither costs a Binder call. Null until the first load lands. */
+    private var lastState: DocumentPageState? = null
 
     private var previewing = false
 
@@ -115,6 +136,10 @@ class DocumentEditorActivity : AppCompatActivity() {
     private var restoredCaret = NO_CARET
     private var restoredPreviewing = false
 
+    /** A recreated screen may be holding an unstored seed: the claim has to come back with it, or
+     *  the save that lands those words would be an ordinary one and the provenance would be lost. */
+    private var restoredDraftPending = false
+
     /** This instance's session hooks, held by identity so `onDestroy` can only clear its own. */
     private val beginListener = EditorSession.BeginListener { onHostBegan() }
     private val flushHook = EditorSession.FlushHook { unsavedSnapshotBlocking() }
@@ -137,6 +162,7 @@ class DocumentEditorActivity : AppCompatActivity() {
         restoredText = savedInstanceState?.getString(STATE_TEXT)
         restoredCaret = savedInstanceState?.getInt(STATE_CARET, NO_CARET) ?: NO_CARET
         restoredPreviewing = savedInstanceState?.getBoolean(STATE_PREVIEWING) == true
+        restoredDraftPending = savedInstanceState?.getBoolean(STATE_DRAFT_PENDING) == true
 
         buildChrome()
         installWatcher()
@@ -174,6 +200,7 @@ class DocumentEditorActivity : AppCompatActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putBoolean(STATE_PREVIEWING, previewing)
+        outState.putBoolean(STATE_DRAFT_PENDING, saver.draftPending)
         if (!this::binding.isInitialized) return
         val text = currentText()
         outState.putInt(STATE_CARET, binding.editor.selectionEnd)
@@ -189,30 +216,83 @@ class DocumentEditorActivity : AppCompatActivity() {
         if (EditorSession.flushHook === flushHook) EditorSession.flushHook = null
         if (EditorAutomation.peer === automationPeer) EditorAutomation.peer = null
         saver.cancelTimers()
+        // The reading popups' coroutine paths ride the now-cancelled lifecycle scope; this is the
+        // hide those paths can no longer run. A refused caller never built the chrome.
+        if (this::flips.isInitialized) flips.close()
+        if (this::strip.isInitialized) strip.close()
     }
 
     // ── Chrome ────────────────────────────────────────────────────────────────
 
     private fun buildChrome() {
+        // The back arrow is the ONE leave door (user call, M6 review): every way out saves and
+        // nothing discards, so a ✓ Done beside it did the same thing twice. The debug hook's
+        // `done` still leaves with RESULT_OK — the host treats both results identically.
         binding.btnClose.setOnClickListener { leave(Activity.RESULT_CANCELED) }
-        binding.btnDone.setOnClickListener { leave(Activity.RESULT_OK) }
         binding.btnWrite.setOnClickListener { setPreviewing(false) }
         binding.btnPreview.setOnClickListener { setPreviewing(true) }
         // Live in Preview too: reading comfort is most of what a text size is for.
-        binding.btnTextSize.setOnClickListener { promptTextSize() }
+        binding.btnTextSize.setOnClickListener { overflow?.close(); textSize.prompt() }
+        // Live in Preview too, and for the same kind of reason: walking the notebook is reading as
+        // much as it is writing (og's rule).
+        binding.btnPagePrev.setOnClickListener { flipPage(DocumentContract.PAGE_PREV) }
+        binding.btnPageNext.setOnClickListener { flipPage(DocumentContract.PAGE_NEXT) }
         for (button in listOf(
-            binding.btnClose, binding.btnDone, binding.btnTextSize, binding.btnWrite, binding.btnPreview,
+            binding.btnClose, binding.btnTextSize, binding.btnWrite,
+            binding.btnPreview, binding.btnPagePrev, binding.btnPageNext,
         )) {
             TooltipCompat.setTooltipText(button, button.contentDescription)
         }
         updateModeButtons()
 
+        format = FormatActions(
+            binding = binding,
+            isPreviewing = { previewing },
+            onSearch = { find.open() },
+            onWordCount = { tools.showWordCount() },
+        )
+        textSize = TextSizeControl(
+            context = this,
+            binding = binding,
+            scope = lifecycleScope,
+            isPreviewing = { previewing },
+            renderPreview = { renderPreview() },
+        )
         tools = EditorTools(
             context = this,
             binding = binding,
             isPreviewing = { previewing },
             leavePreview = { setPreviewing(false) },
             onEdited = { saver.saveNow() },
+        )
+        strip = SourceStrip(
+            activity = this,
+            binding = binding,
+            saver = saver,
+            scope = lifecycleScope,
+            canBringIn = { !flips.inFlight && !leaving },
+            onReflow = { overflow?.close(); tools.reflow() },
+            onBroughtIn = { state ->
+                showTarget(state)
+                if (previewing) renderPreview()
+                tools.keepCaretVisible()
+            },
+        )
+        strip.install()
+        flips = PageFlipController(
+            activity = this,
+            binding = binding,
+            saver = saver,
+            scope = lifecycleScope,
+            // The match count is stale the moment the buffer is another page's; the query itself
+            // survives in the field, which is what a writer looking for the same word wants.
+            onFlipStarting = { find.close(); overflow?.close() },
+            installText = ::installLoadedText,
+            onAdopted = { state ->
+                showTarget(state)
+                if (previewing) renderPreview()
+                tools.keepCaretVisible()
+            },
         )
         find = FindReplaceBar(
             context = this,
@@ -232,7 +312,7 @@ class DocumentEditorActivity : AppCompatActivity() {
 
         val controls = FormatBar.build(
             bar = binding.formatBar,
-            onTool = ::runTool,
+            onTool = { format.run(it) },
             onToolUsed = { overflow?.close() },
             onOverflow = { overflow?.toggle() },
         )
@@ -252,26 +332,10 @@ class DocumentEditorActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * A tap anywhere that is not the bar or the panel puts the overflow away — placing the caret in
-     * the text should not have to be preceded by dismissing a menu. Deliberately **not** consumed:
-     * the touch is the writer choosing where to type, and it must still land.
-     */
+    /** A tap outside the format bar and its panel puts the overflow away; the touch still lands. */
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        if (!this::binding.isInitialized) return super.dispatchTouchEvent(event)
-        if (event.actionMasked == MotionEvent.ACTION_DOWN && overflow?.isOpen() == true &&
-            !isInside(binding.formatBar, event) && !isInside(binding.overflowPanel, event)
-        ) {
-            overflow?.close()
-        }
+        overflow?.dismissIfOutside(event)
         return super.dispatchTouchEvent(event)
-    }
-
-    private fun isInside(view: View, event: MotionEvent): Boolean {
-        if (view.visibility != View.VISIBLE) return false
-        val xy = IntArray(2).also { view.getLocationOnScreen(it) }
-        return event.rawX >= xy[0] && event.rawX <= xy[0] + view.width &&
-            event.rawY >= xy[1] && event.rawY <= xy[1] + view.height
     }
 
     // ── Load ──────────────────────────────────────────────────────────────────
@@ -295,8 +359,14 @@ class DocumentEditorActivity : AppCompatActivity() {
                         for (i in 0 until state.textChunks) append(host.readChunk(i))
                     }
                     // Only worth asking when the bundle has no answer — a recreated screen's own
-                    // caret always wins, so a lookup then would be read and thrown away.
-                    val caret = if (restoredCaret == NO_CARET) EditorPrefs.caret(state.pageKey) else 0
+                    // caret always wins, so a lookup then would be read and thrown away. A fresh
+                    // seed opens at the top too: there is no "where you left off" for text that has
+                    // never been on screen.
+                    val caret = if (restoredCaret == NO_CARET && !state.seeded) {
+                        EditorPrefs.caret(state.pageKey)
+                    } else {
+                        0
+                    }
                     Loaded(state, text, EditorPrefs.textSize(), caret)
                 } catch (e: Exception) {
                     // The class name only: an exception's message from either side of this seam
@@ -318,25 +388,24 @@ class DocumentEditorActivity : AppCompatActivity() {
     private fun adopt(loaded: Loaded) {
         val state = loaded.state
         saver.pageKey = state.pageKey
-        saver.markLoaded(loaded.text)
-
-        binding.title.text = state.title.ifEmpty { getString(R.string.document_title) }
-        // −1 is the notebook scope (M7) — not a page, so nothing to number.
-        binding.pageIndicator.text = if (state.pageIndex >= 0) {
-            getString(R.string.document_page_indicator, state.pageIndex + 1, state.pageCount)
-        } else ""
+        // A seeded window is a draft the host built and has NOT stored: what is on screen is
+        // unsaved, and the save that lands it carries the claim that stamps the watermark the host
+        // parked. Opening the editor on a written page IS the act of drafting it (og), and this is
+        // where that becomes true.
+        saver.adoptWindow(loaded.text, state.seeded)
+        // A recreation can be holding an unstored seed of its own — see [restoredDraftPending].
+        if (restoredDraftPending) saver.armDraft()
+        showTarget(state)
 
         // Both surfaces are sized before the text lands, so nothing is laid out twice. Not persisted
         // — this is the value that was just read back.
-        applyTextSize(loaded.textSizeSp, persist = false)
+        textSize.apply(loaded.textSizeSp, persist = false)
 
         // A recreated editor prefers its own saved buffer over the pull, and treats it as UNSAVED:
         // `savedText` stays what the host handed over, so the first debounce writes the difference.
         val restored = restoredText
         val opening = restored ?: loaded.text
-        applyingEdit = true
-        binding.editor.setText(opening)
-        applyingEdit = false
+        installLoadedText(opening)
         // Open where the writer left off — the bundle's caret on a recreation, the remembered one
         // otherwise. Falling back to the TOP rather than the end: a document is usually read before
         // it is added to, and landing at the bottom hides everything written.
@@ -348,6 +417,31 @@ class DocumentEditorActivity : AppCompatActivity() {
         if (saver.isDirty(opening)) saver.schedule()
         if (!previewing) binding.editor.requestFocus()
         Slog.d(TAG) { "loaded ${loaded.text.length} chars in ${state.textChunks} chunk(s)" }
+    }
+
+    /**
+     * The header and the strip for [state] — every adopted target goes through here, whether it
+     * arrived from the open, from a flip or from a Bring in, so the three can never disagree.
+     *
+     * The strip's line comes from the host's answer *unless* an unstored draft is on screen: the
+     * host is describing what it holds, and a seed in the buffer is not that yet.
+     */
+    private fun showTarget(state: DocumentPageState) {
+        lastState = state
+        binding.title.text = state.title.ifEmpty { getString(R.string.document_title) }
+        // −1 is the notebook scope (M7) — not a page, so nothing to number.
+        binding.pageIndicator.text = if (state.pageIndex >= 0) {
+            getString(R.string.document_page_indicator, state.pageIndex + 1, state.pageCount)
+        } else ""
+        strip.show(if (saver.draftPending) DocumentContract.SOURCE_DRAFTED else state.source)
+    }
+
+    /** Install text that is not an edit — a load or a flip. It must not sit on the undo stack, and
+     *  it must not be mistaken for the writer typing. */
+    private fun installLoadedText(text: String) {
+        applyingEdit = true
+        binding.editor.setText(text)
+        applyingEdit = false
     }
 
     /**
@@ -363,6 +457,10 @@ class DocumentEditorActivity : AppCompatActivity() {
         binding.writingChrome.visibility = View.GONE
         binding.btnWrite.visibility = View.GONE
         binding.btnPreview.visibility = View.GONE
+        // GONE, never disabled: a disabled button is visually silent on e-ink, and there is no
+        // notebook to walk when nothing could be read.
+        binding.btnPagePrev.visibility = View.GONE
+        binding.btnPageNext.visibility = View.GONE
     }
 
     /** What one load brought back — the state, the reassembled text and the editor's own stored
@@ -425,50 +523,37 @@ class DocumentEditorActivity : AppCompatActivity() {
         binding.previewScroll.scrollTo(0, 0)
     }
 
-    // ── Formatting ────────────────────────────────────────────────────────────
+    // ── Page flips ────────────────────────────────────────────────────────────
 
-    private fun runTool(tool: FormatTool) {
-        when (tool) {
-            FormatTool.H1 -> applyBlock(MarkdownFormatter.Block.HEADING, 1)
-            FormatTool.H2 -> applyBlock(MarkdownFormatter.Block.HEADING, 2)
-            FormatTool.H3 -> applyBlock(MarkdownFormatter.Block.HEADING, 3)
-            FormatTool.BOLD -> wrapInline("**")
-            FormatTool.ITALIC -> wrapInline("*")
-            FormatTool.STRIKETHROUGH -> wrapInline("~~")
-            FormatTool.CODE -> wrapInline("`")
-            FormatTool.QUOTE -> applyBlock(MarkdownFormatter.Block.QUOTE)
-            FormatTool.BULLET -> applyBlock(MarkdownFormatter.Block.BULLET)
-            FormatTool.ORDERED -> applyBlock(MarkdownFormatter.Block.ORDERED)
-            FormatTool.TASK -> applyBlock(MarkdownFormatter.Block.TASK)
-            FormatTool.LINK -> runFormat(MarkdownFormatter::insertLink)
-            FormatTool.IMAGE -> runFormat(MarkdownFormatter::insertImage)
-            FormatTool.RULE -> runFormat(MarkdownFormatter::insertRule)
-            // Not formatter operations: these two act on the screen, not on the buffer.
-            FormatTool.SEARCH -> find.open()
-            FormatTool.WORD_COUNT -> tools.showWordCount()
+    /**
+     * One tap on an arrow, or one `Ctrl+PgUp` / `Ctrl+PgDn`. The decision is [FlipRules]'; the act
+     * is [PageFlipController]'s.
+     *
+     * The edge check is **local**, against the last state the host answered with: a tap past the
+     * last page must not cost a Binder round trip to be told there is nothing there. And at an edge
+     * the arrows stay exactly where they are and say so — a disabled button is visually silent on
+     * e-ink, so the toast is the only thing that can report a tap that changed nothing.
+     */
+    private fun flipPage(direction: Int) {
+        val state = lastState
+        val outcome = FlipRules.check(
+            busy = flips.inFlight || strip.inFlight,
+            leaving = leaving,
+            hasTarget = state != null,
+            direction = direction,
+            pageIndex = state?.pageIndex ?: 0,
+            pageCount = state?.pageCount ?: 1,
+        )
+        when (outcome) {
+            FlipRules.Outcome.BLOCKED -> Unit
+            FlipRules.Outcome.AT_FIRST -> toast(R.string.document_first_page)
+            FlipRules.Outcome.AT_LAST -> toast(R.string.document_last_page)
+            FlipRules.Outcome.GO -> flips.flip(direction)
         }
     }
 
-    private fun wrapInline(marker: String) = runFormat { buf, s, t ->
-        MarkdownFormatter.toggleInline(buf, s, t, marker)
-    }
-
-    private fun applyBlock(kind: MarkdownFormatter.Block, level: Int = 1) = runFormat { buf, s, t ->
-        MarkdownFormatter.toggleBlock(buf, s, t, kind, level)
-    }
-
-    /** Run one formatter operation over the current selection and re-install the caret it returns. */
-    private fun runFormat(op: (TextBuffer, Int, Int) -> MarkdownFormatter.Selection) {
-        if (previewing) return
-        val text = binding.editor.text ?: return
-        val start = binding.editor.selectionStart.coerceIn(0, text.length)
-        val end = binding.editor.selectionEnd.coerceIn(0, text.length)
-        val selection = op(EditableBuffer(text), start, end)
-        binding.editor.setSelection(
-            selection.start.coerceIn(0, text.length),
-            selection.end.coerceIn(0, text.length),
-        )
-    }
+    private fun toast(@StringRes messageRes: Int) =
+        Toast.makeText(this, messageRes, Toast.LENGTH_SHORT).show()
 
     // ── Typing ────────────────────────────────────────────────────────────────
 
@@ -489,66 +574,10 @@ class DocumentEditorActivity : AppCompatActivity() {
                 val at = newlineAt
                 newlineAt = -1
                 if (applyingEdit) return
-                if (at >= 0 && s != null) continueListAt(s, at)
+                if (at >= 0 && s != null) tools.continueListAt(s, at)
                 saver.schedule()
             }
         })
-    }
-
-    /** og's list continuation, through the buffer rather than key events. */
-    private fun continueListAt(text: Editable, newlineIndex: Int) {
-        var lineStart = newlineIndex
-        while (lineStart > 0 && text[lineStart - 1] != '\n') lineStart--
-        var lineEnd = newlineIndex + 1
-        while (lineEnd < text.length && text[lineEnd] != '\n') lineEnd++
-
-        val before = text.subSequence(lineStart, newlineIndex).toString()
-        val after = text.subSequence((newlineIndex + 1).coerceAtMost(text.length), lineEnd).toString()
-
-        when (val action = MarkdownFormatter.listEnter(before, after)) {
-            is MarkdownFormatter.ListEnter.Continue -> {
-                val at = (newlineIndex + 1).coerceAtMost(text.length)
-                text.insert(at, action.marker)
-                binding.editor.setSelection((at + action.marker.length).coerceAtMost(text.length))
-            }
-
-            is MarkdownFormatter.ListEnter.End -> {
-                text.delete(lineStart, (lineStart + action.length).coerceAtMost(text.length))
-            }
-
-            null -> return
-        }
-        // An item added in the middle leaves the ones below it claiming numbers they no longer have.
-        tools.renumberLists(text)
-    }
-
-    // ── Text size ─────────────────────────────────────────────────────────────
-
-    /** Pick a text size. The tick marks the one in force; the choice outlives the showing. */
-    private fun promptTextSize() {
-        overflow?.close()
-        val sheet = ActionSheetDialog(this).title(getString(R.string.text_size_title))
-        for ((labelRes, size) in EditorPrefs.SIZES) {
-            val label = getString(labelRes)
-            sheet.addAction(
-                null,
-                if (size == textSizeSp) getString(R.string.text_size_current, label) else label,
-            ) { applyTextSize(size) }
-        }
-        sheet.show()
-    }
-
-    /** Draw both surfaces at [sp]. [persist] is false only at load, where the value came *from* the
-     *  store and writing it back would be a Binder round trip that changes nothing. */
-    private fun applyTextSize(sp: Float, persist: Boolean = true) {
-        textSizeSp = sp
-        binding.editor.textSize = sp
-        binding.previewText.textSize = sp + EditorPrefs.PREVIEW_BUMP
-        if (persist) lifecycleScope.launch(Dispatchers.IO) { EditorPrefs.saveTextSize(sp) }
-        // The renderer bakes sizes into spans from the paint it was handed, so the preview has to be
-        // rebuilt rather than just re-measured.
-        if (previewing) renderPreview()
-        Slog.d(TAG) { "text size → ${sp}sp" }
     }
 
     // ── Keyboard ──────────────────────────────────────────────────────────────
@@ -573,18 +602,25 @@ class DocumentEditorActivity : AppCompatActivity() {
      */
     private fun handleShortcut(event: KeyEvent): Boolean {
         val shift = event.isShiftPressed
-        // Preview is read-only; only the mode toggle stays live there (og's rule).
+        // Preview is read-only; the mode toggle stays live there (og's rule) and so do the page
+        // flips, which are as much a reading act as a writing one.
         if (previewing) {
-            if (event.keyCode == KeyEvent.KEYCODE_P && !shift) { setPreviewing(false); return true }
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_P -> if (!shift) { setPreviewing(false); return true }
+                KeyEvent.KEYCODE_PAGE_UP -> { flipPage(DocumentContract.PAGE_PREV); return true }
+                KeyEvent.KEYCODE_PAGE_DOWN -> { flipPage(DocumentContract.PAGE_NEXT); return true }
+            }
             return false
         }
         when (event.keyCode) {
             KeyEvent.KEYCODE_P -> if (!shift) { setPreviewing(true); return true }
+            KeyEvent.KEYCODE_PAGE_UP -> { overflow?.close(); flipPage(DocumentContract.PAGE_PREV); return true }
+            KeyEvent.KEYCODE_PAGE_DOWN -> { overflow?.close(); flipPage(DocumentContract.PAGE_NEXT); return true }
             // Paragraph and H4–H6 are chord-only, as in og: the bar stops at H3, the grammar does not.
-            KeyEvent.KEYCODE_0 -> if (!shift) { overflow?.close(); applyBlock(MarkdownFormatter.Block.PARAGRAPH); return true }
-            KeyEvent.KEYCODE_4 -> if (!shift) { overflow?.close(); applyBlock(MarkdownFormatter.Block.HEADING, 4); return true }
-            KeyEvent.KEYCODE_5 -> if (!shift) { overflow?.close(); applyBlock(MarkdownFormatter.Block.HEADING, 5); return true }
-            KeyEvent.KEYCODE_6 -> if (!shift) { overflow?.close(); applyBlock(MarkdownFormatter.Block.HEADING, 6); return true }
+            KeyEvent.KEYCODE_0 -> if (!shift) { overflow?.close(); format.block(MarkdownFormatter.Block.PARAGRAPH); return true }
+            KeyEvent.KEYCODE_4 -> if (!shift) { overflow?.close(); format.block(MarkdownFormatter.Block.HEADING, 4); return true }
+            KeyEvent.KEYCODE_5 -> if (!shift) { overflow?.close(); format.block(MarkdownFormatter.Block.HEADING, 5); return true }
+            KeyEvent.KEYCODE_6 -> if (!shift) { overflow?.close(); format.block(MarkdownFormatter.Block.HEADING, 6); return true }
             KeyEvent.KEYCODE_1 -> if (!shift) return tool(FormatTool.H1)
             KeyEvent.KEYCODE_2 -> if (!shift) return tool(FormatTool.H2)
             KeyEvent.KEYCODE_3 -> if (!shift) return tool(FormatTool.H3)
@@ -598,8 +634,8 @@ class DocumentEditorActivity : AppCompatActivity() {
             KeyEvent.KEYCODE_9 -> if (shift) return tool(FormatTool.TASK)
             KeyEvent.KEYCODE_K -> return tool(if (shift) FormatTool.IMAGE else FormatTool.LINK)
             KeyEvent.KEYCODE_MINUS -> if (shift) return tool(FormatTool.RULE)
-            // Find, and its shifted sibling: reflow has no button until M6, so this is its only
-            // entry point besides the debug hook.
+            // Find, and its shifted sibling: the same reflow the source strip's button runs, from
+            // the keyboard.
             KeyEvent.KEYCODE_F -> {
                 overflow?.close()
                 if (shift) tools.reflow() else find.open()
@@ -612,7 +648,7 @@ class DocumentEditorActivity : AppCompatActivity() {
     /** Run a tool from a chord and claim the key. */
     private fun tool(tool: FormatTool): Boolean {
         overflow?.close()
-        runTool(tool)
+        format.run(tool)
         return true
     }
 
@@ -732,8 +768,16 @@ class DocumentEditorActivity : AppCompatActivity() {
             binding.editor.onTextContextMenuItem(android.R.id.undo)
         }
 
-        override fun textSize(): Float = textSizeSp
-        override fun setTextSize(sp: Float) = applyTextSize(sp)
+        override fun textSize(): Float = textSize.sp
+        override fun setTextSize(sp: Float) = textSize.apply(sp)
+
+        // ── M6 ────────────────────────────────────────────────────────────────
+        // Both of these start work that finishes later; a walk polls `get_state` / `page_label` /
+        // `source_label` afterwards rather than expecting a reply to carry the result.
+
+        override fun flip(direction: Int) = flipPage(direction)
+        override fun bringIn(mode: Int) = strip.bringIn(mode)
+        override fun sourceLabel(): String = strip.label()
     }
 
     private companion object {
@@ -745,6 +789,7 @@ class DocumentEditorActivity : AppCompatActivity() {
         const val STATE_TEXT = "doc_text"
         const val STATE_CARET = "doc_caret"
         const val STATE_PREVIEWING = "doc_previewing"
+        const val STATE_DRAFT_PENDING = "doc_draft_pending"
 
         /** The buffer rides `onSaveInstanceState` only below this: a bundle is a Binder transaction
          *  and the budget is ~1 MB. 256k chars is half of it as UTF-16, with room for the rest. */

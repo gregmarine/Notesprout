@@ -61,6 +61,22 @@ class DocumentHostBinder(
 
         /** Persist a completed save. Blank text is a delete — the repository owns that rule. */
         fun commit(commit: DocumentHostSession.Commit)
+
+        /**
+         * M6: move the target to the neighbouring page and load [session]'s window with its
+         * document — or its freshly recognized seed (`seeded = true`, watermark parked). null =
+         * no page in that direction or the load failed; **the target must not have moved** and
+         * the window must be exactly what it was.
+         */
+        fun requestPage(session: DocumentHostSession, direction: Int): DocumentPageState?
+
+        /**
+         * M6: recognize the current target page and load [session]'s window with the result
+         * (`seeded = true`), parking the watermark read before recognition. The document row is
+         * not touched. Recognition unavailable throws `IllegalStateException` carrying exactly
+         * [DocumentContract.SEED_UNAVAILABLE].
+         */
+        fun requestSeed(session: DocumentHostSession, mode: Int): DocumentPageState
     }
 
     /**
@@ -117,15 +133,28 @@ class DocumentHostBinder(
         }
     }
 
-    // ── The calls whose phases have not landed ──────
-    // `UnsupportedOperationException` marshals across Binder intact (the arc-11 / J3 precedent), so
-    // an extension built ahead of the host gets an honest refusal naming the phase rather than a
-    // silently-killed transaction it would read as success. Each one is still gated first: a
-    // stranger must never learn which calls exist by the exception it gets back.
+    // ── M6's two: flips and Bring in ──────
+    // The M7/M8 calls below still answer UnsupportedOperationException — it marshals across Binder
+    // intact (the arc-11 / J3 precedent), so an extension built ahead of the host gets an honest
+    // refusal naming the phase rather than a silently-killed transaction it would read as success.
+    // Every one is still gated first: a stranger must never learn which calls exist by the
+    // exception it gets back.
 
-    override fun requestPage(direction: Int): DocumentPageState {
+    override fun requestPage(direction: Int): DocumentPageState? {
         gate()
-        throw UnsupportedOperationException("requestPage lands in M6")
+        require(direction == DocumentContract.PAGE_PREV || direction == DocumentContract.PAGE_NEXT) {
+            "unknown direction $direction"
+        }
+        val t0 = SystemClock.elapsedRealtime()
+        val state = hook { hooks.requestPage(session, direction) }
+        Slog.d(TAG) {
+            if (state == null) "requestPage($direction): no page / load failed " +
+                "in ${SystemClock.elapsedRealtime() - t0} ms"
+            else "requestPage($direction): → page ${state.pageIndex + 1}/${state.pageCount}, " +
+                "${state.textChars} chars${if (state.seeded) " (seeded)" else ""} " +
+                "in ${SystemClock.elapsedRealtime() - t0} ms"
+        }
+        return state
     }
 
     override fun requestScope(scope: Int): DocumentPageState {
@@ -135,7 +164,16 @@ class DocumentHostBinder(
 
     override fun requestSeed(mode: Int): DocumentPageState {
         gate()
-        throw UnsupportedOperationException("requestSeed lands in M6")
+        require(mode == DocumentContract.BRING_REPLACE || mode == DocumentContract.BRING_APPEND) {
+            "unknown mode $mode"
+        }
+        val t0 = SystemClock.elapsedRealtime()
+        val state = hook { hooks.requestSeed(session, mode) }
+        Slog.d(TAG) {
+            "requestSeed($mode): ${state.textChars} chars in ${state.textChunks} chunk(s) " +
+                "in ${SystemClock.elapsedRealtime() - t0} ms"
+        }
+        return state
     }
 
     override fun requestMerge(mode: Int): DocumentPageState {

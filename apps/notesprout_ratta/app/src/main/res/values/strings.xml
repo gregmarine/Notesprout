@@ -486,6 +486,8 @@
     <string name="cd_document">Document</string>
     <string name="document_failed_title">Document unavailable</string>
     <string name="document_failed_body">The document editor could not be opened. It may have been disabled or removed.</string>
+    <!-- The open-time seed (M6): shown while the page is recognized, before the editor opens. -->
+    <string name="document_reading_page">Reading this page…</string>
 
     <!-- Scratch Pad (arc 11) — the entry button on both the library's bottom bar and the
          notebook's top bar. Both are GONE unless a trusted extension is installed. -->

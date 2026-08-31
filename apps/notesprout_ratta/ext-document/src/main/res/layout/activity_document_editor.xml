@@ -5,9 +5,10 @@
   enough, the notebook needs no handoff around this screen).
 
   Shape, top to bottom:
-    header  — Close · [title · n / m] · Text size · Write · Preview · Done
+    header  — Close · title · ‹ n / m › · Text size · Write · Preview   (no ✓ Done — see topBarRow)
     rule    — 1dp inkBlack
-    writing chrome (format bar + overflow panel + find bar), hidden as ONE piece in Preview
+    writing chrome (source strip + format bar + overflow panel + find bar), hidden as ONE piece
+              in Preview
     rule    — 1dp inkBlack
     editor  — the Markdown source, or the rendered preview in its place
 
@@ -16,9 +17,7 @@
   true the moment the bar is narrower than its contents. Both containers are in flow — the panel
   pushes the text down rather than floating over it, because an overlay ghosts on e-ink.
 
-  M6's page arrows and source strip and M7's scope toggle do not exist here at all: not built,
-  rather than built and hidden. Reflow (M5) has no control either — its home is M6's source strip,
-  and until that exists the Ctrl+Shift+F chord is the whole of it.
+  M7's scope toggle does not exist here at all: not built, rather than built and hidden.
 
   Chrome sits flush at the top edge — the top guard is 0 on Ratta; the Activity still applies it,
   because the guard, not this file, is where that decision lives.
@@ -30,94 +29,94 @@
     android:background="@color/paperWhite"
     android:orientation="vertical">
 
-    <!-- A FrameLayout, not a row: the title is centred on the SCREEN, so it stays put whatever
-         flanks it (the scratch pad's lesson — a weight-centred title moves when a button on one
-         side appears or goes). -->
-    <FrameLayout
+    <!-- One row, the app's own header idiom: the title DOCKED right after the back arrow (the
+         library reads `← Notebooks / Test` the same way), weight-1 so it takes the slack and
+         ellipsizes first; then the page cluster `‹ n / m ›`; then the trailing actions. Everything
+         rides the row's center_vertical, so the title and the arrow can never disagree on a
+         baseline — the M6-review complaint that killed the floated-centre arrangement.
+
+         There is NO ✓ Done (user call, 2026-08-30): writing here is not cancellable and every way
+         out saves, so the back arrow IS the leave door — a second button that did the same thing
+         read as redundant. og keeps its ✓; SN diverges deliberately. (M8's text documents want a
+         "show the pages" exit — that phase decides its own control, and it is not this one.) -->
+    <LinearLayout
         android:id="@+id/topBarRow"
         android:layout_width="match_parent"
         android:layout_height="@dimen/toolbar_bar_thickness"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
         android:paddingStart="4dp"
         android:paddingEnd="4dp">
-
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-
-            <TextView
-                android:id="@+id/title"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:paddingStart="8dp"
-                android:paddingEnd="8dp"
-                android:singleLine="true"
-                android:text="@string/document_title"
-                android:textColor="@color/inkBlack"
-                android:textSize="16sp" />
-
-            <!-- `n / m`. Smaller than the title rather than grey: it carries information, and
-                 information takes inkBlack and gets smaller to read as secondary. -->
-            <TextView
-                android:id="@+id/pageIndicator"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:singleLine="true"
-                android:textColor="@color/inkBlack"
-                android:textSize="13sp" />
-
-        </LinearLayout>
 
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnClose"
             style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_gravity="start|center_vertical"
             android:contentDescription="@string/cd_document_close"
             android:src="@drawable/ic_arrow_left" />
 
-        <!-- Text size / Write / Preview / Done, in that order, at the trailing edge — the SN rule:
-             action buttons on the TOP bar, after the cancel side. The armed mode's button carries
-             the selected state of bg_toolbar_button (a 1dp inkBlack box), which is how every armed
-             tool in this app reads. Text size stays live in Preview: reading comfort is what it is
-             mostly for. -->
-        <LinearLayout
+        <TextView
+            android:id="@+id/title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:singleLine="true"
+            android:text="@string/document_title"
+            android:textColor="@color/inkBlack"
+            android:textSize="16sp" />
+
+        <!-- The page arrows (M6), flanking the count they move. Never disabled and never hidden:
+             at the first or last page they say so instead, because a disabled button is visually
+             silent on e-ink. They work in Preview too — walking the notebook is reading as much
+             as writing. -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnPagePrev"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:contentDescription="@string/cd_document_page_prev"
+            android:src="@drawable/ic_page_prev" />
+
+        <!-- `n / m`. Smaller than the title rather than grey: it carries information, and
+             information takes inkBlack and gets smaller to read as secondary. -->
+        <TextView
+            android:id="@+id/pageIndicator"
             android:layout_width="wrap_content"
-            android:layout_height="match_parent"
-            android:layout_gravity="end|center_vertical"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
+            android:layout_height="wrap_content"
+            android:singleLine="true"
+            android:textColor="@color/inkBlack"
+            android:textSize="13sp" />
 
-            <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnTextSize"
-                style="@style/Widget.Notesprout.ToolbarButton"
-                android:contentDescription="@string/cd_document_text_size"
-                android:src="@drawable/ic_text_size" />
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnPageNext"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:contentDescription="@string/cd_document_page_next"
+            android:src="@drawable/ic_page_next" />
 
-            <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnWrite"
-                style="@style/Widget.Notesprout.ToolbarButton"
-                android:contentDescription="@string/cd_document_write"
-                android:src="@drawable/ic_pen" />
+        <!-- Text size / Write / Preview at the trailing edge — the SN rule: action buttons on the
+             TOP bar, after the cancel side. The armed mode's button carries the selected state of
+             bg_toolbar_button (a 1dp inkBlack box), which is how every armed tool in this app
+             reads. Text size stays live in Preview: reading comfort is what it is mostly for. -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnTextSize"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="8dp"
+            android:contentDescription="@string/cd_document_text_size"
+            android:src="@drawable/ic_text_size" />
 
-            <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnPreview"
-                style="@style/Widget.Notesprout.ToolbarButton"
-                android:contentDescription="@string/cd_document_preview"
-                android:src="@drawable/ic_eye" />
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnWrite"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:contentDescription="@string/cd_document_write"
+            android:src="@drawable/ic_pen" />
 
-            <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnDone"
-                style="@style/Widget.Notesprout.ToolbarButton"
-                android:layout_marginStart="8dp"
-                android:contentDescription="@string/cd_document_done"
-                android:src="@drawable/ic_check" />
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnPreview"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:contentDescription="@string/cd_document_preview"
+            android:src="@drawable/ic_eye" />
 
-        </LinearLayout>
-
-    </FrameLayout>
+    </LinearLayout>
 
     <!-- Bar's bottom border. 1dp solid inkBlack — borderGray is invisible on e-ink. -->
     <View
@@ -131,6 +130,84 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical">
+
+        <!-- The source strip (M6): where this document came from, and the only two acts that can
+             change that. It is the FIRST child of the writing chrome, so Preview takes it away with
+             the rest of the writing tools — provenance is a writer's concern.
+
+             Reflow sits LEFT of Bring in so that Bring in keeps its position under the hand (og's
+             order). Both are word buttons rather than glyphs — on e-ink words read better than
+             icons, and there is room for two here — but they are HAND-SIZED, not find-bar-sized
+             (the M6-review call): minHeight rides @dimen/toolbar_button_size like every other
+             tappable control, because these two are tapped mid-writing, not mid-search.
+             focusable="false" for the find bar's reason — the caret and the selection these act on
+             belong to the editor. -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="12dp"
+            android:paddingTop="4dp"
+            android:paddingEnd="8dp"
+            android:paddingBottom="4dp">
+
+            <!-- "Drafted from this page" / "Page has changed since this draft" / "Not drafted from
+                 this page". inkBlack, a step under the title: it carries information. -->
+            <TextView
+                android:id="@+id/sourceLabel"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:singleLine="true"
+                android:textColor="@color/inkBlack"
+                android:textSize="14sp" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnReflow"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_toolbar_button"
+                android:contentDescription="@string/cd_document_reflow"
+                android:focusable="false"
+                android:focusableInTouchMode="false"
+                android:minWidth="0dp"
+                android:minHeight="@dimen/toolbar_button_size"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:stateListAnimator="@null"
+                android:text="@string/document_reflow"
+                android:textAllCaps="false"
+                android:textColor="@color/inkBlack"
+                android:textSize="14sp" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnBringIn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_toolbar_button"
+                android:contentDescription="@string/cd_document_bring_in"
+                android:focusable="false"
+                android:focusableInTouchMode="false"
+                android:minWidth="0dp"
+                android:minHeight="@dimen/toolbar_button_size"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:stateListAnimator="@null"
+                android:text="@string/document_bring_in"
+                android:textAllCaps="false"
+                android:textColor="@color/inkBlack"
+                android:textSize="14sp" />
+
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
 
         <LinearLayout
             android:id="@+id/formatBar"

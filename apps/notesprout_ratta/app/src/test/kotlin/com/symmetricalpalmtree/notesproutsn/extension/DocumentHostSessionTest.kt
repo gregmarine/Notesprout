@@ -137,6 +137,41 @@ class DocumentHostSessionTest {
         catch (expected: IllegalStateException) {}
     }
 
+    /** The typed refusal, matched with `==` on the far side — never a prefix, never a `contains`. */
+    @Test
+    fun theNoDraftRefusalCarriesExactlyTheContractMessage() {
+        val s = session()
+        try {
+            s.acceptChunk("page-1", 0, "seeded", last = true, drafted = true)
+            fail()
+        } catch (expected: IllegalStateException) {
+            assertEquals(DocumentContract.NO_DRAFT_PENDING, expected.message)
+        }
+    }
+
+    /** M6: a recreated editor re-`current()`s the same target, and its drafted save is still owed
+     *  the anchor the seed was served with. */
+    @Test
+    fun theParkedWatermarkSurvivesASameKeyReload() {
+        val s = session(key = "page-1")
+        s.parkWatermark(4242L)
+        s.setWindow("page-1", "the same target, reloaded")
+        val commit = s.acceptChunk("page-1", 0, "seeded", last = true, drafted = true)
+        assertEquals(4242L, commit!!.draftWatermark)
+    }
+
+    /** M6: a flip is a new target — the old page's unconsumed anchor must never be stamped onto it. */
+    @Test
+    fun aDifferentKeyReloadClearsTheParkedWatermark() {
+        val s = session(key = "page-1")
+        s.parkWatermark(4242L)
+        s.setWindow("page-2", "another page")
+        try { s.acceptChunk("page-2", 0, "seeded", last = true, drafted = true); fail() }
+        catch (expected: IllegalStateException) {
+            assertEquals(DocumentContract.NO_DRAFT_PENDING, expected.message)
+        }
+    }
+
     @Test
     fun aDraftedSaveConsumesTheParkedWatermark() {
         val s = session()

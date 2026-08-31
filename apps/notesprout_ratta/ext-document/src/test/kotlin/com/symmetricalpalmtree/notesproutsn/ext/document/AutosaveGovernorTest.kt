@@ -118,4 +118,42 @@ class AutosaveGovernorTest {
         // No target learned yet: nothing may be written anywhere.
         assertFalse(g.shouldFlushOnReconnect("page-1", null, "ab"))
     }
+
+    @Test
+    fun `abandonQueue drops the outgoing page's queue without stalling the next save`() {
+        val g = AutosaveGovernor()
+        g.markLoaded("a")
+        g.request("ab")
+        // Typed again while that push was in flight: queued behind it.
+        assertEquals(SaveAction.Wait, g.request("abc"))
+        // The push lands and the flip takes the queue away — "abc" belongs to the page being left.
+        g.onSaved("ab")
+        g.abandonQueue()
+        assertFalse(g.isPushing)
+        assertEquals("ab", g.savedText)
+        // The incoming page's text is what the screen holds now, and it pushes normally.
+        g.markLoaded("z")
+        assertEquals(SaveAction.Push("zz"), g.request("zz"))
+    }
+
+    @Test
+    fun `requestDraft pushes even unchanged text — the Bring-in re-anchor`() {
+        val g = AutosaveGovernor()
+        g.markLoaded("same")
+        // The ordinary trigger drops it as unchanged…
+        assertEquals(SaveAction.Idle, g.request("same"))
+        // …a Bring in's does not: re-anchoring the watermark is the whole act (og's rule).
+        assertEquals(SaveAction.Push("same"), g.requestDraft("same"))
+        assertTrue(g.isPushing)
+        g.onSaved("same")
+        assertFalse(g.isPushing)
+    }
+
+    @Test
+    fun `requestDraft queues behind an in-flight push`() {
+        val g = AutosaveGovernor()
+        g.markLoaded("a")
+        assertEquals(SaveAction.Push("ab"), g.request("ab"))
+        assertEquals(SaveAction.Wait, g.requestDraft("ab"))
+    }
 }

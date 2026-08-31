@@ -1,6 +1,7 @@
 package com.symmetricalpalmtree.notesproutsn.ext.document
 
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
@@ -45,6 +46,23 @@ class FormatBarOverflow(
     fun close() { panel.visibility = View.GONE }
     fun isOpen(): Boolean = panel.visibility == View.VISIBLE
     fun toggle() { if (isOpen()) close() else open() }
+
+    /**
+     * A tap anywhere that is not the bar or the panel puts the overflow away — placing the caret in
+     * the text should not have to be preceded by dismissing a menu. The event is **never consumed**
+     * here: the touch is the writer choosing where to type, and it must still land.
+     */
+    fun dismissIfOutside(event: MotionEvent) {
+        if (event.actionMasked != MotionEvent.ACTION_DOWN || !isOpen()) return
+        if (!isInside(bar, event) && !isInside(panel, event)) close()
+    }
+
+    private fun isInside(view: View, event: MotionEvent): Boolean {
+        if (view.visibility != View.VISIBLE) return false
+        val xy = IntArray(2).also { view.getLocationOnScreen(it) }
+        return event.rawX >= xy[0] && event.rawX <= xy[0] + view.width &&
+            event.rawY >= xy[1] && event.rawY <= xy[1] + view.height
+    }
 
     // ── The cut ───────────────────────────────────────────────────────────────
 

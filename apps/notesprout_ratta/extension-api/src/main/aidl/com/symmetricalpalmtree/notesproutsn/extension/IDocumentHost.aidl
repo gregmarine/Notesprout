@@ -19,9 +19,9 @@ import com.symmetricalpalmtree.notesproutsn.extension.DocumentPageState;
  * cross; a method whose phase has not landed yet answers UnsupportedOperationException (it
  * marshals intact -- the J3 precedent).
  *
- * M6..M8 own the semantics of the calls their phases land (requestPage/requestSeed: M6;
- * requestScope/requestMerge/cancelRequest: M7; renameNotebook/closeNotebook: M8) and may
- * reshape them before the arc freezes; begin/current/readChunk/saveChunk are M3's and stable.
+ * M7..M8 own the semantics of the calls their phases land (requestScope/requestMerge/
+ * cancelRequest: M7; renameNotebook/closeNotebook: M8) and may reshape them before the arc
+ * freezes; begin/current/readChunk/saveChunk are M3's and requestPage/requestSeed M6's — stable.
  */
 interface IDocumentHost {
     /** The current target's state; parks its document text in the read window. */
@@ -39,17 +39,30 @@ interface IDocumentHost {
      */
     void saveChunk(String pageKey, int chunkIndex, String chunk, boolean last, boolean drafted);
 
-    /** M6: flip to the page PAGE_PREV/PAGE_NEXT of the current one. The editor saves first
-     *  (the no-save zone is guarded on both sides); null = no page there / load failed, and the
-     *  editor stays where it was. Answers with the new target's state + read window. */
+    /**
+     * M6: flip to the page PAGE_PREV/PAGE_NEXT of the current one. The editor pushes its text
+     * FIRST (the flip gap is a no-save zone, guarded on both sides); this call then moves the
+     * host's target and swaps the read window atomically, so a save landing in the gap is
+     * refused by key rather than written onto the wrong page. An undocumented page is seeded
+     * exactly like opening one — the answer carries `seeded = true` and the window holds the
+     * recognized text (empty when there is no recognizer ready: the flip still lands, the page
+     * stays seedable). null = no page there / the load failed; the target did NOT move and the
+     * editor stays where it was.
+     */
     DocumentPageState requestPage(int direction);
 
     /** M7: switch the target between SCOPE_PAGE and SCOPE_NOTEBOOK. Same guards as a flip. */
     DocumentPageState requestScope(int scope);
 
-    /** M6: load the read window with the current page's recognized text (BRING_REPLACE /
-     *  BRING_APPEND -- the sheet ran editor-side first). The document row is NOT touched: the
-     *  seed becomes real only when the editor stores it (a drafted save). */
+    /**
+     * M6: load the read window with the current page's freshly recognized text (BRING_REPLACE /
+     * BRING_APPEND -- the sheet ran editor-side first, so nobody waits through a recognition
+     * they then cancel; the mode is advisory here, the editor applies it through its own
+     * buffer). The document row is NOT touched: the host parks the watermark it read before
+     * recognizing, and the seed becomes real only when the editor stores it (a drafted save).
+     * Recognition unavailable (no extension / model not ready / engine refused) is an
+     * IllegalStateException carrying exactly DocumentContract.SEED_UNAVAILABLE.
+     */
     DocumentPageState requestSeed(int mode);
 
     /** M7: load the read window with the notebook-wide merge (same modes, same not-stored rule). */

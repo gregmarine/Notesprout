@@ -55,6 +55,14 @@ class DocumentEditorEntry(
     private val hooks: DocumentHostBinder.Hooks,
     /** Run immediately before the screen is launched, and only after a successful `begin`. */
     private val beforeLaunch: () -> Unit = {},
+    /**
+     * The showing ended (M6). Runs at the **top** of [onResult], on the caller's Main thread and
+     * **before** the detached `finish()` coroutine — so the caller reads the page the editor ended
+     * on while the hooks still hold it, and can catch the notebook up to it (og's
+     * `navigateToPage(endedOn)`). Not called on the [close] backstop: a screen being destroyed has
+     * nothing to catch up to.
+     */
+    private val onClosed: () -> Unit = {},
 ) {
 
     private val launcher: ActivityResultLauncher<android.content.Intent> =
@@ -183,6 +191,9 @@ class DocumentEditorEntry(
     private fun onResult(result: ActivityResult) {
         val pending = reconnectJob
         Slog.d(TAG) { "document editor returned: resultCode=${result.resultCode}" }
+        // First, synchronously: the caller still needs the showing's target, and the `finish()`
+        // below is detached — a callback sequenced after it would race the teardown.
+        onClosed()
         // A detached scope: `finish` has an `end()` call plus an unbind and two revokes to run, and
         // the caller may be on its way out.
         MainScope().launch {

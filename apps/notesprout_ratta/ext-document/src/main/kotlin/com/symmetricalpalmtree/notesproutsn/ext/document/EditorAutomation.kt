@@ -69,6 +69,26 @@ internal interface AutomationPeer {
     /** The size preference in sp (**not** `editor.textSize`, which is px). */
     fun textSize(): Float
     fun setTextSize(sp: Float)
+
+    // ── M6's flips and the source strip ───────────────────────────────────────
+    // The page's recognized text is user content like everything else here: it crosses on the
+    // bring-in path and is never logged.
+
+    /**
+     * Flip a page — `PAGE_PREV` / `PAGE_NEXT`. Returns nothing on purpose: the flip pushes the
+     * outgoing page and reads the incoming one, so a walk polls [pageLabel] (and [text]) afterwards
+     * rather than expecting an answer here. At an edge it toasts and nothing moves.
+     */
+    fun flip(direction: Int)
+
+    /**
+     * Bring the page's text in — `BRING_REPLACE` / `BRING_APPEND`. The same path the sheet's two
+     * rows take, minus the sheet. Also asynchronous: poll [text] and [sourceLabel].
+     */
+    fun bringIn(mode: Int)
+
+    /** The source strip's line as it now reads. */
+    fun sourceLabel(): String
 }
 
 /** The live screen's peer, or null when no screen is up (and always null in release). */

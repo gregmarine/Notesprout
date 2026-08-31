@@ -58,6 +58,40 @@ internal class EditorTools(
         return true
     }
 
+    /**
+     * og's list continuation, through the buffer rather than through key events: Enter inside a list
+     * item writes the next item's marker, and Enter on an empty item takes the marker away and ends
+     * the list.
+     *
+     * [newlineIndex] is where the plain newline was just typed — the Activity's watcher notes it and
+     * calls this from `afterTextChanged`, which is the only place an `Editable` may be edited.
+     */
+    fun continueListAt(text: Editable, newlineIndex: Int) {
+        var lineStart = newlineIndex
+        while (lineStart > 0 && text[lineStart - 1] != '\n') lineStart--
+        var lineEnd = newlineIndex + 1
+        while (lineEnd < text.length && text[lineEnd] != '\n') lineEnd++
+
+        val before = text.subSequence(lineStart, newlineIndex).toString()
+        val after = text.subSequence((newlineIndex + 1).coerceAtMost(text.length), lineEnd).toString()
+
+        when (val action = MarkdownFormatter.listEnter(before, after)) {
+            is MarkdownFormatter.ListEnter.Continue -> {
+                val at = (newlineIndex + 1).coerceAtMost(text.length)
+                text.insert(at, action.marker)
+                binding.editor.setSelection((at + action.marker.length).coerceAtMost(text.length))
+            }
+
+            is MarkdownFormatter.ListEnter.End -> {
+                text.delete(lineStart, (lineStart + action.length).coerceAtMost(text.length))
+            }
+
+            null -> return
+        }
+        // An item added in the middle leaves the ones below it claiming numbers they no longer have.
+        renumberLists(text)
+    }
+
     // ── Reflow ────────────────────────────────────────────────────────────────
 
     /**

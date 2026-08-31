@@ -15,9 +15,10 @@ import android.os.Parcelable
  * here just as the host is for a descriptor: a state that fails them rejects the reply.
  *
  * Wire form: `String pageKey · int scope · int pageIndex · int pageCount · String title ·
- * int textDocument (0/1) · int source · int textChars · int textChunks`. A future field is a
- * compatible tail — the state is the reply's whole payload, so a reader of this version stops
- * after `textChunks` and an old-shape parcel simply runs out.
+ * int textDocument (0/1) · int source · int textChars · int textChunks · int seeded (0/1, the
+ * M6 tail)`. A future field is a compatible tail — the state is the reply's whole payload, so a
+ * reader stops after the fields it knows and an old-shape parcel simply runs out (which is how
+ * `seeded` reads: a parcel with no tail left is `false`, exactly what an M3-shape answer meant).
  */
 class DocumentPageState(
     /** The save target's opaque host-minted token — see [DocumentContract.MAX_PAGE_KEY_CHARS]. */
@@ -39,6 +40,14 @@ class DocumentPageState(
     val textChars: Int,
     /** How many `readChunk` calls serve that text — always ≥ 1 ([TextChunks]' empty-chunk rule). */
     val textChunks: Int,
+    /**
+     * M6's compatible tail: the read window holds a **fresh seed or merge draft** — recognized
+     * (or merged) text the host built but has NOT stored. The editor must treat it as unsaved
+     * (the host's document is still what it was — blank, for a seed) and push its saves with
+     * `drafted = true` until one commits, which is the store that makes the draft real and moves
+     * the watermark. `false` is M3's meaning unchanged: the window holds the stored document.
+     */
+    val seeded: Boolean = false,
 ) : Parcelable {
 
     init {
@@ -83,6 +92,7 @@ class DocumentPageState(
         dest.writeInt(source)
         dest.writeInt(textChars)
         dest.writeInt(textChunks)
+        dest.writeInt(if (seeded) 1 else 0)
     }
 
     override fun describeContents(): Int = 0
@@ -98,6 +108,8 @@ class DocumentPageState(
             source = parcel.readInt(),
             textChars = parcel.readInt(),
             textChunks = parcel.readInt(),
+            // The tail: an M3-shape parcel ends at textChunks, and running out means false.
+            seeded = parcel.dataAvail() > 0 && parcel.readInt() != 0,
         )
 
         @JvmField

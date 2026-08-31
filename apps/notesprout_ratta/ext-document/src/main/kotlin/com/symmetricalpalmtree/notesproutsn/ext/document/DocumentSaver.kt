@@ -5,10 +5,12 @@ import android.os.Looper
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /**
  * The plumbing half of autosave: timers, threads and the binder. Every *decision* it makes is
@@ -32,6 +34,15 @@ import kotlinx.coroutines.sync.withLock
  * The coroutine scope is deliberately **not** cancelled when the screen goes: a save armed by
  * `onPause` must land even though the Activity is on its way out, and the extension process outlives
  * the screen for exactly as long as the host holds its bind.
+ *
+ * M6 added two things, both of which are decisions kept in pure classes here too:
+ *
+ * - **The draft claim** ([DraftAnchor]). A seed or a Bring in puts text on screen that the host has
+ *   not stored; the save that lands it carries `drafted = true`, which is what stamps the host's
+ *   parked watermark. Every push snapshots the claim at its trigger and carries it through.
+ * - **The flip's no-save zone** ([suspended], [prepareFlip], [pushForFlip]). A flip pushes the
+ *   outgoing page first and only then lets the target move, and every other save trigger is inert
+ *   in between.
  */
 class DocumentSaver(
     /** Reads the live buffer. **Main thread only** — this class never calls it from anywhere else. */
@@ -47,12 +58,26 @@ class DocumentSaver(
      * next open should land where they were looking.
      */
     private val caretSink: (String, Int) -> Unit,
+    /**
+     * A drafted push landed (M6): the seed or the Bring in is stored and the source strip may say
+     * "drafted from this page" and mean it. **Main thread**, and only ever fired for a push that
+     * carried the flag.
+     */
+    private val onDraftAnchored: () -> Unit = {},
+    /**
+     * A drafted push was refused with [com.symmetricalpalmtree.notesproutsn.extension.DocumentContract.NO_DRAFT_PENDING]:
+     * the host had no watermark parked, nothing was written, and the claim is gone. The words go
+     * again immediately as an ordinary save; the strip must stop claiming provenance. **Main
+     * thread.**
+     */
+    private val onDraftDowngraded: () -> Unit = {},
 ) {
 
     private val main = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val pushLock = Mutex()
     private val governor = AutosaveGovernor()
+    private val anchor = DraftAnchor()
 
     /** The only target this screen ever saves to, learned at load. Null until then — and a save
      *  without one is not a save that goes to the wrong place, it is no save at all. */
@@ -62,13 +87,54 @@ class DocumentSaver(
      *  [AutosaveGovernor.savedText] back to older words. */
     private var leaving = false
 
+    /**
+     * **The flip gap's no-save zone** (M6), guarded editor-side; the host guards its side by key.
+     *
+     * Between the moment a flip pushes the outgoing page and the moment the incoming page's text is
+     * installed, the buffer belongs to nobody: the host is being keyed to the incoming page while
+     * the screen still shows the outgoing one, so a save landing in the gap would write one page's
+     * words onto another. The trigger set is real — an autosave from typing through a slow seed, an
+     * `onPause`, a Preview tap, a Done. While this is set [saveNow] returns at once and
+     * [flushAndThen] skips its push, because the outgoing text was already pushed as the flip began.
+     */
+    var suspended: Boolean = false
+
     private val debounceTick = Runnable { saveNow() }
     private val retryTick = Runnable { saveNow() }
 
     // ── What the screen asks ──────────────────────────────────────────────────
 
-    /** The host handed this text over at load: it is what the host already holds. */
-    fun markLoaded(text: String) = governor.markLoaded(text)
+    /** True while a seed / Bring in is on screen and unstored — the next push carries the flag. */
+    val draftPending: Boolean get() = anchor.pending
+
+    /** A seed or a Bring in was adopted: the next push is the one that makes it real. */
+    fun armDraft() = anchor.arm()
+
+    /**
+     * Take on a freshly loaded read window — at open, or at the far end of a flip. [seeded] is the
+     * host's word that it **built** this text and has **not** stored it. Returns whether a draft
+     * claim was armed, which is also "does this need a save arming".
+     *
+     * A seeded window is treated as **unsaved**: the host's document is still what it was (blank,
+     * for a seed), so `savedText` is empty and the first push writes the whole draft with the claim
+     * on it.
+     *
+     * **An empty seed is not a draft.** The host answers `seeded = true` with an empty window when
+     * there was nothing to read — no recognizer ready, or a page with nothing on it — and og's rule
+     * there is "open empty, write no row; the page stays seedable". Claiming provenance for that
+     * would eventually stamp "drafted from this page" over words the writer typed themselves.
+     */
+    fun adoptWindow(text: String, seeded: Boolean): Boolean {
+        val draft = seeded && text.isNotBlank()
+        if (draft) {
+            governor.markLoaded("")
+            anchor.arm()
+        } else {
+            governor.markLoaded(text)
+            anchor.clear()
+        }
+        return draft
+    }
 
     /** True when [text] is not what the host is known to hold. */
     fun isDirty(text: String): Boolean = governor.isDirty(text)
@@ -97,14 +163,40 @@ class DocumentSaver(
      * the governor what to do with it. **Main thread only.**
      */
     fun saveNow() {
+        // The flip gap: the outgoing page's text went as the flip began, and what is in the buffer
+        // now is nobody's until the incoming page lands.
+        if (suspended) return
         main.removeCallbacks(debounceTick)
         main.removeCallbacks(retryTick)
         val key = pageKey ?: return
         caretSink(key, caretSnapshot())
+        // Snapshotted with the text, at the trigger: a Bring in that arms the claim after this
+        // point belongs to the push it triggers itself, not to this one.
+        val drafted = anchor.pending
         when (val action = governor.request(snapshot())) {
-            is AutosaveGovernor.SaveAction.Push -> launchPush(key, action.text)
+            is AutosaveGovernor.SaveAction.Push -> launchPush(key, action.text, drafted)
             // Wait: a push is in flight and this snapshot is queued behind it — nothing to start.
             // Idle / Retry: nothing new to write.
+            else -> Unit
+        }
+    }
+
+    /**
+     * A **Bring in** just armed the draft claim: push the buffer NOW, even when its text is
+     * unchanged — og's rule, and the reason [AutosaveGovernor.requestDraft] exists: both Bring in
+     * choices re-anchor the watermark to the state just recognized, *even when the draft came out
+     * identical*. The ordinary [saveNow] would drop the unchanged text, the host's parked watermark
+     * would never be consumed, and the strip would claim a provenance the row does not carry.
+     * **Main thread only.**
+     */
+    fun saveDraftNow() {
+        if (suspended) return
+        main.removeCallbacks(debounceTick)
+        main.removeCallbacks(retryTick)
+        val key = pageKey ?: return
+        caretSink(key, caretSnapshot())
+        when (val action = governor.requestDraft(snapshot())) {
+            is AutosaveGovernor.SaveAction.Push -> launchPush(key, action.text, anchor.pending)
             else -> Unit
         }
     }
@@ -130,18 +222,28 @@ class DocumentSaver(
         val text = snapshot()
         // Before the early return: leaving without typing is still a move worth remembering.
         if (key != null) caretSink(key, caretSnapshot())
+        if (suspended) {
+            // Done pressed mid-flip. The outgoing page's words were pushed as the flip began, and
+            // the buffer may show a page the host is no longer keyed to — there is nothing safe to
+            // write here, so the leave just proceeds. (The flip's own coroutine finds the screen
+            // finishing and abandons its adopt.)
+            then()
+            return
+        }
         if (key == null || !governor.isDirty(text)) {
             then()
             return
         }
+        val drafted = anchor.pending
         scope.launch {
             val error = try {
-                pushLock.withLock { pushBlocking(key, text) }
+                pushLock.withLock { pushBlocking(key, text, drafted) }
                 null
             } catch (e: Exception) {
                 e
             }
             main.post {
+                settleDraft(drafted, error)
                 if (error == null) {
                     EditorSession.pending.clear(key)
                     governor.onSaved(text)
@@ -156,31 +258,106 @@ class DocumentSaver(
         }
     }
 
-    // ── The push ──────────────────────────────────────────────────────────────
+    // ── The flip's two halves ─────────────────────────────────────────────────
 
-    private fun launchPush(key: String, text: String) {
-        scope.launch {
-            val error = try {
-                pushLock.withLock { pushBlocking(key, text) }
+    /**
+     * Everything a flip must do on Main **before** it goes async and **before** [pageKey] moves,
+     * in one call so nothing can slip between the pieces (the M5 handoff trap: `caretSink` files
+     * the caret under whatever `pageKey` says at the time, so the outgoing caret has to be handed
+     * over while the outgoing key is still the current one).
+     *
+     * Returns the snapshot to push, or null when the buffer holds nothing the host has not got.
+     * **Main thread only.**
+     */
+    fun prepareFlip(): FlipSnapshot? {
+        cancelTimers()
+        // The queue dies here, not at the flip push's bookkeeping: a snapshot queued behind an
+        // in-flight push is OLDER than the one taken below, and without this an in-flight push's
+        // own completion would relaunch it — behind the flip's push on the same lock — landing
+        // stale text over the newest words as the page is left. This snapshot supersedes anything
+        // queued, by construction.
+        governor.abandonQueue()
+        val key = pageKey ?: return null
+        caretSink(key, caretSnapshot())
+        val text = snapshot()
+        if (!governor.isDirty(text)) return null
+        return FlipSnapshot(key, text, anchor.pending)
+    }
+
+    /**
+     * The flip's outgoing push: behind the same lock as every other save, with the same bookkeeping
+     * — this is one save that happens to be the last one the page will get. **Call from a
+     * background dispatcher**; the Binder calls block and the bookkeeping hops to Main itself.
+     *
+     * Returns true when the words landed. A false aborts the flip: moving on would leave a page
+     * unwritten with no way back to it.
+     */
+    suspend fun pushForFlip(snapshot: FlipSnapshot): Boolean {
+        // NonCancellable throughout: this rides the SCREEN's lifecycle scope (unlike every other
+        // push, which rides this class's uncancellable one), and a Done/destroy landing mid-flip
+        // must not cancel the bookkeeping — a push that succeeded but never ran `pending.clear`
+        // would leave a stale park for this key that the teardown flush then writes OVER the words
+        // that just landed.
+        val error = withContext(NonCancellable) {
+            try {
+                pushLock.withLock { pushBlocking(snapshot.pageKey, snapshot.text, snapshot.drafted) }
                 null
             } catch (e: Exception) {
                 e
             }
-            main.post { finishPush(key, text, error) }
+        }
+        withContext(Dispatchers.Main + NonCancellable) {
+            finishPush(snapshot.pageKey, snapshot.text, snapshot.drafted, error, fromFlip = true)
+        }
+        return error == null
+    }
+
+    /** One page's words on their way out, taken together on Main so they cannot disagree. */
+    class FlipSnapshot(val pageKey: String, val text: String, val drafted: Boolean)
+
+    // ── The push ──────────────────────────────────────────────────────────────
+
+    private fun launchPush(key: String, text: String, drafted: Boolean) {
+        scope.launch {
+            val error = try {
+                pushLock.withLock { pushBlocking(key, text, drafted) }
+                null
+            } catch (e: Exception) {
+                e
+            }
+            main.post { finishPush(key, text, drafted, error) }
         }
     }
 
-    /** Bookkeeping for a finished push. **Main thread**, so the governor is single-threaded. */
-    private fun finishPush(key: String, text: String, error: Exception?) {
+    /**
+     * Bookkeeping for a finished push. **Main thread**, so the governor and the anchor are
+     * single-threaded. [fromFlip] marks the outgoing push of a page the editor is leaving.
+     */
+    private fun finishPush(
+        key: String,
+        text: String,
+        drafted: Boolean,
+        error: Exception?,
+        fromFlip: Boolean = false,
+    ) {
+        val outcome = settleDraft(drafted, error)
         if (error == null) {
             // The park goes first: it is only ever a stale copy of what just landed.
             EditorSession.pending.clear(key)
-            Slog.d(TAG) { "saved ${text.length} chars" }
+            Slog.d(TAG) { "saved ${text.length} chars${if (drafted) " (drafted)" else ""}" }
             if (leaving) return
             val next = governor.onSaved(text)
+            if (fromFlip) {
+                // A snapshot queued behind this push is the OUTGOING page's words, and the target is
+                // about to move — pushing them after that would write them onto the incoming page.
+                // The governor is told the queue is gone, so it does not go on believing a push is
+                // running and swallow every later save into it.
+                governor.abandonQueue()
+                return
+            }
             if (next is AutosaveGovernor.SaveAction.Push) {
                 // Newer words arrived while that push was in flight; they go now, after it.
-                pageKey?.let { launchPush(it, next.text) }
+                pageKey?.let { launchPush(it, next.text, anchor.pending) }
             }
             return
         }
@@ -190,15 +367,36 @@ class DocumentSaver(
         EditorSession.pending.park(key, text)
         governor.onFailed()
         if (leaving) return
+        if (outcome == DraftAnchor.Outcome.DOWNGRADED && !suspended) {
+            // Nothing was written and the provenance is gone, but the words are still owed: they go
+            // again right now as an ordinary save rather than waiting out a retry beat.
+            saveNow()
+            return
+        }
         main.postDelayed(retryTick, RETRY_DELAY_MS)
     }
 
+    /** The draft claim's half of a finished push, and the one callback it owes the screen. */
+    private fun settleDraft(drafted: Boolean, error: Exception?): DraftAnchor.Outcome {
+        val outcome = if (error == null) {
+            anchor.onPushSucceeded(drafted)
+        } else {
+            anchor.onPushFailed(drafted, error.message)
+        }
+        when (outcome) {
+            DraftAnchor.Outcome.ANCHORED -> onDraftAnchored()
+            DraftAnchor.Outcome.DOWNGRADED -> onDraftDowngraded()
+            else -> Unit
+        }
+        return outcome
+    }
+
     /** Blocking, on IO: the whole document through the host's callback binder, chunk by chunk. */
-    private fun pushBlocking(key: String, text: String) {
+    private fun pushBlocking(key: String, text: String, drafted: Boolean) {
         val host = EditorSession.host ?: throw IllegalStateException("no showing")
-        ChunkPush.push({ pageKey, index, chunk, last, drafted ->
-            host.saveChunk(pageKey, index, chunk, last, drafted)
-        }, key, text)
+        ChunkPush.push({ pageKey, index, chunk, last, isDrafted ->
+            host.saveChunk(pageKey, index, chunk, last, isDrafted)
+        }, key, text, drafted)
     }
 
     private companion object {

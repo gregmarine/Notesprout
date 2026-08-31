@@ -100,4 +100,26 @@ object DocumentContract {
      *  Close = seal straight back to the library. */
     const val CLOSE_SHOW_PAGES: Int = 0
     const val CLOSE_TO_LIBRARY: Int = 1
+
+    // ── Typed refusal messages (M6) ──────
+    // The `RecognizerClient` recipe: an `IllegalStateException` crossing Binder intact, carrying one
+    // of these EXACT strings, is a condition the caller can act on rather than a generic failure.
+    // Matched with `==` on both sides — never `contains`, never a prefix.
+
+    /**
+     * `requestSeed` / `requestMerge` could not produce a draft because recognition is not there to
+     * run: no recognizer extension installed, the model not downloaded, or the engine refused. The
+     * editor explains ("recognition isn't available"); nothing was written and the page stays
+     * seedable. Distinct from a generic failure so the editor can say *why* rather than "failed".
+     */
+    const val SEED_UNAVAILABLE: String = "SEED_UNAVAILABLE"
+
+    /**
+     * A `saveChunk` commit with `drafted = true` arrived with no watermark parked host-side — the
+     * park died with a host restart, or an ordinary edit tried to invent a draft. The whole
+     * accumulation was reset and **nothing was written**. The editor's honest recovery is to clear
+     * its draft-pending flag and retry the same text as an ordinary save: the words land, and only
+     * the provenance anchor is lost (the strip reads "not drafted" until the next Bring in).
+     */
+    const val NO_DRAFT_PENDING: String = "NO_DRAFT_PENDING"
 }

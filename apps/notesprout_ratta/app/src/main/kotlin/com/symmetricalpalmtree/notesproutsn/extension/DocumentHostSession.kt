@@ -41,14 +41,23 @@ class DocumentHostSession {
     private val saveParts = StringBuilder()
     private var parkedWatermark: Long? = null
 
-    /** Load the read window for [pageKey] with [text], atomically dropping any half-received
-     *  save (a window swap is a target swap — a stale accumulation must not commit onto it).
-     *  Returns the chunk count for the state answer. */
+    /**
+     * Load the read window for [pageKey] with [text], atomically dropping any half-received
+     * save (a window swap is a target swap — a stale accumulation must not commit onto it).
+     * Returns the chunk count for the state answer.
+     *
+     * A parked watermark survives a **same-key** reload (a recreated editor re-`current()`s the
+     * same target, and its drafted save is still owed the anchor) but is cleared by a
+     * **different-key** one (a flip is a new target; the old page's unconsumed draft anchor must
+     * never be stamped onto the new page's row). M6 made that split explicit — M3 cleared on
+     * neither, which left a cross-target park reachable in theory.
+     */
     fun setWindow(pageKey: String, text: String): Int = synchronized(lock) {
         require(pageKey.isNotEmpty() && pageKey.length <= DocumentContract.MAX_PAGE_KEY_CHARS) {
             "bad pageKey length"
         }
         require(text.length <= DocumentContract.MAX_DOCUMENT_CHARS) { "document too large" }
+        if (windowKey != null && pageKey != windowKey) parkedWatermark = null
         windowKey = pageKey
         windowChunks = TextChunks.chunk(text)
         resetSaveLocked()
@@ -67,7 +76,7 @@ class DocumentHostSession {
     }
 
     /** Park the watermark a just-served seed/merge was built against (M6/M7); the next drafted
-     *  commit consumes it. Serving a new window clears it — see [setWindow]'s reset. */
+     *  commit consumes it. Serving a **different target's** window clears it — see [setWindow]. */
     fun parkWatermark(watermark: Long): Unit = synchronized(lock) {
         parkedWatermark = watermark
     }
@@ -108,7 +117,10 @@ class DocumentHostSession {
         val watermark = if (drafted) {
             parkedWatermark ?: run {
                 resetSaveLocked()
-                throw IllegalStateException("no draft pending")
+                // The typed message ([DocumentContract.NO_DRAFT_PENDING], matched with `==`): the
+                // editor's honest recovery is to clear its draft-pending flag and retry the same
+                // text as an ordinary save — the words land, only the provenance anchor is lost.
+                throw IllegalStateException(DocumentContract.NO_DRAFT_PENDING)
             }
         } else null
         val text = saveParts.toString()

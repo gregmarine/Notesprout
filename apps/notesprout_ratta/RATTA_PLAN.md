@@ -822,7 +822,86 @@ caret restore; **user checklist**: none expected.
 **Questions to resolve at phase start:** none expected.
 
 ### M6 — Seeding: recognition in, Bring in, staleness, page flips
-**Status:** ⬜ Not started
+**Status:** 🧪 Awaiting device verification (code + walk ✅ 2026-08-30 — user checklist below)
+
+**Outcome (code + walk, 2026-08-30):** Seeding, the source strip, Bring in and in-editor page
+flips are live on the Nomad; 1283 JVM tests/variant (+42), debug+release green, NUL-clean.
+og semantics throughout; what is SN-shaped, and the locks:
+- **Seam:** `DocumentPageState` grew the compatible-tail **`seeded`** flag ("the read window
+  holds a fresh draft the host has NOT stored" — the editor treats it as unsaved and pushes
+  `drafted = true` until one commits); two **typed refusal messages** on `DocumentContract`,
+  matched `==` (the RecognizerClient recipe): `SEED_UNAVAILABLE` (Bring in with no recognizer
+  ready) and `NO_DRAFT_PENDING` (a drafted commit whose parked watermark died — the editor
+  **downgrades**: claim cleared, same words re-sent as an ordinary save; only provenance lost).
+  `DocumentHostSession.setWindow` now clears the parked watermark on a **different-key** load
+  and keeps it on a same-key one (M3's comment said this; the code didn't — fixed, pinned).
+- **Host:** the hooks own the **target** (`targetPageId` — a flip moves it, nothing else does;
+  saved state `KEY_DOCUMENT_TARGET`, restored before `reconnect()`; reset + notebook catch-up
+  `refreshToPage(endedOn)` in the entry's new `onClosed`, which runs at the TOP of `onResult`,
+  before the detached finish). Decision tables live in pure `DocumentTargetRules`
+  (resolveTarget / source / flipIndex / openDecision / flipDecision — 18 tests); the open-time
+  seed + the editor's silent recognitions live in `DocumentSeedFlow` (tap: drain → stored-doc
+  check → `RecognizerReadiness` consent → "Reading this page…" → recognize → `stageSeed`,
+  consume-once at `current()`; flip/Bring-in: READY-or-nothing, no dialog, never a download).
+  Watermark read **before** recognition on every path. `requestPage` = null on ANY failure with
+  target/window guaranteed untouched (mutations are the last statements); `requestSeed` refuses
+  typed. A failed/blank seed never blocks: the flip lands empty, the page stays seedable.
+- **Editor:** `SourceStrip` (og's line + words Reflow · Bring in, Reflow LEFT; sheet-first
+  Replace/Append; applied through the `Editable` — one Ctrl+Z; `DocumentDraft.append` join),
+  `PageFlipController` (the no-save zone: `prepareFlip` on Main fires the outgoing caret under
+  the outgoing key, **abandons the governor queue** — a queued older snapshot relaunched by an
+  in-flight push's completion would land stale text over the flip's own push — then blocking
+  outgoing push under the shared lock (NonCancellable bookkeeping: a Done mid-flip must not
+  skip `pending.clear`, or the teardown flush replays a stale park over what just landed),
+  abort-on-failure = editor stays, `requestPage`, own caret lookup (`EditorPrefs.caret`, top
+  for a seed), `setText` adopt — never on the undo stack), `ReadingPopup` (350 ms delay on
+  flips, immediate on Bring in; `close()` from `onDestroy` — the coroutine hide rides a
+  cancelled scope), pure `FlipRules` + `DraftAnchor` (arm/anchor/downgrade, 16 tests),
+  `DocumentSaver.adoptWindow` (**an empty seed is not a draft** — arming it would stamp
+  "drafted" over hand-typed words), `STATE_DRAFT_PENDING` in saved state. Arrows flank the
+  page label (header restructured to weighted flanks — a screen-centred group could not hold
+  them at 62 dp buttons); `Ctrl+PgUp/PgDn` live in Write AND Preview; edge taps toast
+  "First page." / "Last page." (og wording). M5 spillover extractions: `FormatActions`,
+  `TextSizeControl`, `EditorTools.continueListAt`, `FormatBarOverflow.dismissIfOutside`
+  (Activity at 799 lines).
+- **The walk's one real find (fixed + device-proven):** a Bring in whose recognition equals the
+  buffer never pushed — `saveNow` drops unchanged text, so og's rule ("both choices re-anchor
+  `srcUpdatedAt` even when the draft came out identical") never landed and the parked watermark
+  sat unconsumed. Fix: `AutosaveGovernor.requestDraft` + `DocumentSaver.saveDraftNow` — a Bring
+  in's save bypasses the unchanged-drop. Proven: re-anchor survives close/reopen.
+- **Walk (Nomad, re-driven by hand after the agent's tap-aim FAIL — the trap's ~12th firing):**
+  open-time seed with real ink (`seed: 5 strokes → 4 chars in 173 ms` → served seeded →
+  `committed (drafted)` at the debounce) ✓ · seed-once (reopen instant, same text) ✓ · flips
+  11↔12↔13 incl. flip-seeding ✓ · edges stay put (1/1 and 13/13) ✓ · Bring in
+  Replace/Append + forced re-anchor across reopen ✓ · flip persistence (typed marker survives
+  flip-away/back) ✓ · hand-typed doc honestly "Not drafted from this page" ✓ · close catch-up
+  (notebook followed to 13/13 on Done, on-glass) ✓ · shell `am start` refused ✓ · binds = 0
+  after close, crash buffer clean ✓. **Kill-host edge recorded:** host killed AND editor closed
+  before it returned → the IndexGuard bounce (Bootstrap relaunch) eats the host's saved state,
+  so no reconnect runs; the parked final save stays in the live extension process and is
+  **dropped on key mismatch** at the next showing (`pending dropped — target changed` — the
+  M4 corruption-safety rule doing its job). Exposure: keystrokes typed between host death and
+  closing the editor; corruption-proof by design; accepted (og's single-process shape cannot
+  express it; M4's "no screen alive" ladder is the standing answer).
+- **Not walk-testable (adb cannot ink):** staleness flipping after NEW ink → user checklist.
+- **User checklist outcome (2026-08-30): function passed ("works really well"); three chrome
+  calls, all applied same-day:** (1) title DOCKED after the back arrow (the library's own
+  `← Notebooks / Test` idiom — the floated-centre group read as misaligned); (2) the source
+  strip's label + Reflow/Bring in are HAND-SIZED (`minHeight = @dimen/toolbar_button_size`,
+  14 sp — they are tapped mid-writing, not find-bar-sized); (3) **NO ✓ Done in the editor
+  header** (user call — every way out saves and nothing discards, so the back arrow is the ONE
+  leave door; og keeps its ✓, SN diverges deliberately; the debug hook's `done` still leaves
+  with RESULT_OK, which the host treats identically to Close). **M8 consequence:** its
+  "✓ Done = show pages / Close = to library" split for text documents can no longer ride a
+  button that exists — the control is an M8 phase-start decision.
+
+**User checklist (M6):** 1. seed quality eye-check on a really handwritten page (open Document
+on an inked, undocumented page — does the recognized draft read right?) · 2. flip-under-slow-seed
+feel (flip to a heavily inked undocumented page — the 350 ms "Reading this page…" popup, no
+dialog flash on drafted pages) · 3. write NEW ink on a drafted page, reopen the editor — the
+strip must say "Page has changed since this draft" · 4. source strip + arrows legibility.
+
+The host's `openDocumentEditor` seeds **before** launch (og's order): flush ink → document row
 
 The host's `openDocumentEditor` seeds **before** launch (og's order): flush ink → document row
 non-blank ⇒ hand over instantly → else `RecognizerClient.recognizePage` behind "Reading this
@@ -886,7 +965,10 @@ cover eye-check.
 *Fable the tail; Opus routing + import fork + cover; Sonnet create-screen radio; Haiku walks.*
 
 **Questions to resolve at phase start:** create-screen radio wording; whether a text document
-shows in the library with a distinct badge beyond the cover glyph.
+shows in the library with a distinct badge beyond the cover glyph; **and the show-pages exit's
+control** — M6's review removed the header's ✓ Done (the back arrow is the one leave door for
+ordinary notebooks), so the og shape "✓ = show pages / Close = library" needs a fresh answer
+for text documents (a text-document-only button? a Close sub-choice? a library route only?).
 
 ### M9 — Export: `SOURCE_DOCUMENT` + PDF-of-preview
 **Status:** ⬜ Not started
