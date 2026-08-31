@@ -1022,7 +1022,8 @@ SN has no Page Index; should the Contents dialog grow a selection-merge path, or
 auto-merge + Merge enough for SN? (Recommend: enough — revisit on demand.)
 
 ### M8 — Text documents + `.md`/`.txt` import
-**Status:** 🧪 Awaiting device verification (code + walk complete 2026-08-31 — user checklist open)
+**Status:** ✅ Complete (commits 70e0218 + 1051cba, 2026-08-31 — user checklist passed, "All
+tests pass"; the one checklist find was the show-pages scope, fixed in 1051cba)
 
 **Outcome (code + walk, 2026-08-31):** Text documents are live end to end on the Nomad; 1321 JVM
 tests/variant (+6 net of the twin deletion below), all nine modules build debug + release,
@@ -1098,8 +1099,8 @@ whole-diff NUL-scan clean, walk 10/10. og semantics throughout; what is SN-shape
   `pm disable`/`enable` clean · binds 0, crash buffer empty.
 - **Traps (new this phase):** a gradle gate piped through `| tail` reports the PIPE's exit code —
   a failing version-pin test rode a "green" gate for two runs; run gates unpiped and read
-  `$?` (or check the XML), always. The NUL trap fired a **7th** time — a `' '` char literal
-  and a `"﻿"` string landed as RAW bytes; python-rewrite with escapes, then byte-scan.
+  `$?` (or check the XML), always. The NUL trap fired a **7th** time — a `'\u0000'` char literal
+  and a `"\uFEFF"` string landed as RAW bytes; python-rewrite with escapes, then byte-scan.
 
 **User checklist (M8):** 1. **SAF import of a real `.md`** (the picker is not adb-drivable):
 library → Import → pick a Markdown file — it should land straight in the editor with the
