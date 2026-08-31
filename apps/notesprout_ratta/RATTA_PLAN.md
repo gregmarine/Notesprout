@@ -1209,7 +1209,7 @@ notebook's own page size. `.txt` strip = **og's `MarkdownText.toPlainText` verba
 into `:markdown` and pinned by og's tests (incl. the never-collapse-blocks repro rule).
 
 ### M10 — Proofread
-**Status:** 🧪 Awaiting device verification (2026-08-31 — code + walk done, user checklist pending)
+**Status:** ✅ Complete (2026-08-31, commit 2fcc980 — checklist passed, all 4)
 
 **Outcome (code + walk):** og's proofread, extension-local, all og semantics. Phase-start answers:
 **dictionary asset reused verbatim** (sha256-identical copy of og's VarCon-patched
@@ -1241,8 +1241,8 @@ store-persistence proof; popup titles "suggestions are loading" honestly; crash 
 Walk-expectation correction worth keeping: "the cat sat. the dog barked." raises NO
 sentence-capital flag — **"sat" is in ABBREVIATIONS (Saturday)**, precision over recall, og
 behavior confirmed live; a walk that wants that rule to fire must not end the prior sentence in a
-weekday/month word. Pending user checklist: underline legibility/texture on e-ink, popup feel,
-toggle round-trip.
+weekday/month word. User checklist passed 2026-08-31 (all 4: underline legibility/texture on
+e-ink, popup + Ctrl+Z, no-flicker debounce, toggle round-trip).
 
 og's subsystem, extension-local: SymSpellKt (module-local dep, approved) + the bundled gzipped
 dictionary asset (og's VarCon-patched dictionary — both US/UK spellings; **asset reuse from og
