@@ -8,13 +8,12 @@ A from-scratch, Supernote-only rebuild of Notesprout in the spirit of the Paper 
 Original Notesprout (`apps/notesprout_android`) and Notesprout Paper (`apps/notesprout_paper`)
 are **reading references — no app code is copied**.
 
-**Arcs 1–19 are complete and frozen. Arc 20 "Search" is IN PROGRESS** (one phase, Q1 — the
-section is at the end of this file). Their entries below are compact ledgers: status, what
+**Arcs 1–20 are complete and frozen.** Their entries below are compact ledgers: status, what
 still binds, and the reference doc. **The full phase-by-phase records (outcomes, findings,
 walk logs) live in git history — arcs 1–18 at `git show 90a9198:apps/notesprout_ratta/RATTA_PLAN.md`,
-arc 19's full phase records at the end of this file until the next compaction** — and each
-feature's authoritative reference is its `docs/` file. **After arc 20 no further arc is
-planned — ask the user before starting anything.**
+arcs 19–20's full phase records at the end of this file until the next compaction** — and each
+feature's authoritative reference is its `docs/` file. **No next arc is planned — ask the user
+before starting anything.**
 
 ---
 
@@ -458,6 +457,33 @@ cleanup; 1 refuted), version stays `0.1.0-ratta`. 1503 JVM tests/variant. Refs:
 `docs/document.md` (the feature), `docs/extensions.md` §§ fifth point + boundary rows 14–18,
 `docs/export.md`, `docs/import.md`, `docs/library.md`, `docs/notebook.md`.
 
+### Arc 20 "Search" ✅ frozen 2026-08-31 (Q1 eae3673 · dialog revision 5b61116 · shelf bottom bar dcfc108)
+The library's first search: folders and notebooks **by name**, from anywhere in the tree, fuzzy.
+Core only — no extension, no schema change, no new dependency. Still binding:
+**fuzzy is subsequence + ranking, NOT typo tolerance** (`core/FuzzyRank`; edit distance was offered
+and **declined** — adding it needs a fresh user decision; the honest edge is that a *dropped* letter
+still matches and a *swapped* one does not); ranking is EXACT > PREFIX > word-start > substring >
+subsequence, then word-start hits, span, name length, name — **a total, stable order**, and its
+subsequence pass walks **backwards for each character's latest feasible position, then forwards
+preferring word starts** (a plain greedy is not a ranking); **the whole library always**, never
+scoped to the current folder, so the DAO stopped filtering names entirely (`allAliveOfType`
+replaced `searchOfType`'s `LIKE` **and** `allAliveNotebooks`); **folders first, then relevance**
+(`SearchAssembly`) with **Sort GONE** in search; **a dialog asks and the shelf's title is the query,
+quoted** (`NameDialog`, the template-browser shape — an inline top-bar field was built, walked,
+reviewed and replaced on the user's call), the Search button **re-opens the dialog rather than
+toggling the mode off**; the shelf is entered **only** by an accepted query, so there is one empty
+state and a blank query is refused by the dialog in its own words; a folder tap **goes there and
+closes the search**; every card carries its **parent folder's name** (folders included — names are
+unique only per parent); **`BrowseMode.SEARCH` is never persisted in either direction** and the
+query lives in memory only (prefs hold ids and enum names — a query is a name); **in every shelf,
+Pinned and Recents included, the bottom bar's Backup / Import / Templates stand down** with the
+create buttons (group-hidden — `ImportFlow` owns `btnImport`; pager stays). The template browser's
+Search shelf runs on the **same matcher**, ranks sentinels and rows in one list, and hides Sort;
+`data/template/TemplateSearch` is deleted. Review: high, 5/5 fixed (the two mediums were a
+`clearFocus()` that does not drop focus — caret `Blink` as a 500 ms EPD repaint loop — and a
+skippable `SHOW_IMPLICIT`; both retired with the field). Version stays `0.1.0-ratta`.
+1511 JVM tests/variant. Refs: `docs/library.md` § Search, `docs/templates.md`.
+
 ---
 
 ## Verification (end of arc)
@@ -529,7 +555,8 @@ explicitly **not** searched: names only, this arc.
 | IME | **The dialog owns it** — nothing in the top bar ever holds focus, so no caret blinks on the panel between searches and the never-hide-the-IME rule is never in play. `LibraryActivity` keeps `adjustNothing` (the grid measures itself once against a real band — G3's reason; the dialog's own window pans regardless) and `keyboard\|keyboardHidden` configChanges (the M4 lesson: a BT-keyboard attach must not recreate it). |
 
 ### Q1 — Search
-**Status:** 🔄 In progress (code + walk + review done; commit + freeze pending)
+**Status:** ✅ Complete (eae3673 · 5b61116 · dcfc108) — **arc 20 frozen 2026-08-31**, user checklist
+passed ("It all looks and works good"), with the two amendments recorded below.
 
 **Outcome (code + Nomad walk).** Search is live: `core/FuzzyRank` (the matcher + the total order),
 `library/SearchAssembly` (folders-first, then relevance) and `library/LibrarySearch` (the field, the
