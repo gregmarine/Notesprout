@@ -967,8 +967,11 @@ survived the kill). A notebook's top bar is Back · Pen · Eraser · Lasso · �
 pad** again; its pad shows **Send page to notebook**; Back returns to the notebook. `logcat -b
 crash` empty; no `dropped` / `compensating` / `failed` line from `ScratchStore` /
 `ScratchDocument`. The store file stays 4.3 MB after the wipe (freed pages, no VACUUM in the
-ladder — cosmetic; a future compaction question, not this arc's). **User checklist (eye/hand — ink,
-lasso, both transfers): pending at commit time; recorded below when answered.**
+ladder — cosmetic; a future compaction question, not this arc's). **User checklist (7ac960f7): items 1–3 passed (ink + erase + undo/redo + lasso-move
+survive a force-stop; both placements arrive selected with undo/redo; both Send directions paste
+selected); item 4 — the >4 MiB single-page stress — SKIPPED by the user. The ceiling's removal is
+proven structurally (no cap anywhere in the write path, keyset reads) and by the JVM split/plan
+tests, not by an on-device page past 4 MiB.**
 **Left for X5:** every doc (`scratchpad.md` data model + failure table, `extensions.md` module
 table/audit rows, `BACKLOG.md`).
 
