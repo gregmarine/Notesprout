@@ -318,7 +318,11 @@
     <string name="backup_locked_title">Library locked</string>
     <string name="backup_locked_body">The library is locked. Unlock Notesprout SN, then back up again.</string>
     <string name="backup_problem_title">Backup didn\'t finish</string>
-    <string name="backup_problem_body">%1$d copied, %2$d skipped, %3$d failed. %4$s\n\nYour notebooks are untouched, and anything that failed will be tried again next time.</string>
+    <string name="backup_problem_body">%1$d copied, %2$d skipped, %3$d failed.%5$s\n%4$s\n\nYour notebooks are untouched, and anything that failed will be tried again next time.</string>
+    <string name="backup_stores_copied">%1$d extension store copied.</string>
+    <string name="backup_stores_copied_plural">%1$d extension stores copied.</string>
+    <string name="backup_stores_failed">%1$d extension store was not backed up.</string>
+    <string name="backup_stores_failed_plural">%1$d extension stores were not backed up.</string>
     <string name="backup_index_copied">The library index was backed up.</string>
     <string name="backup_index_failed">The library index was not backed up.</string>
     <string name="backup_folder_failed_title">Couldn\'t use that folder</string>

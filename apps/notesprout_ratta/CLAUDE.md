@@ -39,8 +39,9 @@ picker and extension match, the always-re-key-to-global pipeline, the untrusted 
 three questions, the remap, the staged-rename Garden write, the failure table) ·
 `docs/backup.md` (arc 17: **compaction + local backup** — the seal-time `.soil` purge and index
 purge, sidecar hygiene and the reopen-waits-on-the-claim rule, the Backup screen, the engine's
-index-last ordering and stamp map, the WAL-alongside rule for both file kinds, the `.part`/`.old`
-destination discipline, the exclude toggle, the failure table) ·
+index-last ordering and stamp map, the WAL-alongside rule for every file kind, the `.part`/`.old`
+destination discipline, the exclude toggle, the failure table; grown by **arc 21 / W5** — every
+`Garden/<pkg>.db` is in the backup set, and the manual copy-back that stands in for a restore) ·
 `docs/document.md` (arc 19: **Documents** as a feature — the page is the draft, the document is
 the result: the data model and flags-as-watermark, the extension editor and its two-process
 autosave/teardown table, seeding and Bring in, the notebook document, text documents, the export
@@ -131,7 +132,8 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
     search merge.
     extensions get the **extension store** (`IExtensionStore` — per-package,
   encrypted under the global key at `Garden/<pkg>.db`, minted per bind, uid-bound, revoked with
-  the unbind) because **an extension writes nothing to disk itself, ever**; action strings are
+  the unbind, **and copied by every backup run** — arc 21 / W5) because **an extension writes
+  nothing to disk itself, ever**; action strings are
   SN-namespaced so Paper's extensions are never discovered; trust is same-signature both ways
   (discovery + bind-time re-check host-side, `HostCallerCheck` first thing in every stub method);
   `ExtensionContract.API_VERSION` = 4 (arc 21 / W1 — the tag point itself; 3 was arc 19 / M8's result-kind tail, 2 arc 18's
@@ -167,7 +169,10 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   vice versa. References: `apps/notesprout_paper/docs/data.md` + `docs/crypto.md`.
 - **`data/SoilFile.kt` is the only path constructor** — `extensionStoreFile` included
   (arc-11 / J2 amendment: the function exists now, and it is the only way to derive an
-  extension store's `Garden/<pkg>.db`).
+  extension store's `Garden/<pkg>.db`) **and `extensionStoreFiles` too** (arc 21 / W5: the one
+  path authority also owns the one listing of that directory — the library's structure is still
+  index-only, but a store has no index row to be listed from, so the backup run reads the
+  file system, and only there).
 - **Every SQLCipher open routes through `crypto/SoilCrypto`.** Passphrases never logged,
   never in Intent extras, never in the index. Never delete a DB on corruption.
 - **`IndexGuard.ready(this)` first thing in every index-touching `onCreate`**;

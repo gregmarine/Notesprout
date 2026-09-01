@@ -265,6 +265,10 @@ class BackupActivity : AppCompatActivity() {
      * "Skipped" is one number covering four honest reasons — already up to date, deliberately
      * excluded, open elsewhere in the app, or a file no longer on the device. The distinction
      * matters to the engine and not to the person reading the line.
+     *
+     * **Extension stores get their own sentence** (arc 21 / W5, the user's call): they are not
+     * notebooks, so folding them into "N copied" would make a number the user can check against
+     * the library stop matching it.
      */
     private fun report(result: BackupEngine.Result) {
         if (isFinishing || isDestroyed) return
@@ -282,7 +286,7 @@ class BackupActivity : AppCompatActivity() {
             result.problem == BackupEngine.Problem.NO_KEY ->
                 Dialogs.problem(this, R.string.backup_locked_title, R.string.backup_locked_body)
 
-            result.failed > 0 || !result.indexCopied -> Dialogs.problem(
+            result.failed > 0 || result.storesFailed > 0 || !result.indexCopied -> Dialogs.problem(
                 this,
                 R.string.backup_problem_title,
                 getString(
@@ -293,14 +297,43 @@ class BackupActivity : AppCompatActivity() {
                     getString(
                         if (result.indexCopied) R.string.backup_index_copied else R.string.backup_index_failed
                     ),
+                    storesLine(result),
                 ),
             )
 
             else -> Dialogs.confirm(
                 this,
                 R.string.backup_done_title,
-                getString(R.string.backup_done_body, result.copied, skipped),
+                getString(R.string.backup_done_body, result.copied, skipped) + storesLine(result),
             ) { finish() }
+        }
+    }
+
+    /**
+     * The extension-store sentences, on their own line under the notebook counts — nothing at all
+     * when there is no store on the device, because a line reading "0 extension stores copied" is a
+     * sentence about something the reader has never heard of.
+     */
+    private fun storesLine(result: BackupEngine.Result): String = buildString {
+        if (result.storesCopied > 0) {
+            append('\n')
+            append(
+                getString(
+                    if (result.storesCopied == 1) R.string.backup_stores_copied
+                    else R.string.backup_stores_copied_plural,
+                    result.storesCopied,
+                )
+            )
+        }
+        if (result.storesFailed > 0) {
+            append('\n')
+            append(
+                getString(
+                    if (result.storesFailed == 1) R.string.backup_stores_failed
+                    else R.string.backup_stores_failed_plural,
+                    result.storesFailed,
+                )
+            )
         }
     }
 

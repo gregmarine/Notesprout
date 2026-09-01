@@ -1035,3 +1035,21 @@ store's own SQLite file, and each extension migrating at its own pace. Nothing e
 needs to move. It would delete `TagCodec` and its arithmetic outright and lift the pad's ceiling.
 
 Needs a fresh user decision and an arc of its own — it is a seam change every extension inherits.
+
+## Notesprout SN — arc 21 "Tags" W5 (2026-09-01): a restore screen
+
+**W5 put every extension store into the backup set; it did not add a way to put one back.** The
+user's phase-start call: W5 ships backup only, the manual copy-back is documented
+(`apps/notesprout_ratta/docs/backup.md` § Extension stores), and a restore screen is deferred here.
+
+Arc 17 shipped the same shape for the library itself — backup, no restore — because a single
+notebook already comes back through arc 16's Import, every backup file being a self-describing
+`.soil`. **A store has no such door**: it is not a notebook, no importer claims it, and recovering
+one means a shell copy of `Garden/<pkg>.db` (plus its `-wal` if the backup carries one, both or
+neither) with the app closed.
+
+A restore arc would cover the whole backup folder in one screen — index, notebooks and stores —
+and its hard parts are the ones arc 17 named and left: the aside-swap ordering, what "replace all"
+means against a library that has moved on since the backup, and the fact that a store's ciphertext
+is keyed to the device that wrote it (a restore across devices needs the source device's recovery
+key, exactly as an encrypted import does). Needs a user decision on scope before it is planned.

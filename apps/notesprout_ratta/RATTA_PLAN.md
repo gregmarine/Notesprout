@@ -12,7 +12,7 @@ are **reading references — no app code is copied**.
 still binds, and the reference doc. **The full phase-by-phase records (outcomes, findings,
 walk logs) live in git history — arcs 1–18 at `git show 90a9198:apps/notesprout_ratta/RATTA_PLAN.md`,
 arcs 19–20's full phase records at the end of this file until the next compaction** — and each
-feature's authoritative reference is its `docs/` file. **Arc 21 "Tags" is in progress — W1–W4 complete, next work = W5.
+feature's authoritative reference is its `docs/` file. **Arc 21 "Tags" is in progress — W1–W5 complete, next work = W6.
 Fable planned only: Opus/Sonnet/Haiku execute every phase (see the arc section's model notes).**
 
 ---
@@ -961,7 +961,7 @@ tag `packing` on Page 1 of the "Tags" notebook (folder Test).
 contract + `API_VERSION` 5), both CLAUDE.mds. The `BACKLOG.md` entry for the declined store-seam
 widening is already written.
 
-### W5 — Backup of extension stores ⬜
+### W5 — Backup of extension stores ✅
 The arc-17 engine grows the store set: enumerate via a new `SoilFile.extensionStoreFiles(ctx)`
 (the one path authority grows the one listing function; `isValidExtensionPackage` filters),
 **copy every pass unconditionally** (small files — no stamp bookkeeping; `updatedAt` semantics
@@ -972,6 +972,55 @@ sidecars present, encrypted header).*
 **Questions at phase start:** the restore path — arc 17 shipped backup + per-notebook Replace
 import; confirm with the user what "restoring" a store means this arc (likely: document the
 manual copy-back + BACKLOG a restore screen).
+
+#### W5 phase-start decisions (user, 2026-09-01 — do not re-litigate)
+
+| Decision | Answer |
+|---|---|
+| Restore | **Document + BACKLOG.** W5 ships backup only. `docs/backup.md` gains the manual copy-back (`<pkg>.db` plus its `-wal` **if the backup has one — both or neither**, `-shm` never, app closed, ciphertext keyed to the device that wrote it), and a whole-library restore screen goes to the monorepo `BACKLOG.md` as its own future arc. The same answer arc 17 gave for the library itself. |
+| The done dialog | **Stores get their own sentence** — "N extension stores copied.", on its own line under the notebook counts. Notebook counts stay exactly as they are: folding stores into "N copied" would make a number the user can check against the library stop matching it. Nothing at all when there is no store (a line reading "0 extension stores copied" is a sentence about something the reader has never heard of). |
+
+**Outcome (code + Nomad walk).** Every `Garden/<pkg>.db` is in the backup set. **1626 JVM
+tests/variant** (+6). All ten modules build debug + release; both release APKs sign.
+
+New: `SoilFile.extensionStoreFiles` + the pure `extensionStorePackage` (the one path authority grew
+the one listing function) · `ExtensionStores.checkpointIfOpen` · `BackupEngine.copyStore` ·
+`Result.storesCopied`/`storesFailed` · `BackupActivity.storesLine`. Reshaped: `copyIndex`'s body
+became **`copyDatabase`**, taken by the index and every store.
+
+**Locks the phase set.** A store takes the **index's** treatment, never a notebook's: `ExtensionStores`
+caches every store it opens for the life of the process and closes none, so the notebook rule
+(never copy under a live writer — skip and count it) would skip *every store worth copying*.
+Snapshot-into-cache → probe → copy → WAL alongside is what makes the live copy safe, and that body
+is now shared rather than a sibling copy. **Every pass, unconditionally, no stamps**: a store has no
+`updatedAt` to compare against — its edits are an extension's, not the library's — and inventing a
+clock for one would be a second answer that can disagree with the file. Ordered **after the
+notebooks, before the index** (a store is content; the index is last because it is the manifest of
+what the run already wrote). `succeeded` counts a store copy, so a run that copied only stores still
+moves `lastRunAt`. A **zero-length** store is skipped (a create that never finished must not replace
+a good destination copy with an empty one), and an **uninstalled** extension's store is still copied
+— arc 11's rule that removing an extension's data is a deliberate act. A store this process has
+**not** opened is deliberately not opened to checkpoint it: that costs a cold KDF to buy what the
+WAL-alongside rule already buys.
+
+**`Garden/` is enumerated here, and this is the one place it is.** The library's structure stays
+index-only; a store has no index row to be listed from, because the host mints the file the first
+time an extension is lent its store and that file is the only record it exists. The pure
+`extensionStorePackage(fileName)` is the whole rule — only a store ends in `.db`, and its stem must
+still pass `isValidExtensionPackage`, which names out notebooks, an import in flight and every
+sidecar.
+
+**Walk (by hand on the Nomad, both sidecar branches proven live).** Four stores on the device
+(`ext.document.dev`, `ext.scratchpad.dev`, `ext.tags.dev`, and `probe.test` — the arc-11 debug
+probe's leftover, correctly treated as a store). First run: "9 copied, 33 skipped. / 4 extension
+stores copied." and all four `.db`s landed at the destination byte-for-byte with their **non-empty
+`-wal`s alongside** and **no `-shm`** · every copied header is ciphertext (no `SQLite format 3`) ·
+then the scratch pad was opened and closed, which left its WAL absorbed and the store **open in the
+host**, so the second run checkpointed it and **verifiably deleted the now-stale destination
+`-wal`** while the other three kept theirs · second run "0 copied, 42 skipped. / 4 extension stores
+copied." — unconditional, exactly as specified · `logcat -b crash` empty.
+
+**Status:** ✅ Complete.
 
 ### W6 — Review, docs, freeze ⬜
 `/code-review` on the arc range (**run + fixed by Opus this arc — Fable unavailable**; level

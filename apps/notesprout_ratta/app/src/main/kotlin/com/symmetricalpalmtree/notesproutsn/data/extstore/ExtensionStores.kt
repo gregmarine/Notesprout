@@ -72,6 +72,23 @@ object ExtensionStores {
         return db
     }
 
+    /**
+     * Fold [pkg]'s WAL back into its main file **if this process has the store open** (arc 21 / W5,
+     * the backup run's pre-copy step). Best effort — the WAL's length afterwards is the honest
+     * verdict, and the backup's WAL-alongside rule covers whatever the checkpoint could not absorb.
+     *
+     * A store this process never opened is deliberately left alone: opening one costs a cold KDF
+     * (seconds on e-ink) and takes a connection on a file the run is about to read, to buy nothing
+     * a copy of the `-wal` alongside does not already buy. Never throws. IO.
+     */
+    @Synchronized
+    fun checkpointIfOpen(pkg: String) {
+        val db = cache[pkg] ?: return
+        runCatching {
+            db.openHelper.writableDatabase.query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }
+        }.onFailure { Slog.d(TAG) { "checkpoint failed for $pkg: ${it.message}" } }
+    }
+
     /** Close every cached store (tests / debug). Never throws. */
     @Synchronized
     fun closeAll() {

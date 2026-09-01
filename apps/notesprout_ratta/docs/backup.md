@@ -23,9 +23,12 @@ that will be its own capability-point user decision — nothing here scaffolds f
 own future arc. og's `docs/backup.md` + `NotebookCompactor` were the reading references — no code
 copied.
 
+**Arc 21 / W5 grew the set: every extension store is backed up too** — see
+[Extension stores](#extension-stores-arc-21--w5) below. Same rule, still no restore.
+
 **Status: arc 17 complete** — K1 compaction (`73d6490`) · K2 backup (`7fb0aa2`, user checklist
 passed) · K3 review (high, 10/10 findings fixed — the destination-integrity cluster the headline),
-this doc.
+this doc. **Grown by arc 21 / W5** (extension stores).
 
 ---
 
@@ -150,14 +153,15 @@ app under the progress dialog; the screen carries a belt catch too).
    immediately**, with the `updatedAt` the work list read (never the wall clock: an edit landing
    mid-run can never be masked; a failed copy never stamps and retries next run; a stamp write
    that itself fails only re-copies next run and never aborts the run).
-4. **The index, last, after every stamp**: purge (`SnIndex.compactIfNeeded(0)`) + checkpoint, then
+4. **Every extension store** (arc 21 / W5), after the notebooks and before the index — see below.
+5. **The index, last, after every stamp**: purge (`SnIndex.compactIfNeeded(0)`) + checkpoint, then
    **snapshot to a local temp and probe it** (encrypted header, byte-for-byte the live length)
    before streaming — a torn copy of the live index is worse than no backup; only a failed
    snapshot falls back to streaming the live file.
-5. **`lastRunAt`** — only when at least one destination write succeeded — and the stamp map
-   pruned of notebooks the index purge removed.
+6. **`lastRunAt`** — only when at least one destination write succeeded (**a store copy counts**)
+   — and the stamp map pruned of notebooks the index purge removed.
 
-**The WAL rule, both file kinds (K3 review made it whole).** A non-empty `-wal` beside a source
+**The WAL rule, every file kind (K3 review made it whole).** A non-empty `-wal` beside a source
 file is live data: it is copied **alongside**, and *both* must land before the copy counts (before
 the stamp, for a notebook). An absorbed WAL instead deletes the stale destination sidecar — and
 that delete must be **verifiable**: a swallowed failure would pair a fresh `.soil` with an old
@@ -182,6 +186,49 @@ direction. Living in the index lets the stamp map ride the same encryption and t
 the rows it describes. **An import that lands on an existing id clears that id's stamp**
 (`BackupStore.clearStamp`, called from `ImportFlow` — K3 review: imported content can carry an
 `updatedAt` *older* than the stamp, and D8 would read "up to date" forever).
+
+---
+
+## Extension stores (arc 21 / W5)
+
+Every `Garden/<pkg>.db` is copied too — the scratch pad's pages, the proofread user dictionary and
+arc 21's tag index all become durable, and the backup folder stops being a copy of *most* of what
+the user has.
+
+- **The listing is the file system, and it is the one place `Garden/` is enumerated.**
+  `SoilFile.extensionStoreFiles(context)` — the one path authority grew the one listing function.
+  A store has no index row to be listed from: the host mints the file the first time an extension is
+  lent its store, and that file is the only record it exists. The pure half,
+  `extensionStorePackage(fileName)`, is what decides — a store is the only thing in that directory
+  ending in `.db`, and its stem must still pass `isValidExtensionPackage`, so a notebook, an import
+  in flight and every sidecar are all named out.
+- **Every pass, unconditionally — no stamps.** A store is small, and it has no `updatedAt` to
+  compare a stamp against: its edits belong to an extension, not to the library. Inventing a clock
+  for one would be a second answer that can disagree with the file, so the run simply copies it.
+  `updatedAt` semantics elsewhere are untouched.
+- **A store takes the *index's* treatment, not a notebook's** — checkpoint if this process holds it
+  open (`ExtensionStores.checkpointIfOpen`, best effort; a store this process never opened is left
+  alone rather than paying a cold KDF to buy what the WAL-alongside rule already buys), then
+  snapshot into the cache, probe it, copy that, WAL alongside. The notebook rule — never copy under
+  a live writer, skip and count it — would skip **every** store worth copying, because
+  `ExtensionStores` caches each store it opens for the life of the process and closes none.
+  `BackupEngine.copyDatabase` is the one body both kinds take.
+- **Ordered after the notebooks, before the index.** A store is content; the index is last by rule,
+  because it is the manifest of everything the run already wrote.
+- **A zero-length store is skipped** (a create that never finished — copying it would replace a good
+  destination copy with an empty one). An uninstalled extension's store is still copied: arc 11's
+  rule is that removing an extension's data is a deliberate act, never a side effect.
+- **Its own sentence in the dialog** (the user's W5 call): "N extension stores copied." Folding them
+  into "N copied" would make a number the user can check against the library stop matching it.
+
+**Getting a store back — still no restore screen.** There is no restore path in the app for a store
+(as there is none for the library). A store is recovered by hand, with the app closed: copy
+`<pkg>.db` from the backup folder into `Garden/`, and its `-wal` beside it **if the backup has one**
+(a backup with a `-wal` is incomplete without it, and a `-wal` left over from an older copy corrupts
+the newer one — take both or neither, never one). Any `-shm` is rebuilt on open and is never copied.
+The file is ciphertext under the device's global key: a store from a *different* device's library
+will not open, and the app reports corruption rather than deleting it (never-delete-on-corruption).
+A restore screen for the whole library, stores included, is in the monorepo `BACKLOG.md`.
 
 ---
 
@@ -226,6 +273,8 @@ safe.
 | Index checkpoint busy | The non-empty index `-wal` is snapshotted and copied alongside; both must land or `indexCopied` is false. |
 | Index snapshot fails its probe | Falls back to streaming the live file (+ its live WAL) — last resort, logged. |
 | Stamp write fails | Logged, run continues; that notebook re-copies next run (the safe direction). |
+| Extension store copy fails | Counted `storesFailed`; the dialog says the run didn't finish and names how many stores did not land. Nothing else in the run is affected, and every store is retried next pass anyway. |
+| Extension store is zero length | Skipped silently (a create that never finished); the destination keeps whatever good copy it has. |
 | Anything else throws | The top-level catch turns it into a `failed` count and the dialog says the run didn't finish; the app never crashes under the progress dialog. |
 | Corrupt `backup` config blob | Reads as a fresh config; worst case is re-copying everything. |
 
@@ -233,7 +282,8 @@ safe.
 
 ## What this arc deliberately did not do
 
-- **No restore** (arc 16's Import recovers a single notebook; whole-library restore is a future
-  arc). - **No automatic runs**, no scheduler. - **No per-device subfolder** (og's LOCAL shape;
-  only debug's `dev/` split). - **No Drive** — a future arc, as an extension, behind its own
-  capability-point user decision.
+- **No restore** (arc 16's Import recovers a single notebook; whole-library restore is a future arc,
+  and arc 21 / W5 confirmed the same answer for extension stores — the manual copy-back is
+  documented above and a restore screen is in `BACKLOG.md`). - **No automatic runs**, no scheduler.
+  - **No per-device subfolder** (og's LOCAL shape; only debug's `dev/` split). - **No Drive** — a
+  future arc, as an extension, behind its own capability-point user decision.

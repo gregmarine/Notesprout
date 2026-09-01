@@ -159,14 +159,18 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   Proofread; `docs/document.md` is the feature reference), plus post-arc fixes F1–F5. Ten
   modules (host + `:sn-screen` + `:markdown` + `:extension-api` + six extension APKs), SIX
   extension points (recognizer · scratch pad · exporter · importer · document editor · tag
-  manager), g-paper pin 0.1.23, version `0.1.0-ratta`, 1590 JVM tests/variant. **Arc 21 "Tags"
+  manager), g-paper pin 0.1.23, version `0.1.0-ratta`, 1626 JVM tests/variant. **Arc 21 "Tags"
   in progress: W1 ✅ (the SIXTH point `ACTION_TAG_MANAGER` + `_SCREEN` is live — `:ext-tags` /
   NSE · Tags, the third tier-2 screen and the first with no paper on it, so no EPD handoff;
   library long-press "Tags…" row) · W2 ✅ (the notebook's three tag doors) · W3 ✅ (the lasso's
   Tag: a lone heading is silent + toast, ink alone is recognized into a prefilled tag screen, a
-  mixed selection is not offered the button). Next work = W4 "Search merge". Fable planned only —
-  Opus/Sonnet/Haiku execute per the plan's model notes. No SEVENTH point without another user
-  decision.**
+  mixed selection is not offered the button) · W4 ✅ (one query over names AND tags; **every tag
+  assignment now names its notebook**, a page tag also its page — `API_VERSION` 5, the first
+  non-tail bump) · W5 ✅ (**every `Garden/<pkg>.db` is in the backup set** — unconditional every
+  pass, the index's snapshot-and-probe treatment, no restore: the manual copy-back is in
+  `docs/backup.md` and a restore screen is in `BACKLOG.md`). Next work = W6 "Review, docs,
+  freeze". Fable planned only — Opus/Sonnet/Haiku execute per the plan's model notes. No SEVENTH
+  point without another user decision.**
   **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for ANY work there** — it holds the working
   protocol, model recipe, standing traps, the per-arc ledger of still-binding decisions, and the
   active arc's full plan. Subsystem detail: `apps/notesprout_ratta/docs/` + that app's CLAUDE.md.
