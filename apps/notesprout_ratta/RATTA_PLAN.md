@@ -13,7 +13,7 @@ still binds, and the reference doc. **The full phase-by-phase records (outcomes,
 walk logs) live in git history — arcs 1–18 at `git show 90a9198:apps/notesprout_ratta/RATTA_PLAN.md`,
 arcs 19–20's full phase records at the end of this file until the next compaction** — and each
 feature's authoritative reference is its `docs/` file. **Arc 21 "Tags" is complete and frozen (2026-09-01) — W1–W6 all ✅.
-ARC 22 "Tables" IS PLANNED (wizard complete 2026-09-01) — next phase X1, the seam, Fable-written.
+ARC 22 "Tables" IS IN PROGRESS — X1 + X2 ✅ 2026-09-01; next phase X3, tags on rows (Opus).
 Its plan is the first "Phases" section below.**
 
 ---
@@ -589,9 +589,9 @@ commit.
 
 ---
 
-## Phases — Arc 22 "Tables" (planned 2026-09-01, wizard complete — X1 next)
+## Phases — Arc 22 "Tables" (planned 2026-09-01, wizard complete — X3 next)
 
-**Status: X1 ✅ · X2 ⬜ · X3 ⬜ · X4 ⬜ · X5 ⬜** (one phase per session; flip the marker, run the
+**Status: X1 ✅ · X2 ✅ · X3 ⬜ · X4 ⬜ · X5 ⬜** (one phase per session; flip the marker, run the
 phase, record its Outcome, update docs/memory/CLAUDE.md, gates green, commit + push, `/clear`).
 
 The extension store stops being a key/value seam and becomes **real SQLite tables** — the
@@ -883,7 +883,8 @@ land in ≈ 2.4 s and read back in ≈ 0.9 s.
 **Left for X5:** every doc (`docs/extensions.md` § store and the audit rows, `scratchpad.md`,
 `tags.md`, `document.md`, `backup.md`'s one sentence, `BACKLOG.md`'s two entries). Both CLAUDE.mds
 carry the X1 truth already.
- ⬜ (Opus code · Sonnet scaffold/tests · Haiku walk)
+
+### X2 — Scratch pad on rows ✅ (Opus code · Sonnet scaffold/tests · Haiku walk)
 `:ext-scratchpad` declares 6 and schema v1:
 ```sql
 CREATE TABLE page   (id TEXT PRIMARY KEY, position INTEGER NOT NULL, width REAL NOT NULL, height REAL NOT NULL,
@@ -911,6 +912,65 @@ insert/delete pages, kill + reopen keeps everything, both transfers, **user chec
 "Document" notebook's ink (5 073 strokes across 20 pages) to ONE pad page repeatedly until well past
 the old 4 MiB mark and confirm it loads and draws — the ceiling is gone.
 **Questions at phase start:** none expected. Confirm the flip.
+
+**Outcome (2026-09-01, Opus code + Fable review; 1690 JVM tests/variant, +59 — 58 new pad tests
+against the codec's 8 deleted, +1 codec-arithmetic pin; ten modules debug + release, both changed
+release APKs signed, NUL-scan clean; no docs — X5):** implemented as the phase reads, on a Fable
+brief that fixed twelve calls beyond it. What binds from here:
+
+- **Two write ops, both idempotent.** Stroke rows are `INSERT OR REPLACE` / `DELETE … WHERE id`;
+  page rows are `INSERT OR IGNORE` + `UPDATE`; positions are renumbered per id (page counts are
+  tens); `state('current')` is `INSERT OR REPLACE`. **Never `INSERT OR REPLACE INTO page`** —
+  REPLACE deletes the conflicting row first and, with `foreign_keys` ON, that delete CASCADES the
+  page's strokes. Every SQL string lives in `ScratchSql` (pinned by `ScratchSqlTest`).
+- **A write is split into ≤ 4 MiB / ≤ 10 000-statement `exec` batches** (`ScratchBatches`, over
+  the new `StoreCodec.statementBytes` + `STATEMENTS_HEADER_BYTES` — codec arithmetic, pinned
+  against `encodeStatements(...).size`). One batch is one transaction and therefore atomic — every
+  ordinary flush, page op and placement. Past it the write is several transactions, and the caller's
+  retry converges *because* every statement is idempotent. `receive` **compensates** a multi-batch
+  failure (new page: `DELETE FROM page` cascade + positions back; current page: one `dropStroke`
+  per minted id — never an `IN (…)` list, the 999-arg cap) before throwing `StoreUnavailable`.
+- **Reads are planned, never refused.** `readPage` = size row, then `SELECT "order", LENGTH(blob)`
+  (small), then `ScratchReadPlan.ranges` packs consecutive strokes under the 4 MiB budget
+  (`ROW_OVERHEAD` 128, an over-estimate) and each range is one `BETWEEN` query through
+  `StoreReads.all` — a page of any size comes back without ever meeting `STORE_RESULT_LARGE`.
+  `StrokeRows.decode`: a bad row is a **dropped stroke, never a lost page** (counted, `Log.w`);
+  arc 11's "unreadable page" state, its strings and dialogs are gone with the blob.
+- **`ScratchDocument` is a `TreeMap<order, Stroke>` + an op log** (`Put(stroke, order)` / `Drop`
+  per stroke id in a `LinkedHashMap` — coalescing is the map; an erase is always a `Drop`, because a
+  `Put` may be a move of a row already stored). Flush snapshots + clears the log before the IO hop
+  and on failure merges the snapshot back **under** newer entries. **Orders are a high-water
+  mark, not the map's last key** (Fable review finding): erasing the tail stroke lowers the last
+  key, so `lastKey + 1` would hand an erased stroke's order to the next one drawn and the restore
+  would collide — `highWater` never lowers while the page is loaded, and two stored rows at one
+  order (never written by this code) both survive a load (the second is re-put past the end).
+  `Erased.Entry` carries the **order**; `Pasted` carries strokes **and orders**; `Page` carries
+  `ink`/`afterInk` (`PageInk`) instead of blobs; `replayPages` emits `sizePage` only with an ink so
+  a lone-page delete's redo can never write `0 × 0` over a known size; `deleteCurrent` takes the
+  undo ink from memory after the flush (a page can be bigger than one read).
+- **Deleted:** `ScratchPageCodec` (+ test), `PageFullException`, `SCRATCH_PAGE_FULL`,
+  `ScratchPageFullException`, the pad's "Page is full" / "Page unreadable" and the host's "Scratch
+  page is full" strings, `Add` (every committed stroke is taken), `refuse()`. `PLACE_TIMEOUT_MS`
+  stays 10 s (a placement is now INSERTs, cheaper than the re-encode it was sized for).
+- The pad's manifest declares **6**; the registry lists it again. `:ext-tags` / `:ext-document`
+  untouched (X3 / X4).
+
+**Walk (Haiku for the open + wipe + crash buffer; steps 3–7 re-driven by hand after the agent
+declared swipes "unreliable" — the standing false-failure trap, they were fine): all green.**
+First pad open on the Nomad's real arc-11 store: `wiped legacy store for
+com.symmetricalpalmtree.notesproutsn.ext.scratchpad.dev (format 1, 10 kv row(s) dropped)` →
+`begin: pages=1 in 153 ms` → `page … loaded: 0 strokes, 1 pages`, indicator `1 / 1`. Swipe past
+the end inserts (`2 / 2`, `3 / 3`), swipe back flips (`2 / 3`); long-press → "Delete this page?" →
+Delete lands on `1 / 2`; Back → `end` / `finish: end ok`; `am force-stop` of BOTH processes then
+relaunch + reopen → `begin: pages=2 in 137 ms`, opens on `1 / 2` (the pages and the current page
+survived the kill). A notebook's top bar is Back · Pen · Eraser · Lasso · … · Recents · **Scratch
+pad** again; its pad shows **Send page to notebook**; Back returns to the notebook. `logcat -b
+crash` empty; no `dropped` / `compensating` / `failed` line from `ScratchStore` /
+`ScratchDocument`. The store file stays 4.3 MB after the wipe (freed pages, no VACUUM in the
+ladder — cosmetic; a future compaction question, not this arc's). **User checklist (eye/hand — ink,
+lasso, both transfers): pending at commit time; recorded below when answered.**
+**Left for X5:** every doc (`scratchpad.md` data model + failure table, `extensions.md` module
+table/audit rows, `BACKLOG.md`).
 
 ### X3 — Tags on rows + the search merge ⬜ (Opus code · Sonnet scaffold/tests · Haiku walk)
 `:ext-tags` declares 6 and schema v1:

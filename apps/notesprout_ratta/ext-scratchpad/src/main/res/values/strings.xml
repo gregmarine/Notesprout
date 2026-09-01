@@ -32,10 +32,6 @@
     <!-- Problem dialogs — a tap that did nothing is never a toast on e-ink. -->
     <string name="scratch_store_failed_title">Scratch pad unavailable</string>
     <string name="scratch_store_failed_body">Notesprout SN could not open the scratch pad\'s storage. Nothing was lost — try again.</string>
-    <string name="scratch_page_full_title">Page is full</string>
-    <string name="scratch_page_full_body">This scratch page holds as much ink as it can. Start a new page to keep writing.</string>
-    <string name="scratch_unreadable_title">Page unreadable</string>
-    <string name="scratch_unreadable_body">This scratch page could not be read, so it is shown empty and left untouched — nothing will be written over it. Delete it to start again.</string>
     <string name="scratch_nothing_to_send_title">Nothing to send</string>
     <string name="scratch_nothing_to_send_body">There is no ink here to send to the notebook.</string>
 </resources>

@@ -18,9 +18,11 @@
             <intent-filter>
                 <action android:name="com.symmetricalpalmtree.notesproutsn.extension.SCRATCH_PAD" />
             </intent-filter>
+            <!-- 6 since arc 22 / X2: the pad's pages are rows in the host's table store, and a
+                 store-taking point is accepted only at MIN_API_VERSION_FOR_STORE and above. -->
             <meta-data
                 android:name="com.symmetricalpalmtree.notesproutsn.extension.API_VERSION"
-                android:value="1" />
+                android:value="6" />
         </service>
 
         <!-- The extension-owned screen (tier 2): exported, custom action, NO launcher filter;

@@ -573,8 +573,6 @@
     <string name="scratch_sent_toast">Sent to scratch pad</string>
     <string name="scratch_too_large_title">Too much to send</string>
     <string name="scratch_too_large_body">This selection holds more ink than the scratch pad can take. Send a smaller part of it.</string>
-    <string name="scratch_page_full_host_title">Scratch page is full</string>
-    <string name="scratch_page_full_host_body">The scratch pad\'s current page holds as much ink as it can, so nothing was sent. Send to a new page instead.</string>
     <string name="scratch_drain_failed_title">Nothing came back</string>
     <string name="scratch_drain_failed_body">The ink from the scratch pad could not be brought back. Nothing was changed — it is still on the pad.</string>
     <string name="scratch_truncated_title">Not everything came back</string>

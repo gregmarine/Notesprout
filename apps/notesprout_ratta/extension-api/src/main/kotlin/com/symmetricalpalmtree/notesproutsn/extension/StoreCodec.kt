@@ -115,7 +115,7 @@ class StoreRows(val columns: List<String>, val cells: List<List<Cell>>) : Iterab
 
 /**
  * The two wire documents of the store seam (arc 22 / X1), pure and shared by both sides —
- * big-endian `DataOutputStream`, the `ScratchPageCodec` idiom.
+ * big-endian `DataOutputStream`, the arc-11 page-codec idiom.
  *
  * **Statements** — magic `NSST` · u8 version 1 · u16 count · per statement u32 sqlLen + UTF-8 sql ·
  * u16 argc · args as cells. **Rows** — magic `NSRW` · u8 version 1 · u16 columnCount · per column
@@ -229,6 +229,16 @@ object StoreCodec {
     /** The rows document's header — magic, version, column names and the row count — for [columns]. */
     fun rowsHeaderBytes(columns: List<String>): Int =
         4 + 1 + 2 + columns.sumOf { 2 + utf8Length(it) } + 4
+
+    /** The statements document's header — magic, version and the statement count. */
+    const val STATEMENTS_HEADER_BYTES: Int = 4 + 1 + 2
+
+    /** The encoded size of one statement inside a batch — `u32 sqlLen + sql · u16 argc + args`, the
+     *  exact bytes [encodeStatements] writes for it. A batch is
+     *  [STATEMENTS_HEADER_BYTES] + the sum over its statements, which is what an extension splitting
+     *  a long write into `STORE_MAX_VALUE_BYTES`-sized batches has to measure against. */
+    fun statementBytes(statement: Statement): Int =
+        4 + utf8Length(statement.sql) + 2 + statement.args.sumOf { cellBytes(it) }
 
     // ── Internals ──────
 

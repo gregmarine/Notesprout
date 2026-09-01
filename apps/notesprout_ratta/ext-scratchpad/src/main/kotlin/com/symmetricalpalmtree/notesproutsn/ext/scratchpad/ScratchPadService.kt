@@ -27,8 +27,8 @@ import com.symmetricalpalmtree.notesproutsn.extension.InkBundle
  * of the same rule (over → `IllegalArgumentException`, the whole inbound dropped). On `last` it
  * mints fresh ids ([ScratchInk.toStrokes] — nothing from the wire is trusted beyond its geometry)
  * and places the lot through [ScratchStore.receive], leaving [ScratchSession.received] for the
- * screen to consume once. **The full rule refuses the whole placement**:
- * [ExtensionContract.SCRATCH_PAGE_FULL], nothing placed and nothing inserted.
+ * screen to consume once. A scratch page has **no size ceiling** since arc 22 / X2 — the placement
+ * is one store transaction, so the only failure left is the store being gone.
  *
  * `takeOutgoing` hands back one parked chunk; an empty bundle says "done", which is also the honest
  * answer for an index past the end.
@@ -37,7 +37,7 @@ import com.symmetricalpalmtree.notesproutsn.extension.InkBundle
  * silently and the caller reads an empty reply as success. Logs: counts + durations — never ink.
  *
  * A debug-only `StoreProbe` briefly lived here: a once-per-process cross-process 4 MiB
- * `putLarge` / `getLarge` round trip from `begin`, the arc's open question about ashmem over a **real**
+ * large-value round trip from `begin`, the arc's open question about ashmem over a **real**
  * Binder (the host's own self-test never leaves its process). It answered — **916 ms on the Nomad**,
  * inside `begin`'s 2 s budget, matching Paper's 917 ms — and was removed in the same phase, as Paper
  * removed its own: left in, it would sit inside the first pad open of every session and muddy J4's
@@ -90,10 +90,6 @@ class ScratchPadService : Service() {
                 val newPage = placement == ExtensionContract.PLACEMENT_NEW_PAGE
                 val received = try {
                     ScratchStore(store).receive(minted, w, h, newPage)
-                } catch (e: PageFullException) {
-                    // Nothing was placed and nothing inserted — the host says so and does not open.
-                    ScratchSession.clearInbound()
-                    throw IllegalStateException(ExtensionContract.SCRATCH_PAGE_FULL)
                 } catch (e: StoreUnavailable) {
                     ScratchSession.clearInbound()
                     throw IllegalStateException(STORE_UNAVAILABLE)

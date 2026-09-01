@@ -39,7 +39,7 @@ package com.symmetricalpalmtree.notesproutsn.extension
  * **Failure has two different meanings and they are not interchangeable.** An absent or empty value
  * is a **first run** — [TagIndex.EMPTY], write freely. A value whose version line is not a version
  * this build knows is **unreadable**, and [decode] throws: the caller must say so and must not save
- * an empty index over it (the `ScratchPageCodec` rule — losing a library's tags to a blank overwrite
+ * an empty index over it (the arc-11 blob rule — losing a library's tags to a blank overwrite
  * is not a failure anyone can undo). A **truncated tail** is neither: the last line, if the blob does
  * not end in a newline, is dropped and everything before it is kept.
  */

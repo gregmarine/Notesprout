@@ -175,13 +175,18 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   pad calling transaction code 1 lands on a different method), so the three **store-taking** points
   (scratch pad, document editor, tag manager) are accepted only at
   `MIN_API_VERSION_FOR_STORE` 6 and above; the stateless points keep floor 1. **Consequence, live
-  on the Nomad until X2/X3/X4 each redeclare 6: the pad button, every Document entry and every tag
-  door are GONE and search runs names-only** — deliberate, and the X1 walk verified it.
+  on the Nomad until X3/X4 each redeclare 6: every Document entry and every tag door are GONE and
+  search runs names-only** — deliberate, and the X1 walk verified it (the pad redeclared 6 in X2
+  and its button is back).
   Meta-data is **per service**.
 - **The Scratch Pad is not ours to change from here** (arc 11, `docs/scratchpad.md`). It is the
   `:ext-scratchpad` APK: its own process, its own g-paper surface, its own undo stack, and it
   **writes nothing to disk itself** — its pages live in the host store, lent for the showing and
-  revoked with the unbind. It opens **no `.soil`**, and the notebook behind it is **not sealed** —
+  revoked with the unbind (**rows since arc 22 / X2**: `ScratchSchema.V1` = `page` / `stroke` /
+  `state`, every SQL string in `ScratchSql`, writes as an idempotent op log split into ≤ 4 MiB
+  `exec` batches, reads planned by `LENGTH(blob)` into `BETWEEN` ranges — **no page ceiling**, and a
+  page row is never `INSERT OR REPLACE`d because REPLACE's delete cascades its strokes). It opens
+  **no `.soil`**, and the notebook behind it is **not sealed** —
   what the notebook gives up is the EPD pipeline, not its data. Both transfers are **copies** that
   cross only through the held service (never the Intent, never a file), carry **no ids**, and keep
   coordinates 1:1. The pad's tools are the notebook's, fixed: a pad that lassoed differently one tap

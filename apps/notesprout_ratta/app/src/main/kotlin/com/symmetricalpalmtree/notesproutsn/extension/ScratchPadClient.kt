@@ -10,9 +10,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/** The pad's target page would cross the store's value cap (`SCRATCH_PAGE_FULL`) — nothing was placed. */
-class ScratchPageFullException(cause: Throwable) : ExtensionCallException(ExtensionContract.SCRATCH_PAGE_FULL, cause)
-
 /**
  * The host's client for the one scratch pad (arc 11 / J3) — SN's first **held** bind: the operation
  * is the showing of the extension's screen, so the bind brackets it. One instance per calling
@@ -94,8 +91,8 @@ class ScratchPadClient(context: Context, val ref: ProviderRef) {
     /**
      * Notebook → pad (J5): hand [chunks] (from [TransferCaps.chunk], non-empty) to the held extension
      * with [placement] (`PLACEMENT_NEW_PAGE` / `PLACEMENT_CURRENT_PAGE`) and the page px size they
-     * were authored in. Throws [ScratchPageFullException] (the target page would cross the store cap
-     * — nothing placed) or [ExtensionCallException] (bind dead, timeout, refused).
+     * were authored in. Throws [ExtensionCallException] (bind dead, timeout, refused) — a scratch
+     * page has no size ceiling since arc 22 / X2, so there is no "page full" answer any more.
      */
     suspend fun send(chunks: List<List<WireStroke>>, pageWidth: Float, pageHeight: Float, placement: Int) {
         val binding = held ?: throw ExtensionCallException("not open")
@@ -105,17 +102,11 @@ class ScratchPadClient(context: Context, val ref: ProviderRef) {
         for ((i, chunk) in chunks.withIndex()) {
             val bundle = InkBundle(chunk, pageWidth, pageHeight)
             val last = i == chunks.lastIndex
-            // The last chunk carries the whole placement (read + decode + re-encode + write of a page
-            // up to 4 MiB on an e-ink CPU) — a Binder call cannot be cancelled, so a budget that is
-            // too short reports a failure for ink that then lands anyway. PLACE_TIMEOUT_MS for it.
-            binding.call(if (last) PLACE_TIMEOUT_MS else CALL_TIMEOUT_MS) {
-                try {
-                    it.receiveInk(bundle, placement, last)
-                } catch (e: IllegalStateException) {
-                    if (e.message == ExtensionContract.SCRATCH_PAGE_FULL) throw ScratchPageFullException(e)
-                    throw e
-                }
-            }
+            // The last chunk carries the whole placement (the page row, the renumber and one INSERT
+            // per stroke, in one transaction on an e-ink CPU) — a Binder call cannot be cancelled, so
+            // a budget that is too short reports a failure for ink that then lands anyway.
+            // PLACE_TIMEOUT_MS for it.
+            binding.call(if (last) PLACE_TIMEOUT_MS else CALL_TIMEOUT_MS) { it.receiveInk(bundle, placement, last) }
             strokes += chunk.size
         }
         Slog.d(TAG) { "send: ${chunks.size} chunks, $strokes strokes, placement=$placement in ${System.currentTimeMillis() - t0} ms" }

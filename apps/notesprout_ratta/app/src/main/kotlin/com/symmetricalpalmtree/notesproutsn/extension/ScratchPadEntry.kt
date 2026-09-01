@@ -40,10 +40,10 @@ import kotlinx.coroutines.withContext
  *    and the launch: the notebook's `paper.releaseForHandoff()`. The pad releases its own before
  *    every `finish()`.
  *  - **Both transfers' host half (J5).** [open] takes an optional [Send] — the ink goes over the
- *    **held bind** before the screen is launched, and never rides the Intent — and a
- *    [ScratchPageFullException] there stops the whole thing: the dialog says so and the pad is not
- *    opened, because nothing was placed. Coming back, a `RESULT_SCRATCH_SEND` is drained on the bind
- *    that is *still held* and handed to [onDrained] before the bind is finished.
+ *    **held bind** before the screen is launched, and never rides the Intent — and a failure there
+ *    stops the whole thing: the dialog says so and the pad is not opened, because nothing was
+ *    placed. Coming back, a `RESULT_SCRATCH_SEND` is drained on the bind that is *still held* and
+ *    handed to [onDrained] before the bind is finished.
  *  - **The bind's life.** [ScratchPadClient.finish] runs from the result callback — after the drain,
  *    never before it — and from [close] as the backstop for a caller destroyed while the pad is up.
  *
@@ -152,7 +152,7 @@ class ScratchPadEntry(
     /**
      * The outbound half: chunk and hand the strokes over on the held bind. False = it did not go,
      * everything is already released and the pad was **not** opened — which is the honest answer,
-     * because a `SCRATCH_PAGE_FULL` means nothing was placed.
+     * because a placement is one store transaction: it landed whole or not at all.
      */
     private suspend fun handOver(open: ScratchPadClient, send: Send): Boolean {
         // Off Main: a full selection is 10 000 strokes of float copying, and the box is already up.
@@ -168,10 +168,6 @@ class ScratchPadEntry(
         try {
             open.send(chunks, send.pageWidth, send.pageHeight, send.placement)
             onSent()
-        } catch (e: ScratchPageFullException) {
-            // Nothing was placed — so nothing is opened either, and the message says which page.
-            fail(open, R.string.scratch_page_full_host_title, R.string.scratch_page_full_host_body)
-            return false
         } catch (e: ExtensionCallException) {
             Slog.d(TAG) { "send failed: ${e.message}" }
             fail(open, R.string.scratch_failed_title, R.string.scratch_failed_body)

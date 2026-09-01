@@ -89,7 +89,6 @@ class ExtensionContractTest {
         assertEquals(20_000, ExtensionContract.TRANSFER_CHUNK_POINTS)
         // Not a hand-picked number: the bound counts BOTH reasons a chunk closes (see the constant).
         assertEquals(74, ExtensionContract.TRANSFER_MAX_CHUNKS)
-        assertEquals("scratch page full", ExtensionContract.SCRATCH_PAGE_FULL)
         // A chunk must never be able to exceed a whole transfer.
         assertTrue(ExtensionContract.TRANSFER_CHUNK_STROKES <= ExtensionContract.MAX_TRANSFER_STROKES)
         assertTrue(ExtensionContract.TRANSFER_CHUNK_POINTS <= ExtensionContract.MAX_TRANSFER_POINTS)

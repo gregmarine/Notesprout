@@ -151,11 +151,12 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   (2026-09-01; the per-arc feature references are `apps/notesprout_ratta/docs/*.md`). Ten
   modules (host + `:sn-screen` + `:markdown` + `:extension-api` + six extension APKs), SIX
   extension points (recognizer · scratch pad · exporter · importer · document editor · tag
-  manager), g-paper pin 0.1.23, version `0.1.0-ratta`, 1631 JVM tests/variant.
-  **ARC 22 "Tables" IS IN PROGRESS — X1 (the seam) ✅ 2026-09-01; next phase X2 (scratch pad on
-  rows, Opus): the extension store is now real SQLite tables behind gated parameterized SQL (KV API
-  removed, `API_VERSION` 6 with a store floor, legacy stores wiped on open, no code-review phase).
-  Until X2/X3/X4 land, the pad, Document and tag doors are GONE on the device by design. Plan =
+  manager), g-paper pin 0.1.23, version `0.1.0-ratta`, 1690 JVM tests/variant.
+  **ARC 22 "Tables" IS IN PROGRESS — X1 (the seam) ✅ + X2 (scratch pad on rows) ✅ 2026-09-01;
+  next phase X3 (tags on rows + the search merge, Opus): the extension store is now real SQLite
+  tables behind gated parameterized SQL (KV API removed, `API_VERSION` 6 with a store floor, legacy
+  stores wiped on open, no code-review phase). The pad is back on rows with no page ceiling; until
+  X3/X4 land, the Document and tag doors are GONE on the device by design. Plan =
   `RATTA_PLAN.md` § "Phases — Arc 22". No SEVENTH extension point without another user decision.**
   **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for ANY work there** — it holds the working
   protocol, model recipe, standing traps, the per-arc ledger of still-binding decisions, and the

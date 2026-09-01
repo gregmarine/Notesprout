@@ -249,11 +249,6 @@ object ExtensionContract {
         MAX_TRANSFER_STROKES / TRANSFER_CHUNK_STROKES +
             2 * MAX_TRANSFER_POINTS / TRANSFER_CHUNK_POINTS + 1
 
-    /** The exact `IllegalStateException` message the scratch-pad extension throws from `receiveInk`
-     *  when the target page's encoded ink would exceed [STORE_MAX_VALUE_BYTES]. The host compares the
-     *  message, not a substring. */
-    const val SCRATCH_PAGE_FULL: String = "scratch page full"
-
     // ── Tags (`ITagManager`, arc 21 / W1) ──────
     // The whole tag index is ONE store value, so these caps are not taste: [TagCodec.WORST_CASE_BYTES]
     // is the arithmetic that proves the worst legal index still fits [STORE_MAX_VALUE_BYTES], and a

@@ -137,6 +137,27 @@ class StoreCodecTest {
         assertEquals(everyKind.sumOf { StoreCodec.cellBytes(it) }, StoreCodec.rowBytes(everyKind))
     }
 
+    /** The batch-splitting arithmetic an extension writes long flushes against (arc 22 / X2). */
+    @Test
+    fun statementSizes_matchTheBytesWritten() {
+        val statements = listOf(
+            Statement("SELECT 1"),
+            Statement("INSERT INTO t (a, b) VALUES (?, ?)", everyKind[0], everyKind[4]),
+            Statement("UPDATE t SET \u00f6 = ? WHERE id = ?", everyKind),
+        )
+        for (s in statements) {
+            assertEquals(
+                s.sql,
+                StoreCodec.STATEMENTS_HEADER_BYTES + StoreCodec.statementBytes(s),
+                StoreCodec.encodeStatements(listOf(s)).size,
+            )
+        }
+        assertEquals(
+            StoreCodec.STATEMENTS_HEADER_BYTES + statements.sumOf { StoreCodec.statementBytes(it) },
+            StoreCodec.encodeStatements(statements).size,
+        )
+    }
+
     @Test
     fun cellOf_mapsKotlinValues() {
         assertEquals(Cell.Null, Cell.of(null))

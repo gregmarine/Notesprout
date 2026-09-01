@@ -243,7 +243,6 @@ class ScratchPadActivity : AppCompatActivity() {
         binding.openingOverlay.visibility = View.GONE
         Slog.d(TAG) { "page ${document.currentPageId} loaded: ${document.strokes.size} strokes, ${document.pageCount} pages" }
         consumeReceived()
-        if (document.isUnreadable) showProblem(R.string.scratch_unreadable_title, R.string.scratch_unreadable_body)
     }
 
     /**
@@ -256,9 +255,10 @@ class ScratchPadActivity : AppCompatActivity() {
      * [ExtensionContract.EXTRA_SCRATCH_OPEN_RECEIVED] says the host sent one.
      *
      * One undo step, and which one depends on what the placement did to the page list: a **new
-     * page** is a [ScratchAction.Page] whose `afterBlob` is the ink that came with it — undo takes
+     * page** is a [ScratchAction.Page] whose `afterInk` is the ink that came with it — undo takes
      * the page away with its cargo, redo brings both back — and a **current page** placement is a
-     * [ScratchAction.Pasted], which removes and restores exactly what arrived.
+     * [ScratchAction.Pasted], which removes and restores exactly what arrived, at the orders it
+     * arrived at.
      *
      * The **lasso is armed before `setSelection`** (a selection under the pen can neither be dragged
      * nor dismissed) and the state is set by hand, because a host-initiated selection never echoes
@@ -289,11 +289,11 @@ class ScratchPadActivity : AppCompatActivity() {
                     after = document.pageIds,
                     afterCurrent = received.pageId,
                     pageId = received.pageId,
-                    blob = null,                          // the page did not exist before
-                    afterBlob = document.encodeCurrentPage(),
+                    ink = null,                           // the page did not exist before
+                    afterInk = document.currentInk(),
                 )
             } else {
-                ScratchAction.Pasted(received.pageId, arrived)
+                ScratchAction.Pasted(received.pageId, arrived, arrived.map { document.orderOf(it.id) ?: 0L })
             }
         )
 
@@ -338,16 +338,10 @@ class ScratchPadActivity : AppCompatActivity() {
     private val listener = object : PaperListener {
         override fun onStrokeCommitted(stroke: Stroke) {
             if (!opened || closing) return
-            when (document.addStroke(stroke)) {
-                ScratchDocument.Add.OK -> {
-                    undo.record(ScratchAction.Drew(document.currentPageId, stroke))
-                    scheduleSave()
-                }
-                ScratchDocument.Add.PAGE_FULL ->
-                    refuse(stroke, R.string.scratch_page_full_title, R.string.scratch_page_full_body)
-                ScratchDocument.Add.UNREADABLE ->
-                    refuse(stroke, R.string.scratch_unreadable_title, R.string.scratch_unreadable_body)
-            }
+            // A scratch page has no ceiling (arc 22 / X2): every committed stroke is taken.
+            document.addStroke(stroke)
+            undo.record(ScratchAction.Drew(document.currentPageId, stroke))
+            scheduleSave()
         }
 
         override fun onStrokesErased(strokeIds: List<String>) {
@@ -392,19 +386,6 @@ class ScratchPadActivity : AppCompatActivity() {
         override fun onToolChanged(tool: Tool) = toolbar.sync(tool)
     }
 
-    /**
-     * Put a refused stroke back off the paper and say why. Posted rather than called inline: a
-     * data-in call from inside the engine's own commit callback is asking for re-entrancy, and the
-     * pen has just lifted, so one frame here is a boundary frame.
-     */
-    private fun refuse(stroke: Stroke, titleRes: Int, bodyRes: Int) {
-        binding.root.post {
-            if (isFinishing || isDestroyed) return@post
-            paper.removeStrokes(listOf(stroke.id))
-            showProblem(titleRes, bodyRes)
-        }
-    }
-
     // ── Page gestures → operations ───────────────────────────────────────────
 
     private val gestureListener = object : PageGestures.Listener {
@@ -433,8 +414,6 @@ class ScratchPadActivity : AppCompatActivity() {
                     block()
                 } catch (e: CancellationException) {
                     throw e
-                } catch (e: PageFullException) {
-                    showProblem(R.string.scratch_page_full_title, R.string.scratch_page_full_body)
                 } catch (e: StoreUnavailable) {
                     Log.w(TAG, "store unavailable", e)
                     showProblem(R.string.scratch_store_failed_title, R.string.scratch_store_failed_body)
@@ -506,9 +485,6 @@ class ScratchPadActivity : AppCompatActivity() {
         paper.setTemplate(null)   // the pad is plain paper: no templates, ever
         paper.loadStrokes(document.strokes)
         toolbar.setPage(document.pageNumber, document.pageCount)
-        if (!firstLoad && document.isUnreadable) {
-            showProblem(R.string.scratch_unreadable_title, R.string.scratch_unreadable_body)
-        }
     }
 
     private fun deleteSelection(sel: Selection) {

@@ -18,8 +18,8 @@ interface IScratchPad {
     /** Notebook -> pad (J5): one chunk of the inbound ink; [placement] (PLACEMENT_*) + [last] on
      *  every chunk. The extension appends chunks until last == true, then places them (a new page
      *  after the current one, or the current page) and marks them "open selected" for the next screen
-     *  launch. Throws IllegalStateException(SCRATCH_PAGE_FULL) if the target page would exceed the
-     *  store's value cap. */
+     *  launch. A scratch page has no size ceiling (arc 22 / X2 — it is rows in the store's `stroke`
+     *  table); the only failure left is IllegalStateException("store unavailable"). */
     void receiveInk(in InkBundle chunk, int placement, boolean last);
 
     /** Pad -> notebook (J5): after RESULT_SCRATCH_SEND the host drains the outbound ink chunk by
