@@ -3,7 +3,6 @@ package com.symmetricalpalmtree.notesproutsn.data.index
 import androidx.room.withTransaction
 import com.symmetricalpalmtree.notesproutsn.data.soil.FolderRef
 import com.symmetricalpalmtree.notesproutsn.data.soil.KEY_SCOPE_GLOBAL
-import com.symmetricalpalmtree.notesproutsn.data.template.TemplateSearch
 import java.util.UUID
 
 /**
@@ -21,8 +20,13 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
 
     suspend fun notebooks(parentId: String?): List<ObjectSummary> = dao.childrenOfType(parentId, ObjectType.NOTEBOOK)
 
-    /** Every alive notebook, anywhere in the tree — the backup work list (arc 17 / K2). */
-    suspend fun allNotebooks(): List<ObjectSummary> = dao.allAliveNotebooks()
+    /** Every alive notebook, anywhere in the tree — the backup work list (arc 17 / K2) and half of
+     *  the search shelf's listing (arc 20 / Q1). */
+    suspend fun allNotebooks(): List<ObjectSummary> = dao.allAliveOfType(ObjectType.NOTEBOOK)
+
+    /** Every alive folder, anywhere in the tree — the search shelf's other half (arc 20 / Q1). It
+     *  doubles as the parent-name table its notebook cards' second line is built from. */
+    suspend fun allFolders(): List<ObjectSummary> = dao.allAliveOfType(ObjectType.FOLDER)
 
     /**
      * Set or clear the exclude-from-backup bit (arc 17 / K2). Deliberately **not** an edit:
@@ -510,12 +514,12 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
         if (ids.isEmpty()) emptyMap() else dao.aliveOfType(ids, ObjectType.TEMPLATE).associateBy { it.id }
 
     /**
-     * Every alive static template whose name matches [query], anywhere in the tree, blob-free.
-     * A blank query reads nothing at all rather than the whole library.
+     * Every alive static template, anywhere in the tree, blob-free — the search shelf's candidates
+     * (arc 20 / Q1). The matching is **not** done here any more: it is fuzzy since arc 20, so it
+     * cannot be a `LIKE`, and the shelf ranks these rows against its sentinels in one list
+     * (`TemplateShelves.searchCards`). A blank query never reaches this call.
      */
-    suspend fun searchTemplates(query: String): List<ObjectSummary> =
-        if (!TemplateSearch.isRunnable(query)) emptyList()
-        else dao.searchOfType(ObjectType.TEMPLATE, TemplateSearch.likePattern(query))
+    suspend fun allTemplates(): List<ObjectSummary> = dao.allAliveOfType(ObjectType.TEMPLATE)
 
     private companion object {
         const val MAX_ANCESTRY_HOPS = 50

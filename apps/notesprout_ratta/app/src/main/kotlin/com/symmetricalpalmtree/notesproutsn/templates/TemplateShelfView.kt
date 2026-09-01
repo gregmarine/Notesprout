@@ -3,11 +3,11 @@ package com.symmetricalpalmtree.notesproutsn.templates
 import androidx.appcompat.app.AppCompatActivity
 import com.symmetricalpalmtree.notesproutsn.R
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
+import com.symmetricalpalmtree.notesproutsn.core.FuzzyRank
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.prefs.RecentsPrefs
 import com.symmetricalpalmtree.notesproutsn.data.prefs.SortPrefs
-import com.symmetricalpalmtree.notesproutsn.data.template.TemplateSearch
 import com.symmetricalpalmtree.notesproutsn.library.NameDialog
 import com.symmetricalpalmtree.notesproutsn.library.SortRules
 
@@ -104,7 +104,7 @@ class TemplateShelfView(
             // library, which does not read as "you searched for nothing" — it reads as a result.
             // Its own words, not the naming dialog's: a query is not a name, and "that name won't
             // work" is an answer to a question the user did not ask.
-            if (!TemplateSearch.isRunnable(typed)) {
+            if (!FuzzyRank.isRunnable(typed)) {
                 Dialogs.problem(
                     activity,
                     R.string.template_search_empty_title,
@@ -190,18 +190,20 @@ class TemplateShelfView(
     }
 
     /**
-     * The search shelf: matching rows from anywhere in the tree, in the screen's sort, with the
-     * matching sentinels ahead of them. Two sources, because the sentinels have no rows to match —
-     * `TemplateSearch` is what keeps the two matching rules one rule.
+     * The search shelf: every template in the library and every sentinel, matched and **ranked
+     * together** by relevance (arc 20 / Q1). Not the screen's sort — the sort control is GONE while
+     * this shelf is up, because relevance *is* the order here and a live Sort would fight it.
+     *
+     * The database no longer filters: matching is fuzzy, which a `LIKE` cannot be, so the rows come
+     * back whole (blob-free) and `TemplateShelves.searchCards` does the work with the same matcher
+     * the library's own search uses.
      */
-    private suspend fun searchCards(): List<TemplateCard> {
-        val rows = SortRules.sort(repo.searchTemplates(query), sortPrefs.field, sortPrefs.order)
-        return TemplateShelves.searchSentinelCards(
-            query,
-            activity.getString(R.string.template_blank),
-            builtInLabels(),
-        ) + TemplateShelves.searchRowCards(rows)
-    }
+    private suspend fun searchCards(): List<TemplateCard> = TemplateShelves.searchCards(
+        query,
+        activity.getString(R.string.template_blank),
+        builtInLabels(),
+        repo.allTemplates(),
+    )
 
     /** The built-in labels, in [TemplateLibrary.BUILT_IN_KINDS] order — a shelf composes its own
      *  sentinel cards, so it needs the words the Default folder would have used. */

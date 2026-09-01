@@ -34,7 +34,7 @@ passphrase.
 row's right edge:
 
 ```
-[←]  Notebooks / … / Folder        [+Notebook] [+Folder] [Recents] [Pinned] [Sort] [Scratch pad]
+[←]  Notebooks / … / Folder   [+Notebook] [+Folder] [Search] [Recents] [Pinned] [Sort] [Scratch pad]
 ```
 
 `+Notebook` is `ic_notebook_plus` — Tabler `address-book` with the person taken out and a plus cut
@@ -44,9 +44,15 @@ sat beside a second identical plus meaning "new page".)
 
 `Notebooks` is the root crumb; each ancestor follows, separated by ` / `; any crumb jumps straight
 there. `btnUp`'s back arrow appears left of the crumbs once you are below the root. **In a mode the
-breadcrumbs give way** to a title (`modeTitle`) and `btnCloseMode` — a **left arrow**, first child
-of the row, before the title — see [Modes](#modes). `btnUp` and `btnCloseMode` share the same
-`ic_arrow_left` and never show at once: a shelf has no path to go up out of.
+breadcrumbs give way** to a title (`modeTitle`) — or, in Search, to the **field itself**
+(`searchField`) — and `btnCloseMode`, a **left arrow**, first child of the row, before the title;
+see [Modes](#modes) and [Search](#search-arc-20). `btnUp` and `btnCloseMode` share the same
+`ic_arrow_left` and never show at once: a shelf has no path to go up out of. Exactly one of
+`breadcrumbScroll` / `modeTitle` / `searchField` is ever visible.
+
+**Search** (arc 20 / Q1), `ic_search`, sits **between `+Folder` and `Recents`** — the user's
+placement call: it opens a shelf the way Pinned and Recents do, but what it finds is something you
+were on your way to open or create into.
 
 **Bottom bar** — a `FrameLayout`, not a row:
 
@@ -90,19 +96,25 @@ notebook's page-template row, which go straight to `TemplatesActivity.pickIntent
 
 ## Modes
 
-`BrowseMode { NORMAL, PINNED, RECENTS }` (`data/prefs/BrowseState`). A mode is a **flat shelf of
-notebooks with no path** — the folder tree is still there underneath, and closing the mode returns
-to exactly the folder you were in.
+`BrowseMode { NORMAL, PINNED, RECENTS, SEARCH }` (`data/prefs/BrowseState`). A mode is a **flat
+shelf with no path** — the folder tree is still there underneath, and closing the mode returns to
+exactly the folder you were in.
 
 `setMode(new)` is a no-op on the mode already showing; otherwise it writes `browseState.mode`,
 resets `pageIndex` to 0 and refreshes. `btnPinned` toggles PINNED ↔ NORMAL, `btnRecents` toggles
-RECENTS ↔ NORMAL, `btnCloseMode` (the left arrow at the row's head) and Back both go to NORMAL. The mode **persists across a
-relaunch**: it is read back in `onCreate` and honoured by the first refresh.
+RECENTS ↔ NORMAL, `btnCloseMode` (the left arrow at the row's head) and Back both go to NORMAL.
+**`btnSearch` deliberately does not toggle** — see [Search](#search-arc-20). The mode **persists
+across a relaunch** — except SEARCH, which `BrowseState` refuses to store in either direction.
 
 **Chrome in a mode** (`renderChrome`): breadcrumb scroll and `btnUp` hidden, `modeTitle` ("Pinned"
 / "Recent") and `btnCloseMode` shown; `btnNewFolder` / `btnNewNotebook` hidden — a shelf is not a
-place to create into. Sort stays active. The active mode's top-bar button takes
-`isSelected = true`, so `bg_toolbar_button`'s border says which shelf you are on.
+place to create into. Sort stays active **except in Search**, whose order is relevance. The active
+mode's top-bar button takes `isSelected = true`, so `bg_toolbar_button`'s border says which shelf
+you are on.
+
+Entering Search is the one mode switch that renders the chrome **synchronously first**: `refresh`
+renders it too, but a coroutine later, and a `GONE` field cannot take focus — the keyboard simply
+never opened.
 
 **What each shelf holds** — one `repo.pinnedNotebookIds()` read per refresh feeds every card's
 badge *and* the long-press sheet's Pin/Unpin label, so no card ever queries the index on its own:
@@ -112,6 +124,7 @@ badge *and* the long-press sheet's Pin/Unpin label, so no card ever queries the 
 | NORMAL | folders + notebooks of the current folder | the current sort, folders first |
 | PINNED | the pinned notebooks, alive only | **the current sort** — the pin edge's `sortOrder` is recorded but deliberately unused for display |
 | RECENTS | `RecentsPrefs.entries()`, alive notebooks only | **stored order, newest first — never re-sorted** |
+| SEARCH | folders + notebooks matching the query, **anywhere in the tree** | folders first, then **relevance** ([`SearchAssembly`](#search-arc-20)) |
 
 Pinned uses the on-screen sort rather than pin order on purpose: a second, invisible arrangement
 would be one the user has no control to see. Recents refuses the sort for the opposite reason —
@@ -125,7 +138,7 @@ memoised per refresh, instead of the last-modified stamp: on that shelf "where i
 thing.
 
 **Empty states** are one `TextView` whose text is set per mode before it is shown — "No notebooks
-yet" / "No pinned notebooks" / "No recent notebooks".
+yet" / "No pinned notebooks" / "No recent notebooks", and in Search one of **two** (see below).
 
 **Pin storage is an index list edge**, not a pref: a `list_item` row under the `PINNED_LIST_ID`
 sentinel (`IndexRepository.pin` / `unpin` / `pinnedNotebookIds`). It therefore lives in the
@@ -250,6 +263,98 @@ work is invisible on e-ink, and a sheet that grew a row after it was already up 
 user's finger. A tap hands off to `ExportActivity` with `EXTRA_NOTEBOOK_ID` / `EXTRA_NOTEBOOK_NAME`
 only — never a `File` — latched against a double-tap the same way every other door out of the
 library is. See [`docs/export.md`](export.md) for the screen itself.
+
+---
+
+## Search (arc 20)
+
+Find a folder or a notebook **by name**, from anywhere in the library. `library/LibrarySearch` owns
+the field, the query and the cards; `core/FuzzyRank` and `library/SearchAssembly` are pure and
+JVM-tested. Content — ink, recognized text, documents — is **not** searched: names only, this arc.
+
+**Fuzzy means subsequence, not typo tolerance** (the user's explicit call). The query's letters must
+appear in the name **in order**, gaps allowed, so `mtg` finds "Meeting Notes" and `jrn` finds
+"20260825_Journal", while `bolg` finds nothing. Edit distance was offered and declined — **adding it
+needs a fresh decision.** Where the line falls is worth knowing: a *dropped* letter still finds its
+name (that is what a subsequence is), a *swapped or wrong* one does not.
+
+Ranking, best first — `FuzzyRank.Match`:
+
+| Tier | Meaning | Example for `notes` |
+|---|---|---|
+| EXACT | the name *is* the query | "Notes" |
+| PREFIX | the name begins with it | "Notes from Tuesday" |
+| WORD_START | it appears whole, starting a word | "Meeting Notes" |
+| SUBSTRING | it appears whole, mid-word | "Denotes" |
+| SUBSEQUENCE | the letters, in order, with gaps | "No one tells" |
+
+Below the tier: how many matched letters landed on a **word start** (a separator, a camel-case
+capital or the first digit after a letter), then how **tight** the run is, then the shorter name,
+then the name itself. The order is total and stable — the same search over the same library always
+produces the same page, which is the difference between a result and a shuffle.
+
+The subsequence pass runs **backwards then forwards**: the backward walk gives every character its
+latest possible position (and decides whether a subsequence exists at all), and the forward walk
+takes a word start when one is available before that ceiling. A plain left-to-right greedy scored
+"Meeting Team Group" no better than "Amount Given" for `mtg` — both land one letter on a word start
+by luck — which is a ranking that ranks nothing.
+
+**The shape of the shelf:**
+
+- **The whole library, always.** Two blob-free listings (`allFolders` + `allNotebooks`), ranked in
+  Kotlin. A search scoped to the folder you happen to be standing in would answer "no" for a
+  notebook two folders over — the one question a search exists to answer. It also means the
+  database does no matching at all: fuzzy cannot be a `LIKE`.
+- **Folders first, then relevance** (`SearchAssembly`). The library's containers-before-contents
+  rule outranks the score, everywhere. **Sort is GONE** while searching.
+- **The Search key runs it** — the IME action or Enter, or a tap on the Search button, which
+  **re-runs the field rather than toggling the mode off** (the ← arrow and Back are the way out; a
+  control that both submits and cancels is one you cannot use quickly). Not live-as-you-type:
+  every keystroke pause would be a whole card page repainted, covers and all, on an e-ink panel.
+- **Tapping a folder goes there and closes the search** — the shelf's job was to find the place.
+  Tapping a notebook opens it through the same one door (latch + "Opening…" overlay) as every
+  other card in this file. Long-press raises the ordinary action sheet, and any action that changes
+  a name or removes a row re-runs the query.
+- **Cards are the Recents shape**: every card's second line is its **parent folder's name**
+  (resolved from the folder listing already in hand — the subtitles cost no extra reads), because
+  on a flat shelf "where is it" beats "when". **Folder cards get one too** (`card_folder`'s
+  `folderParent`, GONE everywhere else): folder names are unique only per parent, so `Work/Notes`
+  and `Personal/Notes` would otherwise be the same card twice.
+- **Two empty states**: "Type a name, then Search" before a query is run, "No folders or notebooks
+  match that" after one. They are two different things to be told.
+- **The query lives in memory only.** Prefs hold ids and enum names, never a display name, and a
+  typed query is a name. It survives a hop to another shelf and back within the process — restored
+  **select-all'd**, because retyping on the Supernote's on-screen keyboard is the expensive part —
+  and dies with the process. `BrowseMode.SEARCH` is likewise never persisted, in either direction:
+  a cold launch onto a query-less search shelf would be a screen where the library should be.
+
+**The IME.** The field takes focus and the keyboard opens on entering the mode — with an **explicit**
+`showSoftInput` (flag 0, not `SHOW_IMPLICIT`, which the system is allowed to skip when a hard
+keyboard is attached; on Ratta the hardware keys are delivered *only while the IME is shown*, so a
+declined implicit show would strand the mode with no way to type into it at all). Running the search
+dismisses it. That dismissal is the app's **one** deliberate exception to the Ratta rule that
+nothing may hide the IME (hiding it also stops a hardware keyboard's keys being delivered): the rule
+protects a user who still needs to type, and this fires only once they have said they are done — on
+top of the results the keyboard would otherwise be covering. Tapping the field brings it back.
+`LibraryActivity` is `adjustNothing` (the grid measures itself once against a real band — the
+New-notebook screen's reason) and declares `keyboard|keyboardHidden`, so attaching a BT keyboard
+cannot destroy the library under a standing query.
+
+Two smaller rules the arc-20 review pinned, both about not repainting or removing things for
+nothing:
+
+- **Dropping focus takes more than `clearFocus()`.** It re-runs the root's focus search, and the
+  field is the only view in this bar that is focusable *in touch mode* — so focus comes straight
+  back, and with it `TextView`'s caret `Blink`, invalidating every 500 ms forever on an EPD panel.
+  `LibrarySearch.dropFocus` turns `isFocusableInTouchMode` off around the clear and back on after,
+  so the caret really goes and tapping the field still brings focus (and the keyboard) back.
+- **A blank submit with no query is inert.** Search does not toggle the mode off, so it collects
+  the taps Pinned and Recents would have toggled with; answering one by dismissing an expensive
+  on-screen keyboard for a screen that does not change is the worst reading of it. Clearing a query
+  that *is* there stays a real act — it empties the shelf.
+
+**The same matcher runs the template browser's Search shelf** ([`templates.md`](templates.md)) —
+one rule, so a name findable on one screen is findable on the other.
 
 ---
 
@@ -668,3 +773,5 @@ library falls back to the root. Nothing in prefs is trusted as still existing.
 | `library/SchemePrefillTest` (K3) | no-scheme/unparseable/refused expansions all fall back to null, siblings fetched only when the scheme holds a counter, a throwing sibling fetch never escapes, valid expansions pass through |
 | `data/TemplateGeometryTest` | 8 mm spacing at dpi, density-scaled feature sizes with the 1 px floor, lined top margin, grid symmetry, grid-≠-lined, dot intersections, Nomad-page counts |
 | `library/LibraryCardsTest` (arc 19 / M8) | `NotebookFlags.TEXT_DOCUMENT`'s card-level read — the one bit of the text-document card path that is pure |
+| `core/FuzzyRankTest` (arc 20 / Q1) | every tier, the word-start rules (separators / camel / first digit), word-starts and span as tie-breaks, the two-pass subsequence preferring word starts, what must **not** match (transposition, wrong letter, over-long query, blank), punctuation as literal, and `rank`'s total, stable order |
+| `library/SearchAssemblyTest` (arc 20 / Q1) | folders before notebooks whatever the score says, relevance inside each group, non-matches dropped from both, a blank query finding nothing, an empty library |

@@ -58,10 +58,11 @@ import kotlinx.coroutines.withContext
  *  - **Covers are lazy, one page at a time.** The DAO listing is blob-free, so entering a folder of
  *    forty notebooks reads forty rows and six covers, not forty covers.
  *
- * On top of that sit the two **modes** (R5): Pinned and Recents. A mode is a flat shelf of
- * notebooks with no path — the breadcrumbs give way to a title and a close button, and the create
- * buttons stand down because there is no folder to create into. The mode persists in
- * [BrowseState], so the shelf the user left is the shelf they come back to.
+ * On top of that sit the **modes** (R5, grown arc 20): Pinned, Recents and Search. A mode is a flat
+ * shelf with no path — the breadcrumbs give way to a title (or, for Search, to the field itself) and
+ * a close button, and the create buttons stand down because there is no folder to create into. The
+ * mode persists in [BrowseState], so the shelf the user left is the shelf they come back to —
+ * except Search, which is the one shelf a relaunch never reopens ([LibrarySearch]).
  */
 class LibraryActivity : AppCompatActivity() {
 
@@ -76,6 +77,9 @@ class LibraryActivity : AppCompatActivity() {
     /** Import (arc 16) — the bottom bar's Import button (left group, right after Backup since
      *  arc 17 / K2) and the whole pipeline behind it. GONE unless a trusted importer is installed. */
     private lateinit var importFlow: ImportFlow
+
+    /** Search (arc 20 / Q1) — the top bar's field, the query behind it and the cards it produces. */
+    private lateinit var search: LibrarySearch
 
     private var folderId: String? = null
     private var pageIndex = 0
@@ -135,6 +139,13 @@ class LibraryActivity : AppCompatActivity() {
         mode = browseState.mode
         coldLaunch = savedInstanceState == null
 
+        // Built before the bars are wired: the Search button's listener reaches for it, and the
+        // field's editor action can fire the moment the mode opens.
+        search = LibrarySearch(this, repo, binding.searchField) {
+            // A new query is a new listing — never page 4 of the last one.
+            pageIndex = 0
+            lifecycleScope.launch { refresh() }
+        }
         wireBars()
         // The Scratch Pad (arc 11). Built here because it registers an ActivityResult launcher, and
         // one may not be registered after STARTED. No handoff to make: the library hosts no paper.
@@ -300,6 +311,11 @@ class LibraryActivity : AppCompatActivity() {
         // folder you were in, so the same button is always the way out of what it opened.
         btnPinned.setOnClickListener { setMode(if (mode == BrowseMode.PINNED) BrowseMode.NORMAL else BrowseMode.PINNED) }
         btnRecents.setOnClickListener { setMode(if (mode == BrowseMode.RECENTS) BrowseMode.NORMAL else BrowseMode.RECENTS) }
+        // Search does NOT toggle like the other two (arc 20): tapping it while searching re-runs
+        // what is in the field, which is the second way to run a query without reaching for the
+        // keyboard's own Search key. The left arrow and Back are the way out — deliberately, because
+        // a control that both submits and cancels is a control you cannot use quickly.
+        btnSearch.setOnClickListener { if (mode == BrowseMode.SEARCH) search.run() else setMode(BrowseMode.SEARCH) }
         btnCloseMode.setOnClickListener { setMode(BrowseMode.NORMAL) }
         btnTemplates.setOnClickListener { startActivity(TemplatesActivity.intent(this@LibraryActivity)) }
         // Backup (arc 17 / K2), the bottom bar's far-left button. Not latched with `launching`:
@@ -316,17 +332,32 @@ class LibraryActivity : AppCompatActivity() {
         btnNext.setOnClickListener { goToPage(pageIndex + 1) }
         btnLast.setOnClickListener { goToPage(pageCount - 1) }
 
-        listOf(btnPinned, btnRecents, btnCloseMode, btnTemplates, btnBackup, btnSort, btnNewFolder,
-               btnNewNotebook, btnUp, btnFirst, btnPrev, btnNext, btnLast)
+        listOf(btnPinned, btnRecents, btnSearch, btnCloseMode, btnTemplates, btnBackup, btnSort,
+               btnNewFolder, btnNewNotebook, btnUp, btnFirst, btnPrev, btnNext, btnLast)
             .forEach { TooltipCompat.setTooltipText(it, it.contentDescription) }
     }
 
-    /** Switch shelves. A no-op on the mode already showing, so a redundant tap costs no refresh. */
+    /**
+     * Switch shelves. A no-op on the mode already showing, so a redundant tap costs no refresh.
+     *
+     * [BrowseState] refuses to store [BrowseMode.SEARCH] (a cold launch onto a query-less search
+     * shelf would be a screen where the library should be), so entering search leaves the remembered
+     * shelf as it was and leaving search writes the one being returned to.
+     */
     private fun setMode(newMode: BrowseMode) {
         if (mode == newMode) return
+        val leaving = mode
         mode = newMode
         browseState.mode = newMode
         pageIndex = 0
+        if (leaving == BrowseMode.SEARCH) search.close()
+        // The chrome is rendered HERE, before the field is asked to take focus — [refresh] renders
+        // it too, but a coroutine later, and a GONE view cannot be focused: the keyboard simply
+        // never opened. Only on the way in, so the other modes keep their single render.
+        if (newMode == BrowseMode.SEARCH) {
+            renderChrome()
+            search.open()
+        }
         Slog.d(TAG) { "mode → $newMode" }
         lifecycleScope.launch { refresh() }
     }
@@ -338,19 +369,30 @@ class LibraryActivity : AppCompatActivity() {
      */
     private fun renderChrome() = with(binding) {
         val inMode = mode != BrowseMode.NORMAL
+        val searching = mode == BrowseMode.SEARCH
         breadcrumbScroll.visibility = if (inMode) View.GONE else View.VISIBLE
-        modeTitle.visibility = if (inMode) View.VISIBLE else View.GONE
+        // Exactly one of the three ever occupies the row's middle: the path, a shelf's name, or —
+        // while searching — the field the shelf is made of.
+        modeTitle.visibility = if (inMode && !searching) View.VISIBLE else View.GONE
+        searchField.visibility = if (searching) View.VISIBLE else View.GONE
         btnCloseMode.visibility = if (inMode) View.VISIBLE else View.GONE
         btnNewFolder.visibility = if (inMode) View.GONE else View.VISIBLE
         btnNewNotebook.visibility = if (inMode) View.GONE else View.VISIBLE
+        // Sort goes only on the search shelf: relevance IS its order (arc 20), so the control could
+        // only fight an ordering it cannot change. Pinned and Recents keep it — Pinned is ordered by
+        // it, and Recents deliberately ignores it without pretending it is gone.
+        btnSort.visibility = if (searching) View.GONE else View.VISIBLE
         btnPinned.isSelected = mode == BrowseMode.PINNED
         btnRecents.isSelected = mode == BrowseMode.RECENTS
+        btnSearch.isSelected = searching
 
         if (inMode) {
             btnUp.visibility = View.GONE
-            modeTitle.setText(
-                if (mode == BrowseMode.PINNED) R.string.mode_title_pinned else R.string.mode_title_recents
-            )
+            if (!searching) {
+                modeTitle.setText(
+                    if (mode == BrowseMode.PINNED) R.string.mode_title_pinned else R.string.mode_title_recents
+                )
+            }
         } else {
             renderBreadcrumb()
         }
@@ -422,6 +464,7 @@ class LibraryActivity : AppCompatActivity() {
             BrowseMode.NORMAL -> normalItems(pinnedIds.toSet())
             BrowseMode.PINNED -> pinnedItems(pinnedIds)
             BrowseMode.RECENTS -> recentItems(pinnedIds.toSet())
+            BrowseMode.SEARCH -> search.cards(pinnedIds.toSet())
         }
 
         binding.emptyState.setText(
@@ -429,6 +472,8 @@ class LibraryActivity : AppCompatActivity() {
                 BrowseMode.NORMAL -> R.string.library_empty
                 BrowseMode.PINNED -> R.string.library_pinned_empty
                 BrowseMode.RECENTS -> R.string.library_recents_empty
+                // Two answers, not one: nothing typed yet, or nothing called that.
+                BrowseMode.SEARCH -> search.emptyTextRes()
             }
         )
         binding.emptyState.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
@@ -547,8 +592,26 @@ class LibraryActivity : AppCompatActivity() {
     // ── Cards ────────────────────────────────────────────────────────────────
 
     private fun onCardTap(item: CardItem) = when (item) {
-        is CardItem.Folder -> navigateTo(item.summary.id)
+        is CardItem.Folder -> enterFolder(item.summary.id)
         is CardItem.Notebook -> openNotebook(item.summary.id, item.summary.name)
+    }
+
+    /**
+     * Enter a folder — from the tree, or from a **search result**, which is the only shelf that
+     * holds folder cards at all.
+     *
+     * From a shelf it also leaves the shelf: going there *is* the result (arc 20 — the search's job
+     * was to find the place), and staying on the shelf would leave the breadcrumbs, Back and the
+     * create buttons all describing a folder the user cannot see. One refresh, not two: the mode is
+     * changed in place and [navigateTo] does the listing.
+     */
+    private fun enterFolder(id: String) {
+        if (mode != BrowseMode.NORMAL) {
+            if (mode == BrowseMode.SEARCH) search.close()
+            mode = BrowseMode.NORMAL
+            browseState.mode = BrowseMode.NORMAL
+        }
+        navigateTo(id)
     }
 
     /**

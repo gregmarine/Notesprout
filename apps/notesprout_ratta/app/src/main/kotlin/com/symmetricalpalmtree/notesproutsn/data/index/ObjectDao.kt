@@ -41,19 +41,17 @@ interface ObjectDao {
     suspend fun aliveNotebooks(ids: List<String>): List<ObjectSummary>
 
     /**
-     * Alive rows of [type] whose name matches [pattern] (`LIKE`, `\\` escaping —
-     * `templates/TemplateSearch.likePattern` builds it), **anywhere in the tree**, blob-free.
+     * Every alive row of [type], **anywhere in the tree**, blob-free — the search listing (arc 20 /
+     * Q1) and the backup work list (arc 17 / K2).
      *
      * No `parentId` at all: a search that only looked in the folder you happen to be standing in
-     * would answer "no" for paper that is two folders over, which is the one question a search
-     * exists to answer. SQLite's `LIKE` is ASCII case-insensitive, which is deliberately the same
-     * rule `TemplateSearch.matchesLabel` applies to the sentinels the screen composes.
+     * would answer "no" for a notebook that is two folders over, which is the one question a search
+     * exists to answer. **No name predicate either** — matching is fuzzy since arc 20
+     * (`core/FuzzyRank`) and a `LIKE` cannot be; names are ranked in Kotlin over these rows, which
+     * carry no blobs and cost a listing, not a library.
      */
-    @Query(
-        "SELECT $SUMMARY_COLS FROM objects " +
-        "WHERE type = :type AND deletedAt IS NULL AND name LIKE :pattern ESCAPE '\\'"
-    )
-    suspend fun searchOfType(type: String, pattern: String): List<ObjectSummary>
+    @Query("SELECT $SUMMARY_COLS FROM objects WHERE type = :type AND deletedAt IS NULL")
+    suspend fun allAliveOfType(type: String): List<ObjectSummary>
 
     /** The alive rows of [type] among [ids], blob-free (arc 13 / G5 — one read for a whole pinned
      *  or recents shelf). Empty [ids] never hits the database. */
@@ -62,10 +60,6 @@ interface ObjectDao {
         "WHERE id IN (:ids) AND type = :type AND deletedAt IS NULL"
     )
     suspend fun aliveOfType(ids: List<String>, type: String): List<ObjectSummary>
-
-    /** Every alive notebook, anywhere in the tree, blob-free — the backup work list (arc 17 / K2). */
-    @Query("SELECT $SUMMARY_COLS FROM objects WHERE type = 'notebook' AND deletedAt IS NULL")
-    suspend fun allAliveNotebooks(): List<ObjectSummary>
 
     @Query(
         "SELECT count(*) FROM objects WHERE type = :type AND deletedAt IS NULL AND name = :name AND " +

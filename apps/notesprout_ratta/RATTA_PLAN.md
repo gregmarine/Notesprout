@@ -8,12 +8,13 @@ A from-scratch, Supernote-only rebuild of Notesprout in the spirit of the Paper 
 Original Notesprout (`apps/notesprout_android`) and Notesprout Paper (`apps/notesprout_paper`)
 are **reading references — no app code is copied**.
 
-**Arcs 1–19 are complete and frozen.** Their entries below are compact ledgers: status, what
+**Arcs 1–19 are complete and frozen. Arc 20 "Search" is IN PROGRESS** (one phase, Q1 — the
+section is at the end of this file). Their entries below are compact ledgers: status, what
 still binds, and the reference doc. **The full phase-by-phase records (outcomes, findings,
 walk logs) live in git history — arcs 1–18 at `git show 90a9198:apps/notesprout_ratta/RATTA_PLAN.md`,
 arc 19's full phase records at the end of this file until the next compaction** — and each
-feature's authoritative reference is its `docs/` file. **No next arc is planned — ask the user
-before starting anything.**
+feature's authoritative reference is its `docs/` file. **After arc 20 no further arc is
+planned — ask the user before starting anything.**
 
 ---
 
@@ -498,6 +499,104 @@ commit.
 | og feature references | monorepo `docs/` (documents.md, proofread.md, full-notebook-export.md, backup.md, scratchpad.md, clipboard-and-page-transfer.md, links.md) |
 | g-paper API + host duties | `~/git/g-paper/docs/{api,architecture,host-responsibilities,integration-guide}.md` |
 | Frozen arc phase records | `git show 90a9198:apps/notesprout_ratta/RATTA_PLAN.md` |
+
+---
+
+## Phases — Arc 20 "Search" (planned 2026-08-31, wizard complete)
+
+Find a folder or a notebook by **name**, from anywhere in the library, with a **fuzzy** match —
+the library's first search. One phase, **Q1**. Content (ink, recognized text, documents) is
+explicitly **not** searched: names only, this arc.
+
+### Locked decisions (arc-20 wizard 2026-08-31 — do not re-ask)
+
+| Decision | Answer |
+|---|---|
+| Arc shape | **One phase, Q1** — the standing gates (JVM tests, Nomad walk, `/code-review` **high**, docs, freeze). Version stays **`0.1.0-ratta`**. |
+| The button | `ic_search` (already in `:sn-screen`), top bar, **between `+Folder` and `Recents`** — the user's placement call. |
+| What "fuzzy" means | **Subsequence + ranking**, not typo tolerance (the user's explicit call — `mtg` finds "Meeting Notes"; `meting` does **not**). Pure `core/FuzzyRank`: tiers EXACT > PREFIX > WORD-START substring > substring > subsequence, tie-broken by word-start hits, then span, then name length, then name (case-insensitive). Edit distance was offered and declined — **do not add it without a fresh decision**. |
+| Scope | **The whole library, always** — every alive folder and notebook anywhere in the tree, whatever folder you are standing in (arc 13's template-search call, made again). |
+| Order | **Folders first, then relevance** inside each group; the library's folders-before-notebooks rule outranks the score. **Sort is GONE in search mode** — relevance *is* the order, and a live Sort control would fight it. |
+| Trigger | **The IME's Search action** (or Enter), and a tap on the Search button re-runs the field. **Not** live-as-you-type: every debounce is a whole-page EPD repaint with cover reads. |
+| Folder tap | **Go there, search closes** — the shelf's job was to find the place. Back then peels normally. |
+| Long-press | **The same action sheet as anywhere** (Pinned/Recents parity); the query re-runs after any action that changes a name or removes a row. |
+| Chrome in search | `[←] [ field ] [Search•] [Recents] [Pinned] [Scratch pad]` — `+Notebook`, `+Folder` and `Sort` hide; the Scratch pad button **stays** (the user's explicit amendment). The field replaces the breadcrumbs/`modeTitle`, `NameDialog.input`'s bordered recipe. |
+| The Search button does not toggle | Unlike Pinned/Recents, tapping Search **while in search re-runs the query** rather than leaving; `←` and Back are the way out. A deliberate divergence — written down in `docs/library.md`. |
+| Persistence | `BrowseMode` gains **`SEARCH`**, and it is the one mode that is **never persisted**: a query is a moment, not a view. A relaunch lands in NORMAL at the remembered folder; the reader maps a stored `SEARCH` back to NORMAL. The query itself never touches prefs (**a name never reaches device-local plaintext** — the standing prefs rule). |
+| Cards | The Pinned/Recents card shape. A notebook's second line is its **parent folder name** (the Recents call: on a flat shelf "where is it" beats "when"), memoised per refresh; folder cards keep icon + name. |
+| Empty states | Blank field → "Type to search"; a run that matched nothing → "No matches". Two strings, because they are two different answers. |
+| Templates | **The template Search shelf adopts the same fuzzy rule** (the user's call): `TemplateSearch` is reimplemented on `FuzzyRank`, `IndexRepository.searchTemplates` ranks in Kotlin instead of SQL `LIKE` (the `LIKE` DAO query goes), sentinels and rows rank **together** in one list, and **`btnSort` is GONE on that shelf only**. Its dialog-vs-inline shape stays as arc 13 built it. |
+| IME | The field takes focus and the IME opens on entering search mode. On the Search action the field **clears focus and the keyboard is dismissed** so the results are visible — a written exception to the Ratta never-hide-the-IME rule, and a narrow one: the rule protects a user who still needs to type, and this fires only when they have said they are done. Tapping the field brings it back. `LibraryActivity` gains `adjustNothing` (the grid measures itself once against a real band — G3's reason) and `keyboard\|keyboardHidden` configChanges (the M4 lesson: a BT-keyboard attach must not recreate it). |
+
+### Q1 — Search
+**Status:** 🔄 In progress (code + walk + review done; commit + freeze pending)
+
+**Outcome (code + Nomad walk).** Search is live: `core/FuzzyRank` (the matcher + the total order),
+`library/SearchAssembly` (folders-first, then relevance) and `library/LibrarySearch` (the field, the
+query, the cards) — `LibraryActivity` grew a mode branch, the chrome and `enterFolder`, nothing more.
+`BrowseMode.SEARCH` is refused by `BrowseState` **in both directions**. The index stopped filtering
+names: `ObjectDao.searchOfType`'s `LIKE` is gone, replaced by `allAliveOfType` (which also absorbed
+`allAliveNotebooks`), and `IndexRepository` grew `allFolders` / `allTemplates`. Templates followed
+the user's call — `TemplateSearch` is now a door onto `FuzzyRank`, `TemplateShelves.searchCards`
+ranks sentinels and rows **in one list**, and `btnSort` is GONE on that shelf. 1511 JVM
+tests/variant (+25 new, −9 with the deleted `TemplateSearchTest`; +8 net after the review). Manifest: `LibraryActivity` gained `adjustNothing` + `keyboard|keyboardHidden`.
+
+**Two findings worth keeping:**
+- **A `GONE` field cannot take focus.** `search.open()` ran before `refresh`'s `renderChrome`, so the
+  keyboard never opened (`mInputShown=false`, proven on the Nomad). Fixed by rendering the chrome
+  synchronously on the way *into* the mode — the other modes keep their single render.
+- **A left-to-right greedy subsequence is not a ranking.** It scored "Meeting Team Group" no better
+  than "Amount Given" for `mtg`. The matcher walks **backwards for each character's latest feasible
+  position, then forwards preferring word starts** under that ceiling.
+
+Also written down: fuzzy-by-subsequence forgives a **dropped** letter (`meting` still finds
+"Meeting Notes") but not a swapped or wrong one — the honest edge of the no-edit-distance decision.
+
+**Review (level high, `/code-review` over the working tree): 5 findings, 5 fixed.** Two mediums were
+both real and both on the seam between the field and the EPD panel: (1) **`clearFocus()` does not
+drop focus** when the field is the only touch-mode-focusable view in the bar — focus bounced
+straight back and `TextView`'s caret `Blink` invalidated every 500 ms, a permanent partial-refresh
+loop on a screen whose rule is that nothing repaints unless something happened (`dropFocus` now
+toggles `isFocusableInTouchMode` around the clear; proven on the Nomad — two captures 1.2 s apart
+are pixel-identical, and tapping the field still brings focus and the keyboard back);
+(2) **`SHOW_IMPLICIT` is skippable with a hard keyboard attached**, which on Ratta (keys delivered
+only while the IME is shown) would have stranded the mode with no way to type into it — explicit
+flag 0 now, `mShowExplicitlyRequested=true` verified. Three lows, all fixed: a blank submit with no
+query is **inert** (Search collects the taps Pinned/Recents would have toggled with — it must not
+answer them by taking an expensive keyboard away); **folder cards carry the parent line too**
+(`card_folder.folderParent` — folder names are unique only per parent, so two "Notes" were one card
+twice); and `data/template/TemplateSearch` — down to a single wrapper with no production caller and
+a KDoc describing behaviour the rewrite removed — was **deleted**, `TemplateShelfView` calling
+`FuzzyRank.isRunnable` directly. Final: **1511 JVM tests/variant**.
+
+**Written reason for the size rule** (`LibraryActivity` 823 → 886 lines, the `ExportActivity`
+precedent): the whole search *feature* is already out of it — the matcher, the ordering rule and the
+field/query/cards controller are three files of their own, and what stayed is a `when` branch, the
+chrome and `enterFolder`. What is left in the Activity is one screen's wiring — chrome, modes,
+listing, cards, sheets, delete, move, sort — and every candidate for extraction is a handful of
+lines that would then need the Activity, the repo, the prefs and a refresh callback passed to it.
+Splitting it would move lines, not responsibilities.
+
+**Walk (by hand on the Nomad, 12/12).** Button placement · search chrome (+Notebook/+Folder/Sort
+gone, Scratch pad kept, Search selected) · keyboard opens on entry · typed via the on-screen keys
+(`input text` is swallowed, as ever — **but the Supernote keyboard IS visible to `screencap`**,
+which is what made the walk drivable) · run on Enter and on the Search button · `jour` and the fuzzy
+`jrn` both find the folder + its two notebooks with parent-folder subtitles · folder tap enters and
+closes the search · no-match and type-to-search states · the last query returns select-all'd ·
+long-press → Pin re-runs the query and the badge lands · Back leaves to the folder, keyboard down ·
+the template shelf finds Grid from `grd` with Sort gone. `logcat -b crash` empty.
+
+New pure code: `core/FuzzyRank` (the matcher + comparator) and `library/SearchAssembly`
+(folders-first + relevance over `ObjectSummary`), both JVM-tested. New `library/LibrarySearch`
+holds the field, the query and the card assembly, so `LibraryActivity` (already at 823 lines)
+grows by a mode branch and chrome, not a feature. Index: one blob-free `allAliveOfType` listing
+per run — the whole library's folder + notebook rows, ranked in Kotlin (fuzzy cannot be a `LIKE`).
+
+**Gate:** `./gradlew test` both variants green; debug + release build, release signs; Nomad walk
+(search from the library, a folder hit, a notebook hit, no-match, blank field, long-press
+actions re-running the query, Back and `←` out, the template shelf still finding paper);
+`/code-review high`; NUL-scan; docs (`docs/library.md`, `docs/templates.md`) + both CLAUDE.mds
++ this ledger; then the user checklist.
 
 ---
 

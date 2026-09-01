@@ -138,30 +138,49 @@ class TemplateShelvesTest {
 
     // ── search composition ───────────────────────────────────────────────────
 
+    private fun search(query: String, rows: List<ObjectSummary> = emptyList()) =
+        TemplateShelves.searchCards(query, "Blank", labels, rows).map { it.id }
+
     @Test
     fun `search finds a built-in by its label, case-insensitively`() {
-        val cards = TemplateShelves.searchSentinelCards("grid", "Blank", labels)
-        assertEquals(listOf(ListIds.TEMPLATE_GRID_ID), cards.map { it.id })
+        assertEquals(listOf(ListIds.TEMPLATE_GRID_ID), search("grid"))
+        assertEquals(listOf(ListIds.TEMPLATE_GRID_ID), search("GRID"))
     }
 
     /** Not pinnable, but findable: a user who types "blank" and gets nothing has been told
      *  something false about a card that is right there. */
     @Test
     fun `search finds blank`() {
-        val cards = TemplateShelves.searchSentinelCards("bla", "Blank", labels)
-        assertEquals(listOf(ListIds.TEMPLATE_BLANK_ID), cards.map { it.id })
+        assertEquals(listOf(ListIds.TEMPLATE_BLANK_ID), search("bla"))
+    }
+
+    /**
+     * Arc 20: sentinels and rows are ranked **together** by relevance, not composed sentinels-first
+     * in `BUILT_IN_KINDS` order. Both of these hold "i" mid-word, so the tie falls to the shorter
+     * name — "Grid" before "Lined".
+     */
+    @Test
+    fun `search orders by relevance, not by the built-in order`() {
+        assertEquals(listOf(ListIds.TEMPLATE_GRID_ID, ListIds.TEMPLATE_LINED_ID), search("i"))
+    }
+
+    /** A row that answers better than a sentinel comes first — the whole point of one ranked list.
+     *  An imported template actually called "Dot" is an exact answer; the built-in "Dotted" is a
+     *  prefix one, and arc 13's sentinels-always-first composition could never have said so. */
+    @Test
+    fun `a better-matching row outranks a sentinel`() {
+        assertEquals(listOf("t1", ListIds.TEMPLATE_DOTTED_ID), search("dot", listOf(row("t1", "Dot"))))
     }
 
     @Test
-    fun `search returns the built-ins in their fixed order`() {
-        // "d" is in Dotted and in Lined ("Lined" has no d... it does not) — use a shared letter.
-        val cards = TemplateShelves.searchSentinelCards("i", "Blank", labels)
-        assertEquals(listOf(ListIds.TEMPLATE_LINED_ID, ListIds.TEMPLATE_GRID_ID), cards.map { it.id })
+    fun `search matching nothing composes no cards`() {
+        assertTrue(search("zzz").isEmpty())
     }
 
+    /** A blank query is not a search: it must not answer with every sentinel in the library. */
     @Test
-    fun `search matching nothing composes no sentinel cards`() {
-        assertTrue(TemplateShelves.searchSentinelCards("zzz", "Blank", labels).isEmpty())
+    fun `a blank query composes no cards`() {
+        assertTrue(search("   ", listOf(row("t1", "Grid paper"))).isEmpty())
     }
 
     @Test
@@ -170,7 +189,8 @@ class TemplateShelvesTest {
             row("f1", "Grid folder", type = ObjectType.TEMPLATE_FOLDER),
             row("t1", "Grid scan"),
         )
-        assertEquals(listOf("t1"), TemplateShelves.searchRowCards(rows).map { it.id })
+        val ids = search("grid scan", rows)
+        assertEquals(listOf("t1"), ids)
     }
 
     // ── isPlace ──────────────────────────────────────────────────────────────

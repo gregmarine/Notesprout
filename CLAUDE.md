@@ -147,16 +147,19 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
 - `main` — stable release branch (v1.0 "Seed" through v1.3 "Supernote" shipped; the release merge
   commits are in git history).
 - `ratta` — **the active feature branch** (cut 2026-08-20): Notesprout SN, a from-scratch
-  Supernote-only rebuild under `apps/notesprout_ratta/`. **Arcs 1–19 complete + frozen**
-  (2026-08-31): Ratta Paper · Polish · Headings · Contents · Naming · Links · Pages · Objects ·
+  Supernote-only rebuild under `apps/notesprout_ratta/`. **Arcs 1–20** (2026-08-31): Ratta Paper ·
+  Polish · Headings · Contents · Naming · Links · Pages · Objects ·
   Snap · Recents · Scratch Pad · Paper · Stationery · Scribble · Export · Import · Backup ·
-  PDF · **Document** (arc 19 — og's Documents as the FIFTH point: `NSE · Document` editor +
+  PDF · Document · **Search** (arc 20 — fuzzy name search over the whole library from the library's
+  top bar: `core/FuzzyRank` is subsequence-and-ranking, **not** typo tolerance, and the template
+  browser's Search shelf runs on the same matcher; `docs/library.md` § Search is the reference) ·
+  **Document** (arc 19 — og's Documents as the FIFTH point: `NSE · Document` editor +
   document exporter + text importer in one APK, the `:markdown` shared engine, text documents,
   Proofread; `docs/document.md` is the feature reference), plus post-arc fixes F1–F5. Nine
   modules (host + `:sn-screen` + `:markdown` + `:extension-api` + five extension APKs), FIVE
   extension points (recognizer · scratch pad · exporter · importer · document editor — no SIXTH
-  without an explicit user decision), g-paper pin 0.1.23, version `0.1.0-ratta`, 1503 JVM
-  tests/variant. **No next arc is planned — ask first.**
+  without an explicit user decision), g-paper pin 0.1.23, version `0.1.0-ratta`, 1511 JVM
+  tests/variant. **After arc 20 no further arc is planned — ask first.**
   **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for ANY work there** — it holds the working
   protocol, model recipe, standing traps, the per-arc ledger of still-binding decisions, and the
   active arc's full plan. Subsystem detail: `apps/notesprout_ratta/docs/` + that app's CLAUDE.md.

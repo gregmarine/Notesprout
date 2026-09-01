@@ -28,30 +28,8 @@ class FakeObjectDao : ObjectDao {
             .filter { it.type == ObjectType.NOTEBOOK && it.deletedAt == null }
             .map { it.toSummary() }
 
-    override suspend fun allAliveNotebooks() =
-        rows.values.filter { it.type == ObjectType.NOTEBOOK && it.deletedAt == null }.map { it.toSummary() }
-
-    override suspend fun searchOfType(type: String, pattern: String): List<ObjectSummary> {
-        // The `%`/`_` wildcards and `\` escaping of a real LIKE, in the smallest form that keeps
-        // `TemplateSearch.likePattern`'s output honest here — an escaped wildcard must match the
-        // literal character, which is exactly what the escaping exists to guarantee.
-        val regex = StringBuilder()
-        var i = 0
-        while (i < pattern.length) {
-            val c = pattern[i]
-            when {
-                c == '\\' && i + 1 < pattern.length -> { regex.append(Regex.escape(pattern[i + 1].toString())); i++ }
-                c == '%' -> regex.append(".*")
-                c == '_' -> regex.append(".")
-                else -> regex.append(Regex.escape(c.toString()))
-            }
-            i++
-        }
-        val re = Regex(regex.toString(), RegexOption.IGNORE_CASE)
-        return rows.values
-            .filter { it.type == type && it.deletedAt == null && re.matches(it.name) }
-            .map { it.toSummary() }
-    }
+    override suspend fun allAliveOfType(type: String): List<ObjectSummary> =
+        rows.values.filter { it.type == type && it.deletedAt == null }.map { it.toSummary() }
 
     override suspend fun aliveOfType(ids: List<String>, type: String): List<ObjectSummary> =
         ids.mapNotNull { rows[it] }.filter { it.type == type && it.deletedAt == null }.map { it.toSummary() }

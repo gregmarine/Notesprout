@@ -40,12 +40,12 @@ root) and **Default** (the reserved folder). Both are sentinels, and **neither l
 |---|---|
 | `data/index/ObjectType.TEMPLATE` / `.TEMPLATE_FOLDER` | the two additive row types, `"template"` / `"template_folder"` |
 | `data/index/ListIds` | the five card sentinels + `TEMPLATE_PINNED_LIST_ID` |
-| `data/index/IndexRepository` § *Template library* | list · create · duplicate · fit · soft-delete · recursive folder delete · the pin shelf · search |
-| `data/index/ObjectDao.searchOfType` / `.aliveOfType` | the two reads a shelf needs — `LIKE … ESCAPE` with no `parentId`, and one blob-free batch |
+| `data/index/IndexRepository` § *Template library* | list · create · duplicate · fit · soft-delete · recursive folder delete · the pin shelf · the search listing |
+| `data/index/ObjectDao.allAliveOfType` / `.aliveOfType` | the two reads a shelf needs — every alive row of a type with no `parentId` (arc 20: no name predicate either — matching is fuzzy), and one blob-free batch |
 | `data/template/TemplateToken` | **pure** — the `.soil` token vocabulary and the image digest |
 | `data/template/TemplateFit` | **pure** — Fit / Stretch / Fill as one source rect and one destination rect |
 | `data/template/TemplateImport` | **pure** — sample size, downscale, the blob cap, the offered name |
-| `data/template/TemplateSearch` | **pure** — the `LIKE` pattern and the label matcher, one rule for both halves |
+| `core/FuzzyRank` | **pure** — the family's one fuzzy name matcher (arc 20), shared with the library's own search; `data/template/TemplateSearch` was its arc-13 predecessor and is gone |
 | `data/template/PagePaper` + `PaperSource` | the one place a pick becomes page-sized pixels |
 | `data/template/BuiltInTemplates` / `TemplateGeometry` | the three built-ins' arithmetic and their WEBP encode |
 | `notebook/PageTemplate` | **pure** — reuse-before-mint (`reusableId`) and the tick (`tokenOf`) |
@@ -264,7 +264,7 @@ its head — the library's shape for its own shelves — and New folder, Import 
 |---|---|
 | **Pinned** | a sentinel `LIST` row + `list_item` edges. **Static templates and the three built-ins**; never a folder, never Blank (it is already card #1 at the root, forever). The built-ins lead, in their fixed order; the rows follow in the screen's sort. Scrubbed on delete. |
 | **Recents** | device-local prefs, **stored order, never re-sorted** — a history that obeyed Name ↑ would stop being a history. Self-healing: dead rows are pruned, sentinels never are. |
-| **Search** | names anywhere in the tree, flattened, **plus Blank and the three built-ins by their labels** — typing "grid" and not finding Grid would read as a bug. **Folders never appear**: a place is not paper, and a flat shelf whose taps mean "pick this" must not have taps that mean two things. |
+| **Search** | names anywhere in the tree, flattened, **plus Blank and the three built-ins by their labels** — typing "grid" and not finding Grid would read as a bug. Since arc 20 the two halves are **ranked together by relevance** and **Sort is GONE** on this shelf alone (`TemplateShelves.searchCards`). **Folders never appear**: a place is not paper, and a flat shelf whose taps mean "pick this" must not have taps that mean two things. |
 
 **A shelf is a glance, not a place.** Nothing persists — not the mode, not the query. The browser
 opens in the tree, at the root, every time and in every host. A picker that opened onto a shelf would
@@ -283,11 +283,20 @@ the last query in it. An inline field was rejected: the New Notebook host is `ad
 field in the browser's own chrome would sit under the IME with no way to reach it — and live
 filtering is a repaint per keystroke on e-ink.
 
-`TemplateSearch` is the one rule both halves use. SQLite's `LIKE` is ASCII-case-insensitive and
-substring-anywhere; a Kotlin-side `contains` that was case-*sensitive* would make "Grid" findable and
-"grid" not, **for the built-in only** — precisely the split a user reads as the search being broken.
-`%`, `_` and the escape character are neutralised, because a query of `_` silently matching every
-name is worse than an error.
+**`core/FuzzyRank` is the one rule both halves use** — since **arc 20** the same matcher the
+library's own search runs on (the user's call: one search behaviour across both screens; arc 13's
+`data/template/TemplateSearch` held the rule until then and has been deleted, its last wrapper
+function with it). Matching is **fuzzy** — the query's letters in order, gaps allowed,
+so `grd` finds Grid — which a SQL `LIKE` cannot be, so the database stopped filtering entirely:
+`IndexRepository.allTemplates()` hands over every alive template, blob-free, and sentinels and rows
+are matched **and ranked in one list**. Relevance is therefore the order here, which is why Sort
+stands down on this shelf. Wildcards are gone with the `LIKE`: `%` and `_` are now ordinary
+characters that mean themselves, which is what a user typing them expects.
+
+Two things the rewrite kept from arc 13, both load-bearing: the sentinels are matched by **exactly**
+the rule the rows are (a "Grid" that was findable and a "grid" that was not, for the built-in only,
+is the split a user reads as the search being broken), and a blank query is refused rather than
+answered with the whole library.
 
 ### What counts as a use
 
@@ -382,7 +391,7 @@ never a blob in an Intent extra — and the notebook's own session does the read
 | "Default" typed as a name at the root | problem dialog naming the reason; **the dialog stays open with the typing intact** | `TemplateLibrary.isReservedName` |
 | "Default" **moved** to the root from deeper in the tree | the same words (*"That name won't work"*), and the move does not happen | `FolderPickerActivity.moveHere` (G6) |
 | A duplicate name among siblings | problem dialog | `IndexRepository` sibling check |
-| An empty search | its **own** two strings — *"Nothing to search for"* — never `name_problem_title` | `TemplateSearch.isRunnable` |
+| An empty search | its **own** two strings — *"Nothing to search for"* — never `name_problem_title` | `FuzzyRank.isRunnable` |
 | An import succeeded · an export succeeded | **toast** | `TemplateTransfer` |
 
 The rule behind the column: **a toast only confirms something that already happened; anything

@@ -26,6 +26,25 @@
         android:singleLine="true"
         android:ellipsize="end"
         android:paddingStart="4dp"
+        android:paddingEnd="4dp" />
+
+    <!-- Where the folder is (arc 20). GONE everywhere but the search shelf, which is flat: two
+         folders called "Notes" in two different places are otherwise the same card twice. Smaller
+         and still inkBlack — secondary text that is meant to be read never takes inkLight. -->
+    <TextView
+        android:id="@+id/folderParent"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="11sp"
+        android:textColor="@color/inkBlack"
+        android:gravity="center"
+        android:singleLine="true"
+        android:ellipsize="end"
+        android:paddingStart="4dp"
         android:paddingEnd="4dp"
-        android:paddingBottom="8dp" />
+        android:visibility="gone" />
+
+    <Space
+        android:layout_width="match_parent"
+        android:layout_height="8dp" />
 </LinearLayout>

@@ -350,7 +350,12 @@ class TemplateBrowser(
         // `inDefaults && !inShelf`, not `inDefaults`: opening a shelf does not clear the folder you
         // opened it from, so gating on Default alone hid Sort on a shelf raised from inside it —
         // a shelf that IS ordered by the sort prefs, with no way to change them.
-        btnSort.visibility = if (inDefaults && !inShelf) View.GONE else View.VISIBLE
+        //
+        // The **search** shelf is the exception, and the one shelf the sort does not order: since
+        // arc 20 it is ranked by relevance, so a Sort control there could only fight the ordering it
+        // cannot change. GONE, never disabled — invisible on e-ink either way.
+        val searching = shelf.mode == TemplateShelfView.Mode.SEARCH
+        btnSort.visibility = if ((inDefaults && !inShelf) || searching) View.GONE else View.VISIBLE
         btnNewFolder.visibility = if (fixed) View.GONE else View.VISIBLE
         // Import goes too: the Default folder is the app's paper, and the arc reserves it against
         // anything landing inside. A button that could only refuse itself is not a button.

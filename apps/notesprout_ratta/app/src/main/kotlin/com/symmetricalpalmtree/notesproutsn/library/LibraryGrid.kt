@@ -35,7 +35,14 @@ object LibraryCards {
 
 /** What a card stands for. Folders and notebooks share the grid but not the card layout. */
 sealed class CardItem(val summary: ObjectSummary) {
-    class Folder(s: ObjectSummary) : CardItem(s)
+
+    /**
+     * @param subtitle a second line under the name. Only the search shelf sets it (the parent
+     *   folder's name): that shelf is flat, so two folders called "Notes" in two different places
+     *   would otherwise be the same card twice. The tree, the move picker and the link picker all
+     *   pass nothing and the line is GONE, exactly as before.
+     */
+    class Folder(s: ObjectSummary, val subtitle: String? = null) : CardItem(s)
 
     /**
      * @param pinned draws the pin badge — the library resolves it once per refresh from the pinned
@@ -144,6 +151,10 @@ class LibraryGrid(
     private fun folderCard(inflater: LayoutInflater, item: CardItem.Folder): View =
         inflater.inflate(R.layout.card_folder, container, false).apply {
             findViewById<TextView>(R.id.folderName).text = item.summary.name
+            findViewById<TextView>(R.id.folderParent).apply {
+                text = item.subtitle
+                visibility = if (item.subtitle == null) View.GONE else View.VISIBLE
+            }
         }
 
     private fun notebookCard(

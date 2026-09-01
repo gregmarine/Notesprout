@@ -12,7 +12,8 @@ references — **no app code is copied from either**. Devices: **Nomad only by d
 The Manta identifies as a Nomad — target by serial.
 
 **Subsystem docs (`docs/`) — read the matching one before working in that area:**
-`docs/library.md` (library screen, naming schemes) · `docs/notebook.md` (the notebook screen:
+`docs/library.md` (library screen, naming schemes, **search** — arc 20's fuzzy name search and the
+shared `core/FuzzyRank` matcher) · `docs/notebook.md` (the notebook screen:
 tools, selection, **snap to guides**, headings, Contents, **Recents**, gestures, **the page
 template picker — the whole library since arc 13**, undo, frame-silence ledger) ·
 `docs/links.md` (arc 6: link rows/payload, render, picker + create-in-picker, follow + trail) ·

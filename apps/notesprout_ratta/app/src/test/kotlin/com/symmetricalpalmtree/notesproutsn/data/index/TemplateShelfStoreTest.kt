@@ -144,50 +144,33 @@ class TemplateShelfStoreTest {
         assertEquals(emptyMap<String, ObjectSummary>(), repo.aliveTemplates(emptyList()))
     }
 
-    // ── Search ───────────────────────────────────────────────────────────────
+    // ── The search listing ───────────────────────────────────────────────────
+    //
+    // Arc 20: the database stopped filtering. Matching is fuzzy (`core/FuzzyRank`), which a `LIKE`
+    // cannot be, so the repository's job here is only to hand the shelf every candidate — every
+    // alive template, anywhere in the tree, and nothing else.
 
     @Test
-    fun `search matches a substring anywhere in the tree`() = runBlocking {
+    fun `the search listing reaches the whole tree`() = runBlocking {
         template("t1", "Grid scan", parentId = "somewhere")
         template("t2", "Ruled")
-        assertEquals(listOf("t1"), repo.searchTemplates("grid").map { it.id })
+        assertEquals(setOf("t1", "t2"), repo.allTemplates().map { it.id }.toSet())
     }
 
     @Test
-    fun `search is case-insensitive`() = runBlocking {
-        template("t1", "Grid scan")
-        assertEquals(1, repo.searchTemplates("GRID").size)
-    }
-
-    @Test
-    fun `search never returns folders`() = runBlocking {
+    fun `the search listing never returns folders`() = runBlocking {
         template("t1", "Grid scan")
         dao.upsert(ObjectEntity(
             id = "f1", type = ObjectType.TEMPLATE_FOLDER, name = "Grid folder", parentId = null,
             createdAt = 0L, updatedAt = 0L,
         ))
-        assertEquals(listOf("t1"), repo.searchTemplates("Grid").map { it.id })
+        assertEquals(listOf("t1"), repo.allTemplates().map { it.id })
     }
 
     @Test
-    fun `search never returns deleted rows`() = runBlocking {
+    fun `the search listing never returns deleted rows`() = runBlocking {
         template("t1", "Grid scan")
         repo.deleteTemplate("t1")
-        assertTrue(repo.searchTemplates("grid").isEmpty())
-    }
-
-    /** `_` is a legal character in a template name AND LIKE's any-single-character wildcard. */
-    @Test
-    fun `an underscore in the query is a literal, not a wildcard`() = runBlocking {
-        template("t1", "my_grid")
-        template("t2", "myXgrid")
-        assertEquals(listOf("t1"), repo.searchTemplates("my_grid").map { it.id })
-    }
-
-    @Test
-    fun `a blank query reads nothing rather than everything`() = runBlocking {
-        template("t1", "Ruled")
-        assertTrue(repo.searchTemplates("").isEmpty())
-        assertTrue(repo.searchTemplates("   ").isEmpty())
+        assertTrue(repo.allTemplates().isEmpty())
     }
 }

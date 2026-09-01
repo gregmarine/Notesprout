@@ -1,9 +1,9 @@
 package com.symmetricalpalmtree.notesproutsn.templates
 
+import com.symmetricalpalmtree.notesproutsn.core.FuzzyRank
 import com.symmetricalpalmtree.notesproutsn.data.index.ListIds
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectSummary
 import com.symmetricalpalmtree.notesproutsn.data.prefs.RecentEntry
-import com.symmetricalpalmtree.notesproutsn.data.template.TemplateSearch
 
 /**
  * What the Pinned and Recents shelves are made of — **pure Kotlin, no Android, JVM-tested**
@@ -76,32 +76,34 @@ object TemplateShelves {
     fun rowIdsAmong(ids: List<String>): List<String> = ids.filterNot { it in PINNABLE_SENTINELS }
 
     /**
-     * The rows a **search** shelf shows, from a list the caller has already sorted: templates only.
-     * Folders are places, not paper — a flat shelf whose taps mean "pick this" must never hold a
-     * card whose tap means "go somewhere", and a shelf has no breadcrumb to come back along.
-     */
-    fun searchRowCards(sortedRows: List<ObjectSummary>): List<TemplateCard> =
-        TemplateLibrary.rowCards(sortedRows).filterIsInstance<TemplateCard.Static>()
-
-    /**
-     * A search shelf's sentinel half: Blank and any built-in whose **label** matches [query]. The
-     * labels come in as parameters, in [TemplateLibrary.BUILT_IN_KINDS] order, for the same reason
-     * they do everywhere else here — the strings are the screen's, the composition is this file's.
+     * The whole **search** shelf, sentinels and rows **ranked together** against [query]
+     * (arc 20 / Q1 — arc 13 built these as two lists, sentinels first, ordered by the screen's sort).
      *
-     * Blank is searchable even though it is not pinnable: finding it is free, and a user who types
-     * "blank" expecting the no-paper card and gets nothing has been told something false.
+     * One list, because relevance is now the order: a user who types "grid" wants the Grid paper
+     * first whether it is a built-in or an import, and two lists could only have put every sentinel
+     * ahead of a better answer. [FuzzyRank] is the same matcher the library's search uses, so a name
+     * that is findable on one screen is findable on the other.
+     *
+     * [rows] is templates only — folders are places, not paper, and a flat shelf whose taps mean
+     * "pick this" must never hold a card whose tap means "go somewhere" with no breadcrumb back.
+     * Blank is searchable even though it is not pinnable: a user who types "blank" expecting the
+     * no-paper card and gets nothing has been told something false. The labels come in as
+     * parameters, in [TemplateLibrary.BUILT_IN_KINDS] order — the strings are the screen's, the
+     * composition is this file's.
      */
-    fun searchSentinelCards(
+    fun searchCards(
         query: String,
         blankLabel: String,
         builtInLabels: List<String>,
-    ): List<TemplateCard> = buildList {
-        if (TemplateSearch.matchesLabel(blankLabel, query)) add(TemplateCard.Blank(blankLabel))
+        rows: List<ObjectSummary>,
+    ): List<TemplateCard> {
+        val candidates = ArrayList<TemplateCard>(rows.size + 1 + builtInLabels.size)
+        candidates.add(TemplateCard.Blank(blankLabel))
         TemplateLibrary.BUILT_IN_KINDS.forEachIndexed { i, (id, kind) ->
-            if (TemplateSearch.matchesLabel(builtInLabels[i], query)) {
-                add(TemplateCard.BuiltIn(id, builtInLabels[i], kind))
-            }
+            candidates.add(TemplateCard.BuiltIn(id, builtInLabels[i], kind))
         }
+        candidates.addAll(TemplateLibrary.rowCards(rows).filterIsInstance<TemplateCard.Static>())
+        return FuzzyRank.rank(candidates, query) { it.name }
     }
 
     /** The Default folder is never pinnable and never a recent — it is a place. Named here so the
