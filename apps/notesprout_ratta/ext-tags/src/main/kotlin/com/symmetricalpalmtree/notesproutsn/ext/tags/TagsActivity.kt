@@ -15,8 +15,9 @@ import com.symmetricalpalmtree.notesproutsn.core.Dialogs
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.core.TopGuard
 import com.symmetricalpalmtree.notesproutsn.ext.tags.databinding.ActivityTagsBinding
+import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
 import com.symmetricalpalmtree.notesproutsn.extension.HostCallerCheck
-import com.symmetricalpalmtree.notesproutsn.extension.TagIndex
+import com.symmetricalpalmtree.notesproutsn.extension.TagRecord
 import com.symmetricalpalmtree.notesproutsn.extension.TagRules
 import com.symmetricalpalmtree.notesproutsn.extension.TagShowing
 import kotlinx.coroutines.Dispatchers
@@ -56,10 +57,11 @@ import java.util.concurrent.atomic.AtomicReference
  *    **tap toggles** this target's membership (the ✓ says which way), a **long press deletes the
  *    tag everywhere**, behind a confirm that names how much of the library it reaches.
  *
- * **Every edit is written before it is shown.** `edit` re-reads the index inside
- * [TagSession.writes], applies the change, writes it, and only then does the screen redraw — so what
- * is on the glass is what is in the store, and a failed write leaves the screen showing what is
- * still true.
+ * **Every edit is written before it is shown.** `edit` sends the change to the store, **re-reads**
+ * the index, and only then does the screen redraw — so what is on the glass is what is in the store,
+ * and a failed write leaves the screen showing what is still true. The re-read is also how a change
+ * another writer made in the meantime arrives (arc 22 / X3: the store's transaction is the lock, not
+ * a monitor in this process, so there is no longer any pretence that this screen is the only writer).
  *
  * IME rules (Ratta): the keyboard is asked for with the **explicit** flag 0 — `SHOW_IMPLICIT` is
  * skippable with a hardware keyboard attached, and on Supernote hardware keys are delivered only
@@ -304,16 +306,21 @@ class TagsActivity : AppCompatActivity() {
     private fun readIndex(): Read {
         val store = TagSession.store ?: return Read.Failed(R.string.tags_unavailable)
         return try {
-            Read.Ok(TagStore(store).read())
-        } catch (e: IndexUnreadable) {
-            // Unreadable is NOT empty: nothing here may write over it.
-            Slog.d(TAG) { "index unreadable" }
-            Read.Failed(R.string.tags_unreadable)
+            Read.Ok(readIndex(TagStore(store)))
         } catch (e: StoreUnavailable) {
             Slog.d(TAG) { "store unavailable: ${e.message}" }
             Read.Failed(R.string.tags_unavailable)
         }
     }
+
+    /**
+     * The screen's whole picture, in **two reads** (arc 22 / X3): the library's tags — the list and
+     * the keystroke filter are over all of them — and the assignments of the notebook this showing is
+     * about. Every mode reads the notebook's, MANAGE included; BROWSE and ADD on one page then filter
+     * by target in memory, because the extra rows are that one notebook's and there are few of them.
+     */
+    private fun readIndex(store: TagStore): TagIndex =
+        TagIndex(store.tags(), store.assignmentsOfNotebook(showing.notebookId))
 
     /** Nothing can be shown and nothing can be fixed from here: explain, then leave. */
     private fun failAndClose(messageRes: Int) {
@@ -466,12 +473,12 @@ class TagsActivity : AppCompatActivity() {
         // entered in) and read back on Main — the coroutine hop is what publishes it.
         val display = AtomicReference(TagRules.display(text))
         edit(
-            transform = { current ->
-                val result = current.assign(text, target.notebookId, target.pageId)
+            work = { store ->
+                val result = store.assign(text, target.notebookId, target.pageId)
                 display.set(result.display)
                 // Attaching a tag that is already there is not a failure and not a write — the
                 // "nothing changed" answer still clears the field and still names the tag.
-                if (result.index === current) null else result.index
+                result.changed
             },
             onDone = {
                 onDone()
@@ -480,9 +487,9 @@ class TagsActivity : AppCompatActivity() {
         )
     }
 
-    private fun removeFromTarget(tag: TagIndex.Tag) {
+    private fun removeFromTarget(tag: TagRecord) {
         edit(
-            transform = { current -> current.unassign(tag.id, target.notebookId, target.pageId) },
+            work = { store -> store.unassign(tag.id, target.notebookId, target.pageId) },
             onDone = { toast(getString(R.string.tags_removed_toast, tag.display)) },
         )
     }
@@ -491,23 +498,44 @@ class TagsActivity : AppCompatActivity() {
      * Deleting a tag reaches every notebook and page it is on, and there is no undo for a tag
      * operation — so the confirm names the size of it in the same words the removal will use.
      */
-    private fun confirmDelete(tag: TagIndex.Tag) {
+    private fun confirmDelete(tag: TagRecord) {
         if (busy) return
-        val usage = index.usageOf(tag.id)
-        val body = if (usage.total == 0) getString(R.string.tags_delete_unused)
-        else getString(R.string.tags_delete_body, blastRadius(usage))
-        Dialogs.style(
-            AlertDialog.Builder(this)
-                .setTitle(getString(R.string.tags_delete_title, tag.display))
-                .setMessage(body)
-                .setPositiveButton(R.string.tags_delete_confirm) { _, _ -> deleteTag(tag) }
-                .setNegativeButton(R.string.cancel, null)
-                .create(),
-        ).show()
+        // The count is a **read** now (arc 22 / X3), not arithmetic over an index in memory: this
+        // screen only ever holds one notebook's assignments, and the blast radius is the whole
+        // library's. So it goes on IO behind the same busy latch every edit takes, and the dialog is
+        // built when the answer lands — a tap that opened nothing would read as a tap that missed.
+        busy = true
+        lifecycleScope.launch {
+            val usage = withContext(Dispatchers.IO) {
+                val store = TagSession.store ?: return@withContext null
+                try {
+                    TagStore(store).usageOf(tag.id)
+                } catch (e: Exception) {
+                    Slog.d(TAG) { "usage read failed: ${e.javaClass.simpleName}" }
+                    null
+                }
+            }
+            busy = false
+            if (isFinishing || isDestroyed) return@launch
+            if (usage == null) {
+                Dialogs.problem(this@TagsActivity, R.string.tags_problem_title, R.string.tags_unavailable)
+                return@launch
+            }
+            val body = if (usage.total == 0) getString(R.string.tags_delete_unused)
+            else getString(R.string.tags_delete_body, blastRadius(usage))
+            Dialogs.style(
+                AlertDialog.Builder(this@TagsActivity)
+                    .setTitle(getString(R.string.tags_delete_title, tag.display))
+                    .setMessage(body)
+                    .setPositiveButton(R.string.tags_delete_confirm) { _, _ -> deleteTag(tag) }
+                    .setNegativeButton(R.string.cancel, null)
+                    .create(),
+            ).show()
+        }
     }
 
     /** "2 notebooks and 1 page" — whichever halves are non-zero, in that order. */
-    private fun blastRadius(usage: TagIndex.Usage): String {
+    private fun blastRadius(usage: TagStore.Usage): String {
         val notebooks = when {
             usage.notebooks == 0 -> null
             usage.notebooks == 1 -> getString(R.string.tags_delete_notebooks, 1)
@@ -525,9 +553,10 @@ class TagsActivity : AppCompatActivity() {
         }
     }
 
-    private fun deleteTag(tag: TagIndex.Tag) {
+    private fun deleteTag(tag: TagRecord) {
         edit(
-            transform = { current -> current.deleteTag(tag.id) },
+            // One statement: the declared `ON DELETE CASCADE` takes every assignment with the row.
+            work = { store -> store.deleteTag(tag.id) },
             onDone = { toast(getString(R.string.tags_deleted_toast, tag.display)) },
         )
     }
@@ -535,51 +564,70 @@ class TagsActivity : AppCompatActivity() {
     /**
      * One edit, written before it is shown.
      *
-     * [transform] runs on IO inside [TagSession.writes] against a **freshly read** index — never the
-     * one on screen — because the service's call-shaped `assign` writes the same single value from a
-     * Binder thread. It returns the index to write, or null for "nothing changed". Only after the
-     * write lands does the screen adopt it, so the glass and the store can never disagree.
+     * [work] runs on IO: it sends its statements to the store and answers whether anything actually
+     * changed. The index is then **re-read** — the two reads [readIndex] makes — and only after that
+     * does the screen adopt it, so the glass and the store can never disagree, and an edit another
+     * writer made in the meantime arrives with this one.
+     *
+     * `RESULT_OK` is set only when something changed: an idempotent attach (the tag was already on
+     * the target) is an honest success that the host has no reason to redraw for.
      */
-    private fun edit(transform: (TagIndex) -> TagIndex?, onDone: () -> Unit) {
+    private fun edit(work: (TagStore) -> Boolean, onDone: () -> Unit) {
         if (busy) { Slog.d(TAG) { "edit: busy" }; return }
         busy = true
         lifecycleScope.launch {
-            val outcome = withContext(Dispatchers.IO) { applyEdit(transform) }
+            val outcome = withContext(Dispatchers.IO) { applyEdit(work) }
             busy = false
             if (isFinishing || isDestroyed) return@launch
             when (outcome) {
-                is TagWrites.Outcome.Written -> {
+                is Applied.Ok -> {
                     index = outcome.index
-                    setResult(Activity.RESULT_OK)
+                    if (outcome.changed) setResult(Activity.RESULT_OK)
                     render()
                     onDone()
                 }
-                is TagWrites.Outcome.Unchanged -> {
-                    index = outcome.index
-                    render()
-                    onDone()
-                }
-                is TagWrites.Outcome.Failed -> Dialogs.problem(
-                    this@TagsActivity, R.string.tags_problem_title, sentence(outcome.reason),
+                is Applied.Failed -> Dialogs.problem(
+                    this@TagsActivity, R.string.tags_problem_title, outcome.messageRes,
                 )
             }
         }
     }
 
-    private fun applyEdit(transform: (TagIndex) -> TagIndex?): TagWrites.Outcome {
-        val store = TagSession.store
-            ?: return TagWrites.Outcome.Failed(TagWrites.Reason.STORE_UNAVAILABLE)
-        return TagWrites.apply(TagStore(store), transform)
+    private sealed class Applied {
+        class Ok(val index: TagIndex, val changed: Boolean) : Applied()
+        class Failed(val messageRes: Int) : Applied()
     }
 
-    /** A [TagWrites.Reason] in this screen's own words — the service says the same reasons to the
-     *  host as marshalable messages, and neither side may read the other's wording. */
-    private fun sentence(reason: TagWrites.Reason): Int = when (reason) {
-        TagWrites.Reason.STORE_UNAVAILABLE -> R.string.tags_unavailable
-        TagWrites.Reason.INDEX_UNREADABLE -> R.string.tags_unreadable
-        TagWrites.Reason.INDEX_FULL -> R.string.tags_full
-        TagWrites.Reason.NOT_A_TAG -> R.string.tags_invalid
-        TagWrites.Reason.SAVE_FAILED -> R.string.tags_save_failed
+    /**
+     * The write, then the re-read, with every typed failure turned into this screen's own sentence —
+     * the service says the same failures to the host as marshalable messages, and neither side may
+     * read the other's wording.
+     */
+    private fun applyEdit(work: (TagStore) -> Boolean): Applied {
+        val store = TagSession.store ?: return Applied.Failed(R.string.tags_unavailable)
+        val tags = TagStore(store)
+        val changed = try {
+            work(tags)
+        } catch (e: StoreUnavailable) {
+            return Applied.Failed(R.string.tags_unavailable)
+        } catch (e: IllegalStateException) {
+            // Compared verbatim, never as a substring (the family rule).
+            return Applied.Failed(
+                if (e.message == ExtensionContract.TAG_INDEX_FULL) R.string.tags_full
+                else R.string.tags_save_failed,
+            )
+        } catch (e: IllegalArgumentException) {
+            return Applied.Failed(R.string.tags_invalid)
+        } catch (e: Exception) {
+            return Applied.Failed(R.string.tags_save_failed)
+        }
+        return try {
+            Applied.Ok(readIndex(tags), changed)
+        } catch (e: StoreUnavailable) {
+            Applied.Failed(R.string.tags_unavailable)
+        } catch (e: Exception) {
+            Applied.Failed(R.string.tags_save_failed)
+        }
     }
 
     // ── Small things ─────────────────────────────────────────────────────────

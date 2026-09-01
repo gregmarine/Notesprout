@@ -86,12 +86,15 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   dictionary asset `assets/proofread/en_82765.dict` — gzip content behind an opaque extension
   on purpose: AAPT gunzips any `.gz` asset and strips the extension) ·
   `:ext-tags` (**NSE · Tags**, arc 21 / W1 — `:extension-api` + `:sn-screen`, never `:app`; one
-  service + a screen: `TagManagerService` and `TagsActivity`, API version **5** (W1 declared 4;
-  W4's reshaped `TagShowing` moved it, and it is the only service that moved). The FIRST tier-2
-  screen carrying **no paper** — no `PaperView`, no g-paper call and therefore **no EPD handoff**
-  (M3's measured answer covers it); the tag index lives in the host's extension store — **as rows
-  from arc 22 / X3**; until then its `TagStore` is an X1 "unavailable" stub and the service still
-  declares 5, so a version-6 host does not list it).
+  service + a screen: `TagManagerService` and `TagsActivity`, API version **6** (W1 declared 4;
+  W4's reshaped `TagShowing` moved it to 5; arc 22 / X3 moved it to 6 with the store rewrite). The
+  FIRST tier-2 screen carrying **no paper** — no `PaperView`, no g-paper call and therefore **no EPD
+  handoff** (M3's measured answer covers it); the tag index is **rows in the host's extension store
+  since arc 22 / X3** — `TagSchema.V1` = `tag` / `assignment`, every SQL string in `TagSql`, the
+  identity a stored `UNIQUE` column, a notebook tag's `pageId` `''` and never NULL, deleting a tag
+  one `DELETE` under the declared `ON DELETE CASCADE`, and **the transaction is the lock** (arc 21's
+  process-local `TagWrites` monitor is gone, with `TagCodec` / `CompactId` and the whole one-blob
+  layout)).
   `gradle.properties` sets `android.nonTransitiveRClass=false` — undoing it breaks every
   `:sn-screen` resource reference from `:app`.
 - **SN has SIX extension points** — each added on its own explicit user decision, and
@@ -133,11 +136,14 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   - `ACTION_TAG_MANAGER` + `_SCREEN` (arc 21 / W1) — the third screen-owning point, served by
     `:ext-tags`, and the first whose screen carries no paper. **One interface, two call shapes:**
     a showing is a HELD bind (`begin` → `configureShowing` → launch → result → `end`) and the store
-    is lent once; `snapshot` / `assign` are bind-per-call and the store rides the call. Tag text and
-    target labels are the user's own words — they cross on the bind as a `TagShowing`, **never** in
-    the screen's Intent, and are never logged on either side. The extension owns the tag index (in
-    its extension store — the arc-21 one-blob layout is being replaced by tables, arc 22 / X3); the
-    host owns every entry point, the recognizer and the search merge.
+    is lent once; `tags` / `assignmentsOf` / `assign` are bind-per-call and the store rides the call.
+    Tag text and target labels are the user's own words — they cross on the bind as a `TagShowing`,
+    **never** in the screen's Intent, and are never logged on either side. The extension owns the tag
+    index (rows in its extension store since arc 22 / X3); the host owns every entry point, the
+    recognizer and the search merge. **The search merge is TWO paged queries** (X3, replacing W4's
+    whole-index ashmem `snapshot`): `tags(store, offset)` in pages of `TAGS_PAGE` for the host's own
+    `FuzzyRank`, then `assignmentsOf(store, matchedIds, offset)` in pages of `ASSIGNMENTS_PAGE` for
+    only the rows the ranking needs — a reply is an ordinary parcel, which is why both page.
 
   All of them get the **extension store** (`IExtensionStore` — per-package,
   encrypted under the global key at `Garden/<pkg>.db`, minted per bind, uid-bound, revoked with
@@ -175,9 +181,9 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   pad calling transaction code 1 lands on a different method), so the three **store-taking** points
   (scratch pad, document editor, tag manager) are accepted only at
   `MIN_API_VERSION_FOR_STORE` 6 and above; the stateless points keep floor 1. **Consequence, live
-  on the Nomad until X3/X4 each redeclare 6: every Document entry and every tag door are GONE and
-  search runs names-only** — deliberate, and the X1 walk verified it (the pad redeclared 6 in X2
-  and its button is back).
+  on the Nomad until X4 redeclares 6: every Document entry is GONE** — deliberate, and the X1 walk
+  verified it (the pad redeclared 6 in X2 and its button is back; the tag manager redeclared 6 in X3,
+  so every tag door and the search merge are back).
   Meta-data is **per service**.
 - **The Scratch Pad is not ours to change from here** (arc 11, `docs/scratchpad.md`). It is the
   `:ext-scratchpad` APK: its own process, its own g-paper surface, its own undo stack, and it

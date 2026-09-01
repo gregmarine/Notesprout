@@ -556,7 +556,6 @@
          words — neither side reads the other's wording. -->
     <string name="tags_assign_failed_body">That tag could not be saved. Nothing has been changed.</string>
     <string name="tags_full_body">This library is holding as many tags as it can. Delete one to add another.</string>
-    <string name="tags_unreadable_body">This library\'s tags could not be read. Nothing has been changed.</string>
 
     <!-- Scratch Pad (arc 11) — the entry button on both the library's bottom bar and the
          notebook's top bar. Both are GONE unless a trusted extension is installed. -->

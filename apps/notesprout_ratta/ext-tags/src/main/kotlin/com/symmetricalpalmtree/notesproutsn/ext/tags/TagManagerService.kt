@@ -3,38 +3,40 @@ package com.symmetricalpalmtree.notesproutsn.ext.tags
 import android.app.Service
 import android.content.Intent
 import android.os.IBinder
-import android.os.Parcel
-import android.os.SharedMemory
 import android.os.SystemClock
 import com.symmetricalpalmtree.notesproutsn.core.Slog
+import com.symmetricalpalmtree.notesproutsn.extension.AssignmentRecord
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
 import com.symmetricalpalmtree.notesproutsn.extension.HostCallerCheck
 import com.symmetricalpalmtree.notesproutsn.extension.IExtensionStore
 import com.symmetricalpalmtree.notesproutsn.extension.ITagManager
-import com.symmetricalpalmtree.notesproutsn.extension.LargeValue
-import com.symmetricalpalmtree.notesproutsn.extension.SharedBytes
+import com.symmetricalpalmtree.notesproutsn.extension.TagRecord
+import com.symmetricalpalmtree.notesproutsn.extension.TagRules
 import com.symmetricalpalmtree.notesproutsn.extension.TagShowing
-import java.util.concurrent.atomic.AtomicReference
 
 /**
- * The TAG_MANAGER point (arc 21 / W1). Every method: `HostCallerCheck.enforce` first.
+ * The TAG_MANAGER point (arc 21 / W1, on rows since arc 22 / X3). Every method:
+ * `HostCallerCheck.enforce` first.
  *
  * **Two call patterns on one interface**, and the store is what tells them apart:
  *  - `begin` / `configureShowing` / `end` bracket a **showing** — the host holds one bind for the
  *    screen's whole life and the store is lent once, exactly as the scratch pad's is. `begin` parks
  *    the store and clears anything stale (a second `begin` while one is held replaces it — the host
  *    restarted); `configureShowing` parks what the screen is about; `end` clears both.
- *  - `snapshot` / `assign` are **call-shaped** — bind, call, unbind — so the store rides the call.
- *    They are what the host's search merge (W4) and the lasso's silent heading→tag (W3) use, and
- *    neither of them shows anything.
+ *  - `tags` / `assignmentsOf` / `assign` are **call-shaped** — bind, call, unbind — so the store
+ *    rides the call. They are what the host's search merge (W4) and the lasso's silent heading→tag
+ *    (W3) use, and none of them shows anything.
  *
- * Both patterns run on Binder threads, and both may edit the same single stored value, so **every
- * read-modify-write takes [TagSession.writes]** — the screen's edits included.
+ * **The two reads are paged and carry no ashmem** (X3). They replace W4's `snapshot`, which handed
+ * the whole index over as one `TagCodec` blob over a shared-memory region: a reply is an ordinary
+ * parcel now, so `tags` answers at most `TAGS_PAGE` records and `assignmentsOf` at most
+ * `ASSIGNMENTS_PAGE` rows, and the host loops until a short page. The search merge therefore reads
+ * the tags, ranks them itself, and asks for the assignments of **only the ids that matched**.
  *
- * `snapshot` answers over ashmem: a full index is megabytes and a `byte[]` that size cannot cross a
- * Binder. The region we create is parked per Binder thread and closed in [onTransact]'s `finally`,
- * **after** the reply (which holds a dup of the descriptor) is written — the `ExtensionStoreBinder`
- * recipe, and getting it wrong hands the host a closed fd.
+ * **The transaction is the lock.** There is no read-modify-write to serialize any more: `assign` is
+ * two small reads and one two-statement batch whose caps ride inside the inserts, so the screen and
+ * this service may write at the same moment — in this process or after a host restart — without a
+ * monitor between them.
  *
  * Only `SecurityException` / `IllegalArgumentException` / `IllegalStateException` are thrown —
  * anything else kills the transaction **silently** and the host reads an empty reply as success.
@@ -43,18 +45,6 @@ import java.util.concurrent.atomic.AtomicReference
 class TagManagerService : Service() {
 
     private val binder = object : ITagManager.Stub() {
-
-        /** The ashmem region a `snapshot` reply carries, closed after the reply is marshalled. */
-        private val pending = ThreadLocal<SharedMemory>()
-
-        override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
-            try {
-                return super.onTransact(code, data, reply, flags)
-            } finally {
-                pending.get()?.close()
-                pending.remove()
-            }
-        }
 
         override fun begin(store: IExtensionStore?) {
             enforce()
@@ -86,25 +76,48 @@ class TagManagerService : Service() {
             Slog.d(TAG) { "end" }
         }
 
-        override fun snapshot(store: IExtensionStore?): LargeValue? {
+        override fun tags(store: IExtensionStore?, offset: Int): List<TagRecord> {
             enforce()
             requireNotNull(store) { "store is null" }
+            require(offset >= 0) { "offset is negative ($offset)" }
             val t0 = SystemClock.elapsedRealtime()
-            val blob = try {
-                TagStore(store).readBlob()
+            val page = try {
+                TagStore(store).tagsPage(offset)
             } catch (e: StoreUnavailable) {
                 throw IllegalStateException(STORE_UNAVAILABLE)
-            } ?: return null
-            // The ashmem step is its own failure domain: `ErrnoException` is checked and outside
-            // Binder's marshalable set, so it would kill the transaction silently.
-            val value = try {
-                SharedBytes.write(blob)
-            } catch (e: Exception) {
-                throw IllegalStateException("snapshot region: ${e.javaClass.simpleName}: ${e.message}")
             }
-            pending.set(value.memory)
-            Slog.d(TAG) { "snapshot: ${blob.size} bytes in ${SystemClock.elapsedRealtime() - t0} ms" }
-            return value
+            Slog.d(TAG) { "tags: ${page.size} from $offset in ${SystemClock.elapsedRealtime() - t0} ms" }
+            return page
+        }
+
+        override fun assignmentsOf(
+            store: IExtensionStore?,
+            tagIds: List<String>?,
+            offset: Int,
+        ): List<AssignmentRecord> {
+            enforce()
+            requireNotNull(store) { "store is null" }
+            requireNotNull(tagIds) { "tagIds is null" }
+            require(offset >= 0) { "offset is negative ($offset)" }
+            // The list becomes one `IN (…)`, so its length is SQLite's bind cap and not a taste.
+            require(tagIds.size <= ExtensionContract.ASSIGNMENT_QUERY_TAGS) {
+                "${tagIds.size} tag ids — at most ${ExtensionContract.ASSIGNMENT_QUERY_TAGS}"
+            }
+            for (id in tagIds) require(TagRules.isId(id)) { "tag id is not a UUID" }
+            // An empty selection is a real answer and touches no store: the host's ranking simply
+            // matched nothing, which is the common case for a query that finds only names.
+            if (tagIds.isEmpty()) return emptyList()
+            val t0 = SystemClock.elapsedRealtime()
+            val page = try {
+                TagStore(store).assignmentsOf(tagIds, offset)
+            } catch (e: StoreUnavailable) {
+                throw IllegalStateException(STORE_UNAVAILABLE)
+            }
+            Slog.d(TAG) {
+                "assignmentsOf: ${page.size} rows for ${tagIds.size} tag(s) from $offset " +
+                    "in ${SystemClock.elapsedRealtime() - t0} ms"
+            }
+            return page
         }
 
         override fun assign(
@@ -120,32 +133,19 @@ class TagManagerService : Service() {
             // assignment names one, because it is the only way the library can find the page again.
             requireNotNull(notebookId) { "notebookId is null" }
             val t0 = SystemClock.elapsedRealtime()
-            // The whole read-modify-write is [TagWrites]', because the screen writes the same single
-            // value from IO. `assign` itself throws for text that is not a tag and for a cap — both
-            // marshalable, and both leave the store untouched.
-            val display = AtomicReference<String>()
-            val outcome = TagWrites.apply(TagStore(store)) { index ->
-                val result = index.assign(text, notebookId, pageId)
-                display.set(result.display)
-                if (result.index === index) null else result.index
+            // `assign` itself throws for text that is not a tag (IllegalArgumentException) and for a
+            // cap (IllegalStateException(TAG_INDEX_FULL)); both are marshalable, both leave the store
+            // untouched, and both pass straight through. Everything else is "unavailable".
+            val assigned = try {
+                TagStore(store).assign(text, notebookId, pageId)
+            } catch (e: StoreUnavailable) {
+                throw IllegalStateException(STORE_UNAVAILABLE)
             }
-            when (outcome) {
-                // "Nothing changed" is the tag already being on the target — an honest success, and
-                // the caller still gets the canonical spelling for its toast.
-                is TagWrites.Outcome.Written, is TagWrites.Outcome.Unchanged -> Unit
-                is TagWrites.Outcome.Failed -> throw refusal(outcome.reason)
+            Slog.d(TAG) {
+                "assign: ${text.length} chars, changed=${assigned.changed} " +
+                    "in ${SystemClock.elapsedRealtime() - t0} ms"
             }
-            Slog.d(TAG) { "assign: ${text.length} chars in ${SystemClock.elapsedRealtime() - t0} ms" }
-            return display.get() ?: throw IllegalStateException(STORE_UNAVAILABLE)
-        }
-
-        /** A [TagWrites.Reason] as the one marshalable exception the host compares verbatim. */
-        private fun refusal(reason: TagWrites.Reason): RuntimeException = when (reason) {
-            TagWrites.Reason.NOT_A_TAG -> IllegalArgumentException("not a tag")
-            TagWrites.Reason.INDEX_FULL -> IllegalStateException(ExtensionContract.TAG_INDEX_FULL)
-            TagWrites.Reason.INDEX_UNREADABLE -> IllegalStateException(INDEX_UNREADABLE)
-            TagWrites.Reason.STORE_UNAVAILABLE, TagWrites.Reason.SAVE_FAILED ->
-                IllegalStateException(STORE_UNAVAILABLE)
+            return assigned.display
         }
 
         private fun enforce() = HostCallerCheck.enforce(this@TagManagerService, BuildConfig.HOST_PACKAGE)
@@ -156,13 +156,8 @@ class TagManagerService : Service() {
     companion object {
         private const val TAG = "TagManagerService"
 
-        /** The store binder is gone (`begin` never ran, or the host revoked it). One of the three
-         *  exceptions that survive Binder marshalling. */
+        /** The store binder is gone (`begin` never ran, or the host revoked it), or the store could
+         *  not be reached at all. One of the three exceptions that survive Binder marshalling. */
         const val STORE_UNAVAILABLE = "store unavailable"
-
-        /** There is a stored index and it cannot be read — the host says so and changes nothing.
-         *  Deliberately distinct from an absent index, which is simply empty. */
-        const val INDEX_UNREADABLE = "tag index unreadable"
-
     }
 }

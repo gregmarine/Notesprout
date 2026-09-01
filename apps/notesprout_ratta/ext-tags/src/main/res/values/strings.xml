@@ -58,7 +58,6 @@
     <!-- Problems. Each says what did not happen, because on e-ink a tap with no answer reads as broken. -->
     <string name="tags_problem_title">Tags</string>
     <string name="tags_unavailable">Tags could not be opened just now.</string>
-    <string name="tags_unreadable">This library\'s tags could not be read. Nothing has been changed.</string>
     <string name="tags_save_failed">That change could not be saved.</string>
     <string name="tags_invalid">A tag needs some text, and no more than 64 characters.</string>
     <string name="tags_full">This library is holding as many tags as it can. Delete one to add another.</string>

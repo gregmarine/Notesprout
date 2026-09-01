@@ -59,9 +59,10 @@ class ExtensionContractTest {
         )
     }
 
-    /** The tag caps (arc 21 / W1). They are not taste — `TagCodecTest` proves the worst legal index
-     *  built from them still fits one store value, and moving one without moving that proof is how
-     *  a library's tags would quietly stop fitting where they are kept. */
+    /** The tag caps (arc 21 / W1) and the paging numbers (arc 22 / X3). The caps are the wizard's
+     *  and are **policy** now — a `COUNT(*)` check inside the insert that would break one — where
+     *  arc 21's arithmetic had to prove the worst legal index fitted one store value. The paging
+     *  numbers are not policy: they are what a Binder reply parcel can carry. */
     @Test
     fun tagConstants() {
         assertEquals(64, ExtensionContract.MAX_TAG_CHARS)
@@ -70,8 +71,13 @@ class ExtensionContractTest {
         assertEquals(200, ExtensionContract.MAX_TARGET_LABEL_CHARS)
         assertEquals("tag index full", ExtensionContract.TAG_INDEX_FULL)
         // Since W4 a target id has no length cap of its own: it is a canonical UUID or it is not a
-        // target, and 22 base64url characters is what the codec pays for one.
-        assertEquals(22, CompactId.CHARS)
+        // target ([TagRules.isId] at every door).
+        // The paging numbers (arc 22 / X3): a reply is an ordinary parcel, so both listings page.
+        assertEquals(500, ExtensionContract.TAGS_PAGE)
+        assertEquals(1_000, ExtensionContract.ASSIGNMENTS_PAGE)
+        assertEquals(500, ExtensionContract.ASSIGNMENT_QUERY_TAGS)
+        // One `IN (…)` list of that many ids plus the LIMIT/OFFSET binds must fit SQLite's own cap.
+        assertTrue(ExtensionContract.ASSIGNMENT_QUERY_TAGS + 2 <= ExtensionContract.STORE_MAX_ARGS)
     }
 
     /** The scratch-pad transfer values: Paper's **shipped** constants (its S2 outcome), not the

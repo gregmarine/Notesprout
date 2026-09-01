@@ -2,7 +2,9 @@ package com.symmetricalpalmtree.notesproutsn.library
 
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectSummary
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectType
-import com.symmetricalpalmtree.notesproutsn.extension.TagIndex
+import com.symmetricalpalmtree.notesproutsn.extension.AssignmentRecord
+import com.symmetricalpalmtree.notesproutsn.extension.TagRecord
+import com.symmetricalpalmtree.notesproutsn.extension.TagRules
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -30,16 +32,47 @@ class SearchAssemblyTest {
         folders: List<ObjectSummary>,
         notebooks: List<ObjectSummary>,
         query: String,
-        tags: TagIndex? = null,
+        tags: Tagged? = null,
     ): List<String> {
-        val shelf = SearchAssembly.rank(folders, notebooks, query, tags)
+        val shelf = rank(folders, notebooks, query, tags)
         return shelf.folders.map { it.id } + shelf.notebooks.map { it.notebook.id }
     }
 
-    private fun tagged(vararg assigns: Triple<String, String, String?>): TagIndex {
-        var i = TagIndex.EMPTY
-        for ((text, nb, page) in assigns) i = i.assign(text, nb, page).index
-        return i
+    /**
+     * The two-query shape (arc 22 / X3): the extension's tag list and the assignments the host would
+     * have fetched for the ids its own matching selected. [rank] runs [SearchAssembly.matchTags]
+     * first, exactly as `LibrarySearch` does inside the one bind, and passes the pair on — so every
+     * arc-20 and arc-21 assertion below is re-expressed over records rather than rewritten.
+     */
+    private class Tagged(val tags: List<TagRecord>, val assignments: List<AssignmentRecord>)
+
+    private fun rank(
+        folders: List<ObjectSummary>,
+        notebooks: List<ObjectSummary>,
+        query: String,
+        tagged: Tagged?,
+    ): SearchAssembly.Shelf {
+        if (tagged == null) return SearchAssembly.rank(folders, notebooks, query)
+        val matches = SearchAssembly.matchTags(tagged.tags, query)
+        // The host asks for the assignments of the SELECTED tags only; anything else never crosses.
+        val fetched = tagged.assignments.filter { it.tagId in matches.ids }
+        return SearchAssembly.rank(folders, notebooks, query, matches, fetched)
+    }
+
+    /** Build a tag list and its assignments from `(text, notebook, page)` triples — one [TagRecord]
+     *  per identity, with the first casing kept, exactly as the store's UNIQUE index would. */
+    private fun tagged(vararg assigns: Triple<String, String, String?>): Tagged {
+        val byIdentity = LinkedHashMap<String, TagRecord>()
+        val assignments = LinkedHashSet<AssignmentRecord>()
+        var minted = 0
+        for ((text, nb, page) in assigns) {
+            val tag = byIdentity.getOrPut(TagRules.identityKey(text)) {
+                minted++
+                TagRecord("%08x-1111-4111-8111-111111111111".format(minted), TagRules.display(text))
+            }
+            assignments += AssignmentRecord(tag.id, nb, page ?: "")
+        }
+        return Tagged(byIdentity.values.toList(), assignments.toList())
     }
 
     // ── Arc 20: names ────────────────────────────────────────────────────────
@@ -82,7 +115,7 @@ class SearchAssemblyTest {
     /** No tag extension is arc 20's shelf exactly — not a degraded one, and nothing says otherwise. */
     @Test
     fun `without a tag index the shelf is names only`() {
-        val shelf = SearchAssembly.rank(emptyList(), listOf(notebook(n1, "Work")), "work", tags = null)
+        val shelf = SearchAssembly.rank(emptyList(), listOf(notebook(n1, "Work")), "work")
         assertEquals(listOf(n1), shelf.notebooks.map { it.notebook.id })
         assertNull(shelf.notebooks.single().matchedTag)
         assertTrue(shelf.pages.isEmpty())
@@ -93,7 +126,7 @@ class SearchAssemblyTest {
     @Test
     fun `a notebook is found by a tag on it`() {
         val notebooks = listOf(notebook(n1, "Trip Journal"))
-        val shelf = SearchAssembly.rank(emptyList(), notebooks, "packing", tagged(Triple("packing", n1, null)))
+        val shelf = rank(emptyList(), notebooks, "packing", tagged(Triple("packing", n1, null)))
         assertEquals(listOf(n1), shelf.notebooks.map { it.notebook.id })
         assertEquals("packing", shelf.notebooks.single().matchedTag)
     }
@@ -104,7 +137,7 @@ class SearchAssemblyTest {
     fun `the matched tag is shown only when the name did not match`() {
         val notebooks = listOf(notebook(n1, "Packing Lists"), notebook(n2, "Trip Journal"))
         val tags = tagged(Triple("packing", n1, null), Triple("packing", n2, null))
-        val shelf = SearchAssembly.rank(emptyList(), notebooks, "packing", tags)
+        val shelf = rank(emptyList(), notebooks, "packing", tags)
         val byId = shelf.notebooks.associateBy { it.notebook.id }
         assertNull("a name match explains itself", byId.getValue(n1).matchedTag)
         assertEquals("packing", byId.getValue(n2).matchedTag)
@@ -114,7 +147,7 @@ class SearchAssemblyTest {
     @Test
     fun `a notebook matching by name and by tag appears once`() {
         val notebooks = listOf(notebook(n1, "Packing Lists"))
-        val shelf = SearchAssembly.rank(
+        val shelf = rank(
             emptyList(), notebooks, "packing", tagged(Triple("packing", n1, null)),
         )
         assertEquals(1, shelf.notebooks.size)
@@ -125,7 +158,7 @@ class SearchAssemblyTest {
     fun `the better of the name and the tag decides the order`() {
         val notebooks = listOf(notebook(n1, "Planning and packing kit"), notebook(n2, "Trip Journal"))
         // "packing" is a whole word inside n1's name, and n2's tag is the query exactly.
-        val shelf = SearchAssembly.rank(
+        val shelf = rank(
             emptyList(), notebooks, "packing", tagged(Triple("packing", n2, null)),
         )
         assertEquals(listOf(n2, n1), shelf.notebooks.map { it.notebook.id })
@@ -136,7 +169,7 @@ class SearchAssemblyTest {
     @Test
     fun `a tagged page becomes its own card, naming its notebook`() {
         val notebooks = listOf(notebook(n1, "Trip Journal"))
-        val shelf = SearchAssembly.rank(
+        val shelf = rank(
             emptyList(), notebooks, "packing", tagged(Triple("packing", n1, p1)),
         )
         // The notebook itself was not tagged and its name does not match, so it is not on the shelf.
@@ -152,7 +185,7 @@ class SearchAssemblyTest {
     fun `one card per page, not per tag`() {
         val notebooks = listOf(notebook(n1, "Trip Journal"))
         val tags = tagged(Triple("pack", n1, p1), Triple("packing list", n1, p1))
-        val shelf = SearchAssembly.rank(emptyList(), notebooks, "pack", tags)
+        val shelf = rank(emptyList(), notebooks, "pack", tags)
         assertEquals(1, shelf.pages.size)
         assertEquals("pack", shelf.pages.single().matchedTag)
     }
@@ -166,7 +199,7 @@ class SearchAssemblyTest {
             Triple("packing", n1, p1),
             Triple("packing", n1, p2),
         )
-        val shelf = SearchAssembly.rank(emptyList(), notebooks, "packing", tags)
+        val shelf = rank(emptyList(), notebooks, "packing", tags)
         assertEquals(1, shelf.notebooks.size)
         assertEquals(listOf(p1, p2), shelf.pages.map { it.pageId }.sorted())
     }
@@ -178,7 +211,7 @@ class SearchAssemblyTest {
     @Test
     fun `a tag on a notebook that is gone surfaces nothing`() {
         val tags = tagged(Triple("packing", n1, null), Triple("packing", n1, p1))
-        val shelf = SearchAssembly.rank(emptyList(), emptyList(), "packing", tags)
+        val shelf = rank(emptyList(), emptyList(), "packing", tags)
         assertTrue(shelf.notebooks.isEmpty())
         assertTrue(shelf.pages.isEmpty())
     }
@@ -186,7 +219,7 @@ class SearchAssemblyTest {
     @Test
     fun `a tag that does not match the query brings nothing with it`() {
         val notebooks = listOf(notebook(n1, "Trip Journal"))
-        val shelf = SearchAssembly.rank(
+        val shelf = rank(
             emptyList(), notebooks, "packing", tagged(Triple("recipes", n1, p1)),
         )
         assertTrue(shelf.pages.isEmpty())
@@ -198,19 +231,19 @@ class SearchAssemblyTest {
     fun `tags match fuzzily and rank by relevance`() {
         val notebooks = listOf(notebook(n1, "A"), notebook(n2, "B"))
         val tags = tagged(Triple("meeting notes", n1, p1), Triple("mtg", n2, p2))
-        val shelf = SearchAssembly.rank(emptyList(), notebooks, "mtg", tags)
+        val shelf = rank(emptyList(), notebooks, "mtg", tags)
         // "mtg" is exactly one tag and a subsequence of the other; exact wins.
         assertEquals(listOf(p2, p1), shelf.pages.map { it.pageId })
         // Letters that are not in order are not a subsequence, and find neither. ("mgt" *would*
         // find "meeting notes" — m·g·t are all there in that order — which is the honest edge of
         // arc 20's rule, not a bug: a subsequence forgives a dropped letter, never a moved one.)
-        assertTrue(SearchAssembly.rank(emptyList(), notebooks, "gm", tags).pages.isEmpty())
+        assertTrue(rank(emptyList(), notebooks, "gm", tags).pages.isEmpty())
     }
 
     @Test
     fun `isEmpty covers all three groups`() {
         assertTrue(SearchAssembly.rank(emptyList(), emptyList(), "x").isEmpty)
-        val shelf = SearchAssembly.rank(
+        val shelf = rank(
             emptyList(), listOf(notebook(n1, "A")), "packing", tagged(Triple("packing", n1, p1)),
         )
         assertTrue(!shelf.isEmpty)

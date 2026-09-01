@@ -20,7 +20,7 @@ import android.os.Parcelable
  * **The target is a pair** (arc 21 / W4): a notebook, and — when the showing is about one page —
  * that page. It is never a page alone. Before W4 a page showing carried a page id and no way to say
  * which notebook it belonged to, which is exactly the gap that made tagged pages unfindable from the
- * library; the same shape now runs through [TagIndex.Assignment], the codec and this parcel, so no
+ * library; the same shape now runs through [AssignmentRecord], the store's rows and this parcel, so no
  * layer can hold a page without its notebook.
  *
  * Wire form: `String notebookId · String pageId (nullable) · String targetLabel · int mode ·
@@ -57,8 +57,8 @@ class TagShowing(
         // Both ids are canonical UUIDs, which is also what keeps a path character or a NUL out of
         // them: the UUID alphabet has neither. The hand-rolled character checks W1 carried here were
         // a weaker spelling of the same guarantee.
-        require(CompactId.isId(notebookId)) { "notebookId is not a UUID" }
-        require(pageId == null || CompactId.isId(pageId)) { "pageId is not a UUID" }
+        require(TagRules.isId(notebookId)) { "notebookId is not a UUID" }
+        require(pageId == null || TagRules.isId(pageId)) { "pageId is not a UUID" }
         require(targetLabel.length <= ExtensionContract.MAX_TARGET_LABEL_CHARS) {
             "targetLabel length ${targetLabel.length} > ${ExtensionContract.MAX_TARGET_LABEL_CHARS}"
         }
@@ -72,7 +72,7 @@ class TagShowing(
         require(pageIds.size == pageLabels.size) { "pageIds/pageLabels length mismatch" }
         require(pageIds.size <= MAX_PAGES) { "pageIds size ${pageIds.size} > $MAX_PAGES" }
         for (id in pageIds) {
-            require(CompactId.isId(id)) { "page id is not a UUID" }
+            require(TagRules.isId(id)) { "page id is not a UUID" }
         }
         for (label in pageLabels) {
             require(label.length <= ExtensionContract.MAX_TARGET_LABEL_CHARS) { "page label too long" }

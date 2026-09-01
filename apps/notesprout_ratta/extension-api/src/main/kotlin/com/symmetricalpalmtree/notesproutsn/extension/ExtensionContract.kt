@@ -42,7 +42,7 @@ object ExtensionContract {
      * declaration is untouched (meta-data is per service).
      *
      * **5 since arc 21 / W4** — the tag target became a *pair* (a notebook, plus a page when the
-     * target is one), which reshaped [TagShowing]'s wire form and [TagCodec]'s records. This is the
+     * target is one), which reshaped [TagShowing]'s wire form and the index's stored records. This is the
      * one bump so far that is **not** a compatible tail: a W1-shaped tag extension against a W4 host
      * would unmarshal a `TagShowing` wrongly. It fails loudly rather than quietly — the constructor
      * `require`s reject the result and the exception crosses as `IllegalArgumentException` — but the
@@ -57,7 +57,9 @@ object ExtensionContract {
      * ([MIN_API_VERSION_FOR_STORE]): a service on a store-taking point is listed only in
      * `MIN_API_VERSION_FOR_STORE..API_VERSION`. Every store-taking service (scratch pad, document
      * editor, tag manager) redeclares 6; the stateless points (recognizer, exporters, importers)
-     * keep their declarations and their floor of 1.
+     * keep their declarations and their floor of 1. `ITagManager` was reshaped in the same bump
+     * (arc 22 / X3): `snapshot` — one ashmem blob of the whole index — is replaced by the paged
+     * [TAGS_PAGE] / [ASSIGNMENTS_PAGE] reads the search merge runs.
      */
     const val API_VERSION: Int = 6
 
@@ -249,10 +251,13 @@ object ExtensionContract {
         MAX_TRANSFER_STROKES / TRANSFER_CHUNK_STROKES +
             2 * MAX_TRANSFER_POINTS / TRANSFER_CHUNK_POINTS + 1
 
-    // ── Tags (`ITagManager`, arc 21 / W1) ──────
-    // The whole tag index is ONE store value, so these caps are not taste: [TagCodec.WORST_CASE_BYTES]
-    // is the arithmetic that proves the worst legal index still fits [STORE_MAX_VALUE_BYTES], and a
-    // test fails if a change here breaks it.
+    // ── Tags (`ITagManager`, arc 21 / W1, on rows since arc 22 / X3) ──────
+    // The three caps below are the arc-21 wizard's, and since X3 they are **policy and nothing
+    // else**: the tag index is `tag` / `assignment` rows in the extension's store, so a cap is a
+    // `COUNT(*)` check inside the insert that would break it — race-free, because the count and the
+    // insert are one statement in one transaction. Arc 21's size arithmetic (`WORST_CASE_BYTES`,
+    // `MAX_TAG_ID_CHARS`, `CompactId`) is deleted with the one-store-value layout that needed it;
+    // there is no longer any relationship between a cap here and a byte budget anywhere.
 
     /** Longest a tag may be, measured on its **normalized display form** ([TagRules.display]).
      *  Multi-word tags are the point, so the only restriction is the length. */
@@ -265,8 +270,35 @@ object ExtensionContract {
     const val MAX_TAG_ASSIGNMENTS: Int = 50_000
 
     // A target id has no length cap of its own since W4: it is a canonical UUID or it is not a
-    // target ([CompactId.isId] is the check, at every door), and what the codec pays for it is
-    // [CompactId.CHARS]. The old 48-character bound described a shape that no longer exists.
+    // target ([TagRules.isId] is the check, at every door and in both records).
+
+    /**
+     * Records one `ITagManager.tags` reply carries (arc 22 / X3).
+     *
+     * It exists because a **Binder transaction has a budget** (≈ 1 MiB, shared by everything in
+     * flight on the process) and a reply is a plain parcel — no ashmem on this call. [MAX_TAGS]
+     * records at roughly 250 parcel bytes apiece is over a megabyte, which would not merely be slow:
+     * it would be a `TransactionTooLargeException`. So the listing is paged, and a page shorter than
+     * this ends the loop ([TagPages]).
+     */
+    const val TAGS_PAGE: Int = 500
+
+    /**
+     * Rows one `ITagManager.assignmentsOf` reply carries (arc 22 / X3). Bigger than [TAGS_PAGE]
+     * because an assignment is three ids and no user text — about 120 parcel bytes — so a thousand
+     * of them is still a small fraction of the transaction budget.
+     */
+    const val ASSIGNMENTS_PAGE: Int = 1_000
+
+    /**
+     * Most tag ids one `ITagManager.assignmentsOf` call may name (arc 22 / X3); the host chunks a
+     * longer selection and the extension refuses one that is longer.
+     *
+     * The extension turns the list into one `IN (?, ?, …)`, so the bound is really SQLite's
+     * per-statement bind limit ([STORE_MAX_ARGS] 999) with room left for the `LIMIT`/`OFFSET` binds
+     * and for the statement to stay well inside [STORE_MAX_SQL_CHARS].
+     */
+    const val ASSIGNMENT_QUERY_TAGS: Int = 500
 
     /** Longest a target's display label may be (the screen's title — display only, never a path). */
     const val MAX_TARGET_LABEL_CHARS: Int = 200

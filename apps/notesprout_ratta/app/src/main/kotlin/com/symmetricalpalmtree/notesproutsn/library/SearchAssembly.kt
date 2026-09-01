@@ -2,13 +2,14 @@ package com.symmetricalpalmtree.notesproutsn.library
 
 import com.symmetricalpalmtree.notesproutsn.core.FuzzyRank
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectSummary
-import com.symmetricalpalmtree.notesproutsn.extension.TagIndex
+import com.symmetricalpalmtree.notesproutsn.extension.AssignmentRecord
+import com.symmetricalpalmtree.notesproutsn.extension.TagRecord
 
 /**
  * What the search shelf holds, and in what order — **pure Kotlin, no Android, JVM-tested**
- * (arc 20 / Q1, grown in arc 21 / W4). The rows come from the index, the tags come from the tag
- * extension's snapshot, and the ranking comes from [FuzzyRank]; the rules that live here are the
- * shelf's own.
+ * (arc 20 / Q1, grown in arc 21 / W4, split into two steps in arc 22 / X3). The rows come from the
+ * index, the tags come from the tag extension, and the ranking comes from [FuzzyRank]; the rules
+ * that live here are the shelf's own.
  *
  * **Folders, then notebooks, then pages.** The library puts containers before contents everywhere
  * ([SortRules.foldersFirst]), and relevance never outranks the kind — a shelf that scattered folders
@@ -19,6 +20,12 @@ import com.symmetricalpalmtree.notesproutsn.extension.TagIndex
  * same matcher with the same total order, so `mtg` finds a notebook called "Meeting Notes" and a
  * notebook tagged `meeting` and puts them in one list rather than two. A notebook that matches both
  * ways appears **once**, at its better rank.
+ *
+ * **Two steps, because the read is now two queries** (X3). [matchTags] answers "which tags does this
+ * query touch, and how well" over the extension's tag list; the ids it selects are what the host
+ * then asks for assignments of, and [rank] takes both. Arc 21 read every assignment in the library —
+ * up to fifty thousand — for every run and threw nearly all of them away; the matching is what makes
+ * the second query small, so it has to happen before it.
  *
  * **A page hit is its own card.** A tag on page 3 of a notebook is not a fact about the notebook —
  * the whole point of tagging a page is that the page is the thing you want back — so it gets a card
@@ -57,6 +64,36 @@ object SearchAssembly {
     }
 
     /**
+     * Which of the library's tags answer a query, and how well (arc 22 / X3).
+     *
+     * Computed **once per run**, before anything is read about assignments: a library can hold five
+     * thousand tags and a notebook can carry many, so re-matching per notebook would be the same
+     * string comparison run over and over for one shelf — and [ids] is what keeps the assignment
+     * query down to the rows the ranking will actually look at.
+     *
+     * [display] holds **every** tag, matched or not, because a card names its tag by id after the
+     * fact; [match] holds only the ones that answered.
+     */
+    class TagMatches(
+        val display: Map<String, String>,
+        val match: Map<String, FuzzyRank.Match>,
+    ) {
+        /** The tags [query] touched — the ids whose assignments are worth fetching. */
+        val ids: Set<String> = match.keys
+    }
+
+    /** [TagMatches] for [query] over the extension's tag list. Pure; no Android, no IO. */
+    fun matchTags(tags: List<TagRecord>, query: String): TagMatches {
+        val display = HashMap<String, String>(tags.size * 2)
+        val match = HashMap<String, FuzzyRank.Match>()
+        for (tag in tags) {
+            display[tag.id] = tag.display
+            FuzzyRank.match(tag.display, query)?.let { match[tag.id] = it }
+        }
+        return TagMatches(display, match)
+    }
+
+    /**
      * The ranked shelf for [query]: matching [folders], then matching [notebooks], then matching
      * pages within them.
      *
@@ -64,8 +101,9 @@ object SearchAssembly {
      * only looked in the folder you happen to be standing in would answer 'no' for a notebook two
      * folders over"). A query that is not [FuzzyRank.isRunnable] returns nothing at all.
      *
-     * [tags] is the tag extension's snapshot, or **null** when no tag extension is installed — in
-     * which case this is exactly arc 20's shelf and nothing says otherwise.
+     * [tags] is [matchTags]' answer, or **null** when no tag extension is installed — in which case
+     * this is exactly arc 20's shelf and nothing says otherwise. [assignments] are the rows fetched
+     * for [TagMatches.ids]; rows for other tags are simply never looked at.
      *
      * **Dead assignments never surface, without a filtering pass.** Tags are read *through*
      * [notebooks]: an assignment naming a notebook that is not in that list is simply never looked
@@ -77,7 +115,8 @@ object SearchAssembly {
         folders: List<ObjectSummary>,
         notebooks: List<ObjectSummary>,
         query: String,
-        tags: TagIndex? = null,
+        tags: TagMatches? = null,
+        assignments: List<AssignmentRecord> = emptyList(),
     ): Shelf {
         if (!FuzzyRank.isRunnable(query)) return Shelf(emptyList(), emptyList(), emptyList())
         val rankedFolders = FuzzyRank.rank(folders, query) { it.name }
@@ -86,17 +125,10 @@ object SearchAssembly {
             return Shelf(rankedFolders, hits, emptyList())
         }
 
-        // Which tags answer the query at all, and how well. Computed once: a library can hold five
-        // thousand tags and a notebook can carry many, so re-matching per notebook would be the
-        // same string comparison run over and over for one shelf.
-        val matching = HashMap<String, FuzzyRank.Match>()
-        for (tag in tags.tags) {
-            FuzzyRank.match(tag.display, query)?.let { matching[tag.id] = it }
-        }
-
-        val byNotebook = HashMap<String, ArrayList<TagIndex.Assignment>>()
+        val matching = tags.match
+        val byNotebook = HashMap<String, ArrayList<AssignmentRecord>>()
         if (matching.isNotEmpty()) {
-            for (a in tags.assignments) {
+            for (a in assignments) {
                 if (a.tagId !in matching) continue
                 byNotebook.getOrPut(a.notebookId) { ArrayList() } += a
             }
@@ -111,8 +143,8 @@ object SearchAssembly {
             // The notebook's own tags — the ones with no page. Its best is compared against its
             // name's, and the better label is the one the whole row is then ranked by.
             val bestOwnTag = mine
-                ?.filter { it.pageId == null }
-                ?.mapNotNull { a -> tags.tag(a.tagId)?.let { it.display to matching.getValue(a.tagId) } }
+                ?.filter { it.isNotebookTag }
+                ?.mapNotNull { a -> tags.display[a.tagId]?.let { it to matching.getValue(a.tagId) } }
                 ?.minWithOrNull(compareBy({ it.second }, { it.first.length }, { it.first }))
 
             // The row is ranked by whichever of the two answered better. [FuzzyRank.Match] orders
@@ -132,11 +164,11 @@ object SearchAssembly {
 
             // One card per page, not per tag: a page carrying two matching tags is still one page,
             // and it is named by whichever of them answered the query best.
-            mine?.filter { it.pageId != null }
-                ?.groupBy { it.pageId!! }
-                ?.forEach { (pageId, assignments) ->
-                    val best = assignments
-                        .mapNotNull { a -> tags.tag(a.tagId)?.let { it.display to matching.getValue(a.tagId) } }
+            mine?.filterNot { it.isNotebookTag }
+                ?.groupBy { it.pageId }
+                ?.forEach { (pageId, rows) ->
+                    val best = rows
+                        .mapNotNull { a -> tags.display[a.tagId]?.let { it to matching.getValue(a.tagId) } }
                         .minWithOrNull(compareBy({ it.second }, { it.first.length }, { it.first }))
                         ?: return@forEach
                     pageHits += Candidate(PageHit(nb, pageId, best.first), best.first)

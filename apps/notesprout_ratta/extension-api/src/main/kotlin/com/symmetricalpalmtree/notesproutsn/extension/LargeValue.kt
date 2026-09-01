@@ -13,8 +13,8 @@ import android.os.SharedMemory
  * both directions: the **sender** creates the region, writes, `setProtect(PROT_READ)`, hands it
  * over and closes its own handle once the transaction carrying it is marshalled; the **receiver**
  * maps read-only, copies out [byteCount] bytes, unmaps and closes (in a `finally`). [SharedBytes]
- * writes that handshake once for both sides. The tag manager's `snapshot` still returns one
- * directly until arc 22 / X3 moves it to rows.
+ * writes that handshake once for both sides. Since arc 22 / X3 the store's payloads are the only
+ * thing that rides it — the tag manager's `snapshot` was the last direct user and is gone.
  *
  * Wire form: `SharedMemory · int byteCount` (a compatible tail may be appended later).
  * [requireValid] runs at construction, so at unmarshal too: `byteCount` in

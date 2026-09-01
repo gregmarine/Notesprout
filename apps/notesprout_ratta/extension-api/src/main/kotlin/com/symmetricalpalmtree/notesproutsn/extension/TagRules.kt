@@ -1,6 +1,7 @@
 package com.symmetricalpalmtree.notesproutsn.extension
 
 import java.util.Locale
+import java.util.UUID
 
 /**
  * What makes two pieces of typed text **the same tag** (arc 21 / W1). Pure, stdlib only, shared by
@@ -62,5 +63,29 @@ object TagRules {
     fun isValid(text: String): Boolean {
         val d = display(text)
         return d.isNotEmpty() && d.length <= ExtensionContract.MAX_TAG_CHARS
+    }
+
+    /**
+     * Whether [id] is a **canonical UUID** — the one shape a tag id, a notebook id or a page id may
+     * take, at every door on both sides of the seam (arc 22 / X3, carried over unchanged from
+     * arc 21's `CompactId.isId` when the compact encoding was deleted with the index blob).
+     *
+     * `UUID.fromString` is famously lenient — it accepts `1-2-3-4-5` and pads it out — so the parse
+     * is round-tripped through `toString()` and only the canonical `8-4-4-4-12` form is accepted.
+     * That also keeps a path character, a tab and a NUL out of every id the seam carries: the UUID
+     * alphabet has none of them, which is what lets the parcels stop hand-checking for one.
+     *
+     * Hex **case is not significant**, exactly as it was not for `CompactId` and is not for arc 16's
+     * `SafeImportId` — a `.soil` out of a stranger's file may carry upper-case ids and its pages are
+     * still taggable. Ids are compared as they were handed over, and everything this family mints is
+     * `UUID.randomUUID().toString()`, which is lower case.
+     */
+    fun isId(id: String): Boolean {
+        val parsed = try {
+            UUID.fromString(id)
+        } catch (e: IllegalArgumentException) {
+            return false
+        }
+        return parsed.toString().equals(id, ignoreCase = true)
     }
 }

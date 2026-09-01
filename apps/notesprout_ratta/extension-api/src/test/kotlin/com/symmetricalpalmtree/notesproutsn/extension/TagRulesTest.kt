@@ -61,6 +61,53 @@ class TagRulesTest {
 
     /** The codec relies on this: nothing that has been normalized can carry a tab or a newline, which
      *  is why records are dropped rather than escaped. */
+    // ── isId (arc 22 / X3 — carried over from W4's CompactId.isId when the codec went) ──────
+
+    /** The one shape a tag id, a notebook id or a page id may take, at every door on both sides. */
+    @Test
+    fun isIdAcceptsACanonicalUuid() {
+        assertTrue(TagRules.isId("11111111-1111-4111-8111-111111111111"))
+        assertTrue(TagRules.isId(java.util.UUID.randomUUID().toString()))
+        assertTrue(TagRules.isId(java.util.UUID(0L, 0L).toString()))
+        assertTrue(TagRules.isId(java.util.UUID(-1L, -1L).toString()))
+    }
+
+    /**
+     * `UUID.fromString` is famously lenient — it accepts `1-2-3-4-5` and pads it out — so the parse
+     * is round-tripped through `toString()` and only the canonical 8-4-4-4-12 form gets through.
+     */
+    @Test
+    fun isIdRefusesEverythingThatIsNotOne() {
+        for (bad in listOf(
+            "",
+            " ",
+            "n1",
+            "1-2-3-4-5",
+            "11111111111141118111111111111111",                 // no dashes
+            "{11111111-1111-4111-8111-111111111111}",           // braces
+            "urn:uuid:11111111-1111-4111-8111-111111111111",
+            "11111111-1111-4111-8111-11111111111",              // one short
+            "11111111-1111-4111-8111-1111111111111",            // one long
+            "zzzzzzzz-1111-4111-8111-111111111111",             // not hex
+            "11111111-1111-4111-8111-111111111111 ",            // not trimmed into acceptance
+            "11111111-1111-4111-8111-111111111111\u0000",       // a NUL is not an id character
+        )) {
+            assertFalse("accepted '$bad'", TagRules.isId(bad))
+        }
+    }
+
+    /**
+     * Hex **case is not significant** — arc 21's `CompactId.isId` compared the re-rendered canonical
+     * form case-insensitively and this carries that over unchanged. It matters: arc 16's
+     * `SafeImportId` accepts upper-case hex out of a stranger's `.soil`, so an imported notebook may
+     * legitimately carry upper-case ids and its pages must still be taggable.
+     */
+    @Test
+    fun isIdIgnoresHexCase() {
+        assertTrue(TagRules.isId("AAAAAAAA-1111-4111-8111-111111111111"))
+        assertTrue(TagRules.isId("aaaaaaaa-1111-4111-8111-111111111111"))
+    }
+
     @Test
     fun normalizedTextCarriesNoSeparators() {
         val d = TagRules.display("a\tb\nc  d")

@@ -14,14 +14,10 @@ import kotlinx.coroutines.withContext
 class TagIndexFullException(cause: Throwable) : ExtensionCallException(ExtensionContract.TAG_INDEX_FULL, cause)
 
 /**
- * There **is** a stored tag index and it could not be read. Deliberately not "empty": the host must
- * say so rather than quietly showing a library with no tags in it.
+ * What one search run read out of the tag extension (arc 22 / X3): the library's tags, and the
+ * assignments of **only the tags the host's own matching selected**. Two queries, no snapshot.
  */
-class TagIndexUnreadableException(cause: Throwable) : ExtensionCallException(INDEX_UNREADABLE, cause) {
-    companion object {
-        const val INDEX_UNREADABLE = "tag index unreadable"
-    }
-}
+class TagSearch(val tags: List<TagRecord>, val assignments: List<AssignmentRecord>)
 
 /**
  * The host's client for the one tag manager (arc 21 / W1) — SN's **second** held bind, and the first
@@ -36,9 +32,10 @@ class TagIndexUnreadableException(cause: Throwable) : ExtensionCallException(IND
  * opened so far is released). The caller launches with an `ActivityResultLauncher` — a plain
  * `startActivity` leaves the extension's `callingPackage` null and its screen refuses it.
  *
- * **The two calls** ([snapshot], [assign]) are bind-per-call, the recognizer's shape, because the
+ * **The two calls** ([search], [assign]) are bind-per-call, the recognizer's shape, because the
  * operation *is* the call and nothing is shown. [assign] is the lasso's silent heading→tag (W3);
- * [snapshot] is what the library's search merge reads (W4). Both still pre-open the store.
+ * [search] is what the library's search merge reads (W4, rewritten as two paged queries in arc 22 /
+ * X3 — the whole-index `snapshot` is gone). Both still pre-open the store.
  *
  * Log tag [TAG] — counts, lengths and durations. **A tag is never logged.**
  */
@@ -120,72 +117,88 @@ class TagClient(context: Context, val ref: ProviderRef) {
         const val TAG = "TagClient"
         const val CALL_TIMEOUT_MS = 2_000L
 
-        /** The whole index can be megabytes and its decode is the host's, so a snapshot gets its
-         *  own budget rather than a chat-sized one. */
-        const val SNAPSHOT_TIMEOUT_MS = 5_000L
+        /**
+         * [search]'s budget, and the first cut only (arc 22 / X3).
+         *
+         * The work it has to cover is bounded by the caps: at worst ten pages of tags plus fifty
+         * pages of assignments, each one Binder round trip against SQLCipher. Ten seconds is a
+         * generous ceiling for that on the Nomad and a deliberately loose one, because a timeout
+         * here does not undo anything — a Binder call cannot be cancelled, so an orphaned call
+         * finishes on its own thread while the shelf has already fallen back to names only.
+         * **To be re-measured on the Nomad** against the two counts this call logs; the W6 rule
+         * stands, a budget is sized by the work and not by taste.
+         */
+        const val SEARCH_TIMEOUT_MS = 10_000L
 
         /**
-         * [assign]'s budget, and it is deliberately **not smaller than [SNAPSHOT_TIMEOUT_MS]**: an
-         * assign does strictly more work on the same blob than a snapshot does — a full
-         * `TagCodec.decode`, the edit, an `encode`, and a store write of up to
-         * `TagCodec.WORST_CASE_BYTES` back through the large-value path into SQLCipher.
+         * [assign]'s budget. It is smaller than it was (8 s) because the work is smaller: arc 21's
+         * assign decoded the whole index, edited it, re-encoded it and wrote up to four megabytes
+         * back through the large-value path; X3's is two small indexed reads and one two-statement
+         * transaction.
          *
-         * Sizing it like a chat call is how the lasso's silent heading→tag times out on a large
-         * index, and a timeout here does not undo anything: a Binder call cannot be cancelled, so
-         * the orphaned call finishes on its own thread and the tag lands **after** the host has
-         * already told the user "Nothing has been changed". The honest budget is the cheaper way to
-         * keep that sentence true.
+         * The W6 rule still decides the number, not the shrinkage: a budget is sized by the work,
+         * and a timeout does not undo anything — a Binder call cannot be cancelled, so the orphaned
+         * call finishes on its own thread and the tag lands **after** the host has already told the
+         * user "Nothing has been changed". Four seconds is the honest budget for two reads and a
+         * transaction on a cold-ish store, and keeping it honest is what keeps that sentence true.
          */
-        const val ASSIGN_TIMEOUT_MS = 8_000L
+        const val ASSIGN_TIMEOUT_MS = 4_000L
 
-        /** The exact `IllegalStateException` message the extension throws for a stored-but-unreadable
-         *  index. Compared verbatim, never as a substring (the family rule). */
-        private const val INDEX_UNREADABLE = "tag index unreadable"
+        /** The runaway guards on the two paging loops — one page more than each cap can fill. */
+        private val TAG_PAGES: Int = ExtensionContract.MAX_TAGS / ExtensionContract.TAGS_PAGE + 1
+        private val ASSIGNMENT_PAGES: Int =
+            ExtensionContract.MAX_TAG_ASSIGNMENTS / ExtensionContract.ASSIGNMENTS_PAGE + 1
 
         /**
-         * The whole tag index, or null when the extension has never written one (the library simply
-         * has no tags yet). **W4's door** — the library's search merge reads it per query.
+         * **W4's door, on rows** (arc 22 / X3): the library's tags, and the assignments of the ones
+         * [select] picks out of them.
          *
-         * Bind-per-call, so this is safe to run from a screen that holds no bind of its own; the
-         * store is still pre-opened on IO first.
+         * One pre-opened store and **one bind** for both halves. Inside it:
+         *  1. `tags(store, offset)` is paged until a short page — the whole tag list, which is small
+         *     (5 000 records at most) and is what the host's `FuzzyRank` runs over;
+         *  2. [select] is the host's own matching, run **here**, on the IO thread the call block
+         *     already occupies — it is pure CPU over strings and it decides how little step 3 reads;
+         *  3. `assignmentsOf(store, chunk, offset)` for each `ASSIGNMENT_QUERY_TAGS`-sized chunk of
+         *     the selection, each chunk paged the same way. An empty selection asks nothing at all,
+         *     which is the common case for a query that only matches names.
          *
-         * @throws TagIndexUnreadableException there is an index and it could not be decoded.
-         * @throws ExtensionCallException the bind, the call or the reply failed.
+         * That is the whole point of the two-query shape: arc 21 read every assignment in the
+         * library — up to fifty thousand — through ashmem on every keystroke-free search run, and
+         * threw nearly all of them away.
+         *
+         * @throws ExtensionCallException the bind, a call or a reply failed.
          */
-        suspend fun snapshot(context: Context, ref: ProviderRef): TagIndex? {
+        suspend fun search(
+            context: Context,
+            ref: ProviderRef,
+            select: (List<TagRecord>) -> Collection<String>,
+        ): TagSearch {
             val client = TagClient(context, ref)
             val store = client.openStore() ?: throw ExtensionCallException("store unavailable")
             val t0 = System.currentTimeMillis()
             try {
-                val bytes = ExtensionBinder.call(
+                val result = ExtensionBinder.call(
                     client.appContext, ref, ExtensionContract.ACTION_TAG_MANAGER, TAG,
                     asInterface = { ITagManager.Stub.asInterface(it) },
-                    callTimeoutMs = SNAPSHOT_TIMEOUT_MS,
+                    callTimeoutMs = SEARCH_TIMEOUT_MS,
                 ) { iface ->
-                    val value = try {
-                        iface.snapshot(store)
-                    } catch (e: IllegalStateException) {
-                        if (e.message == INDEX_UNREADABLE) throw TagIndexUnreadableException(e)
-                        throw e
-                    } ?: return@call null
-                    // The region is the extension's; we copy out and close ours in the same breath.
-                    SharedBytes.readAndClose(value)
-                } ?: return null
-                // The decode is the host's work and the blob can be megabytes, so it does not run
-                // on whatever dispatcher the caller happened to be on — the library's search merge
-                // asks for this from a Main-dispatcher coroutine.
-                val index = withContext(Dispatchers.Default) {
-                    try {
-                        TagCodec.decode(bytes)
-                    } catch (e: IllegalArgumentException) {
-                        throw TagIndexUnreadableException(e)
+                    val tags = TagPages.collect(ExtensionContract.TAGS_PAGE, TAG_PAGES) { offset ->
+                        iface.tags(store, offset) ?: emptyList()
                     }
+                    val selected = select(tags).toList()
+                    val assignments = ArrayList<AssignmentRecord>()
+                    for (chunk in selected.chunked(ExtensionContract.ASSIGNMENT_QUERY_TAGS)) {
+                        assignments += TagPages.collect(
+                            ExtensionContract.ASSIGNMENTS_PAGE, ASSIGNMENT_PAGES,
+                        ) { offset -> iface.assignmentsOf(store, chunk, offset) ?: emptyList() }
+                    }
+                    TagSearch(tags, assignments)
                 }
                 Slog.d(TAG) {
-                    "snapshot: ${index.tags.size} tags, ${index.assignments.size} assignments " +
-                        "(${bytes.size} bytes) in ${System.currentTimeMillis() - t0} ms"
+                    "search: ${result.tags.size} tags, ${result.assignments.size} assignments " +
+                        "in ${System.currentTimeMillis() - t0} ms"
                 }
-                return index
+                return result
             } finally {
                 store.revoke()
             }
@@ -221,11 +234,9 @@ class TagClient(context: Context, val ref: ProviderRef) {
                     try {
                         iface.assign(store, text, notebookId, pageId)
                     } catch (e: IllegalStateException) {
-                        when (e.message) {
-                            ExtensionContract.TAG_INDEX_FULL -> throw TagIndexFullException(e)
-                            INDEX_UNREADABLE -> throw TagIndexUnreadableException(e)
-                            else -> throw e
-                        }
+                        // Compared verbatim, never as a substring (the family rule).
+                        if (e.message == ExtensionContract.TAG_INDEX_FULL) throw TagIndexFullException(e)
+                        throw e
                     }
                 } ?: throw ExtensionCallException("assign returned nothing")
                 Slog.d(TAG) { "assign: ${text.length} chars in ${System.currentTimeMillis() - t0} ms" }

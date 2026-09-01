@@ -13,7 +13,7 @@ still binds, and the reference doc. **The full phase-by-phase records (outcomes,
 walk logs) live in git history — arcs 1–18 at `git show 90a9198:apps/notesprout_ratta/RATTA_PLAN.md`,
 arcs 19–20's full phase records at the end of this file until the next compaction** — and each
 feature's authoritative reference is its `docs/` file. **Arc 21 "Tags" is complete and frozen (2026-09-01) — W1–W6 all ✅.
-ARC 22 "Tables" IS IN PROGRESS — X1 + X2 ✅ 2026-09-01; next phase X3, tags on rows (Opus).
+ARC 22 "Tables" IS IN PROGRESS — X1 + X2 + X3 ✅ 2026-09-01; next phase X4, the document editor on rows (Opus).
 Its plan is the first "Phases" section below.**
 
 ---
@@ -589,9 +589,9 @@ commit.
 
 ---
 
-## Phases — Arc 22 "Tables" (planned 2026-09-01, wizard complete — X3 next)
+## Phases — Arc 22 "Tables" (planned 2026-09-01, wizard complete — X4 next)
 
-**Status: X1 ✅ · X2 ✅ · X3 ⬜ · X4 ⬜ · X5 ⬜** (one phase per session; flip the marker, run the
+**Status: X1 ✅ · X2 ✅ · X3 ✅ · X4 ⬜ · X5 ⬜** (one phase per session; flip the marker, run the
 phase, record its Outcome, update docs/memory/CLAUDE.md, gates green, commit + push, `/clear`).
 
 The extension store stops being a key/value seam and becomes **real SQLite tables** — the
@@ -975,7 +975,7 @@ tests, not by an on-device page past 4 MiB.**
 **Left for X5:** every doc (`scratchpad.md` data model + failure table, `extensions.md` module
 table/audit rows, `BACKLOG.md`).
 
-### X3 — Tags on rows + the search merge ⬜ (Opus code · Sonnet scaffold/tests · Haiku walk)
+### X3 — Tags on rows + the search merge ✅ (Opus code · Fable brief + review · Fable walk by hand)
 `:ext-tags` declares 6 and schema v1:
 ```sql
 CREATE TABLE tag        (id TEXT PRIMARY KEY, display TEXT NOT NULL, identityKey TEXT NOT NULL UNIQUE,
@@ -1007,6 +1007,87 @@ tests, re-expressed), assign cap checks, cascade expectations as SQL text. Walk:
 (library sheet, three notebook buttons, lasso Tag on a heading and on ink, search with page cards)
 re-driven; tag / untag / delete-with-cascade; `logcat -b crash` empty.
 **Questions at phase start:** none expected. Confirm the flip.
+
+**Outcome (2026-09-01, Opus code on a Fable brief + Fable review; 1717 JVM tests/variant, +27 —
+27 new tag tests against `TagCodecTest`, `CompactIdTest` and the old `TagIndexTest`'s edit/cap/`of`
+tests deleted; ten modules debug + release, both changed release APKs signed, NUL-scan clean (one
+raw NUL landed in a new test during the phase and was caught by the scan — the trap's 8th firing);
+no docs — X5):** implemented as the phase reads. What binds from here:
+
+- **Schema + SQL exactly as planned.** `TagSchema.V1` = `tag` (`identityKey` stored `UNIQUE`) /
+  `assignment` (PK `(tagId, notebookId, pageId)`, `pageId` `''` = notebook tag, `ON DELETE CASCADE`)
+  + `assignment_target`; every statement in `TagSql` (pinned by `TagSqlTest`, every one through the
+  real validator in both the test and the fake — **no validator refusal was met**: `EXISTS(…)`,
+  `SUM(pageId = '')`, `COUNT(*)`, `INSERT … SELECT … WHERE` and the `IN (?, …)` list all pass).
+- **`assign` = two small reads + ONE two-statement transaction, and the caps ride INSIDE the
+  inserts.** `selectTagByIdentity` answers "exists + already attached" in one read (attached →
+  `changed = false`, nothing written); the batch is `insertTag` (`INSERT OR IGNORE … SELECT ?,?,?,?
+  WHERE (SELECT COUNT(*) FROM tag) < ? AND (SELECT COUNT(*) FROM assignment) < ?`) only when the
+  identity was absent, then `insertAssignment`, which **resolves the tag id BY IDENTITY inside the
+  statement** (`SELECT id, ?, ?, ? FROM tag WHERE identityKey = ? AND (SELECT COUNT(*) FROM
+  assignment) < ?`) so a concurrent creator of the same tag cannot leave a dangling id; the
+  post-write re-read turns `OR IGNORE`'s silence back into `TAG_INDEX_FULL` and answers the
+  **stored** display (first-entered casing even when the other writer won). **Fable review finding,
+  fixed before the walk:** the tag insert is gated on the *assignment* cap too — a new tag created
+  for an attachment the assignment cap then refused would have been an orphan row behind a "nothing
+  was written" sentence. `TagWrites` and its process-local monitor are deleted: **the transaction is
+  the lock**, across both writers and both processes.
+- **`ITagManager` v6:** `snapshot` → `tags(store, offset)` (pages of `TAGS_PAGE` 500, order
+  `identityKey, display`) + `assignmentsOf(store, tagIds, offset)` (pages of `ASSIGNMENTS_PAGE`
+  1 000, ≤ `ASSIGNMENT_QUERY_TAGS` 500 ids per call — one `IN (…)` under the 999-bind cap; the host
+  chunks). `TagRecord(id, display)` / `AssignmentRecord(tagId, notebookId, pageId)` are the
+  `requireValid` parcelables; `TagPages.collect` is the ONE paging loop (short page ends it, runaway
+  guard = cap/page + 1), in `:extension-api` because both sides run it. No ashmem anywhere on the tag
+  path — `onTransact`/`pending` are gone from the service.
+- **`TagRules.isId` replaces `CompactId.isId`** and is deliberately **case-insensitive** on the hex
+  (Opus call, accepted): `CompactId` already was, and arc 16's `SafeImportId` admits upper-case ids
+  out of a stranger's `.soil` — tightening it would make an imported notebook's pages untaggable
+  (`TagShowing`'s `require` would refuse the showing).
+- **`TagIndex` moved into `:ext-tags`** as the screen's in-memory model (queries only, built from
+  the two reads `tags()` + `assignmentsOfNotebook(showing.notebookId)` in every mode; BROWSE/ADD on
+  a page filter the notebook's few rows in memory). Every edit is still **written before it is
+  shown** — the screen re-reads both after each write, which is also how another writer's edit
+  arrives. `usageOf` is a read now (`SUM(pageId = '')` / `SUM(pageId <> '')`), run on IO behind the
+  busy latch before the delete confirm is built. `RESULT_OK` only when something changed.
+- **Host:** `TagClient.search(ctx, ref) { tags -> ids }` = one pre-open + ONE bind: page tags →
+  the host's `SearchAssembly.matchTags` runs inside the block → page `assignmentsOf` per 500-id
+  chunk (an empty selection asks nothing). `SearchAssembly.rank(folders, notebooks, query,
+  TagMatches?, assignments)`; `LibrarySearch` captures the matches out of the lambda.
+  `SEARCH_TIMEOUT_MS` **10 s** (first cut — the Nomad measured **52–78 ms** end-to-end on a 2-tag
+  index: `tags` 15–19 ms, `assignmentsOf` 11–18 ms; the worst case, 10 tag pages + 50 assignment
+  pages, was not built as test data, so the budget stays generous and documented as such);
+  `ASSIGN_TIMEOUT_MS` 8 s → **4 s** (the work is two indexed reads + one transaction now — W6's
+  size-by-the-work rule, not taste). Deleted host-side: `TagIndexUnreadableException`,
+  `INDEX_UNREADABLE`, `tags_unreadable_body`, `SNAPSHOT_TIMEOUT_MS`.
+- **Test doubles:** `FakeTagStore` (statement recorder + canned rows) **applies** the four writes
+  literally — `OR IGNORE`, the identity resolution, both `COUNT` caps — because `assign`'s post-write
+  re-read must see the write; it has a `beforeExec` hook so the concurrent-create race is a test
+  (`theTagCapRefusesAndNothingIsWritten`, `theAssignmentCapRefusesANewTagWithoutCreatingIt`,
+  the second-writer-attaches-by-identity case). Caps are `TagStore` constructor parameters so the
+  cap tests exercise the real statement with small numbers (X2's `maxPayloadBytes` precedent).
+- Manifest declares **6**; the registry lists it again (`TAG_MANAGER: 1 provider(s) of 1`). Only
+  the Document editor is still gone (X4).
+
+**Walk (Fable, by hand on the Nomad — the walk agent was not used this phase): all green.** First
+tag-store open on the real arc-21 file: `wiped legacy store for …ext.tags.dev (format 1, 1 kv row(s)
+dropped)`; MANAGE overview from the two reads (`loaded: 0 tags, 0 assignments`); Page 1 → typed
+`rows` on the on-screen keyboard → landed (the real `assign` SQL), toggled off and on from the
+list, long-press → "Delete “rows”? Remove it from 1 page?" (the `usageOf` read) → cancelled;
+overview shows `Page 1 · rows`; Tag-notebook quick door opened with the keyboard raised (MODE_ADD)
+→ `shelf`; library search `rows` → ONE page card `20260827_200914 · Page 1 / Notebooks · rows`
+(`tags: 2 from 0 in 19 ms` · `assignmentsOf: 1 rows for 1 tag(s) in 18 ms` · `search: 2 tags, 1
+assignments in 78 ms` · `PageNumbers: read 1 page ids`); search `shelf` → the notebook card with
+subtitle `Notebooks · shelf` (58 ms); library sheet **Tags…** → BROWSE (`open: ready in 40 ms`,
+`loaded: 2 tags, 2 assignments`); long-press `shelf` → "Remove it from 1 notebook?" → **Delete** →
+the tag and its assignment gone (cascade), `rows` still listed; back to the shelf → `search: 1
+tags, 0 assignments` and no `assignmentsOf` call at all (empty selection). `logcat -b crash` empty.
+Observed, pre-existing (arc 21 / W4 shape, not X3's): the search shelf re-runs its query **twice**
+on return from a tag screen (`onChanged` + the resume re-list, 10 ms apart) — cheap, noted for X5's
+BACKLOG line. **User checklist:** the lasso's Tag on a heading and on ink (pen input — adb cannot
+drive it), which exercises the host's `TagClient.assign` path and the 4 s budget. Nomad test data
+left behind: tag `rows` on Page 1 of 20260827_200914; every arc-21 tag was wiped by design.
+**Left for X5:** `docs/tags.md` (schema, two queries, the deleted caps arithmetic, `isId`),
+`extensions.md` (tag-point section + `API_VERSION` ledger + audit rows), `library.md` § search.
 
 ### X4 — Document editor on rows ⬜ (Opus code · Sonnet scaffold/tests · Haiku walk)
 `:ext-document`'s editor service declares 6 (the text importer keeps 3 — per-service meta-data);

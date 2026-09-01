@@ -10,8 +10,8 @@ import com.symmetricalpalmtree.notesproutsn.data.index.ObjectSummary
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectType
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionCallException
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionRegistry
+import com.symmetricalpalmtree.notesproutsn.extension.AssignmentRecord
 import com.symmetricalpalmtree.notesproutsn.extension.TagClient
-import com.symmetricalpalmtree.notesproutsn.extension.TagIndex
 import com.symmetricalpalmtree.notesproutsn.notebook.TagTargets
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -43,7 +43,7 @@ class LibrarySearch(
     private val repo: IndexRepository,
     /** Whether a tag manager is installed **right now** — the answer the library's own entry last
      *  got. It decides the dialog's hint and nothing else: what the shelf does about tags is
-     *  settled per run by [snapshot], which asks again. */
+     *  settled per run by [tagSearch], which asks again. */
     private val tagsAvailable: () -> Boolean = { false },
     /** A query was accepted: show the shelf (entering the mode if needed) and re-list. */
     private val onQueryRun: () -> Unit,
@@ -109,11 +109,12 @@ class LibrarySearch(
      * so the subtitles cost no extra reads at all. Folders get one too: this shelf is flat, and
      * folder names are only unique per parent, so two called "Notes" would be one card twice.
      *
-     * **Tags join the query** (arc 21 / W4). One snapshot per run, bind-per-call; no tag extension
-     * installed means names only, silently — the same rule every other tag door follows, except that
-     * this one has nothing to make GONE, so it simply answers arc 20's shelf. A tagged **page**
-     * becomes its own card, which needs the page's number, which needs the notebook's page list: see
-     * [pageCards] for what that costs and when it is paid.
+     * **Tags join the query** (arc 21 / W4, two queries since arc 22 / X3). One bind-per-call run
+     * per query, inside which the tag list is read and matched and then **only the matched tags'
+     * assignments** are fetched; no tag extension installed means names only, silently — the same
+     * rule every other tag door follows, except that this one has nothing to make GONE, so it simply
+     * answers arc 20's shelf. A tagged **page** becomes its own card, which needs the page's number,
+     * which needs the notebook's page list: see [pageCards] for what that costs and when it is paid.
      */
     suspend fun cards(pinnedIds: Set<String>): List<CardItem> {
         // Unreachable by the dialog, which refuses a blank query — a safety net, not a state.
@@ -122,11 +123,12 @@ class LibrarySearch(
         val notebooks = repo.allNotebooks()
         val folderNames = folders.associate { it.id to it.name }
         val root = activity.getString(R.string.recents_parent_root)
-        val tags = snapshot()
-        // Ranking is pure CPU over the whole library and, with tags, over every assignment in it —
-        // up to fifty thousand. Off Main: this is called from the listing coroutine.
+        val tags = tagSearch()
+        // Ranking is pure CPU over the whole library and, with tags, over the assignments that were
+        // actually fetched. Off Main: this is called from the listing coroutine.
         val shelf = withContext(Dispatchers.Default) {
-            SearchAssembly.rank(folders, notebooks, query, tags)
+            if (tags == null) SearchAssembly.rank(folders, notebooks, query)
+            else SearchAssembly.rank(folders, notebooks, query, tags.matches, tags.assignments)
         }
 
         val cards = ArrayList<CardItem>(shelf.folders.size + shelf.notebooks.size + shelf.pages.size)
@@ -180,22 +182,35 @@ class LibrarySearch(
         return cards
     }
 
+    /** What one run read out of the tag extension: which tags the query touched, and the
+     *  assignments of exactly those. */
+    private class TagRun(val matches: SearchAssembly.TagMatches, val assignments: List<AssignmentRecord>)
+
     /**
-     * The tag index, or null when there is no tag extension — in which case search is names only and
-     * says nothing about it, because there is no control to hide and nothing was promised.
+     * The two tag queries, or null when there is no tag extension — in which case search is names
+     * only and says nothing about it, because there is no control to hide and nothing was promised.
+     * A store that cannot be read is null here too: a search shelf is not the place to learn about
+     * it, and a read never writes over anything.
      *
-     * A **stored-but-unreadable** index is also null here, and that is deliberate: it is reported by
-     * every screen that edits tags, and a search shelf is not the place to learn about it. What must
-     * not happen is the host writing over it, and a read never does.
+     * The matching runs **inside** the call (arc 22 / X3) because its answer is what the second
+     * query asks for. It is pure CPU over at most five thousand short strings, on the IO thread the
+     * call block already occupies, and the alternative — ranking here and calling back in — would be
+     * a second bind for the same run.
      */
-    private suspend fun snapshot(): TagIndex? {
+    private suspend fun tagSearch(): TagRun? {
         val ref = ExtensionRegistry.tagManager(activity) ?: return null
         return try {
-            TagClient.snapshot(activity, ref)
+            var matches: SearchAssembly.TagMatches? = null
+            val result = TagClient.search(activity, ref) { tags ->
+                SearchAssembly.matchTags(tags, query).also { matches = it }.ids
+            }
+            // The matcher always ran (the block is what produced `result`); the fallback exists so
+            // this reads as total rather than as an assertion.
+            TagRun(matches ?: SearchAssembly.matchTags(result.tags, query), result.assignments)
         } catch (e: CancellationException) {
             throw e
         } catch (e: ExtensionCallException) {
-            Slog.d(TAG) { "tag snapshot unavailable: ${e.javaClass.simpleName}" }
+            Slog.d(TAG) { "tag search unavailable: ${e.javaClass.simpleName}" }
             null
         }
     }

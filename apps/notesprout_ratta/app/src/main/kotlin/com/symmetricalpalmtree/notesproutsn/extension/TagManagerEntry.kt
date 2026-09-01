@@ -150,8 +150,6 @@ class TagManagerEntry(
                 return@launch
             } catch (e: TagIndexFullException) {
                 R.string.tags_full_body
-            } catch (e: TagIndexUnreadableException) {
-                R.string.tags_unreadable_body
             } catch (e: ExtensionCallException) {
                 Slog.d(TAG) { "assign failed: ${e.javaClass.simpleName}: ${e.message}" }
                 R.string.tags_assign_failed_body

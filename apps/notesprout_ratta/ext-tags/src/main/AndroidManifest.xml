@@ -13,13 +13,14 @@
         <!-- The TAG_MANAGER point (arc 21 / W1) — SN's SIXTH capability point and its THIRD
              screen-owning one. No Application class: this extension has no drawing engine to
              register.
-             API version 5. The point itself was the version-4 event (W1) and this declared 4 until
-             W4 reshaped `TagShowing` and `TagCodec` around the notebook/page pair — the first bump
-             in this family that is NOT a compatible tail, so a W1-shaped host would unmarshal a
-             showing wrongly rather than merely miss a field. Either way an older host knows no
-             `ITagManager` at all, so the skip happens at discovery: there is no tail that could
-             carry it. The `android:value` below is the host-compat gate — it is the line that
-             matters, and this comment must move with it. -->
+             API version 6 (arc 22 / X3). W1 declared 4 (the point itself), W4 moved it to 5 (the
+             notebook/page pair reshaped `TagShowing`'s wire form), and X3 moves it again: the
+             extension store became real SQLite tables, `IExtensionStore` was REPLACED, and
+             `ITagManager` lost `snapshot` for the paged `tags` / `assignmentsOf` reads. That break
+             runs both ways — a version-5 extension calling the old store interface would land on a
+             different method — so the host accepts a store-taking service only at
+             `MIN_API_VERSION_FOR_STORE` (6) and above. The `android:value` below is the
+             host-compat gate — it is the line that matters, and this comment must move with it. -->
         <service
             android:name=".TagManagerService"
             android:exported="true">
@@ -28,7 +29,7 @@
             </intent-filter>
             <meta-data
                 android:name="com.symmetricalpalmtree.notesproutsn.extension.API_VERSION"
-                android:value="5" />
+                android:value="6" />
         </service>
 
         <!-- The extension-owned screen (tier 2): exported, custom action, NO launcher filter;

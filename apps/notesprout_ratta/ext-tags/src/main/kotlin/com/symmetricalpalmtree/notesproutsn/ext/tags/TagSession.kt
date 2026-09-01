@@ -11,16 +11,14 @@ import com.symmetricalpalmtree.notesproutsn.extension.TagShowing
  * [TagShowing] from `configureShowing`. `end()` clears both. Nothing here is ever written to disk by
  * the extension itself — the tag index lives in the host's store.
  *
- * [writes] is the other thing this object owns, and it is not session state: it is the **one lock
- * every read-modify-write of the index takes**. The index is a single store value, and there are two
- * writers in this process — the screen (on IO) and the service's call-shaped `assign` (on a Binder
- * thread, W3) — so without it two edits that read the same index would each write their own version
- * and the second would erase the first.
+ * **There is no write lock here any more** (arc 22 / X3). W1 owned one, because the index was a
+ * single store value and two writers — the screen on IO and the service's call-shaped `assign` on a
+ * Binder thread — each applying their change to the version they happened to be holding is how one
+ * silently erases the other. The index is rows now: every write is one statement, or two in one
+ * batch, and **the store's transaction is the lock** — across both writers, and across the two
+ * processes a monitor in this one could never have covered.
  */
 object TagSession {
-
-    /** The monitor every read-modify-write of the stored index holds. Never held across a UI frame. */
-    val writes = Any()
 
     @Volatile
     var store: IExtensionStore? = null
