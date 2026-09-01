@@ -5,6 +5,10 @@
   level tap the user just made, not a new question, and on e-ink a dialog is a full repaint the
   result would immediately have to undo.
 
+  The line has an id because the same box also stands in front of the lasso's silent heading→tag
+  (arc 21 / W3), which is a wait of the same shape and length but is not recognizing anything —
+  the caller supplies the word.
+
   The root is full-screen but transparent, clickable and focusable: it swallows the second tap a
   slow e-ink refresh invites — the call can run for seconds when the extension process is cold —
   while leaving the page underneath visible; only the box's region repaints.
@@ -25,6 +29,7 @@
         android:padding="24dp">
 
         <TextView
+            android:id="@+id/message"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/heading_recognizing"

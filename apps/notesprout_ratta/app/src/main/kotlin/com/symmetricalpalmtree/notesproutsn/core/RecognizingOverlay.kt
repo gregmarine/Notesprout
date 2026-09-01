@@ -4,6 +4,7 @@ import android.app.Activity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.TextView
 import com.symmetricalpalmtree.notesproutsn.R
 
 /**
@@ -34,9 +35,16 @@ object RecognizingOverlay {
 
     private val TAG_KEY = "notesproutsn.recognizingOverlay"
 
-    fun show(activity: Activity) {
+    /**
+     * Raise the box. [messageRes] is the line inside it — "Recognizing…" by default, and named by
+     * the caller when the wait is the same shape but not a recognition (arc 21 / W3's silent
+     * heading→tag, which is out at the *tag* extension). It is set on every show, so a box reused
+     * from an earlier wait never shows that wait's word.
+     */
+    fun show(activity: Activity, messageRes: Int = R.string.heading_recognizing) {
         if (activity.isFinishing || activity.isDestroyed) return
         val overlay = obtain(activity) ?: return
+        overlay.findViewById<TextView>(R.id.message)?.setText(messageRes)
         overlay.visibility = View.VISIBLE
         overlay.bringToFront()
     }

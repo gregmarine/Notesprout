@@ -45,7 +45,10 @@ enum class SelectionMode { STROKES, HEADING, LINK, MIXED, MIXED_WITH_LINK }
  * lone link, the only selection with one payload to act on) · **Pad** (arc 11 / J5 — the narrowest
  * of them all: only on a pure-ink selection, and only while a trusted scratch-pad extension is
  * installed. `WireStroke` is the whole of what the contract carries, so the moment the selection
- * holds a heading or a link there is nothing honest to send and the button is gone) · **Delete**
+ * holds a heading or a link there is nothing honest to send and the button is gone) · **Tag** (arc 21 /
+ * W3 — next to Pad because it is the other button gated on an extension, and narrow for a reason of
+ * its own: a lone heading or ink alone, never a mixed selection. [TagSelection] holds that rule and
+ * the reasoning behind it) · **Delete**
  * (always, and last: the one destructive verb sits alone on the far edge, away from the buttons
  * reached for casually).
  * **Sub-toolbar**: H1…H6, shown by an H tap and hung off the *bar*
@@ -96,6 +99,12 @@ class SelectionToolbar(
     /** Whether a trusted scratch-pad extension is installed — re-read on every [show], because it
      *  can be disabled under us and a button that lies is worse than one that is absent. */
     private val isScratchPadAvailable: () -> Boolean = { false },
+    /** Make a page tag out of this selection (arc 21 / W3). Which of the two flows that is is the
+     *  screen's to decide — the bar knows only that the button was tapped. */
+    private val onTag: () -> Unit = {},
+    /** Whether a trusted tag manager is installed — re-read on every [show], same reason as the
+     *  scratch pad's. */
+    private val isTagAvailable: () -> Boolean = { false },
 ) {
 
     private val density = root.resources.displayMetrics.density
@@ -106,6 +115,7 @@ class SelectionToolbar(
     private val unlinkButton: AppCompatImageButton
     private val snapButton: AppCompatImageButton
     private val padButton: AppCompatImageButton
+    private val tagButton: AppCompatImageButton
     /** Index 0 is H1 — `levelButtons[n - 1]` is level `n`. */
     private val levelButtons: List<AppCompatImageButton>
 
@@ -167,6 +177,15 @@ class SelectionToolbar(
         }
         bar.addView(padButton)
 
+        // The second extension-gated button, and the second that reads the selection's *kind*:
+        // a lone heading has words already, ink has words to be recognized, and a mixture has two
+        // answers with no way to ask which was meant (TagSelection).
+        tagButton = button(R.drawable.ic_tag, ctx.getString(R.string.tag_selection_action)) {
+            releaseRender()
+            onTag()
+        }
+        bar.addView(tagButton)
+
         bar.addView(
             // Delete last, alone on the far edge — the one destructive verb, kept away from the
             // ones you reach for casually. Release before the row runs, for the same reason the R5
@@ -210,6 +229,8 @@ class SelectionToolbar(
         syncSnapButton()
         padButton.visibility =
             if (mode == SelectionMode.STROKES && isScratchPadAvailable()) View.VISIBLE else View.GONE
+        tagButton.visibility =
+            if (TagSelection.offered(mode, isTagAvailable())) View.VISIBLE else View.GONE
 
         val rootLoc = IntArray(2).also { root.getLocationInWindow(it) }
         val paperLoc = IntArray(2).also { paperView.getLocationInWindow(it) }

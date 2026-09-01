@@ -374,6 +374,11 @@ class NotebookActivity : AppCompatActivity() {
             // Read at every show, not captured once: the extension can be disabled under us, and
             // `ScratchPadEntry` re-runs discovery on every resume and after a failed open.
             isScratchPadAvailable = { ::scratchPad.isInitialized && scratchPad.isAvailable },
+            onTag = { tagSelection() },
+            // Same rule as the pad's, and the same reason: `TagManagerEntry` re-runs discovery on
+            // every resume, so what the bar reads is what was true at the last resume, not at
+            // startup.
+            isTagAvailable = { ::tagEntry.isInitialized && tagEntry.isAvailable },
         )
         binding.notebookName.text = name
         binding.pageIndicator.text = ""
@@ -2245,6 +2250,92 @@ class NotebookActivity : AppCompatActivity() {
     private fun pageLabel(pageId: String): String {
         val n = TagTargets.pageNumber(session.pages.map { it.id }, pageId)
         return if (n == null) notebookName else getString(R.string.tag_page_label, n)
+    }
+
+    // ── Lasso → tag (arc 21 / W3) ────────────────────────────────────────────
+
+    /**
+     * The selection toolbar's **Tag**: whatever is lassoed becomes a tag on **the page it is on** —
+     * always the page, never the notebook (the wizard's call), and always non-destructively. The ink,
+     * the heading and the selection are all exactly as they were afterwards; a tag is a *snapshot* of
+     * some text at this moment, not a second name for the thing it was taken from, so editing that
+     * heading later never renames the tag.
+     *
+     * Which flow this is, is read off the selection **at the tap** rather than trusted from the bar
+     * that offered it — the selection can be moved, changed or dismissed between the bar going up and
+     * a button landing. [TagSelection] holds the rule; the `else` branch is the belt to the bar's
+     * braces.
+     */
+    private fun tagSelection() {
+        if (!opened || closing || !::session.isInitialized || !::tagEntry.isInitialized) return
+        val sel = currentSelection ?: return
+        val pageId = displayedPageId ?: return
+        val lone = sel.strokeIds.isEmpty() && sel.contentIds.size == 1
+        val loneHeading = if (lone) liveHeadings[sel.contentIds.first()] else null
+        when {
+            loneHeading != null -> tagFromHeading(pageId, loneHeading)
+            sel.contentIds.isEmpty() && sel.strokeIds.isNotEmpty() -> tagFromInk(sel, pageId)
+            else -> Slog.d(TAG) { "tag: nothing this selection can be tagged with" }
+        }
+    }
+
+    /**
+     * A heading is already words: one call, one toast, no screen — the wizard's "silent" flow. The
+     * hash prefix is storage, not the title, so it never reaches the tag.
+     *
+     * The one exception is a title that is **not a tag** — over the 64-char cap, or blank. Rather
+     * than refuse a tap the bar just offered, it lands in the same correction screen the ink flow
+     * uses, prefilled with as much of the title as fits, so the act can still be finished in one
+     * more gesture instead of none.
+     */
+    private fun tagFromHeading(pageId: String, heading: Heading) {
+        val title = HeadingPrefix.stripHeadingPrefix(heading.text)
+        if (!TagSelection.isTag(title)) {
+            Slog.d(TAG) { "tag: heading of ${title.length} chars is not a tag — correcting instead" }
+            openTagAdd(pageId, TagSelection.prefill(title))
+            return
+        }
+        tagEntry.assign(title, TagShowing.TARGET_PAGE, pageId) { display ->
+            // The toast fires here and not at the tap: the standing rule is that a toast confirms
+            // something that has already happened, and until the write lands it has not. The
+            // selection stays up — nothing was consumed.
+            toast(getString(R.string.tag_applied_toast, display))
+        }
+    }
+
+    /**
+     * Ink is words that have to be read first. Recognition is the heading convert's — the same
+     * extension, the same single-writing-area call, the same **selection bounds** as the area (a
+     * page-sized area under one line of writing collapses recognition to fragments), and the same
+     * problem dialogs when there is no recognizer or it has nothing to say.
+     *
+     * The result is never attached silently: it goes into the tag screen's add field for the user to
+     * correct, because a recognizer's best guess is not the user's word for something. Everything the
+     * flow needs is captured now — recognition is async and the selection may be gone by the time it
+     * answers.
+     */
+    private fun tagFromInk(sel: Selection, pageId: String) {
+        val strokes = liveStrokes.values.filter { it.id in sel.strokeIds }
+        if (strokes.isEmpty()) return
+        val bounds = sel.bounds
+        HeadingConvert.run(
+            this, strokes, bounds.width, bounds.height,
+            onRecognized = { text -> openTagAdd(pageId, TagSelection.prefill(text)) },
+        )
+    }
+
+    /** The tag screen on this page, add field focused and prefilled with what was recognized. */
+    private fun openTagAdd(pageId: String, prefill: String?) {
+        if (!opened || closing) return
+        tagEntry.open(
+            TagShowing(
+                targetKind = TagShowing.TARGET_PAGE,
+                targetId = pageId,
+                targetLabel = pageLabel(pageId),
+                mode = TagShowing.MODE_ADD,
+                prefill = prefill,
+            ),
+        )
     }
 
     // ── The page sheet: copy / cut / paste / delete ──────────────────────────

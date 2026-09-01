@@ -533,6 +533,20 @@
          host's to resolve; the extension has no idea what a page is. -->
     <string name="tag_page_label">Page %1$d</string>
 
+    <!-- The selection toolbar's Tag button (arc 21 / W3) and the two flows behind it. The hint says
+         "page" because the lasso always tags the page on the paper — never the notebook. -->
+    <string name="tag_selection_action">Tag page with this</string>
+    <!-- The wait box while the silent heading→tag is out at the extension. -->
+    <string name="tag_applying">Tagging…</string>
+    <!-- The silent flow's whole answer: it names the tag in its canonical spelling, which is not
+         necessarily the heading's own casing. -->
+    <string name="tag_applied_toast">Tagged “%1$s”</string>
+    <!-- What can go wrong on the silent path. The tag screen says the same three things in its own
+         words — neither side reads the other's wording. -->
+    <string name="tags_assign_failed_body">That tag could not be saved. Nothing has been changed.</string>
+    <string name="tags_full_body">This library is holding as many tags as it can. Delete one to add another.</string>
+    <string name="tags_unreadable_body">This library\'s tags could not be read. Nothing has been changed.</string>
+
     <!-- Scratch Pad (arc 11) — the entry button on both the library's bottom bar and the
          notebook's top bar. Both are GONE unless a trusted extension is installed. -->
     <string name="cd_scratch_pad">Scratch pad</string>

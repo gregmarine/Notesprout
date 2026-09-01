@@ -159,10 +159,12 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   Proofread; `docs/document.md` is the feature reference), plus post-arc fixes F1–F5. Ten
   modules (host + `:sn-screen` + `:markdown` + `:extension-api` + six extension APKs), SIX
   extension points (recognizer · scratch pad · exporter · importer · document editor · tag
-  manager), g-paper pin 0.1.23, version `0.1.0-ratta`, 1563 JVM tests/variant. **Arc 21 "Tags"
+  manager), g-paper pin 0.1.23, version `0.1.0-ratta`, 1590 JVM tests/variant. **Arc 21 "Tags"
   in progress: W1 ✅ (the SIXTH point `ACTION_TAG_MANAGER` + `_SCREEN` is live — `:ext-tags` /
   NSE · Tags, the third tier-2 screen and the first with no paper on it, so no EPD handoff;
-  library long-press "Tags…" row). Next work = W2 "Notebook entries". Fable planned only —
+  library long-press "Tags…" row) · W2 ✅ (the notebook's three tag doors) · W3 ✅ (the lasso's
+  Tag: a lone heading is silent + toast, ink alone is recognized into a prefilled tag screen, a
+  mixed selection is not offered the button). Next work = W4 "Search merge". Fable planned only —
   Opus/Sonnet/Haiku execute per the plan's model notes. No SEVENTH point without another user
   decision.**
   **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for ANY work there** — it holds the working

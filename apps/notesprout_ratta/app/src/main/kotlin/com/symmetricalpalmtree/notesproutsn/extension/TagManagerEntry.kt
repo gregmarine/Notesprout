@@ -9,6 +9,7 @@ import androidx.lifecycle.lifecycleScope
 import com.symmetricalpalmtree.notesproutsn.R
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
 import com.symmetricalpalmtree.notesproutsn.core.OpeningOverlay
+import com.symmetricalpalmtree.notesproutsn.core.RecognizingOverlay
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
@@ -18,6 +19,10 @@ import kotlinx.coroutines.launch
  * [ScratchPadEntry] pattern and for the same reason: the library's sheet row, the notebook's toolbar
  * (W2) and the lasso's Tag (W3) differ only in the [TagShowing] they hand over, and two
  * near-identical files is the sibling-copy trap `:sn-screen` exists to keep out of this app.
+ *
+ * W3 added the one door that opens **no screen at all** — [assign], the lasso's silent heading→tag.
+ * It lives here rather than beside its caller because availability, the busy latch and the way a
+ * failure is worded are the same questions for a door with a screen and a door without one.
  *
  * What it owns:
  *  - **Availability.** [discover] re-runs the package query every time a caller is about to offer a
@@ -113,6 +118,51 @@ class TagManagerEntry(
                 }
                 launcher.launch(intent)
             }
+        }
+    }
+
+    /**
+     * **The silent door** (arc 21 / W3): create-if-absent and attach [text] to one target, with no
+     * screen at all — the lasso's heading→tag, which is one tap and a toast.
+     *
+     * Bind-per-call ([TagClient.assign]), so it holds nothing and needs no bracket; but the store is
+     * still pre-opened inside the call, and the *first* tag operation of a host process pays
+     * SQLCipher's KDF for it. That is seconds on a Nomad, so the wait gets the same box the heading
+     * convert's does — a tap with no frame for that long reads as a tap that missed.
+     *
+     * [onDone] runs on Main with the tag's **canonical display form** — the casing it was first
+     * entered in, which is not necessarily the casing just handed over, and is the whole reason the
+     * call answers with a string rather than a boolean. Every failure explains itself in a problem
+     * dialog and [onDone] does not run.
+     */
+    fun assign(text: String, targetKind: Int, targetId: String, onDone: (String) -> Unit) {
+        val provider = ref ?: return
+        if (opening) { Slog.d(TAG) { "assign: a showing is opening" }; return }
+        opening = true
+        RecognizingOverlay.show(activity, R.string.tag_applying)
+        activity.lifecycleScope.launch {
+            val failure = try {
+                val display = TagClient.assign(activity, provider, text, targetKind, targetId)
+                RecognizingOverlay.hide(activity)
+                if (activity.isFinishing || activity.isDestroyed) { opening = false; return@launch }
+                opening = false
+                onDone(display)
+                return@launch
+            } catch (e: TagIndexFullException) {
+                R.string.tags_full_body
+            } catch (e: TagIndexUnreadableException) {
+                R.string.tags_unreadable_body
+            } catch (e: ExtensionCallException) {
+                Slog.d(TAG) { "assign failed: ${e.javaClass.simpleName}: ${e.message}" }
+                R.string.tags_assign_failed_body
+            } finally {
+                RecognizingOverlay.hide(activity)   // idempotent backstop for every path above
+            }
+            opening = false
+            if (activity.isFinishing || activity.isDestroyed) return@launch
+            Dialogs.problem(activity, R.string.tags_failed_title, failure)
+            // It may have been disabled or replaced under us — ask again before it is offered again.
+            discover()
         }
     }
 

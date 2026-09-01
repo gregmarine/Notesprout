@@ -12,7 +12,7 @@ are **reading references — no app code is copied**.
 still binds, and the reference doc. **The full phase-by-phase records (outcomes, findings,
 walk logs) live in git history — arcs 1–18 at `git show 90a9198:apps/notesprout_ratta/RATTA_PLAN.md`,
 arcs 19–20's full phase records at the end of this file until the next compaction** — and each
-feature's authoritative reference is its `docs/` file. **Arc 21 "Tags" is in progress — W1 and W2 complete, next work = W3.
+feature's authoritative reference is its `docs/` file. **Arc 21 "Tags" is in progress — W1, W2 and W3 complete, next work = W4.
 Fable planned only: Opus/Sonnet/Haiku execute every phase (see the arc section's model notes).**
 
 ---
@@ -802,7 +802,7 @@ outside tap takes the bar down · `pm disable-user` → the button is **GONE** (
 875 → 1178 → 875 dark px as the row re-flows and comes back) · `logcat -b crash` empty. Test data
 left on the Nomad: tags `wip` (Page 1 of 20260827_200914) and `Blah` (Page 20 of "Document").
 
-### W3 — Lasso → tag ⬜
+### W3 — Lasso → tag ✅
 Selection toolbar gains **Tag** (visibility per the planner call above). Heading flow: silent
 `assign` (call-shaped), toast with the canonical display text. Handwriting flow:
 `RecognizerClient` over the selection bounds (en-US; `RECOGNIZER_NOT_READY` = the exact-message
@@ -811,6 +811,64 @@ user corrects → lands on the current page. Non-destructive both ways.
 Walk: heading→tag silent; ink→tag with correction; recognizer-absent gating.
 *Opus. Haiku: walk (Supernote keyboard is tappable from screencap coords — the arc-20 note).*
 **Questions at phase start:** confirm the mixed-selection rule reads right in practice.
+
+**Outcome (code + user checklist, all items passed).** The lasso's Tag is live: `tagButton` in the
+selection toolbar between Pad and Delete, new pure `notebook/TagSelection` (the flow table), the
+silent door `TagManagerEntry.assign`, and the notebook's `tagSelection` / `tagFromHeading` /
+`tagFromInk` / `openTagAdd`. **1590 JVM tests/variant** (+15). All ten modules build debug +
+release. **The extension side needed no change at all** — W1 built `TagShowing.prefill` and the
+`assign` call, and W2 built the keyboard-at-window-focus latch, so W3 is entirely host-side.
+
+**Two calls at phase start, both the user's:**
+- **A mixed selection is not offered the button.** The planner's sketch recognized whatever was in
+  the selection; the user narrowed it to *exactly one heading (silent) or a selection with no
+  content objects at all (recognize)*, and **no button** for anything in between. The reason is
+  that a mixed selection has two answers — a heading already carries the words a tag would be made
+  of, while the ink beside it carries different words, and re-recognizing the heading's own strokes
+  can come back with something other than what is on the glass. A button that quietly picks one of
+  those is worse than a button that is not there. The offered set is therefore exactly
+  `SelectionMode.HEADING` and `SelectionMode.STROKES` — a lone link is content with a payload, not
+  ink, so it is out too.
+- **The recognizer is NOT gated on.** Tag stands or falls with the *tag* extension alone; a missing
+  recognizer is explained by the same problem dialog the H button beside it already gives. H and Tag
+  sit in the same bar and both go out through the recognizer, so one vanishing while the other
+  stayed would read as a bug rather than as a rule — and it keeps a package query off every `show()`.
+
+**Two implementer calls:**
+- **A heading that is not a tag lands in the correction screen, not in a refusal.** A title over
+  `MAX_TAG_CHARS` (or blank after the prefix is stripped) cannot be assigned, and `TagShowing`'s
+  constructor *refuses* an over-cap prefill rather than truncating — so the silent flow falls
+  through to MODE_ADD prefilled with as much as fits, and the act finishes in one more gesture
+  instead of none. The cut backs off a character rather than splitting a surrogate pair (the
+  `TextChunks` rule, one char wide).
+- **`RecognizingOverlay` grew a message parameter** instead of a third overlay object. The silent
+  assign's wait is the same shape and length as a heading convert's — the first tag operation of a
+  host process pays SQLCipher's KDF (seconds on a Nomad) — but it is not recognizing anything, so
+  the box says "Tagging…". Default argument, one new `@+id/message`, both KDocs say why.
+
+**Shape worth keeping:** ink→tag takes `HeadingConvert` **whole** rather than growing a near-copy.
+"Read this one writing area and give me back a single line" is the same question the heading convert
+asks — same extension, same selection-bounds area (a page-sized area under one line collapses
+recognition to fragments), same problem dialogs — and the only difference is what the caller does
+with the answer. The name stays `HeadingConvert` because that is where the flow came from; nothing
+in it knows a heading is what follows. Likewise `TagManagerEntry` took the silent door rather than
+the Activity, because availability, the busy latch and the wording of a failure are the same
+questions for a door with a screen and a door without one.
+
+Locks the phase set: the lasso always tags **the page on the paper**, never the notebook (wizard),
+and the page id is captured **at the tap** so a flip mid-recognition still lands the tag on the page
+the ink was on; the flow is re-read from the live selection at the tap rather than trusted from the
+bar that offered it (a selection can move, change kind or die between the bar going up and a button
+landing); nothing is consumed — ink, heading and selection are all exactly as they were, and the
+toast fires when the write lands, never at the tap.
+
+**Walk.** The lasso cannot be driven by adb (pen input), so this phase's walk was the user's
+checklist rather than an agent's: ink→tag with correction · heading→tag silent + toast, heading and
+selection untouched · a mixed selection showing **no** tag icon · a lone link the same · the
+over-long heading routing to the prefilled screen · and the extension `pm disable-user`'d → the
+button GONE, back after `pm enable`. All passed. Host-side smoke by adb: notebook opens with the new
+bar constructed (which is what proves `ic_tag` resolves — `button()` sets the drawable in `init`),
+`logcat -b crash` empty.
 
 ### W4 — Search merge ⬜
 `LibrarySearch` fetches `snapshot()` at query time (call-shaped, pre-open rule; absent extension

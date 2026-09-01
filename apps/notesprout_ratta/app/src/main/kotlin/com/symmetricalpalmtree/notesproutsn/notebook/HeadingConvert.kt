@@ -38,6 +38,12 @@ import java.lang.ref.WeakReference
  *
  * **Nothing recognized is ever logged** — counts and durations only. This object also touches no
  * store: it hands the caller a title and the caller decides what a heading is.
+ *
+ * That last sentence is why arc 21 / W3's **ink→tag** takes this flow whole rather than growing a
+ * near-copy of it: the question "read this one writing area and give me back a single line" is the
+ * same question, and the only difference is what the caller does with the answer. The name stays
+ * `HeadingConvert` because a heading is still where the flow came from — but nothing in it knows or
+ * cares that a heading is what follows.
  */
 object HeadingConvert {
 
