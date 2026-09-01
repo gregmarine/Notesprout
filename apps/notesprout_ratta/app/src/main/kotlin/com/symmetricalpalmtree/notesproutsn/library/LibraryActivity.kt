@@ -139,12 +139,13 @@ class LibraryActivity : AppCompatActivity() {
         mode = browseState.mode
         coldLaunch = savedInstanceState == null
 
-        // Built before the bars are wired: the Search button's listener reaches for it, and the
-        // field's editor action can fire the moment the mode opens.
-        search = LibrarySearch(this, repo, binding.searchField) {
-            // A new query is a new listing — never page 4 of the last one.
+        // Built before the bars are wired: the Search button's listener reaches for it.
+        search = LibrarySearch(this, repo) {
+            // A new query is a new listing — never page 4 of the last one. Re-searching while the
+            // shelf is already up is not a no-op: it is a different shelf under the same button.
             pageIndex = 0
-            lifecycleScope.launch { refresh() }
+            if (mode == BrowseMode.SEARCH) lifecycleScope.launch { refresh() }
+            else setMode(BrowseMode.SEARCH)
         }
         wireBars()
         // The Scratch Pad (arc 11). Built here because it registers an ActivityResult launcher, and
@@ -311,11 +312,10 @@ class LibraryActivity : AppCompatActivity() {
         // folder you were in, so the same button is always the way out of what it opened.
         btnPinned.setOnClickListener { setMode(if (mode == BrowseMode.PINNED) BrowseMode.NORMAL else BrowseMode.PINNED) }
         btnRecents.setOnClickListener { setMode(if (mode == BrowseMode.RECENTS) BrowseMode.NORMAL else BrowseMode.RECENTS) }
-        // Search does NOT toggle like the other two (arc 20): tapping it while searching re-runs
-        // what is in the field, which is the second way to run a query without reaching for the
-        // keyboard's own Search key. The left arrow and Back are the way out — deliberately, because
-        // a control that both submits and cancels is a control you cannot use quickly.
-        btnSearch.setOnClickListener { if (mode == BrowseMode.SEARCH) search.run() else setMode(BrowseMode.SEARCH) }
+        // Search does NOT toggle like the other two (arc 20): it always opens the dialog, and while
+        // the shelf is up it opens it again with the last query in it — a second search is a
+        // different shelf, not a return to the tree. The left arrow and Back are the way out.
+        btnSearch.setOnClickListener { search.openDialog() }
         btnCloseMode.setOnClickListener { setMode(BrowseMode.NORMAL) }
         btnTemplates.setOnClickListener { startActivity(TemplatesActivity.intent(this@LibraryActivity)) }
         // Backup (arc 17 / K2), the bottom bar's far-left button. Not latched with `launching`:
@@ -350,14 +350,6 @@ class LibraryActivity : AppCompatActivity() {
         mode = newMode
         browseState.mode = newMode
         pageIndex = 0
-        if (leaving == BrowseMode.SEARCH) search.close()
-        // The chrome is rendered HERE, before the field is asked to take focus — [refresh] renders
-        // it too, but a coroutine later, and a GONE view cannot be focused: the keyboard simply
-        // never opened. Only on the way in, so the other modes keep their single render.
-        if (newMode == BrowseMode.SEARCH) {
-            renderChrome()
-            search.open()
-        }
         Slog.d(TAG) { "mode → $newMode" }
         lifecycleScope.launch { refresh() }
     }
@@ -371,10 +363,9 @@ class LibraryActivity : AppCompatActivity() {
         val inMode = mode != BrowseMode.NORMAL
         val searching = mode == BrowseMode.SEARCH
         breadcrumbScroll.visibility = if (inMode) View.GONE else View.VISIBLE
-        // Exactly one of the three ever occupies the row's middle: the path, a shelf's name, or —
-        // while searching — the field the shelf is made of.
-        modeTitle.visibility = if (inMode && !searching) View.VISIBLE else View.GONE
-        searchField.visibility = if (searching) View.VISIBLE else View.GONE
+        // Exactly one of the two ever occupies the row's middle: the path, or the shelf's name —
+        // which for Search is the query itself, the answer the dialog collected.
+        modeTitle.visibility = if (inMode) View.VISIBLE else View.GONE
         btnCloseMode.visibility = if (inMode) View.VISIBLE else View.GONE
         btnNewFolder.visibility = if (inMode) View.GONE else View.VISIBLE
         btnNewNotebook.visibility = if (inMode) View.GONE else View.VISIBLE
@@ -388,10 +379,10 @@ class LibraryActivity : AppCompatActivity() {
 
         if (inMode) {
             btnUp.visibility = View.GONE
-            if (!searching) {
-                modeTitle.setText(
-                    if (mode == BrowseMode.PINNED) R.string.mode_title_pinned else R.string.mode_title_recents
-                )
+            modeTitle.text = when (mode) {
+                BrowseMode.PINNED -> getString(R.string.mode_title_pinned)
+                BrowseMode.RECENTS -> getString(R.string.mode_title_recents)
+                else -> search.title()
             }
         } else {
             renderBreadcrumb()
@@ -472,8 +463,9 @@ class LibraryActivity : AppCompatActivity() {
                 BrowseMode.NORMAL -> R.string.library_empty
                 BrowseMode.PINNED -> R.string.library_pinned_empty
                 BrowseMode.RECENTS -> R.string.library_recents_empty
-                // Two answers, not one: nothing typed yet, or nothing called that.
-                BrowseMode.SEARCH -> search.emptyTextRes()
+                // The shelf is only ever entered by an accepted query, so there is one answer
+                // here and not two: nothing in the library is called that.
+                BrowseMode.SEARCH -> R.string.library_search_empty
             }
         )
         binding.emptyState.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
@@ -607,7 +599,6 @@ class LibraryActivity : AppCompatActivity() {
      */
     private fun enterFolder(id: String) {
         if (mode != BrowseMode.NORMAL) {
-            if (mode == BrowseMode.SEARCH) search.close()
             mode = BrowseMode.NORMAL
             browseState.mode = BrowseMode.NORMAL
         }

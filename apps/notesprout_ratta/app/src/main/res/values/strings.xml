@@ -43,11 +43,15 @@
     <string name="recents_parent_root">Notebooks</string>
     <string name="page_indicator">%1$d / %2$d</string>
 
-    <!-- Search (arc 20). Two empty states, because "you have not searched yet" and "there is
-         nothing called that" are two different things to be told. -->
-    <string name="library_search_hint">Search names</string>
-    <string name="library_search_prompt">Type a name, then Search</string>
+    <!-- Search (arc 20). A dialog asks; the shelf's title is the answer, quoted the way the
+         template browser quotes its own. -->
+    <string name="mode_title_search">\"%1$s\"</string>
+    <string name="library_search_title">Search</string>
+    <string name="library_search_hint">Folder or notebook name</string>
+    <string name="library_search_confirm">Search</string>
     <string name="library_search_empty">No folders or notebooks match that</string>
+    <string name="library_search_empty_title">Nothing to search for</string>
+    <string name="library_search_empty_body">Type some of the name first.</string>
 
     <!-- New folder -->
     <string name="new_folder_title">New folder</string>

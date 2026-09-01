@@ -44,15 +44,17 @@ sat beside a second identical plus meaning "new page".)
 
 `Notebooks` is the root crumb; each ancestor follows, separated by ` / `; any crumb jumps straight
 there. `btnUp`'s back arrow appears left of the crumbs once you are below the root. **In a mode the
-breadcrumbs give way** to a title (`modeTitle`) — or, in Search, to the **field itself**
-(`searchField`) — and `btnCloseMode`, a **left arrow**, first child of the row, before the title;
-see [Modes](#modes) and [Search](#search-arc-20). `btnUp` and `btnCloseMode` share the same
+breadcrumbs give way** to a title (`modeTitle`) — "Pinned", "Recent", or, on a search shelf, the
+**query itself, quoted** — and `btnCloseMode`, a **left arrow**, first child of the row, before the
+title; see [Modes](#modes) and [Search](#search-arc-20). `btnUp` and `btnCloseMode` share the same
 `ic_arrow_left` and never show at once: a shelf has no path to go up out of. Exactly one of
-`breadcrumbScroll` / `modeTitle` / `searchField` is ever visible.
+`breadcrumbScroll` / `modeTitle` is ever visible.
 
 **Search** (arc 20 / Q1), `ic_search`, sits **between `+Folder` and `Recents`** — the user's
 placement call: it opens a shelf the way Pinned and Recents do, but what it finds is something you
-were on your way to open or create into.
+were on your way to open or create into. It asks for the query in a **dialog** and the shelf then
+wears it as its title — the template browser's shape, so the app's two searches are one
+interaction.
 
 **Bottom bar** — a `FrameLayout`, not a row:
 
@@ -112,9 +114,9 @@ place to create into. Sort stays active **except in Search**, whose order is rel
 mode's top-bar button takes `isSelected = true`, so `bg_toolbar_button`'s border says which shelf
 you are on.
 
-Entering Search is the one mode switch that renders the chrome **synchronously first**: `refresh`
-renders it too, but a coroutine later, and a `GONE` field cannot take focus — the keyboard simply
-never opened.
+Search is also the one mode nothing *switches* into: it is entered by an accepted query and by
+nothing else (`LibraryActivity` calls `setMode(SEARCH)` from the dialog's own callback), which is
+why the shelf can never be standing there empty.
 
 **What each shelf holds** — one `repo.pinnedNotebookIds()` read per refresh feeds every card's
 badge *and* the long-press sheet's Pin/Unpin label, so no card ever queries the index on its own:
@@ -307,10 +309,14 @@ by luck — which is a ranking that ranks nothing.
   database does no matching at all: fuzzy cannot be a `LIKE`.
 - **Folders first, then relevance** (`SearchAssembly`). The library's containers-before-contents
   rule outranks the score, everywhere. **Sort is GONE** while searching.
-- **The Search key runs it** — the IME action or Enter, or a tap on the Search button, which
-  **re-runs the field rather than toggling the mode off** (the ← arrow and Back are the way out; a
-  control that both submits and cancels is one you cannot use quickly). Not live-as-you-type:
-  every keystroke pause would be a whole card page repainted, covers and all, on an e-ink panel.
+- **A dialog asks; the shelf's title is the answer.** Tapping Search opens `NameDialog` — the
+  family's one "type something" surface — and an accepted query becomes the shelf. The Search
+  button **never toggles the mode off**: tapping it again re-opens the dialog with the last query
+  in it, because a second search is a different shelf, not a return to the tree (the ← arrow and
+  Back are the way out). Not live-as-you-type: every keystroke pause would be a whole card page
+  repainted, covers and all, on an e-ink panel. This is the template browser's shape, adopted here
+  on the user's call so the app's two searches are one interaction; an inline field in the top bar
+  was built first and replaced.
 - **Tapping a folder goes there and closes the search** — the shelf's job was to find the place.
   Tapping a notebook opens it through the same one door (latch + "Opening…" overlay) as every
   other card in this file. Long-press raises the ordinary action sheet, and any action that changes
@@ -320,38 +326,23 @@ by luck — which is a ranking that ranks nothing.
   on a flat shelf "where is it" beats "when". **Folder cards get one too** (`card_folder`'s
   `folderParent`, GONE everywhere else): folder names are unique only per parent, so `Work/Notes`
   and `Personal/Notes` would otherwise be the same card twice.
-- **Two empty states**: "Type a name, then Search" before a query is run, "No folders or notebooks
-  match that" after one. They are two different things to be told.
+- **One empty state**, "No folders or notebooks match that" — the shelf is only ever entered by an
+  accepted query, so a search shelf with nothing typed into it does not exist. A blank query is
+  refused by the dialog, in its **own** words ("Nothing to search for"), never the naming dialog's:
+  a query is not a name, and "that name won't work" answers a question the user did not ask.
 - **The query lives in memory only.** Prefs hold ids and enum names, never a display name, and a
   typed query is a name. It survives a hop to another shelf and back within the process — restored
   **select-all'd**, because retyping on the Supernote's on-screen keyboard is the expensive part —
   and dies with the process. `BrowseMode.SEARCH` is likewise never persisted, in either direction:
   a cold launch onto a query-less search shelf would be a screen where the library should be.
 
-**The IME.** The field takes focus and the keyboard opens on entering the mode — with an **explicit**
-`showSoftInput` (flag 0, not `SHOW_IMPLICIT`, which the system is allowed to skip when a hard
-keyboard is attached; on Ratta the hardware keys are delivered *only while the IME is shown*, so a
-declined implicit show would strand the mode with no way to type into it at all). Running the search
-dismisses it. That dismissal is the app's **one** deliberate exception to the Ratta rule that
-nothing may hide the IME (hiding it also stops a hardware keyboard's keys being delivered): the rule
-protects a user who still needs to type, and this fires only once they have said they are done — on
-top of the results the keyboard would otherwise be covering. Tapping the field brings it back.
-`LibraryActivity` is `adjustNothing` (the grid measures itself once against a real band — the
-New-notebook screen's reason) and declares `keyboard|keyboardHidden`, so attaching a BT keyboard
-cannot destroy the library under a standing query.
-
-Two smaller rules the arc-20 review pinned, both about not repainting or removing things for
-nothing:
-
-- **Dropping focus takes more than `clearFocus()`.** It re-runs the root's focus search, and the
-  field is the only view in this bar that is focusable *in touch mode* — so focus comes straight
-  back, and with it `TextView`'s caret `Blink`, invalidating every 500 ms forever on an EPD panel.
-  `LibrarySearch.dropFocus` turns `isFocusableInTouchMode` off around the clear and back on after,
-  so the caret really goes and tapping the field still brings focus (and the keyboard) back.
-- **A blank submit with no query is inert.** Search does not toggle the mode off, so it collects
-  the taps Pinned and Recents would have toggled with; answering one by dismissing an expensive
-  on-screen keyboard for a screen that does not change is the worst reading of it. Clearing a query
-  that *is* there stays a real act — it empties the shelf.
+**The keyboard.** It belongs to the dialog, which is the point of the dialog: `NameDialog` opens
+over the library, the IME opens over it when the field is tapped, and both are gone by the time the
+shelf draws — so nothing in the top bar holds focus, and no caret blinks on an EPD panel between
+searches. `LibraryActivity` is `adjustNothing` (the grid measures itself once against a real band —
+the New-notebook screen's reason; the dialog's own window pans for the IME regardless) and declares
+`keyboard|keyboardHidden`, so attaching a BT keyboard cannot destroy the library under a standing
+query.
 
 **The same matcher runs the template browser's Search shelf** ([`templates.md`](templates.md)) —
 one rule, so a name findable on one screen is findable on the other.

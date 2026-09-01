@@ -517,16 +517,16 @@ explicitly **not** searched: names only, this arc.
 | What "fuzzy" means | **Subsequence + ranking**, not typo tolerance (the user's explicit call — `mtg` finds "Meeting Notes"; `meting` does **not**). Pure `core/FuzzyRank`: tiers EXACT > PREFIX > WORD-START substring > substring > subsequence, tie-broken by word-start hits, then span, then name length, then name (case-insensitive). Edit distance was offered and declined — **do not add it without a fresh decision**. |
 | Scope | **The whole library, always** — every alive folder and notebook anywhere in the tree, whatever folder you are standing in (arc 13's template-search call, made again). |
 | Order | **Folders first, then relevance** inside each group; the library's folders-before-notebooks rule outranks the score. **Sort is GONE in search mode** — relevance *is* the order, and a live Sort control would fight it. |
-| Trigger | **The IME's Search action** (or Enter), and a tap on the Search button re-runs the field. **Not** live-as-you-type: every debounce is a whole-page EPD repaint with cover reads. |
+| Trigger | **A dialog asks for the query** (`NameDialog`, the template browser's shape — the user's 2026-08-31 revision of this row; an inline top-bar field was built first, walked, reviewed, and replaced). The Search button always opens it, and opens it again with the last query in it while the shelf is up — it **never toggles the mode off**. **Not** live-as-you-type: every debounce is a whole-page EPD repaint with cover reads. |
 | Folder tap | **Go there, search closes** — the shelf's job was to find the place. Back then peels normally. |
 | Long-press | **The same action sheet as anywhere** (Pinned/Recents parity); the query re-runs after any action that changes a name or removes a row. |
-| Chrome in search | `[←] [ field ] [Search•] [Recents] [Pinned] [Scratch pad]` — `+Notebook`, `+Folder` and `Sort` hide; the Scratch pad button **stays** (the user's explicit amendment). The field replaces the breadcrumbs/`modeTitle`, `NameDialog.input`'s bordered recipe. |
-| The Search button does not toggle | Unlike Pinned/Recents, tapping Search **while in search re-runs the query** rather than leaving; `←` and Back are the way out. A deliberate divergence — written down in `docs/library.md`. |
+| Chrome in search | `[←] "query" [Search•] [Recents] [Pinned] [Scratch pad]` — `+Notebook`, `+Folder` and `Sort` hide; the Scratch pad button **stays** (the user's explicit amendment). **The shelf's title is the query, quoted** (`mode_title_search`), in `modeTitle` where Pinned and Recents put their names. |
+| The Search button does not toggle | Unlike Pinned/Recents, tapping Search **re-opens the dialog with the last query in it** rather than leaving; `←` and Back are the way out. A deliberate divergence — written down in `docs/library.md`. |
 | Persistence | `BrowseMode` gains **`SEARCH`**, and it is the one mode that is **never persisted**: a query is a moment, not a view. A relaunch lands in NORMAL at the remembered folder; the reader maps a stored `SEARCH` back to NORMAL. The query itself never touches prefs (**a name never reaches device-local plaintext** — the standing prefs rule). |
 | Cards | The Pinned/Recents card shape. A notebook's second line is its **parent folder name** (the Recents call: on a flat shelf "where is it" beats "when"), memoised per refresh; folder cards keep icon + name. |
-| Empty states | Blank field → "Type to search"; a run that matched nothing → "No matches". Two strings, because they are two different answers. |
+| Empty states | **One**: a run that matched nothing → "No folders or notebooks match that". The shelf is only ever entered by an accepted query, so a query-less search shelf does not exist; a blank query is refused **by the dialog**, in its own words ("Nothing to search for"), never the naming dialog's. |
 | Templates | **The template Search shelf adopts the same fuzzy rule** (the user's call): `TemplateSearch` is reimplemented on `FuzzyRank`, `IndexRepository.searchTemplates` ranks in Kotlin instead of SQL `LIKE` (the `LIKE` DAO query goes), sentinels and rows rank **together** in one list, and **`btnSort` is GONE on that shelf only**. Its dialog-vs-inline shape stays as arc 13 built it. |
-| IME | The field takes focus and the IME opens on entering search mode. On the Search action the field **clears focus and the keyboard is dismissed** so the results are visible — a written exception to the Ratta never-hide-the-IME rule, and a narrow one: the rule protects a user who still needs to type, and this fires only when they have said they are done. Tapping the field brings it back. `LibraryActivity` gains `adjustNothing` (the grid measures itself once against a real band — G3's reason) and `keyboard\|keyboardHidden` configChanges (the M4 lesson: a BT-keyboard attach must not recreate it). |
+| IME | **The dialog owns it** — nothing in the top bar ever holds focus, so no caret blinks on the panel between searches and the never-hide-the-IME rule is never in play. `LibraryActivity` keeps `adjustNothing` (the grid measures itself once against a real band — G3's reason; the dialog's own window pans regardless) and `keyboard\|keyboardHidden` configChanges (the M4 lesson: a BT-keyboard attach must not recreate it). |
 
 ### Q1 — Search
 **Status:** 🔄 In progress (code + walk + review done; commit + freeze pending)
@@ -568,6 +568,21 @@ answer them by taking an expensive keyboard away); **folder cards carry the pare
 twice); and `data/template/TemplateSearch` — down to a single wrapper with no production caller and
 a KDoc describing behaviour the rewrite removed — was **deleted**, `TemplateShelfView` calling
 `FuzzyRank.isRunnable` directly. Final: **1511 JVM tests/variant**.
+
+**Post-walk revision (user, 2026-08-31, after the first cut shipped as `eae3673`): the inline
+top-bar field is gone — a dialog asks for the query and the shelf's title is the answer.** The
+template browser's shape, so the app's two searches are one interaction. `searchField` was removed
+from `activity_library.xml`, `LibrarySearch` lost the field, the editor action, the focus dance and
+both IME calls (about 40 lines) and gained `openDialog()` + `title()`; `modeTitle` now carries the
+quoted query; `setMode(SEARCH)` is fired from the dialog's accept callback, so the shelf is only
+ever entered by a runnable query — which retires the "Type to search" empty state, the blank-submit
+rule and both keyboard findings the review had raised against the field (they were fixed on the
+field before it was replaced; the dialog makes them unreachable rather than fixed). Strings:
+`mode_title_search` / `library_search_title` / `_hint` / `_confirm` / `_empty_title` / `_empty_body`
+replace `library_search_prompt`. Re-walked on the Nomad: dialog opens with the last query, blank is
+refused with "Nothing to search for" over a dialog that stays up, an accepted query titles the shelf
+`"jour"`, Cancel leaves the standing shelf untouched, Back leaves to the tree. `logcat -b crash`
+empty.
 
 **Written reason for the size rule** (`LibraryActivity` 823 → 886 lines, the `ExportActivity`
 precedent): the whole search *feature* is already out of it — the matcher, the ordering rule and the

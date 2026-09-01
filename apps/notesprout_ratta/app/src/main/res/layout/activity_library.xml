@@ -47,8 +47,9 @@
                 android:gravity="center_vertical" />
         </HorizontalScrollView>
 
-        <!-- Pinned / Recents replace the breadcrumbs while a mode is on: there is no path to
-             show, only a shelf. Exactly one of breadcrumbScroll / modeTitle is ever visible. -->
+        <!-- Pinned / Recents / Search replace the breadcrumbs while a mode is on: there is no path
+             to show, only a shelf — and a search shelf's name is the query itself. Exactly one of
+             breadcrumbScroll / modeTitle is ever visible. -->
         <TextView
             android:id="@+id/modeTitle"
             android:layout_width="0dp"
@@ -60,33 +61,6 @@
             android:textColor="@color/inkBlack"
             android:singleLine="true"
             android:ellipsize="end"
-            android:visibility="gone" />
-
-        <!-- Search (arc 20 / Q1) takes the same slot as the breadcrumbs and the mode title: while
-             it is up, the query IS the path. A field rather than a title because a search is the
-             one shelf you have to say something to open. Bordered single-line, the NameDialog
-             recipe, so every text input in the app looks like the same object. -->
-        <androidx.appcompat.widget.AppCompatEditText
-            android:id="@+id/searchField"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginStart="8dp"
-            android:layout_marginEnd="8dp"
-            android:background="@drawable/shape_bordered"
-            android:paddingStart="10dp"
-            android:paddingEnd="10dp"
-            android:paddingTop="6dp"
-            android:paddingBottom="6dp"
-            android:textSize="16sp"
-            android:textColor="@color/inkBlack"
-            android:textColorHint="@color/inkLight"
-            android:hint="@string/library_search_hint"
-            android:inputType="text"
-            android:imeOptions="actionSearch"
-            android:maxLines="1"
-            android:singleLine="true"
-            android:importantForAutofill="no"
             android:visibility="gone" />
 
         <!-- Create / view controls: the top bar's right edge is where everything you do
