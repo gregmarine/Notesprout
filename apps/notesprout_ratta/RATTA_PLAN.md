@@ -12,8 +12,9 @@ are **reading references — no app code is copied**.
 still binds, and the reference doc. **The full phase-by-phase records (outcomes, findings,
 walk logs) live in git history — arcs 1–18 at `git show 90a9198:apps/notesprout_ratta/RATTA_PLAN.md`,
 arcs 19–20's full phase records at the end of this file until the next compaction** — and each
-feature's authoritative reference is its `docs/` file. **No next arc is planned — ask the user
-before starting anything.**
+feature's authoritative reference is its `docs/` file. **The next arc is Arc 21 "Tags" — planned
+2026-08-31 (wizard complete), not started. Fable planned only: Opus/Sonnet/Haiku execute every
+phase (see the arc section's model notes).**
 
 ---
 
@@ -525,6 +526,195 @@ commit.
 | og feature references | monorepo `docs/` (documents.md, proofread.md, full-notebook-export.md, backup.md, scratchpad.md, clipboard-and-page-transfer.md, links.md) |
 | g-paper API + host duties | `~/git/g-paper/docs/{api,architecture,host-responsibilities,integration-guide}.md` |
 | Frozen arc phase records | `git show 90a9198:apps/notesprout_ratta/RATTA_PLAN.md` |
+
+---
+
+## Phases — Arc 21 "Tags" (planned 2026-08-31, wizard complete — NOT STARTED)
+
+Tags on **notebooks and pages** — the SIXTH capability point (`ACTION_TAG_MANAGER` + `_SCREEN`,
+granted by the user 2026-08-31), the **third tier-2 screen-owning point**, and the **TENTH module**
+(`:ext-tags`, **NSE · Tags**). Scratch-Pad-shaped: the extension owns the tag screen and its index
+(in its own encrypted extension store, `Garden/<pkg>.db` — an extension still writes nothing to
+disk itself); the host owns every entry point (library long-press row, notebook toolbar button +
+secondary toolbar, lasso-toolbar button), the recognizer call, and the library-search merge.
+
+**⚠️ Fable planned this arc and will NOT be available to execute it.** Opus implements every
+feature phase *including the seam code* — the seam spec below is deliberately complete so no phase
+waits on Fable. Sonnet scaffolds modules/layouts/resources/docs; Haiku walks the Nomad. If a phase
+hits something genuinely outside this spec (crypto/key lifecycle, an engine gap, a schema
+question), **stop and ask the user** rather than improvising.
+
+### Locked decisions (arc-21 wizard 2026-08-31 — do not re-ask)
+
+| Decision | Answer |
+|---|---|
+| Sixth point | **Granted explicitly** (the user's 2026-08-31 message is the decision the standing rule requires). No SEVENTH without another. |
+| Seam shape | **Scratch-Pad-shaped tier-2**: extension owns the tag screen + the index in its extension store; host owns entries, recognition, search merge. |
+| Identity | `:ext-tags` (TENTH module) · label **NSE · Tags** · pkg `…notesproutsn.ext.tags` · `ACTION_TAG_MANAGER` + `ACTION_TAG_MANAGER_SCREEN` · app icon Tabler `tag` outline. |
+| Tag identity | **Trim ends + collapse internal whitespace runs + case-fold** = one tag; display form is the first-entered casing; cap **64 chars**; no other charset restriction. Multi-word tags are the point. |
+| Lifecycle | A tag **persists until explicitly deleted** — removing its last assignment leaves it in the suggestion list. Delete lives behind **long-press on a tag in the list**. |
+| Deleting an assigned tag | **Confirm naming the blast radius** ("Remove from N notebooks and M pages?"), then the tag and every assignment go. |
+| Search | **One query runs names AND tags** through the same `core/FuzzyRank`. **Page hits appear as their own cards** (open the notebook AT that page). Order: folders → notebooks (name- or tag-matched, deduped, best rank) → page hits. |
+| Lasso → tag target | **The current page**, always. Non-destructive — the ink/heading stays untouched. |
+| Snapshot semantics | A tag is a **text snapshot** at creation: editing the source heading later never renames a tag; converting again creates/attaches another tag ("modifying creates a new tag"). |
+| Heading → tag | **Silent** — one tap attaches the heading's text as a page tag, toast-confirmed. |
+| Handwriting → tag | Recognize the selection → **prefilled input dialog for correction** → create/attach. |
+| Visibility | **Only where you go looking**: the tag screen and search-result cards. No tag lines on library cards, nothing on pages. |
+| Notebook toolbar | `ic_tag` in the top bar's **right cluster next to the Document button, before Recents** → secondary toolbar `[Tag notebook] [Tag page] [Manage]`. The first two open the tag screen for that target with the **add-input already focused**; Manage opens the notebook in **browse state — its tags AND every page's tags** for add/remove. |
+| Library entry | Long-press action sheet gains a **"Tags…"** row (notebooks only — folders are not taggable) → tag screen for that notebook. |
+| Backup | **Extension stores enter the arc-17 backup set** (all of `Garden/<pkg>.db` — tags, scratch pad pages, proofread dictionary all become durable). |
+
+### Seam spec (planner-fixed — implement as written; deviations need a user decision)
+
+**Contract additions (`:extension-api`):**
+
+- `ExtensionContract`: `ACTION_TAG_MANAGER` / `ACTION_TAG_MANAGER_SCREEN`
+  (`com.symmetricalpalmtree.notesproutsn.extension.TAG_MANAGER[_SCREEN]` — match the existing
+  namespacing exactly), and **`API_VERSION` 3 → 4** (the tag point is the version-4 event;
+  `:ext-tags` services declare 4, every other extension's declarations stay put; host accepts
+  `1..N` as always — record the event in the constant's comment, D3/M8 recipe).
+- Caps, each pinned by test: `MAX_TAG_CHARS` 64 · `MAX_TAGS` 5_000 · `MAX_TAG_ASSIGNMENTS`
+  50_000 · the serialized index must fit `STORE_MAX_VALUE_BYTES` by construction (assert in the
+  codec test with worst-case sizes).
+- **`ITagManager`** (AIDL), one interface serving both call patterns — the store rides the calls
+  that need it, per the store's own rule:
+
+  ```
+  void       begin(IExtensionStore store);                 // held-bind bracket for a showing
+  void       configureShowing(in TagShowing showing);      // after begin, before launch — nothing rides the Intent
+  void       end();                                        // drop the store + parked showing
+  LargeValue snapshot(IExtensionStore store);              // call-shaped: whole index as a TagCodec blob (ashmem)
+  String     assign(IExtensionStore store, String text, int targetKind, String targetId);
+                                                           // call-shaped: normalize → create-if-absent → attach;
+                                                           // returns the canonical display text (for the toast)
+  ```
+
+  Showings use `ExtensionBinder.hold` (scratch-pad bracket: pre-open store on IO → mint
+  `ExtensionStoreBinder` → hold → `begin` → `configureShowing` → launch via
+  `ActivityResultLauncher` → result → `end()` → close/revoke in one `finally`, `onDestroy`
+  backstop). `snapshot`/`assign` use `ExtensionBinder.call` (bind-per-call, recognizer shape,
+  pre-open rule still applies). Stub methods: `HostCallerCheck.enforce` first, only the three
+  marshalable exceptions leave.
+- **`TagShowing`** (Parcelable, `requireValid` in the constructor = unmarshal validation):
+  `targetKind` (`TARGET_NOTEBOOK` 0 / `TARGET_PAGE` 1) · `targetId` (opaque UUID string — the
+  M3 pageKey precedent) · `targetLabel` (display name the host resolved) · `mode` (`MODE_BROWSE`
+  0 / `MODE_ADD` 1 / `MODE_MANAGE` 2) · `prefill` (nullable — the recognized text) ·
+  `pageIds`/`pageLabels` (parallel string arrays, MANAGE only, else empty — page display numbers
+  are the host's to name). Tag text and labels are user content: they cross the bind, **never**
+  the Intent, and are never logged on either side (counts/lengths/durations only).
+- **`TagCodec`** (pure, `:extension-api`, stdlib-only line codec — the `UserWords`/store-blob
+  precedent, no serialization dep): storage form **is** the wire form. One blob: version line,
+  then tag records (`id · identityKey · display`), then assignment records
+  (`tagId · targetKind · targetId`). Unknown version throws ("unreadable, not empty" — the
+  ScratchPageCodec rule); a truncated tail keeps what decoded whole; escapes tabs/newlines.
+- **`TagRules`** (pure, `:extension-api`, shared by both sides + tests): `identityKey(text)`
+  (trim, collapse `\s+` runs to one space, locale-neutral case fold), `isValid(text)`
+  (non-blank after normalize, ≤ 64), display-form rule (first-entered casing wins).
+
+**Extension side (`:ext-tags`):** no Application class, **no g-paper / no drawing surface** —
+the first non-drawing tier-2 screen, so **no EPD handoff anywhere** (M3's measured answer:
+stop-behind is enough for a non-drawing child screen, cross-process included — do not add
+`releaseForHandoff`). `TagManagerService` parks the showing under one monitor (`begin`/`end`
+take the same one); the screen Activity runs `HostCallerCheck.enforceActivity` first thing in
+`onCreate`, reads the parked showing from the service (same process), and owns: the target's
+current tags (tap a chip/row to remove), the add input with **live-filtered suggestions from the
+in-memory snapshot** (never a store call per keystroke — the list region repaint is the accepted
+EPD cost), the paginated all-tags list when the input is empty (prev/next pager, rows measured
+against the real band — the Today/library idiom), long-press-delete with the blast-radius
+confirm, and MANAGE's notebook + per-page sections. Store layout: key `index` = the `TagCodec`
+blob (`put`/`get` at or under `STORE_MAX_INLINE_BYTES`, `putLarge`/`getLarge` above — fall to
+large only on the exact `STORE_VALUE_LARGE` message; blocking, IO or Binder thread, never Main).
+Chrome: SN design system, action buttons on the **top bar after Cancel** (F2 + the 2026-08-28
+amendment), TopGuard 0, portrait, Ratta IME rules (never hide while the field has focus;
+explicit show flag 0 — the arc-20 hard-keyboard finding). RESULT_OK when anything changed.
+
+**Host side:** `TagClient` (scratch-pad `ScratchPadClient` shape); discovery via
+`ExtensionRegistry` for the new action; **every entry point GONE when no tag extension is
+installed** (menu row, toolbar button, lasso button — the Import-button precedent; search runs
+names-only). Stale assignments (deleted notebooks/pages, arc-17 purge): the host **filters
+snapshot targets against alive index rows at query time**; dead entries are tolerated in the
+blob — pruning is a `BACKLOG.md` note, not this arc.
+
+**Planner calls the wizard didn't cover** (implementer follows; user can override at phase start):
+lasso Tag button shows when the selection is **exactly one heading and nothing else** (→ silent
+flow) **or** a recognizer is READY-able (→ recognize flow; recognition area = the **selection
+bounds**, never the page); any other/mixed selection recognizes the selection's strokes. No undo
+for tag operations (not page content; confirm dialogs guard the destructive ones). Open-at-page
+from search: reuse the notebook's existing open-at-page mechanism if one exists (link-follow /
+Contents navigate by page id — check `docs/notebook.md`), else add an optional page-id extra
+handled at load (ids in extras are the norm; names/queries are not).
+
+### W1 — Point, module, tag screen core ⬜
+`:extension-api` additions above; `:ext-tags` module (manifest, icon, service, screen, store
+layout, codec); host `TagClient` + discovery; **one real entry** so the walk is honest: the
+library long-press sheet's "Tags…" row (notebooks only). Screen ships BROWSE + ADD complete
+(current tags, add input + live suggestions, paginated all-tags list, long-press delete +
+blast-radius confirm); MANAGE refuses politely until W2 (`UnsupportedOperationException` crosses
+intact — the J3 precedent — but prefer simply not offering the mode yet). JVM: TagRules,
+TagCodec (incl. unreadable-not-empty + truncated-tail), caps, gate/validation, snapshot/assign
+logic over a fake store. Walk: tag a notebook, suggestion reuse across notebooks, remove, delete
+w/ confirm, extension-disabled → row GONE.
+*Opus: contract + service + screen logic + client. Sonnet: module scaffold, manifest, icon,
+layouts, strings. Haiku: walk.*
+**Questions at phase start:** none — wizard covered it. Confirm the phase flip only.
+
+### W2 — Notebook entries ⬜
+`ic_tag` top-bar button (right cluster, next to Document, before Recents) → secondary toolbar
+`[Tag notebook] [Tag page] [Manage]` (the selection-toolbar pattern; GONE without the
+extension). Quick-add ×2 = tag screen in MODE_ADD, input focused (IME rules); Manage =
+MODE_MANAGE with the page id/label arrays (display numbers resolved host-side at launch).
+Walk: all three doors, page tags land on the right page, IME opens on quick-add.
+*Opus: flows + toolbar wiring. Sonnet: layout/strings/icon. Haiku: walk.*
+**Questions at phase start:** exact secondary-toolbar button labels/wording (a placement/wording
+call the user traditionally makes on sight).
+
+### W3 — Lasso → tag ⬜
+Selection toolbar gains **Tag** (visibility per the planner call above). Heading flow: silent
+`assign` (call-shaped), toast with the canonical display text. Handwriting flow:
+`RecognizerClient` over the selection bounds (en-US; `RECOGNIZER_NOT_READY` = the exact-message
+"still downloading" dialog the heading flow already has) → tag screen MODE_ADD with `prefill` →
+user corrects → lands on the current page. Non-destructive both ways.
+Walk: heading→tag silent; ink→tag with correction; recognizer-absent gating.
+*Opus. Haiku: walk (Supernote keyboard is tappable from screencap coords — the arc-20 note).*
+**Questions at phase start:** confirm the mixed-selection rule reads right in practice.
+
+### W4 — Search merge ⬜
+`LibrarySearch` fetches `snapshot()` at query time (call-shaped, pre-open rule; absent extension
+= names-only, silently). Tag texts rank through `core/FuzzyRank` with the same total order;
+`SearchAssembly` grows the third group: folders → notebooks (name/tag deduped, best rank) →
+**page-hit cards** ("<notebook> · Page N", parent-folder second line, matched tag shown) that
+open the notebook at that page. Alive-filtering against the index; the query **re-runs after any
+action** (arc-20 rule) — tag edits included. Sort stays GONE; `BrowseMode.SEARCH` persistence
+rules untouched.
+Walk: tag-only match surfaces notebook; page hit opens at the page; names-only when disabled.
+*Opus (touches arc-20 code — read `docs/library.md` § Search first; FuzzyRank itself must not
+change ranking for names). Haiku: walk.*
+**Questions at phase start:** page-hit card wording.
+
+### W5 — Backup of extension stores ⬜
+The arc-17 engine grows the store set: enumerate via a new `SoilFile.extensionStoreFiles(ctx)`
+(the one path authority grows the one listing function; `isValidExtensionPackage` filters),
+**copy every pass unconditionally** (small files — no stamp bookkeeping; `updatedAt` semantics
+untouched), ciphertext stream + WAL-alongside, ordered **before the index** (index-last rule
+unchanged). Backup-done dialog counts them.
+*Opus (read `docs/backup.md` whole first). Haiku: walk (backup to SAF, verify `<pkg>.db` +
+sidecars present, encrypted header).*
+**Questions at phase start:** the restore path — arc 17 shipped backup + per-notebook Replace
+import; confirm with the user what "restoring" a store means this arc (likely: document the
+manual copy-back + BACKLOG a restore screen).
+
+### W6 — Review, docs, freeze ⬜
+`/code-review` on the arc range (**run + fixed by Opus this arc — Fable unavailable**; level
+asked at phase start), fix/accept per user call. Docs: **`docs/tags.md`** NEW (the feature),
+`docs/extensions.md` (sixth point + module table to TEN + `API_VERSION` 4 + boundary-audit
+rows: TagShowing, the snapshot/assign calls, the store-index layout, what each side may know),
+`docs/library.md` (search merge + long-press row), `docs/notebook.md` (toolbar + lasso entries),
+`docs/backup.md` (store set), both CLAUDE.mds, root CLAUDE.md arc record, `BACKLOG.md`
+(assignment pruning; restore screen if W5 lands there), memory. NUL byte-scan every changed
+file. Full gates: JVM both variants, all TEN modules debug+release, release signs, final Nomad
+walk, user checklist.
+*Opus review + fixes; Sonnet docs; Haiku final walk.*
+**Questions at phase start:** review level; version stamp (stay `0.1.0-ratta`?).
 
 ---
 
