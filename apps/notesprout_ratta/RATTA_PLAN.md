@@ -12,7 +12,7 @@ are **reading references — no app code is copied**.
 still binds, and the reference doc. **The full phase-by-phase records (outcomes, findings,
 walk logs) live in git history — arcs 1–18 at `git show 90a9198:apps/notesprout_ratta/RATTA_PLAN.md`,
 arcs 19–20's full phase records at the end of this file until the next compaction** — and each
-feature's authoritative reference is its `docs/` file. **Arc 21 "Tags" is in progress — W1 complete, next work = W2.
+feature's authoritative reference is its `docs/` file. **Arc 21 "Tags" is in progress — W1 and W2 complete, next work = W3.
 Fable planned only: Opus/Sonnet/Haiku execute every phase (see the arc section's model notes).**
 
 ---
@@ -161,6 +161,10 @@ Code / correctness:
   changes with build type (DebugMenu) and caller (`btnSend`); centred = FrameLayout child.
 - **`isPenActive` counts hover** — never idle-gate a dismissal/show that must answer a
   deliberate act; the frame-silence exceptions are ledgered in `docs/notebook.md`.
+- **`showSoftInput` from `onResume` is dropped** (arc 21 / W2): a resumed Activity does not yet have
+  window focus. The field ends up served and caret-ready at `mInputShown=false`, which reads as a
+  broken keyboard. Raise it from `onWindowFocusChanged`, behind a once-per-showing latch — and still
+  with the arc-20 **explicit flag 0**, never `SHOW_IMPLICIT`.
 - **GONE, never disabled; not-built controls do not exist** (J4). Toast confirms / dialog
   explains; **a query is not a name** (don't reuse NameDialog strings for non-names).
 - **Reuse before mint; render at the page's own size; `applyTemplate` never decodes; unknown
@@ -730,7 +734,7 @@ field gives `mInputShown=true mShowExplicitlyRequested=true` with `mServedView=�
 keyboard draws, and every key lands. It was tap aim, which the same agent had already admitted
 elsewhere in its own report.
 
-### W2 — Notebook entries ⬜
+### W2 — Notebook entries ✅
 `ic_tag` top-bar button (right cluster, next to Document, before Recents) → secondary toolbar
 `[Tag notebook] [Tag page] [Manage]` (the selection-toolbar pattern; GONE without the
 extension). Quick-add ×2 = tag screen in MODE_ADD, input focused (IME rules); Manage =
@@ -739,6 +743,64 @@ Walk: all three doors, page tags land on the right page, IME opens on quick-add.
 *Opus: flows + toolbar wiring. Sonnet: layout/strings/icon. Haiku: walk.*
 **Questions at phase start:** exact secondary-toolbar button labels/wording (a placement/wording
 call the user traditionally makes on sight).
+
+**Outcome (code + Nomad walk by hand, all green).** The notebook's three tag doors are live.
+Host: `btnTags` in the top bar's right cluster (`ic_tag`, between Document and Recents, GONE
+without the extension via a new `TagManagerEntry.refresh()`), `notebook/TagsPopup` hung under it,
+`notebook/TagTargets` (pure), and `TagManagerEntry` grew an optional `button`. Extension:
+`TagsActivity` gained MODE_MANAGE, `TagManage` (pure), `TagRowView.buildTarget`, and the layout's
+new `targetSection` wrapper. **1575 JVM tests/variant** (+12). All ten modules build debug +
+release; both release APKs sign.
+
+**Two user calls at phase start:**
+- **The three buttons are icon-only with long-press hints** — the house style every floating bar in
+  the notebook already follows. `ic_notebook` (og's Tabler notebook) and a new `ic_page` (Tabler
+  file — deliberately *not* `ic_file_text`, which is the Document button two taps away in the same
+  bar) joined `ic_list` in `:sn-screen`.
+- **MANAGE is an overview list you drill into**, not many targets edited on one screen: it opens on
+  the notebook plus every page, each row over the tags it carries, and tapping a row makes it the
+  target so the screen becomes *exactly* the W1 screen. The back arrow returns to the overview and
+  only from there leaves. Adding and removing therefore have one implementation and one set of
+  gestures whatever door was taken — editing many targets at once would have needed a second
+  grammar for "which of these am I acting on".
+
+**Two things the walk found, both fixed and re-proven:**
+- **`showSoftInput` from `onResume` is dropped** — a resumed Activity does not yet have window
+  focus, so MODE_ADD came up with the field served and caret-ready at `mInputShown=false`, which
+  reads as a broken keyboard rather than one asked for too early. It is raised from
+  `onWindowFocusChanged` now, behind a once-per-showing latch so returning from a dialog does not
+  re-raise a keyboard the user just put away. (The arc-20 explicit-flag-0 rule is unchanged and
+  still necessary.)
+- **The overview must remember its page.** Drilling into Page 20 and coming back landed on 1/3.
+  `overviewPage` is kept apart from the tag list's `page`, and the text watcher is **silent in the
+  overview** — the state changes clear the field, and that clear was sending the target list back
+  to its first page.
+
+**Shape worth keeping:** the arc-8 `LassoPopup` and this one are the same bar, so the placement
+call, the measure-before-place rule, the rects and the button recipe moved into
+`notebook/AnchoredBar` and both are now thin. A second copy would have been the sibling-copy trap
+in miniature. The tag bar's outside-tap dismissal deliberately does **not** write
+`tapDismissedPopup`: that latch exists so a contact spent dismissing the clipboard popup is not
+also spent pasting, and this bar has no second meaning.
+
+Locks the phase set: two of the three doors are about the page on the paper, so the bar is gated on
+`canvasShown` (a text document that has never shown its pages has no page to tag — absent, not
+greyed); page **numbers** are the host's to resolve, at the tap, against the live page list, and a
+displayed page that is not in the list falls back to the notebook's name rather than "Page 0"; the
+MANAGE arrays stop at `TagShowing.MAX_PAGES` because the parcel refuses rather than allocates above
+it; the overview is never empty (the notebook is always a row) so it has no empty state.
+
+**Walk (by hand on the Nomad).** Button in the right cluster between Document and Recents · bar
+opens under it with the three glyphs · **Tag notebook** → the notebook's screen, keyboard up ·
+**Tag page** → title "Page 1", "Tags on this page", typed `wip` on the on-screen keys, Enter landed
+it (target section + All tags ✓, field cleared, keyboard kept) · **Manage** → "Notebook and pages",
+`Notebook / No tags`, `Page 1 / wip` · drill into Page 1 → "Tags on Page 1", attached Test, back
+arrow → the overview now reading `Test, wip` · on the 20-page **Document** notebook the overview is
+21 rows over 3 pages, numbered Page 1…Page 20 correctly, pager 1/3 → 3/3 · tagged Page 20 from the
+drill-in and it landed on **Page 20** with the overview returning to 3/3 where it was left ·
+outside tap takes the bar down · `pm disable-user` → the button is **GONE** (verified pixel-wise,
+875 → 1178 → 875 dark px as the row re-flows and comes back) · `logcat -b crash` empty. Test data
+left on the Nomad: tags `wip` (Page 1 of 20260827_200914) and `Blah` (Page 20 of "Document").
 
 ### W3 — Lasso → tag ⬜
 Selection toolbar gains **Tag** (visibility per the planner call above). Heading flow: silent

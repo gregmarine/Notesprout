@@ -93,4 +93,85 @@ object TagRowView {
         )
         return column
     }
+
+    // ── MANAGE's overview rows (arc 21 / W2) ─────────────────────────────────
+
+    /** The height a [buildTarget] row takes — two lines, so it is taller than a tag row and the
+     *  pager's arithmetic has to be told which kind it is measuring. */
+    fun targetRowHeightPx(context: Context): Int {
+        val d = context.resources.displayMetrics.density
+        return rowHeightPx(context) + (20 * d).toInt()
+    }
+
+    /**
+     * One row of MANAGE's overview: a target — the notebook, or one of its pages — over the tags
+     * it carries. The second line is **inkBlack and smaller**, never inkLight: it is the answer the
+     * row exists to give, and the palette rule reserves the grey for text meant not to be read.
+     *
+     * The chevron says the row goes somewhere, which is the only thing tapping it does — the edit
+     * happens on the target's own screen, one target at a time.
+     */
+    fun buildTarget(
+        context: Context,
+        label: String,
+        tags: String,
+        onClick: () -> Unit,
+    ): View {
+        val d = context.resources.displayMetrics.density
+        val ink = ContextCompat.getColor(context, R.color.inkBlack)
+        val hairline = d.toInt().coerceAtLeast(1)
+        val iconSize = (24 * d).toInt()
+
+        val column = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+
+        val row = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding((16 * d).toInt(), 0, (16 * d).toInt(), 0)
+            isClickable = true
+            isFocusable = false
+            background = ColorDrawable(Color.TRANSPARENT)
+            setOnClickListener { onClick() }
+        }
+        val lines = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        lines.addView(
+            AppCompatTextView(context).apply {
+                text = label
+                textSize = 16f
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                setTextColor(ink)
+            },
+        )
+        lines.addView(
+            AppCompatTextView(context).apply {
+                text = tags
+                textSize = 13f
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                setTextColor(ink)
+            },
+        )
+        row.addView(lines, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(
+            AppCompatImageView(context).apply {
+                setImageResource(R.drawable.ic_page_next)
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                contentDescription = null
+            },
+            LinearLayout.LayoutParams(iconSize, iconSize),
+        )
+        column.addView(
+            row,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                targetRowHeightPx(context) - hairline,
+            ),
+        )
+        column.addView(
+            View(context).apply { setBackgroundColor(ink) },
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, hairline),
+        )
+        return column
+    }
 }

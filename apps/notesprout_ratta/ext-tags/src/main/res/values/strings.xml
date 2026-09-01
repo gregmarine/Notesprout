@@ -12,6 +12,9 @@
     <string name="cd_tags_prev_page">Previous page</string>
     <string name="cd_tags_next_page">Next page</string>
     <string name="cd_tags_remove">Remove</string>
+    <!-- MANAGE's back arrow has two jobs (arc 21 / W2): inside a target it returns to the
+         overview, and only there does it leave. The hint says which one it is about to do. -->
+    <string name="cd_tags_back_to_overview">Back to all pages</string>
 
     <!-- The two sections. The first names what you are looking at; the second what tapping does. -->
     <string name="tags_on_notebook">Tags on this notebook</string>
@@ -23,6 +26,17 @@
     <string name="tags_no_match">No tag matches that. Add it with ⊕.</string>
     <string name="tags_add_hint">Add a tag…</string>
     <string name="tags_page_indicator">%1$d / %2$d</string>
+
+    <!-- MANAGE (arc 21 / W2): the notebook and every one of its pages in one list, each row over
+         the tags it carries. Tapping a row opens that target's own screen — the same screen the
+         two quick doors open, so there is one place a tag is added and one way it is removed. -->
+    <string name="tags_manage_targets">Notebook and pages</string>
+    <string name="tags_manage_notebook_row">Notebook</string>
+    <string name="tags_manage_no_tags">No tags</string>
+    <!-- The header when a page is the target and the title is already the notebook's name. -->
+    <string name="tags_on_named">Tags on %1$s</string>
+    <!-- The separator between a row's tags: a comma, spelled here so it is translatable. -->
+    <string name="tags_manage_separator">", "</string>
 
     <!-- Toasts confirm what already happened; a dialog explains why a tap did nothing. -->
     <string name="tags_added_toast">Tagged “%1$s”</string>

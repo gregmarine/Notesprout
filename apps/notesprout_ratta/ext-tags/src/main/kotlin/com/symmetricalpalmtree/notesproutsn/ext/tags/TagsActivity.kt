@@ -6,6 +6,7 @@ import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.widget.doAfterTextChanged
@@ -37,6 +38,14 @@ import java.util.concurrent.atomic.AtomicReference
  * `configureShowing`, both read out of [TagSession] (same process). The screen opens **no file** and
  * writes nothing to disk itself — the index is one value in the host's store.
  *
+ * **MODE_MANAGE** (arc 21 / W2) puts one more state in front of that, and only one: an **overview**
+ * of the notebook and every page the host named, each row over the tags it carries. Tapping a row
+ * makes it the target and the screen becomes exactly what it is in every other mode; the back arrow
+ * returns to the overview, and only from the overview does it leave. Adding and removing therefore
+ * have one implementation and one set of gestures whatever door was taken to get here — the
+ * alternative, editing many targets on one screen, would have needed a second grammar for "which of
+ * these am I acting on".
+ *
  * Three surfaces, three unambiguous gestures:
  *  - the target's own tags — **tap removes** it from this notebook or page. The tag itself stays in
  *    the library (the wizard's lifecycle call: a tag persists until it is explicitly deleted);
@@ -64,6 +73,37 @@ class TagsActivity : AppCompatActivity() {
     private var index: TagIndex = TagIndex.EMPTY
     private var page = 0
     private var rowHeightPx = 1
+    private var targetRowHeightPx = 1
+
+    /**
+     * The target every edit on this screen lands on. In BROWSE and ADD it is the showing's, for the
+     * whole showing. In MANAGE it is whichever row of the overview was tapped — so the rest of the
+     * screen never has to ask which mode it is in, only what the target is.
+     */
+    private lateinit var target: Target
+
+    /** MANAGE's rows, built once from the showing: the notebook, then every page the host named. */
+    private var manageTargets: List<Target> = emptyList()
+
+    /** True while MANAGE is showing its list of targets rather than one target's tags. */
+    private var overview = false
+
+    /** Where the overview was left when a target was opened. Kept apart from [page], which belongs
+     *  to the tag list: coming back from Page 20 must land where Page 20 was, not at the top. */
+    private var overviewPage = 0
+
+    /** MODE_ADD owes this showing one keyboard, raised at the first window focus. See
+     *  [onWindowFocusChanged] for why it cannot be `onResume`. */
+    private var pendingAddFocus = false
+
+    /** A thing tags hang on, and the words this screen uses for it. [header] is the section line
+     *  above its tags; [rowLabel] is how the overview lists it. */
+    private class Target(
+        val kind: Int,
+        val id: String,
+        val header: String,
+        val rowLabel: String,
+    )
 
     /** One edit at a time: e-ink gives a tap no feedback for hundreds of ms, so the second tap is
      *  taken as read rather than queued behind a store write. */
@@ -83,6 +123,7 @@ class TagsActivity : AppCompatActivity() {
         setContentView(binding.root)
         TopGuard.applyInsetPadding(binding.root)
         rowHeightPx = TagRowView.rowHeightPx(this)
+        targetRowHeightPx = TagRowView.targetRowHeightPx(this)
 
         val parked = TagSession.showing
         if (parked == null || TagSession.store == null) {
@@ -94,14 +135,18 @@ class TagsActivity : AppCompatActivity() {
             return
         }
         showing = parked
+        buildTargets()
 
         binding.title.text = showing.targetLabel
-        binding.targetLabel.setText(
-            if (showing.targetKind == TagShowing.TARGET_NOTEBOOK) R.string.tags_on_notebook
-            else R.string.tags_on_page,
-        )
-        binding.btnBack.setOnClickListener { finish() }
-        binding.btnBack.setOnLongClickListener { hint(R.string.cd_tags_back) }
+        // The arrow leaves — except inside a MANAGE target, where it comes back out to the
+        // overview first. Both Backs are the same door, so the dispatcher takes the same route.
+        binding.btnBack.setOnClickListener { leave() }
+        binding.btnBack.setOnLongClickListener {
+            hint(if (canReturnToOverview()) R.string.cd_tags_back_to_overview else R.string.cd_tags_back)
+        }
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() = leave()
+        })
         binding.btnAdd.setOnClickListener { addTyped() }
         binding.btnAdd.setOnLongClickListener { hint(R.string.cd_tags_add) }
         binding.btnPrevPage.setOnClickListener { turnPage(-1) }
@@ -115,10 +160,16 @@ class TagsActivity : AppCompatActivity() {
         binding.input.doAfterTextChanged {
             // The filter runs over the index already in memory — never a store call per keystroke.
             // Repainting the list region is the accepted EPD cost.
+            //
+            // Silent in MANAGE's overview: the field is not even on screen up there, and the only
+            // writes it takes are the clears the two state changes make — which must not send the
+            // list of targets back to its first page.
+            if (overview) return@doAfterTextChanged
             page = 0
             renderList()
         }
         showing.prefill?.let { binding.input.setText(it) }
+        pendingAddFocus = showing.mode == TagShowing.MODE_ADD
 
         // The page size is what actually FITS: rows are measured against the real band, and the
         // band shrinks when the IME opens (adjustResize). Re-render only when the height moves.
@@ -131,18 +182,98 @@ class TagsActivity : AppCompatActivity() {
         load()
     }
 
-    /** MODE_ADD opens with the field ready to type into — the notebook's quick-add doors (W2) and
-     *  the lasso's correction dialog (W3) both land here. */
-    override fun onResume() {
-        super.onResume()
-        if (!::showing.isInitialized) return
-        if (showing.mode == TagShowing.MODE_ADD && !binding.input.hasFocus()) {
-            binding.input.requestFocus()
-            binding.input.setSelection(binding.input.text?.length ?: 0)
-            // Flag 0, not SHOW_IMPLICIT: an implicit show is skipped when a hardware keyboard is
-            // attached, and on Ratta that would strand the field with no way to type into it.
-            getSystemService(InputMethodManager::class.java)?.showSoftInput(binding.input, 0)
+    // ── Targets and modes (arc 21 / W2) ──────────────────────────────────────
+
+    /**
+     * Work out what this showing is about, once. MANAGE opens on the overview and its targets are
+     * the notebook plus every page the host named — **in the host's words**: a page number is the
+     * host's to resolve and the extension has no idea what a page is. Every other mode has the one
+     * target the showing named.
+     */
+    private fun buildTargets() {
+        val notebook = Target(
+            kind = showing.targetKind,
+            id = showing.targetId,
+            header = getString(
+                if (showing.targetKind == TagShowing.TARGET_NOTEBOOK) R.string.tags_on_notebook
+                else R.string.tags_on_page,
+            ),
+            rowLabel = getString(R.string.tags_manage_notebook_row),
+        )
+        if (showing.mode != TagShowing.MODE_MANAGE) {
+            target = notebook
+            overview = false
+            return
         }
+        manageTargets = TagManage.targets(
+            notebookId = showing.targetId,
+            notebookLabel = notebook.rowLabel,
+            pageIds = showing.pageIds,
+            pageLabels = showing.pageLabels,
+        ).map { row ->
+            if (row.kind == TagShowing.TARGET_NOTEBOOK) notebook
+            else Target(
+                kind = row.kind,
+                id = row.id,
+                header = getString(R.string.tags_on_named, row.label),
+                rowLabel = row.label,
+            )
+        }
+        target = notebook
+        overview = true
+    }
+
+    private fun canReturnToOverview(): Boolean =
+        ::showing.isInitialized && showing.mode == TagShowing.MODE_MANAGE && !overview
+
+    /** The one leave door, taken by the arrow and by Back alike. */
+    private fun leave() {
+        if (canReturnToOverview()) { showOverview(); return }
+        finish()
+    }
+
+    private fun showOverview() {
+        overview = true
+        // The field belongs to a target; there is none up here, so it goes back to empty rather
+        // than filtering a list it is not over. The flag above is set first on purpose — it is
+        // what keeps the watcher's page reset off this clear.
+        binding.input.setText("")
+        page = overviewPage
+        render()
+    }
+
+    /** A row of the overview was tapped: that target's own screen, which is every other mode's. */
+    private fun openTarget(t: Target) {
+        if (busy) return
+        overviewPage = page
+        target = t
+        overview = false
+        page = 0
+        binding.input.setText("")
+        render()
+    }
+
+    /**
+     * MODE_ADD opens with the field ready to type into — the notebook's quick-add doors (W2) and
+     * the lasso's correction dialog (W3) both land here. MANAGE never does: its overview has no
+     * field, and a keyboard over a list you came to read is a keyboard in the way.
+     *
+     * **From `onWindowFocusChanged`, not `onResume`** (proven on the Nomad at W2): a resumed
+     * Activity does not yet have window focus, and `showSoftInput` against an unfocused window is
+     * dropped — the field ends up served and caret-ready with `mInputShown=false`, which reads as
+     * "the keyboard is broken" rather than "it was asked for too early". The latch makes it a
+     * once-per-showing act, so coming back from a dialog does not re-raise a keyboard the user
+     * just dismissed.
+     */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus || !pendingAddFocus) return
+        pendingAddFocus = false
+        binding.input.requestFocus()
+        binding.input.setSelection(binding.input.text?.length ?: 0)
+        // Flag 0, not SHOW_IMPLICIT: an implicit show is skipped when a hardware keyboard is
+        // attached, and on Ratta that would strand the field with no way to type into it.
+        getSystemService(InputMethodManager::class.java)?.showSoftInput(binding.input, 0)
     }
 
     // ── Loading ──────────────────────────────────────────────────────────────
@@ -189,12 +320,51 @@ class TagsActivity : AppCompatActivity() {
     // ── Rendering ────────────────────────────────────────────────────────────
 
     private fun render() {
-        renderTarget()
-        renderList()
+        // The whole target half stands down in the overview: there is no single target up there,
+        // and six views hidden one at a time is how one of them gets missed.
+        binding.targetSection.visibility = if (overview) View.GONE else View.VISIBLE
+        if (overview) renderOverview() else { renderTarget(); renderList() }
+    }
+
+    /**
+     * MANAGE's overview: the notebook and every page, each over the tags it carries, paged against
+     * the real band like every other list on this screen. It is never empty — the notebook is
+     * always a row — so there is no empty state to show.
+     */
+    private fun renderOverview() {
+        binding.listLabel.setText(R.string.tags_manage_targets)
+        binding.listEmpty.visibility = View.GONE
+
+        bandHeightPx = binding.listBand.height
+        val perPage = TagPaging.rowsPerPage(bandHeightPx, targetRowHeightPx)
+        page = TagPaging.clampPage(page, manageTargets.size, perPage)
+        val pageCount = TagPaging.pageCount(manageTargets.size, perPage)
+
+        val separator = getString(R.string.tags_manage_separator)
+        binding.listBand.removeAllViews()
+        for (t in TagPaging.slice(manageTargets, page, perPage)) {
+            val mine = index.tagsOf(t.kind, t.id)
+            binding.listBand.addView(
+                TagRowView.buildTarget(
+                    context = this,
+                    label = t.rowLabel,
+                    tags = TagManage.summary(
+                        tags = mine.map { it.display },
+                        none = getString(R.string.tags_manage_no_tags),
+                        separator = separator,
+                    ),
+                    onClick = { openTarget(t) },
+                ),
+            )
+        }
+
+        binding.pager.visibility = if (pageCount > 1) View.VISIBLE else View.INVISIBLE
+        binding.pageIndicator.text = getString(R.string.tags_page_indicator, page + 1, pageCount)
     }
 
     private fun renderTarget() {
-        val mine = index.tagsOf(showing.targetKind, showing.targetId)
+        binding.targetLabel.text = target.header
+        val mine = index.tagsOf(target.kind, target.id)
         binding.targetTags.removeAllViews()
         for (tag in mine) {
             binding.targetTags.addView(
@@ -212,6 +382,7 @@ class TagsActivity : AppCompatActivity() {
 
     private fun renderList() {
         if (!::showing.isInitialized) return
+        if (overview) { renderOverview(); return }
         val query = binding.input.text?.toString().orEmpty()
         val filtering = TagRules.display(query).isNotEmpty()
         val rows = if (filtering) index.suggest(query) else index.sortedTags()
@@ -224,7 +395,7 @@ class TagsActivity : AppCompatActivity() {
 
         binding.listBand.removeAllViews()
         for (tag in TagPaging.slice(rows, page, perPage)) {
-            val attached = index.isAssigned(tag.id, showing.targetKind, showing.targetId)
+            val attached = index.isAssigned(tag.id, target.kind, target.id)
             binding.listBand.addView(
                 TagRowView.build(
                     context = this,
@@ -252,10 +423,18 @@ class TagsActivity : AppCompatActivity() {
     }
 
     private fun turnPage(delta: Int) {
-        val query = binding.input.text?.toString().orEmpty()
-        val rows = if (TagRules.display(query).isNotEmpty()) index.suggest(query) else index.sortedTags()
-        val perPage = TagPaging.rowsPerPage(binding.listBand.height, rowHeightPx)
-        val next = TagPaging.clampPage(page + delta, rows.size, perPage)
+        val count: Int
+        val rowHeight: Int
+        if (overview) {
+            count = manageTargets.size
+            rowHeight = targetRowHeightPx
+        } else {
+            val query = binding.input.text?.toString().orEmpty()
+            count = (if (TagRules.display(query).isNotEmpty()) index.suggest(query) else index.sortedTags()).size
+            rowHeight = rowHeightPx
+        }
+        val perPage = TagPaging.rowsPerPage(binding.listBand.height, rowHeight)
+        val next = TagPaging.clampPage(page + delta, count, perPage)
         if (next == page) return
         page = next
         renderList()
@@ -285,7 +464,7 @@ class TagsActivity : AppCompatActivity() {
         val display = AtomicReference(TagRules.display(text))
         edit(
             transform = { current ->
-                val result = current.assign(text, showing.targetKind, showing.targetId)
+                val result = current.assign(text, target.kind, target.id)
                 display.set(result.display)
                 // Attaching a tag that is already there is not a failure and not a write — the
                 // "nothing changed" answer still clears the field and still names the tag.
@@ -300,7 +479,7 @@ class TagsActivity : AppCompatActivity() {
 
     private fun removeFromTarget(tag: TagIndex.Tag) {
         edit(
-            transform = { current -> current.unassign(tag.id, showing.targetKind, showing.targetId) },
+            transform = { current -> current.unassign(tag.id, target.kind, target.id) },
             onDone = { toast(getString(R.string.tags_removed_toast, tag.display)) },
         )
     }

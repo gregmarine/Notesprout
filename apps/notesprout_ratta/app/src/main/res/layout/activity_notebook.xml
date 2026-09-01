@@ -86,6 +86,19 @@
                 android:visibility="gone"
                 android:contentDescription="@string/cd_document"/>
 
+            <!-- Tags (arc 21 / W2). GONE unless a trusted tag manager is installed —
+                 TagManagerEntry owns it, re-discovering on every resume. Next to the Document
+                 button because both are "what this page and this notebook are ABOUT", and before
+                 Recents, which leaves for somewhere else entirely. It opens a secondary bar
+                 rather than a screen: a tag has to land on something, and which thing is the one
+                 question the button cannot answer for you. -->
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnTags"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_tag"
+                android:visibility="gone"
+                android:contentDescription="@string/cd_tags"/>
+
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnRecents"
                 style="@style/Widget.Notesprout.ToolbarButton"
@@ -187,6 +200,18 @@
          armed lasso button by SelectionAnchor.placeUnder. Buttons are built in code. -->
     <LinearLayout
         android:id="@+id/lassoPopup"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:orientation="horizontal"
+        android:visibility="gone"
+        android:background="@drawable/shape_dialog_bordered"
+        android:padding="4dp"/>
+
+    <!-- The tag button's secondary toolbar (arc 21 / W2) — Tag notebook / Tag page / Manage, hung
+         under the tag button by SelectionAnchor.placeUnder. Buttons are built in code. -->
+    <LinearLayout
+        android:id="@+id/tagsPopup"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="top|start"

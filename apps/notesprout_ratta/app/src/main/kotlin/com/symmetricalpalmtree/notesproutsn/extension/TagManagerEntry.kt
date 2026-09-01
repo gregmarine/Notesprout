@@ -1,5 +1,6 @@
 package com.symmetricalpalmtree.notesproutsn.extension
 
+import android.view.View
 import androidx.activity.result.ActivityResult
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
@@ -22,7 +23,10 @@ import kotlinx.coroutines.launch
  *  - **Availability.** [discover] re-runs the package query every time a caller is about to offer a
  *    tag door, because a package can be disabled or replaced under a standing screen. Callers make
  *    the door **GONE** when it answers false — never disabled: a disabled control is invisible on
- *    e-ink, and a door that lies is worse than one that is absent.
+ *    e-ink, and a door that lies is worse than one that is absent. A caller whose door is a
+ *    standing button hands it over as [button] and calls [refresh] from its `onResume` instead —
+ *    the [ScratchPadEntry] / [DocumentEditorEntry] shape, for callers whose door is not built at
+ *    the moment it is offered.
  *  - **The busy guard.** One showing at a time, latched **at the tap**: e-ink gives a tap no
  *    feedback for hundreds of ms, and the open is asynchronous twice over (the overlay's frame, then
  *    the store and the bind).
@@ -38,6 +42,10 @@ import kotlinx.coroutines.launch
  */
 class TagManagerEntry(
     private val activity: AppCompatActivity,
+    /** A standing button this entry shows or hides on every [refresh] — the notebook's `ic_tag`
+     *  (W2). Null for callers that ask [discover] at the moment they build the door, which is what
+     *  the library's action sheet does. */
+    private val button: View? = null,
     /** Run on Main after a showing that changed something (`RESULT_OK`). W1 has nothing to redraw;
      *  W4's search shelf re-runs its query here. */
     private val onChanged: () -> Unit = {},
@@ -56,7 +64,21 @@ class TagManagerEntry(
     /** Whether a trusted tag manager is installed **right now**. Suspends — it is a package query. */
     suspend fun discover(): Boolean {
         ref = ExtensionRegistry.tagManager(activity)
+        button?.visibility = if (ref == null) View.GONE else View.VISIBLE
         return ref != null
+    }
+
+    /**
+     * Re-discover and show or hide [button]. Called from the caller's `onResume` and after a failed
+     * open. Discovery is IO; the button is left as it was until the answer arrives.
+     */
+    fun refresh() {
+        activity.lifecycleScope.launch {
+            val found = ExtensionRegistry.tagManager(activity)
+            if (activity.isFinishing || activity.isDestroyed) return@launch
+            ref = found
+            button?.visibility = if (found == null) View.GONE else View.VISIBLE
+        }
     }
 
     /** The answer [discover] last gave, without asking again. */

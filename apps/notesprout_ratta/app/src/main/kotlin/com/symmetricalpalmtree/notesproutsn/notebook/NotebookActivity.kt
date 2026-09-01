@@ -51,6 +51,8 @@ import com.symmetricalpalmtree.notesproutsn.extension.ExtensionRegistry
 import com.symmetricalpalmtree.notesproutsn.extension.RecognizerClient
 import com.symmetricalpalmtree.notesproutsn.extension.ScratchPadClient
 import com.symmetricalpalmtree.notesproutsn.extension.ScratchPadEntry
+import com.symmetricalpalmtree.notesproutsn.extension.TagManagerEntry
+import com.symmetricalpalmtree.notesproutsn.extension.TagShowing
 import com.symmetricalpalmtree.notesproutsn.extension.TransferCaps
 import com.symmetricalpalmtree.notesproutsn.library.NameDialog
 import com.symmetricalpalmtree.notesproutsn.library.NameRules
@@ -111,6 +113,10 @@ class NotebookActivity : AppCompatActivity() {
     private lateinit var documentHooks: DocumentHostHooks
     /** The open-time seed and the editor's silent recognitions (arc 19 / M6). */
     private lateinit var documentSeedFlow: DocumentSeedFlow
+    /** The tag manager's entry (arc 21 / W2) — the sixth point's door, and the owner of `btnTags`. */
+    private lateinit var tagEntry: TagManagerEntry
+    /** The three tag doors that button opens (arc 21 / W2). */
+    private lateinit var tagsPopup: TagsPopup
     private val repo by lazy { IndexRepository() }
 
     /** The global clipboard's one index row (arc 7) — the payload, read and written only here. */
@@ -494,6 +500,30 @@ class NotebookActivity : AppCompatActivity() {
         // document? → recognize → stage → open, and the editor is opened by its last step.
         binding.btnDocument.setOnClickListener { if (opened && !closing) documentSeedFlow.start() }
         TooltipCompat.setTooltipText(binding.btnDocument, binding.btnDocument.contentDescription)
+
+        // Tags (arc 21 / W2) — the sixth point's doors. Like the pad and the editor it must exist
+        // before RESUMED (it registers an ActivityResult launcher), and like them there is no
+        // `releaseForHandoff`: the tag screen carries no paper at all, so M3's measured answer —
+        // stop-behind is enough for a non-drawing child screen, cross-process included — covers it.
+        //
+        // The button opens a bar, not a screen: a tag lands on the notebook or on the page, and
+        // that is the one thing the button cannot decide for the user.
+        tagEntry = TagManagerEntry(activity = this, button = binding.btnTags)
+        tagsPopup = TagsPopup(
+            root = binding.root,
+            bar = binding.tagsPopup,
+            anchor = binding.btnTags,
+            bandBottom = { chromeBand()?.last },
+            releaseRender = { paper.releaseRender() },
+            onTagNotebook = { hideTagsPopup(); openTagsFor(TagShowing.TARGET_NOTEBOOK) },
+            onTagPage = { hideTagsPopup(); openTagsFor(TagShowing.TARGET_PAGE) },
+            onManage = { hideTagsPopup(); openTagManage() },
+        )
+        binding.btnTags.setOnClickListener {
+            if (!opened || closing) return@setOnClickListener
+            if (tagsPopup.isShowing) hideTagsPopup() else showTagsPopup()
+        }
+        TooltipCompat.setTooltipText(binding.btnTags, binding.btnTags.contentDescription)
         // We died with the editor still on screen (M4): the extension's process — and its unsaved
         // text — outlived us, holding a host binder that went with the old instance. Re-open the
         // client here, in onCreate, so the fresh `begin` reaches the editor as its flush signal.
@@ -1185,6 +1215,7 @@ class NotebookActivity : AppCompatActivity() {
         currentSelection = null
         selectionToolbar.hide()   // idempotent — clearSelection fires onSelectionDismissed too
         hideLassoPopup()          // it belongs to the page being left, like every other floating bar
+        hideTagsPopup()           // and its Tag page door would now aim at a page nobody chose
         paper.clearForContentSwap()
         paper.setPageSize(page.width, page.height)
         paper.setTemplate(session.template)
@@ -2133,6 +2164,89 @@ class NotebookActivity : AppCompatActivity() {
         pushExclusions()
     }
 
+    // ── The tag doors (arc 21 / W2) ──────────────────────────────────────────
+
+    /**
+     * Open the tag button's secondary bar. Availability is the button's own business — it is GONE
+     * unless a trusted tag manager is installed — so the only gate here is [canvasShown]: two of
+     * the three doors are about the page on the paper, and a text document that has never shown
+     * its pages has none. The bar stays absent rather than opening with a door that would do
+     * nothing (J4 — a control that cannot work is not shown greyed).
+     */
+    private fun showTagsPopup() {
+        if (!opened || closing || !canvasShown) return
+        if (tagsPopup.show()) pushExclusions()
+    }
+
+    private fun hideTagsPopup() {
+        if (!::tagsPopup.isInitialized || !tagsPopup.isShowing) return
+        tagsPopup.hide()
+        pushExclusions()
+    }
+
+    /**
+     * The two quick doors: the tag screen in **ADD** mode, on this notebook or on the page whose
+     * ink is on the paper, with the field focused and the keyboard up.
+     *
+     * `displayedPageId`, never `session.currentIndex` — the R6 torn-read rule. A tag belongs to
+     * the page the user can see, and during a page op those two are briefly different things.
+     */
+    private fun openTagsFor(targetKind: Int) {
+        if (!opened || closing || !::session.isInitialized) return
+        val showing = if (targetKind == TagShowing.TARGET_NOTEBOOK) {
+            TagShowing(
+                targetKind = TagShowing.TARGET_NOTEBOOK,
+                targetId = notebookId,
+                targetLabel = notebookName,
+                mode = TagShowing.MODE_ADD,
+            )
+        } else {
+            val pageId = displayedPageId ?: return
+            TagShowing(
+                targetKind = TagShowing.TARGET_PAGE,
+                targetId = pageId,
+                targetLabel = pageLabel(pageId),
+                mode = TagShowing.MODE_ADD,
+            )
+        }
+        tagEntry.open(showing)
+    }
+
+    /**
+     * Manage: the notebook **and** every one of its pages in one showing, so the whole notebook's
+     * tagging can be read and fixed in one place.
+     *
+     * The page ids travel with the **labels the host resolved for them** — a page number is the
+     * host's to name, and the extension has no idea what a page is. They go over the bind with
+     * everything else; nothing rides the Intent.
+     */
+    private fun openTagManage() {
+        if (!opened || closing || !::session.isInitialized) return
+        val pageIds = session.pages.map { it.id }
+        val listed = TagTargets.listedPages(pageIds)
+        if (listed.size != pageIds.size) {
+            Slog.d(TAG) { "tag manage: ${pageIds.size} pages, listing ${listed.size}" }
+        }
+        tagEntry.open(
+            TagShowing(
+                targetKind = TagShowing.TARGET_NOTEBOOK,
+                targetId = notebookId,
+                targetLabel = notebookName,
+                mode = TagShowing.MODE_MANAGE,
+                pageIds = listed,
+                pageLabels = listed.indices.map { getString(R.string.tag_page_label, it + 1) },
+            ),
+        )
+    }
+
+    /** "Page N" for the tag screen's title — resolved from the live page list at the tap. A page
+     *  that is not in the list has no number to give, so the notebook's own name stands in rather
+     *  than a "Page 0" that names nothing. */
+    private fun pageLabel(pageId: String): String {
+        val n = TagTargets.pageNumber(session.pages.map { it.id }, pageId)
+        return if (n == null) notebookName else getString(R.string.tag_page_label, n)
+    }
+
     // ── The page sheet: copy / cut / paste / delete ──────────────────────────
 
     /**
@@ -2362,7 +2476,7 @@ class NotebookActivity : AppCompatActivity() {
         val paperLoc = IntArray(2).also { paper.asView().getLocationInWindow(it) }
         val rects = (
             listOfNotNull(rectOf(binding.topBar), rectOf(binding.bottomStrip)) +
-                selectionToolbar.rects() + lassoPopup.rects()
+                selectionToolbar.rects() + lassoPopup.rects() + tagsPopup.rects()
             )
             .map { Rect(it.left - paperLoc[0], it.top - paperLoc[1], it.right - paperLoc[0], it.bottom - paperLoc[1]) }
         paper.setExclusionRects(rects)
@@ -2408,6 +2522,7 @@ class NotebookActivity : AppCompatActivity() {
             // still be carrying the resting contact's answer (O2 review).
             if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) {
                 dismissLassoPopupOnContact(ev, ev.actionIndex)
+                dismissTagsPopupOnContact(ev, ev.actionIndex)
             }
             if (action == MotionEvent.ACTION_DOWN) {
                 val tool = ev.getToolType(0)
@@ -2436,7 +2551,25 @@ class NotebookActivity : AppCompatActivity() {
         if (tapDismissedPopup) hideLassoPopup()
     }
 
-    /** Both bars, the selection toolbar and the lasso popup — a floating bar is chrome like any other. */
+    /**
+     * The tag bar's outside-tap dismissal (arc 21 / W2) — the lasso popup's rule, and the tag
+     * button excluded for the same reason: without that, its own re-tap would close the bar here
+     * and the click listener would immediately reopen it.
+     *
+     * It deliberately does **not** write [tapDismissedPopup]. That latch exists so a contact spent
+     * dismissing the clipboard popup is not also spent pasting, and the tag bar has no such
+     * second meaning — a pen going to write while it is up should take it down and then ink.
+     */
+    private fun dismissTagsPopupOnContact(ev: MotionEvent, index: Int) {
+        if (!::tagsPopup.isInitialized || !tagsPopup.isShowing) return
+        val x = ev.getX(index).toInt(); val y = ev.getY(index).toInt()
+        if (rectOf(binding.btnTags)?.contains(x, y) == true) return
+        if (tagsPopup.contains(x, y)) return
+        hideTagsPopup()
+    }
+
+    /** Both bars, the selection toolbar and the two floating popups — a floating bar is chrome
+     *  like any other. */
     private fun overChrome(ev: MotionEvent): Boolean {
         val top = rectOf(binding.topBar)
         val bottom = rectOf(binding.bottomStrip)
@@ -2444,7 +2577,8 @@ class NotebookActivity : AppCompatActivity() {
         return (top?.contains(x, y) == true) ||
             (bottom?.contains(x, y) == true) ||
             (::selectionToolbar.isInitialized && selectionToolbar.contains(x, y)) ||
-            (::lassoPopup.isInitialized && lassoPopup.contains(x, y))
+            (::lassoPopup.isInitialized && lassoPopup.contains(x, y)) ||
+            (::tagsPopup.isInitialized && tagsPopup.contains(x, y))
     }
 
     private fun rectOf(v: View): Rect? {
@@ -2463,6 +2597,7 @@ class NotebookActivity : AppCompatActivity() {
         // is also the resume that follows a return from the pad.
         if (::scratchPad.isInitialized) scratchPad.refresh()
         if (::documentEntry.isInitialized) documentEntry.refresh()
+        if (::tagEntry.isInitialized) tagEntry.refresh()
     }
 
     /**
@@ -2588,6 +2723,9 @@ class NotebookActivity : AppCompatActivity() {
         if (::linkPickFlow.isInitialized) linkPickFlow.close()
         // The pad's held bind must not outlive the screen that opened it, result or no result.
         if (::scratchPad.isInitialized) scratchPad.close()
+        // The tag screen's held bind, same rule. It reaches back into nothing of ours — the index
+        // is the extension's own store value — so it needs no ordering against the seal below.
+        if (::tagEntry.isInitialized) tagEntry.close()
         // Same rule for the editor's held bind — and it matters more here, because its host binder
         // reaches back into this session: released before the seal below, never after. The close's
         // Job is what enforces "never after" (M11): the seal coroutine joins it, so the extension's

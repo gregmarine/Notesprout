@@ -522,6 +522,17 @@
     <string name="tags_failed_title">Tags unavailable</string>
     <string name="tags_failed_body">Tags could not be opened. The extension may have been disabled or removed.</string>
 
+    <!-- The notebook's tag button and its secondary toolbar (arc 21 / W2). The three doors are
+         icon-only and name themselves on a long press — the user's W2 call, and the recipe every
+         floating bar in the notebook follows. -->
+    <string name="cd_tags">Tags</string>
+    <string name="tag_notebook_action">Tag notebook</string>
+    <string name="tag_page_action">Tag page</string>
+    <string name="tag_manage_action">Manage tags</string>
+    <!-- What the host calls a page when it names one to the tag screen — page NUMBERS are the
+         host's to resolve; the extension has no idea what a page is. -->
+    <string name="tag_page_label">Page %1$d</string>
+
     <!-- Scratch Pad (arc 11) — the entry button on both the library's bottom bar and the
          notebook's top bar. Both are GONE unless a trusted extension is installed. -->
     <string name="cd_scratch_pad">Scratch pad</string>
