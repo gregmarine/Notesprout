@@ -12,8 +12,17 @@ import com.symmetricalpalmtree.notesproutsn.extension.TagShowing
  */
 object TagManage {
 
-    /** One row of the overview: a thing tags hang on, in the words the host gave for it. */
-    class Row(val kind: Int, val id: String, val label: String)
+    /**
+     * One row of the overview: a thing tags hang on, in the words the host gave for it.
+     *
+     * The notebook is on **every** row (arc 21 / W4) — the overview is one notebook's, and a page
+     * row that named only its page would be the same half-fact that made tagged pages unfindable
+     * from the library. [pageId] null is the notebook's own row.
+     */
+    class Row(val notebookId: String, val pageId: String?, val label: String) {
+        val kind: Int
+            get() = if (pageId == null) TagShowing.TARGET_NOTEBOOK else TagShowing.TARGET_PAGE
+    }
 
     /**
      * The notebook first, then one row per page. A showing whose arrays disagree in length is not
@@ -27,9 +36,9 @@ object TagManage {
         pageLabels: List<String>,
     ): List<Row> {
         val rows = ArrayList<Row>(pageIds.size + 1)
-        rows += Row(TagShowing.TARGET_NOTEBOOK, notebookId, notebookLabel)
+        rows += Row(notebookId, null, notebookLabel)
         for (i in 0 until minOf(pageIds.size, pageLabels.size)) {
-            rows += Row(TagShowing.TARGET_PAGE, pageIds[i], pageLabels[i])
+            rows += Row(notebookId, pageIds[i], pageLabels[i])
         }
         return rows
     }

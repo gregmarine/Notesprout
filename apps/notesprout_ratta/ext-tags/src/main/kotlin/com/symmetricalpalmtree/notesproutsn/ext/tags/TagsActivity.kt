@@ -99,8 +99,8 @@ class TagsActivity : AppCompatActivity() {
     /** A thing tags hang on, and the words this screen uses for it. [header] is the section line
      *  above its tags; [rowLabel] is how the overview lists it. */
     private class Target(
-        val kind: Int,
-        val id: String,
+        val notebookId: String,
+        val pageId: String?,
         val header: String,
         val rowLabel: String,
     )
@@ -192,8 +192,8 @@ class TagsActivity : AppCompatActivity() {
      */
     private fun buildTargets() {
         val notebook = Target(
-            kind = showing.targetKind,
-            id = showing.targetId,
+            notebookId = showing.notebookId,
+            pageId = showing.pageId,
             header = getString(
                 if (showing.targetKind == TagShowing.TARGET_NOTEBOOK) R.string.tags_on_notebook
                 else R.string.tags_on_page,
@@ -206,15 +206,15 @@ class TagsActivity : AppCompatActivity() {
             return
         }
         manageTargets = TagManage.targets(
-            notebookId = showing.targetId,
+            notebookId = showing.notebookId,
             notebookLabel = notebook.rowLabel,
             pageIds = showing.pageIds,
             pageLabels = showing.pageLabels,
         ).map { row ->
-            if (row.kind == TagShowing.TARGET_NOTEBOOK) notebook
+            if (row.pageId == null) notebook
             else Target(
-                kind = row.kind,
-                id = row.id,
+                notebookId = row.notebookId,
+                pageId = row.pageId,
                 header = getString(R.string.tags_on_named, row.label),
                 rowLabel = row.label,
             )
@@ -343,7 +343,7 @@ class TagsActivity : AppCompatActivity() {
         val separator = getString(R.string.tags_manage_separator)
         binding.listBand.removeAllViews()
         for (t in TagPaging.slice(manageTargets, page, perPage)) {
-            val mine = index.tagsOf(t.kind, t.id)
+            val mine = index.tagsOf(t.notebookId, t.pageId)
             binding.listBand.addView(
                 TagRowView.buildTarget(
                     context = this,
@@ -364,7 +364,7 @@ class TagsActivity : AppCompatActivity() {
 
     private fun renderTarget() {
         binding.targetLabel.text = target.header
-        val mine = index.tagsOf(target.kind, target.id)
+        val mine = index.tagsOf(target.notebookId, target.pageId)
         binding.targetTags.removeAllViews()
         for (tag in mine) {
             binding.targetTags.addView(
@@ -395,7 +395,7 @@ class TagsActivity : AppCompatActivity() {
 
         binding.listBand.removeAllViews()
         for (tag in TagPaging.slice(rows, page, perPage)) {
-            val attached = index.isAssigned(tag.id, target.kind, target.id)
+            val attached = index.isAssigned(tag.id, target.notebookId, target.pageId)
             binding.listBand.addView(
                 TagRowView.build(
                     context = this,
@@ -464,7 +464,7 @@ class TagsActivity : AppCompatActivity() {
         val display = AtomicReference(TagRules.display(text))
         edit(
             transform = { current ->
-                val result = current.assign(text, target.kind, target.id)
+                val result = current.assign(text, target.notebookId, target.pageId)
                 display.set(result.display)
                 // Attaching a tag that is already there is not a failure and not a write — the
                 // "nothing changed" answer still clears the field and still names the tag.
@@ -479,7 +479,7 @@ class TagsActivity : AppCompatActivity() {
 
     private fun removeFromTarget(tag: TagIndex.Tag) {
         edit(
-            transform = { current -> current.unassign(tag.id, target.kind, target.id) },
+            transform = { current -> current.unassign(tag.id, target.notebookId, target.pageId) },
             onDone = { toast(getString(R.string.tags_removed_toast, tag.display)) },
         )
     }

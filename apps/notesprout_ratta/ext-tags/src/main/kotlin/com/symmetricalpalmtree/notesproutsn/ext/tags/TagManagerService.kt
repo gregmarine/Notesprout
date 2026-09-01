@@ -107,18 +107,25 @@ class TagManagerService : Service() {
             return value
         }
 
-        override fun assign(store: IExtensionStore?, text: String?, targetKind: Int, targetId: String?): String {
+        override fun assign(
+            store: IExtensionStore?,
+            text: String?,
+            notebookId: String?,
+            pageId: String?,
+        ): String {
             enforce()
             requireNotNull(store) { "store is null" }
             requireNotNull(text) { "text is null" }
-            requireNotNull(targetId) { "targetId is null" }
+            // A page may be absent — that is a notebook tag. A notebook may not: since W4 every
+            // assignment names one, because it is the only way the library can find the page again.
+            requireNotNull(notebookId) { "notebookId is null" }
             val t0 = SystemClock.elapsedRealtime()
             // The whole read-modify-write is [TagWrites]', because the screen writes the same single
             // value from IO. `assign` itself throws for text that is not a tag and for a cap — both
             // marshalable, and both leave the store untouched.
             val display = AtomicReference<String>()
             val outcome = TagWrites.apply(TagStore(store)) { index ->
-                val result = index.assign(text, targetKind, targetId)
+                val result = index.assign(text, notebookId, pageId)
                 display.set(result.display)
                 if (result.index === index) null else result.index
             }

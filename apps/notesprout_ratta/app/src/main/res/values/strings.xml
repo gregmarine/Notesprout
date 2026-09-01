@@ -48,6 +48,10 @@
     <string name="mode_title_search">\"%1$s\"</string>
     <string name="library_search_title">Search</string>
     <string name="library_search_hint">Folder or notebook name</string>
+    <!-- The same field when a tag manager is installed and tags join the query
+         (arc 21 / W4). Two hints, not one: without the extension nothing is searched by
+         tag, and a hint that promised otherwise would be a control that cannot work. -->
+    <string name="library_search_hint_tags">Folder, notebook or tag</string>
     <string name="library_search_confirm">Search</string>
     <string name="library_search_empty">No folders or notebooks match that</string>
     <string name="library_search_empty_title">Nothing to search for</string>
@@ -532,6 +536,9 @@
     <!-- What the host calls a page when it names one to the tag screen — page NUMBERS are the
          host's to resolve; the extension has no idea what a page is. -->
     <string name="tag_page_label">Page %1$d</string>
+    <!-- A search card's second line when a tag is what put the row on the shelf (arc 21 / W4):
+         where it lives, then why it is here. -->
+    <string name="search_where_and_tag">%1$s · %2$s</string>
 
     <!-- The selection toolbar's Tag button (arc 21 / W3) and the two flows behind it. The hint says
          "page" because the lasso always tags the page on the paper — never the notebook. -->

@@ -135,14 +135,14 @@ class TagManagerEntry(
      * call answers with a string rather than a boolean. Every failure explains itself in a problem
      * dialog and [onDone] does not run.
      */
-    fun assign(text: String, targetKind: Int, targetId: String, onDone: (String) -> Unit) {
+    fun assign(text: String, notebookId: String, pageId: String?, onDone: (String) -> Unit) {
         val provider = ref ?: return
         if (opening) { Slog.d(TAG) { "assign: a showing is opening" }; return }
         opening = true
         RecognizingOverlay.show(activity, R.string.tag_applying)
         activity.lifecycleScope.launch {
             val failure = try {
-                val display = TagClient.assign(activity, provider, text, targetKind, targetId)
+                val display = TagClient.assign(activity, provider, text, notebookId, pageId)
                 RecognizingOverlay.hide(activity)
                 if (activity.isFinishing || activity.isDestroyed) { opening = false; return@launch }
                 opening = false

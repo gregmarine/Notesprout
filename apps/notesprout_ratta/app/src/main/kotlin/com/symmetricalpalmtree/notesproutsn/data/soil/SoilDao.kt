@@ -42,6 +42,19 @@ interface SoilDao {
     @Query("SELECT count(*) FROM notebook WHERE type = 'page' AND deletedAt IS NULL")
     suspend fun livePageCount(): Int
 
+    /**
+     * This notebook's live page ids **in page order**, blob-free (arc 21 / W4).
+     *
+     * The library's search merge asks this to turn a tagged page id into "Page 3" and to tell a
+     * page that still exists from one that was deleted under its tag. Ids only: a search shelf
+     * reading page rows whole would pull every template and cover blob in the file with them.
+     */
+    @Query(
+        """SELECT id FROM notebook WHERE type = 'page' AND parentId = :notebookId
+           AND deletedAt IS NULL ORDER BY `order`"""
+    )
+    suspend fun livePageIds(notebookId: String): List<String>
+
     @Query("UPDATE notebook SET deletedAt = :at, updatedAt = :at WHERE id IN (:ids) AND deletedAt IS NULL")
     suspend fun softDelete(ids: List<String>, at: Long)
 

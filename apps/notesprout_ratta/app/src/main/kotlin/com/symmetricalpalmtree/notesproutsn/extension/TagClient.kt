@@ -157,10 +157,15 @@ class TagClient(context: Context, val ref: ProviderRef) {
                     // The region is the extension's; we copy out and close ours in the same breath.
                     SharedBytes.readAndClose(value)
                 } ?: return null
-                val index = try {
-                    TagCodec.decode(bytes)
-                } catch (e: IllegalArgumentException) {
-                    throw TagIndexUnreadableException(e)
+                // The decode is the host's work and the blob can be megabytes, so it does not run
+                // on whatever dispatcher the caller happened to be on — the library's search merge
+                // asks for this from a Main-dispatcher coroutine.
+                val index = withContext(Dispatchers.Default) {
+                    try {
+                        TagCodec.decode(bytes)
+                    } catch (e: IllegalArgumentException) {
+                        throw TagIndexUnreadableException(e)
+                    }
                 }
                 Slog.d(TAG) {
                     "snapshot: ${index.tags.size} tags, ${index.assignments.size} assignments " +
@@ -177,6 +182,9 @@ class TagClient(context: Context, val ref: ProviderRef) {
          * display form (the casing it was first entered in) — **W3's door**, the lasso's silent
          * heading→tag.
          *
+         * The target is a pair: [notebookId] always, [pageId] only for a tag on one page of it
+         * (arc 21 / W4). Both must be canonical UUIDs.
+         *
          * @throws TagIndexFullException a cap refused it; nothing was written.
          * @throws ExtensionCallException anything else, including text that is not a tag.
          */
@@ -184,8 +192,8 @@ class TagClient(context: Context, val ref: ProviderRef) {
             context: Context,
             ref: ProviderRef,
             text: String,
-            targetKind: Int,
-            targetId: String,
+            notebookId: String,
+            pageId: String?,
         ): String {
             val client = TagClient(context, ref)
             val store = client.openStore() ?: throw ExtensionCallException("store unavailable")
@@ -197,7 +205,7 @@ class TagClient(context: Context, val ref: ProviderRef) {
                     callTimeoutMs = CALL_TIMEOUT_MS,
                 ) { iface ->
                     try {
-                        iface.assign(store, text, targetKind, targetId)
+                        iface.assign(store, text, notebookId, pageId)
                     } catch (e: IllegalStateException) {
                         when (e.message) {
                             ExtensionContract.TAG_INDEX_FULL -> throw TagIndexFullException(e)

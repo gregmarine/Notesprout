@@ -524,6 +524,10 @@ class LinkPickerActivity : AppCompatActivity() {
                 }
                 PickMode.THIS_NOTEBOOK -> Unit    // the browse is not on screen in this mode
             }
+            // A page card is the search shelf's alone (arc 21 / W4) — this browse has no search and
+            // builds its own page cards from [PickerPage]. Listed so the compiler keeps this branch
+            // honest if that ever changes, rather than an `else` that would swallow it.
+            is CardItem.Page -> Unit
         }
     }
 

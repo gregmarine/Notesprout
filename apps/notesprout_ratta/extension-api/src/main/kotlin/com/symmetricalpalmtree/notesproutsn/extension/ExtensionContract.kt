@@ -38,8 +38,16 @@ object ExtensionContract {
      * **4 since arc 21 / W1** — the TAG_MANAGER point. A tag extension's service declares 4 so an
      * older host, which knows nothing of `ITagManager`, never lists it; every other extension's
      * declaration is untouched (meta-data is per service).
+     *
+     * **5 since arc 21 / W4** — the tag target became a *pair* (a notebook, plus a page when the
+     * target is one), which reshaped [TagShowing]'s wire form and [TagCodec]'s records. This is the
+     * one bump so far that is **not** a compatible tail: a W1-shaped tag extension against a W4 host
+     * would unmarshal a `TagShowing` wrongly. It fails loudly rather than quietly — the constructor
+     * `require`s reject the result and the exception crosses as `IllegalArgumentException` — but the
+     * declaration is what keeps it from being reached at all. Only the tag service moves; every
+     * other extension keeps the version it declared.
      */
-    const val API_VERSION: Int = 4
+    const val API_VERSION: Int = 5
 
     /** Intent action a handwriting-recognizer `<service>` declares in its intent-filter. */
     const val ACTION_HANDWRITING_RECOGNIZER: String =
@@ -188,9 +196,9 @@ object ExtensionContract {
     /** Most tag→target assignments in the whole index. */
     const val MAX_TAG_ASSIGNMENTS: Int = 50_000
 
-    /** Longest a target id may be — a notebook or page UUID is 36 chars; the slack is for a future
-     *  target kind, and the bound is load-bearing in [TagCodec.WORST_CASE_BYTES]. */
-    const val MAX_TARGET_ID_CHARS: Int = 48
+    // A target id has no length cap of its own since W4: it is a canonical UUID or it is not a
+    // target ([CompactId.isId] is the check, at every door), and what the codec pays for it is
+    // [CompactId.CHARS]. The old 48-character bound described a shape that no longer exists.
 
     /** Longest a target's display label may be (the screen's title — display only, never a path). */
     const val MAX_TARGET_LABEL_CHARS: Int = 200

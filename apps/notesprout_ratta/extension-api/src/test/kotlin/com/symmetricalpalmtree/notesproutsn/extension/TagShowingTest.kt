@@ -1,6 +1,7 @@
 package com.symmetricalpalmtree.notesproutsn.extension
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.fail
 import org.junit.Test
 
@@ -11,15 +12,18 @@ import org.junit.Test
  */
 class TagShowingTest {
 
+    private val n1 = "11111111-1111-4111-8111-111111111111"
+    private val p1 = "aaaaaaaa-1111-4111-8111-111111111111"
+
     private fun showing(
-        targetKind: Int = TagShowing.TARGET_NOTEBOOK,
-        targetId: String = "n1",
+        notebookId: String = n1,
+        pageId: String? = null,
         targetLabel: String = "Journal",
         mode: Int = TagShowing.MODE_BROWSE,
         prefill: String? = null,
         pageIds: List<String> = emptyList(),
         pageLabels: List<String> = emptyList(),
-    ) = TagShowing(targetKind, targetId, targetLabel, mode, prefill, pageIds, pageLabels)
+    ) = TagShowing(notebookId, pageId, targetLabel, mode, prefill, pageIds, pageLabels)
 
     private fun assertRefused(build: () -> TagShowing) {
         try {
@@ -35,21 +39,38 @@ class TagShowingTest {
         assertEquals(TagShowing.MODE_ADD, showing(mode = TagShowing.MODE_ADD).mode)
         assertEquals(
             TagShowing.MODE_MANAGE,
-            showing(mode = TagShowing.MODE_MANAGE, pageIds = listOf("p1"), pageLabels = listOf("Page 1")).mode,
+            showing(mode = TagShowing.MODE_MANAGE, pageIds = listOf(p1), pageLabels = listOf("Page 1")).mode,
         )
     }
 
+    /** The kind is derived, never carried (arc 21 / W4): a page id present is what makes a page
+     *  showing, and `targetId` is whichever of the two the tags actually hang on. */
     @Test
-    fun refusesUnknownKindAndMode() {
-        assertRefused { showing(targetKind = 7) }
-        assertRefused { showing(mode = 7) }
+    fun theKindFallsOutOfThePair() {
+        val notebook = showing()
+        assertEquals(TagShowing.TARGET_NOTEBOOK, notebook.targetKind)
+        assertEquals(n1, notebook.targetId)
+        assertNull(notebook.pageId)
+
+        val page = showing(pageId = p1)
+        assertEquals(TagShowing.TARGET_PAGE, page.targetKind)
+        assertEquals(p1, page.targetId)
+        assertEquals(n1, page.notebookId)
     }
 
     @Test
+    fun refusesUnknownMode() {
+        assertRefused { showing(mode = 7) }
+    }
+
+    /** Both ids are canonical UUIDs, which is also what keeps a path character out of them. */
+    @Test
     fun refusesBadTargets() {
-        assertRefused { showing(targetId = "") }
-        assertRefused { showing(targetId = "x".repeat(ExtensionContract.MAX_TARGET_ID_CHARS + 1)) }
-        assertRefused { showing(targetId = "a/b") }
+        assertRefused { showing(notebookId = "") }
+        assertRefused { showing(notebookId = "n1") }
+        assertRefused { showing(notebookId = "x".repeat(64)) }
+        assertRefused { showing(notebookId = "a/b") }
+        assertRefused { showing(pageId = "p1") }
         assertRefused { showing(targetLabel = "x".repeat(ExtensionContract.MAX_TARGET_LABEL_CHARS + 1)) }
     }
 
@@ -63,20 +84,24 @@ class TagShowingTest {
     /** Pages belong to MANAGE and to a notebook — a page's own screen has nothing to page through. */
     @Test
     fun pagesBelongToManageOnly() {
-        assertRefused { showing(mode = TagShowing.MODE_BROWSE, pageIds = listOf("p1"), pageLabels = listOf("Page 1")) }
+        assertRefused { showing(mode = TagShowing.MODE_BROWSE, pageIds = listOf(p1), pageLabels = listOf("Page 1")) }
         assertRefused {
             showing(
-                targetKind = TagShowing.TARGET_PAGE, targetId = "p1",
-                mode = TagShowing.MODE_MANAGE, pageIds = listOf("p1"), pageLabels = listOf("Page 1"),
+                pageId = p1,
+                mode = TagShowing.MODE_MANAGE, pageIds = listOf(p1), pageLabels = listOf("Page 1"),
             )
         }
-        assertRefused { showing(mode = TagShowing.MODE_MANAGE, pageIds = listOf("p1"), pageLabels = emptyList()) }
+        assertRefused { showing(mode = TagShowing.MODE_MANAGE, pageIds = listOf(p1), pageLabels = emptyList()) }
         assertRefused {
             showing(
                 mode = TagShowing.MODE_MANAGE,
-                pageIds = List(TagShowing.MAX_PAGES + 1) { "p$it" },
+                pageIds = List(TagShowing.MAX_PAGES + 1) { p1 },
                 pageLabels = List(TagShowing.MAX_PAGES + 1) { "Page $it" },
             )
+        }
+        // A listed page that is not a UUID is refused with the rest.
+        assertRefused {
+            showing(mode = TagShowing.MODE_MANAGE, pageIds = listOf("p1"), pageLabels = listOf("Page 1"))
         }
     }
 

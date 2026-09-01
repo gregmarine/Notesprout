@@ -17,14 +17,22 @@ import android.os.Parcelable
  * family rule since E1. This parcel crosses **into** the extension, which treats the host as
  * untrusted input just as the host treats a descriptor.
  *
- * Wire form: `int targetKind · String targetId · String targetLabel · int mode · String prefill
- * (nullable) · String[] pageIds · String[] pageLabels`. A future field is a compatible tail.
+ * **The target is a pair** (arc 21 / W4): a notebook, and — when the showing is about one page —
+ * that page. It is never a page alone. Before W4 a page showing carried a page id and no way to say
+ * which notebook it belonged to, which is exactly the gap that made tagged pages unfindable from the
+ * library; the same shape now runs through [TagIndex.Assignment], the codec and this parcel, so no
+ * layer can hold a page without its notebook.
+ *
+ * Wire form: `String notebookId · String pageId (nullable) · String targetLabel · int mode ·
+ * String prefill (nullable) · String[] pageIds · String[] pageLabels`. A future field is a
+ * compatible tail.
  */
 class TagShowing(
-    /** [TARGET_NOTEBOOK] or [TARGET_PAGE] — what the tags being edited hang on. */
-    val targetKind: Int,
-    /** The target's opaque host id (a notebook or page UUID — the M3 pageKey precedent). */
-    val targetId: String,
+    /** The notebook the showing is about — **always present**, page showings included. */
+    val notebookId: String,
+    /** The page within [notebookId], when the tags being edited hang on a page rather than the
+     *  notebook itself. Null makes this a notebook showing. */
+    val pageId: String?,
     /** The target's display name, resolved host-side. Display only; never a path. */
     val targetLabel: String,
     /** [MODE_BROWSE] / [MODE_ADD] / [MODE_MANAGE]. */
@@ -38,12 +46,19 @@ class TagShowing(
     val pageLabels: List<String> = emptyList(),
 ) : Parcelable {
 
+    /** [TARGET_NOTEBOOK] or [TARGET_PAGE] — derived from whether [pageId] is present, never carried
+     *  separately (the W4 rule: a stored kind is a second copy of the answer). */
+    val targetKind: Int get() = if (pageId == null) TARGET_NOTEBOOK else TARGET_PAGE
+
+    /** The thing the tags hang on: the page when there is one, else the notebook. */
+    val targetId: String get() = pageId ?: notebookId
+
     init {
-        require(targetKind == TARGET_NOTEBOOK || targetKind == TARGET_PAGE) { "unknown target kind ($targetKind)" }
-        require(targetId.isNotEmpty() && targetId.length <= ExtensionContract.MAX_TARGET_ID_CHARS) {
-            "targetId length ${targetId.length} outside 1..${ExtensionContract.MAX_TARGET_ID_CHARS}"
-        }
-        require('\u0000' !in targetId && '/' !in targetId) { "targetId carries a path character" }
+        // Both ids are canonical UUIDs, which is also what keeps a path character or a NUL out of
+        // them: the UUID alphabet has neither. The hand-rolled character checks W1 carried here were
+        // a weaker spelling of the same guarantee.
+        require(CompactId.isId(notebookId)) { "notebookId is not a UUID" }
+        require(pageId == null || CompactId.isId(pageId)) { "pageId is not a UUID" }
         require(targetLabel.length <= ExtensionContract.MAX_TARGET_LABEL_CHARS) {
             "targetLabel length ${targetLabel.length} > ${ExtensionContract.MAX_TARGET_LABEL_CHARS}"
         }
@@ -57,7 +72,7 @@ class TagShowing(
         require(pageIds.size == pageLabels.size) { "pageIds/pageLabels length mismatch" }
         require(pageIds.size <= MAX_PAGES) { "pageIds size ${pageIds.size} > $MAX_PAGES" }
         for (id in pageIds) {
-            require(id.isNotEmpty() && id.length <= ExtensionContract.MAX_TARGET_ID_CHARS) { "bad page id" }
+            require(CompactId.isId(id)) { "page id is not a UUID" }
         }
         for (label in pageLabels) {
             require(label.length <= ExtensionContract.MAX_TARGET_LABEL_CHARS) { "page label too long" }
@@ -69,8 +84,8 @@ class TagShowing(
     }
 
     override fun writeToParcel(dest: Parcel, flags: Int) {
-        dest.writeInt(targetKind)
-        dest.writeString(targetId)
+        dest.writeString(notebookId)
+        dest.writeString(pageId)
         dest.writeString(targetLabel)
         dest.writeInt(mode)
         dest.writeString(prefill)
@@ -98,8 +113,8 @@ class TagShowing(
         const val MAX_PAGES: Int = 5_000
 
         private fun read(parcel: Parcel): TagShowing = TagShowing(
-            targetKind = parcel.readInt(),
-            targetId = parcel.readString() ?: "",
+            notebookId = parcel.readString() ?: "",
+            pageId = parcel.readString(),
             targetLabel = parcel.readString() ?: "",
             mode = parcel.readInt(),
             prefill = parcel.readString(),

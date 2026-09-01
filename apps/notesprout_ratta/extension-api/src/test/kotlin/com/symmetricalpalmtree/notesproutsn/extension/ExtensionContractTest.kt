@@ -18,7 +18,7 @@ class ExtensionContractTest {
         // arc 19 / M8 (the text importer's ImporterInfo.resultKind tail — a version-2 host would
         // read text bytes as a .soil); 4 since arc 21 / W1 (the TAG_MANAGER point — an older host
         // knows no `ITagManager` at all). Bumping this again is a contract event.
-        assertEquals(4, ExtensionContract.API_VERSION)
+        assertEquals(5, ExtensionContract.API_VERSION)
         assertEquals(2_000, ExtensionContract.MAX_INK_STROKES)
         assertEquals(60_000, ExtensionContract.MAX_INK_POINTS)
         assertEquals(20, ExtensionContract.MAX_PRECONTEXT_CHARS)
@@ -64,11 +64,11 @@ class ExtensionContractTest {
         assertEquals(64, ExtensionContract.MAX_TAG_CHARS)
         assertEquals(5_000, ExtensionContract.MAX_TAGS)
         assertEquals(50_000, ExtensionContract.MAX_TAG_ASSIGNMENTS)
-        assertEquals(48, ExtensionContract.MAX_TARGET_ID_CHARS)
         assertEquals(200, ExtensionContract.MAX_TARGET_LABEL_CHARS)
         assertEquals("tag index full", ExtensionContract.TAG_INDEX_FULL)
-        // A UUID target id must fit with room to spare — every host id is one today.
-        assertTrue(ExtensionContract.MAX_TARGET_ID_CHARS >= 36)
+        // Since W4 a target id has no length cap of its own: it is a canonical UUID or it is not a
+        // target, and 22 base64url characters is what the codec pays for one.
+        assertEquals(22, CompactId.CHARS)
     }
 
     /** The scratch-pad transfer values: Paper's **shipped** constants (its S2 outcome), not the

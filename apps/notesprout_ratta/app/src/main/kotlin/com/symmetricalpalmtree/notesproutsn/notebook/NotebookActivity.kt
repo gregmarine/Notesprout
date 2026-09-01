@@ -2200,16 +2200,16 @@ class NotebookActivity : AppCompatActivity() {
         if (!opened || closing || !::session.isInitialized) return
         val showing = if (targetKind == TagShowing.TARGET_NOTEBOOK) {
             TagShowing(
-                targetKind = TagShowing.TARGET_NOTEBOOK,
-                targetId = notebookId,
+                notebookId = notebookId,
+                pageId = null,
                 targetLabel = notebookName,
                 mode = TagShowing.MODE_ADD,
             )
         } else {
             val pageId = displayedPageId ?: return
             TagShowing(
-                targetKind = TagShowing.TARGET_PAGE,
-                targetId = pageId,
+                notebookId = notebookId,
+                pageId = pageId,
                 targetLabel = pageLabel(pageId),
                 mode = TagShowing.MODE_ADD,
             )
@@ -2234,8 +2234,8 @@ class NotebookActivity : AppCompatActivity() {
         }
         tagEntry.open(
             TagShowing(
-                targetKind = TagShowing.TARGET_NOTEBOOK,
-                targetId = notebookId,
+                notebookId = notebookId,
+                pageId = null,
                 targetLabel = notebookName,
                 mode = TagShowing.MODE_MANAGE,
                 pageIds = listed,
@@ -2295,7 +2295,7 @@ class NotebookActivity : AppCompatActivity() {
             openTagAdd(pageId, TagSelection.prefill(title))
             return
         }
-        tagEntry.assign(title, TagShowing.TARGET_PAGE, pageId) { display ->
+        tagEntry.assign(title, notebookId, pageId) { display ->
             // The toast fires here and not at the tap: the standing rule is that a toast confirms
             // something that has already happened, and until the write lands it has not. The
             // selection stays up — nothing was consumed.
@@ -2329,8 +2329,8 @@ class NotebookActivity : AppCompatActivity() {
         if (!opened || closing) return
         tagEntry.open(
             TagShowing(
-                targetKind = TagShowing.TARGET_PAGE,
-                targetId = pageId,
+                notebookId = notebookId,
+                pageId = pageId,
                 targetLabel = pageLabel(pageId),
                 mode = TagShowing.MODE_ADD,
                 prefill = prefill,

@@ -12,7 +12,8 @@ import org.junit.Test
 /** The tag index's key layout over the host's store (arc 21 / W1), against a fake store. */
 class TagStoreTest {
 
-    private val nb = TagShowing.TARGET_NOTEBOOK
+    /** Since W4 a target is a notebook, plus a page when the tag is on one. */
+    private val n1 = "11111111-1111-4111-8111-111111111111"
 
     @Test
     fun firstRunIsEmptyNotAFailure() {
@@ -25,7 +26,7 @@ class TagStoreTest {
     fun writeThenReadRoundTrips() {
         val fake = FakeExtensionStore()
         val store = TagStore(fake)
-        val index = TagIndex.EMPTY.assign("reading list", nb, "n1").index
+        val index = TagIndex.EMPTY.assign("reading list", n1).index
         store.write(index)
         assertEquals(setOf(TagStore.KEY_INDEX), fake.values.keys)
         val back = store.read()
@@ -79,7 +80,7 @@ class TagStoreTest {
     @Test
     fun theStoredBytesAreExactlyTheCodecBlob() {
         val fake = FakeExtensionStore()
-        val index = TagIndex.EMPTY.assign("draft", nb, "n1").index
+        val index = TagIndex.EMPTY.assign("draft", n1).index
         TagStore(fake).write(index)
         // The wire form IS the storage form — `snapshot` hands the host this value untouched.
         assertTrue(TagCodec.encode(index).contentEquals(fake.values[TagStore.KEY_INDEX]))

@@ -15,8 +15,9 @@ import org.junit.Test
  */
 class TagWritesTest {
 
-    private val nb = TagShowing.TARGET_NOTEBOOK
-    private val page = TagShowing.TARGET_PAGE
+    /** Since W4 a target is a notebook, plus a page when the tag is on one. */
+    private val n1 = "11111111-1111-4111-8111-111111111111"
+    private val p1 = "aaaaaaaa-1111-4111-8111-111111111111"
 
     private fun fresh(): Pair<FakeExtensionStore, TagStore> {
         val fake = FakeExtensionStore()
@@ -37,7 +38,7 @@ class TagWritesTest {
     @Test
     fun assignCreatesAttachesAndWrites() {
         val (fake, store) = fresh()
-        val index = written(TagWrites.apply(store) { it.assign("Reading List", nb, "n1").index })
+        val index = written(TagWrites.apply(store) { it.assign("Reading List", n1).index })
         assertEquals(listOf("Reading List"), index.tags.map { it.display })
         // Written, not merely held in memory: the store carries it before anyone is told.
         assertEquals(
@@ -52,13 +53,13 @@ class TagWritesTest {
     fun aSecondEditAppliesToWhatTheFirstWrote() {
         val (_, store) = fresh()
         val stale = TagIndex.EMPTY
-        TagWrites.apply(store) { it.assign("draft", nb, "n1").index }
+        TagWrites.apply(store) { it.assign("draft", n1).index }
         // The caller still holds `stale` — and the transform is handed the FRESH index anyway.
         val after = written(
             TagWrites.apply(store) { current ->
                 assertEquals(1, current.tags.size)
                 assertEquals(0, stale.tags.size)
-                current.assign("done", nb, "n1").index
+                current.assign("done", n1).index
             },
         )
         assertEquals(2, after.tags.size)
@@ -67,7 +68,7 @@ class TagWritesTest {
     @Test
     fun nothingToDoIsUnchangedAndStillHandsBackTheFreshIndex() {
         val (fake, store) = fresh()
-        TagWrites.apply(store) { it.assign("draft", nb, "n1").index }
+        TagWrites.apply(store) { it.assign("draft", n1).index }
         val before = fake.values[TagStore.KEY_INDEX]!!.copyOf()
         val outcome = TagWrites.apply(store) { null }
         assertTrue(outcome is TagWrites.Outcome.Unchanged)
@@ -81,7 +82,7 @@ class TagWritesTest {
         val (_, store) = fresh()
         assertEquals(
             TagWrites.Reason.NOT_A_TAG,
-            failedWith(TagWrites.apply(store) { it.assign("   ", nb, "n1").index }),
+            failedWith(TagWrites.apply(store) { it.assign("   ", n1).index }),
         )
     }
 
@@ -89,12 +90,12 @@ class TagWritesTest {
     fun aCapIsItsOwnReasonAndWritesNothing() {
         val (fake, store) = fresh()
         var full = TagIndex.EMPTY
-        for (n in 0 until ExtensionContract.MAX_TAGS) full = full.assign("tag $n", nb, "n1").index
+        for (n in 0 until ExtensionContract.MAX_TAGS) full = full.assign("tag $n", n1).index
         store.write(full)
         val before = fake.values[TagStore.KEY_INDEX]!!.copyOf()
         assertEquals(
             TagWrites.Reason.INDEX_FULL,
-            failedWith(TagWrites.apply(store) { it.assign("one too many", nb, "n1").index }),
+            failedWith(TagWrites.apply(store) { it.assign("one too many", n1).index }),
         )
         assertTrue(before.contentEquals(fake.values[TagStore.KEY_INDEX]))
     }
@@ -124,11 +125,11 @@ class TagWritesTest {
     @Test
     fun removeAndDeleteGoThroughTheSameCycle() {
         val (_, store) = fresh()
-        var index = written(TagWrites.apply(store) { it.assign("draft", nb, "n1").index })
-        index = written(TagWrites.apply(store) { it.assign("draft", page, "p1").index })
+        var index = written(TagWrites.apply(store) { it.assign("draft", n1).index })
+        index = written(TagWrites.apply(store) { it.assign("draft", n1, p1).index })
         val draft = index.find("draft")!!.id
 
-        index = written(TagWrites.apply(store) { it.unassign(draft, page, "p1") })
+        index = written(TagWrites.apply(store) { it.unassign(draft, n1, p1) })
         // The tag persists until it is explicitly deleted — that is the lifecycle call.
         assertEquals(1, index.tags.size)
         assertEquals(1, index.assignments.size)

@@ -12,7 +12,7 @@ are **reading references — no app code is copied**.
 still binds, and the reference doc. **The full phase-by-phase records (outcomes, findings,
 walk logs) live in git history — arcs 1–18 at `git show 90a9198:apps/notesprout_ratta/RATTA_PLAN.md`,
 arcs 19–20's full phase records at the end of this file until the next compaction** — and each
-feature's authoritative reference is its `docs/` file. **Arc 21 "Tags" is in progress — W1, W2 and W3 complete, next work = W4.
+feature's authoritative reference is its `docs/` file. **Arc 21 "Tags" is in progress — W1–W4 complete, next work = W5.
 Fable planned only: Opus/Sonnet/Haiku execute every phase (see the arc section's model notes).**
 
 ---
@@ -870,7 +870,7 @@ button GONE, back after `pm enable`. All passed. Host-side smoke by adb: noteboo
 bar constructed (which is what proves `ic_tag` resolves — `button()` sets the drawable in `init`),
 `logcat -b crash` empty.
 
-### W4 — Search merge ⬜
+### W4 — Search merge ✅
 `LibrarySearch` fetches `snapshot()` at query time (call-shaped, pre-open rule; absent extension
 = names-only, silently). Tag texts rank through `core/FuzzyRank` with the same total order;
 `SearchAssembly` grows the third group: folders → notebooks (name/tag deduped, best rank) →
@@ -882,6 +882,84 @@ Walk: tag-only match surfaces notebook; page hit opens at the page; names-only w
 *Opus (touches arc-20 code — read `docs/library.md` § Search first; FuzzyRank itself must not
 change ranking for names). Haiku: walk.*
 **Questions at phase start:** page-hit card wording.
+
+#### W4 phase-start decisions (user, 2026-09-01 — do not re-litigate)
+
+**The structural surprise that opened them.** The plan's page-hit card assumed the host could name
+the notebook a tagged page lives in. It cannot: W1 stored a page assignment as
+`(tagId, TARGET_PAGE, pageUuid)` and **nothing anywhere records the owning notebook** — the global
+index holds folders and notebooks only, pages exist solely inside each `.soil`. Scanning for the
+owner is not available either: `KeyMaterial`'s raw-key cache is **per file** (the salt is per file),
+so a first-ever open of a `.soil` costs a full KDF. The user's call reshaped the record instead.
+
+| Decision | Answer |
+|---|---|
+| The assignment record | **Every assignment names a notebook**; a page tag *also* names a page. `notebookId` present alone = a notebook tag, `notebookId` + `pageId` = a page tag. The user's model, and it makes the page→notebook relationship storable instead of inferable. |
+| Where the pair lives | **Two explicit fields in the contract**, not packed into the opaque target id: `TagIndex.Assignment` becomes `(tagId, notebookId, pageId?)` and `TagCodec` bumps its version. The extension now *knows* a page belongs to a notebook, which it did not. |
+| The encoded `kind` field | **Dropped** — a present `pageId` is what makes an assignment a page tag, so a stored kind is a second copy of the answer that can disagree with the question (W1's own reason for dropping `identityKey`). `TagShowing.TARGET_NOTEBOOK` / `TARGET_PAGE` stay in the API surface: they read well at call sites and MODE_MANAGE is defined against them. |
+| Id form | **Compact base64url** — a UUID's 128 bits as 22 chars, not 36. W1's precedent applied again: keep every cap the wizard set, shrink the record. Assignment = 53 bytes; `WORST_CASE_BYTES` 50 000 × 53 + 1 000 007 = **3 650 007** against 4 MiB (was 3 900 007), so all three caps (5 000 tags · 50 000 assignments · 64 chars) are **unchanged**. One pure transform in `:extension-api`, JVM-tested both directions. Plain UUIDs were offered and declined — they would have forced the assignment cap down to ~35 000. |
+| Old blobs | Tolerant migrate, not a wipe: a v1 `A <tagId> <kind> <target>` record with `kind == TARGET_NOTEBOOK` becomes `(tagId, target, null)` — a notebook assignment already *was* its notebook id. `kind == TARGET_PAGE` records are **dropped**: they name a page with no recoverable owner. (On the Nomad that is W2's two test tags.) |
+| Page-hit card wording | Name line **`<Notebook> · Page N`**, subtitle **`<folder> · <tag>`**. The name line is `singleLine` — the notebook name is ellipsized so `· Page N` always survives, rather than letting a long name eat the page number. |
+| Page-hit card cover | **The notebook's own cover snapshot** — already in hand from the listing, no extra read, no `.soil` raster. A page hit and its notebook look alike above the fold; the two text lines tell them apart. |
+| Notebook card subtitle | The matched tag joins the folder **only when the name did not match** — `folder · tag` answers "why is this here", and a name match already answers it. A notebook matching both keeps the plain folder line. |
+| Page numbers | Resolved by reading the owning notebook's `.soil` page list, on IO, **cached per process**, and only for notebooks that actually have page hits. Viable because raw keys persist in `DerivedKeyStore`, so a notebook that has been opened before reopens without a KDF — and a notebook with a tagged page has necessarily been opened. A notebook that will not open contributes **no page cards**; its notebook card is unaffected. The walk measures this. |
+| Long-press on a page card | **Nothing** this arc. The ordinary action sheet acts on a notebook, and firing it from a page card would rename or delete something the card does not name. |
+
+**Declined, and why it is in `BACKLOG.md`.** The user asked the right question — why is a table being
+serialized at all? Because `IExtensionStore` (arc 11) is **key/value**: `get`/`put`/`delete`/`keys`
+over byte arrays. The file underneath is already SQLite and host-owned; only the seam hides it. So
+every extension serializes its structure into values — the scratch pad's pages are `pages` (one id
+per line) plus `page/<id>` blobs, which is why a scratch page has a hard 4 MiB ceiling and a "page
+full" dialog. Widening `IExtensionStore` to offer rows and columns was offered and **declined for
+this arc**: W4 ships on the blob. The seam question and the pad's page ceiling go to `BACKLOG.md`
+together — they have one cause.
+
+**Outcome (code + Nomad walk by hand).** One query now answers over names **and** tags, and a
+tagged page is its own card that opens the notebook at it. **1620 JVM tests/variant** (+30). All ten
+modules build debug + release; both release APKs sign.
+
+New: `CompactId` (`:extension-api`, pure) · `library/PageNumbers` (host) · `CardItem.Page` +
+`LibraryGrid.pageCard`/`paintCover` · `SoilDao.livePageIds` · `SearchAssembly.Shelf`/`NotebookHit`/
+`PageHit`. Reshaped: `TagIndex.Assignment` (tagId · notebookId · pageId?), `TagCodec` (`NSTAG2`,
+compact ids, no kind field, v1 migration), `TagShowing` (the pair), `ITagManager.assign`,
+`TagClient.assign`, `TagManagerEntry.assign`, and the five host call sites.
+
+**What the arc did not expect.** W4's real work turned out to be upstream of search: a W1 page
+assignment named a page and nothing else, so the library could not say which notebook a tagged page
+was in — see the decision table above. Reshaping the record was the phase; the merge itself is small.
+
+**Locks the phase set.** `API_VERSION` **5**, and it is the first bump that is **not** a compatible
+tail — a W1-shaped tag extension against a W4 host would unmarshal a `TagShowing` wrongly. It fails
+loudly (the constructor `require`s reject it, crossing as `IllegalArgumentException`), and the
+declaration keeps it from being reached; only the tag service moves. `ExtensionContract.MAX_TARGET_ID_CHARS`
+is **gone** — an id is a canonical UUID or it is not a target, checked by `CompactId.isId` at every
+door, which is also what keeps a path character and a NUL out of one (the UUID alphabet has neither),
+so W1's hand-rolled character checks were deleted as the weaker spelling of the same guarantee.
+In memory an id is **always** a UUID; the compact form lives between `TagCodec`'s two functions and
+nowhere else. Ranking and the blob decode both run **off Main** (`Dispatchers.Default`) — the decode
+can be megabytes and the rank walks every assignment, and the caller is the listing coroutine.
+A page card carries **no long-press**: the action sheet acts on a notebook, and firing it from a card
+that names a page would act on something the card does not name.
+
+**Two finds from the walk, both fixed and re-proven on the Nomad:**
+- **Page cards got no cover.** `bindCurrentPage` fetched covers for `CardItem.Notebook` only, so
+  every page card fell through to the paper placeholder. It asks for any non-folder card now, and
+  `distinct()` keeps two hits from one notebook to a single fetch.
+- **The search dialog's hint was a lie.** "Folder or notebook name" survived a change that made tags
+  searchable. There are two hints now and the dialog picks by whether a tag manager is installed —
+  the house rule about not claiming a control that cannot work, applied to a hint. `LibraryActivity`
+  refreshes `TagManagerEntry` from `onResume` for it (it has no button, so nothing did).
+
+**Walk (by hand on the Nomad).** The v1 → v2 migration ran live on the real store: all five existing
+tags survived and the two W2 page assignments were dropped, exactly as the codec test asserts ·
+tagged Page 1 of "Tags" with `packing` from the notebook's Tag-page door · searched `packing` from
+the library and got **one page card**, `Tags · Page 1` over `Test · packing`, the notebook's own cover
+above it · tapping it opened the notebook · `logcat -b crash` empty. Test data left on the Nomad:
+tag `packing` on Page 1 of the "Tags" notebook (folder Test).
+
+**Left for W6:** `docs/tags.md`, `docs/library.md` § Search, `docs/extensions.md` (the reshaped
+contract + `API_VERSION` 5), both CLAUDE.mds. The `BACKLOG.md` entry for the declined store-seam
+widening is already written.
 
 ### W5 — Backup of extension stores ⬜
 The arc-17 engine grows the store set: enumerate via a new `SoilFile.extensionStoreFiles(ctx)`

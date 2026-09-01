@@ -8,6 +8,14 @@ import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectSummary
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectType
+import com.symmetricalpalmtree.notesproutsn.extension.ExtensionCallException
+import com.symmetricalpalmtree.notesproutsn.extension.ExtensionRegistry
+import com.symmetricalpalmtree.notesproutsn.extension.TagClient
+import com.symmetricalpalmtree.notesproutsn.extension.TagIndex
+import com.symmetricalpalmtree.notesproutsn.notebook.TagTargets
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * The library's **search shelf** (arc 20 / Q1) — the query, the dialog that asks for it, and the
@@ -33,6 +41,10 @@ import com.symmetricalpalmtree.notesproutsn.data.index.ObjectType
 class LibrarySearch(
     private val activity: Activity,
     private val repo: IndexRepository,
+    /** Whether a tag manager is installed **right now** — the answer the library's own entry last
+     *  got. It decides the dialog's hint and nothing else: what the shelf does about tags is
+     *  settled per run by [snapshot], which asks again. */
+    private val tagsAvailable: () -> Boolean = { false },
     /** A query was accepted: show the shelf (entering the mode if needed) and re-list. */
     private val onQueryRun: () -> Unit,
 ) {
@@ -57,7 +69,8 @@ class LibrarySearch(
             titleRes = R.string.library_search_title,
             confirmRes = R.string.library_search_confirm,
             initial = query,
-            hintRes = R.string.library_search_hint,
+            hintRes = if (tagsAvailable()) R.string.library_search_hint_tags
+            else R.string.library_search_hint,
         ) { typed, dismiss ->
             // A blank query would open a shelf holding the entire library, which does not read as
             // "you searched for nothing" — it reads as a result. Its own words, not the naming
@@ -95,6 +108,12 @@ class LibrarySearch(
      * shelf "where is it" beats "when"), resolved from the folder listing that is already in hand,
      * so the subtitles cost no extra reads at all. Folders get one too: this shelf is flat, and
      * folder names are only unique per parent, so two called "Notes" would be one card twice.
+     *
+     * **Tags join the query** (arc 21 / W4). One snapshot per run, bind-per-call; no tag extension
+     * installed means names only, silently — the same rule every other tag door follows, except that
+     * this one has nothing to make GONE, so it simply answers arc 20's shelf. A tagged **page**
+     * becomes its own card, which needs the page's number, which needs the notebook's page list: see
+     * [pageCards] for what that costs and when it is paid.
      */
     suspend fun cards(pinnedIds: Set<String>): List<CardItem> {
         // Unreachable by the dialog, which refuses a blank query — a safety net, not a state.
@@ -103,10 +122,81 @@ class LibrarySearch(
         val notebooks = repo.allNotebooks()
         val folderNames = folders.associate { it.id to it.name }
         val root = activity.getString(R.string.recents_parent_root)
-        return SearchAssembly.rank(folders, notebooks, query).map { s ->
-            val where = parentLabel(s, folderNames, root)
-            if (s.type == ObjectType.FOLDER) CardItem.Folder(s, subtitle = where)
-            else CardItem.Notebook(s, pinned = s.id in pinnedIds, subtitle = where)
+        val tags = snapshot()
+        // Ranking is pure CPU over the whole library and, with tags, over every assignment in it —
+        // up to fifty thousand. Off Main: this is called from the listing coroutine.
+        val shelf = withContext(Dispatchers.Default) {
+            SearchAssembly.rank(folders, notebooks, query, tags)
+        }
+
+        val cards = ArrayList<CardItem>(shelf.folders.size + shelf.notebooks.size + shelf.pages.size)
+        for (f in shelf.folders) cards += CardItem.Folder(f, subtitle = parentLabel(f, folderNames, root))
+        for (hit in shelf.notebooks) {
+            val where = parentLabel(hit.notebook, folderNames, root)
+            cards += CardItem.Notebook(
+                hit.notebook,
+                pinned = hit.notebook.id in pinnedIds,
+                subtitle = hit.matchedTag?.let { activity.getString(R.string.search_where_and_tag, where, it) } ?: where,
+            )
+        }
+        cards += pageCards(shelf.pages, folderNames, root)
+        return cards
+    }
+
+    /**
+     * The page hits as cards — the one part of a run that reads anything but the index.
+     *
+     * A page's **number** is its position among its notebook's live page rows, and only that
+     * notebook's `.soil` knows it. So one file is opened per notebook that produced a page hit —
+     * never per hit, never for a notebook that produced none, and not at all when nothing was
+     * tagged. [PageNumbers] caches the answer against the notebook's `updatedAt`, so a second search
+     * over an unchanged library reads no files at all.
+     *
+     * That read is also the **aliveness check**: a page that is no longer in the list has been
+     * deleted under its tag, and its card is dropped. A notebook that will not open drops its page
+     * cards and keeps its notebook card — the shelf says less rather than saying something wrong.
+     */
+    private suspend fun pageCards(
+        hits: List<SearchAssembly.PageHit>,
+        folderNames: Map<String, String>,
+        root: String,
+    ): List<CardItem> {
+        if (hits.isEmpty()) return emptyList()
+        val pagesByNotebook = HashMap<String, List<String>?>()
+        val cards = ArrayList<CardItem>(hits.size)
+        for (hit in hits) {
+            val pages = pagesByNotebook.getOrPut(hit.notebook.id) {
+                PageNumbers.pagesOf(activity, hit.notebook.id, hit.notebook.updatedAt)
+            } ?: continue
+            val number = TagTargets.pageNumber(pages, hit.pageId) ?: continue
+            val where = parentLabel(hit.notebook, folderNames, root)
+            cards += CardItem.Page(
+                hit.notebook,
+                pageId = hit.pageId,
+                pageLabel = activity.getString(R.string.tag_page_label, number),
+                subtitle = activity.getString(R.string.search_where_and_tag, where, hit.matchedTag),
+            )
+        }
+        return cards
+    }
+
+    /**
+     * The tag index, or null when there is no tag extension — in which case search is names only and
+     * says nothing about it, because there is no control to hide and nothing was promised.
+     *
+     * A **stored-but-unreadable** index is also null here, and that is deliberate: it is reported by
+     * every screen that edits tags, and a search shelf is not the place to learn about it. What must
+     * not happen is the host writing over it, and a read never does.
+     */
+    private suspend fun snapshot(): TagIndex? {
+        val ref = ExtensionRegistry.tagManager(activity) ?: return null
+        return try {
+            TagClient.snapshot(activity, ref)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: ExtensionCallException) {
+            Slog.d(TAG) { "tag snapshot unavailable: ${e.javaClass.simpleName}" }
+            null
         }
     }
 

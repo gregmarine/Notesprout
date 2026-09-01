@@ -143,7 +143,7 @@ class LibraryActivity : AppCompatActivity() {
         coldLaunch = savedInstanceState == null
 
         // Built before the bars are wired: the Search button's listener reaches for it.
-        search = LibrarySearch(this, repo) {
+        search = LibrarySearch(this, repo, tagsAvailable = { ::tags.isInitialized && tags.isAvailable }) {
             // A new query is a new listing — never page 4 of the last one. Re-searching while the
             // shelf is already up is not a no-op: it is a different shelf under the same button.
             pageIndex = 0
@@ -158,7 +158,13 @@ class LibraryActivity : AppCompatActivity() {
         TooltipCompat.setTooltipText(binding.btnScratchPad, binding.btnScratchPad.contentDescription)
         // Tags (arc 21 / W1). No button of its own — the door is a row in the card sheet — but it
         // registers an ActivityResult launcher, so it is built here for the same reason as the pad.
-        tags = TagManagerEntry(activity = this)
+        tags = TagManagerEntry(activity = this) {
+            // A tag screen that changed something changed what a standing query answers (arc 21 /
+            // W4) — the arc-20 rule that any action re-runs the query, applied to the one action
+            // that can add or remove a row without touching a name. Only in SEARCH: no other shelf
+            // is built out of tags.
+            if (mode == BrowseMode.SEARCH) lifecycleScope.launch { refresh() }
+        }
         // Import (arc 16 / I1). Built here for the same reason as the pad: it registers two
         // ActivityResult launchers (the document picker and the folder picker), and one may not be
         // registered after STARTED.
@@ -205,6 +211,9 @@ class LibraryActivity : AppCompatActivity() {
         // because an IndexGuard bounce returns from onCreate but still gets this callback.
         if (::scratchPad.isInitialized) scratchPad.refresh()
         if (::importFlow.isInitialized) importFlow.refresh()
+        // No button to show or hide, but the search dialog's hint asks whether tags are searchable
+        // (arc 21 / W4), and that answer goes stale the same way every other one does.
+        if (::tags.isInitialized) tags.refresh()
         if (gridMeasured) lifecycleScope.launch { refresh() }
     }
 
@@ -236,10 +245,12 @@ class LibraryActivity : AppCompatActivity() {
      * at tap time, and the launch runs only once that frame has been drawn — the notebook then
      * carries the same box from its own first frame until the page lands.
      */
-    private fun openNotebook(id: String, name: String, viaLink: Boolean = false) {
+    private fun openNotebook(id: String, name: String, viaLink: Boolean = false, pageId: String? = null) {
         if (launching) return
         launching = true
-        OpeningOverlay.showThen(this) { startActivity(NotebookActivity.intent(this, id, name, viaLink)) }
+        OpeningOverlay.showThen(this) {
+            startActivity(NotebookActivity.intent(this, id, name, viaLink, initialPageId = pageId))
+        }
     }
 
     /**
@@ -548,7 +559,11 @@ class LibraryActivity : AppCompatActivity() {
         val g = grid ?: return
         val range = GridMath.pageRange(pageIndex, g.cardsPerPage, items.size)
         val missing = range
-            .mapNotNull { (items[it] as? CardItem.Notebook)?.summary?.id }
+            // A page card shows its **notebook's** cover (arc 21 / W4) and its summary is that
+            // notebook's, so it asks for a cover like any other card — and two page hits from one
+            // notebook share the fetch, because the map is keyed by notebook id.
+            .mapNotNull { items[it].takeIf { c -> c !is CardItem.Folder }?.summary?.id }
+            .distinct()
             .filter { it !in coverCache }
         if (missing.isNotEmpty()) {
             val fetched = withContext(Dispatchers.IO) {
@@ -601,6 +616,11 @@ class LibraryActivity : AppCompatActivity() {
     private fun onCardTap(item: CardItem) = when (item) {
         is CardItem.Folder -> enterFolder(item.summary.id)
         is CardItem.Notebook -> openNotebook(item.summary.id, item.summary.name)
+        // A page found by a tag opens its notebook **at that page** (arc 21 / W4). The page id
+        // rides the Intent, which is what ids do — it is the link-follow's own extra, and the one
+        // mechanism the notebook already has for "open here". The tag that found it does not
+        // travel: it is the user's own words, and the notebook has no use for it.
+        is CardItem.Page -> openNotebook(item.summary.id, item.summary.name, pageId = item.pageId)
     }
 
     /**
@@ -710,8 +730,8 @@ class LibraryActivity : AppCompatActivity() {
     private fun showTags(s: ObjectSummary) {
         tags.open(
             TagShowing(
-                targetKind = TagShowing.TARGET_NOTEBOOK,
-                targetId = s.id,
+                notebookId = s.id,
+                pageId = null,
                 targetLabel = s.name,
                 mode = TagShowing.MODE_BROWSE,
             ),

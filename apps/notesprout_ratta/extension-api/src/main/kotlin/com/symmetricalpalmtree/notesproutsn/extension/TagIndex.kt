@@ -30,9 +30,39 @@ class TagIndex private constructor(
         val identityKey: String get() = TagRules.identityKey(display)
     }
 
-    /** One attachment: [tagId] on ([targetKind], [targetId]). Assignments are a set — the pair
-     *  cannot appear twice, and [assign] is what enforces that. */
-    class Assignment(val tagId: String, val targetKind: Int, val targetId: String)
+    /**
+     * One attachment: [tagId] on a notebook, or on one page **of** a notebook (arc 21 / W4).
+     *
+     * **Every assignment names a notebook.** A page tag names its page as well, and that is the only
+     * difference between the two kinds — [pageId] present *is* what makes it a page tag, so no kind
+     * flag is stored. A stored kind would be a second copy of the answer that could disagree with
+     * the question, which is the same reason W1 declined to store a tag's identity key.
+     *
+     * The notebook is not decoration. Before W4 a page assignment carried a page id and nothing
+     * else, and the library had no way on earth to say which notebook that page was in: the global
+     * index holds folders and notebooks only, pages live inside each `.soil`, and opening every
+     * `.soil` to look costs a key derivation apiece. A relationship has to be stored to be known.
+     *
+     * Assignments are a set — the same tag cannot land on the same target twice, and [assign]
+     * enforces it.
+     *
+     * Both ids are canonical UUIDs ([CompactId.isId]); [TagCodec] stores them compacted and
+     * [of] drops anything else.
+     */
+    class Assignment(val tagId: String, val notebookId: String, val pageId: String? = null) {
+
+        /** [TagShowing.TARGET_NOTEBOOK] or [TARGET_PAGE][TagShowing.TARGET_PAGE] — derived, never
+         *  stored. */
+        val targetKind: Int
+            get() = if (pageId == null) TagShowing.TARGET_NOTEBOOK else TagShowing.TARGET_PAGE
+
+        /** The thing the tag hangs on: the page when there is one, else the notebook. */
+        val targetId: String get() = pageId ?: notebookId
+
+        /** True when this attaches to the given target — the one comparison every query makes. */
+        fun isOn(notebookId: String, pageId: String?): Boolean =
+            this.notebookId == notebookId && this.pageId == pageId
+    }
 
     /** What [assign] did: the index to write, and the tag's canonical display text for the toast. */
     class Assigned(val index: TagIndex, val display: String, val tagId: String, val created: Boolean)
@@ -62,19 +92,25 @@ class TagIndex private constructor(
         compareBy({ it.identityKey }, { it.display }),
     )
 
-    /** The tags attached to one target, in [sortedTags] order. */
-    fun tagsOf(targetKind: Int, targetId: String): List<Tag> {
+    /** The tags attached to one target, in [sortedTags] order. [pageId] null asks about the
+     *  notebook itself; a page id asks about that page. */
+    fun tagsOf(notebookId: String, pageId: String? = null): List<Tag> {
         val ids = HashSet<String>()
-        for (a in assignments) if (a.targetKind == targetKind && a.targetId == targetId) ids += a.tagId
+        for (a in assignments) if (a.isOn(notebookId, pageId)) ids += a.tagId
         return sortedTags().filter { it.id in ids }
     }
 
     /** True when [tagId] is already on that target. */
-    fun isAssigned(tagId: String, targetKind: Int, targetId: String): Boolean =
-        assignments.any { it.tagId == tagId && it.targetKind == targetKind && it.targetId == targetId }
+    fun isAssigned(tagId: String, notebookId: String, pageId: String? = null): Boolean =
+        assignments.any { it.tagId == tagId && it.isOn(notebookId, pageId) }
 
     /** Every target one tag reaches, in index order — what the host filters against alive rows. */
     fun targetsOf(tagId: String): List<Assignment> = assignments.filter { it.tagId == tagId }
+
+    /** Every assignment inside one notebook — the notebook's own tag and every page tag in it.
+     *  The host's search merge groups by this (arc 21 / W4). */
+    fun assignmentsIn(notebookId: String): List<Assignment> =
+        assignments.filter { it.notebookId == notebookId }
 
     /** The blast radius of deleting [tagId], counted by kind. */
     fun usageOf(tagId: String): Usage {
@@ -82,7 +118,7 @@ class TagIndex private constructor(
         var pages = 0
         for (a in assignments) {
             if (a.tagId != tagId) continue
-            if (a.targetKind == TagShowing.TARGET_NOTEBOOK) notebooks++ else pages++
+            if (a.pageId == null) notebooks++ else pages++
         }
         return Usage(notebooks, pages)
     }
@@ -127,30 +163,28 @@ class TagIndex private constructor(
      * @throws IllegalArgumentException [text] is not a valid tag ([TagRules.isValid]).
      * @throws IllegalStateException [ExtensionContract.TAG_INDEX_FULL] — a cap refused it; nothing changed.
      */
-    fun assign(text: String, targetKind: Int, targetId: String): Assigned {
+    fun assign(text: String, notebookId: String, pageId: String? = null): Assigned {
         require(TagRules.isValid(text)) { "not a tag" }
-        require(targetKind == TagShowing.TARGET_NOTEBOOK || targetKind == TagShowing.TARGET_PAGE) {
-            "unknown target kind ($targetKind)"
-        }
-        require(targetId.isNotEmpty() && targetId.length <= ExtensionContract.MAX_TARGET_ID_CHARS) {
-            "target id length ${targetId.length} outside 1..${ExtensionContract.MAX_TARGET_ID_CHARS}"
-        }
+        // The one shape a target may take. Not taste: [TagCodec] stores ids compacted, and the
+        // arithmetic that proves the worst legal index fits one store value assumes it can.
+        require(CompactId.isId(notebookId)) { "notebook id is not a UUID" }
+        require(pageId == null || CompactId.isId(pageId)) { "page id is not a UUID" }
         val existing = find(text)
-        if (existing != null && isAssigned(existing.id, targetKind, targetId)) {
+        if (existing != null && isAssigned(existing.id, notebookId, pageId)) {
             return Assigned(this, existing.display, existing.id, created = false)
         }
         if (assignments.size >= ExtensionContract.MAX_TAG_ASSIGNMENTS) {
             throw IllegalStateException(ExtensionContract.TAG_INDEX_FULL)
         }
         if (existing != null) {
-            val next = TagIndex(tags, assignments + Assignment(existing.id, targetKind, targetId))
+            val next = TagIndex(tags, assignments + Assignment(existing.id, notebookId, pageId))
             return Assigned(next, existing.display, existing.id, created = false)
         }
         if (tags.size >= ExtensionContract.MAX_TAGS) {
             throw IllegalStateException(ExtensionContract.TAG_INDEX_FULL)
         }
         val tag = Tag(mintId(), TagRules.display(text))
-        val next = TagIndex(tags + tag, assignments + Assignment(tag.id, targetKind, targetId))
+        val next = TagIndex(tags + tag, assignments + Assignment(tag.id, notebookId, pageId))
         return Assigned(next, tag.display, tag.id, created = true)
     }
 
@@ -159,10 +193,8 @@ class TagIndex private constructor(
      * persists until it is explicitly deleted, so removing its last assignment leaves it in the
      * suggestion list, ready to be used again.
      */
-    fun unassign(tagId: String, targetKind: Int, targetId: String): TagIndex {
-        val next = assignments.filterNot {
-            it.tagId == tagId && it.targetKind == targetKind && it.targetId == targetId
-        }
+    fun unassign(tagId: String, notebookId: String, pageId: String? = null): TagIndex {
+        val next = assignments.filterNot { it.tagId == tagId && it.isOn(notebookId, pageId) }
         return if (next.size == assignments.size) this else TagIndex(tags, next)
     }
 
@@ -180,9 +212,11 @@ class TagIndex private constructor(
      * the **query-time** filter: what the host shows must describe the library that exists.
      */
     fun filterAlive(aliveNotebooks: Set<String>, alivePages: Set<String>): TagIndex {
+        // A page assignment must clear **both** gates: its notebook alive in the index, and the page
+        // itself still in that notebook. Since W4 the first is answerable at all — before it, an
+        // orphaned page tag was indistinguishable from a live one.
         val kept = assignments.filter {
-            if (it.targetKind == TagShowing.TARGET_NOTEBOOK) it.targetId in aliveNotebooks
-            else it.targetId in alivePages
+            it.notebookId in aliveNotebooks && (it.pageId == null || it.pageId in alivePages)
         }
         return if (kept.size == assignments.size) this else TagIndex(tags, kept)
     }
@@ -206,7 +240,7 @@ class TagIndex private constructor(
          * shape is made trustworthy. Records that cannot be honoured are **dropped, not thrown**
          * (the tail-tolerance rule): a tag with a blank or over-long display, a duplicate id, a
          * second record folding to an identity already taken, an assignment naming a tag that is
-         * not there, an unknown target kind, a repeated assignment. Caps truncate.
+         * not there, an id that is not a UUID, a repeated assignment. Caps truncate.
          */
         fun of(tags: List<Tag>, assignments: List<Assignment>): TagIndex {
             val keptTags = ArrayList<Tag>(minOf(tags.size, ExtensionContract.MAX_TAGS))
@@ -226,9 +260,9 @@ class TagIndex private constructor(
             for (a in assignments) {
                 if (keptAssignments.size >= ExtensionContract.MAX_TAG_ASSIGNMENTS) break
                 if (a.tagId !in ids) continue
-                if (a.targetKind != TagShowing.TARGET_NOTEBOOK && a.targetKind != TagShowing.TARGET_PAGE) continue
-                if (a.targetId.isEmpty() || a.targetId.length > ExtensionContract.MAX_TARGET_ID_CHARS) continue
-                if (!seen.add("${a.tagId}\u0000${a.targetKind}\u0000${a.targetId}")) continue
+                if (!CompactId.isId(a.notebookId)) continue
+                if (a.pageId != null && !CompactId.isId(a.pageId)) continue
+                if (!seen.add("${a.tagId}\u0000${a.notebookId}\u0000${a.pageId ?: ""}")) continue
                 keptAssignments += a
             }
             return TagIndex(keptTags, keptAssignments)

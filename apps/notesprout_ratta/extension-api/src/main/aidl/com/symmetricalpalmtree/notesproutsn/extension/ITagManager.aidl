@@ -41,6 +41,11 @@ interface ITagManager {
     /** Normalize [text], create the tag if the library has never seen it, attach it to the target,
      *  and write the index. Returns the tag's CANONICAL display text (the casing first entered),
      *  which is what the host's toast says. Throws IllegalArgumentException for text that is not a
-     *  tag, IllegalStateException(TAG_INDEX_FULL) when a cap refuses it (nothing written). */
-    String assign(IExtensionStore store, String text, int targetKind, String targetId);
+     *  tag or an id that is not a canonical UUID, IllegalStateException(TAG_INDEX_FULL) when a cap
+     *  refuses it (nothing written).
+     *
+     *  The target is a PAIR (arc 21 / W4): [notebookId] always, [pageId] only when the tag belongs
+     *  to one page of it. A page is never named on its own -- the library has no other way to find
+     *  out which notebook a tagged page is in. */
+    String assign(IExtensionStore store, String text, String notebookId, String pageId);
 }

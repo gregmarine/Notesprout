@@ -1,6 +1,7 @@
 package com.symmetricalpalmtree.notesproutsn.library
 
 import android.content.Context
+import android.text.TextUtils
 import android.text.format.DateFormat
 import android.view.LayoutInflater
 import android.view.View
@@ -54,6 +55,25 @@ sealed class CardItem(val summary: ObjectSummary) {
         s: ObjectSummary,
         val pinned: Boolean = false,
         val subtitle: String? = null,
+    ) : CardItem(s)
+
+    /**
+     * One **page** of a notebook, found by a tag on it (arc 21 / W4) — the search shelf's card, and
+     * nowhere else's.
+     *
+     * [summary] is the **notebook's**, not the page's: pages have no index row, and the card wants
+     * the notebook's cover anyway (the covers map is keyed by notebook id, so two page hits from one
+     * notebook cost one fetch between them). What makes the card a page is [pageId], which is what a
+     * tap opens the notebook at.
+     *
+     * @param pageLabel "Page 3" — resolved host-side against the notebook's live page list.
+     * @param subtitle the parent folder and the tag that matched, already joined.
+     */
+    class Page(
+        s: ObjectSummary,
+        val pageId: String,
+        val pageLabel: String,
+        val subtitle: String,
     ) : CardItem(s)
 }
 
@@ -133,6 +153,7 @@ class LibraryGrid(
             val view = when (item) {
                 is CardItem.Folder -> folderCard(inflater, item)
                 is CardItem.Notebook -> notebookCard(inflater, context, item, covers[item.summary.id])
+                is CardItem.Page -> pageCard(inflater, context, item, covers[item.summary.id])
             }
             view.layoutParams = GridLayout.LayoutParams().apply {
                 width = cardWidth
@@ -141,7 +162,12 @@ class LibraryGrid(
             }
             view.isSelected = selectedId != null && item.summary.id == selectedId
             view.setOnClickListener { onTap(item) }
-            onLongPress?.let { handler -> view.setOnLongClickListener { handler(item); true } }
+            // A page card gets no long-press (arc 21 / W4): the action sheet acts on a notebook —
+            // rename, move, delete — and firing it from a card that names a page would act on
+            // something the card does not name.
+            if (item !is CardItem.Page) {
+                onLongPress?.let { handler -> view.setOnLongClickListener { handler(item); true } }
+            }
             grid.addView(view)
         }
         container.addView(grid)
@@ -175,7 +201,45 @@ class LibraryGrid(
             ?: "${DateFormat.getMediumDateFormat(context).format(d)} ${DateFormat.getTimeFormat(context).format(d)}"
 
         view.findViewById<View>(R.id.pinBadge).visibility = if (item.pinned) View.VISIBLE else View.GONE
+        paintCover(view, context, s, coverBytes)
+        return view
+    }
 
+    /**
+     * A page found by a tag (arc 21 / W4): the notebook's cover, `<Notebook> · Page N`, and the
+     * folder and tag beneath.
+     *
+     * **The notebook name is ellipsized, not the line.** `cardName` is `singleLine`, so letting the
+     * whole title fall off the end would eat the page number — the one part of the card that says
+     * which page this is. The name is cut to whatever is left after the suffix is measured, so
+     * "· Page 3" always survives. No pin badge: a page is not a notebook and cannot be pinned.
+     */
+    private fun pageCard(
+        inflater: LayoutInflater,
+        context: Context,
+        item: CardItem.Page,
+        coverBytes: ByteArray?,
+    ): View {
+        val view = inflater.inflate(R.layout.card_notebook, container, false)
+        val name = view.findViewById<TextView>(R.id.cardName)
+        val suffix = PAGE_SEPARATOR + item.pageLabel
+        val available = cardWidth - view.paddingStart - view.paddingEnd -
+            name.paddingStart - name.paddingEnd
+        val room = available - name.paint.measureText(suffix)
+        val head = TextUtils.ellipsize(
+            item.summary.name, name.paint, room.coerceAtLeast(0f), TextUtils.TruncateAt.END,
+        )
+        name.text = head.toString() + suffix
+
+        view.findViewById<TextView>(R.id.cardDate).text = item.subtitle
+        view.findViewById<View>(R.id.pinBadge).visibility = View.GONE
+        paintCover(view, context, item.summary, coverBytes)
+        return view
+    }
+
+    /** The card's picture: the cover snapshot, else a text-document glyph, else the paper. Shared by
+     *  the notebook card and the page card, which show the same notebook's cover. */
+    private fun paintCover(view: View, context: Context, s: ObjectSummary, coverBytes: ByteArray?) {
         val cover = view.findViewById<ImageView>(R.id.coverImage)
         val bmp = Bitmaps.decodeBounded(coverBytes, COVER_DECODE_EDGE)
         if (bmp != null) {
@@ -203,7 +267,6 @@ class LibraryGrid(
                 )
             )
         }
-        return view
     }
 
     private fun kindOf(label: String?): TemplateKind =
@@ -212,6 +275,9 @@ class LibraryGrid(
     private companion object {
         /** Covers are written small; decode is bounded regardless of what the blob claims. */
         const val COVER_DECODE_EDGE = 512
+
+        /** Between the notebook's name and the page's, on a page card (arc 21 / W4). */
+        const val PAGE_SEPARATOR = " · "
 
         /** Roughly how much of a card's height the cover band gets (the rest is name + date). */
         const val COVER_BAND_FRACTION = 0.75f

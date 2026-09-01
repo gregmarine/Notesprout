@@ -32,6 +32,10 @@ class FakeSoilDao : SoilDao {
         .filter { it.type == "template" && it.parentId == notebookId && it.deletedAt == null }
         .map { TemplateDigest(it.id, it.text, it.width, it.height, it.blob?.size) }
     override suspend fun livePageCount() = rows.values.count { it.type == "page" && it.deletedAt == null }
+    override suspend fun livePageIds(notebookId: String) = rows.values
+        .filter { it.type == "page" && it.parentId == notebookId && it.deletedAt == null }
+        .sortedBy { it.order }
+        .map { it.id }
     override suspend fun softDelete(ids: List<String>, at: Long) {
         for (id in ids) rows[id]?.let { if (it.deletedAt == null) rows[id] = it.copy(deletedAt = at, updatedAt = at) }
         events += "softDelete:${ids.joinToString(",")}"

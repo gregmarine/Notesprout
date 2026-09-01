@@ -1006,3 +1006,32 @@ was accepted-instead-of-fixed this arc. Ledger items that outlive the arc:
   notebook document (SN has no Page Index; auto-merge + the Merge sheet cover it — revisit on
   demand); open-with/share-to for `.md`/`.txt` (the arc-16 single-entry lock stands); images
   beyond og's source-level placeholder.
+
+## Notesprout SN — arc 21 "Tags" W4 (2026-09-01): the extension store is key/value
+
+**The extension store should offer rows and columns, not just keys and values.** Raised by the
+user at W4's phase start, examined, and **declined for arc 21** — W4 shipped on the blob. It is
+recorded here because it is not a preference; it is the cause of several unrelated-looking things.
+
+`IExtensionStore` (arc 11 / J2) is `get` / `put` / `delete` / `keys` over byte arrays, plus the
+`putLarge` / `getLarge` ashmem pair. The file underneath is **already SQLite** — host-owned,
+encrypted under the global key at `Garden/<pkg>.db` — so only the seam hides the fact. Every
+extension since has therefore serialized its structure into values, and pays for it:
+
+- **Tags** (`TagCodec`) hold what is plainly a relational model — tags, and assignments joining a
+  tag to a notebook and optionally a page — in **one 4 MiB store value**. That is where
+  `WORST_CASE_BYTES` comes from, why `MAX_TAGS` / `MAX_TAG_ASSIGNMENTS` / `MAX_TAG_CHARS` exist as
+  numbers rather than as anything a user would recognise, and why W4 had to write ids in base64url
+  (`CompactId`) to keep the caps the wizard set. A search merge decodes the **whole** index per
+  query rather than asking a question of it.
+- **The scratch pad** stores `pages` (one page id per line) and `page/<id>` blobs of encoded ink.
+  Its user-visible **4 MiB page ceiling** — `ScratchDocument` tracking the exact encoded size and
+  removing the stroke that would cross the line, behind a "page full" dialog — exists for exactly
+  this reason and for no other.
+
+The change would be an **appended** table facility on `IExtensionStore` (the compatible-append
+recipe the interface's own KDoc already used for `putLarge`), the host implementing it over the
+store's own SQLite file, and each extension migrating at its own pace. Nothing else in the family
+needs to move. It would delete `TagCodec` and its arithmetic outright and lift the pad's ceiling.
+
+Needs a fresh user decision and an arc of its own — it is a seam change every extension inherits.
