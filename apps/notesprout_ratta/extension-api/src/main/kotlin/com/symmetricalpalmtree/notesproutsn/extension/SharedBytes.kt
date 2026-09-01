@@ -4,7 +4,8 @@ import android.os.SharedMemory
 import android.system.OsConstants
 
 /**
- * The ashmem handshake behind [LargeValue], written once for both sides (arc 11 / J2).
+ * The ashmem handshake behind [LargeValue], written once for both sides (arc 11 / J2; the
+ * chunk carrier of the arc-22 store seam — [StorePayload.of] / [StorePayload.readAndClose] call it).
  *
  * [write] — the sender: create a region of exactly `bytes.size`, map RW, copy in, unmap,
  * `setProtect(PROT_READ)`, wrap. The sender still owns the handle and **must close it** once the

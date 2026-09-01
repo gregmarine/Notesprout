@@ -12,6 +12,9 @@ import android.util.Log
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.data.extensionStoreFile
 import com.symmetricalpalmtree.notesproutsn.data.extstore.ExtensionStores
+import com.symmetricalpalmtree.notesproutsn.data.extstore.StoreExecutor
+import com.symmetricalpalmtree.notesproutsn.extension.Cell
+import com.symmetricalpalmtree.notesproutsn.extension.DocumentContract
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilDatabase
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilSchema
 import com.symmetricalpalmtree.notesproutsn.data.template.BuiltInTemplates
@@ -270,11 +273,13 @@ object DocumentPdfRender {
     /**
      * The editor's saved text size, in sp — the one number this render takes from outside itself.
      *
-     * It lives in the **document editor's** host-owned extension store (`EditorPrefs.KEY_TEXT_SIZE`,
-     * a float's `toString` in UTF-8), so the path is: which package serves the editor point, does
-     * that package already have a store, what does the key say. **Only if the store already
-     * exists** — [ExtensionStores.open] would otherwise create one, and minting a store on an
-     * extension's behalf from an export is not a thing the host does.
+     * It lives in the **document editor's** host-owned extension store, in the `prefs` table whose
+     * shape `DocumentContract` pins (arc 22 / X1 — the ONE extension table the host reads, through
+     * its own executor and no binder), so the path is: which package serves the editor point, does
+     * that package already have a store, does the store have the table, what does the row say.
+     * **Only if the store file and the table already exist** — [ExtensionStores.open] would
+     * otherwise create one, and minting a store (or a table) on an extension's behalf from an
+     * export is not a thing the host does.
      *
      * Every failure at all — no editor installed, no store, an unparseable value, a locked library
      * — lands on the default. A text size is comfort, and an export must never refuse over one.
@@ -284,8 +289,25 @@ object DocumentPdfRender {
         if (pkg == null || !extensionStoreFile(context, pkg).exists()) {
             DocumentPdfMetrics.DEFAULT_TEXT_SIZE_SP
         } else {
-            val raw = ExtensionStores.open(context, pkg).kv().get(DocumentPdfMetrics.TEXT_SIZE_KEY)
-            DocumentPdfMetrics.textSizeSp(raw?.toString(Charsets.UTF_8))
+            val db = ExtensionStores.open(context, pkg)
+            if (!db.hasTable(DocumentContract.PREFS_TABLE)) {
+                DocumentPdfMetrics.DEFAULT_TEXT_SIZE_SP
+            } else {
+                var raw: String? = null
+                db.executor().query(
+                    "SELECT ${DocumentContract.PREFS_VALUE_COLUMN} FROM ${DocumentContract.PREFS_TABLE} " +
+                        "WHERE ${DocumentContract.PREFS_KEY_COLUMN} = ?",
+                    listOf(Cell.Text(DocumentPdfMetrics.TEXT_SIZE_KEY)),
+                    object : StoreExecutor.RowSink {
+                        override fun columns(names: List<String>) = Unit
+                        override fun row(cells: List<Cell>): Boolean {
+                            raw = (cells[0] as? Cell.Text)?.value
+                            return false
+                        }
+                    },
+                )
+                DocumentPdfMetrics.textSizeSp(raw)
+            }
         }
     } catch (e: CancellationException) {
         throw e

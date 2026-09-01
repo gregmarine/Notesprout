@@ -1,171 +1,367 @@
 package com.symmetricalpalmtree.notesproutsn.data.extstore
 
+import com.symmetricalpalmtree.notesproutsn.extension.Cell
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
+import com.symmetricalpalmtree.notesproutsn.extension.Statement
+import com.symmetricalpalmtree.notesproutsn.extension.StoreCodec
+import com.symmetricalpalmtree.notesproutsn.extension.StoreSchema
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.util.TreeMap
 
 /**
  * `ExtensionStoreBinder` is an `IExtensionStore.Stub` (an `android.os.Binder`) and cannot be
  * constructed on the JVM; every check and cap it applies lives in [ExtensionStoreGate], which is
- * what these drive — over a fake [KvDao] with an injectable calling uid. The binder's own two steps
- * (the ashmem copy and the deferred region close) are on-device only: the debug library's
+ * what these drive — over a fake [StoreExecutor] with an injectable calling uid. Real SQL, the
+ * ashmem copy and the deferred region close are on-device only: the debug library's
  * "Extension store self-test" is their check.
  */
 class ExtensionStoreGateTest {
 
-    /** In-memory `KvDao`; [keysWithPrefix] is the same exact, case-sensitive "starts with" the real query is. */
-    private class FakeDao : KvDao {
-        val rows = TreeMap<String, ByteArray>()
-        var failNext: RuntimeException? = null
-        override fun get(key: String): ByteArray? { fail(); return rows[key] }
-        override fun upsert(row: KvEntity) { fail(); rows[row.key] = row.value }
-        override fun delete(key: String) { fail(); rows.remove(key) }
-        override fun keysWithPrefix(prefix: String): List<String> {
-            fail()
-            return rows.keys.filter { it.startsWith(prefix) }
+    /**
+     * A recording executor: statements land in [committed] only when their transaction succeeds
+     * (a throw inside `transaction` discards the buffer — the rollback). Reads answer `host_schema`'s
+     * version from [version] and anything else from [canned]; [failOn] makes the next matching
+     * statement throw the way SQLite would.
+     */
+    private class FakeExecutor : StoreExecutor {
+        var version = 0
+        val committed = ArrayList<Pair<String, List<Cell>>>()
+        val canned = HashMap<String, Pair<List<String>, List<List<Cell>>>>()
+        var failOn: String? = null
+        private var buffer: ArrayList<Pair<String, List<Cell>>>? = null
+        private var bufferedVersion: Int? = null
+        var depth = 0
+
+        override fun <T> transaction(block: () -> T): T {
+            check(depth == 0) { "nested transaction" }
+            depth++
+            buffer = ArrayList()
+            bufferedVersion = version
+            try {
+                val r = block()
+                committed += buffer!!
+                version = bufferedVersion!!
+                return r
+            } finally {
+                buffer = null
+                depth--
+            }
         }
-        override fun count(): Int = rows.size
-        private fun fail() { failNext?.let { failNext = null; throw it } }
+
+        override fun ddl(sql: String) {
+            maybeFail(sql)
+            record(sql, emptyList())
+        }
+
+        override fun exec(sql: String, args: List<Cell>): Long {
+            maybeFail(sql)
+            if (sql == ExtensionStoreGate.WRITE_VERSION) {
+                val v = (args[0] as Cell.Integer).value.toInt()
+                if (buffer != null) bufferedVersion = v else version = v
+            }
+            record(sql, args)
+            return 1
+        }
+
+        override fun query(sql: String, args: List<Cell>, sink: StoreExecutor.RowSink) {
+            maybeFail(sql)
+            if (sql == ExtensionStoreGate.READ_VERSION) {
+                sink.columns(listOf("version"))
+                sink.row(listOf(Cell.Integer(version.toLong())))
+                return
+            }
+            val (columns, rows) = canned[sql] ?: error("no canned answer for: $sql")
+            sink.columns(columns)
+            for (r in rows) if (!sink.row(r)) return
+        }
+
+        private fun record(sql: String, args: List<Cell>) {
+            (buffer ?: committed) += sql to args
+        }
+
+        private fun maybeFail(sql: String) {
+            val f = failOn ?: return
+            if (sql.contains(f)) {
+                failOn = null
+                throw RuntimeException("SQLiteConstraintException: $sql")
+            }
+        }
     }
 
     private val ext = 10_123
     private var caller = ext
-    private val dao = FakeDao()
-    private val gate = ExtensionStoreGate(dao, ext, { caller }, { 42L })
+    private val executor = FakeExecutor()
+    private val gate = ExtensionStoreGate(executor, ext) { caller }
 
-    @Test
-    fun roundTrip() {
-        gate.put("a", byteArrayOf(1, 2, 3))
-        assertArrayEquals(byteArrayOf(1, 2, 3), gate.get("a"))
-        gate.put("a", byteArrayOf(9))
-        assertArrayEquals(byteArrayOf(9), gate.get("a"))
-        gate.delete("a")
-        assertNull(gate.get("a"))
-        gate.delete("a") // absent: a no-op, not a failure
-    }
+    private val v1 = StoreSchema(1, listOf(listOf("CREATE TABLE t (id TEXT PRIMARY KEY, n INTEGER)")))
+    private val v2 = StoreSchema(2, v1.steps + listOf(listOf("ALTER TABLE t ADD COLUMN w REAL")))
+
+    private fun batch(vararg statements: Statement) = StoreCodec.encodeStatements(statements.toList())
+    private fun one(sql: String, vararg args: Any?) = StoreCodec.encodeStatements(listOf(Statement(sql, *args)))
+    private fun rows(columns: List<String>, vararg rows: List<Cell>) = columns to rows.toList()
+
+    // ── Trust ──────
 
     @Test
     fun uidMismatch_isSecurityException_onEveryMethod() {
         caller = ext + 1
-        assertThrows(SecurityException::class.java) { gate.get("k") }
-        assertThrows(SecurityException::class.java) { gate.put("k", byteArrayOf(1)) }
-        assertThrows(SecurityException::class.java) { gate.delete("k") }
-        assertThrows(SecurityException::class.java) { gate.keys("") }
-        assertThrows(SecurityException::class.java) { gate.putLarge("k", byteArrayOf(1)) }
-        assertThrows(SecurityException::class.java) { gate.getLarge("k") }
-        assertTrue(dao.rows.isEmpty())
+        assertThrows(SecurityException::class.java) { gate.schemaVersion() }
+        assertThrows(SecurityException::class.java) { gate.applySchema(v1) }
+        assertThrows(SecurityException::class.java) { gate.exec(one("DELETE FROM t")) }
+        assertThrows(SecurityException::class.java) { gate.query(one("SELECT 1")) }
+        assertThrows(SecurityException::class.java) { gate.next(0) }
+        assertThrows(SecurityException::class.java) { gate.close(0) }
+        assertTrue(executor.committed.isEmpty())
     }
 
     @Test
-    fun revoked_isSecurityException_onEveryMethod() {
-        gate.put("k", byteArrayOf(1))
+    fun revoked_isSecurityException_onEveryMethod_andDropsParkedResults() {
+        gate.applySchema(v1)
+        executor.canned["SELECT * FROM t"] = bigResult(3)
+        val first = gate.query(one("SELECT * FROM t"))
+        assertTrue(first.more)
+        assertEquals(1, gate.openResults)
         gate.revoke()
         assertTrue(gate.revoked)
-        assertThrows(SecurityException::class.java) { gate.get("k") }
-        assertThrows(SecurityException::class.java) { gate.put("k", byteArrayOf(2)) }
-        assertThrows(SecurityException::class.java) { gate.delete("k") }
-        assertThrows(SecurityException::class.java) { gate.keys("") }
-        assertThrows(SecurityException::class.java) { gate.putLarge("k", byteArrayOf(2)) }
-        assertThrows(SecurityException::class.java) { gate.getLarge("k") }
-        assertArrayEquals(byteArrayOf(1), dao.rows["k"]) // untouched
+        assertEquals(0, gate.openResults)
+        assertThrows(SecurityException::class.java) { gate.schemaVersion() }
+        assertThrows(SecurityException::class.java) { gate.applySchema(v1) }
+        assertThrows(SecurityException::class.java) { gate.exec(one("DELETE FROM t")) }
+        assertThrows(SecurityException::class.java) { gate.query(one("SELECT 1")) }
+        assertThrows(SecurityException::class.java) { gate.next(first.handle) }
+        assertThrows(SecurityException::class.java) { gate.close(first.handle) }
+    }
+
+    // ── Schema ──────
+
+    @Test
+    fun applySchema_runsMissingSteps_eachInItsOwnTransaction_andIsIdempotent() {
+        assertEquals(0, gate.schemaVersion())
+        gate.applySchema(v2)
+        assertEquals(2, gate.schemaVersion())
+        assertEquals(
+            listOf(
+                v1.steps[0][0], ExtensionStoreGate.WRITE_VERSION,
+                v2.steps[1][0], ExtensionStoreGate.WRITE_VERSION,
+            ),
+            executor.committed.map { it.first },
+        )
+        assertEquals(listOf(1L, 2L), executor.committed.filter { it.first == ExtensionStoreGate.WRITE_VERSION }.map { (it.second[0] as Cell.Integer).value })
+        val n = executor.committed.size
+        gate.applySchema(v2)                // a no-op when the versions match
+        assertEquals(n, executor.committed.size)
+        assertEquals(2, gate.schemaVersion())
     }
 
     @Test
-    fun keyCaps() {
-        assertThrows(IllegalArgumentException::class.java) { gate.put("", byteArrayOf(1)) }
-        assertThrows(IllegalArgumentException::class.java) { gate.get("") }
-        assertThrows(IllegalArgumentException::class.java) { gate.delete(null) }
-        val max = "k".repeat(ExtensionContract.STORE_MAX_KEY_CHARS)
-        gate.put(max, byteArrayOf(1))
-        assertThrows(IllegalArgumentException::class.java) { gate.put(max + "x", byteArrayOf(1)) }
-        assertThrows(IllegalArgumentException::class.java) { gate.get(max + "x") }
-        assertThrows(IllegalArgumentException::class.java) { gate.putLarge("", byteArrayOf(1)) }
+    fun applySchema_resumesFromTheAppliedVersion() {
+        executor.version = 1               // step 1 landed in an earlier life
+        gate.applySchema(v2)
+        assertEquals(listOf(v2.steps[1][0], ExtensionStoreGate.WRITE_VERSION), executor.committed.map { it.first })
+        assertEquals(2, executor.version)
     }
 
     @Test
-    fun valueCap_inlinePath() {
-        gate.put("ok", ByteArray(ExtensionContract.STORE_MAX_INLINE_BYTES))
-        assertThrows(IllegalArgumentException::class.java) {
-            gate.put("big", ByteArray(ExtensionContract.STORE_MAX_INLINE_BYTES + 1))
+    fun applySchema_refusesADowngrade_typed() {
+        gate.applySchema(v2)
+        val e = assertThrows(IllegalStateException::class.java) { gate.applySchema(v1) }
+        assertEquals(ExtensionContract.STORE_SCHEMA_NEWER, e.message)
+        assertEquals(2, gate.schemaVersion())
+        assertThrows(IllegalArgumentException::class.java) { gate.applySchema(null) }
+    }
+
+    @Test
+    fun applySchema_aFailingStep_rollsBackThatStep_andKeepsTheVersion() {
+        executor.failOn = "ADD COLUMN"
+        gate.applySchema(v1)
+        assertThrows(IllegalStateException::class.java) { gate.applySchema(v2) }
+        assertEquals(1, gate.schemaVersion())
+        assertEquals(listOf(v1.steps[0][0], ExtensionStoreGate.WRITE_VERSION), executor.committed.map { it.first })
+        // After it is declared once, this binder stays declared — the failed step is the next call's problem.
+        gate.exec(one("DELETE FROM t"))
+    }
+
+    @Test
+    fun execAndQuery_beforeApplySchema_areRefused_typed() {
+        val e1 = assertThrows(IllegalStateException::class.java) { gate.exec(one("DELETE FROM t")) }
+        assertEquals(ExtensionContract.STORE_SCHEMA_UNAPPLIED, e1.message)
+        val e2 = assertThrows(IllegalStateException::class.java) { gate.query(one("SELECT 1")) }
+        assertEquals(ExtensionContract.STORE_SCHEMA_UNAPPLIED, e2.message)
+        assertTrue(executor.committed.isEmpty())
+        // schemaVersion itself needs no declaration.
+        assertEquals(0, gate.schemaVersion())
+    }
+
+    // ── exec ──────
+
+    @Test
+    fun exec_runsTheBatchInOneTransaction_answeringChangesPerStatement() {
+        gate.applySchema(v1)
+        val before = executor.committed.size
+        val changes = gate.exec(batch(
+            Statement("INSERT INTO t (id, n) VALUES (?, ?)", "a", 1),
+            Statement("UPDATE t SET n = ? WHERE id = ?", 2, "a"),
+            Statement("DELETE FROM t WHERE id = ?", "zzz"),
+        ))
+        assertArrayEquals(longArrayOf(1, 1, 1), changes)
+        val ran = executor.committed.drop(before)
+        assertEquals(3, ran.size)
+        assertEquals("INSERT INTO t (id, n) VALUES (?, ?)", ran[0].first)
+        assertEquals(listOf(Cell.Text("a"), Cell.Integer(1)), ran[0].second)
+        assertEquals(listOf(Cell.Integer(2), Cell.Text("a")), ran[1].second)
+    }
+
+    @Test
+    fun exec_aFailureMidBatch_rollsTheWholeBatchBack_asIllegalState() {
+        gate.applySchema(v1)
+        val before = executor.committed.size
+        executor.failOn = "second"
+        assertThrows(IllegalStateException::class.java) {
+            gate.exec(batch(
+                Statement("INSERT INTO t (id) VALUES ('first')"),
+                Statement("INSERT INTO t (id) VALUES ('second')"),
+                Statement("INSERT INTO t (id) VALUES ('third')"),
+            ))
         }
-        assertThrows(IllegalArgumentException::class.java) { gate.put("nul", null) }
-        assertNull(dao.rows["big"])
+        assertEquals(before, executor.committed.size)   // nothing landed, not even the first
+        assertEquals(0, executor.depth)
     }
 
     @Test
-    fun valueCap_largePath() {
-        gate.putLarge("ok", ByteArray(ExtensionContract.STORE_MAX_VALUE_BYTES))
-        assertEquals(ExtensionContract.STORE_MAX_VALUE_BYTES, dao.rows["ok"]!!.size)
+    fun exec_validatesEveryStatement_beforeRunningAny() {
+        gate.applySchema(v1)
+        val before = executor.committed.size
         assertThrows(IllegalArgumentException::class.java) {
-            gate.putLarge("big", ByteArray(ExtensionContract.STORE_MAX_VALUE_BYTES + 1))
+            gate.exec(batch(Statement("DELETE FROM t"), Statement("PRAGMA user_version = 9")))
         }
-        assertThrows(IllegalArgumentException::class.java) { gate.putLarge("nul", null) }
-        assertNull(dao.rows["big"])
+        assertThrows(IllegalArgumentException::class.java) { gate.exec(one("SELECT * FROM t")) }
+        assertThrows(IllegalArgumentException::class.java) { gate.exec(one("DELETE FROM host_schema")) }
+        assertThrows(IllegalArgumentException::class.java) { gate.exec(one("DELETE FROM t; DROP TABLE t")) }
+        assertThrows(IllegalArgumentException::class.java) { gate.exec(byteArrayOf(1, 2, 3)) }   // unreadable
+        assertThrows(IllegalArgumentException::class.java) { gate.exec(null) }
+        assertEquals(before, executor.committed.size)
+    }
+
+    // ── query + handles ──────
+
+    private fun bigResult(chunksWorth: Int): Pair<List<String>, List<List<Cell>>> {
+        // Rows of ~1 MiB blobs: four per 4 MiB chunk at most, three per chunk comfortably.
+        val columns = listOf("id", "blob")
+        val rows = List(3 * chunksWorth) { i -> listOf(Cell.Integer(i.toLong()), Cell.Blob(ByteArray(1_300_000))) }
+        return columns to rows
     }
 
     @Test
-    fun get_aboveInlineCap_throwsStoreValueLarge_getLargeReadsAnySize() {
-        val big = ByteArray(ExtensionContract.STORE_MAX_INLINE_BYTES + 1) { 7 }
-        gate.putLarge("big", big)
-        val e = assertThrows(IllegalStateException::class.java) { gate.get("big") }
-        assertEquals(ExtensionContract.STORE_VALUE_LARGE, e.message)
-        assertArrayEquals(big, gate.getLarge("big"))
-        // Small values read on both paths; an empty value is a value, not an absence.
-        gate.put("small", byteArrayOf(1, 2))
-        assertArrayEquals(byteArrayOf(1, 2), gate.get("small"))
-        assertArrayEquals(byteArrayOf(1, 2), gate.getLarge("small"))
-        gate.put("empty", ByteArray(0))
-        assertArrayEquals(ByteArray(0), gate.get("empty"))
-        assertArrayEquals(ByteArray(0), gate.getLarge("empty"))
-        assertNull(gate.getLarge("absent"))
+    fun query_smallResult_isOneChunkWithNoHandle() {
+        gate.applySchema(v1)
+        executor.canned["SELECT id, n FROM t WHERE n > ?"] = rows(listOf("id", "n"), listOf(Cell.Text("a"), Cell.Integer(1)))
+        val chunk = gate.query(one("SELECT id, n FROM t WHERE n > ?", 0))
+        assertFalse(chunk.more)
+        assertEquals(ExtensionStoreGate.NO_HANDLE, chunk.handle)
+        val decoded = StoreCodec.decodeRows(chunk.bytes)
+        assertEquals(listOf("id", "n"), decoded.columns)
+        assertEquals("a", decoded[0].text("id"))
+        assertEquals(0, gate.openResults)
     }
 
     @Test
-    fun keysCap_rejectsNewKey_butAllowsReplace() {
-        for (i in 0 until ExtensionContract.STORE_MAX_KEYS) dao.rows["k$i"] = byteArrayOf(0)
-        assertThrows(IllegalStateException::class.java) { gate.put("new", byteArrayOf(1)) }
-        assertThrows(IllegalStateException::class.java) { gate.putLarge("new", byteArrayOf(1)) }
-        gate.put("k0", byteArrayOf(7)) // an existing key: replace is fine at the cap
-        assertArrayEquals(byteArrayOf(7), dao.rows["k0"])
-        assertEquals(ExtensionContract.STORE_MAX_KEYS, dao.rows.size)
+    fun query_emptyResult_isOneChunkOfZeroRows() {
+        gate.applySchema(v1)
+        executor.canned["SELECT id FROM t"] = rows(listOf("id"))
+        val chunk = gate.query(one("SELECT id FROM t"))
+        assertFalse(chunk.more)
+        assertTrue(StoreCodec.decodeRows(chunk.bytes).isEmpty())
     }
 
     @Test
-    fun keys_orderedAscending_prefixFilters() {
-        for (k in listOf("page:b", "page:a", "other:z", "page:c")) gate.put(k, byteArrayOf(1))
-        assertEquals(listOf("other:z", "page:a", "page:b", "page:c"), gate.keys(""))
-        assertEquals(listOf("page:a", "page:b", "page:c"), gate.keys("page:"))
-        assertEquals(listOf("other:z", "page:a", "page:b", "page:c"), gate.keys(null))
-        assertTrue(gate.keys("zzz").isEmpty())
+    fun query_largeResult_parksTheRemainder_andNextDrainsIt() {
+        gate.applySchema(v1)
+        executor.canned["SELECT * FROM t"] = bigResult(3)
+        val first = gate.query(one("SELECT * FROM t"))
+        assertTrue(first.more)
+        assertTrue(first.handle >= 0)
+        assertEquals(1, gate.openResults)
+        var ids = StoreCodec.decodeRows(first.bytes).rows.map { it.long("id") }
+        var chunk = first
+        var chunks = 1
+        while (chunk.more) {
+            chunk = gate.next(chunk.handle)
+            chunks++
+            ids = ids + StoreCodec.decodeRows(chunk.bytes).rows.map { it.long("id") }
+        }
+        assertEquals(ExtensionStoreGate.NO_HANDLE, chunk.handle)
+        assertEquals((0L until 9L).toList(), ids)
+        assertTrue("$chunks chunks", chunks >= 3)
+        assertEquals(0, gate.openResults)
+        // The handle is gone once drained.
+        assertThrows(IllegalStateException::class.java) { gate.next(first.handle) }
     }
 
     @Test
-    fun keys_prefixIsLiteralAndCaseSensitive() {
-        for (k in listOf("a%b", "axb", "a_b", "Page:1", "page:2")) gate.put(k, byteArrayOf(1))
-        assertEquals(listOf("a%b"), gate.keys("a%"))
-        assertEquals(listOf("a_b"), gate.keys("a_"))
-        assertEquals(listOf("page:2"), gate.keys("page:"))
+    fun close_dropsAnUnfinishedResult_andIsANoOpForUnknownHandles() {
+        gate.applySchema(v1)
+        executor.canned["SELECT * FROM t"] = bigResult(2)
+        val first = gate.query(one("SELECT * FROM t"))
+        assertEquals(1, gate.openResults)
+        gate.close(first.handle)
+        assertEquals(0, gate.openResults)
+        assertThrows(IllegalStateException::class.java) { gate.next(first.handle) }
+        gate.close(first.handle)
+        gate.close(12345)
+        assertThrows(IllegalStateException::class.java) { gate.next(12345) }
     }
 
     @Test
-    fun daoFailure_becomesIllegalState() {
-        // Something Binder cannot marshal (SQLiteFullException, say) must surface as
-        // IllegalStateException — never as a silently failed transaction the caller reads as success.
-        class DiskFull : RuntimeException("disk full")
-        dao.failNext = DiskFull()
-        assertThrows(IllegalStateException::class.java) { gate.put("a", byteArrayOf(1)) }
-        dao.failNext = DiskFull()
-        assertThrows(IllegalStateException::class.java) { gate.get("a") }
-        dao.failNext = DiskFull()
-        assertThrows(IllegalStateException::class.java) { gate.getLarge("a") }
-        dao.failNext = DiskFull()
-        assertThrows(IllegalStateException::class.java) { gate.delete("a") }
-        dao.failNext = DiskFull()
-        assertThrows(IllegalStateException::class.java) { gate.keys("") }
+    fun aFifthOpenResult_isRefused_typed_andSmallQueriesStillRun() {
+        gate.applySchema(v1)
+        executor.canned["SELECT * FROM t"] = bigResult(2)
+        executor.canned["SELECT id FROM t"] = rows(listOf("id"), listOf(Cell.Text("x")))
+        val handles = (0 until ExtensionContract.STORE_MAX_OPEN_RESULTS).map { gate.query(one("SELECT * FROM t")).handle }
+        assertEquals(ExtensionContract.STORE_MAX_OPEN_RESULTS, gate.openResults)
+        assertEquals(handles.size, handles.toSet().size)
+        val e = assertThrows(IllegalStateException::class.java) { gate.query(one("SELECT * FROM t")) }
+        assertEquals(ExtensionContract.STORE_RESULTS_OPEN, e.message)
+        // A result that fits one chunk needs no handle and is not refused.
+        assertFalse(gate.query(one("SELECT id FROM t")).more)
+        gate.close(handles[0])
+        assertTrue(gate.query(one("SELECT * FROM t")).more)
+    }
+
+    @Test
+    fun query_typedCaps_stopTheRead_andParkNothing() {
+        gate.applySchema(v1)
+        val columns = listOf("blob")
+        executor.canned["SELECT blob FROM t"] = columns to listOf(listOf(Cell.Blob(ByteArray(ExtensionContract.STORE_MAX_ROW_BYTES))))
+        val e = assertThrows(IllegalStateException::class.java) { gate.query(one("SELECT blob FROM t")) }
+        assertEquals(ExtensionContract.STORE_ROW_LARGE, e.message)
+        assertEquals(0, gate.openResults)
+    }
+
+    @Test
+    fun query_validates_andTakesExactlyOneStatement() {
+        gate.applySchema(v1)
+        assertThrows(IllegalArgumentException::class.java) { gate.query(one("DELETE FROM t")) }
+        assertThrows(IllegalArgumentException::class.java) { gate.query(one("SELECT * FROM host_schema")) }
+        assertThrows(IllegalArgumentException::class.java) { gate.query(one("SELECT 1; SELECT 2")) }
+        assertThrows(IllegalArgumentException::class.java) { gate.query(batch(Statement("SELECT 1"), Statement("SELECT 2"))) }
+        assertThrows(IllegalArgumentException::class.java) { gate.query(null) }
+        assertThrows(IllegalArgumentException::class.java) { gate.query(byteArrayOf()) }
+        assertEquals(0, gate.openResults)
+    }
+
+    @Test
+    fun executorFailure_becomesIllegalState_everywhere() {
+        gate.applySchema(v1)
+        executor.canned["SELECT id FROM t"] = rows(listOf("id"))
+        executor.failOn = "SELECT id FROM t"
+        assertThrows(IllegalStateException::class.java) { gate.query(one("SELECT id FROM t")) }
+        executor.failOn = ExtensionStoreGate.READ_VERSION
+        assertThrows(IllegalStateException::class.java) { gate.schemaVersion() }
+        executor.failOn = "DELETE"
+        assertThrows(IllegalStateException::class.java) { gate.exec(one("DELETE FROM t")) }
     }
 }

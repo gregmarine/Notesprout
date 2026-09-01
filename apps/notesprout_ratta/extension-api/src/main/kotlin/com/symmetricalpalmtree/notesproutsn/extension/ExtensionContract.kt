@@ -11,9 +11,11 @@ package com.symmetricalpalmtree.notesproutsn.extension
  * extension on the same device never matches one, and each family's `HostCallerCheck` refuses the
  * other family's host.
  *
- * `IExtensionStore` (arc 11 / J2) is not a capability point but the **service** the host offers an
- * extension it has bound: a per-package encrypted key/value store the host owns, handed in as a
- * parameter and revoked when the bind ends. Its caps are the `STORE_*` constants below.
+ * `IExtensionStore` (arc 11 / J2, rebuilt arc 22 / X1) is not a capability point but the
+ * **service** the host offers an extension it has bound: a per-package encrypted SQLite store the
+ * host owns — the extension declares its tables ([StoreSchema]), sends parameterized SQL
+ * ([StoreCodec] statements through a [StorePayload]) and reads rows back ([StoreResult]) — handed
+ * in as a parameter and revoked when the bind ends. Its caps are the `STORE_*` constants below.
  */
 object ExtensionContract {
 
@@ -46,8 +48,42 @@ object ExtensionContract {
      * `require`s reject the result and the exception crosses as `IllegalArgumentException` — but the
      * declaration is what keeps it from being reached at all. Only the tag service moves; every
      * other extension keeps the version it declared.
+     *
+     * **6 since arc 22 / X1** — `IExtensionStore` was **replaced**: the key/value methods are gone
+     * and the table-store methods stand in their transaction codes. The second break that is not a
+     * compatible tail, and the first that breaks the *other* direction too: a version-5 scratch pad
+     * calling transaction code 1 on a version-6 host would land on a different method with a
+     * mismatched parcel, which is not reliably loud. So this bump also carries a **floor**
+     * ([MIN_API_VERSION_FOR_STORE]): a service on a store-taking point is listed only in
+     * `MIN_API_VERSION_FOR_STORE..API_VERSION`. Every store-taking service (scratch pad, document
+     * editor, tag manager) redeclares 6; the stateless points (recognizer, exporters, importers)
+     * keep their declarations and their floor of 1.
      */
-    const val API_VERSION: Int = 5
+    const val API_VERSION: Int = 6
+
+    /**
+     * The floor for a service on a **store-taking** point (arc 22 / X1): the host accepts such a
+     * service only when it declares `MIN_API_VERSION_FOR_STORE..API_VERSION`, because the store
+     * it is lent is a version-6 interface and an older extension would speak the old one at it.
+     * Points that take no store keep the floor of 1 — see [minApiVersion].
+     */
+    const val MIN_API_VERSION_FOR_STORE: Int = 6
+
+    /**
+     * The lowest API version the host accepts for a service on [action] — [MIN_API_VERSION_FOR_STORE]
+     * for the three store-taking points ([ACTION_SCRATCH_PAD], [DocumentContract.ACTION_DOCUMENT_EDITOR],
+     * [ACTION_TAG_MANAGER]), 1 for every other. The range rule at [API_VERSION] applies above it.
+     */
+    fun minApiVersion(action: String): Int = if (action in STORE_TAKING_ACTIONS) MIN_API_VERSION_FOR_STORE else 1
+
+    /** Whether a service declaring [apiVersion] on [action] is one this host may bind — the range
+     *  rule and the floor in one place, pure so the registry's decision is JVM-tested. */
+    fun accepts(action: String, apiVersion: Int): Boolean = apiVersion in minApiVersion(action)..API_VERSION
+
+    /** The points whose service is lent an `IExtensionStore`. */
+    private val STORE_TAKING_ACTIONS: Set<String> by lazy {
+        setOf(ACTION_SCRATCH_PAD, DocumentContract.ACTION_DOCUMENT_EDITOR, ACTION_TAG_MANAGER)
+    }
 
     /** Intent action a handwriting-recognizer `<service>` declares in its intent-filter. */
     const val ACTION_HANDWRITING_RECOGNIZER: String =
@@ -79,28 +115,65 @@ object ExtensionContract {
     const val META_API_VERSION: String =
         "com.symmetricalpalmtree.notesproutsn.extension.API_VERSION"
 
-    // ── Extension-store caps (`IExtensionStore`, arc 11 / J2 — enforced by the host) ──────
-    // The store is host-owned and encrypted; an extension writes nothing to disk itself, ever.
+    // ── Extension-store caps (`IExtensionStore` v6, arc 22 / X1 — enforced by the host) ──────
+    // The store is host-owned and encrypted; an extension writes nothing to disk itself, ever. The
+    // extension declares its tables once (`StoreSchema`), then sends parameterized SQL and reads
+    // encoded rows back. Every byte that crosses is validated by the host (`StoreSql`, `StoreCodec`).
 
-    /** Longest key an extension may store (chars); the empty key is rejected. */
-    const val STORE_MAX_KEY_CHARS: Int = 512
-
-    /** Largest value an extension may store — 4 MiB, sized for one key per scratch page. A value
-     *  above [STORE_MAX_INLINE_BYTES] travels only through `putLarge` / `getLarge` (a [LargeValue]
-     *  over `SharedMemory`): a `byte[]` that size cannot cross a Binder. */
-    const val STORE_MAX_VALUE_BYTES: Int = 4 * 1024 * 1024
-
-    /** Largest value the `byte[]` `put` / `get` path carries (512 KiB — the Binder transaction
-     *  budget). `put` above it → `IllegalArgumentException`; `get` of a *stored* value above it →
-     *  `IllegalStateException` with the exact message [STORE_VALUE_LARGE]. */
+    /** Largest payload that rides inline as a `byte[]` in a [StorePayload] (512 KiB — the Binder
+     *  transaction budget). Above it the payload travels as a [LargeValue] over ashmem. */
     const val STORE_MAX_INLINE_BYTES: Int = 512 * 1024
 
-    /** The exact `IllegalStateException` message `get` throws for a stored value above
-     *  [STORE_MAX_INLINE_BYTES]. Extensions compare the message, not a substring. */
-    const val STORE_VALUE_LARGE: String = "value is large — use getLarge"
+    /** Largest single payload in either direction — 4 MiB: one statement batch, or one chunk of a
+     *  query result. [LargeValue.requireValid] enforces it on the wire. */
+    const val STORE_MAX_VALUE_BYTES: Int = 4 * 1024 * 1024
 
-    /** Most keys one extension's store may hold. */
-    const val STORE_MAX_KEYS: Int = 50_000
+    /** Largest **whole** materialized query result (32 MiB): the host runs a query to completion,
+     *  encodes the rows and hands them over in [STORE_MAX_VALUE_BYTES] chunks; past this it refuses
+     *  with [STORE_RESULT_LARGE] and the extension pages with `LIMIT`. */
+    const val STORE_MAX_RESULT_BYTES: Int = 32 * 1024 * 1024
+
+    /** A row is never split across chunks, so one encoded row must fit one chunk. Above it the
+     *  query is refused with [STORE_ROW_LARGE]. */
+    const val STORE_MAX_ROW_BYTES: Int = STORE_MAX_VALUE_BYTES
+
+    /** Most statements in one `exec` batch (one transaction). */
+    const val STORE_MAX_BATCH_STATEMENTS: Int = 10_000
+
+    /** Longest SQL text of one statement (chars). */
+    const val STORE_MAX_SQL_CHARS: Int = 8_192
+
+    /** Most bound arguments per statement — SQLite's default bind limit. */
+    const val STORE_MAX_ARGS: Int = 999
+
+    /** Most tables one extension's schema may create (counted over every step). */
+    const val STORE_MAX_TABLES: Int = 64
+
+    /** Most schema versions (steps) a [StoreSchema] may declare, and most statements per step. */
+    const val STORE_MAX_SCHEMA_STEPS: Int = 256
+    const val STORE_MAX_STEP_STATEMENTS: Int = 64
+
+    /** Most unfinished query results one binder may hold open at a time (a result that needs more
+     *  than one chunk is parked behind a handle until `next` drains it or `close` drops it). */
+    const val STORE_MAX_OPEN_RESULTS: Int = 4
+
+    // Typed refusals — `IllegalStateException` messages compared VERBATIM by the extension.
+
+    /** The materialized result would exceed [STORE_MAX_RESULT_BYTES]; nothing was handed over. */
+    const val STORE_RESULT_LARGE: String = "store result large"
+
+    /** One encoded row would exceed [STORE_MAX_ROW_BYTES]; nothing was handed over. */
+    const val STORE_ROW_LARGE: String = "store row large"
+
+    /** `applySchema` with a version below the one already applied to this store — an extension
+     *  never sees a store at a schema newer than it knows, and the host never rolls one back. */
+    const val STORE_SCHEMA_NEWER: String = "store schema newer"
+
+    /** `exec` / `query` on a binder that has not had `applySchema` called on it yet. */
+    const val STORE_SCHEMA_UNAPPLIED: String = "store schema unapplied"
+
+    /** A query needed a handle and this binder already holds [STORE_MAX_OPEN_RESULTS]. */
+    const val STORE_RESULTS_OPEN: String = "store results open"
 
     // ── Handwriting-recognizer caps ──────
     // Enforced by the host BEFORE the call (no bind over the cap) and re-checked by the extension.

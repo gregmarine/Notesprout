@@ -1,174 +1,60 @@
 package com.symmetricalpalmtree.notesproutsn.ext.scratchpad
 
 import com.symmetricalpalmtree.gpaper.core.model.Stroke
-import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
 import com.symmetricalpalmtree.notesproutsn.extension.IExtensionStore
-import com.symmetricalpalmtree.notesproutsn.extension.SharedBytes
 import java.util.UUID
 
 /** The extension cannot reach its storage (any store exception — the host's rule: treat all as unavailable). */
 class StoreUnavailable(cause: Throwable) : Exception(cause.message, cause)
 
-/** A page whose encoded ink would exceed `STORE_MAX_VALUE_BYTES` — the caller refuses the stroke that crossed it. */
+/** A page whose encoded ink would exceed the old value cap — deleted with the ceiling in arc 22 / X2. */
 class PageFullException(val bytes: Int) : Exception("scratch page full ($bytes bytes)")
 
 /**
- * The scratch pad's key layout over the host's `IExtensionStore` (arc 11 / J3). **Blocking** — every
- * call runs on `Dispatchers.IO` (the screen) or the Binder thread (`begin`), never Main. The
- * extension writes nothing to disk itself: this store is the host's, lent for the showing.
+ * The scratch pad's storage adapter over the host's `IExtensionStore`.
  *
- * Keys: [KEY_PAGES] = UTF-8, one page id per line, in order (a page id = a random UUID minted here);
- * [KEY_CURRENT] = the current page id; `page/<id>` = the page blob ([ScratchPageCodec]).
+ * **Arc 22 / X1 — an "unavailable" stub.** The host's store became real SQLite tables
+ * (`IExtensionStore` v6: `applySchema` / `exec` / `query`) and the key/value methods this class was
+ * written over are gone. Until X2 declares the pad's schema (`page` / `stroke` / `state`) and
+ * rewrites this over statements, every read answers its default and every write refuses with
+ * [StoreUnavailable] — and the pad's service still declares API version 1, so a version-6 host does
+ * not list it at all (the floor rule): nothing reaches this code from a live device.
  *
- * Values ≤ `STORE_MAX_INLINE_BYTES` go through `put` / `get`; above that `putLarge` / `getLarge`
- * (the `SharedBytes` handshake — the region we create is closed after the call returns; the one the
- * host returns is closed in a `finally`). **The full rule:** a blob over `STORE_MAX_VALUE_BYTES` is
- * [PageFullException] — never split, never written elsewhere. Any store exception →
- * [StoreUnavailable]. A missing [KEY_PAGES] = first run → one blank page.
+ * The public surface is kept exactly so the screen and the service compile unchanged.
+ * TODO(X2): schema v1 + SQL builders + op-log flush; delete [PageFullException] and `encodedSize`.
  */
+@Suppress("UNUSED_PARAMETER")
 class ScratchStore(private val store: IExtensionStore) {
 
     class Loaded(val ids: List<String>, val currentId: String)
 
-    /** The page list + current id; creates the first blank page on first run. */
-    fun load(): Loaded = guard {
-        val raw = store.get(KEY_PAGES)
-        val ids = raw?.toString(Charsets.UTF_8)?.lines()?.filter { it.isNotBlank() } ?: emptyList()
-        if (ids.isEmpty()) {
-            val id = newId()
-            writeIds(listOf(id))
-            store.put(KEY_CURRENT, id.toByteArray())
-            return@guard Loaded(listOf(id), id)
-        }
-        val storedCurrent = store.get(KEY_CURRENT)?.toString(Charsets.UTF_8)
-        val current = ScratchPages.clampCurrent(ids, storedCurrent)
-        if (current != storedCurrent) store.put(KEY_CURRENT, current.toByteArray())
-        Loaded(ids, current)
-    }
+    /** X1 stub: the pad has no store to load from. */
+    fun load(): Loaded = throw unavailable()
 
-    /** The page blob for [id], or null if the page has no ink yet (never written). */
-    fun readPage(id: String): ByteArray? = guard {
-        try {
-            store.get(pageKey(id))
-        } catch (e: IllegalStateException) {
-            // The stored value is above the inline cap — the contract's exact message, not a substring.
-            if (e.message != ExtensionContract.STORE_VALUE_LARGE) throw e
-            val v = store.getLarge(pageKey(id)) ?: return@guard null
-            SharedBytes.readAndClose(v)
-        }
-    }
+    /** X1 stub: a page with no ink. */
+    fun readPage(id: String): ByteArray? = null
 
-    /** Write a page blob; [PageFullException] above the value cap (nothing written). */
-    fun savePage(id: String, blob: ByteArray) {
-        if (blob.size > ExtensionContract.STORE_MAX_VALUE_BYTES) throw PageFullException(blob.size)
-        guard {
-            if (blob.size <= ExtensionContract.STORE_MAX_INLINE_BYTES) {
-                store.put(pageKey(id), blob)
-            } else {
-                val v = SharedBytes.write(blob)
-                try { store.putLarge(pageKey(id), v) } finally { v.memory.close() }
-            }
-        }
-    }
+    fun savePage(id: String, blob: ByteArray) { throw unavailable() }
 
-    /** Insert a new blank page after [afterId]; returns (new id list, new id). */
-    fun insertPage(ids: List<String>, afterId: String?): Pair<List<String>, String> =
-        insertPageAt(ids, afterId, newId())
+    fun insertPage(ids: List<String>, afterId: String?): Pair<List<String>, String> = throw unavailable()
 
-    /** [insertPage] with the id chosen by the caller — the receive path writes the ink under it
-     *  before the list names it, so the id has to exist first. */
-    fun insertPageAt(ids: List<String>, afterId: String?, id: String): Pair<List<String>, String> = guard {
-        val next = ScratchPages.insertAfter(ids, afterId, id)
-        writeIds(next)
-        next to id
-    }
+    fun insertPageAt(ids: List<String>, afterId: String?, id: String): Pair<List<String>, String> = throw unavailable()
 
-    /** Insert a new blank page before [beforeId]; returns (new id list, new id). */
-    fun insertPageBefore(ids: List<String>, beforeId: String?): Pair<List<String>, String> = guard {
-        val id = newId()
-        val next = ScratchPages.insertBefore(ids, beforeId, id)
-        writeIds(next)
-        next to id
-    }
+    fun insertPageBefore(ids: List<String>, beforeId: String?): Pair<List<String>, String> = throw unavailable()
 
-    /**
-     * Delete [id] and its blob; returns (new id list, landing id). Never below one page: a lone page
-     * keeps its id and is emptied (its blob deleted).
-     */
-    fun deletePage(ids: List<String>, id: String): Pair<List<String>, String> = guard {
-        val (rest, landing) = ScratchPages.delete(ids, id)
-        store.delete(pageKey(id))
-        if (rest != ids) writeIds(rest)
-        rest to landing
-    }
+    fun deletePage(ids: List<String>, id: String): Pair<List<String>, String> = throw unavailable()
 
-    fun setCurrent(id: String) = guard { store.put(KEY_CURRENT, id.toByteArray()) }
+    fun setCurrent(id: String) { throw unavailable() }
 
-    /** Undo / redo of a page insert or delete (J4): write a whole page list as-is. */
-    fun setPages(ids: List<String>) = guard { writeIds(ids) }
+    fun setPages(ids: List<String>) { throw unavailable() }
 
-    /** Undo / redo of a page insert or delete (J4): drop one page's ink, keeping its id in the list. */
-    fun removePageBlob(id: String) = guard { store.delete(pageKey(id)) }
+    fun removePageBlob(id: String) { throw unavailable() }
 
-    /** What [receive] placed: the page it landed on + the ids of the placed strokes (for "open
-     *  selected"), and — so the screen can record the placement as one undo step — whether a page was
-     *  inserted ([newPage]) and the page list + current page as they were before. */
     class Received(val pageId: String, val strokeIds: List<String>, val newPage: Boolean, val pagesBefore: List<String>, val currentBefore: String)
 
-    /**
-     * Notebook → pad (J5, the Binder thread): place [strokes] — on a **new page** inserted after the
-     * current one (its size = the bundle's page size; `0 × 0` → the screen's surface size at first
-     * layout) or appended to the **current page** (its own size kept; the bundle's if it has none
-     * yet) — and make that page current, so the next screen launch opens on it. **The full rule:** a
-     * result over `STORE_MAX_VALUE_BYTES` is [PageFullException] — nothing placed, nothing inserted.
-     * The same promise holds for a store failure part-way through: the new page's ink is written
-     * before the page list names it, and a failed list write takes the orphan blob back out, so the
-     * host's "nothing was sent" is never contradicted by a stray blank page appearing in the pad.
-     */
-    fun receive(strokes: List<Stroke>, pageWidth: Float, pageHeight: Float, newPage: Boolean): Received {
-        val loaded = load()
-        val ids = strokes.map { it.id }
-        if (newPage) {
-            val blob = ScratchPageCodec.encode(pageWidth, pageHeight, strokes)
-            if (blob.size > ExtensionContract.STORE_MAX_VALUE_BYTES) throw PageFullException(blob.size)
-            // The ink is written FIRST and the page list published LAST, so a failure part-way
-            // through cannot leave a page in the list that the host has been told was never placed.
-            // A blob under a key no list names is invisible; it is still cleaned up on the way out.
-            val id = newId()
-            savePage(id, blob)
-            try {
-                insertPageAt(loaded.ids, loaded.currentId, id)
-                setCurrent(id)
-            } catch (e: Throwable) {
-                runCatching { store.delete(pageKey(id)) }
-                runCatching { writeIds(loaded.ids) }
-                throw e
-            }
-            return Received(id, ids, true, loaded.ids, loaded.currentId)
-        }
-        val cur = loaded.currentId
-        val existing = readPage(cur)?.let { ScratchPageCodec.decode(it) }
-        val w = if (existing != null && existing.pageWidth > 0f) existing.pageWidth else pageWidth
-        val h = if (existing != null && existing.pageHeight > 0f) existing.pageHeight else pageHeight
-        val all = (existing?.strokes ?: emptyList()) + strokes
-        val blob = ScratchPageCodec.encode(w, h, all)
-        if (blob.size > ExtensionContract.STORE_MAX_VALUE_BYTES) throw PageFullException(blob.size)
-        savePage(cur, blob)
-        return Received(cur, ids, false, loaded.ids, loaded.currentId)
-    }
+    fun receive(strokes: List<Stroke>, pageWidth: Float, pageHeight: Float, newPage: Boolean): Received = throw unavailable()
 
-    private fun writeIds(ids: List<String>) {
-        store.put(KEY_PAGES, ids.joinToString("\n").toByteArray(Charsets.UTF_8))
-    }
-
-    private inline fun <T> guard(block: () -> T): T =
-        try {
-            block()
-        } catch (e: PageFullException) {
-            throw e
-        } catch (e: Exception) {
-            throw StoreUnavailable(e)
-        }
+    private fun unavailable() = StoreUnavailable(IllegalStateException("scratch pad store: not on tables yet (arc 22 / X2)"))
 
     companion object {
         const val KEY_PAGES = "pages"

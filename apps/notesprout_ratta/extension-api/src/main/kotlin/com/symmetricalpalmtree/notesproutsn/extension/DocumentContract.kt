@@ -28,6 +28,20 @@ object DocumentContract {
     const val ACTION_DOCUMENT_EDITOR_SCREEN: String =
         "com.symmetricalpalmtree.notesproutsn.extension.DOCUMENT_EDITOR_SCREEN"
 
+    // ── The editor's `prefs` table (arc 22 / X1) ──────
+    // The ONE extension table the host reads: Document-PDF export takes the editor's saved text size
+    // (arc 19 / M9) straight from the editor's store through the host's own executor — no binder,
+    // only if the store file and the table already exist, never minting either. Its shape is pinned
+    // here so both sides name the same thing; no other host code reads an extension's tables.
+
+    /** The editor's preferences table: `prefs (key TEXT PRIMARY KEY, value TEXT NOT NULL)`. */
+    const val PREFS_TABLE: String = "prefs"
+    const val PREFS_KEY_COLUMN: String = "key"
+    const val PREFS_VALUE_COLUMN: String = "value"
+
+    /** The `prefs` key of the editing-surface text size in sp, stored as the float's `toString`. */
+    const val PREF_TEXT_SIZE: String = "size"
+
     // ── The whole-document cap ──────
     // Guards BOTH directions: the host refuses to open the editor over a larger document before
     // any bind, and the host's save accumulator re-checks the running total on receipt.

@@ -23,11 +23,18 @@ import com.symmetricalpalmtree.notesproutsn.crypto.SoilFileKind
 import com.symmetricalpalmtree.notesproutsn.data.extensionStoreFile
 import com.symmetricalpalmtree.notesproutsn.data.extstore.ExtensionStoreBinder
 import com.symmetricalpalmtree.notesproutsn.data.extstore.ExtensionStores
+import com.symmetricalpalmtree.notesproutsn.data.extstore.StoreFormat
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
-import com.symmetricalpalmtree.notesproutsn.extension.SharedBytes
+import com.symmetricalpalmtree.notesproutsn.extension.IExtensionStore
+import com.symmetricalpalmtree.notesproutsn.extension.Statement
+import com.symmetricalpalmtree.notesproutsn.extension.StoreCodec
+import com.symmetricalpalmtree.notesproutsn.extension.StorePayload
+import com.symmetricalpalmtree.notesproutsn.extension.StoreReads
+import com.symmetricalpalmtree.notesproutsn.extension.StoreSchema
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * Debug build only (this file has a no-op twin in `src/release`): a ⋯ button at the right of the
@@ -35,13 +42,18 @@ import kotlinx.coroutines.withContext
  *  - **Show recovery key** — reveal + copy the global passphrase.
  *  - **Forget cached key** — clear the Keystore-cached passphrase and raw keys, then kill the
  *    process; the next launch must land on the Unlock screen with the file intact.
- *  - **Extension store self-test** (arc 11 / J2) — open-or-create the store of a fake package
- *    `probe.test` (`Garden/probe.test.db`), round-trip a value through a **real**
- *    [ExtensionStoreBinder] (calling uid = our own, so the gate's uid check passes), check the file
- *    header is encrypted, drive the 4 MiB `putLarge` / `getLarge` path through real ashmem, and
- *    prove the inline cap, the `STORE_VALUE_LARGE` refusal, the wrong-uid refusal and the revoked
- *    refusal; toast OK / FAIL. Room + SQLCipher + `SharedMemory` cannot run on the JVM, so this is
- *    the store's only on-device check until an extension actually uses it.
+ *  - **Extension store self-test** (arc 11 / J2, grown to tables at arc 22 / X1) — the store's only
+ *    on-device check, because SQLCipher, `SharedMemory` and a real `Binder` cannot run on the JVM.
+ *    Through a **real** [ExtensionStoreBinder] (calling uid = our own, so the gate's uid check
+ *    passes) over the store of a fake package `probe.test` (`Garden/probe.test.db`, recreated fresh
+ *    each run): encrypted header → `applySchema` v1 → `exec` of 5 000 stroke-shaped rows in two
+ *    batches (each rides ashmem) → a `query` that streams them back in more than one chunk with
+ *    byte-exact equality → a failing batch (a constraint violation mid-list) leaves zero new rows →
+ *    `applySchema` v2 (`ADD COLUMN`) then v1 again refused with `STORE_SCHEMA_NEWER` → a denylisted
+ *    statement, `host_schema` and a two-statement string all refused as `IllegalArgumentException`
+ *    → `exec` before `applySchema` refused with `STORE_SCHEMA_UNAPPLIED` → wrong uid / revoked
+ *    refused → a **legacy-shaped file** (`Garden/probe.legacy.db`, built by the probe itself with a
+ *    `kv` table at `user_version 1`) opens as a wipe to format version 2. Timings in the summary.
  *  - **WEBP encoder measurement** ([WebpProbe]) — lossless vs lossy-q100 on this device's own page
  *    size, for the open question in `BuiltInTemplates.toWebp`. Skia's encoders are the subject, so
  *    no host tool can answer it; run it on every device tier before changing the format.
@@ -144,50 +156,151 @@ object DebugMenu {
     /** IO. Returns a short summary; throws on the first failed check. */
     private fun runStoreProbe(activity: AppCompatActivity): String {
         val pkg = "probe.test"
+        // The probe's own files — recreated fresh so every run proves the create door. Anything this
+        // process holds open is closed first (a cached store is never closed otherwise).
+        ExtensionStores.closeAll()
+        val file = extensionStoreFile(activity, pkg)
+        deleteWithSidecars(file)
         val t0 = System.currentTimeMillis()
         val db = ExtensionStores.open(activity, pkg)
         val openMs = System.currentTimeMillis() - t0
-        val file = extensionStoreFile(activity, pkg)
         check(SoilCrypto.probe(file) == SoilFileKind.Encrypted) { "file is not encrypted" }
+        check(userVersion(db.writable()) == StoreFormat.VERSION) { "fresh store not at format ${StoreFormat.VERSION}" }
         // Called in-process, Binder.getCallingUid() is our own uid — so a real binder works here.
-        val store = ExtensionStoreBinder(db, android.os.Process.myUid())
-        val key = "probe:" + System.currentTimeMillis()
-        val value = "hello".toByteArray()
-        store.put(key, value)
-        check(store.get(key)?.contentEquals(value) == true) { "get after put mismatch" }
-        check(key in store.keys("probe:")) { "keys(prefix) missing the key" }
-        check(store.keys("zzz").isEmpty()) { "keys(zzz) not empty" }
-        store.delete(key)
-        check(store.get(key) == null) { "get after delete not null" }
-        // The large path: 4 MiB through real ashmem both ways.
-        val bigKey = "probe:big:" + System.currentTimeMillis()
-        val big = ByteArray(ExtensionContract.STORE_MAX_VALUE_BYTES) { (it % 251).toByte() }
-        val t1 = System.currentTimeMillis()
-        // In-process there is no parcel: the binder receives this very object and closes it itself
-        // (over IPC the sender closes its own handle after the call — the region is dup'd into it).
-        store.putLarge(bigKey, SharedBytes.write(big))
-        val got = store.getLarge(bigKey) ?: error("getLarge returned null")
-        val back = SharedBytes.readAndClose(got)
-        val bigMs = System.currentTimeMillis() - t1
-        check(back.contentEquals(big)) { "4 MiB round trip mismatch" }
-        check(runCatching { store.get(bigKey) }.exceptionOrNull()?.message == ExtensionContract.STORE_VALUE_LARGE) {
-            "get of a large value not refused"
+        val store: IExtensionStore = ExtensionStoreBinder(db, android.os.Process.myUid())
+
+        // Structural: nothing before the declaration.
+        expectIse(ExtensionContract.STORE_SCHEMA_UNAPPLIED, "exec before applySchema") {
+            StoreReads.exec(store, "DELETE FROM stroke")
         }
-        check(runCatching { store.put("probe:inline", ByteArray(ExtensionContract.STORE_MAX_INLINE_BYTES + 1)) }
-            .exceptionOrNull() is IllegalArgumentException) { "inline cap not enforced" }
-        // An empty value rides a 1-byte region — ashmem refuses a zero-size one.
-        val emptyKey = "probe:empty:" + System.currentTimeMillis()
-        store.putLarge(emptyKey, SharedBytes.write(ByteArray(0)))
-        check(SharedBytes.readAndClose(store.getLarge(emptyKey)!!).isEmpty()) { "empty large value mismatch" }
-        store.delete(emptyKey)
-        store.delete(bigKey)
-        check(store.getLarge(bigKey) == null) { "getLarge after delete not null" }
-        check(runCatching { store.get("") }.exceptionOrNull() is IllegalArgumentException) { "empty key accepted" }
+        check(store.schemaVersion() == 0) { "fresh store schemaVersion != 0" }
+        val v1 = StoreSchema(1, listOf(listOf(
+            "CREATE TABLE stroke (id TEXT PRIMARY KEY, pageId TEXT NOT NULL, \"order\" INTEGER NOT NULL, blob BLOB NOT NULL)",
+            "CREATE INDEX stroke_page_order ON stroke(pageId, \"order\")",
+        )))
+        store.applySchema(v1)
+        check(store.schemaVersion() == 1) { "schemaVersion after v1 != 1" }
+        store.applySchema(v1)   // idempotent
+        check(store.schemaVersion() == 1) { "schemaVersion after v1 again != 1" }
+
+        // 5 000 stroke-shaped rows, 1 KiB blobs, two batches — each batch rides ashmem (≈ 2.7 MB).
+        val rows = 5_000
+        val blobOf = { i: Int -> ByteArray(1024) { j -> ((i * 31 + j) % 251).toByte() } }
+        val t1 = System.currentTimeMillis()
+        for (half in 0 until 2) {
+            val batch = (half * rows / 2 until (half + 1) * rows / 2).map { i ->
+                Statement("INSERT INTO stroke (id, pageId, \"order\", blob) VALUES (?, ?, ?, ?)", "s$i", "p${i % 20}", i, blobOf(i))
+            }
+            val changes = StoreReads.exec(store, batch)
+            check(changes.size == batch.size && changes.all { it == 1L }) { "batch $half changes() wrong" }
+        }
+        val batchMs = System.currentTimeMillis() - t1
+
+        // Read back in more than one chunk (≈ 5.2 MB of rows against a 4 MiB chunk), byte-exact.
+        val t2 = System.currentTimeMillis()
+        var chunks = 0
+        val statement = StorePayload.of(StoreCodec.encodeStatements(listOf(Statement("SELECT id, \"order\", blob FROM stroke ORDER BY \"order\""))))
+        var result = store.query(statement)
+        var seen = 0
+        while (true) {
+            chunks++
+            val decoded = StoreCodec.decodeRows(result.payload.readAndClose())
+            for (row in decoded) {
+                val i = row.long("order").toInt()
+                check(i == seen) { "row order broke at $seen (got $i)" }
+                check(row.text("id") == "s$i") { "id mismatch at $i" }
+                check(row.blob("blob").contentEquals(blobOf(i))) { "blob mismatch at $i" }
+                seen++
+            }
+            if (!result.more) break
+            result = store.next(result.handle)
+        }
+        val readMs = System.currentTimeMillis() - t2
+        check(seen == rows) { "read back $seen of $rows rows" }
+        check(chunks > 1) { "read back in $chunks chunk(s) — expected more than one" }
+        check(StoreReads.all(store, "SELECT count(*) AS n FROM stroke")[0].long("n") == rows.toLong()) { "count != $rows" }
+
+        // A failing batch (duplicate primary key mid-list) leaves ZERO new rows.
+        val bad = listOf(
+            Statement("INSERT INTO stroke (id, pageId, \"order\", blob) VALUES (?, ?, ?, ?)", "new-1", "p0", 900_001, byteArrayOf(1)),
+            Statement("INSERT INTO stroke (id, pageId, \"order\", blob) VALUES (?, ?, ?, ?)", "s0", "p0", 900_002, byteArrayOf(2)),
+            Statement("INSERT INTO stroke (id, pageId, \"order\", blob) VALUES (?, ?, ?, ?)", "new-3", "p0", 900_003, byteArrayOf(3)),
+        )
+        check(runCatching { StoreReads.exec(store, bad) }.exceptionOrNull() is IllegalStateException) { "constraint violation not an ISE" }
+        check(StoreReads.all(store, "SELECT count(*) AS n FROM stroke WHERE id LIKE 'new-%'")[0].long("n") == 0L) { "failed batch left rows behind" }
+
+        // Schema forward, never back.
+        val v2 = StoreSchema(2, v1.steps + listOf(listOf("ALTER TABLE stroke ADD COLUMN width REAL NOT NULL DEFAULT 1")))
+        store.applySchema(v2)
+        check(store.schemaVersion() == 2) { "schemaVersion after v2 != 2" }
+        check(StoreReads.all(store, "SELECT width FROM stroke LIMIT 1")[0].real("width") == 1.0) { "ADD COLUMN default not seen" }
+        expectIse(ExtensionContract.STORE_SCHEMA_NEWER, "downgrade") { store.applySchema(v1) }
+
+        // The validator at the door.
+        expectIae("PRAGMA") { StoreReads.all(store, "PRAGMA user_version") }
+        expectIae("host_schema") { StoreReads.all(store, "SELECT * FROM host_schema") }
+        expectIae("two statements") { StoreReads.exec(store, "DELETE FROM stroke; DROP TABLE stroke") }
+        expectIae("write via query") { StoreReads.all(store, "WITH x AS (SELECT 1) DELETE FROM stroke") }
+        expectIae("bad schema") { StoreSchema(1, listOf(listOf("CREATE VIEW v AS SELECT 1"))) }
+        // host_schema is still exactly what it was after all that.
+        check(store.schemaVersion() == 2) { "host_schema moved" }
+
+        // Trust: wrong uid, then revoked.
         val other = ExtensionStoreBinder(db, android.os.Process.myUid() + 1)
-        check(runCatching { other.get("x") }.exceptionOrNull() is SecurityException) { "wrong uid accepted" }
-        store.revoke()
-        check(runCatching { store.get("x") }.exceptionOrNull() is SecurityException) { "revoked binder accepted" }
-        return "open ${openMs}ms, 4 MiB round trip ${bigMs}ms, ${file.name}"
+        check(runCatching { other.schemaVersion() }.exceptionOrNull() is SecurityException) { "wrong uid accepted" }
+        (store as ExtensionStoreBinder).revoke()
+        check(runCatching { store.schemaVersion() }.exceptionOrNull() is SecurityException) { "revoked binder accepted" }
+
+        // A legacy-shaped file (the arc-11 Room key/value store) opens as a wipe to format 2.
+        val legacyPkg = "probe.legacy"
+        val legacyFile = extensionStoreFile(activity, legacyPkg)
+        deleteWithSidecars(legacyFile)
+        buildLegacyStore(legacyFile)
+        val t3 = System.currentTimeMillis()
+        val legacy = ExtensionStores.open(activity, legacyPkg)
+        val wipeMs = System.currentTimeMillis() - t3
+        check(userVersion(legacy.writable()) == StoreFormat.VERSION) { "legacy store not at format ${StoreFormat.VERSION} after open" }
+        check(!legacy.hasTable("kv") && !legacy.hasTable("room_master_table")) { "legacy tables survived the wipe" }
+        check(legacy.hasTable(StoreFormat.HOST_SCHEMA_TABLE)) { "host_schema missing after the wipe" }
+        val legacyStore = ExtensionStoreBinder(legacy, android.os.Process.myUid())
+        check(legacyStore.schemaVersion() == 0) { "wiped store schemaVersion != 0" }
+        legacyStore.revoke()
+
+        return "open ${openMs}ms · 5 000 rows in ${batchMs}ms · read back $chunks chunks in ${readMs}ms · legacy wipe ${wipeMs}ms · ${file.name}"
+    }
+
+    private fun expectIse(message: String, what: String, block: () -> Unit) {
+        val e = runCatching(block).exceptionOrNull()
+        check(e is IllegalStateException && e.message == message) { "$what: expected ISE($message), got ${e?.javaClass?.simpleName}: ${e?.message}" }
+    }
+
+    private fun expectIae(what: String, block: () -> Unit) {
+        val e = runCatching(block).exceptionOrNull()
+        check(e is IllegalArgumentException) { "$what: expected IAE, got ${e?.javaClass?.simpleName}: ${e?.message}" }
+    }
+
+    private fun userVersion(db: androidx.sqlite.db.SupportSQLiteDatabase): Int =
+        db.query("PRAGMA user_version").use { if (it.moveToFirst()) it.getInt(0) else -1 }
+
+    private fun deleteWithSidecars(file: File) {
+        for (f in listOf(file, File(file.path + "-wal"), File(file.path + "-shm"), File(file.path + "-journal"))) {
+            if (f.exists()) check(f.delete()) { "could not delete ${f.name}" }
+        }
+    }
+
+    /** The arc-11 shape: `kv` + `room_master_table`, `user_version 1`, under the global key. */
+    private fun buildLegacyStore(file: File) {
+        val pass = KeySession.get() ?: error("no global key in session")
+        val db = SoilCrypto.createRaw(file, pass)
+        try {
+            db.execSQL("CREATE TABLE kv (`key` TEXT NOT NULL PRIMARY KEY, `value` BLOB NOT NULL, updatedAt INTEGER NOT NULL)")
+            db.execSQL("CREATE TABLE room_master_table (id INTEGER PRIMARY KEY, identity_hash TEXT)")
+            db.execSQL("INSERT INTO kv VALUES ('pages', X'00', 0)")
+            db.execSQL("INSERT INTO kv VALUES ('current', X'00', 0)")
+            db.execSQL("PRAGMA user_version = ${StoreFormat.LEGACY_KV_VERSION}")
+        } finally {
+            db.close()
+        }
     }
 
     private fun showKey(activity: AppCompatActivity) {

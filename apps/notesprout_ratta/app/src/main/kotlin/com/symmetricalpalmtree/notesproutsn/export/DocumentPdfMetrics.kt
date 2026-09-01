@@ -1,5 +1,7 @@
 package com.symmetricalpalmtree.notesproutsn.export
 
+import com.symmetricalpalmtree.notesproutsn.extension.DocumentContract
+
 /**
  * The page geometry and type size a Document PDF is laid out at (arc 19 / M9) — pure, so the one
  * thing that decides whether the exported page *looks like* what the writer saw is provable off a
@@ -10,10 +12,11 @@ package com.symmetricalpalmtree.notesproutsn.export
  * at the foot, `lineSpacingMultiplier="1.15"` — rendered through `PreviewRender` with an 8dp block
  * gap at the editor's saved text size plus `EditorPrefs.PREVIEW_BUMP`. The export cannot ask the
  * extension for any of that (nothing but document text crosses that seam), so it restates it here
- * and the two are kept honest by eye at the arc's walk. The **pinned** source of the store key
- * layout is `:ext-document`'s `EditorPrefs` and its `EditorPrefsLayoutTest`: [TEXT_SIZE_KEY],
- * [DEFAULT_TEXT_SIZE_SP], the 14..25 range and [PREVIEW_BUMP_SP] all name values that file owns —
- * change one there and this is the other half that has to move.
+ * and the two are kept honest by eye at the arc's walk. The text size is read from the editor's
+ * `prefs` table — the ONE extension table the host reads, its shape pinned in
+ * `DocumentContract.PREFS_TABLE` / `PREF_TEXT_SIZE` (arc 22 / X1) — and [DEFAULT_TEXT_SIZE_SP], the
+ * 14..25 range and [PREVIEW_BUMP_SP] name values `:ext-document`'s `EditorPrefs` owns — change one
+ * there and this is the other half that has to move.
  *
  * The bottom margin is deliberately not the top one. It is the Preview's scroll tail: room to read
  * the last line clear of the chrome. On a printed page it reads as the wider foot margin a
@@ -33,8 +36,8 @@ object DocumentPdfMetrics {
     /** `lineSpacingMultiplier` on the Preview `TextView`. */
     const val LINE_SPACING_MULTIPLIER: Float = 1.15f
 
-    /** The extension store key the editor's text size lives under — `EditorPrefs.KEY_TEXT_SIZE`. */
-    const val TEXT_SIZE_KEY: String = "size"
+    /** The `prefs` key the editor's text size lives under — the contract's pinned name. */
+    const val TEXT_SIZE_KEY: String = DocumentContract.PREF_TEXT_SIZE
 
     /** What the editor opens at before anything has been chosen — `EditorPrefs.DEFAULT_TEXT_SIZE`. */
     const val DEFAULT_TEXT_SIZE_SP: Float = 16f

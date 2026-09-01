@@ -591,7 +591,7 @@ commit.
 
 ## Phases — Arc 22 "Tables" (planned 2026-09-01, wizard complete — X1 next)
 
-**Status: X1 ⬜ · X2 ⬜ · X3 ⬜ · X4 ⬜ · X5 ⬜** (one phase per session; flip the marker, run the
+**Status: X1 ✅ · X2 ⬜ · X3 ⬜ · X4 ⬜ · X5 ⬜** (one phase per session; flip the marker, run the
 phase, record its Outcome, update docs/memory/CLAUDE.md, gates green, commit + push, `/clear`).
 
 The extension store stops being a key/value seam and becomes **real SQLite tables** — the
@@ -779,7 +779,7 @@ held-bind bracket, "an extension writes nothing to disk itself, ever", and W5's 
   probe itself with a `kv` table) opens as a wipe to version 2. Timings in the summary
   (open, 5 000-row batch, read-back).
 
-### X1 — The seam ⬜ (Fable)
+### X1 — The seam ✅ (Fable)
 `:extension-api` v6 (contract, parcelables, `StoreCodec`, `StoreSql`, `StoreNames`,
 `StoreReads`; delete `LargeValue`-era KV KDoc; keep `LargeValue`/`SharedBytes`); host store rewrite
 (`ExtensionStores` doors + user_version ladder + wipe, `StoreExecutor` + `SupportStoreExecutor`,
@@ -804,7 +804,86 @@ still work; pad button, Document entries and every tag door GONE; search runs na
 still copies every `Garden/<pkg>.db`.
 **Questions at phase start:** none — wizard + planner calls cover it. Confirm the flip only.
 
-### X2 — Scratch pad on rows ⬜ (Opus code · Sonnet scaffold/tests · Haiku walk)
+**Outcome (2026-09-01, Fable; 1631 JVM tests/variant, +8 net — 42 new store tests against 34
+KV-era tests deleted; ten modules debug + release, four release APKs signed, NUL-scan clean):**
+implemented as the seam spec reads, with these implementer calls, all inside the spec's letter:
+
+- **The format ladder rides the open helper's own lifecycle.** The `SupportSQLiteOpenHelper`
+  callback's version IS `StoreFormat.VERSION` (2), so a `0` file gets `onCreate` (fresh), a `1`
+  file — arc 11's Room kv — gets `onUpgrade` (**the wipe**, inside the helper's own version
+  transaction, logged as a kv row count), and a file above 2 gets `onDowngrade`, which throws and
+  leaves the file as found. `StoreFormat.decide` is the pure table (JVM-tested); the callbacks only
+  act on it. `NonDestructiveOpenHelperFactory` still wraps every open. Foreign keys are enabled as a
+  **pool** setting (`setForeignKeyConstraintsEnabled` in `onConfigure`), not a per-connection PRAGMA
+  — WAL readers are separate connections, and a PRAGMA in `onOpen` would only have reached one.
+- **Chunker in `:extension-api`, not the host** (`StoreChunker`, beside `StoreCodec`): it is codec
+  arithmetic (`rowsHeaderBytes` + `rowBytes` are the exact bytes the writers produce, pinned by
+  test), and the caps are raised *at the row that crosses*, so the host's `RowSink` stops reading
+  there rather than materializing the rest. A result that ends exactly on a chunk boundary gets no
+  empty trailing chunk; an empty result gets its one.
+- **`StoreSql` tolerates ONE trailing `;`** (any other `;` outside a literal is the one-statement
+  refusal) — the DDL in the X2–X4 schemas is written `;`-terminated and refusing that would have
+  been a paper cut with no safety behind it. **A query cannot smuggle a write under `WITH`**:
+  `INSERT`/`UPDATE`/`DELETE` anywhere in a query, and `REPLACE` followed by `INTO`, are refused
+  (`replace(x, y, z)` the function still passes) — `rawQuery` of a `WITH … DELETE` would run it.
+  DDL refuses a second head word anywhere (`… DROP` inside a `CREATE`), plus
+  `VIEW`/`TRIGGER`/`VIRTUAL`/`TEMP`/`TEMPORARY`. Object names (table/index created, altered,
+  dropped, and an index's `ON` table) must be **bare** `StoreNames`; column names are the
+  extension's business (`"order"`, `pageId` pass). The reserved-space check applies to every WORD
+  and quoted identifier in every kind, so `sqlite_version()` is refused too — a harmless loss.
+- **`StoreSchema` construction is the DDL validator run** (every statement `checkDdl`'d, the table
+  cap counted statically over `CREATE TABLE`s across all steps); version `1..256` (a schema of zero
+  steps is a bug, not a declaration). `Cell.of` + `Statement(sql, vararg args)` +
+  `StoreReads.all(store, sql, vararg)` / `StoreReads.exec(...)` are the extension-facing sugar;
+  `Row` typed accessors throw `IllegalArgumentException` on a wrong storage class (the "bad row =
+  dropped" rule an extension can catch), except that an INTEGER reads as a REAL (SQLite's own
+  affinity).
+- **The gate's `exec`/`query` are `declared`-gated per binder** (a boolean flipped by the first
+  successful `applySchema` on that binder — `schemaVersion` itself needs no declaration). A schema
+  step that fails rolls back *that step* and keeps the version; the binder stays declared if an
+  earlier `applySchema` succeeded.
+- **`ExtensionContract.minApiVersion(action)` / `accepts(action, version)`** hold the floor rule
+  (pure, in the contract — the registry calls `accepts`). `DocumentContract` grew the pinned
+  `PREFS_TABLE`/`PREFS_KEY_COLUMN`/`PREFS_VALUE_COLUMN`/`PREF_TEXT_SIZE`;
+  `DocumentPdfRender.editorTextSizeSp` reads through `ExtensionStoreDatabase.hasTable` + the
+  executor (no binder) and answers the default until X4 creates the table.
+- **The three stubs**: `ScratchStore` (reads null / `load` + writes throw `StoreUnavailable`),
+  `TagStore` (`readBlob` null, `read` = `TagIndex.EMPTY`, `write` throws), `EditorPrefs` (defaults
+  and no-ops; the size ladder + `DEFAULT_TEXT_SIZE`/`PREVIEW_BUMP` stay — the screen lays itself
+  out with them). Their KV-era tests (`ScratchDocumentTest`, `ScratchReceivedUndoTest`,
+  `ScratchStoreReceiveTest`, `TagStoreTest`, `TagWritesTest`, `EditorPrefsLayoutTest`, both
+  `FakeExtensionStore`s) are deleted; the pure codec tests (`ScratchPageCodecTest`, `TagCodecTest`,
+  `CompactIdTest`, `CaretMemoryTest`, `UserWordsTest`) stay until their codecs go in X2/X3/X4.
+  `TagWrites`, `TagClient.snapshot`, `ScratchPageCodec` and `LargeValue`-returning `snapshot` all
+  still compile untouched — X3's business.
+- **The debug self-test recreates its own files each run** (`probe.test.db` + sidecars deleted,
+  then `ExtensionStores.closeAll()` first — a cached store is never closed otherwise) so the create
+  door is proved every time, and builds `probe.legacy.db` itself (`SoilCrypto.createRaw` → `kv` +
+  `room_master_table` + two rows + `user_version 1`) for the wipe proof. The Nomad's arc-11
+  `probe.test.db` (4.3 MB kv) is gone with the first run — the probe's own file.
+
+**Walk (Haiku, the SAF/backup items re-driven by hand): all green.** Self-test on the Nomad:
+`Extension store: OK (open 2010ms · 5 000 rows in 2398ms · read back 2 chunks in 894ms · legacy
+wipe 1983ms · probe.test.db)` with `fresh store for probe.test` and `wiped legacy store for
+probe.legacy (format 1, 2 kv row(s) dropped)` in the log — the create door, two ashmem batches,
+a two-chunk read-back byte-exact, the constraint rollback, v2 then v1 refused, three
+`IllegalArgumentException` refusals, `STORE_SCHEMA_UNAPPLIED`, wrong uid, revoked, and the wipe.
+**The floor, live:** `ExtensionRegistry` skips the tag service (`api version 5 outside 6..6`),
+the pad (`1 outside 6..6`) and the editor (`2 outside 6..6`); the recognizer answers `1
+provider(s) of 1`, exporters `3 of 3` (soil + pdf + the Document APK's document exporter — a
+stateless point, still accepted at 3), importers `2 of 2` (soil + text). The library sheet has no
+Tags… row; the notebook's top bar is Back · Contents · Pen · Eraser · Lasso · Recents (no pad,
+Document or tag button); the search dialog's hint is "Folder or notebook name". Export reached the
+picker (Tags.pdf; the format chooser lists PDF + `.soil` only — the document row is gated on a
+document existing, as before); Import reached the picker; a backup run to the remembered folder
+logged `1 copied, 40 up to date, 1 excluded … stores 5 copied / 0 failed` — the three extension
+stores plus both probe stores. `logcat -b crash` empty. **Two timings worth keeping:** a cold
+create is ≈ 2.0 s and a legacy open-and-wipe ≈ 2.0 s (both one native KDF); 5 000 1-KiB rows
+land in ≈ 2.4 s and read back in ≈ 0.9 s.
+**Left for X5:** every doc (`docs/extensions.md` § store and the audit rows, `scratchpad.md`,
+`tags.md`, `document.md`, `backup.md`'s one sentence, `BACKLOG.md`'s two entries). Both CLAUDE.mds
+carry the X1 truth already.
+ ⬜ (Opus code · Sonnet scaffold/tests · Haiku walk)
 `:ext-scratchpad` declares 6 and schema v1:
 ```sql
 CREATE TABLE page   (id TEXT PRIMARY KEY, position INTEGER NOT NULL, width REAL NOT NULL, height REAL NOT NULL,

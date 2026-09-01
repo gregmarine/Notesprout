@@ -1,85 +1,43 @@
 package com.symmetricalpalmtree.notesproutsn.ext.tags
 
-import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
 import com.symmetricalpalmtree.notesproutsn.extension.IExtensionStore
-import com.symmetricalpalmtree.notesproutsn.extension.SharedBytes
-import com.symmetricalpalmtree.notesproutsn.extension.TagCodec
 import com.symmetricalpalmtree.notesproutsn.extension.TagIndex
 
 /** The extension cannot reach its storage (any store exception — the host's rule: treat all as unavailable). */
 class StoreUnavailable(cause: Throwable) : Exception(cause.message, cause)
 
 /**
- * There **is** a stored index and it cannot be read (an unknown version line). Deliberately not the
- * same as "no index yet": the caller must say so and must not write over it, because a blank index
- * saved over a library's tags is a loss nobody can undo (the `ScratchPageCodec` rule).
+ * There **is** a stored index and it cannot be read. Deleted with the blob in arc 22 / X3 — an
+ * unreadable store is "unavailable" then, because there is no blob to be half-read.
  */
 class IndexUnreadable(cause: Throwable) : Exception(cause.message, cause)
 
 /**
- * The tag index's key layout over the host's `IExtensionStore` (arc 21 / W1). **Blocking** — every
- * call runs on `Dispatchers.IO` (the screen) or a Binder thread (the service's call-shaped methods),
- * never Main. The extension writes nothing to disk itself: this store is the host's, lent for the
- * showing.
+ * The tag index's storage adapter over the host's `IExtensionStore`.
  *
- * **One key, [KEY_INDEX], holding the whole index** as its [TagCodec] blob. Not a key per tag: the
- * index is read whole on every open and written whole on every edit, and a per-tag layout would turn
- * one write into a fan-out with no transaction around it — a half-applied edit is exactly what a
- * single value cannot produce. The caps are sized so the worst legal index fits one value
- * ([TagCodec.WORST_CASE_BYTES]).
+ * **Arc 22 / X1 — an "unavailable" stub.** The host's store became real SQLite tables
+ * (`IExtensionStore` v6) and the one-blob key/value layout this class was written over is gone.
+ * Until X3 declares the `tag` / `assignment` schema and rewrites the index over statements, a read
+ * answers an empty index and a write refuses with [StoreUnavailable] — and the tag service still
+ * declares API version 5, so a version-6 host does not list it at all (the floor rule): nothing
+ * reaches this code from a live device.
  *
- * Values at or under `STORE_MAX_INLINE_BYTES` go through `put` / `get`; above that
- * `putLarge` / `getLarge` (the `SharedBytes` handshake — the region we create is closed after the
- * call returns; the one the host returns is closed in a `finally`). The fall to the large path is on
- * the **exact** `STORE_VALUE_LARGE` message, never a substring.
+ * TODO(X3): schema v1 + SQL builders; `tags()` / `assignmentsOf()` replace `snapshot`; delete
+ * `TagCodec`, `CompactId`, [IndexUnreadable] and `TagWrites`' process-local lock.
  */
+@Suppress("UNUSED_PARAMETER")
 class TagStore(private val store: IExtensionStore) {
 
-    /** The stored blob, or null when there is none yet (first run). */
-    fun readBlob(): ByteArray? = guard {
-        try {
-            store.get(KEY_INDEX)
-        } catch (e: IllegalStateException) {
-            if (e.message != ExtensionContract.STORE_VALUE_LARGE) throw e
-            val v = store.getLarge(KEY_INDEX) ?: return@guard null
-            SharedBytes.readAndClose(v)
-        }
-    }
+    /** X1 stub: no blob. */
+    fun readBlob(): ByteArray? = null
 
-    /**
-     * The stored index. A missing value is [TagIndex.EMPTY] — a first run, not a failure.
-     *
-     * @throws IndexUnreadable there is a value and its version line is not [TagCodec.VERSION].
-     * @throws StoreUnavailable the store could not be reached.
-     */
-    fun read(): TagIndex {
-        val blob = readBlob()
-        return try {
-            TagCodec.decode(blob)
-        } catch (e: IllegalArgumentException) {
-            throw IndexUnreadable(e)
-        }
-    }
+    /** X1 stub: an empty index. */
+    fun read(): TagIndex = TagIndex.EMPTY
 
-    /** Write the whole index. @throws StoreUnavailable */
+    /** X1 stub: refuses. @throws StoreUnavailable */
     fun write(index: TagIndex) {
-        val blob = TagCodec.encode(index)
-        guard {
-            if (blob.size <= ExtensionContract.STORE_MAX_INLINE_BYTES) {
-                store.put(KEY_INDEX, blob)
-            } else {
-                val v = SharedBytes.write(blob)
-                try { store.putLarge(KEY_INDEX, v) } finally { v.memory.close() }
-            }
-        }
+        throw StoreUnavailable(IllegalStateException("tag store: not on tables yet (arc 22 / X3)"))
     }
-
-    private inline fun <T> guard(block: () -> T): T =
-        try {
-            block()
-        } catch (e: Exception) {
-            throw StoreUnavailable(e)
-        }
 
     companion object {
         const val KEY_INDEX = "index"

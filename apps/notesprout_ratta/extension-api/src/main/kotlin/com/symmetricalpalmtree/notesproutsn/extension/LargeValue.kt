@@ -5,21 +5,21 @@ import android.os.Parcelable
 import android.os.SharedMemory
 
 /**
- * A large extension-store value (`IExtensionStore.putLarge` / `getLarge`, arc 11 / J2): the bytes
- * live in [memory]`[0 until byteCount]`.
+ * A payload too large for a Binder transaction, carried as an ashmem region (arc 11 / J2; since
+ * arc 22 / X1 the chunk carrier behind [StorePayload]): the bytes live in [memory]`[0 until byteCount]`.
  *
- * A 4 MiB `byte[]` cannot cross a Binder (~1 MB transaction budget), so values above
- * [ExtensionContract.STORE_MAX_INLINE_BYTES] travel as an ashmem region, the same handshake in both
- * directions: the **sender** creates the region, writes, `setProtect(PROT_READ)`, hands it over and
- * closes its own handle once the transaction carrying it is marshalled; the **receiver** maps
- * read-only, copies out [byteCount] bytes, unmaps and closes (in a `finally`). [SharedBytes] writes
- * that handshake once for both sides.
+ * A 4 MiB `byte[]` cannot cross a Binder (~1 MB transaction budget), so a payload above
+ * [ExtensionContract.STORE_MAX_INLINE_BYTES] travels as an ashmem region, the same handshake in
+ * both directions: the **sender** creates the region, writes, `setProtect(PROT_READ)`, hands it
+ * over and closes its own handle once the transaction carrying it is marshalled; the **receiver**
+ * maps read-only, copies out [byteCount] bytes, unmaps and closes (in a `finally`). [SharedBytes]
+ * writes that handshake once for both sides. The tag manager's `snapshot` still returns one
+ * directly until arc 22 / X3 moves it to rows.
  *
  * Wire form: `SharedMemory · int byteCount` (a compatible tail may be appended later).
  * [requireValid] runs at construction, so at unmarshal too: `byteCount` in
  * `0..STORE_MAX_VALUE_BYTES` and `≤ memory.size`. An empty value rides a **1-byte region with
- * `byteCount = 0`** — ashmem refuses a zero-size region, and `getLarge` must be able to return any
- * stored size.
+ * `byteCount = 0`** — ashmem refuses a zero-size region.
  */
 class LargeValue(
     val memory: SharedMemory,

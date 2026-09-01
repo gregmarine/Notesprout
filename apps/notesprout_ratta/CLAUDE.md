@@ -89,7 +89,9 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   service + a screen: `TagManagerService` and `TagsActivity`, API version **5** (W1 declared 4;
   W4's reshaped `TagShowing` moved it, and it is the only service that moved). The FIRST tier-2
   screen carrying **no paper** — no `PaperView`, no g-paper call and therefore **no EPD handoff**
-  (M3's measured answer covers it); the tag index is one value in the host's extension store).
+  (M3's measured answer covers it); the tag index lives in the host's extension store — **as rows
+  from arc 22 / X3**; until then its `TagStore` is an X1 "unavailable" stub and the service still
+  declares 5, so a version-6 host does not list it).
   `gradle.properties` sets `android.nonTransitiveRClass=false` — undoing it breaks every
   `:sn-screen` resource reference from `:app`.
 - **SN has SIX extension points** — each added on its own explicit user decision, and
@@ -133,23 +135,49 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
     a showing is a HELD bind (`begin` → `configureShowing` → launch → result → `end`) and the store
     is lent once; `snapshot` / `assign` are bind-per-call and the store rides the call. Tag text and
     target labels are the user's own words — they cross on the bind as a `TagShowing`, **never** in
-    the screen's Intent, and are never logged on either side. The extension owns the tag index (one
-    store key, the whole `TagCodec` blob); the host owns every entry point, the recognizer and the
-    search merge.
+    the screen's Intent, and are never logged on either side. The extension owns the tag index (in
+    its extension store — the arc-21 one-blob layout is being replaced by tables, arc 22 / X3); the
+    host owns every entry point, the recognizer and the search merge.
 
   All of them get the **extension store** (`IExtensionStore` — per-package,
   encrypted under the global key at `Garden/<pkg>.db`, minted per bind, uid-bound, revoked with
   the unbind, **and copied by every backup run** — arc 21 / W5) because **an extension writes
-  nothing to disk itself, ever**; action strings are
+  nothing to disk itself, ever**. **Since arc 22 / X1 the store is real SQLite tables behind gated
+  parameterized SQL, not key/value:** the extension declares versioned DDL once (`StoreSchema` —
+  the host applies the missing steps and refuses a downgrade), then sends `SELECT`/`WITH` through
+  `query` and `INSERT`/`REPLACE`/`UPDATE`/`DELETE`/`WITH` batches through `exec` (one transaction,
+  all-or-nothing, never held open across Binder calls) as `StoreCodec` payloads, and reads
+  `StoreCodec` rows back in ≤ 4 MiB chunks (`StoreReads.all` is the loop). The host validates every
+  statement (`StoreSql`: one statement, the head keyword decides the kind, a denylist —
+  `PRAGMA`/`ATTACH`/DDL/transaction control — anywhere in the token stream, positional binds only,
+  and **every identifier in a reserved space `host_*` / `sqlite_*` / `room_*` / `android_*`
+  refused**, quoted or not), runs it on the one connection it owns (WAL, `foreign_keys` ON — a
+  declared `ON DELETE CASCADE` cascades), and maps every SQLite failure — a constraint violation
+  included — to `IllegalStateException`. Room left the store file: it is a `SupportSQLiteOpenHelper`
+  over the same `SoilCrypto`/`KeyOpener` factories, its **format** rides `PRAGMA user_version`
+  (`StoreFormat`: 2 = tables; 1 or a `kv` table = the arc-11 store, **wiped on open, no migration**
+  — the user's call; above 2 = refuse, file left as found). `host_schema` is the host's one table;
+  the editor's `prefs` table is the ONE extension table the host reads (`DocumentContract` pins its
+  shape; Document-PDF export's text size, only if file and table exist). The debug menu's
+  "Extension store self-test" is the only on-device proof — SQLCipher, ashmem and a real Binder
+  cannot run on the JVM; the gate runs there over an injected `StoreExecutor`.
+  Action strings are
   SN-namespaced so Paper's extensions are never discovered; trust is same-signature both ways
   (discovery + bind-time re-check host-side, `HostCallerCheck` first thing in every stub method);
-  `ExtensionContract.API_VERSION` = **5** and the host accepts `1..N` (the declared number is what
-  the extension *requires* of the host). The ledger: 2 = arc 18's `sourceKind` tail · 3 = arc 19 /
-  M8's `resultKind` tail · 4 = arc 21 / W1, the tag point itself · **5 = arc 21 / W4, the first
-  bump that is NOT a compatible tail** — `TagShowing`'s wire form changed, so a W1-shaped tag
-  extension against a W4 host unmarshals wrongly; it fails loudly (the constructor `require`s
-  reject it as an `IllegalArgumentException`) and the declaration keeps it from being reached.
-  Meta-data is **per service** — only the tag service moved.
+  `ExtensionContract.API_VERSION` = **6** and the host accepts `minApiVersion(action)..6` (the
+  declared number is what the extension *requires* of the host). The ledger: 2 = arc 18's
+  `sourceKind` tail · 3 = arc 19 / M8's `resultKind` tail · 4 = arc 21 / W1, the tag point itself ·
+  **5 = arc 21 / W4, the first bump that is NOT a compatible tail** — `TagShowing`'s wire form
+  changed, so a W1-shaped tag extension against a W4 host unmarshals wrongly; it fails loudly (the
+  constructor `require`s reject it as an `IllegalArgumentException`) and the declaration keeps it
+  from being reached · **6 = arc 22 / X1, the second break and the first with a FLOOR** —
+  `IExtensionStore` was *replaced*, which also breaks the old-extension/new-host direction (a v5
+  pad calling transaction code 1 lands on a different method), so the three **store-taking** points
+  (scratch pad, document editor, tag manager) are accepted only at
+  `MIN_API_VERSION_FOR_STORE` 6 and above; the stateless points keep floor 1. **Consequence, live
+  on the Nomad until X2/X3/X4 each redeclare 6: the pad button, every Document entry and every tag
+  door are GONE and search runs names-only** — deliberate, and the X1 walk verified it.
+  Meta-data is **per service**.
 - **The Scratch Pad is not ours to change from here** (arc 11, `docs/scratchpad.md`). It is the
   `:ext-scratchpad` APK: its own process, its own g-paper surface, its own undo stack, and it
   **writes nothing to disk itself** — its pages live in the host store, lent for the showing and

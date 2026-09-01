@@ -17,8 +17,11 @@ class ExtensionContractTest {
         // 1..API_VERSION). 2 since arc 18 / D3 (the PDF exporter's sourceKind tail); 3 since
         // arc 19 / M8 (the text importer's ImporterInfo.resultKind tail — a version-2 host would
         // read text bytes as a .soil); 4 since arc 21 / W1 (the TAG_MANAGER point — an older host
-        // knows no `ITagManager` at all). Bumping this again is a contract event.
-        assertEquals(5, ExtensionContract.API_VERSION)
+        // knows no `ITagManager` at all); 5 since arc 21 / W4 (TagShowing's wire form — the first
+        // non-tail break); 6 since arc 22 / X1 (IExtensionStore REPLACED — the second non-tail
+        // break, and the first with a floor). Bumping this again is a contract event.
+        assertEquals(6, ExtensionContract.API_VERSION)
+        assertEquals(6, ExtensionContract.MIN_API_VERSION_FOR_STORE)
         assertEquals(2_000, ExtensionContract.MAX_INK_STROKES)
         assertEquals(60_000, ExtensionContract.MAX_INK_POINTS)
         assertEquals(20, ExtensionContract.MAX_PRECONTEXT_CHARS)
@@ -92,17 +95,58 @@ class ExtensionContractTest {
         assertTrue(ExtensionContract.TRANSFER_CHUNK_POINTS <= ExtensionContract.MAX_TRANSFER_POINTS)
     }
 
-    /** The store's caps and its one exact message (extensions compare it verbatim, not by substring). */
+    /** The store's caps and its typed messages (extensions compare them verbatim, not by substring). */
     @Test
     fun storeConstants() {
-        assertEquals(512, ExtensionContract.STORE_MAX_KEY_CHARS)
-        assertEquals(4 * 1024 * 1024, ExtensionContract.STORE_MAX_VALUE_BYTES)
         assertEquals(512 * 1024, ExtensionContract.STORE_MAX_INLINE_BYTES)
-        assertEquals(50_000, ExtensionContract.STORE_MAX_KEYS)
-        assertEquals("value is large — use getLarge", ExtensionContract.STORE_VALUE_LARGE)
-        // The inline path must be a strict subset of the large one, or `get` could refuse a value
-        // `put` was willing to take.
+        assertEquals(4 * 1024 * 1024, ExtensionContract.STORE_MAX_VALUE_BYTES)
+        assertEquals(32 * 1024 * 1024, ExtensionContract.STORE_MAX_RESULT_BYTES)
+        assertEquals(ExtensionContract.STORE_MAX_VALUE_BYTES, ExtensionContract.STORE_MAX_ROW_BYTES)
+        assertEquals(10_000, ExtensionContract.STORE_MAX_BATCH_STATEMENTS)
+        assertEquals(8_192, ExtensionContract.STORE_MAX_SQL_CHARS)
+        assertEquals(999, ExtensionContract.STORE_MAX_ARGS)
+        assertEquals(64, ExtensionContract.STORE_MAX_TABLES)
+        assertEquals(256, ExtensionContract.STORE_MAX_SCHEMA_STEPS)
+        assertEquals(64, ExtensionContract.STORE_MAX_STEP_STATEMENTS)
+        assertEquals(4, ExtensionContract.STORE_MAX_OPEN_RESULTS)
+        assertEquals("store result large", ExtensionContract.STORE_RESULT_LARGE)
+        assertEquals("store row large", ExtensionContract.STORE_ROW_LARGE)
+        assertEquals("store schema newer", ExtensionContract.STORE_SCHEMA_NEWER)
+        assertEquals("store schema unapplied", ExtensionContract.STORE_SCHEMA_UNAPPLIED)
+        assertEquals("store results open", ExtensionContract.STORE_RESULTS_OPEN)
+        // The inline carrier must be a strict subset of the region one, or a payload could be too
+        // big to ride inline and too big for a region at once.
         assertTrue(ExtensionContract.STORE_MAX_INLINE_BYTES < ExtensionContract.STORE_MAX_VALUE_BYTES)
+        // A chunk is a payload; a result is at least a chunk.
+        assertTrue(ExtensionContract.STORE_MAX_ROW_BYTES <= ExtensionContract.STORE_MAX_VALUE_BYTES)
+        assertTrue(ExtensionContract.STORE_MAX_VALUE_BYTES <= ExtensionContract.STORE_MAX_RESULT_BYTES)
+    }
+
+    /** The floor rule (arc 22 / X1): a store-taking point's service is listed only at 6 and above;
+     *  the stateless points keep accepting 1..API_VERSION. */
+    @Test
+    fun storeTakingPointsHaveTheFloor() {
+        for (action in listOf(
+            ExtensionContract.ACTION_SCRATCH_PAD,
+            DocumentContract.ACTION_DOCUMENT_EDITOR,
+            ExtensionContract.ACTION_TAG_MANAGER,
+        )) {
+            assertEquals(action, 6, ExtensionContract.minApiVersion(action))
+            assertTrue(action, !ExtensionContract.accepts(action, 5))
+            assertTrue(action, ExtensionContract.accepts(action, 6))
+            assertTrue(action, !ExtensionContract.accepts(action, ExtensionContract.API_VERSION + 1))
+        }
+        for (action in listOf(
+            ExtensionContract.ACTION_HANDWRITING_RECOGNIZER,
+            ExporterContract.ACTION_NOTEBOOK_EXPORTER,
+            ImporterContract.ACTION_NOTEBOOK_IMPORTER,
+        )) {
+            assertEquals(action, 1, ExtensionContract.minApiVersion(action))
+            assertTrue(action, ExtensionContract.accepts(action, 1))
+            assertTrue(action, ExtensionContract.accepts(action, ExtensionContract.API_VERSION))
+            assertTrue(action, !ExtensionContract.accepts(action, 0))
+            assertTrue(action, !ExtensionContract.accepts(action, ExtensionContract.API_VERSION + 1))
+        }
     }
 
     @Test
