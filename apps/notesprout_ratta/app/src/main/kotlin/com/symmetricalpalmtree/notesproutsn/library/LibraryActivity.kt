@@ -376,6 +376,14 @@ class LibraryActivity : AppCompatActivity() {
         btnPinned.isSelected = mode == BrowseMode.PINNED
         btnRecents.isSelected = mode == BrowseMode.RECENTS
         btnSearch.isSelected = searching
+        // The bottom bar's actions go with the create buttons, for the same reason: Backup, Import
+        // and Templates all act on the library — the folder tree you are standing in — and a shelf
+        // is not standing anywhere. The **group** is hidden rather than its buttons, because
+        // `ImportFlow` owns btnImport's own visibility (GONE without an importer, re-checked every
+        // resume) and two owners of one flag is a race. The pager stays: a shelf paginates like any
+        // other listing, and the debug ⋯ stays where a debug build put it.
+        bottomLeft.visibility = if (inMode) View.GONE else View.VISIBLE
+        btnTemplates.visibility = if (inMode) View.GONE else View.VISIBLE
 
         if (inMode) {
             btnUp.visibility = View.GONE

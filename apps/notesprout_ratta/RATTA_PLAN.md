@@ -584,6 +584,13 @@ refused with "Nothing to search for" over a dialog that stays up, an accepted qu
 `"jour"`, Cancel leaves the standing shelf untouched, Back leaves to the tree. `logcat -b crash`
 empty.
 
+**Second user amendment (2026-08-31, from testing): the bottom bar's actions stand down in every
+shelf.** Backup, Import and Templates act on the library — the folder tree you are standing in — and
+Pinned / Recents / Search are not standing anywhere; they now hide with the create buttons.
+`bottomLeft` is hidden as a **group** (ImportFlow owns `btnImport`'s own visibility and two owners of
+one flag is a race), `btnTemplates` on its own so the debug ⋯ keeps its slot, and the **pager stays**
+— a shelf paginates like any other listing. Verified on the Nomad in all three shelves and back.
+
 **Written reason for the size rule** (`LibraryActivity` 823 → 886 lines, the `ExportActivity`
 precedent): the whole search *feature* is already out of it — the matcher, the ordering rule and the
 field/query/cards controller are three files of their own, and what stayed is a `when` branch, the

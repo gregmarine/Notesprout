@@ -60,6 +60,8 @@ interaction.
 
 ```
 [Backup] [Import]       |<  <  n / n  >  >|                [Templates] [debug ⋯]
+
+in a shelf:                 |<  <  n / n  >  >|                        [debug ⋯]
 ```
 
 The pager takes `layout_gravity="center"` so it is centred on the **screen**, the left-hand group
@@ -109,10 +111,17 @@ RECENTS ↔ NORMAL, `btnCloseMode` (the left arrow at the row's head) and Back b
 across a relaunch** — except SEARCH, which `BrowseState` refuses to store in either direction.
 
 **Chrome in a mode** (`renderChrome`): breadcrumb scroll and `btnUp` hidden, `modeTitle` ("Pinned"
-/ "Recent") and `btnCloseMode` shown; `btnNewFolder` / `btnNewNotebook` hidden — a shelf is not a
-place to create into. Sort stays active **except in Search**, whose order is relevance. The active
-mode's top-bar button takes `isSelected = true`, so `bg_toolbar_button`'s border says which shelf
-you are on.
+/ "Recent" / the query) and `btnCloseMode` shown; `btnNewFolder` / `btnNewNotebook` hidden — a shelf
+is not a place to create into. Sort stays active **except in Search**, whose order is relevance. The
+active mode's top-bar button takes `isSelected = true`, so `bg_toolbar_button`'s border says which
+shelf you are on.
+
+**The bottom bar's actions go too** (arc 20, the user's call on seeing it): Backup, Import and
+Templates all act on the library — the folder tree you are standing in — and a shelf is not standing
+anywhere. The **group** (`bottomLeft`) is hidden rather than its two buttons, because `ImportFlow`
+owns `btnImport`'s own visibility (GONE without an importer, re-checked every resume) and two owners
+of one flag is a race; `btnTemplates` is hidden on its own so the debug ⋯ beside it stays where a
+debug build put it. **The pager stays**: a shelf paginates like any other listing.
 
 Search is also the one mode nothing *switches* into: it is entered by an accepted query and by
 nothing else (`LibraryActivity` calls `setMode(SEARCH)` from the dialog's own callback), which is
