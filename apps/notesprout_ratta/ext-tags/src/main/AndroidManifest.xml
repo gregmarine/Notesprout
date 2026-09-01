@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- No launcher activity: the Supernote launcher lists the package anyway (accepted — "Ratta
+         being Ratta"); everywhere else only Settings → Apps shows it. -->
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/ext_label"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:theme="@style/Theme.Notesprout">
+
+        <!-- The TAG_MANAGER point (arc 21 / W1) — SN's SIXTH capability point and its THIRD
+             screen-owning one. No Application class: this extension has no drawing engine to
+             register.
+             API version 4: the point itself is the version-4 event. An older host knows no
+             `ITagManager` at all, so the skip has to happen at discovery — there is no compatible
+             tail that could carry it. -->
+        <service
+            android:name=".TagManagerService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.symmetricalpalmtree.notesproutsn.extension.TAG_MANAGER" />
+            </intent-filter>
+            <meta-data
+                android:name="com.symmetricalpalmtree.notesproutsn.extension.API_VERSION"
+                android:value="4" />
+        </service>
+
+        <!-- The extension-owned screen (tier 2): exported, custom action, NO launcher filter;
+             launched only by the host for a result — it verifies its caller first thing in
+             onCreate. <category DEFAULT> is required or implicit resolution will not match it.
+             `keyboard|keyboardHidden` in configChanges: pairing a Bluetooth keyboard is a
+             configuration change and must not recreate the screen under a half-typed tag (M4's
+             lesson). `adjustResize`: the soft keyboard shrinks the layout instead of covering the
+             field — and on Ratta it must NEVER be hidden while the field has focus, because
+             hardware keys are translated by the IME and delivered only while it is shown. -->
+        <activity
+            android:name=".TagsActivity"
+            android:configChanges="keyboard|keyboardHidden"
+            android:exported="true"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="stateUnchanged|adjustResize">
+            <intent-filter>
+                <action android:name="com.symmetricalpalmtree.notesproutsn.extension.TAG_MANAGER_SCREEN" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

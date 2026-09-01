@@ -34,8 +34,12 @@ object ExtensionContract {
      * through the `.soil` probe, a guaranteed refusal after the work), and an older host skips it
      * at discovery instead of failing at the destination. Extensions the absent-tail default
      * serves correctly keep declaring 1 and run against every host.
+     *
+     * **4 since arc 21 / W1** — the TAG_MANAGER point. A tag extension's service declares 4 so an
+     * older host, which knows nothing of `ITagManager`, never lists it; every other extension's
+     * declaration is untouched (meta-data is per service).
      */
-    const val API_VERSION: Int = 3
+    const val API_VERSION: Int = 4
 
     /** Intent action a handwriting-recognizer `<service>` declares in its intent-filter. */
     const val ACTION_HANDWRITING_RECOGNIZER: String =
@@ -50,6 +54,18 @@ object ExtensionContract {
      *  result** (a plain `startActivity` leaves `callingPackage` null and the screen refuses it). */
     const val ACTION_SCRATCH_PAD_SCREEN: String =
         "com.symmetricalpalmtree.notesproutsn.extension.SCRATCH_PAD_SCREEN"
+
+    /** Intent action a tag-manager `<service>` declares in its intent-filter (arc 21 / W1 — SN's
+     *  SIXTH capability point, granted by the user 2026-08-31). */
+    const val ACTION_TAG_MANAGER: String =
+        "com.symmetricalpalmtree.notesproutsn.extension.TAG_MANAGER"
+
+    /** Intent action the tag extension's exported screen `<activity>` declares — the third
+     *  screen-owning (tier-2) point, and the first whose screen carries **no paper**. Resolved with
+     *  `setPackage(<the discovered service's package>)` and launched for a result; a plain
+     *  `startActivity` leaves `callingPackage` null and the screen refuses it. */
+    const val ACTION_TAG_MANAGER_SCREEN: String =
+        "com.symmetricalpalmtree.notesproutsn.extension.TAG_MANAGER_SCREEN"
 
     /** `<meta-data>` name (on the `<service>`) carrying the extension's API version. */
     const val META_API_VERSION: String =
@@ -156,4 +172,31 @@ object ExtensionContract {
      *  when the target page's encoded ink would exceed [STORE_MAX_VALUE_BYTES]. The host compares the
      *  message, not a substring. */
     const val SCRATCH_PAGE_FULL: String = "scratch page full"
+
+    // ── Tags (`ITagManager`, arc 21 / W1) ──────
+    // The whole tag index is ONE store value, so these caps are not taste: [TagCodec.WORST_CASE_BYTES]
+    // is the arithmetic that proves the worst legal index still fits [STORE_MAX_VALUE_BYTES], and a
+    // test fails if a change here breaks it.
+
+    /** Longest a tag may be, measured on its **normalized display form** ([TagRules.display]).
+     *  Multi-word tags are the point, so the only restriction is the length. */
+    const val MAX_TAG_CHARS: Int = 64
+
+    /** Most distinct tags one library may hold. Past it, creating a new tag is refused. */
+    const val MAX_TAGS: Int = 5_000
+
+    /** Most tag→target assignments in the whole index. */
+    const val MAX_TAG_ASSIGNMENTS: Int = 50_000
+
+    /** Longest a target id may be — a notebook or page UUID is 36 chars; the slack is for a future
+     *  target kind, and the bound is load-bearing in [TagCodec.WORST_CASE_BYTES]. */
+    const val MAX_TARGET_ID_CHARS: Int = 48
+
+    /** Longest a target's display label may be (the screen's title — display only, never a path). */
+    const val MAX_TARGET_LABEL_CHARS: Int = 200
+
+    /** The exact `IllegalStateException` message a tag manager throws when a cap ([MAX_TAGS] /
+     *  [MAX_TAG_ASSIGNMENTS]) refuses a new tag or assignment — nothing was written. The host
+     *  compares the message, not a substring. */
+    const val TAG_INDEX_FULL: String = "tag index full"
 }

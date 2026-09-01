@@ -16,8 +16,9 @@ class ExtensionContractTest {
         // The declared meta-data is the version an extension REQUIRES of the host (a host accepts
         // 1..API_VERSION). 2 since arc 18 / D3 (the PDF exporter's sourceKind tail); 3 since
         // arc 19 / M8 (the text importer's ImporterInfo.resultKind tail — a version-2 host would
-        // read text bytes as a .soil). Bumping this again is a contract event.
-        assertEquals(3, ExtensionContract.API_VERSION)
+        // read text bytes as a .soil); 4 since arc 21 / W1 (the TAG_MANAGER point — an older host
+        // knows no `ITagManager` at all). Bumping this again is a contract event.
+        assertEquals(4, ExtensionContract.API_VERSION)
         assertEquals(2_000, ExtensionContract.MAX_INK_STROKES)
         assertEquals(60_000, ExtensionContract.MAX_INK_POINTS)
         assertEquals(20, ExtensionContract.MAX_PRECONTEXT_CHARS)
@@ -45,6 +46,29 @@ class ExtensionContractTest {
             "com.symmetricalpalmtree.notesproutsn.extension.SCRATCH_PAD_SCREEN",
             ExtensionContract.ACTION_SCRATCH_PAD_SCREEN,
         )
+        assertEquals(
+            "com.symmetricalpalmtree.notesproutsn.extension.TAG_MANAGER",
+            ExtensionContract.ACTION_TAG_MANAGER,
+        )
+        assertEquals(
+            "com.symmetricalpalmtree.notesproutsn.extension.TAG_MANAGER_SCREEN",
+            ExtensionContract.ACTION_TAG_MANAGER_SCREEN,
+        )
+    }
+
+    /** The tag caps (arc 21 / W1). They are not taste — `TagCodecTest` proves the worst legal index
+     *  built from them still fits one store value, and moving one without moving that proof is how
+     *  a library's tags would quietly stop fitting where they are kept. */
+    @Test
+    fun tagConstants() {
+        assertEquals(64, ExtensionContract.MAX_TAG_CHARS)
+        assertEquals(5_000, ExtensionContract.MAX_TAGS)
+        assertEquals(50_000, ExtensionContract.MAX_TAG_ASSIGNMENTS)
+        assertEquals(48, ExtensionContract.MAX_TARGET_ID_CHARS)
+        assertEquals(200, ExtensionContract.MAX_TARGET_LABEL_CHARS)
+        assertEquals("tag index full", ExtensionContract.TAG_INDEX_FULL)
+        // A UUID target id must fit with room to spare — every host id is one today.
+        assertTrue(ExtensionContract.MAX_TARGET_ID_CHARS >= 36)
     }
 
     /** The scratch-pad transfer values: Paper's **shipped** constants (its S2 outcome), not the

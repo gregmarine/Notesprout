@@ -96,6 +96,8 @@
     <!-- Import / export (arc 13 / G4) -->
     <string name="action_fit">Fit…</string>
     <string name="action_export">Export…</string>
+    <!-- Tags (arc 21 / W1) — notebooks only; a folder is a place, and a place is not tagged. -->
+    <string name="action_tags">Tags…</string>
     <string name="template_import_default_name">Imported template</string>
     <string name="template_fit_title">How should it fill the page?</string>
     <string name="template_fit_fit">Fit — whole picture, centred</string>
@@ -514,6 +516,11 @@
     <string name="document_failed_body">The document editor could not be opened. It may have been disabled or removed.</string>
     <!-- The open-time seed (M6): shown while the page is recognized, before the editor opens. -->
     <string name="document_reading_page">Reading this page…</string>
+
+    <!-- Tags (arc 21 / W1) — the doors are GONE unless a trusted tag manager is installed, so this
+         is only ever seen when one was there at the long-press and gone by the tap. -->
+    <string name="tags_failed_title">Tags unavailable</string>
+    <string name="tags_failed_body">Tags could not be opened. The extension may have been disabled or removed.</string>
 
     <!-- Scratch Pad (arc 11) — the entry button on both the library's bottom bar and the
          notebook's top bar. Both are GONE unless a trusted extension is installed. -->

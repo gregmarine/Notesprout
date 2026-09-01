@@ -39,6 +39,8 @@ import com.symmetricalpalmtree.notesproutsn.databinding.ActivityLibraryBinding
 import com.symmetricalpalmtree.notesproutsn.export.ExportActivity
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionRegistry
 import com.symmetricalpalmtree.notesproutsn.extension.ScratchPadEntry
+import com.symmetricalpalmtree.notesproutsn.extension.TagManagerEntry
+import com.symmetricalpalmtree.notesproutsn.extension.TagShowing
 import com.symmetricalpalmtree.notesproutsn.importing.ImportFlow
 import com.symmetricalpalmtree.notesproutsn.notebook.NotebookActivity
 import com.symmetricalpalmtree.notesproutsn.templates.TemplatesActivity
@@ -73,6 +75,7 @@ class LibraryActivity : AppCompatActivity() {
     private val repo by lazy { IndexRepository() }
     /** The Scratch Pad's entry button (arc 11) — GONE unless a trusted extension is installed. */
     private lateinit var scratchPad: ScratchPadEntry
+    private lateinit var tags: TagManagerEntry
 
     /** Import (arc 16) — the bottom bar's Import button (left group, right after Backup since
      *  arc 17 / K2) and the whole pipeline behind it. GONE unless a trusted importer is installed. */
@@ -153,6 +156,9 @@ class LibraryActivity : AppCompatActivity() {
         scratchPad = ScratchPadEntry(activity = this, button = binding.btnScratchPad)
         binding.btnScratchPad.setOnClickListener { scratchPad.open() }
         TooltipCompat.setTooltipText(binding.btnScratchPad, binding.btnScratchPad.contentDescription)
+        // Tags (arc 21 / W1). No button of its own — the door is a row in the card sheet — but it
+        // registers an ActivityResult launcher, so it is built here for the same reason as the pad.
+        tags = TagManagerEntry(activity = this)
         // Import (arc 16 / I1). Built here for the same reason as the pad: it registers two
         // ActivityResult launchers (the document picker and the folder picker), and one may not be
         // registered after STARTED.
@@ -206,8 +212,9 @@ class LibraryActivity : AppCompatActivity() {
         // The guard bounce still runs this callback, and a `lateinit` teardown would crash on the
         // way out of a task Android rebuilt after a background process kill.
         if (IndexGuard.bounced(this)) { super.onDestroy(); return }
-        // The pad's held bind must not outlive the screen that opened it, result or no result.
+        // A held bind must not outlive the screen that opened it, result or no result.
         if (::scratchPad.isInitialized) scratchPad.close()
+        if (::tags.isInitialized) tags.close()
         super.onDestroy()
     }
 
@@ -622,7 +629,7 @@ class LibraryActivity : AppCompatActivity() {
      * e-ink, and a sheet that grew a row after it was already up would move the user's finger.
      */
     private fun onCardLongPress(item: CardItem) {
-        if (item !is CardItem.Notebook) { showCardSheet(item, canExport = false); return }
+        if (item !is CardItem.Notebook) { showCardSheet(item, canExport = false, canTag = false); return }
         // The IO beat between the long-press and the sheet is an e-ink feedback gap like any other
         // (arc-15 review): a second long-press in it would stack a second sheet, and a card tap in
         // it would pop the sheet over a departing library. One latch closes the gap; a sheet that
@@ -630,20 +637,25 @@ class LibraryActivity : AppCompatActivity() {
         if (sheetPending || launching) return
         sheetPending = true
         lifecycleScope.launch {
-            val canExport = try {
-                ExtensionRegistry.exporters(this@LibraryActivity).isNotEmpty()
+            val canExport: Boolean
+            val canTag: Boolean
+            try {
+                canExport = ExtensionRegistry.exporters(this@LibraryActivity).isNotEmpty()
+                // Same beat, same reason: a tag manager can be disabled or replaced under a
+                // standing library, and the row is GONE — never disabled — when there is none.
+                canTag = tags.discover()
             } finally {
                 sheetPending = false
             }
             if (isFinishing || isDestroyed || launching) return@launch
-            showCardSheet(item, canExport)
+            showCardSheet(item, canExport, canTag)
         }
     }
 
     /** True while a notebook sheet's exporter discovery is in flight — long-press to show. */
     private var sheetPending = false
 
-    private fun showCardSheet(item: CardItem, canExport: Boolean) {
+    private fun showCardSheet(item: CardItem, canExport: Boolean, canTag: Boolean) {
         val s = item.summary
         val isFolder = item is CardItem.Folder
         val sheet = ActionSheetDialog(this).title(s.name)
@@ -668,6 +680,11 @@ class LibraryActivity : AppCompatActivity() {
         if (canExport) {
             sheet.addAction(R.drawable.ic_download, getString(R.string.action_export)) { showExport(s) }
         }
+        // Tags (arc 21 / W1) — notebooks only: a folder is a place, and a place is not tagged. GONE
+        // without a tag manager installed, like every other extension-backed row.
+        if (canTag && !isFolder) {
+            sheet.addAction(R.drawable.ic_tag, getString(R.string.action_tags)) { showTags(s) }
+        }
         // Exclude from backup (arc 17 / K2) — notebooks only, and always there: it needs no
         // extension and no destination. The state comes from the listing's own `flags`, not a
         // fresh read, and the label carries it (the Pin/Unpin pattern) so the row never moves.
@@ -681,6 +698,24 @@ class LibraryActivity : AppCompatActivity() {
                 if (isFolder) confirmDeleteFolder(s) else confirmDeleteNotebook(s)
             }
             .show()
+    }
+
+    /**
+     * The tag screen for one notebook. Identity travels as id + name **over the bind**, not in the
+     * Intent — a name is the user's own words, and so is every tag it will show (arc 21 / W1).
+     *
+     * Not latched with [launching]: this door is the extension's screen, launched for a result the
+     * way the scratch pad's is, and [TagManagerEntry] carries its own one-showing guard.
+     */
+    private fun showTags(s: ObjectSummary) {
+        tags.open(
+            TagShowing(
+                targetKind = TagShowing.TARGET_NOTEBOOK,
+                targetId = s.id,
+                targetLabel = s.name,
+                mode = TagShowing.MODE_BROWSE,
+            ),
+        )
     }
 
     /** Identity travels as id + name — never a `File`. Latched with every other door out (S2). */

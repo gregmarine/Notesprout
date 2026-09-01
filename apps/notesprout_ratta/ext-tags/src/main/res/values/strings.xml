@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The extension's own strings. `ok` and `cancel` come from :sn-screen (Dialogs / ActionSheetDialog
+  reference them from inside the module) and are deliberately not repeated here.
+-->
+<resources>
+    <string name="ext_label">NSE · Tags</string>
+
+    <!-- Every icon button needs a long-press hint naming it, and the hint is its content description. -->
+    <string name="cd_tags_back">Back</string>
+    <string name="cd_tags_add">Add tag</string>
+    <string name="cd_tags_prev_page">Previous page</string>
+    <string name="cd_tags_next_page">Next page</string>
+    <string name="cd_tags_remove">Remove</string>
+
+    <!-- The two sections. The first names what you are looking at; the second what tapping does. -->
+    <string name="tags_on_notebook">Tags on this notebook</string>
+    <string name="tags_on_page">Tags on this page</string>
+    <string name="tags_target_empty">No tags yet — add one below.</string>
+    <string name="tags_all">All tags</string>
+    <string name="tags_matching">Matching tags</string>
+    <string name="tags_all_empty">No tags in this library yet.</string>
+    <string name="tags_no_match">No tag matches that. Add it with ⊕.</string>
+    <string name="tags_add_hint">Add a tag…</string>
+    <string name="tags_page_indicator">%1$d / %2$d</string>
+
+    <!-- Toasts confirm what already happened; a dialog explains why a tap did nothing. -->
+    <string name="tags_added_toast">Tagged “%1$s”</string>
+    <string name="tags_removed_toast">Removed “%1$s”</string>
+    <string name="tags_deleted_toast">Deleted “%1$s”</string>
+
+    <!-- Deleting a tag reaches every notebook and page it is on, so the confirm names the size of
+         it before anything happens. -->
+    <string name="tags_delete_title">Delete “%1$s”?</string>
+    <string name="tags_delete_unused">This tag is not on anything. It will be removed from the list.</string>
+    <string name="tags_delete_body">Remove it from %1$s? The tag itself is deleted too.</string>
+    <string name="tags_delete_notebooks">%1$d notebook</string>
+    <string name="tags_delete_notebooks_plural">%1$d notebooks</string>
+    <string name="tags_delete_pages">%1$d page</string>
+    <string name="tags_delete_pages_plural">%1$d pages</string>
+    <string name="tags_delete_and">%1$s and %2$s</string>
+    <string name="tags_delete_confirm">Delete</string>
+
+    <!-- Problems. Each says what did not happen, because on e-ink a tap with no answer reads as broken. -->
+    <string name="tags_problem_title">Tags</string>
+    <string name="tags_unavailable">Tags could not be opened just now.</string>
+    <string name="tags_unreadable">This library\'s tags could not be read. Nothing has been changed.</string>
+    <string name="tags_save_failed">That change could not be saved.</string>
+    <string name="tags_invalid">A tag needs some text, and no more than 64 characters.</string>
+    <string name="tags_full">This library is holding as many tags as it can. Delete one to add another.</string>
+</resources>

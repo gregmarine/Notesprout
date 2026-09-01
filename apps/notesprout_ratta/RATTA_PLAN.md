@@ -12,9 +12,8 @@ are **reading references — no app code is copied**.
 still binds, and the reference doc. **The full phase-by-phase records (outcomes, findings,
 walk logs) live in git history — arcs 1–18 at `git show 90a9198:apps/notesprout_ratta/RATTA_PLAN.md`,
 arcs 19–20's full phase records at the end of this file until the next compaction** — and each
-feature's authoritative reference is its `docs/` file. **The next arc is Arc 21 "Tags" — planned
-2026-08-31 (wizard complete), not started. Fable planned only: Opus/Sonnet/Haiku execute every
-phase (see the arc section's model notes).**
+feature's authoritative reference is its `docs/` file. **Arc 21 "Tags" is in progress — W1 complete, next work = W2.
+Fable planned only: Opus/Sonnet/Haiku execute every phase (see the arc section's model notes).**
 
 ---
 
@@ -65,7 +64,7 @@ phase (see the arc section's model notes).**
   KSP, compileSdk/targetSdk 35, minSdk 29, Java 17 via `org.gradle.java.home` (Temurin-17).
   Repos: `mavenLocal()`, `google()`, `mavenCentral()`. `android.nonTransitiveRClass=false`
   (load-bearing since J1 — undoing it breaks every moved resource reference).
-- **Nine modules**: `:app` (host) · `:sn-screen`
+- **Ten modules**: `:app` (host) · `:sn-screen`
   (shared paper-screen library — g-paper `api`, design resources, screen helpers; **a fix to
   shared screen logic goes there, never in a consumer**) · `:markdown` (arc 19 — the shared
   markdown engine, stdlib only, never depends on `:app`/`:sn-screen`/`:extension-api`; host +
@@ -74,16 +73,23 @@ phase (see the arc section's model notes).**
   `:ext-soil` (exporter + importer services, one APK) · `:ext-pdf` (module-local
   pdfbox-android 2.0.27.0) · `:ext-document` (**NSE · Document** — editor point + document
   exporter + text importer, one APK, three registrations; module-local SymSpellKt 3.4.0 + the
-  bundled proofread dictionary). Full table: app `CLAUDE.md` + `docs/extensions.md`.
+  bundled proofread dictionary) · `:ext-tags` (**NSE · Tags**, arc 21 — one service + a screen;
+  the first tier-2 screen with **no paper**, so no g-paper call and no EPD handoff).
+  Full table: app `CLAUDE.md` + `docs/extensions.md`.
 - **g-paper pin: 0.1.23** in `sn-screen/build.gradle.kts` — `gpaper-core` + `gpaper-ratta`
   only. No Onyx, no jetifier, no pickFirsts, no `tools:replace`.
-- **FIVE extension points** (each was its own user decision — no SIXTH without another;
-  arc 19's `ACTION_DOCUMENT_EDITOR` was the fifth's, granted 2026-08-30):
+- **SIX extension points** (each was its own user decision — no SEVENTH without another;
+  arc 21's `ACTION_TAG_MANAGER` was the sixth's, granted 2026-08-31):
   `HANDWRITING_RECOGNIZER` · `SCRATCH_PAD` (+`_SCREEN`, tier-2 screen-owning) ·
   `NOTEBOOK_EXPORTER` (plural; soil + pdf + document) · `NOTEBOOK_IMPORTER` (soil + text) ·
   `DOCUMENT_EDITOR` (+`_SCREEN`, the second tier-2 — the first host-side callback stub,
-  `IDocumentHost`). `ExtensionContract.API_VERSION` = 3; the host accepts `1..N`; meta-data is
+  `IDocumentHost`) · `TAG_MANAGER` (+`_SCREEN`, the third tier-2 and the first with **no paper**
+  on its screen; one interface serving both a held-bind showing and two bind-per-call methods).
+  `ExtensionContract.API_VERSION` = 4; the host accepts `1..N`; meta-data is
   **per service** — an extension declares what each service *requires* of the host.
+  **A new point needs BOTH its actions in the host's `<queries>` block** or `queryIntentServices`
+  answers `0 provider(s) of 0 candidate(s)` for a service that is installed, exported, signed and
+  versioned correctly — it reads as a signature or version mismatch and is neither (arc 21 / W1).
 - **Data model:** index `objects` table (user_version 1) + `Garden/<uuid>.soil` universal
   `notebook` table v1 + `notebook_meta`. Row types SN writes: notebook/page/template/stroke +
   additive heading/link/document (arc 19 — `flags` carries the document's source watermark;
@@ -644,7 +650,7 @@ from search: reuse the notebook's existing open-at-page mechanism if one exists 
 Contents navigate by page id — check `docs/notebook.md`), else add an optional page-id extra
 handled at load (ids in extras are the norm; names/queries are not).
 
-### W1 — Point, module, tag screen core ⬜
+### W1 — Point, module, tag screen core ✅
 `:extension-api` additions above; `:ext-tags` module (manifest, icon, service, screen, store
 layout, codec); host `TagClient` + discovery; **one real entry** so the walk is honest: the
 library long-press sheet's "Tags…" row (notebooks only). Screen ships BROWSE + ADD complete
@@ -657,6 +663,72 @@ w/ confirm, extension-disabled → row GONE.
 *Opus: contract + service + screen logic + client. Sonnet: module scaffold, manifest, icon,
 layouts, strings. Haiku: walk.*
 **Questions at phase start:** none — wizard covered it. Confirm the phase flip only.
+
+**Outcome (code + Nomad walk 9/9).** The SIXTH point is live. `:extension-api` grew
+`ACTION_TAG_MANAGER` / `_SCREEN`, `API_VERSION` 3 → 4, the tag caps, `ITagManager.aidl`,
+`TagShowing`, and three pure files (`TagRules` · `TagIndex` · `TagCodec`). `:ext-tags` is the TENTH
+module (**NSE · Tags**, Tabler `tag` icon): `TagManagerService` · `TagStore` · `TagWrites` ·
+`TagPaging` · `TagRowView` · `TagsActivity`. Host: `ExtensionRegistry.tagManager`, `TagClient`,
+`TagManagerEntry`, the library sheet's **Tags…** row, `ic_tag` in `:sn-screen`.
+**1563 JVM tests/variant** (+52). All ten modules build debug + release; release signs.
+
+**Three implementer calls** (the seam spec is otherwise as written):
+- **The codec's arithmetic did not close as specified.** `id · identityKey · display` with UUID ids,
+  under the wizard's caps (5 000 tags / 50 000 assignments / 64 chars), is ~6.0 MB against a 4 MiB
+  `STORE_MAX_VALUE_BYTES` — so the spec's own "must fit by construction" could not hold. **Every cap
+  was kept** and the record shrank instead: `id · display` (the identity key is a pure function of
+  the display form, so storing it was a second copy of the answer that could disagree with the
+  question), **compact base-36 ids** (`TagCodec.MAX_TAG_ID_CHARS` 4 — the assignment table pays for
+  an id 50 000 times) and `MAX_TARGET_ID_CHARS` 48. `TagCodec.WORST_CASE_BYTES` is now 3 900 007,
+  and `TagCodecTest` fails if any cap moves past the budget.
+- **Tabs and newlines are dropped, not escaped** — the `UserWords` rule the spec itself names as the
+  precedent. `TagRules.display` collapses every whitespace run, so an escape layer would be
+  unreachable code posing as a guarantee.
+- **MODE_MANAGE is validated in the contract but not offered** (the plan's stated preference over a
+  polite refusal): `TagShowing` accepts all three modes with MANAGE's page-array rules pinned, and
+  W2 is what builds the screen half.
+
+**New trap, cost an hour and reads as something else entirely:** a new capability point needs its
+two actions in the **host's `<queries>` block** or `queryIntentServices` answers with **zero
+candidates** for a service that is installed, exported, correctly signed and correctly versioned —
+`0 provider(s) of 0 candidate(s)`, which looks exactly like a signature or API-version mismatch and
+is neither. Both actions added (the service's *and* the screen's, the scratch-pad/document
+precedent).
+
+**Shape worth keeping:** `TagWrites` is the **one** read-modify-write of the index, taken by both
+writers in the process (the screen on IO, the service's call-shaped `assign` on a Binder thread) —
+the index is a single store value, and two writers each applying their change to the version they
+happened to hold is how one silently erases the other. It reads **fresh inside the lock**, never the
+index the caller is showing, and answers with a typed `Reason` rather than an exception because the
+two callers say failures differently (a marshalable message the host compares verbatim vs. a
+sentence in a dialog). `TagIndex` is immutable and shared by both sides of the seam, so the host's
+W4 search merge and the extension's edits can never disagree about what a tag is.
+
+Locks the phase set: the store key layout is **one key, `index`**, holding the whole `TagCodec` blob
+(never a key per tag — one write, no fan-out without a transaction around it); **unreadable is not
+empty** and nothing may be written over it (`IndexUnreadable` / `INDEX_UNREADABLE`, distinct from an
+absent value, which is a first run); `snapshot` answers over ashmem with the region parked per
+Binder thread and closed in `onTransact`'s `finally`, after the reply is marshalled; the screen's
+three gestures are **tap the target row = detach · tap a list row = toggle · long-press a list row =
+delete everywhere** behind the blast-radius confirm; the pager is `INVISIBLE`, never `GONE`, and its
+arrows never disable.
+
+**Walk (by hand on the Nomad, 9/9).** Tags… row present on notebooks between Export… and Exclude
+from backup · **absent on folders** · screen opens (title = the notebook's name, both empty states)
+· typed `reading list` on the on-screen keyboard, live filter flipped the list to "Matching tags",
+Enter added it (target section + All tags with ✓, field cleared, keyboard kept) · a **second
+notebook** offered the same tag with ⊕ and attached on a tap · tapping the target row removed it
+while the tag **stayed in All tags** (the lifecycle rule, seen live) · long-press → `Delete "reading
+list"?` / "Remove it from 1 notebook? The tag itself is deleted too." — the count naming the *other*
+notebook — and Delete cleared it everywhere · extension `pm disable-user` → the row is **GONE**, and
+back after `pm enable` · `logcat -b crash` empty. Store file is SQLCipher ciphertext at
+`Garden/…ext.tags.dev.db`. Timings: cold open 2 630 ms (the KDF, behind `OpeningOverlay`), warm 53 ms.
+
+**Walk-agent false failure, ~15th firing:** the agent reported tests 4–7 BLOCKED on "the input field
+does not accept text — PinyinIME binds and immediately finishes". Re-driven by hand: tapping the
+field gives `mInputShown=true mShowExplicitlyRequested=true` with `mServedView=…app:id/input`, the
+keyboard draws, and every key lands. It was tap aim, which the same agent had already admitted
+elsewhere in its own report.
 
 ### W2 — Notebook entries ⬜
 `ic_tag` top-bar button (right cluster, next to Document, before Recents) → secondary toolbar

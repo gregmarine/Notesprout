@@ -56,7 +56,7 @@ All root `CLAUDE.md` rules apply (Kotlin/17, kotlinx-serialization only, no new 
 deps without discussion, no Material Components, no `runBlocking` on main, `Slog.d` not
 `Log.d`, e-ink design system, Tabler icons only). Plus, for this app:
 
-- **Nine modules, own Gradle root**: `:app` (the
+- **Ten modules, own Gradle root**: `:app` (the
   host) · `:markdown` (arc 19 / M1 — the shared markdown engine: parser, renderer, formatter,
   reflow, search, draft, paginator; stdlib only, depends on **nothing** in this project and
   nothing beyond the android SDK its spans use — `:app` and `:ext-document` consume it, one
@@ -78,12 +78,16 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   Application class, no drawing engine; module-local `com.darkrockstudios:symspellkt:3.4.0`
   (arc 19 / M10 — the pdfbox precedent, never leaks into another module) with the bundled
   dictionary asset `assets/proofread/en_82765.dict` — gzip content behind an opaque extension
-  on purpose: AAPT gunzips any `.gz` asset and strips the extension).
+  on purpose: AAPT gunzips any `.gz` asset and strips the extension) ·
+  `:ext-tags` (**NSE · Tags**, arc 21 / W1 — `:extension-api` + `:sn-screen`, never `:app`; one
+  service + a screen: `TagManagerService` and `TagsActivity`, API version 4. The FIRST tier-2
+  screen carrying **no paper** — no `PaperView`, no g-paper call and therefore **no EPD handoff**
+  (M3's measured answer covers it); the tag index is one value in the host's extension store).
   `gradle.properties` sets `android.nonTransitiveRClass=false` — undoing it breaks every
   `:sn-screen` resource reference from `:app`.
-- **SN has FIVE extension points** — each added on its own explicit user decision, and
-  **no SIXTH may be added without another** (arc 19's `ACTION_DOCUMENT_EDITOR` was the fifth's,
-  granted 2026-08-30). The full seam — contracts, caps, trust, the
+- **SN has SIX extension points** — each added on its own explicit user decision, and
+  **no SEVENTH may be added without another** (arc 21's `ACTION_TAG_MANAGER` was the sixth's,
+  granted 2026-08-31). The full seam — contracts, caps, trust, the
   boundary audit — is `docs/extensions.md`; the rules that bind every point:
   - `ACTION_HANDWRITING_RECOGNIZER` (headings + the markdown engine are core, the engine is
     swappable). **Only `prepare()` may start a model download** (host consent dialog first;
@@ -116,12 +120,21 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
     shared `TextChunks` rule under `DocumentContract.MAX_DOCUMENT_CHARS`, and every save names
     its target `pageKey` (the mode-routing guard, structural). Ink never crosses this seam, and
     document text is never logged on either side. Nothing rides the screen's Intent — no extras
-    at all. extensions get the **extension store** (`IExtensionStore` — per-package,
+    at all.
+  - `ACTION_TAG_MANAGER` + `_SCREEN` (arc 21 / W1) — the third screen-owning point, served by
+    `:ext-tags`, and the first whose screen carries no paper. **One interface, two call shapes:**
+    a showing is a HELD bind (`begin` → `configureShowing` → launch → result → `end`) and the store
+    is lent once; `snapshot` / `assign` are bind-per-call and the store rides the call. Tag text and
+    target labels are the user's own words — they cross on the bind as a `TagShowing`, **never** in
+    the screen's Intent, and are never logged on either side. The extension owns the tag index (one
+    store key, the whole `TagCodec` blob); the host owns every entry point, the recognizer and the
+    search merge.
+    extensions get the **extension store** (`IExtensionStore` — per-package,
   encrypted under the global key at `Garden/<pkg>.db`, minted per bind, uid-bound, revoked with
   the unbind) because **an extension writes nothing to disk itself, ever**; action strings are
   SN-namespaced so Paper's extensions are never discovered; trust is same-signature both ways
   (discovery + bind-time re-check host-side, `HostCallerCheck` first thing in every stub method);
-  `ExtensionContract.API_VERSION` = 3 (arc 19 / M8 — the result-kind tail; 2 was arc 18's
+  `ExtensionContract.API_VERSION` = 4 (arc 21 / W1 — the tag point itself; 3 was arc 19 / M8's result-kind tail, 2 arc 18's
   sourceKind tail) and the host accepts `1..N` (the declared number is what the extension
   *requires* of the host).
 - **The Scratch Pad is not ours to change from here** (arc 11, `docs/scratchpad.md`). It is the

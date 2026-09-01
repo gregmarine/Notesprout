@@ -65,6 +65,19 @@ object ExtensionRegistry {
     }
 
     /**
+     * The one trusted tag manager, or null (arc 21 / W1 — SN's **sixth** capability point, and its
+     * third screen-owning one). Same filter and same first-wins rule as [scratchPad]: a second
+     * installed manager is ignored with a `Slog.d`, because two tag indexes would be two libraries.
+     * Re-run every time a tag door is about to be offered — a package can be disabled or replaced
+     * under a standing screen, and every one of those doors is **GONE** when this answers null.
+     */
+    suspend fun tagManager(context: Context): ProviderRef? = withContext(Dispatchers.IO) {
+        val all = discover(context.applicationContext, ExtensionContract.ACTION_TAG_MANAGER)
+        for (extra in all.drop(1)) Slog.d(TAG) { "ignoring additional tag manager ${extra.component.flattenToShortString()}" }
+        all.firstOrNull()
+    }
+
+    /**
      * Every trusted notebook exporter, ordered by (label, package) — plural on purpose (arc 15 /
      * E1): any number may register, the Export screen lists them all, and with exactly one the
      * chooser collapses to a label. Re-run at every library-sheet open — a package can be

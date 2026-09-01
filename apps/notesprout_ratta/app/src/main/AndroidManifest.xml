@@ -32,6 +32,17 @@
         <intent>
             <action android:name="com.symmetricalpalmtree.notesproutsn.extension.DOCUMENT_EDITOR_SCREEN" />
         </intent>
+        <!-- The tag manager (arc 21) — two actions, same reason again: the service is discovered by
+             one and its exported screen resolved by the other, and package visibility gates both.
+             Without these, `queryIntentServices` answers with **zero candidates** for a service that
+             is plainly installed and correctly registered — which reads exactly like a signature or
+             version mismatch and is neither. -->
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesproutsn.extension.TAG_MANAGER" />
+        </intent>
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesproutsn.extension.TAG_MANAGER_SCREEN" />
+        </intent>
     </queries>
 
     <application
