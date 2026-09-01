@@ -13,7 +13,8 @@ still binds, and the reference doc. **The full phase-by-phase records (outcomes,
 walk logs) live in git history — arcs 1–18 at `git show 90a9198:apps/notesprout_ratta/RATTA_PLAN.md`,
 arcs 19–20's full phase records at the end of this file until the next compaction** — and each
 feature's authoritative reference is its `docs/` file. **Arc 21 "Tags" is complete and frozen (2026-09-01) — W1–W6 all ✅.
-NEXT ARC IS NOT PLANNED: ask the user before starting one.**
+ARC 22 "Tables" IS PLANNED (wizard complete 2026-09-01) — next phase X1, the seam, Fable-written.
+Its plan is the first "Phases" section below.**
 
 ---
 
@@ -585,6 +586,325 @@ commit.
 | og feature references | monorepo `docs/` (documents.md, proofread.md, full-notebook-export.md, backup.md, scratchpad.md, clipboard-and-page-transfer.md, links.md) |
 | g-paper API + host duties | `~/git/g-paper/docs/{api,architecture,host-responsibilities,integration-guide}.md` |
 | Frozen arc phase records | `git show 90a9198:apps/notesprout_ratta/RATTA_PLAN.md` |
+
+---
+
+## Phases — Arc 22 "Tables" (planned 2026-09-01, wizard complete — X1 next)
+
+**Status: X1 ⬜ · X2 ⬜ · X3 ⬜ · X4 ⬜ · X5 ⬜** (one phase per session; flip the marker, run the
+phase, record its Outcome, update docs/memory/CLAUDE.md, gates green, commit + push, `/clear`).
+
+The extension store stops being a key/value seam and becomes **real SQLite tables** — the
+extension declares its schema, sends parameterized SQL, and gets rows back — while the host keeps
+owning **everything it owns today**: the file (`Garden/<pkg>.db`, `SoilFile` the only path
+constructor), the key (global passphrase, `SoilCrypto`, `KeyOpener`), the one connection and its
+thread, every cap, validation of every byte that crosses, and backup. **Not a seventh point** — a
+change to the service every store-taking point already receives. Raised at arc 21 / W4, declined
+then, decided now (the `BACKLOG.md` entry "the extension store is key/value" is this arc's brief).
+
+Why: the scratch pad's **4 MiB page ceiling**, `PageFullException` and the whole-page re-encode
+on every save; the tag index's **one 4 MiB value** with `TagCodec`, `WORST_CASE_BYTES`,
+`CompactId`, base-36 ids and a whole-index decode per search; the editor's line-codec blobs — all
+exist only because arc 11 hid SQLite behind six methods. The file underneath was always SQLite.
+
+**Fable writes X1 (the seam).** X2–X4 are Opus-implemented, Sonnet-scaffolded, Haiku-walked. X5
+is docs (Sonnet) — **no code-review phase in this arc, on the user's call**. Anything a phase meets
+outside this spec (crypto/key lifecycle, an engine gap, a schema question) stops and asks the user.
+
+### Locked decisions (arc-22 wizard 2026-09-01 — do not re-ask)
+
+| Decision | Answer |
+|---|---|
+| Seam shape | **Gated parameterized SQL.** The extension declares versioned DDL once; at runtime it sends `SELECT`/`INSERT`/`UPDATE`/`DELETE` strings with bound args. The host validates every statement (one statement, declared-name space only, no `PRAGMA`/`ATTACH`/DDL/transaction control at runtime), runs it, and answers with encoded rows. Full SQLite expressiveness (joins, aggregates, indexes, CTEs). |
+| Schema ownership | **Extension declares, host applies.** A `StoreSchema` = ordered DDL steps (v1 create, v2 alter…); the host keeps the applied version per store in its own table, validates each step, runs the missing steps, and **refuses a downgrade** (an extension never sees a store at a schema newer than it knows). |
+| The KV API | **Removed in this arc.** `get`/`put`/`delete`/`keys`/`putLarge`/`getLarge` go; the `kv` table goes; every store user (scratch pad, tags, document editor) moves to tables. |
+| Existing data | **Wipe, no migration.** `0.1.0-ratta` is unreleased and the Nomad's data is test data. A store still carrying the arc-11 shape is reset on open (legacy tables dropped, schema version 0). The old codecs are deleted outright. Old backups restored later are reset the same way. |
+| Tag search merge | **Two queries:** `tags()` (every tag, id + display — small) so the host's `FuzzyRank` runs as today, then `assignmentsOf(matchedTagIds)` for only the rows the ranking needs. `TagCodec`, `WORST_CASE_BYTES`, `CompactId` are deleted. |
+| Test harness | **No new dependency.** Pure gate logic (validator, codec, chunking, DDL checks, name guard) is JVM-tested behind an injectable executor; real execution is proven on the Nomad by the debug "Extension store self-test" (grown to tables). |
+| Seam author | **Fable writes X1.** The spec below is still complete enough for Opus to take it if a Fable session is unavailable. |
+
+**Planner calls, accepted 2026-09-01 (locks):** (1) `API_VERSION` 5 → **6**, the second non-tail
+break; every store-taking service (scratch pad, editor, tag manager) redeclares 6, ML Kit / Soil / PDF
+stay. (2) Writes are **batch-atomic only** — a list of statements runs in one host transaction per
+call; **no transaction is ever held open across Binder calls**. (3) Reads: the host runs the query
+to completion, encodes the rows, and hands **≤ 4 MiB chunks** through `LargeValue` behind a
+per-call handle (cleared on revoke); a result above a fixed in-memory cap is a typed refusal and
+the extension pages with `LIMIT`. (4) A scratch-pad page becomes **unbounded like a notebook
+page**: `PageFullException`, the byte accounting and the "page full" dialog are deleted. (5) **One
+binder**: `IExtensionStore` is *replaced* with the table shape (a break may redefine — the
+compatible-append recipe is for tails, and this is not one). (6) Tag ids become **UUIDs**;
+`identityKey` is a stored, uniquely indexed column. (7) Arc 22 "Tables", phases X1–X5. (8) The
+debug self-test grows to prove tables on-device. (9) Backup/restore untouched — same file, same key.
+
+**Sharpened during planning (implementer follows; user may override at phase start):**
+
+- **A version FLOOR joins the range rule.** Arc 18's rule (host accepts `1..API_VERSION`) protects
+  new-extension/old-host only; a *replaced* interface breaks the other direction, and a v5 scratch
+  pad calling transaction code 1 on a v6 host would land on a different method with a mismatched
+  parcel — not reliably loud. So `ExtensionContract.MIN_API_VERSION_FOR_STORE = 6`, and the host
+  accepts a **store-taking** point's service (`SCRATCH_PAD`, `DOCUMENT_EDITOR`, `TAG_MANAGER`) only
+  in `6..API_VERSION`; the stateless points keep floor 1. **Consequence: after X1 and until each of
+  X2–X4 lands, that extension's doors are GONE** (the existing not-installed path — pad button,
+  editor entries, tag doors, search names-only). Deliberate, honest, and X1's walk verifies it.
+- **Room leaves the store file.** Extension tables are unknown at compile time, so Room's entity
+  machinery buys nothing; `ExtensionStoreDatabase`/`KvDao`/`KvEntity` are deleted and the store is
+  a thin wrapper over `SupportSQLiteOpenHelper` built from the **same** `SoilCrypto` /
+  `KeyOpener` factories (still `NonDestructiveOpenHelperFactory`-wrapped, still the create/open
+  two doors, still process-lifetime cached and never closed, still WAL + `wal_autocheckpoint =
+  100` + `busy_timeout = 5000`). The `.soil` and the index keep Room; only the store moves.
+- **Store format version rides `PRAGMA user_version`:** `2` = table store. On open: `user_version
+  1` (Room-era kv) or a `kv`/`room_master_table` in `sqlite_master` → **legacy: drop those two
+  tables, create `host_schema`, set 2** (the wipe, logged as a count, never a name); `0` on an empty
+  file → fresh create; **`> 2` → refuse to open** (a newer host wrote it — never-delete-on-corruption
+  applies, the store is left exactly as found and the extension is "unavailable").
+- **Foreign keys are ON** for the store connection (`PRAGMA foreign_keys = ON` in `onOpen`), so a
+  declared `ON DELETE CASCADE` actually cascades. Documented as a promise of the seam.
+- **The editor's `prefs` table is the ONE extension table the host reads** (Document-PDF export's
+  text size, arc 19 / M9 — `DocumentPdfRender.editorTextSizeSp`). Its shape is pinned in
+  `DocumentContract` (`PREFS_TABLE = "prefs"`, columns `key`/`value`, `PREF_TEXT_SIZE = "size"`),
+  read through the host's own executor (no binder) **only if the file exists and the table exists**
+  — the same never-mint rule as today. No other host code reads an extension's tables.
+- **Arc-21 caps stay as policy:** `MAX_TAGS` 5 000 / `MAX_TAG_ASSIGNMENTS` 50 000 / `MAX_TAG_CHARS`
+  64 were the user's; they become `COUNT(*)` checks before an insert (`TAG_INDEX_FULL` keeps its
+  meaning). Their *size* arithmetic (`WORST_CASE_BYTES`, `MAX_TAG_ID_CHARS`, `CompactId`) goes.
+- **Extension-side tests are statement-shaped.** With no JVM SQLite, each extension's fake store
+  becomes a **statement recorder + canned-row responder**: SQL builders are pure and tested for
+  exact text + args; row decoders are tested from hand-built rows; the executor call is thin. The
+  Nomad walk is where real SQL runs.
+
+### Superseded locks (this arc rewrites them — do not cite the old form)
+
+Arc 11 "encrypted per-package KV + ashmem large values" (→ tables; ashmem stays as the chunk
+carrier) · arc 11's 4 MiB page ceiling, `PageFullException`, `SCRATCH_PAGE_FULL`, the `pages`
+line list and `page/<id>` blobs · arc 19 / M5 "store key layout PINNED (`size` + `carets` line
+codec)" and M10 "user dictionary as a `UserWords` line blob under `dict`" · arc 21 "one store key
+`index` holding the whole `TagCodec` blob — never a key per tag" (boundary row 22), `NSTAG2`,
+`WORST_CASE_BYTES` 3 650 007 pinned by test, `CompactId`, base-36 ids, "identityKey is derived,
+never stored", `snapshot` as the search merge's read · "`API_VERSION` 5, the FIRST bump that is not
+a compatible tail" (6 is the second, and the first with a floor). Everything else in the arc
+ledgers stands — in particular the pre-open rule, the three-exception rule, the uid gate, the
+held-bind bracket, "an extension writes nothing to disk itself, ever", and W5's backup treatment.
+
+### Seam spec (planner-fixed — X1 implements as written)
+
+**Contract (`:extension-api`, stdlib only, everything pure and JVM-tested):**
+
+- `ExtensionContract.API_VERSION` = **6**; new `MIN_API_VERSION_FOR_STORE` = 6 (KDoc records the
+  event and the floor rule). Store caps replace the KV ones: `STORE_MAX_INLINE_BYTES` 512 KiB
+  (payload rides inline `byte[]` at or under it) · `STORE_MAX_VALUE_BYTES` 4 MiB (one payload /
+  one result chunk, ashmem above inline — `LargeValue.requireValid` unchanged) ·
+  `STORE_MAX_RESULT_BYTES` 32 MiB (the whole materialized result) · `STORE_MAX_ROW_BYTES` = the
+  chunk cap (a row is never split) · `STORE_MAX_BATCH_STATEMENTS` 10 000 · `STORE_MAX_SQL_CHARS`
+  8 192 · `STORE_MAX_ARGS` 999 per statement (SQLite's default bind limit) · `STORE_MAX_TABLES`
+  64 · `STORE_MAX_SCHEMA_STEPS` 256, `STORE_MAX_STEP_STATEMENTS` 64 · `STORE_MAX_OPEN_RESULTS` 4
+  per binder. Typed messages (compared verbatim): `STORE_RESULT_LARGE` · `STORE_ROW_LARGE` ·
+  `STORE_SCHEMA_NEWER` (the downgrade refusal) · `STORE_SCHEMA_UNAPPLIED` · `STORE_RESULTS_OPEN`.
+  Deleted: `STORE_MAX_KEY_CHARS`, `STORE_MAX_KEYS`, `STORE_VALUE_LARGE`.
+- **`IExtensionStore` v6** (replaced whole; every method `HostCallerCheck`-free — it is the host's
+  own stub, uid-gated as today; only the three marshalable exceptions leave):
+
+  ```
+  int          schemaVersion();                    // applied version for this store; 0 = fresh
+  void         applySchema(in StoreSchema schema); // idempotent: runs steps applied+1..schema.version,
+                                                   //   each step its own txn + version bump (crash-resumable);
+                                                   //   ISE(STORE_SCHEMA_NEWER) on a downgrade; IAE on bad DDL
+  long[]       exec(in StorePayload batch);        // N statements, ONE transaction, all-or-nothing;
+                                                   //   returns changes() per statement
+  StoreResult  query(in StorePayload statement);   // first chunk (+ handle when more follow)
+  StoreResult  next(int handle);                   // the following chunk; ISE when unknown/finished
+  void         close(int handle);                  // drop an unfinished result early
+  ```
+
+  `exec`/`query` before `applySchema` on this binder → `ISE(STORE_SCHEMA_UNAPPLIED)` (structural:
+  a query cannot precede the declaration of what it queries; bind-per-call methods apply per call —
+  a no-op when versions match is one `SELECT`).
+- **Parcelables** (`requireValid` in `init` = unmarshal validation, both directions):
+  `StorePayload(inline: ByteArray?, region: LargeValue?)` — exactly one non-null, inline ≤
+  `STORE_MAX_INLINE_BYTES`; `describeContents` = `CONTENTS_FILE_DESCRIPTOR` when a region rides.
+  `StoreResult(payload: StorePayload, handle: Int, more: Boolean)` — `handle` −1 when complete.
+  `StoreSchema(version: Int, steps: List<List<String>>)` — `steps[i]` is version `i+1`'s DDL;
+  `version == steps.size`, caps enforced, every statement pre-validated by the shared validator so a
+  bad schema fails at construction on the extension's side, not at bind.
+- **`StoreCodec`** (pure, shared both sides, JVM-tested, big-endian `DataOutputStream`, the
+  `ScratchPageCodec` idiom): **statements** — magic `NSST` · u8 version 1 · u16 count · per
+  statement u32 sqlLen + UTF-8 sql · u16 argc · args as cells; **rows** — magic `NSRW` · u8
+  version 1 · u16 columnCount · column names · u32 rowCount · per row per column a **cell** = u8
+  tag (`0 NULL · 1 INTEGER i64 · 2 REAL f64 · 3 TEXT u32+UTF-8 · 4 BLOB u32+bytes`). Unknown
+  magic/version → `IllegalArgumentException` (unreadable ≠ empty). Extension-facing helpers in the
+  same module: `Statement(sql, args: List<Cell>)`, `Cell` sealed, `Row` (typed accessors by index
+  and by column name), `StoreRows` (the decoded chunk), and **`StoreReads.all(store, statement)`**
+  — the loop over `query`/`next` that closes on any failure, so no extension re-writes it.
+- **`StoreSql`** (pure validator, shared so an extension can pre-check): a tiny tokenizer honest
+  about `'…'`, `"…"`, `` `…` ``, `[…]`, `--` and `/* */`; **one statement** (no `;` outside
+  literals); first keyword ∈ {`SELECT`, `WITH`} for `query`, ∈ {`INSERT`, `REPLACE`, `UPDATE`,
+  `DELETE`, `WITH`} for `exec`; top-level denylist anywhere in the token stream: `ATTACH DETACH
+  PRAGMA VACUUM CREATE DROP ALTER BEGIN COMMIT ROLLBACK SAVEPOINT RELEASE REINDEX ANALYZE
+  load_extension`; **every identifier token that names a host-reserved space** (`host_*`,
+  `sqlite_*`, `room_*`, `android_*`) is refused — the file is per-package, so the only things
+  to protect are the host's tables, the connection and the file, and this is what protects them.
+  DDL validator (schema steps): `CREATE TABLE`, `CREATE [UNIQUE] INDEX`, `ALTER TABLE … ADD
+  COLUMN | RENAME …`, `DROP TABLE|INDEX`, all `IF [NOT] EXISTS` forms, `WITHOUT ROWID`, and
+  `REFERENCES … ON DELETE …` clauses; **no views, no triggers, no virtual tables** in v6 (each is
+  an additive later tail if ever wanted). `StoreNames.isValid`: `^[a-z][a-z0-9_]{0,62}$` and not
+  in a reserved space. `?` and `?NNN` positional binds only (named binds refused — a name is one
+  more parser).
+
+**Host (`:app` `data/extstore/`):**
+
+- `ExtensionStores` keeps its name, cache, doors and pre-open rule; `open` returns the new
+  `ExtensionStoreDatabase` (a wrapper: `SupportSQLiteOpenHelper` + `writable()`), runs the
+  user_version ladder above, creates `host_schema (id INTEGER PRIMARY KEY CHECK (id = 0), version
+  INTEGER NOT NULL)`; `checkpointIfOpen` and `closeAll` adapt; **backup is untouched** (same file,
+  same WAL rule, same `copyDatabase`).
+- `StoreExecutor` (interface, Android-free): `transaction { }`, `exec(sql, args): Long`,
+  `query(sql, args, sink)`. `SupportStoreExecutor` implements it over `SupportSQLiteDatabase`
+  (device-only); tests inject a fake.
+- `ExtensionStoreGate(executor, extUid, callingUid)` keeps its shape and its `io {}` mapping (every
+  SQLite failure → `IllegalStateException`; `SQLiteConstraintException` too — the extension reads
+  the message, the host never parses it), grows `schemaVersion`/`applySchema`/`exec`/`query`/
+  `next`/`close`, parks results as `List<ByteArray>` chunks per handle (**bytes, not regions** — a
+  region is minted at `next()` time and parked in the binder's `ThreadLocal` exactly as
+  `getLarge` does today), refuses a fifth open result, and drops every parked chunk on `revoke()`.
+  `exec` is `@Synchronized` (one writer per store at a time; reads run under WAL concurrently).
+- `ExtensionStoreBinder` keeps the `onTransact`/`finally` region-close discipline and the
+  `region {}` `ErrnoException` mapping; `StorePayload.region` follows the `putLarge` handshake
+  (host copies in and closes its handle at once).
+- `ExtensionRegistry.discover` applies the per-point floor.
+- The debug menu's **"Extension store self-test"** proves on the Nomad, in-process through a real
+  binder: fresh create → `applySchema` v1 → `exec` batch of 5 000 stroke-shaped rows (blobs) →
+  `query` streaming them back in > 1 chunk with byte-exact equality → a failing batch (constraint
+  violation mid-list) leaves **zero** rows → `applySchema` v2 (`ADD COLUMN`) then v1 again refused
+  with `STORE_SCHEMA_NEWER` → denylisted statement refused as `IllegalArgumentException` →
+  `host_schema` unreachable from SQL → wrong uid / revoked → a legacy-shaped file (built by the
+  probe itself with a `kv` table) opens as a wipe to version 2. Timings in the summary
+  (open, 5 000-row batch, read-back).
+
+### X1 — The seam ⬜ (Fable)
+`:extension-api` v6 (contract, parcelables, `StoreCodec`, `StoreSql`, `StoreNames`,
+`StoreReads`; delete `LargeValue`-era KV KDoc; keep `LargeValue`/`SharedBytes`); host store rewrite
+(`ExtensionStores` doors + user_version ladder + wipe, `StoreExecutor` + `SupportStoreExecutor`,
+gate, binder, registry floor); delete `KvDao`/`KvEntity`/Room from the store; adapt
+`ScratchPadClient`/`DocumentEditorClient`/`TagClient` **only as far as they compile** (they mint the
+binder — unchanged shape); `DocumentPdfRender.editorTextSizeSp` moves to the pinned `prefs` read
+via the host executor (returns the default until X4 creates the table); debug self-test.
+**The three store-taking extensions keep declaring 5 in X1 and are therefore GONE from the host
+until their phase.** X1 touches `:ext-scratchpad`, `:ext-document` and `:ext-tags` only as far as
+the release gate needs them to build: each module's store adapter (`ScratchStore`, `TagStore`,
+`EditorPrefs`) is reduced to a compiling **"unavailable" stub** against v6 (reads answer their
+default, writes refuse) with a `TODO(X2|X3|X4)` at the seam, and their now-dead codec tests are
+deleted with the codecs' callers left for their phase. No feature work in those modules in X1.
+JVM: codec round-trips (every cell kind, empty result, 0-column guard), validator (each denylist
+word, quoted-literal false positives, `;` inside a string, reserved-name refusal, one-statement
+rule), chunker (row never split, `STORE_ROW_LARGE`, `STORE_RESULT_LARGE`, exact chunk counts),
+gate (uid/revoked on every method, unapplied-schema refusal, batch rollback through the fake
+executor, handle lifecycle incl. the fifth-result refusal and revoke-drops-all), `StoreSchema`
+construction validation, the floor rule in the registry's pure part, user_version ladder as a pure
+decision table. Walk (Haiku): self-test passes; recognizer/heading, export (soil + pdf), import
+still work; pad button, Document entries and every tag door GONE; search runs names-only; backup
+still copies every `Garden/<pkg>.db`.
+**Questions at phase start:** none — wizard + planner calls cover it. Confirm the flip only.
+
+### X2 — Scratch pad on rows ⬜ (Opus code · Sonnet scaffold/tests · Haiku walk)
+`:ext-scratchpad` declares 6 and schema v1:
+```sql
+CREATE TABLE page   (id TEXT PRIMARY KEY, position INTEGER NOT NULL, width REAL NOT NULL, height REAL NOT NULL,
+                     createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL);
+CREATE INDEX page_position ON page(position);            -- non-unique: renumbering shifts in place
+CREATE TABLE stroke (id TEXT PRIMARY KEY, pageId TEXT NOT NULL REFERENCES page(id) ON DELETE CASCADE,
+                     "order" INTEGER NOT NULL, color INTEGER NOT NULL, width REAL NOT NULL, style TEXT NOT NULL,
+                     blob BLOB NOT NULL);                 -- blob = StrokeCodec format B, unchanged
+CREATE INDEX stroke_page_order ON stroke(pageId, "order");
+CREATE TABLE state  (key TEXT PRIMARY KEY, value TEXT NOT NULL);   -- 'current' → page id
+```
+`ScratchStore` becomes SQL builders + thin calls; `ScratchDocument` keeps its in-memory model and
+undo stack but its dirty/flush path becomes an **op log** (insert / delete / update-blob per
+stroke, page insert/delete/renumber) flushed as one `exec` batch — the whole-page re-encode is
+gone. **Delete:** `ScratchPageCodec`, `PageFullException`, `encodedBytes`/`sizes`/`strokeBytes`,
+`SCRATCH_PAGE_FULL`, the "page full" dialog + string, `ScratchPages`' list-as-storage role (the
+list math may stay as pure position arithmetic). `receive` writes page + strokes in **one batch**
+(the hand-rolled ink-first/compensating-delete choreography goes — the transaction is the
+guarantee); transfer caps (`MAX_TRANSFER_*`, Binder budget) stay. Page load = keyset paging by
+`"order"` in `STORE_MAX_VALUE_BYTES`-sized reads via `StoreReads` so no page can ever hit
+`STORE_RESULT_LARGE`. Never Main (unchanged). JVM: builders (exact SQL + args), op-log coalescing
+(add-then-erase same stroke = nothing), receive batch shape, row→Stroke decode (bad blob = that
+stroke dropped, page still loads — the `StrokeRows` rule), undo replay ops. Walk: draw, flip,
+insert/delete pages, kill + reopen keeps everything, both transfers, **user checklist:** send the
+"Document" notebook's ink (5 073 strokes across 20 pages) to ONE pad page repeatedly until well past
+the old 4 MiB mark and confirm it loads and draws — the ceiling is gone.
+**Questions at phase start:** none expected. Confirm the flip.
+
+### X3 — Tags on rows + the search merge ⬜ (Opus code · Sonnet scaffold/tests · Haiku walk)
+`:ext-tags` declares 6 and schema v1:
+```sql
+CREATE TABLE tag        (id TEXT PRIMARY KEY, display TEXT NOT NULL, identityKey TEXT NOT NULL UNIQUE,
+                         createdAt INTEGER NOT NULL);
+CREATE TABLE assignment (tagId TEXT NOT NULL REFERENCES tag(id) ON DELETE CASCADE, notebookId TEXT NOT NULL,
+                         pageId TEXT NOT NULL DEFAULT '', createdAt INTEGER NOT NULL,
+                         PRIMARY KEY (tagId, notebookId, pageId));   -- '' = notebook tag (NULL ≠ NULL in a PK)
+CREATE INDEX assignment_target ON assignment(notebookId, pageId);
+```
+`ITagManager` v6: `begin`/`configureShowing`/`end` unchanged; **`snapshot` replaced** by
+`List<TagRecord> tags(IExtensionStore store, int offset)` (pages of `TAGS_PAGE` 500 — 5 000 × ~250
+parcel bytes would not fit one Binder transaction) and `List<AssignmentRecord>
+assignmentsOf(IExtensionStore store, in List<String> tagIds, int offset)` (pages of
+`ASSIGNMENTS_PAGE` 1 000); `assign` keeps its signature, now `INSERT OR IGNORE tag` +
+`INSERT OR IGNORE assignment` in one batch under the policy caps. Records are Parcelables with
+`requireValid`; page id `''` on the wire means notebook tag (the no-kind rule stands). **Delete:**
+`TagCodec`, `CompactId`, `WORST_CASE_BYTES`, `MAX_TAG_ID_CHARS`, `TagStore.KEY_INDEX`,
+`TagWrites`' process-local lock (the transaction is the lock, across both writers and both
+processes), the `IndexUnreadable` failure (an unreadable store is "unavailable" now — there is no
+blob to be half-read). `TagIndex` shrinks to the **screen's in-memory tag list** (loaded once per
+showing, live-filtered per keystroke — the arc-21 "never a store call per keystroke" lock stands);
+assignments for the showing's target(s) are queried; `usageOf` = one `GROUP BY pageId = ''`;
+delete-with-blast-radius = one `DELETE FROM tag` (cascade). Host: `TagClient.tags`/`assignmentsOf`
+with **timeouts re-measured on the Nomad** (size by the work — the W6 rule); `SearchAssembly.rank`
+ranks over `tags()` then asks `assignmentsOf(matched)` and groups exactly as today (own-tag =
+`pageId == ''`); `LibrarySearch` keeps one fetch per query run; `TagManagerEntry`/`TagTargets`
+unchanged. JVM: builders, record validation, rank over the two-query shape (same fixtures as W4's
+tests, re-expressed), assign cap checks, cascade expectations as SQL text. Walk: every arc-21 door
+(library sheet, three notebook buttons, lasso Tag on a heading and on ink, search with page cards)
+re-driven; tag / untag / delete-with-cascade; `logcat -b crash` empty.
+**Questions at phase start:** none expected. Confirm the flip.
+
+### X4 — Document editor on rows ⬜ (Opus code · Sonnet scaffold/tests · Haiku walk)
+`:ext-document`'s editor service declares 6 (the text importer keeps 3 — per-service meta-data);
+schema v1:
+```sql
+CREATE TABLE prefs (key TEXT PRIMARY KEY, value TEXT NOT NULL);                 -- 'size', 'proofread' (absent = on)
+CREATE TABLE word  (word TEXT PRIMARY KEY, addedAt INTEGER NOT NULL);           -- the user dictionary
+CREATE TABLE caret (pageKey TEXT PRIMARY KEY, offset INTEGER NOT NULL, updatedAt INTEGER NOT NULL);
+```
+`EditorPrefs` keeps its blocking, fetch-the-binder-per-call, every-exception-is-the-default shape;
+`rememberCaret` = `INSERT OR REPLACE` + the LRU trim `DELETE FROM caret WHERE pageKey NOT IN
+(SELECT pageKey FROM caret ORDER BY updatedAt DESC LIMIT 100)` in one batch; the dictionary's
+add/remove are single statements (no read-modify-write, no `wordsLock`); the proofread engine's
+words-before-engine publish order stands. **Delete:** `CaretMemory`'s codec, `UserWords`' line
+codec (the normalization rule stays as a pure function), `EditorPrefsLayoutTest`. Host:
+`DocumentPdfRender` now finds the pinned `prefs` table (X1 wired the read). JVM: builders, trim
+statement, decode of each pref, dictionary normalization. Walk: text size survives kill; proofread
+toggle; add-to-dictionary survives `am force-stop`; caret restore per page + `nb:<id>`;
+Document-PDF export at a non-default size.
+**Questions at phase start:** none expected. Confirm the flip.
+
+### X5 — Docs, ledger, freeze ⬜ (Sonnet docs · Fable/Opus reads them back)
+**No code review in this arc (user's call).** `docs/extensions.md` § store rewritten (contract,
+caps, validator rules, codec, chunk protocol, schema lifecycle, the floor, the user_version ladder,
+the self-test), the `API_VERSION` ledger (6 = arc 22 — the second break, the first with a floor),
+module table, and **the boundary audit re-walked** (rows 1, 5, 14, 16, 19–22 change; add rows for
+the SQL gate, reserved names, the `prefs` read); `docs/scratchpad.md` data model (rows, no
+ceiling); `docs/tags.md` (schema, two queries, deleted caps arithmetic); `docs/document.md` (three
+tables); `docs/backup.md` (a legacy-shaped store in an old backup resets on open — one sentence);
+app `CLAUDE.md` store paragraph + module lines; root `CLAUDE.md` ratta pointer; `BACKLOG.md` — the
+W4 "key/value" entry closes (→ arc 22), the W6 "pruning dead tag assignments" entry is rewritten
+(a prune is now `DELETE … WHERE notebookId NOT IN (…)`, still wanting a trigger decision), the W5
+restore entry unchanged; `RATTA_PLAN.md` ledger entry for arc 22 + compaction of this section into
+it; memory. **Version stamp stays `0.1.0-ratta`** unless the user says otherwise at phase start.
+**Questions at phase start:** the version stamp only.
+
+### Per-phase gates (every phase, before its commit)
+`./gradlew test` both variants green (record the count) · every module debug + release builds ·
+both release APKs sign · NUL byte-scan of changed files (python, not grep) · the walk's FAILs
+re-driven by hand before belief · docs/memory/CLAUDE.md updated · **commit + push** · `/clear`.
 
 ---
 

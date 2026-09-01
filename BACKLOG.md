@@ -1036,6 +1036,10 @@ needs to move. It would delete `TagCodec` and its arithmetic outright and lift t
 
 Needs a fresh user decision and an arc of its own — it is a seam change every extension inherits.
 
+**→ Decided 2026-09-01: this is Arc 22 "Tables"** (`apps/notesprout_ratta/RATTA_PLAN.md` § "Phases —
+Arc 22"): gated parameterized SQL over extension-declared schemas, the KV API removed, no migration
+of existing stores (wiped on open — `0.1.0-ratta` is unreleased). This entry closes at X5.
+
 ## Notesprout SN — arc 21 "Tags" W5 (2026-09-01): a restore screen
 
 **W5 put every extension store into the backup set; it did not add a way to put one back.** The

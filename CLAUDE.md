@@ -148,31 +148,14 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   commits are in git history).
 - `ratta` — **the active feature branch** (cut 2026-08-20): Notesprout SN, a from-scratch
   Supernote-only rebuild under `apps/notesprout_ratta/`. **Arcs 1–21 complete + frozen**
-  (2026-09-01): Ratta Paper ·
-  Polish · Headings · Contents · Naming · Links · Pages · Objects ·
-  Snap · Recents · Scratch Pad · Paper · Stationery · Scribble · Export · Import · Backup ·
-  PDF · Document · Search · **Tags** (arc 21 — tags on notebooks and pages as the SIXTH
-  capability point: `ACTION_TAG_MANAGER` + `_SCREEN`, `:ext-tags` / NSE · Tags, the third tier-2
-  screen and the first with **no paper** on it, so no EPD handoff. Four doors — the library's
-  long-press "Tags…" row, the notebook bar's `[Tag notebook] [Tag page] [Manage]`, the lasso's Tag
-  (a lone heading is silent + toast, ink alone is recognized into a prefilled screen, **a mixed
-  selection is not offered the button**), and library search, which now runs **one query over names
-  AND tags** with tagged pages as their own cards. **Every assignment names its notebook**, a page
-  tag also its page — which moved `API_VERSION` to 5, the first bump that is *not* a compatible
-  tail. Backup grew to cover **every `Garden/<pkg>.db`**, unconditionally, every pass — no restore,
-  so the manual copy-back is in `docs/backup.md` and a restore screen is in `BACKLOG.md`.
-  `docs/tags.md` is the feature reference) ·
-  **Search** (arc 20 — fuzzy name search over the whole library from the library's
-  top bar: `core/FuzzyRank` is subsequence-and-ranking, **not** typo tolerance, and the template
-  browser's Search shelf runs on the same matcher; `docs/library.md` § Search is the reference) ·
-  **Document** (arc 19 — og's Documents as the FIFTH point: `NSE · Document` editor +
-  document exporter + text importer in one APK, the `:markdown` shared engine, text documents,
-  Proofread; `docs/document.md` is the feature reference), plus post-arc fixes F1–F5. Ten
+  (2026-09-01; the per-arc feature references are `apps/notesprout_ratta/docs/*.md`). Ten
   modules (host + `:sn-screen` + `:markdown` + `:extension-api` + six extension APKs), SIX
   extension points (recognizer · scratch pad · exporter · importer · document editor · tag
   manager), g-paper pin 0.1.23, version `0.1.0-ratta`, 1623 JVM tests/variant.
-  **NEXT ARC NOT PLANNED — ask the user first. No SEVENTH extension point without another user
-  decision.**
+  **ARC 22 "Tables" IS PLANNED (2026-09-01) — next phase X1 (the seam, Fable-written): the
+  extension store becomes real SQLite tables behind gated parameterized SQL (KV API removed,
+  `API_VERSION` 6 with a store floor, no data migration, no code-review phase). Plan =
+  `RATTA_PLAN.md` § "Phases — Arc 22". No SEVENTH extension point without another user decision.**
   **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for ANY work there** — it holds the working
   protocol, model recipe, standing traps, the per-arc ledger of still-binding decisions, and the
   active arc's full plan. Subsystem detail: `apps/notesprout_ratta/docs/` + that app's CLAUDE.md.
