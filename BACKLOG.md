@@ -1053,3 +1053,30 @@ and its hard parts are the ones arc 17 named and left: the aside-swap ordering, 
 means against a library that has moved on since the backup, and the fact that a store's ciphertext
 is keyed to the device that wrote it (a restore across devices needs the source device's recovery
 key, exactly as an encrypted import does). Needs a user decision on scope before it is planned.
+
+## Notesprout SN — arc 21 "Tags" W6 (2026-09-01): pruning dead tag assignments
+
+**Deleting a notebook or a page does not remove the tag assignments naming it.** Deliberate for the
+arc, and correct as far as the user can see — nothing dead ever surfaces — but the blob grows and
+nothing shrinks it.
+
+Aliveness is answered at **query time** and never in the store. `SearchAssembly.rank` reads tags
+*through* the index's own live notebook listing, so an assignment naming a deleted notebook is
+simply never looked at; a page's aliveness is a different question with a different source (the
+notebook's live page rows, which only the host can read) and `PageNumbers` answers it the same way.
+The extension is not the side that knows: it holds ids, and the index that says which ids are alive
+is the host's. That is the shape the seam wants — the extension owns tags, the host owns the
+library — so a pruning pass cannot be a background job inside `:ext-tags`.
+
+The cost is bounded and small: an assignment is 53 bytes, `MAX_TAG_ASSIGNMENTS` is 50 000, and the
+budget is checked against the store's 4 MiB value. A library would have to delete tagged notebooks
+for a very long time to reach it — and if it did, the refusal is a cap message about a number the
+user has no way to see, which is the honest complaint against leaving this.
+
+A pruning pass would be host-driven: hand the extension the set of live notebook ids (and, for the
+notebooks it asks about, live page ids) and let `TagWrites` drop the rest under its own lock. The
+open questions are when it runs (a backup pass? the arc-17 close purge? a Tags-screen visit?) and
+whether removing a tag's last assignment may ever delete the tag — it may **not**, by the arc's
+lifecycle rule, so a prune leaves tags behind on purpose. Wants a user decision on the trigger.
+Note that the store-seam entry above would dissolve most of this: with real rows, a delete is a
+`DELETE`.

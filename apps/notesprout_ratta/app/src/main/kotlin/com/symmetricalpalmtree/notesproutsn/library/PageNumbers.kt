@@ -68,7 +68,9 @@ object PageNumbers {
         }
     }
 
-    /** Forget everything — the debug menu's key reset and a restore, where every file changed
-     *  underneath without any index stamp this process saw. */
-    fun clear() = cache.clear()
+    // No `clear()`. Nothing calls one, and a cache-invalidation door that no path takes is worse
+    // than none: it reads as the answer to "what about a key reset?" while doing nothing. The cache
+    // is keyed on the notebook's `updatedAt`, so any edit that moves pages already invalidates its
+    // own entry; a whole-library event that moved files underneath without moving a stamp would
+    // need a caller here, and that is the arc that adds one.
 }

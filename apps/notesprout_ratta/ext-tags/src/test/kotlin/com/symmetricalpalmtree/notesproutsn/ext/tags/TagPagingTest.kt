@@ -46,11 +46,4 @@ class TagPagingTest {
         assertEquals(emptyList<Int>(), TagPaging.slice(emptyList<Int>(), page = 0, perPage = 5))
     }
 
-    @Test
-    fun pageOfFindsWhereAnItemLanded() {
-        assertEquals(0, TagPaging.pageOf(index = 0, perPage = 5))
-        assertEquals(0, TagPaging.pageOf(index = 4, perPage = 5))
-        assertEquals(1, TagPaging.pageOf(index = 5, perPage = 5))
-        assertEquals(0, TagPaging.pageOf(index = -1, perPage = 5))
-    }
 }

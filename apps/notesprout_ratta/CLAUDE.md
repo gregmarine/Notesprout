@@ -13,9 +13,11 @@ The Manta identifies as a Nomad — target by serial.
 
 **Subsystem docs (`docs/`) — read the matching one before working in that area:**
 `docs/library.md` (library screen, naming schemes, **search** — arc 20's fuzzy name search and the
-shared `core/FuzzyRank` matcher) · `docs/notebook.md` (the notebook screen:
+shared `core/FuzzyRank` matcher, grown by arc 21 / W4 into one query over names **and tags** with
+tagged pages as their own cards) · `docs/notebook.md` (the notebook screen:
 tools, selection, **snap to guides**, headings, Contents, **Recents**, gestures, **the page
-template picker — the whole library since arc 13**, undo, frame-silence ledger) ·
+template picker — the whole library since arc 13**, arc 21's tag button and the lasso's Tag, undo,
+frame-silence ledger) ·
 `docs/links.md` (arc 6: link rows/payload, render, picker + create-in-picker, follow + trail) ·
 `docs/templates.md` (arc 13: **the paper library** — the two kinds and no third, the sentinels that
 are not rows, the reserved **Default** folder, the one browser its three hosts share, SAF import and
@@ -25,10 +27,10 @@ table, and the abandoned generator idea) ·
 half's long-press sheet and the object half's Copy/Cut, tap-to-place and lasso popup, both
 within and **across notebooks**, where a copied link's own-notebook target is re-pointed at the
 notebook it came from) ·
-`docs/extensions.md` (the **seam**: the five extension points — the recognizer, arc 11's
-screen-owning scratch pad, arc 15's generic exporter point, arc 16's generic importer point and
-arc 19's screen-owning document editor with its host-callback binder — the extension store, the
-tier-2 recipe for an extension-owned screen, and **the boundary audit**) ·
+`docs/extensions.md` (the **seam**: the six extension points — the recognizer, arc 11's
+screen-owning scratch pad, arc 15's generic exporter point, arc 16's generic importer point,
+arc 19's screen-owning document editor with its host-callback binder and arc 21's tag manager —
+the extension store, the tier-2 recipe for an extension-owned screen, and **the boundary audit**) ·
 `docs/export.md` (arc 15, grown arc 18: notebook export as a feature — the library sheet's Export…
 row, the `ExportActivity` screen with its now-real two-exporter chooser, the keying trio and its
 host-side transforms, `SoilOpenFiles`, the conditional-deletion rule, **`NSE · PDF Export`** — the
@@ -46,6 +48,9 @@ destination discipline, the exclude toggle, the failure table; grown by **arc 21
 the result: the data model and flags-as-watermark, the extension editor and its two-process
 autosave/teardown table, seeding and Bring in, the notebook document, text documents, the export
 half, Proofread, the failure table) ·
+`docs/tags.md` (arc 21: **Tags** as a feature — tags on notebooks and pages, the identity and
+lifecycle rules, the `TagIndex` record where every assignment names its notebook, the tag screen's
+three modes, the four doors (library sheet, notebook bar, lasso, search), and the failure table) ·
 `docs/scratchpad.md` (arc 11: the Scratch Pad as a feature — screen, tools, pages, store layout,
 both transfers, failure table) ·
 `docs/sn-screen.md` (arc 11 / J1: the shared `:sn-screen` paper-screen library — what may live
@@ -81,7 +86,8 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   dictionary asset `assets/proofread/en_82765.dict` — gzip content behind an opaque extension
   on purpose: AAPT gunzips any `.gz` asset and strips the extension) ·
   `:ext-tags` (**NSE · Tags**, arc 21 / W1 — `:extension-api` + `:sn-screen`, never `:app`; one
-  service + a screen: `TagManagerService` and `TagsActivity`, API version 4. The FIRST tier-2
+  service + a screen: `TagManagerService` and `TagsActivity`, API version **5** (W1 declared 4;
+  W4's reshaped `TagShowing` moved it, and it is the only service that moved). The FIRST tier-2
   screen carrying **no paper** — no `PaperView`, no g-paper call and therefore **no EPD handoff**
   (M3's measured answer covers it); the tag index is one value in the host's extension store).
   `gradle.properties` sets `android.nonTransitiveRClass=false` — undoing it breaks every
@@ -130,15 +136,20 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
     the screen's Intent, and are never logged on either side. The extension owns the tag index (one
     store key, the whole `TagCodec` blob); the host owns every entry point, the recognizer and the
     search merge.
-    extensions get the **extension store** (`IExtensionStore` — per-package,
+
+  All of them get the **extension store** (`IExtensionStore` — per-package,
   encrypted under the global key at `Garden/<pkg>.db`, minted per bind, uid-bound, revoked with
   the unbind, **and copied by every backup run** — arc 21 / W5) because **an extension writes
   nothing to disk itself, ever**; action strings are
   SN-namespaced so Paper's extensions are never discovered; trust is same-signature both ways
   (discovery + bind-time re-check host-side, `HostCallerCheck` first thing in every stub method);
-  `ExtensionContract.API_VERSION` = 4 (arc 21 / W1 — the tag point itself; 3 was arc 19 / M8's result-kind tail, 2 arc 18's
-  sourceKind tail) and the host accepts `1..N` (the declared number is what the extension
-  *requires* of the host).
+  `ExtensionContract.API_VERSION` = **5** and the host accepts `1..N` (the declared number is what
+  the extension *requires* of the host). The ledger: 2 = arc 18's `sourceKind` tail · 3 = arc 19 /
+  M8's `resultKind` tail · 4 = arc 21 / W1, the tag point itself · **5 = arc 21 / W4, the first
+  bump that is NOT a compatible tail** — `TagShowing`'s wire form changed, so a W1-shaped tag
+  extension against a W4 host unmarshals wrongly; it fails loudly (the constructor `require`s
+  reject it as an `IllegalArgumentException`) and the declaration keeps it from being reached.
+  Meta-data is **per service** — only the tag service moved.
 - **The Scratch Pad is not ours to change from here** (arc 11, `docs/scratchpad.md`). It is the
   `:ext-scratchpad` APK: its own process, its own g-paper surface, its own undo stack, and it
   **writes nothing to disk itself** — its pages live in the host store, lent for the showing and

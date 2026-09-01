@@ -128,10 +128,13 @@ class TagsActivity : AppCompatActivity() {
         val parked = TagSession.showing
         if (parked == null || TagSession.store == null) {
             // The host never launched us, or it revoked the bind before we came up. Say so — a
-            // screen that opens empty and does nothing reads as broken.
+            // screen that opens empty and does nothing reads as broken. It must leave on the
+            // dialog's *dismiss*, never beside it: `Dialogs.problem` has no dismiss callback, so
+            // finishing on the next line tears the window down before the dialog is drawn and the
+            // screen flashes and vanishes with nothing said — the very thing this branch exists to
+            // avoid. `failAndClose` is the same shape further down.
             Slog.d(TAG) { "no showing parked — refusing" }
-            Dialogs.problem(this, R.string.tags_problem_title, R.string.tags_unavailable)
-            finish()
+            failAndClose(R.string.tags_unavailable)
             return
         }
         showing = parked

@@ -26,8 +26,17 @@ class TagIndex private constructor(
 
     /** One tag: the short internal id and the display form (the casing whoever entered it first used). */
     class Tag(val id: String, val display: String) {
-        /** Re-derived, never stored — [TagRules] is the one definition of "the same tag". */
-        val identityKey: String get() = TagRules.identityKey(display)
+        /**
+         * Derived from [display], never stored — [TagRules] is the one definition of "the same tag",
+         * and a second stored copy of the answer could disagree with the question (the reason W1
+         * declined to persist it at all).
+         *
+         * It is derived **once, here**, rather than on each read. [sortedTags] sorts *by* this key,
+         * so a `get()` that re-normalized would run `TagRules.identityKey` twice per comparison —
+         * and `tagsOf` sorts once per row of the MANAGE overview, on the main thread, on every
+         * repaint. A [Tag] is immutable, so there is nothing for the cached value to fall behind.
+         */
+        val identityKey: String = TagRules.identityKey(display)
     }
 
     /**
@@ -50,14 +59,6 @@ class TagIndex private constructor(
      * [of] drops anything else.
      */
     class Assignment(val tagId: String, val notebookId: String, val pageId: String? = null) {
-
-        /** [TagShowing.TARGET_NOTEBOOK] or [TARGET_PAGE][TagShowing.TARGET_PAGE] — derived, never
-         *  stored. */
-        val targetKind: Int
-            get() = if (pageId == null) TagShowing.TARGET_NOTEBOOK else TagShowing.TARGET_PAGE
-
-        /** The thing the tag hangs on: the page when there is one, else the notebook. */
-        val targetId: String get() = pageId ?: notebookId
 
         /** True when this attaches to the given target — the one comparison every query makes. */
         fun isOn(notebookId: String, pageId: String?): Boolean =
@@ -103,14 +104,6 @@ class TagIndex private constructor(
     /** True when [tagId] is already on that target. */
     fun isAssigned(tagId: String, notebookId: String, pageId: String? = null): Boolean =
         assignments.any { it.tagId == tagId && it.isOn(notebookId, pageId) }
-
-    /** Every target one tag reaches, in index order — what the host filters against alive rows. */
-    fun targetsOf(tagId: String): List<Assignment> = assignments.filter { it.tagId == tagId }
-
-    /** Every assignment inside one notebook — the notebook's own tag and every page tag in it.
-     *  The host's search merge groups by this (arc 21 / W4). */
-    fun assignmentsIn(notebookId: String): List<Assignment> =
-        assignments.filter { it.notebookId == notebookId }
 
     /** The blast radius of deleting [tagId], counted by kind. */
     fun usageOf(tagId: String): Usage {
@@ -205,21 +198,12 @@ class TagIndex private constructor(
         return TagIndex(tags.filterNot { it.id == tagId }, assignments.filterNot { it.tagId == tagId })
     }
 
-    /**
-     * Drop every assignment whose target is not in [aliveNotebooks] / [alivePages]. Not used to
-     * *store* anything in this arc — pruning the blob is a `BACKLOG.md` note, because a notebook the
-     * user has not deleted can be absent from one snapshot for reasons that are not permanent. It is
-     * the **query-time** filter: what the host shows must describe the library that exists.
-     */
-    fun filterAlive(aliveNotebooks: Set<String>, alivePages: Set<String>): TagIndex {
-        // A page assignment must clear **both** gates: its notebook alive in the index, and the page
-        // itself still in that notebook. Since W4 the first is answerable at all — before it, an
-        // orphaned page tag was indistinguishable from a live one.
-        val kept = assignments.filter {
-            it.notebookId in aliveNotebooks && (it.pageId == null || it.pageId in alivePages)
-        }
-        return if (kept.size == assignments.size) this else TagIndex(tags, kept)
-    }
+    // There is deliberately no `filterAlive` here. Staleness is answered **structurally**, not by a
+    // filtering pass: `SearchAssembly.rank` reads tags *through* the index's own live notebook
+    // listing, so an assignment naming a deleted notebook is never looked at, and `PageNumbers`
+    // answers a page's aliveness the same way against the notebook's live page rows. A function
+    // that filtered an index nobody filters would be a doc comment asserting a role it does not
+    // have. Pruning the stored blob is a `BACKLOG.md` note and would go through `TagWrites`.
 
     /** The smallest base-36 id no tag holds — short because [TagCodec] pays for it per assignment. */
     private fun mintId(): String {
@@ -251,8 +235,15 @@ class TagIndex private constructor(
                 if (t.id.isEmpty() || t.id.length > TagCodec.MAX_TAG_ID_CHARS) continue
                 if (!TagRules.isValid(t.display)) continue
                 val display = TagRules.display(t.display)
-                if (!ids.add(t.id)) continue
+                // Identity first, then the id — in the other order a tag dropped for a duplicate
+                // identity has already reserved its id, and every assignment naming it then passes
+                // the `a.tagId !in ids` gate below and lands pointing at a tag that is not in
+                // `keptTags`. Such an orphan is invisible to every reader (they all go through
+                // `tags`), unreachable by `deleteTag`, and counts against MAX_TAG_ASSIGNMENTS for
+                // good. An id is only spent on a tag that is actually kept.
+                if (t.id in ids) continue
                 if (!identities.add(TagRules.identityKey(display))) continue
+                ids += t.id
                 keptTags += if (display == t.display) t else Tag(t.id, display)
             }
             val keptAssignments = ArrayList<Assignment>(minOf(assignments.size, ExtensionContract.MAX_TAG_ASSIGNMENTS))

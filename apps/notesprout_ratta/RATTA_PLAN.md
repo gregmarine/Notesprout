@@ -8,12 +8,12 @@ A from-scratch, Supernote-only rebuild of Notesprout in the spirit of the Paper 
 Original Notesprout (`apps/notesprout_android`) and Notesprout Paper (`apps/notesprout_paper`)
 are **reading references — no app code is copied**.
 
-**Arcs 1–20 are complete and frozen.** Their entries below are compact ledgers: status, what
+**Arcs 1–21 are complete and frozen.** Their entries below are compact ledgers: status, what
 still binds, and the reference doc. **The full phase-by-phase records (outcomes, findings,
 walk logs) live in git history — arcs 1–18 at `git show 90a9198:apps/notesprout_ratta/RATTA_PLAN.md`,
 arcs 19–20's full phase records at the end of this file until the next compaction** — and each
-feature's authoritative reference is its `docs/` file. **Arc 21 "Tags" is in progress — W1–W5 complete, next work = W6.
-Fable planned only: Opus/Sonnet/Haiku execute every phase (see the arc section's model notes).**
+feature's authoritative reference is its `docs/` file. **Arc 21 "Tags" is complete and frozen (2026-09-01) — W1–W6 all ✅.
+NEXT ARC IS NOT PLANNED: ask the user before starting one.**
 
 ---
 
@@ -167,6 +167,22 @@ Code / correctness:
   with the arc-20 **explicit flag 0**, never `SHOW_IMPLICIT`.
 - **GONE, never disabled; not-built controls do not exist** (J4). Toast confirms / dialog
   explains; **a query is not a name** (don't reuse NameDialog strings for non-names).
+- **A screen that explains itself and then leaves must leave on the dialog's DISMISS, never beside
+  it** (arc 21 / W6). `Dialogs.problem` has **no dismiss callback**, so `problem(…)` followed by
+  `finish()` tears the window down before the dialog is drawn: the screen flashes and vanishes with
+  nothing said, which is the exact failure the explanation was added to prevent.
+  `Dialogs.confirm(…) { finish() }` is the shape.
+- **Size a timeout by the work, not by the call's chattiness** (arc 21 / W6, sharpening J5/D3). An
+  `assign` that decodes, edits, re-encodes and writes megabytes cannot ride the same budget as a
+  two-word call. And because **a Binder call cannot be cancelled**, a timeout does not undo
+  anything — the orphaned call finishes and the write lands *after* the host has told the user
+  nothing changed, so an honest budget is what keeps that sentence true.
+- **A derived `get()` that a sort orders by is recomputed per comparison** (arc 21 / W6). On an
+  immutable class make it a `val`; there is nothing for it to fall behind.
+- **Dead code with a confident doc comment is worse than no code** (arc 21 / W6, six members
+  removed): the comment asserts a role the function does not have, and the next reader believes it.
+  `filterAlive`'s KDoc called itself "the query-time filter" when there is no query-time filter —
+  staleness is answered structurally, by reading through the live listings.
 - **Reuse before mint; render at the page's own size; `applyTemplate` never decodes; unknown
   kind stays unknown** (arc 12/13 template rules). Nothing ever soft-deletes a template row.
 - **Bitmap hygiene:** cards RGB_565 (opaque, erased to white) — **`LinkComposite` must stay
@@ -495,6 +511,39 @@ Search shelf runs on the **same matcher**, ranks sentinels and rows in one list,
 skippable `SHOW_IMPLICIT`; both retired with the field). Version stays `0.1.0-ratta`.
 1511 JVM tests/variant. Refs: `docs/library.md` § Search, `docs/templates.md`.
 
+### Arc 21 "Tags" ✅ frozen 2026-09-01 (W1 374ddc8 · W2 b748566 · W3 a4de84e · W4 a1a5031 · W5 bf30697 · W6)
+Tags on **notebooks and pages** — the SIXTH point (`ACTION_TAG_MANAGER` + `_SCREEN`), `NSE · Tags`
+(`:ext-tags`, the TENTH module), and the **third tier-2 screen — the first carrying no paper**, so no
+g-paper call and **no EPD handoff** anywhere (arc 19 / M3's measured answer covers it). Still binding:
+**one interface, two call shapes** — a showing is a HELD bind (`begin` → `configureShowing` → launch →
+result → `end`) with the store lent once, while `snapshot`/`assign` are bind-per-call with the store
+riding the call; **the extension owns the tag index** (one store key `index`, the whole `TagCodec`
+blob — never a key per tag) and the host owns every entry point, the recognizer and the search merge;
+**tag text and target labels cross on the bind, never in the screen's Intent**, and are never logged.
+**Every assignment names its notebook**, a page tag also its page (`Assignment(tagId, notebookId,
+pageId?)`) — a page tag could not otherwise be traced to a notebook, because the index holds folders
+and notebooks only and a first-ever `.soil` open costs a KDF; a present `pageId` **is** what makes it
+a page tag, so no kind is stored. **Every cap the wizard set was kept and the record shrank instead**,
+twice (W1 dropped the stored `identityKey`, W4 the encoded kind; ids are compact base64url via
+`CompactId`) — `WORST_CASE_BYTES` 3 650 007 against 4 MiB, pinned by test. `TagWrites` is the ONE
+read-modify-write, reading fresh inside its lock and answering a typed `Reason`. **`API_VERSION` 5,
+the first bump that is NOT a compatible tail** (W4 reshaped `TagShowing`) — it fails loudly and only
+the tag service's declaration moved. Identity = trim + collapse + case-fold, display is the
+first-entered casing, 64 chars, tabs/newlines **dropped not escaped**; a tag **persists until
+explicitly deleted**, and deleting an assigned one confirms naming the blast radius. **Aliveness is
+structural** — the merge reads tags through the library's own live listings; there is no filter and
+W6 removed the one that had no caller. Four doors, all GONE without the extension: the library sheet's
+Tags… row (notebooks only), the notebook bar's three icon-only buttons (gated on `canvasShown`; MANAGE
+is an overview you **drill into**), the lasso's Tag (**exactly one heading → silent + toast, or ink
+with no content objects → recognize**; a mixed selection and a lone link get **no button**; the
+recognizer is not gated on), and search (one query over names AND tags, page hits as their own cards).
+Backup grew to **every `Garden/<pkg>.db`**, unconditionally every pass, the index's snapshot-and-probe
+treatment, after the notebooks and before the index — **no restore** (manual copy-back documented).
+`Garden/` is enumerated in `SoilFile.extensionStoreFiles` and **only** there. No undo for tag
+operations. W6 review: high, 6/6 fixed; version stays `0.1.0-ratta`; 1623 JVM tests/variant. Refs:
+`docs/tags.md` (the feature), `docs/extensions.md` §§ sixth point + boundary rows 19–23,
+`docs/library.md`, `docs/notebook.md`, `docs/backup.md`.
+
 ---
 
 ## Verification (end of arc)
@@ -539,7 +588,8 @@ commit.
 
 ---
 
-## Phases — Arc 21 "Tags" (planned 2026-08-31, wizard complete — NOT STARTED)
+## Phases — Arc 21 "Tags" ✅ COMPLETE + FROZEN 2026-09-01
+(planned 2026-08-31; W1 374ddc8 · W2 b748566 · W3 a4de84e · W4 a1a5031 · W5 bf30697 · W6 below)
 
 Tags on **notebooks and pages** — the SIXTH capability point (`ACTION_TAG_MANAGER` + `_SCREEN`,
 granted by the user 2026-08-31), the **third tier-2 screen-owning point**, and the **TENTH module**
@@ -1022,7 +1072,7 @@ copied." — unconditional, exactly as specified · `logcat -b crash` empty.
 
 **Status:** ✅ Complete.
 
-### W6 — Review, docs, freeze ⬜
+### W6 — Review, docs, freeze ✅
 `/code-review` on the arc range (**run + fixed by Opus this arc — Fable unavailable**; level
 asked at phase start), fix/accept per user call. Docs: **`docs/tags.md`** NEW (the feature),
 `docs/extensions.md` (sixth point + module table to TEN + `API_VERSION` 4 + boundary-audit
@@ -1034,6 +1084,101 @@ file. Full gates: JVM both variants, all TEN modules debug+release, release sign
 walk, user checklist.
 *Opus review + fixes; Sonnet docs; Haiku final walk.*
 **Questions at phase start:** review level; version stamp (stay `0.1.0-ratta`?).
+
+#### W6 phase-start decisions (user, 2026-09-01)
+
+Review level **high** (every arc's answer). Version stays **`0.1.0-ratta`** (every arc's answer).
+Findings: **fix all six** — the arc-19 / M11 precedent.
+
+**Outcome (review + fixes + docs).** `/code-review high 645f144..HEAD` returned **six findings — two
+medium, four low — and all six were verified against the source before triage** (none refuted). All
+six fixed. **1623 JVM tests/variant** (1626 − 4 dead-code tests + 1 new sanitizer test). All ten
+modules build debug + release; both release APKs sign.
+
+The two mediums were both **a screen or a sentence telling the user something untrue**:
+
+- **`TagsActivity` explained a revoked bind with a dialog that never drew.** `Dialogs.problem` has no
+  dismiss callback, so `problem(…)` followed by `finish()` on the next line tears the window down
+  before the dialog is on screen — the flash-and-vanish that the comment directly above it says the
+  branch exists to prevent. It takes `failAndClose` now, which is the same file's own correct
+  spelling (`Dialogs.confirm(…) { finish() }` — leave on the *dismiss*, never beside it).
+- **`assign` had a smaller budget than `snapshot` while doing strictly more work.** `snapshot` was
+  given 5 s "because the index can be megabytes"; `assign` decodes that same index, edits it,
+  re-encodes it and writes up to `WORST_CASE_BYTES` back through the large-value path into
+  SQLCipher — on 2 s. On a large index the lasso's silent heading→tag times out, and because **a
+  Binder call cannot be cancelled** the orphaned call finishes anyway: the tag lands *after* the host
+  has already said "Nothing has been changed." New `ASSIGN_TIMEOUT_MS` = 8 s, with the reasoning in
+  its KDoc — the honest budget is the cheap way to keep that sentence true.
+
+The four lows, and what each was really about:
+
+- **`TagIndex.of` spent an id on a tag it then dropped.** `ids.add(t.id)` ran *before* the identity
+  de-dup, so a tag folded away as a duplicate identity kept its id reserved — and every assignment
+  naming it passed the `tagId !in ids` gate and landed pointing at a tag not in `keptTags`. Such an
+  orphan is invisible to every reader, unreachable by `deleteTag`, and counts against
+  `MAX_TAG_ASSIGNMENTS` for good. Reachable only from a foreign or corrupt blob, which is exactly
+  what `of` exists to make trustworthy. Identity is checked first now and an id is spent only on a
+  tag that is kept; the new test asserts every surviving assignment names a tag that is there.
+- **`Tag.identityKey` was a `get()` that `sortedTags()` sorted by** — re-running `TagRules.display` +
+  `lowercase` on every comparison, and `tagsOf` calls `sortedTags` once per MANAGE overview row, on
+  Main, on every repaint. It is a `val` computed once now; a `Tag` is immutable, so there is nothing
+  for it to fall behind.
+- **Six dead members carrying doc comments that asserted roles they did not have** —
+  `TagIndex.filterAlive` / `targetsOf` / `assignmentsIn`, `Assignment.targetKind` / `targetId`,
+  `TagPaging.pageOf`, `PageNumbers.clear()`. All removed with their tests. **`filterAlive` is the one
+  worth remembering**: its KDoc called it "the query-time filter", and there is no query-time filter
+  — staleness is answered **structurally**, by `SearchAssembly.rank` reading tags *through* the
+  index's own live notebook listing and `PageNumbers` answering a page against the notebook's live
+  page rows. A comment in its place now says so, so the next reader does not re-add it.
+  (`TagShowing`'s own `targetKind`/`targetId` are live and stay.)
+- **The `:ext-tags` manifest comment said "API version 4" two lines above `android:value="5"`.** The
+  declared number is the host-compat gate, so a stale comment beside it is the one place a future
+  edit is most likely to "fix" the wrong line. It now records both numbers and why they differ.
+
+**Docs.** `docs/tags.md` **NEW** (489 lines — the feature bible: identity and lifecycle, the record
+where every assignment names its notebook, the codec budget, the seam summary, the screen's three
+modes, all four doors, the failure table, the traps). `docs/extensions.md` 1141 → 1404 (six points
+throughout, module table to TEN, `API_VERSION` 5 with the tail-vs-break ledger, the tag-manager point
+section, boundary-audit **rows 19–23**, the store's backup subsection). `docs/library.md` 777 → 846
+(the tag half of search, the page-hit cards, the Tags… sheet row). `docs/notebook.md` 1303 → 1430
+(`btnTags`/`TagsPopup`, the `AnchoredBar` extraction, the lasso's Tag, the `RecognizingOverlay`
+message). `docs/backup.md` was already done in W5. Both CLAUDE.mds, root `CLAUDE.md`'s arc record
+(arcs 1–21 frozen), and `BACKLOG.md` (the assignment-pruning entry — W4's store-seam and W5's restore
+entries were already written).
+
+**Two things the doc pass found that the review did not, and both were real:** `filterAlive`'s
+dead-ness (found independently by two agents before the review's own row), and the stale manifest
+comment. A doc pass that has to state what the code does is a second reader of it.
+
+NUL byte-scan: every changed file clean (the trap's ninth would-be firing — none fired).
+
+**Walk (by hand on the Nomad, after the agent's ~16th false failure).** The Haiku walk reported
+steps 4 and 10 as UNVERIFIED — "the Tags… row does not navigate", "the tag button does not respond"
+— with steps 5–9 and 11 abandoned on top of them. **Both were tap aim, again.** The tag button sits
+at x≈1108 and the agent tapped x=755; the Tags… row sits at y≈1084 and the agent tapped y=734, which
+is the Unpin/Rename band. Re-driven by hand, every abandoned step passes:
+notebook top bar → the bar opens under the button with its three glyphs (notebook · page · list) ·
+**Manage** → `TagsActivity` resumed, "Notebook and pages", `Notebook / Blah, Test` over
+`Page 1 / No tags` · drill into Page 1 → exactly the W1 screen ("Tags on Page 1", both empty states,
+the add input, All tags with eight rows and ⊕) · tapping `packing` flipped it to ✓ and put it in the
+target section (**the `assign` write landing under the new 8 s budget**) · long-press → `Delete
+"Blah"?` / "Remove it from 1 notebook? The tag itself is deleted too." · Cancel, then the target
+row's ✕ detached — and the screen came back **byte-identical** to the pre-attach capture, with
+`packing` still in All tags (the lifecycle rule seen live, and a clean reversal of the test edit) ·
+the library sheet's **Tags…** row opens the screen · `pm disable-user` → the row is **GONE** and the
+sheet re-flows; `pm enable` → the sheet is **byte-identical** to before the disable ·
+`logcat -b crash` and the main buffer both empty of anything naming the app.
+
+**The walk-agent trap has now fired ~16 times and its shape has never changed:** a control the agent
+can see in its own screenshot, coordinates it never measured, and a confident story about the app
+being broken laid over the miss. Re-drive every FAIL and every UNVERIFIED by hand.
+
+**User checklist: PASSED** ("The checklist passes", 2026-09-01) — the four pen-only items adb cannot
+drive: heading→tag silent + toast with heading and selection untouched · ink→tag recognized into the
+prefilled screen and landing on the page · **no Tag button** for a mixed selection or a lone link ·
+pen feel unchanged.
+
+**Status:** ✅ Complete. **Arc 21 "Tags" frozen.**
 
 ---
 

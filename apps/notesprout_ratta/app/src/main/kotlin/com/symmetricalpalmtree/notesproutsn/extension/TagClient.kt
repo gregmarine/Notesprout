@@ -124,6 +124,20 @@ class TagClient(context: Context, val ref: ProviderRef) {
          *  own budget rather than a chat-sized one. */
         const val SNAPSHOT_TIMEOUT_MS = 5_000L
 
+        /**
+         * [assign]'s budget, and it is deliberately **not smaller than [SNAPSHOT_TIMEOUT_MS]**: an
+         * assign does strictly more work on the same blob than a snapshot does — a full
+         * `TagCodec.decode`, the edit, an `encode`, and a store write of up to
+         * `TagCodec.WORST_CASE_BYTES` back through the large-value path into SQLCipher.
+         *
+         * Sizing it like a chat call is how the lasso's silent heading→tag times out on a large
+         * index, and a timeout here does not undo anything: a Binder call cannot be cancelled, so
+         * the orphaned call finishes on its own thread and the tag lands **after** the host has
+         * already told the user "Nothing has been changed". The honest budget is the cheaper way to
+         * keep that sentence true.
+         */
+        const val ASSIGN_TIMEOUT_MS = 8_000L
+
         /** The exact `IllegalStateException` message the extension throws for a stored-but-unreadable
          *  index. Compared verbatim, never as a substring (the family rule). */
         private const val INDEX_UNREADABLE = "tag index unreadable"
@@ -202,7 +216,7 @@ class TagClient(context: Context, val ref: ProviderRef) {
                 val display = ExtensionBinder.call(
                     client.appContext, ref, ExtensionContract.ACTION_TAG_MANAGER, TAG,
                     asInterface = { ITagManager.Stub.asInterface(it) },
-                    callTimeoutMs = CALL_TIMEOUT_MS,
+                    callTimeoutMs = ASSIGN_TIMEOUT_MS,
                 ) { iface ->
                     try {
                         iface.assign(store, text, notebookId, pageId)

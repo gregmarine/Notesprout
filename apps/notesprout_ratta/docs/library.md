@@ -275,6 +275,15 @@ user's finger. A tap hands off to `ExportActivity` with `EXTRA_NOTEBOOK_ID` / `E
 only — never a `File` — latched against a double-tap the same way every other door out of the
 library is. See [`docs/export.md`](export.md) for the screen itself.
 
+**Tags…** (arc 21 / W1) is notebooks-only too, for the same reason Export… is — a folder's sheet
+never even offers it. It sits between Export… and Exclude from backup, and it shows on the same
+beat and by the same latch as Export…'s exporter check (`tags.discover()` alongside
+`ExtensionRegistry.exporters()`), so one IO round-trip settles both rows before the sheet goes up.
+**GONE**, never disabled, when no trusted tag manager is installed. A tap opens the tag screen in
+BROWSE mode on that notebook (`TagManagerEntry.open`), identity carried on the bind rather than the
+Intent — the same rule every other tag door in this app follows. The screen itself, and the tag
+model behind it, are [`docs/tags.md`](tags.md)'s.
+
 ---
 
 ## Search (arc 20)
@@ -355,6 +364,66 @@ query.
 
 **The same matcher runs the template browser's Search shelf** ([`templates.md`](templates.md)) —
 one rule, so a name findable on one screen is findable on the other.
+
+### Tags join the query (arc 21 / W4)
+
+The query now runs over names **and** tags, through the same `core/FuzzyRank` matcher and the same
+total order — `mtg` still finds "Meeting Notes" by name, and now finds a notebook tagged `meeting`
+by exactly the same rule, in one list rather than two. `FuzzyRank` itself did not change: arc 20's
+ranking of names is exactly as it was.
+
+`LibrarySearch` fetches the tag extension's `snapshot()` **at query time** (call-shaped — the
+pre-open rule applies here like everywhere else). No tag extension installed means the shelf
+answers names only, silently: there is no control to hide for this, and a library without one is
+exactly arc 20's search.
+
+`SearchAssembly` grew a third group, drawn last: **folders → notebooks (name- or tag-matched,
+deduped, best rank) → page hits.** A notebook that matches by both name and tag still appears once,
+at whichever rank is better. A tag on a *page* is a different fact from a tag on a notebook — the
+whole point of tagging a page is that the page is the thing wanted back — so it surfaces as its own
+card, opening the notebook **at that page**.
+
+**Page-hit cards.** The name line reads `<Notebook> · Page N` and is `singleLine`: the notebook's
+own name ellipsizes rather than the whole line, so `· Page N` always survives instead of a long
+title eating the page number. The subtitle is `<folder> · <tag>`. The cover is the **notebook's
+own** cover snapshot — already in hand from the listing, no extra read, no `.soil` raster — so a
+page hit and its notebook look alike above the fold and the two text lines are what tell them
+apart. Tapping a page card opens the notebook at that page; **there is no long-press on one** — the
+action sheet acts on a notebook, and firing it from a card that names a page would act on something
+the card does not name.
+
+**A notebook card's subtitle** joins the matched tag to the parent folder (`folder · tag`) only
+**when the name did not match** — the subtitle exists to answer "why is this here", and a name
+match has already answered it. A notebook matching both keeps the plain folder line.
+
+**Page numbers cost a read.** A page's number is its position in its notebook's live page rows, and
+nothing outside that `.soil` knows it, so `library/PageNumbers` opens the file on IO — and only for
+a notebook that actually produced a page hit, never per hit and never for one that produced none.
+It is cheap in practice: raw keys persist in `DerivedKeyStore`, so a notebook that has ever been
+opened reopens without a KDF, and a notebook holding a tagged page has necessarily been opened (that
+is where the tag was applied from). The read is cached per process, keyed on the notebook's
+`updatedAt`, so a second search over an unchanged library opens no files at all. **A notebook that
+will not open contributes no page cards** — its notebook card is unaffected, and the shelf says less
+rather than saying something wrong.
+
+**Stale assignments are filtered, not pruned.** An assignment naming a deleted notebook, or a page
+the arc-17 purge removed, is tolerated in the extension's own blob and simply never surfaces —
+filtered against the alive index rows and the live page list **at query time**. Actually removing
+dead assignments from the blob is a `BACKLOG.md` note, not this arc.
+
+**Ranking and the blob decode both run off Main** (`Dispatchers.Default`): the decode can be
+megabytes and the rank walks every assignment in the library, up to fifty thousand, and the caller
+is the listing coroutine.
+
+**The dialog's hint changes with availability** — "Folder or notebook name" with no tag manager
+installed, "Folder, notebook or tag" with one — the house rule about not claiming a control that
+cannot work, extended to a hint. `LibraryActivity` refreshes the tag entry from its own `onResume`
+for this, since the hint has no button of its own to keep it current.
+
+The arc-20 rules this leaves untouched: Sort stays GONE while searching; `BrowseMode.SEARCH` is
+never persisted in either direction, and neither is the query; every action re-runs the query, tag
+edits included; folders still come first. For the tag screen itself and the tag model, see
+[`docs/tags.md`](tags.md).
 
 ---
 
@@ -774,4 +843,4 @@ library falls back to the root. Nothing in prefs is trusted as still existing.
 | `data/TemplateGeometryTest` | 8 mm spacing at dpi, density-scaled feature sizes with the 1 px floor, lined top margin, grid symmetry, grid-≠-lined, dot intersections, Nomad-page counts |
 | `library/LibraryCardsTest` (arc 19 / M8) | `NotebookFlags.TEXT_DOCUMENT`'s card-level read — the one bit of the text-document card path that is pure |
 | `core/FuzzyRankTest` (arc 20 / Q1) | every tier, the word-start rules (separators / camel / first digit), word-starts and span as tie-breaks, the two-pass subsequence preferring word starts, what must **not** match (transposition, wrong letter, over-long query, blank), punctuation as literal, and `rank`'s total, stable order |
-| `library/SearchAssemblyTest` (arc 20 / Q1) | folders before notebooks whatever the score says, relevance inside each group, non-matches dropped from both, a blank query finding nothing, an empty library |
+| `library/SearchAssemblyTest` (arc 20 / Q1, grown arc 21 / W4) | folders before notebooks whatever the score says, relevance inside each group, non-matches dropped from both, a blank query finding nothing, an empty library; names-only with no tag index, a notebook found by a tag, the matched tag shown only when the name did not, a notebook matching both appearing once, the better of the two deciding rank, a tagged page as its own card naming its notebook, one card per page not per tag, pages and their notebook as separate rows, a tag on a gone notebook surfacing nothing, a non-matching tag bringing nothing with it, fuzzy tag matching and ranking, `isEmpty` over all three groups |

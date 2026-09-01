@@ -147,11 +147,22 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
 - `main` — stable release branch (v1.0 "Seed" through v1.3 "Supernote" shipped; the release merge
   commits are in git history).
 - `ratta` — **the active feature branch** (cut 2026-08-20): Notesprout SN, a from-scratch
-  Supernote-only rebuild under `apps/notesprout_ratta/`. **Arcs 1–20 complete + frozen**
-  (2026-08-31): Ratta Paper ·
+  Supernote-only rebuild under `apps/notesprout_ratta/`. **Arcs 1–21 complete + frozen**
+  (2026-09-01): Ratta Paper ·
   Polish · Headings · Contents · Naming · Links · Pages · Objects ·
   Snap · Recents · Scratch Pad · Paper · Stationery · Scribble · Export · Import · Backup ·
-  PDF · Document · **Search** (arc 20 — fuzzy name search over the whole library from the library's
+  PDF · Document · Search · **Tags** (arc 21 — tags on notebooks and pages as the SIXTH
+  capability point: `ACTION_TAG_MANAGER` + `_SCREEN`, `:ext-tags` / NSE · Tags, the third tier-2
+  screen and the first with **no paper** on it, so no EPD handoff. Four doors — the library's
+  long-press "Tags…" row, the notebook bar's `[Tag notebook] [Tag page] [Manage]`, the lasso's Tag
+  (a lone heading is silent + toast, ink alone is recognized into a prefilled screen, **a mixed
+  selection is not offered the button**), and library search, which now runs **one query over names
+  AND tags** with tagged pages as their own cards. **Every assignment names its notebook**, a page
+  tag also its page — which moved `API_VERSION` to 5, the first bump that is *not* a compatible
+  tail. Backup grew to cover **every `Garden/<pkg>.db`**, unconditionally, every pass — no restore,
+  so the manual copy-back is in `docs/backup.md` and a restore screen is in `BACKLOG.md`.
+  `docs/tags.md` is the feature reference) ·
+  **Search** (arc 20 — fuzzy name search over the whole library from the library's
   top bar: `core/FuzzyRank` is subsequence-and-ranking, **not** typo tolerance, and the template
   browser's Search shelf runs on the same matcher; `docs/library.md` § Search is the reference) ·
   **Document** (arc 19 — og's Documents as the FIFTH point: `NSE · Document` editor +
@@ -159,18 +170,9 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   Proofread; `docs/document.md` is the feature reference), plus post-arc fixes F1–F5. Ten
   modules (host + `:sn-screen` + `:markdown` + `:extension-api` + six extension APKs), SIX
   extension points (recognizer · scratch pad · exporter · importer · document editor · tag
-  manager), g-paper pin 0.1.23, version `0.1.0-ratta`, 1626 JVM tests/variant. **Arc 21 "Tags"
-  in progress: W1 ✅ (the SIXTH point `ACTION_TAG_MANAGER` + `_SCREEN` is live — `:ext-tags` /
-  NSE · Tags, the third tier-2 screen and the first with no paper on it, so no EPD handoff;
-  library long-press "Tags…" row) · W2 ✅ (the notebook's three tag doors) · W3 ✅ (the lasso's
-  Tag: a lone heading is silent + toast, ink alone is recognized into a prefilled tag screen, a
-  mixed selection is not offered the button) · W4 ✅ (one query over names AND tags; **every tag
-  assignment now names its notebook**, a page tag also its page — `API_VERSION` 5, the first
-  non-tail bump) · W5 ✅ (**every `Garden/<pkg>.db` is in the backup set** — unconditional every
-  pass, the index's snapshot-and-probe treatment, no restore: the manual copy-back is in
-  `docs/backup.md` and a restore screen is in `BACKLOG.md`). Next work = W6 "Review, docs,
-  freeze". Fable planned only — Opus/Sonnet/Haiku execute per the plan's model notes. No SEVENTH
-  point without another user decision.**
+  manager), g-paper pin 0.1.23, version `0.1.0-ratta`, 1623 JVM tests/variant.
+  **NEXT ARC NOT PLANNED — ask the user first. No SEVENTH extension point without another user
+  decision.**
   **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for ANY work there** — it holds the working
   protocol, model recipe, standing traps, the per-arc ledger of still-binding decisions, and the
   active arc's full plan. Subsystem detail: `apps/notesprout_ratta/docs/` + that app's CLAUDE.md.

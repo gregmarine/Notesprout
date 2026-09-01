@@ -32,12 +32,12 @@ deliberate differences are listed at the end.
 | `HeadingRenderer` (N2) | the g-paper `ContentRenderer` that paints `liveHeadings` into the committed layer (`BELOW_STROKES`), plus the static `measure()` both the convert flow and the edit dialog size from |
 | `HeadingConvert` (N2) | ink → title: discovers the recognizer, drives `RecognizerReadiness` + the "Recognizing…" box, hands back a one-line title or explains why not |
 | `HeadingEditDialog` (N2) | the hash-free "fix a heading's words" dialog — prefill/strip, empty Save = delete, never hides the IME |
-| `core/RecognizingOverlay` (N2) | the "Recognizing…" box during a convert — `OpeningOverlay`'s smaller, dialog-free sibling |
+| `core/RecognizingOverlay` (N2) | the "Recognizing…" box during a convert — `OpeningOverlay`'s smaller, dialog-free sibling. Grew a message parameter in arc 21 / W3 (default text unchanged) so the lasso's silent heading→tag can reuse it, showing "Tagging…" instead |
 | `notebook/InkPayload` (N2) | `Stroke` (g-paper) → `InkStroke` (extension-api) in writing order — the one place a page's ink is reduced to bare geometry for the recognizer |
 | `CoverSnapshot` | `paper.renderToBitmap()` → ≤ 512 px long edge → WEBP q100 → `IndexRepository.setCover`; headings ride along for free (`HeadingRenderer` is part of the same committed-layer render) |
 | `NotebookToolbar` | `[←] [contents] [pen] [eraser] [lasso] … [document] [recents] [scratch pad]` — arming only; owns the fixed tool values (the Contents, Document and Recents buttons belong to their own flows, not to it). Back goes through `backPressed()`, never straight to `close()` (K4 — both Backs walk the link trail in a via-link notebook). O1: a second tap on the **armed lasso** calls back to the screen (the clipboard popup), and `showClipboardLoaded()` swaps that button's icon |
-| `SelectionToolbar` | the floating bar over a live lasso selection: Delete (always) + H, plus (K1) **Link** / **Edit** / **Unlink** by `SelectionMode` (five modes since K1), plus (O1) **Copy** / **Cut** in every mode, plus (N2) the H1–H6 level sub-toolbar it can open |
-| `LassoPopup` (O1) | the small bordered bar under the **armed** lasso button: **Paste** + **Clear** for the object clipboard. Opens only while the clipboard holds objects; the screen owns every dismissal |
+| `SelectionToolbar` | the floating bar over a live lasso selection: Delete (always) + H, plus (K1) **Link** / **Edit** / **Unlink** by `SelectionMode` (five modes since K1), plus (O1) **Copy** / **Cut** in every mode, plus (N2) the H1–H6 level sub-toolbar it can open, plus (arc 21 / W3) **Tag** — see [Tag](#tag-arc-21) below |
+| `LassoPopup` (O1) | the small bordered bar under the **armed** lasso button: **Paste** + **Clear** for the object clipboard. Opens only while the clipboard holds objects; the screen owns every dismissal. Placement is [`AnchoredBar`](#anchoredbar) since arc 21 / W2, shared with the tag button's own popup |
 | `ObjectClip` (O1) | pure selection ⇄ clipboard payload — capture, fresh ids, parent rewiring, the per-type `"order"` rebase, geometry translation (stroke = decode/translate/re-encode). JVM-tested. [`docs/clipboard.md`](clipboard.md) |
 | `ObjectPlacement` (O1) | pure placement arithmetic: payload box + tap (or source origin) + page size → the clamped `dx/dy`. JVM-tested |
 | **Links (arc 6)** | `LinkPayload` · `PageLink`/`LinkRows` · `LinkStore` · `LinkComposite`/`LinkRenderer` · `LinkPickerActivity`/`LinkPickerModel`/`PageCardGrid` · `LinkPickFlow` · `PickerPageSource`/`ForeignPageSource`/`PageReads`/`PagePreview`/`PreviewMath`/`PageLabels` · `LinkFollowFlow`/`LinkNav` · `data/prefs/LinkTrail` — the whole subsystem is documented in [`docs/links.md`](links.md) |
@@ -53,6 +53,11 @@ deliberate differences are listed at the end.
 | `RecentsFlow` (T1) | what the clock button and the two-finger swipe-down both call: busy guard, pen-gated `releaseRender`, gather → `RecentsDialog`, `showing` (drives BLOCK_ALL), `dismissIfShowing()`. Owns `btnRecents` outright |
 | `RecentsDialog` (T1) | the Recents screen: `dialog_contents.xml` mirrored to the right (2 dp rule on the left edge), three-line rows, measured pagination, tap = switch notebooks |
 | `DocumentEditorEntry` / `DocumentSeedFlow` / `DocumentHostHooks` (arc 19 / M3–M8) | what `btnDocument` opens: the fifth extension point's client, the seed-before-launch flow, and the host-side callback binder every read/write from the editor comes back through. Full detail — data model, seeding, flips, the notebook document, text documents — is [`docs/document.md`](document.md); see [Document](#document-arc-19) below for this screen's own slice |
+| `AnchoredBar` (arc 21 / W2) | the placement mechanics for a small bordered bar hung under a top-bar button — measure-before-place, the rects, the button recipe — pulled out of the arc-8 `LassoPopup` so `TagsPopup` did not need a second copy of the same bar |
+| `TagsPopup` (arc 21 / W2) | the `ic_tag` button's own bar, hung under it via `AnchoredBar`: **Tag notebook** · **Tag page** · **Manage** — the notebook's three tag doors. Gated on `canvasShown`; see [Tags](#tags-arc-21) below |
+| `TagTargets` (arc 21 / W2) | pure: a page's 1-based number in the live page list (or null — a page briefly missing from it names nothing), and the pages a MANAGE showing may carry, capped at `TagShowing.MAX_PAGES`. JVM-tested |
+| `TagSelection` (arc 21 / W3) | pure: which selections offer the lasso's Tag button and which of the two flows a tap takes (`TagFlow.SILENT` / `RECOGNIZE` / `NONE`), plus the prefill cut for an over-cap heading title. JVM-tested; see [Tag](#tag-arc-21) below |
+| `TagManagerEntry` (arc 21 / W1) | the host's one door for every tag surface — library sheet, notebook toolbar, lasso — the `ScratchPadEntry` shape: availability, the busy latch, the "Opening…" wait, a held showing's bind life, and (W3) the silent `assign` call with its own "Tagging…" wait |
 
 ## Layout (`activity_notebook.xml`)
 
@@ -60,16 +65,20 @@ deliberate differences are listed at the end.
 Context) → `topBar` overlay (flush at the top edge — the top guard is 0 on Ratta; 1dp inkBlack
 bottom border) → `bottomStrip` overlay ("`<name>` `n / N`", 1dp top border) → `selectionToolbar`
 (floating, `GONE`, placed by margins) → `selectionSubToolbar` (N2 — its own floating `GONE` bar,
-placed by `SelectionAnchor.placeSub` off the main bar when H is tapped) → `openingOverlay` (an
+placed by `SelectionAnchor.placeSub` off the main bar when H is tapped) → `tagsPopup` (arc 21 / W2 —
+the `ic_tag` button's own floating `GONE` bar, placed by `AnchoredBar` under `btnTags`) →
+`openingOverlay` (an
 `<include>` of `overlay_opening.xml`, **last child so it is topmost**, and `VISIBLE` from the first
 frame). Immersive: system bars hidden, transient by swipe. Portrait-locked.
 
 The `topBarRow` is left-packed — Back, then Contents / Pen / Eraser / Lasso, all butted together
 (the same spacing the scratch pad's row uses) — with a **weighted spacer** after the Lasso holding
-the row's free space, so `btnDocument` (arc 19), `btnRecents` (T1) and the Scratch Pad button sit
-flush at the right edge, in that order — Document immediately before Recents (the user's placement
-call, M3 phase start: page-bound, so leftmost of the "leave this page" cluster) — and everything to
-their left keeps its position whatever the screen width.
+the row's free space, so `btnDocument` (arc 19), `btnTags` (arc 21 / W2), `btnRecents` (T1) and the
+Scratch Pad button sit flush at the right edge, in that order — Document immediately before Tags,
+Tags immediately before Recents (the user's placement call, arc 21 / W2: next to Document, before
+Recents) — and everything to their left keeps its position whatever the screen width. `btnTags` is
+**GONE without a trusted tag manager installed** (`TagManagerEntry.refresh()`, re-run from
+`onResume` like every other extension-backed control), never disabled.
 
 Both bars — and both selection bars while they are up — are pushed to `paper.setExclusionRects`
 after every root layout pass, translated into the paper view's coordinates, so the stylus can never
@@ -253,7 +262,7 @@ Every write schedules a trailing-debounced (2 s) `IndexRepository.touch(notebook
 close. Ink is durable the moment the row lands (WAL); a process kill loses at most the strokes
 still queued in the channel.
 
-## Selection (R5, context toolbar P1, headings N2)
+## Selection (R5, context toolbar P1, headings N2, tag arc 21)
 
 **The engine owns every mechanic.** Outline capture, the hit test, the static dashed selection box
 (the tight bounds inflated 12 px so a thin selection stays grabbable), the drag preview, the
@@ -283,6 +292,7 @@ toolbar are set there by hand rather than waiting on the callback.
 | Tap the bar's **Copy** / **Cut** (O1) | the selection goes on the global clipboard; the bar goes, and the host **re-arms `Tool.LASSO`** so the next tap places ([`docs/clipboard.md`](clipboard.md)) |
 | Tap bare paper with the lasso armed and **nothing** selected (O1) | `onPaperTapped` (g-paper 0.1.5) → the clipboard's objects paste **centred on the tap**, landing selected |
 | Tap the bar's **Snap** (A1) | snap-to-guide flips for every drag from now on — nothing on the page moves ([Snap to guides](#snap-to-guides-a1) below) |
+| Tap the bar's **Tag** (arc 21) | the silent flow on a lone heading, or the recognize flow on ink alone — non-destructive, offered on no other selection ([Tag](#tag-arc-21) below) |
 | Tap outside / tool change / any data-in call / page swap | `onSelectionDismissed` → bar(s) hidden, mirror cleared (unless a converted heading's selection is waiting to take its place — see Headings below) |
 
 ### The selection toolbar
@@ -290,8 +300,11 @@ toolbar are set there by hand rather than waiting on the callback.
 A bordered row floating over the paper: (A1) **Snap** and (O1) **Copy** / **Cut** first — all three
 offered in every mode — then (N2) an **H** button that opens a second floating bar of its own, the
 H1–H6 level sub-toolbar (`SelectionMode` and the convert/change flows are covered under Headings
-below), then Link / Edit / Unlink, then Pad, and **Delete** last. It is a *bar*, not a button,
-because it is the shape the selection's actions live in from here on.
+below), then Link / Edit / Unlink, then Pad, then (arc 21 / W3) **Tag** — next to Pad because it is
+the other button gated on an extension, and narrow for its own reason: it is offered only on a lone
+heading or on ink alone, never a mixed selection (see [Tag](#tag-arc-21) below) — and **Delete**
+last. It is a *bar*, not a button, because it is the shape the selection's actions live in from here
+on.
 
 **Delete sits on the far edge, alone**: it is the one destructive verb, and it is kept away from
 the buttons the hand reaches for casually. (It led the row from P1 through arc 13; the order above
@@ -358,6 +371,57 @@ counts proximity + a 350 ms tail), so an idle gate would deliver the bar long af
 belongs to — the R3 panel lesson. It is safe because the engine has *already* presented the
 selection box on this same boundary: this frame is part of that presentation, not a repaint during
 writing. See the frame-silence section for the full list.
+
+### Tag (arc 21)
+
+The lasso always tags **the page on the paper, never the notebook** (the wizard's call) — a lassoed
+heading or a lassoed patch of ink turns into a page tag, non-destructively both ways: the ink, the
+heading and the selection are all exactly as they were afterward, because a tag is a *snapshot* of
+some text at this moment, not a second name for the thing it was taken from. Editing that heading
+later never renames the tag it produced; converting the same ink again makes another one.
+
+**The offered set is exactly one heading, or a selection with no content objects at all** —
+`SelectionMode.HEADING` and `SelectionMode.STROKES`, decided by `TagSelection.flowFor`. A **mixed**
+selection is not offered the button at all, and neither is a lone link (content with a payload, not
+ink). The reason is that a mixed selection has two answers with no way to ask which is meant: a
+heading already carries the words a tag would be made of, while the ink beside it carries different
+words, and re-recognizing the heading's own strokes could come back with something other than what
+is on the glass. A button that quietly picked one of those would be worse than a button that is not
+there.
+
+- **A lone heading — `TagFlow.SILENT`.** One call (`TagManagerEntry.assign`), one toast naming the
+  tag's canonical display text, no screen. The heading's hash prefix is storage, not the title, and
+  never reaches the tag. A title that is **not** a valid tag — over `MAX_TAG_CHARS`, or blank once
+  the prefix is stripped — is not refused: it falls through to the same correction screen the ink
+  flow uses, prefilled with as much of the title as fits (`TagSelection.prefill`, a character backed
+  off rather than a surrogate pair split — the `TextChunks` rule), so a tap that cannot finish
+  silently still lands somewhere the user can finish it in one more gesture.
+- **Ink alone — `TagFlow.RECOGNIZE`.** This takes `HeadingConvert` **whole** rather than growing a
+  near-copy — "read this one writing area and give me back a single line" is the same question a
+  heading convert asks: same extension, same selection-bounds writing area (a page-sized area under
+  one line of writing collapses recognition to fragments), same problem dialogs. Only the caller's
+  use of the answer differs — it opens the tag screen in `MODE_ADD` with the recognized text as
+  `prefill` instead of creating a heading — so the name `HeadingConvert` stays; nothing in it knows a
+  heading is what usually follows.
+
+**The recognizer is NOT gated on.** Tag stands or falls with the *tag* extension alone; a missing
+recognizer is explained by the same problem dialog the H button beside it already gives — H and Tag
+sit in the same bar and both go out through the recognizer, so one vanishing while the other stayed
+would read as a bug rather than a rule. It also keeps a package query off every `show()`.
+
+**The flow is re-read from the live selection at the tap**, not trusted from the bar that offered
+it — a selection can move, change kind or die between the bar going up and a button landing. The
+page id is captured **at the tap** too (`displayedPageId`, the R6 rule), so a flip mid-recognition
+still lands the tag on the page the ink was on. The toast fires when the write lands, never at the
+tap — the standing toast-confirms rule, since until the write lands nothing has happened yet.
+
+`RecognizingOverlay` shows "Tagging…" for the silent flow's wait rather than a third overlay object
+— a default message-resource argument, because the wait is the same shape and length as a heading
+convert's (the first tag operation of a host process pays SQLCipher's KDF, seconds on a Nomad) even
+though nothing is being recognized.
+
+See [Tags](#tags-arc-21) below for the notebook's other two tag doors, and
+[`docs/tags.md`](tags.md) for the tag screen and the tag model.
 
 ## Snap to guides (A1)
 
@@ -832,6 +896,53 @@ runs in the extension's own process on top of this screen, and a Bluetooth-keybo
 detach is a config change reaching all the way down here too — a recreate behind a live editor
 would tear down the host binder mid-edit, the exact failure M4 exists to close.
 
+## Tags (arc 21)
+
+The notebook's own doors into the sixth extension point — see [`docs/extensions.md`](extensions.md)
+for the point itself and [`docs/tags.md`](tags.md) for the tag screen and the tag model; this section
+is only the notebook's own slice. The lasso's door onto the same point is [Tag](#tag-arc-21) above.
+
+`btnTags` (icon `ic_tag`) sits in the top bar's right cluster, between Document and Recents (see
+[Layout](#layout-activity_notebookxml) above) — **GONE without a trusted tag manager installed**,
+never disabled. A tap opens `TagsPopup`, an [`AnchoredBar`](#anchoredbar) hung under it, holding
+three **icon-only buttons with long-press hints** — the house style every floating bar in this
+screen follows:
+
+| Button | Icon | Opens |
+|---|---|---|
+| Tag notebook | `ic_notebook` | the tag screen in `MODE_ADD` on this notebook, field focused |
+| Tag page | `ic_page` (Tabler `file` — deliberately **not** `ic_file_text`, which is the Document button two taps away in the same bar) | the same, on the page whose ink is on the paper |
+| Manage tags | `ic_list` | the tag screen in `MODE_MANAGE`: this notebook **and** every one of its pages, for add and remove |
+
+**Gated on `canvasShown`, not on `opened` alone.** Two of the three doors are about the page on the
+paper, and a text document that has never shown its pages has no page to tag — the bar stays absent
+rather than opening with a door that would do nothing (the standing rule: a control that cannot work
+is not shown greyed).
+
+**Page numbers are the host's to resolve, at the tap, against the live page list** — the extension
+is handed labels, never a way to work them out, because it has no idea what a page is
+(`TagTargets.pageNumber`). A displayed page that is not in the list — briefly true during a page op —
+falls back to the notebook's own name rather than naming a "Page 0". MANAGE's page id/label arrays
+stop at `TagShowing.MAX_PAGES`: the parcel **refuses** rather than allocates above it, so listing
+what fits is the lesser of the two failures.
+
+**The bar's outside-tap dismissal deliberately does not write `tapDismissedPopup`.** That latch
+exists so a contact spent dismissing the *clipboard* popup is not also spent pasting on the same
+contact — a coincidence of geometry the lasso popup has to guard against and this bar does not, since
+it has no second meaning a stray tap could trigger.
+
+### AnchoredBar
+
+Placement, the measure-before-place rule, the rects and the button recipe for `TagsPopup` are not a
+second copy of arc 8's `LassoPopup` (the armed lasso button's own Paste/Clear bar). Both bars are the
+same shape — a small bordered row of icon buttons hung under a top-bar or toolbar control — so the
+placement call, the measure-before-place rule, the rects and the button recipe moved into
+`notebook/AnchoredBar`, and both callers are now thin on top of it: a `TagsPopup` or `LassoPopup`
+supplies only its own buttons and the rule for when it may open. A second, near-identical bar class
+would have been the sibling-copy trap ([`docs/drawing-engine.md`](drawing-engine.md)'s Ratta/Generic
+family) in miniature — the same lesson, at the scale of one floating bar instead of a whole notebook
+view.
+
 ## Pages
 
 A notebook is an ordered list of `page` rows under the notebook row; `"order"` is kept **dense,
@@ -1205,6 +1316,12 @@ both follow a deliberate chrome tap on `btnDocument` — exception 1's justifica
 page-template picker's own Activity launch, extended to a cross-process one at M3): the tap has
 already passed the gate before either can show, and nothing here repaints while the pen writes.
 
+**Arc 21 added no new exception**: `TagsPopup`'s show/hide follows a deliberate chrome tap on
+`btnTags` — exception 1's justification again, a bar in place of a dialog or an Activity launch. The
+lasso's Tag button rides exception 5, the same as every other selection-toolbar button's own tap;
+and the silent flow's "Tagging…" box is exception 4's "Recognizing…" box exactly, carrying a
+different word for a wait of the same shape.
+
 Any new exception needs the same written justification.
 
 ## JVM tests
@@ -1270,6 +1387,16 @@ past the threshold, exact-threshold miss, independent axes, no targets, a zero p
 zero margin, and a zero-size selection). What is left on this side is a preference and a button,
 which is a device eye-check, not a unit test — and one adb can only half reach, since it can neither
 lasso nor drag.
+
+**Arc 21 (tags), the notebook's own half:** `TagTargetsTest` (1-based page numbers following the
+list's order, a page not in the list having none, every page listed while under `MAX_PAGES`, the
+listing stopping exactly at the bound) and `TagSelectionTest` (a lone heading is the silent flow, ink
+alone is recognized, a mixed selection has no flow, a lone link is not ink, no tag manager means no
+button whatever is selected, exactly the two flows offered with one, an ordinary title is a tag, a
+blank or over-cap one is not, a prefill normalized the way a tag is, recognized line breaks
+collapsing, nothing left being a null prefill rather than an empty one, an over-long prefill cut to
+the cap, and a cut never splitting a surrogate pair). The tag screen, the codec and the seam's own
+tests are [`docs/tags.md`](tags.md)'s.
 
 ## Deliberate differences from Paper v0
 

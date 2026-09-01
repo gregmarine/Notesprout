@@ -13,9 +13,13 @@
         <!-- The TAG_MANAGER point (arc 21 / W1) — SN's SIXTH capability point and its THIRD
              screen-owning one. No Application class: this extension has no drawing engine to
              register.
-             API version 4: the point itself is the version-4 event. An older host knows no
-             `ITagManager` at all, so the skip has to happen at discovery — there is no compatible
-             tail that could carry it. -->
+             API version 5. The point itself was the version-4 event (W1) and this declared 4 until
+             W4 reshaped `TagShowing` and `TagCodec` around the notebook/page pair — the first bump
+             in this family that is NOT a compatible tail, so a W1-shaped host would unmarshal a
+             showing wrongly rather than merely miss a field. Either way an older host knows no
+             `ITagManager` at all, so the skip happens at discovery: there is no tail that could
+             carry it. The `android:value` below is the host-compat gate — it is the line that
+             matters, and this comment must move with it. -->
         <service
             android:name=".TagManagerService"
             android:exported="true">

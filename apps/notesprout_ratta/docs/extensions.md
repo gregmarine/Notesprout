@@ -34,37 +34,52 @@ exporter on arc 15's exporter point and a text importer on arc 16's importer poi
 `:ext-soil` one-APK-many-services precedent). The seam's new piece is `IDocumentHost` — the
 first **host-side** stub on any SN extension seam, minted per showing so the editor's autosave
 pushes text back to the host live. M3 landed the point; M9 the `SOURCE_DOCUMENT` source kind;
-M8 the `resultKind` descriptor tail. The rule survives, one word wider each time: **no *sixth*
-capability point without another user decision** (`apps/notesprout_ratta/CLAUDE.md`).
+M8 the `resultKind` descriptor tail. The rule survived one word wider through arc 19 — **no
+*sixth* capability point without another user decision** — and arc 21 is that decision.
+
+**Arc 21 is the fifth fresh user decision, on 2026-08-31.** The user asked for tags on notebooks
+and pages, so SN gains a **sixth** capability point — `ACTION_TAG_MANAGER`, the third
+screen-owning one, served by **`NSE · Tags`** (`:ext-tags`), the **tenth** module. The shape is
+the scratch pad's: the extension owns the tag screen and the tag index, in its own extension
+store; the host owns every entry point (the library's long-press row, the notebook's three tag
+doors, the lasso's silent and recognized flows), the recognizer call, and the library's search
+merge. It is the first screen-owning point whose screen carries **no paper at all** — no
+`PaperView`, no g-paper, and therefore no EPD handoff — and the first interface to serve two call
+shapes at once, a held bind for the showing and bind-per-call for `snapshot`/`assign`. The rule
+survives once more, another word wider: **no *seventh* capability point without another user
+decision** (`apps/notesprout_ratta/CLAUDE.md`).
 
 The pad as a **feature** has its own reference — [`docs/scratchpad.md`](scratchpad.md); export has
 its own — [`docs/export.md`](export.md); import has its own too — [`docs/import.md`](import.md);
-documents likewise — [`docs/document.md`](document.md). This doc is the seam for all five points.
+documents likewise — [`docs/document.md`](document.md); tags likewise —
+[`docs/tags.md`](tags.md). This doc is the seam for all six points.
 
 Fresh code. Paper's own extension arcs (`PAPER_EXTENSIONS_PLAN.md`, `PAPER_RECOGNITION_PLAN.md`,
 `PAPER_SCRATCHPAD_PLAN.md`, its `:extension-api` / `:ext-mlkit` / `:ext-scratchpad`) are the shape
-reference — nothing is copied, and SN's AIDL is scoped to its **five** points rather than Paper's
-broader capability set. Paper never built export, import or documents, so it has nothing to say
-about the third, fourth or fifth; og's `docs/full-notebook-export.md` § Import was the fourth's
-reading reference and og's `docs/documents.md` the fifth's.
+reference — nothing is copied, and SN's AIDL is scoped to its **six** points rather than Paper's
+broader capability set. Paper never built export, import, documents or tags, so it has nothing to
+say about the third through sixth; og's `docs/full-notebook-export.md` § Import was the fourth's
+reading reference and og's `docs/documents.md` the fifth's. Tags have no og reading reference —
+the feature is new to this family.
 
 ---
 
 ## Module layout
 
-Nine modules, SN's own Gradle root:
+Ten modules, SN's own Gradle root:
 
 | Module | Type | Depends on | Holds |
 |---|---|---|---|
 | `:sn-screen` | Android library | g-paper (`api`) + androidx; **never** `:app`, **never** `:extension-api` | the design resources and the screen helpers both paper surfaces need — see [`sn-screen.md`](sn-screen.md) |
 | `:markdown` | Android library | nothing in this project — stdlib + the android SDK its spans use (arc 19 / M1) | the shared pure markdown engine `:app` and `:ext-document` both consume — parser, renderer, `HeadingTypography`, `MarkdownDraw`, `MarkdownFormatter`, `TextBuffer`, `MarkdownReflow`, `TextSearch`, `DocumentDraft`, `MarkdownText`, `MarkdownPaginator`. One engine, no drift: the host renders text-document covers and the PDF preview, the extension renders the editor's Preview |
-| `:extension-api` | Android library | nothing in `:app`, no library beyond the Kotlin stdlib (`build.gradle.kts` says so explicitly) | the AIDL (`IHandwritingRecognizer`, `InkStroke.aidl`; `IExtensionStore`, `LargeValue.aidl`; `IScratchPad`, `WireStroke.aidl`, `InkBundle.aidl`; `INotebookExporter`, `ExporterInfo.aidl`, `ExportSpec.aidl`, `ExportResult.aidl`; `INotebookImporter`, `ImporterInfo.aidl`, `ImportSpec.aidl`, `ImportResult.aidl`; `IDocumentEditor`, `IDocumentHost`, `DocumentPageState.aidl`), the hand-written `InkStroke` / `LargeValue` / `WireStroke` / `InkBundle` / `ExporterInfo` / `OptionDescriptor` / `ExportSpec` / `ExportResult` / `ImporterInfo` / `ImportSpec` / `ImportResult` / `DocumentPageState` parcelables, `PageBundle` (the arc-18 page-bundle container — pure `java.io`, no Android types), `SharedBytes`, `InkChunks`, `TextChunks`, `RecognizerStatus`, `ExtensionContract`, `ExporterContract`, `ImporterContract`, `DocumentContract`, `HostCallerCheck` |
+| `:extension-api` | Android library | nothing in `:app`, no library beyond the Kotlin stdlib (`build.gradle.kts` says so explicitly) | the AIDL (`IHandwritingRecognizer`, `InkStroke.aidl`; `IExtensionStore`, `LargeValue.aidl`; `IScratchPad`, `WireStroke.aidl`, `InkBundle.aidl`; `INotebookExporter`, `ExporterInfo.aidl`, `ExportSpec.aidl`, `ExportResult.aidl`; `INotebookImporter`, `ImporterInfo.aidl`, `ImportSpec.aidl`, `ImportResult.aidl`; `IDocumentEditor`, `IDocumentHost`, `DocumentPageState.aidl`; `ITagManager`, `TagShowing.aidl`), the hand-written `InkStroke` / `LargeValue` / `WireStroke` / `InkBundle` / `ExporterInfo` / `OptionDescriptor` / `ExportSpec` / `ExportResult` / `ImporterInfo` / `ImportSpec` / `ImportResult` / `DocumentPageState` / `TagShowing` parcelables, `PageBundle` (the arc-18 page-bundle container — pure `java.io`, no Android types), `SharedBytes`, `InkChunks`, `TextChunks`, `RecognizerStatus`, `ExtensionContract`, `ExporterContract`, `ImporterContract`, `DocumentContract`, `HostCallerCheck`, and — arc 21's four pure tag files — `TagRules`, `TagIndex`, `TagCodec`, `CompactId` |
 | `:ext-mlkit` | Android application (its own installable APK) | `:extension-api` + `com.google.mlkit:digital-ink-recognition:19.0.0` | `HandwritingRecognizerService`, `ModelManager`, `MlKitEngine`, `PageText`, `StrokeSegmenter`, `Dots`, `Box` |
 | `:ext-scratchpad` | Android application (its own installable APK) | `:extension-api` + `:sn-screen` (g-paper arrives through its `api`) + androidx; **never** `:app`, no Room / SQLCipher / serialization | `ScratchPadApplication`, `ScratchPadService`, `ScratchPadActivity`, `ScratchSession`, `ScratchStore`, `ScratchPageCodec`, `ScratchPages`, `ScratchInk` |
 | `:ext-soil` | Android application (its own installable APK) | `:extension-api` only | `SoilExporterService`, `SoilExportSpec` — see [`export.md`](export.md); and, arc 16, `SoilImporterService` — see [`import.md`](import.md). One package, two services, one label |
 | `:ext-pdf` | Android application (its own installable APK) | `:extension-api` + `com.tom-roush:pdfbox-android:2.0.27.0` (module-local — approved 2026-08-30, used only on the protect path) | `PdfExporterService`, `PdfDescriptor`, `PdfExportSpec`, `PdfAssembly`, `CountingOutputStream` — arc 18's second exporter on the same point; see [`export.md`](export.md) |
 | `:ext-document` | Android application (its own installable APK) | `:extension-api` + `:sn-screen` + `:markdown` + `com.darkrockstudios:symspellkt:3.4.0` (module-local — approved 2026-08-30, the pdfbox precedent); **never** `:app`, no Application class, no drawing engine | one package, TWO services + a screen: `DocumentEditorService` + `DocumentEditorActivity` (the editor — arc 19 / M3–M7, with `EditorSession`, `DocumentSaver`, `AutosaveGovernor`, `ChunkPush`, `PendingPark`, `EditorPrefs`, the format bar, find & replace, and the `proofread/` engine over the bundled `assets/proofread/en_82765.dict`), `TextImporterService` (M8, on the importer point) and `DocumentExporterService` (M9, on the exporter point) — see [`document.md`](document.md) |
-| `:app` (`extension/` package) | part of the host APK | `:extension-api` | `ExtensionRegistry`, `ExtensionBinder`, `ExtensionCallException`, `InkCaps`, `RecognizerClient`, `RecognizerReadiness`, `ScratchPadClient`, `TransferCaps`, `ExporterClient`, `ImporterClient`, `DocumentEditorClient`, `DocumentEditorEntry`, `DocumentHostBinder`, `DocumentHostSession`; and in `data/extstore/`, the extension store (`ExtensionStores`, `ExtensionStoreDatabase`, `KvEntity`, `KvDao`, `ExtensionStoreGate`, `ExtensionStoreBinder`) — plus, in `export/` and `crypto/`, export's own host-side half (`ExportActivity`, `ExportPanel`, `ExportOptions`, `ExportArtifact`, `ExportNaming`, `ExportKeying`, `SoilOpenFiles`, and arc 19's `ExportText`, `ExportDocumentRules`, `DocumentPdfRender`, `DocumentPdfMetrics`), and in `importing/` and `crypto/`, import's (`ImportFlow`, `NotebookImport`, `ImporterMatch`, `ImportNames`, `AncestryPlan`, `SafeImportId`, `ImportDialogs`, `ImportOverlay`, `ImportKeying`, `NotebookRemap` in `data/soil/`, and arc 19's `TextImport`) |
+| `:ext-tags` | Android application (its own installable APK) | `:extension-api` + `:sn-screen` (g-paper arrives through its `api` and is deliberately never touched); **never** `:app`, no Application class, no drawing engine | the TENTH module (arc 21 / W1–W4, **NSE · Tags**, Tabler `tag` icon): one service + a screen, `TagManagerService` + `TagsActivity`, over `TagSession` (the `ScratchSession` shape — the two share a process), `TagStore` (the index's key layout, one key), `TagWrites` (the one read-modify-write both writers in the process take), `TagManage`, `TagPaging`, `TagRowView` — see [`tags.md`](tags.md) |
+| `:app` (`extension/` package) | part of the host APK | `:extension-api` | `ExtensionRegistry`, `ExtensionBinder`, `ExtensionCallException`, `InkCaps`, `RecognizerClient`, `RecognizerReadiness`, `ScratchPadClient`, `TransferCaps`, `ExporterClient`, `ImporterClient`, `DocumentEditorClient`, `DocumentEditorEntry`, `DocumentHostBinder`, `DocumentHostSession`, `TagClient`, `TagManagerEntry`; and in `data/extstore/`, the extension store (`ExtensionStores`, `ExtensionStoreDatabase`, `KvEntity`, `KvDao`, `ExtensionStoreGate`, `ExtensionStoreBinder`) — plus, in `export/` and `crypto/`, export's own host-side half (`ExportActivity`, `ExportPanel`, `ExportOptions`, `ExportArtifact`, `ExportNaming`, `ExportKeying`, `SoilOpenFiles`, and arc 19's `ExportText`, `ExportDocumentRules`, `DocumentPdfRender`, `DocumentPdfMetrics`), in `importing/` and `crypto/`, import's (`ImportFlow`, `NotebookImport`, `ImporterMatch`, `ImportNames`, `AncestryPlan`, `SafeImportId`, `ImportDialogs`, `ImportOverlay`, `ImportKeying`, `NotebookRemap` in `data/soil/`, and arc 19's `TextImport`), and in `notebook/`, tags' own host-side half (`TagsPopup`, `TagTargets`, `TagSelection`) |
 
 `:sn-screen` is deliberately **not** in that dependency chain: it never sees `:extension-api`, so a
 shared screen helper can never quietly become part of the wire contract. `:ext-scratchpad` depends on
@@ -107,14 +122,27 @@ The host's `AndroidManifest.xml` declares package-visibility for the point (API 
     <intent>
         <action android:name="…extension.DOCUMENT_EDITOR_SCREEN" />
     </intent>
+    <intent>
+        <action android:name="…extension.TAG_MANAGER" />
+    </intent>
+    <intent>
+        <action android:name="…extension.TAG_MANAGER_SCREEN" />
+    </intent>
 </queries>
 ```
 
-The two screen-owning points (scratch pad, document editor) need **both** of their actions
-listed: one to discover and bind the service, one to resolve and launch the screen. The exporter
-and importer points need only one each — `describe()` and the delivery call both ride the same
-bind-per-call service. Plus `ACCESS_NETWORK_STATE`, for
-the readiness flow's offline pre-check (below).
+The three screen-owning points (scratch pad, document editor, tag manager) need **both** of their
+actions listed: one to discover and bind the service, one to resolve and launch the screen. The
+exporter and importer points need only one each — `describe()` and the delivery call both ride the
+same bind-per-call service. Plus `ACCESS_NETWORK_STATE`, for the readiness flow's offline
+pre-check (below).
+
+**Missing either of a screen-owning point's two actions from this block is a silent-zero trap, not
+a mismatch.** Arc 21 / W1 cost an hour to it: with the service's own action present but the
+screen's absent (or the reverse), `queryIntentServices` answers `0 provider(s) of 0 candidate(s)`
+for a service that is installed, exported, correctly signed and at the right API version — which
+reads exactly like a signature or version skew and is neither. Both actions went in together, the
+scratch-pad / document-editor precedent.
 
 ---
 
@@ -157,7 +185,7 @@ loading as one busy state), `UNAVAILABLE` (3). The host treats anything outside 
 
 | Constant | Value | Purpose |
 |---|---|---|
-| `API_VERSION` | 3 (arc 19 / M8) | the host accepts an extension whose `<meta-data>` is in `1..API_VERSION` — the declared number is what the extension *requires* of the host, so a new-seam extension is skipped by an older host instead of misread by it. Meta-data is **per service**: the PDF exporter declares 2 (the `sourceKind` tail), `:ext-document`'s text importer and document exporter declare 3 (the `resultKind` tail / `SOURCE_DOCUMENT`), its editor service stays at 2, everything else at 1 |
+| `API_VERSION` | 5 (arc 21 / W4) | the host accepts an extension whose `<meta-data>` is in `1..API_VERSION` — the declared number is what the extension *requires* of the host, so a new-seam extension is skipped by an older host instead of misread by it. Meta-data is **per service**: the PDF exporter declares 2 (the `sourceKind` tail), `:ext-document`'s text importer and document exporter declare 3 (the `resultKind` tail / `SOURCE_DOCUMENT`), its editor service stays at 2, `:ext-tags`' one service declares 5, everything else at 1. **The ledger:** 2 = arc 18's `sourceKind` tail · 3 = arc 19 / M8's `resultKind` tail · 4 = arc 21 / W1, the tag point itself · 5 = arc 21 / W4, and it is the **first bump that is not a compatible tail** — see the version note below |
 | `ACTION_HANDWRITING_RECOGNIZER` | `…notesproutsn.extension.HANDWRITING_RECOGNIZER` | SN-namespaced action string |
 | `META_API_VERSION` | `…notesproutsn.extension.API_VERSION` | the `<service>` meta-data name |
 | `MAX_INK_STROKES` | 2,000 | most strokes in one recognize call |
@@ -172,6 +200,24 @@ which can be installed on the very same Nomad — are never discovered by SN's q
 versa; N0 pinned this with a test rather than leaving it to convention. `RECOGNIZER_NOT_READY` is
 compared **by exact message string**, not substring: it is the one case the host types as "still
 downloading," and every other `IllegalStateException` is treated as a generic engine failure.
+
+**A version bump means one of two different things, and `API_VERSION`'s history through arc 21 is
+where both shapes are on the record.** Versions 2 and 3 were **compatible tails**: `ExporterInfo`
+grew `sourceKind` and `ImporterInfo` grew `resultKind`, and an old host reading either tail simply
+finds nothing there — `dataAvail()` runs out and the absent-tail default is exactly the old
+meaning, so an old-host/new-extension pairing that predates the field still runs correctly on real
+wire (proven at the D1 and M8 walks). Declaring the version that introduced the tail is what keeps
+an *old* host from mis-reading it as absent when the extension needs it read — the extension
+requires the newer host, not the other way around. Version 5 is not that shape. W4 turned a tag
+target from a single id into a **pair** (a notebook, and optionally a page of it), which reshaped
+`TagShowing`'s wire form and `TagCodec`'s stored records — there is no absent-tail reading of a
+parcel whose fields changed underneath it. A W1-shaped `:ext-tags` bound to a W4 host would
+unmarshal a `TagShowing` **wrongly**, not blankly, so this bump relies on the version guard alone
+rather than on a graceful old-reading: it fails loudly (the constructor `require`s reject the
+malformed result, and the exception crosses as `IllegalArgumentException`) precisely because the
+declaration is what keeps a mismatched pairing from being reached at all. Only the tag service's
+own declaration moved for it; every other extension's declaration, and its meaning, is untouched —
+meta-data is still per service, and the host still accepts `1..API_VERSION`.
 
 ---
 
@@ -427,6 +473,32 @@ call's timeout window.
 the unbind — after which every method throws `SecurityException`. The store file itself outlives the
 extension: uninstalling or disabling one leaves its `.db` in place, because removing an extension's
 data is a deliberate act, not a side effect.
+
+### Backup (arc 21 / W5)
+
+**Every `Garden/<pkg>.db` is in the backup set** — the natural conclusion of "an extension writes
+nothing to disk itself, ever": if the host owns the data, the host's backup owns it too. The one
+path authority grew the one listing function, `SoilFile.extensionStoreFiles(ctx)` — `Garden/`
+stays otherwise unenumerated (the library's structure is index-only, and a store has no index row
+to be listed from; the host mints the file the first time an extension is lent its store, and that
+file is the only record it exists) — filtered through `isValidExtensionPackage` and the pure
+`extensionStorePackage(fileName)`, which is the whole rule: only a store ends in `.db`, and its
+stem must still pass the package-name guard.
+
+A store is copied on **every pass, unconditionally** — no stamp, no `updatedAt` to compare against,
+because a store's edits are an extension's, not the library's, and inventing a clock for one would
+be a second answer that can disagree with the file. It is ordered **after the notebooks, before the
+index** (a store is content; the index is last because it is the manifest of what the run already
+wrote), and it takes the **global index's** treatment, not a notebook's: `ExtensionStores` caches
+every store it opens for the process's life and closes none, so the notebook rule — skip a file
+under a live writer and count it — would skip every store worth copying. `ExtensionStores
+.checkpointIfOpen` folds a live store's WAL first, so the copy is safe the same way the index's is:
+snapshot-into-cache → probe → copy → WAL-alongside.
+
+There is **no restore this arc** — the manual copy-back (`<pkg>.db` plus its `-wal` if the backup
+has one, `-shm` never, app closed, ciphertext keyed to the device that wrote it) is documented in
+[`docs/backup.md`](backup.md), and a whole-library restore screen is a `BACKLOG.md` item, the same
+answer arc 17 gave for the library itself.
 
 ### Verification
 
@@ -1001,6 +1073,168 @@ The same APK registers on the two generic points, one service each — no new po
 
 ---
 
+## The tag-manager point (arc 21)
+
+> Tags **as a feature** — the identity and lifecycle rules, the tag screen's three modes, the four
+> doors (library sheet, notebook bar, lasso, search), the failure table — is
+> [`docs/tags.md`](tags.md). What follows is the **seam**.
+
+`ACTION_TAG_MANAGER` + `_SCREEN` — the sixth point, the third screen-owning one, served by
+`:ext-tags` (**NSE · Tags**). The extension owns the tag screen and the tag index (one key in its
+own extension store, holding the whole `TagCodec` blob); the host owns every entry point (the
+library's long-press row, the notebook's three tag doors, the lasso's silent and recognized
+flows), the recognizer call, and the library's search merge.
+
+### One interface, two call shapes
+
+`ITagManager` is the first seam in this app carrying two call patterns on one interface, and the
+store argument is what tells them apart:
+
+```
+void       begin(IExtensionStore store);
+void       configureShowing(in TagShowing showing);
+void       end();
+LargeValue snapshot(IExtensionStore store);
+String     assign(IExtensionStore store, String text, String notebookId, String pageId);
+```
+
+A **showing** is the scratch pad's bracket, verbatim: `ExtensionBinder.hold` pre-opens the store on
+IO (the pre-open rule), mints one uid-bound `ExtensionStoreBinder`, holds the bind, `begin(store)`
+lends the store for the screen's whole life, `configureShowing(showing)` says what this showing is
+about, the screen launches through an `ActivityResultLauncher`, and `end()` — best-effort under
+`TagClient.CALL_TIMEOUT_MS` (2 s) — drops both the store and the parked showing in one `finally`
+alongside the unbind and the revoke, on every path: result, cancel, caller `onDestroy`. `snapshot`
+and `assign` are bind-per-call, the recognizer's shape: `ExtensionBinder.call`, and the store rides
+that one call rather than being lent ahead of it — nothing is held once the call returns.
+
+The two shapes exist on one interface because they answer two different questions. "Show the user
+this" is an operation with a lifetime — the store has to still be there when the screen finally
+lets go of it, whatever the user does with the screen in between — while "read the whole index" or
+"attach this tag" is not: the operation *is* the call. The store's own rule (lent once for a
+showing, lent per call otherwise, stated at `IExtensionStore`'s own introduction) is what keeps a
+single interface honest about the difference rather than forcing every caller through a bracket it
+does not need. Every other seam in this app only ever needed one shape — the recognizer only
+calls, the pad and the document editor only hold — and the tag point is the first to need both at
+once, because the same tag screen the wizard specified had to sit beside a silent lasso flow that
+shows nothing at all.
+
+### The first tier-2 screen with no paper
+
+`:ext-tags` has no Application class and no g-paper call anywhere in its own code — `TagsActivity`
+never touches a `PaperView` and never registers an engine, because there is nothing on this screen
+to draw with one. That makes it the first screen-owning point with **no EPD handoff anywhere**: arc
+11 / J4's ordering rule (the caller releases before the launch, the extension reclaims in
+`onResume`, every exit on the extension side releases before `finish()`) exists because two paper
+surfaces were trading one firmware ink session, and a screen with no paper has nothing to trade.
+Arc 19 / M3 already measured the answer for exactly this case — **stop-behind is enough behind a
+non-drawing child screen, cross-process included** — and `releaseForHandoff` is deliberately
+**absent** from every call site in `TagClient` and `TagManagerEntry`. Adding one would be solving a
+problem this screen does not have.
+
+### Trust, and nothing on the Intent
+
+The tier-2 recipe runs unchanged: `TagsActivity` is exported under `ACTION_TAG_MANAGER_SCREEN`
+with `<category DEFAULT>` and no launcher filter, `HostCallerCheck.enforceActivity` is the first
+statement in `onCreate` — before anything is inflated — and the host launches it only through an
+`ActivityResultLauncher`, only after `begin`/`configureShowing` have both already succeeded.
+`TagManagerService`'s stub calls `HostCallerCheck.enforce` first in every method; only the three
+marshalable exception shapes ever leave one.
+
+Tag text and target labels are the user's own words. They cross on the bind, as fields of
+`TagShowing`, handed over by `configureShowing` — **never** on the screen's Intent, which carries
+the action and the package and nothing else (`TagShowing`'s own KDoc states the reason: an Intent
+extra is readable in a `dumpsys` and can survive in the recent-tasks description, the arc-19 rule
+applied again). Every log line on both sides of the seam — `TagManagerService`, `TagClient`,
+`TagManagerEntry`, `TagsActivity` — carries counts, lengths and durations, and never a tag or a
+label; `configureShowing`'s own debug line names the mode, the target kind and the page count, on
+purpose, and nothing else.
+
+### `snapshot` — one region, closed after the reply
+
+`snapshot` answers over ashmem because a full index can be megabytes and a `byte[]` that size
+cannot cross a Binder — the `LargeValue` handshake this app already uses for a scratch page and a
+document chunk. `TagManagerService`'s stub parks the region it creates in a
+`ThreadLocal<SharedMemory>` and closes it in `onTransact`'s `finally`, **after** `super.onTransact`
+has written the reply that holds a dup of the descriptor — closing before the reply is marshalled
+would hand the host a dead fd, the `ExtensionStoreBinder` recipe repeated for a third seam. `null`
+means the store holds no index yet (a first run, not a failure); a stored-but-unreadable index
+throws `IllegalStateException`, which the host's `TagClient.snapshot` re-types as
+`TagIndexUnreadableException` rather than letting an unreadable blob be read as an empty library.
+
+### `TagWrites` — the one read-modify-write
+
+The index is a **single store value**, and there are two writers in the extension's process: the
+screen's own edits (on IO) and the service's call-shaped `assign` (on a Binder thread — the lasso's
+silent heading→tag, W3). Both take `TagWrites.apply`, which is the whole of the discipline in one
+place: take `TagSession.writes` for the cycle, read the index **fresh** — never the one the caller
+is already showing — run the caller's change, write, and only then hand the new index back.
+Skipping the fresh read is exactly how two writers each holding a stale copy would each apply their
+own edit and one would silently erase the other's; the lock is what makes "fresh" true across two
+threads sharing one process.
+
+`TagWrites.Outcome` answers with a typed `Reason` rather than an exception, because the two callers
+say a failure in different languages: `TagManagerService.refusal` turns a `Reason` into one of the
+three marshalable exception shapes with an exact message the host compares verbatim
+(`ExtensionContract.TAG_INDEX_FULL`, a local `"tag index unreadable"`, or a generic
+store-unavailable message), while `TagsActivity.sentence` turns the same `Reason` into a dialog
+string. Neither side may guess the other's wording from a raw exception, so the type is the
+contract instead of the message text.
+
+### The caps, and what compacting bought
+
+Three caps, each pinned by test: `MAX_TAG_CHARS` 64, `MAX_TAGS` 5,000, `MAX_TAG_ASSIGNMENTS`
+50,000. They are not taste — the whole index is one store value, so `TagCodec.WORST_CASE_BYTES`
+(3,650,007, against `STORE_MAX_VALUE_BYTES` = 4 MiB) is the arithmetic proof that the worst legal
+index still fits, and the test fails if any of the caps, or the encoding measured against them,
+moves past it.
+
+That number only closes because of two things `TagCodec` deliberately does **not** store, both
+found at implementation time rather than planned for:
+
+- **No identity key.** A tag's `identityKey` is a pure function of its `display` text
+  (`TagRules.identityKey` — trim, collapse whitespace runs, fold case), so storing it beside the
+  display would be a second copy of an answer that could disagree with the question it answers.
+  Every read re-derives it.
+- **No assignment kind.** Since W4 an assignment's shape is `(tagId, notebookId, pageId?)` — a
+  present `pageId` **is** what makes it a page tag, so a stored kind field would say nothing that
+  isn't already said by whether that field is null. `TagShowing.TARGET_NOTEBOOK` / `TARGET_PAGE`
+  stay in the API surface, because call sites read better naming a kind and `MODE_MANAGE` is
+  defined against them, but nothing on the wire or in storage carries one.
+
+W4's own reshape — every assignment now names its notebook, and a page assignment names its page as
+well — pushed the worst case past 4 MiB on plain 36-character UUIDs. Rather than lower a cap the
+wizard had already set, `CompactId` (pure, `:extension-api`) writes a canonical UUID as 22
+base64url characters instead of 36 — a storage encoding and nothing more. In memory, on the seam,
+and at every call site an id is always a full UUID; the compact form exists only between
+`TagCodec.encode` / `decode` and nowhere else. The pattern now runs twice in this one arc: **every
+cap the wizard set was kept, and the record shrank instead** — first by dropping a stored value
+that was a pure function of another (W1's `identityKey`), then by shrinking how an id already known
+to be right is spelled (W4's `CompactId`).
+
+### `TagIndex` is shared, and immutable
+
+`TagIndex`, `TagRules` and `TagCodec` are pure `:extension-api` files with no Android type in any
+of them, and both processes hold the identical class over the identical bytes: the extension edits
+the index and writes it back to its store, the host decodes a `snapshot` of the same bytes to merge
+tags into search (W4). One model on both sides of the seam is what makes it structurally
+impossible for the host's idea of what a tag is to drift from the extension's — there is no second
+definition anywhere to disagree with the first. Every edit returns a **new** `TagIndex` rather than
+mutating one in place, which is what lets a screen hold both the version it just rendered and the
+version it would fall back to if a write failed; the store, never the in-memory copy, is the truth.
+
+### A target id is a UUID or it is not a target
+
+`ExtensionContract.MAX_TARGET_ID_CHARS` — a length cap W1 originally carried, sized for a
+hand-rolled shape check — is **gone** as of W4. `CompactId.isId` (`compact(id) != null`, which
+round-trips a parsed UUID back through `toString()` before accepting it, so a lenient parse like
+`UUID.fromString("1-2-3-4-5")` is refused) is the one check at every door a target id crosses —
+`TagShowing`'s constructor, `TagIndex.assign`, `TagIndex.of`'s decode-time filtering — and it is
+also what keeps a path character or a NUL out of one for free: the canonical UUID alphabet has
+neither, so W1's hand-written character-class checks were a weaker spelling of the same guarantee
+`CompactId` already gives.
+
+---
+
 ## Boundary audit
 
 What crosses the process boundary, in which direction, and what guards it. **Re-walk this table
@@ -1011,7 +1245,8 @@ the importer point, walked against the code at the arc-16 freeze (2026-08-28). R
 exporter point's arc-18 growth — the source-kind seam and the one deliberate secret crossing —
 walked against the code at the arc-18 freeze (2026-08-30). Rows 14–18 are the document-editor
 point and `:ext-document`'s two sibling registrations, walked against the code at the arc-19
-freeze (2026-08-31).
+freeze (2026-08-31). Rows 19–23 are the tag-manager point, walked against the code at the arc-21
+freeze (2026-09-01).
 
 | # | The claim | Where it holds |
 |---|---|---|
@@ -1035,6 +1270,12 @@ freeze (2026-08-31).
 | 16 | **The editor screen is the extension's, launched only by the core for a result — and the store holds small per-device state, never the document.** `DocumentEditorActivity` is exported under `ACTION_DOCUMENT_EDITOR_SCREEN` with `<category DEFAULT>` and no launcher filter; `HostCallerCheck.enforceActivity` runs first thing in `onCreate` (host package **and** signature, else `finish()` before anything is inflated), and the host launches only through an `ActivityResultLauncher` with `setPackage` from a trusted `ProviderRef` after `begin` succeeded — the tier-2 recipe, its second use. The extension writes nothing to disk: its whole persistent surface is four store keys — `size`, `carets` (LRU 100), `proofread`, `dict` — comfort, not content; a draft never lives in the store (autosave pushes through the host binder), every store failure degrades to a default silently, and the store binder is fetched per call because a restarted host lends a new one. The `end()` flush is the teardown backstop: the host is asked `current()` first (a host that cannot answer leaves everything **parked**, never lost), the live buffer rides the saver's own push lock so it can never interleave with an in-flight autosave, a same-key park is skipped as the older copy, and a park or buffer whose key is not the host's current target is parked or **dropped by `PendingPark`'s key rule** — writing it elsewhere would be corruption. | `DocumentEditorActivity.onCreate`, `HostCallerCheck.enforceActivity`, the `:ext-document` manifest, `DocumentEditorEntry`, `EditorPrefs` (+ `CaretMemory` / `UserWords`, JVM-tested), `DocumentEditorService.flushBeforeRevoke` / `pushPendingInBackground`, `DocumentSaver.pushLockedBlocking`, `PendingPark` (JVM-tested) |
 | 17 | **A `SOURCE_DOCUMENT` exporter receives final bytes the host assembled — and is held to the verbatim equality.** The host does the assembly *and* the format strip (`ExportText` — read-only open through the one `SoilDatabase.open` door after the `SoilOpenFiles` guard, stamps nothing, not even `exportedAt`; a `.txt` stripped through `:markdown`; **export never recognizes** — no document is an honest refusal, never an empty file), so what crosses the read fd is already the file the user asked for and the extension is a byte-for-byte streamer with no decode and no charset sniff. The reserved `OPTION_TEXT_FORMAT` is host-executed (assembly + destination naming); the spec that crosses carries the choice id and nothing new. Because the output is a copy and not a transform, `ExportVerification` holds this kind to the same `bytesWritten == streamBytes` equality as `SOURCE_SOIL` — the per-kind verification rule doing its job. The exporter is listed only when the notebook has a document (`ExportDocumentRules.listed`), its service meta-data declares API 3, and an unknown source kind still fails unmarshal and drops the exporter. | `ExportText` (guard order in KDoc), `ExportDocumentRules` (JVM-tested), `ExporterContract.SOURCE_DOCUMENT` / `OPTION_TEXT_FORMAT`, `ExportVerification` (JVM-tested), `DocumentExporterService.export` (E1-shaped fd `finally`), `DocumentExporterDescriptor` (JVM-tested), `TextStreams.streamCopy` |
 | 18 | **A `RESULT_TEXT_DOCUMENT` importer streams verbatim, and the host decides what the bytes are — after delivery, under its own caps.** `ImporterInfo.resultKind` is a compatible parcel tail (absent = `RESULT_NOTEBOOK`, the arc-18 `sourceKind` recipe mirrored; an unknown kind fails unmarshal and drops the importer), and the service's API-3 meta-data is what keeps a version-2 host — which would read the absent tail as `.soil` and run Markdown through the notebook probe — from ever pairing with it. `TextImporterService` is `SoilImporterService` in shape down to the line: caller check inside the fd `try`, verbatim `streamCopy`, no decode, no cap of its own — recognising the bytes is the job of the side that owns the data. Host side, after delivery: byte cap first (10 MB, first-hand `File.length()`), **strict UTF-8** with `CodingErrorAction.REPORT` (mojibake refused, not landed), NUL = binary wearing a text extension, the char cap re-checked after decode, BOM and CRLF normalized and nothing else touched. What survives becomes an ordinary encrypted text-document create — the delivered bytes never name a path, an id or a destination. | `ImporterInfo` (tail + `require`s, JVM-tested), `ImporterContract.RESULT_*`, `TextImporterService` (API 3 meta-data in the manifest), `TextImport.decode` (JVM-tested), `ImportFlow` (the fork after delivery), `TextStreams.streamCopy` |
+
+| 19 | **Outward on `configureShowing` is a target *pair* and its display label — no tag the library already holds, no store key or path.** `TagShowing(notebookId, pageId?, targetLabel, mode, prefill?, pageIds, pageLabels)` crosses on the held bind, after `begin`, before the launch; the screen's own Intent carries only the action and the package. Both ids are checked as canonical UUIDs in the constructor (`CompactId.isId` — the one check that also keeps a path character or a NUL out of either), `targetLabel` is capped at `MAX_TARGET_LABEL_CHARS` (200) and refuses a NUL, `prefill` is capped at `MAX_TAG_CHARS` (64) when present, and MANAGE's parallel `pageIds`/`pageLabels` are capped at `TagShowing.MAX_PAGES` (5,000) and must match in length — the parcel refuses rather than allocates above any of them. The showing says what the screen is *about*; what is *in* the index is the extension's to read for itself. | `TagShowing` (constructor `require`s, JVM-tested), `ITagManager.aidl`, `TagClient.open`, `TagManagerService.configureShowing`, `TagSession.showing` |
+| 20 | **`snapshot` hands back the whole index over ashmem, and unreadable is never read as empty.** The only argument is the store binder; the reply is a `LargeValue` — the region the extension creates, parked per Binder thread and closed in `onTransact`'s `finally` **after** the reply is marshalled, copied out and closed by the host in `TagClient.snapshot`'s own `finally`. `null` means no index has ever been written (a first run); a stored value whose version line this build does not know throws `IllegalStateException`, re-typed host-side as `TagIndexUnreadableException` rather than decoded as `TagIndex.EMPTY`. The decode runs off Main (`Dispatchers.Default`) — the blob can be megabytes and the caller is the library's search-query coroutine. | `ITagManager.snapshot`, `TagManagerService.snapshot` (`ThreadLocal<SharedMemory>`), `TagClient.snapshot`, `TagCodec.decode` (JVM-tested) |
+| 21 | **`assign` crosses normalize-ready text and a target pair outward, and the tag's canonical spelling inward — nothing else either way.** Outward: `store`, `text` (untrimmed — normalization is `TagIndex.assign`'s job, not the caller's), `notebookId` (always) and `pageId` (nullable — present only for a page tag). Inward: one `String`, the tag's **canonical display form** — the casing whoever created it first used, which may not be the casing this call just sent, and is the whole reason the call answers with a string rather than a boolean: it is what the host's toast says. A cap refusal (`IllegalStateException(TAG_INDEX_FULL)`) or invalid text (`IllegalArgumentException`) leaves the index untouched on both sides — `TagWrites.apply` never reaches `store.write` on that path. | `ITagManager.assign`, `TagManagerService.assign` (`TagWrites.apply`, `refusal`), `TagClient.assign` (`TagIndexFullException`, `TagIndexUnreadableException`), `TagIndex.assign` (JVM-tested), `TagManagerEntry.assign` (the lasso's silent door) |
+| 22 | **The store-index layout is one key holding the whole blob — never a key per tag.** `TagStore.KEY_INDEX` (`"index"`) is the entire surface: `read()`/`write()` move the complete `TagCodec` encoding in one `get`/`put` (or, above `STORE_MAX_INLINE_BYTES`, one `getLarge`/`putLarge`), so an edit is one write with no fan-out and no transaction needed around several — the shape a per-tag layout would have required, and a half-applied edit is exactly what a single value cannot produce. Every read-modify-write of it, from either process-side writer (the screen on IO, the service's call-shaped `assign` on a Binder thread), is serialized through `TagWrites.apply`'s lock (`TagSession.writes`), which reads the index **fresh** inside that lock rather than the one the caller is already showing. | `TagStore` (`KEY_INDEX`), `TagWrites.apply` (JVM-tested via `TagWritesTest`), `TagSession.writes`, `TagCodec.WORST_CASE_BYTES` (proves the one value is enough) |
+| 23 | **The host holds a decoded `TagIndex` only at query time, and never writes it.** Every door that shows or edits a tag routes through the extension (`TagManagerEntry.open` / `.assign`); the host itself never calls `TagStore.write` and never calls `TagIndex.assign`/`unassign`/`deleteTag`. The one place the host reads the index without opening a screen is the library's search merge (W4, `TagClient.snapshot`), and dead assignments never surface there **without a filtering pass**: `SearchAssembly.rank` reads tags only by iterating the notebook list it was already handed — the index's own live listing — so an assignment naming a notebook that is not in it is simply never looked at, and a page's aliveness is answered separately, from the owning notebook's own live page list. `TagIndex` carries **no** aliveness filter: W1 shipped one, W6's review found it had no caller, and it was removed rather than left standing as a doc comment asserting a role it did not have — the merge gets the identical result structurally, for free, from lists it was reading anyway. | `TagManagerEntry` (every screen-opening door), `TagClient.snapshot`/`.assign`, `SearchAssembly.rank` |
 
 **One recorded asymmetry.** The host forces inbound colour to opaque black; the extension does not
 force it on the ink the host sends. That is not an oversight and not a hole: SN's ink is fixed
@@ -1060,15 +1301,26 @@ text. The proofread engine extends it further: the user dictionary's words are t
 vocabulary, so `UserWords` / `EditorPrefs` log nothing at all — not even key names, which name
 pages.
 
+**Tags are the same rule again, applied to the shortest piece of user text this app carries**
+(arc 21): a tag is the user's own words whether it came from typing or from a heading's or a
+selection's recognized text, and it crosses the seam only on the bind (`TagShowing`, `assign`'s
+argument, `snapshot`'s reply), never on an Intent and never in a log line. `TagManagerService`,
+`TagClient`, `TagManagerEntry` and `TagsActivity` all log counts, lengths, mode and target *kind*
+— never a tag's text or a target's label. `configureShowing`'s own debug line names the mode, the
+target kind and the page count on purpose, and stops there.
+
 ---
 
 ## Identity
 
-All five extensions share one recipe; only the name and the point differ. (`:ext-soil` serves
+All six extensions share one recipe; only the name and the point differ. (`:ext-soil` serves
 **two** points — exporter and importer — under one identity: the user's arc-16 call was no rename,
 so the label stays `NSE · Soil Export` even though it imports too. `:ext-pdf` is the second
 exporter on the same point — arc 18, no new point. `:ext-document` serves **three** points under
-one identity — its own editor point plus one service each on the exporter and importer points.)
+one identity — its own editor point plus one service each on the exporter and importer points.
+`:ext-tags` is the one extension in the family whose icon is **not** the shared Tabler "puzzle" —
+the wizard's own call, an app icon of Tabler `tag` instead, because this is the point a person is
+most likely to find by name in Settings → Apps rather than by process of elimination.)
 
 **`:ext-scratchpad`**
 
@@ -1124,6 +1376,18 @@ one identity — its own editor point plus one service each on the exporter and 
 | versionName | host lockstep: `0.1.0-ratta` (`-dev` suffixed in debug), bumped together with `:app` at arc freezes |
 | Release APK | 7.8 MB — SymSpellKt is module-local (the pdfbox precedent), and the bundled proofread dictionary asset (`assets/proofread/en_82765.dict` — gzip content behind an opaque extension, because AAPT gunzips any `.gz` asset and strips the extension) rides inside |
 | API version | **per service**: the editor declares 2, the text importer and document exporter declare **3** (the `resultKind` tail / `SOURCE_DOCUMENT` are load-bearing for them — an older host skips those two services at discovery and still binds nothing it would misread) |
+
+**`:ext-tags`** (arc 21 / W1–W4, the TENTH module — `TagManagerService` + `TagsActivity`, one APK on one point)
+
+| | |
+|---|---|
+| Label | **"NSE · Tags"** (`"NSE · Tags Dev"` in debug — a build-type string override, not a suffix) |
+| Package | `com.symmetricalpalmtree.notesproutsn.ext.tags` (`.dev` in debug) |
+| Icon | **not** the family's puzzle — Tabler `tag`, ink-black outline only, on the wizard's own call: this is the one extension whose subject already has a glyph everyone reads, so it wears its own mark rather than the shared one. Same adaptive-icon geometry as every other extension's (108dp viewport, Tabler's 24-unit grid × 3.1 centred at 54) |
+| Launcher activity | **None** — the screen `<activity>` is exported under its own action with `<category DEFAULT>` and is refused unless launched for a result by the host; the Supernote launcher shows the package anyway, the family recipe |
+| versionName | host lockstep: `0.1.0-ratta` (`-dev` suffixed in debug), bumped together with `:app` at arc freezes |
+| Release APK | ≈ 6.9 MB — no module-local dependency beyond `:extension-api` and `:sn-screen`; no Room, no SQLCipher, no serialization library (the tag index lives in the host's extension store, not in a file this APK owns) |
+| API version | declares **5** (the point itself is the version-4 event, W4's target-pair reshape is the version-5 one — see the `API_VERSION` ledger above); every other extension's declaration is untouched |
 
 ---
 

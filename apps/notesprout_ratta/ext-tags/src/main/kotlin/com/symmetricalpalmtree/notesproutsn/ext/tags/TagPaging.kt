@@ -37,9 +37,7 @@ object TagPaging {
         return items.subList(from, minOf(from + perPage, items.size))
     }
 
-    /** The page [index] lands on — how the list follows a tag that moved after an edit. */
-    fun pageOf(index: Int, perPage: Int): Int {
-        if (perPage <= 0 || index < 0) return 0
-        return index / perPage
-    }
+    // No `pageOf` here. The screen never follows a moved row onto its new page: an edit re-renders
+    // the page you are standing on, and both lists are clamped by [clampPage] instead. A helper for
+    // a navigation the screen does not do would read as a promise that it does.
 }

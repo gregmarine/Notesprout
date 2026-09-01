@@ -45,8 +45,8 @@ class TagIndexTest {
         assertEquals(2, second.index.assignments.size)
     }
 
-    /** The W4 shape: a notebook tag has no page, a page tag has both, and the kind falls out of
-     *  that rather than being carried. */
+    /** The W4 shape: a notebook tag has no page, a page tag has both, and which kind it is falls out
+     *  of that rather than being carried. */
     @Test
     fun anAssignmentAlwaysNamesItsNotebook() {
         val i = index(A("draft", n1), A("draft", n1, p1))
@@ -54,13 +54,10 @@ class TagIndexTest {
         val pageTag = i.assignments.first { it.pageId != null }
 
         assertEquals(n1, notebookTag.notebookId)
-        assertEquals(TagShowing.TARGET_NOTEBOOK, notebookTag.targetKind)
-        assertEquals(n1, notebookTag.targetId)
+        assertEquals(null, notebookTag.pageId)
 
         assertEquals(n1, pageTag.notebookId)
         assertEquals(p1, pageTag.pageId)
-        assertEquals(TagShowing.TARGET_PAGE, pageTag.targetKind)
-        assertEquals(p1, pageTag.targetId)
     }
 
     /** The same page id under two notebooks is two different targets — which is only expressible
@@ -166,15 +163,6 @@ class TagIndexTest {
         assertEquals(emptyList<String>(), i.tagsOf(n2).map { it.display })
     }
 
-    /** What the host's search merge groups by: everything inside one notebook, its pages included. */
-    @Test
-    fun assignmentsInGathersTheWholeNotebook() {
-        val i = index(A("draft", n1), A("wip", n1, p1), A("done", n2), A("done", n2, p2))
-        assertEquals(2, i.assignmentsIn(n1).size)
-        assertEquals(2, i.assignmentsIn(n2).size)
-        assertEquals(0, i.assignmentsIn(p1).size)
-    }
-
     @Test
     fun suggestRanksExactThenPrefixThenSubstring() {
         val i = index(
@@ -248,22 +236,20 @@ class TagIndexTest {
         assertEquals(2, i.assignments.size)
     }
 
-    /** A page assignment must clear **both** gates: its notebook alive, and the page still in it.
-     *  Only the first of those is a question W1 could have asked. */
+    /** A tag dropped for a duplicate identity must not keep its id reserved: if it did, every
+     *  assignment naming it would survive `of`'s `tagId !in ids` gate and point at a tag that is
+     *  not in the index — invisible to every reader, unreachable by `deleteTag`, and counting
+     *  against MAX_TAG_ASSIGNMENTS for good. */
     @Test
-    fun filterAliveDropsDeadTargetsOnly() {
-        val i = index(A("draft", n1), A("draft", n2), A("draft", n1, p1))
-        val alive = i.filterAlive(aliveNotebooks = setOf(n1), alivePages = setOf(p1))
-        assertEquals(2, alive.assignments.size)
-        // The tag itself is untouched — a dead assignment is not a dead tag.
-        assertEquals(1, alive.tags.size)
-    }
-
-    @Test
-    fun filterAliveDropsAPageWhoseNotebookIsGone() {
-        val i = index(A("draft", n1, p1))
-        val alive = i.filterAlive(aliveNotebooks = emptySet(), alivePages = setOf(p1))
-        assertEquals(0, alive.assignments.size)
+    fun aDroppedDuplicateIdentityDoesNotStrandItsAssignments() {
+        val i = TagIndex.of(
+            tags = listOf(TagIndex.Tag("a", "Draft"), TagIndex.Tag("b", "draft")),
+            assignments = listOf(TagIndex.Assignment("a", n1), TagIndex.Assignment("b", n2)),
+        )
+        assertEquals(1, i.tags.size)
+        // Every surviving assignment names a tag that is actually there.
+        assertTrue(i.assignments.all { a -> i.tag(a.tagId) != null })
+        assertEquals(listOf("a"), i.assignments.map { it.tagId })
     }
 
     @Test
