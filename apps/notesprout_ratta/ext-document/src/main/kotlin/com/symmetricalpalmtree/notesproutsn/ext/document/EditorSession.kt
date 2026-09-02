@@ -17,7 +17,8 @@ import com.symmetricalpalmtree.notesproutsn.extension.IExtensionStore
  *
  * **Nothing here is ever written to disk by the extension itself** — the document lives in the
  * host's `.soil` and the editor's small per-device state in the host's extension store
- * ([EditorPrefs], M5: the text size and the caret memory). Both
+ * ([EditorPrefs], M5 — three tables since arc 22 / X4: the text size and the proofread toggle in
+ * `prefs`, the user dictionary in `word`, the caret memory in `caret`). Both
  * binders are revoked by the host alongside the unbind, so a reference kept past `end()` would not
  * be a leak of anything usable — it would just be a binder that throws `SecurityException` on every
  * call. Clearing them is still the honest thing: it is what makes "there is no showing" a state the

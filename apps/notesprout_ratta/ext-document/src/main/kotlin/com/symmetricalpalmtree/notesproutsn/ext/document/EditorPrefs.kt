@@ -1,21 +1,43 @@
 package com.symmetricalpalmtree.notesproutsn.ext.document
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+
 /**
- * The editor's small per-device state — the text size, the caret memory, and since M10 the
- * proofread toggle and the user dictionary — over the host's extension store (arc 19 / M5).
+ * The editor's small per-device state — the text size, the proofread toggle, the user dictionary
+ * and the caret memory — over the host's extension store (arc 19 / M5, on rows since arc 22 / X4).
  *
- * **Arc 22 / X1 — an "unavailable" stub.** The host's store became real SQLite tables
- * (`IExtensionStore` v6) and the key/value methods this object was written over are gone. Until X4
- * declares the `prefs` / `word` / `caret` schema and rewrites these over statements, every read
- * answers its default and every write is a silent no-op — exactly the "store unavailable" branch
- * each of them already had — and the editor service still declares API version 2, so a version-6
- * host does not list it at all (the floor rule): nothing reaches this code from a live device.
+ * Three tables hold it, declared by [EditorSchema] and reached only through [EditorStore], which is
+ * the one place in this module where SQL runs:
  *
- * What stays is the part that never touched the store: the size ladder and the two constants the
- * screen lays itself out with. TODO(X4): schema v1 + statements; delete `CaretMemory`'s codec and
- * `UserWords`' line codec (the normalization rule stays as a pure function).
+ * ```sql
+ * prefs (key, value)                   -- 'size', 'proofread' (absent = on)
+ * word  (word, addedAt)                -- the user dictionary
+ * caret (pageKey, offset, updatedAt)   -- where the writer left off, per page
+ * ```
+ *
+ * **The extension writes nothing to disk itself, ever.** This is the host's store, minted per bind
+ * and revoked with the unbind, so everything here goes through the binder parked in
+ * [EditorSession] — and the binder is **fetched per call**, never cached: the host can restart
+ * underneath a live screen and lend a new one, and a held reference would be a binder that throws
+ * on every call for the rest of the showing.
+ *
+ * **Every method blocks on Binder I/O — call only from `Dispatchers.IO` or another background
+ * thread.** None of them may be called from Main; [rememberCaretAsync] is the one exception, and it
+ * is a hand-off to a background lane rather than a method that does the work.
+ *
+ * **Every exception means "store unavailable"** (the host's rule, `ScratchStore`'s idiom): a read
+ * returns its default and a write is skipped, silently. This state is comfort, not content — losing
+ * it costs a scroll and a tap, and no failure of it may ever surface as a problem the writer has to
+ * deal with. That is this object's whole job: [EditorStore] lets failures through, and this decides
+ * what they mean. Nothing here logs: the values are small, but the keys name pages and the words
+ * are the writer's own vocabulary.
+ *
+ * The `prefs` table's name and columns are [com.symmetricalpalmtree.notesproutsn.extension.DocumentContract]'s,
+ * because that one table is read by the **host** as well (Document-PDF export's text size).
  */
-@Suppress("UNUSED_PARAMETER")
 object EditorPrefs {
 
     /** What the editor opens at before anything has been chosen. */
@@ -36,41 +58,113 @@ object EditorPrefs {
         R.string.text_size_largest to 25f,
     )
 
+    /** For the fire-and-forget caret handover, which must land even after `finish()` has started —
+     *  so it cannot ride the screen's lifecycle scope. Parallelism 1 (M11): two launches running
+     *  concurrently could store a stale caret over the leave-path's newer one, and a single lane
+     *  runs them in launch order. Order is the reason, not exclusion — a statement is correct
+     *  whoever else is writing. */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
+
     // ── Text size ─────────────────────────────────────────────────────────────
 
-    /** X1 stub: the default. */
-    fun textSize(): Float = DEFAULT_TEXT_SIZE
+    /** The stored size, or [DEFAULT_TEXT_SIZE]. **Blocking — never on Main.** */
+    fun textSize(): Float = try {
+        store()?.textSize() ?: DEFAULT_TEXT_SIZE
+    } catch (e: Exception) {
+        DEFAULT_TEXT_SIZE
+    }
 
-    /** X1 stub: not remembered. */
-    fun saveTextSize(sp: Float) = Unit
+    /** Remember [sp] for next time. **Blocking — never on Main.** */
+    fun saveTextSize(sp: Float) {
+        try {
+            store()?.saveTextSize(sp)
+        } catch (e: Exception) {
+            // Unavailable: the size still applies to this showing, it just will not outlive it.
+        }
+    }
 
     // ── Proofread (arc 19 / M10) ──────────────────────────────────────────────
 
-    /** X1 stub: on (the feature's default). */
-    fun proofreadEnabled(): Boolean = true
+    /** Whether proofread is on. Absent = on — the feature defaults on. **Blocking — never on
+     *  Main.** Unavailable reads answer `true`: the default must not flip because the store
+     *  hiccuped, and a wrongly-on proofread costs heap while a wrongly-off one silently
+     *  removes a feature. */
+    fun proofreadEnabled(): Boolean = try {
+        store()?.proofreadEnabled() ?: true
+    } catch (e: Exception) {
+        true
+    }
 
-    /** X1 stub: not remembered. */
-    fun saveProofreadEnabled(on: Boolean) = Unit
+    /** Remember the proofread toggle. **Blocking — never on Main.** */
+    fun saveProofreadEnabled(on: Boolean) {
+        try {
+            store()?.saveProofreadEnabled(on)
+        } catch (e: Exception) {
+            // Unavailable: the choice still applies to this showing.
+        }
+    }
 
     // ── The user dictionary (arc 19 / M10) ────────────────────────────────────
 
-    /** X1 stub: empty. */
-    fun userWords(): LinkedHashSet<String> = LinkedHashSet()
+    /** The stored user dictionary, oldest first — empty when unavailable. Words are the
+     *  normalized form. **Blocking — never on Main.** */
+    fun userWords(): LinkedHashSet<String> = try {
+        store()?.userWords() ?: LinkedHashSet()
+    } catch (e: Exception) {
+        LinkedHashSet()
+    }
 
-    /** X1 stub: the write does not land (the caller's in-memory mirror still honours the vouch). */
-    fun addUserWord(word: String): Boolean = false
+    /** Add [word] (already normalized) to the user dictionary. Re-adding is not an error and
+     *  does not move the word. Answers whether the word is stored — the caller's in-memory
+     *  mirror updates regardless (the session should honor the vouch even if it will not
+     *  outlive it). **Blocking — never on Main.** */
+    fun addUserWord(word: String): Boolean = try {
+        store()?.addUserWord(word) ?: false
+    } catch (e: Exception) {
+        false
+    }
 
-    /** X1 stub: nothing stored to remove. */
-    fun removeUserWord(word: String) = Unit
+    /** Remove [word] from the user dictionary — a hard drop, effective immediately.
+     *  **Blocking — never on Main.** */
+    fun removeUserWord(word: String) {
+        try {
+            store()?.removeUserWord(word)
+        } catch (e: Exception) {
+            // Unavailable: the removal holds for this showing via the caller's mirror.
+        }
+    }
 
     // ── Where the writer left off ─────────────────────────────────────────────
 
-    /** X1 stub: the top. */
-    fun caret(pageKey: String): Int = 0
+    /** The caret last seen on [pageKey]'s document, or 0 — the top — when we have never seen it.
+     *  **Blocking — never on Main.** */
+    fun caret(pageKey: String): Int = try {
+        store()?.caret(pageKey) ?: 0
+    } catch (e: Exception) {
+        0
+    }
 
-    /** X1 stub: not remembered. */
-    fun rememberCaret(pageKey: String, offset: Int) = Unit
+    /** Record where the caret is on [pageKey]. **Blocking — never on Main.** */
+    fun rememberCaret(pageKey: String, offset: Int) {
+        try {
+            store()?.rememberCaret(pageKey, offset)
+        } catch (e: Exception) {
+            // Unavailable: the next open lands at the top, which is where it lands anyway when
+            // nothing is known.
+        }
+    }
 
-    /** X1 stub: not remembered. */
-    fun rememberCaretAsync(pageKey: String, offset: Int) = Unit
+    /** [rememberCaret] from Main — fire and forget, on the single-lane scope so the leave path's
+     *  newer caret is never overtaken by an earlier launch. */
+    fun rememberCaretAsync(pageKey: String, offset: Int) {
+        if (pageKey.isEmpty()) return
+        scope.launch { rememberCaret(pageKey, offset) }
+    }
+
+    // ── The store for this call ───────────────────────────────────────────────
+
+    /** The showing's store, wrapped — or null when there is no showing. **Fetched per call**: a
+     *  host restart lends a new binder, and a cached one would throw for the rest of the showing. */
+    private fun store(): EditorStore? = EditorSession.store?.let { EditorStore(it) }
 }

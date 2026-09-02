@@ -132,7 +132,14 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
     shared `TextChunks` rule under `DocumentContract.MAX_DOCUMENT_CHARS`, and every save names
     its target `pageKey` (the mode-routing guard, structural). Ink never crosses this seam, and
     document text is never logged on either side. Nothing rides the screen's Intent — no extras
-    at all.
+    at all. The editor's per-device state is **rows in its extension store since arc 22 / X4**:
+    `EditorSchema.V1` = `prefs` (`key`/`value` — the ONE extension table the host reads, its shape
+    pinned in `DocumentContract`) / `word` (the word is the primary key) / `caret` (`pageKey`,
+    `offset`, `updatedAt`); every SQL string in `EditorSql`, run only by `EditorStore` (schema
+    applied on every call — the binder is fetched per call), behind the `EditorPrefs` facade
+    where every exception is the default. `rememberCaret` is one two-statement batch (upsert +
+    the LRU trim at 100); the dictionary's add/remove are single statements — no
+    read-modify-write, no lock.
   - `ACTION_TAG_MANAGER` + `_SCREEN` (arc 21 / W1) — the third screen-owning point, served by
     `:ext-tags`, and the first whose screen carries no paper. **One interface, two call shapes:**
     a showing is a HELD bind (`begin` → `configureShowing` → launch → result → `end`) and the store
@@ -181,9 +188,11 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   pad calling transaction code 1 lands on a different method), so the three **store-taking** points
   (scratch pad, document editor, tag manager) are accepted only at
   `MIN_API_VERSION_FOR_STORE` 6 and above; the stateless points keep floor 1. **Consequence, live
-  on the Nomad until X4 redeclares 6: every Document entry is GONE** — deliberate, and the X1 walk
-  verified it (the pad redeclared 6 in X2 and its button is back; the tag manager redeclared 6 in X3,
-  so every tag door and the search merge are back).
+  on the Nomad between X1 and each extension's phase: that extension's doors were GONE** —
+  deliberate, and the X1 walk verified it (the pad redeclared 6 in X2 and its button came back; the
+  tag manager in X3, so every tag door and the search merge came back; the editor service in X4, so
+  the Document button came back — its text importer and document exporter services stay at 3,
+  since neither takes a store).
   Meta-data is **per service**.
 - **The Scratch Pad is not ours to change from here** (arc 11, `docs/scratchpad.md`). It is the
   `:ext-scratchpad` APK: its own process, its own g-paper surface, its own undo stack, and it

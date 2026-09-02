@@ -13,7 +13,7 @@ still binds, and the reference doc. **The full phase-by-phase records (outcomes,
 walk logs) live in git history — arcs 1–18 at `git show 90a9198:apps/notesprout_ratta/RATTA_PLAN.md`,
 arcs 19–20's full phase records at the end of this file until the next compaction** — and each
 feature's authoritative reference is its `docs/` file. **Arc 21 "Tags" is complete and frozen (2026-09-01) — W1–W6 all ✅.
-ARC 22 "Tables" IS IN PROGRESS — X1 + X2 + X3 ✅ 2026-09-01; next phase X4, the document editor on rows (Opus).
+ARC 22 "Tables" IS IN PROGRESS — X1 + X2 + X3 + X4 ✅ 2026-09-01; next phase X5, docs / ledger / freeze (Sonnet docs).
 Its plan is the first "Phases" section below.**
 
 ---
@@ -115,6 +115,11 @@ Device / adb:
   `screencap`). **adb cannot inject stylus ink, lasso, drags, or multi-finger gestures**;
   finger `input tap`/`input swipe` work. EPD live ink is invisible to `screencap` — verify
   committed strokes only.
+- **`am broadcast --es text 'two words'` through `adb shell` delivers only the first word** (arc 22 /
+  X4 — the outer shell's quotes are gone by the time the device's shell splits the line). The
+  document editor's automation receiver reads `--es file /data/local/tmp/x.md` for exactly this;
+  push the text and pass the path. The walk agent's "UNCLEAR: no spelling flag" was a one-word
+  buffer, not a missing flag.
 - **A SAF pick cannot be driven by adb** (G4 — DocumentsUI file items are inert to every
   injectable input). Every path that begins with choosing a file/folder is a user checklist
   item; agents verify up to the picker and inspect results via shell afterwards.
@@ -589,9 +594,9 @@ commit.
 
 ---
 
-## Phases — Arc 22 "Tables" (planned 2026-09-01, wizard complete — X4 next)
+## Phases — Arc 22 "Tables" (planned 2026-09-01, wizard complete — X5 next)
 
-**Status: X1 ✅ · X2 ✅ · X3 ✅ · X4 ⬜ · X5 ⬜** (one phase per session; flip the marker, run the
+**Status: X1 ✅ · X2 ✅ · X3 ✅ · X4 ✅ · X5 ⬜** (one phase per session; flip the marker, run the
 phase, record its Outcome, update docs/memory/CLAUDE.md, gates green, commit + push, `/clear`).
 
 The extension store stops being a key/value seam and becomes **real SQLite tables** — the
@@ -1089,7 +1094,7 @@ left behind: tag `rows` on Page 1 of 20260827_200914; every arc-21 tag was wiped
 **Left for X5:** `docs/tags.md` (schema, two queries, the deleted caps arithmetic, `isId`),
 `extensions.md` (tag-point section + `API_VERSION` ledger + audit rows), `library.md` § search.
 
-### X4 — Document editor on rows ⬜ (Opus code · Sonnet scaffold/tests · Haiku walk)
+### X4 — Document editor on rows ✅ (Opus code on a Fable brief + Fable review · Haiku walk, two items re-driven by hand)
 `:ext-document`'s editor service declares 6 (the text importer keeps 3 — per-service meta-data);
 schema v1:
 ```sql
@@ -1108,6 +1113,64 @@ statement, decode of each pref, dictionary normalization. Walk: text size surviv
 toggle; add-to-dictionary survives `am force-stop`; caret restore per page + `nb:<id>`;
 Document-PDF export at a non-default size.
 **Questions at phase start:** none expected. Confirm the flip.
+
+**Outcome (2026-09-01, Opus code on a Fable brief + Fable review; 1738 JVM tests/variant, +21 —
+41 new editor-store tests against the deleted `CaretMemoryTest` + `UserWordsTest`; ten modules
+debug + release, both changed release APKs signed, NUL-scan clean; no docs — X5):** implemented
+as the phase reads. What binds from here:
+
+- **Schema + SQL exactly as planned.** `EditorSchema.V1` = `prefs` (`key`/`value`, the DDL built
+  from `DocumentContract`'s pinned names — the one table the host reads) / `word` (the word IS the
+  primary key) / `caret` (`pageKey`, `offset`, `updatedAt`); every statement in `EditorSql`
+  (pinned by `EditorSqlTest`, each through the real validator — `key`, `value` and `offset` are
+  SQLite fallback keywords and pass unquoted, on the JVM and on the Nomad). `INSERT OR REPLACE` is
+  used for a pref and a caret and the KDoc says why it is safe here (no table has children — X2's
+  `REPLACE INTO page` rule needs restating wherever REPLACE appears). `insertWord` is `OR IGNORE`
+  (a re-add keeps its `addedAt` — the manage list's order); `selectWords` orders `addedAt, word`
+  (a total order). `rememberCaret` = **ONE `exec` of two statements** — the upsert, then
+  `DELETE … NOT IN (SELECT pageKey … ORDER BY updatedAt DESC LIMIT ?)` with `CARET_LIMIT` 100
+  **bound**, not written into the text.
+- **`EditorStore` is the one place SQL runs** (X3's `TagStore` shape: blocking, applies the schema
+  on every public call — the binder is fetched per call and a restarted host lends an undeclared
+  one — and lets every exception through). `EditorPrefs` is the thin facade the callers already
+  used: same names and signatures, `EditorSession.store` per call, **every exception is the
+  default**, the `limitedParallelism(1)` lane for `rememberCaretAsync` kept for ORDER (the leave
+  path's newer caret), `caretLock` / `wordsLock` deleted — no read-modify-write remains.
+  **Deleted:** `CaretMemory`, `UserWords` and both tests; no new `UserWords` object was minted —
+  `SpellEngine.normalizeWord` already is the normalization rule and every caller applies it.
+  `EditorPrefsLayoutTest` had already gone in X1.
+- **Implementer calls (Opus, accepted):** `caret()` narrows the INTEGER with `coerceIn(0,
+  Int.MAX_VALUE)` (a `Long` needs the upper bound too); no `load()` door on `EditorStore` (no caller
+  needs one — the per-call apply covers it); `EditorPrefsTest` reaches the binder through the real
+  `EditorSession.begin(fake, FakeHost)` with a 12-line refusing `IDocumentHost` fake rather than a
+  test seam on the object; the two sibling-service manifest comments that said "the editor above
+  keeps its 2" were corrected (the values stay 3). **Fable review, two fixes before the walk:** the
+  schema KDoc credited the host with the scratch pad's `state` table (it is `:ext-scratchpad`'s —
+  the true host precedent is `DocumentPdfRender`'s own unquoted `key`/`value` read), and
+  `rememberCaret` clamps a negative offset on the way in as arc 19's encoder did.
+- **`FakeEditorStore`** applies its five writes (upsert pref / caret, `OR IGNORE` word, two
+  deletes, the LRU trim by `updatedAt DESC LIMIT n`) so read-after-write is real; `EditorStoreTest`
+  proves the trim evicts the oldest past the limit and that every failure propagates (the store's
+  half), `EditorPrefsTest` that a null or failing store answers every default and makes no call
+  (the facade's half). Manifest: the editor service declares **6**; the text importer and the
+  document exporter keep **3** (per-service meta-data; neither takes a store).
+
+**Walk (Haiku, W4 + W7 re-driven by hand — both were quoting artifacts, see the new standing trap):
+all green.** `ExtensionRegistry`: `DOCUMENT_EDITOR: 1 provider(s) of 1 candidate(s)` — the Document
+button is back in the notebook's top bar; first editor open: `wiped legacy store for
+…ext.document.dev (format 1, 4 kv row(s) dropped)` (the arc-19 `size` / `carets` / `proofread` /
+`dict` keys); text size 16 → 21 survived `am force-stop` of both processes (then restored to 16);
+caret per page — page 1 at 40 and page 2 at 6 each restored on flip and after a kill (the editor
+reopens on the page it left); the notebook document's `nb:` caret restored across two scope
+toggles; proofread off survived a kill (then turned back on); a nonsense word added from the popup
+took the flag count 1 → 0 and after a kill the dictionary loaded `83627 words + 1 user words` with
+the flag still absent; the store file re-stamped today; export reached the SAF picker;
+`logcat -b crash` empty. **User checklist:** a Document-PDF export at a non-default text size (the
+size read is the host's own `prefs` query, and a SAF pick cannot be driven). Nomad test data left
+behind: one nonsense user-dictionary word, page-document text on pages 1–2 of 20260827_200914 plus
+a seeded notebook document; text size back at 16, proofread on. **Left for X5:** `docs/document.md`
+(the three tables, the deleted codecs, `EditorStore`), `extensions.md` (module table, audit rows,
+the `prefs` read), and `document.md` § Proofread (the dictionary as rows).
 
 ### X5 — Docs, ledger, freeze ⬜ (Sonnet docs · Fable/Opus reads them back)
 **No code review in this arc (user's call).** `docs/extensions.md` § store rewritten (contract,

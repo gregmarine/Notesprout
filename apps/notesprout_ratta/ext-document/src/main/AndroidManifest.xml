@@ -11,7 +11,16 @@
         android:theme="@style/Theme.Notesprout">
 
         <!-- The DOCUMENT_EDITOR point (arc 19 / M3) — the second screen-owning point after
-             SCRATCH_PAD. No Application class: this extension has no drawing engine to register. -->
+             SCRATCH_PAD. No Application class: this extension has no drawing engine to register.
+             API version 6 (arc 22 / X4). M3 declared 2; X4 moves it because the extension store
+             became real SQLite tables and `IExtensionStore` was REPLACED — the editor's per-device
+             state is now the `prefs` / `word` / `caret` rows this service declares. That break runs
+             both ways (a version-2 extension calling the old store interface would land on a
+             different method), so the host accepts a store-taking service only at
+             `MIN_API_VERSION_FOR_STORE` (6) and above; until this line said 6, every Document door
+             on the device was gone by design. The two services below stay at 3 — meta-data is per
+             service, and neither of them takes a store. The `android:value` below is the
+             host-compat gate — it is the line that matters, and this comment must move with it. -->
         <service
             android:name=".DocumentEditorService"
             android:exported="true">
@@ -20,15 +29,15 @@
             </intent-filter>
             <meta-data
                 android:name="com.symmetricalpalmtree.notesproutsn.extension.API_VERSION"
-                android:value="2" />
+                android:value="6" />
         </service>
 
         <!-- The NOTEBOOK_IMPORTER point (arc 16 / I1), served here too since arc 19 / M8: `.md` /
              `.markdown` / `.txt` in, as a text document. A sibling of `:ext-soil`'s importer — same
              action, same stateless bind, different declared formats — and the host lists whatever
              is installed.
-             API version 3 on THIS service alone (metadata is per-service; the editor above keeps
-             its 2): the descriptor's result-kind tail is what tells the host these bytes are text,
+             API version 3 on THIS service alone (metadata is per-service; the editor above
+             declares 6): the descriptor's result-kind tail is what tells the host these bytes are text,
              and a version-2 host would read the absent tail as ".soil" and run a Markdown file
              through the notebook probe. -->
         <service
@@ -46,7 +55,7 @@
              notebook's document out, as Markdown or plain text. The third exporter on the one
              point, beside `:ext-soil` and `:ext-pdf` — the host assembles the final text bytes and
              this service streams them verbatim.
-             API version 3 on THIS service (metadata is per-service; the editor above keeps its 2):
+             API version 3 on THIS service (metadata is per-service; the editor above declares 6):
              the descriptor declares the SOURCE_DOCUMENT source kind, and a version-2 host would
              fail its unmarshal on that unknown kind — a silent drop. Declaring 3 makes the skip
              happen at discovery instead, before any bind. -->
