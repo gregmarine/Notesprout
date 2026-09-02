@@ -21,8 +21,9 @@ import com.symmetricalpalmtree.notesproutsn.notebook.PenIdle
  * controls, Send, the pager, and the title behind the frame-silence gate.
  *
  * **The three toggles are words, not glyphs** — there is no icon for "week" worth learning, and
- * words read better on e-ink — Today still is; the three view latches became Tabler icons at Y4 on
- * the user's call. The armed one has `isSelected` set, which reads as the ToolbarButton's border. It is set from [setView] on every page shown, **never from
+ * words read better on e-ink — but Today and the three view latches became Tabler icons at Y4 on
+ * the user's calls (calendar-star · calendar-month · calendar-week · calendar-user). The armed latch
+ * has `isSelected` set, which reads as the ToolbarButton's border. It is set from [setView] on every page shown, **never from
  * the tap that asked for it**: what is latched is what is on the paper, so a navigation that failed
  * cannot leave a lie in the bar.
  *
@@ -49,7 +50,7 @@ class CalendarToolbar(
     btnLasso: ImageButton,
     private val btnSend: ImageButton,
     private val btnScratchPad: ImageButton,
-    private val btnToday: Button,
+    private val btnToday: View,
     private val btnMonth: View,
     private val btnWeek: View,
     private val btnDay: View,

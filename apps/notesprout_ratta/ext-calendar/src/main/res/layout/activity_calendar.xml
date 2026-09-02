@@ -85,18 +85,16 @@
                 android:gravity="center_vertical"
                 android:orientation="horizontal">
 
-                <androidx.appcompat.widget.AppCompatButton
+                <!-- Today and the three view latches are Tabler icons since Y4 (the user's calls):
+                     calendar-star, then calendar-month, calendar-week, calendar-user. The armed latch
+                     wears the ToolbarButton's selected border — the notebook's own armed-tool look. -->
+                <androidx.appcompat.widget.AppCompatImageButton
                     android:id="@+id/btnToday"
-                    android:layout_width="wrap_content"
-                    style="@style/Widget.Notesprout.TextButton"
-                    android:layout_height="@dimen/toolbar_button_size"
+                    style="@style/Widget.Notesprout.ToolbarButton"
                     android:layout_marginEnd="8dp"
-                    android:text="@string/calendar_today"
+                    android:src="@drawable/ic_calendar_star"
                     android:contentDescription="@string/cd_calendar_today" />
 
-                <!-- The three view latches are Tabler icons since Y4 (the user's call): calendar-month,
-                     calendar-week, calendar. The armed one wears the ToolbarButton's selected border —
-                     the notebook's own armed-tool look. Today stays a word. -->
                 <androidx.appcompat.widget.AppCompatImageButton
                     android:id="@+id/btnMonth"
                     style="@style/Widget.Notesprout.ToolbarButton"
@@ -113,7 +111,7 @@
                 <androidx.appcompat.widget.AppCompatImageButton
                     android:id="@+id/btnDay"
                     style="@style/Widget.Notesprout.ToolbarButton"
-                    android:src="@drawable/ic_calendar"
+                    android:src="@drawable/ic_calendar_user"
                     android:contentDescription="@string/cd_calendar_view_day" />
 
                 <androidx.appcompat.widget.AppCompatImageButton

@@ -73,10 +73,11 @@ app's debug build consumes the library's debug variant, so the gate means exactl
 | `notebook/InkSelectionBar` | arc 23 / Y4 — the ONE Send-then-Delete floating bar an ink-on-paper extension screen puts over a lasso selection, replacing the pad's and the calendar's own `*SelectionToolbar` copies; built on `FloatingSelectionBar`, Send absent (never disabled) with no notebook behind the caller |
 
 Resources: `values/{colors,dimens,styles,themes}`, `values-sw720dp/dimens`,
-`values-sw960dp/dimens` (the Manta's card-grid minimum only — see `docs/library.md` § The grid), 52
+`values-sw960dp/dimens` (the Manta's card-grid minimum only — see `docs/library.md` § The grid), 54
 chrome `ic_*.xml` (grown one arc at a time since J1's move; the latest are arc 23 / Y4's
-`ic_calendar_month` and `ic_calendar_week`, the calendar's Month and Week latches — `ic_calendar`
-itself dates to Y1 and now serves the Day latch),
+`ic_calendar_star`, `ic_calendar_month`, `ic_calendar_week` and `ic_calendar_user`, the calendar's
+Today button and its three view latches — `ic_calendar` itself dates to Y1 and is the extension's
+door on both host bars),
 the button/border/radio drawables the moved styles reference, and a `strings.xml` holding only `ok`
 and `cancel` — the two strings the moved helpers reference themselves. Every other string stays in
 `:app`.

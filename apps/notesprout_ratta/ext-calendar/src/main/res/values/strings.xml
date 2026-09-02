@@ -18,11 +18,7 @@
 
     <!-- Today + the three view toggles (Y2) — words, not icons: there is no glyph for "Week" worth
          learning. isSelected on the toggles is set from showPage, never assumed from the tap. -->
-    <string name="calendar_today">Today</string>
     <string name="cd_calendar_today">Go to today</string>
-    <string name="calendar_view_month">Month</string>
-    <string name="calendar_view_week">Week</string>
-    <string name="calendar_view_day">Day</string>
     <string name="cd_calendar_view_month">Month view</string>
     <string name="cd_calendar_view_week">Week view</string>
     <string name="cd_calendar_view_day">Day view</string>

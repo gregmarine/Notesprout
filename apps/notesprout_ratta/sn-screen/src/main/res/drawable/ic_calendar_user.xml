@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Tabler "calendar-month" (outline/calendar-month.svg) — the calendar's Month latch (arc 23 / Y4, the user's icon call). -->
+<!-- Tabler "calendar-user" (outline/calendar-user.svg) — the calendar's Day latch (arc 23 / Y4, the user's icon call). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
@@ -11,7 +11,7 @@
         android:strokeWidth="2"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M4 7a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-12"/>
+        android:pathData="M12 21h-6a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v4.5"/>
     <path
         android:fillColor="@android:color/transparent"
         android:strokeColor="@color/inkBlack"
@@ -39,19 +39,12 @@
         android:strokeWidth="2"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M8 14v4"/>
+        android:pathData="M17 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/>
     <path
         android:fillColor="@android:color/transparent"
         android:strokeColor="@color/inkBlack"
         android:strokeWidth="2"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M12 14v4"/>
-    <path
-        android:fillColor="@android:color/transparent"
-        android:strokeColor="@color/inkBlack"
-        android:strokeWidth="2"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M16 14v4"/>
+        android:pathData="M22 22a2 2 0 0 0 -2 -2h-2a2 2 0 0 0 -2 2"/>
 </vector>

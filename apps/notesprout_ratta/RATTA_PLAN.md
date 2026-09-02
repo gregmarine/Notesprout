@@ -8,14 +8,14 @@ A from-scratch, Supernote-only rebuild of Notesprout in the spirit of the Paper 
 Original Notesprout (`apps/notesprout_android`) and Notesprout Paper (`apps/notesprout_paper`)
 are **reading references — no app code is copied**.
 
-**Arcs 1–22 are complete and frozen.** Their entries below are compact ledgers: status, what
+**Arcs 1–23 are complete and frozen.** Their entries below are compact ledgers: status, what
 still binds, and the reference doc. **The full phase-by-phase records (outcomes, findings,
 walk logs) live in git history — arcs 1–18 at `git show 90a9198:apps/notesprout_ratta/RATTA_PLAN.md`,
 arcs 19–22's full phase records at the end of this file until the next compaction** — and each
 feature's authoritative reference is its `docs/` file. **Arc 22 "Tables" is complete and frozen
 (2026-09-01) — X1–X5 all ✅: the extension store is real SQLite tables behind gated parameterized
 SQL. Arc 23 "Calendar" is PLANNED (wizard locked 2026-09-01, § "Phases — Arc 23"
-below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd) · **Y4 🧪** (2026-09-02: the user reversed "no code review" — `/code-review high` on the arc range, ten findings, all ten fixed incl. two sibling-copy refactors; docs + ledger written; the Nomad walk and the user checklist are what remain before the arc freezes). The SEVENTH point is granted and live; no EIGHTH without another decision. **No next arc is planned.**
+below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd) · **Y4 ✅** (2026-09-02: the user reversed "no code review" — `/code-review high` on the arc range, ten findings, all ten fixed incl. two sibling-copy refactors; docs + ledger; Nomad walks; user checklist passed). **Arcs 1–23 are complete and frozen.** The SEVENTH point is live; no EIGHTH without another decision. **No next arc is planned.**
 
 ---
 
@@ -687,7 +687,7 @@ hairlines `round(density)` on integer edges, the template baked once per `BakeKe
 the pure anchor rule (toggle keeps anchor + half; open/step onto today's period anchors on today;
 double-tap ALWAYS Day AM; a replay re-anchors via `landed`); gestures = swipe (`SwipeMath`), double-tap
 (`PageGestures.onFingerDoubleTap`, an independent second history), 2/3-finger undo/redo, no long-press;
-tools the notebook's, fixed; both doors (library + notebook — **immediately before the Scratch Pad, which is the LAST button on every bar**; `releaseForHandoff` before the launch) GONE without a trusted calendar; **the calendar's own pad door** (`EXTRA_CALENDAR_SCRATCH_PAD_AVAILABLE` + `RESULT_CALENDAR_OPEN_SCRATCH_PAD`, walked by the host, the calendar brought back on a plain close); the view latches Tabler `calendar-month`/`calendar-week`/`calendar` icons, Today a word; **both transfers** through the held bind only — notebook → calendar
+tools the notebook's, fixed; both doors (library + notebook — **immediately before the Scratch Pad, which is the LAST button on every bar**; `releaseForHandoff` before the launch) GONE without a trusted calendar; **the calendar's own pad door** (`EXTRA_CALENDAR_SCRATCH_PAD_AVAILABLE` + `RESULT_CALENDAR_OPEN_SCRATCH_PAD`, walked by the host, the calendar brought back on a plain close); Today and the view latches Tabler icons (`calendar-star` · `calendar-month` · `calendar-week` · `calendar-user`); **both transfers** through the held bind only — notebook → calendar
 asks host-side (Today AM/PM · This week · This month, resolved AT THE TAP via `CalendarTarget.of`), lands
 1:1 and selected; calendar → notebook drains on the still-held bind into the ONE `pasteTransferred`
 body; **a timed-out placement is settled, not believed**, and `finish` settles before `end` (a Binder
@@ -750,9 +750,9 @@ commit.
 
 ---
 
-## Phases — Arc 23 "Calendar" (planned 2026-09-01, wizard complete)
+## Phases — Arc 23 "Calendar" ✅ COMPLETE + FROZEN 2026-09-02
 
-**Status: Y1 ✅ · Y2 ✅ · Y3 ✅ · Y4 🧪** (code, docs, ledger done; the Nomad walk waits on the device PIN, then the user checklist) (wizard locked 2026-09-01; Fable planned it and writes Y1).
+**Status: Y1 ✅ · Y2 ✅ · Y3 ✅ · Y4 ✅ — Arc 23 "Calendar" COMPLETE + FROZEN 2026-09-02.** (wizard locked 2026-09-01; Fable planned it and writes Y1).
 
 A basic writable calendar, the way a physical organizer is one: **Month, Week and Day pages**,
 each a full writing surface whose strokes are recorded in the extension's own store — month ink
@@ -1107,7 +1107,7 @@ notebook → lands selected in the notebook; drag it; (3) EPD feel on both hando
 calendar right after the notebook door, and on the notebook right after Back — no ghosting, no
 missed first stroke. **Commit b8ec3fbd (pushed); user checklist PASSED "All tests pass" 2026-09-02. Y3 CLOSED; Y4 next.**
 
-### Y4 — Review, docs, ledger, freeze 🧪 (Fable `/code-review` on the arc range · Fable fixes 1–8 · Opus refactors 9–10 · Sonnet docs · Fable read-back — awaiting the Nomad walk + user checklist)
+### Y4 — Review, docs, ledger, freeze ✅ (Fable `/code-review` on the arc range · Fable fixes 1–8 · Opus refactors 9–10 · Sonnet docs · Fable read-back · Nomad walks by hand · user checklist passed; commits 4c1a10d7 · 02cad998 · the icon pass)
 New `docs/calendar.md` (the feature: the three pages, the store, navigation, both transfers, the
 failure table, where the code is) · `docs/extensions.md` § the calendar point + `:ext-ink` in the
 module table + `API_VERSION` ledger (7 = the calendar point, per-action floor) + boundary audit
@@ -1234,8 +1234,11 @@ the host walks the door: `ExtensionScreenEntry` gained `decorateIntent` + `onClo
 both callers chain `onCalendarClosed` → `scratchPad.open()` with a `reopenCalendarAfterPad` latch →
 `onPadClosed` reopens the calendar (at its bookmark) only on a plain `RESULT_CANCELED` — a pad that
 sent ink to the notebook stays closed. A compatible contract addition; the calendar still declares
-7. (3) **The three view latches are Tabler icons** — `ic_calendar_month` / `ic_calendar_week` (new
-in `:sn-screen`) / `ic_calendar` as `ToolbarButton`s wearing the selected border; Today stays a word.
+7. (3) **Today and the three view latches are Tabler icons** — `ic_calendar_star` (Today) ·
+`ic_calendar_month` · `ic_calendar_week` · `ic_calendar_user` (Day), all new in `:sn-screen`, as
+`ToolbarButton`s, the armed latch wearing the selected border (the first cut had month/week's two
+path sets swapped and Day on plain `calendar`; the user's second pass fixed both — the four label
+strings went with the words).
 **Day-picker fixes (the checklist's "doesn't fully work"):** the header `TextView` was added after
 `btnPrevMonth` at `match_parent` width, so it sat on top of the left arrow and took its taps (the
 right arrow, added after the title, was never covered) — margins the width of a button on both
@@ -1247,6 +1250,11 @@ Month ▣ · Week · Day · Send · Scratch pad (last); picker prev → August, 
 year grid, `RESULT_CALENDAR_OPEN_SCRATCH_PAD` → pad (`send=true` behind the notebook) → Back →
 calendar reopened at its bookmark; crash buffer empty. Gates re-run green (1857 JVM tests/variant,
 twelve modules debug + release, three release APKs sign, NUL clean).
+
+**User checklist PASSED** ("All of the tests already passed … the picker looks and works correctly
+now", 2026-09-02) — the four pen items (undo across pages re-anchors the organizer · picker cells,
+hints, header, border · same-page undo without a flash · all four transfer paths + the calendar →
+pad → calendar chain). **Y4 CLOSED. Arc 23 "Calendar" frozen 2026-09-02.**
 **User checklist (pen):** (1) draw on
   Month, toggle to Week, 2-finger undo → the paper lands back on Month AND the Month latch/pager
   follow it (fix 1); (2) the day picker's cells feel hand-sized on the Nomad, the arrows show a
