@@ -69,7 +69,16 @@ import kotlin.coroutines.resume
  * picker; Today lands on today in the showing view; the three word toggles change the view; a finger
  * double-tap on a Month or Week cell opens that day's Day page. The screen holds no navigation rule
  * of its own — it hit-tests, asks for a [CalendarNavigation.Move], shows it, and reports that it
- * landed. Only the Send buttons' host half is still outstanding (Y3).
+ * landed.
+ *
+ * **A received placement** (arc 23 / Y3) is the notebook's lasso, sent across before this screen was
+ * launched and already in the store when it opens. It is **consumed once** — the record is cleared
+ * before anything can fail — and the page it names is the page this showing opens on, ahead of the
+ * bookmark: the placement is the reason the screen is up. It lands **selected with the lasso armed**
+ * so the pen can drag it into a cell at once, as **one** [InkAction.Pasted] step, and the tool the
+ * user had comes back pen-idle when that selection is dismissed. Its coordinates are the notebook
+ * page's, **1:1** — no cell-fitting; the selection is what makes placing it one gesture (the
+ * planner's call).
  *
  * **The anchor is why the toggles feel like one organizer.** The three views are three
  * magnifications of the same day, so the state carries the day being looked at rather than the
@@ -98,8 +107,9 @@ import kotlin.coroutines.resume
  *
  * Frame silence: no app frame while `paper.isPenActive`. The title waits for the gate
  * ([CalendarToolbar]); the frames that do not are the pad's recorded exceptions in their calendar
- * form — the selection bar's show at lasso completion (and its re-anchor after a move), the
- * "Opening…" box's hide when the page lands, and a problem dialog at a chrome tap.
+ * form — the selection bar's show at lasso completion (and its re-anchor after a move, and over a
+ * received placement, which is the same frame at the same kind of boundary), the "Opening…" box's
+ * hide when the page lands, and a problem dialog at a chrome tap.
  */
 class CalendarActivity : AppCompatActivity() {
 
@@ -127,6 +137,10 @@ class CalendarActivity : AppCompatActivity() {
 
     /** True when the host says this launch follows a `receiveInk` (Y3's host half). */
     private var openReceived = false
+
+    /** The tool armed before a received placement selected itself (Y3). Put back **pen-idle** when
+     *  that selection is dismissed, and only if the lasso is still armed. Null the rest of the time. */
+    private var toolBeforeReceive: Tool? = null
 
     /** The day the showing template was baked for — re-baked when it is no longer today. */
     private var bakedToday: LocalDate? = null
@@ -244,10 +258,13 @@ class CalendarActivity : AppCompatActivity() {
             // rather than guessing from a dimen (a chrome dimen names a part; the bar is the whole).
             binding.root.awaitLaidOut()
             val bookmark = withContext(Dispatchers.IO) { store.open() }
-            // The bookmark is honoured whatever kind it names — the organizer opens where it was
-            // left. `open()` has already validated it; an unreadable one comes back null and the
-            // rule below is the first-run answer anyway: today's Month.
-            val move = nav.opening(bookmark?.target, LocalDate.now(), nowHour())
+            // A launch that follows a `receiveInk` opens on the page the ink landed on, not on the
+            // bookmark: the placement is the reason this screen is up. `opening` passes whatever it
+            // is given through unchanged — only the anchor is derived — so the target is exactly the
+            // one the host named. Otherwise the bookmark is honoured whatever kind it names, and an
+            // unreadable one comes back null: the first-run answer is today's Month.
+            val placed = if (openReceived) CalendarSession.received?.target else null
+            val move = nav.opening(placed ?: bookmark?.target, LocalDate.now(), nowHour())
             document.show(move.target)
             nav.shown(move)
         } catch (e: CancellationException) {
@@ -264,6 +281,67 @@ class CalendarActivity : AppCompatActivity() {
         // Deliberately NOT pen-idle-gated: a boundary frame, nothing has been drawn yet.
         binding.openingOverlay.visibility = View.GONE
         Slog.d(TAG) { "page ${document.target.kind}/${document.target.date}/${document.target.half} loaded: ${document.strokes.size} strokes" }
+        consumeReceived()
+    }
+
+    /**
+     * The one-shot handover of a `receiveInk` placement (Y3) — the ink is already in the store and
+     * already on the paper (it came in with the page [openDocument] just showed); what is left is
+     * to say so.
+     *
+     * **Consumed once**: the record is cleared before anything can fail, so a placement whose page
+     * is no longer the one showing (only reachable through a host restart mid-showing) is dropped
+     * rather than re-applied at the next open — and it is only applied at all when the launch
+     * Intent's [ExtensionContract.EXTRA_CALENDAR_OPEN_RECEIVED] says the host sent one.
+     *
+     * One undo step, an [InkAction.Pasted] that removes and restores exactly what arrived at the
+     * orders it arrived at. There is no page branch here as there is on the pad: a placement never
+     * creates a page the user did not already have — every date has a page, minted or not.
+     *
+     * The **lasso is armed before `setSelection`** (a selection under the pen can neither be dragged
+     * nor dismissed) and the state is set by hand, because a host-initiated selection never echoes
+     * `onSelectionCreated`.
+     */
+    private fun consumeReceived() {
+        val received = CalendarSession.received ?: return
+        CalendarSession.received = null
+        if (!openReceived) {
+            // The host did not launch us for a placement, so this record is not ours to apply.
+            // Not reachable while `begin` clears the session — which is the point of checking.
+            Slog.d(TAG) { "received placement dropped: this launch did not ask for one" }
+            return
+        }
+        if (received.target != document.target) {
+            Slog.d(TAG) {
+                "received placement dropped: page ${received.target.kind}/${received.target.date}/${received.target.half} is not showing"
+            }
+            return
+        }
+        val ids = received.strokeIds.toHashSet()
+        val arrived = document.strokes.filter { it.id in ids }
+        if (arrived.isEmpty()) return
+
+        undo.record(InkAction.Pasted(document.pageId, arrived, arrived.map { document.orderOf(it.id) ?: 0L }))
+
+        var box = arrived.first().bounds
+        for (i in 1 until arrived.size) box = box.union(arrived[i].bounds)
+        // The write lands AFTER the tool change, never before it (the notebook's O2 lesson, kept
+        // here for the same reason): a tool change dismisses any live selection, and that dismissal
+        // runs `restoreToolAfterReceive` — which would consume this very field and put the pen back
+        // under the selection we are about to make.
+        val prior = paper.tool
+        if (prior != Tool.LASSO) {
+            paper.tool = Tool.LASSO
+            toolbar.sync(Tool.LASSO)   // a host-initiated tool change is never echoed back
+            toolBeforeReceive = prior
+        }
+        val selection = Selection(ids, emptySet(), box)
+        paper.setSelection(ids, emptySet(), box)
+        selectionActive = true
+        currentSelection = selection
+        selectionToolbar.show(box)
+        pushExclusions()
+        Slog.d(TAG) { "received ${arrived.size} strokes" }
     }
 
     private suspend fun View.awaitLaidOut() {
@@ -338,6 +416,7 @@ class CalendarActivity : AppCompatActivity() {
             currentSelection = null
             selectionToolbar.hide()
             pushExclusions()
+            restoreToolAfterReceive()
         }
 
         override fun onToolChanged(tool: Tool) = toolbar.sync(tool)
@@ -524,7 +603,28 @@ class CalendarActivity : AppCompatActivity() {
         ).show()
     }
 
-    // ── Send (calendar → notebook; the host half lands in Y3) ────────────────
+    /**
+     * Put back the tool a received placement took away (Y3) — **only if the lasso is still armed**,
+     * so a tool the user picked while the selection was up wins, and **pen-idle**, because this is a
+     * chrome frame like any other. One shot: the field is cleared whichever way it goes.
+     */
+    private fun restoreToolAfterReceive() {
+        val prior = toolBeforeReceive ?: return
+        toolBeforeReceive = null
+        if (paper.tool != Tool.LASSO) return
+        whenPenIdle {
+            if (isFinishing || isDestroyed || paper.tool != Tool.LASSO) return@whenPenIdle
+            paper.tool = prior
+            toolbar.sync(prior)
+        }
+    }
+
+    private fun whenPenIdle(action: () -> Unit) {
+        if (!paper.isPenActive) { action(); return }
+        binding.root.postDelayed({ whenPenIdle(action) }, PaperView.PEN_ACTIVE_TAIL_MS)
+    }
+
+    // ── Send (calendar → notebook) ───────────────────────────────────────────
 
     /** The top bar's Send: this whole page, in writing order. */
     private fun sendPage() = send(null)

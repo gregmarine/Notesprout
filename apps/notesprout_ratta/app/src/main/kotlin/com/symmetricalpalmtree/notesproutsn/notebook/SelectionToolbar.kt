@@ -45,8 +45,10 @@ enum class SelectionMode { STROKES, HEADING, LINK, MIXED, MIXED_WITH_LINK }
  * lone link, the only selection with one payload to act on) · **Pad** (arc 11 / J5 — the narrowest
  * of them all: only on a pure-ink selection, and only while a trusted scratch-pad extension is
  * installed. `WireStroke` is the whole of what the contract carries, so the moment the selection
- * holds a heading or a link there is nothing honest to send and the button is gone) · **Tag** (arc 21 /
- * W3 — next to Pad because it is the other button gated on an extension, and narrow for a reason of
+ * holds a heading or a link there is nothing honest to send and the button is gone) · **Calendar**
+ * (arc 23 / Y3 — the second extension-gated button, next to the pad and ink-only for the pad's exact
+ * reason: `WireStroke` is the whole of what that contract carries too) · **Tag** (arc 21 /
+ * W3 — beside them because it is the third button gated on an extension, and narrow for a reason of
  * its own: a lone heading or ink alone, never a mixed selection. [TagSelection] holds that rule and
  * the reasoning behind it) · **Delete**
  * (always, and last: the one destructive verb sits alone on the far edge, away from the buttons
@@ -99,6 +101,10 @@ class SelectionToolbar(
     /** Whether a trusted scratch-pad extension is installed — re-read on every [show], because it
      *  can be disabled under us and a button that lies is worse than one that is absent. */
     private val isScratchPadAvailable: () -> Boolean = { false },
+    /** Send this ink selection to the Calendar (arc 23 / Y3) — the screen asks which page. */
+    private val onCalendar: () -> Unit = {},
+    /** Whether a trusted calendar extension is installed — re-read on every [show], the pad's rule. */
+    private val isCalendarAvailable: () -> Boolean = { false },
     /** Make a page tag out of this selection (arc 21 / W3). Which of the two flows that is is the
      *  screen's to decide — the bar knows only that the button was tapped. */
     private val onTag: () -> Unit = {},
@@ -115,6 +121,7 @@ class SelectionToolbar(
     private val unlinkButton: AppCompatImageButton
     private val snapButton: AppCompatImageButton
     private val padButton: AppCompatImageButton
+    private val calendarButton: AppCompatImageButton
     private val tagButton: AppCompatImageButton
     /** Index 0 is H1 — `levelButtons[n - 1]` is level `n`. */
     private val levelButtons: List<AppCompatImageButton>
@@ -177,9 +184,19 @@ class SelectionToolbar(
         }
         bar.addView(padButton)
 
-        // The second extension-gated button, and the second that reads the selection's *kind*:
-        // a lone heading has words already, ink has words to be recognized, and a mixture has two
-        // answers with no way to ask which was meant (TagSelection).
+        // The second extension-gated button, and the pad's neighbour on the pad's rule: the
+        // calendar takes strokes and nothing else, so a heading or a link in the set takes this
+        // one away too.
+        calendarButton = button(R.drawable.ic_calendar, ctx.getString(R.string.calendar_send_action)) {
+            releaseRender()
+            onCalendar()
+        }
+        bar.addView(calendarButton)
+
+        // The third extension-gated button, and the one that reads the selection's *kind* rather
+        // than merely requiring ink: a lone heading has words already, ink has words to be
+        // recognized, and a mixture has two answers with no way to ask which was meant
+        // (TagSelection).
         tagButton = button(R.drawable.ic_tag, ctx.getString(R.string.tag_selection_action)) {
             releaseRender()
             onTag()
@@ -229,6 +246,8 @@ class SelectionToolbar(
         syncSnapButton()
         padButton.visibility =
             if (mode == SelectionMode.STROKES && isScratchPadAvailable()) View.VISIBLE else View.GONE
+        calendarButton.visibility =
+            if (mode == SelectionMode.STROKES && isCalendarAvailable()) View.VISIBLE else View.GONE
         tagButton.visibility =
             if (TagSelection.offered(mode, isTagAvailable())) View.VISIBLE else View.GONE
 

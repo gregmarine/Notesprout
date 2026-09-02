@@ -44,6 +44,9 @@ import com.symmetricalpalmtree.notesproutsn.data.prefs.RecentsPrefs
 import com.symmetricalpalmtree.notesproutsn.data.prefs.SnapPrefs
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityNotebookBinding
 import com.symmetricalpalmtree.notesproutsn.core.markdown.HeadingPrefix
+import com.symmetricalpalmtree.notesproutsn.extension.CalendarClient
+import com.symmetricalpalmtree.notesproutsn.extension.CalendarEntry
+import com.symmetricalpalmtree.notesproutsn.extension.CalendarTarget
 import com.symmetricalpalmtree.notesproutsn.extension.DocumentEditorEntry
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionCallException
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
@@ -54,6 +57,7 @@ import com.symmetricalpalmtree.notesproutsn.extension.ScratchPadEntry
 import com.symmetricalpalmtree.notesproutsn.extension.TagManagerEntry
 import com.symmetricalpalmtree.notesproutsn.extension.TagShowing
 import com.symmetricalpalmtree.notesproutsn.extension.TransferCaps
+import com.symmetricalpalmtree.notesproutsn.extension.WireStroke
 import com.symmetricalpalmtree.notesproutsn.library.NameDialog
 import com.symmetricalpalmtree.notesproutsn.library.NameRules
 import com.symmetricalpalmtree.notesproutsn.notebook.NotebookUndo.Action
@@ -71,6 +75,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.time.LocalDate
 
 /**
  * The notebook screen: a full-bleed g-paper surface with the toolbar and the name strip overlaying
@@ -106,6 +111,8 @@ class NotebookActivity : AppCompatActivity() {
     private lateinit var snapPrefs: SnapPrefs
     /** The Scratch Pad's entry button (arc 11) — the host half of the EPD handoff lives in it. */
     private lateinit var scratchPad: ScratchPadEntry
+    /** The Calendar's entry button (arc 23 / Y3) — the pad's shape, the same handoff inside it. */
+    private lateinit var calendar: CalendarEntry
     /** The Document editor's entry button (arc 19 / M3) — the fifth extension point's door. */
     private lateinit var documentEntry: DocumentEditorEntry
     /** The `.soil` half of that door: the four hooks the editor's callback binder reaches back
@@ -211,11 +218,13 @@ class NotebookActivity : AppCompatActivity() {
     private var currentSelection: Selection? = null
 
     /**
-     * The tool that was armed before ink came back from the scratch pad selected it (arc 11 / J5).
-     * Put back **pen-idle** when that selection is dismissed, and only if the lasso is still armed —
-     * a tool the user picked meanwhile wins. Null the rest of the time.
+     * The tool that was armed before ink came back from an extension selected it (arc 11 / J5, and
+     * the calendar's transfer too since arc 23 / Y3 — **one** field for both, because only one
+     * transfer can have just landed). Put back **pen-idle** when that selection is dismissed, and
+     * only if the lasso is still armed — a tool the user picked meanwhile wins. Null the rest of
+     * the time.
      */
-    private var toolBeforePadPaste: Tool? = null
+    private var toolBeforeTransferPaste: Tool? = null
 
     /**
      * The selection a just-created object (a converted heading, a wrapped link) wants as the
@@ -374,6 +383,10 @@ class NotebookActivity : AppCompatActivity() {
             // Read at every show, not captured once: the extension can be disabled under us, and
             // `ScratchPadEntry` re-runs discovery on every resume and after a failed open.
             isScratchPadAvailable = { ::scratchPad.isInitialized && scratchPad.isAvailable },
+            onCalendar = { sendSelectionToCalendar() },
+            // Read at every show, for the pad's reason: `CalendarEntry` re-runs discovery on every
+            // resume and after a failed open, and a button that lies is worse than one that is absent.
+            isCalendarAvailable = { ::calendar.isInitialized && calendar.isAvailable },
             onTag = { tagSelection() },
             // Same rule as the pad's, and the same reason: `TagManagerEntry` re-runs discovery on
             // every resume, so what the bar reads is what was true at the last resume, not at
@@ -437,6 +450,23 @@ class NotebookActivity : AppCompatActivity() {
         )
         binding.btnScratchPad.setOnClickListener { if (opened && !closing) scratchPad.open() }
         TooltipCompat.setTooltipText(binding.btnScratchPad, binding.btnScratchPad.contentDescription)
+
+        // The Calendar (arc 23 / Y3) — the seventh extension point, and the pad's twin in every way
+        // that matters here: a second paper surface in a second process, built at this point in
+        // onCreate because it registers an ActivityResult launcher, and handed the EPD pipeline the
+        // instant before it launches. The notebook is not sealed behind it either — the calendar
+        // opens no `.soil`.
+        calendar = CalendarEntry(
+            activity = this,
+            button = binding.btnCalendar,
+            // The notebook is the one caller that can be sent to, so the calendar shows its Send buttons.
+            sendEnabled = true,
+            beforeLaunch = { paper.releaseForHandoff() },
+            onSent = { onCalendarSent() },
+            onDrained = { drained -> pasteFromCalendar(drained) },
+        )
+        binding.btnCalendar.setOnClickListener { if (opened && !closing) calendar.open() }
+        TooltipCompat.setTooltipText(binding.btnCalendar, binding.btnCalendar.contentDescription)
 
         // The Document editor (arc 19 / M3) — the fifth extension point. Like the pad it must exist
         // before RESUMED (it registers an ActivityResult launcher), and like the pad the notebook is
@@ -1062,7 +1092,7 @@ class NotebookActivity : AppCompatActivity() {
                 pendingSelection = null
                 select()
             }
-            restoreToolAfterPadPaste()
+            restoreToolAfterTransferPaste()
         }
         override fun onToolChanged(tool: Tool) { toolbar.sync(tool) }
     }
@@ -2060,16 +2090,98 @@ class NotebookActivity : AppCompatActivity() {
         toast(getString(R.string.scratch_sent_toast))
     }
 
+    // ── Calendar transfers (arc 23 / Y3) ─────────────────────────────────────
+
     /**
-     * Ink coming back from the pad ([ScratchPadEntry.onDrained]) — the strokes are already
-     * sanitized and capped by [TransferCaps.Drain], and their **ids are minted here**: nothing from
-     * the wire is trusted beyond its geometry.
+     * The selection toolbar's **Calendar**: ask which calendar page the ink should land on, then
+     * hand it over and open the calendar on it.
+     *
+     * [sendSelectionToPad]'s order, rule for rule — **a copy, not a move** (nothing on this page
+     * changed, so nothing goes on the undo stack), **ink only** (the selection can change kind
+     * between the show and the tap, and `WireStroke` is the whole of what the contract carries),
+     * the strokes taken from [liveStrokes] filtered by the id set so **writing order** survives,
+     * and **the caps checked before any bind** — a refusal must cost nothing.
+     *
+     * The four choices come from [CalendarTargets], which routes every one through
+     * `CalendarTarget.of`: the host knows today and nothing else about periods. The rows carry no
+     * icons — four identical calendar glyphs would say nothing (`LinkPickerActivity`'s new-page
+     * sheet is the precedent).
+     *
+     * The sheet rises from a selection-toolbar tap — the O1 pattern, the same act as the lasso
+     * popup's own sheet — so it needs no new frame-silence exception.
+     */
+    private fun sendSelectionToCalendar() {
+        if (!opened || closing || !::calendar.isInitialized) return
+        val sel = currentSelection ?: return
+        if (sel.contentIds.isNotEmpty() || sel.strokeIds.isEmpty()) return
+        val ids = sel.strokeIds
+        val strokes = liveStrokes.values.filter { it.id in ids }
+        if (strokes.isEmpty()) return
+        if (!TransferCaps.withinLimits(strokes.size, TransferCaps.pointCount(strokes))) {
+            Dialogs.problem(this, R.string.calendar_too_large_title, R.string.calendar_too_large_body)
+            return
+        }
+        val page = session.currentPage
+        val sheet = ActionSheetDialog(this).title(getString(R.string.calendar_target_title))
+        for (row in CalendarTargets.rows(LocalDate.now())) {
+            val label = when (row.choice) {
+                CalendarTargets.Choice.TODAY_AM -> R.string.calendar_target_today_am
+                CalendarTargets.Choice.TODAY_PM -> R.string.calendar_target_today_pm
+                CalendarTargets.Choice.THIS_WEEK -> R.string.calendar_target_week
+                CalendarTargets.Choice.THIS_MONTH -> R.string.calendar_target_month
+            }
+            sheet.addAction(null, getString(label)) { openCalendarWith(strokes, page, row.target) }
+        }
+        sheet.show()
+    }
+
+    /** Hand the ink to the entry, which opens the store, holds the bind, sends and launches — and
+     *  which tells us [onCalendarSent] only once the ink is actually across. */
+    private fun openCalendarWith(strokes: List<Stroke>, page: PageRef, target: CalendarTarget) {
+        if (!opened || closing) return
+        calendar.open(
+            CalendarEntry.Send(strokes, page.width.toFloat(), page.height.toFloat(), target)
+        )
+    }
+
+    /** The ink is on the calendar. The selection it came from goes (it has been acted on) and the
+     *  toast confirms something that has already happened — the standing toast rule, kept honest by
+     *  firing here rather than at the tap, where the send could still have failed. */
+    private fun onCalendarSent() {
+        if (isFinishing || isDestroyed) return
+        paper.clearSelection()
+        toast(getString(R.string.calendar_sent_toast))
+    }
+
+    // ── The transfer paste, shared by both (arc 23 / Y3) ─────────────────────
+
+    /**
+     * Ink coming back from the pad ([ScratchPadEntry.onDrained]) — the transfer paste, in the pad's
+     * words.
+     */
+    private fun pasteFromPad(drained: ScratchPadClient.Drained) =
+        pasteTransferred(drained.strokes, drained.truncated, PAD_WORDING, "the scratch pad")
+
+    /**
+     * Ink coming back from the calendar ([CalendarEntry.onDrained]) — the same paste, the calendar's
+     * words. Deliberately **not** a sibling copy of the pad's: the two transfers differ in nothing
+     * but the three strings they say, and a copy is how the `RattaNotebookView` trap is recreated one
+     * file at a time.
+     */
+    private fun pasteFromCalendar(drained: CalendarClient.Drained) =
+        pasteTransferred(drained.strokes, drained.truncated, CALENDAR_WORDING, "the calendar")
+
+    /**
+     * Ink coming back from an extension's screen — the strokes are already sanitized and capped by
+     * [TransferCaps.Drain], and their **ids are minted here**: nothing from the wire is trusted
+     * beyond its geometry. [wording] is the whole of what the two callers differ by; [source] names
+     * the sender in the log line and nowhere else.
      *
      * It lands on the page that is displayed **when the write runs**, appended after that page's
      * current max `"order"` with relative order preserved (writing order is load-bearing — the
-     * arc-8 rebase rule), as **one** undoable step. Coordinates are kept **1:1**: the pad page and
-     * the notebook page are both this device's screen, and a cross-size page clips the ink like any
-     * other.
+     * arc-8 rebase rule), as **one** undoable step. Coordinates are kept **1:1**: the sender's page
+     * and the notebook page are both this device's screen, and a cross-size page clips the ink like
+     * any other.
      *
      * It lands **selected with the lasso armed**, so the pen can drag it into place at once — a
      * selection under the pen can neither be dragged nor dismissed, so the tool is switched
@@ -2077,17 +2189,22 @@ class NotebookActivity : AppCompatActivity() {
      * is dismissed. That frame is the selection toolbar's own recorded exception, at a boundary
      * (nothing is being written — the user has just come back from another screen).
      */
-    private fun pasteFromPad(drained: ScratchPadClient.Drained) {
+    private fun pasteTransferred(
+        wire: List<WireStroke>,
+        truncated: Boolean,
+        wording: TransferWording,
+        source: String,
+    ) {
         if (!opened || closing) return
         runPageOp {
             val pageId = displayedPageId
             session.store.drain()
-            val strokes = TransferCaps.toStrokes(drained.strokes)
+            val strokes = TransferCaps.toStrokes(wire)
             if (strokes.isEmpty()) return@runPageOp
             val written = runCatching { session.pasteStrokes(pageId, strokes) }
-                .onFailure { Log.w(TAG, "scratch paste failed", it) }
+                .onFailure { Log.w(TAG, "paste from $source failed", it) }
             if (written.isFailure) {
-                Dialogs.problem(this, R.string.clip_failed_title, R.string.scratch_paste_failed_body)
+                Dialogs.problem(this, R.string.clip_failed_title, wording.pasteFailedBodyRes)
                 return@runPageOp
             }
             // The user may have flipped away while the write was in flight; the rows are correct
@@ -2097,7 +2214,7 @@ class NotebookActivity : AppCompatActivity() {
             strokes.forEach { liveStrokes[it.id] = it }
             paper.addStrokes(strokes)
             paper.notifyContentChanged()
-            // A scratch paste IS a strokes-only object paste: same rows created, same direction,
+            // A transfer paste IS a strokes-only object paste: same rows created, same direction,
             // same replay — so it takes arc-8's entry rather than a fifteenth kind (J5 Q1).
             undo.record(Action.ObjectsPasted(pageId, strokes.map { it.id }, emptyList(), emptyList()))
 
@@ -2105,12 +2222,12 @@ class NotebookActivity : AppCompatActivity() {
             for (i in 1 until strokes.size) box = box.union(strokes[i].bounds)
             // The write lands AFTER the tool change, never before it (the O2 lesson): arming the
             // lasso dismisses whatever selection was still up, and that dismissal runs
-            // `restoreToolAfterPadPaste` — which would consume this very field and put the pen back
-            // under the selection we are about to make.
+            // `restoreToolAfterTransferPaste` — which would consume this very field and put the pen
+            // back under the selection we are about to make.
             val priorTool = paper.tool
             if (priorTool != Tool.LASSO) {
                 armLasso()
-                toolBeforePadPaste = priorTool
+                toolBeforeTransferPaste = priorTool
             }
             val strokeIds = strokes.mapTo(HashSet()) { it.id }
             val selection = Selection(strokeIds, emptySet(), box)
@@ -2120,24 +2237,32 @@ class NotebookActivity : AppCompatActivity() {
             showSelectionToolbar(selection)
 
             // A cut drain is a problem the user has to know about — the rest of their ink is still
-            // on the pad. Otherwise the ordinary paste toast, in arc-8's words (J5 Q2).
-            if (drained.truncated) {
+            // over there. Otherwise the ordinary paste toast, in arc-8's words (J5 Q2).
+            if (truncated) {
                 Dialogs.problem(
-                    this, getString(R.string.scratch_truncated_title),
-                    getString(R.string.scratch_truncated_body, strokes.size),
+                    this, getString(wording.truncatedTitleRes),
+                    getString(wording.truncatedBodyRes, strokes.size),
                 )
             } else {
                 toast(getString(R.string.objects_pasted_toast))
             }
-            Slog.d(TAG) { "pasted ${strokes.size} strokes from the scratch pad onto $pageId" }
+            Slog.d(TAG) { "pasted ${strokes.size} strokes from $source onto $pageId" }
         }
     }
 
-    /** Put back the tool a pad paste took away — only while the lasso is still armed (a tool the
-     *  user picked meanwhile wins), and pen-idle, because it is a chrome frame like any other. */
-    private fun restoreToolAfterPadPaste() {
-        val prior = toolBeforePadPaste ?: return
-        toolBeforePadPaste = null
+    /** The three strings a transfer paste says in its sender's name — the whole difference between
+     *  the pad's paste and the calendar's. */
+    private class TransferWording(
+        val pasteFailedBodyRes: Int,
+        val truncatedTitleRes: Int,
+        val truncatedBodyRes: Int,
+    )
+
+    /** Put back the tool a transfer paste took away — only while the lasso is still armed (a tool
+     *  the user picked meanwhile wins), and pen-idle, because it is a chrome frame like any other. */
+    private fun restoreToolAfterTransferPaste() {
+        val prior = toolBeforeTransferPaste ?: return
+        toolBeforeTransferPaste = null
         if (paper.tool != Tool.LASSO) return
         whenPenIdle {
             if (isFinishing || isDestroyed || paper.tool != Tool.LASSO) return@whenPenIdle
@@ -2687,6 +2812,7 @@ class NotebookActivity : AppCompatActivity() {
         // Re-discovered on every resume: a package can be disabled or replaced under us, and this
         // is also the resume that follows a return from the pad.
         if (::scratchPad.isInitialized) scratchPad.refresh()
+        if (::calendar.isInitialized) calendar.refresh()
         if (::documentEntry.isInitialized) documentEntry.refresh()
         if (::tagEntry.isInitialized) tagEntry.refresh()
     }
@@ -2814,6 +2940,8 @@ class NotebookActivity : AppCompatActivity() {
         if (::linkPickFlow.isInitialized) linkPickFlow.close()
         // The pad's held bind must not outlive the screen that opened it, result or no result.
         if (::scratchPad.isInitialized) scratchPad.close()
+        // The calendar's held bind, same rule and the same reason.
+        if (::calendar.isInitialized) calendar.close()
         // The tag screen's held bind, same rule. It reaches back into nothing of ours — the index
         // is the extension's own store value — so it needs no ordering against the seal below.
         if (::tagEntry.isInitialized) tagEntry.close()
@@ -2862,6 +2990,20 @@ class NotebookActivity : AppCompatActivity() {
          *  coming and showing the pages instead. Comfortably past a cold bind's KDF (≈3 s on the
          *  Nomad) — this is a backstop, not a timeout anyone should ever see. */
         private const val EDITOR_LAUNCH_WATCHDOG_MS = 10_000L
+
+        /** What a paste back from the scratch pad says when it fails or is cut short. */
+        private val PAD_WORDING = TransferWording(
+            pasteFailedBodyRes = R.string.scratch_paste_failed_body,
+            truncatedTitleRes = R.string.scratch_truncated_title,
+            truncatedBodyRes = R.string.scratch_truncated_body,
+        )
+
+        /** The same three, in the calendar's name (arc 23 / Y3). */
+        private val CALENDAR_WORDING = TransferWording(
+            pasteFailedBodyRes = R.string.calendar_paste_failed_body,
+            truncatedTitleRes = R.string.calendar_truncated_title,
+            truncatedBodyRes = R.string.calendar_truncated_body,
+        )
 
         /** Covers any screen; deliberately not MAX_VALUE (engine-side rect math must not overflow). */
         private val BLOCK_ALL = Rect(0, 0, 100_000, 100_000)

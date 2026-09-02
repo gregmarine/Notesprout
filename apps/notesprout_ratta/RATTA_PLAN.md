@@ -15,7 +15,7 @@ arcs 19–22's full phase records at the end of this file until the next compact
 feature's authoritative reference is its `docs/` file. **Arc 22 "Tables" is complete and frozen
 (2026-09-01) — X1–X5 all ✅: the extension store is real SQLite tables behind gated parameterized
 SQL. Arc 23 "Calendar" is PLANNED (wizard locked 2026-09-01, § "Phases — Arc 23"
-below) — Y1 ✅ (6a16017a, user checklist passed 2026-09-02), next work = Y2. The SEVENTH point is granted and live; no EIGHTH without another decision.**
+below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 🧪 (awaiting the user checklist), next work = Y4. The SEVENTH point is granted and live; no EIGHTH without another decision.**
 
 ---
 
@@ -690,7 +690,7 @@ commit.
 
 ## Phases — Arc 23 "Calendar" (planned 2026-09-01, wizard complete)
 
-**Status: Y1 ✅ · Y2 ✅ · Y3 ⬜ · Y4 ⬜** (wizard locked 2026-09-01; Fable planned it and writes Y1).
+**Status: Y1 ✅ · Y2 ✅ · Y3 🧪 · Y4 ⬜** (wizard locked 2026-09-01; Fable planned it and writes Y1).
 
 A basic writable calendar, the way a physical organizer is one: **Month, Week and Day pages**,
 each a full writing surface whose strokes are recorded in the extension's own store — month ink
@@ -990,7 +990,7 @@ row; (2) ink on a Day PM page, swipe to AM and back → the ink stays with its h
 on the Day rows and the Week cells; (4) the Week/Day hairlines visible on the Nomad; (5) lasso a
 stroke on Week, drag it into another cell. **Commit eaf8d8ce (pushed); user checklist PASSED "all tests pass" 2026-09-02. Y2 CLOSED; Y3 next.**
 
-### Y3 — The notebook door + both transfers ⬜ (Opus code on a Fable brief · Fable review · Haiku walk)
+### Y3 — The notebook door + both transfers 🧪 (Opus code on a Fable brief · Fable review · Fable walk by hand; awaiting the user checklist)
 Notebook top-bar `btnCalendar` after `btnScratchPad` with `releaseForHandoff()` before launch ·
 `CalendarEntry`'s second door · `EXTRA_CALENDAR_SEND_ENABLED` → the calendar's top-bar Send (whole
 page) + selection Send (lasso) · `RESULT_CALENDAR_SEND` → the host's drain + paste · selection
@@ -1003,7 +1003,47 @@ notebook on Back and on a Send exit (committed ink verified after each — live 
 to screencap) · the busy guard · `logcat -b crash` empty. **User checklist (adb cannot lasso):**
 lasso → Send to Calendar → "This week" → lands selected, drag into a cell · calendar lasso → Send
 to Notebook → lands selected · EPD feel on both handoffs.
-**Questions at phase start:** version stamp only.
+**Questions at phase start:** version stamp only — **stays `0.1.0-ratta`** (user, 2026-09-02).
+
+**Y3 Outcome (2026-09-02, Opus code on a Fable brief + Fable review + Fable walk BY HAND on the
+Nomad; 1833 JVM tests/variant, +7; twelve modules debug; all green):** Shipped as the brief reads —
+and Y1 had already built the whole seam, so Y3 was the two doors and the two consumers. Host:
+`btnCalendar` after `btnScratchPad` in the notebook's top bar; `CalendarEntry`'s second door with
+`sendEnabled = true`, `beforeLaunch = paper.releaseForHandoff()`, refresh on resume, close on
+destroy; `SelectionToolbar`'s 8th button **Calendar** between Pad and Tag (ink-only, extension-gated
+— the pad's exact rule); new pure `notebook/CalendarTargets` (`Choice` × `Row`, every target via
+`CalendarTarget.of` so the host never computes a period) + `CalendarTargetsTest` (7);
+`sendSelectionToCalendar` (caps before any bind → `ActionSheetDialog` with the four rows, icons
+null — `LinkPickerActivity`'s precedent) → `openCalendarWith` → `onCalendarSent`. **The paste back
+is ONE body for both extensions** — `pasteTransferred(wire, truncated, TransferWording, source)`;
+`pasteFromPad` / `pasteFromCalendar` are one-liners over it with `PAD_WORDING` / `CALENDAR_WORDING`;
+`toolBeforePadPaste` → `toolBeforeTransferPaste` (one field, one restore — only one transfer can
+have just landed). Extension: `openDocument` opens on `CalendarSession.received.target` ahead of
+the bookmark when `openReceived` (`nav.opening` passes the target through unchanged);
+`consumeReceived()` after the overlay hide — consumed once, dropped unless its target is the showing
+page, one `InkAction.Pasted`, lasso armed **before** `setSelection`, `toolBeforeReceive` +
+`restoreToolAfterReceive` + `whenPenIdle` as the pad has them. **Implementer calls (recorded):**
+Calendar is "the second extension-gated button" and Tag "the third" in the bar's comments (the
+brief's numbering was off by one); `source` also names the sender in the paste-failure `Log.w`.
+**Nomad walk (by hand — the notebook's own pasted selection stood in for a lasso, so BOTH
+directions were adb-driven):** notebook (Tags, Page 1) → Calendar door → Week page opened
+`send=true`, `begin` 818 ms cold-in-process / 28 ms warm · top-bar Send → `result=1` →
+`drainOutgoing: 1 chunks, 19 strokes in 106 ms` → `pasted 19 strokes from the calendar` landed
+SELECTED with the bar up, Send to Calendar visible on it · Send to Calendar → the four-row sheet →
+"This month" → `receiveInk: 19 strokes placed on 0/2026-09-01/0 in 119 ms` → the calendar opened
+on **September** (not the Week bookmark) with the 24 strokes and the 19 placed ones selected under
+the bar (screencap) · Back → notebook, `end` → unbind · busy guard: two rapid taps = one `hold`, one
+showing · `pm disable-user` → **both** doors GONE (library + notebook), `pm enable` → both back ·
+reopen from the library: `rows: 3 period(s), 4 page(s), 63 stroke(s)` (44 + 19) · `logcat -b crash`
+empty. **`PLACE_TIMEOUT_MS` stays 10 s** — 119 ms for 19 strokes; the pad's number is generous by
+two orders. **No new trap.** Nomad test data: "Tags" Page 1 now carries the Week page's 19 strokes;
+September 2026 carries "This is a test" (19 strokes, cells 22–29); the Week page (Aug 30) untouched.
+Docs → Y4. **User checklist (pen):** (1) lasso ink in a notebook → Send to Calendar → "This week"
+→ the calendar opens on the week, the ink selected; drag it into a cell; 2-finger double-tap
+undoes the placement, 3-finger redoes it; (2) in the calendar, lasso a stroke → Send selection to
+notebook → lands selected in the notebook; drag it; (3) EPD feel on both handoffs — ink on the
+calendar right after the notebook door, and on the notebook right after Back — no ghosting, no
+missed first stroke.
 
 ### Y4 — Docs, ledger, freeze ⬜ (Sonnet docs in parallel · Fable read-back · **no code review, the user's call**)
 New `docs/calendar.md` (the feature: the three pages, the store, navigation, both transfers, the
