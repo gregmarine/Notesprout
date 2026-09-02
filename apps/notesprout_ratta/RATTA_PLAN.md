@@ -1084,7 +1084,7 @@ tags, 0 assignments` and no `assignmentsOf` call at all (empty selection). `logc
 Observed, pre-existing (arc 21 / W4 shape, not X3's): the search shelf re-runs its query **twice**
 on return from a tag screen (`onChanged` + the resume re-list, 10 ms apart) — cheap, noted for X5's
 BACKLOG line. **User checklist:** the lasso's Tag on a heading and on ink (pen input — adb cannot
-drive it), which exercises the host's `TagClient.assign` path and the 4 s budget. Nomad test data
+drive it), which exercises the host's `TagClient.assign` path and the 4 s budget — **PASSED by the user 2026-09-01 ("All tests pass"; commit 26b8d609)**. Nomad test data
 left behind: tag `rows` on Page 1 of 20260827_200914; every arc-21 tag was wiped by design.
 **Left for X5:** `docs/tags.md` (schema, two queries, the deleted caps arithmetic, `isId`),
 `extensions.md` (tag-point section + `API_VERSION` ledger + audit rows), `library.md` § search.
