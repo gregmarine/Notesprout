@@ -15,7 +15,7 @@ arcs 19–22's full phase records at the end of this file until the next compact
 feature's authoritative reference is its `docs/` file. **Arc 22 "Tables" is complete and frozen
 (2026-09-01) — X1–X5 all ✅: the extension store is real SQLite tables behind gated parameterized
 SQL. Arc 23 "Calendar" is PLANNED (wizard locked 2026-09-01, § "Phases — Arc 23"
-below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 🧪 (awaiting the user checklist), next work = Y4. The SEVENTH point is granted and live; no EIGHTH without another decision.**
+below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd, user checklist passed 2026-09-02), next work = Y4 (docs only, no code review). The SEVENTH point is granted and live; no EIGHTH without another decision.**
 
 ---
 
@@ -690,7 +690,7 @@ commit.
 
 ## Phases — Arc 23 "Calendar" (planned 2026-09-01, wizard complete)
 
-**Status: Y1 ✅ · Y2 ✅ · Y3 🧪 · Y4 ⬜** (wizard locked 2026-09-01; Fable planned it and writes Y1).
+**Status: Y1 ✅ · Y2 ✅ · Y3 ✅ · Y4 ⬜** (wizard locked 2026-09-01; Fable planned it and writes Y1).
 
 A basic writable calendar, the way a physical organizer is one: **Month, Week and Day pages**,
 each a full writing surface whose strokes are recorded in the extension's own store — month ink
@@ -990,7 +990,7 @@ row; (2) ink on a Day PM page, swipe to AM and back → the ink stays with its h
 on the Day rows and the Week cells; (4) the Week/Day hairlines visible on the Nomad; (5) lasso a
 stroke on Week, drag it into another cell. **Commit eaf8d8ce (pushed); user checklist PASSED "all tests pass" 2026-09-02. Y2 CLOSED; Y3 next.**
 
-### Y3 — The notebook door + both transfers 🧪 (Opus code on a Fable brief · Fable review · Fable walk by hand; awaiting the user checklist)
+### Y3 — The notebook door + both transfers ✅ (Opus code on a Fable brief · Fable review · Fable walk by hand; commit b8ec3fbd; user checklist PASSED 2026-09-02)
 Notebook top-bar `btnCalendar` after `btnScratchPad` with `releaseForHandoff()` before launch ·
 `CalendarEntry`'s second door · `EXTRA_CALENDAR_SEND_ENABLED` → the calendar's top-bar Send (whole
 page) + selection Send (lasso) · `RESULT_CALENDAR_SEND` → the host's drain + paste · selection
@@ -1043,7 +1043,7 @@ Docs → Y4. **User checklist (pen):** (1) lasso ink in a notebook → Send to C
 undoes the placement, 3-finger redoes it; (2) in the calendar, lasso a stroke → Send selection to
 notebook → lands selected in the notebook; drag it; (3) EPD feel on both handoffs — ink on the
 calendar right after the notebook door, and on the notebook right after Back — no ghosting, no
-missed first stroke.
+missed first stroke. **Commit b8ec3fbd (pushed); user checklist PASSED "All tests pass" 2026-09-02. Y3 CLOSED; Y4 next.**
 
 ### Y4 — Docs, ledger, freeze ⬜ (Sonnet docs in parallel · Fable read-back · **no code review, the user's call**)
 New `docs/calendar.md` (the feature: the three pages, the store, navigation, both transfers, the
