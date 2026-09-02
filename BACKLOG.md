@@ -1007,7 +1007,7 @@ was accepted-instead-of-fixed this arc. Ledger items that outlive the arc:
   demand); open-with/share-to for `.md`/`.txt` (the arc-16 single-entry lock stands); images
   beyond og's source-level placeholder.
 
-## Notesprout SN — arc 21 "Tags" W4 (2026-09-01): the extension store is key/value
+## Notesprout SN — arc 21 "Tags" W4 (2026-09-01): the extension store is key/value — CLOSED by arc 22 "Tables" (2026-09-01)
 
 **The extension store should offer rows and columns, not just keys and values.** Raised by the
 user at W4's phase start, examined, and **declined for arc 21** — W4 shipped on the blob. It is
@@ -1036,9 +1036,18 @@ needs to move. It would delete `TagCodec` and its arithmetic outright and lift t
 
 Needs a fresh user decision and an arc of its own — it is a seam change every extension inherits.
 
-**→ Decided 2026-09-01: this is Arc 22 "Tables"** (`apps/notesprout_ratta/RATTA_PLAN.md` § "Phases —
-Arc 22"): gated parameterized SQL over extension-declared schemas, the KV API removed, no migration
-of existing stores (wiped on open — `0.1.0-ratta` is unreleased). This entry closes at X5.
+**→ Decided and SHIPPED 2026-09-01 as Arc 22 "Tables"** (`apps/notesprout_ratta/RATTA_PLAN.md`
+§ Arc 22 ledger; the reference is `apps/notesprout_ratta/docs/extensions.md` § the extension store).
+Not the appended facility sketched above — a **replacement**: `IExtensionStore` v6 is `schemaVersion`
+/ `applySchema` / `exec` / `query` / `next` / `close` over gated parameterized SQL (`StoreSql`
+validates every statement, `StoreCodec` carries statements and rows, ≤ 4 MiB chunks over the
+arc-11 ashmem carrier), `API_VERSION` 5 → 6 with the first version **floor** for the three
+store-taking points, the KV API and the `kv` table gone, Room gone from the store file, and
+**no migration** — an arc-11-shaped store is wiped on its first open (`0.1.0-ratta` is unreleased,
+the user's call). Everything the entry predicted was deleted: `TagCodec`, `CompactId`,
+`WORST_CASE_BYTES` and the tag caps' size arithmetic (the caps stay as `COUNT(*)` policy);
+`ScratchPageCodec`, `PageFullException` and the pad's 4 MiB page ceiling; the editor's line codecs.
+**This entry is closed.**
 
 ## Notesprout SN — arc 21 "Tags" W5 (2026-09-01): a restore screen
 
@@ -1058,11 +1067,11 @@ means against a library that has moved on since the backup, and the fact that a 
 is keyed to the device that wrote it (a restore across devices needs the source device's recovery
 key, exactly as an encrypted import does). Needs a user decision on scope before it is planned.
 
-## Notesprout SN — arc 21 "Tags" W6 (2026-09-01): pruning dead tag assignments
+## Notesprout SN — arc 21 "Tags" W6 (2026-09-01): pruning dead tag assignments (rewritten after arc 22)
 
-**Deleting a notebook or a page does not remove the tag assignments naming it.** Deliberate for the
-arc, and correct as far as the user can see — nothing dead ever surfaces — but the blob grows and
-nothing shrinks it.
+**Deleting a notebook or a page does not remove the tag assignments naming it.** Deliberate for
+arc 21, and correct as far as the user can see — nothing dead ever surfaces — but rows accumulate
+and nothing removes them.
 
 Aliveness is answered at **query time** and never in the store. `SearchAssembly.rank` reads tags
 *through* the index's own live notebook listing, so an assignment naming a deleted notebook is
@@ -1072,15 +1081,36 @@ The extension is not the side that knows: it holds ids, and the index that says 
 is the host's. That is the shape the seam wants — the extension owns tags, the host owns the
 library — so a pruning pass cannot be a background job inside `:ext-tags`.
 
-The cost is bounded and small: an assignment is 53 bytes, `MAX_TAG_ASSIGNMENTS` is 50 000, and the
-budget is checked against the store's 4 MiB value. A library would have to delete tagged notebooks
-for a very long time to reach it — and if it did, the refusal is a cap message about a number the
-user has no way to see, which is the honest complaint against leaving this.
+**Arc 22 "Tables" (2026-09-01) dissolved the hard half.** The assignments are rows in the
+extension's own `assignment` table now (`apps/notesprout_ratta/docs/tags.md` § the data model), so
+a prune is one statement — `DELETE FROM assignment WHERE notebookId NOT IN (…)` (and, per notebook
+asked about, `… WHERE notebookId = ? AND pageId <> '' AND pageId NOT IN (…)`) — inside one `exec`
+transaction, with no codec, no blob budget and no `TagWrites` lock (both are gone). Two shapes
+remain to choose between: the live-id list riding the statement's binds (under the seam's 999-bind
+cap, so a library past that many notebooks needs a second shape) or a declared `live_notebook`
+table filled in the same batch and joined with `NOT IN (SELECT …)`. The cost of leaving it is
+smaller than it was — a dead assignment is one indexed row, not 53 bytes of a 4 MiB value — but
+`MAX_TAG_ASSIGNMENTS` (50 000, a `COUNT(*)` policy check now) still counts dead rows, so a library
+that deletes tagged notebooks for a very long time would still meet a cap about a number the user
+has no way to see.
 
-A pruning pass would be host-driven: hand the extension the set of live notebook ids (and, for the
-notebooks it asks about, live page ids) and let `TagWrites` drop the rest under its own lock. The
-open questions are when it runs (a backup pass? the arc-17 close purge? a Tags-screen visit?) and
-whether removing a tag's last assignment may ever delete the tag — it may **not**, by the arc's
-lifecycle rule, so a prune leaves tags behind on purpose. Wants a user decision on the trigger.
-Note that the store-seam entry above would dissolve most of this: with real rows, a delete is a
-`DELETE`.
+Still open, unchanged by arc 22: **when it runs** (a backup pass? the arc-17 close purge? a
+Tags-screen visit?) and the rule that removing a tag's last assignment may **not** delete the tag —
+by the arc-21 lifecycle rule a prune leaves tags behind on purpose. Wants a user decision on the
+trigger.
+
+## Notesprout SN — arc 22 "Tables" X3 (2026-09-01): the search shelf queries twice on return
+
+**Returning to the library's search shelf from a tag screen runs the search query twice** —
+`onChanged` and the resume re-list fire about 10 ms apart, each a full `tags` → `assignmentsOf`
+merge. Arc 21 / W4's shape, observed (not introduced) during X3's Nomad walk. Cheap today (the
+whole merge measured 52–78 ms on a 2-tag index), so it was left; worth a one-shot latch when the
+shelf's return path is next touched.
+
+## Notesprout SN — arc 22 "Tables" X2 (2026-09-01): a wiped store keeps its file size
+
+**The legacy wipe frees pages but never runs `VACUUM`**, so an arc-11 store that held 4.3 MB of
+kv rows is still a 4.3 MB file after it becomes an empty table store. Cosmetic — the freed pages are
+reused — and `VACUUM` is on the seam's runtime denylist for extensions by design; if a compaction is
+ever wanted it is a host-side step in the format ladder (arc 17's seal-time purge is the precedent),
+not something an extension asks for.

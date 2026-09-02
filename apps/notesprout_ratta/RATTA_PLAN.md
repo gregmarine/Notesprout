@@ -8,13 +8,13 @@ A from-scratch, Supernote-only rebuild of Notesprout in the spirit of the Paper 
 Original Notesprout (`apps/notesprout_android`) and Notesprout Paper (`apps/notesprout_paper`)
 are **reading references — no app code is copied**.
 
-**Arcs 1–21 are complete and frozen.** Their entries below are compact ledgers: status, what
+**Arcs 1–22 are complete and frozen.** Their entries below are compact ledgers: status, what
 still binds, and the reference doc. **The full phase-by-phase records (outcomes, findings,
 walk logs) live in git history — arcs 1–18 at `git show 90a9198:apps/notesprout_ratta/RATTA_PLAN.md`,
-arcs 19–20's full phase records at the end of this file until the next compaction** — and each
-feature's authoritative reference is its `docs/` file. **Arc 21 "Tags" is complete and frozen (2026-09-01) — W1–W6 all ✅.
-ARC 22 "Tables" IS IN PROGRESS — X1 + X2 + X3 + X4 ✅ 2026-09-01; next phase X5, docs / ledger / freeze (Sonnet docs).
-Its plan is the first "Phases" section below.**
+arcs 19–22's full phase records at the end of this file until the next compaction** — and each
+feature's authoritative reference is its `docs/` file. **Arc 22 "Tables" is complete and frozen
+(2026-09-01) — X1–X5 all ✅: the extension store is real SQLite tables behind gated parameterized
+SQL. NO NEXT ARC IS PLANNED — a new arc starts with a user decision and a wizard, never with code.**
 
 ---
 
@@ -59,7 +59,7 @@ Its plan is the first "Phases" section below.**
 | App icon | Tabler seedling **mirrored** (outermost group `scaleX="-1"`, pivot 54), black outline on white adaptive icon; all icons Tabler outline. |
 | Crypto UX | Identical to Paper v0: `NSPT-` recovery key = the immutable global passphrase, attempt-limiter thresholds (1–2 free · 3–4 → 30 s · 5–9 → 5 min · ≥10 → 1 h), confusable-folding unlock, 450 ms "Preparing…". Unlock never hides the IME while the key field has focus (Ratta rule). |
 
-## Architecture (current — after arc 19)
+## Architecture (current — after arc 22)
 
 - **Own Gradle root** at `apps/notesprout_ratta/`. Gradle 8.14, AGP 8.11.1, Kotlin 2.2.20,
   KSP, compileSdk/targetSdk 35, minSdk 29, Java 17 via `org.gradle.java.home` (Temurin-17).
@@ -86,8 +86,21 @@ Its plan is the first "Phases" section below.**
   `DOCUMENT_EDITOR` (+`_SCREEN`, the second tier-2 — the first host-side callback stub,
   `IDocumentHost`) · `TAG_MANAGER` (+`_SCREEN`, the third tier-2 and the first with **no paper**
   on its screen; one interface serving both a held-bind showing and two bind-per-call methods).
-  `ExtensionContract.API_VERSION` = 4; the host accepts `1..N`; meta-data is
+  `ExtensionContract.API_VERSION` = **6**; the host accepts `minApiVersion(action)..6` — floor
+  **6** for the three store-taking points (scratch pad, document editor, tag manager; arc 22 /
+  X1, because `IExtensionStore` was *replaced*), floor 1 for the stateless ones; meta-data is
   **per service** — an extension declares what each service *requires* of the host.
+- **The extension store is real SQLite tables (arc 22):** `IExtensionStore` v6 =
+  `schemaVersion` / `applySchema` / `exec` / `query` / `next` / `close`; the extension declares
+  versioned DDL once (`StoreSchema`), sends gated parameterized SQL (`StoreSql` validates: one
+  statement, head keyword decides the kind, denylist, reserved `host_*`/`sqlite_*`/`room_*`/
+  `android_*` names refused, positional binds only), and reads `StoreCodec` rows back in ≤ 4 MiB
+  chunks. Host keeps the file (`Garden/<pkg>.db`), the key, the one connection (WAL, foreign keys
+  ON), every cap, and backup; format rides `PRAGMA user_version` (`StoreFormat` 2; an arc-11 kv
+  store is **wiped on open**, above 2 refused). No Room in the store. Schemas: `ScratchSchema.V1`
+  (`page`/`stroke`/`state`) · `TagSchema.V1` (`tag`/`assignment`) · `EditorSchema.V1`
+  (`prefs`/`word`/`caret` — `prefs` is the ONE extension table the host reads). Full seam:
+  `docs/extensions.md` § the extension store.
   **A new point needs BOTH its actions in the host's `<queries>` block** or `queryIntentServices`
   answers `0 provider(s) of 0 candidate(s)` for a service that is installed, exported, signed and
   versioned correctly — it reads as a signature or version mismatch and is neither (arc 21 / W1).
@@ -550,6 +563,80 @@ operations. W6 review: high, 6/6 fixed; version stays `0.1.0-ratta`; 1623 JVM te
 `docs/tags.md` (the feature), `docs/extensions.md` §§ sixth point + boundary rows 19–23,
 `docs/library.md`, `docs/notebook.md`, `docs/backup.md`.
 
+### Arc 22 "Tables" ✅ frozen 2026-09-01 (X1 df720360 · X2 7ac960f7 · X3 26b8d609 · X4 2fa9c4aa · X5)
+The extension store stopped being a key/value seam and became **real SQLite tables behind gated
+parameterized SQL** — not a seventh point, a change to the service every store-taking point already
+receives. Still binding: **`IExtensionStore` v6 was REPLACED whole** (`schemaVersion` / `applySchema`
+/ `exec` / `query` / `next` / `close`); the extension declares versioned DDL once (`StoreSchema` —
+construction IS the DDL validator run, version 1..256; the host applies the missing steps each in
+its own transaction with the version bump, keeps the applied version in its own `host_schema`
+table, and **refuses a downgrade** with `STORE_SCHEMA_NEWER`); `exec`/`query` before `applySchema`
+on a binder = `STORE_SCHEMA_UNAPPLIED` (structural — bind-per-call callers apply per call). **Every
+statement is validated (`StoreSql`)**: one statement (ONE trailing `;` tolerated), the head keyword
+decides the kind (`SELECT`/`WITH` for `query`; `INSERT`/`REPLACE`/`UPDATE`/`DELETE`/`WITH` for
+`exec` — and a query cannot smuggle a write under `WITH`), the denylist anywhere in the token
+stream (`ATTACH DETACH PRAGMA VACUUM CREATE DROP ALTER BEGIN COMMIT ROLLBACK SAVEPOINT RELEASE
+REINDEX ANALYZE load_extension`), **every word or quoted identifier in a reserved space `host_*` /
+`sqlite_*` / `room_*` / `android_*` refused**, positional `?`/`?NNN` binds only; DDL allows
+tables, indexes, `ALTER … ADD COLUMN | RENAME`, `DROP`, `REFERENCES … ON DELETE`, and **no views,
+triggers, virtual or TEMP tables**; object names are bare `StoreNames`, column names are the
+extension's business. **Writes are batch-atomic only** (one transaction per `exec`, ≤ 10 000
+statements, never held open across Binder calls; `exec` is `@Synchronized` per store); **reads run
+to completion and cross in ≤ 4 MiB `StoreCodec` chunks** (inline ≤ 512 KiB, ashmem above — the
+arc-11 `LargeValue` stays only as the chunk carrier; a row is never split; ≤ 4 open results per
+binder; every parked chunk dropped on revoke; `StoreChunker` is codec arithmetic and lives in
+`:extension-api`; `StoreReads.all` is the one loop). Caps: `STORE_MAX_INLINE_BYTES` 512 KiB ·
+`STORE_MAX_VALUE_BYTES` 4 MiB · `STORE_MAX_RESULT_BYTES` 32 MiB · `STORE_MAX_ROW_BYTES` = the
+chunk cap · `STORE_MAX_BATCH_STATEMENTS` 10 000 · `STORE_MAX_SQL_CHARS` 8 192 · `STORE_MAX_ARGS`
+999 · `STORE_MAX_TABLES` 64 · `STORE_MAX_SCHEMA_STEPS` 256 / `STORE_MAX_STEP_STATEMENTS` 64 ·
+`STORE_MAX_OPEN_RESULTS` 4. Every SQLite failure — a constraint violation included — crosses as
+`IllegalStateException` (the three-exception rule stands). **Room left the store file**: a thin
+`SupportSQLiteOpenHelper` over the same `SoilCrypto`/`KeyOpener` factories, still
+`NonDestructiveOpenHelperFactory`-wrapped, WAL + `wal_autocheckpoint` + `busy_timeout`, cached for
+the process and never closed; **foreign keys ON as a POOL setting** (`setForeignKeyConstraintsEnabled`
+in `onConfigure` — WAL readers are separate connections, a PRAGMA in `onOpen` reaches one), so a
+declared `ON DELETE CASCADE` cascades — and therefore **`INSERT OR REPLACE` into a table with
+children deletes the children** (X2's `page` rule; restated wherever REPLACE appears). **Format
+rides `PRAGMA user_version`** (`StoreFormat` 2 = tables): 0 → fresh create, 1 or a `kv` /
+`room_master_table` → **wipe on open, no migration** (the user's call — `0.1.0-ratta` is unreleased;
+logged as a kv row count, never a name; the file keeps its size — no VACUUM), above 2 → refuse, file
+left as found (never-delete-on-corruption). **`API_VERSION` 5 → 6, the second break and the first
+with a FLOOR**: `MIN_API_VERSION_FOR_STORE` 6 for `SCRATCH_PAD` / `DOCUMENT_EDITOR` / `TAG_MANAGER`
+(`ExtensionContract.minApiVersion` / `accepts`), floor 1 for the stateless points — a replaced
+interface breaks the old-extension/new-host direction too (a v5 pad on transaction code 1 lands on
+a different method), and between X1 and each extension's phase that extension's doors were GONE on
+the Nomad, deliberately. **The editor's `prefs` table is the ONE extension table the host reads**
+(`DocumentContract` pins `prefs` / `key` / `value` / `size`; `DocumentPdfRender.editorTextSizeSp`
+reads it through the host executor, no binder, only if file and table exist). **Deleted outright:**
+the KV API (`get`/`put`/`delete`/`keys`/`putLarge`/`getLarge`), the `kv` table, `KvDao`/`KvEntity`,
+`STORE_MAX_KEY_CHARS`/`STORE_MAX_KEYS`/`STORE_VALUE_LARGE`; `ScratchPageCodec`, `PageFullException`,
+`SCRATCH_PAGE_FULL` and the pad's 4 MiB page ceiling; `TagCodec`, `CompactId`, `WORST_CASE_BYTES`,
+`MAX_TAG_ID_CHARS`, `TagWrites`, `snapshot`, `IndexUnreadable`; `CaretMemory`, `UserWords`. **Per
+extension:** the pad (X2) = `ScratchSchema.V1` `page`/`stroke`/`state`, an idempotent op log
+(`Put`/`Drop` per stroke id, orders a high-water mark) split into ≤ 4 MiB / ≤ 10 000-statement
+batches, reads planned by `LENGTH(blob)` into `BETWEEN` ranges — **no page ceiling**, `receive`
+compensates a multi-batch failure, never `INSERT OR REPLACE INTO page`; tags (X3) = `TagSchema.V1`
+`tag` (UUID ids, `identityKey` stored UNIQUE) / `assignment` (PK `(tagId, notebookId, pageId)`,
+`''` = notebook tag, cascade), `assign` = two reads + ONE two-statement transaction with the caps
+INSIDE the inserts and the id resolved by identity inside the statement, **the transaction is the
+lock**, `ITagManager` v6's `snapshot` → paged `tags(store, offset)` (500) + `assignmentsOf(store,
+ids, offset)` (1 000, ≤ 500 ids/call) with `TagPages.collect` the one loop, `TagIndex` moved into
+`:ext-tags` as the screen's query-only model, `TagRules.isId` case-insensitive on purpose,
+`SEARCH_TIMEOUT_MS` 10 s (Nomad 52–78 ms on a 2-tag index) / `ASSIGN_TIMEOUT_MS` 4 s; the editor
+(X4) = `EditorSchema.V1` `prefs`/`word`/`caret`, `EditorStore` the one place SQL runs (schema
+applied on every call — the binder is fetched per call), `EditorPrefs` the facade where every
+exception is the default, `rememberCaret` one two-statement batch with `CARET_LIMIT` 100 bound,
+`insertWord` `OR IGNORE`, no read-modify-write and no lock; the text importer and document exporter
+services stay at 3. Extension-side tests are statement-shaped (SQL builders pinned for exact text
++ args through the real validator; fakes are statement recorders that APPLY their writes); the debug
+"Extension store self-test" is the only on-device proof (Nomad: cold create ≈ 2.0 s, 5 000 1-KiB
+rows ≈ 2.4 s, read back 2 chunks ≈ 0.9 s, legacy wipe ≈ 2.0 s). Backup/restore untouched (same
+file, same key; a legacy-shaped store from an old backup wipes on open). **No code-review phase —
+the user's call.** Version stays `0.1.0-ratta`; **1738 JVM tests/variant**. Refs:
+`docs/extensions.md` § the extension store + the boundary audit, `docs/scratchpad.md`,
+`docs/tags.md`, `docs/document.md`, `docs/backup.md`, `BACKLOG.md` (the closed W4 entry, the
+rewritten pruning entry, the X2 file-size and X3 double-query notes).
+
 ---
 
 ## Verification (end of arc)
@@ -594,10 +681,11 @@ commit.
 
 ---
 
-## Phases — Arc 22 "Tables" (planned 2026-09-01, wizard complete — X5 next)
+## Phases — Arc 22 "Tables" ✅ COMPLETE + FROZEN 2026-09-01
 
-**Status: X1 ✅ · X2 ✅ · X3 ✅ · X4 ✅ · X5 ⬜** (one phase per session; flip the marker, run the
-phase, record its Outcome, update docs/memory/CLAUDE.md, gates green, commit + push, `/clear`).
+**Status: X1 ✅ · X2 ✅ · X3 ✅ · X4 ✅ · X5 ✅** (planned 2026-09-01, wizard complete; every phase
+shipped the same day). Full phase records below, kept until the next compaction; the ledger entry
+under "Frozen arcs" is what binds.
 
 The extension store stops being a key/value seam and becomes **real SQLite tables** — the
 extension declares its schema, sends parameterized SQL, and gets rows back — while the host keeps
@@ -1173,7 +1261,7 @@ a seeded notebook document; text size back at 16, proofread on. **Left for X5:**
 (the three tables, the deleted codecs, `EditorStore`), `extensions.md` (module table, audit rows,
 the `prefs` read), and `document.md` § Proofread (the dictionary as rows).
 
-### X5 — Docs, ledger, freeze ⬜ (Sonnet docs · Fable/Opus reads them back)
+### X5 — Docs, ledger, freeze ✅ (Sonnet docs · Fable read them back)
 **No code review in this arc (user's call).** `docs/extensions.md` § store rewritten (contract,
 caps, validator rules, codec, chunk protocol, schema lifecycle, the floor, the user_version ladder,
 the self-test), the `API_VERSION` ledger (6 = arc 22 — the second break, the first with a floor),
@@ -1187,6 +1275,58 @@ W4 "key/value" entry closes (→ arc 22), the W6 "pruning dead tag assignments" 
 restore entry unchanged; `RATTA_PLAN.md` ledger entry for arc 22 + compaction of this section into
 it; memory. **Version stamp stays `0.1.0-ratta`** unless the user says otherwise at phase start.
 **Questions at phase start:** the version stamp only.
+
+**Phase-start decision (user, 2026-09-01):** version stays **`0.1.0-ratta`** (every arc's answer).
+
+**Outcome (2026-09-01, Fable orchestrating four Sonnet doc agents in parallel + Fable read-back
+of every rewritten section; no code, no code review — the user's call; gates re-run on the
+unchanged tree: 1738 JVM tests/variant, 0 failures, ten modules debug + release, host release
+signs, NUL-scan clean on all ten changed files):**
+
+- **`docs/extensions.md` 1404 → 1725.** § "The extension store (arc 11 / J2 — rebuilt on tables,
+  arc 22)" rewritten whole as sixteen subsections (contract · caps table · validator · codec ·
+  chunk protocol · schema lifecycle · the floor · the `user_version` ladder · Room left the store ·
+  executor split · gate · three exceptions restated · the one host-read table · self-test with the
+  Nomad timings · backup · verification by test class); `API_VERSION` ledger gains 6 (the second
+  break, the first with a floor — and why 5 needed none); module + identity tables at 6 for every
+  store-taking service, 3 for the two stateless Document services; scratch-pad, document-editor and
+  tag-manager sections moved to rows (the tag section gained "the two-query search merge", "the
+  transaction is the lock", "the caps — policy now", "`TagIndex` moved", "`isId` is
+  case-insensitive"); **boundary audit re-walked** — rows 1, 5, 14, 16, 19–23 rewritten (23 also
+  named the deleted `TagClient.snapshot`), rows **24–26 new** (the SQL gate · reserved name spaces
+  · the `prefs` read). Fable read-back fixed three slips: the ladder's transaction credited to
+  Room (it is the open helper's), and "Room, SQLCipher, ashmem and a Binder cannot run on the JVM"
+  twice (Room is not in the store any more).
+- **`docs/scratchpad.md` 221 → 304.** § "Pages and the store" rewritten (DDL verbatim, two
+  idempotent ops + the REPLACE-cascade rule, the op log and high-water mark, `ScratchBatches`,
+  planned reads, the ceiling's deletion — the skipped >4 MiB stress stated honestly, the legacy
+  wipe and its unchanged file size); transfers step 5, the undo table (`afterInk`), failure table
+  (two 4 MiB rows + "unreadable" out; bad row / multi-batch compensation / legacy wipe / refused
+  format in), "Where the code is". **`docs/backup.md` +3**: the one sentence.
+- **`docs/tags.md` 493 → 628.** § "The data model" rewritten with a new "`assign` — two reads, one
+  transaction" subsection quoting both inserts; `TagCodec` subsection and the v1→v2 migration
+  deleted; seam (two paged queries, 4 → 5 → 6), screen (`TagIndex` query-only, `usageOf` before
+  the confirm), search door (`TagClient.search`, the two timeouts with the Nomad numbers), backup,
+  failure table (unreadable rows out; refused format / legacy wipe / concurrent create in), traps
+  retired and added. **`docs/library.md` 846 → 858**: the tag-fetch paragraphs of § search only.
+- **`docs/document.md` 538 → 650.** A new § "The editor's store" (the doc had no store section to
+  rewrite — its "Data model" is the `document` row); Export's `prefs` read; Proofread's `word`
+  table; failure table + Related. Fable read-back fixed one sentence: the wipe creates
+  `host_schema`, not the extension's tables (those arrive on the next `applySchema`).
+- **This file:** header (arcs 1–22 frozen, no next arc planned), Architecture (after arc 22:
+  `API_VERSION` 6 + floor, the store paragraph), the Arc 22 ledger entry under "Frozen arcs", this
+  section marked complete. **`BACKLOG.md`:** the W4 key/value entry CLOSED (what shipped vs. what
+  it sketched — a replacement, not an append); the W6 pruning entry rewritten (a prune is a
+  `DELETE` now, two shapes under the 999-bind cap, trigger still a user decision); two new notes
+  (X3: the search shelf queries twice on return from a tag screen · X2: a wiped store keeps its
+  file size, `VACUUM` is host-side if ever). **Both CLAUDE.mds** (`:ext-document`'s "editor keeps
+  2" corrected to 6; doc-list lines name the tables; root pointer = arcs 1–22 frozen, no next arc
+  without a user decision) and memory.
+- **Every doc agent reported code = plan** on every number, SQL string and signature it checked;
+  the doc pass found no code defect this time. Agents were told not to cite boundary-audit row
+  numbers from other docs (the audit was being renumbered concurrently) — cite it by topic.
+
+**Status:** ✅ Complete. **Arc 22 "Tables" frozen.** No next arc is planned.
 
 ### Per-phase gates (every phase, before its commit)
 `./gradlew test` both variants green (record the count) · every module debug + release builds ·

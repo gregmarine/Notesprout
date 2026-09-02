@@ -228,6 +228,9 @@ the user has.
 the newer one — take both or neither, never one). Any `-shm` is rebuilt on open and is never copied.
 The file is ciphertext under the device's global key: a store from a *different* device's library
 will not open, and the app reports corruption rather than deleting it (never-delete-on-corruption).
+A store copied back from an old enough backup to still carry the arc-11 key/value shape is wiped on
+its first open after the restore like any other legacy store (format 1 → tables, logged as a row
+count), leaving the backup file itself untouched.
 A restore screen for the whole library, stores included, is in the monorepo `BACKLOG.md`.
 
 ---

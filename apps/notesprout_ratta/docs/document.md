@@ -59,7 +59,8 @@ is the page row's own id used as an **opaque stable token** (never parsed, only 
 equality); the notebook document's is the minted token `"nb:<notebookId>"` (below). No path, no
 notebook id, no passphrase, and no ink ever crosses this seam — only chunked text and the small
 per-device state (caret memory, text size, the proofread toggle, the user dictionary) that lives
-in the extension store.
+in the extension store — three ordinary tables since arc 22 / X4, not a key/value blob; see
+[The editor's store](#the-editors-store) below.
 
 ---
 
@@ -112,6 +113,106 @@ edit is still "the pages have changed," og's rule). `liveDescendantIds` gained `
 **page level only** — a page copy/cut/paste/delete/undo carries its document; a link never wraps
 one. `SoilCompactor` purges a document row only via cascade from its purged page — there is no
 independent document-purge path.
+
+---
+
+## The editor's store
+
+The editor's small per-device state — the saved text size, the proofread toggle, the user
+dictionary, and the caret memory — lives in the host's extension store for `:ext-document`
+(`Garden/<pkg>.db`, one per package, encrypted under the global key; an extension writes nothing
+to disk itself, ever). Arc 19 / M5 held all four under one key/value store; arc 22 / X4 moved them
+onto three ordinary tables (`EditorSchema.V1`, applied by the host on the extension's own
+declaration):
+
+```sql
+CREATE TABLE prefs (key TEXT PRIMARY KEY, value TEXT NOT NULL);                 -- 'size', 'proofread' (absent = on)
+CREATE TABLE word  (word TEXT PRIMARY KEY, addedAt INTEGER NOT NULL);           -- the user dictionary
+CREATE TABLE caret (pageKey TEXT PRIMARY KEY, offset INTEGER NOT NULL, updatedAt INTEGER NOT NULL);
+```
+
+Three tables and not one, because each is a different *identity*: a **pref** is a key with one
+value; a **word** is its own identity, with the word itself as the primary key; a **caret** is per
+page. Rows are what remove the read-modify-write a blob forced — adding one word no longer means
+decoding, changing, and rewriting the whole dictionary.
+
+- **`prefs`** is the **one** extension table the host itself reads: Document-PDF export takes the
+  editor's saved text size straight off it (see [Export](#export) below). Its table and column
+  names come from `DocumentContract` (`PREFS_TABLE` / `PREFS_KEY_COLUMN` / `PREFS_VALUE_COLUMN` /
+  `PREF_TEXT_SIZE = "size"`) rather than from `:ext-document` itself, so both sides name the same
+  thing and a test pins that they do. The proofread toggle's key, `EditorSql.PREF_PROOFREAD =
+  "proofread"`, is `:ext-document`'s own — the host never reads it.
+- **`word`** is the user dictionary. The word *is* the primary key, so there is nothing to decode
+  to find out whether a word is already vouched for.
+- **`caret`** is keyed by `pageKey` — the same opaque token every save names its target with,
+  including the notebook document's minted `"nb:<notebookId>"`. `updatedAt` is what the LRU
+  eviction orders by.
+
+**`INSERT OR REPLACE` is safe here**, and it needs saying because arc 22 / X2 forbade the same
+statement for the scratch pad's `page` table: none of these three tables has a `REFERENCES` — no
+table in this schema has children — and `REPLACE` deletes the conflicting row before it inserts the
+new one. Under `foreign_keys = ON` (the store's own promise) that delete would cascade through
+anything the old row pointed to; with no children, a replace takes nothing with it, so an upsert of
+a pref or a caret is one statement instead of a read-compare-write.
+
+`insertWord` is `INSERT OR IGNORE`, not `OR REPLACE`: re-adding an already-vouched word must not
+move it, because its `addedAt` is what the manage list orders by (og's rule — the writer added it
+when they added it). `selectWords` orders `ORDER BY addedAt, word`; the tie-break on `word` makes
+the order **total**, so two words added in the same millisecond still come back the same way on a
+list the writer taps rows in. Removing a word is a plain `DELETE FROM word WHERE word = ?` — a hard
+drop, effective immediately, with nothing to tombstone.
+
+`rememberCaret` is **one `exec` of exactly two statements**, in one transaction: the
+`INSERT OR REPLACE` upsert, then
+
+```sql
+DELETE FROM caret WHERE pageKey NOT IN (SELECT pageKey FROM caret ORDER BY updatedAt DESC LIMIT ?)
+```
+
+with the cap (`EditorSql.CARET_LIMIT = 100`, unchanged from arc 19's `CaretMemory.LIMIT`) **bound**
+rather than written into the SQL text — a cap in the text is a cap a test cannot vary. Sending both
+statements in one batch means the row just written is inside the window the trim measures against,
+so the memory can never sit over its own cap even for an instant. A negative offset is clamped to 0
+on the way in (`rememberCaret`) as well as on the way out (`caret()`, which narrows the stored
+`INTEGER` with `coerceIn(0, Int.MAX_VALUE)`) — arc 19's encoder clamped on write only.
+
+**`EditorStore` is the one place in `:ext-document` where SQL runs.** It is blocking Binder I/O and
+applies `EditorSchema.V1` on **every** public call, not once at construction: the binder is fetched
+per call from `EditorSession` rather than cached, so a host that restarted under a live screen
+lends an undeclared one, and the host's own gate refuses `exec`/`query` on a binder that has not
+declared — the per-call apply is what keeps a host restart invisible to the caller.
+`EditorStore` lets every exception through. **`EditorPrefs`** is the thin facade the editor's
+screens already called before X4 — same names and signatures — and is where "any failure means the
+default" is decided: every method wraps its `EditorStore` call in a try/catch that answers the
+default on **any** exception, because this state is comfort, never content. `rememberCaretAsync`
+still runs on its own `Dispatchers.IO.limitedParallelism(1)` lane, kept for **order** rather than
+exclusion — a statement is correct whoever else is writing, but two racing launches could still
+store a stale caret over the leave path's newer one, and a single lane runs them in launch order.
+
+**There is no lock left, and no `load()` door.** Arc 19's `caretLock` and `wordsLock` existed
+because adding one word or moving one caret meant decoding a whole blob, changing it, and writing
+the whole thing back — two of those interleaving is how one silently erases the other. Every write
+here is a single statement or one two-statement batch, correct no matter who else is writing at the
+same time: the transaction is the lock (the same rule arc 22 / X2 gave the scratch pad and X3 gave
+the tag index). `EditorStore` has no method that loads the whole store into memory, because nothing
+left needs one.
+
+**Deleted:** `CaretMemory`'s codec and `UserWords`' line-blob codec, and their tests
+(`CaretMemoryTest`, `UserWordsTest`, plus `EditorPrefsLayoutTest`, which had already gone at X1's
+KV-stub reduction). No replacement object was minted for either — the `word` table's row shape does
+the dictionary's whole job, and word normalization was already a pure function
+(`SpellEngine.normalizeWord`, lowercase + folded apostrophe) that every caller applied before
+storing; it did not move.
+
+**First open of an arc-19-shaped store is a wipe, not a migration** — `0.1.0-ratta` is unreleased,
+so an editor store still carrying the old `kv` table is reset the moment anything opens it: the
+host drops `kv` (and `room_master_table`) inside its own version transaction and stamps the file
+format 2 with its own empty `host_schema` — the three tables above arrive on the extension's next
+`applySchema`, like a fresh store's — logging the count it dropped —
+`wiped legacy store for <pkg> (format 1, 4 kv row(s) dropped)` (the arc-19 `size` / `carets` /
+`proofread` / `dict` keys, on the Nomad's test data). Nothing carries over; the first read after
+the wipe answers every default. A store whose format is *newer* than this host wrote is never
+touched at all — see [Failure table](#failure-table).
 
 ---
 
@@ -387,11 +488,13 @@ extension, so the host does the stripping and the extension stays a pure copy.
 selected exporter is `SOURCE_PAGES`. Choosing Document makes the host paginate and render the
 Markdown preview itself — `MarkdownPaginator` (from `:markdown`) slicing a `StaticLayout` at
 **exactly the editor Preview's own metrics** (`DocumentPdfMetrics` mirrors `EditorPrefs`'s key
-layout, including the user's saved text-size preference, read from the editor's extension store
-**only if that store file already exists** — an export must never mint one) — into the standard
-`PageBundle` `:ext-pdf` already knows how to assemble. The render is **plain white ground,
-always**; the page-template toggle is hidden in Document mode, since prose under ruled paper made
-no sense once tried.
+layout, including the user's saved text-size preference, read straight off the editor's own
+`prefs` table — see [The editor's store](#the-editors-store) above — through the host's own
+executor and **no binder**, and only when the store file **and** that table already exist; an
+export must never mint either. Arc 22 / X1 wired this read and X4 created the table it reads —
+before X4 the read always fell through to the default) — into the standard `PageBundle` `:ext-pdf`
+already knows how to assemble. The render is **plain white ground, always**; the page-template
+toggle is hidden in Document mode, since prose under ruled paper made no sense once tried.
 
 ---
 
@@ -419,15 +522,20 @@ pure engine files.
   KDoc claimed a capitalized-after-capitalized guard the *code* never actually implemented — the
   KDoc was corrected, the code left untouched (matching behavior, not matching comments, is the
   contract).
-- **User dictionary lives in the extension store** — an extension writes nothing to disk itself,
-  and the store is exactly the mechanism for small per-device state. `UserWords`' line-blob codec
-  sits under `EditorPrefs.KEY_USER_WORDS = "dict"`; the normalized form (lowercase, folded
-  apostrophe) is the storage form; removal is a hard drop; insertion order preserves og's
-  `addedAt` ordering with the actual clock removed (the store carries no timestamp column).
-- **The on/off toggle** lives under `EditorPrefs.KEY_PROOFREAD = "proofread"`, **absent means
-  on** (matching og's default-on), and is read **asynchronously** in `start()` — the store is
-  Binder I/O, so there is no synchronous constructor read, and the dictionary is never loaded at
-  all while the toggle is off (a user who turned it off should not pay the load cost).
+- **User dictionary is the `word` table** ([The editor's store](#the-editors-store) above) — an
+  extension writes nothing to disk itself, and since arc 22 / X4 rows are exactly the mechanism for
+  small per-device state, not a blob under a key. The normalized form (lowercase, folded
+  apostrophe — `SpellEngine.normalizeWord`, unchanged by the row move) is the storage form and the
+  primary key; adding a word is one `INSERT OR IGNORE` (a re-add does not move it); removing one is
+  one `DELETE` — a hard drop, effective immediately. `addedAt` is a real stored column now (arc
+  19's blob format had no timestamp column and only preserved insertion order), so
+  `selectWords`'s `ORDER BY addedAt, word` is the manage list's order, total on the `word`
+  tie-break.
+- **The on/off toggle** is the `prefs` row keyed `EditorSql.PREF_PROOFREAD = "proofread"`,
+  **absent means on** (matching og's default-on), and is read **asynchronously** in `start()` —
+  the store is Binder I/O, so there is no synchronous constructor read, and the dictionary is
+  never loaded at all while the toggle is off (a user who turned it off should not pay the load
+  cost).
 - **The suggestion index builds on a process-level scope**, not the editor's own lifecycle scope —
   `:ext-document` has no Application class, so this is a deliberate choice: a lifecycle-scoped
   build would restart the ~40 s Nomad-measured index build from zero on every editor open. og's
@@ -485,6 +593,8 @@ build, and it never assigns its peer at all in release.
 | A save chunk is refused (cap exceeded, bad ordering) | The **whole save resets** — never a partial document on disk |
 | `MAX_DOCUMENT_CHARS` exceeded (editor buffer or an import) | Refused at the boundary that would have exceeded it — the editor caps its own buffer save at 256k chars in saved state, and `TextImport` enforces the cap alongside the 10 MB byte cap |
 | Extension store unavailable | `EditorPrefs` treats every exception from the store as "store unavailable" and degrades — a lost caret costs a scroll position, a lost dictionary entry costs one flag, never the document itself |
+| The store's format is newer than this host wrote (`user_version` > 2) | The open throws (never-delete-on-corruption: the file is left exactly as found); `EditorPrefs` treats it like any other store exception — unavailable, every read answers its default |
+| First open of an arc-19-shaped store (a `kv` table present) | A one-time **wipe, not a migration** — `kv` (and `room_master_table`) dropped inside the host's own version transaction before the three tables above are created; logged as a row count, never a name — see [The editor's store](#the-editors-store) |
 | No `ACTION_DOCUMENT_EDITOR` extension installed | The Document button is `GONE`; for a **text document**, `TextDocRouting` falls back to `loadCanvas` (the ordinary notebook surface) with a 10 s watchdog in case an editor never appears |
 | Host process dies behind a live editor | Host-driven reconnect (`KEY_DOCUMENT_SHOWING` → `reconnect()`); see [teardown](#two-process-autosave-and-teardown) |
 | Host dies *and* the editor closes before reconnect can run | The `IndexGuard` bounce eats the saved state; the parked final save is dropped on key mismatch at the next showing — corruption-safe, accepted edge |
@@ -525,8 +635,10 @@ the Merge sheet cover the need well enough to not build a third path, revisitabl
 ## Related
 
 - [`docs/extensions.md`](extensions.md) — the seam: `ACTION_DOCUMENT_EDITOR`, `IDocumentEditor`,
-  `IDocumentHost` (the seam's first host-side stub), the text-chunking rule, the boundary audit
-  rows for the fifth point.
+  `IDocumentHost` (the seam's first host-side stub), the text-chunking rule, the boundary audit for
+  the fifth point, and **§ the store** — the gated-SQL mechanism (schema declaration and
+  application, the validator, the `user_version` format ladder, the wipe-not-migrate rule) that
+  [The editor's store](#the-editors-store) above is one instance of.
 - [`docs/export.md`](export.md) — `SOURCE_DOCUMENT`, the Source row, `DocumentExporterService`.
 - [`docs/import.md`](import.md) — the result-kind tail, `TextImporterService`, the text import
   fork.

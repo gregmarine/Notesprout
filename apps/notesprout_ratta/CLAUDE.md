@@ -30,7 +30,8 @@ notebook it came from) ·
 `docs/extensions.md` (the **seam**: the six extension points — the recognizer, arc 11's
 screen-owning scratch pad, arc 15's generic exporter point, arc 16's generic importer point,
 arc 19's screen-owning document editor with its host-callback binder and arc 21's tag manager —
-the extension store, the tier-2 recipe for an extension-owned screen, and **the boundary audit**) ·
+**the extension store, rebuilt on real SQLite tables behind gated SQL in arc 22**, the tier-2
+recipe for an extension-owned screen, and **the boundary audit**) ·
 `docs/export.md` (arc 15, grown arc 18: notebook export as a feature — the library sheet's Export…
 row, the `ExportActivity` screen with its now-real two-exporter chooser, the keying trio and its
 host-side transforms, `SoilOpenFiles`, the conditional-deletion rule, **`NSE · PDF Export`** — the
@@ -44,14 +45,17 @@ purge, sidecar hygiene and the reopen-waits-on-the-claim rule, the Backup screen
 index-last ordering and stamp map, the WAL-alongside rule for every file kind, the `.part`/`.old`
 destination discipline, the exclude toggle, the failure table; grown by **arc 21 / W5** — every
 `Garden/<pkg>.db` is in the backup set, and the manual copy-back that stands in for a restore) ·
-`docs/document.md` (arc 19: **Documents** as a feature — the page is the draft, the document is
-the result: the data model and flags-as-watermark, the extension editor and its two-process
-autosave/teardown table, seeding and Bring in, the notebook document, text documents, the export
-half, Proofread, the failure table) ·
-`docs/tags.md` (arc 21: **Tags** as a feature — tags on notebooks and pages, the identity and
-lifecycle rules, the `TagIndex` record where every assignment names its notebook, the tag screen's
-three modes, the four doors (library sheet, notebook bar, lasso, search), and the failure table) ·
-`docs/scratchpad.md` (arc 11: the Scratch Pad as a feature — screen, tools, pages, store layout,
+`docs/document.md` (arc 19, per-device state on rows arc 22 / X4: **Documents** as a feature —
+the page is the draft, the document is the result: the data model and flags-as-watermark, the
+extension editor and its two-process autosave/teardown table, the `prefs` / `word` / `caret`
+tables, seeding and Bring in, the notebook document, text documents, the export half, Proofread,
+the failure table) ·
+`docs/tags.md` (arc 21, rebuilt on rows arc 22 / X3: **Tags** as a feature — tags on notebooks
+and pages, the identity and lifecycle rules, the `tag` / `assignment` tables where every assignment
+names its notebook, the two-query search merge, the tag screen's three modes, the four doors
+(library sheet, notebook bar, lasso, search), and the failure table) ·
+`docs/scratchpad.md` (arc 11, rebuilt on rows arc 22 / X2: the Scratch Pad as a feature — screen,
+tools, pages, the `page` / `stroke` / `state` tables and the op-log flush with no page ceiling,
 both transfers, failure table) ·
 `docs/sn-screen.md` (arc 11 / J1: the shared `:sn-screen` paper-screen library — what may live
 there, what may not depend on it, and the `nonTransitiveRClass` flag that holds it together).
@@ -80,7 +84,8 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   `:ext-document` (**NSE · Document**, arc 19 / M3, grown M8 — `:extension-api` + `:sn-screen` +
   `:markdown`, never `:app`; one package, TWO services + a screen: `DocumentEditorService` +
   the editor Activity, and `TextImporterService` on the importer point (declares API version 3
-  for its `ImporterInfo.resultKind` tail — per-service meta-data, the editor keeps 2); no
+  for its `ImporterInfo.resultKind` tail — per-service meta-data; the editor service declares
+  **6** since arc 22 / X4, because it takes a store); no
   Application class, no drawing engine; module-local `com.darkrockstudios:symspellkt:3.4.0`
   (arc 19 / M10 — the pdfbox precedent, never leaks into another module) with the bundled
   dictionary asset `assets/proofread/en_82765.dict` — gzip content behind an opaque extension

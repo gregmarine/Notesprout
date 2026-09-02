@@ -10,7 +10,9 @@ store, trust — is [`docs/extensions.md`](extensions.md); the parts of the scre
 [`docs/sn-screen.md`](sn-screen.md); the notebook it talks to is [`docs/notebook.md`](notebook.md).
 
 **Status: arc 11 complete** — J1 `:sn-screen` · J2 the store · J3 the point · J4 the screen +
-both entry buttons · J5 the two transfers · J6 review, docs, freeze.
+both entry buttons · J5 the two transfers · J6 review, docs, freeze. **Grown by arc 22 / X2**
+(2026-09-01): the store moved from a per-package key/value blob to real SQLite tables — the pad's
+pages have no size ceiling any more. See § Pages and the store.
 
 ## Why an extension at all
 
@@ -27,8 +29,8 @@ capability point. What it bought:
   lent for the showing and revoked with the unbind.
 
 Two structural moves rode along: `:sn-screen` (J1), the shared paper-screen library both surfaces
-build from; and the full extension store (J2), encrypted per-package KV with an ashmem path for
-large values.
+build from; and the full extension store (J2) — encrypted per-package SQLite behind gated
+parameterized SQL since arc 22 / X1, with ashmem still carrying a chunk over the inline cap.
 
 ## The screen
 
@@ -72,22 +74,95 @@ page-op lock first, and only then hands off and finishes.
 
 ## Pages and the store
 
-The pad's pages are a flat list in the host's store for `com.…notesproutsn.ext.scratchpad`:
+The pad's pages are rows in the host's store for `com.…notesproutsn.ext.scratchpad` (arc 22 / X2 —
+arc 11's flat `pages` / `current` / `page/<id>` key-value layout is gone entirely). `ScratchSchema.V1`:
 
-| Key | Value |
-|---|---|
-| `pages` | UTF-8, one page id per line, in order (a page id is a UUID minted by the pad) |
-| `current` | the current page id — where the pad opens next time |
-| `page/<id>` | the page blob: `ScratchPageCodec` (page size + the strokes) |
+```sql
+CREATE TABLE page   (id TEXT PRIMARY KEY, position INTEGER NOT NULL, width REAL NOT NULL, height REAL NOT NULL,
+                     createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL);
+CREATE INDEX page_position ON page(position);            -- non-unique: renumbering shifts in place
+CREATE TABLE stroke (id TEXT PRIMARY KEY, pageId TEXT NOT NULL REFERENCES page(id) ON DELETE CASCADE,
+                     "order" INTEGER NOT NULL, color INTEGER NOT NULL, width REAL NOT NULL, style TEXT NOT NULL,
+                     blob BLOB NOT NULL);                 -- blob = StrokeCodec format B, unchanged
+CREATE INDEX stroke_page_order ON stroke(pageId, "order");
+CREATE TABLE state  (key TEXT PRIMARY KEY, value TEXT NOT NULL);   -- 'current' → page id
+```
 
-Values up to `STORE_MAX_INLINE_BYTES` (512 KiB) go through `put` / `get`; above that through
-`putLarge` / `getLarge` over ashmem, the region closed in a `finally` on both sides. A missing
-`pages` key is first run — one blank page is created.
+`stroke.blob` is exactly the `.soil`'s own stroke geometry (`StrokeCodec` format B) — arc 11's
+whole-page blob is gone, but the bytes inside one stroke never changed. `stroke."order"` is the
+writing order within its page, and it is what an undo/redo cycle restores a stroke to. First run
+applies `ScratchSchema.V1` (idempotent — a no-op is one host-side `SELECT`) and, finding no page
+rows at all, mints one blank page and names it current, in one batch.
 
-**The full rule.** A page blob over `STORE_MAX_VALUE_BYTES` (4 MiB) is refused whole: `PageFullException`,
-never split, never written elsewhere. `ScratchDocument` keeps the *exact* encoded running size, so a
-stroke that would cross the line is removed and a dialog says so — once per visit, not once per
-stroke. On the transfer path the same rule refuses the **whole** placement (below).
+**Two write ops, both idempotent**, because a batch that fails part-way is retried by whatever
+caller owns it and the retry has to converge:
+
+- a stroke row is `INSERT OR REPLACE` (a stroke has no children, so REPLACE is safe) and removed
+  with `DELETE … WHERE id = ?` (a row that is not there is not an error);
+- a page row is `INSERT OR IGNORE` then `UPDATE`d, and its position is renumbered per id (page
+  counts are tens, so every position is rewritten rather than shifted in place). **Never
+  `INSERT OR REPLACE INTO page`** — REPLACE deletes the conflicting row first, and with
+  `foreign_keys` ON that delete CASCADEs, taking the page's strokes with it;
+- `state('current')` is `INSERT OR REPLACE`.
+
+Every one of these strings lives in `ScratchSql`, pinned by `ScratchSqlTest` (exact SQL text and
+bound args).
+
+**The op log.** `ScratchDocument` keeps the current page as a `TreeMap<order, Stroke>` plus a
+`LinkedHashMap<id, Op>` op log — one entry per touched stroke id, `Put(stroke, order)` or `Drop`.
+Coalescing is the map itself: a second edit to the same stroke overwrites the first entry rather
+than queuing a second one, and a flush is one statement per touched stroke rather than a re-encode
+of the page. An erase is always a `Drop`, never "forget the `Put`" — a `Put` may be a move of a row
+already stored, and dropping the entry outright would leave that row behind. `flushUntilClean`
+snapshots the log and clears it **before** the IO hop (so a stroke committed mid-write re-dirties
+the page and takes another pass, rather than being silently lost) and, on a failed write, merges
+the snapshot back **under** anything recorded since — a newer entry for the same id wins because it
+already describes the row's latest state — then rethrows.
+
+Orders are a **high-water mark** (`highWater`), never the map's last key — a Fable-review finding:
+erasing the tail stroke lowers the last key, so handing out `lastKey + 1` again would give an
+erased stroke's order to the next one drawn, and restoring the erased stroke via undo would then
+collide with it. `highWater` only ever rises while the page is loaded.
+
+**Batching.** A write is split into ≤ `STORE_MAX_VALUE_BYTES` (4 MiB) / ≤
+`STORE_MAX_BATCH_STATEMENTS` (10 000)-statement `exec` batches (`ScratchBatches`, measuring each
+statement with `StoreCodec.statementBytes` so what is measured is exactly what the payload will
+weigh). One batch is one transaction and therefore atomic — every ordinary flush, page operation
+and placement under the cap lands as one. Past it the write is several transactions run in order,
+and the caller's retry is what closes the gap — which is exactly why every statement above is
+idempotent. `receive` (the notebook → pad placement, § The transfers) **compensates** a multi-batch
+failure before throwing `StoreUnavailable`: a new page's statements are undone with
+`DELETE FROM page` (the declared cascade) plus the old positions restored; a placement onto the
+current page is undone with one `dropStroke` per minted id — never an `IN (…)` list, because of the
+999-argument cap (`STORE_MAX_ARGS`).
+
+**Reads are planned, never refused.** `readPage` first reads the small index — `SELECT "order",
+LENGTH(blob)` for every stroke on the page — then `ScratchReadPlan.ranges` packs consecutive
+strokes into ranges that fit under the 4 MiB budget (`ROW_OVERHEAD` 128, an over-estimate for the
+id/order/colour/width/style cells and their tags), and each range is one `BETWEEN` query run
+through `StoreReads.all`. A page of any size comes back this way and never meets
+`STORE_RESULT_LARGE`. `StrokeRows.decode`: a malformed row — bad geometry, a cell of the wrong
+storage class, a stroke with no points — is a **dropped stroke, never a lost page**: it is skipped
+and counted (`Log.w`), and the rest of the page loads.
+
+**The ceiling is gone.** Arc 11's `PageFullException`, `SCRATCH_PAGE_FULL`, the "Page is full" /
+"Page unreadable" / "Scratch page is full" strings, `Add`, `refuse()` and `ScratchPageCodec` are all
+deleted — a page is rows now, and the only failure left is the store being unreachable at all (any
+exception at all becomes `StoreUnavailable`, which is what the screen and the service both answer
+to). The proof is structural (no byte cap anywhere in the write path, keyset/ranged reads) plus the
+JVM split/plan tests; the phase's user checklist included an on-device single-page stress well past
+the old 4 MiB mark, and it was **skipped by the user** — said here honestly rather than claimed as
+verified on the Nomad.
+
+**The legacy wipe.** A store still shaped like arc 11's (a `kv` table, `PRAGMA user_version` at 1)
+is reset the first time this host opens it — `kv` and `room_master_table` dropped, no migration,
+logged once as `wiped legacy store for <pkg> (format 1, N kv row(s) dropped)`, never a key. The
+file keeps its on-disk size afterwards (freed pages, no `VACUUM` anywhere in this ladder) — a
+future compaction question, not this one.
+
+`PLACE_TIMEOUT_MS` stays 10 s: a placement is now inserts, cheaper than the whole-page re-encode it
+was originally sized for. Never Main, unchanged — every store call still hops to `Dispatchers.IO`,
+except `begin` / `receiveInk`, which run on the Binder thread exactly as before.
 
 Deleting the last page empties it rather than removing it: the pad always has at least one page.
 
@@ -108,7 +183,12 @@ page is clipped exactly like any other ink.
 5. The service re-checks the **running totals** as chunks accumulate (the untrusted-input half of
    step 3), mints fresh ids, and places through `ScratchStore.receive` **on the Binder thread** —
    New page inserts after the current one at the bundle's size, Current page appends keeping its own.
-   The target becomes `current`, so the screen opens on it.
+   The target becomes `current`, so the screen opens on it. The whole placement is one statement
+   list: under the batch cap (§ Pages and the store) that is one transaction, and the promise
+   "nothing was placed" is the transaction's; past it the batches run in order and a failure
+   part-way is **compensated** before `StoreUnavailable` surfaces — the arc-11 hand-rolled
+   ink-first/compensating-delete choreography this replaced is gone, because the transaction (or
+   the compensation) is now the guarantee.
 6. The screen is launched with `EXTRA_SCRATCH_OPEN_RECEIVED` and consumes the record **once**: it
    switches to the **lasso before `setSelection`**, selects what arrived, and records **one** undo
    step. The tool the user had comes back pen-idle at dismissal — unless they picked another one
@@ -140,7 +220,7 @@ needs — so the whole round trip is finger-drivable.
 | Placement | Action | Undo | Redo |
 |---|---|---|---|
 | Current page | `Pasted` | removes exactly what arrived | puts exactly it back |
-| New page | `Page` (with `afterBlob`) | removes the page **with its cargo** | brings the page back **with its ink** |
+| New page | `Page` (with `afterInk`, a `PageInk`) | removes the page **with its cargo** | brings the page back **with its ink** |
 
 `ScratchAction.Page` carries the affected page's ink on *each* side of the move, which is what lets
 one shape cover three acts — insert (blank both sides), delete (ink on the `before` side) and a
@@ -155,13 +235,14 @@ Every failure is a dialog that says what happened and what is still true. Toasts
 | No trusted pad installed | host | the button is **GONE** (never disabled — invisible on e-ink) | — |
 | Open failed (disabled, replaced, store unreadable) | host | "Scratch pad unavailable" | nothing sent, discovery re-runs |
 | Selection over the transfer caps | host, **before any bind** | "Too much to send" | nothing sent |
-| The pad's target page would cross 4 MiB | pad → `SCRATCH_PAGE_FULL` → host | "Scratch page is full — nothing was sent" | **nothing placed, no page inserted**; the pad is not opened |
+| A placement's batches fail part-way (arc 22 / X2) | pad's store call → host | "Scratch pad unavailable" — the same text as any open failure | **compensated first** (the new page or the minted strokes are undone), then nothing placed; the pad is not opened |
 | The drain hit a cap or the chunk budget | host | "Not everything came back" + the pasted count | what came is pasted; the rest is **still on the pad** |
 | The drain failed outright, or brought back nothing | host | "Nothing came back" | nothing pasted; the ink is **still on the pad** |
 | The paste could not be written | host | "…could not be written. Nothing was changed" | nothing pasted; the ink is still on the pad |
 | Send with no ink picked | pad | "Nothing to send" | the pad stays up |
-| A stroke would cross 4 MiB while writing | pad | "Page is full" (once per visit) | the stroke is removed, nothing written |
-| A page blob will not decode | pad | "Page unreadable" | shown empty and **left untouched** — nothing is written over it |
+| A stroke row will not decode (arc 22 / X2) | pad, on read | nothing — no dialog | that stroke is **dropped, never surfaced**; counted and logged, the rest of the page loads |
+| The store still carries arc 11's key/value shape | host, on first open | nothing — the pad opens as if fresh | **wiped** (`kv` + `room_master_table` dropped, logged as a row count); no migration |
+| The store's format is newer than this host writes | host, on open | "Scratch pad unavailable" | **left exactly as found** — never-delete-on-corruption |
 | The store binder is gone | pad | "Scratch pad unavailable" | the pad finishes |
 
 ## Entry points
@@ -209,8 +290,10 @@ exception: the same act as the Contents and Recents buttons.
 |---|---|
 | `:ext-scratchpad` `ScratchPadActivity` | the screen, the handoff, the received-placement consume, `send()` |
 | `ScratchToolbar` / `ScratchSelectionToolbar` | the chrome, the fixed tools, both Send buttons |
-| `ScratchDocument` | pages in memory over the store, the exact running size behind the full rule, the undo replay |
-| `ScratchStore` / `ScratchPages` / `ScratchPageCodec` | the key layout, the pure list rules, the blob format |
+| `ScratchDocument` | the current page in memory (`TreeMap` + op log), `flushUntilClean`, the undo replay |
+| `ScratchSchema` / `ScratchSql` | the table DDL, every SQL string the pad sends (pinned by `ScratchSqlTest`) |
+| `ScratchStore` / `ScratchBatches` / `ScratchReadPlan` / `StrokeRows` | the write/read calls, batch splitting + compensation, ranged reads, row → stroke decode |
+| `ScratchPages` | the pure page-list position arithmetic (no longer a storage role) |
 | `ScratchPadService` / `ScratchSession` | the held bind's four methods; the process-wide state a showing lends |
 | `ScratchInk` / `ScratchUndo` | wire ⇄ paper on the extension side; the five actions |
 | `:extension-api` `IScratchPad.aidl` | `begin` · `receiveInk` · `takeOutgoing` · `end` |

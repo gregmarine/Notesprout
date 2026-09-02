@@ -147,24 +147,23 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
 - `main` — stable release branch (v1.0 "Seed" through v1.3 "Supernote" shipped; the release merge
   commits are in git history).
 - `ratta` — **the active feature branch** (cut 2026-08-20): Notesprout SN, a from-scratch
-  Supernote-only rebuild under `apps/notesprout_ratta/`. **Arcs 1–21 complete + frozen**
+  Supernote-only rebuild under `apps/notesprout_ratta/`. **Arcs 1–22 complete + frozen**
   (2026-09-01; the per-arc feature references are `apps/notesprout_ratta/docs/*.md`). Ten
   modules (host + `:sn-screen` + `:markdown` + `:extension-api` + six extension APKs), SIX
   extension points (recognizer · scratch pad · exporter · importer · document editor · tag
-  manager), g-paper pin 0.1.23, version `0.1.0-ratta`, 1738 JVM tests/variant.
-  **ARC 22 "Tables" IS IN PROGRESS — X1 (the seam) ✅ + X2 (scratch pad on rows) ✅ + X3 (tags on
-  rows + the search merge) ✅ + X4 (document editor on rows) ✅ 2026-09-01; next phase X5 (docs /
-  ledger / freeze, Sonnet docs — no code-review phase, the user's call): the extension store is
-  now real SQLite tables behind gated parameterized SQL (KV API removed, `API_VERSION` 6 with a
-  store floor, legacy stores wiped on open). All three store-taking extensions are back on rows
-  and every door is back on the device (pad: no page ceiling; tags: two paged queries, the
-  transaction is the lock; editor: `prefs` / `word` / `caret`, no read-modify-write). Plan =
-  `RATTA_PLAN.md` § "Phases — Arc 22". No SEVENTH extension point without another user decision.**
-  **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for ANY work there** — it holds the working
-  protocol, model recipe, standing traps, the per-arc ledger of still-binding decisions, and the
-  active arc's full plan. Subsystem detail: `apps/notesprout_ratta/docs/` + that app's CLAUDE.md.
-  Full frozen-arc phase records live in git history
-  (`git show 90a9198:apps/notesprout_ratta/RATTA_PLAN.md`).
+  manager), g-paper pin 0.1.23, version `0.1.0-ratta`, 1738 JVM tests/variant. **Arc 22
+  "Tables" (X1–X5, 2026-09-01) made the extension store real SQLite tables behind gated
+  parameterized SQL** — `IExtensionStore` v6 (`applySchema` / `exec` / `query` / `next` /
+  `close`), the KV API removed, `API_VERSION` 6 with a store floor, legacy stores wiped on open,
+  and the scratch pad (no page ceiling), tags (two paged queries, the transaction is the lock)
+  and the document editor (`prefs` / `word` / `caret`) all on rows. **NO NEXT ARC IS PLANNED —
+  ask the user before starting anything there.** No SEVENTH extension point without another
+  user decision. **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for ANY work there** — it
+  holds the working protocol, model recipe, standing traps, and the per-arc ledger of
+  still-binding decisions. Subsystem detail: `apps/notesprout_ratta/docs/` + that app's
+  CLAUDE.md. Full frozen-arc phase records live in git history
+  (`git show 90a9198:apps/notesprout_ratta/RATTA_PLAN.md` for arcs 1–18; later arcs at the end
+  of the plan file).
 - `germination` — previous post-MVP feature branch (reference, not active)
 - The former feature branches (`seed`, `sprout`, `sapling`, `supernote`, `paper`) are merged and
   **deleted** (local + remote) — "on sprout/sapling/supernote/paper" means `main`; history lives under

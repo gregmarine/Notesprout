@@ -45,14 +45,31 @@ store; the host owns every entry point (the library's long-press row, the notebo
 doors, the lasso's silent and recognized flows), the recognizer call, and the library's search
 merge. It is the first screen-owning point whose screen carries **no paper at all** — no
 `PaperView`, no g-paper, and therefore no EPD handoff — and the first interface to serve two call
-shapes at once, a held bind for the showing and bind-per-call for `snapshot`/`assign`. The rule
+shapes at once, a held bind for the showing and bind-per-call for `tags`/`assignmentsOf`/`assign`
+(`snapshot`, W1's original bind-per-call read, was replaced at arc 22 / X3 — see below). The rule
 survives once more, another word wider: **no *seventh* capability point without another user
 decision** (`apps/notesprout_ratta/CLAUDE.md`).
+
+**Arc 22 "Tables" is not a seventh decision — the rule above still stands — but it is a fresh
+decision all the same, self-granted 2026-09-01: a rebuild of the *service* every store-taking
+point already receives, not a new point.** `IExtensionStore` stopped being a per-package
+key/value blob store and became real SQLite tables behind gated parameterized SQL: an extension
+declares its schema once (`StoreSchema`), then sends `SELECT`/`INSERT`/`UPDATE`/`DELETE` through a
+validator (`StoreSql`) and reads rows back (`StoreCodec`) — full SQLite expressiveness (joins,
+aggregates, indexes) where arc 11 offered six methods and a byte array. X1 rebuilt the seam and
+the host's store, with every store-taking extension GONE from the host until it redeclared the new
+floor; X2 moved the scratch pad onto rows (the 4 MiB page ceiling is gone with the blob it
+bounded); X3 moved the tag manager onto rows (`ITagManager`'s `snapshot` replaced by two paged
+reads, `tags`/`assignmentsOf`, and the caps' size arithmetic deleted with the one-value layout it
+protected); X4 moved the document editor onto rows (`prefs`/`word`/`caret`, no more
+read-modify-write). `API_VERSION` 6 is the ledger's second break that is not a compatible tail, and
+the first that carries a floor — see the ledger below.
 
 The pad as a **feature** has its own reference — [`docs/scratchpad.md`](scratchpad.md); export has
 its own — [`docs/export.md`](export.md); import has its own too — [`docs/import.md`](import.md);
 documents likewise — [`docs/document.md`](document.md); tags likewise —
-[`docs/tags.md`](tags.md). This doc is the seam for all six points.
+[`docs/tags.md`](tags.md). This doc is the seam for all six points, and the store rebuild that
+underlies three of them.
 
 Fresh code. Paper's own extension arcs (`PAPER_EXTENSIONS_PLAN.md`, `PAPER_RECOGNITION_PLAN.md`,
 `PAPER_SCRATCHPAD_PLAN.md`, its `:extension-api` / `:ext-mlkit` / `:ext-scratchpad`) are the shape
@@ -72,14 +89,14 @@ Ten modules, SN's own Gradle root:
 |---|---|---|---|
 | `:sn-screen` | Android library | g-paper (`api`) + androidx; **never** `:app`, **never** `:extension-api` | the design resources and the screen helpers both paper surfaces need — see [`sn-screen.md`](sn-screen.md) |
 | `:markdown` | Android library | nothing in this project — stdlib + the android SDK its spans use (arc 19 / M1) | the shared pure markdown engine `:app` and `:ext-document` both consume — parser, renderer, `HeadingTypography`, `MarkdownDraw`, `MarkdownFormatter`, `TextBuffer`, `MarkdownReflow`, `TextSearch`, `DocumentDraft`, `MarkdownText`, `MarkdownPaginator`. One engine, no drift: the host renders text-document covers and the PDF preview, the extension renders the editor's Preview |
-| `:extension-api` | Android library | nothing in `:app`, no library beyond the Kotlin stdlib (`build.gradle.kts` says so explicitly) | the AIDL (`IHandwritingRecognizer`, `InkStroke.aidl`; `IExtensionStore`, `LargeValue.aidl`; `IScratchPad`, `WireStroke.aidl`, `InkBundle.aidl`; `INotebookExporter`, `ExporterInfo.aidl`, `ExportSpec.aidl`, `ExportResult.aidl`; `INotebookImporter`, `ImporterInfo.aidl`, `ImportSpec.aidl`, `ImportResult.aidl`; `IDocumentEditor`, `IDocumentHost`, `DocumentPageState.aidl`; `ITagManager`, `TagShowing.aidl`), the hand-written `InkStroke` / `LargeValue` / `WireStroke` / `InkBundle` / `ExporterInfo` / `OptionDescriptor` / `ExportSpec` / `ExportResult` / `ImporterInfo` / `ImportSpec` / `ImportResult` / `DocumentPageState` / `TagShowing` parcelables, `PageBundle` (the arc-18 page-bundle container — pure `java.io`, no Android types), `SharedBytes`, `InkChunks`, `TextChunks`, `RecognizerStatus`, `ExtensionContract`, `ExporterContract`, `ImporterContract`, `DocumentContract`, `HostCallerCheck`, and — arc 21's four pure tag files — `TagRules`, `TagIndex`, `TagCodec`, `CompactId` |
+| `:extension-api` | Android library | nothing in `:app`, no library beyond the Kotlin stdlib (`build.gradle.kts` says so explicitly) | the AIDL (`IHandwritingRecognizer`, `InkStroke.aidl`; `IExtensionStore`, `StorePayload.aidl`, `StoreResult.aidl`, `StoreSchema.aidl`; `IScratchPad`, `WireStroke.aidl`, `InkBundle.aidl`; `INotebookExporter`, `ExporterInfo.aidl`, `ExportSpec.aidl`, `ExportResult.aidl`; `INotebookImporter`, `ImporterInfo.aidl`, `ImportSpec.aidl`, `ImportResult.aidl`; `IDocumentEditor`, `IDocumentHost`, `DocumentPageState.aidl`; `ITagManager`, `TagShowing.aidl`, `TagRecord.aidl`, `AssignmentRecord.aidl`), the hand-written `InkStroke` / `StorePayload` / `StoreResult` / `StoreSchema` / `WireStroke` / `InkBundle` / `ExporterInfo` / `OptionDescriptor` / `ExportSpec` / `ExportResult` / `ImporterInfo` / `ImportSpec` / `ImportResult` / `DocumentPageState` / `TagShowing` / `TagRecord` / `AssignmentRecord` parcelables, `PageBundle` (the arc-18 page-bundle container — pure `java.io`, no Android types), `SharedBytes`, `InkChunks`, `TextChunks`, `RecognizerStatus`, `ExtensionContract`, `ExporterContract`, `ImporterContract`, `DocumentContract`, `HostCallerCheck`, and — the store seam rebuilt at arc 22 / X1 — `StoreCodec` (`Cell`, `Statement`, `Row`, `StoreRows`, `StoreChunker`), `StoreSql` / `StoreNames` (the validator), `StoreReads` (the extension-side `query`/`exec` loop), `TagRules` (arc 21, `isId` case-insensitive since X3) and `TagPages` (arc 22 / X3, the one paging loop both sides run). Arc 21's `TagIndex` / `TagCodec` / `CompactId` are **deleted** with the one-blob layout they served; `TagIndex` survives as `:ext-tags`' own in-memory query model, not a file shared by both sides |
 | `:ext-mlkit` | Android application (its own installable APK) | `:extension-api` + `com.google.mlkit:digital-ink-recognition:19.0.0` | `HandwritingRecognizerService`, `ModelManager`, `MlKitEngine`, `PageText`, `StrokeSegmenter`, `Dots`, `Box` |
-| `:ext-scratchpad` | Android application (its own installable APK) | `:extension-api` + `:sn-screen` (g-paper arrives through its `api`) + androidx; **never** `:app`, no Room / SQLCipher / serialization | `ScratchPadApplication`, `ScratchPadService`, `ScratchPadActivity`, `ScratchSession`, `ScratchStore`, `ScratchPageCodec`, `ScratchPages`, `ScratchInk` |
+| `:ext-scratchpad` | Android application (its own installable APK) | `:extension-api` + `:sn-screen` (g-paper arrives through its `api`) + androidx; **never** `:app`, no Room / SQLCipher / serialization | `ScratchPadApplication`, `ScratchPadService`, `ScratchPadActivity`, `ScratchSession`, `ScratchSchema` (arc 22 / X2, schema v1: `page`/`stroke`/`state`), `ScratchSql`, `ScratchStore`, `ScratchDocument` (the op log, replacing the whole-page re-encode), `ScratchBatches`, `ScratchReadPlan`, `StrokeRows`, `ScratchInk` |
 | `:ext-soil` | Android application (its own installable APK) | `:extension-api` only | `SoilExporterService`, `SoilExportSpec` — see [`export.md`](export.md); and, arc 16, `SoilImporterService` — see [`import.md`](import.md). One package, two services, one label |
 | `:ext-pdf` | Android application (its own installable APK) | `:extension-api` + `com.tom-roush:pdfbox-android:2.0.27.0` (module-local — approved 2026-08-30, used only on the protect path) | `PdfExporterService`, `PdfDescriptor`, `PdfExportSpec`, `PdfAssembly`, `CountingOutputStream` — arc 18's second exporter on the same point; see [`export.md`](export.md) |
-| `:ext-document` | Android application (its own installable APK) | `:extension-api` + `:sn-screen` + `:markdown` + `com.darkrockstudios:symspellkt:3.4.0` (module-local — approved 2026-08-30, the pdfbox precedent); **never** `:app`, no Application class, no drawing engine | one package, TWO services + a screen: `DocumentEditorService` + `DocumentEditorActivity` (the editor — arc 19 / M3–M7, with `EditorSession`, `DocumentSaver`, `AutosaveGovernor`, `ChunkPush`, `PendingPark`, `EditorPrefs`, the format bar, find & replace, and the `proofread/` engine over the bundled `assets/proofread/en_82765.dict`), `TextImporterService` (M8, on the importer point) and `DocumentExporterService` (M9, on the exporter point) — see [`document.md`](document.md) |
-| `:ext-tags` | Android application (its own installable APK) | `:extension-api` + `:sn-screen` (g-paper arrives through its `api` and is deliberately never touched); **never** `:app`, no Application class, no drawing engine | the TENTH module (arc 21 / W1–W4, **NSE · Tags**, Tabler `tag` icon): one service + a screen, `TagManagerService` + `TagsActivity`, over `TagSession` (the `ScratchSession` shape — the two share a process), `TagStore` (the index's key layout, one key), `TagWrites` (the one read-modify-write both writers in the process take), `TagManage`, `TagPaging`, `TagRowView` — see [`tags.md`](tags.md) |
-| `:app` (`extension/` package) | part of the host APK | `:extension-api` | `ExtensionRegistry`, `ExtensionBinder`, `ExtensionCallException`, `InkCaps`, `RecognizerClient`, `RecognizerReadiness`, `ScratchPadClient`, `TransferCaps`, `ExporterClient`, `ImporterClient`, `DocumentEditorClient`, `DocumentEditorEntry`, `DocumentHostBinder`, `DocumentHostSession`, `TagClient`, `TagManagerEntry`; and in `data/extstore/`, the extension store (`ExtensionStores`, `ExtensionStoreDatabase`, `KvEntity`, `KvDao`, `ExtensionStoreGate`, `ExtensionStoreBinder`) — plus, in `export/` and `crypto/`, export's own host-side half (`ExportActivity`, `ExportPanel`, `ExportOptions`, `ExportArtifact`, `ExportNaming`, `ExportKeying`, `SoilOpenFiles`, and arc 19's `ExportText`, `ExportDocumentRules`, `DocumentPdfRender`, `DocumentPdfMetrics`), in `importing/` and `crypto/`, import's (`ImportFlow`, `NotebookImport`, `ImporterMatch`, `ImportNames`, `AncestryPlan`, `SafeImportId`, `ImportDialogs`, `ImportOverlay`, `ImportKeying`, `NotebookRemap` in `data/soil/`, and arc 19's `TextImport`), and in `notebook/`, tags' own host-side half (`TagsPopup`, `TagTargets`, `TagSelection`) |
+| `:ext-document` | Android application (its own installable APK) | `:extension-api` + `:sn-screen` + `:markdown` + `com.darkrockstudios:symspellkt:3.4.0` (module-local — approved 2026-08-30, the pdfbox precedent); **never** `:app`, no Application class, no drawing engine | one package, TWO services + a screen: `DocumentEditorService` + `DocumentEditorActivity` (the editor — arc 19 / M3–M7, with `EditorSession`, `DocumentSaver`, `AutosaveGovernor`, `ChunkPush`, `PendingPark`, `EditorSchema` (arc 22 / X4, schema v1: `prefs`/`word`/`caret`), `EditorSql`, `EditorStore`, `EditorPrefs` (the thin facade callers keep using), the format bar, find & replace, and the `proofread/` engine over the bundled `assets/proofread/en_82765.dict`), `TextImporterService` (M8, on the importer point) and `DocumentExporterService` (M9, on the exporter point) — see [`document.md`](document.md) |
+| `:ext-tags` | Android application (its own installable APK) | `:extension-api` + `:sn-screen` (g-paper arrives through its `api` and is deliberately never touched); **never** `:app`, no Application class, no drawing engine | the TENTH module (arc 21 / W1–W4, grown onto rows at arc 22 / X3, **NSE · Tags**, Tabler `tag` icon): one service + a screen, `TagManagerService` + `TagsActivity`, over `TagSession` (the `ScratchSession` shape — the two share a process), `TagSchema` (schema v1: `tag`/`assignment`), `TagSql`, `TagStore`, `TagIndex` (moved here from `:extension-api` at X3 — the screen's query-only in-memory model, built from two reads), `TagManage`, `TagPaging`, `TagRowView` — see [`tags.md`](tags.md) |
+| `:app` (`extension/` package) | part of the host APK | `:extension-api` | `ExtensionRegistry`, `ExtensionBinder`, `ExtensionCallException`, `InkCaps`, `RecognizerClient`, `RecognizerReadiness`, `ScratchPadClient`, `TransferCaps`, `ExporterClient`, `ImporterClient`, `DocumentEditorClient`, `DocumentEditorEntry`, `DocumentHostBinder`, `DocumentHostSession`, `TagClient`, `TagManagerEntry`; and in `data/extstore/`, the extension store — rebuilt on `SupportSQLiteOpenHelper` at arc 22 / X1, Room's `KvEntity`/`KvDao` deleted with it (`ExtensionStores`, `ExtensionStoreDatabase`, `StoreFormat`, `StoreExecutor` / `SupportStoreExecutor`, `ExtensionStoreGate`, `ExtensionStoreBinder`) — plus, in `export/` and `crypto/`, export's own host-side half (`ExportActivity`, `ExportPanel`, `ExportOptions`, `ExportArtifact`, `ExportNaming`, `ExportKeying`, `SoilOpenFiles`, and arc 19's `ExportText`, `ExportDocumentRules`, `DocumentPdfRender`, `DocumentPdfMetrics`), in `importing/` and `crypto/`, import's (`ImportFlow`, `NotebookImport`, `ImporterMatch`, `ImportNames`, `AncestryPlan`, `SafeImportId`, `ImportDialogs`, `ImportOverlay`, `ImportKeying`, `NotebookRemap` in `data/soil/`, and arc 19's `TextImport`), and in `notebook/`, tags' own host-side half (`TagsPopup`, `TagTargets`, `TagSelection`) |
 
 `:sn-screen` is deliberately **not** in that dependency chain: it never sees `:extension-api`, so a
 shared screen helper can never quietly become part of the wire contract. `:ext-scratchpad` depends on
@@ -185,7 +202,8 @@ loading as one busy state), `UNAVAILABLE` (3). The host treats anything outside 
 
 | Constant | Value | Purpose |
 |---|---|---|
-| `API_VERSION` | 5 (arc 21 / W4) | the host accepts an extension whose `<meta-data>` is in `1..API_VERSION` — the declared number is what the extension *requires* of the host, so a new-seam extension is skipped by an older host instead of misread by it. Meta-data is **per service**: the PDF exporter declares 2 (the `sourceKind` tail), `:ext-document`'s text importer and document exporter declare 3 (the `resultKind` tail / `SOURCE_DOCUMENT`), its editor service stays at 2, `:ext-tags`' one service declares 5, everything else at 1. **The ledger:** 2 = arc 18's `sourceKind` tail · 3 = arc 19 / M8's `resultKind` tail · 4 = arc 21 / W1, the tag point itself · 5 = arc 21 / W4, and it is the **first bump that is not a compatible tail** — see the version note below |
+| `API_VERSION` | 6 (arc 22 / X1) | the host accepts a service whose `<meta-data>` is in `minApiVersion(action)..API_VERSION` (`ExtensionContract.accepts`) — the declared number is what the extension *requires* of the host. `minApiVersion` is 1 for a stateless point, but `MIN_API_VERSION_FOR_STORE` (6) for the three **store-taking** points (scratch pad, document editor, tag manager): a service there is skipped below the floor even though the ceiling alone would admit it, because a replaced `IExtensionStore` breaks the old-extension/new-host direction too — see the version note below. Meta-data is **per service**: the PDF exporter declares 2 (the `sourceKind` tail), `:ext-document`'s text importer and document exporter declare 3 (the `resultKind` tail / `SOURCE_DOCUMENT`), its editor service declares **6** (arc 22 / X4, since it takes a store), `:ext-tags`' one service declares **6** (arc 22 / X3), `:ext-scratchpad`'s one service declares **6** (arc 22 / X2), everything else (`:ext-mlkit`, `:ext-soil`) at 1. **The ledger:** 2 = arc 18's `sourceKind` tail · 3 = arc 19 / M8's `resultKind` tail · 4 = arc 21 / W1, the tag point itself · 5 = arc 21 / W4, the first bump that is not a compatible tail · **6 = arc 22 / X1, the second break and the first that carries a floor** — see the version note below |
+| `MIN_API_VERSION_FOR_STORE` | 6 (arc 22 / X1) | the floor `minApiVersion` answers for a service on a store-taking point; every other point keeps a floor of 1 |
 | `ACTION_HANDWRITING_RECOGNIZER` | `…notesproutsn.extension.HANDWRITING_RECOGNIZER` | SN-namespaced action string |
 | `META_API_VERSION` | `…notesproutsn.extension.API_VERSION` | the `<service>` meta-data name |
 | `MAX_INK_STROKES` | 2,000 | most strokes in one recognize call |
@@ -217,7 +235,33 @@ rather than on a graceful old-reading: it fails loudly (the constructor `require
 malformed result, and the exception crosses as `IllegalArgumentException`) precisely because the
 declaration is what keeps a mismatched pairing from being reached at all. Only the tag service's
 own declaration moved for it; every other extension's declaration, and its meaning, is untouched —
-meta-data is still per service, and the host still accepts `1..API_VERSION`.
+meta-data is still per service, and the host still accepted `1..API_VERSION` at that point.
+
+**Version 6 (arc 22 / X1) is a third shape, and the first to break *both* directions at once.**
+`IExtensionStore` was not merely grown, it was **replaced**: the version-1..5 interface's six
+methods (`get`/`put`/`delete`/`keys`/`putLarge`/`getLarge`) are gone, and the version-6 interface's
+six methods (`schemaVersion`/`applySchema`/`exec`/`query`/`next`/`close`) now answer those same
+transaction codes. The usual range rule (`1..API_VERSION`) still protects the
+old-extension/new-host direction it always has — an old extension is simply skipped — but this
+time the *other* direction breaks too: a version-5 extension calling transaction code 1 against a
+version-6 host would not fail loudly, it would land on `schemaVersion`, or worse `applySchema`
+with a parcel shaped like the old `get`'s `String` key, which is not reliably loud the way a
+rejected `TagShowing` is. So version 6 is the first bump to carry a **floor** as well as a
+ceiling: `ExtensionContract.minApiVersion(action)` answers `MIN_API_VERSION_FOR_STORE` (6) for the
+three points whose service is lent a store (`ACTION_SCRATCH_PAD`,
+`DocumentContract.ACTION_DOCUMENT_EDITOR`, `ACTION_TAG_MANAGER`) and 1 for every other point, and
+`accepts(action, apiVersion)` is the range check (`minApiVersion(action)..API_VERSION`) the
+registry runs — both pure and JVM-tested (`ExtensionContractTest`).
+
+**The live consequence, verified on the Nomad at every phase from X1 through X4:** the instant X1
+shipped, every store-taking service still declared its pre-X1 number, so `ExtensionRegistry`
+skipped all three of them at once — the scratch pad's notebook-toolbar button, every Document
+entry and all three tag doors were **gone from the host**, deliberately, until each extension's
+own phase redeclared 6 (the pad at X2, the tag manager at X3, the editor at X4). `ITagManager`
+itself was reshaped again in the same bump (arc 22 / X3): `snapshot` — one ashmem blob of the
+whole index — was replaced by the paged `tags`/`assignmentsOf` reads the search merge now runs, a
+change only the tag service's own declaration needed to survive, since nothing about it is an
+absent-tail reading (the method is gone, not a field on it).
 
 ---
 
@@ -376,142 +420,358 @@ nothing in this arc reads a locale.
 
 ---
 
-## The extension store (arc 11 / J2)
+## The extension store (arc 11 / J2 — rebuilt on tables, arc 22)
 
 `IExtensionStore` is **not a capability point** — it is the service the host offers an extension it
-has already bound: a per-package, host-owned, encrypted key/value store, handed in as a *parameter*
-of the calls that need it and revoked when the bind ends. The rule it exists to enforce is short:
+has already bound: a per-package, host-owned, encrypted store, handed in as a *parameter* of the
+calls that need it and revoked when the bind ends. The rule it exists to enforce has not moved:
 **an extension writes nothing to disk itself, ever.** Its data is the host's, under the host's key,
 in the host's directory, and it survives the extension being uninstalled.
 
-Six methods, in this order — the base four first, the large pair **appended**, never reordered, so
-the four keep their transaction codes without an `API_VERSION` bump (the family's
-compatible-append recipe, kept even though SN ships all six at once; the store extensions still
-declare 1 — the arc-18 bump to 2 names the exporter's `sourceKind` seam, which none of them use):
+Arc 11 / J2 shipped this as a key/value store — `get`/`put`/`delete`/`keys`, plus an
+ashmem-backed `putLarge`/`getLarge` pair above the inline cap. **Arc 22 "Tables" rebuilt it
+whole**, because every store user's awkward shape turned out to be downstream of hiding SQLite
+behind six blob methods: the scratch pad's 4 MiB page ceiling and whole-page re-encode on every
+save, the tag index's one 4 MiB value with a bespoke codec and a whole-index decode per search, the
+document editor's line-codec blobs for a caret map and a dictionary. The file underneath was
+always SQLite. `IExtensionStore` v6 **replaced** the interface (`API_VERSION` 6 — the ledger
+above): an extension now declares its tables once and sends parameterized SQL, and the host
+validates, runs and encodes the reply, instead of moving opaque bytes under a key. X1 rebuilt the
+seam and the host's store; X2, X3 and X4 moved the scratch pad, the tag manager and the document
+editor onto rows in their own sections below — this section is the seam under all three.
+
+### The contract — six methods
 
 ```
-byte[]     get(String key)
-void       put(String key, in byte[] value)
-void       delete(String key)
-List<String> keys(String prefix)
-void       putLarge(String key, in LargeValue value)
-LargeValue getLarge(String key)
+int          schemaVersion();
+void         applySchema(in StoreSchema schema);
+long[]       exec(in StorePayload batch);
+StoreResult  query(in StorePayload statement);
+StoreResult  next(int handle);
+void         close(int handle);
 ```
 
-### Caps
+`schemaVersion` answers the version already applied to this store (0 = nothing declared yet).
+`applySchema` is idempotent — it runs the steps `applied + 1 .. schema.version`, each its own
+transaction with the version bump (crash-resumable: a step that has landed is never re-run), and
+throws `IllegalStateException(STORE_SCHEMA_NEWER)` on a downgrade. `exec` runs N statements as
+**one** transaction, all-or-nothing, and answers `changes()` per statement in order — a failure
+anywhere rolls the whole batch back. `query` runs exactly one `SELECT`/`WITH` to completion,
+encodes the rows and hands back the first chunk, naming a `handle` when more follow; `next` drains
+the following chunk (`IllegalStateException` on an unknown or already-drained handle); `close`
+drops an unfinished result early (a no-op on an unknown handle — every parked result is dropped on
+revoke regardless).
+
+**`exec` / `query` refuse with `STORE_SCHEMA_UNAPPLIED` until `applySchema` has run on this
+binder** — structural, not a courtesy check: a query cannot precede the declaration of what it
+queries, so there is no way to read or write a table this binder has not yet declared (a no-op
+`applySchema` call, when the versions already match, is one `SELECT` against `host_schema`).
+`ExtensionStoreGate.declared` is the flag, per binder, flipped by the first successful
+`applySchema` on it; `schemaVersion` itself needs no declaration.
+
+### The caps
 
 `ExtensionContract.STORE_*`, enforced by the host and pinned by test:
 
 | Cap | Value | Why |
 |---|---|---|
-| `STORE_MAX_KEY_CHARS` | 512 | the empty key is rejected too |
 | `STORE_MAX_INLINE_BYTES` | 512 KiB | the `byte[]` path's ceiling — the Binder transaction budget is ~1 MB |
-| `STORE_MAX_VALUE_BYTES` | 4 MiB | the large path's ceiling, sized for one key per scratch page |
-| `STORE_MAX_KEYS` | 50 000 | per extension |
-| `STORE_VALUE_LARGE` | `"value is large — use getLarge"` | the **exact** message `get` throws for a stored value above the inline cap; extensions compare it verbatim, not by substring |
+| `STORE_MAX_VALUE_BYTES` | 4 MiB | one payload in either direction: one statement batch, or one chunk of a query result — above it a payload rides ashmem |
+| `STORE_MAX_RESULT_BYTES` | 32 MiB | the whole **materialized** query result; past it the host refuses with `STORE_RESULT_LARGE` and the extension pages with `LIMIT` |
+| `STORE_MAX_ROW_BYTES` | = `STORE_MAX_VALUE_BYTES` | a row is never split across chunks, so one encoded row must fit one chunk; above it, `STORE_ROW_LARGE` |
+| `STORE_MAX_BATCH_STATEMENTS` | 10 000 | most statements in one `exec` (one transaction) |
+| `STORE_MAX_SQL_CHARS` | 8 192 | longest SQL text of one statement |
+| `STORE_MAX_ARGS` | 999 | most bound arguments per statement — SQLite's own default bind limit |
+| `STORE_MAX_TABLES` | 64 | most tables one schema may create, counted over every step |
+| `STORE_MAX_SCHEMA_STEPS` | 256 | most versions (steps) a `StoreSchema` may declare |
+| `STORE_MAX_STEP_STATEMENTS` | 64 | most statements per step |
+| `STORE_MAX_OPEN_RESULTS` | 4 | most unfinished query results one binder may hold open at once |
 
-A `put` above the inline cap is an `IllegalArgumentException`; a `get` of a value that was stored
-above it is the `STORE_VALUE_LARGE` `IllegalStateException`, never a truncation. A put of a **new**
-key at `STORE_MAX_KEYS` fails; replacing an existing key at the cap is still fine.
+Typed refusals, `IllegalStateException` messages compared **verbatim**: `STORE_RESULT_LARGE`,
+`STORE_ROW_LARGE`, `STORE_SCHEMA_NEWER` (a downgrade — an extension never sees a store at a schema
+newer than it knows, and the host never rolls one back), `STORE_SCHEMA_UNAPPLIED`,
+`STORE_RESULTS_OPEN` (a fifth query wanting a handle on a binder that already holds four). The
+key/value era's caps are **deleted**: `STORE_MAX_KEY_CHARS`, `STORE_MAX_KEYS`, `STORE_VALUE_LARGE`.
 
-### Why the large pair exists — and the ashmem handshake
+### The validator (`StoreSql`)
 
-A 4 MiB `byte[]` cannot cross a Binder. Values above the inline cap travel in an ashmem region
-(`LargeValue` = `SharedMemory` + `byteCount`), the same handshake in both directions:
+Pure and shared (`:extension-api`), so an extension can pre-check what the host will refuse. A
+tiny tokenizer honest about all four SQL quote forms — `'…'` (string), `"…"` / `` `…` `` / `[…]`
+(identifier) — and both comment forms (`-- …` to end of line, `/* … */`) feeds a handful of rules;
+nothing here parses SQL, it only refuses shapes the seam does not carry:
 
-- the **sender** creates a region of exactly `bytes.size`, maps RW, copies in, unmaps,
-  `setProtect(PROT_READ)`, hands it over, and closes **its own** handle once the transaction is
-  marshalled — a stub in `onTransact`'s `finally`, a client after the call returns;
-- the **receiver** maps read-only, copies out exactly `byteCount` bytes, unmaps and closes in its
-  own `finally`.
+- **One statement.** No `;` outside a literal or comment; **one trailing `;` is tolerated** (an X1
+  implementer call, not in the original spec — the X2–X4 schemas are all written `;`-terminated,
+  and refusing that one case would have been a paper cut with no safety behind it). Any other `;`
+  is the one-statement refusal.
+- **The head keyword decides the kind.** `SELECT` / `WITH` for `checkQuery`; `INSERT` / `REPLACE` /
+  `UPDATE` / `DELETE` / `WITH` for `checkExec`; `CREATE` / `ALTER` / `DROP` for `checkDdl`.
+- **A query cannot smuggle a write under `WITH`.** `INSERT` / `UPDATE` / `DELETE` anywhere in the
+  token stream of a query is refused, and so is `REPLACE` immediately followed by `INTO` — a
+  `rawQuery` of `WITH … DELETE …` would actually run it. The `replace(x, y, z)` **function** still
+  passes: the refusal is `REPLACE INTO` specifically, not the bare word `REPLACE`.
+- **The denylist**, anywhere in the token stream for `query`/`exec`: `ATTACH DETACH PRAGMA VACUUM
+  CREATE DROP ALTER BEGIN COMMIT ROLLBACK SAVEPOINT RELEASE REINDEX ANALYZE load_extension`. DDL
+  keeps its own head word and refuses a second one anywhere (`… DROP` inside a `CREATE`), plus
+  `VIEW TRIGGER VIRTUAL TEMP TEMPORARY` — no views, triggers, virtual tables or temp objects in v6
+  (each is an additive later tail if ever wanted).
+- **Reserved names, checked on every identifier token — bare or quoted, in every statement kind.**
+  `StoreNames.isReserved` refuses anything starting with `host_`, `sqlite_`, `room_` or `android_`
+  (case-folded) — the prefixes that protect what the file holds besides an extension's own tables:
+  the host's own `host_schema`, SQLite's catalog, and the names the Room era and the platform
+  mint. The file is per-package, so those are the only things a validator here needs to protect,
+  and the check applies to every WORD and quoted identifier in every statement kind — so
+  `sqlite_version()` is refused too, a harmless loss.
+- **Positional binds only** (`?`, `?NNN`); `:name` / `@name` / `$name` are refused as
+  `IllegalArgumentException("named binds are not supported (…) — use ?")` — a name is one more
+  parser to trust.
+- **DDL shape** (schema steps only): `CREATE TABLE`, `CREATE [UNIQUE] INDEX … ON`, `ALTER TABLE …
+  ADD [COLUMN] | RENAME TO | RENAME [COLUMN] … TO`, `DROP TABLE|INDEX`, each with its `IF [NOT]
+  EXISTS` form, plus `WITHOUT ROWID` and `REFERENCES … ON DELETE …` (foreign keys are ON for the
+  store connection — see Room below — so a declared cascade cascades). The object a statement
+  creates, alters or drops (and an index's `ON` table) must be bare and `StoreNames.isValid`
+  (`^[a-z][a-z0-9_]{0,62}$`, not reserved); column names are the extension's own business, so
+  `"order"` and `pageId` both pass.
 
-`SharedBytes.write` / `read` / `readAndClose` write that handshake once for both sides, so neither
-side re-derives it. Two details are load-bearing:
+Every refusal is an `IllegalArgumentException` naming which rule fired.
 
-- **ashmem refuses a zero-size region**, so an empty value rides a **1-byte region with
-  `byteCount = 0`**. An empty value is a value, not an absence.
-- `LargeValue.requireValid` runs in the constructor, therefore also at **unmarshal** — it is the one
-  thing between a malformed parcel and a read past the region's end. `describeContents` returns
-  `CONTENTS_FILE_DESCRIPTOR`, or `Bundle.hasFileDescriptors()` lies about it.
+### The codec (`StoreCodec`)
 
-### Only three exceptions cross a Binder
+Two wire documents, pure and shared, big-endian `DataOutputStream`, the arc-11 page-codec idiom:
+**statements** — magic `NSST` · u8 version 1 · u16 count · per statement u32 sqlLen + UTF-8 sql ·
+u16 argc · args as cells; **rows** — magic `NSRW` · u8 version 1 · u16 columnCount · per column a
+u16 nameLen + UTF-8 name · u32 rowCount · per row per column a **cell**: u8 tag (`0 NULL · 1
+INTEGER i64 · 2 REAL f64 · 3 TEXT u32+UTF-8 · 4 BLOB u32+bytes`). Unknown magic or version, a
+truncated document, a bad tag or a length past the end all throw `IllegalArgumentException` —
+**unreadable is never empty** (the arc-11 rule that keeps a half-read value from being written
+over). A rows document needs at least one column; a zero-column document is corrupt, not empty.
 
-`SecurityException`, `IllegalArgumentException`, `IllegalStateException` — that is the whole set
-this contract uses. (Binder's own marshalable set is slightly wider — `NullPointerException` and
-`UnsupportedOperationException` are in it too, which is why `ScratchPadService`'s not-yet-implemented
-J5 methods can throw the latter safely — but nothing in the store path relies on that.) Anything
-outside it kills the transaction **silently**, and the caller reads the empty reply as
-null / success. In Paper that is exactly how a page came back blank and was then saved over the real
-one. So:
+`Cell` is a sealed class over SQLite's five storage classes (`Null` / `Integer` / `Real` / `Text` /
+`Blob`, `Blob` comparing by content); `Cell.of` converts `null` / `Long` / `Int` / `Boolean` /
+`Double` / `Float` / `String` / `ByteArray` and refuses anything else. `Row`'s typed accessors
+(`long` / `real` / `text` / `blob`, each with an `OrNull` twin) throw `IllegalArgumentException` on
+a wrong storage class — the "bad row = dropped row" contract an extension can catch — except that
+an `INTEGER` also answers `real()` (SQLite's own column affinity, not a bug). `StoreReads.all(store,
+statement)` is the extension-facing loop over `query`/`next` that stitches chunks into one
+`StoreRows`, closing the parked remainder on any failure so a failed read never leaves a handle
+behind; `StoreReads.exec` is its `exec` counterpart.
 
-- every DAO failure (SQLite full / locked / I/O) becomes an `IllegalStateException` inside
-  `ExtensionStoreGate.io {}`;
-- every ashmem step is wrapped by `ExtensionStoreBinder.region {}`, which exists **separately** from
-  the gate's mapping because `ErrnoException` is checked and outside the set;
-- an extension treats all three the same way: *store unavailable*.
+`StoreChunker` splits a query's rows into chunks **as the host reads them**, living in
+`:extension-api` beside `StoreCodec` rather than in the host, because it is codec arithmetic:
+`StoreCodec.rowsHeaderBytes` / `rowBytes` / `statementBytes` are the exact bytes the writers
+produce, pinned by test, and the caps are raised **at the row that crosses** — `add` throws
+`IllegalStateException(STORE_ROW_LARGE)` for a single row that will not fit one chunk (with its
+header) and `STORE_RESULT_LARGE` for a result whose chunks would sum past the result cap — so the
+host stops reading there instead of materializing the rest. **A row is never divided between two
+chunks.** `finish()`'s one asymmetry: a result that ends exactly on a chunk boundary gets no empty
+trailing chunk, but an empty result still gets its one (an empty rows document, not nothing).
 
-### Host side
+### The chunk protocol
 
-| Piece | Role |
-|---|---|
-| `data/SoilFile.kt` → `extensionStoreFile(ctx, pkg)` | **still the only path constructor**, `extensionStoreFile` included: `Garden/<pkg>.db`, beside the `.soil` files. `isValidExtensionPackage` (`[a-zA-Z0-9_.]+`) refuses anything that could become a path segment |
-| `ExtensionStores` | open-or-create on IO, process-lifetime cache, one DB per package. SN's **second named create entry point** after `SoilDatabase.create`, and it obeys the same two doors — create only over a missing/empty file, open only through `requireExisting` + the raw-key cache. Raw-key id `ext:<pkg>`, which can never collide with a notebook UUID or the index's id |
-| `ExtensionStoreDatabase` / `KvEntity` / `KvDao` | one `kv(key, value, updatedAt)` table, its own version. Nothing here touches the global index or any `.soil`, so neither one's version moves when this one does. `keysWithPrefix` uses `substr`, not `LIKE`: `LIKE` is ASCII-case-insensitive per connection *and* reads `%` / `_` as wildcards |
-| `ExtensionStoreGate` | every check and cap, **with no Android types precisely so it is JVM-testable** — the binder is an `android.os.Binder` and cannot be constructed in a unit test |
-| `ExtensionStoreBinder` | the `IExtensionStore.Stub` the host mints **per bind**, bound to that extension's uid; the ashmem copy in / out around the gate; `getLarge`'s region parked in a per-Binder-thread slot that `onTransact`'s `finally` closes **after** the reply (holding a dup of the descriptor) is written |
+A payload at or under `STORE_MAX_INLINE_BYTES` (512 KiB) rides inline as a `byte[]` in a
+`StorePayload`; anything above it, up to `STORE_MAX_VALUE_BYTES` (4 MiB), rides a `LargeValue` over
+ashmem — the arc-11 / J2 `putLarge` handshake, unchanged: the sender creates the region, writes,
+protects it read-only, hands it over and closes its own handle once the transaction is marshalled;
+the receiver copies out exactly `byteCount` bytes and closes (`StorePayload.of` / `readAndClose`).
+Ashmem is now purely the **chunk carrier** for the two payload types (`StorePayload` /
+`StoreResult`), not a value type of its own — the key/value era's `putLarge`/`getLarge` methods
+are gone with the interface they belonged to.
 
-Encryption: `Garden/<pkg>.db` is SQLCipher under the **global** key, opened through `SoilCrypto`
-like everything else, so every factory is `NonDestructiveOpenHelperFactory`-wrapped and a wrong key
-reports corruption without deleting the file. The `.db`s sit in `Garden/` beside the `.soil`s and
-are invisible to the library, whose structure is index-only — nothing enumerates that directory.
+A query result that needs more than one chunk is **parked as bytes**, not as a live region, behind
+a `handle` on `ExtensionStoreGate` (`HashMap<Int, ArrayDeque<ByteArray>>`, at most
+`STORE_MAX_OPEN_RESULTS` per binder — a fifth throws `STORE_RESULTS_OPEN`). The **binder**
+(`ExtensionStoreBinder`) mints the actual ashmem region only when a chunk is about to leave: an
+outgoing chunk above the inline cap is wrapped in a region created fresh at `query`/`next` time,
+parked in a per-Binder-thread `ThreadLocal<SharedMemory>`, and closed in `onTransact`'s `finally`
+— **after** `super.onTransact` has written the reply holding a dup of the descriptor, the ordering
+this app has relied on since the scratch pad's own `getLarge`. Every parked chunk, at every
+handle, is dropped when the gate is `revoke()`d.
 
-**Pre-open rule:** a caller opens the store on IO **before** binding the extension. A cold open runs
-the KDF (≈ 0.5–1.5 s on e-ink when the raw key is not cached yet), and that must never land inside a
-call's timeout window.
+### The schema lifecycle (`StoreSchema`)
 
-**Lifecycle:** the binder is minted per bind, uid-bound, and `revoke()`d in the same `finally` as
-the unbind — after which every method throws `SecurityException`. The store file itself outlives the
-extension: uninstalling or disabling one leaves its `.db` in place, because removing an extension's
-data is a deliberate act, not a side effect.
+`StoreSchema(version, steps)` is ordered DDL: `steps[i]` is the DDL that takes a store from version
+`i` to `i + 1`, and `version == steps.size` always. **Construction *is* the DDL validator run** —
+every statement in every step is `StoreSql.checkDdl`'d at construction, so a bad schema fails on
+the extension's side, at the declaration, never at bind, and again at unmarshal on the host's; the
+table cap (`STORE_MAX_TABLES`) is counted statically over every `CREATE TABLE` across all steps in
+the same pass. Version is `1..STORE_MAX_SCHEMA_STEPS` (a zero-step schema is a bug, not a
+declaration); each step holds `1..STORE_MAX_STEP_STATEMENTS` statements.
+
+The host keeps the version it has applied to each store in its own table (`host_schema (id INTEGER
+PRIMARY KEY CHECK (id = 0), version INTEGER NOT NULL)`, one row) and runs only the missing steps on
+`applySchema` — **each step its own transaction with the version bump inside it**, so a crash
+between steps resumes at the next one rather than re-running a step that already landed. A step
+that fails rolls back *that step only* and leaves the version where it was; the binder stays
+`declared` if an earlier `applySchema` on it already succeeded. A downgrade — `applySchema` with a
+version below the one already applied — is refused with `IllegalStateException(STORE_SCHEMA_NEWER)`:
+an extension never sees a store at a schema newer than it knows, and the host never rolls one back.
+
+### The floor
+
+`IExtensionStore` v6 did not just add methods, it **replaced** the interface: the version-1..5
+methods (`get`/`put`/`delete`/`keys`/`putLarge`/`getLarge`) are gone, and the six methods above now
+answer those same transaction codes. That breaks the *old-extension/new-host* direction the usual
+range rule protects for free, but also the *new-host/old-extension* one: a version-5 extension
+calling transaction code 1 on a version-6 host would land on `schemaVersion`, or worse
+`applySchema` with a parcel shaped like a `String` key — not reliably loud. So this bump carries a
+**floor** as well as the usual ceiling: `ExtensionContract.MIN_API_VERSION_FOR_STORE` = 6, and
+`minApiVersion(action)` answers it for the three points whose service is lent a store
+(`ACTION_SCRATCH_PAD`, `DocumentContract.ACTION_DOCUMENT_EDITOR`, `ACTION_TAG_MANAGER`) and 1 for
+every other (stateless) point; `accepts(action, apiVersion)` is the range check
+(`minApiVersion(action)..API_VERSION`) the registry runs, both pure and JVM-tested.
+
+**The live consequence, X1 through X4, verified on the Nomad each time:** the moment X1 shipped,
+every store-taking service still declared its pre-X1 number, so `ExtensionRegistry` skipped all
+three at once — the scratch pad's notebook-toolbar button, every Document entry and all three tag
+doors were **gone from the host**, deliberately, until each extension's own phase redeclared 6 (the
+pad at X2, the tag manager at X3, the editor at X4). The stateless points — the recognizer, both
+exporters, both importers — never moved, because nothing about *their* interfaces changed.
+
+### The `user_version` ladder (`StoreFormat`)
+
+The store **file's** format rides `PRAGMA user_version`, decided by the pure table
+`StoreFormat.decide(userVersion, hasLegacyTables)` and acted on by the `SupportSQLiteOpenHelper`
+callback whose own version parameter *is* `StoreFormat.VERSION` (2 — the open helper's own version
+machinery gives this ladder a transaction for free; Room is not involved):
+
+- `0` on an empty file, no legacy tables → `FRESH` — `onCreate` runs, `host_schema` is created.
+- `1` (the Room-era key/value format) or **any** `kv` / `room_master_table` present in
+  `sqlite_master` at any version → `WIPE` — `onUpgrade` drops those two tables and creates
+  `host_schema`, all inside the helper's own version transaction. **No migration** — the arc-22
+  wizard's call: `0.1.0-ratta` is unreleased and the Nomad's arc-11 data was test data. The wipe is
+  logged as a row count (`"wiped legacy store for <pkg> (format 1, N kv row(s) dropped)"`), never a
+  key or value.
+- `2` = `VERSION`, already the table store → `OPEN` — nothing runs.
+- above `VERSION` → `REFUSE` — `onDowngrade` **throws**; a newer host wrote this file, and
+  never-delete-on-corruption applies: the file is left exactly as found and the extension reads as
+  "unavailable," never wiped or repaired.
+
+A restored backup carrying a legacy-shaped store is wiped on its next open exactly the same way —
+there is no separate restore-time path, since the ladder runs on `user_version` and
+`sqlite_master`, not on how the file arrived (see Backup below).
+
+### Room left the store
+
+Extension tables are unknown at compile time, so Room's entity machinery bought nothing once the
+schema became the extension's to declare: `ExtensionStoreDatabase` is a thin wrapper over a
+`SupportSQLiteOpenHelper` built from the **same** `SoilCrypto` / `KeyOpener` factories every other
+SQLCipher open in this app takes — still `NonDestructiveOpenHelperFactory`-wrapped (a wrong key
+reports corruption without deleting), still the create-door / open-door split `ExtensionStores`
+always had, still cached for the process's lifetime and closed only by `closeAll()` (tests/debug),
+still WAL with `wal_autocheckpoint = 100` and `busy_timeout = 5000` set in `onOpen`. `KvDao` /
+`KvEntity` and Room's dependency on the store file are **deleted** outright.
+
+**Foreign keys are ON as a pool setting, not a per-connection PRAGMA**: `onConfigure` calls
+`db.setForeignKeyConstraintsEnabled(true)`, which the connection pool applies to every connection it
+opens — a `PRAGMA foreign_keys = ON` issued once in `onOpen` would only have reached the one
+connection that ran it, and WAL readers are separate connections. This is documented as a promise
+of the seam: a declared `REFERENCES … ON DELETE CASCADE` actually cascades, which is what lets
+`ScratchSchema` drop a page's strokes with one `DELETE FROM page` and `TagSchema` drop a tag's
+assignments with one `DELETE FROM tag`.
+
+### The executor split
+
+`StoreExecutor` (`transaction` / `ddl` / `exec` / `query`) carries **no Android type in its
+signature**, precisely so `ExtensionStoreGate` — everything worth unit-testing about the seam —
+runs on the JVM; `SupportStoreExecutor` is the one implementation that actually touches
+`SupportSQLiteDatabase`, and tests inject a fake. `query`'s `RowSink` callback answers column
+names once, then rows one at a time until it returns `false` — the hook `StoreChunker` uses to
+stop the underlying cursor read at the exact row that would cross a cap, rather than materializing
+a refused result first and throwing after.
+
+### The gate
+
+`ExtensionStoreGate` requires the caller's uid to be the bound `extUid` and the gate not `revoked`
+before anything else, on every method — `SecurityException` otherwise. Every executor failure —
+SQLite full, locked, an I/O error, **a constraint violation included** — is mapped to
+`IllegalStateException` inside `io {}`; the message crosses, and the extension reads it, but the
+host never parses it back. `exec` is `@Synchronized` — one writer per store at a time; reads run
+concurrently under WAL. **No transaction is ever held open across a Binder call**: `exec`'s
+transaction begins and ends inside one call, and `query` reads its statement to completion before
+answering, so nothing here can leave the connection mid-transaction between two calls the way a
+long-held write lock would.
+
+### Only three exceptions cross a Binder — restated
+
+`SecurityException`, `IllegalArgumentException`, `IllegalStateException` remain the whole set this
+contract uses. `ExtensionStoreBinder.region {}` still wraps the ashmem step **outside** the gate's
+`io {}`, because an `ErrnoException` from a mapping or creation failure is checked and outside
+Binder's marshalable set — left alone it would kill the transaction silently and the extension
+would read the empty reply as success, the exact Paper-era failure this app has never allowed back
+in. An extension treats all three exception types, and a `RemoteException` from a dead bind, the
+same way: *store unavailable*.
+
+### The one extension table the host reads
+
+`prefs (key TEXT PRIMARY KEY, value TEXT NOT NULL)` — the document editor's own schema — is the
+**one** extension table any host code reads: Document-PDF export takes the editor's saved text
+size (arc 19 / M9, rewired at X1) straight from it, through the host's own `StoreExecutor`,
+**never a binder**, and only if `ExtensionStoreDatabase.hasTable` says the table already exists —
+the same never-mint rule the rest of the app applies to a `.soil` it does not own. The table's own
+name and both column names are pinned in `DocumentContract`
+(`PREFS_TABLE`/`PREFS_KEY_COLUMN`/`PREFS_VALUE_COLUMN`/`PREF_TEXT_SIZE`) rather than spelled twice,
+so the two sides cannot drift on what they mean by "the prefs table." Every failure on this path —
+no editor installed, no store file, no table yet, an unparseable value, a locked library — lands on
+`DocumentPdfMetrics.DEFAULT_TEXT_SIZE_SP`: a text size is comfort, never something an export may
+refuse over.
+
+### The self-test
+
+SQLCipher, `SharedMemory` and a real `Binder` cannot run on the JVM, so the debug library's
+⋯ → **"Extension store self-test"** is the only on-device proof, driven through a **real**
+`ExtensionStoreBinder` (called in-process, so `Binder.getCallingUid()` is the app's own uid and the
+gate's check passes) over `Garden/probe.test.db`, a fake package recreated fresh on every run: an
+encrypted-header check → `exec` refused with `STORE_SCHEMA_UNAPPLIED` before any `applySchema` →
+`applySchema` v1 (idempotent — applying it twice is a no-op) → 5 000 stroke-shaped 1 KiB-blob rows
+across two `exec` batches (each rides ashmem) → a `query` streaming them back in more than one
+chunk, byte-exact → a batch with a duplicate primary key mid-list leaves **zero** new rows behind →
+`applySchema` v2 (`ALTER TABLE … ADD COLUMN`) then v1 again refused with `STORE_SCHEMA_NEWER` →
+`PRAGMA`, a two-statement string, a query that writes under `WITH`, and a schema declaring `CREATE
+VIEW` all refused as `IllegalArgumentException`, and `host_schema` itself is unreachable from SQL
+(a reserved name) → wrong uid, then a revoked binder, both `SecurityException` → a **legacy-shaped
+file** built by the probe itself (`Garden/probe.legacy.db`, `kv` + `room_master_table`,
+`user_version 1`) opens as a wipe to format 2. Nomad timings, kept in the summary string: **open
+≈ 2.0 s** (cold KDF), **5 000 rows in ≈ 2.4 s**, **read back 2 chunks in ≈ 0.9 s**, **legacy wipe
+≈ 2.0 s** (also one cold KDF). The probe recreates both its own files every run —
+`ExtensionStores.closeAll()` first, since a cached store is never closed otherwise — so the create
+door and the wipe door are both proved every time, not just the first.
 
 ### Backup (arc 21 / W5)
 
-**Every `Garden/<pkg>.db` is in the backup set** — the natural conclusion of "an extension writes
-nothing to disk itself, ever": if the host owns the data, the host's backup owns it too. The one
-path authority grew the one listing function, `SoilFile.extensionStoreFiles(ctx)` — `Garden/`
-stays otherwise unenumerated (the library's structure is index-only, and a store has no index row
-to be listed from; the host mints the file the first time an extension is lent its store, and that
-file is the only record it exists) — filtered through `isValidExtensionPackage` and the pure
-`extensionStorePackage(fileName)`, which is the whole rule: only a store ends in `.db`, and its
-stem must still pass the package-name guard.
+Unchanged in shape by the rebuild: **every `Garden/<pkg>.db` is in the backup set**, copied on
+every pass unconditionally, ordered after the notebooks and before the index, WAL-checkpointed
+first when this process has the store open (`ExtensionStores.checkpointIfOpen`). One sentence
+added by X1: **a legacy-shaped store restored from an old backup is wiped on its next open like
+any other** — the `StoreFormat` ladder runs on `user_version` and `sqlite_master`, not on how the
+file arrived, so a copied-back arc-11 `.db` is indistinguishable from one that was simply never
+upgraded, and gets the identical `WIPE` decision, logged the identical way.
 
-A store is copied on **every pass, unconditionally** — no stamp, no `updatedAt` to compare against,
-because a store's edits are an extension's, not the library's, and inventing a clock for one would
-be a second answer that can disagree with the file. It is ordered **after the notebooks, before the
-index** (a store is content; the index is last because it is the manifest of what the run already
-wrote), and it takes the **global index's** treatment, not a notebook's: `ExtensionStores` caches
-every store it opens for the process's life and closes none, so the notebook rule — skip a file
-under a live writer and count it — would skip every store worth copying. `ExtensionStores
-.checkpointIfOpen` folds a live store's WAL first, so the copy is safe the same way the index's is:
-snapshot-into-cache → probe → copy → WAL-alongside.
-
-There is **no restore this arc** — the manual copy-back (`<pkg>.db` plus its `-wal` if the backup
-has one, `-shm` never, app closed, ciphertext keyed to the device that wrote it) is documented in
-[`docs/backup.md`](backup.md), and a whole-library restore screen is a `BACKLOG.md` item, the same
-answer arc 17 gave for the library itself.
+There is still **no restore this arc** — the manual copy-back (`<pkg>.db` plus its `-wal` if the
+backup has one, `-shm` never, app closed, ciphertext keyed to the device that wrote it) is
+documented in [`docs/backup.md`](backup.md), and a whole-library restore screen is a `BACKLOG.md`
+item, the same answer arc 17 gave for the library itself.
 
 ### Verification
 
-Room, SQLCipher and `SharedMemory` cannot run on the JVM, so the store is checked from two sides:
+SQLCipher, `SharedMemory` and a real `Binder` cannot run on the JVM, so the store is checked
+from two sides:
 
-- **JVM** — `ExtensionStoreGateTest` drives every check and cap over a fake `KvDao` with an
-  injectable calling uid; `LargeValueTest` pins the unmarshal validation; `ExtensionContractTest`
-  pins the caps and the exact `STORE_VALUE_LARGE` string; `SoilFileTest` pins the package-name guard.
-- **Device** — the debug library's ⋯ → **"Extension store self-test"** opens `probe.test`, checks
-  the file header is encrypted, round-trips through a **real** `ExtensionStoreBinder` (called
-  in-process, so `Binder.getCallingUid()` is our own uid and the gate passes), drives 4 MiB and
-  empty values through real ashmem both ways, and proves the inline cap, the `STORE_VALUE_LARGE`
-  refusal, the wrong-uid refusal and the revoked refusal. OK / FAIL as a toast.
+- **JVM** — `StoreCodecTest` round-trips every cell kind, an empty result and the zero-column
+  guard; `StoreSqlTest` drives the tokenizer (all four quote forms, both comment forms, a `;`
+  inside a string, the one-trailing-`;` tolerance), every denylist word, the reserved-name refusal
+  on bare and quoted identifiers, the `WITH … DELETE` smuggling refusal, and the DDL shape checks;
+  `StoreChunkerTest` pins exact chunk counts, `STORE_ROW_LARGE`, `STORE_RESULT_LARGE` and the
+  boundary-exact no-empty-trailing-chunk rule; `StoreSchemaTest` pins construction-time DDL
+  validation and the table-count cap; `StoreWireRulesTest` pins `StorePayload` / `StoreResult`
+  unmarshal validation; `StoreReadsTest` pins the chunk-stitching loop and its close-on-failure
+  rule; `ExtensionStoreGateTest` drives every check and cap over a fake `StoreExecutor` with an
+  injectable calling uid — uid/revoked on every method, the unapplied-schema refusal, batch
+  rollback, the open-result handle lifecycle including the fifth-result refusal and
+  revoke-drops-all; `StoreFormatTest` pins the ladder as a pure decision table;
+  `ExtensionContractTest` pins every `STORE_*` cap and the exact typed-refusal strings.
+- **Device** — the self-test above is the only proof that SQLCipher, ashmem and a real `Binder`
+  agree with the JVM's picture of the gate: OK / FAIL as a toast, the full trace and timings in
+  `Slog`.
 
 ---
 
@@ -647,34 +907,49 @@ Only exceptions that survive Binder marshalling are ever thrown from a stub meth
 kills the transaction silently and the caller reads an empty reply as success. Through J3 the two
 transfer methods threw `UnsupportedOperationException` for that reason (`EX_UNSUPPORTED_OPERATION`
 crosses intact); J5 replaced them with the real implementations, whose refusals are
-`IllegalArgumentException` (over the caps) and `IllegalStateException` (`SCRATCH_PAGE_FULL`, store
-gone).
+`IllegalArgumentException` (over the transfer caps) and `IllegalStateException` (the store
+unavailable, or — since arc 22 / X2 — a multi-batch failure the store's own compensation could not
+fully undo).
 
-`ScratchStore` is the pad's key layout over `IExtensionStore`, and the extension's only storage:
+**Since arc 22 / X2 the pad's storage is rows, not a key layout** — `ScratchSchema.V1` declares
+three tables in the host's extension store:
 
-| Key | Value |
-|---|---|
-| `pages` | UTF-8, one page id per line, in order |
-| `current` | the current page id |
-| `page/<id>` | the page blob (`ScratchPageCodec`) |
+```sql
+page   (id, position, width, height, createdAt, updatedAt)          -- 0 × 0 = size not learned yet
+stroke (id, pageId → page.id ON DELETE CASCADE, "order", color, width, style, blob)
+state  (key, value)                                                 -- 'current' → the current page id
+```
 
-It is **blocking** — IO thread or the Binder thread, never Main. Values at or below
-`STORE_MAX_INLINE_BYTES` go through `put` / `get`; above that through `putLarge` / `getLarge`.
-`readPage` tries `get` first and falls to `getLarge` **only** on the contract's exact
-`STORE_VALUE_LARGE` message. A blob over `STORE_MAX_VALUE_BYTES` is `PageFullException` — never
-split, never written elsewhere; every other store failure is `StoreUnavailable`.
+`stroke.blob` is `StrokeCodec` format B (x/y/pressure/tilt) — the `.soil`'s own stroke encoding,
+unchanged; `stroke."order"` is the writing order within its page, what makes the page's ink stable
+across an undo/redo cycle. `ScratchSql` is every statement as a pure builder, and **two write ops,
+both idempotent**, because a batch that failed part-way is retried by whatever caller owns it and
+the retry has to converge: a stroke row is `INSERT OR REPLACE` (a stroke has no children, so
+REPLACE is safe) or `DELETE … WHERE id = ?` (a row that is not there is not an error); a page row
+is `INSERT OR IGNORE` then `UPDATE`d — **never `INSERT OR REPLACE INTO page`**, because REPLACE
+deletes the conflicting row first and, with foreign keys ON, that delete **cascades** — it would
+take the page's strokes with it.
 
-`ScratchPageCodec` is a page blob ⇄ `(pageWidth, pageHeight, strokes)`: a small header plus the
-`.soil`'s own `StrokeCodec` format-B blob per stroke, so a page is that format with a header on it.
-Three rules matter and each has a test:
+`ScratchDocument` is a `TreeMap<order, Stroke>` plus an **op log** (`Put`/`Drop` per stroke id,
+page insert/delete/renumber), replacing arc 11's whole-page re-encode on every save: a flush
+snapshots and clears the log, then writes it as one or more `exec` batches
+(`ScratchBatches`, split at ≤ 4 MiB / ≤ 10 000 statements over `StoreCodec`'s own arithmetic — one
+batch is one transaction and therefore atomic; past it, `receive` **compensates** a multi-batch
+failure — a cascading `DELETE FROM page` for a new page, one `dropStroke` per minted id for the
+current page, never an `IN (…)` list — before throwing `StoreUnavailable`). Orders are a
+**high-water mark**, never the map's last key, so erasing the tail stroke can never hand its order
+to the next stroke drawn.
 
-- **`strokeBytes` is exact.** The 4 MiB full rule keeps a *running* encoded size rather than
-  re-encoding the page on every stroke, so `HEADER_BYTES + Σ strokeBytes` must equal
-  `encode(...).size` to the byte. Geometry is zlib-compressed **per stroke**, so a moved stroke has
-  to be re-measured — "floats re-encode to the same size" is false, and a test caught it in Paper.
-- **A truncated tail keeps what decoded whole.** The partial stroke is dropped; the page still opens.
-- **An unknown version is unreadable, not empty.** It throws, so the caller can say "unreadable" —
-  a blank page saved over real ink is the failure this prevents.
+Reads are **planned, never refused**: `readPage` reads the size row, then `SELECT "order",
+LENGTH(blob)` (small), then packs consecutive strokes into `BETWEEN` ranges under the 4 MiB chunk
+budget (`ScratchReadPlan`) — a page of any size comes back without ever meeting
+`STORE_RESULT_LARGE`. `StrokeRows.decode` drops a bad row rather than losing the page (counted,
+logged) — arc 11's "unreadable page" state, and the blob it protected, are both gone. **The 4 MiB
+page ceiling, `PageFullException`, `SCRATCH_PAGE_FULL` and the "page full" dialog are deleted**: a
+scratch page is unbounded, the same as a notebook page, structurally (no cap anywhere in the write
+path, keyset reads throughout) — proven by the JVM split/plan tests and not, as of the X2 walk, by
+an on-device page stressed past 4 MiB (the user's checklist skipped that one item; see
+[`docs/scratchpad.md`](scratchpad.md)).
 
 ### What J3 proved on the Nomad
 
@@ -734,7 +1009,7 @@ file — carry **no ids**, and keep coordinates 1:1. The feature-level walk-thro
 | Validated at unmarshal | `WireStroke` / `InkBundle` `requireValid` (a malformed stroke rejects the whole bundle) | the same, host-side |
 | Sanitized | `ScratchInk.toStrokes` — unknown style → PEN, width clamped | `TransferCaps.sanitize` — the same, **plus colour forced opaque black** |
 | Ids | minted by the extension | minted by the host |
-| Failure | `SCRATCH_PAGE_FULL` refuses the **whole** placement — nothing placed, nothing inserted | a cut drain is reported, never silently truncated |
+| Failure | a multi-batch write failure is **compensated** (the new page or the minted strokes are undone) before `StoreUnavailable`, never a partial placement left standing — the 4 MiB page ceiling and `SCRATCH_PAGE_FULL` this row named through X1 are deleted at X2 | a cut drain is reported, never silently truncated |
 
 The two mappings are deliberate **twins** (`TransferCaps` host-side, `ScratchInk` extension-side)
 rather than one shared class: `:sn-screen` never sees `:extension-api`, and keeping the twin is what
@@ -1048,13 +1323,39 @@ are another document's, and writing them there would be corruption.
 
 ### The store is small per-device state, never the document
 
-The editor's extension-store layout is a persistence format, pinned by test: `size` (text size
-sp), `carets` (the caret LRU as `CaretMemory`'s line blob, cap 100), and since M10 `proofread`
-(`"1"`/`"0"`, absent = on) and `dict` (the user dictionary as `UserWords`' line blob — normalized
-form, insertion order, hard drop on remove). **A draft never lives in the store** — autosave
-pushes text to the host through the callback binder; the store holds comfort, not content, and
-every store failure degrades silently to a default. The extension fetches the store binder from
-`EditorSession` **per call**, never caching it, because a restarted host lends a new one.
+Arc 19 kept all of this under four keys of one key/value store — `size`, `carets` (`CaretMemory`'s
+line blob, cap 100), and since M10 `proofread` / `dict` (`UserWords`' line blob) — so the shape it
+took was the shape a blob can hold: the caret map and the dictionary were each a whole value, read
+and rewritten entirely to change one entry. **Since arc 22 / X4 it is three tables**
+(`EditorSchema.V1`):
+
+```sql
+prefs (key, value)                   -- 'size', 'proofread' (absent = on)
+word  (word, addedAt)                -- the user dictionary
+caret (pageKey, offset, updatedAt)   -- where the writer left off, per page
+```
+
+Each is a different *identity*, which is what removes the read-modify-write: a **pref** is a key
+with one value, and its table is the ONE the host itself reads (`prefs` — pinned in
+`DocumentContract` rather than spelled twice, since `DocumentPdfRender` reads it too); a **word**
+is its own identity — the word *is* the primary key, so vouching for one is `INSERT OR IGNORE` and
+removing one is a plain `DELETE`, with no set to decode in between (`insertWord` keeps `addedAt`
+on a re-add, since that column is the manage list's order — a re-add must not move it); a
+**caret** is per page, and `updatedAt` is what the LRU orders by — the eviction arc 19 did in
+Kotlin over a `LinkedHashMap` is now one bound `DELETE` (`CARET_LIMIT` 100) in the **same batch**
+as the write that caused it (`rememberCaret` = one two-statement `exec`). `INSERT OR REPLACE` is
+safe on all three — unlike the scratch pad's `page` table, none of the three has children (no
+`REFERENCES`, no cascade), so a replaced row takes nothing with it.
+
+`EditorStore` is the one place SQL runs, in the `TagStore`/`ScratchStore` shape: blocking, applies
+the schema on **every** public call (the binder is fetched per call, never cached, because a
+restarted host lends a new one), and lets every exception through; `EditorPrefs` is the thin
+facade every caller already used — same names and signatures, every exception answering the
+default. **`CaretMemory` and `UserWords` are deleted** along with their line codecs; the
+normalization rule that mattered (`SpellEngine.normalizeWord`) already existed and every caller
+still applies it. **A draft never lives in the store** — autosave pushes text to the host through
+the callback binder; the store holds comfort, not content, and every store failure still degrades
+silently to a default.
 
 ### The sibling registrations
 
@@ -1073,17 +1374,18 @@ The same APK registers on the two generic points, one service each — no new po
 
 ---
 
-## The tag-manager point (arc 21)
+## The tag-manager point (arc 21, rebuilt on rows arc 22 / X3)
 
 > Tags **as a feature** — the identity and lifecycle rules, the tag screen's three modes, the four
 > doors (library sheet, notebook bar, lasso, search), the failure table — is
 > [`docs/tags.md`](tags.md). What follows is the **seam**.
 
 `ACTION_TAG_MANAGER` + `_SCREEN` — the sixth point, the third screen-owning one, served by
-`:ext-tags` (**NSE · Tags**). The extension owns the tag screen and the tag index (one key in its
-own extension store, holding the whole `TagCodec` blob); the host owns every entry point (the
-library's long-press row, the notebook's three tag doors, the lasso's silent and recognized
-flows), the recognizer call, and the library's search merge.
+`:ext-tags` (**NSE · Tags**). The extension owns the tag screen and the tag index — **`tag` /
+`assignment` rows in its own extension store since arc 22 / X3**, not one key holding the whole
+index as arc 21 built it; the host owns every entry point (the library's long-press row, the
+notebook's three tag doors, the lasso's silent and recognized flows), the recognizer call, and the
+library's search merge.
 
 ### One interface, two call shapes
 
@@ -1091,21 +1393,32 @@ flows), the recognizer call, and the library's search merge.
 store argument is what tells them apart:
 
 ```
-void       begin(IExtensionStore store);
-void       configureShowing(in TagShowing showing);
-void       end();
-LargeValue snapshot(IExtensionStore store);
-String     assign(IExtensionStore store, String text, String notebookId, String pageId);
+void begin(IExtensionStore store);
+void configureShowing(in TagShowing showing);
+void end();
+List<TagRecord> tags(IExtensionStore store, int offset);
+List<AssignmentRecord> assignmentsOf(IExtensionStore store, in List<String> tagIds, int offset);
+String assign(IExtensionStore store, String text, String notebookId, String pageId);
 ```
+
+**Arc 22 / X3 replaced `snapshot`** (one `LargeValue` of the whole index) with the two paged reads
+above: `tags` answers a page of `TagRecord`s (`ExtensionContract.TAGS_PAGE` = 500, browse order
+`identityKey, display`, a page shorter than 500 ending the loop), `assignmentsOf` answers a page of
+`AssignmentRecord`s (`ASSIGNMENTS_PAGE` = 1 000) for at most `ASSIGNMENT_QUERY_TAGS` (500) tag ids
+at a time. Neither reply rides ashmem — a `List<Parcelable>` this size is an ordinary Binder
+parcel, which is exactly why both are paged rather than sent whole (`TagPages.collect`, in
+`:extension-api` so both sides run the identical loop and can never disagree about where a listing
+ends).
 
 A **showing** is the scratch pad's bracket, verbatim: `ExtensionBinder.hold` pre-opens the store on
 IO (the pre-open rule), mints one uid-bound `ExtensionStoreBinder`, holds the bind, `begin(store)`
 lends the store for the screen's whole life, `configureShowing(showing)` says what this showing is
 about, the screen launches through an `ActivityResultLauncher`, and `end()` — best-effort under
 `TagClient.CALL_TIMEOUT_MS` (2 s) — drops both the store and the parked showing in one `finally`
-alongside the unbind and the revoke, on every path: result, cancel, caller `onDestroy`. `snapshot`
-and `assign` are bind-per-call, the recognizer's shape: `ExtensionBinder.call`, and the store rides
-that one call rather than being lent ahead of it — nothing is held once the call returns.
+alongside the unbind and the revoke, on every path: result, cancel, caller `onDestroy`. `tags`,
+`assignmentsOf` and `assign` are bind-per-call, the recognizer's shape: `ExtensionBinder.call`, and
+the store rides that one call rather than being lent ahead of it — nothing is held once the call
+returns.
 
 The two shapes exist on one interface because they answer two different questions. "Show the user
 this" is an operation with a lifetime — the store has to still be there when the screen finally
@@ -1149,89 +1462,88 @@ applied again). Every log line on both sides of the seam — `TagManagerService`
 label; `configureShowing`'s own debug line names the mode, the target kind and the page count, on
 purpose, and nothing else.
 
-### `snapshot` — one region, closed after the reply
+### The two-query search merge
 
-`snapshot` answers over ashmem because a full index can be megabytes and a `byte[]` that size
-cannot cross a Binder — the `LargeValue` handshake this app already uses for a scratch page and a
-document chunk. `TagManagerService`'s stub parks the region it creates in a
-`ThreadLocal<SharedMemory>` and closes it in `onTransact`'s `finally`, **after** `super.onTransact`
-has written the reply that holds a dup of the descriptor — closing before the reply is marshalled
-would hand the host a dead fd, the `ExtensionStoreBinder` recipe repeated for a third seam. `null`
-means the store holds no index yet (a first run, not a failure); a stored-but-unreadable index
-throws `IllegalStateException`, which the host's `TagClient.snapshot` re-types as
-`TagIndexUnreadableException` rather than letting an unreadable blob be read as an empty library.
+Arc 21 / W4's search merge read one `snapshot` — a `LargeValue` of the whole index, decoded whole
+off Main. **Arc 22 / X3 replaced it with two paged reads**, because there is no longer a blob to
+decode: `TagClient.search(ctx, ref) { tags -> ids }` does one pre-open and ONE bind — inside it,
+`tags(store, offset)` is paged through `TagPages.collect` for the host's own `FuzzyRank` to run
+over (small: `MAX_TAGS` records at ~250 parcel bytes apiece, still comfortably under a Binder
+transaction, which is *why* `TAGS_PAGE` exists rather than sending it in one call), and the caller's
+lambda hands back the matched tag ids; then `assignmentsOf(store, matchedIds, offset)` fetches only
+the rows the ranking needs, chunked into groups of `ASSIGNMENT_QUERY_TAGS` (500) and paged again.
+`SearchAssembly.rank(folders, notebooks, query, TagMatches?, assignments)` groups exactly as
+before (own-tag = `pageId == ""`); an **empty** tag-match selection asks `assignmentsOf` nothing at
+all. `SEARCH_TIMEOUT_MS` is **10 s** — a first cut, generous on purpose: the Nomad measured
+**52–78 ms** end to end on a 2-tag index (`tags` 15–19 ms, `assignmentsOf` 11–18 ms), but the worst
+case — ten tag pages and fifty assignment pages — was never built as test data, so the budget stays
+wide rather than tuned to a case nobody has actually run.
 
-### `TagWrites` — the one read-modify-write
+### The transaction is the lock
 
-The index is a **single store value**, and there are two writers in the extension's process: the
-screen's own edits (on IO) and the service's call-shaped `assign` (on a Binder thread — the lasso's
-silent heading→tag, W3). Both take `TagWrites.apply`, which is the whole of the discipline in one
-place: take `TagSession.writes` for the cycle, read the index **fresh** — never the one the caller
-is already showing — run the caller's change, write, and only then hand the new index back.
-Skipping the fresh read is exactly how two writers each holding a stale copy would each apply their
-own edit and one would silently erase the other's; the lock is what makes "fresh" true across two
-threads sharing one process.
+Arc 21's index was a **single store value**, so two writers — the screen's own edits on IO and the
+service's call-shaped `assign` on a Binder thread (the lasso's silent heading→tag) — needed
+`TagWrites`, a process-local monitor around a read-modify-write of the whole blob: read fresh,
+apply, write, hand the new index back, or one writer's edit silently erases the other's. **Arc 22 /
+X3 deletes `TagWrites` outright**: there is no blob and no read-modify-write left to serialize.
+`assign` is now two small reads and **one two-statement transaction** (`TagStore.assign` /
+`TagSql.insertTag` + `insertAssignment`): `selectTagByIdentity` answers "does this tag exist, and
+is it already on this target" in one read; if it is, nothing is written and the stored display
+comes back unchanged. Otherwise the batch is `insertTag` (`INSERT OR IGNORE … SELECT ?,?,?,? WHERE
+(SELECT COUNT(*) FROM tag) < ? AND (SELECT COUNT(*) FROM assignment) < ?` — gated on **both** caps,
+so a tag whose attachment the assignment cap is about to refuse is never created as an orphan) only
+when the identity was absent, then `insertAssignment`, which **resolves the tag id by identity
+inside the statement** (`SELECT id, ?, ?, ? FROM tag WHERE identityKey = ? AND (SELECT COUNT(*)
+FROM assignment) < ?`) rather than trusting an id read a moment earlier — so a concurrent creator
+of the same tag can never leave this call pointing at a row that was never inserted. A post-write
+re-read turns `INSERT OR IGNORE`'s silence back into a typed `TAG_INDEX_FULL` refusal (nothing was
+written either way) and answers the **stored** display even when a concurrent writer won the
+create with different casing. **The transaction is the lock** — correct across both writers in one
+process, and across two host processes, which a monitor never could be.
 
-`TagWrites.Outcome` answers with a typed `Reason` rather than an exception, because the two callers
-say a failure in different languages: `TagManagerService.refusal` turns a `Reason` into one of the
-three marshalable exception shapes with an exact message the host compares verbatim
-(`ExtensionContract.TAG_INDEX_FULL`, a local `"tag index unreadable"`, or a generic
-store-unavailable message), while `TagsActivity.sentence` turns the same `Reason` into a dialog
-string. Neither side may guess the other's wording from a raw exception, so the type is the
-contract instead of the message text.
+### The caps — policy now, not size arithmetic
 
-### The caps, and what compacting bought
+Three caps, unchanged from the arc-21 wizard and each still pinned by test: `MAX_TAG_CHARS` 64,
+`MAX_TAGS` 5,000, `MAX_TAG_ASSIGNMENTS` 50,000. What changed at X3 is what enforcing them means:
+the index is `tag` / `assignment` **rows** now, so a cap is a `COUNT(*)` check bound *inside* the
+insert (`insertTag` / `insertAssignment`, above) — race-free, because the count and the insert are
+one statement in one transaction, never a check-then-write two statements apart could race between.
+Arc 21's whole size arithmetic — `TagCodec.WORST_CASE_BYTES` (the proof the worst legal index still
+fit one 4 MiB store value), `MAX_TAG_ID_CHARS`, `CompactId`'s 22-character base64url id encoding —
+is **deleted** with the one-blob layout it existed to protect: there is no longer any relationship
+between a cap here and a byte budget anywhere, because there is no single value whose size the caps
+had to keep under a ceiling. Tag ids are now plain `UUID.randomUUID().toString()`, and
+`identityKey` (`TagRules.identityKey` — trim, collapse whitespace runs, fold case) is a **stored,
+uniquely indexed column** rather than a value the codec omitted to save space: on rows, the
+uniqueness of a tag identity has to be enforced by *something*, and a `UNIQUE` index is the only
+thing that can enforce it across two processes with no lock (arc 21 argued the opposite — a stored
+copy could disagree with the question it answers — and that reasoning still holds for what a
+**record** carries: `TagRecord.identityKey` is still derived, never itself a wire field).
 
-Three caps, each pinned by test: `MAX_TAG_CHARS` 64, `MAX_TAGS` 5,000, `MAX_TAG_ASSIGNMENTS`
-50,000. They are not taste — the whole index is one store value, so `TagCodec.WORST_CASE_BYTES`
-(3,650,007, against `STORE_MAX_VALUE_BYTES` = 4 MiB) is the arithmetic proof that the worst legal
-index still fits, and the test fails if any of the caps, or the encoding measured against them,
-moves past it.
+### `TagIndex` moved to `:ext-tags`, and is query-only
 
-That number only closes because of two things `TagCodec` deliberately does **not** store, both
-found at implementation time rather than planned for:
+`TagIndex` used to live in `:extension-api`, pure and shared, because both processes decoded the
+identical bytes off one `snapshot`. There is no blob to share any more: the host asks the store
+directly for `TagRecord`s and `AssignmentRecord`s and ranks them itself, so `TagIndex` moved into
+`:ext-tags` at X3 as **the screen's own in-memory query model** — built once per showing from two
+reads (`tags()` and `assignmentsOfNotebook`), filtered in memory per keystroke (the arc-21 lock
+stands: never a store call per keystroke), and holding **no edits at all** — every edit is a
+statement through `TagStore`, and the screen re-reads both after each write, which is also how
+another writer's edit arrives. `TagRules` and `TagPages` are the two pieces still shared, in
+`:extension-api`, because both sides need the identical identity rule and the identical paging
+loop; `TagCodec` and `CompactId` are deleted outright with the layout they served.
 
-- **No identity key.** A tag's `identityKey` is a pure function of its `display` text
-  (`TagRules.identityKey` — trim, collapse whitespace runs, fold case), so storing it beside the
-  display would be a second copy of an answer that could disagree with the question it answers.
-  Every read re-derives it.
-- **No assignment kind.** Since W4 an assignment's shape is `(tagId, notebookId, pageId?)` — a
-  present `pageId` **is** what makes it a page tag, so a stored kind field would say nothing that
-  isn't already said by whether that field is null. `TagShowing.TARGET_NOTEBOOK` / `TARGET_PAGE`
-  stay in the API surface, because call sites read better naming a kind and `MODE_MANAGE` is
-  defined against them, but nothing on the wire or in storage carries one.
+### `TagRules.isId` is case-insensitive on purpose
 
-W4's own reshape — every assignment now names its notebook, and a page assignment names its page as
-well — pushed the worst case past 4 MiB on plain 36-character UUIDs. Rather than lower a cap the
-wizard had already set, `CompactId` (pure, `:extension-api`) writes a canonical UUID as 22
-base64url characters instead of 36 — a storage encoding and nothing more. In memory, on the seam,
-and at every call site an id is always a full UUID; the compact form exists only between
-`TagCodec.encode` / `decode` and nowhere else. The pattern now runs twice in this one arc: **every
-cap the wizard set was kept, and the record shrank instead** — first by dropping a stored value
-that was a pure function of another (W1's `identityKey`), then by shrinking how an id already known
-to be right is spelled (W4's `CompactId`).
-
-### `TagIndex` is shared, and immutable
-
-`TagIndex`, `TagRules` and `TagCodec` are pure `:extension-api` files with no Android type in any
-of them, and both processes hold the identical class over the identical bytes: the extension edits
-the index and writes it back to its store, the host decodes a `snapshot` of the same bytes to merge
-tags into search (W4). One model on both sides of the seam is what makes it structurally
-impossible for the host's idea of what a tag is to drift from the extension's — there is no second
-definition anywhere to disagree with the first. Every edit returns a **new** `TagIndex` rather than
-mutating one in place, which is what lets a screen hold both the version it just rendered and the
-version it would fall back to if a write failed; the store, never the in-memory copy, is the truth.
-
-### A target id is a UUID or it is not a target
-
-`ExtensionContract.MAX_TARGET_ID_CHARS` — a length cap W1 originally carried, sized for a
-hand-rolled shape check — is **gone** as of W4. `CompactId.isId` (`compact(id) != null`, which
-round-trips a parsed UUID back through `toString()` before accepting it, so a lenient parse like
-`UUID.fromString("1-2-3-4-5")` is refused) is the one check at every door a target id crosses —
-`TagShowing`'s constructor, `TagIndex.assign`, `TagIndex.of`'s decode-time filtering — and it is
-also what keeps a path character or a NUL out of one for free: the canonical UUID alphabet has
-neither, so W1's hand-written character-class checks were a weaker spelling of the same guarantee
-`CompactId` already gives.
+`TagRules.isId` (which replaced `CompactId.isId` at X3, carried over unchanged in behaviour) is
+still the one check at every door a target id crosses — `TagShowing`'s constructor, `TagRecord` /
+`AssignmentRecord`'s own `require`s — round-tripping a parsed UUID through `toString()` so a
+lenient parse like `UUID.fromString("1-2-3-4-5")` is refused, and keeping a path character or a NUL
+out of one for free (the canonical UUID alphabet has neither). It is **deliberately
+case-insensitive** on the hex: `CompactId` already was, and arc 16's `SafeImportId` admits
+upper-case ids out of a stranger's imported `.soil` — tightening the check now would make an
+imported notebook's pages untaggable, since `TagShowing`'s `require` would refuse the showing over
+a spelling difference that names the identical UUID.
 
 ---
 
@@ -1245,16 +1557,20 @@ the importer point, walked against the code at the arc-16 freeze (2026-08-28). R
 exporter point's arc-18 growth — the source-kind seam and the one deliberate secret crossing —
 walked against the code at the arc-18 freeze (2026-08-30). Rows 14–18 are the document-editor
 point and `:ext-document`'s two sibling registrations, walked against the code at the arc-19
-freeze (2026-08-31). Rows 19–23 are the tag-manager point, walked against the code at the arc-21
-freeze (2026-09-01).
+freeze (2026-08-31). Rows 19–23 are the tag-manager point, originally walked against the code at
+the arc-21 freeze (2026-09-01). **Rows 1, 5, 14, 16 and 19–23 are re-walked below against arc 22's
+rebuilt store** (X1 through X4, 2026-09-01) — every one of them named a key/value detail that
+changed underneath it — and rows 24–26 are new: the SQL gate, the reserved name spaces, and the
+one extension table the host itself reads, none of which existed to audit before the store became
+tables.
 
 | # | The claim | Where it holds |
 |---|---|---|
-| 1 | **Outward on `begin` is the uid-bound store binder only.** `begin(store)` is the held bind's opening call and its one argument: an `ExtensionStoreBinder` minted in `ScratchPadClient.open` **after** `ExtensionStores.open` on IO (the pre-open rule), bound to `getPackageUid(ref.packageName)`, gated by `ExtensionStoreGate.check()` on every method, held for the showing in `ScratchSession.store` and revoked in the same `finally` as the unbind — on every path: result, cancel, caller `onDestroy`, failed `begin`. `IExtensionStore` still has no method that could return a key, path or `File`. Nothing else reaches the extension at open: the Intent is the action + `setPackage` + two booleans — no key, path, name, notebook or page id. | `ScratchPadClient.open/finish`, `ExtensionBinder.hold` / `HeldBinding`, `ExtensionStoreBinder`, `ExtensionStoreGate` (JVM-tested), `ScratchPadService.begin/end`, `ScratchSession` |
+| 1 | **Outward on `begin` is the uid-bound store binder only.** `begin(store)` is the held bind's opening call and its one argument: an `ExtensionStoreBinder` minted in `ScratchPadClient.open` **after** `ExtensionStores.open` on IO (the pre-open rule), bound to `getPackageUid(ref.packageName)`, gated by `ExtensionStoreGate.check()` on every method, held for the showing in `ScratchSession.store` and revoked in the same `finally` as the unbind — on every path: result, cancel, caller `onDestroy`, failed `begin`. **Since arc 22 / X1 `IExtensionStore` is six SQL-shaped methods** (`schemaVersion`/`applySchema`/`exec`/`query`/`next`/`close`), not `get`/`put`/`delete`/`keys`/`putLarge`/`getLarge`, but the claim is unchanged: still no method that could return a key, path or `File`, and every statement that crosses is validated (`StoreSql`) before it runs on the one connection the host owns. Nothing else reaches the extension at open: the Intent is the action + `setPackage` + two booleans — no key, path, name, notebook or page id. | `ScratchPadClient.open/finish`, `ExtensionBinder.hold` / `HeldBinding`, `ExtensionStoreBinder`, `ExtensionStoreGate` (JVM-tested), `ScratchPadService.begin/end`, `ScratchSession` |
 | 2 | **Outward ink is bare geometry + width + colour + style name + the page px size — capped and chunked before the bind.** `InkBundle(strokes, pageWidth, pageHeight)` with `WireStroke` = four parallel `FloatArray`s + `width` + `colorArgb` + the `StrokeStyle` **name**. `TransferCaps.toWireStrokes` is the one reduction site from a g-paper `Stroke` (id and time never leave; point-less strokes skipped); `placement` is one of two recorded ints. **No stroke id, page id or number, notebook id or name, or selection bounds has a parameter to travel in** — `IScratchPad` has no other argument. Host side, before any bind: `withinLimits` → the "too much to send" dialog, then `InkChunks.chunk`. Extension side: `requireValid` at unmarshal, the running totals re-checked under one monitor, the placement int checked, fresh ids minted, the page written on the Binder thread under the full rule. | `IScratchPad.aidl`, `WireStroke` / `InkBundle` (parcel + `requireValid`, JVM-tested), `TransferCaps.withinLimits/chunk/toWireStrokes`, `InkChunks`, `ScratchPadClient.send`, `ScratchPadService.receiveInk`, `ScratchInk.toStrokes`, `ScratchStore.receive` |
 | 3 | **Inward ink is validated, capped and fresh-id'd; the paste is one undoable step and nothing else on the page changes.** Every reply is an `InkBundle` → `requireValid` at unmarshal, then `TransferCaps.sanitize` (known style or PEN, width in 0.5–50 px, **colour forced opaque black**) under `Drain`: stop at the first empty bundle, at the summed caps, or at `TRANSFER_MAX_CHUNKS` + one probe past it (a non-empty chunk there = truncated → the "not everything came back" dialog, naming the pasted count). Fresh ids are minted host-side (`toStrokes`, `timeMillis 0`); `NotebookSession.pasteStrokes` writes the rows in **one transaction** with `"order"` rebased inside it, and `NotebookActivity` records **one** `Action.ObjectsPasted` and leaves the strokes selected. No other row, object, page or session state is touched; a failed write → a dialog, nothing pasted, and a drain that fails or brings back nothing gets its own dialog rather than a silent return (J6). The bind is finished **after** the paste callback, never before it. | `IScratchPad.aidl`, `InkBundle.requireValid`, `TransferCaps.sanitize/toStrokes/Drain` (JVM-tested), `ScratchPadClient.drainOutgoing`, `ScratchPadEntry.onResult`, `NotebookSession.pasteStrokes`, `NotebookActivity.pasteFromPad` |
 | 4 | **The screen is the extension's, launched only by the core, caller-checked both ways; data never rides the Intent.** `ScratchPadActivity` is exported under `ACTION_SCRATCH_PAD_SCREEN` with `<category DEFAULT>` and **no launcher filter**; `HostCallerCheck.enforceActivity` is the first statement in `onCreate` (host package **and** `SIGNATURE_MATCH`, else `finish()` before anything is inflated). The core launches it only through an `ActivityResultLauncher` with `setPackage` from a trusted `ProviderRef`, and only after `begin` succeeded and (on a paper-hosting caller) `releaseForHandoff()`. The Activity reads only the two booleans and returns only `RESULT_SCRATCH_SEND` / `RESULT_CANCELED`; ink goes through the service, pages through the store binder. Every exit runs `releaseForHandoff()` before `finish()`. Verified on the Nomad every phase: a shell `am start` is `refused caller (none)`. | `ScratchPadActivity.onCreate` / `finishWithHandoff` / `onResume`, `HostCallerCheck.enforceActivity`, the `:ext-scratchpad` manifest, `ScratchPadClient.open`, `ScratchPadEntry` (`ActivityResultLauncher`, `beforeLaunch`) |
-| 5 | **The store caps change no trust rule.** A value is ≤ `STORE_MAX_VALUE_BYTES` (4 MiB): **inline** up to `STORE_MAX_INLINE_BYTES` (512 KiB); above that as a `LargeValue` — a read-only ashmem region + `byteCount` the receiver copies out of and closes in `finally`, host side through `SharedBytes.readAndClose` **before** the gate sees bytes, so the cap applies to the copy and never to a live mapping. Keys are still bounded, every method is still uid-bound and revocable through the same gate, and the DB is still opened only through `SoilCrypto` under the global key. On a **new-page** placement the ink is written before the page list names it and a failed list write takes the orphan blob back out, so "nothing was sent" is never contradicted by a stray blank page (J6). **A page over the cap is refused by the extension, never split, never written elsewhere:** `PageFullException` → `SCRATCH_PAGE_FULL` on `receiveInk` (the host's dialog; nothing placed) or the pad's own dialog once per visit on a stroke the page cannot take. The pad has no file, prefs or second store of its own. | `ExtensionContract.STORE_*`, `IExtensionStore.aidl`, `LargeValue`, `SharedBytes`, `ExtensionStoreBinder`, `ExtensionStoreGate` (JVM-tested), `ScratchStore`, `ScratchDocument`, `ScratchPadActivity` |
+| 5 | **The store caps change no trust rule, and since arc 22 / X2 there is no page ceiling to enforce.** A payload is ≤ `STORE_MAX_VALUE_BYTES` (4 MiB): **inline** up to `STORE_MAX_INLINE_BYTES` (512 KiB); above that as a `LargeValue` — a read-only ashmem region + `byteCount` the receiver copies out of and closes in `finally`, host side through `SharedBytes.readAndClose` **before** the gate sees bytes, so the cap applies to the copy and never to a live mapping. Every statement is still `StoreSql`-validated, every method is still uid-bound and revocable through the same gate, and the DB is still opened only through `SoilCrypto` under the global key, with foreign keys ON so `ON DELETE CASCADE` actually cascades. `receiveInk` writes the page's rows as one or more `exec` batches (`ScratchBatches`, split at 4 MiB / 10 000 statements) — **a multi-batch failure is compensated** (the new page's cascade, or a `dropStroke` per minted id) rather than left half-written, so "nothing was sent" is never contradicted by orphaned rows. **The 4 MiB page ceiling, `PageFullException` and `SCRATCH_PAGE_FULL` — this row's claim through X1 — are deleted at X2**: a page is unbounded like a notebook page, and reads are planned into `BETWEEN` ranges (`ScratchReadPlan`) rather than refused. The pad has no file, prefs or second store of its own. | `ExtensionContract.STORE_*`, `IExtensionStore.aidl`, `LargeValue`, `SharedBytes`, `ExtensionStoreBinder`, `ExtensionStoreGate` (JVM-tested), `ScratchSchema`, `ScratchSql`, `ScratchStore`, `ScratchDocument`, `ScratchBatches`, `ScratchReadPlan`, `ScratchPadActivity` |
 | 6 | **Outward on `export` is two fds and a bounded spec with no secret, no id and no path.** The call's only arguments are a read `ParcelFileDescriptor` (the host's own already-keyed cache artifact), a write `ParcelFileDescriptor` (the SAF destination the host opened) and an `ExportSpec` — an id → value map (each value ≤ `MAX_SPEC_VALUE_CHARS`, 64, a choice id or `"0"`/`"1"`, never free text) plus a display-only `notebookName` (≤ `MAX_NAME_CHARS`, 200; its constructor refuses `/` and NUL, so it cannot carry a path). **No notebook id, no file path, no passphrase has anywhere to ride** — the reserved keying option's chosen choice id crosses; the typed secret behind it never does, because `ExportOptions.specValues` never writes an entry for a `KIND_PASSPHRASE` option. | `INotebookExporter.aidl`, `ExportSpec` (constructor `require`s, JVM-tested), `ExportOptions.specValues`, `ExportNaming.specName`, `ExportActivity.runExport`, `ExporterClient.export` |
 | 7 | **Inward is bounded descriptors and a byte count verified before success is believed.** `describe()`'s `ExporterInfo` and its `OptionDescriptor` list are capped at unmarshal (`MAX_OPTIONS` 8, `MAX_CHOICES` 8, `MAX_ID_CHARS` 32, `MAX_LABEL_CHARS` 80, `MAX_FILE_EXTENSION_CHARS` 12, `MAX_MIME_CHARS` 128 — every cap pinned by `ExporterContractTest`); a descriptor over any cap, declaring an option kind the host cannot draw, or declaring the reserved keying option with a choice id the host has no transform for, **drops that exporter with a log line, never a crash** (`ExportOptions.isRenderable`, `ExportActivity.loadCandidates`). `export()`'s `ExportResult` carries only a non-negative `bytesWritten`; the host checks it against the length of the file it actually streamed (the keying transform's output, when there was one) and, where the destination provider will answer, against what that provider now reports holding — an exporter that died mid-stream, or under-reported its own copy, cannot read as success on either count. | `ExporterInfo`, `OptionDescriptor`, `ExportResult` (constructor `require`s, JVM-tested), `ExporterContractTest`, `ExportActivity.loadCandidates` / `runExport`, `ExporterClient.describe` / `.export` |
 | 8 | **The keying secret's whole lifecycle is host-side.** A typed *New passphrase…* value is entered into `ExportActivity`'s own XML-static, `saveEnabled="false"` masked fields — never saved to instance state, because the system may persist that Bundle to disk and the secret has no business there — held in a private, non-persisted `typedPassphrase` var from the Export tap to the end of the flow, consumed by `ExportKeying.apply` on the local cache artifact, and cleared in the flow's own `finally` — and at the picker's cancel, the other way the flow ends. It is never written into `ExportSpec` (the reserved keying option only ever carries a choice id), never put in an Intent extra, and never logged — failure paths log the transform's exception **class name only** (`Log.w(TAG, "keying transform failed: ${e.javaClass.simpleName}")`), on the recorded principle that a transform's own message text could carry a path. A rekey armed with the fields lost to a screen rebuild is refused with its own honest dialog rather than silently falling back to Keep. | `ExportActivity` (`editPassphrase`/`editPassphraseConfirm` XML `saveEnabled="false"`, `typedPassphrase`, `onExportTap`, `runExport`), `ExportKeying.plan` / `.apply`, `activity_export.xml` |
@@ -1265,17 +1581,20 @@ freeze (2026-09-01).
 | 12 | **A `SOURCE_PAGES` exporter receives baked pixels, never the notebook — and its success is judged per source kind.** `ExporterInfo.sourceKind` is a compatible parcel tail (`dataAvail()` — absent = `SOURCE_SOIL`, so every pre-arc-18 descriptor keeps its meaning, proven on real wire at the D1 walk; an unknown kind fails unmarshal and drops the exporter). The host does the reading with the one process that can: `ExportRender` runs `ExportArtifact.prepare`'s guard order one for one (`SoilOpenFiles` held → IN_USE, missing key, unopenable), opens **read-only** through the one `SoilDatabase.open` door and stamps nothing (not even `exportedAt`), bakes each page at its own size — template, headings, links' children, ink — one page in memory at a time, into a `PageBundle` in `cacheDir/export/` that the screen's one `finally` wipes. The container is capped before allocation on **both** sides (`MAX_PAGES` 4096 / `MAX_DIMENSION_PX` 32768 / `MAX_PAGE_BYTES` 32 MiB; magic + declared count checked), and the extension re-checks each decode against the declaration — a mismatch is a delivery failure, never a page to skip. The device key opens the notebook for reading and never leaves the host. Verification (`ExportVerification`, pure): the verbatim `bytesWritten == streamBytes` equality runs for `SOURCE_SOIL` only; `SOURCE_PAGES` is corroborated against the destination's own answers, zero bytes is never a document, `SHORT` (may delete wreckage) stays distinct from `UNCONFIRMED` (never a delete), and an unknown kind is `SHORT` — verification never defaults to trust. | `ExporterInfo` (tail + `require`s, JVM-tested), `ExporterContract.SOURCE_*`, `PageBundle` (Writer/Reader caps, round-trip JVM-tested), `ExportRender` (+ pure `plan`, JVM-tested), `ExportVerification` (JVM-tested), `ExportActivity.runExport` / `renderedPages`, `PdfAssembly.addPage` |
 | 13 | **The export secret is the ONE deliberate secret that crosses any extension seam — user-typed, export-scoped, and it opens no Notesprout data.** It is a password for the *output* file (arc 18 / D2's `OPTION_PROTECT`), never the global passphrase, never derived from it, never the device key; `KIND_PASSPHRASE` keeps its never-crosses meaning and the secret is never in the spec's value map — it rides only `ExportSpec.exportSecret`, a compatible tail holding because the spec stays `export()`'s trailing argument. Host lifecycle = `typedPassphrase`'s to the letter: XML-static `saveEnabled="false"` dual fields, held from the Export tap to the flow's end, cleared at the picker's cancel and in the flow's `finally`, never in instance state / an Intent / a log line; > `MAX_EXPORT_SECRET_CHARS` (128) refused at the tap; a screen rebuilt behind the picker refuses with the honest password-lost body rather than exporting unprotected; `isRenderable` drops a descriptor declaring both rekey and protect (one block, one tenant). Extension side: `PdfExportSpec` refuses an inconsistent delivery in both directions (armed-with-no-secret; secret-nothing-asked-for) with messages that never name, quote or measure the secret; `PdfAssembly` holds it only for the pdfbox call and drops its reference in `finally`, whichever way the assembly ended. | `ExporterContract.OPTION_PROTECT` / `MAX_EXPORT_SECRET_CHARS`, `ExportSpec` (constructor `require` + tail, JVM-tested), `ExportOptions.isRenderable` / `wantsExportSecret` (JVM-tested), `ExportActivity` (`typedExportSecret`, `onExportTap`, `runExport`, `saveLauncher` cancel), `activity_export.xml`, `PdfExportSpec.require` (JVM-tested), `PdfAssembly.assemble`, `PdfExporterService.export` |
 
-| 14 | **Outward on the editor's `begin` is two uid-bound binders and nothing else — and nothing rides the screen's Intent at all.** `begin(store, host)` is the held bind's opening call: an `ExtensionStoreBinder` minted in `DocumentEditorClient.open` **after** `ExtensionStores.open` on IO (the pre-open rule) and a `DocumentHostBinder` over a fresh `DocumentHostSession`, both bound to `getPackageUid(ref.packageName)`, both revoked in the same `finally` as the unbind — on every path: result, cancel, caller `onDestroy`, failed `begin`. Revoking the host binder also **clears its session**: the read window and any half-received save go with the bind, never outlive it. The screen Intent is the action + `setPackage` and **not one extra** — no id, key, text, name or path; the scratch pad's two booleans were the last thing to ride an Intent on any SN seam, and this point starts with none. `begin`/`end` in the extension: `HostCallerCheck.enforce` first, marshalable exceptions only. | `DocumentEditorClient.open/finish`, `ExtensionBinder.hold`, `ExtensionStoreBinder`, `DocumentHostBinder.revoke`, `DocumentHostSession.clear` (JVM-tested), `DocumentEditorService.begin/end`, `EditorSession` |
+| 14 | **Outward on the editor's `begin` is two uid-bound binders and nothing else — and nothing rides the screen's Intent at all.** `begin(store, host)` is the held bind's opening call: an `ExtensionStoreBinder` minted in `DocumentEditorClient.open` **after** `ExtensionStores.open` on IO (the pre-open rule) and a `DocumentHostBinder` over a fresh `DocumentHostSession`, both bound to `getPackageUid(ref.packageName)`, both revoked in the same `finally` as the unbind — on every path: result, cancel, caller `onDestroy`, failed `begin`. Revoking the host binder also **clears its session**: the read window and any half-received save go with the bind, never outlive it. **Since arc 22 / X4 the store binder is `IExtensionStore` v6**, so the editor's own service redeclares `MIN_API_VERSION_FOR_STORE` (6) — before that phase landed the service was still at 2 and `ExtensionRegistry` skipped it, so this `begin` never fired at all. The screen Intent is the action + `setPackage` and **not one extra** — no id, key, text, name or path; the scratch pad's two booleans were the last thing to ride an Intent on any SN seam, and this point starts with none. `begin`/`end` in the extension: `HostCallerCheck.enforce` first, marshalable exceptions only. | `DocumentEditorClient.open/finish`, `ExtensionBinder.hold`, `ExtensionStoreBinder`, `DocumentHostBinder.revoke`, `DocumentHostSession.clear` (JVM-tested), `DocumentEditorService.begin/end`, `EditorSession` |
 | 15 | **The host-side stub answers only the bound extension, and text crosses it chunked, capped and target-keyed in both directions.** `IDocumentHost` is the first host-side stub on any SN seam; `gate()` — the bound uid, and not revoked — is the first statement of **every** method, so a stranger never learns which calls exist by the exception it gets back. Reads are a pull: every state-answering call loads the read window **atomically** with the `DocumentPageState` it returns (`setWindow` under one monitor), and `readChunk` refuses an index outside it. Writes are a push: `saveChunk` chunks arrive in order from 0, each ≤ `TEXT_CHUNK_CHARS`, the running total re-checked against `MAX_DOCUMENT_CHARS` on receipt (the untrusted-inward re-check — the receiveInk recipe), and **a save whose `pageKey` is not the current target's never accumulates a single chunk** (the mode-routing guard, structural: notebook text can never land on a page row, a flip-gap save is refused by key). Any refusal resets the whole accumulation. The watermark moves only through a drafted commit consuming a host-parked value — `NO_DRAFT_PENDING` otherwise, typed and `==`-matched; a different-key window swap clears the park (a cross-target draft anchor is unreachable). Hooks run blocking on Binder threads, funnelled to the marshalable set with **class name only** — a message could carry a path or a fragment of the document. | `DocumentHostBinder` (`gate`, `hook`, every override), `DocumentHostSession` (`setWindow` / `readChunk` / `acceptChunk` / `parkWatermark`, JVM-tested), `TextChunks` (JVM-tested both sides), `DocumentContract` caps + typed messages, `ChunkPush` (extension side, JVM-tested) |
-| 16 | **The editor screen is the extension's, launched only by the core for a result — and the store holds small per-device state, never the document.** `DocumentEditorActivity` is exported under `ACTION_DOCUMENT_EDITOR_SCREEN` with `<category DEFAULT>` and no launcher filter; `HostCallerCheck.enforceActivity` runs first thing in `onCreate` (host package **and** signature, else `finish()` before anything is inflated), and the host launches only through an `ActivityResultLauncher` with `setPackage` from a trusted `ProviderRef` after `begin` succeeded — the tier-2 recipe, its second use. The extension writes nothing to disk: its whole persistent surface is four store keys — `size`, `carets` (LRU 100), `proofread`, `dict` — comfort, not content; a draft never lives in the store (autosave pushes through the host binder), every store failure degrades to a default silently, and the store binder is fetched per call because a restarted host lends a new one. The `end()` flush is the teardown backstop: the host is asked `current()` first (a host that cannot answer leaves everything **parked**, never lost), the live buffer rides the saver's own push lock so it can never interleave with an in-flight autosave, a same-key park is skipped as the older copy, and a park or buffer whose key is not the host's current target is parked or **dropped by `PendingPark`'s key rule** — writing it elsewhere would be corruption. | `DocumentEditorActivity.onCreate`, `HostCallerCheck.enforceActivity`, the `:ext-document` manifest, `DocumentEditorEntry`, `EditorPrefs` (+ `CaretMemory` / `UserWords`, JVM-tested), `DocumentEditorService.flushBeforeRevoke` / `pushPendingInBackground`, `DocumentSaver.pushLockedBlocking`, `PendingPark` (JVM-tested) |
+| 16 | **The editor screen is the extension's, launched only by the core for a result — and the store holds small per-device state, never the document.** `DocumentEditorActivity` is exported under `ACTION_DOCUMENT_EDITOR_SCREEN` with `<category DEFAULT>` and no launcher filter; `HostCallerCheck.enforceActivity` runs first thing in `onCreate` (host package **and** signature, else `finish()` before anything is inflated), and the host launches only through an `ActivityResultLauncher` with `setPackage` from a trusted `ProviderRef` after `begin` succeeded — the tier-2 recipe, its second use. The extension writes nothing to disk: **since arc 22 / X4 its whole persistent surface is three tables** — `prefs` (`key`/`value` — the ONE table the host itself reads, pinned in `DocumentContract`), `word` (the user dictionary, the word IS the primary key) and `caret` (`pageKey`/`offset`/`updatedAt`, LRU 100 via a bound `DELETE` in the same batch as the write) — comfort, not content, replacing the old four key/value keys and their line codecs (`CaretMemory`, `UserWords`, both deleted). A draft never lives in the store (autosave pushes through the host binder), every store failure degrades to a default silently, and `EditorStore` applies the schema and fetches the store binder on **every** call because a restarted host lends a new one. The `end()` flush is the teardown backstop: the host is asked `current()` first (a host that cannot answer leaves everything **parked**, never lost), the live buffer rides the saver's own push lock so it can never interleave with an in-flight autosave, a same-key park is skipped as the older copy, and a park or buffer whose key is not the host's current target is parked or **dropped by `PendingPark`'s key rule** — writing it elsewhere would be corruption. | `DocumentEditorActivity.onCreate`, `HostCallerCheck.enforceActivity`, the `:ext-document` manifest, `DocumentEditorEntry`, `EditorSchema`, `EditorSql`, `EditorStore`, `EditorPrefs` (JVM-tested), `DocumentEditorService.flushBeforeRevoke` / `pushPendingInBackground`, `DocumentSaver.pushLockedBlocking`, `PendingPark` (JVM-tested) |
 | 17 | **A `SOURCE_DOCUMENT` exporter receives final bytes the host assembled — and is held to the verbatim equality.** The host does the assembly *and* the format strip (`ExportText` — read-only open through the one `SoilDatabase.open` door after the `SoilOpenFiles` guard, stamps nothing, not even `exportedAt`; a `.txt` stripped through `:markdown`; **export never recognizes** — no document is an honest refusal, never an empty file), so what crosses the read fd is already the file the user asked for and the extension is a byte-for-byte streamer with no decode and no charset sniff. The reserved `OPTION_TEXT_FORMAT` is host-executed (assembly + destination naming); the spec that crosses carries the choice id and nothing new. Because the output is a copy and not a transform, `ExportVerification` holds this kind to the same `bytesWritten == streamBytes` equality as `SOURCE_SOIL` — the per-kind verification rule doing its job. The exporter is listed only when the notebook has a document (`ExportDocumentRules.listed`), its service meta-data declares API 3, and an unknown source kind still fails unmarshal and drops the exporter. | `ExportText` (guard order in KDoc), `ExportDocumentRules` (JVM-tested), `ExporterContract.SOURCE_DOCUMENT` / `OPTION_TEXT_FORMAT`, `ExportVerification` (JVM-tested), `DocumentExporterService.export` (E1-shaped fd `finally`), `DocumentExporterDescriptor` (JVM-tested), `TextStreams.streamCopy` |
 | 18 | **A `RESULT_TEXT_DOCUMENT` importer streams verbatim, and the host decides what the bytes are — after delivery, under its own caps.** `ImporterInfo.resultKind` is a compatible parcel tail (absent = `RESULT_NOTEBOOK`, the arc-18 `sourceKind` recipe mirrored; an unknown kind fails unmarshal and drops the importer), and the service's API-3 meta-data is what keeps a version-2 host — which would read the absent tail as `.soil` and run Markdown through the notebook probe — from ever pairing with it. `TextImporterService` is `SoilImporterService` in shape down to the line: caller check inside the fd `try`, verbatim `streamCopy`, no decode, no cap of its own — recognising the bytes is the job of the side that owns the data. Host side, after delivery: byte cap first (10 MB, first-hand `File.length()`), **strict UTF-8** with `CodingErrorAction.REPORT` (mojibake refused, not landed), NUL = binary wearing a text extension, the char cap re-checked after decode, BOM and CRLF normalized and nothing else touched. What survives becomes an ordinary encrypted text-document create — the delivered bytes never name a path, an id or a destination. | `ImporterInfo` (tail + `require`s, JVM-tested), `ImporterContract.RESULT_*`, `TextImporterService` (API 3 meta-data in the manifest), `TextImport.decode` (JVM-tested), `ImportFlow` (the fork after delivery), `TextStreams.streamCopy` |
 
-| 19 | **Outward on `configureShowing` is a target *pair* and its display label — no tag the library already holds, no store key or path.** `TagShowing(notebookId, pageId?, targetLabel, mode, prefill?, pageIds, pageLabels)` crosses on the held bind, after `begin`, before the launch; the screen's own Intent carries only the action and the package. Both ids are checked as canonical UUIDs in the constructor (`CompactId.isId` — the one check that also keeps a path character or a NUL out of either), `targetLabel` is capped at `MAX_TARGET_LABEL_CHARS` (200) and refuses a NUL, `prefill` is capped at `MAX_TAG_CHARS` (64) when present, and MANAGE's parallel `pageIds`/`pageLabels` are capped at `TagShowing.MAX_PAGES` (5,000) and must match in length — the parcel refuses rather than allocates above any of them. The showing says what the screen is *about*; what is *in* the index is the extension's to read for itself. | `TagShowing` (constructor `require`s, JVM-tested), `ITagManager.aidl`, `TagClient.open`, `TagManagerService.configureShowing`, `TagSession.showing` |
-| 20 | **`snapshot` hands back the whole index over ashmem, and unreadable is never read as empty.** The only argument is the store binder; the reply is a `LargeValue` — the region the extension creates, parked per Binder thread and closed in `onTransact`'s `finally` **after** the reply is marshalled, copied out and closed by the host in `TagClient.snapshot`'s own `finally`. `null` means no index has ever been written (a first run); a stored value whose version line this build does not know throws `IllegalStateException`, re-typed host-side as `TagIndexUnreadableException` rather than decoded as `TagIndex.EMPTY`. The decode runs off Main (`Dispatchers.Default`) — the blob can be megabytes and the caller is the library's search-query coroutine. | `ITagManager.snapshot`, `TagManagerService.snapshot` (`ThreadLocal<SharedMemory>`), `TagClient.snapshot`, `TagCodec.decode` (JVM-tested) |
-| 21 | **`assign` crosses normalize-ready text and a target pair outward, and the tag's canonical spelling inward — nothing else either way.** Outward: `store`, `text` (untrimmed — normalization is `TagIndex.assign`'s job, not the caller's), `notebookId` (always) and `pageId` (nullable — present only for a page tag). Inward: one `String`, the tag's **canonical display form** — the casing whoever created it first used, which may not be the casing this call just sent, and is the whole reason the call answers with a string rather than a boolean: it is what the host's toast says. A cap refusal (`IllegalStateException(TAG_INDEX_FULL)`) or invalid text (`IllegalArgumentException`) leaves the index untouched on both sides — `TagWrites.apply` never reaches `store.write` on that path. | `ITagManager.assign`, `TagManagerService.assign` (`TagWrites.apply`, `refusal`), `TagClient.assign` (`TagIndexFullException`, `TagIndexUnreadableException`), `TagIndex.assign` (JVM-tested), `TagManagerEntry.assign` (the lasso's silent door) |
-| 22 | **The store-index layout is one key holding the whole blob — never a key per tag.** `TagStore.KEY_INDEX` (`"index"`) is the entire surface: `read()`/`write()` move the complete `TagCodec` encoding in one `get`/`put` (or, above `STORE_MAX_INLINE_BYTES`, one `getLarge`/`putLarge`), so an edit is one write with no fan-out and no transaction needed around several — the shape a per-tag layout would have required, and a half-applied edit is exactly what a single value cannot produce. Every read-modify-write of it, from either process-side writer (the screen on IO, the service's call-shaped `assign` on a Binder thread), is serialized through `TagWrites.apply`'s lock (`TagSession.writes`), which reads the index **fresh** inside that lock rather than the one the caller is already showing. | `TagStore` (`KEY_INDEX`), `TagWrites.apply` (JVM-tested via `TagWritesTest`), `TagSession.writes`, `TagCodec.WORST_CASE_BYTES` (proves the one value is enough) |
-| 23 | **The host holds a decoded `TagIndex` only at query time, and never writes it.** Every door that shows or edits a tag routes through the extension (`TagManagerEntry.open` / `.assign`); the host itself never calls `TagStore.write` and never calls `TagIndex.assign`/`unassign`/`deleteTag`. The one place the host reads the index without opening a screen is the library's search merge (W4, `TagClient.snapshot`), and dead assignments never surface there **without a filtering pass**: `SearchAssembly.rank` reads tags only by iterating the notebook list it was already handed — the index's own live listing — so an assignment naming a notebook that is not in it is simply never looked at, and a page's aliveness is answered separately, from the owning notebook's own live page list. `TagIndex` carries **no** aliveness filter: W1 shipped one, W6's review found it had no caller, and it was removed rather than left standing as a doc comment asserting a role it did not have — the merge gets the identical result structurally, for free, from lists it was reading anyway. | `TagManagerEntry` (every screen-opening door), `TagClient.snapshot`/`.assign`, `SearchAssembly.rank` |
+| 19 | **Outward on `configureShowing` is a target *pair* and its display label — no tag the library already holds, no store key or path.** `TagShowing(notebookId, pageId?, targetLabel, mode, prefill?, pageIds, pageLabels)` crosses on the held bind, after `begin`, before the launch; the screen's own Intent carries only the action and the package. Both ids are checked as canonical UUIDs in the constructor (`TagRules.isId` since arc 22 / X3 — `CompactId.isId` before it, identical behaviour, now case-insensitive on the hex; the one check that also keeps a path character or a NUL out of either), `targetLabel` is capped at `MAX_TARGET_LABEL_CHARS` (200) and refuses a NUL, `prefill` is capped at `MAX_TAG_CHARS` (64) when present, and MANAGE's parallel `pageIds`/`pageLabels` are capped at `TagShowing.MAX_PAGES` (5,000) and must match in length — the parcel refuses rather than allocates above any of them. The showing says what the screen is *about*; what is *in* the index is the extension's to read for itself. | `TagShowing` (constructor `require`s, JVM-tested), `ITagManager.aidl`, `TagClient.open`, `TagManagerService.configureShowing`, `TagSession.showing` |
+| 20 | **`tags`/`assignmentsOf` hand back the index a page at a time, and neither rides ashmem any more.** Arc 22 / X3 replaced `snapshot` (one `LargeValue` of the whole index, unreadable-never-empty over ashmem) with two ordinary paged Binder calls: `tags(store, offset)` answers ≤ `TAGS_PAGE` (500) `TagRecord`s, `assignmentsOf(store, tagIds, offset)` answers ≤ `ASSIGNMENTS_PAGE` (1 000) `AssignmentRecord`s for ≤ `ASSIGNMENT_QUERY_TAGS` (500) ids at a time; both constructors are the unmarshal validation (`TagRules.isId` on every id, `TagRules.isValid` + the normalized-form check on `display`), so a malformed record is dropped and counted rather than corrupting a decode the way an unreadable blob once could. `TagPages.collect` (`:extension-api`) is the one paging loop both sides run — a short page ends it, a runaway peer trips a guard rather than returning a silently truncated list. There is no longer an "unreadable index" state to re-type: a store the extension cannot reach is `StoreUnavailable`, the same as every other store failure. | `ITagManager.tags`/`.assignmentsOf`, `TagManagerService` (thin pass-through to `TagStore`), `TagClient.search`, `TagPages.collect` (JVM-tested), `TagRecord`/`AssignmentRecord` (constructor `require`s, JVM-tested) |
+| 21 | **`assign` crosses normalize-ready text and a target pair outward, and the tag's canonical spelling inward — nothing else either way.** Outward: `store`, `text` (untrimmed — normalization is `TagRules`'s job, not the caller's), `notebookId` (always) and `pageId` (nullable — present only for a page tag). Inward: one `String`, the tag's **canonical display form** — the casing whoever created it first used, which may not be the casing this call just sent, and is the whole reason the call answers with a string rather than a boolean: it is what the host's toast says. A cap refusal (`IllegalStateException(TAG_INDEX_FULL)`) or invalid text (`IllegalArgumentException`) leaves the index untouched on both sides — since arc 22 / X3, `TagStore.assign`'s one two-statement transaction simply never runs, or runs and is undone by SQLite's own rollback; there is no `TagWrites.apply`/`store.write` step left to short-circuit. | `ITagManager.assign`, `TagManagerService.assign`, `TagClient.assign` (`TagIndexFullException`), `TagStore.assign` (JVM-tested via `FakeTagStore`), `TagManagerEntry.assign` (the lasso's silent door) |
+| 22 | **The store-index layout is `tag` / `assignment` rows — never one key holding the whole blob.** `TagSchema.V1` (`TagStore.load`) declares both tables; every statement lives in `TagSql`, and a read or write is one or two ordinary statements rather than a whole-value round trip. **No read-modify-write remains to serialize**: `assign` is two small reads plus one two-statement transaction (`insertTag` gated on both the tag and assignment `COUNT(*)` caps, `insertAssignment` resolving the tag id by identity inside its own statement), and SQLite's own transaction is what makes it correct under two writers — the screen on IO and the service's call-shaped `assign` on a Binder thread — with no process-local lock standing in for it. `TagWrites` and its monitor (`TagSession.writes`) are **deleted**. | `TagSchema`, `TagSql` (JVM-tested via `TagSqlTest`), `TagStore.assign`/`load` (JVM-tested), `TagSession` |
+| 23 | **The host holds decoded `TagRecord`/`AssignmentRecord` pages only at query time, and never writes any of it.** Every door that shows or edits a tag routes through the extension (`TagManagerEntry.open` / `.assign`); the host itself never runs a write statement and never calls into `TagStore`. The one place the host reads the index without opening a screen is the library's search merge (`TagClient.search`, arc 22 / X3's two-query replacement for W4's `snapshot`), and dead assignments never surface there **without a filtering pass**: `SearchAssembly.rank` reads tags only by iterating the notebook list it was already handed — the index's own live listing — so an assignment naming a notebook that is not in it is simply never looked at, and a page's aliveness is answered separately, from the owning notebook's own live page list. Neither `TagRecord` nor `AssignmentRecord` carries an aliveness flag of its own — the merge gets the identical result structurally, for free, from lists it was reading anyway, the same design W1's shipped-but-uncalled filter was removed in favour of at W6. | `TagManagerEntry` (every screen-opening door), `TagClient.search`/`.assign`, `SearchAssembly.rank` |
+| 24 | **Every statement that crosses `exec`/`query` is validated before it touches the connection — one statement, a known head keyword, no denylisted word, no reserved name.** `StoreSql.checkExec`/`checkQuery` run inside `ExtensionStoreGate` between decoding a `StoreCodec` batch and running it: `PRAGMA`, `ATTACH`, `VACUUM`, every DDL keyword, and every transaction-control keyword are refused anywhere in the token stream (not just as the head), a query cannot smuggle a write under `WITH`, and only one statement (one optional trailing `;`) is ever accepted per call. The file is per-package, so this is the whole of what a validator here needs to protect: the host's own connection and the file it lives in. A refusal is `IllegalArgumentException`, thrown before the executor is ever called — no partial run, nothing to roll back. | `StoreSql` (JVM-tested via `StoreSqlTest`), `ExtensionStoreGate.exec`/`.query` |
+| 25 | **A `host_*`/`sqlite_*`/`room_*`/`android_*` name is refused wherever it appears — bare or quoted, in a query, a write, or a schema step.** `StoreNames.isReserved` runs on every WORD and quoted-identifier token `StoreSql`'s tokenizer produces, in every statement kind, so an extension cannot reach `host_schema` (the host's own applied-version table), SQLite's `sqlite_master`/`sqlite_sequence` catalog, or a name a Room-era or platform convention would mint — `sqlite_version()` is refused along with everything else in that space, a harmless loss the validator does not special-case around. `StoreNames.isValid` additionally requires a table or index name an extension *creates* to be lowercase, bare and `^[a-z][a-z0-9_]{0,62}$` — column names are exempt, since they are the extension's own business and never collide with a host-owned object. | `StoreNames` (JVM-tested via `StoreSqlTest`), `StoreSchema.requireValid` (DDL names), `StoreSql.check` (runtime names) |
+| 26 | **The host reads exactly one extension table, through its own executor, never a binder, and only if the table is already there.** `DocumentPdfRender.editorTextSizeSp` is the sole caller: it resolves the installed document editor, checks `extensionStoreFile(...).exists()`, opens the store the normal `ExtensionStores.open` way, calls `ExtensionStoreDatabase.hasTable(DocumentContract.PREFS_TABLE)`, and only then runs a plain `SELECT` through `StoreExecutor` — no `IExtensionStore` binder is ever minted for this read, and nothing is created if the table or the file is absent. The table's name and both column names are pinned in `DocumentContract` rather than duplicated in `:app`, so the two sides cannot drift on what "the prefs table" means; every failure on this path — missing editor, missing file, missing table, an unparseable value — lands on `DocumentPdfMetrics.DEFAULT_TEXT_SIZE_SP` rather than refusing the export. | `DocumentPdfRender.editorTextSizeSp`, `DocumentContract.PREFS_*`, `ExtensionStoreDatabase.hasTable`, `EditorSchema` (the table this reads) |
 
 **One recorded asymmetry.** The host forces inbound colour to opaque black; the extension does not
 force it on the ink the host sends. That is not an oversight and not a hole: SN's ink is fixed
@@ -1298,16 +1617,17 @@ and `TextImport` log counts, chunk counts, lengths and durations — never a cha
 document. Exception funnels on both sides of the seam carry a **class name only**, on the
 recorded principle that an exception's own message could hold a path or a slice of the user's
 text. The proofread engine extends it further: the user dictionary's words are the writer's own
-vocabulary, so `UserWords` / `EditorPrefs` log nothing at all — not even key names, which name
-pages.
+vocabulary, so `EditorStore` / `EditorPrefs` log nothing at all — not even key names, which name
+pages (arc 22 / X4 deleted `UserWords` and `CaretMemory` with the key/value layout they served;
+the rule they enforced did not move to the tables that replaced them).
 
 **Tags are the same rule again, applied to the shortest piece of user text this app carries**
 (arc 21): a tag is the user's own words whether it came from typing or from a heading's or a
 selection's recognized text, and it crosses the seam only on the bind (`TagShowing`, `assign`'s
-argument, `snapshot`'s reply), never on an Intent and never in a log line. `TagManagerService`,
-`TagClient`, `TagManagerEntry` and `TagsActivity` all log counts, lengths, mode and target *kind*
-— never a tag's text or a target's label. `configureShowing`'s own debug line names the mode, the
-target kind and the page count on purpose, and stops there.
+argument, the `tags`/`assignmentsOf` replies since arc 22 / X3), never on an Intent and never in a
+log line. `TagManagerService`, `TagClient`, `TagManagerEntry` and `TagsActivity` all log counts,
+lengths, mode and target *kind* — never a tag's text or a target's label. `configureShowing`'s own
+debug line names the mode, the target kind and the page count on purpose, and stops there.
 
 ---
 
@@ -1332,6 +1652,7 @@ most likely to find by name in Settings → Apps rather than by process of elimi
 | Launcher activity | **None**; the screen `<activity>` is exported under its own action with `<category DEFAULT>` (without which implicit resolution never matches it) and is refused unless launched for a result by the host |
 | versionName | host lockstep: `0.1.0-ratta` (`-dev` in debug) |
 | Release APK | 6.8 MB |
+| API version | declares **6** (arc 22 / X2 — `MIN_API_VERSION_FOR_STORE`; the pad's button was gone from the host between X1's landing and X2's, when this was still the pre-X1 number) |
 
 **`:ext-mlkit`**
 
@@ -1363,7 +1684,7 @@ most likely to find by name in Settings → Apps rather than by process of elimi
 | Launcher activity | **None** — the Supernote launcher shows the package anyway; the family recipe |
 | versionName | host lockstep: `0.1.0-ratta` (`-dev` suffixed in debug), bumped together with `:app` at arc freezes |
 | Release APK | 14 MB — pdfbox-android pulls bouncycastle; module-local, and since the D3 review it assembles every export (the framework's `PdfDocument` held each page's raster until the write — the memory finding) |
-| API version | declares **2** (`sourceKind` is load-bearing for it) — an older host skips it at discovery rather than streaming a `.soil` at it; `:ext-mlkit`, `:ext-scratchpad` and `:ext-soil` stay at 1 |
+| API version | declares **2** (`sourceKind` is load-bearing for it) — an older host skips it at discovery rather than streaming a `.soil` at it; `:ext-mlkit` and `:ext-soil` stay at 1, `:ext-scratchpad` declares 6 (arc 22 / X2 — a store-taking point, not a `sourceKind` matter) |
 
 **`:ext-document`** (arc 19 / M3, grown M8–M10 — `DocumentEditorService` + the editor screen, `TextImporterService`, `DocumentExporterService`, one APK on three points)
 
@@ -1375,7 +1696,7 @@ most likely to find by name in Settings → Apps rather than by process of elimi
 | Launcher activity | **None** — the editor `<activity>` is exported under its own action with `<category DEFAULT>` and is refused unless launched for a result by the host; the Supernote launcher shows the package anyway, the family recipe |
 | versionName | host lockstep: `0.1.0-ratta` (`-dev` suffixed in debug), bumped together with `:app` at arc freezes |
 | Release APK | 7.8 MB — SymSpellKt is module-local (the pdfbox precedent), and the bundled proofread dictionary asset (`assets/proofread/en_82765.dict` — gzip content behind an opaque extension, because AAPT gunzips any `.gz` asset and strips the extension) rides inside |
-| API version | **per service**: the editor declares 2, the text importer and document exporter declare **3** (the `resultKind` tail / `SOURCE_DOCUMENT` are load-bearing for them — an older host skips those two services at discovery and still binds nothing it would misread) |
+| API version | **per service**: the editor declares **6** (arc 22 / X4 — `MIN_API_VERSION_FOR_STORE`; the Document button was gone from the host between X1's landing and X4's, when this was still 2), the text importer and document exporter stay at **3** (the `resultKind` tail / `SOURCE_DOCUMENT` are load-bearing for them, and neither takes a store — an older host skips those two services at discovery and still binds nothing it would misread) |
 
 **`:ext-tags`** (arc 21 / W1–W4, the TENTH module — `TagManagerService` + `TagsActivity`, one APK on one point)
 
@@ -1387,7 +1708,7 @@ most likely to find by name in Settings → Apps rather than by process of elimi
 | Launcher activity | **None** — the screen `<activity>` is exported under its own action with `<category DEFAULT>` and is refused unless launched for a result by the host; the Supernote launcher shows the package anyway, the family recipe |
 | versionName | host lockstep: `0.1.0-ratta` (`-dev` suffixed in debug), bumped together with `:app` at arc freezes |
 | Release APK | ≈ 6.9 MB — no module-local dependency beyond `:extension-api` and `:sn-screen`; no Room, no SQLCipher, no serialization library (the tag index lives in the host's extension store, not in a file this APK owns) |
-| API version | declares **5** (the point itself is the version-4 event, W4's target-pair reshape is the version-5 one — see the `API_VERSION` ledger above); every other extension's declaration is untouched |
+| API version | declares **6** (the point itself was the version-4 event, W4's target-pair reshape the version-5 one, and arc 22 / X3's store rewrite the version-6 one — see the `API_VERSION` ledger above; every tag door and the search merge were gone from the host between X1's landing and X3's, when this was still 5); every other extension's declaration is untouched |
 
 ---
 

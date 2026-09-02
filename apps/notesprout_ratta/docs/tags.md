@@ -14,16 +14,20 @@ the tag screen and the whole tag index, in its own encrypted extension store; th
 entry point (four of them), the recognizer call the lasso's ink flow needs, and the library's
 search merge.
 
-This is the feature doc. The seam — `ITagManager`, `TagShowing`'s wire form, the store's key
-layout, the boundary audit — is [`docs/extensions.md`](extensions.md) § the sixth point; this doc
-only summarizes it. The notebook's tag button is [`docs/notebook.md`](notebook.md); the library's
-row and search merge are [`docs/library.md`](library.md) § Search; the backup set is
+This is the feature doc. The seam — `ITagManager`, `TagShowing`'s wire form, the store's schema,
+the boundary audit — is [`docs/extensions.md`](extensions.md) § the sixth point; this doc only
+summarizes it. The notebook's tag button is [`docs/notebook.md`](notebook.md); the library's row
+and search merge are [`docs/library.md`](library.md) § Search; the backup set is
 [`docs/backup.md`](backup.md).
 
 **Status: arc 21 complete** — W1 the point, the module, the screen's BROWSE/ADD core, the library's
 first door · W2 the notebook's three doors + MODE_MANAGE · W3 the lasso's Tag · W4 the search merge
 (and the record reshape it forced) · W5 extension stores enter the backup set · W6 review, docs,
-freeze (this doc is part of it).
+freeze. **Arc 22 / X3 (2026-09-01) rebuilt the index's storage** — the one-blob layout under
+`TagCodec` is gone; `tag` and `assignment` are rows in the host's extension store now, reached
+through gated parameterized SQL (`docs/extensions.md` § the store). This doc describes that shape
+as it stands today; a mention of "arc 21" below is a historical note about how a decision came
+to be, never a claim about what currently runs.
 
 ---
 
@@ -33,9 +37,23 @@ The scratch pad proved that a screen-owning point can hold real state without a 
 tags reuse that shape rather than inventing a fourth. The core keeps one thing it would otherwise
 have had to grow twice: a query surface over an arbitrary set of user-typed labels, attached to
 things that live in two different places (the global index's notebooks, a `.soil`'s pages). Living
-in `:ext-tags` means the index is one value in one encrypted per-package store — an extension
-writes nothing to disk itself, the arc-11 rule holds unchanged — and the host never has to decide
-where a tag table would live in `notesprout.db` or inside every `.soil`.
+in `:ext-tags` means the index is rows in one encrypted per-package store — an extension writes
+nothing to disk itself, the arc-11 rule holds unchanged — and the host never has to decide where a
+tag table would live in `notesprout.db` or inside every `.soil`.
+
+**What arc 21 paid, and what arc 22 removed.** The arc-11 seam only ever offered one shape: a
+key/value store. W1 built the index as one store *value* because that was the only shape there
+was — the whole library's tags and assignments, encoded by `TagCodec` into one blob under
+`ExtensionContract.STORE_MAX_VALUE_BYTES` (4 MiB), decoded whole on every read and rewritten whole
+on every edit. That single constraint is what shaped most of arc 21: an identity key that had to
+be dropped rather than stored so the worst-case index would fit the byte budget, ids compacted to
+a 22-character base64url form to buy back a few bytes each, a `WORST_CASE_BYTES` arithmetic proof
+pinned by test, a process-local write lock (`TagWrites`) because a read-modify-write of one blob
+has no other way to stay correct between two writers. Arc 22 / X3 rebuilt the seam under it — the
+store is real SQLite tables now — and every one of those costs went with the blob that forced
+them: the identity key is a stored, uniquely indexed column; ids are plain UUIDs; there is no
+byte-budget arithmetic to prove because there is no single value to bound; and the lock is gone
+because a SQL transaction already is one. See The data model, below.
 
 `:ext-tags` is also SN's **first tier-2 screen carrying no paper at all**: no g-paper dependency,
 no `PaperView`, and therefore **no EPD handoff anywhere in the seam**. Arc 19 / M3 already measured
@@ -62,18 +80,20 @@ both sides of the seam and every test that touches it):
 
 Two things follow directly, and both are deliberate rather than incidental:
 
-- **Tabs and newlines are dropped, not escaped.** `Char.isWhitespace` — what `display` collapses —
-  already covers both, so nothing that has been through `TagRules.display` can carry either one.
-  An escape layer in the codec would be unreachable code pretending to be a guarantee; a record
-  that somehow carries a raw tab or newline is simply skipped (`TagCodec.writable`), which costs a
-  re-add rather than silently becoming two wrong tags.
-- **The identity key is never stored.** It is re-derived from the display form every time an index
-  is read, so an index can never disagree with the rule that built it.
+- **Tabs and newlines cannot reach a stored row.** `Char.isWhitespace` — what `display` collapses —
+  already covers both, so nothing that has been through `TagRules.display` carries either one. There
+  is no escape layer anywhere in the seam, because there is nothing left needing one.
+- **The identity key is derived on the wire, and stored only as a constraint.** `TagRecord`
+  computes `identityKey` from `display` the moment a record is built, the same way on both sides of
+  the seam; the store's `tag.identityKey` column holds the same value as a `UNIQUE` index, which is
+  what makes "does this tag already exist" enforceable with two writers and no lock (see The data
+  model). One function produces the value either side ever sees, so the database's constraint and
+  the in-memory answer cannot drift apart.
 
 **Lifecycle.** A tag persists until it is explicitly deleted — removing its last assignment leaves
-it sitting in the suggestion list, ready to be reused. `TagIndex.assign` is idempotent (re-assigning
-an attached tag is a no-op that still answers with the canonical spelling, so a double tap on
-e-ink costs nothing) and keeps the **first** casing: assigning "Reading List" to a library that
+it sitting in the suggestion list, ready to be reused. `TagStore.assign` is idempotent (re-assigning
+an attached tag writes nothing and still answers with the canonical spelling, so a double tap on
+e-ink costs one read) and keeps the **first** casing: assigning "Reading List" to a library that
 already holds "reading list" attaches the existing tag and hands back "reading list". `unassign`
 detaches from one target and never touches the tag itself. `deleteTag` is the **only** thing that
 removes a tag, and it removes it — and every assignment of it — everywhere at once; the screen is
@@ -90,20 +110,28 @@ is watching it.
 
 ## The data model
 
-`TagIndex` (`:extension-api`, pure, immutable) is the whole library's tags as data — shared,
-unmodified, by both sides of the seam: the extension edits it and writes it back to its store, and
-the host decodes a snapshot of it to feed the search merge. Every edit returns a **new** index,
-which is what lets a screen hold the version it would fall back to if a write failed.
+`TagSchema.V1` (`:ext-tags`) is the whole library's tags, as two tables the extension declares once
+and the host applies. Every statement below is quoted verbatim from the code:
 
-```
-class Tag(val id: String, val display: String)
-class Assignment(val tagId: String, val notebookId: String, val pageId: String? = null)
+```sql
+CREATE TABLE tag (
+    id TEXT PRIMARY KEY,
+    display TEXT NOT NULL,
+    identityKey TEXT NOT NULL UNIQUE,
+    createdAt INTEGER NOT NULL);
+CREATE TABLE assignment (
+    tagId TEXT NOT NULL REFERENCES tag(id) ON DELETE CASCADE,
+    notebookId TEXT NOT NULL,
+    pageId TEXT NOT NULL DEFAULT '',
+    createdAt INTEGER NOT NULL,
+    PRIMARY KEY (tagId, notebookId, pageId));
+CREATE INDEX assignment_target ON assignment(notebookId, pageId);
 ```
 
 **Every assignment names a notebook.** A page tag names its page as well — `notebookId` alone is a
 notebook tag, `notebookId` + `pageId` is a page tag, and `pageId`'s presence is what makes it one:
-there is no stored `kind` field, because a stored kind would be a second copy of an answer the
-record already gives, and a second copy is a place for the two to disagree.
+there is no stored `kind` column, because a stored kind would be a second copy of an answer the
+row already gives.
 
 This shape is not what W1 shipped. A W1 assignment named a page and nothing else, and W4's own
 phase — building the search merge — ran straight into the fact that **nothing anywhere could say
@@ -112,81 +140,94 @@ lives entirely inside its notebook's `.soil`, and there is no way to scan for th
 because `KeyMaterial`'s raw-key cache is per file (the salt is per file) — a first-ever open of an
 unopened `.soil` costs a full key derivation. The user's call reshaped the record instead of adding
 a lookup: every assignment carries its notebook, so the relationship is stored rather than
-inferred. `ExtensionContract.API_VERSION` moved to **5** for it — the one bump so far that is
-**not** a compatible tail (below).
+inferred. `ExtensionContract.API_VERSION` moved to **5** for it at the time — since superseded by
+arc 22 / X3's **6**, below. The shape (notebook always, page only for a page tag) is unchanged by
+the move to rows; only the storage under it moved.
 
-**Queries worth knowing:** `find(text)` answers "does this already exist?" by identity key.
-`tagsOf(notebookId, pageId?)` lists one target's tags. `usageOf(tagId)` counts how many notebooks
-and pages a tag reaches — what the delete confirm names. `suggest(query)` orders live suggestions
-exact-identity first, then prefix, then substring matches, each group in browse order — deliberately
-**not** `core/FuzzyRank`, which lives in `:app` and answers a different question (matching what you
-are searching *for*, not what you are *typing right now* to avoid creating a duplicate).
+**`pageId` is `''`, never `NULL`, and it sits inside the primary key.** In SQL `NULL` is not equal
+to `NULL`, so a nullable page column would let the same notebook tag be inserted twice with the
+primary key saying nothing about it. `''` is a value, and the `String?` ⇄ `""` mapping happens once,
+at `TagStore`'s door; everything above that reads `pageIdOrNull`.
 
-**There is deliberately no aliveness filter on `TagIndex`.** W1 shipped a `filterAlive`, W6's review
-found it had no caller, and it was removed rather than kept: staleness is answered **structurally**,
-not by a pass. The search merge reads tags only *through* the library's own live notebook listing,
-so an assignment naming a deleted notebook is never looked at, and `PageNumbers` answers a page's
-aliveness the same way against the notebook's live page rows. A function that filtered an index
-nobody filters would have been a doc comment asserting a role it did not have. Pruning the *stored*
-blob is a `BACKLOG.md` note and would go through `TagWrites`.
+**Ids are UUIDs, everywhere.** `tag.id`, `assignment.tagId`, `notebookId` and (non-empty) `pageId`
+are all canonical UUIDs, minted with `UUID.randomUUID().toString()`. `TagRules.isId` is the one
+shape check at every door on the seam (`TagRecord`/`AssignmentRecord`'s constructors, `TagStore`,
+the service's `assignmentsOf`) — round-tripped through `toString()` so only the canonical `8-4-4-4-12`
+form is accepted, but **deliberately case-insensitive** on the hex: `CompactId.isId` already was,
+and arc 16's `SafeImportId` admits upper-case ids out of a stranger's `.soil` — tightening the check
+would make an imported notebook's pages untaggable.
 
-### `TagCodec` — the wire form is the storage form
+**`identityKey` is a stored, uniquely indexed column — arc 21 derived it and refused to store it.**
+On one blob that was the right call: a second copy of an answer can disagree with the question. On
+rows the reasoning inverts, because the uniqueness of a tag identity has to be enforced by
+*something*, and a `UNIQUE` index is the only thing that can enforce it across two writers with no
+lock between them. `TagRules.identityKey` is still the one function that produces the value —
+`TagRecord` re-derives it on the wire, the column just gives the store something to constrain on.
 
-A line codec, not JSON — `:extension-api` carries no serialization dependency and never will (the
-`UserWords` precedent). UTF-8, tab-separated, one record per line:
+**The caps are policy now, not byte arithmetic.** `MAX_TAGS` (5,000), `MAX_TAG_ASSIGNMENTS`
+(50,000) and `MAX_TAG_CHARS` (64, on the display form) are the same numbers the arc-21 wizard set,
+but each is now a `COUNT(*)` check bound *inside* the insert it gates, race-free because the count
+and the insert are one statement in one transaction. `TAG_INDEX_FULL` keeps its meaning — a cap
+refused a write, nothing was written — but there is no `WORST_CASE_BYTES` proof to keep in step
+with it any more, because there is no single value whose size that arithmetic was ever protecting.
 
+**Every SQL string the seam sends lives in `TagSql`, pinned to exact text by `TagSqlTest`, and every
+one runs through the real validator (`StoreSql`) in both the test and `FakeTagStore` — no validator
+refusal was ever met while building this.** The shapes that had to clear it: `EXISTS(…)` in
+`selectTagByIdentity`, `SUM(pageId = '')` in `selectUsage`, `COUNT(*)` inside both inserts,
+`INSERT … SELECT … WHERE` for the same two, and the `IN (?, …)` list `selectAssignmentsOf` builds
+from a chunk of ids.
+
+### `assign` — two reads, one transaction
+
+The whole of `TagStore.assign` is two small reads and one two-statement transaction, and the reason
+it can be that small is that **the caps ride inside the inserts** rather than being checked
+beforehand:
+
+```sql
+-- insertTag — gated on BOTH caps, because a new tag is only ever created to be attached
+-- in the same batch.
+INSERT OR IGNORE INTO tag (id, display, identityKey, createdAt)
+SELECT ?, ?, ?, ? WHERE (SELECT COUNT(*) FROM tag) < ? AND (SELECT COUNT(*) FROM assignment) < ?
+
+-- insertAssignment — resolves the tag id BY IDENTITY inside the statement, never from an id
+-- the caller read a moment ago.
+INSERT OR IGNORE INTO assignment (tagId, notebookId, pageId, createdAt)
+SELECT id, ?, ?, ? FROM tag WHERE identityKey = ? AND (SELECT COUNT(*) FROM assignment) < ?
 ```
-NSTAG2                        ← version line; unknown = UNREADABLE, not empty
-T <id> <display>               ← one per tag, insertion order
-A <tagId> <notebook>            ← a notebook tag
-A <tagId> <notebook> <page>     ← a page tag
-```
 
-**Ids are written compacted.** `CompactId` (`:extension-api`, pure) turns a canonical UUID's 128
-bits into 22 base64url characters instead of 36 — `compact()`/`expand()`, round-tripped through
-`UUID.toString()` so only the canonical form is ever accepted (the same leniency guard
-`SafeImportId` applies on the import path). In memory an id is **always** a UUID; the compact form
-exists only between `TagCodec`'s encode and decode and nowhere else. `CompactId.isId(id)` — "is this
-a canonical UUID at all" — is the one shape check every door on the seam makes now:
-`ExtensionContract.MAX_TARGET_ID_CHARS` is gone entirely, because a UUID's alphabet has no path
-character and no NUL in it either, and W1's hand-rolled character checks were a weaker spelling of
-the same guarantee `CompactId.isId` gives for free.
+The second guard on `insertTag` is a Fable review finding, fixed before the walk: without it, a new
+tag created for an attachment the assignment cap then refused would have been an orphan row behind
+a sentence that promised "nothing was written." `insertAssignment` resolving the tag id by identity
+rather than by a value read earlier is what makes a concurrent creator harmless — if another writer
+created the same tag a moment before, this statement's own `SELECT` finds *that* row, and the
+assignment lands on it rather than on an id nobody inserted.
 
-**The arithmetic is load-bearing, not decoration.** The whole index is one store value, capped at
-`ExtensionContract.STORE_MAX_VALUE_BYTES` (4 MiB), and `TagCodec.WORST_CASE_BYTES` is the proof —
-checked by a test that fails if a cap moves — that the worst legal index still fits:
+`assign` reads `selectTagByIdentity` once before writing (does the tag exist, and is it already on
+the target — an idempotent attach short-circuits here, writing nothing) and once after: the
+post-write re-read is what turns `INSERT OR IGNORE`'s silence back into a typed `TAG_INDEX_FULL`
+failure, and it is also what answers with the **stored** display — the casing whoever entered the
+tag first used, even when this call lost a race to create it.
 
-| Constant | Value |
-|---|---|
-| `MAX_TAGS` | 5,000 |
-| `MAX_TAG_ASSIGNMENTS` | 50,000 |
-| `MAX_TAG_CHARS` (display, UTF-16 units) | 64 |
-| `TagCodec.MAX_TAG_ID_CHARS` | 4 (base-36 mint counter; 3 within 5,000 tags, 4 is slack good to 1.6M) |
-| `CompactId.CHARS` | 22 |
-| `TagCodec.WORST_CASE_BYTES` | 3,650,007 |
+**The transaction is the lock.** Arc 21's `TagWrites` held a process-local monitor around every
+read-modify-write of the one blob, because two writers each applying their change to the version
+they happened to be holding is how one silently erases the other. There is no blob and no monitor
+now: every write is one statement, or two in one batch, that is correct no matter who else is
+writing at the same moment — in this process, after a host restart, or from the other process
+entirely. `TagWrites` and `TagSession.writes` are deleted.
 
-That number did not close on the first attempt. `id · identityKey · display` under the wizard's
-caps came to roughly 6.0 MB — too large for 4 MiB — and rather than shrink a cap the wizard had set,
-W1 dropped the identity key (a pure function of `display`, so storing it duplicated an answer that
-could disagree with the question) and shrank ids to a base-36 counter; W4's own notebook/page pair
-repeated the same move with `CompactId` once ids had to be stored twice per assignment instead of
-once.
+**`usageOf` and `deleteTag` are reads and a single statement, not arithmetic over an index in
+memory.** `usageOf(tagId)` is `SELECT SUM(pageId = '') AS notebooks, SUM(pageId <> '') AS pages FROM
+assignment WHERE tagId = ?` — `SUM` over no rows is `NULL`, read as 0 — and it is what the delete
+confirm's blast-radius sentence names. `deleteTag(id)` is `DELETE FROM tag WHERE id = ?`; the
+declared `ON DELETE CASCADE` takes every assignment of it in the same statement, so "delete with
+blast radius" is one write with no window in which an assignment names a tag that is gone.
 
-**Failure has two meanings that are not interchangeable.** An absent or empty stored value is a
-**first run** — `TagIndex.EMPTY`, write freely. A stored value whose version line is not one this
-build reads is **unreadable**, and `decode` throws `IllegalArgumentException`: the caller must say
-so and must never write an empty index over it (the `ScratchPageCodec` rule — losing a whole
-library's tags to a blank overwrite is a loss nobody can undo). A **truncated tail** is neither: a
-blob that does not end in `\n` has its last, partial line dropped, and everything decoded whole is
-kept.
-
-**The v1 → v2 migration.** W1 shipped `NSTAG1`, whose assignment record was
-`A <tagId> <kind> <targetId>` with plain, uncompacted UUIDs. A `kind == TARGET_NOTEBOOK` record
-migrates whole — a notebook assignment's target *was* its notebook id all along. A
-`kind == TARGET_PAGE` record is **dropped**: it names a page and nothing else, and the notebook
-that page belongs to is not recoverable from anywhere. `NSTAG1` is still read, never written. On the
-Nomad this migration ran live at W4 and dropped exactly the two page-tag test assignments W2 had
-left behind, while all five notebook tags survived untouched — exactly what the codec test asserts.
+**A legacy (arc-21) store is wiped on open, not migrated.** `0.1.0-ratta` is unreleased, so every
+tag any Nomad build had written before X3 was test data; the first open of a store still shaped
+like the old key/value layout drops it and starts empty, logged as a count and never a tag name —
+on the Nomad this read `wiped legacy store for …ext.tags.dev (format 1, 1 kv row(s) dropped)`.
+There is no migration path from `TagCodec`'s blob to rows, and none is planned.
 
 ---
 
@@ -197,11 +238,26 @@ apart:
 
 - **A showing** — `begin(store)` → `configureShowing(TagShowing)` → the host launches the screen for
   a result → `end()` — is a **held bind**, the scratch pad's bracket. The store is lent once for the
-  screen's whole life and revoked with the unbind.
-- **`snapshot(store)`** and **`assign(store, text, notebookId, pageId)`** are **bind-per-call**, the
-  recognizer's shape: the store rides the one call that needs it, because the operation *is* the
-  call and nothing is ever shown. `snapshot` is the search merge's door (W4); `assign` is the
-  lasso's silent heading→tag (W3).
+  screen's whole life and revoked with the unbind. Unchanged since W1.
+- **`tags(store, offset)`, `assignmentsOf(store, tagIds, offset)` and `assign(store, text,
+  notebookId, pageId)`** are **bind-per-call**, the recognizer's shape: the store rides the one call
+  that needs it, because the operation *is* the call and nothing is ever shown. `tags` +
+  `assignmentsOf` are the search merge's door (W4, reshaped onto rows at X3); `assign` is the
+  lasso's silent heading→tag (W3), unchanged in signature.
+
+**Arc 22 / X3 replaced `snapshot(store)` with two paged reads**, because a reply is now an ordinary
+Binder parcel rather than a `LargeValue` over ashmem, and 5,000 tags at roughly 250 parcel bytes
+apiece would not fit one transaction. `tags` answers at most `TAGS_PAGE` (500) records in the browse
+order (`identityKey`, then `display` — stable by construction, so `LIMIT`/`OFFSET` paging is safe
+rather than merely plausible); `assignmentsOf` answers at most `ASSIGNMENTS_PAGE` (1,000) rows for
+up to `ASSIGNMENT_QUERY_TAGS` (500) tag ids per call — one `IN (…)` kept comfortably under SQLite's
+999-bind limit with room left for the `LIMIT`/`OFFSET` binds, so a longer selection is the host's to
+chunk. `TagPages.collect` (`:extension-api`, because both sides run it) is the **one** paging loop:
+a short page ends it, and a runaway guard (one page more than the cap could ever fill) stops a
+misbehaving peer from spinning forever rather than answering with a silently truncated list.
+`TagRecord` and `AssignmentRecord` are `requireValid` parcelables — the row shape crossing the wire,
+nothing more. There is no ashmem anywhere on the tag seam any more; `onTransact`/`pending` are gone
+from the service entirely.
 
 `TagShowing` (Parcelable, `:extension-api`) is everything one showing needs, and it crosses **on
 the bind**, never the screen's Intent: a tag and a target's display label are the user's own words,
@@ -212,19 +268,19 @@ page), the resolved `targetLabel`, `mode` (`MODE_BROWSE` / `MODE_ADD` / `MODE_MA
 `prefill`, and — MANAGE only — parallel `pageIds`/`pageLabels` arrays capped at `MAX_PAGES` (5,000):
 the parcel **refuses** rather than allocates above it.
 
-Both writers in the extension's process — the screen's own edits (on IO) and the service's
-call-shaped `assign` (on a Binder thread) — take the **same** lock, `TagSession.writes`, through
-`TagWrites.apply`: read the stored index fresh inside the lock (never the one the caller is
-showing), run the change, write, and only then hand back the new index. Without that single
-chokepoint two writers editing the same store value from two threads would each apply their change
-to the version they happened to be holding, and the second would silently erase the first.
-`TagWrites.Reason` is the one typed vocabulary for why a cycle did not land
-(`STORE_UNAVAILABLE` / `INDEX_UNREADABLE` / `INDEX_FULL` / `NOT_A_TAG` / `SAVE_FAILED`) — the
-service turns it into a marshalable `IllegalStateException` message the host compares verbatim, the
-screen turns it into a dialog sentence, and neither side reads the other's wording.
+**The transaction is the lock now**, not a process-local monitor (The data model, above, has the
+detail): `assign`'s two reads and one two-statement batch are correct whoever else is writing, in
+this process or the other, so the screen's own edits and the service's call-shaped `assign` need no
+chokepoint between them.
 
-The full contract — every method's exceptions, the ashmem handshake `snapshot` uses to answer over
-a Binder, the boundary-audit rows (what each side may know) — is `docs/extensions.md` § the sixth
+`ExtensionContract.API_VERSION` is **6** — W1 declared 4, W4's reshaped `TagShowing` moved it to 5
+(the first bump that was not a compatible tail), and X3 moves it again because `IExtensionStore` was
+*replaced*: a version-5 extension calling the old store interface would land on a different method
+on a version-6 host, so the host accepts a **store-taking** service (`TAG_MANAGER` included) only at
+`MIN_API_VERSION_FOR_STORE` (6) and above.
+
+The full contract — every method's exceptions, the paging loop both `tags` and `assignmentsOf`
+share, the boundary-audit rows (what each side may know) — is `docs/extensions.md` § the sixth
 point; this section only orients.
 
 ---
@@ -235,6 +291,22 @@ point; this section only orients.
 paper pieces (there is nothing to draw). `HostCallerCheck.enforceActivity` is the first statement
 in `onCreate`, before anything is inflated — the screen is exported (it has to be; the host
 launches it by action) and a plain `am start` with no `callingPackage` is refused outright.
+
+**`TagIndex` (moved into `:ext-tags` at X3) is the screen's in-memory model** — the library's tags
+and the assignments of the one notebook this showing is about, loaded in **two reads per showing**
+(`store.tags()` + `store.assignmentsOfNotebook(showing.notebookId)`) and asked the same questions
+over and over rather than re-querying. It used to live in `:extension-api` and be shared by both
+sides of the seam, because the host decoded the same blob the extension wrote; there is no blob now
+— the host asks the store for `TagRecord`s and `AssignmentRecord`s directly and does its own
+ranking, so this model belongs to the extension alone. What is left is the **query half**: `find`
+answers "does this already exist?" by identity key, `tagsOf(notebookId, pageId?)` lists one target's
+tags, `isAssigned` answers one membership question, and `suggest(query)` orders live suggestions
+exact-identity first, then prefix, then substring matches, each group in browse order — deliberately
+**not** `core/FuzzyRank`, which lives in `:app` and answers a different question (matching what you
+are searching *for*, not what you are *typing right now* to avoid creating a duplicate). Nothing
+here writes; edits go through `TagStore`. **The filter runs against this, never against the store**
+— the arc-21 "never a store call per keystroke" lock stands. There is deliberately no aliveness
+filter on it either; see Traps and standing decisions.
 
 The chrome is three surfaces, three unambiguous gestures:
 
@@ -252,10 +324,19 @@ guessed row count: `TagPaging.rowsPerPage` measures `bandPx / rowPx`, and the pa
 the reader's finger the moment the count crosses a boundary. Its arrows never disable — a disabled
 control is invisible on e-ink; at either end they simply have nothing to do.
 
-**Every edit is written before it is shown.** `edit()` runs `transform` on IO inside
-`TagSession.writes`, and only once the write has actually landed does the screen redraw and fire its
-`onDone` (the field clearing, the toast). What is on the glass is always what is in the store; a
-failed write leaves the screen showing exactly what is still true.
+**Every edit is written before it is shown.** `edit()` sends its statements to `TagStore` on IO
+behind a busy latch and, once the write lands, **re-reads both queries** — the same two `readIndex`
+makes — before the screen adopts the result and fires its `onDone` (the field clearing, the toast).
+That re-read is also how another writer's edit arrives: the glass and the store can never disagree,
+because what is on screen is always freshly read, never patched in memory. `RESULT_OK` is set only
+when something actually changed — an idempotent attach (the tag was already on the target) is an
+honest success the host has no reason to redraw for.
+
+**Deleting a tag reads its blast radius before asking.** `confirmDelete` runs `TagStore.usageOf` on
+IO behind the same busy latch, because the count is no longer arithmetic over an index already in
+memory — this screen only ever holds one notebook's assignments, and a tag's blast radius is the
+whole library's. The confirm dialog is built once the read lands; a tap that opened nothing would
+otherwise read as a tap that missed.
 
 **IME rules follow the Ratta family's, not og's.** The keyboard is asked for with the **explicit**
 flag `0`, never `SHOW_IMPLICIT` (which a hardware keyboard skips, stranding the field on Ratta,
@@ -371,12 +452,25 @@ the mechanics of the merge (folders → notebooks → pages, ranking, the dialog
 [`docs/library.md`](library.md) § Search; this is what the tag half adds and how the resulting
 cards look.
 
-`LibrarySearch.snapshot()` fetches the tag index once per run, bind-per-call — no extension
-installed answers `null` silently, and the shelf is exactly arc 20's name-only one, with nothing to
-disable because search has no standing tag control. When a tag manager *is* installed, the search
-dialog's hint changes from "Folder or notebook name" to "Folder, notebook or tag"
-(`LibraryActivity.onResume` keeps `TagManagerEntry`'s discovery current for it, since the dialog has
-no button of its own to refresh from).
+`TagClient.search(ctx, ref) { tags -> ids }` (arc 22 / X3) is the merge's whole door — one pre-open
+and **one bind**, inside which: page `tags` to a short page (the host's own `SearchAssembly.matchTags`
+runs *inside* the call block, choosing which ids matter), then page `assignmentsOf` for only the
+matched ids, chunked at `ASSIGNMENT_QUERY_TAGS` (500) per `IN (…)`. An empty selection — a query that
+only matches names — asks nothing at all. This replaces W4's single whole-index `snapshot()` call;
+no extension installed still answers `null` silently, and the shelf is exactly arc 20's name-only
+one, with nothing to disable because search has no standing tag control.
+
+`TagClient.SEARCH_TIMEOUT_MS` is **10 s**, a first cut and deliberately generous: the Nomad measured
+52–78 ms end to end on a 2-tag index (`tags` 15–19 ms, `assignmentsOf` 11–18 ms), but the worst case
+— ten tag pages and fifty assignment pages — was never built as test data, so the budget stays loose
+rather than tuned to a case nobody has actually run. `assign`'s budget shrank with the work it now
+covers: `ASSIGN_TIMEOUT_MS` is **4 s** (was 8 s), because arc 21's assign decoded the whole index,
+edited it, re-encoded it and wrote up to 4 MiB back through the large-value path, where X3's is two
+small indexed reads and one two-statement transaction.
+
+When a tag manager *is* installed, the search dialog's hint changes from "Folder or notebook name"
+to "Folder, notebook or tag" (`LibraryActivity.onResume` keeps `TagManagerEntry`'s discovery current
+for it, since the dialog has no button of its own to refresh from).
 
 `SearchAssembly.rank` folds tag matches into the existing name-ranked lists rather than adding a
 separate pass:
@@ -390,7 +484,8 @@ separate pass:
   notebook; before that a page hit could not be traced back to anything.
 - Dead assignments never need a filtering pass to be excluded: the merge iterates the library's own
   **live** notebook listing, so an assignment naming a notebook that is not in it is simply never
-  looked at (see the data model section above — this is why `TagIndex` carries no aliveness filter).
+  looked at (see Traps and standing decisions — this is why nothing on either side of the seam
+  filters an index for aliveness).
 
 **Page-hit cards** (`CardItem.Page`, `LibraryGrid.pageCard`) carry:
 
@@ -423,6 +518,10 @@ Opening a page hit reuses the existing "open at a page" mechanism (`NotebookActi
 Every `Garden/<pkg>.db`, tags included, is in the backup set as of arc 21 / W5 — copied
 unconditionally on every run, ordered after the notebooks and before the index, with its own line
 in the done dialog ("N extension stores copied.") rather than being folded into the notebook count.
+Arc 22 / X3 changed what is inside that file, not the copy itself: it is real SQLite tables now, but
+still the same file, the same key, the same WAL/sidecar treatment every store gets. A store restored
+from a backup taken before X3 still carries the old key/value shape — it is wiped on its first open
+after restore, exactly as a never-backed-up legacy store is (The data model, above), never migrated.
 There is no restore screen for a store any more than there is for the library itself; getting one
 back is the manual copy-back documented in [`docs/backup.md`](backup.md) § Extension stores. This
 doc does not repeat that mechanics — it exists once, there.
@@ -436,53 +535,84 @@ doc does not repeat that mechanics — it exists once, there.
 | No trusted `ACTION_TAG_MANAGER` extension installed | Every door is `GONE` — the library row, the notebook's `ic_tag` button, the selection toolbar's Tag button; search silently becomes names-only |
 | The extension was disabled/replaced between discovery and the tap | `open()`/`assign()` fail; "Tags unavailable" / "Tags could not be opened. The extension may have been disabled or removed." (`tags_failed_title` / `tags_failed_body`), and discovery re-runs so the next tap sees the truth |
 | The screen launched with no showing parked (host restarted mid-bind, or never launched it) | `TagsActivity` shows "Tags could not be opened just now." (`tags_unavailable`) and finishes immediately |
-| A stored index cannot be decoded (bad/future version line) | `IndexUnreadable` — the screen shows "This library's tags could not be read. Nothing has been changed." and closes without writing; the host's `assign`/`snapshot` paths surface the same wording (`tags_unreadable_body`) and change nothing |
-| A cap refused a new tag or assignment (`MAX_TAGS` / `MAX_TAG_ASSIGNMENTS`) | `TAG_INDEX_FULL`; "This library is holding as many tags as it can. Delete one to add another." on both sides, nothing written |
+| The store cannot be reached at all — any exception reading or writing it | `StoreUnavailable` (the store's own catch-all rule); the screen shows `tags_unavailable`, the host's `TagClient` calls fail as `ExtensionCallException` and the doors behave as if the extension were gone |
+| A store the host refuses to open (`PRAGMA user_version` > 2 — a newer host wrote it) | Refused outright, surfaced as `StoreUnavailable`; the file is left exactly as found — never-delete-on-corruption |
+| A legacy (arc-21 key/value) store shape is found on open | Wiped silently on that open (dropped tables, logged as a count, never a tag name) — the screen simply opens on an empty library; every tag written before X3 was test data on an unreleased build |
+| A cap refused a new tag or assignment (`MAX_TAGS` / `MAX_TAG_ASSIGNMENTS`) | `TAG_INDEX_FULL` — `assign`'s post-write re-read turns `INSERT OR IGNORE`'s silence into this; "This library is holding as many tags as it can. Delete one to add another." on both sides, nothing written |
+| Two writers create the same tag at the same moment | The second's `INSERT OR IGNORE` into `tag` is a no-op (the `UNIQUE` index); its assignment still resolves the row **by identity** inside its own statement and lands on it — no error, no dangling id, no user-visible difference |
 | Typed text is not a valid tag (blank after normalize, or over 64 chars) | The add field: "A tag needs some text, and no more than 64 characters." A heading over the cap instead falls through to the prefilled correction screen rather than a dialog |
-| A store write reaches the lock but fails to land | `SAVE_FAILED`; "That change could not be saved." — the screen keeps showing the index it had before the attempt |
+| A write raises an exception that is neither a cap nor an unreachable store | `tags_save_failed`; "That change could not be saved." — the screen keeps showing the index it had before the attempt |
 | Recognizer not ready during the lasso's ink→tag | The existing heading-convert "still downloading" dialog; the Tag button itself is unaffected, since its visibility never depends on the recognizer |
 | Mixed selection, or a lone link, under the lasso | No button offered at all — nothing to fail |
 | A displayed page is not in the live page list at the moment a door is tapped (mid page-op) | The tag screen's title falls back to the notebook's own name rather than naming "Page 0" |
 | A notebook has more pages than `TagShowing.MAX_PAGES` (5,000) | MANAGE lists the first 5,000 rather than crashing the tap; logged |
 | Deleting a tag that is on nothing | "This tag is not on anything. It will be removed from the list." — no blast-radius sentence, since there is no blast radius |
 | A search hit's notebook will not open | Its page cards are dropped for that run; its notebook card, if it also matched, is unaffected |
-| A `.soil` v1 tag blob (`NSTAG1`) is opened by this build | Notebook assignments migrate whole; page assignments are dropped — they name a page with no recoverable owner |
 
 ---
 
 ## Traps and standing decisions
 
-- **One store key, `index`, holds the whole blob.** Never a key per tag — a per-tag layout would
-  turn one logical edit into a fan-out with no transaction around it, and the caps exist precisely
-  so the worst legal index still fits one value.
-- **Ranking and the blob decode run off Main** (`Dispatchers.Default`), both in `LibrarySearch` and
-  in `TagClient.snapshot` — the decode can be megabytes and the rank walks every assignment, and the
-  caller in both cases is a listing coroutine that must not stall on it.
+- **The transaction is the lock.** Arc 21's `TagWrites` held a process-local monitor around every
+  read-modify-write of the one blob; there is nothing to hold now, because a statement (or a batch
+  of them in `assign`) is correct no matter who else is writing at the same moment — this process's
+  screen and service, or the other process entirely, after a restart included. Reintroducing a lock
+  here would be solving a problem rows do not have.
+- **`INSERT OR IGNORE`'s silence has to be turned into a refusal by reading again.** A conflicting
+  insert simply does nothing and reports zero rows changed — indistinguishable, from the statement's
+  own answer, between "already there" and "a cap said no." `assign`'s post-write `selectTagByIdentity`
+  is what tells the two apart and is why the whole operation is two reads, not one.
+- **The 999-bind cap is what shapes `assignmentsOf`'s chunk size.** `ASSIGNMENT_QUERY_TAGS` (500) is
+  not a round number chosen for taste: `selectAssignmentsOf` turns its id list into one `IN (?, …)`,
+  and 500 leaves comfortable room under SQLite's per-statement bind limit for the `LIMIT`/`OFFSET`
+  binds beside it, without either side having to reason about the exact arithmetic at the boundary.
+- **`TagRules.isId` is deliberately case-insensitive on the hex.** `CompactId.isId` already was, and
+  arc 16's `SafeImportId` admits upper-case ids out of a stranger's `.soil`; tightening the check now
+  would make an imported notebook's pages untaggable rather than closing a real gap.
+- **`FakeTagStore` applies the four writes literally, not just records them.** `assign`'s whole shape
+  rests on a post-write re-read seeing the write, so a fake that only recorded statements could never
+  exercise a cap refusal or a concurrent create. It honours `OR IGNORE`, the identity resolution
+  inside `insertAssignment`, and both `COUNT` caps — nothing else — and its `beforeExec` hook is what
+  lets a test land a second writer's row between `assign`'s pre-read and its own batch
+  (`aConcurrentCreatorOfTheSameTagStillLeavesTheAssignmentAttached`). Real SQL is still proved only
+  on the Nomad.
+- **The caps are `TagStore` constructor parameters, not just contract constants**, so a cap test
+  (`theTagCapRefusesAndNothingIsWritten`, `theAssignmentCapRefusesANewTagWithoutCreatingIt`) exercises
+  the real `INSERT … WHERE COUNT(*) < ?` statement with a small number instead of having to build
+  thousands of rows to reach `MAX_TAGS`/`MAX_TAG_ASSIGNMENTS`.
+- **Matching and ranking run off Main, but no longer in the same place.** `SearchAssembly.matchTags`
+  runs *inside* `TagClient.search`'s call block, on the IO thread the bind already occupies — pure
+  CPU over at most 5,000 short strings, and running it there is what lets it choose the
+  `assignmentsOf` selection without a second bind. `SearchAssembly.rank`, the final grouping over
+  folders/notebooks/pages, still runs on `Dispatchers.Default` in `LibrarySearch.cards`, because its
+  caller is the listing coroutine and it walks every candidate. There is no whole-index decode to
+  worry about any more, and there never can be again.
 - **There is no undo for a tag operation.** It is not page content, and the destructive one (delete)
   is guarded by a confirm instead.
-- **`MAX_TARGET_ID_CHARS` is gone, not merely unused** — an id is a canonical UUID or it is not a
-  target, checked by `CompactId.isId` at every door (`TagShowing`'s constructor, `TagIndex.assign`,
-  `TagIndex.of`'s decode-time filtering). Reintroducing a length-based check would be reintroducing
-  a weaker spelling of a guarantee this arc already has for free.
-- **In memory an id is always a UUID.** The compact 22-character form exists only inside
-  `TagCodec`'s `encode`/`decode` pair; nothing else in the seam should ever hold one.
+- **Aliveness is structural, and nothing on either side of the seam filters an index for it.** W1
+  shipped a `filterAlive` on the old `TagIndex`, W6's review found it had no caller, and it was
+  removed rather than kept — the search merge reads tags only *through* the library's own live
+  notebook listing (see § 4. Library search), so an assignment naming a deleted notebook is simply
+  never looked at, and `PageNumbers` answers a page's aliveness the same way against the notebook's
+  live page rows. A function that filtered an index nobody filters would be a doc comment asserting
+  a role it did not have. Pruning stored rows for dead notebooks is a `BACKLOG.md` note, and is now
+  one `DELETE FROM assignment WHERE notebookId NOT IN (…)` inside the store's own transaction — no
+  lock to route it through any more, though the live id set still has to be handed in by the host,
+  because the extension is not the side that knows which ids are alive.
 - **The overview's outside-tap dismissal for `TagsPopup` does not write `tapDismissedPopup`** — that
   latch exists so a contact spent dismissing the clipboard popup is not also spent pasting, and the
   tag bar carries no second meaning for a tap to accidentally trigger.
-- **Aliveness is structural, and nothing on `TagIndex` filters for it.** W1's `filterAlive`,
-  `targetsOf` and `assignmentsIn`, `Assignment.targetKind`/`targetId`, `TagPaging.pageOf` and
-  `PageNumbers.clear()` were all removed by W6's review: each had no production caller while
-  carrying a doc comment asserting a role it did not have, which is the kind of thing the next
-  reader trusts. If a future arc prunes the *stored* blob (see the monorepo `BACKLOG.md`), it goes
-  through `TagWrites` under its lock, with the live id sets handed in by the host — the extension is
-  not the side that knows which ids are alive.
+- **Pre-existing, arc-21 shape — not X3's, but observed during X3's walk:** the search shelf re-runs
+  its query **twice** on return from a tag screen (`onChanged` + the resume re-list, about 10 ms
+  apart). Cheap, and recorded as a `BACKLOG.md` line rather than chased here.
 
 ---
 
 ## Related
 
 - [`docs/extensions.md`](extensions.md) — the seam in full: `ACTION_TAG_MANAGER` + `_SCREEN`,
-  `ITagManager`, `TagShowing`'s wire form, the boundary-audit rows for the sixth point.
+  `ITagManager`, `TagShowing`'s wire form, § the store (the schema/SQL contract every store-taking
+  point shares), and the tag rows of the boundary audit.
 - [`docs/library.md`](library.md) § Search — the merge's own mechanics (the dialog, the ordering
   rule, `FuzzyRank`, folders/notebooks/pages) that this doc only summarizes from the tag side.
 - [`docs/notebook.md`](notebook.md) — the top-bar `ic_tag` button and the selection toolbar's Tag in
@@ -490,4 +620,9 @@ doc does not repeat that mechanics — it exists once, there.
 - [`docs/backup.md`](backup.md) § Extension stores — the backup set and the manual copy-back.
 - `apps/notesprout_ratta/RATTA_PLAN.md` § "Phases — Arc 21 \"Tags\"" — the wizard's locked
   decisions and every phase's outcome record, including the two implementer-level arithmetic
-  reshapes (W1's dropped identity key, W4's compact ids) this doc only summarizes.
+  reshapes (W1's dropped identity key, W4's compact ids) that arc 22 / X3 later deleted along with
+  the blob they existed for.
+- `apps/notesprout_ratta/RATTA_PLAN.md` § "Phases — Arc 22 \"Tables\"", the X3 phase — the rows
+  rewrite this doc describes: the locked decisions, the seam spec, and X3's Outcome record (the
+  Fable review finding on `insertTag`'s assignment-cap gate, the Nomad walk's timings and test
+  data left behind).

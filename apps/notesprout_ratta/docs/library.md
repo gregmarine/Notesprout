@@ -365,17 +365,22 @@ query.
 **The same matcher runs the template browser's Search shelf** ([`templates.md`](templates.md)) —
 one rule, so a name findable on one screen is findable on the other.
 
-### Tags join the query (arc 21 / W4)
+### Tags join the query (arc 21 / W4, the fetch rebuilt on rows arc 22 / X3)
 
 The query now runs over names **and** tags, through the same `core/FuzzyRank` matcher and the same
 total order — `mtg` still finds "Meeting Notes" by name, and now finds a notebook tagged `meeting`
 by exactly the same rule, in one list rather than two. `FuzzyRank` itself did not change: arc 20's
 ranking of names is exactly as it was.
 
-`LibrarySearch` fetches the tag extension's `snapshot()` **at query time** (call-shaped — the
-pre-open rule applies here like everywhere else). No tag extension installed means the shelf
-answers names only, silently: there is no control to hide for this, and a library without one is
-exactly arc 20's search.
+`LibrarySearch` reads the tag extension through `TagClient.search(ctx, ref) { tags -> ids }`
+**at query time** (call-shaped — the pre-open rule applies here like everywhere else), and the read
+is two queries now, not one (arc 22 / X3, replacing W4's single whole-index `snapshot()` call): one
+pre-open and **one bind**, inside which the host pages the library's `tags`, runs its own
+`SearchAssembly.matchTags` over them to decide which ids the query actually touched, and then pages
+`assignmentsOf` for **only** those ids — chunked at `ASSIGNMENT_QUERY_TAGS` (500) per `IN (…)`. A
+query that matches no tag asks for no assignments at all. No tag extension installed means the
+shelf answers names only, silently: there is no control to hide for this, and a library without one
+is exactly arc 20's search.
 
 `SearchAssembly` grew a third group, drawn last: **folders → notebooks (name- or tag-matched,
 deduped, best rank) → page hits.** A notebook that matches by both name and tag still appears once,
@@ -407,13 +412,20 @@ will not open contributes no page cards** — its notebook card is unaffected, a
 rather than saying something wrong.
 
 **Stale assignments are filtered, not pruned.** An assignment naming a deleted notebook, or a page
-the arc-17 purge removed, is tolerated in the extension's own blob and simply never surfaces —
-filtered against the alive index rows and the live page list **at query time**. Actually removing
-dead assignments from the blob is a `BACKLOG.md` note, not this arc.
+the arc-17 purge removed, is tolerated in the extension's store and simply never surfaces — the
+merge iterates the library's own **live** notebook listing, so a row naming one that isn't in it is
+never looked at, and a page's aliveness is answered the same way against the notebook's live page
+rows. There is no filtering pass anywhere doing this on purpose; it falls out of reading through a
+live listing rather than a stored one. Actually removing dead rows from the store is a `BACKLOG.md`
+note, not this arc.
 
-**Ranking and the blob decode both run off Main** (`Dispatchers.Default`): the decode can be
-megabytes and the rank walks every assignment in the library, up to fifty thousand, and the caller
-is the listing coroutine.
+**Matching and ranking run off Main, but not in the same place.** `SearchAssembly.matchTags` runs
+*inside* `TagClient.search`'s call block, on the IO thread the bind already occupies — pure CPU over
+at most 5,000 short strings, which is what lets it choose the `assignmentsOf` selection without a
+second bind. `SearchAssembly.rank`, the pass that folds tags into the name-ranked lists, still runs
+on `Dispatchers.Default` in `LibrarySearch.cards` because its caller is the listing coroutine and it
+walks every candidate. There is no whole-index decode to run off Main any more — a `tags`/
+`assignmentsOf` reply is an ordinary parcel, not a blob to be decoded.
 
 **The dialog's hint changes with availability** — "Folder or notebook name" with no tag manager
 installed, "Folder, notebook or tag" with one — the house rule about not claiming a control that
