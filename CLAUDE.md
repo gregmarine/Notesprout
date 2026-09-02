@@ -156,9 +156,10 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   parameterized SQL** — `IExtensionStore` v6 (`applySchema` / `exec` / `query` / `next` /
   `close`), the KV API removed, `API_VERSION` 6 with a store floor, legacy stores wiped on open,
   and the scratch pad (no page ceiling), tags (two paged queries, the transaction is the lock)
-  and the document editor (`prefs` / `word` / `caret`) all on rows. **NO NEXT ARC IS PLANNED —
-  ask the user before starting anything there.** No SEVENTH extension point without another
-  user decision. **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for ANY work there** — it
+  and the document editor (`prefs` / `word` / `caret`) all on rows. **Arc 23 "Calendar" is
+  PLANNED (wizard locked 2026-09-01) — next work = Y1**: the SEVENTH point (`ACTION_CALENDAR`,
+  granted), a writable Month/Week/Day organizer as `:ext-calendar` + a shared `:ext-ink` library.
+  No EIGHTH extension point without another user decision. **Read `apps/notesprout_ratta/RATTA_PLAN.md` first for ANY work there** — it
   holds the working protocol, model recipe, standing traps, and the per-arc ledger of
   still-binding decisions. Subsystem detail: `apps/notesprout_ratta/docs/` + that app's
   CLAUDE.md. Full frozen-arc phase records live in git history

@@ -104,7 +104,9 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   `:sn-screen` resource reference from `:app`.
 - **SN has SIX extension points** — each added on its own explicit user decision, and
   **no SEVENTH may be added without another** (arc 21's `ACTION_TAG_MANAGER` was the sixth's,
-  granted 2026-08-31). The full seam — contracts, caps, trust, the
+  granted 2026-08-31). **The SEVENTH, `ACTION_CALENDAR`, was granted 2026-09-01 for arc 23**
+  (`RATTA_PLAN.md` § "Phases — Arc 23"; lands at Y1 with the `:ext-ink` + `:ext-calendar` modules) —
+  no EIGHTH without another decision. The full seam — contracts, caps, trust, the
   boundary audit — is `docs/extensions.md`; the rules that bind every point:
   - `ACTION_HANDWRITING_RECOGNIZER` (headings + the markdown engine are core, the engine is
     swappable). **Only `prepare()` may start a model download** (host consent dialog first;
