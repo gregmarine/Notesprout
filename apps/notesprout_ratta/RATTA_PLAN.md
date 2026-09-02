@@ -690,7 +690,7 @@ commit.
 
 ## Phases — Arc 23 "Calendar" (planned 2026-09-01, wizard complete)
 
-**Status: Y1 ✅ · Y2 🧪 · Y3 ⬜ · Y4 ⬜** (wizard locked 2026-09-01; Fable planned it and writes Y1).
+**Status: Y1 ✅ · Y2 ✅ · Y3 ⬜ · Y4 ⬜** (wizard locked 2026-09-01; Fable planned it and writes Y1).
 
 A basic writable calendar, the way a physical organizer is one: **Month, Week and Day pages**,
 each a full writing surface whose strokes are recorded in the extension's own store — month ink
@@ -925,7 +925,7 @@ undo / 3-finger redo; (4) the cell hairlines visible on the Nomad; (5) the pad: 
 send it to a notebook, then lasso in a notebook and send to the pad (both transfers on the
 repointed pad). **Commit 6a16017a (pushed); user checklist PASSED "The tests pass" 2026-09-02. Y1 CLOSED; Y2 next.**
 
-### Y2 — Week + Day + navigation 🧪 (Opus code on a Fable brief · Fable review · Sonnet layouts/strings · Haiku walk; awaiting the user checklist)
+### Y2 — Week + Day + navigation ✅ (Opus code on a Fable brief · Fable review · Sonnet layouts/strings · Haiku walk; commit eaf8d8ce; user checklist PASSED 2026-09-02)
 `CalendarGeometry` + `CalendarTemplate` for Week and Day (fixed row height, slack band, gutter,
 time labels 12-hour with AM/PM from the half) · view toggles · the bottom pager with prev/next and
 the title · `DayPickerDialog` rebuilt fresh in `:ext-calendar` (og's shape: e-ink day grid, tap
@@ -988,7 +988,7 @@ data unchanged (the Y1 checklist's five strokes on September 2026). **User check
 ink on a Week cell and on a Day AM row, Back, reopen → both still there and the Day ink sits on its
 row; (2) ink on a Day PM page, swipe to AM and back → the ink stays with its half; (3) pen feel
 on the Day rows and the Week cells; (4) the Week/Day hairlines visible on the Nomad; (5) lasso a
-stroke on Week, drag it into another cell.
+stroke on Week, drag it into another cell. **Commit eaf8d8ce (pushed); user checklist PASSED "all tests pass" 2026-09-02. Y2 CLOSED; Y3 next.**
 
 ### Y3 — The notebook door + both transfers ⬜ (Opus code on a Fable brief · Fable review · Haiku walk)
 Notebook top-bar `btnCalendar` after `btnScratchPad` with `releaseForHandoff()` before launch ·
