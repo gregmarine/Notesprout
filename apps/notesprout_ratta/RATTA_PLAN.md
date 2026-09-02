@@ -15,8 +15,7 @@ arcs 19–22's full phase records at the end of this file until the next compact
 feature's authoritative reference is its `docs/` file. **Arc 22 "Tables" is complete and frozen
 (2026-09-01) — X1–X5 all ✅: the extension store is real SQLite tables behind gated parameterized
 SQL. Arc 23 "Calendar" is PLANNED (wizard locked 2026-09-01, § "Phases — Arc 23"
-below) — Y1 is 🧪 (code + Nomad walk done 2026-09-02; user pen checklist pending), next work =
-Y2. The SEVENTH point is granted and live; no EIGHTH without another decision.**
+below) — Y1 ✅ (6a16017a, user checklist passed 2026-09-02), next work = Y2. The SEVENTH point is granted and live; no EIGHTH without another decision.**
 
 ---
 
@@ -686,7 +685,7 @@ commit.
 
 ## Phases — Arc 23 "Calendar" (planned 2026-09-01, wizard complete)
 
-**Status: Y1 🧪 · Y2 ⬜ · Y3 ⬜ · Y4 ⬜** (wizard locked 2026-09-01; Fable planned it and writes Y1).
+**Status: Y1 ✅ · Y2 ⬜ · Y3 ⬜ · Y4 ⬜** (wizard locked 2026-09-01; Fable planned it and writes Y1).
 
 A basic writable calendar, the way a physical organizer is one: **Month, Week and Day pages**,
 each a full writing surface whose strokes are recorded in the extension's own store — month ink
@@ -854,7 +853,7 @@ into a cell; the selection is what makes that one gesture) · the Week page's sp
 blank paper, unlabeled · out-of-month cells on Month are writable like any other · nothing is ever
 deleted from `period` in this arc (a later question — `BACKLOG.md`).
 
-### Y1 — The seam, `:ext-ink`, `:ext-calendar`, the Month page 🧪 (Fable — code + walk done 2026-09-02, user checklist pending)
+### Y1 — The seam, `:ext-ink`, `:ext-calendar`, the Month page ✅ (Fable; commit 6a16017a; user checklist PASSED 2026-09-02)
 Contract additions above (`API_VERSION` 7, per-action floor, `ICalendar`, `CalendarTarget`,
 `CalendarDates`, extras/results). `:ext-ink` extracted from the pad and the pad repointed — **the
 pad's JVM tests pass unchanged and the pad's Nomad walk is re-run** (open, ink, flip, send both
@@ -919,7 +918,7 @@ store is empty; the pad's three pages untouched).
 there; (2) lasso a stroke, drag it into another cell, Delete another; (3) 2-finger double-tap
 undo / 3-finger redo; (4) the cell hairlines visible on the Nomad; (5) the pad: ink a page and
 send it to a notebook, then lasso in a notebook and send to the pad (both transfers on the
-repointed pad).
+repointed pad). **Commit 6a16017a (pushed); user checklist PASSED "The tests pass" 2026-09-02. Y1 CLOSED; Y2 next.**
 
 ### Y2 — Week + Day + navigation ⬜ (Opus code on a Fable brief · Fable review · Sonnet layouts/strings · Haiku walk)
 `CalendarGeometry` + `CalendarTemplate` for Week and Day (fixed row height, slack band, gutter,
