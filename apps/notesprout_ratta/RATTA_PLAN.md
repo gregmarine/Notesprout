@@ -1166,7 +1166,8 @@ toggles; proofread off survived a kill (then turned back on); a nonsense word ad
 took the flag count 1 → 0 and after a kill the dictionary loaded `83627 words + 1 user words` with
 the flag still absent; the store file re-stamped today; export reached the SAF picker;
 `logcat -b crash` empty. **User checklist:** a Document-PDF export at a non-default text size (the
-size read is the host's own `prefs` query, and a SAF pick cannot be driven). Nomad test data left
+size read is the host's own `prefs` query, and a SAF pick cannot be driven) — **PASSED by the user
+2026-09-01 ("The test passed"; commit 2fa9c4aa)**. Nomad test data left
 behind: one nonsense user-dictionary word, page-document text on pages 1–2 of 20260827_200914 plus
 a seeded notebook document; text size back at 16, proofread on. **Left for X5:** `docs/document.md`
 (the three tables, the deleted codecs, `EditorStore`), `extensions.md` (module table, audit rows,
