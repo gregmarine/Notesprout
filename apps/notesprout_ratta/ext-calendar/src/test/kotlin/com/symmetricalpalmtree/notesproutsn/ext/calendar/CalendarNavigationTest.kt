@@ -2,6 +2,7 @@ package com.symmetricalpalmtree.notesproutsn.ext.calendar
 
 import com.symmetricalpalmtree.notesproutsn.extension.CalendarTarget
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
 import java.time.LocalDate
@@ -169,5 +170,21 @@ class CalendarNavigationTest {
         assertEquals(CalendarTarget.HALF_AM, nav.anchorHalf)
         assertTarget(CalendarTarget.KIND_DAY, "2026-09-02", CalendarTarget.HALF_PM,
             nav.go(nav.stepped(forward = false, today, morning)).target)
+    }
+
+    @Test
+    fun aReplayThatLandedOnAnotherPageMovesTheOrganizerThere_andASamePageReplayMovesNothing() {
+        val nav = opened()   // today's Month
+        val week = CalendarTarget.of(CalendarTarget.KIND_WEEK, today)
+        val moved = nav.landed(week, today, morning)
+        assertNotNull(moved)
+        nav.shown(moved!!)
+        assertEquals(CalendarTarget.KIND_WEEK, nav.kind)
+        assertEquals(today, nav.anchor)   // this week holds today → anchored on today, as stepping would
+        assertEquals(null, nav.landed(week, today, morning))
+        val otherDay = CalendarTarget.of(CalendarTarget.KIND_DAY, today.plusDays(9), CalendarTarget.HALF_PM)
+        nav.shown(nav.landed(otherDay, today, morning)!!)
+        assertEquals(today.plusDays(9), nav.anchor)
+        assertEquals(CalendarTarget.HALF_PM, nav.anchorHalf)
     }
 }

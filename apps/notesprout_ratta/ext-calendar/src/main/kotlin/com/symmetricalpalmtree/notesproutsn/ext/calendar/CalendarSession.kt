@@ -1,47 +1,23 @@
 package com.symmetricalpalmtree.notesproutsn.ext.calendar
 
 import com.symmetricalpalmtree.notesproutsn.extension.CalendarTarget
-import com.symmetricalpalmtree.notesproutsn.extension.IExtensionStore
-import com.symmetricalpalmtree.notesproutsn.extension.WireStroke
+import com.symmetricalpalmtree.notesproutsn.ink.InkTransferSession
 
 /**
- * Process-wide state shared by [CalendarService] (the host's held bind) and `CalendarActivity`
- * (the screen) — they live in the same process. It holds **only what the host lent for this
- * showing**: the store binder from `begin`, the inbound ink accumulating over `receiveInk` chunks
- * with the page it is bound for, the outbound chunks for `takeOutgoing` and the one-shot "open
- * selected" record. `end()` clears it all. **Nothing here is ever written to disk by the extension
- * itself** — its data lives in the host store.
+ * Process-wide state shared by [CalendarService] (the host's held bind) and `CalendarActivity` (the
+ * screen) — they live in the same process. Everything it holds and every rule it holds it under are
+ * `:ext-ink`'s [InkTransferSession] since arc 23: the store binder from `begin`, the inbound ink
+ * accumulating over `receiveInk` chunks under one monitor with the caps re-check and the page bound
+ * by the first chunk, the outbound chunks for `takeOutgoing` and the one-shot "open selected"
+ * record. `end()` clears it all. **Nothing here is ever written to disk by the extension itself** —
+ * its data lives in the host store.
+ *
+ * The calendar's two type parameters: the placement is a real type, [CalendarTarget] (which every
+ * chunk carries and which is unmarshal-validated), and the record is [CalendarStore.Received].
+ *
+ * **`recordInboundPageSize = false`** — the sender's page size is dropped, because a calendar page
+ * is minted `0 × 0` and takes the screen's size the first time a screen shows it; the notebook
+ * page's size is the notebook's. (The pad's answer is the other one, and that difference is the
+ * parameter rather than a second copy of this class.)
  */
-object CalendarSession {
-    @Volatile var store: IExtensionStore? = null
-
-    /** Inbound chunks accumulating until `last` (Binder thread; guarded by the service's lock). */
-    val inbound = ArrayList<WireStroke>()
-    var inboundPoints: Int = 0
-    var inboundTarget: CalendarTarget? = null
-
-    /** What the screen's Send put up for the host to drain — already chunked per Binder call — plus its page size. */
-    @Volatile var outbound: List<List<WireStroke>> = emptyList()
-    @Volatile var outboundPageWidth: Float = 0f
-    @Volatile var outboundPageHeight: Float = 0f
-
-    /** The page + stroke ids a `receiveInk` placed, to open on and select when the screen next opens (one shot). */
-    @Volatile var received: CalendarStore.Received? = null
-
-    @Synchronized
-    fun clearInbound() {
-        inbound.clear()
-        inboundPoints = 0
-        inboundTarget = null
-    }
-
-    @Synchronized
-    fun clear() {
-        store = null
-        clearInbound()
-        outbound = emptyList()
-        outboundPageWidth = 0f
-        outboundPageHeight = 0f
-        received = null
-    }
-}
+object CalendarSession : InkTransferSession<CalendarTarget, CalendarStore.Received>(recordInboundPageSize = false)

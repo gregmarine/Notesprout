@@ -21,9 +21,14 @@ No Room, no SQLCipher, no serialization: nothing here knows what a `.soil` is.
 `:app` depends on `:sn-screen`; so do `:ext-scratchpad`, `:ext-document`, `:ext-tags`,
 `:ext-calendar` and — since arc 23 / Y1 — **`:ext-ink`**, the ink-on-rows library the pad and the
 calendar share (`InkWire`, `StrokeRows`, `StoreBatches`, `StrokeReadPlan`, `InkDocument`,
-`InkAction`, the `InkStore` base). `:ext-ink` is the one module that depends on **both** this and
+`InkAction`, the `InkStore` base, and — since Y4's review — the shared stroke SQL/DDL (`InkSql`),
+the `InkPage` contract, the transfer session (`InkTransferSession<P, R>`) and the abstract tier-2
+ink screen (`InkScreenActivity`)). `:ext-ink` is the one module that depends on **both** this and
 `:extension-api` (`api` on each), which is exactly why those helpers could not live here: they are
-extension-side code over the contract's `Statement` and `WireStroke`. It never depends on `:app`.
+extension-side code over the contract's `Statement` and `WireStroke` — and, since Y4,
+`InkScreenActivity` extends this module's own `AppCompatActivity`, which is why `:ext-ink` also took
+on `api(appcompat)` (a version both consumers already declared, no new library on the graph). It
+never depends on `:app`.
 g-paper is **not** declared in any consumer — it arrives through this module's `api(...)`, and the
 version pin lives here.
 
@@ -57,19 +62,22 @@ app's debug build consumes the library's debug variant, so the gate means exactl
 | `core/Immersive` | system bars hidden, transient by swipe |
 | `notebook/PageMath` | page-index arithmetic |
 | `notebook/SelectionAnchor` | where a floating bar may sit relative to a selection |
-| `notebook/PageGestures` | the finger vocabulary — flips, inserts, the two swipes, the multi-finger undo/redo taps, the long-press. Pen-gated throughout |
+| `notebook/PageGestures` | the finger vocabulary — flips, inserts, the two swipes, the multi-finger undo/redo taps, the long-press, and (arc 23 / Y2) `Listener.onFingerDoubleTap` — a second, independent history over the same qualifying bare taps, so a consumer can add a double-tap without touching `onFingerTap`, which stays byte-identical. Pen-gated throughout |
 | `core/SwipeMath` | the one horizontal-flip rule, in pure arithmetic — shared by `PageGestures` and `ListSwipe` so a page turn means the same travel everywhere. JVM-tested |
 | `core/ListSwipe` | the one-finger flip for a **paginated list** (F3): `SwipeMath` applied to a region rather than the screen, armed only inside it, finger-only, observer-only |
 | `notebook/UndoRedoStack<A>` | the generic LIFO history plus its `generation` counter. The notebook's fourteen action kinds stay in `:app` as `NotebookUndo.Action` |
 | `notebook/PaperToolbar` | back + the three tool buttons, **binding-free** |
 | `notebook/PaperChrome` | exclusion rects and the over-chrome hit test, with the host-specific parts as suppliers |
 | `notebook/FloatingSelectionBar` | an extension screen's floating selection bar (arc 23 / Y1 — the pad's own, shared so the calendar's is not a sibling copy): a row of buttons built to the one recipe, placed by `SelectionAnchor` next to the lasso box; the consumer says which buttons |
+| `notebook/PenIdle` | arc 23 / Y4 — the two pen-activity gates every paper-hosting screen writes against: `whenIdle` (the frame-silence gate, re-posting at `PaperView.PEN_ACTIVE_TAIL_MS` while the pen is active) and `releaseRenderIfIdle` (`PaperView.releaseRender`'s own pen-gated contract); one copy rather than the four that had grown across the pad's and the calendar's toolbars and screens — `PaperToolbar` is trimmed to call it too |
+| `notebook/InkSelectionBar` | arc 23 / Y4 — the ONE Send-then-Delete floating bar an ink-on-paper extension screen puts over a lasso selection, replacing the pad's and the calendar's own `*SelectionToolbar` copies; built on `FloatingSelectionBar`, Send absent (never disabled) with no notebook behind the caller |
 
 Resources: `values/{colors,dimens,styles,themes}`, `values-sw720dp/dimens`,
-`values-sw960dp/dimens` (the Manta's card-grid minimum only — see `docs/library.md` § The grid), the 39 chrome
-`ic_*.xml` (the 37 that moved plus `ic_sketching`, `ic_pencil_down` and arc 23's `ic_calendar`), the button/border/radio
-drawables the moved styles reference, and a `strings.xml` holding only `ok` and `cancel` — the two
-strings the moved helpers reference themselves. Every other string stays in `:app`.
+`values-sw960dp/dimens` (the Manta's card-grid minimum only — see `docs/library.md` § The grid), 50
+chrome `ic_*.xml` (grown one arc at a time since J1's move; the latest is arc 23's `ic_calendar`),
+the button/border/radio drawables the moved styles reference, and a `strings.xml` holding only `ok`
+and `cancel` — the two strings the moved helpers reference themselves. Every other string stays in
+`:app`.
 
 **`ic_launcher_foreground.xml` and every `mipmap-*` stay in `:app`.** The launcher glyph is the
 host's identity, not shared chrome; the Scratch Pad extension draws its own.

@@ -10,7 +10,6 @@ import com.symmetricalpalmtree.notesproutsn.extension.HostCallerCheck
 import com.symmetricalpalmtree.notesproutsn.extension.IExtensionStore
 import com.symmetricalpalmtree.notesproutsn.extension.IScratchPad
 import com.symmetricalpalmtree.notesproutsn.extension.InkBundle
-import com.symmetricalpalmtree.notesproutsn.ink.InkWire
 import com.symmetricalpalmtree.notesproutsn.ink.StoreUnavailable
 
 /**
@@ -20,17 +19,20 @@ import com.symmetricalpalmtree.notesproutsn.ink.StoreUnavailable
  * reads the page list on the Binder thread (first run creates one blank page; the count is logged).
  * `end` clears everything.
  *
- * **The two transfers (J5).** Both run on the **Binder thread**, both under [ScratchSession]'s one
- * monitor, and neither ever touches the paper: the screen is not up during a `receiveInk` (the host
- * sends and then launches) and it has already parked its ink before a `takeOutgoing`.
+ * **The two transfers (J5) are `:ext-ink`'s** since arc 23 — [ScratchSession] is an
+ * `InkTransferSession`, and the accumulate-and-place body, the running-total caps re-check, the
+ * one-monitor rule, the placement bound by the first chunk and the `"store unavailable"` mapping
+ * all live there, one copy shared with the calendar. What is the pad's own is what is left here:
+ * the placement int's own validity check, the page-list read at `begin`, and the wording of the
+ * logs. Both transfers run on the **Binder thread** and neither ever touches the paper: the screen
+ * is not up during a `receiveInk` (the host sends and then launches) and it has already parked its
+ * ink before a `takeOutgoing`.
  *
- * `receiveInk` accumulates chunks until `last`, **re-checking the running totals** against the
- * transfer caps as it goes — the host checks before any bind, and this is the untrusted-input half
- * of the same rule (over → `IllegalArgumentException`, the whole inbound dropped). On `last` it
- * mints fresh ids ([InkWire.toStrokes] — nothing from the wire is trusted beyond its geometry)
- * and places the lot through [ScratchStore.receive], leaving [ScratchSession.received] for the
- * screen to consume once. A scratch page has **no size ceiling** since arc 22 / X2 — the placement
- * is one store transaction, so the only failure left is the store being gone.
+ * `receiveInk` accumulates chunks until `last`, then mints fresh ids (`InkWire.toStrokes` — nothing
+ * from the wire is trusted beyond its geometry) and places the lot through [ScratchStore.receive],
+ * leaving `ScratchSession.received` for the screen to consume once. A scratch page has **no size
+ * ceiling** since arc 22 / X2 — the placement is one store transaction, so the only failure left is
+ * the store being gone.
  *
  * `takeOutgoing` hands back one parked chunk; an empty bundle says "done", which is also the honest
  * answer for an index past the end.
@@ -53,8 +55,7 @@ class ScratchPadService : Service() {
             enforce()
             requireNotNull(store) { "store is null" }
             val t0 = SystemClock.elapsedRealtime()
-            ScratchSession.clear()
-            ScratchSession.store = store
+            ScratchSession.begin(store)
             val pages = try { ScratchStore(store).load().ids.size } catch (e: StoreUnavailable) { -1 }
             Slog.d(TAG) { "begin: pages=$pages in ${SystemClock.elapsedRealtime() - t0} ms" }
         }
@@ -66,50 +67,24 @@ class ScratchPadService : Service() {
                 "unknown placement ($placement)"
             }
             // The chunk is already through `InkBundle.requireValid` at unmarshal; what is left to
-            // check is the running total across chunks, which no single bundle can see.
-            val store = ScratchSession.store ?: throw IllegalStateException(STORE_UNAVAILABLE)
-            // One monitor for the whole accumulate-and-place: `begin` and `end` take the same one,
-            // so a host that restarts mid-transfer can never interleave with a placement.
-            synchronized(ScratchSession) {
-                if (ScratchSession.inbound.isEmpty()) {
-                    ScratchSession.inboundPageWidth = chunk.pageWidth
-                    ScratchSession.inboundPageHeight = chunk.pageHeight
-                }
-                val strokes = ScratchSession.inbound.size + chunk.strokes.size
-                val points = ScratchSession.inboundPoints + chunk.pointCount
-                if (strokes > ExtensionContract.MAX_TRANSFER_STROKES || points > ExtensionContract.MAX_TRANSFER_POINTS) {
-                    ScratchSession.clearInbound()
-                    throw IllegalArgumentException("transfer over the caps ($strokes strokes, $points points)")
-                }
-                ScratchSession.inbound += chunk.strokes
-                ScratchSession.inboundPoints = points
-                if (!last) return
-
-                val t0 = SystemClock.elapsedRealtime()
-                val minted = InkWire.toStrokes(ScratchSession.inbound)
-                val w = ScratchSession.inboundPageWidth
-                val h = ScratchSession.inboundPageHeight
-                val newPage = placement == ExtensionContract.PLACEMENT_NEW_PAGE
-                val received = try {
-                    ScratchStore(store).receive(minted, w, h, newPage)
-                } catch (e: StoreUnavailable) {
-                    ScratchSession.clearInbound()
-                    throw IllegalStateException(STORE_UNAVAILABLE)
-                }
-                ScratchSession.received = received
-                ScratchSession.clearInbound()
-                Slog.d(TAG) {
-                    "receiveInk: ${minted.size} strokes placed (newPage=$newPage) in ${SystemClock.elapsedRealtime() - t0} ms"
-                }
-            }
+            // check is what no single bundle can see — the running total across chunks and that
+            // every chunk names the same placement. Both are the shared session's, under its one
+            // monitor: `begin` and `end` take the same lock, so a host that restarts mid-transfer
+            // can never interleave with a placement.
+            val newPage = placement == ExtensionContract.PLACEMENT_NEW_PAGE
+            val placed = ScratchSession.receiveChunk(chunk, placement, last) { store, strokes, _ ->
+                // The page size the first chunk carried: a new page is minted at the size the ink
+                // was authored in (`recordInboundPageSize` — the pad's answer).
+                ScratchStore(store).receive(strokes, ScratchSession.inboundPageWidth, ScratchSession.inboundPageHeight, newPage)
+            } ?: return
+            Slog.d(TAG) { "receiveInk: ${placed.strokes} strokes placed (newPage=$newPage) in ${placed.millis} ms" }
         }
 
         override fun takeOutgoing(chunkIndex: Int): InkBundle {
             enforce()
             // An index past the end is an empty bundle, not an error: "done" is exactly what the
             // host is asking about, and it probes one chunk past the budget on purpose.
-            val chunk = ScratchSession.outbound.getOrNull(chunkIndex).orEmpty()
-            return InkBundle(chunk, ScratchSession.outboundPageWidth, ScratchSession.outboundPageHeight)
+            return ScratchSession.outgoing(chunkIndex)
         }
 
         override fun end() {
@@ -125,9 +100,5 @@ class ScratchPadService : Service() {
 
     companion object {
         private const val TAG = "ScratchPadService"
-
-        /** The store binder is gone (`begin` never ran, or the host revoked it mid-transfer).
-         *  An `IllegalStateException` — one of the three that survive Binder marshalling. */
-        private const val STORE_UNAVAILABLE = "store unavailable"
     }
 }

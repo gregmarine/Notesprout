@@ -24,10 +24,17 @@ object CalendarTargets {
     class Row(val choice: Choice, val target: CalendarTarget)
 
     /** The four rows, in the wizard's order: Today AM · Today PM · This week · This month. */
-    fun rows(today: LocalDate): List<Row> = listOf(
-        Row(Choice.TODAY_AM, CalendarTarget.of(CalendarTarget.KIND_DAY, today, CalendarTarget.HALF_AM)),
-        Row(Choice.TODAY_PM, CalendarTarget.of(CalendarTarget.KIND_DAY, today, CalendarTarget.HALF_PM)),
-        Row(Choice.THIS_WEEK, CalendarTarget.of(CalendarTarget.KIND_WEEK, today)),
-        Row(Choice.THIS_MONTH, CalendarTarget.of(CalendarTarget.KIND_MONTH, today)),
-    )
+    fun rows(today: LocalDate): List<Row> = Choice.entries.map { Row(it, target(it, today)) }
+
+    /**
+     * One choice's target **as of [today]** — what the sheet resolves at the tap, not when it was
+     * raised: a sheet left up across midnight (or a device that slept under it) must send to the day
+     * the person is tapping on, not the day they lassoed on.
+     */
+    fun target(choice: Choice, today: LocalDate): CalendarTarget = when (choice) {
+        Choice.TODAY_AM -> CalendarTarget.of(CalendarTarget.KIND_DAY, today, CalendarTarget.HALF_AM)
+        Choice.TODAY_PM -> CalendarTarget.of(CalendarTarget.KIND_DAY, today, CalendarTarget.HALF_PM)
+        Choice.THIS_WEEK -> CalendarTarget.of(CalendarTarget.KIND_WEEK, today)
+        Choice.THIS_MONTH -> CalendarTarget.of(CalendarTarget.KIND_MONTH, today)
+    }
 }

@@ -1,24 +1,14 @@
 package com.symmetricalpalmtree.notesproutsn.ext.calendar
 
-import android.app.Activity
 import android.os.Bundle
 import android.util.Log
-import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
 import androidx.activity.OnBackPressedCallback
-import androidx.appcompat.app.AlertDialog
-import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
-import com.symmetricalpalmtree.gpaper.core.PaperListener
-import com.symmetricalpalmtree.gpaper.core.PaperView
 import com.symmetricalpalmtree.gpaper.core.Tool
 import com.symmetricalpalmtree.gpaper.core.engine.GPaper
-import com.symmetricalpalmtree.gpaper.core.model.Selection
-import com.symmetricalpalmtree.gpaper.core.model.SelectionMove
-import com.symmetricalpalmtree.gpaper.core.model.Stroke
-import com.symmetricalpalmtree.notesproutsn.core.Dialogs
 import com.symmetricalpalmtree.notesproutsn.core.Immersive
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.core.TopGuard
@@ -27,22 +17,17 @@ import com.symmetricalpalmtree.notesproutsn.extension.CalendarDates
 import com.symmetricalpalmtree.notesproutsn.extension.CalendarTarget
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
 import com.symmetricalpalmtree.notesproutsn.extension.HostCallerCheck
-import com.symmetricalpalmtree.notesproutsn.extension.InkChunks
+import com.symmetricalpalmtree.notesproutsn.extension.WireStroke
 import com.symmetricalpalmtree.notesproutsn.ink.InkAction
-import com.symmetricalpalmtree.notesproutsn.ink.InkWire
-import com.symmetricalpalmtree.notesproutsn.ink.StoreUnavailable
+import com.symmetricalpalmtree.notesproutsn.ink.InkPage
+import com.symmetricalpalmtree.notesproutsn.ink.InkScreenActivity
+import com.symmetricalpalmtree.notesproutsn.notebook.InkSelectionBar
 import com.symmetricalpalmtree.notesproutsn.notebook.PageGestures
 import com.symmetricalpalmtree.notesproutsn.notebook.PaperChrome
-import com.symmetricalpalmtree.notesproutsn.notebook.UndoRedoStack
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.LocalTime
@@ -50,11 +35,13 @@ import kotlin.coroutines.resume
 
 /**
  * The extension-owned Calendar screen (arc 23 / Y1; UI-rule tier 2) — the pad's shape, in the
- * extension's own process, built from `:sn-screen`: full-bleed g-paper, two thin chrome bars,
- * [PageGestures] for the finger vocabulary, [PaperChrome] for the exclusion rects, [UndoRedoStack]
- * for the history and the floating bar through [CalendarSelectionToolbar]. The page and its
- * persistence are [CalendarDocument]'s; the store is the host's, lent for this showing — **the
- * extension writes nothing to disk itself, ever**.
+ * extension's own process, built from `:sn-screen` and, since the arc-23 sweep, on `:ext-ink`'s
+ * [InkScreenActivity]: **the whole tier-2 skeleton is there** — full-bleed g-paper, the page-op
+ * lock, the undo/redo replay (with this screen's [followReplay] hook), the debounced save against
+ * every leave flush, the chrome band and exclusions, the EPD handoff and Send. This class is what
+ * is the **calendar's own**: navigation, the template bake, the day picker and the double-tap. The
+ * page and its persistence are [CalendarDocument]'s; the store is the host's, lent for this showing
+ * — **the extension writes nothing to disk itself, ever**.
  *
  * **The grid is the page's template.** [CalendarGeometry] lays it out at the page's own size under
  * the two bars, [CalendarTemplate] paints it, and g-paper sets it behind the ink — so a store
@@ -93,14 +80,9 @@ import kotlin.coroutines.resume
  * (it has to be, the host launches it by action) and only a `startActivityForResult` from the host
  * package gets in. A plain `am start` from a shell has a null `callingPackage` and is refused.
  *
- * **The EPD handoff is the pad's, kept whole.** Two paper surfaces in two processes: the notebook
- * calls `releaseForHandoff()` immediately before launching us, we reclaim in [onResume]
- * (`resumeDrawing`), and **every** exit here goes through [finishWithHandoff] — `releaseForHandoff()`
- * and then `finish()`. A failure there goes to g-paper, never a host workaround.
- *
- * **Back awaits the flush.** The host's result callback runs `end()` → unbind → revoke the moment we
- * finish, so a save still in flight would hit a revoked binder. [exit] flushes under the page-op
- * lock first and only then hands off and finishes; so does every page leave and `onPause`.
+ * **The EPD handoff is the pad's, kept whole**, and so is **Back awaits the flush** — both are
+ * [InkScreenActivity]'s class note, and a failure in the handoff goes to g-paper, never a host
+ * workaround.
  *
  * Undo is **calendar-level, in memory, per showing** (the pad's rule): an action names its page,
  * and replaying one recorded on another page navigates there first ([CalendarDocument.revert]).
@@ -111,26 +93,15 @@ import kotlin.coroutines.resume
  * received placement, which is the same frame at the same kind of boundary), the "Opening…" box's
  * hide when the page lands, and a problem dialog at a chrome tap.
  */
-class CalendarActivity : AppCompatActivity() {
+class CalendarActivity : InkScreenActivity<InkAction>() {
 
     private lateinit var binding: ActivityCalendarBinding
-    private lateinit var paper: PaperView
-    private lateinit var chrome: PaperChrome
     private lateinit var toolbar: CalendarToolbar
-    private lateinit var selectionToolbar: CalendarSelectionToolbar
-    private lateinit var gestures: PageGestures
-    private lateinit var document: CalendarDocument
     private lateinit var palette: CalendarTemplate.Palette
+    private var document: CalendarDocument? = null
 
     /** Where the organizer is looking and what each control does to it — the anchor rule, pure. */
     private val nav = CalendarNavigation()
-
-    /** In-memory, calendar-level history: it survives page turns and dies with the screen. */
-    private val undo = UndoRedoStack<InkAction>()
-
-    /** Serialises every page/undo/flush operation, so two overlapping gestures can't tangle the
-     *  page — and so a debounced save can never run inside a page swap. */
-    private val pageOps = Mutex()
 
     /** True when the calendar was opened from a notebook — the two Send buttons exist only then. */
     private var sendEnabled = false
@@ -138,20 +109,58 @@ class CalendarActivity : AppCompatActivity() {
     /** True when the host says this launch follows a `receiveInk` (Y3's host half). */
     private var openReceived = false
 
-    /** The tool armed before a received placement selected itself (Y3). Put back **pen-idle** when
-     *  that selection is dismissed, and only if the lasso is still armed. Null the rest of the time. */
-    private var toolBeforeReceive: Tool? = null
-
     /** The day the showing template was baked for — re-baked when it is no longer today. */
     private var bakedToday: LocalDate? = null
 
-    private var opened = false
-    private var closing = false
-    private var selectionActive = false
-    private var currentSelection: Selection? = null
-    private var problemShowing = false
+    /** What the template on the paper was baked from — the page, the day, the page size and the
+     *  bars' measured heights. A [showPage] whose key is unchanged (an undo or redo on the showing
+     *  page) reloads the strokes and nothing else: no page-sized bitmap, no extra EPD frames. */
+    private var bakeKey: BakeKey? = null
+    private var baked: android.graphics.Bitmap? = null
 
-    private val saveRunnable = Runnable { runPageOp { document.flushUntilClean() } }
+    private data class BakeKey(val target: CalendarTarget, val today: LocalDate, val width: Int, val height: Int, val top: Int, val bottom: Int)
+
+    // ── What the skeleton asks for ───────────────────────────────────────────
+
+    override val logTag: String get() = TAG
+    override val screenRoot: View? get() = if (::binding.isInitialized) binding.root else null
+    override val topBarView: View? get() = if (::binding.isInitialized) binding.topBar else null
+    override val bottomBarView: View? get() = if (::binding.isInitialized) binding.bottomBar else null
+    override val openingOverlay: View? get() = if (::binding.isInitialized) binding.openingOverlay else null
+    override val inkPage: InkPage? get() = document
+    override val storeFailedTitleRes: Int get() = R.string.calendar_store_failed_title
+    override val storeFailedBodyRes: Int get() = R.string.calendar_store_failed_body
+    override val nothingToSendTitleRes: Int get() = R.string.calendar_nothing_to_send_title
+    override val nothingToSendBodyRes: Int get() = R.string.calendar_nothing_to_send_body
+    override val sendResultCode: Int get() = ExtensionContract.RESULT_CALENDAR_SEND
+
+    override fun parkOutgoing(chunks: List<List<WireStroke>>, pageWidth: Float, pageHeight: Float) =
+        CalendarSession.park(chunks, pageWidth, pageHeight)
+
+    /** The calendar has no page-level action, so its stack is `:ext-ink`'s four kinds unwrapped. */
+    override fun record(action: InkAction) = undo.record(action)
+
+    override fun syncTool(tool: Tool) = toolbar.sync(tool)
+
+    override fun showPage() = showPage(firstLoad = false)
+
+    override suspend fun revert(action: InkAction) {
+        document?.revert(action)
+    }
+
+    override suspend fun reapply(action: InkAction) {
+        document?.reapply(action)
+    }
+
+    /** A replay may have navigated the document to the action's page ([CalendarDocument.revert] /
+     *  `reapply` land there first); the organizer follows, or the toggles, the pager, the picker and
+     *  a double-tap would all act on the page the navigation still believed was showing. */
+    override fun followReplay() {
+        val doc = document ?: return
+        nav.landed(doc.target, LocalDate.now(), nowHour())?.let { nav.shown(it) }
+    }
+
+    // ── Create ───────────────────────────────────────────────────────────────
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -182,7 +191,7 @@ class CalendarActivity : AppCompatActivity() {
         // notebook deliberately: a calendar one tap away that lassoed differently would read as a bug.
         paper.smartLassoEnabled = true
         paper.scribbleEraseEnabled = true
-        paper.setPaperListener(listener)
+        paper.setPaperListener(paperListener)
 
         toolbar = CalendarToolbar(
             paper = paper,
@@ -208,22 +217,23 @@ class CalendarActivity : AppCompatActivity() {
             onTitle = { showPicker() },
             sendEnabled = sendEnabled,
         )
-        selectionToolbar = CalendarSelectionToolbar(
+        selectionBar = InkSelectionBar(
             root = binding.root,
             paperView = paper.asView(),
             bar = binding.selectionToolbar,
             band = { chromeBand() },
             releaseRender = { paper.releaseRender() },
+            deleteHint = getString(R.string.delete_selection_action),
             onDelete = { currentSelection?.let { deleteSelection(it) } },
+            sendHint = if (sendEnabled) getString(R.string.cd_calendar_send_selection) else null,
             onSend = { sendSelection() },
-            sendEnabled = sendEnabled,
         )
         chrome = PaperChrome(
             paper = paper,
             topBar = binding.topBar,
             bottomStrip = binding.bottomBar,
-            extraRects = { selectionToolbar.rects() },
-            extraContains = { x, y -> selectionToolbar.contains(x, y) },
+            extraRects = { selectionBar.rects() },
+            extraContains = { x, y -> selectionBar.contains(x, y) },
             // The surface accepts no ink until the page is truly on it.
             blockAll = { !opened },
         )
@@ -253,6 +263,7 @@ class CalendarActivity : AppCompatActivity() {
     // ── Open ─────────────────────────────────────────────────────────────────
 
     private suspend fun openDocument(store: CalendarStore) {
+        val doc = document ?: return
         try {
             // The bars' real heights are what the grid is laid out under — wait for the first layout
             // rather than guessing from a dimen (a chrome dimen names a part; the bar is the whole).
@@ -265,7 +276,7 @@ class CalendarActivity : AppCompatActivity() {
             // unreadable one comes back null: the first-run answer is today's Month.
             val placed = if (openReceived) CalendarSession.received?.target else null
             val move = nav.opening(placed ?: bookmark?.target, LocalDate.now(), nowHour())
-            document.show(move.target)
+            doc.show(move.target)
             nav.shown(move)
         } catch (e: CancellationException) {
             throw e
@@ -280,7 +291,7 @@ class CalendarActivity : AppCompatActivity() {
         pushExclusions()   // swap the block-all rect for the real chrome rects
         // Deliberately NOT pen-idle-gated: a boundary frame, nothing has been drawn yet.
         binding.openingOverlay.visibility = View.GONE
-        Slog.d(TAG) { "page ${document.target.kind}/${document.target.date}/${document.target.half} loaded: ${document.strokes.size} strokes" }
+        Slog.d(TAG) { "page ${doc.target.kind}/${doc.target.date}/${doc.target.half} loaded: ${doc.strokes.size} strokes" }
         consumeReceived()
     }
 
@@ -296,13 +307,11 @@ class CalendarActivity : AppCompatActivity() {
      *
      * One undo step, an [InkAction.Pasted] that removes and restores exactly what arrived at the
      * orders it arrived at. There is no page branch here as there is on the pad: a placement never
-     * creates a page the user did not already have — every date has a page, minted or not.
-     *
-     * The **lasso is armed before `setSelection`** (a selection under the pen can neither be dragged
-     * nor dismissed) and the state is set by hand, because a host-initiated selection never echoes
-     * `onSelectionCreated`.
+     * creates a page the user did not already have — every date has a page, minted or not. The
+     * selection it lands as is the skeleton's ([InkScreenActivity.showArrivedSelection]).
      */
     private fun consumeReceived() {
+        val doc = document ?: return
         val received = CalendarSession.received ?: return
         CalendarSession.received = null
         if (!openReceived) {
@@ -311,36 +320,18 @@ class CalendarActivity : AppCompatActivity() {
             Slog.d(TAG) { "received placement dropped: this launch did not ask for one" }
             return
         }
-        if (received.target != document.target) {
+        if (received.target != doc.target) {
             Slog.d(TAG) {
                 "received placement dropped: page ${received.target.kind}/${received.target.date}/${received.target.half} is not showing"
             }
             return
         }
         val ids = received.strokeIds.toHashSet()
-        val arrived = document.strokes.filter { it.id in ids }
+        val arrived = doc.strokes.filter { it.id in ids }
         if (arrived.isEmpty()) return
 
-        undo.record(InkAction.Pasted(document.pageId, arrived, arrived.map { document.orderOf(it.id) ?: 0L }))
-
-        var box = arrived.first().bounds
-        for (i in 1 until arrived.size) box = box.union(arrived[i].bounds)
-        // The write lands AFTER the tool change, never before it (the notebook's O2 lesson, kept
-        // here for the same reason): a tool change dismisses any live selection, and that dismissal
-        // runs `restoreToolAfterReceive` — which would consume this very field and put the pen back
-        // under the selection we are about to make.
-        val prior = paper.tool
-        if (prior != Tool.LASSO) {
-            paper.tool = Tool.LASSO
-            toolbar.sync(Tool.LASSO)   // a host-initiated tool change is never echoed back
-            toolBeforeReceive = prior
-        }
-        val selection = Selection(ids, emptySet(), box)
-        paper.setSelection(ids, emptySet(), box)
-        selectionActive = true
-        currentSelection = selection
-        selectionToolbar.show(box)
-        pushExclusions()
+        undo.record(InkAction.Pasted(doc.pageId, arrived, arrived.map { doc.orderOf(it.id) ?: 0L }))
+        showArrivedSelection(ids, arrived)
         Slog.d(TAG) { "received ${arrived.size} strokes" }
     }
 
@@ -360,68 +351,6 @@ class CalendarActivity : AppCompatActivity() {
         }
     }
 
-    /** A calendar that opened nothing is explained, not toasted — then it leaves the way every exit does. */
-    private fun failOpen() {
-        binding.openingOverlay.visibility = View.GONE
-        if (isFinishing || isDestroyed) return
-        closing = true
-        Dialogs.style(
-            AlertDialog.Builder(this)
-                .setTitle(R.string.calendar_store_failed_title)
-                .setMessage(R.string.calendar_store_failed_body)
-                .setPositiveButton(R.string.ok) { _, _ -> finishWithHandoff() }
-                .setOnCancelListener { finishWithHandoff() }
-                .create()
-        ).show()
-    }
-
-    // ── g-paper → the document ───────────────────────────────────────────────
-
-    private val listener = object : PaperListener {
-        override fun onStrokeCommitted(stroke: Stroke) {
-            if (!opened || closing) return
-            document.addStroke(stroke)
-            undo.record(InkAction.Drew(document.pageId, stroke))
-            scheduleSave()
-        }
-
-        override fun onStrokesErased(strokeIds: List<String>) {
-            if (!opened || closing) return
-            document.erase(strokeIds)?.let { undo.record(it); scheduleSave() }
-        }
-
-        override fun onSelectionMoved(move: SelectionMove) {
-            if (!opened || closing) return
-            document.move(move.strokeIds, move.dx, move.dy)?.let { undo.record(it); scheduleSave() }
-            currentSelection = currentSelection?.let { it.copy(bounds = it.bounds.offset(move.dx, move.dy)) }
-            currentSelection?.let { selectionToolbar.show(it.bounds); pushExclusions() }
-        }
-
-        override fun onSelectionCreated(selection: Selection) {
-            selectionActive = true
-            currentSelection = selection
-            // Shown immediately, not through the pen-idle gate: a lasso ends with the pen still
-            // hovering — this frame is part of the engine's own presentation of the box.
-            selectionToolbar.show(selection.bounds)
-            pushExclusions()
-        }
-
-        override fun onSelectionDragStarted() {
-            selectionToolbar.hide()
-            pushExclusions()
-        }
-
-        override fun onSelectionDismissed() {
-            selectionActive = false
-            currentSelection = null
-            selectionToolbar.hide()
-            pushExclusions()
-            restoreToolAfterReceive()
-        }
-
-        override fun onToolChanged(tool: Tool) = toolbar.sync(tool)
-    }
-
     // ── Page gestures → operations ───────────────────────────────────────────
 
     private val gestureListener = object : PageGestures.Listener {
@@ -436,33 +365,14 @@ class CalendarActivity : AppCompatActivity() {
         override fun onFingerDoubleTap(x: Float, y: Float) = runPageOp { openDay(x, y) }
     }
 
-    /** Serialise every page/undo/flush mutation; ignore anything while not open or once closing. */
-    private fun runPageOp(block: suspend () -> Unit) {
-        if (!opened || closing) return
-        lifecycleScope.launch {
-            pageOps.withLock {
-                if (!opened || closing) return@withLock
-                try {
-                    block()
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: StoreUnavailable) {
-                    Log.w(TAG, "store unavailable", e)
-                    showProblem(R.string.calendar_store_failed_title, R.string.calendar_store_failed_body)
-                } catch (t: Throwable) {
-                    Log.w(TAG, "page op failed", t)
-                }
-            }
-        }
-    }
-
     /**
      * The one road every navigation takes: put the move's page on the paper, then record that it
      * landed. The order matters — [CalendarNavigation.shown] is what moves the anchor, and a show
      * that threw (a store gone out from under us) must leave the organizer exactly where it was.
      */
     private suspend fun showMove(m: CalendarNavigation.Move, firstLoad: Boolean = false) {
-        document.show(m.target)
+        val doc = document ?: return
+        doc.show(m.target)
         nav.shown(m)
         showPage(firstLoad)
     }
@@ -477,7 +387,7 @@ class CalendarActivity : AppCompatActivity() {
      * double-tap on a Day page are both **nothing**, silently: there is no wrong page to land on.
      */
     private suspend fun openDay(x: Float, y: Float) {
-        val t = document.target
+        val t = document?.target ?: return
         val day = when (t.kind) {
             CalendarTarget.KIND_MONTH -> monthGeometry().hitTest(x, y, t.localDate)
             CalendarTarget.KIND_WEEK -> weekGeometry().hitTest(x, y, t.localDate)
@@ -498,60 +408,53 @@ class CalendarActivity : AppCompatActivity() {
     /** The hour the clock says, for the half a Day page opens on. */
     private fun nowHour(): Int = LocalTime.now().hour
 
-    private suspend fun doUndo() {
-        val a = undo.popUndo() ?: return
-        val g = undo.generation
-        try {
-            document.revert(a)
-        } catch (t: Throwable) {
-            undo.pushUndo(a)
-            throw t
-        }
-        // A pen-up landing mid-replay recorded a fresh edit, which cleared redo — honour
-        // record-clears-redo rather than re-populating redo with the entry we just undid.
-        if (undo.generation == g) undo.pushRedo(a)
-        showPage()
-    }
-
-    private suspend fun doRedo() {
-        val a = undo.popRedo() ?: return
-        try {
-            document.reapply(a)
-        } catch (t: Throwable) {
-            undo.pushRedo(a)
-            throw t
-        }
-        undo.pushUndo(a)
-        showPage()
-    }
-
     /**
      * Put the document's page on the paper. The order is the host-responsibilities page-swap law:
      * `clearForContentSwap` (pixels hold — no blank flash on e-ink) → `setPageSize` / `setTemplate`
      * → `loadStrokes`, which is a single EPD refresh. Any selection goes first, because a data-in
      * call would dismiss it anyway and it belongs to the page being left.
      */
-    private fun showPage(firstLoad: Boolean = false) {
+    private fun showPage(firstLoad: Boolean) {
+        val doc = document ?: return
         paper.clearSelection()
         selectionActive = false
         currentSelection = null
-        selectionToolbar.hide()
+        selectionBar.hide()
         if (!firstLoad) paper.clearForContentSwap()
-        paper.setPageSize(document.pageWidth.toInt(), document.pageHeight.toInt())
-        paper.setTemplate(bakeTemplate())
-        paper.loadStrokes(document.strokes)
-        toolbar.setTitle(titleOf(document.target))
+        applyTemplate(force = false)
+        paper.loadStrokes(doc.strokes)
+        toolbar.setTitle(titleOf(doc.target))
         // The latch says what is on the paper. It rides this frame; it is never one of its own.
-        toolbar.setView(document.target.kind)
+        toolbar.setView(doc.target.kind)
+    }
+
+    /**
+     * Put the showing page's size and template on the paper — baked only when something the bake
+     * depends on has changed ([BakeKey]), or when [force]d (a date rolled over under the screen).
+     * `setPageSize` and `setTemplate` are each an EPD repaint, and a bake is a page-sized bitmap
+     * rasterized with forty-odd labelled cells: an undo that changes neither pays for neither. The
+     * replaced bitmap is recycled — g-paper holds only the one it was last given.
+     */
+    private fun applyTemplate(force: Boolean) {
+        val doc = document ?: return
+        val today = LocalDate.now()
+        val key = BakeKey(doc.target, today, doc.pageWidth.toInt(), doc.pageHeight.toInt(), binding.topBar.height, binding.bottomBar.height)
+        if (!force && key == bakeKey && baked != null) return
+        val fresh = bakeTemplate(doc.target)
+        val old = baked
+        bakeKey = key
+        baked = fresh
+        paper.setPageSize(key.width, key.height)
+        paper.setTemplate(fresh)
+        old?.recycle()
     }
 
     /** The page's grid at the page's own size, under the bars as they are laid out now — the three
      *  layouts dispatched by the showing page's kind. */
-    private fun bakeTemplate(): android.graphics.Bitmap {
+    private fun bakeTemplate(t: CalendarTarget): android.graphics.Bitmap {
         val today = LocalDate.now()
         bakedToday = today
         val density = resources.displayMetrics.density
-        val t = document.target
         val notes = getString(R.string.calendar_notes_label)
         return when (t.kind) {
             CalendarTarget.KIND_WEEK -> CalendarTemplate.week(weekGeometry(), t.localDate, today, density, palette, notes)
@@ -561,19 +464,22 @@ class CalendarActivity : AppCompatActivity() {
     }
 
     private fun monthGeometry() = CalendarGeometry.month(
-        document.pageWidth.toInt(), document.pageHeight.toInt(),
+        pageWidthPx(), pageHeightPx(),
         resources.displayMetrics.density, binding.topBar.height, binding.bottomBar.height,
     )
 
     private fun weekGeometry() = CalendarGeometry.week(
-        document.pageWidth.toInt(), document.pageHeight.toInt(),
+        pageWidthPx(), pageHeightPx(),
         resources.displayMetrics.density, binding.topBar.height, binding.bottomBar.height,
     )
 
     private fun dayGeometry() = CalendarGeometry.day(
-        document.pageWidth.toInt(), document.pageHeight.toInt(),
+        pageWidthPx(), pageHeightPx(),
         resources.displayMetrics.density, binding.topBar.height, binding.bottomBar.height,
     )
+
+    private fun pageWidthPx(): Int = (document?.pageWidth ?: 0f).toInt()
+    private fun pageHeightPx(): Int = (document?.pageHeight ?: 0f).toInt()
 
     private fun titleOf(t: CalendarTarget): String = when (t.kind) {
         CalendarTarget.KIND_MONTH -> CalendarDates.monthTitle(t.localDate)
@@ -581,190 +487,18 @@ class CalendarActivity : AppCompatActivity() {
         else -> CalendarDates.dayTitle(t.localDate, t.half)
     }
 
-    private fun deleteSelection(sel: Selection) {
-        if (!opened || closing) return
-        val ids = sel.strokeIds.toList()
-        if (ids.isEmpty()) { paper.clearSelection(); return }
-        document.erase(ids)?.let { undo.record(it); scheduleSave() }
-        // `removeStrokes` dismisses the selection itself — every data-in call does.
-        paper.removeStrokes(ids)
-    }
-
-    private fun showProblem(titleRes: Int, bodyRes: Int) {
-        if (isFinishing || isDestroyed || problemShowing) return
-        problemShowing = true
-        Dialogs.style(
-            AlertDialog.Builder(this)
-                .setTitle(titleRes)
-                .setMessage(bodyRes)
-                .setPositiveButton(R.string.ok, null)
-                .setOnDismissListener { problemShowing = false }
-                .create()
-        ).show()
-    }
-
-    /**
-     * Put back the tool a received placement took away (Y3) — **only if the lasso is still armed**,
-     * so a tool the user picked while the selection was up wins, and **pen-idle**, because this is a
-     * chrome frame like any other. One shot: the field is cleared whichever way it goes.
-     */
-    private fun restoreToolAfterReceive() {
-        val prior = toolBeforeReceive ?: return
-        toolBeforeReceive = null
-        if (paper.tool != Tool.LASSO) return
-        whenPenIdle {
-            if (isFinishing || isDestroyed || paper.tool != Tool.LASSO) return@whenPenIdle
-            paper.tool = prior
-            toolbar.sync(prior)
-        }
-    }
-
-    private fun whenPenIdle(action: () -> Unit) {
-        if (!paper.isPenActive) { action(); return }
-        binding.root.postDelayed({ whenPenIdle(action) }, PaperView.PEN_ACTIVE_TAIL_MS)
-    }
-
-    // ── Send (calendar → notebook) ───────────────────────────────────────────
-
-    /** The top bar's Send: this whole page, in writing order. */
-    private fun sendPage() = send(null)
-
-    /** The selection bar's Send: what the lasso caught. The ids are read **now** — the selection can
-     *  die between the tap and the page-op lock, and what the user pointed at is what they meant. */
-    private fun sendSelection() {
-        val ids = currentSelection?.strokeIds?.toHashSet() ?: return
-        send(ids)
-    }
-
-    /**
-     * Park [ids] (or the whole page when null) for the host to drain, and leave with
-     * [ExtensionContract.RESULT_CALENDAR_SEND]. **Send is a copy** — the page keeps its ink, and
-     * nothing goes on the undo stack. The page is flushed first, under the same lock every other page
-     * op takes. An empty pick is a dialog, never silence.
-     */
-    private fun send(ids: Set<String>?) {
-        if (!opened || closing) return
-        runPageOp {
-            document.flushUntilClean()
-            val picked = if (ids == null) document.strokes else document.strokes.filter { it.id in ids }
-            val wire = InkWire.toWireStrokes(picked)
-            if (wire.isEmpty()) {
-                showProblem(R.string.calendar_nothing_to_send_title, R.string.calendar_nothing_to_send_body)
-                return@runPageOp
-            }
-            CalendarSession.outbound = InkChunks.chunk(wire)
-            CalendarSession.outboundPageWidth = document.pageWidth
-            CalendarSession.outboundPageHeight = document.pageHeight
-            Slog.d(TAG) { "send: ${wire.size} strokes in ${CalendarSession.outbound.size} chunks" }
-            closing = true
-            binding.root.removeCallbacks(saveRunnable)
-            finishWithHandoff(ExtensionContract.RESULT_CALENDAR_SEND)
-        }
-    }
-
-    // ── Saving ───────────────────────────────────────────────────────────────
-
-    /** Debounced: a hand writing a line would otherwise write a statement per stroke. */
-    private fun scheduleSave() {
-        binding.root.removeCallbacks(saveRunnable)
-        binding.root.postDelayed(saveRunnable, SAVE_DEBOUNCE_MS)
-    }
-
-    // ── Chrome ───────────────────────────────────────────────────────────────
-
-    private fun pushExclusions() {
-        if (::chrome.isInitialized) chrome.pushExclusions()
-    }
-
-    /** The free band between the two bars, in root coordinates. Null until both are laid out. */
-    private fun chromeBand(): IntRange? {
-        val top = binding.topBar
-        val bottom = binding.bottomBar
-        if (top.height == 0 || bottom.height == 0) return null
-        return top.bottom..bottom.top
-    }
-
-    /** The paper surface in px — a page with no size of its own takes it. Before the first layout
-     *  the screen itself is the honest answer: the calendar is full-bleed and portrait-locked. */
-    private fun surfaceSize(): Pair<Float, Float> {
-        val v = paper.asView()
-        if (v.width > 0 && v.height > 0) return v.width.toFloat() to v.height.toFloat()
-        val dm = resources.displayMetrics
-        return dm.widthPixels.toFloat() to dm.heightPixels.toFloat()
-    }
-
-    /** EPD chrome-release: a finger landing on chrome must release the overlay so the tap's visual
-     *  result shows. Done here because the buttons consume the touch. Palm-gated. */
-    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        if (opened && ::gestures.isInitialized) gestures.onTouchEvent(ev)
-        if (::chrome.isInitialized && ev.actionMasked == MotionEvent.ACTION_DOWN) {
-            val tool = ev.getToolType(0)
-            val stylus = tool == MotionEvent.TOOL_TYPE_STYLUS || tool == MotionEvent.TOOL_TYPE_ERASER
-            if (!stylus && !paper.isPenActive && chrome.overChrome(ev)) paper.releaseRender()
-        }
-        return super.dispatchTouchEvent(ev)
-    }
-
     // ── Lifecycle ────────────────────────────────────────────────────────────
 
     override fun onResume() {
         super.onResume()
-        if (::paper.isInitialized) paper.resumeDrawing()
         // A date rolled over while the screen sat in the background: the ring moves with it. Only
         // when it did — a resume is otherwise not a frame.
         if (opened && !closing && bakedToday != null && bakedToday != LocalDate.now()) {
-            paper.setTemplate(bakeTemplate())
+            applyTemplate(force = true)
         }
-    }
-
-    override fun onPause() {
-        super.onPause()
-        if (!opened || closing || !::document.isInitialized) return
-        binding.root.removeCallbacks(saveRunnable)
-        val doc = document
-        appScope.launch {
-            withContext(NonCancellable) {
-                pageOps.withLock { runCatching { doc.flushUntilClean() }.onFailure { Log.w(TAG, "pause flush failed", it) } }
-            }
-        }
-    }
-
-    /** Every exit flushes and then hands the pipeline off — **the flush is awaited before `finish()`**. */
-    private fun exit() {
-        if (closing) return
-        closing = true
-        binding.root.removeCallbacks(saveRunnable)
-        if (!::document.isInitialized) { finishWithHandoff(); return }
-        val doc = document
-        appScope.launch {
-            withContext(NonCancellable) {
-                pageOps.withLock { runCatching { doc.flushUntilClean() }.onFailure { Log.w(TAG, "final flush failed", it) } }
-            }
-            if (!isFinishing && !isDestroyed) finishWithHandoff()
-        }
-    }
-
-    /** `releaseForHandoff()` and then `finish()` — the whole of this screen's half of the EPD handoff. */
-    private fun finishWithHandoff(resultCode: Int = Activity.RESULT_CANCELED) {
-        if (::paper.isInitialized) paper.releaseForHandoff()
-        setResult(resultCode)
-        Slog.d(TAG) { "finishing (handoff released, result=$resultCode)" }
-        finish()
-    }
-
-    override fun onDestroy() {
-        if (::binding.isInitialized) binding.root.removeCallbacks(saveRunnable)
-        if (::paper.isInitialized) paper.release()
-        super.onDestroy()
     }
 
     private companion object {
         const val TAG = "CalendarActivity"
-
-        /** Quiet time before the page's op log is written. */
-        const val SAVE_DEBOUNCE_MS = 800L
-
-        /** Outlives the Activity so a flush in flight always completes. */
-        val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     }
 }

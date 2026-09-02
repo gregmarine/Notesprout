@@ -214,7 +214,7 @@ class ScratchDocumentTest {
         val inserted = doc.insert(after = true)
         assertEquals(2, doc.pageCount)
         assertEquals(0, doc.strokes.size)
-        assertNotEquals("p1", doc.currentPageId)
+        assertNotEquals("p1", doc.pageId)
         assertEquals(listOf("p1"), inserted.before)
         assertEquals(doc.pageIds, inserted.after)
 
@@ -223,7 +223,7 @@ class ScratchDocumentTest {
         fake.execs.clear()
         val deleted = doc.deleteCurrent()
         assertEquals(1, doc.pageCount)
-        assertEquals("p1", doc.currentPageId)
+        assertEquals("p1", doc.pageId)
         assertEquals("DELETE FROM page WHERE id = ?", fake.sql().first())
         assertEquals(inserted.pageId, deleted.pageId)
     }
@@ -246,7 +246,7 @@ class ScratchDocumentTest {
         val doc = loaded(fake)
         val s = stroke("a")
         doc.addStroke(s)
-        val action = InkAction.Drew(doc.currentPageId, s)
+        val action = InkAction.Drew(doc.pageId, s)
         doc.revert(action)
         assertEquals(0, doc.strokes.size)
         doc.reapply(action)
@@ -358,7 +358,7 @@ class ScratchDocumentTest {
         )
         assertEquals(listOf(2L, 5L), puts(fake).map { long(it.args[2]) })
         assertEquals(listOf("p1", "p2"), doc.pageIds)
-        assertEquals("p2", doc.currentPageId)
+        assertEquals("p2", doc.pageId)
     }
 
     /**
@@ -407,7 +407,7 @@ class ScratchDocumentTest {
         fake.execs.clear()
         doc.revert(drew)
         assertTrue(fake.execs.isEmpty())
-        assertEquals("p1", doc.currentPageId)
+        assertEquals("p1", doc.pageId)
     }
 
     // ── The store is gone ────────────────────────────────────────────────────

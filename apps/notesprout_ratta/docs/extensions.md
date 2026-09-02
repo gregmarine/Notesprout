@@ -65,43 +65,64 @@ protected); X4 moved the document editor onto rows (`prefs`/`word`/`caret`, no m
 read-modify-write). `API_VERSION` 6 is the ledger's second break that is not a compatible tail, and
 the first that carries a floor — see the ledger below.
 
+**Arc 23 "Calendar" is the sixth fresh user decision, on 2026-09-01.** The user asked for a basic
+writable calendar — Month, Week and Day pages, the way a physical organizer is one — so SN gains a
+**seventh** capability point, `ACTION_CALENDAR` + `ACTION_CALENDAR_SCREEN`: the fourth
+screen-owning point and the second with paper (after the pad), served by **`NSE · Calendar`**
+(`:ext-calendar`), the **twelfth** module, alongside a new library module, **`:ext-ink`**, that
+carries the pad's ink-on-rows helpers out from under `:ext-scratchpad` so the calendar is not a
+sibling copy of it. Y1 landed the seam, both modules and the Month page; Y2 grew Week and Day and
+the navigation; Y3 landed the notebook door and both transfers; Y4 is this doc. `API_VERSION` 7 is
+the ledger's third bump — a compatible *addition*, not a break, since no existing interface
+changed shape — and the first with a **per-action** floor, replacing the single
+`MIN_API_VERSION_FOR_STORE` set with a map. The rule survives once more, another word wider: **no
+*eighth* capability point without another user decision** (`apps/notesprout_ratta/CLAUDE.md`).
+
 The pad as a **feature** has its own reference — [`docs/scratchpad.md`](scratchpad.md); export has
 its own — [`docs/export.md`](export.md); import has its own too — [`docs/import.md`](import.md);
 documents likewise — [`docs/document.md`](document.md); tags likewise —
-[`docs/tags.md`](tags.md). This doc is the seam for all six points, and the store rebuild that
-underlies three of them.
+[`docs/tags.md`](tags.md); the calendar likewise — [`docs/calendar.md`](calendar.md). This doc is
+the seam for all seven points, and the store rebuild that underlies three of them.
 
 Fresh code. Paper's own extension arcs (`PAPER_EXTENSIONS_PLAN.md`, `PAPER_RECOGNITION_PLAN.md`,
 `PAPER_SCRATCHPAD_PLAN.md`, its `:extension-api` / `:ext-mlkit` / `:ext-scratchpad`) are the shape
-reference — nothing is copied, and SN's AIDL is scoped to its **six** points rather than Paper's
-broader capability set. Paper never built export, import, documents or tags, so it has nothing to
-say about the third through sixth; og's `docs/full-notebook-export.md` § Import was the fourth's
-reading reference and og's `docs/documents.md` the fifth's. Tags have no og reading reference —
-the feature is new to this family.
+reference — nothing is copied, and SN's AIDL is scoped to its **seven** points rather than Paper's
+broader capability set. Paper never built export, import, documents, tags or a calendar, so it has
+nothing to say about the third through seventh; og's `docs/full-notebook-export.md` § Import was
+the fourth's reading reference, og's `docs/documents.md` the fifth's, and og's own
+`docs/calendar.md` (`CalendarActivity` / `CalendarTemplateRenderer`, at the monorepo root) the
+seventh's — the three layouts and the navigation, not the seam; nothing is copied. Tags have no og
+reading reference — the feature is new to this family.
 
 ---
 
 ## Module layout
 
-Ten modules, SN's own Gradle root:
+Twelve modules, SN's own Gradle root:
 
 | Module | Type | Depends on | Holds |
 |---|---|---|---|
-| `:sn-screen` | Android library | g-paper (`api`) + androidx; **never** `:app`, **never** `:extension-api` | the design resources and the screen helpers both paper surfaces need — see [`sn-screen.md`](sn-screen.md) |
+| `:sn-screen` | Android library | g-paper (`api`) + androidx; **never** `:app`, **never** `:extension-api` | the design resources and the screen helpers every paper surface needs — including `FloatingSelectionBar` (arc 23 / Y1, moved here from the pad so the calendar's floating bar is not a sibling copy), `ic_calendar`, and (arc 23 / Y4) `PenIdle` (the shared frame-silence gate) and `InkSelectionBar` (the ONE Send-then-Delete floating bar over `FloatingSelectionBar`, replacing `ScratchSelectionToolbar` and `CalendarSelectionToolbar`) — see [`sn-screen.md`](sn-screen.md) |
 | `:markdown` | Android library | nothing in this project — stdlib + the android SDK its spans use (arc 19 / M1) | the shared pure markdown engine `:app` and `:ext-document` both consume — parser, renderer, `HeadingTypography`, `MarkdownDraw`, `MarkdownFormatter`, `TextBuffer`, `MarkdownReflow`, `TextSearch`, `DocumentDraft`, `MarkdownText`, `MarkdownPaginator`. One engine, no drift: the host renders text-document covers and the PDF preview, the extension renders the editor's Preview |
-| `:extension-api` | Android library | nothing in `:app`, no library beyond the Kotlin stdlib (`build.gradle.kts` says so explicitly) | the AIDL (`IHandwritingRecognizer`, `InkStroke.aidl`; `IExtensionStore`, `StorePayload.aidl`, `StoreResult.aidl`, `StoreSchema.aidl`; `IScratchPad`, `WireStroke.aidl`, `InkBundle.aidl`; `INotebookExporter`, `ExporterInfo.aidl`, `ExportSpec.aidl`, `ExportResult.aidl`; `INotebookImporter`, `ImporterInfo.aidl`, `ImportSpec.aidl`, `ImportResult.aidl`; `IDocumentEditor`, `IDocumentHost`, `DocumentPageState.aidl`; `ITagManager`, `TagShowing.aidl`, `TagRecord.aidl`, `AssignmentRecord.aidl`), the hand-written `InkStroke` / `StorePayload` / `StoreResult` / `StoreSchema` / `WireStroke` / `InkBundle` / `ExporterInfo` / `OptionDescriptor` / `ExportSpec` / `ExportResult` / `ImporterInfo` / `ImportSpec` / `ImportResult` / `DocumentPageState` / `TagShowing` / `TagRecord` / `AssignmentRecord` parcelables, `PageBundle` (the arc-18 page-bundle container — pure `java.io`, no Android types), `SharedBytes`, `InkChunks`, `TextChunks`, `RecognizerStatus`, `ExtensionContract`, `ExporterContract`, `ImporterContract`, `DocumentContract`, `HostCallerCheck`, and — the store seam rebuilt at arc 22 / X1 — `StoreCodec` (`Cell`, `Statement`, `Row`, `StoreRows`, `StoreChunker`), `StoreSql` / `StoreNames` (the validator), `StoreReads` (the extension-side `query`/`exec` loop), `TagRules` (arc 21, `isId` case-insensitive since X3) and `TagPages` (arc 22 / X3, the one paging loop both sides run). Arc 21's `TagIndex` / `TagCodec` / `CompactId` are **deleted** with the one-blob layout they served; `TagIndex` survives as `:ext-tags`' own in-memory query model, not a file shared by both sides |
+| `:extension-api` | Android library | nothing in `:app`, no library beyond the Kotlin stdlib (`build.gradle.kts` says so explicitly) | the AIDL (`IHandwritingRecognizer`, `InkStroke.aidl`; `IExtensionStore`, `StorePayload.aidl`, `StoreResult.aidl`, `StoreSchema.aidl`; `IScratchPad`, `WireStroke.aidl`, `InkBundle.aidl`; `INotebookExporter`, `ExporterInfo.aidl`, `ExportSpec.aidl`, `ExportResult.aidl`; `INotebookImporter`, `ImporterInfo.aidl`, `ImportSpec.aidl`, `ImportResult.aidl`; `IDocumentEditor`, `IDocumentHost`, `DocumentPageState.aidl`; `ITagManager`, `TagShowing.aidl`, `TagRecord.aidl`, `AssignmentRecord.aidl`; `ICalendar`, `CalendarTarget.aidl`), the hand-written `InkStroke` / `StorePayload` / `StoreResult` / `StoreSchema` / `WireStroke` / `InkBundle` / `ExporterInfo` / `OptionDescriptor` / `ExportSpec` / `ExportResult` / `ImporterInfo` / `ImportSpec` / `ImportResult` / `DocumentPageState` / `TagShowing` / `TagRecord` / `AssignmentRecord` / `CalendarTarget` parcelables, `PageBundle` (the arc-18 page-bundle container — pure `java.io`, no Android types), `SharedBytes`, `InkChunks`, `TextChunks`, `RecognizerStatus`, `ExtensionContract`, `ExporterContract`, `ImporterContract`, `DocumentContract`, `HostCallerCheck`, `CalendarDates` (arc 23 / Y1, pure `java.time` date arithmetic — Sunday weeks, hand-list titles, `step`/`periodDate`/`isNormalized`), and — the store seam rebuilt at arc 22 / X1 — `StoreCodec` (`Cell`, `Statement`, `Row`, `StoreRows`, `StoreChunker`), `StoreSql` / `StoreNames` (the validator), `StoreReads` (the extension-side `query`/`exec` loop), `TagRules` (arc 21, `isId` case-insensitive since X3) and `TagPages` (arc 22 / X3, the one paging loop both sides run). Arc 21's `TagIndex` / `TagCodec` / `CompactId` are **deleted** with the one-blob layout they served; `TagIndex` survives as `:ext-tags`' own in-memory query model, not a file shared by both sides |
 | `:ext-mlkit` | Android application (its own installable APK) | `:extension-api` + `com.google.mlkit:digital-ink-recognition:19.0.0` | `HandwritingRecognizerService`, `ModelManager`, `MlKitEngine`, `PageText`, `StrokeSegmenter`, `Dots`, `Box` |
-| `:ext-scratchpad` | Android application (its own installable APK) | `:extension-api` + `:sn-screen` (g-paper arrives through its `api`) + androidx; **never** `:app`, no Room / SQLCipher / serialization | `ScratchPadApplication`, `ScratchPadService`, `ScratchPadActivity`, `ScratchSession`, `ScratchSchema` (arc 22 / X2, schema v1: `page`/`stroke`/`state`), `ScratchSql`, `ScratchStore`, `ScratchDocument` (the op log, replacing the whole-page re-encode), `ScratchBatches`, `ScratchReadPlan`, `StrokeRows`, `ScratchInk` |
+| `:ext-ink` | Android library | `:extension-api` (`api`) + `:sn-screen` (`api` — g-paper's `Stroke` reaches it that way, plus `StrokeCodec` and `Slog`) + coroutines + (since Y4) `api(appcompat)` — `InkScreenActivity` is an `AppCompatActivity` a consumer extends, the same version both consumers already declared, no new library on the graph — + `implementation(lifecycle-runtime-ktx)`; **never** `:app`, no manifest components, no resources | the ink-on-rows library the scratch pad and the calendar share since arc 23 / Y1, so neither is a sibling copy of the other: `InkWire` (wire ⇄ paper, the extension-side twin of the host's `TransferCaps` — the twin stays deliberate), `StrokeRows` + `StrokeBlob` (row ⇄ stroke, `StrokeCodec` format B, a bad row a dropped stroke and never a lost page), `StoreBatches` (splitting a write into `exec` batches at the store's byte/statement caps), `StrokeReadPlan` (planning a page's stroke read into `BETWEEN` ranges so a page of any size comes back without meeting `STORE_RESULT_LARGE`), `InkDocument` (the `TreeMap<order, Stroke>` + op log + `flushUntilClean`, taking its two stroke statements through a small `StrokeSql` interface so each consumer's SQL stays its own), `InkAction` (`Drew`/`Erased`/`Moved`/`Pasted`, the stroke-level replay), and the abstract `InkStore` base (`StoreUnavailable`, `PageInk`, `execAll`/`run`/`compensated`/`guard`/`readStrokes`) the pad's and the calendar's own stores extend. Moved out of `:ext-scratchpad` at Y1 under neutral names, tests included. **Since arc 23 / Y4** (the code-review fix that closed a second sibling copy the Y1 move left below the store line): `InkSql` (the shared `stroke` DDL and its six statements, byte-identical to what each consumer used to spell out), `InkPage` (the ink half of a consumer's document as a contract — `pageId`/`strokes`/`pageWidth`/`pageHeight`/`erase`/`move`/`flushUntilClean`, `ScratchDocument` and `CalendarDocument` implement it), `InkTransferSession<P, R>` (the process-wide showing state and the two transfer stubs' bodies, `receiveChunk`/`outgoing`, under one monitor, the placement bound by the first chunk), and `InkScreenActivity<A>` (the abstract tier-2 screen skeleton: the page-op lock, undo/redo replay with the `followReplay` hook, the bounded-debounce-vs-unbounded-leave flush, the EPD handoff order) |
+| `:ext-scratchpad` | Android application (its own installable APK) | `:extension-api` + `:sn-screen` (g-paper arrives through its `api`) + `:ext-ink` + androidx; **never** `:app`, no Room / SQLCipher / serialization | `ScratchPadApplication`, `ScratchPadService` (thin on `:ext-ink`'s `InkTransferSession` since Y4 — supplies only the placement int's own check, the page-list read at `begin`, and its own log wording), `ScratchPadActivity` (thin on `:ext-ink`'s `InkScreenActivity` since Y4 — keeps the page list, the pager, inserts, delete confirm, its own `consumeReceived` head), `ScratchSession` (an `InkTransferSession<Int, ScratchStore.Received>(recordInboundPageSize = true)`), `ScratchSchema` (arc 22 / X2, schema v1: `page`/`stroke`/`state` — the `stroke` half is `:ext-ink`'s `InkSql` since Y4), `ScratchSql` (`: InkDocument.StrokeSql by InkSql` since Y4), `ScratchStore` (extends `:ext-ink`'s `InkStore`), `ScratchDocument` (thin over `:ext-ink`'s `InkDocument` — the pad's own layer keeps only the page list and its structural edits — and implements `:ext-ink`'s `InkPage` since Y4), `ScratchUndo` (`ScratchAction` sealed: `Ink(InkAction)` · `Page`, the pad's own page-level action), `ScratchPages`, `ScratchToolbar` — `ScratchInk`, `ScratchBatches`, `ScratchReadPlan` and `StrokeRows` **moved to `:ext-ink`** (arc 23 / Y1) under neutral names, and `ScratchSelectionToolbar` **deleted** (arc 23 / Y4) in favour of `:sn-screen`'s `InkSelectionBar` |
 | `:ext-soil` | Android application (its own installable APK) | `:extension-api` only | `SoilExporterService`, `SoilExportSpec` — see [`export.md`](export.md); and, arc 16, `SoilImporterService` — see [`import.md`](import.md). One package, two services, one label |
 | `:ext-pdf` | Android application (its own installable APK) | `:extension-api` + `com.tom-roush:pdfbox-android:2.0.27.0` (module-local — approved 2026-08-30, used only on the protect path) | `PdfExporterService`, `PdfDescriptor`, `PdfExportSpec`, `PdfAssembly`, `CountingOutputStream` — arc 18's second exporter on the same point; see [`export.md`](export.md) |
 | `:ext-document` | Android application (its own installable APK) | `:extension-api` + `:sn-screen` + `:markdown` + `com.darkrockstudios:symspellkt:3.4.0` (module-local — approved 2026-08-30, the pdfbox precedent); **never** `:app`, no Application class, no drawing engine | one package, TWO services + a screen: `DocumentEditorService` + `DocumentEditorActivity` (the editor — arc 19 / M3–M7, with `EditorSession`, `DocumentSaver`, `AutosaveGovernor`, `ChunkPush`, `PendingPark`, `EditorSchema` (arc 22 / X4, schema v1: `prefs`/`word`/`caret`), `EditorSql`, `EditorStore`, `EditorPrefs` (the thin facade callers keep using), the format bar, find & replace, and the `proofread/` engine over the bundled `assets/proofread/en_82765.dict`), `TextImporterService` (M8, on the importer point) and `DocumentExporterService` (M9, on the exporter point) — see [`document.md`](document.md) |
 | `:ext-tags` | Android application (its own installable APK) | `:extension-api` + `:sn-screen` (g-paper arrives through its `api` and is deliberately never touched); **never** `:app`, no Application class, no drawing engine | the TENTH module (arc 21 / W1–W4, grown onto rows at arc 22 / X3, **NSE · Tags**, Tabler `tag` icon): one service + a screen, `TagManagerService` + `TagsActivity`, over `TagSession` (the `ScratchSession` shape — the two share a process), `TagSchema` (schema v1: `tag`/`assignment`), `TagSql`, `TagStore`, `TagIndex` (moved here from `:extension-api` at X3 — the screen's query-only in-memory model, built from two reads), `TagManage`, `TagPaging`, `TagRowView` — see [`tags.md`](tags.md) |
-| `:app` (`extension/` package) | part of the host APK | `:extension-api` | `ExtensionRegistry`, `ExtensionBinder`, `ExtensionCallException`, `InkCaps`, `RecognizerClient`, `RecognizerReadiness`, `ScratchPadClient`, `TransferCaps`, `ExporterClient`, `ImporterClient`, `DocumentEditorClient`, `DocumentEditorEntry`, `DocumentHostBinder`, `DocumentHostSession`, `TagClient`, `TagManagerEntry`; and in `data/extstore/`, the extension store — rebuilt on `SupportSQLiteOpenHelper` at arc 22 / X1, Room's `KvEntity`/`KvDao` deleted with it (`ExtensionStores`, `ExtensionStoreDatabase`, `StoreFormat`, `StoreExecutor` / `SupportStoreExecutor`, `ExtensionStoreGate`, `ExtensionStoreBinder`) — plus, in `export/` and `crypto/`, export's own host-side half (`ExportActivity`, `ExportPanel`, `ExportOptions`, `ExportArtifact`, `ExportNaming`, `ExportKeying`, `SoilOpenFiles`, and arc 19's `ExportText`, `ExportDocumentRules`, `DocumentPdfRender`, `DocumentPdfMetrics`), in `importing/` and `crypto/`, import's (`ImportFlow`, `NotebookImport`, `ImporterMatch`, `ImportNames`, `AncestryPlan`, `SafeImportId`, `ImportDialogs`, `ImportOverlay`, `ImportKeying`, `NotebookRemap` in `data/soil/`, and arc 19's `TextImport`), and in `notebook/`, tags' own host-side half (`TagsPopup`, `TagTargets`, `TagSelection`) |
+| `:ext-calendar` | Android application (its own installable APK) | `:extension-api` + `:sn-screen` (g-paper arrives through its `api`) + `:ext-ink` + androidx; **never** `:app`, no Room / SQLCipher / serialization | the TWELFTH module (arc 23 / Y1–Y3, **NSE · Calendar**, Tabler `calendar` icon): `CalendarApplication` (registers `RattaEngine` — its own process), `CalendarService` (the `ICalendar` stub, thin on `:ext-ink`'s `InkTransferSession` since Y4 — supplies only the target's own null check and the log wording), `CalendarSession` (an `InkTransferSession<CalendarTarget, CalendarStore.Received>(recordInboundPageSize = false)`), `CalendarSchema` (schema v1: `period`/`page`/`stroke`/`state` — the `stroke` half is `:ext-ink`'s `InkSql` since Y4), `CalendarSql` (`: InkDocument.StrokeSql by InkSql` since Y4), `CalendarStore` (on `:ext-ink`'s `InkStore`), `CalendarDocument` (thin over `:ext-ink`'s `InkDocument` — the calendar's own layer keeps which period/page is showing, whether its rows exist yet, and its size — and implements `:ext-ink`'s `InkPage` since Y4), `CalendarGeometry`, `CalendarTemplate`, `CalendarNavigation`, `DayPickerModel`, `DayPickerDialog`, `CalendarToolbar`, `CalendarActivity` (thin on `:ext-ink`'s `InkScreenActivity` since Y4 — keeps navigation, template bake, the picker, double-tap, `followReplay()`) — `CalendarSelectionToolbar` **deleted** (arc 23 / Y4) in favour of `:sn-screen`'s `InkSelectionBar` — see [`docs/calendar.md`](calendar.md) |
+| `:app` (`extension/` package) | part of the host APK | `:extension-api` | `ExtensionRegistry`, `ExtensionBinder`, `ExtensionCallException`, `InkCaps`, `RecognizerClient`, `RecognizerReadiness`, `HeldInkClient` (arc 23 / Y4 — the pad's and the calendar's held-bind lifecycle written once: `HeldInkPoint` is the per-point names/budgets interface, `DrainedInk` the one drained-result class), `ExtensionScreenEntry` (Y4 — the pad's and the calendar's entry-button door written once: `InkSend` the one outbound-ink class, `EntryWording` the four strings), `TransferSelection` (Y4 — the pure ink-only/writing-order rule both lasso sends obey), `ScratchPadClient` / `CalendarClient` / `ScratchPadEntry` / `CalendarEntry` (since Y4, thin points on the two classes above — a point's companion is a `HeldInkPoint`, its constructor a set of `ExtensionScreenEntry` wiring), `TransferCaps`, `ExporterClient`, `ImporterClient`, `DocumentEditorClient`, `DocumentEditorEntry`, `DocumentHostBinder`, `DocumentHostSession`, `TagClient`, `TagManagerEntry`; and in `data/extstore/`, the extension store — rebuilt on `SupportSQLiteOpenHelper` at arc 22 / X1, Room's `KvEntity`/`KvDao` deleted with it (`ExtensionStores`, `ExtensionStoreDatabase`, `StoreFormat`, `StoreExecutor` / `SupportStoreExecutor`, `ExtensionStoreGate`, `ExtensionStoreBinder`) — plus, in `export/` and `crypto/`, export's own host-side half (`ExportActivity`, `ExportPanel`, `ExportOptions`, `ExportArtifact`, `ExportNaming`, `ExportKeying`, `SoilOpenFiles`, and arc 19's `ExportText`, `ExportDocumentRules`, `DocumentPdfRender`, `DocumentPdfMetrics`), in `importing/` and `crypto/`, import's (`ImportFlow`, `NotebookImport`, `ImporterMatch`, `ImportNames`, `AncestryPlan`, `SafeImportId`, `ImportDialogs`, `ImportOverlay`, `ImportKeying`, `NotebookRemap` in `data/soil/`, and arc 19's `TextImport`), in `notebook/`, tags' own host-side half (`TagsPopup`, `TagTargets`, `TagSelection`), and in `notebook/`, the calendar's own host-side half (`CalendarTargets`, arc 23 / Y3 — the four Send-to-Calendar choices, every one through `CalendarTarget.of`) |
 
 `:sn-screen` is deliberately **not** in that dependency chain: it never sees `:extension-api`, so a
-shared screen helper can never quietly become part of the wire contract. `:ext-scratchpad` depends on
-both, separately — and that seam is exactly why the host's `TransferCaps` and the extension's
-`ScratchInk` are deliberate **twins** of the same wire ⇄ paper mapping rather than one shared class.
+shared screen helper can never quietly become part of the wire contract. **`:ext-ink` is the one
+module that depends on both, separately** (arc 23 / Y1, `api` on each) — and that seam is exactly
+why the host's `TransferCaps` and `:ext-ink`'s `InkWire` are deliberate **twins** of the same wire
+⇄ paper mapping rather than one shared class. `:ext-scratchpad` and `:ext-calendar` each still
+declare all three (`:extension-api`, `:sn-screen`, `:ext-ink`) directly in their own
+`build.gradle.kts` — `:ext-ink`'s `api` dependencies would reach them transitively, but each names
+its own AIDL dependency explicitly rather than relying on that.
 
 `:ext-scratchpad` needs **no** `tools:replace` and **no** libc++ `pickFirsts`: both exist in Paper
 only because the Onyx SDK arrives through its shared screen module. SN has no Onyx, and the release
@@ -145,14 +166,20 @@ The host's `AndroidManifest.xml` declares package-visibility for the point (API 
     <intent>
         <action android:name="…extension.TAG_MANAGER_SCREEN" />
     </intent>
+    <intent>
+        <action android:name="…extension.CALENDAR" />
+    </intent>
+    <intent>
+        <action android:name="…extension.CALENDAR_SCREEN" />
+    </intent>
 </queries>
 ```
 
-The three screen-owning points (scratch pad, document editor, tag manager) need **both** of their
-actions listed: one to discover and bind the service, one to resolve and launch the screen. The
-exporter and importer points need only one each — `describe()` and the delivery call both ride the
-same bind-per-call service. Plus `ACCESS_NETWORK_STATE`, for the readiness flow's offline
-pre-check (below).
+The four screen-owning points (scratch pad, document editor, tag manager, calendar) need **both**
+of their actions listed: one to discover and bind the service, one to resolve and launch the
+screen. The exporter and importer points need only one each — `describe()` and the delivery call
+both ride the same bind-per-call service. Plus `ACCESS_NETWORK_STATE`, for the readiness flow's
+offline pre-check (below).
 
 **Missing either of a screen-owning point's two actions from this block is a silent-zero trap, not
 a mismatch.** Arc 21 / W1 cost an hour to it: with the service's own action present but the
@@ -202,8 +229,9 @@ loading as one busy state), `UNAVAILABLE` (3). The host treats anything outside 
 
 | Constant | Value | Purpose |
 |---|---|---|
-| `API_VERSION` | 6 (arc 22 / X1) | the host accepts a service whose `<meta-data>` is in `minApiVersion(action)..API_VERSION` (`ExtensionContract.accepts`) — the declared number is what the extension *requires* of the host. `minApiVersion` is 1 for a stateless point, but `MIN_API_VERSION_FOR_STORE` (6) for the three **store-taking** points (scratch pad, document editor, tag manager): a service there is skipped below the floor even though the ceiling alone would admit it, because a replaced `IExtensionStore` breaks the old-extension/new-host direction too — see the version note below. Meta-data is **per service**: the PDF exporter declares 2 (the `sourceKind` tail), `:ext-document`'s text importer and document exporter declare 3 (the `resultKind` tail / `SOURCE_DOCUMENT`), its editor service declares **6** (arc 22 / X4, since it takes a store), `:ext-tags`' one service declares **6** (arc 22 / X3), `:ext-scratchpad`'s one service declares **6** (arc 22 / X2), everything else (`:ext-mlkit`, `:ext-soil`) at 1. **The ledger:** 2 = arc 18's `sourceKind` tail · 3 = arc 19 / M8's `resultKind` tail · 4 = arc 21 / W1, the tag point itself · 5 = arc 21 / W4, the first bump that is not a compatible tail · **6 = arc 22 / X1, the second break and the first that carries a floor** — see the version note below |
-| `MIN_API_VERSION_FOR_STORE` | 6 (arc 22 / X1) | the floor `minApiVersion` answers for a service on a store-taking point; every other point keeps a floor of 1 |
+| `API_VERSION` | 7 (arc 23 / Y1) | the host accepts a service whose `<meta-data>` is in `minApiVersion(action)..API_VERSION` (`ExtensionContract.accepts`) — the declared number is what the extension *requires* of the host. `minApiVersion` answers **`MIN_API_VERSION_FOR_STORE`** (6) for the three arc-22 **store-taking** points (scratch pad, document editor, tag manager), **`MIN_API_VERSION_FOR_CALENDAR`** (7) for the calendar, and 1 for every stateless point — a service below its floor is skipped even though the ceiling alone would admit it. Meta-data is **per service**: the PDF exporter declares 2 (the `sourceKind` tail), `:ext-document`'s text importer and document exporter declare 3 (the `resultKind` tail / `SOURCE_DOCUMENT`), its editor service declares **6** (arc 22 / X4, since it takes a store), `:ext-tags`' one service declares **6** (arc 22 / X3), `:ext-scratchpad`'s one service declares **6** (arc 22 / X2), `:ext-calendar`'s one service declares **7** (arc 23 / Y1 — the point was born at 7, so there is no lower number to consider), everything else (`:ext-mlkit`, `:ext-soil`) at 1. **The ledger:** 2 = arc 18's `sourceKind` tail · 3 = arc 19 / M8's `resultKind` tail · 4 = arc 21 / W1, the tag point itself · 5 = arc 21 / W4, the first bump that is not a compatible tail · 6 = arc 22 / X1, the second break and the first that carries a floor · **7 = arc 23 / Y1, the calendar point — a compatible *addition* (no existing interface changes shape) and the first bump with a *per-action* floor** — see the version note below |
+| `MIN_API_VERSION_FOR_STORE` | 6 (arc 22 / X1) | the floor `minApiVersion` answers for a service on one of the three arc-22 store-taking points |
+| `MIN_API_VERSION_FOR_CALENDAR` | 7 (arc 23 / Y1) | the floor `minApiVersion` answers for `ACTION_CALENDAR` — the point was born at API version 7, so there is no older calendar shape for the host to accept; every other point without a row here keeps a floor of 1 |
 | `ACTION_HANDWRITING_RECOGNIZER` | `…notesproutsn.extension.HANDWRITING_RECOGNIZER` | SN-namespaced action string |
 | `META_API_VERSION` | `…notesproutsn.extension.API_VERSION` | the `<service>` meta-data name |
 | `MAX_INK_STROKES` | 2,000 | most strokes in one recognize call |
@@ -219,7 +247,7 @@ versa; N0 pinned this with a test rather than leaving it to convention. `RECOGNI
 compared **by exact message string**, not substring: it is the one case the host types as "still
 downloading," and every other `IllegalStateException` is treated as a generic engine failure.
 
-**A version bump means one of two different things, and `API_VERSION`'s history through arc 21 is
+**A version bump means one of two different things, and `API_VERSION`'s history through arc 23 is
 where both shapes are on the record.** Versions 2 and 3 were **compatible tails**: `ExporterInfo`
 grew `sourceKind` and `ImporterInfo` grew `resultKind`, and an old host reading either tail simply
 finds nothing there — `dataAvail()` runs out and the absent-tail default is exactly the old
@@ -262,6 +290,30 @@ itself was reshaped again in the same bump (arc 22 / X3): `snapshot` — one ash
 whole index — was replaced by the paged `tags`/`assignmentsOf` reads the search merge now runs, a
 change only the tag service's own declaration needed to survive, since nothing about it is an
 absent-tail reading (the method is gone, not a field on it).
+
+**Version 7 (arc 23 / Y1) is a fourth shape: a compatible *addition* that still needed a version
+bump, because the thing it adds is a whole new interface rather than a field on an old one.**
+`ICalendar` did not exist before Y1, so there is no absent-tail reading for a host to fall back to
+and no older shape for it to misread — a version-6 host simply has never heard of `ACTION_CALENDAR`
+and never queries for it. Nothing about `IExtensionStore`, `ITagManager`, `IDocumentEditor` or any
+other existing interface changed shape, so **every extension that already declared a version keeps
+declaring exactly what it declared before** and no door this arc did not touch closes — unlike
+version 6, arc 23 costs no existing extension a redeclaration. What does change is the shape of the
+floor itself: `MIN_API_VERSION_FOR_STORE` was, through X4, the one floor above 1 that existed, so a
+single constant sufficed; a calendar service born at version 7 needs a **different** floor
+(`MIN_API_VERSION_FOR_CALENDAR`, also 7 — there being no lower number a calendar could sensibly
+declare), so `minApiVersion(action)` became a small map (`ACTION_SCRATCH_PAD`,
+`DocumentContract.ACTION_DOCUMENT_EDITOR` and `ACTION_TAG_MANAGER` still answering 6,
+`ACTION_CALENDAR` answering 7, everything absent from the map answering 1) rather than one constant
+compared against a fixed set of actions. `accepts` is unchanged in shape — still the range check
+`minApiVersion(action)..API_VERSION` — because the map is exactly what `minApiVersion` was always
+free to be.
+
+**The live consequence, verified on the Nomad through Y1:** `:ext-calendar`'s service declares 7 —
+the point's own birth version — from the moment it exists, so there was never a phase where the
+calendar's doors were live but skipped the way the pad's, the tag manager's and the editor's were
+between X1 and their own phase. Bootstrapping a point at the version that requires it, rather than
+growing an old one past a floor it predates, is the version-7 shape's whole point.
 
 ---
 
@@ -617,8 +669,12 @@ calling transaction code 1 on a version-6 host would land on `schemaVersion`, or
 **floor** as well as the usual ceiling: `ExtensionContract.MIN_API_VERSION_FOR_STORE` = 6, and
 `minApiVersion(action)` answers it for the three points whose service is lent a store
 (`ACTION_SCRATCH_PAD`, `DocumentContract.ACTION_DOCUMENT_EDITOR`, `ACTION_TAG_MANAGER`) and 1 for
-every other (stateless) point; `accepts(action, apiVersion)` is the range check
-(`minApiVersion(action)..API_VERSION`) the registry runs, both pure and JVM-tested.
+every stateless point; `accepts(action, apiVersion)` is the range check
+(`minApiVersion(action)..API_VERSION`) the registry runs, both pure and JVM-tested. (Arc 23 / Y1
+later added a fourth floor, `MIN_API_VERSION_FOR_CALENDAR` = 7, for the calendar point — see § The
+calendar point below; `minApiVersion` became a small map at that point rather than one constant
+compared against a fixed set of actions, but the shape this section describes is otherwise
+unchanged.)
 
 **The live consequence, X1 through X4, verified on the Nomad each time:** the moment X1 shipped,
 every store-taking service still declared its pre-X1 number, so `ExtensionRegistry` skipped all
@@ -857,29 +913,42 @@ the first empty bundle, one call after the ink. Three tests pin it, one per chun
 
 ### Host side — `ScratchPadClient`
 
-One instance per calling screen. `open(sendEnabled, openReceived)`:
+**Since arc 23 / Y4 the whole lifecycle below is `HeldInkClient`'s, not `ScratchPadClient`'s own —
+`ScratchPadClient` is a thin `HeldInkClient<IScratchPad, Int>` whose companion `Point` is the
+`HeldInkPoint` supplying the pad's two actions, two extras, four calls and three budgets.** Through
+Y3 the pad and the calendar (below) each carried their own copy of this bind-open-send-drain-finish
+sequence, and the copies had already drifted once — the settle rule (a timed-out last chunk is
+waited on again rather than believed, § below) landed on the calendar's copy alone at Y3 and the
+pad did not gain it until this unification — which is the `RattaNotebookView` sibling-copy trap
+playing out in a second seam. One instance of `HeldInkClient` per calling screen. `open(sendEnabled,
+openReceived)`:
 
 1. `ExtensionStores.open` **on IO, before the bind** — the pre-open rule. Measured on the Nomad:
    a cold create is **3 123 ms** end to end and a warm one **114 ms**. A 27× difference is what a
    cold SQLCipher KDF costs, and it must never sit inside a call's timeout window.
 2. Mint one `ExtensionStoreBinder` bound to the extension's uid.
 3. `ExtensionBinder.hold` (signature re-checked at bind).
-4. `begin(store)` under `CALL_TIMEOUT_MS` (2 s). Measured: **47–57 ms**, first run included — it
-   creates the pad's first blank page.
+4. `point.begin(iface, store)` under `HeldInkPoint.callTimeoutMs` (2 s for both points). Measured:
+   **47–57 ms**, first run included — it creates the pad's first blank page.
 5. Return the screen `Intent` (or **null** on any failure, reason logged, everything opened so far
    released — the caller shows the core's own dialog). Returning the Intent rather than a boolean
    plus an accessor keeps it one call: the caller launches exactly what it got.
 
-`finish()` — `end()` best-effort under the same 2 s, then `close()` + `revoke()` in `finally`.
-Idempotent, and the caller runs it from its **result callback and** from `onDestroy` while still
-open, because a bind must not outlive the screen that opened it even when the result never comes.
+`finish()` — settle any call a timeout orphaned (`HeldBinding.settle(settleTimeoutMs)`) so the store
+is never revoked under a placement still writing, then `end()` best-effort under the call timeout,
+then `close()` + `revoke()` in `finally`. Idempotent, and the caller runs it from its **result
+callback and** from `onDestroy` while still open, because a bind must not outlive the screen that
+opened it even when the result never comes.
 
-`send` / `drainOutgoing` (J5) are the two transfers' host half. Two rules are built into them:
+`HeldInkClient.send` / `.drainOutgoing` (J5, the settle rule added Y4) are the two transfers' host
+half. Rules built into them:
 
 - The **last** `receiveInk` chunk carries the whole placement — a read, decode, re-encode and write
   of up to 4 MiB on an e-ink CPU — so it takes `PLACE_TIMEOUT_MS` (10 s), not the 2 s of every other
   call. A Binder call cannot be cancelled: a budget that is too short reports failure for ink that
-  then lands anyway.
+  then lands anyway — which is why, since Y4, a timeout on that last chunk is **settled, not
+  believed**: `send` waits `placeTimeoutMs` again for the orphaned call, and a late `Settled.OK` is
+  treated as the success it is, ink already on the page.
 - `drainOutgoing` probes **one chunk past** `TRANSFER_MAX_CHUNKS`, so a non-empty chunk there tells
   the caller something was left behind rather than letting a silent truncation read as success.
 
@@ -895,13 +964,16 @@ black), and `toStrokes` mints **fresh ids** here. No id ever crosses in either d
 `ScratchPadService` holds what the host lent for this showing in `ScratchSession` — the store
 binder, the inbound chunks, the outbound chunks and the one-shot "open selected" record. `end()`
 clears all of it. `begin` reads the page list on the Binder thread; the first run creates one blank
-page. `receiveInk` accumulates chunks under **one monitor** (`begin` and `end` take the same one, so
-a host that restarts mid-transfer can never interleave with a placement), re-checking the running
-totals against the transfer caps as it goes — the untrusted-input half of the host's own
-before-any-bind check — and on `last` mints fresh ids and places through `ScratchStore.receive`,
-still on the Binder thread. `takeOutgoing` hands back one parked chunk; an index past the end is an
-**empty bundle, not an error**, because "done" is exactly what the host is asking about and it
-probes one chunk past the budget on purpose.
+page. **Since arc 23 / Y4 the stub bodies are `:ext-ink`'s `InkTransferSession`'s, not
+`ScratchPadService`'s own**: `receiveInk` calls `ScratchSession.receiveChunk`, which accumulates
+chunks under **one monitor** (`begin` and `end` take the same one, so a host that restarts
+mid-transfer can never interleave with a placement), re-checks the running totals against the
+transfer caps as it goes — the untrusted-input half of the host's own before-any-bind check — refuses
+a placement that changes mid-transfer, and on `last` mints fresh ids and calls back into
+`ScratchStore.receive` on the Binder thread; `takeOutgoing` is `ScratchSession.outgoing`. What
+`ScratchPadService` still supplies itself is the placement int's own validity check and the log
+wording. An index past the end is an **empty bundle, not an error**, because "done" is exactly what
+the host is asking about and it probes one chunk past the budget on purpose.
 
 Only exceptions that survive Binder marshalling are ever thrown from a stub method — anything else
 kills the transaction silently and the caller reads an empty reply as success. Through J3 the two
@@ -930,20 +1002,24 @@ is `INSERT OR IGNORE` then `UPDATE`d — **never `INSERT OR REPLACE INTO page`**
 deletes the conflicting row first and, with foreign keys ON, that delete **cascades** — it would
 take the page's strokes with it.
 
-`ScratchDocument` is a `TreeMap<order, Stroke>` plus an **op log** (`Put`/`Drop` per stroke id,
-page insert/delete/renumber), replacing arc 11's whole-page re-encode on every save: a flush
-snapshots and clears the log, then writes it as one or more `exec` batches
-(`ScratchBatches`, split at ≤ 4 MiB / ≤ 10 000 statements over `StoreCodec`'s own arithmetic — one
-batch is one transaction and therefore atomic; past it, `receive` **compensates** a multi-batch
-failure — a cascading `DELETE FROM page` for a new page, one `dropStroke` per minted id for the
-current page, never an `IN (…)` list — before throwing `StoreUnavailable`). Orders are a
+**Since arc 23 / Y1 the stroke-level half of this lives in `:ext-ink`'s `InkDocument`**, shared with
+the calendar so the two never drift: a `TreeMap<order, Stroke>` plus an **op log** (`Put`/`Drop`
+per stroke id), replacing arc 11's whole-page re-encode on every save — a flush snapshots and
+clears the log, then writes it as one or more `exec` batches (`:ext-ink`'s `StoreBatches`, moved
+from the pad's own `ScratchBatches` at Y1, split at ≤ 4 MiB / ≤ 10 000 statements over
+`StoreCodec`'s own arithmetic — one batch is one transaction and therefore atomic; past it,
+`receive` **compensates** a multi-batch failure — a cascading `DELETE FROM page` for a new page,
+one `dropStroke` per minted id for the current page, never an `IN (…)` list — before throwing
+`StoreUnavailable`). `ScratchDocument` itself now keeps only the pad's own layer over `InkDocument`
+— the page list and its structural edits (insert/delete/renumber) and the page's size. Orders are a
 **high-water mark**, never the map's last key, so erasing the tail stroke can never hand its order
 to the next stroke drawn.
 
 Reads are **planned, never refused**: `readPage` reads the size row, then `SELECT "order",
 LENGTH(blob)` (small), then packs consecutive strokes into `BETWEEN` ranges under the 4 MiB chunk
-budget (`ScratchReadPlan`) — a page of any size comes back without ever meeting
-`STORE_RESULT_LARGE`. `StrokeRows.decode` drops a bad row rather than losing the page (counted,
+budget (`:ext-ink`'s `StrokeReadPlan`, moved from the pad's own `ScratchReadPlan` at Y1) — a page
+of any size comes back without ever meeting `STORE_RESULT_LARGE`. `:ext-ink`'s `StrokeRows.decode`
+(moved from the pad's own `StrokeRows`) drops a bad row rather than losing the page (counted,
 logged) — arc 11's "unreadable page" state, and the blob it protected, are both gone. **The 4 MiB
 page ceiling, `PageFullException`, `SCRATCH_PAGE_FULL` and the "page full" dialog are deleted**: a
 scratch page is unbounded, the same as a notebook page, structurally (no cap anywhere in the write
@@ -969,7 +1045,8 @@ and muddy J4's timings.
 ### An extension-owned screen — the tier-2 recipe (arc 11 / J4)
 
 A **tier-2** point does not answer a question; it takes the screen. The recipe, in the order it has
-to happen:
+to happen — and, **since arc 23 / Y4, a base class the paper-hosting points share**
+(`:ext-ink`'s `InkScreenActivity`) rather than a shape two files each followed by hand:
 
 1. **The Activity is exported, with a custom action and no launcher filter.** `<category DEFAULT>`
    is required or implicit resolution never matches it.
@@ -1000,20 +1077,25 @@ it is a different process, so the host's registration means nothing to it.
 
 Both directions are copies that cross **only through the held service** — never the Intent, never a
 file — carry **no ids**, and keep coordinates 1:1. The feature-level walk-through is in
-[`docs/scratchpad.md`](scratchpad.md); what belongs here is which side is allowed to trust what:
+[`docs/scratchpad.md`](scratchpad.md); what belongs here is which side is allowed to trust what.
+**Since arc 23 / Y4** the host-side calls this table names — `open`/`send`/`drainOutgoing`/`finish`
+— are `HeldInkClient`'s (via the thin `ScratchPadClient`), the caller that checks `withinLimits`
+before any bind is `NotebookActivity.sendSelectionToExtension`, and what feeds it a selection to
+check is `TransferSelection.sendable` (the ink-only, writing-order rule, Y4) — none of which changes
+what crosses or who sanitizes it, only which class the reader finds it in:
 
 | | Notebook → pad (`receiveInk`) | Pad → notebook (`takeOutgoing`) |
 |---|---|---|
 | Capped **before any bind** | `TransferCaps.withinLimits` in the host | — (the reply is bounded by the drain) |
 | Capped **on receipt** | the service re-checks the running totals across chunks | `TransferCaps.Drain` — summed caps, chunk budget, one probe past it |
 | Validated at unmarshal | `WireStroke` / `InkBundle` `requireValid` (a malformed stroke rejects the whole bundle) | the same, host-side |
-| Sanitized | `ScratchInk.toStrokes` — unknown style → PEN, width clamped | `TransferCaps.sanitize` — the same, **plus colour forced opaque black** |
+| Sanitized | `:ext-ink`'s `InkWire.toStrokes` (moved from `ScratchInk` at Y1) — unknown style → PEN, width clamped | `TransferCaps.sanitize` — the same, **plus colour forced opaque black** |
 | Ids | minted by the extension | minted by the host |
 | Failure | a multi-batch write failure is **compensated** (the new page or the minted strokes are undone) before `StoreUnavailable`, never a partial placement left standing — the 4 MiB page ceiling and `SCRATCH_PAGE_FULL` this row named through X1 are deleted at X2 | a cut drain is reported, never silently truncated |
 
-The two mappings are deliberate **twins** (`TransferCaps` host-side, `ScratchInk` extension-side)
-rather than one shared class: `:sn-screen` never sees `:extension-api`, and keeping the twin is what
-keeps that seam honest.
+The two mappings are deliberate **twins** (`TransferCaps` host-side, `:ext-ink`'s `InkWire`
+extension-side, shared with the calendar since arc 23 / Y1) rather than one shared class:
+`:sn-screen` never sees `:extension-api`, and keeping the twin is what keeps that seam honest.
 
 ---
 
@@ -1547,6 +1629,212 @@ a spelling difference that names the identical UUID.
 
 ---
 
+## The calendar point (arc 23)
+
+> The calendar **as a feature** — the three pages, the store, navigation, both transfers, the
+> failure table — is [`docs/calendar.md`](calendar.md). What follows is the **seam**: the point,
+> the held bind, the wire types, and what each side is allowed to know.
+
+`ACTION_CALENDAR` + `ACTION_CALENDAR_SCREEN` — SN's **seventh** point, granted 2026-09-01, the
+fourth screen-owning one and the second with paper (after the pad), served by **`NSE · Calendar`**
+(`:ext-calendar`). The shape is the pad's, on purpose: the extension owns the calendar screen, its
+g-paper surface and every stroke, in its own extension store; the host owns the two entry doors
+(the library, and — since Y3 — the notebook) and the held bind. `ICalendar` is `IScratchPad`'s
+four methods with the one thing the pad names by an int made a real type: where a placement is
+`PLACEMENT_NEW_PAGE` / `PLACEMENT_CURRENT_PAGE`, the calendar's is a `CalendarTarget` — a page is a
+*date*, and a date that was not normalized would mint a second row for the same period.
+
+### The held bind
+
+The bracket is the pad's, unchanged: `begin(store)` → launch the screen → the result →
+`end()` → unbind → revoke the store binder, the last three in one `finally` on every path.
+
+```
+interface ICalendar {
+    void       begin(IExtensionStore store);
+    void       receiveInk(in InkBundle chunk, in CalendarTarget target, boolean last);
+    InkBundle  takeOutgoing(int chunkIndex);
+    void       end();
+}
+```
+
+Every stub method calls `HostCallerCheck.enforce` first, and only the three marshalable exception
+shapes ever leave one: `receiveInk` throws `IllegalArgumentException` over the transfer caps or on
+a target that changes mid-transfer (every chunk of one transfer must name the same
+`CalendarTarget` — the service re-checks it, the untrusted-input half of the host's own
+before-any-bind check), and `IllegalStateException("store unavailable")` — the pad's own text — is
+the one store failure, on either method that touches it. Nothing rides the screen's Intent but the
+pad's two booleans, mirrored under the calendar's own names: `EXTRA_CALENDAR_SEND_ENABLED` (opened
+from the notebook, so the calendar shows its Send buttons) and `EXTRA_CALENDAR_OPEN_RECEIVED`
+(opened right after a `receiveInk`, so the calendar opens on the target page with the placed
+strokes selected).
+
+### The wire types
+
+**Reused unchanged.** `WireStroke`, `InkBundle`, `InkChunks` and every transfer cap
+(`MAX_TRANSFER_STROKES`/`_POINTS`, `TRANSFER_CHUNK_STROKES`/`_POINTS`, `TRANSFER_MAX_CHUNKS`) are
+the pad's own — a calendar page's ink is ink like any other, and the caps were never about what the
+ink was *for*. What is new is `CalendarTarget`, which rides on **every** `receiveInk` chunk (not
+just the last) exactly as the pad's `placement` int does:
+
+```kotlin
+class CalendarTarget(val kind: Int, val date: String, val half: Int) : Parcelable
+```
+
+`kind` is `KIND_MONTH` / `KIND_WEEK` / `KIND_DAY`; `date` is the period's ISO day
+(`yyyy-MM-dd`), **already normalized** — a month's first day, a week's Sunday, the day itself;
+`half` is 0 (AM, and the only legal value for a month or a week) or 1 (PM, `KIND_DAY` only). The
+constructor's `require`s **are** the validation — unmarshal is validation, the family rule since
+E1 — so a target that fails them crosses as an `IllegalArgumentException` rather than landing ink
+on a page nobody asked for. `CalendarTarget.of(kind, day, half)` is the constructor a caller with a
+`LocalDate` in hand uses (the host's target sheet); it normalizes through `CalendarDates` rather
+than trusting the caller to have done so.
+
+`CalendarDates` (pure, `java.time`, minSdk 29) is the arithmetic both sides and the tests share, so
+**nobody guesses the week rule**: weeks start on **Sunday**, never the device locale. Titles come
+from `DAY_NAMES` / `MONTH_NAMES` / `MONTH_NAMES_SHORT` **hand lists, indexed, never a formatter** —
+arc 5's rule, because CLDR data drifts between devices and a page title is chrome, not locale data.
+A date crosses the seam and lives in a row only as `LocalDate.toString()` — ISO, `Locale.ROOT`-safe
+(og's Eastern-Arabic-digit lesson) — never a formatted string. `step(kind, date, half, forward)` is
+the one place "the next page" is defined: a month by a month, a week by seven days, a day AM → PM →
+the next day's AM (and the mirror going back) — the host's `CalendarTargets` (below) and the
+extension's own navigation both call through it rather than each re-deriving the rule.
+
+### Host side — `CalendarClient`, `CalendarEntry`, `CalendarTargets`
+
+**Since arc 23 / Y4, `CalendarClient` and `CalendarEntry` are thin points, not shapes of their own
+kept in step with the pad's by hand.** `CalendarClient` is a `HeldInkClient<ICalendar,
+CalendarTarget>` whose companion `Point` supplies `ICalendar`'s names and budgets; `CalendarEntry`
+is an `ExtensionScreenEntry<ICalendar, CalendarTarget>` supplying the calendar's registry lookup,
+its four strings and its result code. Through Y3 each was a hand-kept copy of the pad's client and
+entry — "`CalendarClient` is `ScratchPadClient`'s shape on `ICalendar`" was true only by discipline
+— and the copies had already drifted once before Y4 closed them: the settle rule below landed on
+the calendar's copy alone at Y3, and the pad did not gain it (or its `SETTLE_TIMEOUT_MS`) until this
+unification, which is the `RattaNotebookView` sibling-copy trap in a second seam.
+
+`open(sendEnabled, openReceived)` pre-opens the store on IO (the pre-open rule), mints a uid-bound
+`ExtensionStoreBinder`, holds the bind, calls `begin(store)` under `CALL_TIMEOUT_MS` (2 s) and
+returns the screen Intent or null (everything opened so far released on any failure); `send` hands
+`receiveInk` its chunks with the `CalendarTarget` on every one, the **last** chunk under
+`PLACE_TIMEOUT_MS` (10 s, the pad's number — a Binder call cannot be cancelled, so a budget too
+short reports a failure for ink that then lands anyway — and therefore, since Y4, **a timed-out
+placement is settled, not abandoned**: `HeldBinding.settle` waits the budget again for the orphaned
+transaction, a late return without an exception is a success, and only a call that threw or is
+still running past the second budget is a failure); `drainOutgoing` is the pad's `Drain` loop over
+`takeOutgoing`; `finish` **settles first** (`SETTLE_TIMEOUT_MS`, so the store is never revoked under
+a placement's batches, where the extension's own compensation would be refused by the same gate),
+then runs `end()` best-effort, then unbinds and revokes in `finally`, idempotent, called from both
+the result callback and `onDestroy`. All of that is `HeldInkClient`'s code, run once for both
+points.
+
+`CalendarEntry`'s shape — **one class serving both doors** (the library's, since Y1, and the
+notebook's, since Y3) because everything about them is identical except one line: the notebook's
+`beforeLaunch` runs `paper.releaseForHandoff()` immediately before the launch, and the library has
+no pipeline to hand over — is `ExtensionScreenEntry`'s: it owns visibility (the button is `GONE`
+unless `ExtensionRegistry.calendar` finds a trusted service, re-run on every `refresh()`), the busy
+guard, the `OpeningOverlay` wait, and — since Y3 — both transfers' host half: an optional `InkSend`
+crosses over the held bind **before** the screen is launched, and a `RESULT_CALENDAR_SEND` is
+drained on the bind that is **still held**, handed to `onDrained`, before `finish()` runs.
+
+`CalendarTargets` (`notebook/CalendarTargets.kt`) is the pure model behind the Send-to-Calendar
+sheet's four rows — Today AM · Today PM · This week · This month — and **the host never computes a
+period**: every row is `CalendarTarget.of(kind, today, half)`, so the week rule (Sunday-start) is
+the contract's and the extension's alone. "Today" is passed in rather than read from the clock, so
+`CalendarTargetsTest` can put the sheet on any day.
+
+### Extension side — the store on rows
+
+`CalendarService` parks what the host lent for the showing — the store binder, the accumulating
+inbound chunks and their bound `CalendarTarget`, the outbound chunks, and the one-shot "just
+received" record — in `CalendarSession`, under one monitor shared by `begin`/`receiveInk`/`end` so
+a host that restarts mid-transfer can never interleave with a placement. `begin` also declares the
+schema and logs the bookmark and the three row counts — the arc's on-device proof that browsing an
+empty month wrote nothing, since `sqlite3` cannot read a SQLCipher file. **Since arc 23 / Y4 the
+stub bodies are `:ext-ink`'s `InkTransferSession`'s, not `CalendarService`'s own** — `receiveInk`
+calls `CalendarSession.receiveChunk` (the same accumulate-and-place body `ScratchSession` shares),
+and `takeOutgoing` is `CalendarSession.outgoing`; what `CalendarService` still supplies itself is
+the target's own null check (already through `requireValid` at unmarshal) and the log wording.
+
+`CalendarSchema.V1` declares four tables:
+
+```sql
+period (id, kind, date)                                    -- UNIQUE(kind, date); date = ISO day
+page   (id, periodId → period.id ON DELETE CASCADE, half, width, height, createdAt, updatedAt)
+stroke (id, pageId → page.id ON DELETE CASCADE, "order", color, width, style, blob)
+state  (key, value)                                        -- lastView · lastDate · lastHalf
+```
+
+A month or a week owns one `page` (`half` 0); a day owns two (0 = AM, 1 = PM). **Rows are minted on
+the first stroke, never on open** — `CalendarStore.readPage` answers what is there and writes
+nothing, and the flush that carries a page's first `Put` leads with `INSERT OR IGNORE INTO period`
++ `INSERT OR IGNORE INTO page` (`CalendarStore.mintRows`), the page's `periodId` **resolved inside
+the `page` insert** from `(kind, date)` so the day's other half joins whatever period row already
+exists rather than duplicating it. **Neither `period` nor `page` is ever `INSERT OR REPLACE`d** —
+with foreign keys ON, REPLACE deletes the conflicting row first and that delete cascades, taking a
+period's pages and their strokes or a page's strokes with it (X2's trap, which `CalendarSql :
+InkDocument.StrokeSql` inherits along with the rest of the shape). `stroke` is the pad's row
+exactly — `blob` is
+`StrokeCodec` format B, `"order"` the writing order within the page. `page.width`/`height` is the
+page's minted size — this device's screen — so the template, rendered always at the page's own
+size, keeps grid and ink registered on any screen the store is later carried to. **Nothing deletes
+a `period` in this arc**, at all.
+
+`CalendarStore` (on `:ext-ink`'s `InkStore` base) and `CalendarDocument` (thin over `:ext-ink`'s
+`InkDocument`) split the same way the pad's do: the document owns *which* period/page is showing,
+whether its rows exist yet, and its size; what is *on* the page — the strokes, the op log, the
+re-flush rule, the four stroke-level undo replays (`Drew`/`Erased`/`Moved`/`Pasted`) — is
+`InkDocument`'s, shared with the pad so the two never drift. `CalendarStore.receive` (the Binder
+thread, Y3) places a notebook → calendar transfer as one statement list: minting the target's rows
+at `0 × 0` if none exist (the page takes the screen's size the first time a screen shows it — the
+sender's page size is the sender's), numbering the new strokes after whatever is already there,
+and — above the batch cap — **compensating** a part-way failure by deleting each minted stroke by
+id (never an `IN (…)` list: the 999-argument cap) before throwing `StoreUnavailable`; a period or
+page row a failed placement minted is left as it is, because an empty page is not a placement and
+nothing deletes a period.
+
+### The second paper surface and the EPD handoff
+
+The calendar registers g-paper itself (`RattaEngine.register()` in `CalendarApplication` — its own
+process, so the host's registration means nothing to it) and follows the pad's tier-2 recipe
+verbatim: the caller releases (`releaseForHandoff()`) immediately before the launch — the library
+door has no pipeline to hand over, only the notebook's does — the extension reclaims in `onResume`,
+and every exit on the extension side releases before `finish()`. `docs/extensions.md`'s own
+"Two paper surfaces, one EPD pipeline" note (§ the scratch-pad point) is the rule this point
+inherits rather than re-derives; nothing about the ordering changed for a second consumer of it.
+
+### `:ext-ink` — the seam's answer to the sibling-copy trap
+
+The calendar is the second extension to own a paper surface over the host's extension store, and
+without `:ext-ink` it would have been `RattaNotebookView` all over again — a hand-maintained copy
+of the pad's wire mapping, row codec, batching, read planning, op log and stroke-level undo,
+rotting one fix at a time. `:ext-ink` could not live in `:sn-screen`: it is extension-side code
+over the *contract's* `Statement` and `WireStroke`, and `:sn-screen` is deliberately barred from
+ever seeing `:extension-api` (§ Module layout) so a shared screen helper can never quietly become
+part of the wire format. So it is its own library, depending on both — the one module in the whole
+app that does — and the pad was repointed onto it at Y1 rather than the calendar being built as a
+fresh copy of pre-`:ext-ink` code.
+
+### What Y1–Y3 proved on the Nomad
+
+**Y1** (the seam, the Month page): cold open **2,726 ms** (store creation) / warm **56 ms**;
+`begin` **161 ms** cold / **34 ms** warm (the pad's warm `begin`: 23 ms); a shell `am start` of the
+screen is `refused caller (none)`; `pm disable-user` makes the library button vanish
+(`0 provider(s) of 0 candidate(s)`), `pm enable` brings it back; the store file is ciphertext; a
+second month browsed and left is `rows: 0 period(s), 0 page(s), 0 stroke(s)`. **Y3** (the notebook
+door, both transfers): `begin` **818 ms** cold-in-process / **28 ms** warm; `send` →
+`receiveInk: 19 strokes placed … in 119 ms`; `drainOutgoing: 1 chunks, 19 strokes … in 106 ms`;
+`pm disable-user` takes **both** doors — library and notebook — GONE at once, `pm enable` restores
+both; `logcat -b crash` empty at every phase. `PLACE_TIMEOUT_MS` stays the pad's 10 s — 119 ms for
+19 strokes leaves two orders of magnitude of headroom, and nothing in three phases suggested it
+needed tightening.
+
+**Privacy**, the family rule again: ink crosses and nothing else — no stroke id, page id, notebook
+id or name has a parameter to ride on, `CalendarService`/`CalendarClient`/`CalendarEntry` log
+counts and durations only, and the screen's Intent carries the action, the package and two booleans
+— never a date, a target or a page.
+
+---
+
 ## Boundary audit
 
 What crosses the process boundary, in which direction, and what guards it. **Re-walk this table
@@ -1560,17 +1848,19 @@ point and `:ext-document`'s two sibling registrations, walked against the code a
 freeze (2026-08-31). Rows 19–23 are the tag-manager point, originally walked against the code at
 the arc-21 freeze (2026-09-01). **Rows 1, 5, 14, 16 and 19–23 are re-walked below against arc 22's
 rebuilt store** (X1 through X4, 2026-09-01) — every one of them named a key/value detail that
-changed underneath it — and rows 24–26 are new: the SQL gate, the reserved name spaces, and the
-one extension table the host itself reads, none of which existed to audit before the store became
-tables.
+changed underneath it — and rows 24–26 are the SQL gate, the reserved name spaces, and the one
+extension table the host itself reads, none of which existed to audit before the store became
+tables. Rows 27–33 are the calendar point, walked against the code at the arc-23 freeze
+(2026-09-02) — the seam is the pad's, so most of the pad's rows above (1–5) hold for it unchanged
+and are not repeated; what follows is what the calendar's own shape adds.
 
 | # | The claim | Where it holds |
 |---|---|---|
-| 1 | **Outward on `begin` is the uid-bound store binder only.** `begin(store)` is the held bind's opening call and its one argument: an `ExtensionStoreBinder` minted in `ScratchPadClient.open` **after** `ExtensionStores.open` on IO (the pre-open rule), bound to `getPackageUid(ref.packageName)`, gated by `ExtensionStoreGate.check()` on every method, held for the showing in `ScratchSession.store` and revoked in the same `finally` as the unbind — on every path: result, cancel, caller `onDestroy`, failed `begin`. **Since arc 22 / X1 `IExtensionStore` is six SQL-shaped methods** (`schemaVersion`/`applySchema`/`exec`/`query`/`next`/`close`), not `get`/`put`/`delete`/`keys`/`putLarge`/`getLarge`, but the claim is unchanged: still no method that could return a key, path or `File`, and every statement that crosses is validated (`StoreSql`) before it runs on the one connection the host owns. Nothing else reaches the extension at open: the Intent is the action + `setPackage` + two booleans — no key, path, name, notebook or page id. | `ScratchPadClient.open/finish`, `ExtensionBinder.hold` / `HeldBinding`, `ExtensionStoreBinder`, `ExtensionStoreGate` (JVM-tested), `ScratchPadService.begin/end`, `ScratchSession` |
-| 2 | **Outward ink is bare geometry + width + colour + style name + the page px size — capped and chunked before the bind.** `InkBundle(strokes, pageWidth, pageHeight)` with `WireStroke` = four parallel `FloatArray`s + `width` + `colorArgb` + the `StrokeStyle` **name**. `TransferCaps.toWireStrokes` is the one reduction site from a g-paper `Stroke` (id and time never leave; point-less strokes skipped); `placement` is one of two recorded ints. **No stroke id, page id or number, notebook id or name, or selection bounds has a parameter to travel in** — `IScratchPad` has no other argument. Host side, before any bind: `withinLimits` → the "too much to send" dialog, then `InkChunks.chunk`. Extension side: `requireValid` at unmarshal, the running totals re-checked under one monitor, the placement int checked, fresh ids minted, the page written on the Binder thread under the full rule. | `IScratchPad.aidl`, `WireStroke` / `InkBundle` (parcel + `requireValid`, JVM-tested), `TransferCaps.withinLimits/chunk/toWireStrokes`, `InkChunks`, `ScratchPadClient.send`, `ScratchPadService.receiveInk`, `ScratchInk.toStrokes`, `ScratchStore.receive` |
-| 3 | **Inward ink is validated, capped and fresh-id'd; the paste is one undoable step and nothing else on the page changes.** Every reply is an `InkBundle` → `requireValid` at unmarshal, then `TransferCaps.sanitize` (known style or PEN, width in 0.5–50 px, **colour forced opaque black**) under `Drain`: stop at the first empty bundle, at the summed caps, or at `TRANSFER_MAX_CHUNKS` + one probe past it (a non-empty chunk there = truncated → the "not everything came back" dialog, naming the pasted count). Fresh ids are minted host-side (`toStrokes`, `timeMillis 0`); `NotebookSession.pasteStrokes` writes the rows in **one transaction** with `"order"` rebased inside it, and `NotebookActivity` records **one** `Action.ObjectsPasted` and leaves the strokes selected. No other row, object, page or session state is touched; a failed write → a dialog, nothing pasted, and a drain that fails or brings back nothing gets its own dialog rather than a silent return (J6). The bind is finished **after** the paste callback, never before it. | `IScratchPad.aidl`, `InkBundle.requireValid`, `TransferCaps.sanitize/toStrokes/Drain` (JVM-tested), `ScratchPadClient.drainOutgoing`, `ScratchPadEntry.onResult`, `NotebookSession.pasteStrokes`, `NotebookActivity.pasteFromPad` |
-| 4 | **The screen is the extension's, launched only by the core, caller-checked both ways; data never rides the Intent.** `ScratchPadActivity` is exported under `ACTION_SCRATCH_PAD_SCREEN` with `<category DEFAULT>` and **no launcher filter**; `HostCallerCheck.enforceActivity` is the first statement in `onCreate` (host package **and** `SIGNATURE_MATCH`, else `finish()` before anything is inflated). The core launches it only through an `ActivityResultLauncher` with `setPackage` from a trusted `ProviderRef`, and only after `begin` succeeded and (on a paper-hosting caller) `releaseForHandoff()`. The Activity reads only the two booleans and returns only `RESULT_SCRATCH_SEND` / `RESULT_CANCELED`; ink goes through the service, pages through the store binder. Every exit runs `releaseForHandoff()` before `finish()`. Verified on the Nomad every phase: a shell `am start` is `refused caller (none)`. | `ScratchPadActivity.onCreate` / `finishWithHandoff` / `onResume`, `HostCallerCheck.enforceActivity`, the `:ext-scratchpad` manifest, `ScratchPadClient.open`, `ScratchPadEntry` (`ActivityResultLauncher`, `beforeLaunch`) |
-| 5 | **The store caps change no trust rule, and since arc 22 / X2 there is no page ceiling to enforce.** A payload is ≤ `STORE_MAX_VALUE_BYTES` (4 MiB): **inline** up to `STORE_MAX_INLINE_BYTES` (512 KiB); above that as a `LargeValue` — a read-only ashmem region + `byteCount` the receiver copies out of and closes in `finally`, host side through `SharedBytes.readAndClose` **before** the gate sees bytes, so the cap applies to the copy and never to a live mapping. Every statement is still `StoreSql`-validated, every method is still uid-bound and revocable through the same gate, and the DB is still opened only through `SoilCrypto` under the global key, with foreign keys ON so `ON DELETE CASCADE` actually cascades. `receiveInk` writes the page's rows as one or more `exec` batches (`ScratchBatches`, split at 4 MiB / 10 000 statements) — **a multi-batch failure is compensated** (the new page's cascade, or a `dropStroke` per minted id) rather than left half-written, so "nothing was sent" is never contradicted by orphaned rows. **The 4 MiB page ceiling, `PageFullException` and `SCRATCH_PAGE_FULL` — this row's claim through X1 — are deleted at X2**: a page is unbounded like a notebook page, and reads are planned into `BETWEEN` ranges (`ScratchReadPlan`) rather than refused. The pad has no file, prefs or second store of its own. | `ExtensionContract.STORE_*`, `IExtensionStore.aidl`, `LargeValue`, `SharedBytes`, `ExtensionStoreBinder`, `ExtensionStoreGate` (JVM-tested), `ScratchSchema`, `ScratchSql`, `ScratchStore`, `ScratchDocument`, `ScratchBatches`, `ScratchReadPlan`, `ScratchPadActivity` |
+| 1 | **Outward on `begin` is the uid-bound store binder only.** `begin(store)` is the held bind's opening call and its one argument: an `ExtensionStoreBinder` minted in `ScratchPadClient.open` **after** `ExtensionStores.open` on IO (the pre-open rule), bound to `getPackageUid(ref.packageName)`, gated by `ExtensionStoreGate.check()` on every method, held for the showing in `ScratchSession.store` and revoked in the same `finally` as the unbind — on every path: result, cancel, caller `onDestroy`, failed `begin`. **Since arc 22 / X1 `IExtensionStore` is six SQL-shaped methods** (`schemaVersion`/`applySchema`/`exec`/`query`/`next`/`close`), not `get`/`put`/`delete`/`keys`/`putLarge`/`getLarge`, but the claim is unchanged: still no method that could return a key, path or `File`, and every statement that crosses is validated (`StoreSql`) before it runs on the one connection the host owns. Nothing else reaches the extension at open: the Intent is the action + `setPackage` + two booleans — no key, path, name, notebook or page id. | `HeldInkClient.open/finish` (via `ScratchPadClient`, thin since Y4), `ExtensionBinder.hold` / `HeldBinding`, `ExtensionStoreBinder`, `ExtensionStoreGate` (JVM-tested), `ScratchPadService.begin/end`, `ScratchSession`, `:ext-ink`'s `InkTransferSession.begin` (since Y4 — `ScratchSession.store` is this base class's field) |
+| 2 | **Outward ink is bare geometry + width + colour + style name + the page px size — capped and chunked before the bind.** `InkBundle(strokes, pageWidth, pageHeight)` with `WireStroke` = four parallel `FloatArray`s + `width` + `colorArgb` + the `StrokeStyle` **name**. `TransferCaps.toWireStrokes` is the one reduction site from a g-paper `Stroke` (id and time never leave; point-less strokes skipped); `placement` is one of two recorded ints. **No stroke id, page id or number, notebook id or name, or selection bounds has a parameter to travel in** — `IScratchPad` has no other argument. Host side, before any bind: `withinLimits` → the "too much to send" dialog, then `InkChunks.chunk`. Extension side: `requireValid` at unmarshal, the running totals re-checked under one monitor, the placement int checked, fresh ids minted, the page written on the Binder thread under the full rule. | `IScratchPad.aidl`, `WireStroke` / `InkBundle` (parcel + `requireValid`, JVM-tested), `TransferCaps.withinLimits/chunk/toWireStrokes`, `InkChunks`, `HeldInkClient.send` (via `ScratchPadClient`), `ScratchPadService.receiveInk`, `:ext-ink`'s `InkTransferSession.receiveChunk` (since Y4 — the running-totals re-check and the placement-bound-by-first-chunk rule are this shared body's, not `ScratchPadService`'s own), `:ext-ink`'s `InkWire.toStrokes` (moved from `ScratchInk`), `ScratchStore.receive` |
+| 3 | **Inward ink is validated, capped and fresh-id'd; the paste is one undoable step and nothing else on the page changes.** Every reply is an `InkBundle` → `requireValid` at unmarshal, then `TransferCaps.sanitize` (known style or PEN, width in 0.5–50 px, **colour forced opaque black**) under `Drain`: stop at the first empty bundle, at the summed caps, or at `TRANSFER_MAX_CHUNKS` + one probe past it (a non-empty chunk there = truncated → the "not everything came back" dialog, naming the pasted count). Fresh ids are minted host-side (`toStrokes`, `timeMillis 0`); `NotebookSession.pasteStrokes` writes the rows in **one transaction** with `"order"` rebased inside it, and `NotebookActivity` records **one** `Action.ObjectsPasted` and leaves the strokes selected. No other row, object, page or session state is touched; a failed write → a dialog, nothing pasted, and a drain that fails or brings back nothing gets its own dialog rather than a silent return (J6). The bind is finished **after** the paste callback, never before it. | `IScratchPad.aidl`, `InkBundle.requireValid`, `TransferCaps.sanitize/toStrokes/Drain` (JVM-tested), `HeldInkClient.drainOutgoing` (via `ScratchPadClient`), `ExtensionScreenEntry.onResult` (via `ScratchPadEntry`, holds the `DrainedInk`), `NotebookSession.pasteStrokes`, `NotebookActivity.pasteFromPad` |
+| 4 | **The screen is the extension's, launched only by the core, caller-checked both ways; data never rides the Intent.** `ScratchPadActivity` is exported under `ACTION_SCRATCH_PAD_SCREEN` with `<category DEFAULT>` and **no launcher filter**; `HostCallerCheck.enforceActivity` is the first statement in `onCreate` (host package **and** `SIGNATURE_MATCH`, else `finish()` before anything is inflated). The core launches it only through an `ActivityResultLauncher` with `setPackage` from a trusted `ProviderRef`, and only after `begin` succeeded and (on a paper-hosting caller) `releaseForHandoff()`. The Activity reads only the two booleans and returns only `RESULT_SCRATCH_SEND` / `RESULT_CANCELED`; ink goes through the service, pages through the store binder. Every exit runs `releaseForHandoff()` before `finish()`. Verified on the Nomad every phase: a shell `am start` is `refused caller (none)`. | `ScratchPadActivity.onCreate` / `finishWithHandoff` / `onResume`, `HostCallerCheck.enforceActivity`, the `:ext-scratchpad` manifest, `HeldInkClient.open` (via `ScratchPadClient`), `ExtensionScreenEntry` (via `ScratchPadEntry`; `ActivityResultLauncher`, `beforeLaunch`) |
+| 5 | **The store caps change no trust rule, and since arc 22 / X2 there is no page ceiling to enforce.** A payload is ≤ `STORE_MAX_VALUE_BYTES` (4 MiB): **inline** up to `STORE_MAX_INLINE_BYTES` (512 KiB); above that as a `LargeValue` — a read-only ashmem region + `byteCount` the receiver copies out of and closes in `finally`, host side through `SharedBytes.readAndClose` **before** the gate sees bytes, so the cap applies to the copy and never to a live mapping. Every statement is still `StoreSql`-validated, every method is still uid-bound and revocable through the same gate, and the DB is still opened only through `SoilCrypto` under the global key, with foreign keys ON so `ON DELETE CASCADE` actually cascades. `receiveInk` writes the page's rows as one or more `exec` batches (`:ext-ink`'s `StoreBatches`, moved from `ScratchBatches` at arc 23 / Y1, split at 4 MiB / 10 000 statements) — **a multi-batch failure is compensated** (the new page's cascade, or a `dropStroke` per minted id) rather than left half-written, so "nothing was sent" is never contradicted by orphaned rows. **The 4 MiB page ceiling, `PageFullException` and `SCRATCH_PAGE_FULL` — this row's claim through X1 — are deleted at X2**: a page is unbounded like a notebook page, and reads are planned into `BETWEEN` ranges (`:ext-ink`'s `StrokeReadPlan`, moved from `ScratchReadPlan` at Y1) rather than refused. The pad has no file, prefs or second store of its own. | `ExtensionContract.STORE_*`, `IExtensionStore.aidl`, `LargeValue`, `SharedBytes`, `ExtensionStoreBinder`, `ExtensionStoreGate` (JVM-tested), `ScratchSchema`, `ScratchSql`, `ScratchStore`, `ScratchDocument`, `:ext-ink`'s `StoreBatches` (moved from `ScratchBatches`), `:ext-ink`'s `StrokeReadPlan` (moved from `ScratchReadPlan`), `ScratchPadActivity` |
 | 6 | **Outward on `export` is two fds and a bounded spec with no secret, no id and no path.** The call's only arguments are a read `ParcelFileDescriptor` (the host's own already-keyed cache artifact), a write `ParcelFileDescriptor` (the SAF destination the host opened) and an `ExportSpec` — an id → value map (each value ≤ `MAX_SPEC_VALUE_CHARS`, 64, a choice id or `"0"`/`"1"`, never free text) plus a display-only `notebookName` (≤ `MAX_NAME_CHARS`, 200; its constructor refuses `/` and NUL, so it cannot carry a path). **No notebook id, no file path, no passphrase has anywhere to ride** — the reserved keying option's chosen choice id crosses; the typed secret behind it never does, because `ExportOptions.specValues` never writes an entry for a `KIND_PASSPHRASE` option. | `INotebookExporter.aidl`, `ExportSpec` (constructor `require`s, JVM-tested), `ExportOptions.specValues`, `ExportNaming.specName`, `ExportActivity.runExport`, `ExporterClient.export` |
 | 7 | **Inward is bounded descriptors and a byte count verified before success is believed.** `describe()`'s `ExporterInfo` and its `OptionDescriptor` list are capped at unmarshal (`MAX_OPTIONS` 8, `MAX_CHOICES` 8, `MAX_ID_CHARS` 32, `MAX_LABEL_CHARS` 80, `MAX_FILE_EXTENSION_CHARS` 12, `MAX_MIME_CHARS` 128 — every cap pinned by `ExporterContractTest`); a descriptor over any cap, declaring an option kind the host cannot draw, or declaring the reserved keying option with a choice id the host has no transform for, **drops that exporter with a log line, never a crash** (`ExportOptions.isRenderable`, `ExportActivity.loadCandidates`). `export()`'s `ExportResult` carries only a non-negative `bytesWritten`; the host checks it against the length of the file it actually streamed (the keying transform's output, when there was one) and, where the destination provider will answer, against what that provider now reports holding — an exporter that died mid-stream, or under-reported its own copy, cannot read as success on either count. | `ExporterInfo`, `OptionDescriptor`, `ExportResult` (constructor `require`s, JVM-tested), `ExporterContractTest`, `ExportActivity.loadCandidates` / `runExport`, `ExporterClient.describe` / `.export` |
 | 8 | **The keying secret's whole lifecycle is host-side.** A typed *New passphrase…* value is entered into `ExportActivity`'s own XML-static, `saveEnabled="false"` masked fields — never saved to instance state, because the system may persist that Bundle to disk and the secret has no business there — held in a private, non-persisted `typedPassphrase` var from the Export tap to the end of the flow, consumed by `ExportKeying.apply` on the local cache artifact, and cleared in the flow's own `finally` — and at the picker's cancel, the other way the flow ends. It is never written into `ExportSpec` (the reserved keying option only ever carries a choice id), never put in an Intent extra, and never logged — failure paths log the transform's exception **class name only** (`Log.w(TAG, "keying transform failed: ${e.javaClass.simpleName}")`), on the recorded principle that a transform's own message text could carry a path. A rekey armed with the fields lost to a screen rebuild is refused with its own honest dialog rather than silently falling back to Keep. | `ExportActivity` (`editPassphrase`/`editPassphraseConfirm` XML `saveEnabled="false"`, `typedPassphrase`, `onExportTap`, `runExport`), `ExportKeying.plan` / `.apply`, `activity_export.xml` |
@@ -1595,6 +1885,13 @@ tables.
 | 24 | **Every statement that crosses `exec`/`query` is validated before it touches the connection — one statement, a known head keyword, no denylisted word, no reserved name.** `StoreSql.checkExec`/`checkQuery` run inside `ExtensionStoreGate` between decoding a `StoreCodec` batch and running it: `PRAGMA`, `ATTACH`, `VACUUM`, every DDL keyword, and every transaction-control keyword are refused anywhere in the token stream (not just as the head), a query cannot smuggle a write under `WITH`, and only one statement (one optional trailing `;`) is ever accepted per call. The file is per-package, so this is the whole of what a validator here needs to protect: the host's own connection and the file it lives in. A refusal is `IllegalArgumentException`, thrown before the executor is ever called — no partial run, nothing to roll back. | `StoreSql` (JVM-tested via `StoreSqlTest`), `ExtensionStoreGate.exec`/`.query` |
 | 25 | **A `host_*`/`sqlite_*`/`room_*`/`android_*` name is refused wherever it appears — bare or quoted, in a query, a write, or a schema step.** `StoreNames.isReserved` runs on every WORD and quoted-identifier token `StoreSql`'s tokenizer produces, in every statement kind, so an extension cannot reach `host_schema` (the host's own applied-version table), SQLite's `sqlite_master`/`sqlite_sequence` catalog, or a name a Room-era or platform convention would mint — `sqlite_version()` is refused along with everything else in that space, a harmless loss the validator does not special-case around. `StoreNames.isValid` additionally requires a table or index name an extension *creates* to be lowercase, bare and `^[a-z][a-z0-9_]{0,62}$` — column names are exempt, since they are the extension's own business and never collide with a host-owned object. | `StoreNames` (JVM-tested via `StoreSqlTest`), `StoreSchema.requireValid` (DDL names), `StoreSql.check` (runtime names) |
 | 26 | **The host reads exactly one extension table, through its own executor, never a binder, and only if the table is already there.** `DocumentPdfRender.editorTextSizeSp` is the sole caller: it resolves the installed document editor, checks `extensionStoreFile(...).exists()`, opens the store the normal `ExtensionStores.open` way, calls `ExtensionStoreDatabase.hasTable(DocumentContract.PREFS_TABLE)`, and only then runs a plain `SELECT` through `StoreExecutor` — no `IExtensionStore` binder is ever minted for this read, and nothing is created if the table or the file is absent. The table's name and both column names are pinned in `DocumentContract` rather than duplicated in `:app`, so the two sides cannot drift on what "the prefs table" means; every failure on this path — missing editor, missing file, missing table, an unparseable value — lands on `DocumentPdfMetrics.DEFAULT_TEXT_SIZE_SP` rather than refusing the export. | `DocumentPdfRender.editorTextSizeSp`, `DocumentContract.PREFS_*`, `ExtensionStoreDatabase.hasTable`, `EditorSchema` (the table this reads) |
+| 27 | **The `ICalendar` held bind is the pad's bracket verbatim, and every stub method enforces the caller before it does anything else.** `begin(store)` → the screen launch → `receiveInk`* / `takeOutgoing` → `end()` → unbind → revoke, the last three in one `finally` on every path (result, cancel, caller `onDestroy`, failed `begin`) — and, since the Y4 review, **`finish` settles any call a timeout orphaned before `end()`** (`HeldBinding.settle`): a Binder call cannot be cancelled, so the revoke must never land under a placement still writing its batches (the extension's compensation is refused by the same gate that refused the batch). Every one of `CalendarService`'s four stub methods calls `HostCallerCheck.enforce` first; only the three marshalable shapes ever leave one, and the one store failure either side of a transfer can hit is `IllegalStateException("store unavailable")` — the pad's exact text, so a caller that already handles the pad's failure needs no new case for the calendar's. | `ICalendar.aidl`, `CalendarService.begin/receiveInk/takeOutgoing/end`, `HostCallerCheck.enforce`, `HeldInkClient.open/send/drainOutgoing/finish` (via `CalendarClient`, thin since Y4), `CalendarSession`, `:ext-ink`'s `InkTransferSession.begin/receiveChunk/outgoing/clear` (since Y4 — `CalendarService`'s four stub methods call into this shared base rather than holding the bracket themselves) |
+| 28 | **`CalendarTarget` rides every `receiveInk` chunk — not just the last — and is validated by construction, never by convention.** `CalendarTarget(kind, date, half)`'s `require`s run in the constructor, so unmarshal *is* the validation (the family rule since E1): an unnormalized date, an out-of-range `kind`, or a `half` illegal for its `kind` (PM on a month or a week) all cross as `IllegalArgumentException` before a single stroke is placed. Every chunk of one transfer must additionally name the identical target — a change mid-transfer drops the whole accumulation — which is the untrusted-input half of the host's own before-any-bind check (`CalendarClient.send` builds one target and reuses it for every chunk it sends). **Since arc 23 / Y4 that refusal is `:ext-ink`'s `InkTransferSession.receiveChunk`'s, shared with the pad, not `CalendarService`'s own** — the message crossing is now the generic `IllegalArgumentException("placement changed mid-transfer")` rather than the calendar's old `"target changed mid-transfer"`, and the same refusal now protects the pad's placement int too, which never checked for a mid-transfer change before this sweep. | `CalendarTarget` (constructor `require`s, JVM-tested via `CalendarTargetTest`), `CalendarDates.isNormalized` (JVM-tested), `ICalendar.receiveInk`, `CalendarService.receiveInk`, `HeldInkClient.send` (via `CalendarClient`), `:ext-ink`'s `InkTransferSession.receiveChunk` (JVM-tested via `InkTransferSessionTest`) |
+| 29 | **The floor is per action, and the calendar's is its own constant, not a reused one.** `ExtensionContract.minApiVersion(ACTION_CALENDAR)` answers `MIN_API_VERSION_FOR_CALENDAR` (7), never `MIN_API_VERSION_FOR_STORE` (6) — the two floors happen to differ by one only because the calendar point was born a version later, not because the map conflates them. `accepts(action, apiVersion)` is the same range check every point runs (`minApiVersion(action)..API_VERSION`), so `:ext-calendar`'s declared 7 needs no special-casing in `ExtensionRegistry.discover` — the map is the only thing that changed shape. | `ExtensionContract.minApiVersion`/`.accepts`/`MIN_API_VERSIONS` (JVM-tested via `ExtensionContractTest`), `:ext-calendar`'s manifest `<meta-data>` |
+| 30 | **Nothing rides the calendar screen's Intent but two booleans, and no transfer content ever could.** `EXTRA_CALENDAR_SEND_ENABLED` / `EXTRA_CALENDAR_OPEN_RECEIVED` are the pad's two extras under the calendar's own names, and `RESULT_CALENDAR_SEND` is the pad's result code, mirrored; the ink itself never touches the Intent in either direction — outbound ink is sent over the held bind *before* the screen launches, and inbound ink is drained on the bind that is *still held* after the result returns. No date, target, page id or notebook id has anywhere on the Intent to ride. | `ExtensionContract.EXTRA_CALENDAR_*`/`RESULT_CALENDAR_SEND`, `HeldInkClient.open` (via `CalendarClient`; the Intent it builds), `ExtensionScreenEntry.open`/`onResult` (via `CalendarEntry`) |
+| 31 | **`:ext-ink` is shared extension-side code, not a wire contract — nothing in it is a parcelable, an AIDL type, or anything either side unmarshals.** `InkWire`, `StrokeRows`/`StrokeBlob`, `StoreBatches`, `StrokeReadPlan`, `InkDocument`, `InkAction` and the `InkStore` base all run **inside** one extension process, over the `IExtensionStore` calls that process already makes — the pad and the calendar each mint their own `IExtensionStore` binder and send their own `StoreCodec` statements through it; `:ext-ink` only supplies the code that decides what those statements say. Moving it out of `:ext-scratchpad` therefore changed no wire shape at all: the pad's `stroke`/`page` rows are byte-for-byte what they were before Y1, and `:ext-calendar`'s are the same shape again by choosing to reuse the same helpers, not by any contract requiring it to. | `:ext-ink`'s whole module (no manifest components, confirming it crosses no process boundary of its own), `ScratchStore`/`CalendarStore` (each still mints its own `IExtensionStore` binder) |
+| 32 | **The calendar's schema is `period → page → stroke` + `state`, and the cascade is what keeps a `period`/`page` insert safe to retry.** Foreign keys are ON for the store connection (the family rule), so `stroke.pageId` and `page.periodId` both declare `ON DELETE CASCADE` — which is exactly why `CalendarSql.insertPeriod`/`insertPage` are `INSERT OR IGNORE` and **never** `INSERT OR REPLACE`: REPLACE deletes the conflicting row first, and that delete would cascade, taking a period's pages and their strokes, or a page's strokes, with it (X2's trap, inherited by `CalendarSql : InkDocument.StrokeSql`). Rows are minted on the first stroke only (`CalendarStore.receive`/`CalendarDocument`'s `statementsFor`), never on open — `CalendarStore.readPage` is read-only — and nothing in this arc issues a `DELETE FROM period` at all. | `CalendarSchema.V1`, `CalendarSql.insertPeriod`/`.insertPage`/`.putStroke`/`.dropStroke` (JVM-tested via `CalendarSqlTest`), `CalendarStore.mintRows`/`.receive`, `CalendarDocument.statementsFor` |
+| 33 | **The host computes no calendar arithmetic of its own — `CalendarTargets` routes every choice through the contract's `CalendarDates`.** The Send-to-Calendar sheet's four rows (Today AM · Today PM · This week · This month) are each `CalendarTarget.of(kind, today, half)`, which normalizes through `CalendarDates.periodDate` inside `:extension-api` — the host never derives "this week's Sunday" itself. That is deliberate, not merely convenient: the week rule lives in one place, so a host-side guess could never come to disagree with the extension's own and mint a duplicate row for the week the two definitions parted ways. | `notebook/CalendarTargets.kt` (`CalendarTargetsTest`, JVM-tested), `CalendarTarget.of`, `CalendarDates.periodDate` |
 
 **One recorded asymmetry.** The host forces inbound colour to opaque black; the extension does not
 force it on the ink the host sends. That is not an oversight and not a hole: SN's ink is fixed
@@ -1629,18 +1926,28 @@ log line. `TagManagerService`, `TagClient`, `TagManagerEntry` and `TagsActivity`
 lengths, mode and target *kind* — never a tag's text or a target's label. `configureShowing`'s own
 debug line names the mode, the target kind and the page count on purpose, and stops there.
 
+**The calendar crosses ink and nothing else** (arc 23): a stroke's geometry, width, colour and
+style name are the whole of what either transfer carries, plus the `CalendarTarget` naming the
+page it lands on — no stroke id, page id, notebook id or name has a parameter to ride on in either
+direction. `CalendarService`, `CalendarClient` and `CalendarEntry` log counts and durations only
+(`begin: … rows: N period(s), N page(s), N stroke(s)`, `receiveInk: N strokes placed on
+kind/date/half in N ms`) — a target's `kind`/`date`/`half` are logged because they say *where*, not
+*what*, the same distinction `configureShowing`'s debug line draws for the tag manager's mode and
+target kind.
+
 ---
 
 ## Identity
 
-All six extensions share one recipe; only the name and the point differ. (`:ext-soil` serves
+All seven extensions share one recipe; only the name and the point differ. (`:ext-soil` serves
 **two** points — exporter and importer — under one identity: the user's arc-16 call was no rename,
 so the label stays `NSE · Soil Export` even though it imports too. `:ext-pdf` is the second
 exporter on the same point — arc 18, no new point. `:ext-document` serves **three** points under
 one identity — its own editor point plus one service each on the exporter and importer points.
-`:ext-tags` is the one extension in the family whose icon is **not** the shared Tabler "puzzle" —
-the wizard's own call, an app icon of Tabler `tag` instead, because this is the point a person is
-most likely to find by name in Settings → Apps rather than by process of elimination.)
+`:ext-tags` and `:ext-calendar` are the two extensions in the family whose icon is **not** the
+shared Tabler "puzzle" — each on its own wizard call, an app icon of Tabler `tag` and Tabler
+`calendar` respectively, because each is a point a person is likely to find by name in
+Settings → Apps rather than by process of elimination.)
 
 **`:ext-scratchpad`**
 
@@ -1709,6 +2016,18 @@ most likely to find by name in Settings → Apps rather than by process of elimi
 | versionName | host lockstep: `0.1.0-ratta` (`-dev` suffixed in debug), bumped together with `:app` at arc freezes |
 | Release APK | ≈ 6.9 MB — no module-local dependency beyond `:extension-api` and `:sn-screen`; no Room, no SQLCipher, no serialization library (the tag index lives in the host's extension store, not in a file this APK owns) |
 | API version | declares **6** (the point itself was the version-4 event, W4's target-pair reshape the version-5 one, and arc 22 / X3's store rewrite the version-6 one — see the `API_VERSION` ledger above; every tag door and the search merge were gone from the host between X1's landing and X3's, when this was still 5); every other extension's declaration is untouched |
+
+**`:ext-calendar`** (arc 23 / Y1–Y3, the TWELFTH module — `CalendarService` + `CalendarActivity`, one APK on one point)
+
+| | |
+|---|---|
+| Label | **"NSE · Calendar"** (`"NSE · Calendar Dev"` in debug — a build-type string override, not a suffix) |
+| Package | `com.symmetricalpalmtree.notesproutsn.ext.calendar` (`.dev` in debug) |
+| Icon | **not** the family's puzzle — Tabler `calendar`, ink-black outline only, the wizard's own call at Y1: this is the second point (after tags) whose subject already has a glyph everyone reads, so it wears its own mark rather than the shared one. Same adaptive-icon geometry as every other extension's (108dp viewport, Tabler's 24-unit grid × 3.1 centred at 54) |
+| Launcher activity | **None** — the screen `<activity>` is exported under its own action with `<category DEFAULT>` and is refused unless launched for a result by the host; the Supernote launcher shows the package anyway, the family recipe |
+| versionName | host lockstep: `0.1.0-ratta` (`-dev` suffixed in debug), bumped together with `:app` at arc freezes |
+| Release APK | ≈ 6.9 MB signed (the Y4 build; the pad's is 6.9 MB too) — no module-local dependency beyond `:extension-api`, `:sn-screen` and `:ext-ink`; no Room, no SQLCipher, no serialization library (the calendar's rows live in the host's extension store, not in a file this APK owns) — almost exactly the pad's own size, the two sharing `:ext-ink` |
+| API version | declares **7** (`MIN_API_VERSION_FOR_CALENDAR`) from its first phase — the point was born at 7, so unlike the pad, the tag manager and the editor, `:ext-calendar` was never live-but-skipped between a store rebuild and its own redeclaration: there was no lower number for it to have declared first |
 
 ---
 

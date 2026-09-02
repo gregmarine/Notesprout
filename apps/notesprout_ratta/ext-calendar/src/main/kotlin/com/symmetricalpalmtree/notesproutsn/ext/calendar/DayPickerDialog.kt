@@ -8,6 +8,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.widget.TooltipCompat
 import androidx.core.content.ContextCompat
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
 import com.symmetricalpalmtree.notesproutsn.extension.CalendarDates
@@ -23,8 +24,11 @@ import java.time.LocalDate
  * an extension. What it shows is [DayPickerModel]'s and is JVM-tested; this file is only views.
  *
  * **The cells are built in code** because a grid of 42 slots is not a layout, it is a loop. Each day
- * sits as a fixed 40 dp square centred in a 44 dp-tall weight-1 slot, so the ring and the fill are
- * true circles rather than ellipses stretched to whatever the screen made the column.
+ * sits as a fixed square centred in a weight-1 slot whose height is `@dimen/toolbar_button_size` —
+ * the family's one hand-sized tap target (44 dp; 62 dp on the sw720dp tier the Nomad and Manta sit
+ * in), never a hardcoded size — so the ring and the fill are true circles rather than ellipses
+ * stretched to whatever the screen made the column, and the cell keeps pace with every other
+ * hand-sized control when that dimen is retuned.
  *
  * E-ink rules throughout: bordered dialog, no elevation, monochrome — "chosen" is a fill, "today" is
  * a ring, and nothing is greyed.
@@ -81,13 +85,19 @@ object DayPickerDialog {
         title.setOnClickListener { monthMode = !monthMode; render() }
         // One pair of arrows, two meanings — months in the day grid, years in the month chooser;
         // the title above them always says which, so the pair never has to be labelled twice.
-        view.findViewById<View>(R.id.btnPrevMonth).setOnClickListener {
-            shown = if (monthMode) shown.minusYears(1) else shown.minusMonths(1)
-            render()
+        view.findViewById<View>(R.id.btnPrevMonth).apply {
+            TooltipCompat.setTooltipText(this, contentDescription)   // every icon button names itself on a long-press
+            setOnClickListener {
+                shown = if (monthMode) shown.minusYears(1) else shown.minusMonths(1)
+                render()
+            }
         }
-        view.findViewById<View>(R.id.btnNextMonth).setOnClickListener {
-            shown = if (monthMode) shown.plusYears(1) else shown.plusMonths(1)
-            render()
+        view.findViewById<View>(R.id.btnNextMonth).apply {
+            TooltipCompat.setTooltipText(this, contentDescription)
+            setOnClickListener {
+                shown = if (monthMode) shown.plusYears(1) else shown.plusMonths(1)
+                render()
+            }
         }
         render()
 
@@ -110,14 +120,16 @@ object DayPickerDialog {
         )
     }
 
-    /** S M T W T F S — the one row that is not tappable, so it takes the light ink. */
+    /** S M T W T F S — the one row that is not tappable. It still says something (which column is
+     *  Sunday), so it takes ink black and is made *small* to read as secondary — `inkLight` is for
+     *  text not meant to be read, and on e-ink it barely is. */
     private fun weekdayHeader(activity: Activity): LinearLayout = gridRow(activity).apply {
         for (letter in DayPickerModel.WEEKDAY_LETTERS) {
             addView(TextView(activity).apply {
                 text = letter
                 gravity = Gravity.CENTER
-                textSize = 12f
-                setTextColor(color(activity, R.color.inkLight))
+                textSize = 11f
+                setTextColor(color(activity, R.color.inkBlack))
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
                     .apply { bottomMargin = dp(activity, 4) }
             })
@@ -126,13 +138,13 @@ object DayPickerDialog {
 
     /** A leading or trailing blank: a slot that holds the column open and does nothing. */
     private fun spacerCell(activity: Activity): View = View(activity).apply {
-        layoutParams = LinearLayout.LayoutParams(0, dp(activity, 44), 1f)
+        layoutParams = LinearLayout.LayoutParams(0, tapSize(activity), 1f)
     }
 
     private fun dayCell(
         activity: Activity, date: LocalDate, picked: Boolean, isToday: Boolean, onClick: () -> Unit,
     ): View {
-        val size = dp(activity, 40)
+        val size = tapSize(activity) - dp(activity, 4)   // the circle sits just inside its slot
         val label = TextView(activity).apply {
             text = date.dayOfMonth.toString()
             gravity = Gravity.CENTER
@@ -152,7 +164,7 @@ object DayPickerDialog {
             }
         }
         return FrameLayout(activity).apply {
-            layoutParams = LinearLayout.LayoutParams(0, dp(activity, 44), 1f)
+            layoutParams = LinearLayout.LayoutParams(0, tapSize(activity), 1f)
             addView(label)
             setOnClickListener { onClick() }
         }
@@ -164,7 +176,7 @@ object DayPickerDialog {
         text = CalendarDates.MONTH_NAMES_SHORT[month - 1]
         gravity = Gravity.CENTER
         textSize = 14f
-        layoutParams = LinearLayout.LayoutParams(0, dp(activity, 48), 1f).apply {
+        layoutParams = LinearLayout.LayoutParams(0, tapSize(activity), 1f).apply {
             val m = dp(activity, 3)
             setMargins(m, m, m, m)
         }
@@ -180,6 +192,9 @@ object DayPickerDialog {
     }
 
     private fun dp(activity: Activity, v: Int): Int = (v * activity.resources.displayMetrics.density).toInt()
+
+    /** The one hand-sized tap target — `@dimen/toolbar_button_size`, never a number here. */
+    private fun tapSize(activity: Activity): Int = activity.resources.getDimensionPixelSize(R.dimen.toolbar_button_size)
 
     private fun color(activity: Activity, res: Int): Int = ContextCompat.getColor(activity, res)
 }

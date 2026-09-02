@@ -76,7 +76,7 @@ class InkDocument(
     private var highWater = 0L
 
     val strokes: List<Stroke> get() = page.values.toList()
-    val isEmpty: Boolean get() = page.isEmpty()
+
     val hasUnsavedChanges: Boolean get() = ops.isNotEmpty()
 
     /** The order [id] sits at on this page, or null if it is not on it. */
@@ -185,13 +185,24 @@ class InkDocument(
      * [extraDirty] is the consumer's own unwritten state (the pad's page size); while it answers true
      * a pass runs even with an empty op log, and [exec] is where the consumer prepends its statements
      * — and restores its own flag if the write throws.
+     *
+     * [maxPasses] bounds the loop: the debounced save passes [MAX_FLUSH_PASSES] and, still dirty
+     * past it, returns **false** with the leftover ops kept for the next debounce. A **leave** path —
+     * a page swap, `onPause`, an exit — passes [UNBOUNDED] (the default): there is no next debounce
+     * after a swap ([reset] forgets the log), so it runs until the page is clean. The loop cannot
+     * spin: the only writer is the pen, every pass writes what it committed, and it ends the moment
+     * the pen pauses.
      */
-    suspend fun flushUntilClean(extraDirty: () -> Boolean = { false }, exec: suspend (List<Statement>) -> Unit) {
+    suspend fun flushUntilClean(
+        extraDirty: () -> Boolean = { false },
+        maxPasses: Int = UNBOUNDED,
+        exec: suspend (List<Statement>) -> Unit,
+    ): Boolean {
         var pass = 0
         while (ops.isNotEmpty() || extraDirty()) {
-            if (pass++ >= MAX_FLUSH_PASSES) {
-                Slog.d(tag) { "flush still dirty after $MAX_FLUSH_PASSES passes — leaving it to the next save" }
-                return
+            if (pass++ >= maxPasses) {
+                Slog.d(tag) { "flush still dirty after $maxPasses passes — leaving it to the next save" }
+                return false
             }
             val id = pageId
             val snapshot = LinkedHashMap(ops)
@@ -211,6 +222,7 @@ class InkDocument(
             }
             Slog.d(tag) { "flushed ${statements.size} stroke statement(s)" }
         }
+        return true
     }
 
     // ── Internals ────────────────────────────────────────────────────────────
@@ -247,8 +259,12 @@ class InkDocument(
         return moved
     }
 
-    private companion object {
-        /** Enough passes to outrun a hand that keeps writing; beyond it the next debounce takes over. */
+    companion object {
+        /** The debounced save's pass bound — enough to outrun a hand that keeps writing; what it
+         *  leaves behind, the next debounce picks up. */
         const val MAX_FLUSH_PASSES = 8
+
+        /** No bound: a leave path's flush, which has no next debounce to leave anything to. */
+        const val UNBOUNDED = Int.MAX_VALUE
     }
 }

@@ -73,12 +73,16 @@ frame). Immersive: system bars hidden, transient by swipe. Portrait-locked.
 
 The `topBarRow` is left-packed — Back, then Contents / Pen / Eraser / Lasso, all butted together
 (the same spacing the scratch pad's row uses) — with a **weighted spacer** after the Lasso holding
-the row's free space, so `btnDocument` (arc 19), `btnTags` (arc 21 / W2), `btnRecents` (T1) and the
-Scratch Pad button sit flush at the right edge, in that order — Document immediately before Tags,
-Tags immediately before Recents (the user's placement call, arc 21 / W2: next to Document, before
-Recents) — and everything to their left keeps its position whatever the screen width. `btnTags` is
-**GONE without a trusted tag manager installed** (`TagManagerEntry.refresh()`, re-run from
-`onResume` like every other extension-backed control), never disabled.
+the row's free space, so `btnDocument` (arc 19), `btnTags` (arc 21 / W2), `btnRecents` (T1),
+`btnScratchPad` and `btnCalendar` (arc 23 / Y3) sit flush at the right edge, in that order — Document
+immediately before Tags, Tags immediately before Recents (the user's placement call, arc 21 / W2:
+next to Document, before Recents), and Calendar immediately after the Scratch Pad button, for the
+pad's own reason: the other paper surface this page's ink can be sent to — and everything to their
+left keeps its position whatever the screen width. `btnTags` is **GONE without a trusted tag
+manager installed** (`TagManagerEntry.refresh()`, re-run from `onResume` like every other
+extension-backed control), never disabled; `btnCalendar` is the same shape over `CalendarEntry` —
+GONE without a trusted calendar, refreshed on every `onResume`, and a tap `releaseForHandoff()`s the
+paper immediately before launch, the pad's own rule for handing the EPD pipeline over first.
 
 Both bars — and both selection bars while they are up — are pushed to `paper.setExclusionRects`
 after every root layout pass, translated into the paper view's coordinates, so the stylus can never
@@ -300,11 +304,13 @@ toolbar are set there by hand rather than waiting on the callback.
 A bordered row floating over the paper: (A1) **Snap** and (O1) **Copy** / **Cut** first — all three
 offered in every mode — then (N2) an **H** button that opens a second floating bar of its own, the
 H1–H6 level sub-toolbar (`SelectionMode` and the convert/change flows are covered under Headings
-below), then Link / Edit / Unlink, then Pad, then (arc 21 / W3) **Tag** — next to Pad because it is
-the other button gated on an extension, and narrow for its own reason: it is offered only on a lone
-heading or on ink alone, never a mixed selection (see [Tag](#tag-arc-21) below) — and **Delete**
-last. It is a *bar*, not a button, because it is the shape the selection's actions live in from here
-on.
+below), then Link / Edit / Unlink, then **Pad** · **Calendar** (arc 23 / Y3) · **Tag** (arc 21 /
+W3) — three extension-gated buttons in a row, each on an ink-only (Pad, Calendar) or ink-or-lone-
+heading (Tag) selection and each GONE without its own trusted extension installed, re-read on every
+`show()` — and **Delete** last. Calendar sits between Pad and Tag as the second of the three; see
+[Send to Calendar](#send-to-calendar-arc-23) below and [`docs/calendar.md`](calendar.md) for the
+feature. It is a *bar*, not a button, because it is the shape the selection's actions live in from
+here on.
 
 **Delete sits on the far edge, alone**: it is the one destructive verb, and it is kept away from
 the buttons the hand reaches for casually. (It led the row from P1 through arc 13; the order above
@@ -371,6 +377,42 @@ counts proximity + a 350 ms tail), so an idle gate would deliver the bar long af
 belongs to — the R3 panel lesson. It is safe because the engine has *already* presented the
 selection box on this same boundary: this frame is part of that presentation, not a repaint during
 writing. See the frame-silence section for the full list.
+
+### Send to Calendar (arc 23)
+
+The lasso's Calendar button (`sendSelectionToCalendar`) is offered on the same selection as Pad —
+**ink only, `SelectionMode.STROKES`**, because `WireStroke` is the whole of what the seventh
+point's `ICalendar` contract carries, the same reason the pad is ink-only. Since arc 23 / Y4 it
+calls the one gate both lasso sends pass, `sendSelectionToExtension`: `TransferSelection.sendable`
+reads `currentSelection` and returns the strokes in writing order — empty on a mixed or content-only
+selection, or one with nothing live — and, past that, `TransferCaps.withinLimits` is checked
+**before any bind** ("Too much to send" if it does not fit). Through Y3 each send asked this in its
+own words; one written rule is what closed the drift that had already grown between them — the
+pad's settle rule arriving a whole phase late (see [`docs/calendar.md`](calendar.md) § Notebook →
+calendar for the rule itself).
+
+The strokes then go through the four-row `ActionSheetDialog` (`calendar_target_title`, "Send to
+Calendar"): **Today, morning · Today, afternoon · This week · This month**, built by
+`CalendarTargets.Choice` with each row's target resolved **at the tap** — `CalendarTargets.target(choice,
+LocalDate.now())`, so a sheet left up across midnight sends to the day the person is tapping on (the
+Y4 review) — a pure `Choice` → `CalendarTarget` mapping so the host never computes a period itself;
+every target comes from `CalendarTarget.of`, which normalizes
+through the contract's own `CalendarDates` (the week's Sunday, the month's first day). The rows
+carry no icons — four identical calendar glyphs would say nothing, `LinkPickerActivity`'s new-page
+sheet is the precedent — and the sheet rises from the selection-toolbar tap, the O1 pattern, so it
+needs no new frame-silence exception.
+
+Picking a row calls `openCalendarWith(strokes, page, target)` → `CalendarEntry.open(InkSend(strokes,
+page.width, page.height, target))` — `InkSend` the one outbound-ink class shared with the pad since
+Y4, replacing what was `CalendarEntry.Send` — which opens the store, holds the bind, sends the
+chunks and launches the calendar screen on that page — the ink lands **1:1** (no cell-fitting; the
+user drags it into a cell afterward) and **lasso-selected**, as one undo step there. Only once the
+send is actually across does `onCalendarSent()` clear the notebook's own selection and toast "Sent
+to calendar" — the standing toast-confirms rule, since a send that failed partway has changed
+nothing here to confirm.
+
+See [`docs/calendar.md`](calendar.md) for the calendar's own side of both transfers (Send to
+Notebook included) and the paste-back below for the reverse direction.
 
 ### Tag (arc 21)
 
@@ -1075,7 +1117,7 @@ and survives it — [`docs/links.md`](links.md)).
 | `Page` | insert / delete (`Structural` snapshot, whose `objectIds` are type-agnostic — strokes, headings and links all) | `reconcile(before)`, **restoring** `objectIds` | `reconcile(after)`, deleting them |
 | `PagePasted` (B1) | a paste — the same `Structural` shape, its own kind because `objectIds` runs the **opposite direction** (rows the paste *created*) | `reconcile(before)`, **deleting** `objectIds` | `reconcile(after)`, restoring them |
 | `TemplateChanged` (arc 12) | a pick in the template library — the two template ids the page moved between (`""` = blank). No drain: it writes one page row and never touches the stroke writer | `applyTemplate(from)` | `applyTemplate(to)` |
-| `ObjectsPasted` (O1) | an object paste — `Deleted` run in reverse, its own kind for `PagePasted`'s reason (a link travels as a `PageLink` snapshot, so undo takes its wrapped children down with it) | `store.remove` + `headings.erase` + `links.remove` | `store.revive` + `headings.restore` + `links.restore` |
+| `ObjectsPasted` (O1) | an object paste — `Deleted` run in reverse, its own kind for `PagePasted`'s reason (a link travels as a `PageLink` snapshot, so undo takes its wrapped children down with it); a transfer paste from the Scratch Pad or (arc 23 / Y3) the Calendar is a strokes-only object paste and records here too, through the one shared `pasteTransferred` body (below) rather than a fifteenth kind | `store.remove` + `headings.erase` + `links.remove` | `store.revive` + `headings.restore` + `links.restore` |
 
 `Deleted` replays exactly like `Erased` (and its N2 heading half like `HeadingDeleted`) and is
 deliberately kept as its own kind: to the user a sweep of the eraser and "delete these" are
@@ -1109,6 +1151,30 @@ clears redo — the undone entry is *not* pushed onto redo afterwards, so record
 Every gesture-driven operation runs through `runPageOp` — a `Mutex` on `lifecycleScope`, a no-op
 while not open or once closing, `runCatching` + `Log.w` on failure — so two overlapping gestures
 can never tangle the page list.
+
+### The transfer paste-back (arc 11 / J5, unified arc 23 / Y3)
+
+Ink coming back from the Scratch Pad and ink coming back from the Calendar are the same act with
+two different senders, so since Y3 they run through **one body**:
+`pasteTransferred(wire, truncated, wording, source)`. `pasteFromPad` and `pasteFromCalendar` each
+take the `DrainedInk` their entry's `onDrained` callback hands them — the one drained-result class
+(arc 23 / Y4, `extension/HeldInkClient.kt`), shared by both points — and are one-liners over
+`pasteTransferred(drained.strokes, drained.truncated, wording, source)`: `PAD_WORDING` /
+`CALENDAR_WORDING` supply the three strings the two sends differ by (the failed-paste dialog body,
+the truncated-paste title and body), and `source` names the sender in the log line only. The single
+in-flight field the tool restore needs — `toolBeforeTransferPaste` — is one field rather than two:
+only one transfer can have just landed.
+
+The body itself: drain the still-held bind — `HeldInkClient.drainOutgoing`, via `ScratchPadClient`
+/ `CalendarClient`, run from `ExtensionScreenEntry.onResult` once the extension's screen returns —
+mint fresh ids (nothing from the wire is trusted beyond its geometry — `TransferCaps.toStrokes`),
+write the strokes in one transaction appended after the displayed page's current max `"order"` with
+relative order preserved (the arc-8 rebase rule), record one `Action.ObjectsPasted` step, then arm
+the lasso **before** `setSelection` so the pen can drag the result into place at once — the tool the
+user had comes back pen-idle when that selection is dismissed. A drain that came back truncated is a
+problem dialog (the rest of the ink is still on the sender); otherwise the ordinary "Pasted" toast.
+See [`docs/scratchpad.md`](scratchpad.md) § The transfers and [`docs/calendar.md`](calendar.md) for
+each sender's own half.
 
 The long-press **asks**; it never acts. `showPageSheet` opens an `ActionSheetDialog` with
 **Copy page · Cut page · Paste page · Page template · Delete page** — Paste present only when the
@@ -1322,6 +1388,14 @@ lasso's Tag button rides exception 5, the same as every other selection-toolbar 
 and the silent flow's "Tagging…" box is exception 4's "Recognizing…" box exactly, carrying a
 different word for a wait of the same shape.
 
+**Arc 23 added no new exception**: `btnCalendar`'s "Opening…" overlay and the calendar's launch
+follow a deliberate chrome tap — exception 1's justification, the same as the Document button and
+the pad's own door. The lasso's Calendar button raises the four-row Send-to-Calendar sheet on its
+own tap, exception 5's shape (a deliberate response to a selection-toolbar button, the H toggle's
+reasoning) rather than a new one; and the transfer paste-back landing selected with the bar up is
+exception 7's object-paste frame exactly — ink arriving in one frame at a boundary where nothing is
+being written, whether that ink came from the clipboard or from another extension's screen.
+
 Any new exception needs the same written justification.
 
 ## JVM tests
@@ -1397,6 +1471,21 @@ blank or over-cap one is not, a prefill normalized the way a tag is, recognized 
 collapsing, nothing left being a null prefill rather than an empty one, an over-long prefill cut to
 the cap, and a cut never splitting a surrogate pair). The tag screen, the codec and the seam's own
 tests are [`docs/tags.md`](tags.md)'s.
+
+**Arc 23 (calendar), the notebook's own half:** `CalendarTargetsTest` (7) — the four rows in the
+wizard's order, a fixed Wednesday's day/day/week/month targets, a Sunday's week target being that
+day itself, a Saturday's six days back, a month-first day, a year-end day whose week crosses into
+January while the month stays in December, and every row satisfying `CalendarTarget.requireValid`
+(construction is the validation). The screen, the store, the geometry and the seam's own tests are
+[`docs/calendar.md`](calendar.md)'s.
+
+**Arc 23 / Y4 (the host-side client/entry sibling copy), the pure rule the unification also pulled
+out:** `TransferSelectionTest` (5) — a selection sends its strokes in writing order, a mixed
+selection sends nothing, a content-only selection sends nothing, an empty selection sends nothing,
+and ids no longer live are dropped from what is sent. `HeldInkClient` and `ExtensionScreenEntry`
+themselves are exercised through `ScratchPadClient`/`CalendarClient` and
+`ScratchPadEntry`/`CalendarEntry`'s own instrumented paths, not a JVM suite of their own — the
+`RattaNotebookView` sibling-copy trap this closed is documented, not separately unit-tested.
 
 ## Deliberate differences from Paper v0
 

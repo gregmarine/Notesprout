@@ -199,4 +199,21 @@ class InkDocumentTest {
         assertEquals(null, d.move(listOf("not-here"), 1f, 1f))
         assertFalse(d.hasUnsavedChanges)
     }
+
+    @Test
+    fun aBoundedFlushGivesUpPastItsPassesAndKeepsTheLeftover_anUnboundedOneRunsUntilThePenPauses() = runBlocking {
+        val d = doc()
+        var landing = 0
+        val writer: suspend (List<Statement>) -> Unit = { _ ->
+            // A pen that commits one more stroke inside every write — the re-dirtying writer.
+            if (landing < 5) d.addStroke(stroke("late${landing++}"))
+        }
+        d.addStroke(stroke("first"))
+        assertFalse(d.flushUntilClean(maxPasses = 2, exec = writer))
+        assertTrue(d.hasUnsavedChanges)            // the leftover is kept for the next debounce
+        landing = 0
+        assertTrue(d.flushUntilClean(exec = writer))   // unbounded: five re-dirties, then clean
+        assertFalse(d.hasUnsavedChanges)
+        assertEquals(6, d.strokes.size)
+    }
 }

@@ -27,9 +27,10 @@ table, and the abandoned generator idea) ·
 half's long-press sheet and the object half's Copy/Cut, tap-to-place and lasso popup, both
 within and **across notebooks**, where a copied link's own-notebook target is re-pointed at the
 notebook it came from) ·
-`docs/extensions.md` (the **seam**: the six extension points — the recognizer, arc 11's
+`docs/extensions.md` (the **seam**: the seven extension points — the recognizer, arc 11's
 screen-owning scratch pad, arc 15's generic exporter point, arc 16's generic importer point,
-arc 19's screen-owning document editor with its host-callback binder and arc 21's tag manager —
+arc 19's screen-owning document editor with its host-callback binder, arc 21's tag manager and
+arc 23's screen-owning calendar —
 **the extension store, rebuilt on real SQLite tables behind gated SQL in arc 22**, the tier-2
 recipe for an extension-owned screen, and **the boundary audit**) ·
 `docs/export.md` (arc 15, grown arc 18: notebook export as a feature — the library sheet's Export…
@@ -54,9 +55,13 @@ the failure table) ·
 and pages, the identity and lifecycle rules, the `tag` / `assignment` tables where every assignment
 names its notebook, the two-query search merge, the tag screen's three modes, the four doors
 (library sheet, notebook bar, lasso, search), and the failure table) ·
-`docs/scratchpad.md` (arc 11, rebuilt on rows arc 22 / X2: the Scratch Pad as a feature — screen,
+`docs/scratchpad.md` (arc 11, rebuilt on rows arc 22 / X2, its ink helpers moved to `:ext-ink`
+arc 23 / Y1: the Scratch Pad as a feature — screen,
 tools, pages, the `page` / `stroke` / `state` tables and the op-log flush with no page ceiling,
 both transfers, failure table) ·
+`docs/calendar.md` (arc 23: the calendar as a feature — the three pages Month/Week/Day, the
+`period` / `page` / `stroke` / `state` tables with rows minted on the first stroke, navigation and
+the bookmark, both transfers, the failure table) ·
 `docs/sn-screen.md` (arc 11 / J1: the shared `:sn-screen` paper-screen library — what may live
 there, what may not depend on it, and the `nonTransitiveRClass` flag that holds it together).
 
@@ -66,7 +71,7 @@ All root `CLAUDE.md` rules apply (Kotlin/17, kotlinx-serialization only, no new 
 deps without discussion, no Material Components, no `runBlocking` on main, `Slog.d` not
 `Log.d`, e-ink design system, Tabler icons only). Plus, for this app:
 
-- **Ten modules, own Gradle root**: `:app` (the
+- **Twelve modules, own Gradle root**: `:app` (the
   host) · `:markdown` (arc 19 / M1 — the shared markdown engine: parser, renderer, formatter,
   reflow, search, draft, paginator; stdlib only, depends on **nothing** in this project and
   nothing beyond the android SDK its spans use — `:app` and `:ext-document` consume it, one
@@ -75,9 +80,20 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   library — depends on g-paper (`api`) + androidx only, **never** on `:app` or `:extension-api`;
   **a fix to shared screen logic goes there, never in a consumer** — breaking that recreates the
   `RattaNotebookView` sibling-copy trap one file at a time) · `:extension-api` (the contract
-  library — stdlib only) · `:ext-mlkit` (**NSE · ML Kit**) · `:ext-scratchpad` (**NSE · Scratch
-  Pad** — `:extension-api` + `:sn-screen`, never `:app`; no `tools:replace`, no libc++
-  `pickFirsts` — Paper's Onyx tax, SN has no Onyx) · `:ext-soil` (**NSE · Soil Export** —
+  library — stdlib only) · `:ext-ink` (arc 23 / Y1 — Android library, `…notesproutsn.ink`, `api`
+  on BOTH `:extension-api` and `:sn-screen`, never `:app`, no manifest components: the pad's and
+  the calendar's shared ink-on-rows helpers — `InkWire` / `StrokeRows` + `StrokeBlob` /
+  `StoreBatches` / `StrokeReadPlan` / `InkDocument` / `InkAction` / the abstract `InkStore` base —
+  and, since Y4's review, the shared stroke SQL/DDL (`InkSql`), the `InkPage` contract, the
+  transfer session (`InkTransferSession<P, R>` — the two service stubs' bodies, one monitor, the
+  placement bound by the first chunk) and the abstract tier-2 ink screen (`InkScreenActivity`:
+  page-op lock, undo/redo replay, the bounded debounce vs unbounded leave flush, the EPD handoff
+  order); one copy, no drift; the pad was repointed at it) · `:ext-mlkit` (**NSE · ML Kit**) ·
+  `:ext-scratchpad` (**NSE · Scratch
+  Pad** — `:extension-api` + `:sn-screen` + `:ext-ink` since arc 23 / Y1, never `:app`; no
+  `tools:replace`, no libc++
+  `pickFirsts` — Paper's Onyx tax, SN has no Onyx; its ink/store helpers moved to `:ext-ink` and
+  `ScratchAction` is now `sealed { Ink(InkAction) · Page }`) · `:ext-soil` (**NSE · Soil Export** —
   `:extension-api` only; one package, TWO services: `SoilExporterService` + `SoilImporterService`,
   label unchanged on the user's call) · `:ext-pdf` (**NSE · PDF Export** — `:extension-api` only +
   module-local `com.tom-roush:pdfbox-android:2.0.27.0`, which never leaks into another module) ·
@@ -99,14 +115,19 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   identity a stored `UNIQUE` column, a notebook tag's `pageId` `''` and never NULL, deleting a tag
   one `DELETE` under the declared `ON DELETE CASCADE`, and **the transaction is the lock** (arc 21's
   process-local `TagWrites` monitor is gone, with `TagCodec` / `CompactId` and the whole one-blob
-  layout)).
+  layout)) · `:ext-calendar` (**NSE · Calendar**, arc 23 / Y1 — `:extension-api` + `:sn-screen` +
+  `:ext-ink`, never `:app`; one service + a screen: `CalendarService` + `CalendarActivity`; API
+  version **7**; the fourth tier-2 screen and the second with paper; store `CalendarSchema.V1` =
+  `period` / `page` / `stroke` / `state`, every SQL string in `CalendarSql`, rows minted on the
+  first stroke never on open, NEVER `INSERT OR REPLACE` into `period`/`page` (the cascade takes
+  the ink), nothing deletes a period).
   `gradle.properties` sets `android.nonTransitiveRClass=false` — undoing it breaks every
   `:sn-screen` resource reference from `:app`.
-- **SN has SIX extension points** — each added on its own explicit user decision, and
-  **no SEVENTH may be added without another** (arc 21's `ACTION_TAG_MANAGER` was the sixth's,
-  granted 2026-08-31). **The SEVENTH, `ACTION_CALENDAR`, was granted 2026-09-01 for arc 23**
-  (`RATTA_PLAN.md` § "Phases — Arc 23"; lands at Y1 with the `:ext-ink` + `:ext-calendar` modules) —
-  no EIGHTH without another decision. The full seam — contracts, caps, trust, the
+- **SN has SEVEN extension points** — each added on its own explicit user decision, and
+  **no EIGHTH may be added without another** (arc 21's `ACTION_TAG_MANAGER` was the sixth's,
+  granted 2026-08-31; **the SEVENTH, `ACTION_CALENDAR`, was granted 2026-09-01 for arc 23 and
+  landed at Y1** with the `:ext-ink` + `:ext-calendar` modules, `RATTA_PLAN.md` § "Phases —
+  Arc 23"). The full seam — contracts, caps, trust, the
   boundary audit — is `docs/extensions.md`; the rules that bind every point:
   - `ACTION_HANDWRITING_RECOGNIZER` (headings + the markdown engine are core, the engine is
     swappable). **Only `prepare()` may start a model download** (host consent dialog first;
@@ -158,6 +179,17 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
     whole-index ashmem `snapshot`): `tags(store, offset)` in pages of `TAGS_PAGE` for the host's own
     `FuzzyRank`, then `assignmentsOf(store, matchedIds, offset)` in pages of `ASSIGNMENTS_PAGE` for
     only the rows the ranking needs — a reply is an ordinary parcel, which is why both page.
+  - `ACTION_CALENDAR` + `_SCREEN` (arc 23 / Y1) — the fourth screen-owning point, served by
+    `:ext-calendar`. **Scratch-Pad-shaped whole**: an extension writes nothing to disk itself, ever;
+    both transfers are copies through the held bind — never the Intent, never a file — carry no
+    ids, and keep coordinates 1:1; the tools are the notebook's, fixed; the EPD handoff order is
+    g-paper's to keep. `ICalendar` is `IScratchPad`'s four methods with the placement made a real
+    type: `receiveInk` carries a `CalendarTarget` on every chunk, as the pad's placement is.
+    `CalendarTarget` (kind/date/half) is unmarshal-validated (`requireValid` in its constructor) on
+    every chunk. `CalendarDates` (Sunday weeks, hand lists never a formatter, ISO dates only) is
+    shared by both sides so the host never guesses the week rule. The notebook → calendar Send
+    asks first, host-side, via `CalendarTarget.of`: Today morning / Today afternoon / This week /
+    This month. The bookmark (`state`) is written on every show.
 
   All of them get the **extension store** (`IExtensionStore` — per-package,
   encrypted under the global key at `Garden/<pkg>.db`, minted per bind, uid-bound, revoked with
@@ -184,8 +216,13 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   Action strings are
   SN-namespaced so Paper's extensions are never discovered; trust is same-signature both ways
   (discovery + bind-time re-check host-side, `HostCallerCheck` first thing in every stub method);
-  `ExtensionContract.API_VERSION` = **6** and the host accepts `minApiVersion(action)..6` (the
-  declared number is what the extension *requires* of the host). The ledger: 2 = arc 18's
+  `ExtensionContract.API_VERSION` = **7** and the host accepts `minApiVersion(action)..7` — **the
+  floor is per action since arc 23 / Y1** (`minApiVersion` is a map, not a single set): 7 for
+  `ACTION_CALENDAR` (`MIN_API_VERSION_FOR_CALENDAR` — a point born at 7 has no older shape to
+  accept), `MIN_API_VERSION_FOR_STORE` 6 for the three arc-22 store-taking points, 1 for every
+  stateless point — nothing about an existing interface changed, so no existing door vanished with
+  this bump (the declared number is still what the extension *requires* of the host). The ledger:
+  2 = arc 18's
   `sourceKind` tail · 3 = arc 19 / M8's `resultKind` tail · 4 = arc 21 / W1, the tag point itself ·
   **5 = arc 21 / W4, the first bump that is NOT a compatible tail** — `TagShowing`'s wire form
   changed, so a W1-shaped tag extension against a W4 host unmarshals wrongly; it fails loudly (the
@@ -199,7 +236,10 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   deliberate, and the X1 walk verified it (the pad redeclared 6 in X2 and its button came back; the
   tag manager in X3, so every tag door and the search merge came back; the editor service in X4, so
   the Document button came back — its text importer and document exporter services stay at 3,
-  since neither takes a store).
+  since neither takes a store) · **7 = arc 23 / Y1, the calendar point — the first PER-ACTION
+  floor**: `ACTION_CALENDAR` is listed only at `MIN_API_VERSION_FOR_CALENDAR`, every other point's
+  declared floor is unchanged, so no consequence like X1's — a point born at 7 was never reachable
+  at any lower number to begin with.
   Meta-data is **per service**.
 - **The Scratch Pad is not ours to change from here** (arc 11, `docs/scratchpad.md`). It is the
   `:ext-scratchpad` APK: its own process, its own g-paper surface, its own undo stack, and it
@@ -214,7 +254,9 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   coordinates 1:1. The pad's tools are the notebook's, fixed: a pad that lassoed differently one tap
   from the notebook would read as a bug, so a change to the notebook's ink feel is a change to both.
   Touching either paper surface's handoff means re-reading the ordering rule in
-  `docs/extensions.md` § the tier-2 recipe first; a failure there is fixed in **g-paper**.
+  `docs/extensions.md` § the tier-2 recipe first; a failure there is fixed in **g-paper**. The
+  calendar (arc 23, `docs/calendar.md`) shares the pad's ink/store helpers through `:ext-ink` and
+  its screen chrome (`FloatingSelectionBar`) through `:sn-screen` — the same rule applies there.
 
 - **Paper is identified by a TOKEN, not a kind** (arc 13, `docs/templates.md`). A `.soil` `template`
   row's `text` is `""` (blank — no row at all), `LINED`/`DOTTED`/`GRID` byte-for-byte as every build

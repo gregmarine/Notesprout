@@ -101,6 +101,14 @@ class CalendarNavigation {
         return Move(CalendarTarget.of(CalendarTarget.KIND_DAY, day, CalendarTarget.HALF_AM), day, CalendarTarget.HALF_AM)
     }
 
+    /**
+     * An undo/redo replay landed the paper on [t] — the document navigated there itself, so the
+     * organizer follows: the anchor is derived from the page exactly as [opening] and [stepped]
+     * derive it. Null when [t] is already the showing page, so a same-page replay moves nothing.
+     */
+    fun landed(t: CalendarTarget, today: LocalDate, nowHour: Int): Move? =
+        if (current == t) null else arriving(t, today, nowHour)
+
     /** Toggle to [toKind] — the same anchor at a different magnification. Null when [toKind] is
      *  already showing: a toggle to the showing view does nothing, rather than re-showing it. */
     fun toggled(toKind: Int): Move? {

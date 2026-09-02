@@ -4,9 +4,10 @@
     <!-- The readiness flow's offline pre-check (ML Kit's model download hangs silently offline). -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-    <!-- Package-visibility for SN's four extension points (API 30+ filtering). The scratch pad
-         needs both: the service to discover and bind, the screen to resolve and launch for a
-         result. -->
+    <!-- Package-visibility for SN's seven extension points (API 30+ filtering). Every
+         screen-owning point (scratch pad, document editor, tag manager, calendar) needs both
+         actions listed: the service to discover and bind, the screen to resolve and launch for a
+         result — one missing reads as "0 provider(s) of 0 candidate(s)" (arc 21 / W1). -->
     <queries>
         <intent>
             <action android:name="com.symmetricalpalmtree.notesproutsn.extension.HANDWRITING_RECOGNIZER" />

@@ -83,18 +83,34 @@ class CalendarStore(
      * its own so the document knows whether the day's other half already minted it). Writes nothing.
      */
     fun readPage(target: CalendarTarget): StoredPage = guard {
+        val header = readHeader(target)
+        val id = header.pageId ?: return@guard header
+        StoredPage(
+            periodId = header.periodId,
+            pageId = id,
+            width = header.width,
+            height = header.height,
+            strokes = readStrokes(id, CalendarSql.selectStrokeLens(id)) { CalendarSql.selectStrokes(id, it) },
+        )
+    }
+
+    /**
+     * The page's rows without its ink — which rows exist and the page's size. What [receive] needs
+     * (it places *onto* the page and never looks at what is there), and a read that stays one or two
+     * small queries however much ink the page holds; the full stroke read is [readPage]'s alone.
+     */
+    fun readHeader(target: CalendarTarget): StoredPage = guard {
         val page = StoreReads.all(store, CalendarSql.selectPage(target.kind, target.date, target.half)).rows.firstOrNull()
         if (page == null) {
             val period = StoreReads.all(store, CalendarSql.selectPeriod(target.kind, target.date)).rows.firstOrNull()?.text("id")
             return@guard StoredPage(period, null, 0f, 0f, emptyList())
         }
-        val id = page.text("id")
         StoredPage(
             periodId = page.text("periodId"),
-            pageId = id,
+            pageId = page.text("id"),
             width = page.real("width").toFloat(),
             height = page.real("height").toFloat(),
-            strokes = readStrokes(id, CalendarSql.selectStrokeLens(id)) { CalendarSql.selectStrokes(id, it) },
+            strokes = emptyList(),
         )
     }
 
@@ -141,7 +157,10 @@ class CalendarStore(
      * nothing deletes a `period` in this arc.
      */
     fun receive(strokes: List<Stroke>, target: CalendarTarget): Received = guard {
-        val stored = readPage(target)
+        // The header only: a placement onto a page already holding megabytes of ink must not pay a
+        // full stroke read inside the host's placement budget — a Binder call cannot be cancelled,
+        // and a budget blown here reports a failure for ink that then lands anyway.
+        val stored = readHeader(target)
         val ids = strokes.map { it.id }
         val now = System.currentTimeMillis()
         val statements = ArrayList<Statement>(strokes.size + 3)

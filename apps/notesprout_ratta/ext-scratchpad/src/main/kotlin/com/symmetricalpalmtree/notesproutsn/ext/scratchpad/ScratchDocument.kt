@@ -5,6 +5,7 @@ import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.extension.Statement
 import com.symmetricalpalmtree.notesproutsn.ink.InkAction
 import com.symmetricalpalmtree.notesproutsn.ink.InkDocument
+import com.symmetricalpalmtree.notesproutsn.ink.InkPage
 import com.symmetricalpalmtree.notesproutsn.ink.PageInk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -39,26 +40,26 @@ class ScratchDocument(
     private val store: ScratchStore,
     /** The paper surface in px — the size a page with no recorded size of its own takes. */
     private val surfaceSize: () -> Pair<Float, Float>,
-) {
+) : InkPage {
 
     private val ink = InkDocument(ScratchSql, TAG)
 
     var pageIds: List<String> = emptyList()
         private set
 
-    val currentPageId: String get() = ink.pageId
+    override val pageId: String get() = ink.pageId
 
     /** The page's own width/height is unwritten (it only just learned it). */
     private var sizeDirty = false
 
-    var pageWidth: Float = 0f
+    override var pageWidth: Float = 0f
         private set
-    var pageHeight: Float = 0f
+    override var pageHeight: Float = 0f
         private set
 
-    val strokes: List<Stroke> get() = ink.strokes
+    override val strokes: List<Stroke> get() = ink.strokes
     val pageCount: Int get() = pageIds.size
-    val pageIndex: Int get() = pageIds.indexOf(currentPageId).coerceAtLeast(0)
+    val pageIndex: Int get() = pageIds.indexOf(pageId).coerceAtLeast(0)
     val pageNumber: Int get() = pageIndex + 1
     val hasUnsavedChanges: Boolean get() = ink.hasUnsavedChanges || sizeDirty
 
@@ -80,7 +81,7 @@ class ScratchDocument(
      * otherwise be recorded against a page that is no longer on the paper.
      */
     suspend fun goTo(id: String) {
-        if (id == currentPageId) return
+        if (id == pageId) return
         val next = withContext(Dispatchers.IO) { store.readPage(id) }
         flushUntilClean()
         applyPage(id, next)
@@ -98,7 +99,7 @@ class ScratchDocument(
     suspend fun insert(after: Boolean): ScratchAction.Page {
         flushUntilClean()
         val before = pageIds
-        val beforeCurrent = currentPageId
+        val beforeCurrent = pageId
         val (next, newId) = withContext(Dispatchers.IO) {
             if (after) store.insertPage(before, beforeCurrent) else store.insertPageBefore(before, beforeCurrent)
         }
@@ -116,7 +117,7 @@ class ScratchDocument(
     suspend fun deleteCurrent(): ScratchAction.Page {
         flushUntilClean()
         val before = pageIds
-        val deletedId = currentPageId
+        val deletedId = pageId
         val ink = currentInk()
         val (rest, landing) = withContext(Dispatchers.IO) { store.deletePage(before, deletedId) }
         pageIds = rest
@@ -128,13 +129,13 @@ class ScratchDocument(
     // ── Mutations (Main, synchronous) ────────────────────────────────────────
 
     /** Take one committed stroke, at the end of the page's writing order. */
-    fun addStroke(stroke: Stroke) = ink.addStroke(stroke)
+    override fun addStroke(stroke: Stroke) = ink.addStroke(stroke)
 
     /** Drop [ids]; returns the undo action, or null when nothing of ours was in the set. */
-    fun erase(ids: Collection<String>): InkAction.Erased? = ink.erase(ids)
+    override fun erase(ids: Collection<String>): InkAction.Erased? = ink.erase(ids)
 
     /** Translate [ids] by ([dx], [dy]). Returns the undo action, or null when nothing moved. */
-    fun move(ids: Collection<String>, dx: Float, dy: Float): InkAction.Moved? = ink.move(ids, dx, dy)
+    override fun move(ids: Collection<String>, dx: Float, dy: Float): InkAction.Moved? = ink.move(ids, dx, dy)
 
     // ── Saving ───────────────────────────────────────────────────────────────
 
@@ -143,8 +144,8 @@ class ScratchDocument(
      * size, when it is owed, leads the first pass and is put back if that pass fails; the store
      * call itself runs on IO.
      */
-    suspend fun flushUntilClean() {
-        ink.flushUntilClean(extraDirty = { sizeDirty }) { statements ->
+    override suspend fun flushUntilClean(maxPasses: Int): Boolean =
+        ink.flushUntilClean(extraDirty = { sizeDirty }, maxPasses = maxPasses) { statements ->
             val pageId = ink.pageId
             val size = sizeDirty
             sizeDirty = false
@@ -158,7 +159,6 @@ class ScratchDocument(
                 throw t
             }
         }
-    }
 
     /** The current page as it stands (J5) — what a received new page's redo has to put back, and
      *  what a delete's undo carries. */

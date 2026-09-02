@@ -9,6 +9,7 @@ import com.symmetricalpalmtree.gpaper.core.Tool
 import com.symmetricalpalmtree.gpaper.core.model.StrokeStyle
 import com.symmetricalpalmtree.notesproutsn.core.InkColorCodec
 import com.symmetricalpalmtree.notesproutsn.notebook.PaperToolbar
+import com.symmetricalpalmtree.notesproutsn.notebook.PenIdle
 
 /**
  * The pad's chrome (arc 11 / J4, grown in J5): Back, the title and — when a notebook is behind us —
@@ -90,16 +91,11 @@ class ScratchToolbar(
         whenPenIdle { pageIndicator.text = text }
     }
 
-    private fun whenPenIdle(action: () -> Unit) {
-        if (!paper.isPenActive) { action(); return }
-        pageIndicator.postDelayed({ whenPenIdle(action) }, PaperView.PEN_ACTIVE_TAIL_MS)
-    }
+    private fun whenPenIdle(action: () -> Unit) = PenIdle.whenIdle(paper, pageIndicator, action)
 
     /** The [PaperView.releaseRender] contract: pen-gated, or a tap inside the pen-up tail can cost
      *  a live stroke. While the pen is active nobody is looking at a pressed state anyway. */
-    private fun releaseRenderIfIdle() {
-        if (!paper.isPenActive) paper.releaseRender()
-    }
+    private fun releaseRenderIfIdle() = PenIdle.releaseRenderIfIdle(paper)
 
     companion object {
         /** The one pen width, in px — the notebook's, so the two surfaces write identically. */

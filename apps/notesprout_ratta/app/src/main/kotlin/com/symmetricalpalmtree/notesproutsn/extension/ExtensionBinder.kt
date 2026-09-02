@@ -15,7 +15,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -61,6 +63,9 @@ object ExtensionBinder {
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         @Volatile private var closed = false
 
+        /** The most recent [call]'s transaction — the one a timeout may have orphaned. */
+        @Volatile private var lastCall: Deferred<*>? = null
+
         /** True once the connection died or [close] ran — the next [call] throws. */
         val isDead: Boolean get() = closed || deadFlag.get() != null
 
@@ -68,6 +73,7 @@ object ExtensionBinder {
             deadFlag.get()?.let { throw ExtensionCallException(it) }
             if (closed) throw ExtensionCallException("binding closed")
             val deferred = scope.async { block(iface) }
+            lastCall = deferred
             return try {
                 withTimeout(timeoutMs) { deferred.await() }
             } catch (e: TimeoutCancellationException) {
@@ -81,8 +87,31 @@ object ExtensionBinder {
             }
         }
 
+        /**
+         * Wait ≤ [timeoutMs] for the most recent call's transaction to finish — the one a timeout
+         * left running (arc 23 / Y4). **A Binder call cannot be cancelled**: the extension is still
+         * working (a placement's batches, say) after the host has stopped waiting, and tearing the
+         * bind down under it — `end()`, unbind, the store binder revoked — would land the revoke
+         * between the extension's batches, where its own compensation is refused by the same gate.
+         * So a client settles before it ends. Answers [Settled.OK] when the orphaned call completed
+         * without throwing (the work landed: a late success is a success), [Settled.FAILED] when it
+         * threw, and [Settled.PENDING] when it is still running past this second budget — the one
+         * case that stays a guess, and it is logged as one.
+         */
+        suspend fun settle(timeoutMs: Long): Settled {
+            val d = lastCall ?: return Settled.OK
+            if (d.isCompleted.not()) withTimeoutOrNull(timeoutMs) { d.join() }
+            if (!d.isCompleted) {
+                Slog.d(tag) { "settle: a call is still running after $timeoutMs ms — tearing down under it" }
+                return Settled.PENDING
+            }
+            return if (d.isCancelled || runCatching { d.await() }.isFailure) Settled.FAILED else Settled.OK
+        }
+
+        enum class Settled { OK, FAILED, PENDING }
+
         /** Unbind; idempotent. Orphaned calls are cancelled (their Binder transaction finishes on
-         *  its own thread and is discarded). */
+         *  its own thread and is discarded) — [settle] first when one may be running. */
         fun close() {
             if (closed) return
             closed = true

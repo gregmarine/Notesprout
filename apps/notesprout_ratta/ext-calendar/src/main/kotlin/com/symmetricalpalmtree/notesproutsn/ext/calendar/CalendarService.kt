@@ -6,12 +6,10 @@ import android.os.IBinder
 import android.os.SystemClock
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.extension.CalendarTarget
-import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
 import com.symmetricalpalmtree.notesproutsn.extension.HostCallerCheck
 import com.symmetricalpalmtree.notesproutsn.extension.ICalendar
 import com.symmetricalpalmtree.notesproutsn.extension.IExtensionStore
 import com.symmetricalpalmtree.notesproutsn.extension.InkBundle
-import com.symmetricalpalmtree.notesproutsn.ink.InkWire
 import com.symmetricalpalmtree.notesproutsn.ink.StoreUnavailable
 
 /**
@@ -22,18 +20,19 @@ import com.symmetricalpalmtree.notesproutsn.ink.StoreUnavailable
  * on the Binder thread; the row counts are logged (the Y1 walk's "browsing wrote nothing" proof —
  * `sqlite3` cannot read a SQLCipher file). `end` clears everything.
  *
- * **The two transfers.** Both run on the **Binder thread**, both under [CalendarSession]'s one
- * monitor, and neither ever touches the paper: the screen is not up during a `receiveInk` (the host
+ * **The two transfers are `:ext-ink`'s** — [CalendarSession] is an `InkTransferSession`, and the
+ * accumulate-and-place body, the running-total caps re-check, the one-monitor rule, the page bound
+ * by the first chunk (a target that changes mid-transfer → `IllegalArgumentException`, the whole
+ * inbound dropped) and the `"store unavailable"` mapping all live there, one copy shared with the
+ * pad. What is the calendar's own is what is left here: the target's null check — it is already
+ * through `requireValid` at unmarshal — and the wording of the logs. Both run on the **Binder
+ * thread** and neither ever touches the paper: the screen is not up during a `receiveInk` (the host
  * sends and then launches) and it has already parked its ink before a `takeOutgoing`.
  *
- * `receiveInk` accumulates chunks until `last`, **re-checking the running totals** against the
- * transfer caps as it goes and requiring every chunk to name the same target — the host checks
- * before any bind, and this is the untrusted-input half of the same rule (over, or a target that
- * changes mid-transfer → `IllegalArgumentException`, the whole inbound dropped). On `last` it mints
- * fresh ids ([InkWire.toStrokes] — nothing from the wire is trusted beyond its geometry) and places
- * the lot through [CalendarStore.receive], leaving [CalendarSession.received] for the screen to
- * consume once. A page has no size ceiling — the placement is one store transaction, so the only
- * failure left is the store being gone.
+ * `receiveInk` accumulates chunks until `last`, then mints fresh ids (`InkWire.toStrokes` — nothing
+ * from the wire is trusted beyond its geometry) and places the lot through [CalendarStore.receive],
+ * leaving `CalendarSession.received` for the screen to consume once. A page has no size ceiling —
+ * the placement is one store transaction, so the only failure left is the store being gone.
  *
  * `takeOutgoing` hands back one parked chunk; an empty bundle says "done", which is also the honest
  * answer for an index past the end.
@@ -49,8 +48,7 @@ class CalendarService : Service() {
             enforce()
             requireNotNull(store) { "store is null" }
             val t0 = SystemClock.elapsedRealtime()
-            CalendarSession.clear()
-            CalendarSession.store = store
+            CalendarSession.begin(store)
             val summary = try {
                 val s = CalendarStore(store)
                 val at = s.open()
@@ -66,40 +64,11 @@ class CalendarService : Service() {
             enforce()
             requireNotNull(chunk) { "chunk is null" }
             requireNotNull(target) { "target is null" }   // already through requireValid at unmarshal
-            val store = CalendarSession.store ?: throw IllegalStateException(STORE_UNAVAILABLE)
-            // One monitor for the whole accumulate-and-place: `begin` and `end` take the same one,
-            // so a host that restarts mid-transfer can never interleave with a placement.
-            synchronized(CalendarSession) {
-                val bound = CalendarSession.inboundTarget
-                if (bound == null) {
-                    CalendarSession.inboundTarget = target
-                } else if (bound != target) {
-                    CalendarSession.clearInbound()
-                    throw IllegalArgumentException("target changed mid-transfer")
-                }
-                val strokes = CalendarSession.inbound.size + chunk.strokes.size
-                val points = CalendarSession.inboundPoints + chunk.pointCount
-                if (strokes > ExtensionContract.MAX_TRANSFER_STROKES || points > ExtensionContract.MAX_TRANSFER_POINTS) {
-                    CalendarSession.clearInbound()
-                    throw IllegalArgumentException("transfer over the caps ($strokes strokes, $points points)")
-                }
-                CalendarSession.inbound += chunk.strokes
-                CalendarSession.inboundPoints = points
-                if (!last) return
-
-                val t0 = SystemClock.elapsedRealtime()
-                val minted = InkWire.toStrokes(CalendarSession.inbound)
-                val received = try {
-                    CalendarStore(store).receive(minted, target)
-                } catch (e: StoreUnavailable) {
-                    CalendarSession.clearInbound()
-                    throw IllegalStateException(STORE_UNAVAILABLE)
-                }
-                CalendarSession.received = received
-                CalendarSession.clearInbound()
-                Slog.d(TAG) {
-                    "receiveInk: ${minted.size} strokes placed on ${target.kind}/${target.date}/${target.half} in ${SystemClock.elapsedRealtime() - t0} ms"
-                }
+            val placed = CalendarSession.receiveChunk(chunk, target, last) { store, strokes, t ->
+                CalendarStore(store).receive(strokes, t)
+            } ?: return
+            Slog.d(TAG) {
+                "receiveInk: ${placed.strokes} strokes placed on ${target.kind}/${target.date}/${target.half} in ${placed.millis} ms"
             }
         }
 
@@ -107,8 +76,7 @@ class CalendarService : Service() {
             enforce()
             // An index past the end is an empty bundle, not an error: "done" is exactly what the
             // host is asking about, and it probes one chunk past the budget on purpose.
-            val chunk = CalendarSession.outbound.getOrNull(chunkIndex).orEmpty()
-            return InkBundle(chunk, CalendarSession.outboundPageWidth, CalendarSession.outboundPageHeight)
+            return CalendarSession.outgoing(chunkIndex)
         }
 
         override fun end() {
@@ -124,9 +92,5 @@ class CalendarService : Service() {
 
     companion object {
         private const val TAG = "CalendarService"
-
-        /** The store binder is gone (`begin` never ran, or the host revoked it mid-transfer).
-         *  An `IllegalStateException` — one of the three that survive Binder marshalling. */
-        private const val STORE_UNAVAILABLE = "store unavailable"
     }
 }

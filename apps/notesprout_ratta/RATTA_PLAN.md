@@ -15,7 +15,7 @@ arcs 19–22's full phase records at the end of this file until the next compact
 feature's authoritative reference is its `docs/` file. **Arc 22 "Tables" is complete and frozen
 (2026-09-01) — X1–X5 all ✅: the extension store is real SQLite tables behind gated parameterized
 SQL. Arc 23 "Calendar" is PLANNED (wizard locked 2026-09-01, § "Phases — Arc 23"
-below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd, user checklist passed 2026-09-02), next work = Y4 (docs only, no code review). The SEVENTH point is granted and live; no EIGHTH without another decision.**
+below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd) · **Y4 🧪** (2026-09-02: the user reversed "no code review" — `/code-review high` on the arc range, ten findings, all ten fixed incl. two sibling-copy refactors; docs + ledger written; the Nomad walk and the user checklist are what remain before the arc freezes). The SEVENTH point is granted and live; no EIGHTH without another decision. **No next arc is planned.**
 
 ---
 
@@ -60,13 +60,13 @@ below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd, user chec
 | App icon | Tabler seedling **mirrored** (outermost group `scaleX="-1"`, pivot 54), black outline on white adaptive icon; all icons Tabler outline. |
 | Crypto UX | Identical to Paper v0: `NSPT-` recovery key = the immutable global passphrase, attempt-limiter thresholds (1–2 free · 3–4 → 30 s · 5–9 → 5 min · ≥10 → 1 h), confusable-folding unlock, 450 ms "Preparing…". Unlock never hides the IME while the key field has focus (Ratta rule). |
 
-## Architecture (current — after arc 22)
+## Architecture (current — after arc 23)
 
 - **Own Gradle root** at `apps/notesprout_ratta/`. Gradle 8.14, AGP 8.11.1, Kotlin 2.2.20,
   KSP, compileSdk/targetSdk 35, minSdk 29, Java 17 via `org.gradle.java.home` (Temurin-17).
   Repos: `mavenLocal()`, `google()`, `mavenCentral()`. `android.nonTransitiveRClass=false`
   (load-bearing since J1 — undoing it breaks every moved resource reference).
-- **Ten modules**: `:app` (host) · `:sn-screen`
+- **Twelve modules**: `:app` (host) · `:sn-screen`
   (shared paper-screen library — g-paper `api`, design resources, screen helpers; **a fix to
   shared screen logic goes there, never in a consumer**) · `:markdown` (arc 19 — the shared
   markdown engine, stdlib only, never depends on `:app`/`:sn-screen`/`:extension-api`; host +
@@ -76,22 +76,31 @@ below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd, user chec
   pdfbox-android 2.0.27.0) · `:ext-document` (**NSE · Document** — editor point + document
   exporter + text importer, one APK, three registrations; module-local SymSpellKt 3.4.0 + the
   bundled proofread dictionary) · `:ext-tags` (**NSE · Tags**, arc 21 — one service + a screen;
-  the first tier-2 screen with **no paper**, so no g-paper call and no EPD handoff).
+  the first tier-2 screen with **no paper**, so no g-paper call and no EPD handoff) ·
+  **`:ext-ink`** (arc 23 / Y1 — library, `api` on BOTH `:extension-api` and `:sn-screen`, never
+  `:app`, no manifest components: the pad's and the calendar's shared ink-on-rows code — `InkWire`,
+  `StrokeRows` + `StrokeBlob`, `StoreBatches`, `StrokeReadPlan`, `InkDocument`, `InkAction`, the
+  `InkStore` base, and since Y4 the shared transfer session, stroke SQL and ink-screen skeleton;
+  one copy, no drift) · **`:ext-calendar`** (**NSE · Calendar**, arc 23 — one service + a screen
+  with paper, the fourth tier-2 and the second with paper; `period`/`page`/`stroke`/`state`).
   Full table: app `CLAUDE.md` + `docs/extensions.md`.
 - **g-paper pin: 0.1.23** in `sn-screen/build.gradle.kts` — `gpaper-core` + `gpaper-ratta`
   only. No Onyx, no jetifier, no pickFirsts, no `tools:replace`.
-- **SIX extension points** (each was its own user decision — the SEVENTH, `ACTION_CALENDAR`, was
-  granted 2026-09-01 for arc 23 and lands at Y1; no EIGHTH without another;
+- **SEVEN extension points** (each was its own user decision — the SEVENTH, `ACTION_CALENDAR`,
+  granted 2026-09-01, landed at arc 23 / Y1; **no EIGHTH without another**;
   arc 21's `ACTION_TAG_MANAGER` was the sixth's, granted 2026-08-31):
   `HANDWRITING_RECOGNIZER` · `SCRATCH_PAD` (+`_SCREEN`, tier-2 screen-owning) ·
   `NOTEBOOK_EXPORTER` (plural; soil + pdf + document) · `NOTEBOOK_IMPORTER` (soil + text) ·
   `DOCUMENT_EDITOR` (+`_SCREEN`, the second tier-2 — the first host-side callback stub,
   `IDocumentHost`) · `TAG_MANAGER` (+`_SCREEN`, the third tier-2 and the first with **no paper**
-  on its screen; one interface serving both a held-bind showing and two bind-per-call methods).
-  `ExtensionContract.API_VERSION` = **6**; the host accepts `minApiVersion(action)..6` — floor
-  **6** for the three store-taking points (scratch pad, document editor, tag manager; arc 22 /
-  X1, because `IExtensionStore` was *replaced*), floor 1 for the stateless ones; meta-data is
-  **per service** — an extension declares what each service *requires* of the host.
+  on its screen; one interface serving both a held-bind showing and two bind-per-call methods) ·
+  `CALENDAR` (+`_SCREEN`, arc 23 — the fourth tier-2 and the second with paper; `ICalendar` =
+  the pad's four methods with the placement a real type, `CalendarTarget` on every chunk).
+  `ExtensionContract.API_VERSION` = **7**; the host accepts `minApiVersion(action)..7` — **the
+  floor is per action** (a map, arc 23 / Y1): 7 for `ACTION_CALENDAR` (born at 7), **6** for the
+  three arc-22 store-taking points (scratch pad, document editor, tag manager — `IExtensionStore`
+  was *replaced* at X1), 1 for the stateless ones; meta-data is **per service** — an extension
+  declares what each service *requires* of the host.
 - **The extension store is real SQLite tables (arc 22):** `IExtensionStore` v6 =
   `schemaVersion` / `applySchema` / `exec` / `query` / `next` / `close`; the extension declares
   versioned DDL once (`StoreSchema`), sends gated parameterized SQL (`StoreSql` validates: one
@@ -144,6 +153,10 @@ Device / adb:
   screencap conclusion (`monkey` foregrounds unreliably — a whole walk once passed against
   Paper). `am start` onto an already-RESUMED activity fires **no onResume** — HOME first.
   Back at the library root exits the app.
+- **The Nomad sleeps behind a six-digit device PIN** (arc 23 / Y4): `screencap` comes back black,
+  `uiautomator dump` answers `null root node returned`, `dumpsys power` says `mWakefulness=Asleep`,
+  and `KEYCODE_WAKEUP` lands on `com.ratta.supernote.unlock` — a keypad no agent may guess at. Check
+  `dumpsys window | grep mCurrentFocus` before any walk conclusion; the user unlocks it.
 - **Walk-agent false failures are the single most-fired trap** (~10 occurrences): tap aim,
   invented stories ("stale install", "broken row"), long-pressing a folder card (no Export
   row), walking the stale **release** install (give agents the `.dev` package id — the tell
@@ -646,6 +659,47 @@ rewritten pruning entry, the X2 file-size and X3 double-query notes).
 
 ---
 
+### Arc 23 "Calendar" ✅ frozen 2026-09-02 (Y1 6a16017a · Y2 eaf8d8ce · Y3 b8ec3fbd · Y4)
+The SEVENTH point — `ACTION_CALENDAR` + `_SCREEN`, granted 2026-09-01 — a writable Month/Week/Day
+organizer as **`:ext-calendar`** (NSE · Calendar, the TWELFTH module) over the new **`:ext-ink`**
+library (the pad's ink-on-rows helpers, shared so the calendar is not a sibling copy; grown at Y4 into
+the shared transfer session, stroke SQL and the abstract tier-2 ink screen). Still binding: **no
+EIGHTH point without another user decision**; `API_VERSION` **7** with a **per-action floor**
+(`minApiVersion` is a map — calendar 7, the three arc-22 store points 6, stateless 1; nothing about an
+existing interface changed, no door vanished); `ICalendar` = the pad's four methods with the placement
+a real `CalendarTarget` (kind · ISO date already normalized · half; `requireValid` at unmarshal) on
+**every** chunk; `CalendarDates` is the one week/month/step rule for both sides (Sunday weeks, hand-list
+titles, `LocalDate.toString()` only); store `period(kind, date UNIQUE) → page(half) → stroke + state`,
+**rows minted on the first stroke, never on open**, the bookmark on every show (written **before** the
+in-memory swap), **never `INSERT OR REPLACE` into `period`/`page`**, `periodId` resolved by subselect in
+the page insert, a placement mints at 0×0 and the screen sizes it, nothing deletes a period; geometry
+width-/dp-derived with height slack in a band (Day rows `DAY_ROW_DP` 34 fixed), today = ring only,
+hairlines `round(density)` on integer edges, the template baked once per `BakeKey`; `CalendarNavigation`
+the pure anchor rule (toggle keeps anchor + half; open/step onto today's period anchors on today;
+double-tap ALWAYS Day AM; a replay re-anchors via `landed`); gestures = swipe (`SwipeMath`), double-tap
+(`PageGestures.onFingerDoubleTap`, an independent second history), 2/3-finger undo/redo, no long-press;
+tools the notebook's, fixed; both doors (library + notebook, `releaseForHandoff` before the launch)
+GONE without a trusted calendar; **both transfers** through the held bind only — notebook → calendar
+asks host-side (Today AM/PM · This week · This month, resolved AT THE TAP via `CalendarTarget.of`), lands
+1:1 and selected; calendar → notebook drains on the still-held bind into the ONE `pasteTransferred`
+body; **a timed-out placement is settled, not believed**, and `finish` settles before `end` (a Binder
+call cannot be cancelled); `PLACE_TIMEOUT_MS` 10 s (19 strokes = 119 ms; a cap-size transfer is
+unmeasured — BACKLOG). Host: `HeldInkClient` / `ExtensionScreenEntry` / `TransferSelection` are the one
+implementation the pad's and the calendar's thin classes sit on. Extension side: `InkTransferSession`
+(placement bound by the first chunk), `InkSql`, `InkPage`, `InkScreenActivity`; `:sn-screen` `PenIdle`,
+`InkSelectionBar`, `FloatingSelectionBar`. Deleted: `ScratchInk`/`ScratchBatches`/`ScratchReadPlan`/
+`ScratchDocument`'s stroke half (moved), both `…SelectionToolbar`s, `CalendarClient.Drained`/
+`CalendarEntry.Send` and the pad's twins (one `DrainedInk`/`InkSend`). Not in this arc, on the user's
+call: events, tasks, reminders, the day window, history, day notes, calendar export, the Today
+dashboard (`BACKLOG.md`). Traps added: `Widget.Notesprout.TextButton`/`LatchButton` set no
+`layout_width`; two sequential adb taps miss the double-tap window; a transfer paste lands SELECTED so
+the notebook's pasted selection stands in for a lasso when adb-driving both directions. Version stays
+`0.1.0-ratta`; **1857 JVM tests/variant**. Refs: `docs/calendar.md`, `docs/extensions.md` § the
+calendar point + audit rows 27–33, `docs/scratchpad.md`, `docs/sn-screen.md`, `docs/notebook.md`,
+`docs/library.md`, `BACKLOG.md` (six arc-23 entries).
+
+---
+
 ## Verification (end of arc)
 
 1. All JVM unit tests green (`./gradlew test` in `apps/notesprout_ratta`).
@@ -690,7 +744,7 @@ commit.
 
 ## Phases — Arc 23 "Calendar" (planned 2026-09-01, wizard complete)
 
-**Status: Y1 ✅ · Y2 ✅ · Y3 ✅ · Y4 ⬜** (wizard locked 2026-09-01; Fable planned it and writes Y1).
+**Status: Y1 ✅ · Y2 ✅ · Y3 ✅ · Y4 🧪** (code, docs, ledger done; the Nomad walk waits on the device PIN, then the user checklist) (wizard locked 2026-09-01; Fable planned it and writes Y1).
 
 A basic writable calendar, the way a physical organizer is one: **Month, Week and Day pages**,
 each a full writing surface whose strokes are recorded in the extension's own store — month ink
@@ -1045,7 +1099,7 @@ notebook → lands selected in the notebook; drag it; (3) EPD feel on both hando
 calendar right after the notebook door, and on the notebook right after Back — no ghosting, no
 missed first stroke. **Commit b8ec3fbd (pushed); user checklist PASSED "All tests pass" 2026-09-02. Y3 CLOSED; Y4 next.**
 
-### Y4 — Docs, ledger, freeze ⬜ (Sonnet docs in parallel · Fable read-back · **no code review, the user's call**)
+### Y4 — Review, docs, ledger, freeze 🧪 (Fable `/code-review` on the arc range · Fable fixes 1–8 · Opus refactors 9–10 · Sonnet docs · Fable read-back — awaiting the Nomad walk + user checklist)
 New `docs/calendar.md` (the feature: the three pages, the store, navigation, both transfers, the
 failure table, where the code is) · `docs/extensions.md` § the calendar point + `:ext-ink` in the
 module table + `API_VERSION` ledger (7 = the calendar point, per-action floor) + boundary audit
@@ -1056,6 +1110,118 @@ both CLAUDE.mds (twelve modules, SEVEN points, no EIGHTH) · root `CLAUDE.md` po
 `BACKLOG.md` (deleting a period · a date-change receiver for the today ring · calendar export ·
 events / tasks / day window as later extensions) · memory. Byte-scan, commit, push.
 **Questions at phase start:** version stamp only.
+
+**Phase-start decisions (user, 2026-09-02):** the user REVERSED the wizard's "no code review" call at
+phase start — **`/code-review` runs on the arc range after all** (`6a16017a~1..HEAD`), level **high**
+(every arc's answer); version stays **`0.1.0-ratta`** (every arc's answer).
+**Findings: fix ALL TEN** (user, 2026-09-02) — the seven correctness + the design-system row, AND the
+three the review itself called planner-level (the revoke-between-batches race shared with the pad, the
+host-side client/entry sibling copy, the extension-side screen/service/session sibling copy).
+
+**Outcome (2026-09-02, Fable orchestrating — four Sonnet doc agents in parallel, then `/code-review`,
+then Fable fixes 1–8, two Opus refactors in parallel on disjoint modules with Fable review, two more
+Sonnet doc passes, Fable read-back of everything; gates: 1857 JVM tests/variant, +24, 0 failures;
+twelve modules debug + release; three release APKs sign (host 18.4 MB · pad 6.9 MB · calendar 6.9 MB);
+NUL scan clean on 55 changed files):**
+
+- **The review.** `/code-review high 6a16017a~1..HEAD` (95 files, +6852/−607) returned **ten
+  findings — seven correctness, one design-system, two sibling-copy — all ten verified against the
+  source before triage, none refuted.** The user's call: **fix all ten**, the two planner-level
+  refactors included.
+- **Fixes 1–8 (Fable):** (1) an undo/redo replay that lands on another page left `CalendarNavigation`
+  on the old one — toggles, Next, the picker and a double-tap all acted on a stale view; new
+  `CalendarNavigation.landed(target, today, nowHour)` (the arriving rule; null on the showing page) +
+  `followReplay()` after every replay. (2) `CalendarDocument.show` swapped the in-memory page before
+  writing the bookmark, so a `saveState` failure left the document on a page the paper was not
+  showing; **the bookmark is written before the swap** — every store round-trip a show makes comes
+  first. (3) `CalendarStore.receive` ran the full planned stroke read of the target page just to learn
+  its ids; new `readHeader` (one or two small queries), pinned by a test that no blob/`LENGTH` query
+  runs on a placement. (4) the Send-to-Calendar sheet computed its four targets when it opened;
+  `CalendarTargets.target(choice, today)` resolves **at the tap**. (5) `InkDocument.flushUntilClean`
+  gave up silently after 8 passes and the swap's `reset` then discarded the leftover: now
+  `flushUntilClean(extraDirty, maxPasses, exec): Boolean` — **`UNBOUNDED` by default for every leave
+  path** (the only writer is the pen; the loop ends when it pauses), `MAX_FLUSH_PASSES` 8 passed by
+  the two `saveRunnable` debounces alone. (6) `DayPickerDialog`'s 40/44/48 dp cells → `@dimen/
+  toolbar_button_size` (62 dp on the Nomad's tier), `TooltipCompat` on both arrows, the weekday header
+  `inkBlack` 11 sp (it carries information; `inkLight` is for text not meant to be read). (7) `showPage`
+  re-baked a page-sized template and issued three EPD repaints on every undo/redo; `applyTemplate
+  (force)` keeps a `BakeKey` (target · today · size · both bars' heights) and the bitmap — a same-page
+  replay reloads strokes only; the replaced bitmap is recycled. (8) a max-size placement outliving
+  `PLACE_TIMEOUT_MS` was torn down under: `HeldBinding.settle(timeoutMs): Settled {OK, FAILED,
+  PENDING}` over the orphaned `lastCall`; the last chunk's timeout is **settled, not believed** (a
+  late return without an exception is a success and the launch goes ahead); `finish()` settles under
+  `SETTLE_TIMEOUT_MS` (= the placement budget) before `end()`, so the store is never revoked between
+  an extension's batches. **A transfer at the caps is still unmeasured on the Nomad** — `BACKLOG.md`.
+- **Fix 9 (Opus, host):** `HeldInkClient<I, P>` + `HeldInkPoint` + `DrainedInk` (the held-bind
+  lifecycle once: pre-open → uid-bound store binder → hold → `begin` → the two-boolean Intent; `send`
+  with the place budget and the settle rule; `drainOutgoing`; `finish` = settle → `end` → unbind +
+  revoke), `ExtensionScreenEntry<I, P>` + `InkSend<P>` + `EntryWording` (visibility, the `opening`
+  latch, the overlay wait, `handOver`, `fail`, drain-then-finish, `close`), `TransferSelection.sendable`
+  (the ink-only / writing-order rule, 5 tests) and `NotebookActivity.sendSelectionToExtension` (one
+  gate; the sheet IS the difference). `ScratchPadClient`/`CalendarClient` are 60-line points,
+  `ScratchPadEntry`/`CalendarEntry` 52/51-line thin subclasses; `LibraryActivity` untouched. **The
+  pad gained the settle semantics** — the one behavioural drift the copies had grown.
+- **Fix 10 (Opus, extension side):** `:sn-screen` `PenIdle` (`whenIdle` / `releaseRenderIfIdle`) and
+  `InkSelectionBar` (the one Send-then-Delete bar; both `…SelectionToolbar`s deleted); `:ext-ink`
+  `InkSql` (the stroke DDL fragment + six statements — emitted text byte-identical, `InkSqlTest` 4 +
+  the unchanged `ScratchSqlTest`/`CalendarSqlTest`), `InkPage` (the ink half of a document as a
+  contract; `currentPageId` → `pageId`), `InkTransferSession<P, R>(recordInboundPageSize)` (the showing
+  state + both stub bodies under one monitor; **the placement is bound by the first chunk and refused
+  if it changes — the pad has that now too**; the pad's inbound page size vs the calendar's 0×0 is the
+  constructor parameter, tested both ways; `begin` one `@Synchronized` step; 12 tests) and
+  `InkScreenActivity<A>` (535 lines — page-op lock, replay with the `followReplay` hook, the
+  `PaperListener`, `showProblem` one at a time, tool restore, bounded debounce vs unbounded leave
+  flush, chrome band, `dispatchTouchEvent`'s chrome-tap release, `onPause`/`exit`/`finishWithHandoff`/
+  `onDestroy` in their exact order, `send`). `ScratchPadActivity` 721 → 372, `CalendarActivity` 809 →
+  504, services 133/132 → 104/96, sessions → ~22 lines each. **Left different on purpose:** page-size
+  ownership (`ScratchDocument.applyPage` sets `sizeDirty` whenever a stored 0×0 meets a sized surface;
+  `CalendarDocument.show` sets `sizeDirty = pageMinted` — an unminted page carries its size in its
+  mint). `:ext-ink` gained `api(appcompat)` + `lifecycle-runtime-ktx` at the versions both consumers
+  already had — nothing new on the graph. Fable review of both refactors: the handoff order, the
+  pause flush's outliving scope and the page-op lock are unchanged; two dead members the refactor
+  surfaced deleted (`InkDocument.isEmpty`, `InkSelectionBar.isShowing`).
+- **Docs.** `docs/calendar.md` **NEW** (561 lines — the feature bible: the three pages, the store, the
+  navigation and its anchor, both transfers with the settle rule, the Nomad numbers, the failure
+  table, where the code is, tests, traps); `docs/extensions.md` 1725 → 2036 (seven points, twelve
+  modules, `API_VERSION` 7 with the per-action floor, `ICalendar`/`CalendarTarget`/`CalendarDates`,
+  the calendar point section, **boundary audit rows 27–33** new + rows 1–5 re-pointed at `:ext-ink`
+  and the shared host classes, identity block, privacy); `docs/scratchpad.md` 304 → 382 (`:ext-ink`,
+  the shared paste-back and client/entry/screen, the flush rule); `docs/notebook.md` 1430 → 1519 (the
+  door, the selection bar's Calendar, Send to Calendar, the one paste-back body, frame-silence note,
+  tests); `docs/library.md` 858 → 867; `docs/sn-screen.md` (double-tap, `PenIdle`, `InkSelectionBar`,
+  the icon count corrected from a stale 39 to the real 50); both CLAUDE.mds (twelve modules, SEVEN
+  points, no EIGHTH, API 7 ledger, `:ext-ink`'s Y4 growth); root `CLAUDE.md` pointer; `BACKLOG.md`
+  six entries (deleting a period · a date-change receiver · calendar export · events/tasks/day
+  window/history/Today as later extensions · the picker narrowing · **the unmeasured cap-size
+  transfer**). Every doc agent reported code = plan; the doc pass found one real thing the review did
+  not: the host manifest's `<queries>` comment still said "four extension points" (fixed).
+- **Walk (by hand on the Nomad, all green, after the user unlocked it — the device sleeps behind a
+  six-digit PIN; see the new trap):** notebook door → calendar opened on the Week bookmark
+  (`begin … rows: 3 period(s), 4 page(s), 68 stroke(s)` in 150 ms cold-in-process; `open: begin ok
+  in 821 ms`, `send=true`) · Next → "Sep 6 – 12, 2026", Prev → back · top-bar Send → `result=1` →
+  `drainOutgoing: 1 chunks, 24 strokes in 108 ms` → `pasted 24 strokes from the calendar`, the
+  selection bar up with Snap · Copy · Cut · Heading · Link · Pad · **Calendar** · Tag · Delete · Send
+  to Calendar → the four-row sheet → This month → `receive: 24 strokes on the existing page` /
+  `receiveInk: 24 strokes placed on 0/2026-09-01/0 in 93 ms` (the header-only read — fix 3, live) →
+  the calendar opened on **September** with 48 strokes, `received 24`, the shared `InkSelectionBar`
+  up · its Send → `drainOutgoing … 24 strokes in 50 ms` → pasted · notebook Back → library door →
+  calendar on the September bookmark (`rows: 3/4/92`, `begin` 22 ms, `send=false`) · Back →
+  `screen returned: resultCode=0` → `end` → unbind · pad door → `begin: pages=3 in 109 ms`, Next →
+  3 / 3, Back → `end` · `pm disable-user` → `btnCalendar` GONE from the library, `pm enable` → back ·
+  `logcat -b crash` empty. Both refactors' shared classes were what ran on every one of those lines
+  (`CalendarEntry`/`ScratchPadEntry` log as `screen returned`, `InkScreenActivity` as `finishing
+  (handoff released, …)`). Nomad test data: "Tags" Page 1 now carries 19 + 24 + 24 strokes; September
+  2026 holds 48 (the Week page's 24 placed onto it). One find fixed during the walk:
+  `NotebookSession.pasteStrokes`'s log line said "from the scratch pad" for every transfer paste —
+  it names no sender now (the caller does). **NOT walked (pen-only):** undo across pages (fix 1),
+  the picker's cells (fix 6), the same-page undo cost (fix 7) — the user checklist.
+**User checklist (pen):** (1) draw on
+  Month, toggle to Week, 2-finger undo → the paper lands back on Month AND the Month latch/pager
+  follow it (fix 1); (2) the day picker's cells feel hand-sized on the Nomad, the arrows show a
+  long-press hint, the S M T W T F S header reads black (fix 6); (3) undo/redo on the showing page
+  is visibly quicker and flashes nothing (fix 7); (4) the pad and the calendar both still lasso → Send
+  → land selected in the notebook, and the notebook's lasso → Send to Pad / Send to Calendar both still
+  place (fixes 9–10 touched every transfer path).
 
 ---
 

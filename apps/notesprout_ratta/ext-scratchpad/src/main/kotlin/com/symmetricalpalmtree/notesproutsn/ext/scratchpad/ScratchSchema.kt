@@ -1,6 +1,7 @@
 package com.symmetricalpalmtree.notesproutsn.ext.scratchpad
 
 import com.symmetricalpalmtree.notesproutsn.extension.StoreSchema
+import com.symmetricalpalmtree.notesproutsn.ink.InkSql
 
 /**
  * The scratch pad's tables in the host's extension store (arc 22 / X2) — declared once, applied by
@@ -12,6 +13,10 @@ import com.symmetricalpalmtree.notesproutsn.extension.StoreSchema
  * stroke (id, pageId → page.id ON DELETE CASCADE, "order", color, width, style, blob)
  * state  (key, value)                                          -- 'current' → the current page id
  * ```
+ *
+ * **The `stroke` half is `:ext-ink`'s** ([InkSql.CREATE_STROKE_TABLE] / [InkSql.CREATE_STROKE_INDEX],
+ * arc 23) — one declaration for both consumers, byte-identical to what this object used to spell
+ * out and pinned by `ScratchSqlTest`; only the pad's own tables are written here.
  *
  * `stroke.blob` is `StrokeCodec` format B (x / y / pressure / tilt) — the `.soil`'s own stroke
  * encoding, exactly the geometry bytes arc 11's page blob nested. `stroke."order"` is the writing
@@ -36,15 +41,8 @@ object ScratchSchema {
                        createdAt INTEGER NOT NULL,
                        updatedAt INTEGER NOT NULL);""",
                 "CREATE INDEX page_position ON page(position);",
-                """CREATE TABLE stroke (
-                       id TEXT PRIMARY KEY,
-                       pageId TEXT NOT NULL REFERENCES page(id) ON DELETE CASCADE,
-                       "order" INTEGER NOT NULL,
-                       color INTEGER NOT NULL,
-                       width REAL NOT NULL,
-                       style TEXT NOT NULL,
-                       blob BLOB NOT NULL);""",
-                """CREATE INDEX stroke_page_order ON stroke(pageId, "order");""",
+                InkSql.CREATE_STROKE_TABLE,
+                InkSql.CREATE_STROKE_INDEX,
                 "CREATE TABLE state (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
             ),
         ),

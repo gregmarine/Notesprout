@@ -44,19 +44,20 @@ import com.symmetricalpalmtree.notesproutsn.data.prefs.RecentsPrefs
 import com.symmetricalpalmtree.notesproutsn.data.prefs.SnapPrefs
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityNotebookBinding
 import com.symmetricalpalmtree.notesproutsn.core.markdown.HeadingPrefix
-import com.symmetricalpalmtree.notesproutsn.extension.CalendarClient
 import com.symmetricalpalmtree.notesproutsn.extension.CalendarEntry
 import com.symmetricalpalmtree.notesproutsn.extension.CalendarTarget
 import com.symmetricalpalmtree.notesproutsn.extension.DocumentEditorEntry
+import com.symmetricalpalmtree.notesproutsn.extension.DrainedInk
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionCallException
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionRegistry
+import com.symmetricalpalmtree.notesproutsn.extension.InkSend
 import com.symmetricalpalmtree.notesproutsn.extension.RecognizerClient
-import com.symmetricalpalmtree.notesproutsn.extension.ScratchPadClient
 import com.symmetricalpalmtree.notesproutsn.extension.ScratchPadEntry
 import com.symmetricalpalmtree.notesproutsn.extension.TagManagerEntry
 import com.symmetricalpalmtree.notesproutsn.extension.TagShowing
 import com.symmetricalpalmtree.notesproutsn.extension.TransferCaps
+import com.symmetricalpalmtree.notesproutsn.extension.TransferSelection
 import com.symmetricalpalmtree.notesproutsn.extension.WireStroke
 import com.symmetricalpalmtree.notesproutsn.library.NameDialog
 import com.symmetricalpalmtree.notesproutsn.library.NameRules
@@ -2028,39 +2029,51 @@ class NotebookActivity : AppCompatActivity() {
             .onFailure { Log.w(TAG, "clipboard clear failed", it) }
     }
 
-    // ── Scratch Pad transfers (arc 11 / J5) ──────────────────────────────────
+    // ── Ink transfers to an extension screen (arc 11 / J5, arc 23 / Y3) ──────
 
     /**
-     * The selection toolbar's **Pad**: ask where the ink should land on the pad, then hand it over
-     * and open the pad on it.
+     * The gate **both** lasso sends pass — Send to Scratch Pad and Send to Calendar — written once
+     * (arc 23 / Y4): it was two copies of the same four rules, and a rule written twice is a rule
+     * that drifts.
      *
-     * **A copy, not a move** — the notebook keeps its ink and records nothing on its undo stack.
-     * There is nothing to undo: nothing on this page changed.
-     *
-     * The order carries three rules:
-     *  - **Ink only.** The bar's button is already gone on anything else, but the selection can
-     *    change kind between the show and the tap, and `WireStroke` is the whole of what the
-     *    contract carries — a heading or a link in the set has no honest wire form.
-     *  - **The strokes come from [liveStrokes] filtered by the id set**, which preserves **writing
-     *    order** (a LinkedHashMap filled by load then by commit) — never iterate the Set itself.
+     *  - **The screen is alive and the entry is built** ([ready] is the caller's `isInitialized`).
+     *  - **A copy, not a move** — the notebook keeps its ink and records nothing on its undo stack.
+     *    There is nothing to undo: nothing on this page changed.
+     *  - **Ink only, in writing order** — [TransferSelection.sendable], the pure rule: the bar's
+     *    button is already gone on anything else, but the selection can change kind between the show
+     *    and the tap, and `WireStroke` is the whole of what either contract carries.
      *  - **The caps are checked before any bind.** A refusal must cost nothing: no store open, no
-     *    bind, no screen.
+     *    bind, no screen — only the "too much to send" dialog in the extension's own words.
      *
-     * The placement sheet rises from a selection-toolbar tap — the O1 pattern, the same act as the
-     * lasso popup's own sheet — so it needs no new frame-silence exception.
+     * What is **not** shared is [sheet]: the pad asks where on the pad, the calendar asks which
+     * calendar page, and that sheet *is* the difference between the two sends. Either rises from a
+     * selection-toolbar tap — the O1 pattern, the same act as the lasso popup's own sheet — so it
+     * needs no new frame-silence exception.
      */
-    private fun sendSelectionToPad() {
-        if (!opened || closing || !::scratchPad.isInitialized) return
+    private fun sendSelectionToExtension(
+        ready: Boolean,
+        tooLargeTitleRes: Int,
+        tooLargeBodyRes: Int,
+        sheet: (List<Stroke>, PageRef) -> Unit,
+    ) {
+        if (!opened || closing || !ready) return
         val sel = currentSelection ?: return
-        if (sel.contentIds.isNotEmpty() || sel.strokeIds.isEmpty()) return
-        val ids = sel.strokeIds
-        val strokes = liveStrokes.values.filter { it.id in ids }
+        val strokes = TransferSelection.sendable(sel, liveStrokes.values)
         if (strokes.isEmpty()) return
         if (!TransferCaps.withinLimits(strokes.size, TransferCaps.pointCount(strokes))) {
-            Dialogs.problem(this, R.string.scratch_too_large_title, R.string.scratch_too_large_body)
+            Dialogs.problem(this, tooLargeTitleRes, tooLargeBodyRes)
             return
         }
-        val page = session.currentPage
+        sheet(strokes, session.currentPage)
+    }
+
+    /** The selection toolbar's **Pad**: ask where the ink should land on the pad, then hand it over
+     *  and open the pad on it. */
+    private fun sendSelectionToPad() = sendSelectionToExtension(
+        ready = ::scratchPad.isInitialized,
+        tooLargeTitleRes = R.string.scratch_too_large_title,
+        tooLargeBodyRes = R.string.scratch_too_large_body,
+    ) { strokes, page ->
         ActionSheetDialog(this)
             .title(getString(R.string.scratch_placement_title))
             .addAction(R.drawable.ic_plus, getString(R.string.scratch_placement_new_page)) {
@@ -2076,9 +2089,7 @@ class NotebookActivity : AppCompatActivity() {
      *  which tells us [onPadSent] only once the ink is actually across. */
     private fun openPadWith(strokes: List<Stroke>, page: PageRef, placement: Int) {
         if (!opened || closing) return
-        scratchPad.open(
-            ScratchPadEntry.Send(strokes, page.width.toFloat(), page.height.toFloat(), placement)
-        )
+        scratchPad.open(InkSend(strokes, page.width.toFloat(), page.height.toFloat(), placement))
     }
 
     /** The ink is on the pad. The selection it came from goes (it has been acted on) and the toast
@@ -2090,47 +2101,33 @@ class NotebookActivity : AppCompatActivity() {
         toast(getString(R.string.scratch_sent_toast))
     }
 
-    // ── Calendar transfers (arc 23 / Y3) ─────────────────────────────────────
-
     /**
-     * The selection toolbar's **Calendar**: ask which calendar page the ink should land on, then
-     * hand it over and open the calendar on it.
-     *
-     * [sendSelectionToPad]'s order, rule for rule — **a copy, not a move** (nothing on this page
-     * changed, so nothing goes on the undo stack), **ink only** (the selection can change kind
-     * between the show and the tap, and `WireStroke` is the whole of what the contract carries),
-     * the strokes taken from [liveStrokes] filtered by the id set so **writing order** survives,
-     * and **the caps checked before any bind** — a refusal must cost nothing.
+     * The selection toolbar's **Calendar** (arc 23 / Y3): the same gate, then ask which calendar
+     * page the ink should land on, hand it over and open the calendar on it.
      *
      * The four choices come from [CalendarTargets], which routes every one through
      * `CalendarTarget.of`: the host knows today and nothing else about periods. The rows carry no
      * icons — four identical calendar glyphs would say nothing (`LinkPickerActivity`'s new-page
      * sheet is the precedent).
-     *
-     * The sheet rises from a selection-toolbar tap — the O1 pattern, the same act as the lasso
-     * popup's own sheet — so it needs no new frame-silence exception.
      */
-    private fun sendSelectionToCalendar() {
-        if (!opened || closing || !::calendar.isInitialized) return
-        val sel = currentSelection ?: return
-        if (sel.contentIds.isNotEmpty() || sel.strokeIds.isEmpty()) return
-        val ids = sel.strokeIds
-        val strokes = liveStrokes.values.filter { it.id in ids }
-        if (strokes.isEmpty()) return
-        if (!TransferCaps.withinLimits(strokes.size, TransferCaps.pointCount(strokes))) {
-            Dialogs.problem(this, R.string.calendar_too_large_title, R.string.calendar_too_large_body)
-            return
-        }
-        val page = session.currentPage
+    private fun sendSelectionToCalendar() = sendSelectionToExtension(
+        ready = ::calendar.isInitialized,
+        tooLargeTitleRes = R.string.calendar_too_large_title,
+        tooLargeBodyRes = R.string.calendar_too_large_body,
+    ) { strokes, page ->
         val sheet = ActionSheetDialog(this).title(getString(R.string.calendar_target_title))
-        for (row in CalendarTargets.rows(LocalDate.now())) {
-            val label = when (row.choice) {
+        for (choice in CalendarTargets.Choice.entries) {
+            val label = when (choice) {
                 CalendarTargets.Choice.TODAY_AM -> R.string.calendar_target_today_am
                 CalendarTargets.Choice.TODAY_PM -> R.string.calendar_target_today_pm
                 CalendarTargets.Choice.THIS_WEEK -> R.string.calendar_target_week
                 CalendarTargets.Choice.THIS_MONTH -> R.string.calendar_target_month
             }
-            sheet.addAction(null, getString(label)) { openCalendarWith(strokes, page, row.target) }
+            // The target is resolved AT THE TAP — a sheet left up across midnight sends to the day
+            // the person is tapping on, not the day the lasso was drawn on.
+            sheet.addAction(null, getString(label)) {
+                openCalendarWith(strokes, page, CalendarTargets.target(choice, LocalDate.now()))
+            }
         }
         sheet.show()
     }
@@ -2139,9 +2136,7 @@ class NotebookActivity : AppCompatActivity() {
      *  which tells us [onCalendarSent] only once the ink is actually across. */
     private fun openCalendarWith(strokes: List<Stroke>, page: PageRef, target: CalendarTarget) {
         if (!opened || closing) return
-        calendar.open(
-            CalendarEntry.Send(strokes, page.width.toFloat(), page.height.toFloat(), target)
-        )
+        calendar.open(InkSend(strokes, page.width.toFloat(), page.height.toFloat(), target))
     }
 
     /** The ink is on the calendar. The selection it came from goes (it has been acted on) and the
@@ -2159,7 +2154,7 @@ class NotebookActivity : AppCompatActivity() {
      * Ink coming back from the pad ([ScratchPadEntry.onDrained]) — the transfer paste, in the pad's
      * words.
      */
-    private fun pasteFromPad(drained: ScratchPadClient.Drained) =
+    private fun pasteFromPad(drained: DrainedInk) =
         pasteTransferred(drained.strokes, drained.truncated, PAD_WORDING, "the scratch pad")
 
     /**
@@ -2168,7 +2163,7 @@ class NotebookActivity : AppCompatActivity() {
      * but the three strings they say, and a copy is how the `RattaNotebookView` trap is recreated one
      * file at a time.
      */
-    private fun pasteFromCalendar(drained: CalendarClient.Drained) =
+    private fun pasteFromCalendar(drained: DrainedInk) =
         pasteTransferred(drained.strokes, drained.truncated, CALENDAR_WORDING, "the calendar")
 
     /**

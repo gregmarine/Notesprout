@@ -1,9 +1,8 @@
 package com.symmetricalpalmtree.notesproutsn.ext.calendar
 
-import com.symmetricalpalmtree.gpaper.core.model.Stroke
 import com.symmetricalpalmtree.notesproutsn.extension.Statement
 import com.symmetricalpalmtree.notesproutsn.ink.InkDocument
-import com.symmetricalpalmtree.notesproutsn.ink.StrokeBlob
+import com.symmetricalpalmtree.notesproutsn.ink.InkSql
 
 /**
  * Every statement the calendar sends, as a pure builder (arc 23 / Y1) — SQL text and bound
@@ -22,11 +21,16 @@ import com.symmetricalpalmtree.notesproutsn.ink.StrokeBlob
  *   safe) and removed with `DELETE … WHERE id = ?` (a row that is not there is not an error);
  * - `state` rows are `INSERT OR REPLACE` — `state` has no children either.
  *
+ * **The `stroke` half is `:ext-ink`'s** ([InkSql], arc 23): the two write statements arrive as
+ * [InkDocument.StrokeSql] by delegation and the three reads forward, so the calendar's table and
+ * the pad's are declared and addressed once rather than twice. The text is unchanged — this file's
+ * own test pins every string through the host's validator.
+ *
  * `key` / `value` / `order`: `"order"` is quoted (a real keyword); `key` and `value` are SQLite
  * fallback keywords and pass **unquoted** on the JVM and on the Nomad alike (arc 22 / X4).
  * `now` is passed in rather than read here so a test can pin it.
  */
-object CalendarSql : InkDocument.StrokeSql {
+object CalendarSql : InkDocument.StrokeSql by InkSql {
 
     // ── period / page — minted on the first stroke ──────
 
@@ -53,17 +57,6 @@ object CalendarSql : InkDocument.StrokeSql {
     fun touchPage(id: String, now: Long): Statement =
         Statement("UPDATE page SET updatedAt = ? WHERE id = ?", now, id)
 
-    // ── stroke — the pad's row, exactly ──────
-
-    override fun putStroke(pageId: String, order: Long, stroke: Stroke): Statement =
-        Statement(
-            "INSERT OR REPLACE INTO stroke (id, pageId, \"order\", color, width, style, blob) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            stroke.id, pageId, order, stroke.color.toLong(), stroke.width.toDouble(), stroke.style.name, StrokeBlob.encode(stroke),
-        )
-
-    override fun dropStroke(id: String): Statement =
-        Statement("DELETE FROM stroke WHERE id = ?", id)
-
     // ── state — the bookmark ──────
 
     const val KEY_LAST_VIEW = "lastView"
@@ -88,19 +81,13 @@ object CalendarSql : InkDocument.StrokeSql {
         )
 
     /** The read plan's first step: every stroke's order and blob length, which is small. */
-    fun selectStrokeLens(pageId: String): Statement =
-        Statement("SELECT \"order\", LENGTH(blob) AS len FROM stroke WHERE pageId = ? ORDER BY \"order\"", pageId)
+    fun selectStrokeLens(pageId: String): Statement = InkSql.selectStrokeLens(pageId)
 
     /** One planned range of the page's strokes (`StrokeReadPlan`); `BETWEEN` is inclusive. */
-    fun selectStrokes(pageId: String, range: LongRange): Statement =
-        Statement(
-            "SELECT id, \"order\", color, width, style, blob FROM stroke WHERE pageId = ? AND \"order\" BETWEEN ? AND ? ORDER BY \"order\"",
-            pageId, range.first, range.last,
-        )
+    fun selectStrokes(pageId: String, range: LongRange): Statement = InkSql.selectStrokes(pageId, range)
 
     /** Where a placement onto an existing page starts numbering; `-1` on an empty page. */
-    fun selectMaxOrder(pageId: String): Statement =
-        Statement("SELECT COALESCE(MAX(\"order\"), -1) AS maxOrder FROM stroke WHERE pageId = ?", pageId)
+    fun selectMaxOrder(pageId: String): Statement = InkSql.selectMaxOrder(pageId)
 
     fun selectState(): Statement =
         Statement("SELECT key, value FROM state")

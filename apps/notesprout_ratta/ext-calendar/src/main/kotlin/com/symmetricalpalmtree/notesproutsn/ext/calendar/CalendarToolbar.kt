@@ -11,6 +11,7 @@ import com.symmetricalpalmtree.gpaper.core.model.StrokeStyle
 import com.symmetricalpalmtree.notesproutsn.core.InkColorCodec
 import com.symmetricalpalmtree.notesproutsn.extension.CalendarTarget
 import com.symmetricalpalmtree.notesproutsn.notebook.PaperToolbar
+import com.symmetricalpalmtree.notesproutsn.notebook.PenIdle
 
 /**
  * The calendar's chrome (arc 23): Back and the three tools on the top bar, then Today and the three
@@ -123,16 +124,11 @@ class CalendarToolbar(
         whenPenIdle { title.text = text }
     }
 
-    private fun whenPenIdle(action: () -> Unit) {
-        if (!paper.isPenActive) { action(); return }
-        title.postDelayed({ whenPenIdle(action) }, PaperView.PEN_ACTIVE_TAIL_MS)
-    }
+    private fun whenPenIdle(action: () -> Unit) = PenIdle.whenIdle(paper, title, action)
 
     /** The [PaperView.releaseRender] contract: pen-gated, or a tap inside the pen-up tail can cost
      *  a live stroke. While the pen is active nobody is looking at a pressed state anyway. */
-    private fun releaseRenderIfIdle() {
-        if (!paper.isPenActive) paper.releaseRender()
-    }
+    private fun releaseRenderIfIdle() = PenIdle.releaseRenderIfIdle(paper)
 
     companion object {
         /** The one pen width, in px — the notebook's, so the two surfaces write identically. */

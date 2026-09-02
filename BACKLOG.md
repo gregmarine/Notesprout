@@ -1114,3 +1114,84 @@ kv rows is still a 4.3 MB file after it becomes an empty table store. Cosmetic �
 reused — and `VACUUM` is on the seam's runtime denylist for extensions by design; if a compaction is
 ever wanted it is a host-side step in the format ladder (arc 17's seal-time purge is the precedent),
 not something an extension asks for.
+
+## Notesprout SN — arc 23 "Calendar" Y1 (2026-09-02): deleting a period
+
+**Nothing in this arc ever deletes a `period` row.** `CalendarStore.kt` has no `DELETE FROM
+period` statement anywhere — strokes are `INSERT OR REPLACE` / `DELETE … WHERE id = ?`, but a
+`period` (and its `page`s) are minted with `INSERT OR IGNORE` on the first stroke and never
+removed after. A compensated multi-batch placement failure (Y3) drops its strokes by id and
+**leaves a minted empty period/page behind**; an emptied page (every stroke on it erased) keeps
+its row too — an empty page is not the same thing as a placement that never happened.
+
+A future prune is one `DELETE` under the schema's declared `ON DELETE CASCADE` (deleting a
+`period` cascades its `page`s, which cascade their `stroke`s) — mechanically cheap. **WHEN it
+should run is the open question**: a backup pass, the arc-17 seal-time purge, a "clear this empty
+month" affordance in the calendar itself, or never at all (empty rows cost one index row and one
+join miss, nothing more). Needs a fresh user decision before it is planned; this is the same shape
+as the arc-21 dead-tag-assignment entry above, and the same non-answer — aliveness is cheap to
+leave alone until someone asks for a prune trigger.
+
+## Notesprout SN — arc 23 "Calendar" Y1 (2026-09-02): a date-change receiver for the today ring
+
+**The Month/Week today ring can go stale if the screen is left open across midnight.**
+`CalendarTemplate` re-bakes on every navigation and on `onResume` only when the date changed
+(confirmed in `CalendarActivity.kt` — there is no `BroadcastReceiver`, no
+`ACTION_DATE_CHANGED`/`ACTION_TIME_TICK` registration anywhere in `:ext-calendar`); a calendar
+screen sitting open and idle past midnight keeps ringing yesterday's number until the user
+navigates or the Activity resumes. og's calendar carries a date-change receiver for exactly this;
+SN deliberately does not — a planner call at Y1 (`RATTA_PLAN.md` § Arc 23, `CalendarTemplate`:
+"no receiver; a planner call the user may revisit"), traded for the simplicity of "re-bake only on
+a reason to re-bake." Revisit only if a user actually leaves the screen open across midnight and
+notices — a receiver is a small, well-understood addition (the pad and the tag screen already show
+the pattern for a proper unregister) whenever that day comes.
+
+## Notesprout SN — arc 23 "Calendar" (2026-09-02): calendar export
+
+**No exporter reads the calendar store.** `ACTION_NOTEBOOK_EXPORTER`'s descriptors are generic,
+but every exporter that exists (`:ext-soil`, `:ext-pdf`) takes a *notebook* as its source — the
+calendar's `period`/`page`/`stroke` rows live in a different file (`Garden/<pkg>.ext.calendar.db`)
+that no export path opens. A calendar PDF or `.soil`-shaped export is a legitimate later want (the
+Day/Week/Month pages are ordinary paper once rendered) but it is a new decision, not a gap in this
+arc's scope — the arc-23 wizard never asked for one, and the pad has never had one either. Whoever
+picks this up should decide first whether it is a new `sourceKind` on the existing exporter point
+or a reason the exporter contract needs to know about a non-notebook source at all.
+
+## Notesprout SN — arc 23 "Calendar" (2026-09-02): events / tasks / the day window / history / day notes / the Today dashboard as later extensions
+
+**Arc 23 is a writable Month/Week/Day surface and nothing else, on the user's explicit call.**
+og's calendar carries attached events with reminders, a materialized task/routine system, a
+four-view "day window" (Events/Note/Notebooks/History), day notes, and a Today dashboard that
+reads across all of it — none of that exists here. Each was named and set aside at the arc-23
+wizard (`RATTA_PLAN.md` § Arc 23: "Not in this arc, on the user's call: events, tasks, reminders,
+the day window, history, day notes, calendar export, the Today dashboard. Each may become its own
+extension later — a fresh user decision each time.").
+
+The shape question a future decision has to answer isn't "should these exist" but "whose seam do
+they live behind": events/tasks/reminders touch notification plumbing this app has none of yet; a
+day window and a Today dashboard both read *across* the calendar and the library, which no current
+extension point does (every existing point is scoped to one notebook, one store, or one showing);
+and any of them could be the **EIGHTH** extension point, which — per the arc-21/22/23 pattern —
+needs its own explicit grant before anyone writes a line of code toward it.
+
+## Notesprout SN — arc 23 "Calendar" Y2 (2026-09-02): the day picker narrows in month mode
+
+**Cosmetic, left as is.** `DayPickerDialog` is content-sized, and flipping it into month mode (a
+3×4 year grid) narrows the dialog relative to its day-grid width — noticed during Y2's Nomad walk
+when an adb tap landed outside the narrowed dialog and cancelled it (a walk procedure slip, not a
+functional bug). Not fixed on the user's call; revisit only if it reads as a real usability issue
+by eye.
+
+## Notesprout SN — arc 23 "Calendar" Y4 (2026-09-02): a transfer at the caps is unmeasured
+
+**`PLACE_TIMEOUT_MS` (10 s) has been measured only at 19 strokes (119 ms).** A transfer at
+`MAX_TRANSFER_STROKES` — which, with the mint lead and `touchPage`, is more statements than one
+`exec` batch holds — runs as two compensated batches on the extension's Binder thread, and how long
+that takes on the Nomad has never been observed (adb cannot draw a lasso, and no test notebook holds
+ten thousand strokes on one page). The Y4 review's fix keeps a slow placement from leaving half its
+rows behind: the host **settles** a timed-out last chunk (`HeldBinding.settle`, the budget again) and
+treats a late return as the success it is, and `finish()` settles before `end()` so the store is
+never revoked between an extension's batches. What is still owed is the number — seed a page with a
+cap-sized selection (a `.soil` written by hand, or the pasted-selection trick run in a loop) and read
+`receiveInk: N strokes placed … in N ms` off the Nomad; if it approaches the budget, the budget moves,
+not the rule. Applies to the pad and the calendar alike (one shared client since Y4).

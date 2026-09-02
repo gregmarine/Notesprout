@@ -91,4 +91,17 @@ class CalendarTargetsTest {
             }
         }
     }
+
+    @Test
+    fun `a choice resolves against the day it is asked on, not the day the sheet was built`() {
+        val saturday = LocalDate.of(2026, 9, 5)
+        val sunday = saturday.plusDays(1)
+        val built = CalendarTargets.rows(saturday).first { it.choice == CalendarTargets.Choice.THIS_WEEK }.target
+        val tapped = CalendarTargets.target(CalendarTargets.Choice.THIS_WEEK, sunday)
+        assertEquals("2026-08-30", built.date)
+        assertEquals("2026-09-06", tapped.date)
+        for (choice in CalendarTargets.Choice.entries) {
+            assertEquals(CalendarTargets.rows(sunday).first { it.choice == choice }.target, CalendarTargets.target(choice, sunday))
+        }
+    }
 }

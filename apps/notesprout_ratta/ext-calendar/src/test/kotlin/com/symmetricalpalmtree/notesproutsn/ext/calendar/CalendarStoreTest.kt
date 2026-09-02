@@ -159,6 +159,9 @@ class CalendarStoreTest {
             batch.map { it.sql },
         )
         assertEquals(Cell.Integer(5), batch[0].args[2])
+        // The placement reads the page's header and its max order — never its ink (a page holding
+        // megabytes must not cost a full stroke read inside the host's placement budget).
+        assertTrue(fake.queries.none { it.sql.contains("blob") || it.sql.contains("LENGTH(") })
     }
 
     @Test

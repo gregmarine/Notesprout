@@ -1,6 +1,7 @@
 package com.symmetricalpalmtree.notesproutsn.ext.calendar
 
 import com.symmetricalpalmtree.notesproutsn.extension.StoreSchema
+import com.symmetricalpalmtree.notesproutsn.ink.InkSql
 
 /**
  * The calendar's tables in the host's extension store (arc 23 / Y1) — declared once, applied by the
@@ -13,6 +14,10 @@ import com.symmetricalpalmtree.notesproutsn.extension.StoreSchema
  * stroke (id, pageId → page.id ON DELETE CASCADE, "order", color, width, style, blob)
  * state  (key, value)                                       -- lastView · lastDate · lastHalf
  * ```
+ *
+ * **The `stroke` half is `:ext-ink`'s** ([InkSql.CREATE_STROKE_TABLE] / [InkSql.CREATE_STROKE_INDEX],
+ * arc 23) — one declaration for both consumers, byte-identical to what this object used to spell
+ * out and pinned by `CalendarSqlTest`; only the calendar's own tables are written here.
  *
  * A `period` is a month (dated by its first day), a week (by its Sunday) or a day; the kind column
  * says which, so no key prefix does. A month or a week owns one `page` (`half` 0); a day owns two
@@ -48,15 +53,8 @@ object CalendarSchema {
                        createdAt INTEGER NOT NULL,
                        updatedAt INTEGER NOT NULL,
                        UNIQUE(periodId, half));""",
-                """CREATE TABLE stroke (
-                       id TEXT PRIMARY KEY,
-                       pageId TEXT NOT NULL REFERENCES page(id) ON DELETE CASCADE,
-                       "order" INTEGER NOT NULL,
-                       color INTEGER NOT NULL,
-                       width REAL NOT NULL,
-                       style TEXT NOT NULL,
-                       blob BLOB NOT NULL);""",
-                """CREATE INDEX stroke_page_order ON stroke(pageId, "order");""",
+                InkSql.CREATE_STROKE_TABLE,
+                InkSql.CREATE_STROKE_INDEX,
                 "CREATE TABLE state (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
             ),
         ),

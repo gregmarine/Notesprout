@@ -3,6 +3,7 @@ package com.symmetricalpalmtree.notesproutsn.ext.scratchpad
 import com.symmetricalpalmtree.gpaper.core.model.Stroke
 import com.symmetricalpalmtree.notesproutsn.extension.Statement
 import com.symmetricalpalmtree.notesproutsn.ink.InkDocument
+import com.symmetricalpalmtree.notesproutsn.ink.InkSql
 import com.symmetricalpalmtree.notesproutsn.ink.StrokeBlob
 
 /**
@@ -18,11 +19,15 @@ import com.symmetricalpalmtree.notesproutsn.ink.StrokeBlob
  *   `INSERT OR REPLACE INTO page`**: REPLACE deletes the conflicting row first, and with
  *   `foreign_keys` ON that delete CASCADES — it would take the page's strokes with it.
  *
- * `now` is passed in rather than read here so a test can pin it. The two stroke statements are
- * also what `:ext-ink`'s `InkDocument` flushes through ([InkDocument.StrokeSql]) — the shared
- * document, the pad's own SQL.
+ * **The `stroke` half is `:ext-ink`'s** ([InkSql], arc 23): the two write statements arrive as
+ * [InkDocument.StrokeSql] by delegation and the three reads forward, so the pad's table and the
+ * calendar's are declared and addressed once rather than twice. The text is unchanged — this file's
+ * own test pins every string through the host's validator. What is written out here is what is the
+ * **pad's own**: its `page` table, its `state` key and the two page reads.
+ *
+ * `now` is passed in rather than read here so a test can pin it.
  */
-object ScratchSql : InkDocument.StrokeSql {
+object ScratchSql : InkDocument.StrokeSql by InkSql {
 
     // ── page ──────
 
@@ -48,19 +53,7 @@ object ScratchSql : InkDocument.StrokeSql {
         Statement("DELETE FROM page WHERE id = ?", id)
 
     /** Empties a page, keeping the row — what deleting the pad's lone page does. */
-    fun clearPage(id: String): Statement =
-        Statement("DELETE FROM stroke WHERE pageId = ?", id)
-
-    // ── stroke ──────
-
-    override fun putStroke(pageId: String, order: Long, stroke: Stroke): Statement =
-        Statement(
-            "INSERT OR REPLACE INTO stroke (id, pageId, \"order\", color, width, style, blob) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            stroke.id, pageId, order, stroke.color.toLong(), stroke.width.toDouble(), stroke.style.name, geometry(stroke),
-        )
-
-    override fun dropStroke(id: String): Statement =
-        Statement("DELETE FROM stroke WHERE id = ?", id)
+    fun clearPage(id: String): Statement = InkSql.clearStrokes(id)
 
     // ── state ──────
 
@@ -79,19 +72,13 @@ object ScratchSql : InkDocument.StrokeSql {
         Statement("SELECT width, height FROM page WHERE id = ?", id)
 
     /** The read plan's first step: every stroke's order and blob length, which is small. */
-    fun selectStrokeLens(pageId: String): Statement =
-        Statement("SELECT \"order\", LENGTH(blob) AS len FROM stroke WHERE pageId = ? ORDER BY \"order\"", pageId)
+    fun selectStrokeLens(pageId: String): Statement = InkSql.selectStrokeLens(pageId)
 
     /** One planned range of the page's strokes (`StrokeReadPlan`); `BETWEEN` is inclusive. */
-    fun selectStrokes(pageId: String, range: LongRange): Statement =
-        Statement(
-            "SELECT id, \"order\", color, width, style, blob FROM stroke WHERE pageId = ? AND \"order\" BETWEEN ? AND ? ORDER BY \"order\"",
-            pageId, range.first, range.last,
-        )
+    fun selectStrokes(pageId: String, range: LongRange): Statement = InkSql.selectStrokes(pageId, range)
 
     /** Where a placement onto the current page starts numbering; `-1` on an empty page. */
-    fun selectMaxOrder(pageId: String): Statement =
-        Statement("SELECT COALESCE(MAX(\"order\"), -1) AS maxOrder FROM stroke WHERE pageId = ?", pageId)
+    fun selectMaxOrder(pageId: String): Statement = InkSql.selectMaxOrder(pageId)
 
     // ── geometry ──────
 

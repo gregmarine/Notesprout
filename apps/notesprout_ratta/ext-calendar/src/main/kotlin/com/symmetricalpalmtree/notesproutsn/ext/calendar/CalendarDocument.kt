@@ -6,6 +6,7 @@ import com.symmetricalpalmtree.notesproutsn.extension.CalendarTarget
 import com.symmetricalpalmtree.notesproutsn.extension.Statement
 import com.symmetricalpalmtree.notesproutsn.ink.InkAction
 import com.symmetricalpalmtree.notesproutsn.ink.InkDocument
+import com.symmetricalpalmtree.notesproutsn.ink.InkPage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -36,7 +37,7 @@ class CalendarDocument(
     private val store: CalendarStore,
     /** The paper surface in px — the size a page with no recorded size of its own takes. */
     private val surfaceSize: () -> Pair<Float, Float>,
-) {
+) : InkPage {
 
     private val ink = InkDocument(CalendarSql, TAG)
 
@@ -47,7 +48,7 @@ class CalendarDocument(
     val isOpen: Boolean get() = ::target.isInitialized
 
     /** The showing page's id — read from its row, or minted in memory for a page with none. */
-    val pageId: String get() = ink.pageId
+    override val pageId: String get() = ink.pageId
 
     /** A fresh id for the period row, used only if no period row exists at flush time. */
     private var periodId: String = ""
@@ -58,15 +59,15 @@ class CalendarDocument(
     /** The page's own width/height is unwritten (a minted `0 × 0` page just learned it). */
     private var sizeDirty = false
 
-    var pageWidth: Float = 0f
+    override var pageWidth: Float = 0f
         private set
-    var pageHeight: Float = 0f
+    override var pageHeight: Float = 0f
         private set
 
     /** Every page this showing has put on the paper, by id — where an undo entry's page is. */
     private val targetsByPage = HashMap<String, CalendarTarget>()
 
-    val strokes: List<Stroke> get() = ink.strokes
+    override val strokes: List<Stroke> get() = ink.strokes
     val hasUnsavedChanges: Boolean get() = ink.hasUnsavedChanges || sizeDirty
 
     /** The order [id] sits at on the showing page, or null if it is not on it. */
@@ -75,13 +76,17 @@ class CalendarDocument(
     // ── Showing ──────────────────────────────────────────────────────────────
 
     /**
-     * Show [next]. The target is read **before** the departing page is flushed; the bookmark is
-     * written after the swap. Returns without a store round-trip when [next] is already showing.
+     * Show [next]. The target is read **before** the departing page is flushed, and the bookmark is
+     * written **before** the in-memory swap: every store round-trip a show makes comes first, so a
+     * show that throws leaves the document — and with it the paper and the organizer — exactly
+     * where it was. (A bookmark that names a page the swap then fails to reach cannot happen: the
+     * swap is memory only.) Returns without a store round-trip when [next] is already showing.
      */
     suspend fun show(next: CalendarTarget) {
         if (isOpen && next == target) return
         val stored = withContext(Dispatchers.IO) { store.readPage(next) }
         if (isOpen) flushUntilClean()
+        withContext(Dispatchers.IO) { store.saveState(next) }
         target = next
         periodId = stored.periodId ?: CalendarStore.newId()
         pageMinted = stored.pageId != null
@@ -101,19 +106,18 @@ class CalendarDocument(
                 sizeDirty = pageMinted
             }
         }
-        withContext(Dispatchers.IO) { store.saveState(next) }
     }
 
     // ── Mutations (Main, synchronous) ────────────────────────────────────────
 
     /** Take one committed stroke, at the end of the page's writing order. */
-    fun addStroke(stroke: Stroke) = ink.addStroke(stroke)
+    override fun addStroke(stroke: Stroke) = ink.addStroke(stroke)
 
     /** Drop [ids]; returns the undo action, or null when nothing of ours was in the set. */
-    fun erase(ids: Collection<String>): InkAction.Erased? = ink.erase(ids)
+    override fun erase(ids: Collection<String>): InkAction.Erased? = ink.erase(ids)
 
     /** Translate [ids] by ([dx], [dy]). Returns the undo action, or null when nothing moved. */
-    fun move(ids: Collection<String>, dx: Float, dy: Float): InkAction.Moved? = ink.move(ids, dx, dy)
+    override fun move(ids: Collection<String>, dx: Float, dy: Float): InkAction.Moved? = ink.move(ids, dx, dy)
 
     // ── Saving ───────────────────────────────────────────────────────────────
 
@@ -123,9 +127,8 @@ class CalendarDocument(
      * owed; the page's `updatedAt` follows any stroke write. One batch, one transaction, in that
      * order — the stroke rows can only land under a page row that exists.
      */
-    suspend fun flushUntilClean() {
-        ink.flushUntilClean(extraDirty = { sizeDirty }) { statements -> write(statements) }
-    }
+    override suspend fun flushUntilClean(maxPasses: Int): Boolean =
+        ink.flushUntilClean(extraDirty = { sizeDirty }, maxPasses = maxPasses) { statements -> write(statements) }
 
     /** The statements a page's [strokes] flush needs around them — pure, so the shape is JVM-tested. */
     fun statementsFor(strokeStatements: List<Statement>, now: Long): List<Statement> {

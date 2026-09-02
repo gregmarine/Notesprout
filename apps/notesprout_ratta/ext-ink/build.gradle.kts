@@ -38,6 +38,10 @@ dependencies {
     // No manifest components, no resources: it is pure Kotlin over the two libraries.
     api(project(":extension-api"))
     api(project(":sn-screen"))
+    // `InkScreenActivity` (arc 23) is an `AppCompatActivity` a consumer extends, so appcompat is
+    // `api` — the same version both consumers already declare, no new library on the graph.
+    api("androidx.appcompat:appcompat:1.7.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     testImplementation("junit:junit:4.13.2")
 }

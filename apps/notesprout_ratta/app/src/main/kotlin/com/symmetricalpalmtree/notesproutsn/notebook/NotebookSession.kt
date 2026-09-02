@@ -398,7 +398,7 @@ class NotebookSession(
             rows.chunked(ROW_CHUNK).forEach { db.dao().upsertAll(it) }
         }
         repo.touch(notebookId, now)
-        Slog.d(TAG) { "pasted ${strokes.size} strokes from the scratch pad onto $pageId" }
+        Slog.d(TAG) { "pasted ${strokes.size} transferred strokes onto $pageId" }   // the caller names the sender
     }
 
     /**

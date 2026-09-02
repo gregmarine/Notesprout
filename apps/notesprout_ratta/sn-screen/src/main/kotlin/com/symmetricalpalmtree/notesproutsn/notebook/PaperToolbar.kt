@@ -69,9 +69,7 @@ class PaperToolbar(
     /** The bar's rect in window coordinates (for `setExclusionRects`), or null before layout. */
     fun rectInWindow(): Rect? = rectOf(bar)
 
-    private fun releaseRenderIfIdle() {
-        if (!paper.isPenActive) paper.releaseRender()
-    }
+    private fun releaseRenderIfIdle() = PenIdle.releaseRenderIfIdle(paper)
 
     companion object {
         /** A laid-out view's rect in window coordinates, or null before layout has run. */
