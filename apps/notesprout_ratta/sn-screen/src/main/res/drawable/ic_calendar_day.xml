@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Tabler "calendar-user" (outline/calendar-user.svg) — the calendar's Day latch (arc 23 / Y4, the user's icon call). -->
+<!-- The calendar's Day latch (arc 23 / Y4, the user's call): Tabler "calendar" (outline/calendar.svg)
+     with two ruled lines inside the body — the Day page's half-hour rows — on Tabler's own grid,
+     stroke and caps. Not a Tabler glyph as such; the ic_notebook_plus precedent (a derivative built
+     on Tabler geometry). calendar-user was tried and declined. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
@@ -11,7 +14,7 @@
         android:strokeWidth="2"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M12 21h-6a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v4.5"/>
+        android:pathData="M4 7a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-12"/>
     <path
         android:fillColor="@android:color/transparent"
         android:strokeColor="@color/inkBlack"
@@ -39,12 +42,12 @@
         android:strokeWidth="2"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M17 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/>
+        android:pathData="M8 14h8"/>
     <path
         android:fillColor="@android:color/transparent"
         android:strokeColor="@color/inkBlack"
         android:strokeWidth="2"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M22 22a2 2 0 0 0 -2 -2h-2a2 2 0 0 0 -2 2"/>
+        android:pathData="M8 17h8"/>
 </vector>

@@ -75,7 +75,8 @@ app's debug build consumes the library's debug variant, so the gate means exactl
 Resources: `values/{colors,dimens,styles,themes}`, `values-sw720dp/dimens`,
 `values-sw960dp/dimens` (the Manta's card-grid minimum only — see `docs/library.md` § The grid), 54
 chrome `ic_*.xml` (grown one arc at a time since J1's move; the latest are arc 23 / Y4's
-`ic_calendar_star`, `ic_calendar_month`, `ic_calendar_week` and `ic_calendar_user`, the calendar's
+`ic_calendar_star`, `ic_calendar_month`, `ic_calendar_week` and `ic_calendar_day` (Tabler `calendar` with
+two ruled lines — a derivative, the `ic_notebook_plus` precedent), the calendar's
 Today button and its three view latches — `ic_calendar` itself dates to Y1 and is the extension's
 door on both host bars),
 the button/border/radio drawables the moved styles reference, and a `strings.xml` holding only `ok`

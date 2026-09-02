@@ -253,11 +253,14 @@ wizard's call, regardless of what the clock says — and does nothing at all on 
 `setView`, called only from `showPage` after a navigation actually lands — never from the tap that
 asked for it, so a navigation that failed can never leave a lie in the bar. **Since Y4 (the user's
 icon calls) they are Tabler icons, not words** — `ic_calendar_month` (the three bars) /
-`ic_calendar_week` (the dots) / `ic_calendar_user` as `Widget.Notesprout.ToolbarButton` image
+`ic_calendar_week` (the dots) / `ic_calendar_day` (the plain `calendar` frame with two ruled lines
+inside — the Day page's rows; a Tabler derivative on the `ic_notebook_plus` precedent) as
+`Widget.Notesprout.ToolbarButton` image
 buttons, the armed one with `isSelected` set, which reads as the button's own selected border, the
 notebook's armed-tool look; Today is `ic_calendar_star`, an icon too, and the four label strings
 went with the words. (The first cut had the month/week path sets assigned backwards and Day on the
-plain `calendar` glyph — the user's second pass set all four.)
+bare `calendar` glyph; the second tried Tabler `calendar-user` for Day and the user declined it —
+the ruled-lines derivative is the third and final.)
 **The pager's title is itself a tap target** — tapping it opens `DayPickerDialog`, rebuilt in
 `:ext-calendar` in og's shape rather than shared (nothing of the host's crosses into an extension):
 a Sun–Sat day grid whose prev/next step months, a header tap that flips the whole dialog to a 3×4

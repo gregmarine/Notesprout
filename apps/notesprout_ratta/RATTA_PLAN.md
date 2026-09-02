@@ -687,7 +687,7 @@ hairlines `round(density)` on integer edges, the template baked once per `BakeKe
 the pure anchor rule (toggle keeps anchor + half; open/step onto today's period anchors on today;
 double-tap ALWAYS Day AM; a replay re-anchors via `landed`); gestures = swipe (`SwipeMath`), double-tap
 (`PageGestures.onFingerDoubleTap`, an independent second history), 2/3-finger undo/redo, no long-press;
-tools the notebook's, fixed; both doors (library + notebook — **immediately before the Scratch Pad, which is the LAST button on every bar**; `releaseForHandoff` before the launch) GONE without a trusted calendar; **the calendar's own pad door** (`EXTRA_CALENDAR_SCRATCH_PAD_AVAILABLE` + `RESULT_CALENDAR_OPEN_SCRATCH_PAD`, walked by the host, the calendar brought back on a plain close); Today and the view latches Tabler icons (`calendar-star` · `calendar-month` · `calendar-week` · `calendar-user`); **both transfers** through the held bind only — notebook → calendar
+tools the notebook's, fixed; both doors (library + notebook — **immediately before the Scratch Pad, which is the LAST button on every bar**; `releaseForHandoff` before the launch) GONE without a trusted calendar; **the calendar's own pad door** (`EXTRA_CALENDAR_SCRATCH_PAD_AVAILABLE` + `RESULT_CALENDAR_OPEN_SCRATCH_PAD`, walked by the host, the calendar brought back on a plain close); Today and the view latches Tabler icons (`calendar-star` · `calendar-month` · `calendar-week` · `calendar` with two ruled lines, `ic_calendar_day`); **both transfers** through the held bind only — notebook → calendar
 asks host-side (Today AM/PM · This week · This month, resolved AT THE TAP via `CalendarTarget.of`), lands
 1:1 and selected; calendar → notebook drains on the still-held bind into the ONE `pasteTransferred`
 body; **a timed-out placement is settled, not believed**, and `finish` settles before `end` (a Binder
@@ -1235,10 +1235,11 @@ both callers chain `onCalendarClosed` → `scratchPad.open()` with a `reopenCale
 `onPadClosed` reopens the calendar (at its bookmark) only on a plain `RESULT_CANCELED` — a pad that
 sent ink to the notebook stays closed. A compatible contract addition; the calendar still declares
 7. (3) **Today and the three view latches are Tabler icons** — `ic_calendar_star` (Today) ·
-`ic_calendar_month` · `ic_calendar_week` · `ic_calendar_user` (Day), all new in `:sn-screen`, as
-`ToolbarButton`s, the armed latch wearing the selected border (the first cut had month/week's two
-path sets swapped and Day on plain `calendar`; the user's second pass fixed both — the four label
-strings went with the words).
+`ic_calendar_month` · `ic_calendar_week` · `ic_calendar_day` (Day — the plain `calendar` frame with
+two ruled lines, a Tabler derivative on the `ic_notebook_plus` precedent), all new in `:sn-screen`,
+as `ToolbarButton`s, the armed latch wearing the selected border (the first cut had month/week's
+two path sets swapped and Day on the bare `calendar`; the second tried `calendar-user`, declined;
+the four label strings went with the words).
 **Day-picker fixes (the checklist's "doesn't fully work"):** the header `TextView` was added after
 `btnPrevMonth` at `match_parent` width, so it sat on top of the left arrow and took its taps (the
 right arrow, added after the title, was never covered) — margins the width of a button on both

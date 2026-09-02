@@ -22,7 +22,7 @@ import com.symmetricalpalmtree.notesproutsn.notebook.PenIdle
  *
  * **The three toggles are words, not glyphs** — there is no icon for "week" worth learning, and
  * words read better on e-ink — but Today and the three view latches became Tabler icons at Y4 on
- * the user's calls (calendar-star · calendar-month · calendar-week · calendar-user). The armed latch
+ * the user's calls (calendar-star · calendar-month · calendar-week · calendar with two ruled lines). The armed latch
  * has `isSelected` set, which reads as the ToolbarButton's border. It is set from [setView] on every page shown, **never from
  * the tap that asked for it**: what is latched is what is on the paper, so a navigation that failed
  * cannot leave a lie in the bar.

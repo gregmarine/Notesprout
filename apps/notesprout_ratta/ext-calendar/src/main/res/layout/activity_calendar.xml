@@ -86,7 +86,8 @@
                 android:orientation="horizontal">
 
                 <!-- Today and the three view latches are Tabler icons since Y4 (the user's calls):
-                     calendar-star, then calendar-month, calendar-week, calendar-user. The armed latch
+                     calendar-star, then calendar-month, calendar-week, and calendar with two ruled
+                     lines (ic_calendar_day, a Tabler derivative). The armed latch
                      wears the ToolbarButton's selected border — the notebook's own armed-tool look. -->
                 <androidx.appcompat.widget.AppCompatImageButton
                     android:id="@+id/btnToday"
@@ -111,7 +112,7 @@
                 <androidx.appcompat.widget.AppCompatImageButton
                     android:id="@+id/btnDay"
                     style="@style/Widget.Notesprout.ToolbarButton"
-                    android:src="@drawable/ic_calendar_user"
+                    android:src="@drawable/ic_calendar_day"
                     android:contentDescription="@string/cd_calendar_view_day" />
 
                 <androidx.appcompat.widget.AppCompatImageButton
