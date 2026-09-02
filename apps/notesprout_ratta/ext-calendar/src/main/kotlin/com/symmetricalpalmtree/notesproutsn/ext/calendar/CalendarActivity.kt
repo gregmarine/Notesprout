@@ -45,6 +45,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
+import java.time.LocalTime
 import kotlin.coroutines.resume
 
 /**
@@ -58,12 +59,26 @@ import kotlin.coroutines.resume
  * **The grid is the page's template.** [CalendarGeometry] lays it out at the page's own size under
  * the two bars, [CalendarTemplate] paints it, and g-paper sets it behind the ink — so a store
  * carried to another screen keeps grid and ink registered (the pad's 1:1 rule). It is re-baked on
- * every navigation and on `onResume`, because today's ring moves.
+ * every navigation and on `onResume`, because today's ring moves. The page rect is anchored
+ * top-left and the page *is* the whole surface, so **a finger's view coordinates are page
+ * coordinates 1:1** — the double-tap hit-tests the raw point against the same geometry the
+ * template was painted from, and nothing is scaled.
  *
- * **Y1 is the Month page.** The pager steps months (buttons, or a finger swipe through the
- * notebook's own guards); the view toggles, Today, the day picker and the double-tap into a day
- * arrive with Y2, the Send buttons' host half with Y3. Every navigation writes the bookmark
- * (`state` rows) and nothing else — **rows are minted on the first stroke, never on open**.
+ * **Navigation is [CalendarNavigation]'s, and every route ends in [showMove].** The pager steps the
+ * period (buttons, or a finger swipe through the notebook's own guards) and its title opens the day
+ * picker; Today lands on today in the showing view; the three word toggles change the view; a finger
+ * double-tap on a Month or Week cell opens that day's Day page. The screen holds no navigation rule
+ * of its own — it hit-tests, asks for a [CalendarNavigation.Move], shows it, and reports that it
+ * landed. Only the Send buttons' host half is still outstanding (Y3).
+ *
+ * **The anchor is why the toggles feel like one organizer.** The three views are three
+ * magnifications of the same day, so the state carries the day being looked at rather than the
+ * period showing: Month → Week → Day walks down to that day, and back up again from it. A page
+ * opened or stepped to that *contains today* anchors on today, so the first toggle out of this month
+ * is this week. The rule and its tests live in [CalendarNavigation].
+ *
+ * Every navigation writes the bookmark (`state` rows) and nothing else — **rows are minted on the
+ * first stroke, never on open**, so browsing an empty year leaves the store exactly as it was.
  *
  * **The caller check is the first statement**, before anything is inflated: the screen is exported
  * (it has to be, the host launches it by action) and only a `startActivityForResult` from the host
@@ -96,6 +111,9 @@ class CalendarActivity : AppCompatActivity() {
     private lateinit var gestures: PageGestures
     private lateinit var document: CalendarDocument
     private lateinit var palette: CalendarTemplate.Palette
+
+    /** Where the organizer is looking and what each control does to it — the anchor rule, pure. */
+    private val nav = CalendarNavigation()
 
     /** In-memory, calendar-level history: it survives page turns and dies with the screen. */
     private val undo = UndoRedoStack<InkAction>()
@@ -160,6 +178,10 @@ class CalendarActivity : AppCompatActivity() {
             btnEraser = binding.btnEraser,
             btnLasso = binding.btnLasso,
             btnSend = binding.btnSend,
+            btnToday = binding.btnToday,
+            btnMonth = binding.btnMonth,
+            btnWeek = binding.btnWeek,
+            btnDay = binding.btnDay,
             btnPrev = binding.btnPrev,
             btnNext = binding.btnNext,
             title = binding.title,
@@ -167,6 +189,9 @@ class CalendarActivity : AppCompatActivity() {
             onSend = { sendPage() },
             onPrev = { runPageOp { step(forward = false) } },
             onNext = { runPageOp { step(forward = true) } },
+            onToday = { runPageOp { showMove(nav.todayMove(LocalDate.now(), nowHour())) } },
+            onView = { kind -> runPageOp { nav.toggled(kind)?.let { showMove(it) } } },
+            onTitle = { showPicker() },
             sendEnabled = sendEnabled,
         )
         selectionToolbar = CalendarSelectionToolbar(
@@ -219,9 +244,12 @@ class CalendarActivity : AppCompatActivity() {
             // rather than guessing from a dimen (a chrome dimen names a part; the bar is the whole).
             binding.root.awaitLaidOut()
             val bookmark = withContext(Dispatchers.IO) { store.open() }
-            val at = bookmark?.target?.takeIf { it.kind == CalendarTarget.KIND_MONTH }
-                ?: CalendarTarget.of(CalendarTarget.KIND_MONTH, LocalDate.now())   // Y1: the Month page only
-            document.show(at)
+            // The bookmark is honoured whatever kind it names — the organizer opens where it was
+            // left. `open()` has already validated it; an unreadable one comes back null and the
+            // rule below is the first-run answer anyway: today's Month.
+            val move = nav.opening(bookmark?.target, LocalDate.now(), nowHour())
+            document.show(move.target)
+            nav.shown(move)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -322,8 +350,11 @@ class CalendarActivity : AppCompatActivity() {
         override fun onFlipPrevious() = runPageOp { step(forward = false) }
         override fun onUndo() = runPageOp { doUndo() }
         override fun onRedo() = runPageOp { doRedo() }
-        // No long-press, no inserts, no swipe-down here: the calendar has only what it has, and the
-        // other callbacks stay the no-op defaults `PageGestures.Listener` already gives.
+        // A double-tap on a day cell opens that day. `onFingerTap` is deliberately NOT overridden:
+        // a single tap selects nothing here (the wizard's call), so the calendar hears only the
+        // double. No long-press, no inserts, no swipe-down either: the calendar has only what it
+        // has, and the rest stay the no-op defaults `PageGestures.Listener` already gives.
+        override fun onFingerDoubleTap(x: Float, y: Float) = runPageOp { openDay(x, y) }
     }
 
     /** Serialise every page/undo/flush mutation; ignore anything while not open or once closing. */
@@ -346,13 +377,47 @@ class CalendarActivity : AppCompatActivity() {
         }
     }
 
-    /** One period forward or back in the showing view — `CalendarDates.step` is the one rule. */
-    private suspend fun step(forward: Boolean) {
-        val t = document.target
-        val (date, half) = CalendarDates.step(t.kind, t.localDate, t.half, forward)
-        document.show(CalendarTarget.of(t.kind, date, half))
-        showPage()
+    /**
+     * The one road every navigation takes: put the move's page on the paper, then record that it
+     * landed. The order matters — [CalendarNavigation.shown] is what moves the anchor, and a show
+     * that threw (a store gone out from under us) must leave the organizer exactly where it was.
+     */
+    private suspend fun showMove(m: CalendarNavigation.Move, firstLoad: Boolean = false) {
+        document.show(m.target)
+        nav.shown(m)
+        showPage(firstLoad)
     }
+
+    /** One period forward or back in the showing view — the pager's buttons and the finger swipe. */
+    private suspend fun step(forward: Boolean) = showMove(nav.stepped(forward, LocalDate.now(), nowHour()))
+
+    /**
+     * A double-tap at ([x], [y]): the day under it, opened as a Day page. Page coordinates are view
+     * coordinates 1:1, so the raw point goes straight at the geometry the template was painted
+     * from. A tap that names no day — the spare Week cell, a band, a margin, a hairline — and a
+     * double-tap on a Day page are both **nothing**, silently: there is no wrong page to land on.
+     */
+    private suspend fun openDay(x: Float, y: Float) {
+        val t = document.target
+        val day = when (t.kind) {
+            CalendarTarget.KIND_MONTH -> monthGeometry().hitTest(x, y, t.localDate)
+            CalendarTarget.KIND_WEEK -> weekGeometry().hitTest(x, y, t.localDate)
+            else -> null
+        } ?: return
+        nav.dayAt(day)?.let { showMove(it) }
+    }
+
+    /** The pager title's day picker. A dialog raised at a chrome tap — the ledgered exception, not
+     *  a new one — and the pick itself is a page op like every other navigation. */
+    private fun showPicker() {
+        if (!opened || closing || isFinishing || isDestroyed) return
+        DayPickerDialog.show(this, nav.anchor) { day ->
+            runPageOp { showMove(nav.picked(day, LocalDate.now(), nowHour())) }
+        }
+    }
+
+    /** The hour the clock says, for the half a Day page opens on. */
+    private fun nowHour(): Int = LocalTime.now().hour
 
     private suspend fun doUndo() {
         val a = undo.popUndo() ?: return
@@ -397,22 +462,39 @@ class CalendarActivity : AppCompatActivity() {
         paper.setTemplate(bakeTemplate())
         paper.loadStrokes(document.strokes)
         toolbar.setTitle(titleOf(document.target))
+        // The latch says what is on the paper. It rides this frame; it is never one of its own.
+        toolbar.setView(document.target.kind)
     }
 
-    /** The page's grid at the page's own size, under the bars as they are laid out now. */
+    /** The page's grid at the page's own size, under the bars as they are laid out now — the three
+     *  layouts dispatched by the showing page's kind. */
     private fun bakeTemplate(): android.graphics.Bitmap {
         val today = LocalDate.now()
         bakedToday = today
         val density = resources.displayMetrics.density
-        val g = CalendarGeometry.month(
-            widthPx = document.pageWidth.toInt(),
-            heightPx = document.pageHeight.toInt(),
-            density = density,
-            topInsetPx = binding.topBar.height,
-            bottomInsetPx = binding.bottomBar.height,
-        )
-        return CalendarTemplate.month(g, document.target.localDate, today, density, palette, getString(R.string.calendar_notes_label))
+        val t = document.target
+        val notes = getString(R.string.calendar_notes_label)
+        return when (t.kind) {
+            CalendarTarget.KIND_WEEK -> CalendarTemplate.week(weekGeometry(), t.localDate, today, density, palette, notes)
+            CalendarTarget.KIND_DAY -> CalendarTemplate.day(dayGeometry(), t.half, density, palette, notes)
+            else -> CalendarTemplate.month(monthGeometry(), t.localDate, today, density, palette, notes)
+        }
     }
+
+    private fun monthGeometry() = CalendarGeometry.month(
+        document.pageWidth.toInt(), document.pageHeight.toInt(),
+        resources.displayMetrics.density, binding.topBar.height, binding.bottomBar.height,
+    )
+
+    private fun weekGeometry() = CalendarGeometry.week(
+        document.pageWidth.toInt(), document.pageHeight.toInt(),
+        resources.displayMetrics.density, binding.topBar.height, binding.bottomBar.height,
+    )
+
+    private fun dayGeometry() = CalendarGeometry.day(
+        document.pageWidth.toInt(), document.pageHeight.toInt(),
+        resources.displayMetrics.density, binding.topBar.height, binding.bottomBar.height,
+    )
 
     private fun titleOf(t: CalendarTarget): String = when (t.kind) {
         CalendarTarget.KIND_MONTH -> CalendarDates.monthTitle(t.localDate)

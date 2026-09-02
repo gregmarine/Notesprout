@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The day picker (arc 23 / Y2) — the extension's own, rebuilt in og's shape: an e-ink day grid
+  (Sun–Sat), the header title flips it to a 3×4 month grid, today ringed, the picked/initial day
+  filled black with white text. Styled through Dialogs.style (no elevation,
+  shape_dialog_bordered); the day/month cells and the ring/fill drawables are built in code from
+  DayPickerModel — this file is only the header row and the grid's empty host. The root is
+  match_parent on purpose: the grid's cells are weight-1 over a 0 dp width, and under a
+  wrap_content parent they would measure to nothing.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@color/paperWhite"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/toolbar_bar_thickness">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnPrevMonth"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_gravity="start|center_vertical"
+            android:contentDescription="@string/cd_picker_prev"
+            android:src="@drawable/ic_page_prev" />
+
+        <!-- Tap to flip between the day grid and the month grid. -->
+        <TextView
+            android:id="@+id/tvPickerMonthYear"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:minHeight="@dimen/toolbar_button_size"
+            android:textColor="@color/inkBlack"
+            android:textSize="16sp"
+            android:contentDescription="@string/cd_picker_flip" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnNextMonth"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_gravity="end|center_vertical"
+            android:contentDescription="@string/cd_picker_next"
+            android:src="@drawable/ic_page_next" />
+
+    </FrameLayout>
+
+    <!-- The day (or month) grid — rows of weight-1 cells, built in code from DayPickerModel. -->
+    <LinearLayout
+        android:id="@+id/llDayGrid"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="vertical" />
+
+</LinearLayout>

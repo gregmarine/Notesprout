@@ -180,6 +180,11 @@ Code / correctness:
 - **A chrome dimen names a part; a measured view names the whole** (snap margin = `topBar.height`,
   not the dimen). **A bar centred by `layout_weight` is centred on leftover space** — which
   changes with build type (DebugMenu) and caller (`btnSend`); centred = FrameLayout child.
+- **A text-button style sets no `layout_width`** (arc 23 / Y2): `Widget.Notesprout.TextButton` and
+  `LatchButton` carry padding and text only — unlike `ToolbarButton`, which sets both sizes — so an
+  `AppCompatButton` on one of them needs its own `layout_width`. `processDebugResources` passes,
+  `assembleDebug` passes, and the screen dies at inflate (`You must supply a layout_width
+  attribute`). A resource-only agent cannot see this; the walk is what catches it.
 - **`isPenActive` counts hover** — never idle-gate a dismissal/show that must answer a
   deliberate act; the frame-silence exceptions are ledgered in `docs/notebook.md`.
 - **`showSoftInput` from `onResume` is dropped** (arc 21 / W2): a resumed Activity does not yet have
@@ -685,7 +690,7 @@ commit.
 
 ## Phases — Arc 23 "Calendar" (planned 2026-09-01, wizard complete)
 
-**Status: Y1 ✅ · Y2 ⬜ · Y3 ⬜ · Y4 ⬜** (wizard locked 2026-09-01; Fable planned it and writes Y1).
+**Status: Y1 ✅ · Y2 🧪 · Y3 ⬜ · Y4 ⬜** (wizard locked 2026-09-01; Fable planned it and writes Y1).
 
 A basic writable calendar, the way a physical organizer is one: **Month, Week and Day pages**,
 each a full writing surface whose strokes are recorded in the extension's own store — month ink
@@ -920,7 +925,7 @@ undo / 3-finger redo; (4) the cell hairlines visible on the Nomad; (5) the pad: 
 send it to a notebook, then lasso in a notebook and send to the pad (both transfers on the
 repointed pad). **Commit 6a16017a (pushed); user checklist PASSED "The tests pass" 2026-09-02. Y1 CLOSED; Y2 next.**
 
-### Y2 — Week + Day + navigation ⬜ (Opus code on a Fable brief · Fable review · Sonnet layouts/strings · Haiku walk)
+### Y2 — Week + Day + navigation 🧪 (Opus code on a Fable brief · Fable review · Sonnet layouts/strings · Haiku walk; awaiting the user checklist)
 `CalendarGeometry` + `CalendarTemplate` for Week and Day (fixed row height, slack band, gutter,
 time labels 12-hour with AM/PM from the half) · view toggles · the bottom pager with prev/next and
 the title · `DayPickerDialog` rebuilt fresh in `:ext-calendar` (og's shape: e-ink day grid, tap
@@ -933,7 +938,57 @@ strings from the hand lists. **Walk (adb-drivable — finger taps and swipes wor
 toggles, prev/next, Today, picker to a far month, swipe both ways on all three views, double-tap
 a cell lands on Day AM, close and reopen lands where left. **User checklist:** ink on all three
 views survives a reopen; day rows and ink line up after a close/reopen.
-**Questions at phase start:** version stamp only.
+**Questions at phase start:** version stamp only — **stays `0.1.0-ratta`** (user, 2026-09-02).
+
+**Y2 Outcome (2026-09-02, Opus code on a Fable brief + Sonnet XML + Fable review + Haiku walk with
+the picker re-driven by hand; 1826 JVM tests/variant, +28; twelve modules debug; Nomad walk all
+green):** Shipped as the brief reads. `CalendarGeometry` grew `Week` (2×4 cells over the Month
+page's grid area, so the Notes band is Month's ± 1 px; the spare 8th cell hit-tests to null) and
+`Day` (`DAY_ROW_DP` 34 flat, `DAY_GUTTER_DP` 80, 24 rows, the closing hairline at `rowsBottom`, the
+slack band below; rows shrink only on a page too short for them, never grow) + the pure
+`dayRowLabel(half, slot)` ("12:00 AM" … "11:30 PM", AM/PM from `HALF_NAMES`); `CalendarTemplate`
+paints all three through one `dayCell` (the ring arithmetic exists once) and labels a Day slack
+band only at ≥ `SLACK_LABEL_MIN_DP` 24. **The anchor rule is a pure class, `CalendarNavigation`**
+(`Move(target, anchor, anchorHalf)` — `opening` / `stepped` / `todayMove` / `picked` / `dayAt` /
+`toggled`; the screen shows the move and then calls `shown`, so a show that throws leaves the
+organizer where it was). `DayPickerModel` (pure rows/month grid, no trailing empty week) +
+`DayPickerDialog` (og's shape, built in code, `Dialogs.style`). `PageGestures.Listener.
+onFingerDoubleTap` in `:sn-screen` — a second, independent history over the same qualifying bare
+taps; `onFingerTap` byte-identical, the notebook untouched. `CalendarToolbar` takes Today + the
+three word latches (`setView` from `showPage`, never from the tap) and the tappable title.
+**Implementer calls (recorded, not re-litigated):** (1) a toggle keeps the anchor **and its half**
+— `toggled(kind)` takes no clock; `anchorHalf` is recomputed only when the anchor *day* moves (the
+clock's half when that day is today, else AM), so Day Sep 3 PM → Week → Day is Sep 3 PM again;
+(2) **a double-tap always opens AM**, today's cell included (the wizard's "Day AM"); (3) Week's
+`cellsBottom` is Month's `gridBottom` to within 1 px (halving an odd area), pinned as a range;
+(4) the label builder lives on `CalendarGeometry`, no `DayLabels` file. **Fable review fixes (two,
+both XML):** the picker's root was `wrap_content` over weight-1 zero-width cells (they would have
+measured to nothing — og's root is `match_parent`); the four new `AppCompatButton`s carried no
+`layout_width` — **`Widget.Notesprout.TextButton` and `LatchButton` set none** (only
+`ToolbarButton` does), `processDebugResources` passes, and the screen dies at inflate. The walk's
+first run found that one (`InflateException … You must supply a layout_width attribute`) — a NEW
+TRAP in the standing list. **Nomad numbers:** the bars are the **sw720dp tier here — 71 dp = 133 px
+each**, not the tests' 107-px fixture, so the Day page's slack is 22 px (11 dp) and takes no label
+— blank paper by rule; `begin` warm 19–21 ms. **Walk (Haiku, 11/11):** Month/Week/Day toggles with
+the latch following the paper · prev/next on all three (Day: AM → PM → next AM, and back) · six
+swipes · Today on Month and on Day (09:06 → AM) · double-tap Sep 10 on Month and Tue Sep 8 on Week
+land on their Day AM, a double-tap on Day changes nothing · Back + reopen at `at=1/2026-09-13/0`
+then `at=2/2026-09-13/1` with the same titles · rows `1/1/5` at open and at the last reopen · crash
+buffer empty. **Re-driven by hand (Fable):** the agent reached March 2028 by 18 × Next instead of
+through the picker — the picker's flip to the 3×4 month grid, two year steps, Mar, 15 →
+"March 2028" → Day toggle "Wed, Mar 15, 2028 · AM" (the picked day is the anchor) all proved by
+`uiautomator` title reads. **Walk notes:** adb's two sequential `input tap`s exceed the 300 ms
+double-tap window — `adb shell "input tap X Y & input tap X Y; wait"` lands it; the picker dialog
+is content-sized and **narrows in month mode**, so a tap at the day grid's arrow position falls
+outside it and cancels the dialog (a procedure slip in the walk; the narrowing itself is cosmetic
+and left as is). **Not changed, noted for Y3:** `CalendarDocument.show` sizes a page only when its
+stored size is `0 × 0` — a page minted at one screen size and shown at another keeps the old size
+(the 1:1 template rule as documented; Y3's transfer touches exactly this). Docs → Y4. Nomad test
+data unchanged (the Y1 checklist's five strokes on September 2026). **User checklist (pen):** (1)
+ink on a Week cell and on a Day AM row, Back, reopen → both still there and the Day ink sits on its
+row; (2) ink on a Day PM page, swipe to AM and back → the ink stays with its half; (3) pen feel
+on the Day rows and the Week cells; (4) the Week/Day hairlines visible on the Nomad; (5) lasso a
+stroke on Week, drag it into another cell.
 
 ### Y3 — The notebook door + both transfers ⬜ (Opus code on a Fable brief · Fable review · Haiku walk)
 Notebook top-bar `btnCalendar` after `btnScratchPad` with `releaseForHandoff()` before launch ·

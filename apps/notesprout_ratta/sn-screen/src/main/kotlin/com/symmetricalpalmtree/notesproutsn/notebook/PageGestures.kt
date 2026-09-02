@@ -17,6 +17,7 @@ import kotlin.math.hypot
  * | Gesture | Action |
  * |---|---|
  * | 1-finger bare tap | follow a link under it (arc 6) |
+ * | 1-finger double-tap | consumer-defined (arc 23: the calendar opens the day under it) |
  * | 1-finger horizontal swipe | flip previous / next (past the last page: insert one) |
  * | 1-finger vertical swipe down | open the Contents (arc 4) |
  * | 1-finger vertical swipe up | walk the link trail back (arc 6) |
@@ -78,6 +79,16 @@ class PageGestures(
          * point in the host view's coordinates — the finger may creep before the lift.
          */
         fun onFingerTap(x: Float, y: Float) {}
+        /**
+         * Two bare one-finger taps in a row, close together in time and place (arc 23 — the
+         * calendar opens the day cell under them). A **second, independent** history over the same
+         * qualifying taps [onFingerTap] fires on: both callbacks fire for the second tap, because a
+         * consumer that wants only one of them must not have the other silently withheld — the
+         * notebook overrides only [onFingerTap] and its link follow is untouched by this.
+         *
+         * Reports the **down** point of the second tap, like its single-tap twin.
+         */
+        fun onFingerDoubleTap(x: Float, y: Float) {}
     }
 
     private val vc = ViewConfiguration.get(host.context)
@@ -115,6 +126,11 @@ class PageGestures(
     private var tapX = 0f
     private var tapY = 0f
     private var tapDownTime = 0L
+
+    // ── 1-finger double-tap → the consumer's own action (arc 23) ────────────────
+    // A second history over the same qualifying taps, kept apart from `tapArmed` so the single-tap
+    // callback's behaviour is byte-identical to what it was before this existed.
+    private var oneTapTime = 0L; private var oneTapX = 0f; private var oneTapY = 0f
 
     // ── 1-finger long-press → the page sheet ────────────────────────────────────
     private var longPressArmed = false
@@ -393,21 +409,37 @@ class PageGestures(
                     tapDownTime = ev.eventTime
                 }
             }
-            MotionEvent.ACTION_POINTER_DOWN -> tapArmed = false
+            MotionEvent.ACTION_POINTER_DOWN -> { tapArmed = false; oneTapTime = 0L }
             MotionEvent.ACTION_MOVE -> {
                 if (tapArmed && hypot((ev.x - tapX).toDouble(), (ev.y - tapY).toDouble()) > touchSlop) {
                     tapArmed = false
+                    oneTapTime = 0L
                 }
             }
             MotionEvent.ACTION_UP -> {
                 if (tapArmed && ev.eventTime - tapDownTime <= ViewConfiguration.getLongPressTimeout()) {
                     val x = tapX; val y = tapY
                     escrow { listener.onFingerTap(x, y) }
+                    evaluateDoubleTap(ev.eventTime, x, y)
                 }
                 tapArmed = false
             }
-            MotionEvent.ACTION_CANCEL -> tapArmed = false
+            MotionEvent.ACTION_CANCEL -> { tapArmed = false; oneTapTime = 0L }
         }
+    }
+
+    /**
+     * The second history: a qualifying tap that follows the last one within the platform's
+     * double-tap timeout and slop is a double-tap, and consumes the pair. Anything that disqualifies
+     * a tap — a second finger, a move past slop, a long-press firing, a cancel, a stand-down —
+     * forgets the half, so a double-tap is only ever two clean taps in one place.
+     */
+    private fun evaluateDoubleTap(now: Long, x: Float, y: Float) {
+        val withinTime = oneTapTime != 0L && now - oneTapTime <= ViewConfiguration.getDoubleTapTimeout()
+        val withinSlop = oneTapTime != 0L &&
+            hypot((x - oneTapX).toDouble(), (y - oneTapY).toDouble()) <= doubleTapSlop
+        if (withinTime && withinSlop) { oneTapTime = 0L; escrow { listener.onFingerDoubleTap(x, y) } }
+        else { oneTapTime = now; oneTapX = x; oneTapY = y }
     }
 
     // ── 1-finger long-press → delete ────────────────────────────────────────────
@@ -441,6 +473,7 @@ class PageGestures(
         clearSwipe(); clearTwoFinger()
         mfArmed = false; mfMoved = false
         tapArmed = false
+        oneTapTime = 0L
         cancelLongPress()
         Slog.d(TAG) { "gestures stood down" }
     }

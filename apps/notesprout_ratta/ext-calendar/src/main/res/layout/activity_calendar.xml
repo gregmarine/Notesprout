@@ -8,9 +8,11 @@
   Both bars go to paper.setExclusionRects (via PaperChrome) after layout, so ink never lands under
   chrome. Chrome sits flush at the top edge — the top guard is 0 on Ratta.
 
-  Top bar: Back and the three fixed tools on the left; Send on the right, GONE without a notebook
-  behind us. Bottom bar: the pager and nothing else (F2 + 2026-08-28) — prev, the period's title,
-  next — centred on the SCREEN. The view toggles and Today arrive with Y2.
+  Top bar: Back and the three fixed tools on the left; on the right (Y2) Today, then the
+  Month/Week/Day toggles (text latches — the armed one is a thicker border, set from `showPage`,
+  never assumed from the tap), then Send, GONE without a notebook behind us. Bottom bar: the pager
+  and nothing else (F2 + 2026-08-28) — prev, the period's title, next — centred on the SCREEN;
+  the title is itself a tap target (Y2) that opens the day picker.
 
   openingOverlay is the LAST child (topmost) and starts VISIBLE: the screen covers its own first
   frame the way the notebook does, so the launch reads as one continuous "Opening…".
@@ -73,15 +75,61 @@
                     android:src="@drawable/ic_lasso" />
             </LinearLayout>
 
-            <!-- Send = this whole page, to the notebook the calendar was opened from. GONE when
-                 there is no notebook behind us — GONE, never disabled. -->
-            <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnSend"
-                style="@style/Widget.Notesprout.ToolbarButton"
+            <!-- Today, the three view toggles, then Send — in that order, right-aligned. Send =
+                 this whole page, to the notebook the calendar was opened from; GONE when there is
+                 no notebook behind us — GONE, never disabled. -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
                 android:layout_gravity="end|center_vertical"
-                android:contentDescription="@string/cd_calendar_send_page"
-                android:src="@drawable/ic_pencil_down"
-                android:visibility="gone" />
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnToday"
+                    android:layout_width="wrap_content"
+                    style="@style/Widget.Notesprout.TextButton"
+                    android:layout_height="@dimen/toolbar_button_size"
+                    android:layout_marginEnd="8dp"
+                    android:text="@string/calendar_today"
+                    android:contentDescription="@string/cd_calendar_today" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnMonth"
+                    android:layout_width="wrap_content"
+                    style="@style/Widget.Notesprout.LatchButton"
+                    android:layout_height="@dimen/toolbar_button_size"
+                    android:layout_marginStart="4dp"
+                    android:text="@string/calendar_view_month"
+                    android:contentDescription="@string/cd_calendar_view_month" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnWeek"
+                    android:layout_width="wrap_content"
+                    style="@style/Widget.Notesprout.LatchButton"
+                    android:layout_height="@dimen/toolbar_button_size"
+                    android:layout_marginStart="4dp"
+                    android:text="@string/calendar_view_week"
+                    android:contentDescription="@string/cd_calendar_view_week" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnDay"
+                    android:layout_width="wrap_content"
+                    style="@style/Widget.Notesprout.LatchButton"
+                    android:layout_height="@dimen/toolbar_button_size"
+                    android:layout_marginStart="4dp"
+                    android:text="@string/calendar_view_day"
+                    android:contentDescription="@string/cd_calendar_view_day" />
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnSend"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:layout_marginStart="8dp"
+                    android:contentDescription="@string/cd_calendar_send_page"
+                    android:src="@drawable/ic_pencil_down"
+                    android:visibility="gone" />
+
+            </LinearLayout>
 
         </FrameLayout>
 
@@ -126,17 +174,24 @@
                     android:contentDescription="@string/cd_prev_period"
                     android:src="@drawable/ic_page_prev" />
 
+                <!-- Tap the title to open the day picker (Y2) — a tap target is dimen-driven even
+                     though this one is text, not an icon. -->
                 <TextView
                     android:id="@+id/title"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:background="@android:color/transparent"
+                    android:clickable="true"
+                    android:focusable="true"
                     android:gravity="center"
                     android:minWidth="160dp"
+                    android:minHeight="@dimen/toolbar_button_size"
                     android:paddingStart="8dp"
                     android:paddingEnd="8dp"
                     android:singleLine="true"
                     android:textColor="@color/inkBlack"
-                    android:textSize="16sp" />
+                    android:textSize="16sp"
+                    android:contentDescription="@string/cd_calendar_pick_day" />
 
                 <androidx.appcompat.widget.AppCompatImageButton
                     android:id="@+id/btnNext"

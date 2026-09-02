@@ -5,14 +5,15 @@ import java.time.LocalDate
 import kotlin.math.roundToInt
 
 /**
- * Where everything on a calendar page sits (arc 23 / Y1 — Month; Week and Day arrive with Y2) —
- * pure integers, JVM-tested, no `android.graphics`. The template painter draws what this says and
- * the finger hit-test reads it back, so the two can never disagree.
+ * Where everything on a calendar page sits (arc 23 — Month, Week and Day) — pure integers,
+ * JVM-tested, no `android.graphics`. The template painter draws what this says and the finger
+ * hit-test reads it back, so the two can never disagree.
  *
  * **Rule: every dimension is width- or dp-derived; height slack goes to a band; nothing is a
  * proportional slice of the height.** og's Day view sized its rows from the height and is a
- * ledgered bug for it; here the Month grid is square cells from the width, and whatever height is
- * left below the grid is the Notes band.
+ * ledgered bug for it; here the Month grid is square cells from the width, the Day page's rows are
+ * a fixed dp height, and whatever height is left below either is a band — Notes on Month and Week,
+ * blank paper (or Notes, when there is room to say so) on Day.
  *
  * **Hairlines are `round(density)` px on integer edges** — a 1 dp line at the Nomad's 1.875 density
  * is a coin flip otherwise (the standing trap). Every edge here is an `Int`.
@@ -24,6 +25,20 @@ object CalendarGeometry {
 
     /** The day-of-week header band, og's value. */
     const val DOW_HEADER_DP = 40f
+
+    /** One half-hour row on the Day page — a **fixed** height, never a slice of the page's
+     *  (og's height-proportional rows are the ledgered bug this arc does not repeat). */
+    const val DAY_ROW_DP = 34f
+
+    /** The Day page's left gutter, where the time labels live — og's value. */
+    const val DAY_GUTTER_DP = 80f
+
+    /** Half-hour rows in one half of a day: twelve hours, two rows an hour. */
+    const val DAY_ROWS = 24
+
+    /** A slack band shorter than this is left as blank paper: a label needs room to be a label
+     *  rather than a smudge against the bottom bar. */
+    const val SLACK_LABEL_MIN_DP = 24f
 
     /** The Month page's geometry. */
     class Month(
@@ -100,5 +115,153 @@ object CalendarGeometry {
             headerTop = headerTop, headerBottom = headerBottom, gridTop = gridTop, gridBottom = gridBottom,
             notesTop = notesTop, notesBottom = maxOf(notesTop, bottom),
         )
+    }
+
+    // ── Week ─────────────────────────────────────────────────────────────────
+
+    /** The Week page's geometry: 2×4 cells (Sun..Sat and one spare) over the same Notes band. */
+    class Week(
+        val width: Int,
+        val height: Int,
+        val hairline: Int,
+        /** The cells' left edge — what four cells and three hairlines do not use is split. */
+        val left: Int,
+        val cellW: Int,
+        val cellH: Int,
+        val cellsTop: Int,
+        val cellsBottom: Int,
+        val notesTop: Int,
+        val notesBottom: Int,
+    ) {
+        val pitchX: Int get() = cellW + hairline
+        val pitchY: Int get() = cellH + hairline
+
+        val contentRight: Int get() = left + 4 * cellW + 3 * hairline
+
+        val notesHeight: Int get() = maxOf(0, notesBottom - notesTop)
+
+        fun cellLeft(col: Int): Int = left + col * pitchX
+        fun cellTop(row: Int): Int = cellsTop + row * pitchY
+
+        /** The x of the hairline before column [col] (1..3), its left edge. */
+        fun columnDividerX(col: Int): Int = cellLeft(col) - hairline
+
+        /** The y of the one hairline between the two rows, its top edge. */
+        fun rowDividerY(): Int = cellTop(1) - hairline
+
+        /**
+         * The day under ([x], [y]) in the week starting [sunday], or null. Cell index is
+         * `row * 4 + col`: 0..6 are Sun..Sat, **7 is the spare** — blank, unlabeled, and nobody's
+         * day, so it hit-tests to null exactly like the band, the margins and the hairlines do.
+         */
+        fun hitTest(x: Float, y: Float, sunday: LocalDate): LocalDate? {
+            if (y < cellsTop || y >= cellsBottom || x < left || x >= contentRight) return null
+            val col = ((x - left) / pitchX).toInt()
+            val row = ((y - cellsTop) / pitchY).toInt()
+            if (col !in 0..3 || row !in 0..1) return null
+            if (x - cellLeft(col) >= cellW || y - cellTop(row) >= cellH) return null   // on a divider
+            val index = row * 4 + col
+            if (index > 6) return null
+            return sunday.plusDays(index.toLong())
+        }
+    }
+
+    /**
+     * The Week page at the same page size as [month]. **The cell area is the Month page's grid
+     * area** — header, its hairline, six cells and five hairlines — so the Notes band below it is
+     * Month's band to within the integer rounding of halving that area. Cells are the width's
+     * quarter, two rows with one divider between them; the eighth cell is spare.
+     */
+    fun week(widthPx: Int, heightPx: Int, density: Float, topInsetPx: Int, bottomInsetPx: Int): Week {
+        val hairline = maxOf(1, density.roundToInt())
+        val reference = month(widthPx, heightPx, density, topInsetPx, bottomInsetPx)
+        val cellsTop = topInsetPx
+        val bottom = heightPx - bottomInsetPx
+        val area = maxOf(0, reference.gridBottom - cellsTop)
+        val cellW = maxOf(1, (widthPx - 3 * hairline) / 4)
+        val left = (widthPx - (4 * cellW + 3 * hairline)) / 2
+        val cellH = maxOf(1, (area - hairline) / 2)
+        val cellsBottom = cellsTop + 2 * cellH + hairline
+        val notesTop = cellsBottom + hairline
+        return Week(
+            width = widthPx, height = heightPx, hairline = hairline, left = left,
+            cellW = cellW, cellH = cellH, cellsTop = cellsTop, cellsBottom = cellsBottom,
+            notesTop = notesTop, notesBottom = maxOf(notesTop, bottom),
+        )
+    }
+
+    // ── Day ──────────────────────────────────────────────────────────────────
+
+    /**
+     * The Day page's geometry: [DAY_ROWS] half-hour rows of a **fixed** height under the top inset,
+     * a time-label gutter down the left, and whatever height is left over as a slack band. The rows
+     * span the page's full width, as og's do — [left] and [right] are 0 and the width.
+     */
+    class Day(
+        val width: Int,
+        val height: Int,
+        val hairline: Int,
+        /** The gutter hairline's left edge — the labels live to its left, the ledger to its right. */
+        val gutterLeft: Int,
+        /** The gutter hairline's right edge. */
+        val gutterRight: Int,
+        val rowsTop: Int,
+        val rowHeight: Int,
+        val rowsBottom: Int,
+        /** The band below the rows' closing hairline: never negative, and never a row's height. */
+        val slackTop: Int,
+        val slackBottom: Int,
+    ) {
+        val left: Int get() = 0
+        val right: Int get() = width
+
+        /** From one row's top edge to the next: the row plus its divider. */
+        val pitch: Int get() = rowHeight + hairline
+
+        val slackHeight: Int get() = maxOf(0, slackBottom - slackTop)
+
+        /** Row [i]'s top edge, `i` in 0..[DAY_ROWS] − 1. */
+        fun rowTop(i: Int): Int = rowsTop + i * pitch
+
+        /** The y of the hairline above row [i] (1..23), its top edge — the first row has none. */
+        fun rowDividerY(i: Int): Int = rowTop(i) - hairline
+    }
+
+    /**
+     * The Day page for one half. Rows take [DAY_ROW_DP] flat; **only when a page is too short for
+     * 24 of them plus their 23 dividers** do they shrink to the tallest integer that fits (Month's
+     * `byHeight` rule), never below 1 px — a store carried from a smaller screen still shows the
+     * whole twelve hours rather than running under the bottom bar. The slack is what is left, and
+     * it is what absorbs a taller page: the rows never grow.
+     */
+    fun day(widthPx: Int, heightPx: Int, density: Float, topInsetPx: Int, bottomInsetPx: Int): Day {
+        val hairline = maxOf(1, density.roundToInt())
+        val rowsTop = topInsetPx
+        val bottom = heightPx - bottomInsetPx
+        val dividers = (DAY_ROWS - 1) * hairline
+        val byHeight = (bottom - rowsTop - dividers) / DAY_ROWS
+        val rowHeight = maxOf(1, minOf((DAY_ROW_DP * density).roundToInt(), byHeight))
+        val rowsBottom = rowsTop + DAY_ROWS * rowHeight + dividers
+        val gutterLeft = (DAY_GUTTER_DP * density).roundToInt()
+        val slackTop = rowsBottom + hairline     // the rows' closing hairline sits at rowsBottom
+        return Day(
+            width = widthPx, height = heightPx, hairline = hairline,
+            gutterLeft = gutterLeft, gutterRight = gutterLeft + hairline,
+            rowsTop = rowsTop, rowHeight = rowHeight, rowsBottom = rowsBottom,
+            slackTop = slackTop, slackBottom = maxOf(slackTop, bottom),
+        )
+    }
+
+    /**
+     * The label on row [slot] (0..[DAY_ROWS] − 1) of the [half] ledger: "12:00 AM", "12:30 AM",
+     * "1:00 AM" … "11:30 AM", and the same twelve hours with "PM" for the afternoon half. Built
+     * from ints, with AM/PM out of [CalendarDates.HALF_NAMES] — **never a formatter** (arc 5's
+     * rule: CLDR data drifts, and a page label is chrome, not locale data).
+     */
+    fun dayRowLabel(half: Int, slot: Int): String {
+        val hour = half * 12 + slot / 2
+        val h12 = if (hour % 12 == 0) 12 else hour % 12
+        val minute = if (slot % 2 == 0) "00" else "30"
+        return "$h12:$minute ${CalendarDates.HALF_NAMES[half]}"
     }
 }

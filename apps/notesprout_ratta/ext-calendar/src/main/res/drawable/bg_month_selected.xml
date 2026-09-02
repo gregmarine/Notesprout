@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The picker's month grid — the picked month's cell, filled black with white text in code. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/inkBlack" />
+    <corners android:radius="4dp" />
+</shape>
