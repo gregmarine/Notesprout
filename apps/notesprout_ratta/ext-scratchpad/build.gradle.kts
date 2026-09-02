@@ -38,7 +38,7 @@ android {
         viewBinding = true
     }
 
-    // ScratchPageCodec and friends run production code that logs through Slog → android.util.Log;
+    // ScratchDocument and friends run production code that logs through Slog → android.util.Log;
     // on the JVM the framework stubs must return defaults instead of throwing "not mocked".
     testOptions {
         unitTests.isReturnDefaultValues = true
@@ -63,6 +63,10 @@ dependencies {
     // lives in the host's extension store, because an extension writes nothing to disk itself, ever.
     implementation(project(":extension-api"))
     implementation(project(":sn-screen"))
+    // Arc 23 / Y1: the ink-on-rows helpers (wire mapping, stroke rows, batches, read plan, the
+    // in-memory page + op log, the stroke-level undo actions) live in `:ext-ink`, shared with the
+    // calendar — one copy, no drift.
+    implementation(project(":ext-ink"))
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")

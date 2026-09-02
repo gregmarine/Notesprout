@@ -10,6 +10,8 @@ import com.symmetricalpalmtree.notesproutsn.extension.HostCallerCheck
 import com.symmetricalpalmtree.notesproutsn.extension.IExtensionStore
 import com.symmetricalpalmtree.notesproutsn.extension.IScratchPad
 import com.symmetricalpalmtree.notesproutsn.extension.InkBundle
+import com.symmetricalpalmtree.notesproutsn.ink.InkWire
+import com.symmetricalpalmtree.notesproutsn.ink.StoreUnavailable
 
 /**
  * The SCRATCH_PAD point (arc 11 / J3) — the host's **held** bind for one showing of the screen.
@@ -25,7 +27,7 @@ import com.symmetricalpalmtree.notesproutsn.extension.InkBundle
  * `receiveInk` accumulates chunks until `last`, **re-checking the running totals** against the
  * transfer caps as it goes — the host checks before any bind, and this is the untrusted-input half
  * of the same rule (over → `IllegalArgumentException`, the whole inbound dropped). On `last` it
- * mints fresh ids ([ScratchInk.toStrokes] — nothing from the wire is trusted beyond its geometry)
+ * mints fresh ids ([InkWire.toStrokes] — nothing from the wire is trusted beyond its geometry)
  * and places the lot through [ScratchStore.receive], leaving [ScratchSession.received] for the
  * screen to consume once. A scratch page has **no size ceiling** since arc 22 / X2 — the placement
  * is one store transaction, so the only failure left is the store being gone.
@@ -84,7 +86,7 @@ class ScratchPadService : Service() {
                 if (!last) return
 
                 val t0 = SystemClock.elapsedRealtime()
-                val minted = ScratchInk.toStrokes(ScratchSession.inbound)
+                val minted = InkWire.toStrokes(ScratchSession.inbound)
                 val w = ScratchSession.inboundPageWidth
                 val h = ScratchSession.inboundPageHeight
                 val newPage = placement == ExtensionContract.PLACEMENT_NEW_PAGE

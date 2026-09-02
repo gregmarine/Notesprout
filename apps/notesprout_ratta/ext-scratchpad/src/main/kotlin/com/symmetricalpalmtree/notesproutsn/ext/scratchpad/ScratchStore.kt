@@ -7,41 +7,31 @@ import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
 import com.symmetricalpalmtree.notesproutsn.extension.IExtensionStore
 import com.symmetricalpalmtree.notesproutsn.extension.Statement
 import com.symmetricalpalmtree.notesproutsn.extension.StoreReads
+import com.symmetricalpalmtree.notesproutsn.ink.InkStore
+import com.symmetricalpalmtree.notesproutsn.ink.PageInk
+import com.symmetricalpalmtree.notesproutsn.ink.StoreUnavailable
 import java.util.UUID
-
-/** The extension cannot reach its storage (any store exception — the host's rule: treat all as unavailable). */
-class StoreUnavailable(cause: Throwable) : Exception(cause.message, cause)
-
-/** One page as it is stored: its size and its strokes, each with the `"order"` it holds. */
-class PageInk(val width: Float, val height: Float, val strokes: List<Pair<Long, Stroke>>) {
-    companion object {
-        /** A page with nothing on it and no size of its own yet. */
-        val EMPTY = PageInk(0f, 0f, emptyList())
-    }
-}
 
 /**
  * The scratch pad's tables over the host's `IExtensionStore` (arc 11 / J3, rewritten onto rows in
- * arc 22 / X2). **Blocking** — every call runs on `Dispatchers.IO` (the screen) or the Binder
- * thread (`begin` / `receiveInk`), never Main. The extension writes nothing to disk itself: this
- * store is the host's, lent for the showing.
+ * arc 22 / X2, on `:ext-ink`'s [InkStore] base since arc 23 / Y1). **Blocking** — every call runs
+ * on `Dispatchers.IO` (the screen) or the Binder thread (`begin` / `receiveInk`), never Main. The
+ * extension writes nothing to disk itself: this store is the host's, lent for the showing.
  *
  * The schema is [ScratchSchema.V1]; [load] applies it and is the only door — the host's gate
  * refuses `exec` / `query` on a binder that has not declared, so nothing may reach the store
  * before it. Every SQL string lives in [ScratchSql]; every write goes through [execAll], which
- * splits by [ScratchBatches] and runs each batch as one transaction.
+ * splits by `StoreBatches` and runs each batch as one transaction.
  *
  * **There is no page ceiling.** Arc 11's `PageFullException` existed because a page was one store
  * value; a page is now rows, and the only failure left is the store being gone — any exception at
  * all becomes [StoreUnavailable], which is what the screen and the service both answer to.
  */
 class ScratchStore(
-    private val store: IExtensionStore,
-    /** The payload caps — the contract's, overridden only by tests that need more than one batch.
-     *  One number: it bounds an `exec` batch going in and a planned read coming back. */
-    private val maxPayloadBytes: Int = ExtensionContract.STORE_MAX_VALUE_BYTES,
-    private val maxBatchStatements: Int = ExtensionContract.STORE_MAX_BATCH_STATEMENTS,
-) {
+    store: IExtensionStore,
+    maxPayloadBytes: Int = ExtensionContract.STORE_MAX_VALUE_BYTES,
+    maxBatchStatements: Int = ExtensionContract.STORE_MAX_BATCH_STATEMENTS,
+) : InkStore(store, maxPayloadBytes, maxBatchStatements, TAG) {
 
     class Loaded(val ids: List<String>, val currentId: String)
 
@@ -69,8 +59,8 @@ class ScratchStore(
     }
 
     /**
-     * One page's size and ink. The strokes are read in planned ranges ([ScratchReadPlan]) so a page
-     * of any size comes back without ever asking for one result the host would refuse.
+     * One page's size and ink. The strokes are read in planned ranges ([InkStore.readStrokes]) so a
+     * page of any size comes back without ever asking for one result the host would refuse.
      *
      * A missing page row is a page that went away underneath us (only reachable through a host
      * restart mid-showing): it reads as empty and says so, rather than throwing.
@@ -80,30 +70,10 @@ class ScratchStore(
         if (size == null) Log.w(TAG, "page row is gone — reading it as empty")
         val width = size?.real("width")?.toFloat() ?: 0f
         val height = size?.real("height")?.toFloat() ?: 0f
-
-        val index = StoreReads.all(store, ScratchSql.selectStrokeLens(id)).rows
-        val orders = index.map { it.long("order") }
-        val lengths = index.map { it.long("len").toInt() }
-        val strokes = ArrayList<Pair<Long, Stroke>>(orders.size)
-        var dropped = 0
-        for (range in ScratchReadPlan.ranges(orders, lengths, maxPayloadBytes)) {
-            for (row in StoreReads.all(store, ScratchSql.selectStrokes(id, range)).rows) {
-                val decoded = StrokeRows.decode(row)
-                if (decoded == null) dropped++ else strokes += decoded
-            }
-        }
-        if (dropped > 0) Log.w(TAG, "page $id: $dropped stroke row(s) dropped")
-        PageInk(width, height, strokes)
+        PageInk(width, height, readStrokes(id, ScratchSql.selectStrokeLens(id)) { ScratchSql.selectStrokes(id, it) })
     }
 
     // ── Writing ──────────────────────────────────────────────────────────────
-
-    /**
-     * Run [statements] in order. One batch — every ordinary flush, page operation and placement —
-     * is one transaction and therefore atomic; a write long enough to need several is several, and
-     * the caller's retry converges because every statement [ScratchSql] builds is idempotent.
-     */
-    fun execAll(statements: List<Statement>) = guard { run(statements) }
 
     fun setCurrent(id: String) = execAll(listOf(ScratchSql.setCurrent(id)))
 
@@ -202,39 +172,6 @@ class ScratchStore(
 
     /** Every page's position, for the list as it now stands. Page counts are tens — renumber all. */
     private fun renumber(ids: List<String>): List<Statement> = ids.mapIndexed { i, id -> ScratchSql.position(id, i) }
-
-    private fun run(statements: List<Statement>) {
-        for (batch in ScratchBatches.split(statements, maxPayloadBytes, maxBatchStatements)) StoreReads.exec(store, batch)
-    }
-
-    /** [run], but a failure after at least one batch has landed runs [compensation] first. */
-    private inline fun compensated(statements: List<Statement>, compensation: () -> List<Statement>) {
-        val batches = ScratchBatches.split(statements, maxPayloadBytes, maxBatchStatements)
-        var landed = 0
-        try {
-            for (batch in batches) {
-                StoreReads.exec(store, batch)
-                landed++
-            }
-        } catch (e: StoreUnavailable) {
-            throw e
-        } catch (e: Exception) {
-            if (landed > 0) {
-                Log.w(TAG, "placement failed after $landed of ${batches.size} batches — compensating")
-                runCatching { run(compensation()) }
-            }
-            throw StoreUnavailable(e)
-        }
-    }
-
-    private inline fun <T> guard(block: () -> T): T =
-        try {
-            block()
-        } catch (e: StoreUnavailable) {
-            throw e
-        } catch (e: Exception) {
-            throw StoreUnavailable(e)
-        }
 
     companion object {
         private const val TAG = "ScratchStore"

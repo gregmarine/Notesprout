@@ -19,9 +19,11 @@ class ExtensionContractTest {
         // read text bytes as a .soil); 4 since arc 21 / W1 (the TAG_MANAGER point — an older host
         // knows no `ITagManager` at all); 5 since arc 21 / W4 (TagShowing's wire form — the first
         // non-tail break); 6 since arc 22 / X1 (IExtensionStore REPLACED — the second non-tail
-        // break, and the first with a floor). Bumping this again is a contract event.
-        assertEquals(6, ExtensionContract.API_VERSION)
+        // break, and the first with a floor); 7 since arc 23 / Y1 (the CALENDAR point — a compatible
+        // addition, with the floor made per action). Bumping this again is a contract event.
+        assertEquals(7, ExtensionContract.API_VERSION)
         assertEquals(6, ExtensionContract.MIN_API_VERSION_FOR_STORE)
+        assertEquals(7, ExtensionContract.MIN_API_VERSION_FOR_CALENDAR)
         assertEquals(2_000, ExtensionContract.MAX_INK_STROKES)
         assertEquals(60_000, ExtensionContract.MAX_INK_POINTS)
         assertEquals(20, ExtensionContract.MAX_PRECONTEXT_CHARS)
@@ -57,6 +59,25 @@ class ExtensionContractTest {
             "com.symmetricalpalmtree.notesproutsn.extension.TAG_MANAGER_SCREEN",
             ExtensionContract.ACTION_TAG_MANAGER_SCREEN,
         )
+        assertEquals(
+            "com.symmetricalpalmtree.notesproutsn.extension.CALENDAR",
+            ExtensionContract.ACTION_CALENDAR,
+        )
+        assertEquals(
+            "com.symmetricalpalmtree.notesproutsn.extension.CALENDAR_SCREEN",
+            ExtensionContract.ACTION_CALENDAR_SCREEN,
+        )
+    }
+
+    /** The calendar's launch extras and result code (arc 23 / Y1) — the pad's three, mirrored,
+     *  with names that cannot collide with the pad's on a host that opens both. */
+    @Test
+    fun calendarConstants() {
+        assertEquals("calendarSendEnabled", ExtensionContract.EXTRA_CALENDAR_SEND_ENABLED)
+        assertEquals("calendarOpenReceived", ExtensionContract.EXTRA_CALENDAR_OPEN_RECEIVED)
+        assertEquals(1, ExtensionContract.RESULT_CALENDAR_SEND)
+        assertTrue(ExtensionContract.EXTRA_CALENDAR_SEND_ENABLED != ExtensionContract.EXTRA_SCRATCH_SEND_ENABLED)
+        assertTrue(ExtensionContract.EXTRA_CALENDAR_OPEN_RECEIVED != ExtensionContract.EXTRA_SCRATCH_OPEN_RECEIVED)
     }
 
     /** The tag caps (arc 21 / W1) and the paging numbers (arc 22 / X3). The caps are the wizard's
@@ -127,8 +148,9 @@ class ExtensionContractTest {
         assertTrue(ExtensionContract.STORE_MAX_VALUE_BYTES <= ExtensionContract.STORE_MAX_RESULT_BYTES)
     }
 
-    /** The floor rule (arc 22 / X1): a store-taking point's service is listed only at 6 and above;
-     *  the stateless points keep accepting 1..API_VERSION. */
+    /** The floor rule (arc 22 / X1, per action since arc 23 / Y1): a store-taking point's service
+     *  is listed only at 6 and above, the calendar's only at 7, and the stateless points keep
+     *  accepting 1..API_VERSION. No existing door moved when the calendar arrived. */
     @Test
     fun storeTakingPointsHaveTheFloor() {
         for (action in listOf(
@@ -139,8 +161,16 @@ class ExtensionContractTest {
             assertEquals(action, 6, ExtensionContract.minApiVersion(action))
             assertTrue(action, !ExtensionContract.accepts(action, 5))
             assertTrue(action, ExtensionContract.accepts(action, 6))
+            assertTrue(action, ExtensionContract.accepts(action, 7))
             assertTrue(action, !ExtensionContract.accepts(action, ExtensionContract.API_VERSION + 1))
         }
+        val calendar = ExtensionContract.ACTION_CALENDAR
+        assertEquals(7, ExtensionContract.minApiVersion(calendar))
+        assertTrue(!ExtensionContract.accepts(calendar, 6))
+        assertTrue(ExtensionContract.accepts(calendar, 7))
+        assertTrue(!ExtensionContract.accepts(calendar, ExtensionContract.API_VERSION + 1))
+        // The screen action is not a service action — it carries no floor of its own.
+        assertEquals(1, ExtensionContract.minApiVersion(ExtensionContract.ACTION_CALENDAR_SCREEN))
         for (action in listOf(
             ExtensionContract.ACTION_HANDWRITING_RECOGNIZER,
             ExporterContract.ACTION_NOTEBOOK_EXPORTER,

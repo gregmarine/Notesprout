@@ -3,14 +3,19 @@ package com.symmetricalpalmtree.notesproutsn.ext.scratchpad
 import com.symmetricalpalmtree.gpaper.core.model.Stroke
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.extension.Statement
+import com.symmetricalpalmtree.notesproutsn.ink.InkAction
+import com.symmetricalpalmtree.notesproutsn.ink.InkDocument
+import com.symmetricalpalmtree.notesproutsn.ink.PageInk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.TreeMap
 
 /**
- * The pad's pages — in memory, over [ScratchStore] (arc 11 / J4, on rows since arc 22 / X2). The
- * screen owns the paper and the chrome; this owns *what is on the pages* and when it reaches the
- * store.
+ * The pad's pages — in memory, over [ScratchStore] (arc 11 / J4, on rows since arc 22 / X2, over
+ * `:ext-ink` since arc 23 / Y1). The screen owns the paper and the chrome; this owns *which* page is
+ * showing, the page list and its structural edits, and the page's size; **what is on the page** —
+ * the [TreeMap] of strokes, the op log, the re-flush rule and the four stroke-level replays — is
+ * [InkDocument]'s, shared with the calendar so the two never drift.
  *
  * **The split of threads is deliberate.** Mutations ([addStroke], [erase], [move]) are synchronous
  * and run on Main, straight out of the g-paper callbacks: they touch only the in-memory page, so a
@@ -19,25 +24,12 @@ import java.util.TreeMap
  * the store call itself. The screen serialises the suspending half behind one mutex, exactly as the
  * notebook serialises its page ops.
  *
- * **The page is a `TreeMap` keyed on the stroke's `"order"`.** That column is the writing order and
- * it is load-bearing: recognition and every render read ink as a sequence, and an erase that came
- * back at the end rather than in place would change the page. Orders are unique per page and
- * monotone — a new stroke takes `last + 1` — so a restore can put a stroke back at the order it
- * held and nothing can have taken it. "Monotone" is a **high-water mark** ([highWater]), not the
- * last key in the map: erasing the tail stroke lowers the last key, and a new stroke that reused
- * its order would collide with the erased one when an undo brought it back.
+ * **The page size is the pad's one extra unwritten thing.** A page stored as `0 × 0` learns its
+ * size at first layout and owes the row one `UPDATE`; it rides ahead of the strokes in the next
+ * flush ([InkDocument.flushUntilClean]'s `extraDirty`), and comes back if that write fails.
  *
- * **What is unwritten is an op log, not a dirty flag.** Each edit records one entry per stroke id —
- * a `Put` (the row as it should now read) or a `Drop` — in a [LinkedHashMap], so a second edit to
- * the same stroke coalesces onto the first and a flush is one statement per touched stroke rather
- * than a re-encode of the page. Arc 11's whole-page blob, its byte accounting and its 4 MiB
- * ceiling are gone with it.
- *
- * **Re-flush until clean.** [flushUntilClean] snapshots the log and clears it *before* the IO hop,
- * then loops while it has been re-dirtied: a stroke committed during a write would otherwise be in
- * a snapshot that was already sent. A failed flush merges its snapshot back **under** anything
- * newer and rethrows. [goTo] reads the target page **first** and flushes the departing one
- * **second**, so the swap itself has no suspension point for a commit to fall into.
+ * [goTo] reads the target page **first** and flushes the departing one **second**, so the swap
+ * itself has no suspension point for a commit to fall into.
  *
  * **A received placement (J5) never lands here.** `ScratchStore.receive` writes it on the Binder
  * thread before the screen exists; the document simply [load]s what is already in the store. What
@@ -49,51 +41,29 @@ class ScratchDocument(
     private val surfaceSize: () -> Pair<Float, Float>,
 ) {
 
-    /** One unwritten change to one stroke row. */
-    private sealed interface Op {
-        /** The row as it should now read — an added stroke, a moved one, a restored one. */
-        class Put(val stroke: Stroke, val order: Long) : Op
-
-        /** The row should not be there. `DELETE` tolerates a row that never landed, so an
-         *  add-then-erase inside one flush window is safely one `DELETE`. */
-        object Drop : Op
-    }
+    private val ink = InkDocument(ScratchSql, TAG)
 
     var pageIds: List<String> = emptyList()
         private set
 
-    var currentPageId: String = ""
-        private set
-
-    /** The current page, `"order"` → stroke. Iteration order IS the writing order. */
-    private val page = TreeMap<Long, Stroke>()
-
-    /** id → the order it sits at, so an edit named by id can find its row. */
-    private val orders = HashMap<String, Long>()
-
-    /** The unwritten changes, coalesced per stroke id, in the order they were first made. */
-    private val ops = LinkedHashMap<String, Op>()
+    val currentPageId: String get() = ink.pageId
 
     /** The page's own width/height is unwritten (it only just learned it). */
     private var sizeDirty = false
-
-    /** One past the highest order this page has held since it was loaded — never lowered by an
-     *  erase, so an order a live undo entry remembers can never be handed out again. */
-    private var highWater = 0L
 
     var pageWidth: Float = 0f
         private set
     var pageHeight: Float = 0f
         private set
 
-    val strokes: List<Stroke> get() = page.values.toList()
+    val strokes: List<Stroke> get() = ink.strokes
     val pageCount: Int get() = pageIds.size
     val pageIndex: Int get() = pageIds.indexOf(currentPageId).coerceAtLeast(0)
     val pageNumber: Int get() = pageIndex + 1
-    val hasUnsavedChanges: Boolean get() = ops.isNotEmpty() || sizeDirty
+    val hasUnsavedChanges: Boolean get() = ink.hasUnsavedChanges || sizeDirty
 
     /** The order [id] sits at on the current page, or null if it is not on it. */
-    fun orderOf(id: String): Long? = orders[id]
+    fun orderOf(id: String): Long? = ink.orderOf(id)
 
     // ── Loading ──────────────────────────────────────────────────────────────
 
@@ -158,82 +128,41 @@ class ScratchDocument(
     // ── Mutations (Main, synchronous) ────────────────────────────────────────
 
     /** Take one committed stroke, at the end of the page's writing order. */
-    fun addStroke(stroke: Stroke) {
-        put(stroke, nextOrder())
-    }
-
-    /** Take a whole set at once — a received placement's redo (J5), appended in the order given.
-     *  Ids are the caller's (they were minted when the ink arrived and never change). */
-    fun addStrokes(strokes: List<Stroke>) {
-        for (s in strokes) put(s, nextOrder())
-    }
-
-    /** Put strokes back at the orders they held — a [ScratchAction.Pasted] redo. */
-    fun addStrokesAt(strokes: List<Stroke>, orders: List<Long>) {
-        require(strokes.size == orders.size) { "${strokes.size} strokes for ${orders.size} orders" }
-        for (i in strokes.indices) put(strokes[i], orders[i])
-    }
+    fun addStroke(stroke: Stroke) = ink.addStroke(stroke)
 
     /** Drop [ids]; returns the undo action, or null when nothing of ours was in the set. */
-    fun erase(ids: Collection<String>): ScratchAction.Erased? {
-        if (ids.isEmpty()) return null
-        val entries = ArrayList<ScratchAction.Erased.Entry>(ids.size)
-        for (id in ids) {
-            val order = orders[id] ?: continue
-            val stroke = page[order] ?: continue
-            entries += ScratchAction.Erased.Entry(order, stroke)
-        }
-        if (entries.isEmpty()) return null
-        entries.sortBy { it.order }
-        for (e in entries) removeStroke(e.stroke.id)
-        return ScratchAction.Erased(currentPageId, entries)
-    }
+    fun erase(ids: Collection<String>): InkAction.Erased? = ink.erase(ids)
 
-    /** Translate [ids] by ([dx], [dy]); each moved stroke's row is rewritten at the order it holds.
-     *  Returns the undo action, or null when nothing moved. */
-    fun move(ids: Collection<String>, dx: Float, dy: Float): ScratchAction.Moved? {
-        val touched = translate(ids, dx, dy)
-        if (touched.isEmpty()) return null
-        return ScratchAction.Moved(currentPageId, touched, dx, dy)
-    }
+    /** Translate [ids] by ([dx], [dy]). Returns the undo action, or null when nothing moved. */
+    fun move(ids: Collection<String>, dx: Float, dy: Float): InkAction.Moved? = ink.move(ids, dx, dy)
 
     // ── Saving ───────────────────────────────────────────────────────────────
 
     /**
-     * Write the current page until it stays written. The op log is snapshotted and cleared *before*
-     * the IO hop, so a stroke that commits during the write re-dirties the page and takes another
-     * pass; the guard bounds a pathological writer, and what it leaves behind the next debounce
-     * picks up. A failure merges the snapshot back **under** anything recorded since (a newer entry
-     * for the same stroke wins — it already describes the row's latest state) and rethrows
-     * [StoreUnavailable]; because every statement is idempotent, the retry converges.
+     * Write the current page until it stays written ([InkDocument.flushUntilClean]). The page's
+     * size, when it is owed, leads the first pass and is put back if that pass fails; the store
+     * call itself runs on IO.
      */
     suspend fun flushUntilClean() {
-        var pass = 0
-        while (hasUnsavedChanges) {
-            if (pass++ >= MAX_FLUSH_PASSES) {
-                Slog.d(TAG) { "flush still dirty after $MAX_FLUSH_PASSES passes — leaving it to the next save" }
-                return
-            }
-            val pageId = currentPageId
-            val snapshot = LinkedHashMap(ops)
-            val sizeSnapshot = sizeDirty
-            val statements = statementsFor(pageId, snapshot, sizeSnapshot)
-            ops.clear()
+        ink.flushUntilClean(extraDirty = { sizeDirty }) { statements ->
+            val pageId = ink.pageId
+            val size = sizeDirty
             sizeDirty = false
+            val all: List<Statement> =
+                if (size) listOf(ScratchSql.sizePage(pageId, pageWidth, pageHeight, System.currentTimeMillis())) + statements
+                else statements
             try {
-                withContext(Dispatchers.IO) { store.execAll(statements) }
+                withContext(Dispatchers.IO) { store.execAll(all) }
             } catch (t: Throwable) {
-                for ((id, op) in snapshot) if (id !in ops) ops[id] = op
-                sizeDirty = sizeDirty || sizeSnapshot
+                sizeDirty = sizeDirty || size
                 throw t
             }
-            Slog.d(TAG) { "flushed ${statements.size} statement(s)" }
         }
     }
 
     /** The current page as it stands (J5) — what a received new page's redo has to put back, and
      *  what a delete's undo carries. */
-    fun currentInk(): PageInk = PageInk(pageWidth, pageHeight, page.map { it.key to it.value })
+    fun currentInk(): PageInk = PageInk(pageWidth, pageHeight, ink.entries())
 
     /** The page's size once the surface has been laid out — a page stored as `0 × 0` takes it. */
     fun adoptSurfaceSize() {
@@ -253,24 +182,9 @@ class ScratchDocument(
      */
     suspend fun revert(a: ScratchAction) {
         when (a) {
-            is ScratchAction.Drew -> {
-                if (!goToLiving(a.pageId)) return
-                removeStroke(a.stroke.id)
-                flushUntilClean()
-            }
-            is ScratchAction.Erased -> {
-                if (!goToLiving(a.pageId)) return
-                for (e in a.entries) put(e.stroke, e.order)
-                flushUntilClean()
-            }
-            is ScratchAction.Moved -> {
-                if (!goToLiving(a.pageId)) return
-                translate(a.ids, -a.dx, -a.dy)
-                flushUntilClean()
-            }
-            is ScratchAction.Pasted -> {
-                if (!goToLiving(a.pageId)) return
-                for (s in a.strokes) removeStroke(s.id)
+            is ScratchAction.Ink -> {
+                if (!goToLiving(a.action.pageId)) return
+                ink.revert(a.action)
                 flushUntilClean()
             }
             is ScratchAction.Page -> replayPages(a.before, a.beforeCurrent, a.pageId, a.ink)
@@ -280,24 +194,9 @@ class ScratchDocument(
     /** Re-apply [a] — [revert]'s mirror. */
     suspend fun reapply(a: ScratchAction) {
         when (a) {
-            is ScratchAction.Drew -> {
-                if (!goToLiving(a.pageId)) return
-                addStroke(a.stroke)
-                flushUntilClean()
-            }
-            is ScratchAction.Erased -> {
-                if (!goToLiving(a.pageId)) return
-                for (e in a.entries) removeStroke(e.stroke.id)
-                flushUntilClean()
-            }
-            is ScratchAction.Moved -> {
-                if (!goToLiving(a.pageId)) return
-                translate(a.ids, a.dx, a.dy)
-                flushUntilClean()
-            }
-            is ScratchAction.Pasted -> {
-                if (!goToLiving(a.pageId)) return
-                addStrokesAt(a.strokes, a.orders)
+            is ScratchAction.Ink -> {
+                if (!goToLiving(a.action.pageId)) return
+                ink.reapply(a.action)
                 flushUntilClean()
             }
             // Redo writes the page's ink **in the `after` state**: null for an insert (it lands
@@ -306,6 +205,10 @@ class ScratchDocument(
             is ScratchAction.Page -> replayPages(a.after, a.afterCurrent, a.pageId, a.afterInk)
         }
     }
+
+    /** The ink-only forms, for callers holding a bare [InkAction]. */
+    suspend fun revert(a: InkAction) = revert(ScratchAction.Ink(a))
+    suspend fun reapply(a: InkAction) = reapply(ScratchAction.Ink(a))
 
     /** Go to [id] only if it is still a page. A stroke action whose page has since been deleted has
      *  nothing to reverse — the delete's own entry is what puts that page back, and it sits below
@@ -346,43 +249,16 @@ class ScratchDocument(
         pageIds = ids
         // Force the reload: the landing page may be the one we are already on (a delete of the last
         // remaining page lands back on itself), and its ink has just changed underneath us.
-        currentPageId = ""
         applyPage(current, withContext(Dispatchers.IO) { store.readPage(current) })
     }
 
     // ── Internals ────────────────────────────────────────────────────────────
 
-    private fun statementsFor(pageId: String, snapshot: Map<String, Op>, size: Boolean): List<Statement> {
-        val statements = ArrayList<Statement>(snapshot.size + 1)
-        val now = System.currentTimeMillis()
-        if (size) statements += ScratchSql.sizePage(pageId, pageWidth, pageHeight, now)
-        for ((id, op) in snapshot) {
-            statements += when (op) {
-                is Op.Put -> ScratchSql.putStroke(pageId, op.order, op.stroke)
-                Op.Drop -> ScratchSql.dropStroke(id)
-            }
-        }
-        return statements
-    }
-
-    private fun applyPage(id: String, ink: PageInk) {
-        page.clear()
-        orders.clear()
-        ops.clear()
+    private fun applyPage(id: String, page: PageInk) {
+        ink.reset(id, page.strokes)
         sizeDirty = false
-        currentPageId = id
-        pageWidth = ink.width
-        pageHeight = ink.height
-        highWater = 0L
-        for ((order, stroke) in ink.strokes) {
-            // Two stored rows at one order (never written by this code — but a row is a row): the
-            // second is moved past the end and re-put, rather than silently hiding the first.
-            val at = if (page.containsKey(order)) highWater else order
-            page[at] = stroke
-            orders[stroke.id] = at
-            highWater = maxOf(highWater, at + 1)
-            if (at != order) ops[stroke.id] = Op.Put(stroke, at)
-        }
+        pageWidth = page.width
+        pageHeight = page.height
         if (pageWidth <= 0f || pageHeight <= 0f) {
             val (w, h) = surfaceSize()
             if (w > 0f && h > 0f) {
@@ -394,42 +270,7 @@ class ScratchDocument(
         }
     }
 
-    /** The next writing order on this page: the high-water mark (0 on a page that never held ink). */
-    private fun nextOrder(): Long = highWater
-
-    private fun put(stroke: Stroke, order: Long) {
-        val previous = orders.put(stroke.id, order)
-        if (previous != null && previous != order) page.remove(previous)
-        page[order] = stroke
-        highWater = maxOf(highWater, order + 1)
-        ops[stroke.id] = Op.Put(stroke, order)
-    }
-
-    private fun removeStroke(id: String): Boolean {
-        val order = orders.remove(id) ?: return false
-        page.remove(order)
-        // Always a Drop, never "forget the Put": a Put may be a move of a row that is already
-        // stored, and dropping the entry would leave that row behind. DELETE tolerates the rest.
-        ops[id] = Op.Drop
-        return true
-    }
-
-    /** Translate what of [ids] is on this page; returns the ids actually moved. */
-    private fun translate(ids: Collection<String>, dx: Float, dy: Float): List<String> {
-        val moved = ArrayList<String>(ids.size)
-        for (id in ids) {
-            val order = orders[id] ?: continue
-            val stroke = page[order] ?: continue
-            put(stroke.translated(dx, dy), order)
-            moved += id
-        }
-        return moved
-    }
-
     private companion object {
         const val TAG = "ScratchDocument"
-
-        /** Enough passes to outrun a hand that keeps writing; beyond it the next debounce takes over. */
-        const val MAX_FLUSH_PASSES = 8
     }
 }

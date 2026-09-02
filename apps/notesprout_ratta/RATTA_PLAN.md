@@ -15,7 +15,8 @@ arcs 19–22's full phase records at the end of this file until the next compact
 feature's authoritative reference is its `docs/` file. **Arc 22 "Tables" is complete and frozen
 (2026-09-01) — X1–X5 all ✅: the extension store is real SQLite tables behind gated parameterized
 SQL. Arc 23 "Calendar" is PLANNED (wizard locked 2026-09-01, § "Phases — Arc 23"
-below) — next work = Y1. The SEVENTH point is granted; no EIGHTH without another decision.**
+below) — Y1 is 🧪 (code + Nomad walk done 2026-09-02; user pen checklist pending), next work =
+Y2. The SEVENTH point is granted and live; no EIGHTH without another decision.**
 
 ---
 
@@ -685,7 +686,7 @@ commit.
 
 ## Phases — Arc 23 "Calendar" (planned 2026-09-01, wizard complete)
 
-**Status: Y1 ⬜ · Y2 ⬜ · Y3 ⬜ · Y4 ⬜** (wizard locked 2026-09-01; Fable planned it and writes Y1).
+**Status: Y1 🧪 · Y2 ⬜ · Y3 ⬜ · Y4 ⬜** (wizard locked 2026-09-01; Fable planned it and writes Y1).
 
 A basic writable calendar, the way a physical organizer is one: **Month, Week and Day pages**,
 each a full writing surface whose strokes are recorded in the extension's own store — month ink
@@ -853,7 +854,7 @@ into a cell; the selection is what makes that one gesture) · the Week page's sp
 blank paper, unlabeled · out-of-month cells on Month are writable like any other · nothing is ever
 deleted from `period` in this arc (a later question — `BACKLOG.md`).
 
-### Y1 — The seam, `:ext-ink`, `:ext-calendar`, the Month page ⬜ (Fable)
+### Y1 — The seam, `:ext-ink`, `:ext-calendar`, the Month page 🧪 (Fable — code + walk done 2026-09-02, user checklist pending)
 Contract additions above (`API_VERSION` 7, per-action floor, `ICalendar`, `CalendarTarget`,
 `CalendarDates`, extras/results). `:ext-ink` extracted from the pad and the pad repointed — **the
 pad's JVM tests pass unchanged and the pad's Nomad walk is re-run** (open, ink, flip, send both
@@ -871,7 +872,54 @@ args) · `CalendarGeometry` Month rects + `hitTest` · the first-stroke batch sh
 stroke, `OR IGNORE`, one batch) · `minApiVersion` map + `accepts` · moved tests green under their
 new names. **User checklist:** pen feel on the grid, lasso move within the page, undo/redo by
 finger, the cell hairlines visible on the Nomad.
-**Questions at phase start:** version stamp (`0.1.0-ratta` stays?) only.
+**Questions at phase start:** version stamp (`0.1.0-ratta` stays?) only — **stays** (user, 2026-09-01).
+
+**Y1 Outcome (2026-09-02, Fable; 1798 JVM tests/variant, +60; twelve modules debug + release,
+three release APKs sign; walk by hand on the Nomad, all green):**
+Shipped as the seam spec reads. `:extension-api` v7 (`ACTION_CALENDAR`/`_SCREEN`, `API_VERSION`
+7, **`minApiVersion` is a map** — calendar 7 via `MIN_API_VERSION_FOR_CALENDAR`, the three arc-22
+store points 6, everything else 1; `ICalendar`, `CalendarTarget` with `requireValid` + `of(kind,
+day, half)`, `CalendarDates` with the hand lists + `weekTitle`/`dayTitle`/`monthTitle`, the three
+mirrored extras/result). **`:ext-ink`** (`…notesproutsn.ink`, `api` on both `:extension-api` and
+`:sn-screen`): `InkWire` · `StrokeRows` + `StrokeBlob` (the pad's `geometry` encoder, moved) ·
+`StoreBatches` · `StrokeReadPlan` · `InkDocument` (TreeMap + op log + `flushUntilClean(extraDirty,
+exec)` — the consumer prepends its own lead inside `exec` and restores its own flag on failure) ·
+`InkAction` (Drew/Erased/Moved/Pasted, each naming its `pageId`). **Implementer calls (recorded,
+not re-litigated):** (1) **`StoreUnavailable` + `PageInk` moved too, and the pad's `run` /
+`compensated` / `guard` / planned-stroke-read became an abstract `InkStore` base** the pad's and the
+calendar's stores extend — the spec named the six files; these were the rest of the sibling copy.
+(2) The pad's `ScratchAction` is now `sealed { Ink(InkAction) · Page }` — the pad's tests changed by
+exactly the constructor names (`ScratchAction.Drew` → `InkAction.Drew`). (3) **`FloatingSelectionBar`
+went to `:sn-screen`** (the pad's bar minus its button list); `ScratchSelectionToolbar` and
+`CalendarSelectionToolbar` are thin on it. (4) `CalendarStore.receive` mints a missing page at
+**`0 × 0`** and the screen's first showing writes the surface size (`sizePage`, the pad's rule) —
+the sender's page size is the sender's; Y3 may revisit. (5) The mint lead rides only a flush that
+carries a `Put`: a stroke drawn and undone before the debounce is one `DELETE` and **mints nothing**
+(test-pinned). `page.periodId` is resolved by subselect from `(kind, date)` inside the INSERT, so
+the day's other half joins an existing period whatever id the caller minted. `touchPage` follows
+every stroke write. (6) The bookmark (`state`) is written on **every** `show`, the first included —
+"never on open" is the period/page/stroke rule, and the walk proved it (0/0/0 after browsing three
+months). (7) Prev/next **and the finger swipe** step the month already (two lines on
+`PageGestures`; Y2 owns the rest of navigation); the template re-bakes on `onResume` only when the
+date changed. (8) A compensated multi-batch placement drops its strokes by id and **leaves a minted
+empty period/page behind** (nothing deletes a period in this arc; an empty page is not a placement).
+`CalendarActivity` opens after `awaitLaidOut()` so the grid sits under the bars' **measured**
+heights, never a dimen. **Nomad numbers:** cold open 2 726 ms (store creation), warm 56 ms,
+`begin` 161 ms cold / 34 ms warm; the pad's warm `begin` 23 ms. **Walk:** library button after the
+pad · Month page as specified (today ringed, out-of-month grey, Notes band, pager) · `>` and a
+swipe step months · Back → reopen lands on the left month (bookmark) with `rows: 0 period(s), 0
+page(s), 0 stroke(s)` · `am start` → `refused caller (none)` · `pm disable-user` → button GONE
+(`0 provider(s) of 0 candidate(s)`), `pm enable` → back · store file ciphertext header · crash
+buffer empty · **pad re-walk:** open (3 pages, 6 strokes read back through `:ext-ink`), flip,
+Back, reopen on page 2, crash buffer empty. Ink and both pad transfers are pen input — user
+checklist. `docs/sn-screen.md` grew the `:ext-ink` paragraph, the `FloatingSelectionBar` row and
+`ic_calendar`; every other doc is Y4's. **No new trap.** Nomad test data: none added (the calendar
+store is empty; the pad's three pages untouched).
+**User checklist (pen):** (1) pen feel on the Month grid; ink on September, Back, reopen → still
+there; (2) lasso a stroke, drag it into another cell, Delete another; (3) 2-finger double-tap
+undo / 3-finger redo; (4) the cell hairlines visible on the Nomad; (5) the pad: ink a page and
+send it to a notebook, then lasso in a notebook and send to the pad (both transfers on the
+repointed pad).
 
 ### Y2 — Week + Day + navigation ⬜ (Opus code on a Fable brief · Fable review · Sonnet layouts/strings · Haiku walk)
 `CalendarGeometry` + `CalendarTemplate` for Week and Day (fixed row height, slack band, gutter,

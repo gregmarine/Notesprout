@@ -11,6 +11,9 @@ package com.symmetricalpalmtree.notesproutsn.extension
  * extension on the same device never matches one, and each family's `HostCallerCheck` refuses the
  * other family's host.
  *
+ * Since then: arc 15's exporters, arc 16's importers, arc 19's document editor, arc 21's tag
+ * manager and arc 23's calendar — each on its own explicit user decision, seven points in all.
+ *
  * `IExtensionStore` (arc 11 / J2, rebuilt arc 22 / X1) is not a capability point but the
  * **service** the host offers an extension it has bound: a per-package encrypted SQLite store the
  * host owns — the extension declares its tables ([StoreSchema]), sends parameterized SQL
@@ -60,8 +63,15 @@ object ExtensionContract {
      * keep their declarations and their floor of 1. `ITagManager` was reshaped in the same bump
      * (arc 22 / X3): `snapshot` — one ashmem blob of the whole index — is replaced by the paged
      * [TAGS_PAGE] / [ASSIGNMENTS_PAGE] reads the search merge runs.
+     *
+     * **7 since arc 23 / Y1** — the CALENDAR point ([ACTION_CALENDAR], SN's SEVENTH capability point,
+     * granted by the user 2026-09-01). A compatible *addition*: no existing interface changes shape,
+     * so every existing extension keeps declaring what it declares today and no door vanishes. The
+     * floor became **per action** with it ([minApiVersion]): a point born at 7 has no older shape to
+     * accept, so a calendar service is listed only at [MIN_API_VERSION_FOR_CALENDAR]; the three
+     * arc-22 store-taking points keep their floor of 6 and the stateless points their floor of 1.
      */
-    const val API_VERSION: Int = 6
+    const val API_VERSION: Int = 7
 
     /**
      * The floor for a service on a **store-taking** point (arc 22 / X1): the host accepts such a
@@ -72,19 +82,34 @@ object ExtensionContract {
     const val MIN_API_VERSION_FOR_STORE: Int = 6
 
     /**
-     * The lowest API version the host accepts for a service on [action] — [MIN_API_VERSION_FOR_STORE]
-     * for the three store-taking points ([ACTION_SCRATCH_PAD], [DocumentContract.ACTION_DOCUMENT_EDITOR],
-     * [ACTION_TAG_MANAGER]), 1 for every other. The range rule at [API_VERSION] applies above it.
+     * The floor for the calendar point (arc 23 / Y1): the point was born at API version 7, so there
+     * is no older calendar shape a host could accept — a service declaring less is not a calendar
+     * this host knows.
      */
-    fun minApiVersion(action: String): Int = if (action in STORE_TAKING_ACTIONS) MIN_API_VERSION_FOR_STORE else 1
+    const val MIN_API_VERSION_FOR_CALENDAR: Int = 7
+
+    /**
+     * The lowest API version the host accepts for a service on [action] — **per action** since arc
+     * 23 / Y1: [MIN_API_VERSION_FOR_STORE] for the three arc-22 store-taking points
+     * ([ACTION_SCRATCH_PAD], [DocumentContract.ACTION_DOCUMENT_EDITOR], [ACTION_TAG_MANAGER]),
+     * [MIN_API_VERSION_FOR_CALENDAR] for [ACTION_CALENDAR], 1 for every other. The range rule at
+     * [API_VERSION] applies above it. A point that is not in the map has the floor of 1 — a new
+     * point that needs one adds its row here, and the test that pins the map fails until it does.
+     */
+    fun minApiVersion(action: String): Int = MIN_API_VERSIONS[action] ?: 1
 
     /** Whether a service declaring [apiVersion] on [action] is one this host may bind — the range
      *  rule and the floor in one place, pure so the registry's decision is JVM-tested. */
     fun accepts(action: String, apiVersion: Int): Boolean = apiVersion in minApiVersion(action)..API_VERSION
 
-    /** The points whose service is lent an `IExtensionStore`. */
-    private val STORE_TAKING_ACTIONS: Set<String> by lazy {
-        setOf(ACTION_SCRATCH_PAD, DocumentContract.ACTION_DOCUMENT_EDITOR, ACTION_TAG_MANAGER)
+    /** Every point with a floor above 1, and its floor. */
+    private val MIN_API_VERSIONS: Map<String, Int> by lazy {
+        mapOf(
+            ACTION_SCRATCH_PAD to MIN_API_VERSION_FOR_STORE,
+            DocumentContract.ACTION_DOCUMENT_EDITOR to MIN_API_VERSION_FOR_STORE,
+            ACTION_TAG_MANAGER to MIN_API_VERSION_FOR_STORE,
+            ACTION_CALENDAR to MIN_API_VERSION_FOR_CALENDAR,
+        )
     }
 
     /** Intent action a handwriting-recognizer `<service>` declares in its intent-filter. */
@@ -112,6 +137,19 @@ object ExtensionContract {
      *  `startActivity` leaves `callingPackage` null and the screen refuses it. */
     const val ACTION_TAG_MANAGER_SCREEN: String =
         "com.symmetricalpalmtree.notesproutsn.extension.TAG_MANAGER_SCREEN"
+
+    /** Intent action a calendar `<service>` declares in its intent-filter (arc 23 / Y1 — SN's
+     *  SEVENTH capability point, granted by the user 2026-09-01; no EIGHTH without another). The
+     *  fourth screen-owning point and the second with paper, shaped exactly like the scratch pad:
+     *  a held bind for the showing, the store lent at `begin`, both transfers through the bind. */
+    const val ACTION_CALENDAR: String =
+        "com.symmetricalpalmtree.notesproutsn.extension.CALENDAR"
+
+    /** Intent action the calendar extension's exported screen `<activity>` declares. Resolved with
+     *  `setPackage(<the discovered service's package>)` and launched for a result; a plain
+     *  `startActivity` leaves `callingPackage` null and the screen refuses it. */
+    const val ACTION_CALENDAR_SCREEN: String =
+        "com.symmetricalpalmtree.notesproutsn.extension.CALENDAR_SCREEN"
 
     /** `<meta-data>` name (on the `<service>`) carrying the extension's API version. */
     const val META_API_VERSION: String =
@@ -250,6 +288,21 @@ object ExtensionContract {
     const val TRANSFER_MAX_CHUNKS: Int =
         MAX_TRANSFER_STROKES / TRANSFER_CHUNK_STROKES +
             2 * MAX_TRANSFER_POINTS / TRANSFER_CHUNK_POINTS + 1
+
+    // ── Calendar (`ICalendar`, arc 23 / Y1) ──────
+    // The pad's three, mirrored: the screen's launch extras and its result code. The transfer caps
+    // and the chunking above are reused unchanged — `MAX_TRANSFER_*`, `TRANSFER_CHUNK_*`,
+    // `TRANSFER_MAX_CHUNKS`, `InkChunks` — a calendar page's ink is ink like any other. Where the pad
+    // names a placement by an int, the calendar names its target page with a `CalendarTarget`.
+
+    /** Boolean launch extra — true when the calendar is opened from a notebook (it shows its Send buttons). */
+    const val EXTRA_CALENDAR_SEND_ENABLED: String = "calendarSendEnabled"
+
+    /** Boolean launch extra — true right after a `receiveInk` (the calendar opens on the target page, strokes selected). */
+    const val EXTRA_CALENDAR_OPEN_RECEIVED: String = "calendarOpenReceived"
+
+    /** Activity result code: the calendar has outbound ink for `takeOutgoing` (= `Activity.RESULT_FIRST_USER`). */
+    const val RESULT_CALENDAR_SEND: Int = 1
 
     // ── Tags (`ITagManager`, arc 21 / W1, on rows since arc 22 / X3) ──────
     // The three caps below are the arc-21 wizard's, and since X3 they are **policy and nothing

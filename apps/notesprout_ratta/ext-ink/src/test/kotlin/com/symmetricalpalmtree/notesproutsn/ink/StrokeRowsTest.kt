@@ -1,4 +1,4 @@
-package com.symmetricalpalmtree.notesproutsn.ext.scratchpad
+package com.symmetricalpalmtree.notesproutsn.ink
 
 import com.symmetricalpalmtree.gpaper.core.model.Stroke
 import com.symmetricalpalmtree.gpaper.core.model.StrokePoint
@@ -34,7 +34,7 @@ class StrokeRowsTest {
         Cell.Integer(s.color.toLong()),
         Cell.Real(s.width.toDouble()),
         Cell.Text(s.style.name),
-        Cell.Blob(ScratchSql.geometry(s)),
+        Cell.Blob(StrokeBlob.encode(s)),
     )
 
     @Test
@@ -56,7 +56,7 @@ class StrokeRowsTest {
         val s = stroke()
         val r = row(
             Cell.Text(s.id), Cell.Integer(0), Cell.Integer(s.color.toLong()), Cell.Real(3.0),
-            Cell.Text("SOMETHING_A_LATER_BUILD_WROTE"), Cell.Blob(ScratchSql.geometry(s)),
+            Cell.Text("SOMETHING_A_LATER_BUILD_WROTE"), Cell.Blob(StrokeBlob.encode(s)),
         )
         assertEquals(StrokeStyle.PEN, StrokeRows.decode(r)!!.second.style)
     }
@@ -76,7 +76,7 @@ class StrokeRowsTest {
     @Test
     fun aCellOfTheWrongStorageClassDropsTheRow() {
         val s = stroke()
-        val blob = Cell.Blob(ScratchSql.geometry(s))
+        val blob = Cell.Blob(StrokeBlob.encode(s))
         // id as an INTEGER
         assertNull(StrokeRows.decode(row(Cell.Integer(1), Cell.Integer(0), Cell.Integer(0), Cell.Real(3.0), Cell.Text("PEN"), blob)))
         // order as TEXT
@@ -92,7 +92,7 @@ class StrokeRowsTest {
         val empty = Stroke(id = "s", points = emptyList())
         val r = row(
             Cell.Text("s"), Cell.Integer(0), Cell.Integer(0), Cell.Real(3.0),
-            Cell.Text("PEN"), Cell.Blob(ScratchSql.geometry(empty)),
+            Cell.Text("PEN"), Cell.Blob(StrokeBlob.encode(empty)),
         )
         assertNull(StrokeRows.decode(r))
     }
@@ -103,7 +103,7 @@ class StrokeRowsTest {
         val s = stroke()
         val r = row(
             Cell.Text("s"), Cell.Integer(0), Cell.Integer(0), Cell.Integer(3),
-            Cell.Text("PEN"), Cell.Blob(ScratchSql.geometry(s)),
+            Cell.Text("PEN"), Cell.Blob(StrokeBlob.encode(s)),
         )
         assertEquals(3f, StrokeRows.decode(r)!!.second.width, 0f)
     }

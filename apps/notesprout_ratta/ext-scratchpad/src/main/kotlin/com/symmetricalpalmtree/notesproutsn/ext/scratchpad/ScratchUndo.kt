@@ -1,54 +1,23 @@
 package com.symmetricalpalmtree.notesproutsn.ext.scratchpad
 
-import com.symmetricalpalmtree.gpaper.core.model.Stroke
+import com.symmetricalpalmtree.notesproutsn.ink.InkAction
+import com.symmetricalpalmtree.notesproutsn.ink.PageInk
 
 /**
- * What the pad can put back (arc 11 / J4, grown in J5). Five kinds, against the notebook's
- * fourteen: the pad has no headings, no links and no clipboard, so an edit is a stroke, a set of
- * strokes, a translation, ink that arrived from the notebook, or a change to the page list itself.
+ * What the pad can put back (arc 11 / J4, grown in J5; split in arc 23 / Y1). Two shapes: an
+ * **ink** edit — one of `:ext-ink`'s four [InkAction]s (a stroke, a set of strokes, a translation,
+ * ink that arrived from the notebook), wrapped so the stack stays one sealed type — and a change to
+ * the **page list itself**, which is the pad's own and stays here: the calendar has no page list.
  *
  * The history itself is `:sn-screen`'s [com.symmetricalpalmtree.notesproutsn.notebook.UndoRedoStack]
- * typed on [ScratchAction]; the replay lives in [ScratchDocument], which mutates the store and then
- * reloads the page — the same "the store is the source of truth" rule the notebook replays under.
- *
- * `Pasted` (arc 11 / J5) is the fifth: ink that arrived from the notebook onto the **current**
- * page. A received **new page** is not one of these — it is a [ScratchAction.Page], because undoing
- * it has to take the page away with its cargo.
+ * typed on [ScratchAction]; the replay lives in [ScratchDocument], which lands on the action's page,
+ * mutates, writes the store and reloads — the same "the store is the source of truth" rule the
+ * notebook replays under.
  */
 sealed interface ScratchAction {
 
-    /** One committed stroke. */
-    class Drew(val pageId: String, val stroke: Stroke) : ScratchAction
-
-    /**
-     * Strokes taken off a page by the eraser or by the selection's Delete, each with **the `"order"`
-     * it held** (arc 22 / X2 — the row's own column, not a position in a list). Orders are unique
-     * per page and monotone, so nothing else can have taken one back: putting a stroke back at its
-     * order lands it exactly where it was, which is what keeps a page's ink stable across an
-     * undo/redo cycle.
-     */
-    class Erased(val pageId: String, val entries: List<Entry>) : ScratchAction {
-        class Entry(val order: Long, val stroke: Stroke)
-    }
-
-    /** A selection drag. Reverted by translating back; each moved stroke's row is rewritten at the
-     *  order it already held. */
-    class Moved(val pageId: String, val ids: List<String>, val dx: Float, val dy: Float) : ScratchAction
-
-    /**
-     * Ink that arrived from the notebook onto the **current** page (J5) — the one placement that
-     * changes nothing structural. Undo removes exactly what came, redo puts exactly it back; the
-     * strokes are carried whole because they were minted on arrival and no row holds them yet.
-     *
-     * Its own kind rather than an [Erased] with the arms swapped, for the host's `ObjectsPasted`
-     * reason: an entry whose ids run the opposite direction cannot share a replay arm without one
-     * of the two undoing itself.
-     */
-    class Pasted(val pageId: String, val strokes: List<Stroke>, val orders: List<Long>) : ScratchAction {
-        init {
-            require(strokes.size == orders.size) { "${strokes.size} strokes for ${orders.size} orders" }
-        }
-    }
+    /** A stroke-level edit on one page — the replay is [com.symmetricalpalmtree.notesproutsn.ink.InkDocument]'s. */
+    class Ink(val action: InkAction) : ScratchAction
 
     /**
      * A page insert or delete, as the two id lists it moved between plus the affected page's ink on
@@ -59,7 +28,7 @@ sealed interface ScratchAction {
      * page if it did not exist, and land on the page that was current. Redo is the mirror, over
      * [afterInk].
      *
-     * The two inks are what let the shape stretch to J5's third case without a fifth kind:
+     * The two inks are what let the shape stretch to J5's third case without another kind:
      *
      * | act | [ink] (the `before` state) | [afterInk] (the `after` state) |
      * |---|---|---|

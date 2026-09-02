@@ -1,22 +1,23 @@
-package com.symmetricalpalmtree.notesproutsn.ext.scratchpad
+package com.symmetricalpalmtree.notesproutsn.ink
 
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
 
 /**
- * How a page's strokes are read back (arc 22 / X2) — pure, JVM-tested.
+ * How a page's strokes are read back (arc 22 / X2 as the pad's `ScratchReadPlan`; shared as
+ * `:ext-ink` since arc 23 / Y1) — pure, JVM-tested.
  *
- * A page has no size ceiling any more, so it can easily hold more ink than one result may carry.
- * The page is read in two steps: the orders and blob lengths first (small — one row per stroke,
- * two integers), then the strokes themselves, one `BETWEEN` range at a time, each range planned to
- * fit inside a chunk. That keeps the read off `STORE_RESULT_LARGE` entirely rather than
- * discovering it at the row that crosses.
+ * A page has no size ceiling, so it can easily hold more ink than one result may carry. The page is
+ * read in two steps: the orders and blob lengths first (small — one row per stroke, two integers),
+ * then the strokes themselves, one `BETWEEN` range at a time, each range planned to fit inside a
+ * chunk. That keeps the read off `STORE_RESULT_LARGE` entirely rather than discovering it at the
+ * row that crosses.
  *
  * Ranges run over the `"order"` column, and the orders handed in are the page's whole set in
  * ascending order, so a range's endpoints select exactly the strokes it was planned for. A single
  * stroke bigger than the budget gets its own range — the host will refuse that row and the read
  * drops it, keeping the rest of the page.
  */
-object ScratchReadPlan {
+object StrokeReadPlan {
 
     /**
      * What a stroke row costs besides its blob: the id, order, colour, width and style cells plus

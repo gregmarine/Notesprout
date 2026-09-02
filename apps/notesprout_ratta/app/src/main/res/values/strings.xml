@@ -577,4 +577,24 @@
     <string name="scratch_truncated_title">Not everything came back</string>
     <string name="scratch_paste_failed_body">The ink from the scratch pad could not be written to this page. Nothing was changed — it is still on the pad.</string>
     <string name="scratch_truncated_body">The scratch pad had more ink than one transfer can carry. The first %1$d strokes were pasted; the rest are still on the pad.</string>
+
+    <!-- The Calendar extension (arc 23) — the pad's set, mirrored. The two entry buttons and the
+         failure dialogs land in Y1; the transfer strings are Y3's. -->
+    <string name="cd_calendar">Calendar</string>
+    <string name="calendar_failed_title">Calendar unavailable</string>
+    <string name="calendar_failed_body">The calendar could not be opened. It may have been disabled or removed.</string>
+    <string name="calendar_send_action">Send to Calendar</string>
+    <string name="calendar_target_title">Send to Calendar</string>
+    <string name="calendar_target_today_am">Today, morning</string>
+    <string name="calendar_target_today_pm">Today, afternoon</string>
+    <string name="calendar_target_week">This week</string>
+    <string name="calendar_target_month">This month</string>
+    <string name="calendar_sent_toast">Sent to calendar</string>
+    <string name="calendar_too_large_title">Too much to send</string>
+    <string name="calendar_too_large_body">This selection holds more ink than the calendar can take. Send a smaller part of it.</string>
+    <string name="calendar_drain_failed_title">Nothing came back</string>
+    <string name="calendar_drain_failed_body">The ink from the calendar could not be brought back. Nothing was changed — it is still on the calendar.</string>
+    <string name="calendar_truncated_title">Not everything came back</string>
+    <string name="calendar_paste_failed_body">The ink from the calendar could not be written to this page. Nothing was changed — it is still on the calendar.</string>
+    <string name="calendar_truncated_body">The calendar page had more ink than one transfer can carry. The first %1$d strokes were pasted; the rest are still on the calendar.</string>
 </resources>

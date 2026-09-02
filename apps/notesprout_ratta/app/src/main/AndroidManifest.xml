@@ -43,6 +43,13 @@
         <intent>
             <action android:name="com.symmetricalpalmtree.notesproutsn.extension.TAG_MANAGER_SCREEN" />
         </intent>
+        <!-- The calendar (arc 23) — two actions, the same reason a fourth time. -->
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesproutsn.extension.CALENDAR" />
+        </intent>
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesproutsn.extension.CALENDAR_SCREEN" />
+        </intent>
     </queries>
 
     <application

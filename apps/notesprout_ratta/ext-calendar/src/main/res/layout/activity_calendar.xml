@@ -1,0 +1,194 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Calendar screen (arc 23 / Y1) — the pad's shape: full-bleed paper with two thin chrome bars
+  overlaid. The PaperView is added into paperContainer programmatically; the grid is the page's
+  TEMPLATE, baked at the page's own size and set on the paper, so it scrolls, scales and registers
+  with the ink as one thing.
+
+  Both bars go to paper.setExclusionRects (via PaperChrome) after layout, so ink never lands under
+  chrome. Chrome sits flush at the top edge — the top guard is 0 on Ratta.
+
+  Top bar: Back and the three fixed tools on the left; Send on the right, GONE without a notebook
+  behind us. Bottom bar: the pager and nothing else (F2 + 2026-08-28) — prev, the period's title,
+  next — centred on the SCREEN. The view toggles and Today arrive with Y2.
+
+  openingOverlay is the LAST child (topmost) and starts VISIBLE: the screen covers its own first
+  frame the way the notebook does, so the launch reads as one continuous "Opening…".
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/paperWhite">
+
+    <FrameLayout
+        android:id="@+id/paperContainer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <LinearLayout
+        android:id="@+id/topBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:background="@color/paperWhite"
+        android:orientation="vertical">
+
+        <FrameLayout
+            android:id="@+id/topBarRow"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/toolbar_bar_thickness"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:layout_gravity="start"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnBack"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:contentDescription="@string/cd_calendar_back"
+                    android:src="@drawable/ic_arrow_left" />
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnPen"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:contentDescription="@string/cd_tool_pen"
+                    android:src="@drawable/ic_pen" />
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnEraser"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:contentDescription="@string/cd_tool_eraser"
+                    android:src="@drawable/ic_eraser" />
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnLasso"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:contentDescription="@string/cd_tool_lasso"
+                    android:src="@drawable/ic_lasso" />
+            </LinearLayout>
+
+            <!-- Send = this whole page, to the notebook the calendar was opened from. GONE when
+                 there is no notebook behind us — GONE, never disabled. -->
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnSend"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_gravity="end|center_vertical"
+                android:contentDescription="@string/cd_calendar_send_page"
+                android:src="@drawable/ic_pencil_down"
+                android:visibility="gone" />
+
+        </FrameLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/bottomBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:background="@color/paperWhite"
+        android:orientation="vertical">
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
+
+        <!-- The pager only, centred on the SCREEN: [‹] [title] [›]. -->
+        <FrameLayout
+            android:id="@+id/bottomBarRow"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/toolbar_bar_thickness"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:layout_gravity="center"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnPrev"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:contentDescription="@string/cd_prev_period"
+                    android:src="@drawable/ic_page_prev" />
+
+                <TextView
+                    android:id="@+id/title"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:minWidth="160dp"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:singleLine="true"
+                    android:textColor="@color/inkBlack"
+                    android:textSize="16sp" />
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnNext"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:contentDescription="@string/cd_next_period"
+                    android:src="@drawable/ic_page_next" />
+            </LinearLayout>
+
+        </FrameLayout>
+
+    </LinearLayout>
+
+    <!-- The selection's floating bar — Delete, and Send when a notebook is behind us. Placed by
+         :sn-screen's FloatingSelectionBar; the buttons are built in code. -->
+    <LinearLayout
+        android:id="@+id/selectionToolbar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:background="@drawable/shape_dialog_bordered"
+        android:orientation="horizontal"
+        android:padding="4dp"
+        android:visibility="gone" />
+
+    <!-- "Opening…" — the screen's own box (the host's core/OpeningOverlay is :app's and never
+         crosses). Full-screen but transparent and clickable: it swallows the second tap a slow
+         e-ink refresh invites while the page is still being read. -->
+    <FrameLayout
+        android:id="@+id/openingOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/transparent"
+        android:clickable="true"
+        android:focusable="true">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:background="@drawable/shape_dialog_bordered"
+            android:orientation="vertical"
+            android:padding="24dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/calendar_opening"
+                android:textColor="@color/inkBlack"
+                android:textSize="16sp" />
+
+        </LinearLayout>
+
+    </FrameLayout>
+
+</FrameLayout>

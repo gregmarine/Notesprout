@@ -1,11 +1,12 @@
-package com.symmetricalpalmtree.notesproutsn.ext.scratchpad
+package com.symmetricalpalmtree.notesproutsn.ink
 
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
 import com.symmetricalpalmtree.notesproutsn.extension.Statement
 import com.symmetricalpalmtree.notesproutsn.extension.StoreCodec
 
 /**
- * Splitting a write into `exec` batches (arc 22 / X2) — pure, JVM-tested.
+ * Splitting a write into `exec` batches (arc 22 / X2 as the pad's `ScratchBatches`; shared as
+ * `:ext-ink` since arc 23 / Y1) — pure, JVM-tested.
  *
  * One `exec` payload carries at most `STORE_MAX_VALUE_BYTES` and
  * `STORE_MAX_BATCH_STATEMENTS` statements; a flush after a long writing session, or a placement of
@@ -16,12 +17,12 @@ import com.symmetricalpalmtree.notesproutsn.extension.StoreCodec
  * **One batch is one transaction, and therefore atomic** — which is the common case: every ordinary
  * flush, page operation and placement under the cap is one batch. Past it the write is several
  * transactions in order, and the caller's retry is what closes the gap, which is why every
- * statement the pad emits is idempotent ([ScratchSql]).
+ * statement a consumer emits is idempotent.
  *
  * A single statement over the byte budget gets a batch to itself: the host will refuse it, and
  * losing that one stroke is a better answer than losing the page it was drawn on.
  */
-object ScratchBatches {
+object StoreBatches {
 
     fun split(
         statements: List<Statement>,

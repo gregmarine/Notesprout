@@ -38,6 +38,7 @@ import com.symmetricalpalmtree.notesproutsn.data.soilFile
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityLibraryBinding
 import com.symmetricalpalmtree.notesproutsn.export.ExportActivity
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionRegistry
+import com.symmetricalpalmtree.notesproutsn.extension.CalendarEntry
 import com.symmetricalpalmtree.notesproutsn.extension.ScratchPadEntry
 import com.symmetricalpalmtree.notesproutsn.extension.TagManagerEntry
 import com.symmetricalpalmtree.notesproutsn.extension.TagShowing
@@ -75,6 +76,7 @@ class LibraryActivity : AppCompatActivity() {
     private val repo by lazy { IndexRepository() }
     /** The Scratch Pad's entry button (arc 11) — GONE unless a trusted extension is installed. */
     private lateinit var scratchPad: ScratchPadEntry
+    private lateinit var calendar: CalendarEntry
     private lateinit var tags: TagManagerEntry
 
     /** Import (arc 16) — the bottom bar's Import button (left group, right after Backup since
@@ -156,6 +158,10 @@ class LibraryActivity : AppCompatActivity() {
         scratchPad = ScratchPadEntry(activity = this, button = binding.btnScratchPad)
         binding.btnScratchPad.setOnClickListener { scratchPad.open() }
         TooltipCompat.setTooltipText(binding.btnScratchPad, binding.btnScratchPad.contentDescription)
+        // The Calendar (arc 23 / Y1) — the pad's shape, the pad's reason for being built here.
+        calendar = CalendarEntry(activity = this, button = binding.btnCalendar)
+        binding.btnCalendar.setOnClickListener { calendar.open() }
+        TooltipCompat.setTooltipText(binding.btnCalendar, binding.btnCalendar.contentDescription)
         // Tags (arc 21 / W1). No button of its own — the door is a row in the card sheet — but it
         // registers an ActivityResult launcher, so it is built here for the same reason as the pad.
         tags = TagManagerEntry(activity = this) {
@@ -210,6 +216,7 @@ class LibraryActivity : AppCompatActivity() {
         // Re-discovered on every resume: a package can be disabled or replaced under us. Guarded
         // because an IndexGuard bounce returns from onCreate but still gets this callback.
         if (::scratchPad.isInitialized) scratchPad.refresh()
+        if (::calendar.isInitialized) calendar.refresh()
         if (::importFlow.isInitialized) importFlow.refresh()
         // No button to show or hide, but the search dialog's hint asks whether tags are searchable
         // (arc 21 / W4), and that answer goes stale the same way every other one does.
@@ -223,6 +230,7 @@ class LibraryActivity : AppCompatActivity() {
         if (IndexGuard.bounced(this)) { super.onDestroy(); return }
         // A held bind must not outlive the screen that opened it, result or no result.
         if (::scratchPad.isInitialized) scratchPad.close()
+        if (::calendar.isInitialized) calendar.close()
         if (::tags.isInitialized) tags.close()
         super.onDestroy()
     }

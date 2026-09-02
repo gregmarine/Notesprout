@@ -1,8 +1,9 @@
 package com.symmetricalpalmtree.notesproutsn.ext.scratchpad
 
 import com.symmetricalpalmtree.gpaper.core.model.Stroke
-import com.symmetricalpalmtree.notesproutsn.core.StrokeCodec
 import com.symmetricalpalmtree.notesproutsn.extension.Statement
+import com.symmetricalpalmtree.notesproutsn.ink.InkDocument
+import com.symmetricalpalmtree.notesproutsn.ink.StrokeBlob
 
 /**
  * Every statement the scratch pad sends, as a pure builder (arc 22 / X2) — SQL text and bound
@@ -17,9 +18,11 @@ import com.symmetricalpalmtree.notesproutsn.extension.Statement
  *   `INSERT OR REPLACE INTO page`**: REPLACE deletes the conflicting row first, and with
  *   `foreign_keys` ON that delete CASCADES — it would take the page's strokes with it.
  *
- * `now` is passed in rather than read here so a test can pin it.
+ * `now` is passed in rather than read here so a test can pin it. The two stroke statements are
+ * also what `:ext-ink`'s `InkDocument` flushes through ([InkDocument.StrokeSql]) — the shared
+ * document, the pad's own SQL.
  */
-object ScratchSql {
+object ScratchSql : InkDocument.StrokeSql {
 
     // ── page ──────
 
@@ -50,13 +53,13 @@ object ScratchSql {
 
     // ── stroke ──────
 
-    fun putStroke(pageId: String, order: Long, stroke: Stroke): Statement =
+    override fun putStroke(pageId: String, order: Long, stroke: Stroke): Statement =
         Statement(
             "INSERT OR REPLACE INTO stroke (id, pageId, \"order\", color, width, style, blob) VALUES (?, ?, ?, ?, ?, ?, ?)",
             stroke.id, pageId, order, stroke.color.toLong(), stroke.width.toDouble(), stroke.style.name, geometry(stroke),
         )
 
-    fun dropStroke(id: String): Statement =
+    override fun dropStroke(id: String): Statement =
         Statement("DELETE FROM stroke WHERE id = ?", id)
 
     // ── state ──────
@@ -79,7 +82,7 @@ object ScratchSql {
     fun selectStrokeLens(pageId: String): Statement =
         Statement("SELECT \"order\", LENGTH(blob) AS len FROM stroke WHERE pageId = ? ORDER BY \"order\"", pageId)
 
-    /** One planned range of the page's strokes ([ScratchReadPlan]); `BETWEEN` is inclusive. */
+    /** One planned range of the page's strokes (`StrokeReadPlan`); `BETWEEN` is inclusive. */
     fun selectStrokes(pageId: String, range: LongRange): Statement =
         Statement(
             "SELECT id, \"order\", color, width, style, blob FROM stroke WHERE pageId = ? AND \"order\" BETWEEN ? AND ? ORDER BY \"order\"",
@@ -92,17 +95,7 @@ object ScratchSql {
 
     // ── geometry ──────
 
-    /** A stroke's points as `StrokeCodec` format B — the `.soil`'s own encoding, unchanged. */
-    fun geometry(stroke: Stroke): ByteArray {
-        val n = stroke.points.size
-        val x = FloatArray(n)
-        val y = FloatArray(n)
-        val p = FloatArray(n)
-        val t = FloatArray(n)
-        for (i in 0 until n) {
-            val pt = stroke.points[i]
-            x[i] = pt.x; y[i] = pt.y; p[i] = pt.pressure; t[i] = pt.tilt
-        }
-        return StrokeCodec.encode(x, y, p, t)
-    }
+    /** A stroke's points as `StrokeCodec` format B — the `.soil`'s own encoding, unchanged
+     *  (`:ext-ink`'s [StrokeBlob], kept under the pad's name for its callers and tests). */
+    fun geometry(stroke: Stroke): ByteArray = StrokeBlob.encode(stroke)
 }

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- No launcher activity: the Supernote launcher lists the package anyway (accepted — "Ratta
+         being Ratta"); everywhere else only Settings → Apps shows it. -->
+    <application
+        android:name=".CalendarApplication"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/ext_label"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:theme="@style/Theme.Notesprout">
+
+        <!-- The CALENDAR point (arc 23 / Y1) — SN's SEVENTH capability point, its FOURTH
+             screen-owning one and the second with paper. The host holds one bind for the screen's
+             whole showing.
+             API version 7: the point was born at 7, and the host accepts a calendar service only at
+             MIN_API_VERSION_FOR_CALENDAR (7) and above — there is no older calendar shape to accept.
+             The `android:value` below is the host-compat gate; this comment must move with it. -->
+        <service
+            android:name=".CalendarService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.symmetricalpalmtree.notesproutsn.extension.CALENDAR" />
+            </intent-filter>
+            <meta-data
+                android:name="com.symmetricalpalmtree.notesproutsn.extension.API_VERSION"
+                android:value="7" />
+        </service>
+
+        <!-- The extension-owned screen (tier 2): exported, custom action, NO launcher filter;
+             launched only by the host for a result — it verifies its caller first thing in onCreate.
+             <category DEFAULT> is required or implicit resolution will not match it. -->
+        <activity
+            android:name=".CalendarActivity"
+            android:exported="true"
+            android:screenOrientation="portrait">
+            <intent-filter>
+                <action android:name="com.symmetricalpalmtree.notesproutsn.extension.CALENDAR_SCREEN" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

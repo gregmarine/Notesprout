@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The extension's own strings. `ok` and `cancel` come from :sn-screen (Dialogs / ActionSheetDialog
+  reference them from inside the module) and are deliberately not repeated here. Page titles are
+  NOT resources: they come from `CalendarDates`' hand lists (arc 5's rule — never a formatter).
+-->
+<resources>
+    <string name="ext_label">NSE · Calendar</string>
+    <string name="calendar_opening">Opening…</string>
+
+    <!-- Chrome. Every icon button needs a hint naming it: long-press tooltip and content description. -->
+    <string name="cd_calendar_back">Back</string>
+    <string name="cd_tool_pen">Pen</string>
+    <string name="cd_tool_eraser">Eraser</string>
+    <string name="cd_tool_lasso">Lasso</string>
+    <string name="cd_prev_period">Previous</string>
+    <string name="cd_next_period">Next</string>
+
+    <!-- The Notes band's label on the Month and Week pages — drawn into the template, not a view. -->
+    <string name="calendar_notes_label">Notes</string>
+
+    <!-- The selection bar's one destructive verb. -->
+    <string name="delete_selection_action">Delete selection</string>
+
+    <!-- Send (arc 23 / Y3 wires the host half) — both buttons carry the pencil-down icon; they
+         exist only when the calendar was opened from a notebook. -->
+    <string name="cd_calendar_send_page">Send page to notebook</string>
+    <string name="cd_calendar_send_selection">Send selection to notebook</string>
+
+    <!-- Problem dialogs — a tap that did nothing is never a toast on e-ink. -->
+    <string name="calendar_store_failed_title">Calendar unavailable</string>
+    <string name="calendar_store_failed_body">Notesprout SN could not open the calendar\'s storage. Nothing was lost — try again.</string>
+    <string name="calendar_nothing_to_send_title">Nothing to send</string>
+    <string name="calendar_nothing_to_send_body">There is no ink here to send to the notebook.</string>
+</resources>

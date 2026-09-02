@@ -113,6 +113,15 @@
             android:visibility="gone"
             android:contentDescription="@string/cd_scratch_pad" />
 
+        <!-- The Calendar (arc 23). After the pad, the wizard's placement; GONE unless a trusted
+             extension is installed — CalendarEntry owns it, re-discovering on every resume. -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalendar"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_calendar"
+            android:visibility="gone"
+            android:contentDescription="@string/cd_calendar" />
+
     </LinearLayout>
 
     <View

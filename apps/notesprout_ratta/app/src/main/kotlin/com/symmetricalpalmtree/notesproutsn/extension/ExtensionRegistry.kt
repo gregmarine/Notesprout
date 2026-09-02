@@ -17,13 +17,13 @@ data class ProviderRef(
 )
 
 /**
- * Discovery + trust for SN's six extension points. A candidate `<service>` is kept only if it is
+ * Discovery + trust for SN's seven extension points. A candidate `<service>` is kept only if it is
  * exported, its `<meta-data>` API version is one [ExtensionContract.accepts] for the point — the
  * range `1..API_VERSION` (the declared number is what the extension *requires* of the host — the
- * arc-18 / D3 skew guard, reasoned at the constant), **with the floor** of
- * [ExtensionContract.MIN_API_VERSION_FOR_STORE] on the three store-taking points (arc 22 / X1: a
- * replaced `IExtensionStore` breaks the old-extension/new-host direction too, so a version-5 scratch
- * pad is not listed by a version-6 host) — and it is signed
+ * arc-18 / D3 skew guard, reasoned at the constant), **with the floor** the point carries
+ * ([ExtensionContract.minApiVersion] — 6 on the three store-taking points since arc 22 / X1, because
+ * a replaced `IExtensionStore` breaks the old-extension/new-host direction too; 7 on the calendar
+ * point, born there in arc 23 / Y1) — and it is signed
  * with the host's own certificate (`checkSignatures == SIGNATURE_MATCH` — same-signature only).
  * Everything else is skipped with a `Slog.d`. Disabled packages/components are never returned by the
  * query, so `pm disable` == uninstalled from the host's point of view.
@@ -77,6 +77,18 @@ object ExtensionRegistry {
     suspend fun tagManager(context: Context): ProviderRef? = withContext(Dispatchers.IO) {
         val all = discover(context.applicationContext, ExtensionContract.ACTION_TAG_MANAGER)
         for (extra in all.drop(1)) Slog.d(TAG) { "ignoring additional tag manager ${extra.component.flattenToShortString()}" }
+        all.firstOrNull()
+    }
+
+    /**
+     * The one trusted calendar, or null (arc 23 / Y1 — SN's **seventh** capability point, and its
+     * fourth screen-owning one). Same filter and same first-wins rule as [scratchPad]: a second
+     * installed calendar is ignored with a `Slog.d`, because two organizers would be two bookmarks.
+     * Re-run on every resume of a screen that shows the calendar's entry button.
+     */
+    suspend fun calendar(context: Context): ProviderRef? = withContext(Dispatchers.IO) {
+        val all = discover(context.applicationContext, ExtensionContract.ACTION_CALENDAR)
+        for (extra in all.drop(1)) Slog.d(TAG) { "ignoring additional calendar ${extra.component.flattenToShortString()}" }
         all.firstOrNull()
     }
 

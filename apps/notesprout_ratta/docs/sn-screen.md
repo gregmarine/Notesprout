@@ -18,8 +18,14 @@ contract out of here is what makes the host's transfer mapping and the extension
 two twin translations rather than one shared class that quietly becomes part of the wire format.
 No Room, no SQLCipher, no serialization: nothing here knows what a `.soil` is.
 
-`:app` depends on `:sn-screen`; so will `:ext-scratchpad`. g-paper is **not** declared in either
-consumer — it arrives through this module's `api(...)`, and the version pin lives here.
+`:app` depends on `:sn-screen`; so do `:ext-scratchpad`, `:ext-document`, `:ext-tags`,
+`:ext-calendar` and — since arc 23 / Y1 — **`:ext-ink`**, the ink-on-rows library the pad and the
+calendar share (`InkWire`, `StrokeRows`, `StoreBatches`, `StrokeReadPlan`, `InkDocument`,
+`InkAction`, the `InkStore` base). `:ext-ink` is the one module that depends on **both** this and
+`:extension-api` (`api` on each), which is exactly why those helpers could not live here: they are
+extension-side code over the contract's `Statement` and `WireStroke`. It never depends on `:app`.
+g-paper is **not** declared in any consumer — it arrives through this module's `api(...)`, and the
+version pin lives here.
 
 ## The namespace and the R-class flag
 
@@ -57,10 +63,11 @@ app's debug build consumes the library's debug variant, so the gate means exactl
 | `notebook/UndoRedoStack<A>` | the generic LIFO history plus its `generation` counter. The notebook's fourteen action kinds stay in `:app` as `NotebookUndo.Action` |
 | `notebook/PaperToolbar` | back + the three tool buttons, **binding-free** |
 | `notebook/PaperChrome` | exclusion rects and the over-chrome hit test, with the host-specific parts as suppliers |
+| `notebook/FloatingSelectionBar` | an extension screen's floating selection bar (arc 23 / Y1 — the pad's own, shared so the calendar's is not a sibling copy): a row of buttons built to the one recipe, placed by `SelectionAnchor` next to the lasso box; the consumer says which buttons |
 
 Resources: `values/{colors,dimens,styles,themes}`, `values-sw720dp/dimens`,
 `values-sw960dp/dimens` (the Manta's card-grid minimum only — see `docs/library.md` § The grid), the 39 chrome
-`ic_*.xml` (the 37 that moved plus `ic_sketching` and `ic_pencil_down`), the button/border/radio
+`ic_*.xml` (the 37 that moved plus `ic_sketching`, `ic_pencil_down` and arc 23's `ic_calendar`), the button/border/radio
 drawables the moved styles reference, and a `strings.xml` holding only `ok` and `cancel` — the two
 strings the moved helpers reference themselves. Every other string stays in `:app`.
 

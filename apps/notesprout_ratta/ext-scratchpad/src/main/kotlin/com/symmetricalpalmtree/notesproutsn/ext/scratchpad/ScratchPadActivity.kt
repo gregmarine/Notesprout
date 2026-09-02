@@ -25,6 +25,9 @@ import com.symmetricalpalmtree.notesproutsn.ext.scratchpad.databinding.ActivityS
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
 import com.symmetricalpalmtree.notesproutsn.extension.HostCallerCheck
 import com.symmetricalpalmtree.notesproutsn.extension.InkChunks
+import com.symmetricalpalmtree.notesproutsn.ink.InkAction
+import com.symmetricalpalmtree.notesproutsn.ink.InkWire
+import com.symmetricalpalmtree.notesproutsn.ink.StoreUnavailable
 import com.symmetricalpalmtree.notesproutsn.notebook.PageGestures
 import com.symmetricalpalmtree.notesproutsn.notebook.PaperChrome
 import com.symmetricalpalmtree.notesproutsn.notebook.UndoRedoStack
@@ -68,7 +71,7 @@ import kotlinx.coroutines.withContext
  * consumes [ScratchSession.received] **once**: it switches to the **lasso before `setSelection`** (a
  * selection under the pen can neither be dragged nor dismissed), selects what arrived, and records
  * exactly one undo step — a new-page placement as a [ScratchAction.Page] carrying the arrived ink as
- * its `afterBlob`, a current-page one as a [ScratchAction.Pasted]. The tool the user had comes back
+ * its `afterInk`, a current-page one as an [InkAction.Pasted]. The tool the user had comes back
  * pen-idle when that selection is dismissed, unless they picked another one meanwhile. Outbound ink
  * is parked in [ScratchSession] and the screen finishes with [ExtensionContract.RESULT_SCRATCH_SEND]
  * — the host drains it on the bind it is still holding.
@@ -257,7 +260,7 @@ class ScratchPadActivity : AppCompatActivity() {
      * One undo step, and which one depends on what the placement did to the page list: a **new
      * page** is a [ScratchAction.Page] whose `afterInk` is the ink that came with it — undo takes
      * the page away with its cargo, redo brings both back — and a **current page** placement is a
-     * [ScratchAction.Pasted], which removes and restores exactly what arrived, at the orders it
+     * [InkAction.Pasted], which removes and restores exactly what arrived, at the orders it
      * arrived at.
      *
      * The **lasso is armed before `setSelection`** (a selection under the pen can neither be dragged
@@ -293,7 +296,7 @@ class ScratchPadActivity : AppCompatActivity() {
                     afterInk = document.currentInk(),
                 )
             } else {
-                ScratchAction.Pasted(received.pageId, arrived, arrived.map { document.orderOf(it.id) ?: 0L })
+                ScratchAction.Ink(InkAction.Pasted(received.pageId, arrived, arrived.map { document.orderOf(it.id) ?: 0L }))
             }
         )
 
@@ -340,18 +343,18 @@ class ScratchPadActivity : AppCompatActivity() {
             if (!opened || closing) return
             // A scratch page has no ceiling (arc 22 / X2): every committed stroke is taken.
             document.addStroke(stroke)
-            undo.record(ScratchAction.Drew(document.currentPageId, stroke))
+            undo.record(ScratchAction.Ink(InkAction.Drew(document.currentPageId, stroke)))
             scheduleSave()
         }
 
         override fun onStrokesErased(strokeIds: List<String>) {
             if (!opened || closing) return
-            document.erase(strokeIds)?.let { undo.record(it); scheduleSave() }
+            document.erase(strokeIds)?.let { undo.record(ScratchAction.Ink(it)); scheduleSave() }
         }
 
         override fun onSelectionMoved(move: SelectionMove) {
             if (!opened || closing) return
-            document.move(move.strokeIds, move.dx, move.dy)?.let { undo.record(it); scheduleSave() }
+            document.move(move.strokeIds, move.dx, move.dy)?.let { undo.record(ScratchAction.Ink(it)); scheduleSave() }
             // The selection survives a move, at its new position — keep our copy honest, then bring
             // the bar back to where the box now is (the drag is over; this fires at lift).
             currentSelection = currentSelection?.let { it.copy(bounds = it.bounds.offset(move.dx, move.dy)) }
@@ -491,7 +494,7 @@ class ScratchPadActivity : AppCompatActivity() {
         if (!opened || closing) return
         val ids = sel.strokeIds.toList()
         if (ids.isEmpty()) { paper.clearSelection(); return }
-        document.erase(ids)?.let { undo.record(it); scheduleSave() }
+        document.erase(ids)?.let { undo.record(ScratchAction.Ink(it)); scheduleSave() }
         // `removeStrokes` dismisses the selection itself — every data-in call does.
         paper.removeStrokes(ids)
     }
@@ -583,7 +586,7 @@ class ScratchPadActivity : AppCompatActivity() {
         runPageOp {
             document.flushUntilClean()
             val picked = if (ids == null) document.strokes else document.strokes.filter { it.id in ids }
-            val wire = ScratchInk.toWireStrokes(picked)
+            val wire = InkWire.toWireStrokes(picked)
             if (wire.isEmpty()) {
                 showProblem(R.string.scratch_nothing_to_send_title, R.string.scratch_nothing_to_send_body)
                 return@runPageOp

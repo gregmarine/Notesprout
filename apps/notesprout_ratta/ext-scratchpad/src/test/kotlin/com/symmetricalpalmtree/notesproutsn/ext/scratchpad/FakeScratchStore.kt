@@ -10,6 +10,7 @@ import com.symmetricalpalmtree.notesproutsn.extension.StorePayload
 import com.symmetricalpalmtree.notesproutsn.extension.StoreResult
 import com.symmetricalpalmtree.notesproutsn.extension.StoreSchema
 import com.symmetricalpalmtree.notesproutsn.extension.StoreSql
+import com.symmetricalpalmtree.notesproutsn.ink.PageInk
 
 /**
  * The pad's test double for the host's store (arc 22 / X2). There is no SQLite on the JVM, so this

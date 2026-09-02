@@ -3,6 +3,8 @@ package com.symmetricalpalmtree.notesproutsn.ext.scratchpad
 import com.symmetricalpalmtree.gpaper.core.model.Stroke
 import com.symmetricalpalmtree.gpaper.core.model.StrokePoint
 import com.symmetricalpalmtree.notesproutsn.extension.Cell
+import com.symmetricalpalmtree.notesproutsn.ink.PageInk
+import com.symmetricalpalmtree.notesproutsn.ink.StoreUnavailable
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals

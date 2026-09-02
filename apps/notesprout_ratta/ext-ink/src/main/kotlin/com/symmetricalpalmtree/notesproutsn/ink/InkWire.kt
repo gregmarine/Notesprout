@@ -1,4 +1,4 @@
-package com.symmetricalpalmtree.notesproutsn.ext.scratchpad
+package com.symmetricalpalmtree.notesproutsn.ink
 
 import com.symmetricalpalmtree.gpaper.core.model.Stroke
 import com.symmetricalpalmtree.gpaper.core.model.StrokePoint
@@ -7,16 +7,17 @@ import com.symmetricalpalmtree.notesproutsn.extension.WireStroke
 import java.util.UUID
 
 /**
- * The extension's two wire ⇄ paper mappings (arc 11 / J3 — pure, JVM-tested). The host has its own
- * in `TransferCaps`, and `:sn-screen` cannot hold a shared one because it never sees
- * `:extension-api` — the twin is the seam, not a duplication accident.
+ * The extension side's two wire ⇄ paper mappings (arc 11 / J3 as the pad's `ScratchInk`; shared
+ * as `:ext-ink` since arc 23 / Y1 — pure, JVM-tested). The host has its own in `TransferCaps`, and
+ * `:sn-screen` cannot hold a shared one because it never sees `:extension-api` — the twin is the
+ * seam, not a duplication accident.
  *
  * Inward ([toStrokes]): **fresh ids minted here**, `timeMillis 0`, an unknown style name → PEN, the
  * width clamped to [MIN_WIDTH]..[MAX_WIDTH] — nothing from the wire is trusted beyond its geometry.
  * Outward ([toWireStrokes]): geometry + width + colour + style name; the id and time never leave; a
  * point-less stroke is skipped.
  */
-object ScratchInk {
+object InkWire {
 
     const val MIN_WIDTH = 0.5f
     const val MAX_WIDTH = 50f
@@ -48,5 +49,7 @@ object ScratchInk {
         return out
     }
 
-    private fun styleOf(name: String): StrokeStyle = StrokeStyle.entries.firstOrNull { it.name == name } ?: StrokeStyle.PEN
+    /** The style a stored or wired name means — an unknown one reads as [StrokeStyle.PEN], the same
+     *  rule [StrokeRows] takes. */
+    fun styleOf(name: String): StrokeStyle = StrokeStyle.entries.firstOrNull { it.name == name } ?: StrokeStyle.PEN
 }
