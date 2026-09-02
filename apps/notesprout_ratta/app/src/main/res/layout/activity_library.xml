@@ -7,12 +7,17 @@
     android:background="@color/paperWhite">
 
     <!-- Breadcrumb bar. Flush at the top edge: on Ratta the top guard is 0 (no status-bar hazard). -->
+    <!-- 4 dp start/end padding: the notebook's, the calendar's and the pad's bars all carry it, and
+         a bar without it puts its last button 8 px further right than every other screen's — the
+         "icons shift between screens" the user saw after arc 23 / Y4. One shape for every bar. -->
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
         android:layout_height="@dimen/toolbar_bar_thickness"
         android:orientation="horizontal"
-        android:gravity="center_vertical">
+        android:gravity="center_vertical"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp">
 
         <!-- Back out of a shelf. Far left, before the title, and the same left arrow as
              Go-up-a-folder: in a shelf that arrow is the only way back, so it reads as back. -->
@@ -158,7 +163,9 @@
         android:id="@+id/bottomBar"
         android:layout_width="match_parent"
         android:layout_height="@dimen/toolbar_bar_thickness"
-        android:background="@drawable/toolbar_background_bottom">
+        android:background="@drawable/toolbar_background_bottom"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp">
 
         <!-- Backup, then Import — the user's 2026-08-28 placement call. Both are things you do to
              the library itself, so they lead the bar; the pager sits between them and Templates. -->

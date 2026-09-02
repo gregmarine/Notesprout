@@ -1252,6 +1252,11 @@ year grid, `RESULT_CALENDAR_OPEN_SCRATCH_PAD` → pad (`send=true` behind the no
 calendar reopened at its bookmark; crash buffer empty. Gates re-run green (1857 JVM tests/variant,
 twelve modules debug + release, three release APKs sign, NUL clean).
 
+**Post-freeze polish (2026-09-02, the user's eye):** the library's two bars carried no start/end
+padding while the notebook's, the calendar's and the pad's rows all carry 4 dp, so the same button
+sat 8 px further right on the library than anywhere else — "icons shift between screens". Both
+library bars take the 4 dp now; one shape for every bar (`btnScratchPad` ends at x = 1396 on all).
+
 **User checklist PASSED** ("All of the tests already passed … the picker looks and works correctly
 now", 2026-09-02) — the four pen items (undo across pages re-anchors the organizer · picker cells,
 hints, header, border · same-page undo without a flash · all four transfer paths + the calendar →
