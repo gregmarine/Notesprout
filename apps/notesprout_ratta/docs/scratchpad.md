@@ -331,18 +331,23 @@ Every failure is a dialog that says what happened and what is still true. Toasts
 
 | Where | Behaviour |
 |---|---|
-| Library bottom bar, after Recents | opens the pad with **no** Send buttons — there is no notebook to send to |
-| Notebook top bar, before Recents | hands the EPD pipeline over first; the pad gets both Send buttons |
+| Library top bar, last button (arc 23 / Y4 — always the last button on the bar) | opens the pad with **no** Send buttons — there is no notebook to send to |
+| Notebook top bar, last button (arc 23 / Y4 — same placement call) | hands the EPD pipeline over first; the pad gets both Send buttons |
 | Notebook selection toolbar, 7th button (ink-only) | the outbound transfer above |
+| The calendar's own Scratch Pad button (arc 23 / Y4) | a third door the pad never sees as such — the host walks it and walks back: the calendar exits with `RESULT_CALENDAR_OPEN_SCRATCH_PAD`, the host opens the pad exactly as it would from its own button, and reopens the calendar at its bookmark once the pad closes with `RESULT_CANCELED`. See [`docs/calendar.md`](calendar.md) § The two doors + the held bind |
 
-`ScratchPadEntry` serves **both doors** — one class, because everything about them is the same except
+`ScratchPadEntry` serves **both** of its own doors — one class, because everything about them is the same except
 the one line that is not (the notebook's `releaseForHandoff()`); since arc 23 / Y4 that shape is
 `ExtensionScreenEntry`'s, shared with the calendar, and `ScratchPadEntry` is thin on it. Two
 near-identical files would have been the sibling-copy trap `:sn-screen` exists to keep out of this
 app — and, before Y4, `ScratchPadEntry` and `CalendarEntry` were exactly that pair, grown apart by
 the settle rule until the unification closed them. Whether the pad shows its
 Send buttons is a property of the **caller**, not of whether ink was handed over: the notebook's
-plain top-bar tap must still come back able to send.
+plain top-bar tap must still come back able to send. The calendar's own door opens the pad through
+this same `ScratchPadEntry` too — from the host's side it is an ordinary tap on `btnScratchPad`, the
+only thing new is who decided to make it (`onCalendarClosed`, in `LibraryActivity` and
+`NotebookActivity` alike) and what happens when the pad closes (`onPadClosed` reopening the
+calendar rather than nothing at all).
 
 The button is `GONE` unless a trusted pad is installed, discovery re-runs on every `onResume` **and
 after a failed open**, and a busy guard allows one showing at a time. An `OpeningOverlay` goes up at

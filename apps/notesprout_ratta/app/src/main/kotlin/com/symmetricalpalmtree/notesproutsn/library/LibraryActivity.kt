@@ -39,6 +39,7 @@ import com.symmetricalpalmtree.notesproutsn.databinding.ActivityLibraryBinding
 import com.symmetricalpalmtree.notesproutsn.export.ExportActivity
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionRegistry
 import com.symmetricalpalmtree.notesproutsn.extension.CalendarEntry
+import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
 import com.symmetricalpalmtree.notesproutsn.extension.ScratchPadEntry
 import com.symmetricalpalmtree.notesproutsn.extension.TagManagerEntry
 import com.symmetricalpalmtree.notesproutsn.extension.TagShowing
@@ -77,6 +78,23 @@ class LibraryActivity : AppCompatActivity() {
     /** The Scratch Pad's entry button (arc 11) — GONE unless a trusted extension is installed. */
     private lateinit var scratchPad: ScratchPadEntry
     private lateinit var calendar: CalendarEntry
+
+    /** The calendar's Scratch Pad door (arc 23 / Y4): the calendar closed asking for the pad, so the
+     *  pad opens, and a plain close of the pad brings the calendar back at its bookmark. A pad that
+     *  sent ink instead (never from here — the library takes no ink) would stay where it landed. */
+    private var reopenCalendarAfterPad = false
+
+    private fun onCalendarClosed(resultCode: Int) {
+        if (resultCode != ExtensionContract.RESULT_CALENDAR_OPEN_SCRATCH_PAD) return
+        reopenCalendarAfterPad = true
+        scratchPad.open()
+    }
+
+    private fun onPadClosed(resultCode: Int) {
+        if (!reopenCalendarAfterPad) return
+        reopenCalendarAfterPad = false
+        if (resultCode == RESULT_CANCELED) calendar.open()
+    }
     private lateinit var tags: TagManagerEntry
 
     /** Import (arc 16) — the bottom bar's Import button (left group, right after Backup since
@@ -155,11 +173,11 @@ class LibraryActivity : AppCompatActivity() {
         wireBars()
         // The Scratch Pad (arc 11). Built here because it registers an ActivityResult launcher, and
         // one may not be registered after STARTED. No handoff to make: the library hosts no paper.
-        scratchPad = ScratchPadEntry(activity = this, button = binding.btnScratchPad)
+        scratchPad = ScratchPadEntry(activity = this, button = binding.btnScratchPad, onClosed = { onPadClosed(it) })
         binding.btnScratchPad.setOnClickListener { scratchPad.open() }
         TooltipCompat.setTooltipText(binding.btnScratchPad, binding.btnScratchPad.contentDescription)
         // The Calendar (arc 23 / Y1) — the pad's shape, the pad's reason for being built here.
-        calendar = CalendarEntry(activity = this, button = binding.btnCalendar)
+        calendar = CalendarEntry(activity = this, button = binding.btnCalendar, onClosed = { onCalendarClosed(it) })
         binding.btnCalendar.setOnClickListener { calendar.open() }
         TooltipCompat.setTooltipText(binding.btnCalendar, binding.btnCalendar.contentDescription)
         // Tags (arc 21 / W1). No button of its own — the door is a row in the card sheet — but it

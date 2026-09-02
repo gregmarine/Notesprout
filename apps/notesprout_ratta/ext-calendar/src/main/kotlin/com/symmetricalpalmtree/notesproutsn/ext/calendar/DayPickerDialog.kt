@@ -109,7 +109,18 @@ object DayPickerDialog {
         )
         dialog = created
         created.show()
+        // Three quarters of the screen, whatever the tier (the user's call at Y4): a full-width
+        // dialog read as a page and its bordered background sat at the glass's edge, invisible. The
+        // window is sized after show() — before it there is no window to size — and the weighted
+        // cells then measure against this width rather than the screen's.
+        created.window?.setLayout(
+            (activity.resources.displayMetrics.widthPixels * WIDTH_FRACTION).toInt(),
+            android.view.WindowManager.LayoutParams.WRAP_CONTENT,
+        )
     }
+
+    /** The dialog's width as a fraction of the screen's. */
+    private const val WIDTH_FRACTION = 0.75f
 
     // ── Cells ────────────────────────────────────────────────────────────────
 

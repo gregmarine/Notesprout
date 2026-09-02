@@ -104,6 +104,13 @@ open class ExtensionScreenEntry<I : Any, P>(
      *  materialised [DrainedInk], so it is free to). The caller guards its own liveness and does the
      *  pasting. */
     private val onDrained: suspend (DrainedInk) -> Unit,
+    /** Anything else the screen's Intent should carry — booleans only, by the seam's rule (the
+     *  calendar's "a pad is installed", arc 23 / Y4). Runs after `begin` succeeded, before launch. */
+    private val decorateIntent: suspend (Context, android.content.Intent) -> Unit = { _, _ -> },
+    /** The showing is over and the bind is finished; [opening] is already released, so the caller
+     *  may open another door from here (the calendar's pad chain, arc 23 / Y4). The result code is
+     *  the screen's own — a drained send, a cancel, or a door it asked the host to walk through. */
+    private val onClosed: (resultCode: Int) -> Unit = {},
 ) {
 
     private val launcher: ActivityResultLauncher<android.content.Intent> =
@@ -164,6 +171,7 @@ open class ExtensionScreenEntry<I : Any, P>(
                     fail(fresh)
                     return@launch
                 }
+                decorateIntent(activity, intent)
                 if (send != null && !handOver(fresh, send)) return@launch
                 // The pipeline goes over the instant before the launch, and not one step earlier:
                 // until here the open could still have failed and left this screen writing.
@@ -253,6 +261,7 @@ open class ExtensionScreenEntry<I : Any, P>(
             } finally {
                 opening = false
             }
+            if (!activity.isFinishing && !activity.isDestroyed) onClosed(result.resultCode)
         }
     }
 

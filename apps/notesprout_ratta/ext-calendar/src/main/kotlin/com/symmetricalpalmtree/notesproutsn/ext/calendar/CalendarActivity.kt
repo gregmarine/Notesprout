@@ -171,6 +171,7 @@ class CalendarActivity : InkScreenActivity<InkAction>() {
         }
         sendEnabled = intent.getBooleanExtra(ExtensionContract.EXTRA_CALENDAR_SEND_ENABLED, false)
         openReceived = intent.getBooleanExtra(ExtensionContract.EXTRA_CALENDAR_OPEN_RECEIVED, false)
+        val scratchPadAvailable = intent.getBooleanExtra(ExtensionContract.EXTRA_CALENDAR_SCRATCH_PAD_AVAILABLE, false)
         binding = ActivityCalendarBinding.inflate(layoutInflater)
         setContentView(binding.root)
         Immersive.apply(window, binding.root)
@@ -201,6 +202,7 @@ class CalendarActivity : InkScreenActivity<InkAction>() {
             btnEraser = binding.btnEraser,
             btnLasso = binding.btnLasso,
             btnSend = binding.btnSend,
+            btnScratchPad = binding.btnScratchPad,
             btnToday = binding.btnToday,
             btnMonth = binding.btnMonth,
             btnWeek = binding.btnWeek,
@@ -215,7 +217,11 @@ class CalendarActivity : InkScreenActivity<InkAction>() {
             onToday = { runPageOp { showMove(nav.todayMove(LocalDate.now(), nowHour())) } },
             onView = { kind -> runPageOp { nav.toggled(kind)?.let { showMove(it) } } },
             onTitle = { showPicker() },
+            // The pad is the host's to open: leave with the result that asks for it (flushed first,
+            // like every exit), and the host brings the calendar back — at its bookmark — afterwards.
+            onScratchPad = { exit(ExtensionContract.RESULT_CALENDAR_OPEN_SCRATCH_PAD) },
             sendEnabled = sendEnabled,
+            scratchPadAvailable = scratchPadAvailable,
         )
         selectionBar = InkSelectionBar(
             root = binding.root,

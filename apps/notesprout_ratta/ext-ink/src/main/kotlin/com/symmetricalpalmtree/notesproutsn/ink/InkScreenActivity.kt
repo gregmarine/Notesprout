@@ -487,20 +487,20 @@ abstract class InkScreenActivity<A : Any> : AppCompatActivity() {
     }
 
     /**
-     * Every exit — Back, the top bar's Back, the store-failure dialog — flushes and then hands the
-     * pipeline off. **The flush is awaited before `finish()`**: the host's result callback runs
+     * Every exit — Back, the top bar's Back, the store-failure dialog, a door to another extension
+     * ([resultCode] says which; the host answers it) — flushes and then hands the pipeline off. **The flush is awaited before `finish()`**: the host's result callback runs
      * `end()` → unbind → revoke immediately, and a save left in flight would hit a revoked binder.
      */
-    protected fun exit() {
+    protected fun exit(resultCode: Int = Activity.RESULT_CANCELED) {
         if (closing) return
         closing = true
         screenRoot?.removeCallbacks(saveRunnable)
-        val page = inkPage ?: run { finishWithHandoff(); return }
+        val page = inkPage ?: run { finishWithHandoff(resultCode); return }
         appScope.launch {
             withContext(NonCancellable) {
                 pageOps.withLock { runCatching { page.flushUntilClean() }.onFailure { Log.w(logTag, "final flush failed", it) } }
             }
-            if (!isFinishing && !isDestroyed) finishWithHandoff()
+            if (!isFinishing && !isDestroyed) finishWithHandoff(resultCode)
         }
     }
 

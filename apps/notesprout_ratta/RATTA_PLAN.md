@@ -193,6 +193,15 @@ Code / correctness:
 - **A chrome dimen names a part; a measured view names the whole** (snap margin = `topBar.height`,
   not the dimen). **A bar centred by `layout_weight` is centred on leftover space** — which
   changes with build type (DebugMenu) and caller (`btnSend`); centred = FrameLayout child.
+- **A `<shape>` stroke has no padding — an opaque custom dialog root hides every border** (arc 23 /
+  Y4): `Dialogs.style` paints `shape_dialog_bordered` as the WINDOW background, and a custom view that
+  paints its own white at `match_parent` covers the 2 dp stroke on all four sides. Leave the root
+  transparent (the window is the white); the AppCompat message dialogs only ever looked right because
+  their own panels are inset. And a `match_parent` root fills the screen — size the window after
+  `show()` (the picker: 0.75 of the width).
+- **A later sibling at `match_parent` sits ON TOP of an earlier button in a `FrameLayout`** (arc 23 /
+  Y4): the picker's title took the left arrow's taps for two phases while the right arrow, added
+  after it, worked. Margin the overlay clear, or add the buttons last.
 - **A text-button style sets no `layout_width`** (arc 23 / Y2): `Widget.Notesprout.TextButton` and
   `LatchButton` carry padding and text only — unlike `ToolbarButton`, which sets both sizes — so an
   `AppCompatButton` on one of them needs its own `layout_width`. `processDebugResources` passes,
@@ -678,8 +687,7 @@ hairlines `round(density)` on integer edges, the template baked once per `BakeKe
 the pure anchor rule (toggle keeps anchor + half; open/step onto today's period anchors on today;
 double-tap ALWAYS Day AM; a replay re-anchors via `landed`); gestures = swipe (`SwipeMath`), double-tap
 (`PageGestures.onFingerDoubleTap`, an independent second history), 2/3-finger undo/redo, no long-press;
-tools the notebook's, fixed; both doors (library + notebook, `releaseForHandoff` before the launch)
-GONE without a trusted calendar; **both transfers** through the held bind only — notebook → calendar
+tools the notebook's, fixed; both doors (library + notebook — **immediately before the Scratch Pad, which is the LAST button on every bar**; `releaseForHandoff` before the launch) GONE without a trusted calendar; **the calendar's own pad door** (`EXTRA_CALENDAR_SCRATCH_PAD_AVAILABLE` + `RESULT_CALENDAR_OPEN_SCRATCH_PAD`, walked by the host, the calendar brought back on a plain close); the view latches Tabler `calendar-month`/`calendar-week`/`calendar` icons, Today a word; **both transfers** through the held bind only — notebook → calendar
 asks host-side (Today AM/PM · This week · This month, resolved AT THE TAP via `CalendarTarget.of`), lands
 1:1 and selected; calendar → notebook drains on the still-held bind into the ONE `pasteTransferred`
 body; **a timed-out placement is settled, not believed**, and `finish` settles before `end` (a Binder
@@ -1215,6 +1223,30 @@ NUL scan clean on 55 changed files):**
   `NotebookSession.pasteStrokes`'s log line said "from the scratch pad" for every transfer paste —
   it names no sender now (the caller does). **NOT walked (pen-only):** undo across pages (fix 1),
   the picker's cells (fix 6), the same-page undo cost (fix 7) — the user checklist.
+
+**User-checklist findings, fixed the same day (2026-09-02) — three user calls now LOCKED:**
+(1) **The Scratch Pad is the LAST button on every bar; the Calendar sits immediately before it**
+(library + notebook top bars swapped). (2) **The calendar carries its own Scratch Pad door**, last
+on its bar, shown only when the host found a trusted pad: `EXTRA_CALENDAR_SCRATCH_PAD_AVAILABLE`
+(a third boolean on the Intent — discovery is the host's, an extension never queries for another)
+and `RESULT_CALENDAR_OPEN_SCRATCH_PAD` (2) — the calendar `exit(resultCode)`s (flushed first) and
+the host walks the door: `ExtensionScreenEntry` gained `decorateIntent` + `onClosed(resultCode)`,
+both callers chain `onCalendarClosed` → `scratchPad.open()` with a `reopenCalendarAfterPad` latch →
+`onPadClosed` reopens the calendar (at its bookmark) only on a plain `RESULT_CANCELED` — a pad that
+sent ink to the notebook stays closed. A compatible contract addition; the calendar still declares
+7. (3) **The three view latches are Tabler icons** — `ic_calendar_month` / `ic_calendar_week` (new
+in `:sn-screen`) / `ic_calendar` as `ToolbarButton`s wearing the selected border; Today stays a word.
+**Day-picker fixes (the checklist's "doesn't fully work"):** the header `TextView` was added after
+`btnPrevMonth` at `match_parent` width, so it sat on top of the left arrow and took its taps (the
+right arrow, added after the title, was never covered) — margins the width of a button on both
+sides now; the window is sized to `WIDTH_FRACTION` 0.75 after `show()` (full width read as a page);
+and the root's own white background painted over `shape_dialog_bordered`'s stroke (which carries no
+padding) — the root is transparent now and the 2 dp border shows on all four sides. **Walked on the
+Nomad (adb):** library/notebook order Calendar 1164 · Pad 1280 (last); the calendar bar Today ·
+Month ▣ · Week · Day · Send · Scratch pad (last); picker prev → August, next → October, title →
+year grid, `RESULT_CALENDAR_OPEN_SCRATCH_PAD` → pad (`send=true` behind the notebook) → Back →
+calendar reopened at its bookmark; crash buffer empty. Gates re-run green (1857 JVM tests/variant,
+twelve modules debug + release, three release APKs sign, NUL clean).
 **User checklist (pen):** (1) draw on
   Month, toggle to Week, 2-finger undo → the paper lands back on Month AND the Month latch/pager
   follow it (fix 1); (2) the day picker's cells feel hand-sized on the Nomad, the arrows show a

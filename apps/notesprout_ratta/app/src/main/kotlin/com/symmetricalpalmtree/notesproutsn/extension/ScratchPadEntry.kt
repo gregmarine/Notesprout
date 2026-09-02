@@ -26,6 +26,8 @@ class ScratchPadEntry(
     /** Ink the pad sent back, already sanitized and capped; the bind is finished the moment this
      *  returns. */
     onDrained: suspend (DrainedInk) -> Unit = {},
+    /** The showing is over (Y4): the calendar's pad chain reopens the calendar on a plain close. */
+    onClosed: (resultCode: Int) -> Unit = {},
 ) : ExtensionScreenEntry<IScratchPad, Int>(
     activity = activity,
     button = button,
@@ -38,6 +40,7 @@ class ScratchPadEntry(
     beforeLaunch = beforeLaunch,
     onSent = onSent,
     onDrained = onDrained,
+    onClosed = onClosed,
 ) {
 
     private companion object {

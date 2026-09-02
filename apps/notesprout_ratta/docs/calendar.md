@@ -4,11 +4,15 @@ A basic writable organizer, the way a physical one is one: **Month, Week and Day
 full writing surface whose strokes are recorded in the extension's own store. It is an extension
 APK (`NSE · Calendar`, `:ext-calendar`, package `…notesproutsn.ext.calendar`) with its own process,
 its own g-paper surface and its own undo stack — the pad's shape, ridden on the pad's rules, with
-the placement made a real type. Arc 23 shipped in three phases: **Y1** (commit `6a16017a`,
-2026-09-02) — the seam, `:ext-ink`, `:ext-calendar` and the Month page, the library door only;
-**Y2** (commit `eaf8d8ce`, 2026-09-02) — the Week and Day pages, navigation, the day picker,
-double-tap; **Y3** (commit `b8ec3fbd`, 2026-09-02) — the notebook door and both transfers. Each
-phase's user checklist passed the same day it landed.
+the placement made a real type. Arc 23 shipped in three phases plus a user-checklist follow-up:
+**Y1** (commit `6a16017a`, 2026-09-02) — the seam, `:ext-ink`, `:ext-calendar` and the Month page,
+the library door only; **Y2** (commit `eaf8d8ce`, 2026-09-02) — the Week and Day pages, navigation,
+the day picker, double-tap; **Y3** (commit `b8ec3fbd`, 2026-09-02) — the notebook door and both
+transfers; **Y4** (2026-09-02) — the code-review pass (below), then three of the user's own
+checklist calls the same day: the Scratch Pad moved to the last slot on every bar with the calendar
+immediately before it, the calendar grew its own Scratch Pad door, the three view latches became
+Tabler icons, and the day picker's window width and title hit-box were fixed. Each phase's user
+checklist passed the same day it landed.
 
 `ACTION_CALENDAR` + `ACTION_CALENDAR_SCREEN` is SN's **SEVENTH capability point**, granted by the
 user 2026-09-01 — no EIGHTH without another decision. It is the **fourth screen-owning (tier-2)
@@ -245,16 +249,27 @@ a month by a month, a week by seven days, a day AM → PM → the next day's AM 
 back). **A double-tap on a Month or Week cell always opens that day's Day page at AM** — the
 wizard's call, regardless of what the clock says — and does nothing at all on a Day page itself.
 
-`CalendarToolbar` renders the state, never decides it: the three word toggles ("Month" / "Week" /
-"Day", `Widget.Notesprout.LatchButton`) are latched from `setView`, called only from `showPage`
-after a navigation actually lands — never from the tap that asked for it, so a navigation that
-failed can never leave a lie in the bar. **The pager's title is itself a tap target** — tapping it
-opens `DayPickerDialog`, rebuilt in `:ext-calendar` in og's shape rather than shared (nothing of the
-host's crosses into an extension): a Sun–Sat day grid whose prev/next step months, a header tap that
-flips the whole dialog to a 3×4 month chooser whose prev/next step years instead, today ringed, the
-day you came in on filled black. `DayPickerModel` (pure, JVM-tested) provides both grids — the day
-grid never grows a trailing empty week (a 28-day February beginning on a Sunday is exactly four rows)
-— and the dialog itself is only views over it.
+`CalendarToolbar` renders the state, never decides it: the three view toggles are latched from
+`setView`, called only from `showPage` after a navigation actually lands — never from the tap that
+asked for it, so a navigation that failed can never leave a lie in the bar. **Since Y4 (the user's
+icon call) they are Tabler icons, not words** — `ic_calendar_month` / `ic_calendar_week` /
+`ic_calendar` as `Widget.Notesprout.ToolbarButton` image buttons, the armed one with `isSelected`
+set, which reads as the button's own selected border, the notebook's armed-tool look. Today alone
+stays a word (`Widget.Notesprout.TextButton`) — there is no icon for "today" worth learning.
+**The pager's title is itself a tap target** — tapping it opens `DayPickerDialog`, rebuilt in
+`:ext-calendar` in og's shape rather than shared (nothing of the host's crosses into an extension):
+a Sun–Sat day grid whose prev/next step months, a header tap that flips the whole dialog to a 3×4
+month chooser whose prev/next step years instead, today ringed, the day you came in on filled
+black. `DayPickerModel` (pure, JVM-tested) provides both grids — the day grid never grows a
+trailing empty week (a 28-day February beginning on a Sunday is exactly four rows) — and the dialog
+itself is only views over it. **Since Y4 the window is sized after `show()`** to `WIDTH_FRACTION`
+(0.75 of the screen) — a full-width dialog had read as a page rather than a dialog, and its
+bordered background sat off the glass at the edges — and the header `TextView` carries a margin the
+width of a button on each side, because it is added into the `FrameLayout` after `btnPrevMonth`
+and at full width sat on top of the left arrow and took its taps (the right arrow, added after the
+title, was never covered). The root also no longer paints its own white: `shape_dialog_bordered`'s
+2 dp stroke carries no padding, so an opaque root over the whole window had covered the border on
+every side but the one the content happened to fall short of.
 
 ## Gestures
 
@@ -329,6 +344,24 @@ only after a drain completes), the `OpeningOverlay` wait (a cold open is seconds
 creating the store — and a tap with no answer that long reads as a tap that missed), and both
 transfers' host half.
 
+**Since Y4 the calendar also has its own door out, to the pad** — the user's placement call: the
+Scratch Pad is the last button on every bar, so a calendar showing needs its own way to reach it
+rather than making the person back all the way out first. `ExtensionScreenEntry` grew two hooks for
+it, generic enough that either ink screen can use them: `decorateIntent(activity, intent)` runs
+after `begin` succeeds and before launch — the calendar's fills in
+`EXTRA_CALENDAR_SCRATCH_PAD_AVAILABLE` from `ExtensionRegistry.scratchPad(ctx) != null`, discovery
+staying the host's, never a query from one extension to another — and `onClosed(resultCode)` fires
+once the showing and its bind are both finished, so the caller is free to open a second door from
+there. A tap on the calendar's own Scratch Pad button runs `exit(RESULT_CALENDAR_OPEN_SCRATCH_PAD)`
+(flushed first, like every exit) rather than opening anything itself — an extension screen refuses
+any caller but the host, so a door from one extension to another is always the host's to walk
+through. Both callers chain the same way: `onCalendarClosed(resultCode)` opens the pad and sets a
+`reopenCalendarAfterPad` latch when the result was `RESULT_CALENDAR_OPEN_SCRATCH_PAD`;
+`onPadClosed(resultCode)` reopens the calendar — at its bookmark, so it lands where it was — only
+when the latch is set **and** the pad closed with `RESULT_CANCELED`. A pad that sent ink to the
+notebook instead stays closed: the paste is what the person is looking at, and reopening the
+calendar over it would bury the thing that just landed.
+
 `CalendarClient` was `ScratchPadClient`'s shape on `ICalendar` by discipline alone through Y3; since
 Y4 it is that shape **structurally** — a thin `HeldInkClient<ICalendar, CalendarTarget>` whose
 companion `Point` supplies `ICalendar`'s names, extras and budgets, on the one class that now also
@@ -336,8 +369,9 @@ serves the pad. `open` pre-opens the extension store on IO (the pre-open rule �
 never sit inside a call timeout), mints a uid-bound `ExtensionStoreBinder`, holds the bind
 (`ExtensionBinder.hold`, signature re-checked at bind time), calls `begin(store)` within
 `CALL_TIMEOUT_MS` (2 000 ms), and builds the screen Intent (`ACTION_CALENDAR_SCREEN`, `setPackage`,
-the two boolean extras — **nothing else rides the Intent**, every byte of ink crosses the held
-service). `send` / `drainOutgoing` are the transfer host halves (below) — `HeldInkClient`'s methods,
+the two `HeldInkClient` boolean extras plus, since Y4, `decorateIntent`'s third
+(`EXTRA_CALENDAR_SCRATCH_PAD_AVAILABLE`) — **nothing else rides the Intent**, every byte of ink
+crosses the held service). `send` / `drainOutgoing` are the transfer host halves (below) — `HeldInkClient`'s methods,
 run once for both points; `finish` runs `end()` best-effort within the same timeout, then always
 unbinds and revokes the store in `finally`. Before Y4 the calendar's copy carried the settle rule
 (below) alone and the pad's did not — the concrete drift the unification closed. The screen's own
@@ -467,13 +501,14 @@ Mirrors the pad's, row for row.
 
 | Where | Behaviour |
 |---|---|
-| Library top bar, after the pad | opens the calendar with **no** Send buttons — there is no notebook to send to |
-| Notebook top bar, right cluster, after the pad | hands the EPD pipeline over first (`releaseForHandoff()`); the calendar gets both Send buttons |
+| Library top bar, before the pad (Y4 — the pad is always the last button) | opens the calendar with **no** Send buttons — there is no notebook to send to |
+| Notebook top bar, right cluster, before the pad (Y4 — same placement call) | hands the EPD pipeline over first (`releaseForHandoff()`); the calendar gets both Send buttons |
 | Notebook selection toolbar, 8th button (ink-only, second extension-gated slot, between Pad and Tag) | the outbound (notebook → calendar) transfer above |
+| Calendar top bar's own Scratch Pad button, last on the bar (Y4) | shown only when the host found a trusted pad; `exit(RESULT_CALENDAR_OPEN_SCRATCH_PAD)` hands the door to the host, which opens the pad and brings the calendar back at its bookmark on a plain close — see § The two doors + the held bind |
 
-`CalendarEntry` serves both doors identically apart from `beforeLaunch` and `sendEnabled` — two
-near-identical classes would have been the sibling-copy trap in miniature. Both buttons are `GONE`
-unless a trusted calendar is discovered, re-run on every `onResume` and after a failed open.
+`CalendarEntry` serves both entry doors identically apart from `beforeLaunch` and `sendEnabled` —
+two near-identical classes would have been the sibling-copy trap in miniature. Both buttons are
+`GONE` unless a trusted calendar is discovered, re-run on every `onResume` and after a failed open.
 
 ## Frame silence
 
@@ -526,17 +561,17 @@ same gate the pad's screen calls, rather than a copy each screen kept for itself
 | `:ext-calendar` `CalendarGeometry` / `CalendarTemplate` | the three layouts' rects and hit-tests; the template painter |
 | `:ext-calendar` `CalendarNavigation` | the pure anchor rule and every `Move` |
 | `:ext-calendar` `DayPickerModel` / `DayPickerDialog` | the picker's grids (pure) and its views |
-| `:ext-calendar` `CalendarToolbar` | the chrome, the fixed tools, the pager, both Send buttons |
+| `:ext-calendar` `CalendarToolbar` | the chrome, the fixed tools, the pager, both Send buttons, and (Y4) the three Tabler view latches and the calendar's own Scratch Pad button |
 | `:ext-calendar` `CalendarActivity` | thin on `:ext-ink`'s `InkScreenActivity` since Y4 — navigation, template bake, the picker, double-tap, `followReplay()` |
 | `:app` `HeldInkClient` | the held bind, `open` / `send` / `drainOutgoing` / `finish`, once, shared with the pad since Y4 — `HeldInkPoint` the per-point names/budgets interface, `DrainedInk` the one drained-result class |
 | `:app` `CalendarClient` | thin on `HeldInkClient` since Y4 — its companion `Point` is a `HeldInkPoint<ICalendar, CalendarTarget>` naming `ICalendar`'s two actions, two extras and three budgets |
-| `:app` `ExtensionScreenEntry` | both entry doors, the busy guard, the overlay, both transfers' host half, once, shared with the pad since Y4 — `InkSend` the one outbound-ink class (replacing `CalendarEntry.Send`), `EntryWording` the four strings |
-| `:app` `CalendarEntry` | thin on `ExtensionScreenEntry` since Y4 — its registry lookup, its `EntryWording` and `RESULT_CALENDAR_SEND` |
+| `:app` `ExtensionScreenEntry` | both entry doors, the busy guard, the overlay, both transfers' host half, once, shared with the pad since Y4 — `InkSend` the one outbound-ink class (replacing `CalendarEntry.Send`), `EntryWording` the four strings, and (Y4) `decorateIntent`/`onClosed(resultCode)`, the two hooks the calendar's pad door rides |
+| `:app` `CalendarEntry` | thin on `ExtensionScreenEntry` since Y4 — its registry lookup, its `EntryWording`, `RESULT_CALENDAR_SEND`, and (Y4) `decorateIntent` (sets `EXTRA_CALENDAR_SCRATCH_PAD_AVAILABLE`) plus an `onClosed` passthrough |
 | `:app` `CalendarTargets` | the four Send-to-Calendar rows, pure |
 | `:app` `TransferSelection` | the pure ink-only, writing-order rule both lasso sends obey (Y4) — `sendable(selection, live)` |
-| `:app` `NotebookActivity` | `btnCalendar`, `sendSelectionToExtension` (the one gate, Y4), `sendSelectionToCalendar`, `openCalendarWith`, `onCalendarSent`, `pasteFromCalendar`, the shared `pasteTransferred` |
+| `:app` `NotebookActivity` | `btnCalendar`, `sendSelectionToExtension` (the one gate, Y4), `sendSelectionToCalendar`, `openCalendarWith`, `onCalendarSent`, `pasteFromCalendar`, the shared `pasteTransferred`, and (Y4) `onCalendarClosed`/`onPadClosed` — the door chain to and from the calendar's own pad door |
 | `:app` `SelectionToolbar` | the Calendar button (STROKES-only, extension-gated) |
-| `:app` `LibraryActivity` | `btnCalendar`, the library door |
+| `:app` `LibraryActivity` | `btnCalendar`, the library door, and (Y4) `onCalendarClosed`/`onPadClosed` — the same door chain as the notebook's |
 | `:sn-screen` `FloatingSelectionBar` | the row-of-buttons primitive `InkSelectionBar` places |
 | `:sn-screen` `InkSelectionBar` | arc 23 / Y4 — the ONE Send-then-Delete floating bar, replacing `CalendarSelectionToolbar` and the pad's `ScratchSelectionToolbar`, built on `FloatingSelectionBar` |
 | `:sn-screen` `PenIdle` | arc 23 / Y4 — the frame-silence gate (`whenIdle` / `releaseRenderIfIdle`), shared by both toolbars and both activities |
@@ -579,10 +614,12 @@ recorded statements could never exercise a real compensation or a real re-read.
 - **Two sequential `adb shell input tap`s land outside the platform's 300 ms double-tap window** —
   each spawns and tears down its own `input` process. `adb shell "input tap X Y & input tap X Y;
   wait"` (both backgrounded in one shell invocation) lands inside it.
-- **The day picker dialog is content-sized and narrows in month mode** (the 3×4 grid is
-  narrower than the day grid it replaces) — a scripted tap aimed at the day grid's arrow position
-  can land outside the dialog and cancel it instead. Cosmetic, and left as-is; a real finger reads
-  the dialog before tapping.
+- **The day picker dialog's width is fixed since Y4 (`WIDTH_FRACTION` 0.75), but its height is
+  still content-sized and narrows in month mode** — flipping to the 3×4 month chooser shrinks the
+  grid from six rows to four, which moves the header row (and both arrows with it) up the window. A
+  scripted tap aimed at a coordinate dumped before the flip can land outside the dialog, or on the
+  wrong control, after it. Re-dump the layout before every tap rather than reusing coordinates
+  across a flip. Cosmetic on a real finger, which reads the dialog before tapping; left as-is.
 - **A transfer paste lands *selected*, standing in for a lasso when driving both directions by
   adb.** Neither direction of the calendar's transfer can be triggered by a scripted lasso — `adb`
   cannot draw one — but the notebook's own pasted-and-selected ink after a calendar → notebook
@@ -599,4 +636,4 @@ recorded statements could never exercise a real compensation or a real re-read.
 - `docs/notebook.md` / `docs/library.md` — `btnCalendar` and the selection toolbar's Calendar button
   in their place among the rest of that screen's chrome.
 - `apps/notesprout_ratta/RATTA_PLAN.md` § "Phases — Arc 23 \"Calendar\"" — the wizard's locked
-  decisions, the seam spec, and the Y1/Y2/Y3 Outcome records this doc draws its facts from.
+  decisions, the seam spec, and the Y1–Y4 Outcome records this doc draws its facts from.

@@ -25,6 +25,9 @@ class CalendarEntry(
     /** Ink the calendar sent back, already sanitized and capped; the bind is finished the moment this
      *  returns. */
     onDrained: suspend (DrainedInk) -> Unit = {},
+    /** The showing is over (Y4): `RESULT_CALENDAR_OPEN_SCRATCH_PAD` asks the caller to open the pad
+     *  and bring the calendar back afterwards. */
+    onClosed: (resultCode: Int) -> Unit = {},
 ) : ExtensionScreenEntry<ICalendar, CalendarTarget>(
     activity = activity,
     button = button,
@@ -37,6 +40,12 @@ class CalendarEntry(
     beforeLaunch = beforeLaunch,
     onSent = onSent,
     onDrained = onDrained,
+    // The calendar's own Scratch Pad door (Y4): it exists only when the host finds a trusted pad —
+    // discovery is the host's, an extension never queries for another.
+    decorateIntent = { ctx, intent ->
+        intent.putExtra(ExtensionContract.EXTRA_CALENDAR_SCRATCH_PAD_AVAILABLE, ExtensionRegistry.scratchPad(ctx) != null)
+    },
+    onClosed = onClosed,
 ) {
 
     private companion object {

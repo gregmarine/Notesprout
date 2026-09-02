@@ -6,12 +6,16 @@
   shape_dialog_bordered); the day/month cells and the ring/fill drawables are built in code from
   DayPickerModel — this file is only the header row and the grid's empty host. The root is
   match_parent on purpose: the grid's cells are weight-1 over a 0 dp width, and under a
-  wrap_content parent they would measure to nothing.
+  wrap_content parent they would measure to nothing — and the WINDOW is sized by the code to
+  three quarters of the screen (Y4, the user's call: a full-width dialog read as a page, and its
+  border sat off the glass), so match_parent means "the dialog's width", not the screen's.
 -->
+<!-- No background of its own: the window's shape_dialog_bordered is the white AND the 2 dp border,
+     and its stroke carries no padding, so an opaque root painted over the whole window would cover
+     the border — which is exactly what the Y2–Y4 picker did (the user's "no top or side borders"). -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:background="@color/paperWhite"
     android:orientation="vertical"
     android:padding="16dp">
 
@@ -26,11 +30,15 @@
             android:contentDescription="@string/cd_picker_prev"
             android:src="@drawable/ic_page_prev" />
 
-        <!-- Tap to flip between the day grid and the month grid. -->
+        <!-- Tap to flip between the day grid and the month grid. Kept clear of both arrows by a
+             margin the width of a button: this view is added after btnPrevMonth, so at full width
+             it sat ON TOP of the left arrow and took its taps (Y4 — the user's "prev only toggles"). -->
         <TextView
             android:id="@+id/tvPickerMonthYear"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/toolbar_button_size"
+            android:layout_marginEnd="@dimen/toolbar_button_size"
             android:layout_gravity="center"
             android:clickable="true"
             android:focusable="true"

@@ -104,23 +104,24 @@
             android:src="@drawable/ic_sort"
             android:contentDescription="@string/cd_sort" />
 
-        <!-- The Scratch Pad (arc 11). GONE unless a trusted extension is installed —
-             ScratchPadEntry owns it, re-discovering on every resume. -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnScratchPad"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_sketching"
-            android:visibility="gone"
-            android:contentDescription="@string/cd_scratch_pad" />
-
-        <!-- The Calendar (arc 23). After the pad, the wizard's placement; GONE unless a trusted
-             extension is installed — CalendarEntry owns it, re-discovering on every resume. -->
+        <!-- The Calendar (arc 23). Before the pad — the user's placement call at Y4: the Scratch
+             Pad is the LAST button on every bar. GONE unless a trusted extension is installed —
+             CalendarEntry owns it, re-discovering on every resume. -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnCalendar"
             style="@style/Widget.Notesprout.ToolbarButton"
             android:src="@drawable/ic_calendar"
             android:visibility="gone"
             android:contentDescription="@string/cd_calendar" />
+
+        <!-- The Scratch Pad (arc 11) — always the last button. GONE unless a trusted extension is
+             installed — ScratchPadEntry owns it, re-discovering on every resume. -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnScratchPad"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_sketching"
+            android:visibility="gone"
+            android:contentDescription="@string/cd_scratch_pad" />
 
     </LinearLayout>
 

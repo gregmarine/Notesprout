@@ -448,6 +448,7 @@ class NotebookActivity : AppCompatActivity() {
             beforeLaunch = { paper.releaseForHandoff() },
             onSent = { onPadSent() },
             onDrained = { drained -> pasteFromPad(drained) },
+            onClosed = { onPadClosed(it) },
         )
         binding.btnScratchPad.setOnClickListener { if (opened && !closing) scratchPad.open() }
         TooltipCompat.setTooltipText(binding.btnScratchPad, binding.btnScratchPad.contentDescription)
@@ -465,6 +466,7 @@ class NotebookActivity : AppCompatActivity() {
             beforeLaunch = { paper.releaseForHandoff() },
             onSent = { onCalendarSent() },
             onDrained = { drained -> pasteFromCalendar(drained) },
+            onClosed = { onCalendarClosed(it) },
         )
         binding.btnCalendar.setOnClickListener { if (opened && !closing) calendar.open() }
         TooltipCompat.setTooltipText(binding.btnCalendar, binding.btnCalendar.contentDescription)
@@ -2137,6 +2139,25 @@ class NotebookActivity : AppCompatActivity() {
     private fun openCalendarWith(strokes: List<Stroke>, page: PageRef, target: CalendarTarget) {
         if (!opened || closing) return
         calendar.open(InkSend(strokes, page.width.toFloat(), page.height.toFloat(), target))
+    }
+
+    /** The calendar's Scratch Pad door (arc 23 / Y4): the calendar closed asking for the pad, so the
+     *  pad opens (with this notebook behind it, as its own door would), and a plain close of the pad
+     *  brings the calendar back at its bookmark. A pad that sent ink here instead stays closed — the
+     *  paste is what the person is looking at. */
+    private var reopenCalendarAfterPad = false
+
+    private fun onCalendarClosed(resultCode: Int) {
+        if (resultCode != ExtensionContract.RESULT_CALENDAR_OPEN_SCRATCH_PAD) return
+        if (!opened || closing) return
+        reopenCalendarAfterPad = true
+        scratchPad.open()
+    }
+
+    private fun onPadClosed(resultCode: Int) {
+        if (!reopenCalendarAfterPad) return
+        reopenCalendarAfterPad = false
+        if (resultCode == RESULT_CANCELED && opened && !closing) calendar.open()
     }
 
     /** The ink is on the calendar. The selection it came from goes (it has been acted on) and the

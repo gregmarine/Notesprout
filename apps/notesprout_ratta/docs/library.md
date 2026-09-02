@@ -34,7 +34,7 @@ passphrase.
 row's right edge:
 
 ```
-[←]  Notebooks / … / Folder   [+Notebook] [+Folder] [Search] [Recents] [Pinned] [Sort] [Scratch pad] [Calendar]
+[←]  Notebooks / … / Folder   [+Notebook] [+Folder] [Search] [Recents] [Pinned] [Sort] [Calendar] [Scratch pad]
 ```
 
 `+Notebook` is `ic_notebook_plus` — Tabler `address-book` with the person taken out and a plus cut
@@ -57,9 +57,11 @@ wears it as its title — the template browser's shape, so the app's two searche
 interaction.
 
 **Calendar** (arc 23 / Y1, grown a second door at Y3), `btnCalendar` (`ic_calendar`, Tabler
-`calendar`, in `:sn-screen`), sits after `Scratch pad` — the calendar's first door; the notebook top
-bar's ([`notebook.md`](notebook.md)) is its second — and opens the calendar extension's screen
-through `CalendarEntry`: the pad's door shape exactly (a busy guard, the "Opening…" overlay, the
+`calendar`, in `:sn-screen`), sits before `Scratch pad` — since Y4 the pad is always the LAST
+button on this bar, the user's call, so Calendar moved to just ahead of it — the calendar's first
+door; the notebook top bar's ([`notebook.md`](notebook.md)) is its second — and opens the calendar
+extension's screen through `CalendarEntry`: the pad's door shape exactly (a busy guard, the
+"Opening…" overlay, the
 store pre-opened on IO before any bind). **GONE without a trusted calendar**, refreshed on every
 `onResume`. It opens no `.soil` at all, so unlike every other door here it is **not** latched with
 `launching` — `CalendarEntry` carries its own one-showing guard, the way the pad's does. See

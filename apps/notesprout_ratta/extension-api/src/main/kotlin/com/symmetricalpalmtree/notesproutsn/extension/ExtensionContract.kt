@@ -304,6 +304,23 @@ object ExtensionContract {
     /** Activity result code: the calendar has outbound ink for `takeOutgoing` (= `Activity.RESULT_FIRST_USER`). */
     const val RESULT_CALENDAR_SEND: Int = 1
 
+    /**
+     * Boolean Intent extra on the calendar screen (arc 23 / Y4, the user's call): a trusted scratch
+     * pad is installed, so the calendar shows its own Scratch Pad door. Discovery is the host's —
+     * an extension never queries for another — and this is the third boolean the Intent carries;
+     * still no content, no id, no path.
+     */
+    const val EXTRA_CALENDAR_SCRATCH_PAD_AVAILABLE: String = "calendarScratchPadAvailable"
+
+    /**
+     * The calendar screen's result when its Scratch Pad door was tapped (arc 23 / Y4): the host
+     * opens the pad and brings the calendar back — at its bookmark — when the pad is closed without
+     * sending. An extension screen refuses any caller but the host, so a door from one extension to
+     * another is always the host's to walk through. A compatible addition: the calendar keeps
+     * declaring 7.
+     */
+    const val RESULT_CALENDAR_OPEN_SCRATCH_PAD: Int = 2
+
     // ── Tags (`ITagManager`, arc 21 / W1, on rows since arc 22 / X3) ──────
     // The three caps below are the arc-21 wizard's, and since X3 they are **policy and nothing
     // else**: the tag index is `tag` / `assignment` rows in the extension's store, so a cap is a

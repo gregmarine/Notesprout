@@ -74,15 +74,17 @@ frame). Immersive: system bars hidden, transient by swipe. Portrait-locked.
 The `topBarRow` is left-packed — Back, then Contents / Pen / Eraser / Lasso, all butted together
 (the same spacing the scratch pad's row uses) — with a **weighted spacer** after the Lasso holding
 the row's free space, so `btnDocument` (arc 19), `btnTags` (arc 21 / W2), `btnRecents` (T1),
-`btnScratchPad` and `btnCalendar` (arc 23 / Y3) sit flush at the right edge, in that order — Document
-immediately before Tags, Tags immediately before Recents (the user's placement call, arc 21 / W2:
-next to Document, before Recents), and Calendar immediately after the Scratch Pad button, for the
-pad's own reason: the other paper surface this page's ink can be sent to — and everything to their
-left keeps its position whatever the screen width. `btnTags` is **GONE without a trusted tag
-manager installed** (`TagManagerEntry.refresh()`, re-run from `onResume` like every other
-extension-backed control), never disabled; `btnCalendar` is the same shape over `CalendarEntry` —
-GONE without a trusted calendar, refreshed on every `onResume`, and a tap `releaseForHandoff()`s the
-paper immediately before launch, the pad's own rule for handing the EPD pipeline over first.
+`btnCalendar` and `btnScratchPad` (arc 23 / Y3, reordered at Y4) sit flush at the right edge, in
+that order — Document immediately before Tags, Tags immediately before Recents (the user's
+placement call, arc 21 / W2: next to Document, before Recents), and Calendar immediately before the
+Scratch Pad button, for the pad's own reason: the other paper surface this page's ink can be sent
+to. **Since Y4 the Scratch Pad is the LAST button on every bar** — the user's placement call — with
+Calendar moved to sit just before it rather than after; everything to their left keeps its position
+whatever the screen width. `btnTags` is **GONE without a trusted tag manager installed**
+(`TagManagerEntry.refresh()`, re-run from `onResume` like every other extension-backed control),
+never disabled; `btnCalendar` is the same shape over `CalendarEntry` — GONE without a trusted
+calendar, refreshed on every `onResume`, and a tap `releaseForHandoff()`s the paper immediately
+before launch, the pad's own rule for handing the EPD pipeline over first.
 
 Both bars — and both selection bars while they are up — are pushed to `paper.setExclusionRects`
 after every root layout pass, translated into the paper view's coordinates, so the stylus can never
@@ -852,10 +854,10 @@ tap. Nothing about it is stored anywhere new: it reads the same device-local `sn
 only**, so a notebook's name never reaches plaintext prefs), and resolves names and folder paths from
 the global index at gather time. No schema change, nothing in any `.soil`.
 
-**Entry points:** `btnRecents` (Tabler `clock`) **at the top bar's right edge**, with the Document
-button (arc 19) just before it and the Scratch Pad button after it — a weighted spacer after the
-Lasso puts the three there, because none of them is a tool and the Recents panel comes in from that
-side
+**Entry points:** `btnRecents` (Tabler `clock`) **at the top bar's right edge**, with Document and
+Tags before it and Calendar (arc 23) then, since Y4, the Scratch Pad after it — a weighted spacer
+after the Lasso puts them all there, because none of them is a tool and the Recents panel comes in
+from that side
 — and a **two-finger swipe down** on the paper. Unlike the Contents, neither is gated: the button is
 always visible and the swipe always acts, because "nothing recent" is a real answer the panel gives
 ("No recent notebooks") rather than a reason to hide a control.

@@ -26,6 +26,7 @@
     <string name="cd_calendar_view_month">Month view</string>
     <string name="cd_calendar_view_week">Week view</string>
     <string name="cd_calendar_view_day">Day view</string>
+    <string name="cd_calendar_scratch_pad">Scratch pad</string>
 
     <!-- The bottom bar's title is itself a tap target (Y2): it opens the day picker. -->
     <string name="cd_calendar_pick_day">Pick a day</string>

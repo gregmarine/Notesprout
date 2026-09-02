@@ -21,8 +21,8 @@ import com.symmetricalpalmtree.notesproutsn.notebook.PenIdle
  * controls, Send, the pager, and the title behind the frame-silence gate.
  *
  * **The three toggles are words, not glyphs** — there is no icon for "week" worth learning, and
- * words read better on e-ink. The armed one is a `Widget.Notesprout.LatchButton` with `isSelected`
- * set, which reads as a thicker border. It is set from [setView] on every page shown, **never from
+ * words read better on e-ink — Today still is; the three view latches became Tabler icons at Y4 on
+ * the user's call. The armed one has `isSelected` set, which reads as the ToolbarButton's border. It is set from [setView] on every page shown, **never from
  * the tap that asked for it**: what is latched is what is on the paper, so a navigation that failed
  * cannot leave a lie in the bar.
  *
@@ -48,10 +48,11 @@ class CalendarToolbar(
     btnEraser: ImageButton,
     btnLasso: ImageButton,
     private val btnSend: ImageButton,
+    private val btnScratchPad: ImageButton,
     private val btnToday: Button,
-    private val btnMonth: Button,
-    private val btnWeek: Button,
-    private val btnDay: Button,
+    private val btnMonth: View,
+    private val btnWeek: View,
+    private val btnDay: View,
     private val btnPrev: ImageButton,
     private val btnNext: ImageButton,
     private val title: TextView,
@@ -67,7 +68,11 @@ class CalendarToolbar(
     onView: (kind: Int) -> Unit,
     /** The pager's title was tapped: open the day picker. */
     onTitle: () -> Unit,
+    /** The Scratch Pad door (Y4): leave for the pad — the host opens it and brings us back. Never
+     *  called when [scratchPadAvailable] is false — the button is GONE. */
+    onScratchPad: () -> Unit,
     sendEnabled: Boolean,
+    scratchPadAvailable: Boolean,
 ) {
 
     private val tools: PaperToolbar
@@ -91,13 +96,15 @@ class CalendarToolbar(
 
         // Every button carries a hint naming it — the word buttons included: their tooltip is their
         // own text, which is what a long press on a truncated latch is for.
-        listOf(btnPrev, btnNext, btnSend, btnToday, btnMonth, btnWeek, btnDay, title).forEach {
+        listOf(btnPrev, btnNext, btnSend, btnScratchPad, btnToday, btnMonth, btnWeek, btnDay, title).forEach {
             TooltipCompat.setTooltipText(it, it.contentDescription)
         }
         btnPrev.setOnClickListener { releaseRenderIfIdle(); onPrev() }
         btnNext.setOnClickListener { releaseRenderIfIdle(); onNext() }
         btnSend.visibility = if (sendEnabled) View.VISIBLE else View.GONE
         btnSend.setOnClickListener { releaseRenderIfIdle(); onSend() }
+        btnScratchPad.visibility = if (scratchPadAvailable) View.VISIBLE else View.GONE
+        btnScratchPad.setOnClickListener { releaseRenderIfIdle(); onScratchPad() }
         btnToday.setOnClickListener { releaseRenderIfIdle(); onToday() }
         btnMonth.setOnClickListener { releaseRenderIfIdle(); onView(CalendarTarget.KIND_MONTH) }
         btnWeek.setOnClickListener { releaseRenderIfIdle(); onView(CalendarTarget.KIND_WEEK) }

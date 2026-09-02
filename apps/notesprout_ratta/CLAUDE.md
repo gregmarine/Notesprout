@@ -189,7 +189,13 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
     every chunk. `CalendarDates` (Sunday weeks, hand lists never a formatter, ISO dates only) is
     shared by both sides so the host never guesses the week rule. The notebook → calendar Send
     asks first, host-side, via `CalendarTarget.of`: Today morning / Today afternoon / This week /
-    This month. The bookmark (`state`) is written on every show.
+    This month. The bookmark (`state`) is written on every show. **Since arc 23 / Y4 (the user's
+    checklist call) the calendar also has its own door out, to the pad** — the Scratch Pad is the
+    LAST button on every bar, so the calendar carries a third boolean
+    (`EXTRA_CALENDAR_SCRATCH_PAD_AVAILABLE`) and a fourth result code
+    (`RESULT_CALENDAR_OPEN_SCRATCH_PAD`) that ask the host, not the calendar itself, to open the pad
+    and bring the calendar back at its bookmark once the pad closes without sending — a compatible
+    addition, the calendar keeps declaring 7.
 
   All of them get the **extension store** (`IExtensionStore` — per-package,
   encrypted under the global key at `Garden/<pkg>.db`, minted per bind, uid-bound, revoked with

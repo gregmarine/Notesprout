@@ -1663,11 +1663,17 @@ shapes ever leave one: `receiveInk` throws `IllegalArgumentException` over the t
 a target that changes mid-transfer (every chunk of one transfer must name the same
 `CalendarTarget` — the service re-checks it, the untrusted-input half of the host's own
 before-any-bind check), and `IllegalStateException("store unavailable")` — the pad's own text — is
-the one store failure, on either method that touches it. Nothing rides the screen's Intent but the
-pad's two booleans, mirrored under the calendar's own names: `EXTRA_CALENDAR_SEND_ENABLED` (opened
+the one store failure, on either method that touches it. Nothing rides the screen's Intent but
+booleans. Two are the pad's own, mirrored under the calendar's own names: `EXTRA_CALENDAR_SEND_ENABLED` (opened
 from the notebook, so the calendar shows its Send buttons) and `EXTRA_CALENDAR_OPEN_RECEIVED`
 (opened right after a `receiveInk`, so the calendar opens on the target page with the placed
-strokes selected).
+strokes selected). **Since Y4 there is a third**, `EXTRA_CALENDAR_SCRATCH_PAD_AVAILABLE` — a
+trusted pad is installed, so the calendar shows its own Scratch Pad button — set by
+`ExtensionScreenEntry`'s new `decorateIntent` hook rather than by the calendar itself discovering
+the pad (discovery stays the host's, an extension never queries for another). The button's tap
+answers with a fourth result code, `RESULT_CALENDAR_OPEN_SCRATCH_PAD`, alongside `RESULT_CALENDAR_SEND`
+and `RESULT_CANCELED` — it carries no data of its own, only a request that the host walk a door the
+calendar cannot walk itself (an extension screen refuses any caller but the host).
 
 ### The wire types
 
@@ -1735,6 +1741,23 @@ unless `ExtensionRegistry.calendar` finds a trusted service, re-run on every `re
 guard, the `OpeningOverlay` wait, and — since Y3 — both transfers' host half: an optional `InkSend`
 crosses over the held bind **before** the screen is launched, and a `RESULT_CALENDAR_SEND` is
 drained on the bind that is **still held**, handed to `onDrained`, before `finish()` runs.
+
+**Since Y4, `ExtensionScreenEntry` also carries two hooks the calendar's own Scratch Pad door
+rides, generic enough for either ink screen to use.** `decorateIntent(activity, intent)` runs after
+`begin` succeeds and before launch — `CalendarEntry`'s sets
+`EXTRA_CALENDAR_SCRATCH_PAD_AVAILABLE` from `ExtensionRegistry.scratchPad(ctx) != null`, the
+pad's own registry lookup, never the calendar asking the pad directly. `onClosed(resultCode)` fires
+once the showing and its bind are both finished — `opening` already released — so the caller may
+open a second door from there without racing the first one's teardown. Both host callers wire the
+same chain over it: `onCalendarClosed(resultCode)` opens `scratchPad` and sets a
+`reopenCalendarAfterPad` latch when the result is `RESULT_CALENDAR_OPEN_SCRATCH_PAD`;
+`onPadClosed(resultCode)` reopens `calendar` — landing at its bookmark, since nothing about the
+calendar's own state changed — only when that latch is set and the pad's own result was
+`RESULT_CANCELED`. A pad that sent ink to the notebook instead stays closed and the latch is simply
+cleared: the paste on the page is what the person is looking at, not a reason to cover it with the
+calendar again. `LibraryActivity` and `NotebookActivity` each carry their own latch and their own
+pair of these two methods — one class could not serve both, since one door leaves ink behind to
+paste and the other has no notebook to paste into at all.
 
 `CalendarTargets` (`notebook/CalendarTargets.kt`) is the pure model behind the Send-to-Calendar
 sheet's four rows — Today AM · Today PM · This week · This month — and **the host never computes a
@@ -1830,8 +1853,10 @@ needed tightening.
 
 **Privacy**, the family rule again: ink crosses and nothing else — no stroke id, page id, notebook
 id or name has a parameter to ride on, `CalendarService`/`CalendarClient`/`CalendarEntry` log
-counts and durations only, and the screen's Intent carries the action, the package and two booleans
-— never a date, a target or a page.
+counts and durations only, and the screen's Intent carries the action, the package and, since Y4,
+three booleans — never a date, a target or a page. The third (`EXTRA_CALENDAR_SCRATCH_PAD_AVAILABLE`)
+only gates whether the calendar's own Scratch Pad button shows; the result code it can send back
+(`RESULT_CALENDAR_OPEN_SCRATCH_PAD`) is a request that the host walk a door, not a payload.
 
 ---
 
@@ -1888,7 +1913,7 @@ and are not repeated; what follows is what the calendar's own shape adds.
 | 27 | **The `ICalendar` held bind is the pad's bracket verbatim, and every stub method enforces the caller before it does anything else.** `begin(store)` → the screen launch → `receiveInk`* / `takeOutgoing` → `end()` → unbind → revoke, the last three in one `finally` on every path (result, cancel, caller `onDestroy`, failed `begin`) — and, since the Y4 review, **`finish` settles any call a timeout orphaned before `end()`** (`HeldBinding.settle`): a Binder call cannot be cancelled, so the revoke must never land under a placement still writing its batches (the extension's compensation is refused by the same gate that refused the batch). Every one of `CalendarService`'s four stub methods calls `HostCallerCheck.enforce` first; only the three marshalable shapes ever leave one, and the one store failure either side of a transfer can hit is `IllegalStateException("store unavailable")` — the pad's exact text, so a caller that already handles the pad's failure needs no new case for the calendar's. | `ICalendar.aidl`, `CalendarService.begin/receiveInk/takeOutgoing/end`, `HostCallerCheck.enforce`, `HeldInkClient.open/send/drainOutgoing/finish` (via `CalendarClient`, thin since Y4), `CalendarSession`, `:ext-ink`'s `InkTransferSession.begin/receiveChunk/outgoing/clear` (since Y4 — `CalendarService`'s four stub methods call into this shared base rather than holding the bracket themselves) |
 | 28 | **`CalendarTarget` rides every `receiveInk` chunk — not just the last — and is validated by construction, never by convention.** `CalendarTarget(kind, date, half)`'s `require`s run in the constructor, so unmarshal *is* the validation (the family rule since E1): an unnormalized date, an out-of-range `kind`, or a `half` illegal for its `kind` (PM on a month or a week) all cross as `IllegalArgumentException` before a single stroke is placed. Every chunk of one transfer must additionally name the identical target — a change mid-transfer drops the whole accumulation — which is the untrusted-input half of the host's own before-any-bind check (`CalendarClient.send` builds one target and reuses it for every chunk it sends). **Since arc 23 / Y4 that refusal is `:ext-ink`'s `InkTransferSession.receiveChunk`'s, shared with the pad, not `CalendarService`'s own** — the message crossing is now the generic `IllegalArgumentException("placement changed mid-transfer")` rather than the calendar's old `"target changed mid-transfer"`, and the same refusal now protects the pad's placement int too, which never checked for a mid-transfer change before this sweep. | `CalendarTarget` (constructor `require`s, JVM-tested via `CalendarTargetTest`), `CalendarDates.isNormalized` (JVM-tested), `ICalendar.receiveInk`, `CalendarService.receiveInk`, `HeldInkClient.send` (via `CalendarClient`), `:ext-ink`'s `InkTransferSession.receiveChunk` (JVM-tested via `InkTransferSessionTest`) |
 | 29 | **The floor is per action, and the calendar's is its own constant, not a reused one.** `ExtensionContract.minApiVersion(ACTION_CALENDAR)` answers `MIN_API_VERSION_FOR_CALENDAR` (7), never `MIN_API_VERSION_FOR_STORE` (6) — the two floors happen to differ by one only because the calendar point was born a version later, not because the map conflates them. `accepts(action, apiVersion)` is the same range check every point runs (`minApiVersion(action)..API_VERSION`), so `:ext-calendar`'s declared 7 needs no special-casing in `ExtensionRegistry.discover` — the map is the only thing that changed shape. | `ExtensionContract.minApiVersion`/`.accepts`/`MIN_API_VERSIONS` (JVM-tested via `ExtensionContractTest`), `:ext-calendar`'s manifest `<meta-data>` |
-| 30 | **Nothing rides the calendar screen's Intent but two booleans, and no transfer content ever could.** `EXTRA_CALENDAR_SEND_ENABLED` / `EXTRA_CALENDAR_OPEN_RECEIVED` are the pad's two extras under the calendar's own names, and `RESULT_CALENDAR_SEND` is the pad's result code, mirrored; the ink itself never touches the Intent in either direction — outbound ink is sent over the held bind *before* the screen launches, and inbound ink is drained on the bind that is *still held* after the result returns. No date, target, page id or notebook id has anywhere on the Intent to ride. | `ExtensionContract.EXTRA_CALENDAR_*`/`RESULT_CALENDAR_SEND`, `HeldInkClient.open` (via `CalendarClient`; the Intent it builds), `ExtensionScreenEntry.open`/`onResult` (via `CalendarEntry`) |
+| 30 | **Nothing rides the calendar screen's Intent but three booleans, and no transfer content ever could.** `EXTRA_CALENDAR_SEND_ENABLED` / `EXTRA_CALENDAR_OPEN_RECEIVED` are the pad's two extras under the calendar's own names, and `RESULT_CALENDAR_SEND` is the pad's result code, mirrored; the ink itself never touches the Intent in either direction — outbound ink is sent over the held bind *before* the screen launches, and inbound ink is drained on the bind that is *still held* after the result returns. **Since Y4** `EXTRA_CALENDAR_SCRATCH_PAD_AVAILABLE` is a third boolean, set by `ExtensionScreenEntry`'s `decorateIntent` hook from the host's own pad-discovery call rather than the calendar querying for another extension, and `RESULT_CALENDAR_OPEN_SCRATCH_PAD` is a fourth result code — a compatible addition, since the calendar keeps declaring `API_VERSION` 7 — that asks the host to walk a door the calendar cannot walk itself. No date, target, page id or notebook id has anywhere to ride, and neither does this new pair. | `ExtensionContract.EXTRA_CALENDAR_*`/`RESULT_CALENDAR_SEND`/`RESULT_CALENDAR_OPEN_SCRATCH_PAD`, `HeldInkClient.open` (via `CalendarClient`; the Intent it builds), `ExtensionScreenEntry.open`/`decorateIntent`/`onResult`/`onClosed` (via `CalendarEntry`), `LibraryActivity`/`NotebookActivity`'s `onCalendarClosed`/`onPadClosed` |
 | 31 | **`:ext-ink` is shared extension-side code, not a wire contract — nothing in it is a parcelable, an AIDL type, or anything either side unmarshals.** `InkWire`, `StrokeRows`/`StrokeBlob`, `StoreBatches`, `StrokeReadPlan`, `InkDocument`, `InkAction` and the `InkStore` base all run **inside** one extension process, over the `IExtensionStore` calls that process already makes — the pad and the calendar each mint their own `IExtensionStore` binder and send their own `StoreCodec` statements through it; `:ext-ink` only supplies the code that decides what those statements say. Moving it out of `:ext-scratchpad` therefore changed no wire shape at all: the pad's `stroke`/`page` rows are byte-for-byte what they were before Y1, and `:ext-calendar`'s are the same shape again by choosing to reuse the same helpers, not by any contract requiring it to. | `:ext-ink`'s whole module (no manifest components, confirming it crosses no process boundary of its own), `ScratchStore`/`CalendarStore` (each still mints its own `IExtensionStore` binder) |
 | 32 | **The calendar's schema is `period → page → stroke` + `state`, and the cascade is what keeps a `period`/`page` insert safe to retry.** Foreign keys are ON for the store connection (the family rule), so `stroke.pageId` and `page.periodId` both declare `ON DELETE CASCADE` — which is exactly why `CalendarSql.insertPeriod`/`insertPage` are `INSERT OR IGNORE` and **never** `INSERT OR REPLACE`: REPLACE deletes the conflicting row first, and that delete would cascade, taking a period's pages and their strokes, or a page's strokes, with it (X2's trap, inherited by `CalendarSql : InkDocument.StrokeSql`). Rows are minted on the first stroke only (`CalendarStore.receive`/`CalendarDocument`'s `statementsFor`), never on open — `CalendarStore.readPage` is read-only — and nothing in this arc issues a `DELETE FROM period` at all. | `CalendarSchema.V1`, `CalendarSql.insertPeriod`/`.insertPage`/`.putStroke`/`.dropStroke` (JVM-tested via `CalendarSqlTest`), `CalendarStore.mintRows`/`.receive`, `CalendarDocument.statementsFor` |
 | 33 | **The host computes no calendar arithmetic of its own — `CalendarTargets` routes every choice through the contract's `CalendarDates`.** The Send-to-Calendar sheet's four rows (Today AM · Today PM · This week · This month) are each `CalendarTarget.of(kind, today, half)`, which normalizes through `CalendarDates.periodDate` inside `:extension-api` — the host never derives "this week's Sunday" itself. That is deliberate, not merely convenient: the week rule lives in one place, so a host-side guess could never come to disagree with the extension's own and mint a duplicate row for the week the two definitions parted ways. | `notebook/CalendarTargets.kt` (`CalendarTargetsTest`, JVM-tested), `CalendarTarget.of`, `CalendarDates.periodDate` |

@@ -94,31 +94,26 @@
                     android:text="@string/calendar_today"
                     android:contentDescription="@string/cd_calendar_today" />
 
-                <androidx.appcompat.widget.AppCompatButton
+                <!-- The three view latches are Tabler icons since Y4 (the user's call): calendar-month,
+                     calendar-week, calendar. The armed one wears the ToolbarButton's selected border —
+                     the notebook's own armed-tool look. Today stays a word. -->
+                <androidx.appcompat.widget.AppCompatImageButton
                     android:id="@+id/btnMonth"
-                    android:layout_width="wrap_content"
-                    style="@style/Widget.Notesprout.LatchButton"
-                    android:layout_height="@dimen/toolbar_button_size"
+                    style="@style/Widget.Notesprout.ToolbarButton"
                     android:layout_marginStart="4dp"
-                    android:text="@string/calendar_view_month"
+                    android:src="@drawable/ic_calendar_month"
                     android:contentDescription="@string/cd_calendar_view_month" />
 
-                <androidx.appcompat.widget.AppCompatButton
+                <androidx.appcompat.widget.AppCompatImageButton
                     android:id="@+id/btnWeek"
-                    android:layout_width="wrap_content"
-                    style="@style/Widget.Notesprout.LatchButton"
-                    android:layout_height="@dimen/toolbar_button_size"
-                    android:layout_marginStart="4dp"
-                    android:text="@string/calendar_view_week"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:src="@drawable/ic_calendar_week"
                     android:contentDescription="@string/cd_calendar_view_week" />
 
-                <androidx.appcompat.widget.AppCompatButton
+                <androidx.appcompat.widget.AppCompatImageButton
                     android:id="@+id/btnDay"
-                    android:layout_width="wrap_content"
-                    style="@style/Widget.Notesprout.LatchButton"
-                    android:layout_height="@dimen/toolbar_button_size"
-                    android:layout_marginStart="4dp"
-                    android:text="@string/calendar_view_day"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:src="@drawable/ic_calendar"
                     android:contentDescription="@string/cd_calendar_view_day" />
 
                 <androidx.appcompat.widget.AppCompatImageButton
@@ -127,6 +122,20 @@
                     android:layout_marginStart="8dp"
                     android:contentDescription="@string/cd_calendar_send_page"
                     android:src="@drawable/ic_pencil_down"
+                    android:visibility="gone" />
+
+                <!-- The Scratch Pad door (Y4, the user's call) — the LAST button here as on every
+                     bar. The calendar cannot open another extension itself (an extension screen
+                     refuses any caller but the host), so a tap ends this showing with
+                     RESULT_CALENDAR_OPEN_SCRATCH_PAD and the host opens the pad, then brings the
+                     calendar back when the pad is closed. Shown only when the host said a trusted
+                     pad is installed (EXTRA_CALENDAR_SCRATCH_PAD_AVAILABLE) — GONE, never disabled. -->
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnScratchPad"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:layout_marginStart="8dp"
+                    android:contentDescription="@string/cd_calendar_scratch_pad"
+                    android:src="@drawable/ic_sketching"
                     android:visibility="gone" />
 
             </LinearLayout>

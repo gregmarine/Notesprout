@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tabler "calendar-month" (outline/calendar-month.svg) — the calendar's Month latch (arc 23 / Y4, the user's icon call). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M4 7a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-12"/>
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M16 3v4"/>
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M8 3v4"/>
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M4 11h16"/>
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M7 14h.013"/>
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M10.01 14h.005"/>
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M13.01 14h.005"/>
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M16.015 14h.005"/>
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M13.015 17h.005"/>
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M7.01 17h.005"/>
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M10.01 17h.005"/>
+</vector>
