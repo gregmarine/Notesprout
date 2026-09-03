@@ -15,7 +15,7 @@ arcs 19–22's full phase records at the end of this file until the next compact
 feature's authoritative reference is its `docs/` file. **Arc 22 "Tables" is complete and frozen
 (2026-09-01) — X1–X5 all ✅: the extension store is real SQLite tables behind gated parameterized
 SQL. Arc 23 "Calendar" is PLANNED (wizard locked 2026-09-01, § "Phases — Arc 23"
-below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd) · **Y4 ✅** (2026-09-02: the user reversed "no code review" — `/code-review high` on the arc range, ten findings, all ten fixed incl. two sibling-copy refactors; docs + ledger; Nomad walks; user checklist passed). **Arcs 1–23 are complete and frozen.** The SEVENTH point is live; no EIGHTH without another decision. **No next arc is planned.**
+below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd) · **Y4 ✅** (2026-09-02: the user reversed "no code review" — `/code-review high` on the arc range, ten findings, all ten fixed incl. two sibling-copy refactors; docs + ledger; Nomad walks; user checklist passed). **Arcs 1–23 are complete and frozen.** The SEVENTH point is live; no EIGHTH without another decision. **Arc 24 "Events" is PLANNED (wizard locked 2026-09-02, § "Phases — Arc 24" below) — Z1 ⬜ · Z2 ⬜ · Z3 ⬜ · Z4 ⬜ · Z5 ⬜; not a point, not an `API_VERSION` bump: two in-process screens and five tables inside `:ext-calendar`.**
 
 ---
 
@@ -1268,6 +1268,287 @@ pad → calendar chain). **Y4 CLOSED. Arc 23 "Calendar" frozen 2026-09-02.**
   is visibly quicker and flashes nothing (fix 7); (4) the pad and the calendar both still lasso → Send
   → land selected in the notebook, and the notebook's lasso → Send to Pad / Send to Calendar both still
   place (fixes 9–10 touched every transfer path).
+
+---
+
+## Phases — Arc 24 "Events" ⬜ PLANNED (wizard locked 2026-09-02)
+
+**Status: Z1 ⬜ · Z2 ⬜ · Z3 ⬜ · Z4 ⬜ · Z5 ⬜.** Fable planned it; Opus writes the features, Sonnet
+scaffolds, Haiku walks; Fable writes exactly two things — the `CalendarSchema` V2 step (a schema
+contract) and the editor's bounded paper surface with its handoff chain (Z3, an engine seam) — and
+reviews every phase. **Version stays `0.1.0-ratta` for the whole arc (the user's call at planning —
+not a phase-start question this arc).** The last phase asks ONE question at its start: run a code
+review or not (the user's default is no; they may change their mind then).
+
+og's calendar **Events** (`docs/calendar.md` at the monorepo root § Events, `EventModels` /
+`EventRecurrence` / `EventsRepository` / `EventsController` / `EventEditorDialog` /
+`CalendarTemplateRenderer`) are the reading reference — the same event *options*, re-derived and
+re-tested for this codebase, nothing copied. **What is new here and not og's:** a note on every
+event — one page of handwriting on a bounded paper surface under the event's fields, and a
+multi-line text note, the two behind one toggle.
+
+**Not a point, not a bump.** The events screen and the editor are two more Activities inside the
+existing `:ext-calendar` APK, launched by the calendar screen in its own process. `ICalendar`,
+`CalendarTarget`, `ExtensionContract` and the host are untouched — nothing crosses the seam, the
+calendar keeps declaring **7**, and every row lives in the calendar's own `Garden/…ext.calendar.db`,
+which the arc-21 backup already copies unconditionally. The M3 answer covers the list screen (a
+non-drawing child needs no handoff); the editor's note surface is the first **second paper surface
+in one process**, which is Z3's open on-device question (below).
+
+### Locked decisions (arc-24 wizard 2026-09-02 — do not re-ask)
+
+| Decision | Answer |
+|---|---|
+| Where | **Inside `:ext-calendar`**, same process, same store: `EventsActivity` (the day's list) + `EventEditorActivity` (one event, full screen). Both `exported="false"`, launched only in-process with an `ActivityResultLauncher`. No eighth point, no `API_VERSION` change, no host change. |
+| Door | **The calendar's TOP bar: … Day · Send · Events · Scratch Pad (last)** — the user's placement call (the bottom bar stays pager-only; the arc-23 "pad is last" lock holds). Icon `ic_calendar_event` (Tabler `calendar-event`, new in `:sn-screen`). On all three views. |
+| Launch day | Month → **the 1st of the showing month**; Week → **its Sunday**; Day → **that day** (the user's spec — the first day of the period, not the anchor). |
+| Return | **The calendar follows the day the events screen ended on**, in the view it was in: `nav.picked(endedOn)` (Month shows that month, Week that week, Day that day), then a forced re-bake — events may have changed. |
+| Events screen navigation | **Pager + picker**, the calendar views' own shape: `[‹] [Tue, Sep 1, 2026] [›]` centred on the bottom bar, prev/next step one day, a finger swipe steps too (`SwipeMath` via `ListSwipe` on the list band), the title tap opens the same `DayPickerDialog`. |
+| Sections | **Today + Upcoming** — og's two: the day's own events (all-day first, then by start minute, title tiebreak), then the reminder look-ahead (an event surfaces on every day `O − lead ≤ D < O`, one row per event, nearest first). The "Today" label appears only when Upcoming follows. |
+| Editor | **A full screen, not a dialog.** og's options, all of them: type (Birthday · Anniversary · Vacation · Meeting · Appointment · Event — the default recurrence offered on type change for a NEW event), title, start/end date (`DayPickerDialog`), all-day + start/end time, repeat (daily/weekly/monthly/yearly · every N · weekday toggles **in Sun–Sat order** · day-of-month vs ordinal weekday · ends never/on a date/after N), reminders (N days/weeks before, several per event). **Plus the note section** (Z3). |
+| Recurring scope | **og's three**, on edit and on delete of a recurring event: *this occurrence* (an exception date; an edit also writes a standalone one-off override carrying the edited fields, reminders **and the note**) · *this and following* (truncate to `UNTIL occ − 1`; an edit starts a fresh series at the occurrence carrying reminders and the note; a split at the first occurrence collapses to the whole-series op) · *all* (in place; the series anchor is preserved when the editor's dates come back unchanged from the tapped-occurrence prefill). An "ends on" date before the start is refused at Save. |
+| Note — kinds | **Two, behind one toggle:** a single page of handwriting on a bounded g-paper surface, and a multi-line text field. **Default = Handwriting** at creation and whenever the event has stroke rows; **Text** when it has no strokes but has text; Handwriting again when it has neither. |
+| Note — size | **Only what fits below the fields** in the full-screen editor — the note is not full screen. The area's size is **stable**: the space left under the fields at their *tallest* layout (every conditional group counted, IME down), measured once per showing; hidden groups collapse and the area keeps its size. That size is the note page's minted size (`event.noteWidth/noteHeight`, written with the first stroke), and a note shown on another screen keeps it — the pad's 1:1 rule, no template. |
+| Note — tools | **Pen + eraser + lasso** (the notebook's fixed values, smart lasso + scribble erase on), the lasso bar = **Move (drag) · Delete** (no Send — nothing to send to), 2/3-finger undo/redo in memory per showing. |
+| Note — indicator | **None anywhere** — not on list rows, not on the grid. The note is seen only by opening the event. |
+| Grid mark (Month/Week) | **og's per-type glyphs** on the day-number row, right-aligned (numbers stay left): cake · heart · suitcase · people · clock · dot, **distinct types only**, `+` when the row is full — Canvas primitives, the template stays Context-free. |
+| Day page | **Right-aligned text in the rows, no geometry change**: all-day events take rows from the top of the half (both halves), one per row; a timed event sits at the 30-minute row of its start minute when that minute falls in the half's window. **One entry in a row → its title; two or more → "N events."** Text is `inkBlack` (it carries information), ellipsized to at most half the row width right of the gutter. Existing Day ink does not move. |
+| Store | **Columnar, no JSON** — arc 22's direction and og's own backlog regret: `event` + `event_weekday` + `event_exception` + `event_reminder` + `note_stroke`, one `CalendarSchema` **V2 step** (a landed step is never edited). ISO dates as text. **Hard delete** (no SN extension store soft-deletes). |
+| Phases | **Five**: Z1 store + engine · Z2 events screen + editor (fields) + the calendar's door · **Z3 the note section** (its own phase, the user's call — between the editor and the grid) · Z4 grid rendering · Z5 docs/ledger/freeze (+ the review question). |
+
+### Store spec (planner-fixed — Z1 implements as written; deviations need a user decision)
+
+`CalendarSchema.V2` = V1's step unchanged, plus one new step:
+
+```sql
+CREATE TABLE event (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,                 -- BIRTHDAY · ANNIVERSARY · VACATION · MEETING · APPOINTMENT · OTHER
+    title TEXT NOT NULL,
+    startDate TEXT NOT NULL,            -- ISO yyyy-MM-dd; endDate >= startDate, inclusive span
+    endDate TEXT NOT NULL,
+    allDay INTEGER NOT NULL,            -- 0 | 1
+    startMinute INTEGER,                -- minute of day 0..1439, NULL when all-day / unset
+    endMinute INTEGER,
+    recurring INTEGER NOT NULL,         -- 0 | 1 — the DAO's expansion flag (og's), = freq IS NOT NULL
+    freq TEXT,                          -- DAILY · WEEKLY · MONTHLY · YEARLY, NULL = one-off
+    interval INTEGER NOT NULL,          -- every N units, 1..99
+    monthlyMode TEXT NOT NULL,          -- DAY_OF_MONTH · ORDINAL_WEEKDAY
+    endMode TEXT NOT NULL,              -- NEVER · UNTIL · COUNT
+    untilDate TEXT,                     -- ISO, UNTIL only
+    endCount INTEGER,                   -- COUNT only, 1..999
+    noteText TEXT NOT NULL,             -- '' = no text note
+    noteWidth REAL NOT NULL,            -- the note page's minted size; 0 × 0 until the first stroke
+    noteHeight REAL NOT NULL,
+    createdAt INTEGER NOT NULL,
+    updatedAt INTEGER NOT NULL);
+CREATE INDEX event_span ON event(startDate, endDate);
+CREATE INDEX event_recurring ON event(recurring);
+CREATE TABLE event_weekday  (eventId TEXT NOT NULL REFERENCES event(id) ON DELETE CASCADE, weekday INTEGER NOT NULL, PRIMARY KEY(eventId, weekday));   -- ISO 1 = Mon … 7 = Sun; WEEKLY only; none = the anchor's own weekday
+CREATE TABLE event_exception(eventId TEXT NOT NULL REFERENCES event(id) ON DELETE CASCADE, date TEXT NOT NULL, PRIMARY KEY(eventId, date));           -- occurrence STARTS removed from a series
+CREATE TABLE event_reminder (eventId TEXT NOT NULL REFERENCES event(id) ON DELETE CASCADE, amount INTEGER NOT NULL, unit TEXT NOT NULL, PRIMARY KEY(eventId, amount, unit));   -- DAYS · WEEKS
+CREATE TABLE note_stroke (id TEXT PRIMARY KEY, eventId TEXT NOT NULL REFERENCES event(id) ON DELETE CASCADE,
+                          "order" INTEGER NOT NULL, color INTEGER NOT NULL, width REAL NOT NULL,
+                          style TEXT NOT NULL, blob BLOB NOT NULL);
+CREATE INDEX note_stroke_event_order ON note_stroke(eventId, "order");
+```
+
+- `note_stroke` is the pad's stroke row under its own name and parent — **`NoteSql : InkDocument.StrokeSql`**
+  supplies the six statements against `note_stroke`/`eventId` (`InkSql`'s text names `stroke`/`pageId`
+  and cannot be delegated to; `InkSqlTest`'s discipline is repeated for it). `StrokeRows` / `StrokeBlob`
+  / `StoreBatches` / `StrokeReadPlan` / `InkDocument` / `InkAction` are reused as they are; the note's
+  store class extends `:ext-ink`'s `InkStore` for the compensated write and the planned read.
+- **`event` has children → never `INSERT OR REPLACE` into it** (X2's rule, restated here): the upsert
+  is `INSERT OR IGNORE` + `UPDATE … WHERE id = ?`, two idempotent statements. Child rows are
+  `DELETE … WHERE eventId = ?` then `INSERT OR IGNORE`, inside the same batch. `note_stroke` rows are
+  the pad's `INSERT OR REPLACE` / `DELETE … WHERE id = ?` (no children).
+- **Save is one transaction**: the event upsert, its three child sets, `noteText`, the note page size
+  and the note's stroke op log ride ONE `exec` when they fit the batch cap; a note past it goes through
+  `InkStore.compensated` (the minted strokes dropped by id, one `DELETE` each, on a later batch's
+  failure — the calendar's placement rule). Cancel writes nothing; a new event's id is minted at editor
+  open and is written only by Save.
+- **Reads never carry an `IN (…)` list** (the 999-argument cap): a day's events are the one-off rows by
+  span overlap (`startDate <= ? AND endDate >= ?` — ISO text orders correctly) plus every `recurring = 1`
+  row, expanded in Kotlin; child rows for the recurring set come by `JOIN event … WHERE recurring = 1`,
+  the one-off day's children by `eventId = ?` per row (a day holds few). A month's marks are the same
+  two reads over the period's range.
+- **Caps (`EventRules`, pure, pinned):** title ≤ 200 chars, trimmed, tabs/newlines **dropped** (the tag
+  rule); `noteText` ≤ 10 000 chars; reminders ≤ 3 per event, deduped, sorted by lead; `interval`
+  1..99; `endCount` 1..999; weekdays ⊆ 1..7; every date normalized ISO (`CalendarDates`); `endDate ≥
+  startDate`, `endMinute` cleared when `< startMinute` or all-day. Events per day are unbounded.
+- **The recurrence engine is a fresh pure port of og's semantics** (`Recurrence`: `occursOn` ·
+  `occurrenceStartCovering` · `nextOccurrenceStart` · `generateStarts`, JVM-tested against og's cases:
+  Feb 29 yearly, "5th → last" ordinal, COUNT enumeration, exceptions, span preservation) with **one
+  deliberate divergence: WEEKLY interval weeks are counted from Sundays** (`CalendarDates.weekStart`),
+  because this calendar's weeks start on Sunday — og counts ISO-Monday weeks. Recorded here so no
+  reviewer "fixes" it.
+- `Upcoming` (pure): og's `upcomingForDay` rule — non-recurring events starting in `(D, D + 366]` kept
+  when a reminder's lead reaches `D`; recurring via `nextOccurrenceStart` bounded by the event's largest
+  lead; `UpcomingEvent(event, occurrenceStart, daysUntil)`; events without reminders never surface.
+- **Wording is pure and shared by list and grid** (`EventWording`): the time badge ("All day" · "9:00
+  AM") built from ints through `CalendarDates`' hand lists — **never `DateFormat`/a formatter** (arc 5) —
+  the meta line (type · ends 10:30 AM · Sep 3 – Sep 7 · Every 2 weeks on Mon, Wed · until Jan 1, 2027),
+  the Upcoming badge ("Tomorrow" · "In 6 days") and the Day-row label rule ("N events").
+- **Event text is user content**: never logged (counts, ids and durations only), never in an Intent
+  beyond the calendar's own package (the two in-process launches carry a date and an event id, nothing
+  else), never in prefs.
+
+### Screen spec (planner-fixed — Z2/Z3 implement as written)
+
+**`EventsActivity`** — SN list chrome, the tag screen's shape. Top bar `[Back] Events … [Add]` (`ic_plus`;
+action buttons on the top bar). The band lists **Today** then **Upcoming** (section labels `inkBlack`,
+"Today" only when Upcoming follows); a row = time badge · title · meta line, **tap = edit**; no per-row
+delete and no long-press — Delete lives in the editor. **No scrolling**: the band pages the tags way
+(rows measured against the real band; an in-band `‹ 1/2 ›` pager shown `INVISIBLE`-never-`GONE` only
+when a second page exists; arrows never disable). One empty state ("No events on this day"). Bottom bar
+= the day pager + the picker + swipe (locked above). The screen's result carries the day it ended on;
+it re-reads the store on every `onResume` (an editor just closed).
+
+**`EventEditorActivity`** — full screen, portrait, `configChanges="keyboard|keyboardHidden"`,
+`windowSoftInputMode="stateHidden|adjustResize"`, **no IME-hide call anywhere** (the Ratta rule).
+Top bar `[Back] Event … [Delete] [Save]` (`ic_trash` GONE on a new event; `ic_check`). **Back = discard**,
+behind a "Discard changes?" confirm only when something changed. The fields, top to bottom, each a
+hand-sized row (`toolbar_button_size` min height):
+
+1. **Type** — a bordered button opening an `ActionSheetDialog` of the six types (a Spinner is og's, not
+   SN's); choosing a type on a NEW event sets the repeat default (Birthday/Anniversary → yearly).
+2. **Title** — one-line `EditText`, the tag screen's IME recipe (`showSoftInput` from
+   `onWindowFocusChanged` behind a once-per-showing latch, explicit flag 0) only on a **new** event.
+3. **Start · End** — two date buttons opening `DayPickerDialog`; End ≥ Start enforced on pick.
+4. **All day** latch · **Start time · End time** buttons (hidden when all-day) opening SN's own
+   `TimePickerDialog` in `:ext-calendar` — hour and minute **steppers** (`ic_minus`/`ic_plus`, minutes in
+   5-minute steps) + an AM/PM latch, `Dialogs.style`; a long-press on End time clears it (og).
+5. **Repeats** — sheet: Never · Daily · Weekly · Monthly · Yearly; **Every N** as a stepper row (shown
+   when repeating); the unit word follows the freq.
+6. **Weekdays** — seven `LatchButton`s **Sun … Sat** (weekly only; **each with an explicit
+   `layout_width`** — the arc-23 trap).
+7. **Monthly** — two radios: "On day 14" · "On the 2nd Tuesday" (worded from the start date).
+8. **Ends** — sheet: Never · On a date (`DayPickerDialog`) · After N times (stepper).
+9. **Remind me** — a stepper for N, a Days/Weeks latch, `[Add]`; the reminders as one wrapping row of
+   removable bordered chips ("1 week before ✕"), at most 3.
+10. **Note** (Z3) — a header row `[Handwriting] [Text]` (two latches, `ic_pen` / `ic_cursor_text`) over
+    the note area: the paper surface or the multi-line `EditText`, one visible at a time.
+
+**Numbers are steppers, never typed** — no IME for a count on e-ink; the IME exists for the title and the
+text note only. Every icon button carries its long-press hint. Recurring edit/delete raise the scope
+sheet (This occurrence · This and following · All events) before the write, and delete confirms
+naming the blast radius ("Delete every occurrence of Dentist?").
+
+**The note area (Z3):** `GPaper.create` into a bounded container under the fields, its page rect the
+container's size (measured with the IME down at the tallest layout — see the lock), no template,
+white. `PaperChrome`-style exclusion = nothing (the surface is the whole view; ink cannot leave it);
+`PageGestures` on the paper view only (undo/redo, no flips); `InkSelectionBar` with Delete only. The
+strokes are an `InkDocument` over `NoteSql`, kept in memory until **Save**, where the op log rides the
+one transaction — there is no debounce and no per-leave flush: Cancel discards ink too, after the same
+confirm. **While the IME is up the note area is `INVISIBLE`** (the layout shrinks under `adjustResize`;
+the page size is stored, never re-measured) and returns when it goes down; a Handwriting-toggle tap
+with the IME up shows the surface only once the IME is down — the person hides the keyboard with the
+keyboard's own key, never the app. Text ↔ Handwriting keep both contents; the toggle only chooses
+what is shown.
+
+**The handoff chain** (Z3's open question, measured on the Nomad **before** it is built — the arc-19 M3
+recipe): calendar (paper) → events list (no paper) → editor (paper) is the first time two paper
+surfaces live in one process. The planner's default, to be proven or replaced: the calendar
+`releaseForHandoff()`s immediately before launching the events screen (the "another paper-hosting
+screen" row, read as a chain that hosts one), the editor reclaims in `onResume` and releases before
+**every** `finish()`, the list screen touches nothing, and the calendar's own `onResume` reclaims when
+the chain unwinds. g-paper 0.1.2's note that the ownership guard is a **process-local static** is what
+makes the in-process case different from the pad's; if the probe shows a torn session or a slow
+waveform, **the fix goes to g-paper** (bump, `publishToMavenLocal`, re-pin — the engine commit lands
+with the app commit), never a host workaround.
+
+### Grid spec (planner-fixed — Z4)
+
+`CalendarDocument.show` loads the page's marks in the same IO hop as its strokes — `EventStore.marksFor
+(rangeStart, rangeEnd)` for the Month/Week page's visible days (out-of-month cells included) or the one
+day for Day — into `Map<LocalDate, List<DayMark>>` (`DayMark(title, allDay, startMinute, glyph)`, neutral
+of the store, sorted all-day first then by minute). `CalendarTemplate.month/week` draw the glyph row
+per cell (og's placement rule, sized between 10 and 16 dp, `+` overflow); `CalendarTemplate.day` draws
+the row labels per the lock. `BakeKey` grows a `marksHash` so a same-page replay still skips the bake
+and a changed event does not; the events screen's return and every navigation re-read; `onResume`
+re-bakes on a date change as today. **`highlights`-style opt-out is not needed** — nothing exports the
+calendar (BACKLOG stands).
+
+### Z1 — Store + engine ⬜ (Opus code on this spec; **Fable writes `CalendarSchema.V2`** and reviews; Sonnet nothing; Haiku walk)
+`CalendarSchema.V2` · `EventSql` + `NoteSql` (every string pinned through the real validator by
+`EventSqlTest` / `NoteSqlTest`) · `EventStore` (+ the note half on `InkStore`) · pure `EventRules`,
+`Recurrence`, `Upcoming`, `EventWording`, the `Event` model · `FakeEventStore` applying its writes (the
+`FakeCalendarStore` discipline). **JVM:** og's recurrence cases re-derived (daily/weekly/monthly/yearly
+incl. Feb 29, ordinal "5th → last", interval-2 Sunday weeks, COUNT, UNTIL, exceptions, span coverage);
+`upcomingForDay` windows and bounds; every SQL shape; caps; a Save batch's exact statement list; a
+compensated note write; the three scope operations as statement lists (exception + override, truncate
++ new series, in-place with the anchor preserved). **Walk (Haiku):** open the calendar → the host
+applies V2 (`host_schema` 1 → 2, logged), no wipe, `rows: 3/4/92` intact, ink still on September;
+`logcat -b crash` empty. **No user checklist** (nothing visible changes).
+**Questions at phase start:** none.
+
+### Z2 — Events screen + editor + the calendar's door ⬜ (Opus code on a Fable brief · Sonnet layouts/strings/`ic_calendar_event` · Fable review · Haiku walk)
+`EventsActivity` (Today + Upcoming, in-band paging, the day pager + picker + swipe, Add) ·
+`EventEditorActivity` with fields 1–9, the SN `TimePickerDialog`, the scope sheets, Save/Cancel/Delete ·
+the calendar's `btnEvents` (top bar, before the pad), launch with the locked day, the result → `nav.picked`
++ `applyTemplate(force = true)` · both manifests entries. The note section is **absent** (Z3) — the space
+under the fields is blank. **JVM:** the editor's pure state (`EventDraft`: field → `Event` with
+validation and the type-default rule), the list's section assembly and paging arithmetic, the launch-day
+rule (Month → 1st, Week → Sunday, Day → day). **Walk (Haiku — finger taps and the on-screen keyboard
+from screencap coordinates; `input text` is swallowed):** the door on all three views lands on the
+locked day · Add → type sheet → title typed → dates → all-day off + times → weekly, Mon/Wed → ends
+after 5 → reminder 1 week → Save → the row reads right · tap → edit → Save; delete → scope sheet →
+This occurrence → the row is gone on that day only · flip days, picker, swipe · Back → the calendar
+followed the day · `pm disable-user`/`enable` of nothing (no host change — skip) · crash buffer empty.
+**User checklist:** the editor's rows feel hand-sized; the physical keyboard types the title while the
+IME shows; nothing under the fields is clipped on the Nomad.
+**Questions at phase start:** none (the wizard covered the editor).
+
+### Z3 — The note section ⬜ (**Fable writes the bounded paper surface + the handoff chain**; Opus the text note, the toggle, the default rule, the save path; Fable review; Haiku walk + user checklist)
+**Step 0, before any code: the on-device probe** — a throwaway second `GPaper` surface in the editor
+under the chain above; measure ink, undo, Back to the list, Back to the calendar, ink there. Torn
+session or slow waveform → g-paper first. Then: the note area at its locked size · `NoteSql` strokes
+through `InkDocument` in memory, written by Save · the `[Handwriting] [Text]` header · the default rule
+· the `INVISIBLE`-under-IME rule · lasso Move/Delete bar · 2/3-finger undo/redo · the override / new-
+series copies of the note (scope ops carry it) · `noteWidth/noteHeight` minted with the first stroke.
+**JVM:** the default-kind rule (strokes → Handwriting; text only → Text; neither → Handwriting); the
+Save batch with a note (event + children + strokes + size in one list; split + compensation past the
+cap); the copies in the two scope ops. **Walk (Haiku):** the toggle, a text note surviving Save/reopen,
+the default rule with text only, crash buffer empty; ink is pen-only → **user checklist:** write a
+note, Save, reopen → Handwriting shows it; erase, lasso-drag, undo by finger; the text note; Cancel
+after ink → nothing kept; EPD feel on the calendar page after the chain unwinds.
+**Questions at phase start:** the probe's result if it needs a decision — otherwise none.
+
+### Z4 — Grid rendering ⬜ (Opus code on a Fable brief · Fable review · Haiku walk)
+`DayMark` + `EventStore.marksFor` · `CalendarDocument` loads marks with the page · `CalendarTemplate`
+glyphs (Month/Week) and Day-row labels per the locks · `BakeKey.marksHash`. **JVM:** glyph slot
+arithmetic (distinct types, overflow `+`), Day-row bucketing (all-day rows from the top, timed at their
+row, both halves, "N events", the half's window), the label's width rule, `marksHash` stability.
+**Walk (Haiku):** a birthday shows a cake on its Month cell and Week cell; two types → two glyphs, a
+third type on a narrow cell → `+`; Day AM shows the all-day title in row 1 and a 9:00 event at its row;
+two at 9:00 → "2 events"; editing the event re-bakes on return; crash buffer empty. **User checklist:**
+glyphs legible on the Nomad; Day labels do not fight the ink already there.
+**Questions at phase start:** none.
+
+### Z5 — Docs, ledger, freeze ⬜ (Sonnet docs in parallel · Fable read-back · optional review)
+`docs/calendar.md` § Events (the store, the engine, the two screens, the note, the grid, the failure
+table rows, tests, traps) · `docs/extensions.md` (a note that the calendar point grew two in-process
+screens with no contract change; the module table's `:ext-calendar` row) · `docs/sn-screen.md`
+(`ic_calendar_event`) · both CLAUDE.mds · root `CLAUDE.md` pointer · `RATTA_PLAN.md` header,
+Architecture, the Arc 24 ledger entry, this section marked complete · `BACKLOG.md` (close "events as a
+later extension"; add what Z1–Z4 deferred) · memory · byte-scan · commit · push.
+**Questions at phase start: ONE — run `/code-review` on the arc range, or not?** (The user's planning
+answer is no; ask anyway — they said they may change their mind.) Version: **not asked, stays.**
+
+### Planner calls the wizard didn't cover (implementer follows; the user can override at phase start)
+- The events screen and editor are **not** reachable from the library or the notebook — the calendar's
+  button is the one door; the Today dashboard, search over titles, export of events and notifications
+  of any kind are **not in this arc** (BACKLOG).
+- The Day page's row label for a timed event is its **title only** (the row already names the time);
+  all-day entries list in start-date order then title; an all-day entry and a timed one in the same row
+  count together ("2 events").
+- A note's ink coordinates are the note page's own (top-left of the area), 1:1, no scaling; a note page
+  minted on the Nomad and shown on a Manta keeps its size and sits top-left in the area.
+- `event.recurring` is a stored mirror of `freq IS NOT NULL` (og's DAO shape) so the expansion read is
+  an index hit — `EventRules` refuses a row where the two disagree.
+- The events list does not show the Scratch Pad or Calendar doors; Back is its one way out, and it
+  always returns its day.
+- Times are 12-hour everywhere, from ints via the hand lists — the Day page's own labels' rule.
 
 ---
 
