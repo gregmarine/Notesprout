@@ -31,6 +31,10 @@ class FakeCalendarStore : IExtensionStore {
     val pages = ArrayList<Page>()
     val state = HashMap<String, String>()
 
+    /** The events half is `FakeEventStore`'s; the counts read still asks about it, so the number is
+     *  set directly here rather than modelling a table this fake has no other use for. */
+    var eventCount: Long = 0
+
     fun period(id: String, kind: Int, date: String) { periods += Period(id, kind, date) }
     fun page(id: String, periodId: String, half: Int, width: Float, height: Float, strokes: List<Pair<Long, Stroke>> = emptyList()) {
         pages += Page(id, periodId, half, width, height, strokes)
@@ -111,8 +115,11 @@ class FakeCalendarStore : IExtensionStore {
         }
         "maxOrder" -> listOf("maxOrder") to listOf(listOf(Cell.Integer(strokesOf(text(s, 0)).maxOfOrNull { it.first } ?: -1L)))
         "state" -> listOf("key", "value") to state.map { (k, v) -> listOf(Cell.Text(k), Cell.Text(v)) }
-        "counts" -> listOf("periods", "pages", "strokes") to listOf(
-            listOf(Cell.Integer(periods.size.toLong()), Cell.Integer(pages.size.toLong()), Cell.Integer(pages.sumOf { it.strokes.size }.toLong())),
+        "counts" -> listOf("periods", "pages", "strokes", "events") to listOf(
+            listOf(
+                Cell.Integer(periods.size.toLong()), Cell.Integer(pages.size.toLong()),
+                Cell.Integer(pages.sumOf { it.strokes.size }.toLong()), Cell.Integer(eventCount),
+            ),
         )
         else -> error("unreachable")
     }

@@ -31,6 +31,20 @@ class CalendarSqlTest {
         assertTrue(CalendarSchema.V1.steps[0][1].contains("UNIQUE(periodId, half)"))
     }
 
+    /** V2 = V1's step, byte-identical, then the events step (arc 24 / Z1). The events step's own
+     *  shape is `EventSqlTest`'s; this pins that the landed step was not edited. */
+    @Test
+    fun v2IsV1PlusOneStep_andV1IsUntouched() {
+        assertEquals(2, CalendarSchema.V2.version)
+        assertEquals(2, CalendarSchema.V2.steps.size)
+        assertEquals(CalendarSchema.V1.steps[0], CalendarSchema.V2.steps[0])
+        val events = CalendarSchema.V2.steps[1]
+        assertEquals(8, events.size)
+        assertEquals(5, events.count { StoreSql.createsTable(it) })
+        assertEquals(4, events.count { it.contains("REFERENCES event(id) ON DELETE CASCADE") })
+        assertEquals(9, CalendarSchema.V2.steps.sumOf { step -> step.count { StoreSql.createsTable(it) } })
+    }
+
     @Test
     fun everyStatementPassesTheHostGate() {
         val s = stroke()
@@ -141,7 +155,7 @@ class CalendarSqlTest {
         assertEquals(listOf(Cell.Text("g1"), Cell.Integer(3), Cell.Integer(9)), strokes.args)
         assertEquals("SELECT COALESCE(MAX(\"order\"), -1) AS maxOrder FROM stroke WHERE pageId = ?", CalendarSql.selectMaxOrder("g1").sql)
         assertEquals(
-            "SELECT (SELECT COUNT(*) FROM period) AS periods, (SELECT COUNT(*) FROM page) AS pages, (SELECT COUNT(*) FROM stroke) AS strokes",
+            "SELECT (SELECT COUNT(*) FROM period) AS periods, (SELECT COUNT(*) FROM page) AS pages, (SELECT COUNT(*) FROM stroke) AS strokes, (SELECT COUNT(*) FROM event) AS events",
             CalendarSql.selectCounts().sql,
         )
     }

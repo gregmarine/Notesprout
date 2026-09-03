@@ -4,15 +4,24 @@ import com.symmetricalpalmtree.notesproutsn.extension.StoreSchema
 import com.symmetricalpalmtree.notesproutsn.ink.InkSql
 
 /**
- * The calendar's tables in the host's extension store (arc 23 / Y1) — declared once, applied by the
- * host. Every statement is validated by `StoreSql.checkDdl` at construction, so a mistake here
- * fails on this side, at class-load, and never at bind.
+ * The calendar's tables in the host's extension store (arc 23 / Y1; grown arc 24 / Z1) — declared
+ * once, applied by the host. Every statement is validated by `StoreSql.checkDdl` at construction,
+ * so a mistake here fails on this side, at class-load, and never at bind.
  *
  * ```sql
+ * -- step 1 (arc 23)
  * period (id, kind, date)                                   -- UNIQUE(kind, date); date = ISO day
  * page   (id, periodId → period.id ON DELETE CASCADE, half, width, height, createdAt, updatedAt)
  * stroke (id, pageId → page.id ON DELETE CASCADE, "order", color, width, style, blob)
  * state  (key, value)                                       -- lastView · lastDate · lastHalf
+ * -- step 2 (arc 24 — events)
+ * event           (id, type, title, startDate, endDate, allDay, startMinute, endMinute, recurring,
+ *                  freq, interval, monthlyMode, endMode, untilDate, endCount,
+ *                  noteText, noteWidth, noteHeight, createdAt, updatedAt)
+ * event_weekday   (eventId → event.id ON DELETE CASCADE, weekday)      -- PK(eventId, weekday)
+ * event_exception (eventId → event.id ON DELETE CASCADE, date)         -- PK(eventId, date)
+ * event_reminder  (eventId → event.id ON DELETE CASCADE, amount, unit) -- PK(eventId, amount, unit)
+ * note_stroke     (id, eventId → event.id ON DELETE CASCADE, "order", color, width, style, blob)
  * ```
  *
  * **The `stroke` half is `:ext-ink`'s** ([InkSql.CREATE_STROKE_TABLE] / [InkSql.CREATE_STROKE_INDEX],
@@ -27,14 +36,30 @@ import com.symmetricalpalmtree.notesproutsn.ink.InkSql
  * screen, so a template rendered at the page's own size keeps grid and ink registered on any
  * screen the store is later carried to.
  *
+ * **Step 2 — events (arc 24 / Z1).** Columnar, no JSON, hard delete. An `event` is one row: its
+ * dates are ISO `yyyy-MM-dd` text (which orders correctly as text, so a span overlap is
+ * `startDate <= ? AND endDate >= ?`), its minutes are minute-of-day integers or NULL, and
+ * `recurring` is a stored mirror of `freq IS NOT NULL` so the expansion read is an index hit.
+ * `interval` / `monthlyMode` / `endMode` are NOT NULL on every row — a one-off carries the defaults
+ * (`1` / `DAY_OF_MONTH` / `NEVER`). The three small child tables are sets keyed by their whole row:
+ * a WEEKLY rule's weekdays (ISO 1 = Mon … 7 = Sun; none = the anchor's own weekday), the occurrence
+ * STARTS removed from a series, and the reminders (`amount` × `unit` DAYS | WEEKS). `note_stroke`
+ * is the pad's stroke row under its own name and parent — the event's one page of handwriting,
+ * whose minted size is `event.noteWidth/noteHeight` (`0 × 0` until the first stroke).
+ *
  * Foreign keys are ON for the store connection, so `DELETE FROM period` takes its pages and their
- * strokes with it — which is why neither `period` nor `page` is ever written with
- * `INSERT OR REPLACE` (REPLACE deletes the conflicting row first, and that delete cascades).
- * Nothing deletes a `period` in this arc at all.
+ * strokes with it, and `DELETE FROM event` takes its three child sets and its note — which is why
+ * neither `period` nor `page` **nor `event`** is ever written with `INSERT OR REPLACE` (REPLACE
+ * deletes the conflicting row first, and that delete cascades). Nothing deletes a `period`;
+ * deleting an event is the one `DELETE` under the declared cascade.
+ *
+ * **A landed step is never edited.** [V1] is exactly what arc 23 shipped; [V2] is that step plus
+ * the events step, and the host runs only the steps a store has not seen (`host_schema` 1 → 2 on
+ * the first open after the upgrade, each step its own transaction with the version bump).
  */
 object CalendarSchema {
 
-    /** The current version. A landed step is never edited — a change is a new step. */
+    /** Arc 23's step — landed, and therefore never edited; [V2] builds on it. */
     val V1: StoreSchema = StoreSchema(
         version = 1,
         steps = listOf(
@@ -58,5 +83,61 @@ object CalendarSchema {
                 "CREATE TABLE state (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
             ),
         ),
+    )
+
+    /** The events step, arc 24 / Z1 — see the class doc. Every write to `event` is
+     *  `INSERT OR IGNORE` + `UPDATE`, never `INSERT OR REPLACE` (the cascade would take the note). */
+    private val EVENTS_STEP: List<String> = listOf(
+        """CREATE TABLE event (
+                   id TEXT PRIMARY KEY,
+                   type TEXT NOT NULL,
+                   title TEXT NOT NULL,
+                   startDate TEXT NOT NULL,
+                   endDate TEXT NOT NULL,
+                   allDay INTEGER NOT NULL,
+                   startMinute INTEGER,
+                   endMinute INTEGER,
+                   recurring INTEGER NOT NULL,
+                   freq TEXT,
+                   interval INTEGER NOT NULL,
+                   monthlyMode TEXT NOT NULL,
+                   endMode TEXT NOT NULL,
+                   untilDate TEXT,
+                   endCount INTEGER,
+                   noteText TEXT NOT NULL,
+                   noteWidth REAL NOT NULL,
+                   noteHeight REAL NOT NULL,
+                   createdAt INTEGER NOT NULL,
+                   updatedAt INTEGER NOT NULL);""",
+        "CREATE INDEX event_span ON event(startDate, endDate);",
+        "CREATE INDEX event_recurring ON event(recurring);",
+        """CREATE TABLE event_weekday (
+                   eventId TEXT NOT NULL REFERENCES event(id) ON DELETE CASCADE,
+                   weekday INTEGER NOT NULL,
+                   PRIMARY KEY(eventId, weekday));""",
+        """CREATE TABLE event_exception (
+                   eventId TEXT NOT NULL REFERENCES event(id) ON DELETE CASCADE,
+                   date TEXT NOT NULL,
+                   PRIMARY KEY(eventId, date));""",
+        """CREATE TABLE event_reminder (
+                   eventId TEXT NOT NULL REFERENCES event(id) ON DELETE CASCADE,
+                   amount INTEGER NOT NULL,
+                   unit TEXT NOT NULL,
+                   PRIMARY KEY(eventId, amount, unit));""",
+        """CREATE TABLE note_stroke (
+                   id TEXT PRIMARY KEY,
+                   eventId TEXT NOT NULL REFERENCES event(id) ON DELETE CASCADE,
+                   "order" INTEGER NOT NULL,
+                   color INTEGER NOT NULL,
+                   width REAL NOT NULL,
+                   style TEXT NOT NULL,
+                   blob BLOB NOT NULL);""",
+        """CREATE INDEX note_stroke_event_order ON note_stroke(eventId, "order");""",
+    )
+
+    /** The current version: [V1]'s step, untouched, then the events step. */
+    val V2: StoreSchema = StoreSchema(
+        version = 2,
+        steps = V1.steps + listOf(EVENTS_STEP),
     )
 }

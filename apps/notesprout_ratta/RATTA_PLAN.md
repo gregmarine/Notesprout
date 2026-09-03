@@ -15,7 +15,7 @@ arcs 19–22's full phase records at the end of this file until the next compact
 feature's authoritative reference is its `docs/` file. **Arc 22 "Tables" is complete and frozen
 (2026-09-01) — X1–X5 all ✅: the extension store is real SQLite tables behind gated parameterized
 SQL. Arc 23 "Calendar" is PLANNED (wizard locked 2026-09-01, § "Phases — Arc 23"
-below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd) · **Y4 ✅** (2026-09-02: the user reversed "no code review" — `/code-review high` on the arc range, ten findings, all ten fixed incl. two sibling-copy refactors; docs + ledger; Nomad walks; user checklist passed). **Arcs 1–23 are complete and frozen.** The SEVENTH point is live; no EIGHTH without another decision. **Arc 24 "Events" is PLANNED (wizard locked 2026-09-02, § "Phases — Arc 24" below) — Z1 ⬜ · Z2 ⬜ · Z3 ⬜ · Z4 ⬜ · Z5 ⬜; not a point, not an `API_VERSION` bump: two in-process screens and five tables inside `:ext-calendar`.**
+below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd) · **Y4 ✅** (2026-09-02: the user reversed "no code review" — `/code-review high` on the arc range, ten findings, all ten fixed incl. two sibling-copy refactors; docs + ledger; Nomad walks; user checklist passed). **Arcs 1–23 are complete and frozen.** The SEVENTH point is live; no EIGHTH without another decision. **Arc 24 "Events" is IN PROGRESS (wizard locked 2026-09-02, § "Phases — Arc 24" below) — Z1 ✅ (6ac1bce2 — `CalendarSchema.V2` + store + engine, 1965 JVM tests/variant) · Z2 ⬜ · Z3 ⬜ · Z4 ⬜ · Z5 ⬜; not a point, not an `API_VERSION` bump: two in-process screens and five tables inside `:ext-calendar`.**
 
 ---
 
@@ -1273,7 +1273,7 @@ pad → calendar chain). **Y4 CLOSED. Arc 23 "Calendar" frozen 2026-09-02.**
 
 ## Phases — Arc 24 "Events" ⬜ PLANNED (wizard locked 2026-09-02)
 
-**Status: Z1 ⬜ · Z2 ⬜ · Z3 ⬜ · Z4 ⬜ · Z5 ⬜.** Fable planned it; Opus writes the features, Sonnet
+**Status: Z1 ✅ · Z2 ⬜ · Z3 ⬜ · Z4 ⬜ · Z5 ⬜.** Fable planned it; Opus writes the features, Sonnet
 scaffolds, Haiku walks; Fable writes exactly two things — the `CalendarSchema` V2 step (a schema
 contract) and the editor's bounded paper surface with its handoff chain (Z3, an engine seam) — and
 reviews every phase. **Version stays `0.1.0-ratta` for the whole arc (the user's call at planning —
@@ -1469,7 +1469,7 @@ and a changed event does not; the events screen's return and every navigation re
 re-bakes on a date change as today. **`highlights`-style opt-out is not needed** — nothing exports the
 calendar (BACKLOG stands).
 
-### Z1 — Store + engine ⬜ (Opus code on this spec; **Fable writes `CalendarSchema.V2`** and reviews; Sonnet nothing; Haiku walk)
+### Z1 — Store + engine ✅ (Fable wrote `CalendarSchema.V2` + the `open()` upgrade log · Opus everything else on a Fable brief · Fable review · Fable walk by hand; 2026-09-02)
 `CalendarSchema.V2` · `EventSql` + `NoteSql` (every string pinned through the real validator by
 `EventSqlTest` / `NoteSqlTest`) · `EventStore` (+ the note half on `InkStore`) · pure `EventRules`,
 `Recurrence`, `Upcoming`, `EventWording`, the `Event` model · `FakeEventStore` applying its writes (the
@@ -1481,6 +1481,42 @@ compensated note write; the three scope operations as statement lists (exception
 applies V2 (`host_schema` 1 → 2, logged), no wipe, `rows: 3/4/92` intact, ink still on September;
 `logcat -b crash` empty. **No user checklist** (nothing visible changes).
 **Questions at phase start:** none.
+
+**Outcome (2026-09-02):** As specified, nothing crossed the seam. `CalendarSchema.V2` = V1's step
+untouched + the events step (8 DDL statements, 5 tables, 4 cascades — 9 tables in the store, cap 64);
+`CalendarStore.open()` applies V2 and logs `schema v1 → v2` / `schema v2` because the host applies
+missing steps silently. Eleven new source files in `:ext-calendar` (1 423 lines): `Event` (model +
+`EventType` / `Freq` / `MonthlyMode` / `EndMode` / `ReminderUnit` / `Reminder` / `RecurrenceRule` /
+`UpcomingEvent` / `Scope`), `EventRules` (caps + `normalize` ×3 + `Problem { EMPTY_TITLE,
+UNTIL_BEFORE_START }`), `Recurrence` (the engine; **Sunday weeks pinned** — anchor Sat 2026-09-05,
+`{Sun}`, interval 2 → first occurrence Sun 09-13, not 09-06), `Upcoming` + `EventOrder`,
+`EventWording` (ints + hand lists, 12-hour), `EventSql` (one `COLUMNS` const; upsert = `INSERT OR
+IGNORE` + `UPDATE`; child sets `DELETE` + `INSERT OR IGNORE`; every set read a JOIN carrying the
+parent read's predicate — a one-off's only child read is reminders; no `IN (`), `NoteSql :
+InkDocument.StrokeSql` (six statements on `note_stroke`/`eventId`), `EventRows` (a bad row is a
+dropped event, never a lost day; `recurring ≠ freq IS NOT NULL` drops the row; an unknown type is
+dropped, never folded to OTHER), `EventWrites` (pure statement lists: `save` · `delete` ·
+`deleteWithScope` · `editWithScope` · `editSeries` with og's anchor-preservation + exception
+carry-forward, and `editLandsUnder` so the store's compensation and return value cannot disagree),
+`EventStore : InkStore` (`eventsInRange` = six queries + Kotlin expansion; `eventsOn`; `upcomingOn`;
+`get`; `readNote` via the planned read; `save(isNew)` / `delete(scope)` / `edit(scope)` — a NEW event's
+failed multi-batch save compensates with ONE `DELETE FROM event` (the cascade), an existing one drops
+exactly the minted stroke ids; a `Problem` is `IllegalArgumentException`, not `StoreUnavailable`).
+`CalendarSql.selectCounts` grew `events`; `begin` logs it. **Tests: 1857 → 1965 JVM tests/variant
+(+108, 0 failures): 9 new test classes over a write-APPLYING `FakeEventStore` + `TestEvent` builder;
+every SQL string pinned through `StoreSql`.** Twelve modules `assembleDebug` clean; NUL scan clean.
+**Walk (by hand, not Haiku — four adb commands):** backed out of the live calendar first, installed
+only `ext-calendar-debug.apk`, tapped the library's Calendar button → `CalendarStore: schema v1 → v2`,
+`begin: … rows: 3 period(s), 4 page(s), 58 stroke(s), 0 event(s)` (58 ≠ Y4's 92: the person had been
+erasing on the page before this session — a DDL step cannot delete rows; periods/pages unchanged),
+second open logs `schema v2`, ink still on September 13, crash buffer empty. **Known edge (BACKLOG
+candidate, not fixed):** a THIS-scope edit whose note exceeds one batch (>4 MiB or >10 000 statements)
+and fails on a later batch has already landed the exception on the original; the compensation deletes
+the override, so that occurrence is gone until re-added. Under the cap it is one transaction.
+**Deviations from the brief, accepted:** `editWithScope(THIS)` stamps the original (`touchEvent`) like
+the delete does; `EventRows.weekday` is `Int?`; `Recurrence`'s `Event` overloads are total (a one-off
+answers its own span); reminders read back are normalized; `FakeCalendarStore` got a plain
+`eventCount`. No user checklist (nothing visible changed).
 
 ### Z2 — Events screen + editor + the calendar's door ⬜ (Opus code on a Fable brief · Sonnet layouts/strings/`ic_calendar_event` · Fable review · Haiku walk)
 `EventsActivity` (Today + Upcoming, in-band paging, the day pager + picker + swipe, Add) ·

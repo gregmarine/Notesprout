@@ -53,7 +53,7 @@ class CalendarService : Service() {
                 val s = CalendarStore(store)
                 val at = s.open()
                 val counts = s.counts()
-                "at=${at?.let { "${it.kind}/${it.date}/${it.half}" } ?: "(none)"} rows: ${counts.periods} period(s), ${counts.pages} page(s), ${counts.strokes} stroke(s)"
+                "at=${at?.let { "${it.kind}/${it.date}/${it.half}" } ?: "(none)"} rows: ${counts.periods} period(s), ${counts.pages} page(s), ${counts.strokes} stroke(s), ${counts.events} event(s)"
             } catch (e: StoreUnavailable) {
                 "store unavailable (${e.message})"
             }

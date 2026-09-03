@@ -18,7 +18,7 @@ import java.util.UUID
  * thread (`begin` / `receiveInk`), never Main. The extension writes nothing to disk itself: this
  * store is the host's, lent for the showing.
  *
- * The schema is [CalendarSchema.V1]; [open] applies it and is the only door — the host's gate
+ * The schema is [CalendarSchema.V2]; [open] applies it and is the only door — the host's gate
  * refuses `exec` / `query` on a binder that has not declared, so nothing may reach the store before
  * it. Every SQL string lives in [CalendarSql]; every write goes through `execAll`, which splits by
  * `StoreBatches` and runs each batch as one transaction.
@@ -46,7 +46,7 @@ class CalendarStore(
      */
     class StoredPage(val periodId: String?, val pageId: String?, val width: Float, val height: Float, val strokes: List<Pair<Long, Stroke>>)
 
-    class Counts(val periods: Long, val pages: Long, val strokes: Long)
+    class Counts(val periods: Long, val pages: Long, val strokes: Long, val events: Long)
 
     // ── Opening ──────────────────────────────────────────────────────────────
 
@@ -57,7 +57,10 @@ class CalendarStore(
      * rather than throwing: the screen opens on today's Month, which is the first-run answer anyway.
      */
     fun open(): Position? = guard {
-        store.applySchema(CalendarSchema.V1)
+        val before = store.schemaVersion()
+        store.applySchema(CalendarSchema.V2)
+        // The upgrade proof for a walk: the host runs only the missing steps and logs nothing itself.
+        Slog.d(TAG) { if (before == CalendarSchema.V2.version) "schema v$before" else "schema v$before → v${CalendarSchema.V2.version}" }
         val rows = StoreReads.all(store, CalendarSql.selectState()).rows
         val state = HashMap<String, String>(rows.size)
         for (r in rows) state[r.text("key")] = r.text("value")
@@ -69,10 +72,10 @@ class CalendarStore(
         Position(kind, date, half)
     }
 
-    /** The three row counts — logged at `begin`, never used for anything else. */
+    /** The four row counts — logged at `begin`, never used for anything else. */
     fun counts(): Counts = guard {
         val row = StoreReads.all(store, CalendarSql.selectCounts()).rows.first()
-        Counts(row.long("periods"), row.long("pages"), row.long("strokes"))
+        Counts(row.long("periods"), row.long("pages"), row.long("strokes"), row.long("events"))
     }
 
     // ── Reading ──────────────────────────────────────────────────────────────

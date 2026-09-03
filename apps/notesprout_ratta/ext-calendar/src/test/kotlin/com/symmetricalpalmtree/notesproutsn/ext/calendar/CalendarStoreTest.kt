@@ -31,7 +31,7 @@ class CalendarStoreTest {
     fun openDeclaresTheSchemaReadsTheBookmark_andWritesNothing() {
         val fake = FakeCalendarStore()
         assertNull(CalendarStore(fake).open())
-        assertEquals(CalendarSchema.V1, fake.schema)
+        assertEquals(CalendarSchema.V2, fake.schema)
         assertEquals(listOf("applySchema", "query(state)"), fake.calls)
         assertTrue(fake.execs.isEmpty())
 

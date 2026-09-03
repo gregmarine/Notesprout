@@ -92,10 +92,11 @@ object CalendarSql : InkDocument.StrokeSql by InkSql {
     fun selectState(): Statement =
         Statement("SELECT key, value FROM state")
 
-    /** The three row counts in one read — the "browsing wrote nothing" proof, logged at `begin`. */
+    /** The four row counts in one read — the "browsing wrote nothing" proof, logged at `begin`
+     *  (arc 24 / Z1 added `event`, so the same line also says how many events the store holds). */
     fun selectCounts(): Statement =
         Statement(
             "SELECT (SELECT COUNT(*) FROM period) AS periods, (SELECT COUNT(*) FROM page) AS pages, " +
-                "(SELECT COUNT(*) FROM stroke) AS strokes",
+                "(SELECT COUNT(*) FROM stroke) AS strokes, (SELECT COUNT(*) FROM event) AS events",
         )
 }
