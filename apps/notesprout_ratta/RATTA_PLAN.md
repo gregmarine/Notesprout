@@ -1584,7 +1584,7 @@ crushed the reminder row into a half-drawn line before). **Finding for Z3:** at 
 "only what fits" is close to zero there; Z3's measurement will have to say what happens then. **The user is sleeping on this screen and will
 bring their own layout for it — a one-off in their words, but a gap worth closing; Z3 does not start until
 that layout lands.**
-**Rebuilt to the user's own design (2026-09-03, Opus built · Fable walked the Nomad by hand).** The
+**Rebuilt to the user's own design (5a08f150, 2026-09-03, Opus built · Fable walked the Nomad by hand).** The
 user came back with a sketch and six answers, and the og-form reshape above is gone. The screen is now
 **three rows over the note area**: (1) the title field with the TYPE named on the button beside it;
 (2) start date · end date · an "All day" `SwitchCompat` (og's control, the theme's inkBlack accent draws
