@@ -15,7 +15,7 @@ arcs 19–22's full phase records at the end of this file until the next compact
 feature's authoritative reference is its `docs/` file. **Arc 22 "Tables" is complete and frozen
 (2026-09-01) — X1–X5 all ✅: the extension store is real SQLite tables behind gated parameterized
 SQL. Arc 23 "Calendar" is PLANNED (wizard locked 2026-09-01, § "Phases — Arc 23"
-below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd) · **Y4 ✅** (2026-09-02: the user reversed "no code review" — `/code-review high` on the arc range, ten findings, all ten fixed incl. two sibling-copy refactors; docs + ledger; Nomad walks; user checklist passed). **Arcs 1–23 are complete and frozen.** The SEVENTH point is live; no EIGHTH without another decision. **Arc 24 "Events" is IN PROGRESS (wizard locked 2026-09-02, § "Phases — Arc 24" below) — Z1 ✅ (893b20e1 — `CalendarSchema.V2` + store + engine, 1965 JVM tests/variant) · **Z2 ✅** (events screen + editor + the calendar's door, 2013 JVM tests/variant) · Z3 ⬜ · Z4 ⬜ · Z5 ⬜; not a point, not an `API_VERSION` bump: two in-process screens and five tables inside `:ext-calendar`.**
+below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd) · **Y4 ✅** (2026-09-02: the user reversed "no code review" — `/code-review high` on the arc range, ten findings, all ten fixed incl. two sibling-copy refactors; docs + ledger; Nomad walks; user checklist passed). **Arcs 1–23 are complete and frozen.** The SEVENTH point is live; no EIGHTH without another decision. **Arc 24 "Events" is IN PROGRESS (wizard locked 2026-09-02, § "Phases — Arc 24" below) — Z1 ✅ (893b20e1 — `CalendarSchema.V2` + store + engine, 1965 JVM tests/variant) · **Z2 ✅** (2846d770 — events screen + editor + the calendar's door, 2013 JVM tests/variant) · Z3 ⬜ · Z4 ⬜ · Z5 ⬜; not a point, not an `API_VERSION` bump: two in-process screens and five tables inside `:ext-calendar`.**
 
 ---
 
@@ -1518,7 +1518,7 @@ the delete does; `EventRows.weekday` is `Int?`; `Recurrence`'s `Event` overloads
 answers its own span); reminders read back are normalized; `FakeCalendarStore` got a plain
 `eventCount`. No user checklist (nothing visible changed).
 
-### Z2 — Events screen + editor + the calendar's door ✅ (Opus code on a Fable brief · Sonnet layouts/strings/`ic_calendar_event` · Fable review · **Fable walked the Nomad by hand**; 2026-09-03)
+### Z2 — Events screen + editor + the calendar's door ✅ (2846d770 · Opus code on a Fable brief · Sonnet layouts/strings/`ic_calendar_event` · Fable review · **Fable walked the Nomad by hand**; 2026-09-03)
 `EventsActivity` (Today + Upcoming, in-band paging, the day pager + picker + swipe, Add) ·
 `EventEditorActivity` with fields 1–9, the SN `TimePickerDialog`, the scope sheets, Save/Cancel/Delete ·
 the calendar's `btnEvents` (top bar, before the pad), launch with the locked day, the result → `nav.picked`
