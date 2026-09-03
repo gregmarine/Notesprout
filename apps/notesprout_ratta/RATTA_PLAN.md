@@ -1581,7 +1581,9 @@ InlineRow/Inline/StepperValue/Weekday/GroupLine`), and form fields take a new `e
 panel. The three groups sit in a `ScrollView` that only ever scrolls with the IME up (`adjustResize`
 crushed the reminder row into a half-drawn line before). **Finding for Z3:** at the TALLEST layout
 (weekly + after-N + a reminder chip) the fields reach the bottom of the Nomad's panel — the note area's
-"only what fits" is close to zero there; Z3's measurement will have to say what happens then.
+"only what fits" is close to zero there; Z3's measurement will have to say what happens then. **The user is sleeping on this screen and will
+bring their own layout for it — a one-off in their words, but a gap worth closing; Z3 does not start until
+that layout lands.**
 **Deviations from the brief, accepted:** `EventsRow.Header` carries a `Section` enum, not a string id;
 `clampPage`/`pageCount` take the row list + three pixel sizes (no `perPage` exists with two heights);
 `withEndMode(UNTIL)` seeds the start date and `blank()` seeds `endCount` 10; `ordinalOf` answers `5 to
