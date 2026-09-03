@@ -1,10 +1,12 @@
 package com.symmetricalpalmtree.notesproutsn.ext.calendar
 
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.widget.FrameLayout
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.symmetricalpalmtree.gpaper.core.Tool
@@ -102,6 +104,25 @@ class CalendarActivity : InkScreenActivity<InkAction>() {
 
     /** Where the organizer is looking and what each control does to it — the anchor rule, pure. */
     private val nav = CalendarNavigation()
+
+    /**
+     * The Events screen (arc 24 / Z2), launched **in this process** — it is not a point and the host
+     * knows nothing about it. Registered as a property, because a launcher must be registered before
+     * the Activity is STARTED and a field initializer runs during construction.
+     *
+     * On the way back the screen names the day it ended on, and the calendar follows it in the view
+     * it is in (the locked "Return" decision) — then re-bakes by force, because an event may have
+     * been added or deleted and the grid's marks are baked into the template. A result that names no
+     * day (a crash, a kill) moves nothing.
+     */
+    private val eventsLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val ended = result.data?.getStringExtra(EventsActivity.EXTRA_ENDED_ON)?.let(CalendarDates::parse)
+            // Not yet open: only reachable if the process was rebuilt under the child screen, and
+            // the calendar is about to open on its bookmark anyway.
+            if (ended == null || !opened || closing || isFinishing || isDestroyed) return@registerForActivityResult
+            runPageOp { showMove(nav.picked(ended, LocalDate.now(), nowHour()), forceBake = true) }
+        }
 
     /** True when the calendar was opened from a notebook — the two Send buttons exist only then. */
     private var sendEnabled = false
@@ -202,6 +223,7 @@ class CalendarActivity : InkScreenActivity<InkAction>() {
             btnEraser = binding.btnEraser,
             btnLasso = binding.btnLasso,
             btnSend = binding.btnSend,
+            btnEvents = binding.btnEvents,
             btnScratchPad = binding.btnScratchPad,
             btnToday = binding.btnToday,
             btnMonth = binding.btnMonth,
@@ -212,6 +234,7 @@ class CalendarActivity : InkScreenActivity<InkAction>() {
             title = binding.title,
             onBack = { exit() },
             onSend = { sendPage() },
+            onEvents = { openEvents() },
             onPrev = { runPageOp { step(forward = false) } },
             onNext = { runPageOp { step(forward = true) } },
             onToday = { runPageOp { showMove(nav.todayMove(LocalDate.now(), nowHour())) } },
@@ -376,11 +399,11 @@ class CalendarActivity : InkScreenActivity<InkAction>() {
      * landed. The order matters — [CalendarNavigation.shown] is what moves the anchor, and a show
      * that threw (a store gone out from under us) must leave the organizer exactly where it was.
      */
-    private suspend fun showMove(m: CalendarNavigation.Move, firstLoad: Boolean = false) {
+    private suspend fun showMove(m: CalendarNavigation.Move, firstLoad: Boolean = false, forceBake: Boolean = false) {
         val doc = document ?: return
         doc.show(m.target)
         nav.shown(m)
-        showPage(firstLoad)
+        showPage(firstLoad, forceBake)
     }
 
     /** One period forward or back in the showing view — the pager's buttons and the finger swipe. */
@@ -411,6 +434,24 @@ class CalendarActivity : InkScreenActivity<InkAction>() {
         }
     }
 
+    /**
+     * The Events door (arc 24 / Z2). The day it opens on is the **first day of the period showing**
+     * — the 1st of a month, a week's Sunday, or the day itself ([EventsLaunch], a locked decision).
+     *
+     * **No `releaseForHandoff` here**, deliberately: the events screen carries no paper, and M3's
+     * measured answer for a non-drawing child screen is stop-behind. Z3's note surface is the first
+     * second-paper-surface question and it is that phase's to probe.
+     */
+    private fun openEvents() {
+        if (!opened || closing || isFinishing || isDestroyed) return
+        val day = EventsLaunch.launchDay(nav.kind, nav.target.localDate)
+        Slog.d(TAG) { "events: opening $day from kind ${nav.kind}" }
+        eventsLauncher.launch(
+            Intent(this, EventsActivity::class.java)
+                .putExtra(EventsActivity.EXTRA_DAY, CalendarDates.format(day)),
+        )
+    }
+
     /** The hour the clock says, for the half a Day page opens on. */
     private fun nowHour(): Int = LocalTime.now().hour
 
@@ -420,14 +461,14 @@ class CalendarActivity : InkScreenActivity<InkAction>() {
      * → `loadStrokes`, which is a single EPD refresh. Any selection goes first, because a data-in
      * call would dismiss it anyway and it belongs to the page being left.
      */
-    private fun showPage(firstLoad: Boolean) {
+    private fun showPage(firstLoad: Boolean, forceBake: Boolean = false) {
         val doc = document ?: return
         paper.clearSelection()
         selectionActive = false
         currentSelection = null
         selectionBar.hide()
         if (!firstLoad) paper.clearForContentSwap()
-        applyTemplate(force = false)
+        applyTemplate(force = forceBake)
         paper.loadStrokes(doc.strokes)
         toolbar.setTitle(titleOf(doc.target))
         // The latch says what is on the paper. It rides this frame; it is never one of its own.

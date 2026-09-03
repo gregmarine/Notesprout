@@ -27,6 +27,15 @@ class EventWordingTest {
     }
 
     @Test
+    fun theEventsScreenNamesTheWholeDayAndNotAHalfOfIt() {
+        // Sep 1 2026 is a Tuesday. Deliberately shorter than CalendarDates.dayTitle, which names a
+        // half ("· AM") because a Day *page* is half a day — the events list is the whole day.
+        assertEquals("Tue, Sep 1, 2026", EventWording.dayHeading(LocalDate.of(2026, 9, 1)))
+        assertEquals("Fri, Jan 1, 2027", EventWording.dayHeading(LocalDate.of(2027, 1, 1)))
+        assertEquals("Sun, Aug 30, 2026", EventWording.dayHeading(LocalDate.of(2026, 8, 30)))
+    }
+
+    @Test
     fun theTimeBadge() {
         assertEquals("All day", EventWording.timeBadge(testEvent(allDay = true)))
         assertEquals("9:00 AM", EventWording.timeBadge(testEvent(allDay = false, startMinute = 540)))

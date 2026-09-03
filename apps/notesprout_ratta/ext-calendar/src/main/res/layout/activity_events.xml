@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Events screen (arc 24 / Z2) — the tags screen's shape (docs: no paper, no exclusion rects, no
+  EPD handoff — an ordinary vertical stack of chrome). Unlike Tags there is no "add to this target"
+  field: the ⊕ on the top bar opens the editor fresh, and every row already IS a saved event.
+
+  Top to bottom: the title bar (Back / title / Add) · the list band, paged against its own measured
+  height like the tags band · the in-band pager (INVISIBLE, never GONE, with one page) · the
+  calendar's own bottom day-pager, reused verbatim so a swipe or a tap here steps the DAY this
+  screen is showing, never the in-band page. Dividers are 1dp inkBlack; borderGray is invisible on
+  e-ink.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/paperWhite"
+    android:orientation="vertical">
+
+    <!-- A FrameLayout, not a weighted row: the title stays centred on the SCREEN whatever flanks
+         it (the bar-centring trap — see activity_tags.xml). -->
+    <FrameLayout
+        android:id="@+id/topBarRow"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/toolbar_bar_thickness"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp">
+
+        <TextView
+            android:id="@+id/title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:layout_marginStart="52dp"
+            android:layout_marginEnd="52dp"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:singleLine="true"
+            android:text="@string/events_title"
+            android:textColor="@color/inkBlack"
+            android:textSize="16sp" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnBack"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_gravity="start|center_vertical"
+            android:contentDescription="@string/cd_events_back"
+            android:src="@drawable/ic_arrow_left" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnAdd"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_gravity="end|center_vertical"
+            android:contentDescription="@string/cd_events_add"
+            android:src="@drawable/ic_plus" />
+
+    </FrameLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <TextView
+        android:id="@+id/listEmpty"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="12dp"
+        android:text="@string/events_empty"
+        android:textColor="@color/inkBlack"
+        android:textSize="14sp"
+        android:visibility="gone" />
+
+    <!-- The band. Rows (and section header rows) are built in code and measured against this
+         height, exactly like the tags band — the page size is what actually fits. -->
+    <LinearLayout
+        android:id="@+id/listBand"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical" />
+
+    <!-- The in-band pager — VISIBLE only when the day's rows spill past one page; otherwise
+         INVISIBLE (never GONE) so its space is never given back and the bottom day-bar below never
+         creeps up the screen. -->
+    <FrameLayout
+        android:id="@+id/listPager"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/toolbar_bar_thickness"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp"
+        android:visibility="invisible">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:layout_gravity="center"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnPrevPage"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_events_prev_page"
+                android:src="@drawable/ic_page_prev" />
+
+            <TextView
+                android:id="@+id/pageIndicator"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:minWidth="56dp"
+                android:singleLine="true"
+                android:textColor="@color/inkBlack"
+                android:textSize="14sp" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnNextPage"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_events_next_page"
+                android:src="@drawable/ic_page_next" />
+        </LinearLayout>
+
+    </FrameLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!-- The calendar's own bottom bar, verbatim (activity_calendar.xml's bottomBarRow): prev day /
+         the day's title, itself a tap target that opens the shared DayPickerDialog / next day. A
+         swipe over listBand steps this, not the in-band page above. -->
+    <FrameLayout
+        android:id="@+id/bottomBarRow"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/toolbar_bar_thickness"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:layout_gravity="center"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnPrevDay"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_events_prev_day"
+                android:src="@drawable/ic_page_prev" />
+
+            <TextView
+                android:id="@+id/dayTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@android:color/transparent"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center"
+                android:minWidth="160dp"
+                android:minHeight="@dimen/toolbar_button_size"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:singleLine="true"
+                android:textColor="@color/inkBlack"
+                android:textSize="16sp"
+                android:contentDescription="@string/cd_events_pick_day" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnNextDay"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_events_next_day"
+                android:src="@drawable/ic_page_next" />
+        </LinearLayout>
+
+    </FrameLayout>
+
+</LinearLayout>

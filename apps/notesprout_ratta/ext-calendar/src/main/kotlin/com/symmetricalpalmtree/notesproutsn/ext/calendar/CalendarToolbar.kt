@@ -15,8 +15,8 @@ import com.symmetricalpalmtree.notesproutsn.notebook.PenIdle
 
 /**
  * The calendar's chrome (arc 23): Back and the three tools on the top bar, then Today and the three
- * view toggles at its far end with Send beyond them when a notebook is behind us; the pager — prev,
- * the period's title, next — alone on the bottom bar. The tool half is `:sn-screen`'s
+ * view toggles at its far end, then Send (only when a notebook is behind us), Events (arc 24 — always)
+ * and the Scratch Pad door last; the pager — prev, the period's title, next — alone on the bottom bar. The tool half is `:sn-screen`'s
  * [PaperToolbar]; this adds what is the calendar's own: the fixed tool values, the navigation
  * controls, Send, the pager, and the title behind the frame-silence gate.
  *
@@ -49,6 +49,7 @@ class CalendarToolbar(
     btnEraser: ImageButton,
     btnLasso: ImageButton,
     private val btnSend: ImageButton,
+    btnEvents: ImageButton,
     private val btnScratchPad: ImageButton,
     private val btnToday: View,
     private val btnMonth: View,
@@ -60,6 +61,9 @@ class CalendarToolbar(
     onBack: () -> Unit,
     /** Send this whole page to the notebook. Never called when [sendEnabled] is false — the button is GONE. */
     onSend: () -> Unit,
+    /** The Events door (arc 24 / Z2): the calendar's own day list, in this same process.
+     *  Always available — every day has events, or has room for them. */
+    onEvents: () -> Unit,
     onPrev: () -> Unit,
     onNext: () -> Unit,
     /** Today, in whatever view is showing. */
@@ -97,13 +101,16 @@ class CalendarToolbar(
 
         // Every button carries a hint naming it — the word buttons included: their tooltip is their
         // own text, which is what a long press on a truncated latch is for.
-        listOf(btnPrev, btnNext, btnSend, btnScratchPad, btnToday, btnMonth, btnWeek, btnDay, title).forEach {
+        listOf(btnPrev, btnNext, btnSend, btnEvents, btnScratchPad, btnToday, btnMonth, btnWeek, btnDay, title).forEach {
             TooltipCompat.setTooltipText(it, it.contentDescription)
         }
         btnPrev.setOnClickListener { releaseRenderIfIdle(); onPrev() }
         btnNext.setOnClickListener { releaseRenderIfIdle(); onNext() }
         btnSend.visibility = if (sendEnabled) View.VISIBLE else View.GONE
         btnSend.setOnClickListener { releaseRenderIfIdle(); onSend() }
+        // Always visible, unlike Send and the pad: it needs nothing behind us and opens nothing
+        // outside this APK.
+        btnEvents.setOnClickListener { releaseRenderIfIdle(); onEvents() }
         btnScratchPad.visibility = if (scratchPadAvailable) View.VISIBLE else View.GONE
         btnScratchPad.setOnClickListener { releaseRenderIfIdle(); onScratchPad() }
         btnToday.setOnClickListener { releaseRenderIfIdle(); onToday() }

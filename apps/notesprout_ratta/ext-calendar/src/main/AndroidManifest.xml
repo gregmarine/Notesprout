@@ -40,5 +40,24 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+
+        <!-- Events (arc 24 / Z2) — in-process only screens: the calendar screen launches both with
+             an ActivityResultLauncher (never the host), so neither is a point and neither carries a
+             custom action or category — not a new tier-2 door, just the calendar's own second and
+             third screen. Both exported=false. The editor takes the keyboard: configChanges keeps
+             a hardware keyboard from recreating it (the Ratta rule — the IME never hides while a
+             hardware keyboard is attached there) and stateHidden|adjustResize keeps the soft
+             keyboard from being shown uninvited while still resizing the layout when it is. -->
+        <activity
+            android:name=".EventsActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".EventEditorActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:configChanges="keyboard|keyboardHidden"
+            android:windowSoftInputMode="stateHidden|adjustResize" />
     </application>
 </manifest>

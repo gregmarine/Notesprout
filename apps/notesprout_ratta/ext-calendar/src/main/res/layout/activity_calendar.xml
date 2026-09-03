@@ -10,9 +10,10 @@
 
   Top bar: Back and the three fixed tools on the left; on the right (Y2) Today, then the
   Month/Week/Day toggles (text latches — the armed one is a thicker border, set from `showPage`,
-  never assumed from the tap), then Send, GONE without a notebook behind us. Bottom bar: the pager
-  and nothing else (F2 + 2026-08-28) — prev, the period's title, next — centred on the SCREEN;
-  the title is itself a tap target (Y2) that opens the day picker.
+  never assumed from the tap), then Send (GONE without a notebook behind us), then Events (arc 24 /
+  Z2 — always visible, the calendar's door to its own event list), then Scratch Pad last. Bottom
+  bar: the pager and nothing else (F2 + 2026-08-28) — prev, the period's title, next — centred on
+  the SCREEN; the title is itself a tap target (Y2) that opens the day picker.
 
   openingOverlay is the LAST child (topmost) and starts VISIBLE: the screen covers its own first
   frame the way the notebook does, so the launch reads as one continuous "Opening…".
@@ -122,6 +123,17 @@
                     android:contentDescription="@string/cd_calendar_send_page"
                     android:src="@drawable/ic_pencil_down"
                     android:visibility="gone" />
+
+                <!-- The Events door (arc 24 / Z2) — always visible; opens the calendar's own event
+                     list + editor for the current period's launch day (EventsLaunch). Sits between
+                     Send and the Scratch Pad door, never last: Scratch Pad keeps that spot on every
+                     bar. -->
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnEvents"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:layout_marginStart="8dp"
+                    android:contentDescription="@string/cd_calendar_events"
+                    android:src="@drawable/ic_calendar_event" />
 
                 <!-- The Scratch Pad door (Y4, the user's call) — the LAST button here as on every
                      bar. The calendar cannot open another extension itself (an extension screen

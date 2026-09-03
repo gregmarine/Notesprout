@@ -15,7 +15,7 @@ arcs 19–22's full phase records at the end of this file until the next compact
 feature's authoritative reference is its `docs/` file. **Arc 22 "Tables" is complete and frozen
 (2026-09-01) — X1–X5 all ✅: the extension store is real SQLite tables behind gated parameterized
 SQL. Arc 23 "Calendar" is PLANNED (wizard locked 2026-09-01, § "Phases — Arc 23"
-below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd) · **Y4 ✅** (2026-09-02: the user reversed "no code review" — `/code-review high` on the arc range, ten findings, all ten fixed incl. two sibling-copy refactors; docs + ledger; Nomad walks; user checklist passed). **Arcs 1–23 are complete and frozen.** The SEVENTH point is live; no EIGHTH without another decision. **Arc 24 "Events" is IN PROGRESS (wizard locked 2026-09-02, § "Phases — Arc 24" below) — Z1 ✅ (893b20e1 — `CalendarSchema.V2` + store + engine, 1965 JVM tests/variant) · Z2 ⬜ · Z3 ⬜ · Z4 ⬜ · Z5 ⬜; not a point, not an `API_VERSION` bump: two in-process screens and five tables inside `:ext-calendar`.**
+below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd) · **Y4 ✅** (2026-09-02: the user reversed "no code review" — `/code-review high` on the arc range, ten findings, all ten fixed incl. two sibling-copy refactors; docs + ledger; Nomad walks; user checklist passed). **Arcs 1–23 are complete and frozen.** The SEVENTH point is live; no EIGHTH without another decision. **Arc 24 "Events" is IN PROGRESS (wizard locked 2026-09-02, § "Phases — Arc 24" below) — Z1 ✅ (893b20e1 — `CalendarSchema.V2` + store + engine, 1965 JVM tests/variant) · **Z2 ✅** (events screen + editor + the calendar's door, 2013 JVM tests/variant) · Z3 ⬜ · Z4 ⬜ · Z5 ⬜; not a point, not an `API_VERSION` bump: two in-process screens and five tables inside `:ext-calendar`.**
 
 ---
 
@@ -1273,7 +1273,7 @@ pad → calendar chain). **Y4 CLOSED. Arc 23 "Calendar" frozen 2026-09-02.**
 
 ## Phases — Arc 24 "Events" ⬜ PLANNED (wizard locked 2026-09-02)
 
-**Status: Z1 ✅ · Z2 ⬜ · Z3 ⬜ · Z4 ⬜ · Z5 ⬜.** Fable planned it; Opus writes the features, Sonnet
+**Status: Z1 ✅ · Z2 ✅ · Z3 ⬜ · Z4 ⬜ · Z5 ⬜.** Fable planned it; Opus writes the features, Sonnet
 scaffolds, Haiku walks; Fable writes exactly two things — the `CalendarSchema` V2 step (a schema
 contract) and the editor's bounded paper surface with its handoff chain (Z3, an engine seam) — and
 reviews every phase. **Version stays `0.1.0-ratta` for the whole arc (the user's call at planning —
@@ -1518,7 +1518,7 @@ the delete does; `EventRows.weekday` is `Int?`; `Recurrence`'s `Event` overloads
 answers its own span); reminders read back are normalized; `FakeCalendarStore` got a plain
 `eventCount`. No user checklist (nothing visible changed).
 
-### Z2 — Events screen + editor + the calendar's door ⬜ (Opus code on a Fable brief · Sonnet layouts/strings/`ic_calendar_event` · Fable review · Haiku walk)
+### Z2 — Events screen + editor + the calendar's door ✅ (Opus code on a Fable brief · Sonnet layouts/strings/`ic_calendar_event` · Fable review · **Fable walked the Nomad by hand**; 2026-09-03)
 `EventsActivity` (Today + Upcoming, in-band paging, the day pager + picker + swipe, Add) ·
 `EventEditorActivity` with fields 1–9, the SN `TimePickerDialog`, the scope sheets, Save/Cancel/Delete ·
 the calendar's `btnEvents` (top bar, before the pad), launch with the locked day, the result → `nav.picked`
@@ -1534,6 +1534,48 @@ followed the day · `pm disable-user`/`enable` of nothing (no host change — sk
 **User checklist:** the editor's rows feel hand-sized; the physical keyboard types the title while the
 IME shows; nothing under the fields is clipped on the Nomad.
 **Questions at phase start:** none (the wizard covered the editor).
+
+**Outcome (2026-09-03):** As specified. `EventsActivity` + `EventEditorActivity` (both `exported="false"`,
+in-process `ActivityResultLauncher`s, no `HostCallerCheck`, no paper, no handoff, `TopGuard.applyInsetPadding`
+— the editor `followIme = true`), `EventRowView` (two-line rows: 13 sp badge with a 72 dp column + 16 sp
+title, 13 sp inkBlack meta; 34 dp headers), `TimePickerDialog` on a pure `TimeMath` (12-hour parts that
+wrap and **never carry**), `EventsPaging` (rows = Today/Upcoming assembly with the header rule; **greedy
+paging by measured height** with two row heights, a page never *ends* on a header), `EventsLaunch`
+(the locked launch-day rule), `EventDraft` (the editor's flat pure state: 23 fields, every field rule a
+function — `withStartDate` moves an end that sat on the start, all-day off seeds 9:00 AM, weekly seeds the
+anchor's weekday, `repeatTouched` gates the type-default offer, `from()` marks it touched, reminders cap +
+dedupe answer null so the screen can say which), `EventWording.dayHeading`; the door = `btnEvents` on the
+calendar's top bar between Send and the pad, `CalendarActivity.openEvents` → `EventsLaunch.launchDay
+(nav.kind, nav.target.localDate)`, result → `nav.picked` + `showMove(forceBake = true)`; **no
+`releaseForHandoff`** (Z3's question). Save routes: new → `save(isNew = true)`; anything else →
+`edit(scope, original, edited, viewedDay)` — a one-off at `ALL` is `editWithScope`'s in-place road; the
+recurring prefill is a plain `copy` of `occurrenceStartCovering` + span so `editSeries`' anchor
+preservation sees exactly what it compares. **Tests: 1965 → 2013 JVM tests/variant (+48: `EventsPaging`
+13, `EventDraft` 23, `TimeMath` 7, `EventsLaunch` 4, `EventWording` +1).** Twelve modules debug clean,
+`:ext-calendar` release builds, NUL scan clean. **Walk — by hand, not Haiku:** the Haiku agent backed
+out of the app into the Supernote note app and wandered its file manager (trap, below), so Fable drove the
+fifteen steps by screencap + tap: door on all three views lands on the locked day (Month → Sep 1, Week →
+its Sunday, Day → that day) · Add → keyboard up on the title · "Dentist" typed by keyboard taps → Appointment
+→ all-day off → 11:00 AM through the stepper dialog → Weekly (Tue auto-armed) + Mon/Wed → After 5 →
+1 week reminder chip → a second add raised "That reminder is already on this event." → Save → the row reads
+`11:00 AM Dentist / Appointment · Every week on Mon, Tue, Wed · for 5 times` with the Upcoming row
+`Tomorrow Dentist / Appointment · Sep 2 · 11:00 AM` below it · tap → prefilled with the trash, Back with no
+dialog · Delete → scope sheet → This occurrence → "Delete Dentist?" → gone on Sep 1 only, present on
+Sep 2 · picker → Sep 15, finger swipe → Sep 16 · Back → the calendar on September, ink intact · crash buffer
+empty. **Two layout faults found on the glass and fixed:** every conditional row's divider was a sibling
+`View` that stayed when the row went GONE, so three of them stacked into a thick line under Repeats —
+they carry ids now (`dividerWeekdays/Monthly/Ends`) and flip with their rows; and the "Ends" caption in
+the dates row sat against its button (margins). Re-installed and re-checked. **User checklist:** rows feel
+hand-sized · a physical keyboard types the title while the IME shows · nothing under the fields is clipped.
+**Deviations from the brief, accepted:** `EventsRow.Header` carries a `Section` enum, not a string id;
+`clampPage`/`pageCount` take the row list + three pixel sizes (no `perPage` exists with two heights);
+`withEndMode(UNTIL)` seeds the start date and `blank()` seeds `endCount` 10; `ordinalOf` answers `5 to
+true` for the last slot exactly as `Recurrence.ordinalMatches` matches; an editor `ready()` gate (draft
+is `lateinit` until the load answers); a `Read.Failed` on the list sets the day result BEFORE the
+failure dialog so the calendar is never moved by a failure. **Trap (new): a Haiku walk agent on the
+Supernote will wander OUT of the app** — a stray Back at the library lands in the Supernote launcher and
+the agent then explores the device's own apps; give it no Back at the library, and prefer a Fable-driven
+walk for anything past five taps.
 
 ### Z3 — The note section ⬜ (**Fable writes the bounded paper surface + the handoff chain**; Opus the text note, the toggle, the default rule, the save path; Fable review; Haiku walk + user checklist)
 **Step 0, before any code: the on-device probe** — a throwaway second `GPaper` surface in the editor

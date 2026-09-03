@@ -1,0 +1,647 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The event editor (arc 24 / Z2) — one screen for both New and Edit, fields only; Z3 adds the note
+  surface into the empty `noteArea` at the bottom. A row is a horizontal band: a 14sp inkBlack
+  caption (minWidth 96dp so every row's controls start on the same line) then its controls, each
+  row followed by a 1dp inkBlack divider — the same rhythm as the rest of the app's field screens.
+
+  The rule that bites here (the arc-23 trap, restated): `Widget.Notesprout.LatchButton` /
+  `OutlinedButton` / `TextButton` set NO layout_width/layout_height of their own, so every
+  AppCompatButton on one of those styles carries both explicitly below, or the screen dies at
+  inflate — `assembleDebug` does NOT catch this, only running the screen does.
+
+  Several rows are `visibility="gone"` by default (rowWeekdays, rowMonthly, rowEnds's
+  until/count halves, everyGroup, remindersRow) — they exist only for the repeat shapes and event
+  states that call for them; the editor Activity flips them, never the layout. A GONE row gives its
+  space back — never an isEnabled=false control, per the design system's disabled-is-invisible
+  rule. A conditional row's divider carries the row's id with a `divider` prefix and is flipped
+  WITH it — a divider left behind under a GONE row stacks on the next one into a thick line (seen
+  on the Nomad at Z2's first walk).
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/paperWhite"
+    android:orientation="vertical">
+
+    <!-- A FrameLayout, not a weighted row, so the title stays centred on the SCREEN whatever sits
+         at either end (the bar-centring trap). Two buttons live at the end here (Delete, GONE for
+         a new event, then Save), so the title's end margin is wider than the usual 52dp. -->
+    <FrameLayout
+        android:id="@+id/topBarRow"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/toolbar_bar_thickness"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp">
+
+        <TextView
+            android:id="@+id/title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:layout_marginStart="52dp"
+            android:layout_marginEnd="100dp"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:singleLine="true"
+            android:text="@string/editor_title_event"
+            android:textColor="@color/inkBlack"
+            android:textSize="16sp" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnBack"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_gravity="start|center_vertical"
+            android:contentDescription="@string/cd_editor_back"
+            android:src="@drawable/ic_arrow_left" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:layout_gravity="end|center_vertical"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <!-- Hidden for a NEW event — there is nothing yet to delete. -->
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnDelete"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_editor_delete"
+                android:src="@drawable/ic_trash"
+                android:visibility="gone" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnSave"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_editor_save"
+                android:src="@drawable/ic_check" />
+
+        </LinearLayout>
+
+    </FrameLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!-- Type: one of the six EventType sheet choices; the button's text is the type's own label,
+         set from code. -->
+    <LinearLayout
+        android:id="@+id/rowType"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="@dimen/toolbar_button_size"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="96dp"
+            android:text="@string/editor_type"
+            android:textColor="@color/inkBlack"
+            android:textSize="14sp" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnType"
+            style="@style/Widget.Notesprout.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/toolbar_button_size"
+            android:layout_weight="1"
+            android:contentDescription="@string/cd_editor_type" />
+
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!-- Title: the only free-text field in the editor proper (the note surface, Z3, is a second
+         one lower down). No caption — the hint carries the label, the same shape as every other
+         title-style field in the app. -->
+    <LinearLayout
+        android:id="@+id/rowTitle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="@dimen/toolbar_button_size"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp">
+
+        <androidx.appcompat.widget.AppCompatEditText
+            android:id="@+id/inputTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@android:color/transparent"
+            android:hint="@string/editor_title_hint"
+            android:imeOptions="actionDone"
+            android:inputType="textCapSentences"
+            android:maxLines="1"
+            android:textColor="@color/inkBlack"
+            android:textColorHint="@color/inkLight"
+            android:textSize="16sp" />
+
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!-- Starts / Ends dates. Ends follows Starts forward (EventDraft.withStartDate) so the two
+         never invert on their own. -->
+    <LinearLayout
+        android:id="@+id/rowDates"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="@dimen/toolbar_button_size"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="96dp"
+            android:text="@string/editor_starts"
+            android:textColor="@color/inkBlack"
+            android:textSize="14sp" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnStartDate"
+            style="@style/Widget.Notesprout.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/toolbar_button_size"
+            android:layout_weight="1" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_marginEnd="8dp"
+            android:text="@string/editor_ends_on"
+            android:textColor="@color/inkBlack"
+            android:textSize="14sp" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnEndDate"
+            style="@style/Widget.Notesprout.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/toolbar_button_size"
+            android:layout_weight="1" />
+
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!-- All day / start & end time. The two time buttons are hidden by CODE, not by a second
+         layout, when All day is latched — the row itself stays so the screen never reflows a whole
+         band on that one tap. -->
+    <LinearLayout
+        android:id="@+id/rowTimes"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="@dimen/toolbar_button_size"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp">
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/latchAllDay"
+            style="@style/Widget.Notesprout.LatchButton"
+            android:layout_width="wrap_content"
+            android:layout_height="@dimen/toolbar_button_size"
+            android:text="@string/editor_all_day" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnStartTime"
+            style="@style/Widget.Notesprout.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/toolbar_button_size"
+            android:layout_weight="1"
+            android:layout_marginStart="8dp"
+            android:contentDescription="@string/cd_editor_start_time" />
+
+        <!-- Long-press clears the end time (goes back to "no end time"). -->
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnEndTime"
+            style="@style/Widget.Notesprout.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/toolbar_button_size"
+            android:layout_weight="1"
+            android:layout_marginStart="8dp"
+            android:contentDescription="@string/cd_editor_end_time" />
+
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!-- Repeats: Never / Daily / Weekly / Monthly / Yearly. everyGroup (the interval stepper) is
+         visible whenever a repeat is chosen at all. -->
+    <LinearLayout
+        android:id="@+id/rowRepeats"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="@dimen/toolbar_button_size"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="96dp"
+            android:text="@string/editor_repeats"
+            android:textColor="@color/inkBlack"
+            android:textSize="14sp" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnRepeats"
+            style="@style/Widget.Notesprout.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/toolbar_button_size"
+            android:layout_weight="1" />
+
+        <LinearLayout
+            android:id="@+id/everyGroup"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/tvEveryLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/editor_every"
+                android:textColor="@color/inkBlack"
+                android:textSize="14sp" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnEveryMinus"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_editor_every_minus"
+                android:src="@drawable/ic_minus" />
+
+            <TextView
+                android:id="@+id/tvEvery"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="40dp"
+                android:gravity="center"
+                android:textColor="@color/inkBlack"
+                android:textSize="16sp" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnEveryPlus"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_editor_every_plus"
+                android:src="@drawable/ic_plus" />
+
+            <TextView
+                android:id="@+id/tvEveryUnit"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/inkBlack"
+                android:textSize="14sp" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!-- Weekly only: which weekdays the series occurs on. Sun-first, matching CalendarDates. -->
+    <LinearLayout
+        android:id="@+id/rowWeekdays"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="@dimen/toolbar_button_size"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:visibility="gone">
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/latchSun"
+            style="@style/Widget.Notesprout.LatchButton"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/toolbar_button_size"
+            android:layout_weight="1"
+            android:layout_marginStart="2dp"
+            android:layout_marginEnd="2dp"
+            android:text="@string/day_sun" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/latchMon"
+            style="@style/Widget.Notesprout.LatchButton"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/toolbar_button_size"
+            android:layout_weight="1"
+            android:layout_marginStart="2dp"
+            android:layout_marginEnd="2dp"
+            android:text="@string/day_mon" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/latchTue"
+            style="@style/Widget.Notesprout.LatchButton"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/toolbar_button_size"
+            android:layout_weight="1"
+            android:layout_marginStart="2dp"
+            android:layout_marginEnd="2dp"
+            android:text="@string/day_tue" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/latchWed"
+            style="@style/Widget.Notesprout.LatchButton"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/toolbar_button_size"
+            android:layout_weight="1"
+            android:layout_marginStart="2dp"
+            android:layout_marginEnd="2dp"
+            android:text="@string/day_wed" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/latchThu"
+            style="@style/Widget.Notesprout.LatchButton"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/toolbar_button_size"
+            android:layout_weight="1"
+            android:layout_marginStart="2dp"
+            android:layout_marginEnd="2dp"
+            android:text="@string/day_thu" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/latchFri"
+            style="@style/Widget.Notesprout.LatchButton"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/toolbar_button_size"
+            android:layout_weight="1"
+            android:layout_marginStart="2dp"
+            android:layout_marginEnd="2dp"
+            android:text="@string/day_fri" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/latchSat"
+            style="@style/Widget.Notesprout.LatchButton"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/toolbar_button_size"
+            android:layout_weight="1"
+            android:layout_marginStart="2dp"
+            android:layout_marginEnd="2dp"
+            android:text="@string/day_sat" />
+
+    </LinearLayout>
+
+    <View
+        android:id="@+id/dividerWeekdays"
+        android:visibility="gone"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!-- Monthly only: on the same day-of-month, or on the same ordinal weekday ("2nd Tuesday" /
+         "last Tuesday") — the two radio texts are set from code (EventDraft.ordinalOf). -->
+    <LinearLayout
+        android:id="@+id/rowMonthly"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="@dimen/toolbar_button_size"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:visibility="gone">
+
+        <RadioGroup
+            android:id="@+id/monthlyGroup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="horizontal">
+
+            <androidx.appcompat.widget.AppCompatRadioButton
+                android:id="@+id/radioDayOfMonth"
+                style="@style/Widget.Notesprout.RadioButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1" />
+
+            <androidx.appcompat.widget.AppCompatRadioButton
+                android:id="@+id/radioOrdinal"
+                style="@style/Widget.Notesprout.RadioButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1" />
+
+        </RadioGroup>
+
+    </LinearLayout>
+
+    <View
+        android:id="@+id/dividerMonthly"
+        android:visibility="gone"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!-- Ends: Never / on a date / after N times — the sheet drives which half below is visible. -->
+    <LinearLayout
+        android:id="@+id/rowEnds"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="@dimen/toolbar_button_size"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="96dp"
+            android:text="@string/editor_ends"
+            android:textColor="@color/inkBlack"
+            android:textSize="14sp" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnEnds"
+            style="@style/Widget.Notesprout.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/toolbar_button_size"
+            android:layout_weight="1" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnUntilDate"
+            style="@style/Widget.Notesprout.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/toolbar_button_size"
+            android:layout_weight="1"
+            android:layout_marginStart="8dp"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:id="@+id/countGroup"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnCountMinus"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_editor_count_minus"
+                android:src="@drawable/ic_minus" />
+
+            <TextView
+                android:id="@+id/tvCount"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="40dp"
+                android:gravity="center"
+                android:textColor="@color/inkBlack"
+                android:textSize="16sp" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnCountPlus"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_editor_count_plus"
+                android:src="@drawable/ic_plus" />
+
+            <TextView
+                android:id="@+id/tvCountUnit"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/editor_times"
+                android:textColor="@color/inkBlack"
+                android:textSize="14sp" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <View
+        android:id="@+id/dividerEnds"
+        android:visibility="gone"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!-- Reminders: a stepper mints an amount + unit, Add appends a chip (max 3, no duplicate); the
+         chips themselves live in remindersRow below, built in code. -->
+    <LinearLayout
+        android:id="@+id/rowRemind"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="@dimen/toolbar_button_size"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="96dp"
+            android:text="@string/editor_remind"
+            android:textColor="@color/inkBlack"
+            android:textSize="14sp" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnRemindMinus"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:contentDescription="@string/cd_editor_remind_minus"
+            android:src="@drawable/ic_minus" />
+
+        <TextView
+            android:id="@+id/tvRemindAmount"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="40dp"
+            android:gravity="center"
+            android:textColor="@color/inkBlack"
+            android:textSize="16sp" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnRemindPlus"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:contentDescription="@string/cd_editor_remind_plus"
+            android:src="@drawable/ic_plus" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/latchRemindDays"
+            style="@style/Widget.Notesprout.LatchButton"
+            android:layout_width="wrap_content"
+            android:layout_height="@dimen/toolbar_button_size"
+            android:layout_marginStart="8dp"
+            android:text="@string/editor_days" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/latchRemindWeeks"
+            style="@style/Widget.Notesprout.LatchButton"
+            android:layout_width="wrap_content"
+            android:layout_height="@dimen/toolbar_button_size"
+            android:text="@string/editor_weeks" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnRemindAdd"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="8dp"
+            android:contentDescription="@string/cd_editor_remind_add"
+            android:src="@drawable/ic_plus" />
+
+    </LinearLayout>
+
+    <!-- The reminder chips (EventDraft.reminders) — bordered label + an ic_x remove tap, built in
+         code; GONE when there are none so the row gives its space back. -->
+    <LinearLayout
+        android:id="@+id/remindersRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="@dimen/toolbar_button_size"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:visibility="gone" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!-- Z3's note section lands here (Handwriting/Text toggle over the paper surface / text
+         field); blank in Z2. Its size is what is left under the fields at their tallest layout. -->
+    <FrameLayout
+        android:id="@+id/noteArea"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+</LinearLayout>

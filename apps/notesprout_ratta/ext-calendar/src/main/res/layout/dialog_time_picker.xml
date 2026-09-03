@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The time picker (arc 24 / Z2) — TimePickerDialog's content, styled through Dialogs.style like
+  dialog_day_picker.xml: no elevation, shape_dialog_bordered is the window's own white + 2dp border,
+  so this root paints nothing of its own and OK/Cancel are the AlertDialog's own buttons, not views
+  here.
+
+  A live preview (tvTime, "9:05 AM") above two steppers — hour wraps 1..12, minute steps by 5 and
+  wraps 0..55, neither stepper ever changes the other — then the AM/PM latch pair. TimeMath (Opus)
+  owns every wrap/convert rule; this file only lays the controls out.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        android:id="@+id/tvTime"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp"
+        android:gravity="center"
+        android:textColor="@color/inkBlack"
+        android:textSize="24sp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:orientation="horizontal">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnHourMinus"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:contentDescription="@string/cd_time_hour_minus"
+            android:src="@drawable/ic_minus" />
+
+        <TextView
+            android:id="@+id/tvHour"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="48dp"
+            android:gravity="center"
+            android:textColor="@color/inkBlack"
+            android:textSize="20sp" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnHourPlus"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:contentDescription="@string/cd_time_hour_plus"
+            android:src="@drawable/ic_plus" />
+
+        <View
+            android:layout_width="16dp"
+            android:layout_height="1dp" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnMinuteMinus"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:contentDescription="@string/cd_time_minute_minus"
+            android:src="@drawable/ic_minus" />
+
+        <TextView
+            android:id="@+id/tvMinute"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="48dp"
+            android:gravity="center"
+            android:textColor="@color/inkBlack"
+            android:textSize="20sp" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnMinutePlus"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:contentDescription="@string/cd_time_minute_plus"
+            android:src="@drawable/ic_plus" />
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="horizontal">
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/latchAm"
+            style="@style/Widget.Notesprout.LatchButton"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/toolbar_button_size"
+            android:layout_weight="1"
+            android:text="@string/time_am" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/latchPm"
+            style="@style/Widget.Notesprout.LatchButton"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/toolbar_button_size"
+            android:layout_weight="1"
+            android:text="@string/time_pm" />
+
+    </LinearLayout>
+
+</LinearLayout>

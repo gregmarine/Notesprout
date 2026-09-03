@@ -30,6 +30,15 @@ object EventWording {
     /** "Jan 1, 2027" — a date far enough away that the year is part of the answer. */
     fun dateWithYear(d: LocalDate): String = "${date(d)}, ${d.year}"
 
+    /**
+     * "Tue, Sep 1, 2026" — the events screen's bottom-bar title, the day it is listing.
+     *
+     * Deliberately **not** [CalendarDates.dayTitle]: that one names a half ("· AM") because a Day
+     * *page* is half a day. The events list is the whole day, and a title claiming a half it does
+     * not show would be a lie the person can see. Same words, one part shorter.
+     */
+    fun dayHeading(d: LocalDate): String = "${CalendarDates.DAY_NAMES[d.dayOfWeek.value % 7]}, ${dateWithYear(d)}"
+
     /** The row's leading badge: "All day", the start time, or an em dash when there is neither. */
     fun timeBadge(e: Event): String =
         if (e.allDay) "All day" else e.startMinute?.let(::minute) ?: "—"
