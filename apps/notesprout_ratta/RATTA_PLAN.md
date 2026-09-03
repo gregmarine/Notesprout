@@ -15,7 +15,7 @@ arcs 19–22's full phase records at the end of this file until the next compact
 feature's authoritative reference is its `docs/` file. **Arc 22 "Tables" is complete and frozen
 (2026-09-01) — X1–X5 all ✅: the extension store is real SQLite tables behind gated parameterized
 SQL. Arc 23 "Calendar" is PLANNED (wizard locked 2026-09-01, § "Phases — Arc 23"
-below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd) · **Y4 ✅** (2026-09-02: the user reversed "no code review" — `/code-review high` on the arc range, ten findings, all ten fixed incl. two sibling-copy refactors; docs + ledger; Nomad walks; user checklist passed). **Arcs 1–23 are complete and frozen.** The SEVENTH point is live; no EIGHTH without another decision. **Arc 24 "Events" is IN PROGRESS (wizard locked 2026-09-02, § "Phases — Arc 24" below) — Z1 ✅ (893b20e1 — `CalendarSchema.V2` + store + engine, 1965 JVM tests/variant) · **Z2 ✅** (2846d770 — events screen + editor + the calendar's door; editor rebuilt to the user's design 2026-09-03, 2014 JVM tests/variant) · Z3 ⬜ · Z4 ⬜ · Z5 ⬜; not a point, not an `API_VERSION` bump: two in-process screens and five tables inside `:ext-calendar`.**
+below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd) · **Y4 ✅** (2026-09-02: the user reversed "no code review" — `/code-review high` on the arc range, ten findings, all ten fixed incl. two sibling-copy refactors; docs + ledger; Nomad walks; user checklist passed). **Arcs 1–23 are complete and frozen.** The SEVENTH point is live; no EIGHTH without another decision. **Arc 24 "Events" is IN PROGRESS (wizard locked 2026-09-02, § "Phases — Arc 24" below) — Z1 ✅ (893b20e1 — `CalendarSchema.V2` + store + engine, 1965 JVM tests/variant) · **Z2 ✅** (2846d770 — events screen + editor + the calendar's door; editor rebuilt to the user's design 2026-09-03, 2014 JVM tests/variant) · Z3 ⬜ · Z4 ⬜ · Z5 ⬜ (UI cleanup — parked 2026-09-03, discuss first) · Z6 ⬜ docs/freeze; not a point, not an `API_VERSION` bump: two in-process screens and five tables inside `:ext-calendar`.**
 
 ---
 
@@ -1273,7 +1273,7 @@ pad → calendar chain). **Y4 CLOSED. Arc 23 "Calendar" frozen 2026-09-02.**
 
 ## Phases — Arc 24 "Events" ⬜ PLANNED (wizard locked 2026-09-02)
 
-**Status: Z1 ✅ · Z2 ✅ · Z3 ⬜ · Z4 ⬜ · Z5 ⬜.** Fable planned it; Opus writes the features, Sonnet
+**Status: Z1 ✅ · Z2 ✅ · Z3 ⬜ · Z4 ⬜ · Z5 ⬜ (UI cleanup, added 2026-09-03 — discuss first) · Z6 ⬜.** Fable planned it; Opus writes the features, Sonnet
 scaffolds, Haiku walks; Fable writes exactly two things — the `CalendarSchema` V2 step (a schema
 contract) and the editor's bounded paper surface with its handoff chain (Z3, an engine seam) — and
 reviews every phase. **Version stays `0.1.0-ratta` for the whole arc (the user's call at planning —
@@ -1314,7 +1314,7 @@ in one process**, which is Z3's open on-device question (below).
 | Grid mark (Month/Week) | **og's per-type glyphs** on the day-number row, right-aligned (numbers stay left): cake · heart · suitcase · people · clock · dot, **distinct types only**, `+` when the row is full — Canvas primitives, the template stays Context-free. |
 | Day page | **Right-aligned text in the rows, no geometry change**: all-day events take rows from the top of the half (both halves), one per row; a timed event sits at the 30-minute row of its start minute when that minute falls in the half's window. **One entry in a row → its title; two or more → "N events."** Text is `inkBlack` (it carries information), ellipsized to at most half the row width right of the gutter. Existing Day ink does not move. |
 | Store | **Columnar, no JSON** — arc 22's direction and og's own backlog regret: `event` + `event_weekday` + `event_exception` + `event_reminder` + `note_stroke`, one `CalendarSchema` **V2 step** (a landed step is never edited). ISO dates as text. **Hard delete** (no SN extension store soft-deletes). |
-| Phases | **Five**: Z1 store + engine · Z2 events screen + editor (fields) + the calendar's door · **Z3 the note section** (its own phase, the user's call — between the editor and the grid) · Z4 grid rendering · Z5 docs/ledger/freeze (+ the review question). |
+| Phases | **Six** (five at planning; Z5 UI cleanup added 2026-09-03, docs became Z6): Z1 store + engine · Z2 events screen + editor (fields) + the calendar's door · **Z3 the note section** (its own phase, the user's call — between the editor and the grid) · Z4 grid rendering · Z5 docs/ledger/freeze (+ the review question). |
 
 ### Store spec (planner-fixed — Z1 implements as written; deviations need a user decision)
 
@@ -1643,7 +1643,19 @@ two at 9:00 → "2 events"; editing the event re-bakes on return; crash buffer e
 glyphs legible on the Nomad; Day labels do not fight the ink already there.
 **Questions at phase start:** none.
 
-### Z5 — Docs, ledger, freeze ⬜ (Sonnet docs in parallel · Fable read-back · optional review)
+### Z5 — UI cleanup ⬜ (**discuss first** — the user parks a list here so it is not forgotten; nothing is locked)
+Added 2026-09-03 after the editor rebuild: the user says "a few things still don't look great" on the
+events screen and editor but chose to go on to Z3 and clean up later. **This phase opens with a
+conversation, not a brief** — the user names what they saw, Fable turns it into a wizard-style list
+(one question at a time), and only then does anything get built. Candidates noted by Fable during the
+Z2 walks, for that conversation and NOT for pre-emptive fixing: the All day `SwitchCompat` in its off
+state is light grey on the panel (an outlined thumb would read) · the events row's meta line and badge
+sit close under the title at the Nomad's row height · the Repeat details dialog's "Ends" radios take
+three rows of air · the trash icon's tap target vs. the row tap (a miss opens the editor) · the type
+button's fixed 140 dp minimum leaves the title field short on the Nomad. Scope stays inside
+`:ext-calendar`; no API bump; version stays. Nomad walk by hand + the user's own eye.
+
+### Z6 — Docs, ledger, freeze ⬜ (Sonnet docs in parallel · Fable read-back · optional review)
 `docs/calendar.md` § Events (the store, the engine, the two screens, the note, the grid, the failure
 table rows, tests, traps) · `docs/extensions.md` (a note that the calendar point grew two in-process
 screens with no contract change; the module table's `:ext-calendar` row) · `docs/sn-screen.md`
