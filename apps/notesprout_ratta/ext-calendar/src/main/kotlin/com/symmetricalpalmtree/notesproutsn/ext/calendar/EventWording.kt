@@ -84,6 +84,24 @@ object EventWording {
         return if (end == null) base else "$base · $end"
     }
 
+    /**
+     * The editor's Repeat **glance** — the value alone, as short as it can be said: "Weekly" at an
+     * interval of 1, "Every 3 weeks" above it.
+     *
+     * Deliberately narrower than [recurrenceSummary]: a glance button reports what is set, and the
+     * weekdays and the ending live in the dialog it opens. The word for the unset case is a plain
+     * resource, not a string from here — there is nothing to build when there is no rule.
+     */
+    fun repeatGlance(freq: Freq, interval: Int): String {
+        val n = interval.coerceAtLeast(1)
+        return when (freq) {
+            Freq.DAILY -> if (n == 1) "Daily" else "Every $n days"
+            Freq.WEEKLY -> if (n == 1) "Weekly" else "Every $n weeks"
+            Freq.MONTHLY -> if (n == 1) "Monthly" else "Every $n months"
+            Freq.YEARLY -> if (n == 1) "Yearly" else "Every $n years"
+        }
+    }
+
     /** The Upcoming row's countdown badge. */
     fun upcomingBadge(daysUntil: Int): String = if (daysUntil == 1) "Tomorrow" else "In $daysUntil days"
 
@@ -91,7 +109,8 @@ object EventWording {
     fun upcomingMeta(u: UpcomingEvent): String =
         "${u.event.type.label} · ${date(u.occurrenceStart)} · ${timeBadge(u.event)}"
 
-    /** "1 week before" / "3 days before" — the editor's reminder chip. */
+    /** "1 week before" / "3 days before" — the editor's Remind glance button, and the same sentence
+     *  [RemindDialog]'s preview line shows while it is being chosen. */
     fun reminderLabel(r: Reminder): String {
         val unit = when {
             r.unit == ReminderUnit.WEEKS && r.amount == 1 -> "week"

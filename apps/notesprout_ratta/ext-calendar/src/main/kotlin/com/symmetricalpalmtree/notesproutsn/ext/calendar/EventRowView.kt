@@ -6,8 +6,12 @@ import android.graphics.drawable.ColorDrawable
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
+import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.Toast
+import androidx.appcompat.widget.AppCompatImageButton
 import androidx.appcompat.widget.AppCompatTextView
+import androidx.appcompat.widget.TooltipCompat
 import androidx.core.content.ContextCompat
 
 /**
@@ -18,10 +22,10 @@ import androidx.core.content.ContextCompat
  * the arithmetic and the glass cannot disagree about where a page ends:
  *
  * - a **section header** — one short label over the rows it names;
- * - an **event row** — two lines. The first is a fixed-width badge ("All day", "9:00 AM", "In 3
- *   days") and the title; the badge's `minWidth` is what makes every title on the page start on the
- *   same vertical line, which is the whole reason a badge column exists rather than a prefix.
- *   The second is the meta line.
+ * - an **event row** — two lines, with a trash icon at the trailing edge. The first line is a
+ *   fixed-width badge ("All day", "9:00 AM", "In 3 days") and the title; the badge's `minWidth` is
+ *   what makes every title on the page start on the same vertical line, which is the whole reason a
+ *   badge column exists rather than a prefix. The second is the meta line.
  *
  * **The second line is inkBlack and smaller, never inkLight.** It carries information — what the
  * event is, when it ends, how it repeats — and the palette reserves the grey for text meant *not*
@@ -34,7 +38,8 @@ object EventRowView {
 
     /** The height an event row takes — the family's hand-sized tap target plus a second line, and
      *  never a hardcoded number: it grows with `toolbar_button_size` on the tablet tier like every
-     *  other control. */
+     *  other control. The delete icon is exactly one `toolbar_button_size`, so it rides inside a row
+     *  that is already taller than that and the paging arithmetic does not move. */
     fun rowHeightPx(context: Context): Int {
         val d = context.resources.displayMetrics.density
         return context.resources.getDimensionPixelSize(R.dimen.toolbar_button_size) +
@@ -66,9 +71,16 @@ object EventRowView {
     }
 
     /**
-     * One event row: [badge] and [title] on the first line, [meta] on the second, the whole row one
-     * tap target that opens the editor. **No long press** — an event has one destructive verb and it
-     * lives inside the editor, where it can name what it is about to remove.
+     * One event row: [badge] and [title] on the first line, [meta] on the second, a trash icon at the
+     * trailing edge, and the rest of the row one tap target that opens the editor.
+     *
+     * **Delete is here, not in the editor** (the user's call, arc 24 / Z2 rebuild): the person is
+     * already looking at the thing they mean, and the confirm dialog [onDelete] raises is what names
+     * the blast radius. The icon is a child button, so its own tap is consumed there and the row's
+     * click never fires with it — and it sits in the ROW rather than inside the first line, so it is
+     * centred against both lines and neither of them has to give up any height for it.
+     *
+     * There is no long press on the row itself: the one destructive verb has a control of its own.
      */
     fun buildEvent(
         context: Context,
@@ -76,6 +88,7 @@ object EventRowView {
         title: String,
         meta: String,
         onClick: () -> Unit,
+        onDelete: () -> Unit,
     ): View {
         val d = context.resources.displayMetrics.density
         val ink = ContextCompat.getColor(context, R.color.inkBlack)
@@ -130,6 +143,28 @@ object EventRowView {
             },
         )
         row.addView(lines, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+
+        val trashSize = context.resources.getDimensionPixelSize(R.dimen.toolbar_button_size)
+        row.addView(
+            AppCompatImageButton(context).apply {
+                setImageResource(R.drawable.ic_trash)
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                val pad = context.resources.getDimensionPixelSize(R.dimen.toolbar_button_padding)
+                setPadding(pad, pad, pad, pad)
+                background = ColorDrawable(Color.TRANSPARENT)
+                stateListAnimator = null      // no ripple, no lift: e-ink draws neither
+                isFocusable = false           // chrome must never take focus off a field
+                contentDescription = context.getString(R.string.cd_events_delete)
+                TooltipCompat.setTooltipText(this, contentDescription)
+                setOnClickListener { onDelete() }
+                // Words read better than glyphs on e-ink: the long press says what the icon is.
+                setOnLongClickListener {
+                    Toast.makeText(context, R.string.cd_events_delete, Toast.LENGTH_SHORT).show()
+                    true
+                }
+            },
+            LinearLayout.LayoutParams(trashSize, trashSize),
+        )
 
         column.addView(
             row,

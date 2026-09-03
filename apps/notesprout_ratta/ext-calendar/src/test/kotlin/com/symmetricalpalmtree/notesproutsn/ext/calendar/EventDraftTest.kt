@@ -235,27 +235,32 @@ class EventDraftTest {
     // ── Reminders ────────────────────────────────────────────────────────────
 
     @Test
-    fun remindersRefuseTheCapADuplicateAndAnEmptyLead() {
-        var d = requireNotNull(blank().addReminder(1, ReminderUnit.DAYS))
-        d = requireNotNull(d.addReminder(3, ReminderUnit.DAYS))
-        d = requireNotNull(d.addReminder(1, ReminderUnit.WEEKS))
-        assertEquals(EventRules.REMINDERS_MAX, d.reminders.size)
-        // Past the cap, a duplicate and a lead of less than a day are all **null**, so the screen
-        // can say why the tap did nothing rather than looking unresponsive.
-        assertNull(d.addReminder(2, ReminderUnit.DAYS))
-        assertNull(blank().addReminder(1, ReminderUnit.DAYS)!!.addReminder(1, ReminderUnit.DAYS))
-        assertNull(blank().addReminder(0, ReminderUnit.DAYS))
-        // Ordered by the lead the look-ahead uses.
-        assertEquals(listOf(1, 3, 7), d.reminders.map { it.leadDays })
+    fun oneReminderIsSetReplacedAndCleared() {
+        val set = blank().withReminder(Reminder(1, ReminderUnit.DAYS))
+        assertEquals(listOf(Reminder(1, ReminderUnit.DAYS)), set.reminders)
+        // The editor holds ONE: saving a second replaces the first rather than adding to it.
+        val replaced = set.withReminder(Reminder(2, ReminderUnit.WEEKS))
+        assertEquals(listOf(Reminder(2, ReminderUnit.WEEKS)), replaced.reminders)
+        // "None" is a real answer.
+        assertEquals(emptyList<Reminder>(), replaced.withReminder(null).reminders)
+        // Normalized on the way in, exactly as the store would: a lead of less than a day is no
+        // reminder at all, so it lands as none rather than disappearing silently at save.
+        assertEquals(emptyList<Reminder>(), blank().withReminder(Reminder(0, ReminderUnit.DAYS)).reminders)
     }
 
     @Test
-    fun aChipRemovedIsGone() {
-        val d = requireNotNull(requireNotNull(blank().addReminder(2, ReminderUnit.DAYS)).addReminder(1, ReminderUnit.WEEKS))
-        val less = d.removeReminder(Reminder(2, ReminderUnit.DAYS))
-        assertEquals(listOf(Reminder(1, ReminderUnit.WEEKS)), less.reminders)
-        // Removing one that is not there changes nothing.
-        assertEquals(less.reminders, less.removeReminder(Reminder(9, ReminderUnit.DAYS)).reminders)
+    fun anEventWithSeveralRemindersKeepsOnlyTheOneSaved() {
+        // The store's cap is still three, and a row written before the one-reminder editor may
+        // carry three; saving from that editor is what reduces it to one.
+        val many = listOf(
+            Reminder(1, ReminderUnit.DAYS),
+            Reminder(3, ReminderUnit.DAYS),
+            Reminder(1, ReminderUnit.WEEKS),
+        )
+        val opened = EventDraft.from(testEvent(reminders = many))
+        assertEquals(3, opened.reminders.size)
+        val saved = opened.withReminder(Reminder(3, ReminderUnit.DAYS))
+        assertEquals(listOf(Reminder(3, ReminderUnit.DAYS)), saved.reminders)
     }
 
     // ── Change tracking ──────────────────────────────────────────────────────

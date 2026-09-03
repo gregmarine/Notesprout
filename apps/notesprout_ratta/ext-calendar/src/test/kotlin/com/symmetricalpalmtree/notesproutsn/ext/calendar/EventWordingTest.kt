@@ -120,6 +120,22 @@ class EventWordingTest {
     }
 
     @Test
+    fun theRepeatGlanceSaysTheValueAndNothingElse() {
+        // At an interval of 1 the frequency's own word is the whole answer.
+        assertEquals("Daily", EventWording.repeatGlance(Freq.DAILY, 1))
+        assertEquals("Weekly", EventWording.repeatGlance(Freq.WEEKLY, 1))
+        assertEquals("Monthly", EventWording.repeatGlance(Freq.MONTHLY, 1))
+        assertEquals("Yearly", EventWording.repeatGlance(Freq.YEARLY, 1))
+        // Above it, the count joins — and no weekdays and no ending: those live in the dialog.
+        assertEquals("Every 2 days", EventWording.repeatGlance(Freq.DAILY, 2))
+        assertEquals("Every 3 weeks", EventWording.repeatGlance(Freq.WEEKLY, 3))
+        assertEquals("Every 6 months", EventWording.repeatGlance(Freq.MONTHLY, 6))
+        assertEquals("Every 2 years", EventWording.repeatGlance(Freq.YEARLY, 2))
+        // An interval below 1 is not a repeat; it reads as the plain word rather than "Every 0".
+        assertEquals("Weekly", EventWording.repeatGlance(Freq.WEEKLY, 0))
+    }
+
+    @Test
     fun reminderLabels() {
         assertEquals("1 day before", EventWording.reminderLabel(Reminder(1, ReminderUnit.DAYS)))
         assertEquals("3 days before", EventWording.reminderLabel(Reminder(3, ReminderUnit.DAYS)))

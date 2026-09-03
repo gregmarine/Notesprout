@@ -8,9 +8,11 @@ import android.view.View
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.TooltipCompat
 import androidx.lifecycle.lifecycleScope
+import com.symmetricalpalmtree.notesproutsn.core.ActionSheetDialog
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
 import com.symmetricalpalmtree.notesproutsn.core.ListSwipe
 import com.symmetricalpalmtree.notesproutsn.core.Slog
@@ -36,6 +38,11 @@ import java.time.LocalDate
  * view stack — M3 measured the answer for a non-drawing child screen and it is stop-behind. Do not
  * add one. (Z3's editor note surface is the first second-paper-surface question; this screen is not
  * part of it.)
+ *
+ * **Delete lives here, not in the editor** (the user's call, arc 24 / Z2 rebuild): each row carries a
+ * trash icon. It asks the same two questions the editor used to — the scope sheet for a recurring
+ * event, then a confirm that names what is about to go — and on success it simply re-reads, because a
+ * list is what a delete changes.
  *
  * **Two sections, one day** ([EventsPaging]): the day's own events, then the reminder look-ahead.
  * The "Today" label appears only when Upcoming follows it, because a label exists to tell two lists
@@ -267,8 +274,9 @@ class EventsActivity : AppCompatActivity() {
             badge = EventWording.timeBadge(row.event),
             title = row.event.title,
             meta = EventWording.meta(row.event),
-            // A row of this day's list is edited as it is seen: from this day.
+            // A row of this day's list is edited — and deleted — as it is seen: from this day.
             onClick = { openEditor(row.event.id, day) },
+            onDelete = { confirmDelete(row.event, day) },
         )
 
         is EventsRow.Upcoming -> EventRowView.buildEvent(
@@ -280,6 +288,7 @@ class EventsActivity : AppCompatActivity() {
             // **occurrence start**, so "this occurrence" means the occurrence being looked ahead to
             // and not whatever the series happens to do today.
             onClick = { openEditor(row.upcoming.event.id, row.upcoming.occurrenceStart) },
+            onDelete = { confirmDelete(row.upcoming.event, row.upcoming.occurrenceStart) },
         )
     }
 
@@ -300,6 +309,84 @@ class EventsActivity : AppCompatActivity() {
                 .putExtra(EventEditorActivity.EXTRA_EVENT_ID, id)
                 .putExtra(EventEditorActivity.EXTRA_DAY, CalendarDates.format(viewedDay)),
         )
+    }
+
+    // ── Delete ───────────────────────────────────────────────────────────────
+
+    /**
+     * The row's trash icon. A recurring event is asked which occurrences first; everything else goes
+     * straight to the confirm.
+     *
+     * [viewedDay] is the day the row itself is about — `day` for a Today row, the occurrence's own
+     * start for an Upcoming one, exactly as its edit door does. It is what every scope op is computed
+     * against, so a look-ahead row cannot delete today's occurrence by accident.
+     */
+    private fun confirmDelete(event: Event, viewedDay: LocalDate) {
+        if (busy) return
+        if (event.recurrence != null) {
+            scopeSheet(R.string.scope_title_delete) { scope -> confirmDelete(event, viewedDay, scope) }
+            return
+        }
+        confirmDelete(event, viewedDay, Scope.ALL)
+    }
+
+    /** og's three scopes. */
+    private fun scopeSheet(titleRes: Int, onPicked: (Scope) -> Unit) {
+        ActionSheetDialog(this)
+            .title(getString(titleRes))
+            .addAction(null, getString(R.string.scope_this)) { onPicked(Scope.THIS) }
+            .addAction(null, getString(R.string.scope_following)) { onPicked(Scope.FOLLOWING) }
+            .addAction(null, getString(R.string.scope_all)) { onPicked(Scope.ALL) }
+            .show()
+    }
+
+    /** The confirm names what is about to go — "every occurrence" only when that is what ALL on a
+     *  recurring event means, because a delete of one occurrence and a delete of a series are not
+     *  the same act and must not read the same. */
+    private fun confirmDelete(event: Event, viewedDay: LocalDate, scope: Scope) {
+        val wholeSeries = event.recurrence != null && scope == Scope.ALL
+        Dialogs.style(
+            AlertDialog.Builder(this)
+                .setTitle(getString(R.string.events_delete_title, event.title))
+                .setMessage(
+                    if (wholeSeries) getString(R.string.events_delete_body_series, event.title)
+                    else getString(R.string.events_delete_body_once),
+                )
+                .setPositiveButton(R.string.events_delete_confirm) { _, _ -> delete(event, viewedDay, scope) }
+                .setNegativeButton(R.string.cancel, null)
+                .create(),
+        ).show()
+    }
+
+    private fun delete(event: Event, viewedDay: LocalDate, scope: Scope) {
+        if (busy) return
+        busy = true
+        lifecycleScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                val binder = CalendarSession.store ?: return@withContext false
+                try {
+                    // False means the viewed day maps to no occurrence: nothing to do, and never a
+                    // whole-series delete by accident.
+                    EventStore(binder).delete(scope, event, viewedDay)
+                } catch (e: StoreUnavailable) {
+                    Slog.d(TAG) { "delete failed: store unavailable" }
+                    false
+                } catch (e: Exception) {
+                    Slog.d(TAG) { "delete failed: ${e.javaClass.simpleName}" }
+                    false
+                }
+            }
+            busy = false
+            if (isFinishing || isDestroyed) return@launch
+            if (!ok) {
+                Dialogs.problem(this@EventsActivity, R.string.events_delete_failed_title, R.string.events_delete_failed)
+                return@launch
+            }
+            Slog.d(TAG) { "deleted ${event.id} at $scope" }
+            // A delete changes the list, so the list is what is re-read — the one road every other
+            // change to this screen takes.
+            load()
+        }
     }
 
     // ── Leaving ──────────────────────────────────────────────────────────────

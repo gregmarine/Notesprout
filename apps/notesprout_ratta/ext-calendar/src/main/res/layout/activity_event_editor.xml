@@ -1,33 +1,39 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The event editor (arc 24 / Z2, reshaped after the first Nomad walk) — one screen for both New and
-  Edit, fields only; Z3 adds the note surface into the empty `noteArea` at the bottom.
+  The event editor (arc 24 / Z2, rebuilt to the user's own design) — one screen for both New and
+  Edit; Z3 fills the empty `noteArea` at the bottom.
 
-  The shape is og's form, not a ladder of boxes: THREE groups (the event · how it repeats · reminders)
-  separated by a single hairline each, 16dp of air on both sides, and inside a group two row shapes
-  only —
-    · a bold caption OVER a full-width bordered field (Type, Title, Repeats, Ends), text left-aligned
-      with inner padding, the field one hand-sized tap target tall;
-    · a bold label LEFT with its control RIGHT (Starts and Ends: the date, then the time beside it
-      while all-day is off; All day: the latch).
-  Sub-choices that belong to a field sit under it as an inline row ("Every − 1 + weeks", the seven
-  weekday latches, "− 5 + times"). There are NO per-row dividers: a bordered control under a divider
-  reads as two borders, and seven of those in a column is what the first walk looked like.
-  The row vocabulary is `values/styles.xml` (`Editor.*`), module-local.
+  THREE rows over the note area, and nothing else:
 
-  Heights: text fields and latches take `editor_field_height` (52dp — see dimens.xml for why not
-  the 62dp icon-button dimen); the icon steppers keep `toolbar_button_size`.
+    1. the title field, with the event's TYPE named on the button beside it;
+    2. the two dates, the All day switch, and — while all-day is off — the two times;
+    3. two GLANCE buttons, Repeat and Remind me.
 
-  The rule that bites here (the arc-23 trap, restated): `Widget.Notesprout.LatchButton` /
-  `OutlinedButton` / `TextButton` set NO layout_width/layout_height of their own; the `Editor.*`
-  styles set both, and every other AppCompatButton below carries them explicitly — or the screen
-  dies at inflate. `assembleDebug` does NOT catch this, only running the screen does.
+  A glance button says the word alone when the thing is unset ("Repeat", "Remind me") and the value
+  concisely when it is set ("Every 2 weeks", "1 week before"); the details live in the dialog it
+  opens (`RepeatDialog` / `RemindDialog`), which applies on its own Save and discards on Cancel. So
+  this screen has no steppers, no weekday bar, no radios and no chips: the form is three rows tall,
+  which is what leaves the note its space.
 
-  Conditional views are `visibility="gone"` by default (the two time buttons, everyGroup,
-  rowWeekdays, rowMonthly, rowEnds and its until/count halves, remindersRow) — the editor Activity
-  flips them, never the layout. A GONE row gives its space back — never an isEnabled=false control,
-  per the design system's disabled-is-invisible rule. Nothing conditional carries a divider of its
-  own, so nothing can stack one under a hidden row.
+  **Delete is not on this screen.** An event's one destructive verb lives on the events list, as a
+  per-row trash icon (`EventRowView`) — the user's call. The top bar is therefore
+  `title … [Cancel] [Save]`, the folder picker's idiom (action buttons on the top bar, Cancel before
+  the action). System Back = Cancel, behind the same discard confirm.
+
+  Heights: every bordered control takes `editor_field_height` (52dp — see dimens.xml for why not the
+  62dp icon-button dimen), text 16sp throughout.
+
+  Row 2 must FIT: five controls at 16sp inside the Nomad's 749dp (≈580dp of content plus 32dp of
+  side padding). The date and time buttons therefore carry `minWidth 0dp` — a minWidth added here is
+  how the times fall off the end of the row.
+
+  The rule that bites (the arc-23 trap, restated): `Widget.Notesprout.OutlinedButton` /
+  `TextButton` / `ElevatedButton` set NO layout_width/layout_height of their own, so every button
+  below carries both explicitly — or the screen dies at inflate, and `assembleDebug` does NOT catch
+  it. Only running the screen does.
+
+  The two time buttons are `visibility="gone"` here; the Activity flips them with the switch. GONE,
+  never `isEnabled = false` — a disabled control is invisible on e-ink.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/root"
@@ -36,502 +42,216 @@
     android:background="@color/paperWhite"
     android:orientation="vertical">
 
-    <!-- A FrameLayout, not a weighted row, so the title stays centred on the SCREEN whatever sits
-         at either end (the bar-centring trap). Two buttons live at the end here (Delete, GONE for
-         a new event, then Save), so the title's end margin is wider than the usual 52dp. -->
-    <FrameLayout
-        android:id="@+id/topBarRow"
+    <!-- The title reads "New Event" or "Edit Event" — the mode is the one thing the bar has to
+         say, and it says it at the start rather than centred, because two buttons live at the end. -->
+    <LinearLayout
+        android:id="@+id/topBar"
         android:layout_width="match_parent"
         android:layout_height="@dimen/toolbar_bar_thickness"
-        android:paddingStart="4dp"
-        android:paddingEnd="4dp">
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
 
         <TextView
             android:id="@+id/title"
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:layout_marginStart="52dp"
-            android:layout_marginEnd="100dp"
+            android:layout_weight="1"
             android:ellipsize="end"
-            android:gravity="center"
+            android:paddingStart="16dp"
+            android:paddingEnd="8dp"
             android:singleLine="true"
-            android:text="@string/editor_title_event"
+            android:text="@string/editor_title_new"
             android:textColor="@color/inkBlack"
             android:textSize="16sp" />
 
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnBack"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_gravity="start|center_vertical"
-            android:contentDescription="@string/cd_editor_back"
-            android:src="@drawable/ic_arrow_left" />
-
-        <LinearLayout
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnCancel"
+            style="@style/Widget.Notesprout.TextButton"
             android:layout_width="wrap_content"
-            android:layout_height="match_parent"
-            android:layout_gravity="end|center_vertical"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
+            android:layout_height="wrap_content"
+            android:text="@string/cancel" />
 
-            <!-- GONE on a new event — there is nothing to delete yet. Never disabled. -->
-            <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnDelete"
-                style="@style/Widget.Notesprout.ToolbarButton"
-                android:contentDescription="@string/cd_editor_delete"
-                android:src="@drawable/ic_trash"
-                android:visibility="gone" />
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnSave"
+            style="@style/Widget.Notesprout.ElevatedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
+            android:text="@string/editor_save" />
 
-            <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnSave"
-                style="@style/Widget.Notesprout.ToolbarButton"
-                android:contentDescription="@string/cd_editor_save"
-                android:src="@drawable/ic_check" />
-
-        </LinearLayout>
-
-    </FrameLayout>
+    </LinearLayout>
 
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"
         android:background="@color/inkBlack" />
 
-    <!-- The three groups scroll as one when there is not room for them — which is only ever with
-         the IME up (`adjustResize` shrinks the window). With the IME down the groups fit, the
-         ScrollView wraps them and nothing scrolls; the note area below takes what is left. Without
-         this the IME crushed the reminder row into a half-drawn line instead of pushing it under. -->
-    <ScrollView
-        android:id="@+id/fieldsScroll"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:fillViewport="false"
-        android:overScrollMode="never"
-        android:scrollbars="none">
-
-        <LinearLayout
-            android:id="@+id/fields"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical">
-
-    <!-- ═══ Group 1: the event ═══ -->
-
+    <!-- The three rows. No ScrollView: three rows fit above the IME on the Nomad, and a form that
+         can scroll under a keyboard is a form that hides the field being typed into. -->
     <LinearLayout
-        android:id="@+id/groupEvent"
+        android:id="@+id/fields"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:paddingStart="16dp"
-        android:paddingTop="4dp"
-        android:paddingEnd="16dp"
-        android:paddingBottom="12dp">
+        android:paddingTop="8dp"
+        android:paddingEnd="16dp">
 
-        <TextView
-            style="@style/Editor.Caption"
-            android:text="@string/editor_type" />
-
-        <androidx.appcompat.widget.AppCompatButton
-            android:id="@+id/btnType"
-            style="@style/Editor.Field"
-            android:contentDescription="@string/cd_editor_type" />
-
-        <TextView
-            style="@style/Editor.Caption"
-            android:text="@string/editor_title_hint" />
-
-        <!-- The one IME field. A bordered box like the fields around it; the border is the box's,
-             not the EditText's, so the caret and the hint sit inside the same frame as a field. -->
-        <androidx.appcompat.widget.AppCompatEditText
-            android:id="@+id/inputTitle"
-            android:layout_width="match_parent"
-            android:layout_height="@dimen/editor_field_height"
-            android:background="@drawable/shape_bordered"
-            android:gravity="start|center_vertical"
-            android:hint="@string/editor_title_hint"
-            android:imeOptions="actionDone"
-            android:inputType="textCapSentences"
-            android:maxLines="1"
-            android:paddingStart="16dp"
-            android:paddingEnd="16dp"
-            android:textColor="@color/inkBlack"
-            android:textColorHint="@color/inkLight"
-            android:textSize="16sp" />
-
-        <!-- Label-left / control-right rows. The date and time buttons are compact: the label
-             carries the row, the control answers it. -->
+        <!-- ── Row 1: the title, and the type beside it ────────────────────── -->
         <LinearLayout
-            style="@style/Editor.LabelRow"
-            android:layout_marginTop="8dp">
-
-            <TextView
-                style="@style/Editor.Label"
-                android:text="@string/editor_starts" />
-
-            <androidx.appcompat.widget.AppCompatButton
-                android:id="@+id/btnStartDate"
-                style="@style/Editor.Compact" />
-
-            <!-- The time sits beside its date; GONE while all-day (the Activity flips the two
-                 time buttons, the rows stay). -->
-            <androidx.appcompat.widget.AppCompatButton
-                android:id="@+id/btnStartTime"
-                style="@style/Editor.Compact"
-                android:layout_marginStart="8dp"
-                android:contentDescription="@string/cd_editor_start_time"
-                android:visibility="gone" />
-
-        </LinearLayout>
-
-        <LinearLayout
-            style="@style/Editor.LabelRow">
-
-            <TextView
-                style="@style/Editor.Label"
-                android:text="@string/editor_ends_on" />
-
-            <androidx.appcompat.widget.AppCompatButton
-                android:id="@+id/btnEndDate"
-                style="@style/Editor.Compact" />
-
-            <!-- Long-press clears it — "no end time" is a real answer. -->
-            <androidx.appcompat.widget.AppCompatButton
-                android:id="@+id/btnEndTime"
-                style="@style/Editor.Compact"
-                android:layout_marginStart="8dp"
-                android:contentDescription="@string/cd_editor_end_time"
-                android:visibility="gone" />
-
-        </LinearLayout>
-
-        <LinearLayout
-            style="@style/Editor.LabelRow">
-
-            <TextView
-                style="@style/Editor.Label"
-                android:text="@string/editor_all_day" />
-
-            <androidx.appcompat.widget.AppCompatButton
-                android:id="@+id/latchAllDay"
-                style="@style/Widget.Notesprout.LatchButton"
-                android:layout_width="wrap_content"
-                android:layout_height="@dimen/editor_field_height"
-                android:minWidth="160dp"
-                android:text="@string/editor_all_day" />
-
-        </LinearLayout>
-
-    </LinearLayout>
-
-    <View
-        style="@style/Editor.GroupLine" />
-
-    <!-- ═══ Group 2: how it repeats ═══ -->
-
-    <LinearLayout
-        android:id="@+id/groupRepeat"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:paddingStart="16dp"
-        android:paddingTop="4dp"
-        android:paddingEnd="16dp"
-        android:paddingBottom="12dp">
-
-        <TextView
-            style="@style/Editor.Caption"
-            android:text="@string/editor_repeats" />
-
-        <androidx.appcompat.widget.AppCompatButton
-            android:id="@+id/btnRepeats"
-            style="@style/Editor.Field" />
-
-        <!-- "Every − N + weeks" — shown while repeating; the unit word follows the frequency. -->
-        <LinearLayout
-            android:id="@+id/everyGroup"
-            style="@style/Editor.InlineRow"
-            android:visibility="gone">
-
-            <TextView
-                android:id="@+id/tvEveryLabel"
-                style="@style/Editor.Inline"
-                android:layout_marginStart="0dp"
-                android:text="@string/editor_every" />
-
-            <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnEveryMinus"
-                style="@style/Widget.Notesprout.ToolbarButton"
-                android:contentDescription="@string/cd_editor_every_minus"
-                android:src="@drawable/ic_minus" />
-
-            <TextView
-                android:id="@+id/tvEvery"
-                style="@style/Editor.StepperValue" />
-
-            <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnEveryPlus"
-                style="@style/Widget.Notesprout.ToolbarButton"
-                android:contentDescription="@string/cd_editor_every_plus"
-                android:src="@drawable/ic_plus" />
-
-            <TextView
-                android:id="@+id/tvEveryUnit"
-                style="@style/Editor.Inline" />
-
-        </LinearLayout>
-
-        <!-- Weekly only: seven latches, Sun … Sat (the calendar's own column order), ISO in the
-             set. Each carries an explicit width — the arc-23 trap. -->
-        <LinearLayout
-            android:id="@+id/rowWeekdays"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:orientation="horizontal"
-            android:visibility="gone">
-
-            <androidx.appcompat.widget.AppCompatButton
-                android:id="@+id/latchSun"
-                style="@style/Editor.Weekday"
-                android:text="@string/day_sun" />
-
-            <androidx.appcompat.widget.AppCompatButton
-                android:id="@+id/latchMon"
-                style="@style/Editor.Weekday"
-                android:text="@string/day_mon" />
-
-            <androidx.appcompat.widget.AppCompatButton
-                android:id="@+id/latchTue"
-                style="@style/Editor.Weekday"
-                android:text="@string/day_tue" />
-
-            <androidx.appcompat.widget.AppCompatButton
-                android:id="@+id/latchWed"
-                style="@style/Editor.Weekday"
-                android:text="@string/day_wed" />
-
-            <androidx.appcompat.widget.AppCompatButton
-                android:id="@+id/latchThu"
-                style="@style/Editor.Weekday"
-                android:text="@string/day_thu" />
-
-            <androidx.appcompat.widget.AppCompatButton
-                android:id="@+id/latchFri"
-                style="@style/Editor.Weekday"
-                android:text="@string/day_fri" />
-
-            <androidx.appcompat.widget.AppCompatButton
-                android:id="@+id/latchSat"
-                style="@style/Editor.Weekday"
-                android:text="@string/day_sat" />
-
-        </LinearLayout>
-
-        <!-- Monthly only: the same day of the month, or the same ordinal weekday — both worded
-             from the start date by the Activity ("On day 14" / "On the 2nd Tue"). -->
-        <LinearLayout
-            android:id="@+id/rowMonthly"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:orientation="vertical"
-            android:visibility="gone">
-
-            <RadioGroup
-                android:id="@+id/monthlyGroup"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical">
-
-                <androidx.appcompat.widget.AppCompatRadioButton
-                    android:id="@+id/radioDayOfMonth"
-                    style="@style/Widget.Notesprout.RadioButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:minHeight="@dimen/editor_field_height" />
-
-                <androidx.appcompat.widget.AppCompatRadioButton
-                    android:id="@+id/radioOrdinal"
-                    style="@style/Widget.Notesprout.RadioButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:minHeight="@dimen/editor_field_height" />
-
-            </RadioGroup>
-
-        </LinearLayout>
-
-        <!-- Ends: caption + field, then the half the choice needs under it (a date, or a count). -->
-        <LinearLayout
-            android:id="@+id/rowEnds"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:visibility="gone">
-
-            <TextView
-                style="@style/Editor.Caption"
-                android:text="@string/editor_ends" />
-
-            <androidx.appcompat.widget.AppCompatButton
-                android:id="@+id/btnEnds"
-                style="@style/Editor.Field" />
-
-            <LinearLayout
-                style="@style/Editor.InlineRow">
-
-                <androidx.appcompat.widget.AppCompatButton
-                    android:id="@+id/btnUntilDate"
-                    style="@style/Editor.Compact"
-                    android:visibility="gone" />
-
-                <LinearLayout
-                    android:id="@+id/countGroup"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal"
-                    android:visibility="gone">
-
-                    <androidx.appcompat.widget.AppCompatImageButton
-                        android:id="@+id/btnCountMinus"
-                        style="@style/Widget.Notesprout.ToolbarButton"
-                        android:contentDescription="@string/cd_editor_count_minus"
-                        android:src="@drawable/ic_minus" />
-
-                    <TextView
-                        android:id="@+id/tvCount"
-                        style="@style/Editor.StepperValue" />
-
-                    <androidx.appcompat.widget.AppCompatImageButton
-                        android:id="@+id/btnCountPlus"
-                        style="@style/Widget.Notesprout.ToolbarButton"
-                        android:contentDescription="@string/cd_editor_count_plus"
-                        android:src="@drawable/ic_plus" />
-
-                    <TextView
-                        android:id="@+id/tvCountUnit"
-                        style="@style/Editor.Inline"
-                        android:text="@string/editor_times" />
-
-                </LinearLayout>
-
-            </LinearLayout>
-
-        </LinearLayout>
-
-    </LinearLayout>
-
-    <View
-        style="@style/Editor.GroupLine" />
-
-    <!-- ═══ Group 3: reminders ═══ -->
-
-    <LinearLayout
-        android:id="@+id/groupRemind"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:paddingStart="16dp"
-        android:paddingTop="4dp"
-        android:paddingEnd="16dp"
-        android:paddingBottom="12dp">
-
-        <TextView
-            style="@style/Editor.Caption"
-            android:paddingBottom="2dp"
-            android:text="@string/editor_remind" />
-
-        <!-- A hint, not information — inkLight is allowed here and nowhere else on the screen. -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"
-            android:text="@string/editor_remind_hint"
-            android:textColor="@color/inkLight"
-            android:textSize="13sp" />
-
-        <!-- The stepper mints an amount + unit; Add turns it into a chip (max 3, no duplicate). -->
-        <LinearLayout
-            android:id="@+id/rowRemind"
+            android:id="@+id/rowTitle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
-            <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnRemindMinus"
-                style="@style/Widget.Notesprout.ToolbarButton"
-                android:contentDescription="@string/cd_editor_remind_minus"
-                android:src="@drawable/ic_minus" />
-
-            <TextView
-                android:id="@+id/tvRemindAmount"
-                style="@style/Editor.StepperValue" />
-
-            <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnRemindPlus"
-                style="@style/Widget.Notesprout.ToolbarButton"
-                android:contentDescription="@string/cd_editor_remind_plus"
-                android:src="@drawable/ic_plus" />
-
-            <androidx.appcompat.widget.AppCompatButton
-                android:id="@+id/latchRemindDays"
-                style="@style/Widget.Notesprout.LatchButton"
-                android:layout_width="wrap_content"
-                android:layout_height="@dimen/editor_field_height"
-                android:layout_marginStart="12dp"
-                android:minWidth="80dp"
-                android:text="@string/editor_days" />
-
-            <androidx.appcompat.widget.AppCompatButton
-                android:id="@+id/latchRemindWeeks"
-                style="@style/Widget.Notesprout.LatchButton"
-                android:layout_width="wrap_content"
-                android:layout_height="@dimen/editor_field_height"
-                android:layout_marginStart="4dp"
-                android:minWidth="80dp"
-                android:text="@string/editor_weeks" />
-
-            <Space
+            <!-- The one IME field on the screen. The border is the box's, so the caret and the hint
+                 sit inside the same frame every other control has. -->
+            <androidx.appcompat.widget.AppCompatEditText
+                android:id="@+id/inputTitle"
                 android:layout_width="0dp"
-                android:layout_height="1dp"
-                android:layout_weight="1" />
+                android:layout_height="@dimen/editor_field_height"
+                android:layout_weight="1"
+                android:background="@drawable/shape_bordered"
+                android:gravity="start|center_vertical"
+                android:hint="@string/editor_title_hint"
+                android:imeOptions="actionDone"
+                android:inputType="textCapSentences"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:singleLine="true"
+                android:textColor="@color/inkBlack"
+                android:textColorHint="@color/inkLight"
+                android:textSize="16sp" />
 
-            <!-- A word, not a glyph: "Add" beside a stepper already full of + signs. -->
+            <!-- Its text is the TYPE's own name ("Appointment"); tapping it opens the type sheet.
+                 No caption over it — a button that says "Appointment" does not need one. -->
             <androidx.appcompat.widget.AppCompatButton
-                android:id="@+id/btnRemindAdd"
+                android:id="@+id/btnType"
                 style="@style/Widget.Notesprout.OutlinedButton"
                 android:layout_width="wrap_content"
                 android:layout_height="@dimen/editor_field_height"
-                android:contentDescription="@string/cd_editor_remind_add"
-                android:minWidth="96dp"
-                android:text="@string/editor_add"
-                android:textSize="16sp" />
+                android:layout_marginStart="8dp"
+                android:minWidth="140dp"
+                android:textSize="16sp"
+                android:textStyle="normal" />
 
         </LinearLayout>
 
-        <!-- The chips, built in code; GONE while there are none. -->
+        <!-- ── Row 2: the dates, All day, and the times ───────────────────── -->
         <LinearLayout
-            android:id="@+id/remindersRow"
+            android:id="@+id/rowWhen"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
+            android:layout_marginTop="8dp"
             android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:visibility="gone" />
+            android:orientation="horizontal">
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnStartDate"
+                style="@style/Widget.Notesprout.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="@dimen/editor_field_height"
+                android:minWidth="0dp"
+                android:textSize="16sp"
+                android:textStyle="normal" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnEndDate"
+                style="@style/Widget.Notesprout.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="@dimen/editor_field_height"
+                android:layout_marginStart="8dp"
+                android:minWidth="0dp"
+                android:textSize="16sp"
+                android:textStyle="normal" />
+
+            <TextView
+                android:id="@+id/tvAllDay"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:text="@string/editor_all_day"
+                android:textColor="@color/inkBlack"
+                android:textSize="16sp" />
+
+            <!-- A plain SwitchCompat: the theme's inkBlack accent is what draws it, and a custom
+                 thumb/track would be one more monochrome drawable to keep in step with nothing. -->
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/swAllDay"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:contentDescription="@string/editor_all_day" />
+
+            <!-- Both GONE while all-day; the Activity flips them from the draft, never the switch. -->
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnStartTime"
+                style="@style/Widget.Notesprout.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="@dimen/editor_field_height"
+                android:layout_marginStart="8dp"
+                android:contentDescription="@string/cd_editor_start_time"
+                android:minWidth="0dp"
+                android:textSize="16sp"
+                android:textStyle="normal"
+                android:visibility="gone" />
+
+            <!-- Long-press clears it — "no end time" is a real answer and needs a way back to it. -->
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnEndTime"
+                style="@style/Widget.Notesprout.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="@dimen/editor_field_height"
+                android:layout_marginStart="8dp"
+                android:contentDescription="@string/cd_editor_end_time"
+                android:minWidth="0dp"
+                android:textSize="16sp"
+                android:textStyle="normal"
+                android:visibility="gone" />
+
+        </LinearLayout>
+
+        <!-- ── Row 3: the two glance buttons ──────────────────────────────── -->
+        <LinearLayout
+            android:id="@+id/rowGlance"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnRepeat"
+                style="@style/Widget.Notesprout.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="@dimen/editor_field_height"
+                android:minWidth="160dp"
+                android:textSize="16sp"
+                android:textStyle="normal" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnRemind"
+                style="@style/Widget.Notesprout.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="@dimen/editor_field_height"
+                android:layout_marginStart="8dp"
+                android:minWidth="160dp"
+                android:textSize="16sp"
+                android:textStyle="normal" />
+
+        </LinearLayout>
 
     </LinearLayout>
 
     <View
-        style="@style/Editor.GroupLine" />
-
-        </LinearLayout>
-
-    </ScrollView>
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="8dp"
+        android:background="@color/inkBlack" />
 
     <!-- Z3's note section lands here (Handwriting/Text toggle over the paper surface / text field);
-         blank in Z2. Its size is what is left under the fields at their tallest layout. -->
+         empty in Z2, and deliberately holding nothing at all. -->
     <FrameLayout
         android:id="@+id/noteArea"
         android:layout_width="match_parent"

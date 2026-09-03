@@ -68,25 +68,23 @@
     <string name="events_unavailable_title">Events unavailable</string>
     <string name="events_unavailable_body">Notesprout SN could not read the calendar\'s storage. Nothing was lost — try again.</string>
 
-    <!-- The event editor: one screen for New and Edit, fields only (Z2) — the note surface is Z3. -->
-    <string name="editor_title_event">Event</string>
-    <string name="cd_editor_back">Back</string>
-    <string name="cd_editor_delete">Delete event</string>
-    <string name="cd_editor_save">Save</string>
-    <string name="editor_type">Type</string>
-    <string name="cd_editor_type">Choose a type</string>
+    <!-- The event editor (Z2, rebuilt to the user's design): three rows over the note area, the two
+         glance buttons opening the repeat and reminder dialogs. Delete is the events LIST's now. -->
+    <string name="editor_title_new">New Event</string>
+    <string name="editor_title_edit">Edit Event</string>
+    <string name="editor_save">Save</string>
     <string name="editor_title_hint">Title</string>
-    <string name="editor_starts">Starts</string>
-    <string name="editor_ends_on">Ends</string>
     <string name="editor_all_day">All day</string>
     <string name="editor_no_end_time">No end time</string>
-    <string name="editor_start_time">Start time</string>
-    <string name="editor_end_time">End time</string>
-    <string name="editor_add">Add</string>
-    <!-- A hint under "Remind me" — inkLight, the one grey line on the screen: it explains, it does not inform. -->
-    <string name="editor_remind_hint">Surfaces in the day\'s Upcoming list ahead of time.</string>
     <string name="cd_editor_start_time">Start time</string>
     <string name="cd_editor_end_time">End time (long-press to clear)</string>
+
+    <!-- The glance buttons' UNSET words. Set, they read EventWording.repeatGlance / reminderLabel —
+         the value alone, built from ints, never a resource. -->
+    <string name="editor_repeat">Repeat</string>
+    <string name="editor_remind">Remind me</string>
+
+    <!-- RepeatDialog: the frequency sheet, then that frequency's details. -->
     <string name="editor_repeats">Repeats</string>
     <string name="editor_repeat_never">Never</string>
     <string name="editor_repeat_daily">Daily</string>
@@ -121,20 +119,19 @@
     <string name="editor_ends">Ends</string>
     <string name="editor_ends_never">Never</string>
     <string name="editor_ends_on_date">On a date</string>
-    <string name="editor_ends_after">After N times</string>
     <string name="editor_ends_after_short">After</string>
     <string name="cd_editor_count_minus">Fewer</string>
     <string name="cd_editor_count_plus">More</string>
     <string name="editor_times">times</string>
-    <string name="editor_remind">Remind me</string>
+
+    <!-- RemindDialog: one reminder, or None. -->
     <string name="cd_editor_remind_minus">Fewer</string>
     <string name="cd_editor_remind_plus">More</string>
     <string name="editor_days">Days</string>
     <string name="editor_weeks">Weeks</string>
-    <string name="cd_editor_remind_add">Add reminder</string>
-    <string name="cd_editor_remind_remove">Remove reminder</string>
-    <string name="editor_reminders_full">At most three reminders per event.</string>
-    <string name="editor_reminder_duplicate">That reminder is already on this event.</string>
+    <string name="editor_remind_none">None</string>
+
+    <!-- Cancel discards, but never silently. -->
     <string name="editor_discard_title">Discard changes?</string>
     <string name="editor_discard_body">This event has unsaved changes.</string>
     <string name="editor_discard_confirm">Discard</string>
@@ -143,11 +140,17 @@
     <string name="editor_problem_empty_title">Give the event a title.</string>
     <string name="editor_problem_until">The \"ends on\" date is before the start.</string>
     <string name="editor_save_failed">Notesprout SN could not save the event. Nothing was changed.</string>
-    <string name="editor_delete_failed">Notesprout SN could not delete the event. Nothing was changed.</string>
-    <string name="editor_delete_title">Delete %1$s?</string>
-    <string name="editor_delete_body_once">This event will be removed.</string>
-    <string name="editor_delete_body_series">Delete every occurrence of %1$s?</string>
-    <string name="editor_delete_confirm">Delete</string>
+
+    <!-- Delete, on the events LIST (the user's call): a trash icon per row. -->
+    <string name="cd_events_delete">Delete event</string>
+    <string name="events_delete_title">Delete %1$s?</string>
+    <string name="events_delete_body_once">This event will be removed.</string>
+    <string name="events_delete_body_series">Delete every occurrence of %1$s?</string>
+    <string name="events_delete_confirm">Delete</string>
+    <string name="events_delete_failed_title">Cannot delete</string>
+    <string name="events_delete_failed">Notesprout SN could not delete the event. Nothing was changed.</string>
+
+    <!-- The three scopes, for an edit (the editor) or a delete (the list). -->
     <string name="scope_title_edit">Change which events?</string>
     <string name="scope_title_delete">Delete which events?</string>
     <string name="scope_this">This occurrence</string>

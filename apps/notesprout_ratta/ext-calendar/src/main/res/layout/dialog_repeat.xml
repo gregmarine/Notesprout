@@ -1,0 +1,223 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The repeat details dialog (arc 24 / Z2) — `RepeatDialog`'s second step, opened once a frequency has
+  been chosen from the sheet. Styled through `Dialogs.style` like `dialog_time_picker.xml`: the
+  window's own `shape_dialog_bordered` is the white and the border, so this root paints nothing, and
+  Save/Cancel are the AlertDialog's own buttons rather than views here.
+
+  Everything the editor's second and third groups used to hold, in one place and applied only on
+  **Save**: the interval stepper, the weekday bar (weekly only), the two monthly choices (monthly
+  only), and how the series ends. `RepeatDialog` flips the two conditional blocks from its working
+  draft; nothing here is `isEnabled = false` (invisible on e-ink) and nothing carries a divider of
+  its own.
+
+  The arc-23 trap: `LatchButton` sets no size, so the seven weekday latches take `Editor.Weekday`
+  (which sets both) and every other button below carries width and height explicitly.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <!-- "Every − 2 + weeks" — the unit word follows the frequency and is singular at 1. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            style="@style/Editor.Inline"
+            android:layout_marginStart="0dp"
+            android:text="@string/editor_every" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnEveryMinus"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:contentDescription="@string/cd_editor_every_minus"
+            android:src="@drawable/ic_minus" />
+
+        <TextView
+            android:id="@+id/tvEvery"
+            style="@style/Editor.StepperValue" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnEveryPlus"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:contentDescription="@string/cd_editor_every_plus"
+            android:src="@drawable/ic_plus" />
+
+        <TextView
+            android:id="@+id/tvEveryUnit"
+            style="@style/Editor.Inline" />
+
+    </LinearLayout>
+
+    <!-- Weekly only: seven latches, Sun … Sat (the calendar's own column order), ISO in the set. -->
+    <LinearLayout
+        android:id="@+id/rowWeekdays"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/latchSun"
+            style="@style/Editor.Weekday"
+            android:text="@string/day_sun" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/latchMon"
+            style="@style/Editor.Weekday"
+            android:text="@string/day_mon" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/latchTue"
+            style="@style/Editor.Weekday"
+            android:text="@string/day_tue" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/latchWed"
+            style="@style/Editor.Weekday"
+            android:text="@string/day_wed" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/latchThu"
+            style="@style/Editor.Weekday"
+            android:text="@string/day_thu" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/latchFri"
+            style="@style/Editor.Weekday"
+            android:text="@string/day_fri" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/latchSat"
+            style="@style/Editor.Weekday"
+            android:text="@string/day_sat" />
+
+    </LinearLayout>
+
+    <!-- Monthly only: the same day of the month, or the same ordinal weekday — both worded from the
+         start date by `RepeatDialog` ("On day 14" / "On the 2nd Tue"). -->
+    <LinearLayout
+        android:id="@+id/rowMonthly"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <RadioGroup
+            android:id="@+id/monthlyGroup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <androidx.appcompat.widget.AppCompatRadioButton
+                android:id="@+id/radioDayOfMonth"
+                style="@style/Widget.Notesprout.RadioButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="@dimen/editor_field_height" />
+
+            <androidx.appcompat.widget.AppCompatRadioButton
+                android:id="@+id/radioOrdinal"
+                style="@style/Widget.Notesprout.RadioButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="@dimen/editor_field_height" />
+
+        </RadioGroup>
+
+    </LinearLayout>
+
+    <!-- Ends: three radios, each with the control its own answer needs indented under it. The two
+         dependent controls sit INSIDE the RadioGroup as plain children — a RadioGroup manages only
+         its RadioButton children, so nothing here can steal the exclusivity. -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="@string/editor_ends"
+        android:textColor="@color/inkBlack"
+        android:textSize="16sp" />
+
+    <RadioGroup
+        android:id="@+id/endsGroup"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <androidx.appcompat.widget.AppCompatRadioButton
+            android:id="@+id/radioEndsNever"
+            style="@style/Widget.Notesprout.RadioButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="@dimen/editor_field_height"
+            android:text="@string/editor_ends_never" />
+
+        <androidx.appcompat.widget.AppCompatRadioButton
+            android:id="@+id/radioEndsUntil"
+            style="@style/Widget.Notesprout.RadioButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="@dimen/editor_field_height"
+            android:text="@string/editor_ends_on_date" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnUntilDate"
+            style="@style/Widget.Notesprout.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="@dimen/editor_field_height"
+            android:layout_marginStart="32dp"
+            android:layout_marginBottom="4dp"
+            android:minWidth="0dp"
+            android:textSize="16sp"
+            android:textStyle="normal"
+            android:visibility="gone" />
+
+        <androidx.appcompat.widget.AppCompatRadioButton
+            android:id="@+id/radioEndsCount"
+            style="@style/Widget.Notesprout.RadioButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="@dimen/editor_field_height"
+            android:text="@string/editor_ends_after_short" />
+
+        <LinearLayout
+            android:id="@+id/countGroup"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="32dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnCountMinus"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_editor_count_minus"
+                android:src="@drawable/ic_minus" />
+
+            <TextView
+                android:id="@+id/tvCount"
+                style="@style/Editor.StepperValue" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnCountPlus"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_editor_count_plus"
+                android:src="@drawable/ic_plus" />
+
+            <TextView
+                style="@style/Editor.Inline"
+                android:text="@string/editor_times" />
+
+        </LinearLayout>
+
+    </RadioGroup>
+
+</LinearLayout>

@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The reminder dialog (arc 24 / Z2) — `RemindDialog`'s content, in `dialog_time_picker.xml`'s shape:
+  a live preview line above the controls that set it, `Dialogs.style` for the window, and Save /
+  Cancel / None as the AlertDialog's own buttons rather than views here.
+
+  ONE reminder (the user's call — the store still keeps its cap of three for events written before
+  this screen existed). A stepper for the amount and a Days/Weeks latch pair; the preview is the
+  same sentence the glance button will read once the dialog is gone (`EventWording.reminderLabel`),
+  so the dialog cannot describe a reminder one way and the editor another.
+
+  The arc-23 trap: the two latches carry width and height explicitly — `LatchButton` sets neither.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        android:id="@+id/tvRemind"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp"
+        android:gravity="center"
+        android:textColor="@color/inkBlack"
+        android:textSize="24sp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnRemindMinus"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:contentDescription="@string/cd_editor_remind_minus"
+            android:src="@drawable/ic_minus" />
+
+        <TextView
+            android:id="@+id/tvRemindAmount"
+            style="@style/Editor.StepperValue" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnRemindPlus"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:contentDescription="@string/cd_editor_remind_plus"
+            android:src="@drawable/ic_plus" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/latchRemindDays"
+            style="@style/Widget.Notesprout.LatchButton"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/editor_field_height"
+            android:layout_marginStart="12dp"
+            android:layout_weight="1"
+            android:text="@string/editor_days" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/latchRemindWeeks"
+            style="@style/Widget.Notesprout.LatchButton"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/editor_field_height"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1"
+            android:text="@string/editor_weeks" />
+
+    </LinearLayout>
+
+</LinearLayout>

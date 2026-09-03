@@ -199,21 +199,16 @@ data class EventDraft(
     // ── Reminders ────────────────────────────────────────────────────────────
 
     /**
-     * One reminder added, or **null when it cannot be** — past [EventRules.REMINDERS_MAX], a
-     * duplicate of one already listed, or a lead of less than a day. Null rather than a silently
-     * unchanged draft, so the screen can say why the tap did nothing (a dialog; on e-ink a tap
-     * that did nothing and said nothing is indistinguishable from a tap that was not registered).
+     * The event's reminder set to [r], or cleared with null — **one at a time**, which is what the
+     * editor offers (the user's call). Normalized on the way in exactly as the store would: a lead
+     * of less than a day is no reminder at all, so it lands as none rather than as a reminder that
+     * silently disappears at save.
+     *
+     * [EventRules.REMINDERS_MAX] still stands — it is the store's rule, and an event written before
+     * the one-reminder editor may carry three. Saving from that editor is what reduces it to one.
      */
-    fun addReminder(amount: Int, unit: ReminderUnit): EventDraft? {
-        if (amount < 1) return null
-        if (reminders.size >= EventRules.REMINDERS_MAX) return null
-        if (reminders.any { it.amount == amount && it.unit == unit }) return null
-        return copy(reminders = EventRules.normalize(reminders + Reminder(amount, unit)))
-    }
-
-    /** One reminder chip removed. */
-    fun removeReminder(r: Reminder): EventDraft =
-        copy(reminders = reminders.filterNot { it.amount == r.amount && it.unit == r.unit })
+    fun withReminder(r: Reminder?): EventDraft =
+        copy(reminders = EventRules.normalize(listOfNotNull(r)))
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 

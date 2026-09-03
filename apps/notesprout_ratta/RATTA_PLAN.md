@@ -15,7 +15,7 @@ arcs 19–22's full phase records at the end of this file until the next compact
 feature's authoritative reference is its `docs/` file. **Arc 22 "Tables" is complete and frozen
 (2026-09-01) — X1–X5 all ✅: the extension store is real SQLite tables behind gated parameterized
 SQL. Arc 23 "Calendar" is PLANNED (wizard locked 2026-09-01, § "Phases — Arc 23"
-below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd) · **Y4 ✅** (2026-09-02: the user reversed "no code review" — `/code-review high` on the arc range, ten findings, all ten fixed incl. two sibling-copy refactors; docs + ledger; Nomad walks; user checklist passed). **Arcs 1–23 are complete and frozen.** The SEVENTH point is live; no EIGHTH without another decision. **Arc 24 "Events" is IN PROGRESS (wizard locked 2026-09-02, § "Phases — Arc 24" below) — Z1 ✅ (893b20e1 — `CalendarSchema.V2` + store + engine, 1965 JVM tests/variant) · **Z2 ✅** (2846d770 — events screen + editor + the calendar's door, 2013 JVM tests/variant) · Z3 ⬜ · Z4 ⬜ · Z5 ⬜; not a point, not an `API_VERSION` bump: two in-process screens and five tables inside `:ext-calendar`.**
+below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd) · **Y4 ✅** (2026-09-02: the user reversed "no code review" — `/code-review high` on the arc range, ten findings, all ten fixed incl. two sibling-copy refactors; docs + ledger; Nomad walks; user checklist passed). **Arcs 1–23 are complete and frozen.** The SEVENTH point is live; no EIGHTH without another decision. **Arc 24 "Events" is IN PROGRESS (wizard locked 2026-09-02, § "Phases — Arc 24" below) — Z1 ✅ (893b20e1 — `CalendarSchema.V2` + store + engine, 1965 JVM tests/variant) · **Z2 ✅** (2846d770 — events screen + editor + the calendar's door; editor rebuilt to the user's design 2026-09-03, 2014 JVM tests/variant) · Z3 ⬜ · Z4 ⬜ · Z5 ⬜; not a point, not an `API_VERSION` bump: two in-process screens and five tables inside `:ext-calendar`.**
 
 ---
 
@@ -1584,6 +1584,29 @@ crushed the reminder row into a half-drawn line before). **Finding for Z3:** at 
 "only what fits" is close to zero there; Z3's measurement will have to say what happens then. **The user is sleeping on this screen and will
 bring their own layout for it — a one-off in their words, but a gap worth closing; Z3 does not start until
 that layout lands.**
+**Rebuilt to the user's own design (2026-09-03, Opus built · Fable walked the Nomad by hand).** The
+user came back with a sketch and six answers, and the og-form reshape above is gone. The screen is now
+**three rows over the note area**: (1) the title field with the TYPE named on the button beside it;
+(2) start date · end date · an "All day" `SwitchCompat` (og's control, the theme's inkBlack accent draws
+it) · and, only while all-day is off, the two time buttons; (3) two **glance buttons**, Repeat and
+Remind me, that say the word alone when unset and the value concisely when set ("Weekly", "Every 2
+weeks", "1 week before" — `EventWording.repeatGlance`). The top bar is `title … [Cancel] [Save]` (the
+folder picker's idiom; "New Event" / "Edit Event" by mode; no back arrow); system Back = Cancel behind
+the discard confirm. **Delete is not on the editor** — it is a trash icon on every events-list row
+(`EventRowView`, `EventsActivity.confirmDelete`), same scope sheet and named confirm as before. The
+details moved into two dialogs that **apply on Save and discard on Cancel**: `RepeatDialog` (frequency
+sheet FIRST — Never saves at once — then a details dialog: Every − N +, weekday latches, monthly radios,
+Ends radios Never / On a date / After − N + times) and `RemindDialog` (− N + · Days/Weeks latches under a
+preview line, buttons None / Cancel / Save). **The editor holds ONE reminder** (`EventDraft.withReminder`;
+`addReminder`/`removeReminder` gone) while the store keeps `REMINDERS_MAX` — saving from the editor is
+what reduces an older event's list to one. No ScrollView (three rows fit above the IME), no captions,
+no per-row dividers; the `Editor.*` vocabulary shrank to the three styles the dialogs use;
+`editor_field_height` 52 dp stays. **For Z3:** the fields end ~200 dp under the top bar in every state,
+so the note area's height is now fixed by the screen, not by the repeat rule — the tallest-layout finding
+above no longer applies. Tests 2013 → 2014/variant. Walked on the Nomad: list with trash icons · Edit
+prefill ("Dentist": Sep 2, 11:00 AM, Weekly, 1 week before) · Repeat sheet → Weekly details with Mon/Tue/
+Wed and After 5 prefilled · Remind dialog · New Event with the IME up (rows fit) · typed a title · switch
+off shows 9:00 AM + No end time · Save lands in Today · trash → "Delete test?" → gone. No crash.
 **Deviations from the brief, accepted:** `EventsRow.Header` carries a `Section` enum, not a string id;
 `clampPage`/`pageCount` take the row list + three pixel sizes (no `perPage` exists with two heights);
 `withEndMode(UNTIL)` seeds the start date and `blank()` seeds `endCount` 10; `ordinalOf` answers `5 to
