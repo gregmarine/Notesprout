@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The event editor's row vocabulary (arc 24 / Z2) — module-local, because no other screen is a form.
+  Two row shapes and the pieces they are made of; everything hand-sized is dimen-driven
+  (`toolbar_button_size`), never a number. The parents that set no size (`OutlinedButton`,
+  `LatchButton`) get theirs here, so a field in the layout cannot forget them (the arc-23 trap).
+-->
+<resources>
+
+    <!-- A bold caption OVER a full-width field: "Type", "Title", "Repeats", "Ends", "Remind me". -->
+    <style name="Editor.Caption" parent="TextAppearance.Notesprout">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:paddingTop">10dp</item>
+        <item name="android:paddingBottom">4dp</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textColor">@color/inkBlack</item>
+    </style>
+
+    <!-- The full-width bordered field under a caption: text LEFT with inner padding, one hand-sized
+         tap target tall. A field is a button here because tapping it opens a sheet. -->
+    <style name="Editor.Field" parent="Widget.Notesprout.OutlinedButton">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">@dimen/editor_field_height</item>
+        <item name="android:gravity">start|center_vertical</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:textStyle">normal</item>
+    </style>
+
+    <!-- A label-left / control-right row. -->
+    <style name="Editor.LabelRow" parent="">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">4dp</item>
+        <item name="android:minHeight">@dimen/editor_field_height</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:orientation">horizontal</item>
+    </style>
+
+    <!-- The row's label — bold, and it takes the width the control leaves. -->
+    <style name="Editor.Label" parent="TextAppearance.Notesprout">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textColor">@color/inkBlack</item>
+    </style>
+
+    <!-- The row's control: a compact bordered button that says one thing ("Sep 2, 2026", "11:00 AM"). -->
+    <style name="Editor.Compact" parent="Widget.Notesprout.OutlinedButton">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">@dimen/editor_field_height</item>
+        <item name="android:minWidth">160dp</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:textStyle">normal</item>
+    </style>
+
+    <!-- An inline sub-choice under a field ("Every − 1 + weeks"). -->
+    <style name="Editor.InlineRow" parent="">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">4dp</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:orientation">horizontal</item>
+    </style>
+
+    <!-- A word inside an inline row. -->
+    <style name="Editor.Inline" parent="TextAppearance.Notesprout">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginStart">4dp</item>
+        <item name="android:layout_marginEnd">4dp</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:textColor">@color/inkBlack</item>
+    </style>
+
+    <!-- The number between a stepper's − and +. -->
+    <style name="Editor.StepperValue" parent="TextAppearance.Notesprout">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:minWidth">44dp</item>
+        <item name="android:gravity">center</item>
+        <item name="android:textSize">18sp</item>
+        <item name="android:textColor">@color/inkBlack</item>
+    </style>
+
+    <!-- One of the seven weekday latches — explicit width (weight) and height, the arc-23 trap. -->
+    <style name="Editor.Weekday" parent="Widget.Notesprout.LatchButton">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">@dimen/editor_field_height</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:layout_marginStart">2dp</item>
+        <item name="android:layout_marginEnd">2dp</item>
+        <item name="android:paddingStart">0dp</item>
+        <item name="android:paddingEnd">0dp</item>
+        <item name="android:textSize">14sp</item>
+    </style>
+
+    <!-- The hairline between groups — the only lines on the screen. -->
+    <style name="Editor.GroupLine" parent="">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">1dp</item>
+        <item name="android:background">@color/inkBlack</item>
+    </style>
+
+</resources>

@@ -80,6 +80,11 @@
     <string name="editor_ends_on">Ends</string>
     <string name="editor_all_day">All day</string>
     <string name="editor_no_end_time">No end time</string>
+    <string name="editor_start_time">Start time</string>
+    <string name="editor_end_time">End time</string>
+    <string name="editor_add">Add</string>
+    <!-- A hint under "Remind me" — inkLight, the one grey line on the screen: it explains, it does not inform. -->
+    <string name="editor_remind_hint">Surfaces in the day\'s Upcoming list ahead of time.</string>
     <string name="cd_editor_start_time">Start time</string>
     <string name="cd_editor_end_time">End time (long-press to clear)</string>
     <string name="editor_repeats">Repeats</string>

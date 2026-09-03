@@ -1567,6 +1567,21 @@ empty. **Two layout faults found on the glass and fixed:** every conditional row
 they carry ids now (`dividerWeekdays/Monthly/Ends`) and flip with their rows; and the "Ends" caption in
 the dates row sat against its button (margins). Re-installed and re-checked. **User checklist:** rows feel
 hand-sized · a physical keyboard types the title while the IME shows · nothing under the fields is clipped.
+**Reshaped the same night (the user: "surprisingly bad").** Side by side with og's editor on the Manta,
+the first layout was a ladder of boxes — a 62 dp bordered button filling every row edge to edge with a
+divider under each, centred text, three control shapes per row. The rebuild is og's form: three groups
+(the event · how it repeats · reminders) separated by one hairline each, 16 dp of air, **two row shapes**
+— a bold caption OVER a full-width left-aligned field (Type, Title, Repeats, Ends), and a bold label LEFT
+with its control RIGHT (Starts/Ends carry the date and, while not all-day, the time beside it; All day the
+latch) — inline sub-rows for "Every − N + weeks", the seven weekday latches and "− N + times", a grey
+hint under Remind me (the screen's one inkLight line), a worded **Add** button, and NO per-row dividers.
+The vocabulary is module-local `values/styles.xml` (`Editor.Caption/Field/LabelRow/Label/Compact/
+InlineRow/Inline/StepperValue/Weekday/GroupLine`), and form fields take a new `editor_field_height`
+(52 dp) rather than the 62 dp icon-button dimen — ten 62 dp fields stacked pushed the reminders off the
+panel. The three groups sit in a `ScrollView` that only ever scrolls with the IME up (`adjustResize`
+crushed the reminder row into a half-drawn line before). **Finding for Z3:** at the TALLEST layout
+(weekly + after-N + a reminder chip) the fields reach the bottom of the Nomad's panel — the note area's
+"only what fits" is close to zero there; Z3's measurement will have to say what happens then.
 **Deviations from the brief, accepted:** `EventsRow.Header` carries a `Section` enum, not a string id;
 `clampPage`/`pageCount` take the row list + three pixel sizes (no `perPage` exists with two heights);
 `withEndMode(UNTIL)` seeds the start date and `blank()` seeds `endCount` 10; `ordinalOf` answers `5 to

@@ -355,10 +355,11 @@ class EventEditorActivity : AppCompatActivity() {
         binding.btnEndDate.text = EventWording.dateWithYear(d.endDate)
 
         binding.latchAllDay.isSelected = d.allDay
-        // GONE, never disabled — a disabled control is invisible on e-ink. The row itself stays, so
-        // the screen does not reflow a whole band on one tap.
-        binding.btnStartTime.visibility = if (d.allDay) View.GONE else View.VISIBLE
-        binding.btnEndTime.visibility = if (d.allDay) View.GONE else View.VISIBLE
+        // GONE, never disabled — a disabled control is invisible on e-ink. The time sits beside its
+        // date; the rows stay, so the screen does not reflow on one tap.
+        val times = if (d.allDay) View.GONE else View.VISIBLE
+        binding.btnStartTime.visibility = times
+        binding.btnEndTime.visibility = times
         // A stored event can be timed and yet hold no start minute; the badge's own em dash is
         // what says "no time set" everywhere else, so it says it here too.
         binding.btnStartTime.text = d.startMinute?.let(EventWording::minute) ?: NO_TIME
@@ -369,21 +370,15 @@ class EventEditorActivity : AppCompatActivity() {
         binding.tvEvery.text = d.interval.toString()
         d.freq?.let { binding.tvEveryUnit.setText(unitLabel(it, d.interval)) }
 
-        // Each conditional row's divider goes with it: a divider left under a GONE row stacks on
-        // the next row's into a thick line (the Nomad showed it at Z2's first walk).
-        val weekdays = if (d.freq == Freq.WEEKLY) View.VISIBLE else View.GONE
-        binding.rowWeekdays.visibility = weekdays
-        binding.dividerWeekdays.visibility = weekdays
+        // Nothing conditional carries a divider of its own (the first walk's stacked-divider
+        // lesson): the three group hairlines are the only lines on the screen.
+        binding.rowWeekdays.visibility = if (d.freq == Freq.WEEKLY) View.VISIBLE else View.GONE
         weekdayLatches().forEach { (view, iso) -> view.isSelected = iso in d.weekdays }
 
-        val monthly = if (d.freq == Freq.MONTHLY) View.VISIBLE else View.GONE
-        binding.rowMonthly.visibility = monthly
-        binding.dividerMonthly.visibility = monthly
+        binding.rowMonthly.visibility = if (d.freq == Freq.MONTHLY) View.VISIBLE else View.GONE
         if (d.freq == Freq.MONTHLY) renderMonthly(d)
 
-        val ends = if (d.freq != null) View.VISIBLE else View.GONE
-        binding.rowEnds.visibility = ends
-        binding.dividerEnds.visibility = ends
+        binding.rowEnds.visibility = if (d.freq != null) View.VISIBLE else View.GONE
         binding.btnEnds.text = getString(
             when (d.endMode) {
                 EndMode.NEVER -> R.string.editor_ends_never
