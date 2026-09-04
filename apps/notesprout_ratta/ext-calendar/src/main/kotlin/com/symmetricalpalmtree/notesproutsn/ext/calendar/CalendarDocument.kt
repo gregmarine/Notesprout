@@ -9,12 +9,18 @@ import com.symmetricalpalmtree.notesproutsn.ink.InkDocument
 import com.symmetricalpalmtree.notesproutsn.ink.InkPage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.time.LocalDate
 
 /**
  * The calendar's page — in memory, over [CalendarStore] (arc 23 / Y1). The screen owns the paper and
  * the chrome; this owns *which* page is showing (a [CalendarTarget]), whether its rows exist yet,
  * and its size; **what is on the page** — the strokes, the op log, the re-flush rule and the four
  * stroke-level replays — is `:ext-ink`'s [InkDocument], shared with the pad so the two never drift.
+ *
+ * Since arc 24 / Z4 it also carries the showing page's **[marks]** — the events the grid draws,
+ * read through a [MarkSource] in the same IO hop as the strokes, because they are as much part of
+ * "which page is showing" as its size is. They are read, never written: the events screen owns
+ * every write.
  *
  * **Rows are minted on the first stroke, never on open.** [show] reads what is there and writes
  * nothing; a page with no row is shown blank at the surface's size with ids minted in memory. The
@@ -35,11 +41,25 @@ import kotlinx.coroutines.withContext
  */
 class CalendarDocument(
     private val store: CalendarStore,
+    /** Where the showing page's [DayMark]s come from — [EventStore] in the app, a fake in tests.
+     *  Held under its own name because the *loaded* marks are the public [marks] property. */
+    marks: MarkSource,
     /** The paper surface in px — the size a page with no recorded size of its own takes. */
     private val surfaceSize: () -> Pair<Float, Float>,
 ) : InkPage {
 
     private val ink = InkDocument(CalendarSql, TAG)
+
+    private val markSource = marks
+
+    /**
+     * The showing page's events, by day (arc 24 / Z4) — **empty before the first [show]**, and
+     * read in the same IO hop as the page's strokes, so a page and its marks are never one
+     * navigation apart. [CalendarActivity] bakes them into the page's template and compares them
+     * structurally in its bake key.
+     */
+    var marks: Map<LocalDate, List<DayMark>> = emptyMap()
+        private set
 
     /** The page showing. Set by the first [show]; the screen never asks before it. */
     lateinit var target: CalendarTarget
@@ -76,18 +96,31 @@ class CalendarDocument(
     // ── Showing ──────────────────────────────────────────────────────────────
 
     /**
-     * Show [next]. The target is read **before** the departing page is flushed, and the bookmark is
-     * written **before** the in-memory swap: every store round-trip a show makes comes first, so a
-     * show that throws leaves the document — and with it the paper and the organizer — exactly
-     * where it was. (A bookmark that names a page the swap then fails to reach cannot happen: the
-     * swap is memory only.) Returns without a store round-trip when [next] is already showing.
+     * Show [next]. The target's page **and its marks** are read in one IO hop **before** the
+     * departing page is flushed, and the bookmark is written **before** the in-memory swap: every
+     * store round-trip a show makes comes first, so a show that throws leaves the document — and
+     * with it the paper and the organizer — exactly where it was. That includes [marks], which is
+     * assigned in the swap and nowhere else. (A bookmark that names a page the swap then fails to
+     * reach cannot happen: the swap is memory only.)
+     *
+     * Returns without a store round-trip when [next] is already showing — **unless** [refreshMarks]
+     * says to re-read them, and then it is one hop that reads the marks alone: no page read, no
+     * flush, no bookmark. That path exists for the way back from the **events screen**, which is
+     * the one thing in this app that changes what a page's marks are while the page itself has not
+     * moved: an event added, edited or deleted there must show on the grid the calendar comes back
+     * to, and the return usually lands on the very page the person left.
      */
-    suspend fun show(next: CalendarTarget) {
-        if (isOpen && next == target) return
-        val stored = withContext(Dispatchers.IO) { store.readPage(next) }
+    suspend fun show(next: CalendarTarget, refreshMarks: Boolean = false) {
+        if (isOpen && next == target) {
+            if (!refreshMarks) return
+            marks = withContext(Dispatchers.IO) { readMarks(next) }
+            return
+        }
+        val (stored, fresh) = withContext(Dispatchers.IO) { store.readPage(next) to readMarks(next) }
         if (isOpen) flushUntilClean()
         withContext(Dispatchers.IO) { store.saveState(next) }
         target = next
+        marks = fresh
         periodId = stored.periodId ?: CalendarStore.newId()
         pageMinted = stored.pageId != null
         val id = stored.pageId ?: CalendarStore.newId()
@@ -106,6 +139,12 @@ class CalendarDocument(
                 sizeDirty = pageMinted
             }
         }
+    }
+
+    /** The marks a page of [t] shows — the range is [GridMarks]', never guessed here. Blocking. */
+    private fun readMarks(t: CalendarTarget): Map<LocalDate, List<DayMark>> {
+        val (from, to) = GridMarks.rangeOf(t)
+        return markSource.marksFor(from, to)
     }
 
     // ── Mutations (Main, synchronous) ────────────────────────────────────────

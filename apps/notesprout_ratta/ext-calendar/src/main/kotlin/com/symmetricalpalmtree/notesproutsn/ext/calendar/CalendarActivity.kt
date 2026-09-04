@@ -48,7 +48,10 @@ import kotlin.coroutines.resume
  * **The grid is the page's template.** [CalendarGeometry] lays it out at the page's own size under
  * the two bars, [CalendarTemplate] paints it, and g-paper sets it behind the ink — so a store
  * carried to another screen keeps grid and ink registered (the pad's 1:1 rule). It is re-baked on
- * every navigation and on `onResume`, because today's ring moves. The page rect is anchored
+ * every navigation and on `onResume`, because today's ring moves — and since arc 24 / Z4 **the
+ * day's events are in it too**: [CalendarDocument] loads the page's marks in the same IO hop as its
+ * strokes, [BakeKey] carries them structurally, and the events screen's return re-reads them for a
+ * page that never moved. The page rect is anchored
  * top-left and the page *is* the whole surface, so **a finger's view coordinates are page
  * coordinates 1:1** — the double-tap hit-tests the raw point against the same geometry the
  * template was painted from, and nothing is scaled.
@@ -133,13 +136,27 @@ class CalendarActivity : InkScreenActivity<InkAction>() {
     /** The day the showing template was baked for — re-baked when it is no longer today. */
     private var bakedToday: LocalDate? = null
 
-    /** What the template on the paper was baked from — the page, the day, the page size and the
-     *  bars' measured heights. A [showPage] whose key is unchanged (an undo or redo on the showing
-     *  page) reloads the strokes and nothing else: no page-sized bitmap, no extra EPD frames. */
+    /** What the template on the paper was baked from — the page, the day, the page size, the
+     *  bars' measured heights and (arc 24 / Z4) **the marks that were drawn into it**. A [showPage]
+     *  whose key is unchanged (an undo or redo on the showing page) reloads the strokes and nothing
+     *  else: no page-sized bitmap, no extra EPD frames. */
     private var bakeKey: BakeKey? = null
     private var baked: android.graphics.Bitmap? = null
 
-    private data class BakeKey(val target: CalendarTarget, val today: LocalDate, val width: Int, val height: Int, val top: Int, val bottom: Int)
+    /**
+     * [marks] is compared **structurally**, not by a hash: a hash can collide, and a collision here
+     * is a page that silently keeps showing an event the person just deleted. A `Map` of a handful
+     * of small data classes costs nothing to compare against the page-sized bitmap it decides.
+     */
+    private data class BakeKey(
+        val target: CalendarTarget,
+        val today: LocalDate,
+        val width: Int,
+        val height: Int,
+        val top: Int,
+        val bottom: Int,
+        val marks: Map<LocalDate, List<DayMark>>,
+    )
 
     // ── What the skeleton asks for ───────────────────────────────────────────
 
@@ -285,7 +302,7 @@ class CalendarActivity : InkScreenActivity<InkAction>() {
             failOpen()
             return
         }
-        document = CalendarDocument(CalendarStore(store)) { surfaceSize() }
+        document = CalendarDocument(CalendarStore(store), EventStore(store)) { surfaceSize() }
         lifecycleScope.launch { openDocument(CalendarStore(store)) }
     }
 
@@ -320,7 +337,11 @@ class CalendarActivity : InkScreenActivity<InkAction>() {
         pushExclusions()   // swap the block-all rect for the real chrome rects
         // Deliberately NOT pen-idle-gated: a boundary frame, nothing has been drawn yet.
         binding.openingOverlay.visibility = View.GONE
-        Slog.d(TAG) { "page ${doc.target.kind}/${doc.target.date}/${doc.target.half} loaded: ${doc.strokes.size} strokes" }
+        // Counts only — never a title: an event's words are the person's own.
+        Slog.d(TAG) {
+            "page ${doc.target.kind}/${doc.target.date}/${doc.target.half} loaded: " +
+                "${doc.strokes.size} strokes, ${doc.marks.size} marked day(s)"
+        }
         consumeReceived()
     }
 
@@ -401,7 +422,9 @@ class CalendarActivity : InkScreenActivity<InkAction>() {
      */
     private suspend fun showMove(m: CalendarNavigation.Move, firstLoad: Boolean = false, forceBake: Boolean = false) {
         val doc = document ?: return
-        doc.show(m.target)
+        // [forceBake] is only ever set by the events screen's return, and that is exactly the case
+        // where the page may not have moved while its marks did: ask for them again.
+        doc.show(m.target, refreshMarks = forceBake)
         nav.shown(m)
         showPage(firstLoad, forceBake)
     }
@@ -485,7 +508,10 @@ class CalendarActivity : InkScreenActivity<InkAction>() {
     private fun applyTemplate(force: Boolean) {
         val doc = document ?: return
         val today = LocalDate.now()
-        val key = BakeKey(doc.target, today, doc.pageWidth.toInt(), doc.pageHeight.toInt(), binding.topBar.height, binding.bottomBar.height)
+        val key = BakeKey(
+            doc.target, today, doc.pageWidth.toInt(), doc.pageHeight.toInt(),
+            binding.topBar.height, binding.bottomBar.height, doc.marks,
+        )
         if (!force && key == bakeKey && baked != null) return
         val fresh = bakeTemplate(doc.target)
         val old = baked
@@ -497,16 +523,18 @@ class CalendarActivity : InkScreenActivity<InkAction>() {
     }
 
     /** The page's grid at the page's own size, under the bars as they are laid out now — the three
-     *  layouts dispatched by the showing page's kind. */
+     *  layouts dispatched by the showing page's kind, each with the page's own marks (arc 24 / Z4;
+     *  a Day page takes the one day's list, both halves from the same read). */
     private fun bakeTemplate(t: CalendarTarget): android.graphics.Bitmap {
         val today = LocalDate.now()
         bakedToday = today
         val density = resources.displayMetrics.density
         val notes = getString(R.string.calendar_notes_label)
+        val marks = document?.marks.orEmpty()
         return when (t.kind) {
-            CalendarTarget.KIND_WEEK -> CalendarTemplate.week(weekGeometry(), t.localDate, today, density, palette, notes)
-            CalendarTarget.KIND_DAY -> CalendarTemplate.day(dayGeometry(), t.half, density, palette, notes)
-            else -> CalendarTemplate.month(monthGeometry(), t.localDate, today, density, palette, notes)
+            CalendarTarget.KIND_WEEK -> CalendarTemplate.week(weekGeometry(), t.localDate, today, density, palette, notes, marks)
+            CalendarTarget.KIND_DAY -> CalendarTemplate.day(dayGeometry(), t.half, density, palette, notes, marks[t.localDate].orEmpty())
+            else -> CalendarTemplate.month(monthGeometry(), t.localDate, today, density, palette, notes, marks)
         }
     }
 

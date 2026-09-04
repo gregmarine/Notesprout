@@ -97,6 +97,45 @@ class EventStoreTest {
     }
 
     @Test
+    fun marksAreTheDayListNarrowedToWhatTheGridDraws() {
+        val fake = FakeEventStore()
+        fake.seed(testEvent(id = "a", type = EventType.BIRTHDAY, title = "Ann", start = sep1, allDay = true))
+        fake.seed(
+            testEvent(
+                id = "b", type = EventType.MEETING, title = "Standup",
+                start = sep1, allDay = false, startMinute = 540,
+            ),
+        )
+        fake.calls.clear()
+
+        val marks = store(fake).marksFor(sep1, sep1.plusDays(2))
+        // The same six queries a day list costs — nothing extra for the grid.
+        assertEquals(
+            listOf(
+                "query(oneOffsOverlapping)", "query(remindersOverlapping)", "query(recurring)",
+                "query(recurringWeekdays)", "query(recurringExceptions)", "query(recurringReminders)",
+            ),
+            fake.calls,
+        )
+        // One day, in DAY order: the all-day birthday, then the 9:00 meeting.
+        assertEquals(listOf(sep1), marks.keys.toList())
+        assertEquals(
+            listOf(
+                DayMark("Ann", allDay = true, startMinute = null, glyph = Glyph.CAKE),
+                DayMark("Standup", allDay = false, startMinute = 540, glyph = Glyph.PEOPLE),
+            ),
+            marks.getValue(sep1),
+        )
+    }
+
+    @Test
+    fun marksOfAnEmptyRangeAreEmpty() {
+        val fake = FakeEventStore()
+        fake.seed(testEvent(id = "a", title = "Ann", start = sep1))
+        assertTrue(store(fake).marksFor(sep1.plusDays(1), sep1.plusDays(5)).isEmpty())
+    }
+
+    @Test
     fun upcomingIsItsOwnSixQueries() {
         val fake = FakeEventStore()
         fake.seed(testEvent(id = "soon", title = "Trip", start = sep1.plusDays(3), reminders = listOf(Reminder(1, ReminderUnit.WEEKS))))

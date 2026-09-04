@@ -15,7 +15,7 @@ arcs 19–22's full phase records at the end of this file until the next compact
 feature's authoritative reference is its `docs/` file. **Arc 22 "Tables" is complete and frozen
 (2026-09-01) — X1–X5 all ✅: the extension store is real SQLite tables behind gated parameterized
 SQL. Arc 23 "Calendar" is PLANNED (wizard locked 2026-09-01, § "Phases — Arc 23"
-below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd) · **Y4 ✅** (2026-09-02: the user reversed "no code review" — `/code-review high` on the arc range, ten findings, all ten fixed incl. two sibling-copy refactors; docs + ledger; Nomad walks; user checklist passed). **Arcs 1–23 are complete and frozen.** The SEVENTH point is live; no EIGHTH without another decision. **Arc 24 "Events" is IN PROGRESS (wizard locked 2026-09-02, § "Phases — Arc 24" below) — Z1 ✅ (893b20e1 — `CalendarSchema.V2` + store + engine, 1965 JVM tests/variant) · **Z2 ✅** (2846d770 — events screen + editor + the calendar's door; editor rebuilt to the user's design 2026-09-03, 2014 JVM tests/variant) · **Z3 ✅** (1404fea6 — the note section: `NoteSurface` bounded paper + text half behind one toggle, no calendar handoff needed, 2027 JVM tests/variant) · Z4 ⬜ · Z5 ⬜ (UI cleanup — parked 2026-09-03, discuss first) · Z6 ⬜ docs/freeze; not a point, not an `API_VERSION` bump: two in-process screens and five tables inside `:ext-calendar`.**
+below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd) · **Y4 ✅** (2026-09-02: the user reversed "no code review" — `/code-review high` on the arc range, ten findings, all ten fixed incl. two sibling-copy refactors; docs + ledger; Nomad walks; user checklist passed). **Arcs 1–23 are complete and frozen.** The SEVENTH point is live; no EIGHTH without another decision. **Arc 24 "Events" is IN PROGRESS (wizard locked 2026-09-02, § "Phases — Arc 24" below) — Z1 ✅ (893b20e1 — `CalendarSchema.V2` + store + engine, 1965 JVM tests/variant) · **Z2 ✅** (2846d770 — events screen + editor + the calendar's door; editor rebuilt to the user's design 2026-09-03, 2014 JVM tests/variant) · **Z3 ✅** (1404fea6 — the note section: `NoteSurface` bounded paper + text half behind one toggle, no calendar handoff needed, 2027 JVM tests/variant) · **Z4 ✅** (grid rendering — glyphs on Month/Week, labels in the Day rows, marks loaded with the page and in the bake key, 2065 JVM tests/variant) · Z5 ⬜ (UI cleanup — parked 2026-09-03, discuss first) · Z6 ⬜ docs/freeze; not a point, not an `API_VERSION` bump: two in-process screens and five tables inside `:ext-calendar`.**
 
 ---
 
@@ -1273,7 +1273,7 @@ pad → calendar chain). **Y4 CLOSED. Arc 23 "Calendar" frozen 2026-09-02.**
 
 ## Phases — Arc 24 "Events" ⬜ PLANNED (wizard locked 2026-09-02)
 
-**Status: Z1 ✅ · Z2 ✅ · Z3 ✅ · Z4 ⬜ · Z5 ⬜ (UI cleanup, added 2026-09-03 — discuss first) · Z6 ⬜.** Fable planned it; Opus writes the features, Sonnet
+**Status: Z1 ✅ · Z2 ✅ · Z3 ✅ · Z4 ✅ · Z5 ⬜ (UI cleanup, added 2026-09-03 — discuss first) · Z6 ⬜.** Fable planned it; Opus writes the features, Sonnet
 scaffolds, Haiku walks; Fable writes exactly two things — the `CalendarSchema` V2 step (a schema
 contract) and the editor's bounded paper surface with its handoff chain (Z3, an engine seam) — and
 reviews every phase. **Version stays `0.1.0-ratta` for the whole arc (the user's call at planning —
@@ -1684,7 +1684,7 @@ end of row 3** (a `Space` weight 1 between the glances and them), and the note a
 new. Note for Z6: an existing event's `show()` lands before the first layout — the page size then comes
 from the layout listener, and a stored size > 0 wins whenever it exists.
 
-### Z4 — Grid rendering ⬜ (Opus code on a Fable brief · Fable review · Haiku walk)
+### Z4 — Grid rendering ✅ (2026-09-03; Opus code on a Fable brief · Fable review · **Fable walked the Nomad by hand** — Haiku not used, the wander trap)
 `DayMark` + `EventStore.marksFor` · `CalendarDocument` loads marks with the page · `CalendarTemplate`
 glyphs (Month/Week) and Day-row labels per the locks · `BakeKey.marksHash`. **JVM:** glyph slot
 arithmetic (distinct types, overflow `+`), Day-row bucketing (all-day rows from the top, timed at their
@@ -1694,6 +1694,30 @@ third type on a narrow cell → `+`; Day AM shows the all-day title in row 1 and
 two at 9:00 → "2 events"; editing the event re-bakes on return; crash buffer empty. **User checklist:**
 glyphs legible on the Nomad; Day labels do not fight the ink already there.
 **Questions at phase start:** none.
+**Outcome (2026-09-03; 2027 → 2065 JVM tests/variant, +38):** `DayMark(title, allDay, startMinute, glyph)` +
+`Glyph` (six, `Glyph.of(type)`) + **`MarkSource`** (a `fun interface` — the document's read seam;
+`EventStore : InkStore, MarkSource` with `marksFor` = `eventsInRange` mapped, the same six queries, counts-only
+log) · `GridMarks` (pure: `distinct` first-seen, `layout` = og's `maxSlots`/overflow/right-packing with a lone `+`
+at one slot and two types, `rangeOf(target)` = Month's 42 cells from `firstCell` / Week's seven / the Day) ·
+`DayRows` (pure: `slotOf`, `bucket` — all-day AND timeless marks from the top of BOTH halves, timed at its row,
+past row 23 dropped, a shared row counts together; `label` delegates to Z1's `EventWording.dayRowLabel`, **no new
+string**; `labelMaxWidth` = half the row right of the gutter) · `CalendarDocument(store, marks: MarkSource,
+surfaceSize)` — page + marks in ONE IO hop before the flush and the bookmark, `marks` assigned only in the swap;
+`show(next, refreshMarks)` on the same target = a marks-only hop (no page read, no flush, no bookmark) — the
+events screen's return (`showMove(…, forceBake = true)`) is the one caller · **`BakeKey.marks` is the map itself,
+structural, NOT a hash** (a collision would keep a deleted event on the page; the spec's "marksHash" is satisfied
+by equality) · `CalendarTemplate.month/week/day` grow a defaulted last `marks` param; `dayCell` draws the glyph
+row right-aligned on the number row (og's sizes; **ring-aware left edge on today's cell** — og let a glyph touch
+the ring); og's six primitives + `+` in `drawGlyph` at `palette.ink`; Day labels in a SECOND pass after every
+divider, right-aligned 11 dp ink, `fit` via `breakText` + "…". **Walk by hand (Nomad, all green):** Month =
+dot on Sep 1 + clocks on 2/7/8/9, right-aligned, log `5 marked day(s)`; Week same; double-tap → Day AM "Test"
+at the 9:00 row; Events → Sep 2 Dentist → Sep 1 all-day → Back = **re-baked on the same page through the
+marks-only hop** (log: one marks read, no page load), row 1 "Dentist" on BOTH halves; weekly Dentist THIS
+occurrence → Sep 1 9:00 → **"2 events"**; Month Sep 1 = clock + dot (two Dentists dedup to one clock); crash
+buffer empty. **Not provable on the Nomad:** the `+` overflow — a Month cell (≈ 198 px) holds all six types;
+JVM-only. **Cost noted (BACKLOG candidate):** every navigation now pays the six-query marks read, a Day AM↔PM
+flip included — cache across a same-day half flip if it ever reads slow. User checklist: glyph legibility; Day
+labels vs. existing ink.
 
 ### Z5 — UI cleanup ⬜ (**discuss first** — the user parks a list here so it is not forgotten; nothing is locked)
 Added 2026-09-03 after the editor rebuild: the user says "a few things still don't look great" on the

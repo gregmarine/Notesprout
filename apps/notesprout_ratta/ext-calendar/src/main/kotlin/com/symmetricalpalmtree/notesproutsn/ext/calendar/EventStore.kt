@@ -38,9 +38,27 @@ class EventStore(
     maxPayloadBytes: Int = ExtensionContract.STORE_MAX_VALUE_BYTES,
     maxBatchStatements: Int = ExtensionContract.STORE_MAX_BATCH_STATEMENTS,
     private val clock: () -> Long = System::currentTimeMillis,
-) : InkStore(store, maxPayloadBytes, maxBatchStatements, TAG) {
+) : InkStore(store, maxPayloadBytes, maxBatchStatements, TAG), MarkSource {
 
     // ── Reading ──────────────────────────────────────────────────────────────
+
+    /**
+     * The **grid's** read (arc 24 / Z4): every day in `[from, to]` that holds anything, mapped to
+     * its [DayMark]s in [EventOrder.DAY].
+     *
+     * Exactly [eventsInRange]'s six queries and Kotlin expansion — a Month page's 42 cells cost
+     * what one day costs — narrowed to the four fields the template draws. Nothing about the range
+     * is the grid's own: what a page shows is [GridMarks.rangeOf]'s, so the marks and the cells can
+     * never disagree about which days are on the paper.
+     */
+    override fun marksFor(from: LocalDate, to: LocalDate): Map<LocalDate, List<DayMark>> {
+        val byDay = eventsInRange(from, to)
+        val marks = LinkedHashMap<LocalDate, List<DayMark>>(byDay.size)
+        for ((day, events) in byDay) marks[day] = events.map(DayMark::of)
+        // Counts only — an event's title is the person's own words.
+        Slog.d(TAG) { "marks $from..$to: ${marks.size} day(s), ${marks.values.sumOf { it.size }} mark(s)" }
+        return marks
+    }
 
     /**
      * Every day in `[from, to]` that holds anything, mapped to its events in [EventOrder.DAY].
