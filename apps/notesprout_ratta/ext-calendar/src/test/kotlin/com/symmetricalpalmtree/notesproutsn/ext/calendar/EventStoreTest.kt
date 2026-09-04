@@ -202,6 +202,98 @@ class EventStoreTest {
         assertNull("no occurrence covers that day", store(fake).edit(Scope.THIS, series, edited, sep1.plusDays(3)))
     }
 
+    // ── The note's id, which only the store knows (arc 24 / Z3) ──────────────
+
+    /** A recurring original the screens open an occurrence of; every note test below edits it. */
+    private fun series() = testEvent(id = "e1", title = "Standup", start = sep1, recurrence = RecurrenceRule(Freq.DAILY, interval = 7))
+
+    /** A note that records which id it was asked for and writes one stroke under it. */
+    private fun noteAsking(asked: MutableList<String>, strokeId: String = "s1"): (String) -> NoteWrite = { id ->
+        asked += id
+        NoteWrite(listOf(NoteSql.putStroke(id, 0L, stroke(strokeId))), listOf(strokeId))
+    }
+
+    @Test
+    fun anOverrideAsksForTheNoteUnderTheNewId_andParentsItThere() {
+        val fake = FakeEventStore()
+        fake.seed(series())
+        val asked = ArrayList<String>()
+
+        val landed = store(fake).edit(
+            Scope.THIS, series(), series().copy(title = "Moved"), sep1.plusDays(7),
+            newId = "new1", note = noteAsking(asked),
+        )
+        // The caller's own id is the one used — it is minted on Main so both answers can be built
+        // there, and the store must not quietly substitute one of its own.
+        assertEquals("new1", landed)
+        assertEquals(listOf("new1"), asked)
+        assertEquals("new1", fake.noteStrokes["s1"]!!.eventId)
+    }
+
+    @Test
+    fun anInPlaceEditAsksForTheNoteUnderTheOriginalsId() {
+        val fake = FakeEventStore()
+        fake.seed(series())
+        val asked = ArrayList<String>()
+        assertEquals("e1", store(fake).edit(Scope.ALL, series(), series().copy(title = "Moved"), sep1.plusDays(7), "new1", noteAsking(asked)))
+        assertEquals(listOf("e1"), asked)
+        assertEquals("e1", fake.noteStrokes["s1"]!!.eventId)
+
+        // A one-off original is the same road: editWithScope routes it to the in-place editSeries.
+        val oneOff = FakeEventStore()
+        oneOff.seed(testEvent(id = "solo", title = "Dentist", start = sep1))
+        val alone = ArrayList<String>()
+        assertEquals(
+            "solo",
+            store(oneOff).edit(Scope.THIS, testEvent(id = "solo", title = "Dentist", start = sep1), testEvent(id = "solo", title = "Moved", start = sep1), sep1, "new1", noteAsking(alone, "s2")),
+        )
+        assertEquals(listOf("solo"), alone)
+    }
+
+    @Test
+    fun anOverrideThatFailsPartWayIsNotAnEvent_andItsNoteGoesWithIt() {
+        val fake = FakeEventStore()
+        fake.seed(series())
+        fake.failExecAt = 1
+
+        val thrown = runCatching {
+            store(fake, batchCap = 3).edit(
+                Scope.THIS, series(), series().copy(title = "Moved"), sep1.plusDays(7),
+                newId = "new1", note = noteAsking(ArrayList()),
+            )
+        }.exceptionOrNull()
+        assertTrue("was $thrown", thrown is StoreUnavailable)
+
+        // The row this save minted, deleted by id — the cascade takes the copied note with it.
+        val compensation = fake.execs.last()
+        assertEquals(listOf("DELETE FROM event WHERE id = ?"), compensation.map { it.sql })
+        assertEquals("new1", text(compensation.single().args[0]))
+        assertFalse(fake.events.containsKey("new1"))
+        assertTrue("the series it came out of stays", fake.events.containsKey("e1"))
+    }
+
+    @Test
+    fun anInPlaceEditThatFailsPartWayGivesBackOnlyTheStrokesItMinted() {
+        val fake = FakeEventStore()
+        fake.seed(series())
+        fake.seedNote("e1", 0L, stroke("old"))
+        fake.failExecAt = 1
+
+        val minted = listOf("s1", "s2")
+        val thrown = runCatching {
+            store(fake, batchCap = 3).edit(Scope.ALL, series(), series().copy(title = "Moved"), sep1.plusDays(7), "new1") { id ->
+                NoteWrite(minted.mapIndexed { i, s -> NoteSql.putStroke(id, (i + 1).toLong(), stroke(s, i + 1)) }, minted)
+            }
+        }.exceptionOrNull()
+        assertTrue("was $thrown", thrown is StoreUnavailable)
+
+        val compensation = fake.execs.last()
+        assertEquals(List(2) { "DELETE FROM note_stroke WHERE id = ?" }, compensation.map { it.sql })
+        assertEquals(minted, compensation.map { text(it.args[0]) })
+        assertTrue("the event itself stays", fake.events.containsKey("e1"))
+        assertEquals("and so does the note it already had", listOf("old"), fake.noteStrokes.keys.toList())
+    }
+
     @Test
     fun aNewEventThatFailsPartWayIsNotAnEvent() {
         val fake = FakeEventStore()
@@ -227,7 +319,7 @@ class EventStoreTest {
         val minted = listOf("s1", "s2")
         val notes = minted.mapIndexed { i, id -> NoteSql.putStroke("e1", (i + 1).toLong(), stroke(id, i + 1)) }
         val thrown = runCatching {
-            store(fake, batchCap = 3).save(e, isNew = false, noteStatements = notes, mintedStrokeIds = minted)
+            store(fake, batchCap = 3).save(e, isNew = false, note = NoteWrite(notes, minted))
         }.exceptionOrNull()
         assertTrue("was $thrown", thrown is StoreUnavailable)
 

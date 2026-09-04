@@ -134,7 +134,7 @@ class EventStore(
     // ── Writing ──────────────────────────────────────────────────────────────
 
     /**
-     * Save [e] — the row, its three child sets and [noteStatements], one statement list and
+     * Save [e] — the row, its three child sets and [note]'s statements, one statement list and
      * therefore one transaction whenever it fits the batch cap.
      *
      * The caps run first ([EventRules]) whatever the editor already did, and a [EventRules.Problem]
@@ -147,18 +147,13 @@ class EventStore(
      * **existing** event keeps its row and gives back only the strokes this save minted, one
      * `DELETE` each (never an `IN (…)` list — the calendar's placement rule).
      */
-    fun save(
-        e: Event,
-        isNew: Boolean,
-        noteStatements: List<Statement> = emptyList(),
-        mintedStrokeIds: List<String> = emptyList(),
-    ) {
+    fun save(e: Event, isNew: Boolean, note: NoteWrite = NoteWrite.NONE) {
         val event = refuseProblems(e)
         val now = clock()
         guard {
-            compensated(EventWrites.save(event, now, noteStatements)) { compensation(event.id, isNew, mintedStrokeIds) }
+            compensated(EventWrites.save(event, now, note.statements)) { compensation(event.id, isNew, note.mintedStrokeIds) }
         }
-        Slog.d(TAG) { "save ${event.id}: ${if (isNew) "new" else "existing"}, ${noteStatements.size} note statement(s)" }
+        Slog.d(TAG) { "save ${event.id}: ${if (isNew) "new" else "existing"}, ${note.statements.size} note statement(s)" }
     }
 
     /** Delete at [scope] as seen on [viewedDay]; false when the day maps to no occurrence and there
@@ -175,22 +170,29 @@ class EventStore(
      * the original's for an in-place series edit, a freshly minted one for a "this occurrence"
      * override or a new series — or null when the day maps to no occurrence and there is nothing
      * to do. [original] is null for a brand-new event, which is always a plain save.
+     *
+     * [note] is asked **for that id** (arc 24 / Z3): the note's own op log when the fields land
+     * in place, a whole copy under fresh stroke ids when they land under a new one — the screen
+     * cannot know which until the scope has been resolved here, so the store asks rather than
+     * takes ([NoteWrite]). [newId] is the id a new row would take; a caller passes its own so it
+     * can build both answers on Main *before* the IO hop (the note's page is Main-thread state,
+     * and the pen keeps writing while the store call runs), and hand [note] a lookup.
      */
     fun edit(
         scope: Scope,
         original: Event?,
         edited: Event,
         viewedDay: LocalDate,
-        noteStatements: List<Statement> = emptyList(),
-        mintedStrokeIds: List<String> = emptyList(),
+        newId: String = newId(),
+        note: (landedUnder: String) -> NoteWrite = { NoteWrite.NONE },
     ): String? {
         val event = refuseProblems(edited)
-        val newId = newId()
         val landedUnder = EventWrites.editLandsUnder(scope, original, event, viewedDay, newId) ?: return null
         val now = clock()
-        val statements = EventWrites.editWithScope(scope, original, event, viewedDay, newId, now, noteStatements) ?: return null
+        val write = note(landedUnder)
+        val statements = EventWrites.editWithScope(scope, original, event, viewedDay, newId, now, write.statements) ?: return null
         guard {
-            compensated(statements) { compensation(landedUnder, landedUnder == newId, mintedStrokeIds) }
+            compensated(statements) { compensation(landedUnder, landedUnder == newId, write.mintedStrokeIds) }
         }
         Slog.d(TAG) { "edit ${event.id} at $scope → $landedUnder: ${statements.size} statement(s)" }
         return landedUnder

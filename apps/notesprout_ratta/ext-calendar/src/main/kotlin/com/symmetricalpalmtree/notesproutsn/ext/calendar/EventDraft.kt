@@ -17,10 +17,11 @@ import java.time.LocalDate
  * decision about what the *other* fields should now say, and each is the kind of decision that is
  * silently wrong on a device and obvious in a test.
  *
- * The carried-over fields ([id], [exceptions], [noteText], [noteWidth], [noteHeight], [createdAt])
- * are not edited by the fields screen at all; they ride through so [toEvent] can rebuild a whole
- * event without the screen holding the original alongside. ([noteText] and the note's page size
- * become editable in Z3 — the draft already carries them so that phase adds a control, not a field.)
+ * The carried-over fields ([id], [exceptions], [createdAt]) are not edited by any control at all;
+ * they ride through so [toEvent] can rebuild a whole event without the screen holding the original
+ * alongside. The note's three ([noteText], [noteWidth], [noteHeight]) rode through the same way
+ * until Z3 gave them [withNoteText] and [withNoteSize] — which is why that phase added two
+ * one-line copies rather than three fields.
  *
  * [repeatTouched] is bookkeeping, not content: it records whether the person has said anything
  * about the repeat yet, which is the only thing that decides whether choosing a *type* is allowed
@@ -158,6 +159,20 @@ data class EventDraft(
         val end = m?.coerceIn(EventRules.MINUTE_RANGE)
         return copy(endMinute = if (end != null && startMinute != null && end < startMinute) null else end)
     }
+
+    // ── The note (arc 24 / Z3) ───────────────────────────────────────────────
+
+    /** The text half as typed. The cap is [EventRules.NOTE_TEXT_MAX], applied at save by the same
+     *  normalization the store runs — the field's own `LengthFilter` is the courtesy, not the rule. */
+    fun withNoteText(text: String): EventDraft = copy(noteText = text)
+
+    /**
+     * The note page's size, as [NoteSurface.mintedSize] answers it: the area's size once there is
+     * ink on the page ("minted with the first stroke"), and whatever the event already held while
+     * there is not — so a note with no ink rides its stored size through Save unchanged, and one
+     * that has been written on keeps the size it was written at wherever it is next shown.
+     */
+    fun withNoteSize(width: Float, height: Float): EventDraft = copy(noteWidth = width, noteHeight = height)
 
     // ── The repeat ───────────────────────────────────────────────────────────
 

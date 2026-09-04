@@ -166,4 +166,9 @@
     <string name="time_am">AM</string>
     <string name="time_pm">PM</string>
     <string name="type_sheet_title">Type</string>
+
+    <!-- The note section (Z3): two latches over the area, and the text half's hint. -->
+    <string name="editor_note_handwriting">Handwriting</string>
+    <string name="editor_note_text">Text</string>
+    <string name="editor_note_hint">Note</string>
 </resources>

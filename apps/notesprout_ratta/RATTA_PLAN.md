@@ -15,7 +15,7 @@ arcs 19–22's full phase records at the end of this file until the next compact
 feature's authoritative reference is its `docs/` file. **Arc 22 "Tables" is complete and frozen
 (2026-09-01) — X1–X5 all ✅: the extension store is real SQLite tables behind gated parameterized
 SQL. Arc 23 "Calendar" is PLANNED (wizard locked 2026-09-01, § "Phases — Arc 23"
-below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd) · **Y4 ✅** (2026-09-02: the user reversed "no code review" — `/code-review high` on the arc range, ten findings, all ten fixed incl. two sibling-copy refactors; docs + ledger; Nomad walks; user checklist passed). **Arcs 1–23 are complete and frozen.** The SEVENTH point is live; no EIGHTH without another decision. **Arc 24 "Events" is IN PROGRESS (wizard locked 2026-09-02, § "Phases — Arc 24" below) — Z1 ✅ (893b20e1 — `CalendarSchema.V2` + store + engine, 1965 JVM tests/variant) · **Z2 ✅** (2846d770 — events screen + editor + the calendar's door; editor rebuilt to the user's design 2026-09-03, 2014 JVM tests/variant) · Z3 ⬜ · Z4 ⬜ · Z5 ⬜ (UI cleanup — parked 2026-09-03, discuss first) · Z6 ⬜ docs/freeze; not a point, not an `API_VERSION` bump: two in-process screens and five tables inside `:ext-calendar`.**
+below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd) · **Y4 ✅** (2026-09-02: the user reversed "no code review" — `/code-review high` on the arc range, ten findings, all ten fixed incl. two sibling-copy refactors; docs + ledger; Nomad walks; user checklist passed). **Arcs 1–23 are complete and frozen.** The SEVENTH point is live; no EIGHTH without another decision. **Arc 24 "Events" is IN PROGRESS (wizard locked 2026-09-02, § "Phases — Arc 24" below) — Z1 ✅ (893b20e1 — `CalendarSchema.V2` + store + engine, 1965 JVM tests/variant) · **Z2 ✅** (2846d770 — events screen + editor + the calendar's door; editor rebuilt to the user's design 2026-09-03, 2014 JVM tests/variant) · **Z3 ✅** (2026-09-03 — the note section: `NoteSurface` bounded paper + text half behind one toggle, no calendar handoff needed, 2027 JVM tests/variant) · Z4 ⬜ · Z5 ⬜ (UI cleanup — parked 2026-09-03, discuss first) · Z6 ⬜ docs/freeze; not a point, not an `API_VERSION` bump: two in-process screens and five tables inside `:ext-calendar`.**
 
 ---
 
@@ -1273,7 +1273,7 @@ pad → calendar chain). **Y4 CLOSED. Arc 23 "Calendar" frozen 2026-09-02.**
 
 ## Phases — Arc 24 "Events" ⬜ PLANNED (wizard locked 2026-09-02)
 
-**Status: Z1 ✅ · Z2 ✅ · Z3 ⬜ · Z4 ⬜ · Z5 ⬜ (UI cleanup, added 2026-09-03 — discuss first) · Z6 ⬜.** Fable planned it; Opus writes the features, Sonnet
+**Status: Z1 ✅ · Z2 ✅ · Z3 ✅ · Z4 ⬜ · Z5 ⬜ (UI cleanup, added 2026-09-03 — discuss first) · Z6 ⬜.** Fable planned it; Opus writes the features, Sonnet
 scaffolds, Haiku walks; Fable writes exactly two things — the `CalendarSchema` V2 step (a schema
 contract) and the editor's bounded paper surface with its handoff chain (Z3, an engine seam) — and
 reviews every phase. **Version stays `0.1.0-ratta` for the whole arc (the user's call at planning —
@@ -1617,7 +1617,7 @@ Supernote will wander OUT of the app** — a stray Back at the library lands in 
 the agent then explores the device's own apps; give it no Back at the library, and prefer a Fable-driven
 walk for anything past five taps.
 
-### Z3 — The note section ⬜ (**Fable writes the bounded paper surface + the handoff chain**; Opus the text note, the toggle, the default rule, the save path; Fable review; Haiku walk + user checklist)
+### Z3 — The note section ✅ (2026-09-03, the ledger stamp names the commit; **Fable writes the bounded paper surface + the handoff chain**; Opus the text note, the toggle, the default rule, the save path; Fable review; Haiku walk + user checklist)
 **Step 0, before any code: the on-device probe** — a throwaway second `GPaper` surface in the editor
 under the chain above; measure ink, undo, Back to the list, Back to the calendar, ink there. Torn
 session or slow waveform → g-paper first. Then: the note area at its locked size · `NoteSql` strokes
@@ -1631,6 +1631,58 @@ the default rule with text only, crash buffer empty; ink is pen-only → **user 
 note, Save, reopen → Handwriting shows it; erase, lasso-drag, undo by finger; the text note; Cancel
 after ink → nothing kept; EPD feel on the calendar page after the chain unwinds.
 **Questions at phase start:** the probe's result if it needs a decision — otherwise none.
+**Step 0 — the probe ✅ (2026-09-03, Nomad, by hand; throwaway `NoteProbe` on the editor, calendar untouched).**
+Every step green: 16 strokes committed in the 1404 × 1383 px area (screen y 489 — the fields end 261 dp
+under the top of the panel), eraser, lasso-drag, two-finger undo, Cancel → list → Back → calendar inks
+normally (no slow waveform, no ghosting), and a New Event with the IME up (area 1383 → 683 → 1383 px,
+the page size held at the first measure) inks after the keyboard's own hide key. **Finding: the
+calendar needs NO `releaseForHandoff` before the events screen** — the engine's process-local
+`inkOwner` guard covers the chain by itself (the calendar's view tears down on focus loss behind the
+list, the editor's claims on attach, releases before `finish()` and on detach, the calendar reclaims
+in `onResume` after the list is gone), so the planner's default is replaced: the calendar touches
+nothing, the list touches nothing, the editor reclaims in `onResume` and releases before **every**
+`finish()`. No g-paper change; pin stays 0.1.23. **Edge recorded, accepted:** a stroke that starts in
+the area and exits it keeps its out-of-area points in the model (one landed at `top=-95`); the
+firmware paints nothing outside the view (disable bands) and the view clips the committed render, so
+what the person sees is consistent — the stored stroke just carries a few points past the page.
+**Outcome ✅ (2026-09-03; Fable the surface + seam, Opus the editor half on a Fable brief, Fable review +
+adb walk, the user the pen walk; 2014 → 2027 JVM tests/variant, +13).** **Fable:** `NoteSurface` — the
+bounded g-paper surface with `InkDocument` over `NoteSql`, `UndoRedoStack<InkAction>` replayed in memory
+(no page-op lock: nothing suspends), `PageGestures` (undo/redo only), `InkSelectionBar` with Delete alone;
+the page size is the stored one when > 0, else the area's **first** layout (1404 × 1277 px on the Nomad
+with the latches on row 3), never re-measured — `mintedSize()` answers the page's size once there is ink
+and the stored size while there is not; `blocked` (IME up · Text half showing · not yet shown) =
+`INVISIBLE` **and** a whole-view exclusion rect, because an attached Ratta view keeps the pen claimed
+whatever its visibility; `write(landedUnder)` = the pending op log + the ids minted since load when the
+id is the loaded one, else `NoteWrite.copy` — every stroke re-put under the new event id with a **fresh
+stroke id** (`note_stroke.id` is the primary key; a re-parented row would steal the series' note). New:
+`NoteWrite`, `InkDocument.pendingStatements()` (read-only — a failed Save keeps the log for the next tap),
+`EventStore.save(e, isNew, note)` and `edit(…, newId = newId(), note: (landedUnder) -> NoteWrite)` — the
+store asks for the note **for the id it resolved**, and the caller may pass `newId` so both answers are
+built on Main before the IO hop (the page is Main-thread state and the pen keeps writing during the
+store call). **Opus:** `NoteKind.defaultFor` (strokes → Handwriting · text only → Text · neither →
+Handwriting), `EventDraft.withNoteText/withNoteSize`, the editor: `Read(event, ink)` on IO (a failed note
+read is a store failure — an empty page on the glass would let the next Save write emptiness over ink),
+latches on `isSelected`, `applyKind()` = the one showing rule from kind ∨ IME (insets listener on
+`noteSection`; the root's `TopGuard` listener returns them unconsumed), the Text latch takes the keyboard
+(flag 0) and **nothing ever hides it**, Save builds the in-place `NoteWrite` always and the copy only when
+the original is recurring (Fable's review call — `editLandsUnder` can answer a new id for nothing else),
+Cancel counts `hasUnsavedChanges`. Tests: `NoteKindTest`, `NoteWriteTest` (fresh ids, orders and content
+kept, minted empty), `EventStoreTest` +4 (THIS asks for the new id and parents the rows there, ALL/one-off
+ask for the original's, a late multi-batch failure under a new id compensates with the row's delete, in
+place drops only the minted ids), `EventDraftTest` +2, `InkDocumentTest` +1. **Walk:** adb half by Fable
+(open → Handwriting default · Text → hint + IME · typed "hi" survives the toggle · Handwriting under the IME
+stays blocked until the keyboard's own hide key · Save at All → reopen defaults to **Text** · crash buffer
+empty); pen half by the user — **all six checklist steps passed** (ink saved and reopened on Handwriting,
+eraser/scribble/lasso-drag/bar Delete/finger undo-redo, Cancel discards ink, calendar ink normal after the
+chain, New Event under the IME, THIS-scope override carries the note while the series keeps its own).
+**The user's eye, both done the same evening:** the discard dialog's two buttons sat 8 dp apart →
+`Widget.Notesprout.DialogButton` gains `layout_marginStart` 16 dp + 16 dp side padding (`:sn-screen`,
+every two-button dialog); the `[Handwriting] [Text]` header row is gone — **the latches sit at the right
+end of row 3** (a `Space` weight 1 between the glances and them), and the note area grew by the row.
+**Deviation from the screen spec item 10, accepted (user 2026-09-03):** no header row. **Traps:** none
+new. Note for Z6: an existing event's `show()` lands before the first layout — the page size then comes
+from the layout listener, and a stored size > 0 wins whenever it exists.
 
 ### Z4 — Grid rendering ⬜ (Opus code on a Fable brief · Fable review · Haiku walk)
 `DayMark` + `EventStore.marksFor` · `CalendarDocument` loads marks with the page · `CalendarTemplate`

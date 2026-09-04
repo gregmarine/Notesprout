@@ -50,6 +50,30 @@ class InkDocumentTest {
         InkDocument(Sql).also { it.reset("p1", ink.toList()) }
 
     @Test
+    fun pendingStatementsReadTheLogWithoutClearingIt() {
+        val d = doc(0L to stroke("a"))
+        assertTrue(d.pendingStatements().isEmpty())
+        d.addStroke(stroke("b"))
+        d.erase(listOf("a"))
+        d.move(listOf("b"), 2f, 3f)
+        // One statement per touched stroke, in the order first touched, coalesced: the move
+        // rewrote b's Put in place rather than adding a second entry.
+        val first = d.pendingStatements()
+        assertEquals(listOf("PUT", "DROP"), first.map { it.sql })
+        assertEquals("b", text(first[0].args[0]))
+        assertEquals("p1", text(first[0].args[1]))
+        assertEquals(1L, long(first[0].args[2]))
+        assertEquals("a", text(first[1].args[0]))
+        // Nothing was cleared: a second read answers the same, and a flush still has it all.
+        assertEquals(first.map { it.sql }, d.pendingStatements().map { it.sql })
+        assertTrue(d.hasUnsavedChanges)
+        val r = Recorder()
+        runBlocking { d.flushUntilClean(exec = r.exec) }
+        assertEquals(listOf("PUT", "DROP"), r.sql())
+        assertTrue(d.pendingStatements().isEmpty())
+    }
+
+    @Test
     fun aResetPageComesBackInItsWritingOrder() {
         val d = doc(0L to stroke("a"), 4L to stroke("b"), 9L to stroke("c"))
         assertEquals("p1", d.pageId)

@@ -240,6 +240,34 @@
                 android:textSize="16sp"
                 android:textStyle="normal" />
 
+            <Space
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <!-- The note's two latches (Z3), on this row's right end — the user's call: the row
+                 had the room, and a header row of their own cost the note area its height. Exactly
+                 one is down; each carries an explicit layout_width (the LatchButton style sets
+                 none — the arc-23 inflate trap). -->
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnNoteHandwriting"
+                style="@style/Widget.Notesprout.LatchButton"
+                android:layout_width="wrap_content"
+                android:layout_height="@dimen/editor_field_height"
+                android:drawableStart="@drawable/ic_pen"
+                android:drawablePadding="6dp"
+                android:text="@string/editor_note_handwriting" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnNoteText"
+                style="@style/Widget.Notesprout.LatchButton"
+                android:layout_width="wrap_content"
+                android:layout_height="@dimen/editor_field_height"
+                android:layout_marginStart="8dp"
+                android:drawableStart="@drawable/ic_cursor_text"
+                android:drawablePadding="6dp"
+                android:text="@string/editor_note_text" />
+
         </LinearLayout>
 
     </LinearLayout>
@@ -250,12 +278,64 @@
         android:layout_marginTop="8dp"
         android:background="@color/inkBlack" />
 
-    <!-- Z3's note section lands here (Handwriting/Text toggle over the paper surface / text field);
-         empty in Z2, and deliberately holding nothing at all. -->
-    <FrameLayout
-        android:id="@+id/noteArea"
+    <!-- ── The note (Z3): the area under the fields; its two latches sit on row 3 ──
+         The area is whichever half is showing — the bounded paper surface (added into notePaper in
+         code) or the multi-line text field — one VISIBLE at a time; the other is INVISIBLE, never
+         GONE, so the paper keeps its measured size and the firmware's disable bands stay honest.
+         The selection bar is the LAST child of noteHost: it floats over both halves and, being
+         last, sits on top (the arc-23 FrameLayout z-order trap). -->
+    <LinearLayout
+        android:id="@+id/noteSection"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1" />
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <FrameLayout
+            android:id="@+id/noteHost"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <FrameLayout
+                android:id="@+id/notePaper"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+
+            <!-- The text half. No border: the area's edges are the section's. gravity top so a
+                 short note sits where the ink would. -->
+            <EditText
+                android:id="@+id/inputNote"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@null"
+                android:gravity="top|start"
+                android:hint="@string/editor_note_hint"
+                android:importantForAutofill="no"
+                android:inputType="textMultiLine|textCapSentences"
+                android:paddingStart="16dp"
+                android:paddingTop="8dp"
+                android:paddingEnd="16dp"
+                android:paddingBottom="8dp"
+                android:textColor="@color/inkBlack"
+                android:textColorHint="@color/inkLight"
+                android:textSize="16sp"
+                android:visibility="invisible" />
+
+            <!-- The lasso's bar — Delete only (there is nothing to send to). Built in code by
+                 :sn-screen's InkSelectionBar; LAST so it is on top. -->
+            <LinearLayout
+                android:id="@+id/noteSelectionBar"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top|start"
+                android:background="@drawable/shape_dialog_bordered"
+                android:orientation="horizontal"
+                android:padding="4dp"
+                android:visibility="gone" />
+
+        </FrameLayout>
+
+    </LinearLayout>
 
 </LinearLayout>

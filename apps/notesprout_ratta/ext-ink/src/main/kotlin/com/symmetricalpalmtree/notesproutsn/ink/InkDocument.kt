@@ -225,6 +225,26 @@ class InkDocument(
         return true
     }
 
+    /**
+     * The op log as statements, **without clearing it** — for a consumer whose whole page rides
+     * one *outer* transaction rather than a flush of its own (the calendar's event note, arc 24 /
+     * Z3: the strokes are written by the event's Save, alongside its row, and the screen closes on
+     * success). The log stays as it is, so a Save that fails leaves the next tap on Save exactly
+     * what it had; nothing here is idempotent-by-retry in the way [flushUntilClean] is, because
+     * nothing here writes.
+     */
+    fun pendingStatements(): List<Statement> {
+        val id = pageId
+        val out = ArrayList<Statement>(ops.size)
+        for ((strokeId, op) in ops) {
+            out += when (op) {
+                is Op.Put -> sql.putStroke(id, op.order, op.stroke)
+                Op.Drop -> sql.dropStroke(strokeId)
+            }
+        }
+        return out
+    }
+
     // ── Internals ────────────────────────────────────────────────────────────
 
     /** The next writing order on this page: the high-water mark (0 on a page that never held ink). */

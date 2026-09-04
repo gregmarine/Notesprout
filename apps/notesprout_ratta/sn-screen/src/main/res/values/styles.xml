@@ -89,11 +89,17 @@
         <item name="android:padding">8dp</item>
     </style>
 
+    <!-- Air between the buttons (arc 24 / Z3, the user's eye): AppCompat's bar packs them 8dp
+         apart, and "Keep editing" against "Discard" read as one control on the Nomad. The margin
+         is a layout attr, honoured here because the bar inflates its buttons WITH this style. -->
     <style name="Widget.Notesprout.DialogButton" parent="Widget.AppCompat.Button.ButtonBar.AlertDialog">
         <item name="android:textColor">@color/inkBlack</item>
         <item name="android:textAllCaps">false</item>
         <item name="android:stateListAnimator">@null</item>
         <item name="android:background">@android:color/transparent</item>
+        <item name="android:layout_marginStart">16dp</item>
+        <item name="android:paddingStart">16dp</item>
+        <item name="android:paddingEnd">16dp</item>
     </style>
 
 </resources>

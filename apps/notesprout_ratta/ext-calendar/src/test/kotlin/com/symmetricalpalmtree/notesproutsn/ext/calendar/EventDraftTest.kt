@@ -263,6 +263,33 @@ class EventDraftTest {
         assertEquals(listOf(Reminder(3, ReminderUnit.DAYS)), saved.reminders)
     }
 
+    // ── The note ─────────────────────────────────────────────────────────────
+
+    @Test
+    fun theNoteTextIsAnEdit_andItsCapIsAppliedAtSave() {
+        val d = blank().withTitle("Thing")
+        assertEquals("jotted", d.withNoteText("jotted").noteText)
+        assertTrue("typing in the note is an edit like any other", d.withNoteText("jotted").changedFrom(d))
+        assertFalse(d.withNoteText("").changedFrom(d))
+        // The draft holds what was typed; the cap is normalization's, at save.
+        val long = "x".repeat(EventRules.NOTE_TEXT_MAX + 50)
+        assertEquals(long.length, d.withNoteText(long).noteText.length)
+        assertEquals(EventRules.NOTE_TEXT_MAX, d.withNoteText(long).toEvent(now).noteText.length)
+    }
+
+    @Test
+    fun theNotePageSizeRidesThroughToTheEvent() {
+        val d = blank().withTitle("Thing")
+        assertEquals(0f, d.noteWidth, 0f)
+        val sized = d.withNoteSize(1404f, 1383f)
+        assertEquals(1404f, sized.toEvent(now).noteWidth, 0f)
+        assertEquals(1383f, sized.toEvent(now).noteHeight, 0f)
+        assertTrue(sized.changedFrom(d))
+        // A note with no ink writes back the size the event already held, unchanged.
+        val opened = EventDraft.from(testEvent(noteWidth = 800f, noteHeight = 600f))
+        assertEquals(opened, opened.withNoteSize(800f, 600f))
+    }
+
     // ── Change tracking ──────────────────────────────────────────────────────
 
     @Test
