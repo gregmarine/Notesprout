@@ -15,7 +15,7 @@ arcs 19–22's full phase records at the end of this file until the next compact
 feature's authoritative reference is its `docs/` file. **Arc 22 "Tables" is complete and frozen
 (2026-09-01) — X1–X5 all ✅: the extension store is real SQLite tables behind gated parameterized
 SQL. Arc 23 "Calendar" is PLANNED (wizard locked 2026-09-01, § "Phases — Arc 23"
-below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd) · **Y4 ✅** (2026-09-02: the user reversed "no code review" — `/code-review high` on the arc range, ten findings, all ten fixed incl. two sibling-copy refactors; docs + ledger; Nomad walks; user checklist passed). **Arcs 1–23 are complete and frozen.** The SEVENTH point is live; no EIGHTH without another decision. **Arc 24 "Events" is IN PROGRESS (wizard locked 2026-09-02, § "Phases — Arc 24" below) — Z1 ✅ (893b20e1 — `CalendarSchema.V2` + store + engine, 1965 JVM tests/variant) · **Z2 ✅** (2846d770 — events screen + editor + the calendar's door; editor rebuilt to the user's design 2026-09-03, 2014 JVM tests/variant) · **Z3 ✅** (2026-09-03 — the note section: `NoteSurface` bounded paper + text half behind one toggle, no calendar handoff needed, 2027 JVM tests/variant) · Z4 ⬜ · Z5 ⬜ (UI cleanup — parked 2026-09-03, discuss first) · Z6 ⬜ docs/freeze; not a point, not an `API_VERSION` bump: two in-process screens and five tables inside `:ext-calendar`.**
+below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd) · **Y4 ✅** (2026-09-02: the user reversed "no code review" — `/code-review high` on the arc range, ten findings, all ten fixed incl. two sibling-copy refactors; docs + ledger; Nomad walks; user checklist passed). **Arcs 1–23 are complete and frozen.** The SEVENTH point is live; no EIGHTH without another decision. **Arc 24 "Events" is IN PROGRESS (wizard locked 2026-09-02, § "Phases — Arc 24" below) — Z1 ✅ (893b20e1 — `CalendarSchema.V2` + store + engine, 1965 JVM tests/variant) · **Z2 ✅** (2846d770 — events screen + editor + the calendar's door; editor rebuilt to the user's design 2026-09-03, 2014 JVM tests/variant) · **Z3 ✅** (1404fea6 — the note section: `NoteSurface` bounded paper + text half behind one toggle, no calendar handoff needed, 2027 JVM tests/variant) · Z4 ⬜ · Z5 ⬜ (UI cleanup — parked 2026-09-03, discuss first) · Z6 ⬜ docs/freeze; not a point, not an `API_VERSION` bump: two in-process screens and five tables inside `:ext-calendar`.**
 
 ---
 
@@ -1617,7 +1617,7 @@ Supernote will wander OUT of the app** — a stray Back at the library lands in 
 the agent then explores the device's own apps; give it no Back at the library, and prefer a Fable-driven
 walk for anything past five taps.
 
-### Z3 — The note section ✅ (2026-09-03, the ledger stamp names the commit; **Fable writes the bounded paper surface + the handoff chain**; Opus the text note, the toggle, the default rule, the save path; Fable review; Haiku walk + user checklist)
+### Z3 — The note section ✅ (2026-09-03, 1404fea6; **Fable writes the bounded paper surface + the handoff chain**; Opus the text note, the toggle, the default rule, the save path; Fable review; Haiku walk + user checklist)
 **Step 0, before any code: the on-device probe** — a throwaway second `GPaper` surface in the editor
 under the chain above; measure ink, undo, Back to the list, Back to the calendar, ink there. Torn
 session or slow waveform → g-paper first. Then: the note area at its locked size · `NoteSql` strokes
