@@ -15,7 +15,7 @@ arcs 19–22's full phase records at the end of this file until the next compact
 feature's authoritative reference is its `docs/` file. **Arc 22 "Tables" is complete and frozen
 (2026-09-01) — X1–X5 all ✅: the extension store is real SQLite tables behind gated parameterized
 SQL. Arc 23 "Calendar" is PLANNED (wizard locked 2026-09-01, § "Phases — Arc 23"
-below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd) · **Y4 ✅** (2026-09-02: the user reversed "no code review" — `/code-review high` on the arc range, ten findings, all ten fixed incl. two sibling-copy refactors; docs + ledger; Nomad walks; user checklist passed). **Arcs 1–23 are complete and frozen.** The SEVENTH point is live; no EIGHTH without another decision. **Arc 24 "Events" is IN PROGRESS (wizard locked 2026-09-02, § "Phases — Arc 24" below) — Z1 ✅ (893b20e1 — `CalendarSchema.V2` + store + engine, 1965 JVM tests/variant) · **Z2 ✅** (2846d770 — events screen + editor + the calendar's door; editor rebuilt to the user's design 2026-09-03, 2014 JVM tests/variant) · **Z3 ✅** (1404fea6 — the note section: `NoteSurface` bounded paper + text half behind one toggle, no calendar handoff needed, 2027 JVM tests/variant) · **Z4 ✅** (7c54c5a8 — grid rendering — glyphs on Month/Week, labels in the Day rows, marks loaded with the page and in the bake key, 2065 JVM tests/variant) · Z5 ⬜ (UI cleanup — wizard locked 2026-09-03: Z5a layout · Z5b controls) · Z6 ⬜ docs/freeze; not a point, not an `API_VERSION` bump: two in-process screens and five tables inside `:ext-calendar`.**
+below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd) · **Y4 ✅** (2026-09-02: the user reversed "no code review" — `/code-review high` on the arc range, ten findings, all ten fixed incl. two sibling-copy refactors; docs + ledger; Nomad walks; user checklist passed). **Arcs 1–23 are complete and frozen.** The SEVENTH point is live; no EIGHTH without another decision. **Arc 24 "Events" is IN PROGRESS (wizard locked 2026-09-02, § "Phases — Arc 24" below) — Z1 ✅ (893b20e1 — `CalendarSchema.V2` + store + engine, 1965 JVM tests/variant) · **Z2 ✅** (2846d770 — events screen + editor + the calendar's door; editor rebuilt to the user's design 2026-09-03, 2014 JVM tests/variant) · **Z3 ✅** (1404fea6 — the note section: `NoteSurface` bounded paper + text half behind one toggle, no calendar handoff needed, 2027 JVM tests/variant) · **Z4 ✅** (7c54c5a8 — grid rendering — glyphs on Month/Week, labels in the Day rows, marks loaded with the page and in the bake key, 2065 JVM tests/variant) · Z5 🔄 (UI cleanup — wizard locked 2026-09-03: **Z5a layout ✅ 2026-09-03**, 2072 JVM tests/variant · Z5b controls ⬜) · Z6 ⬜ docs/freeze; not a point, not an `API_VERSION` bump: two in-process screens and five tables inside `:ext-calendar`.**
 
 ---
 
@@ -1273,7 +1273,7 @@ pad → calendar chain). **Y4 CLOSED. Arc 23 "Calendar" frozen 2026-09-02.**
 
 ## Phases — Arc 24 "Events" ⬜ PLANNED (wizard locked 2026-09-02)
 
-**Status: Z1 ✅ · Z2 ✅ · Z3 ✅ · Z4 ✅ · Z5 ⬜ (UI cleanup — wizard locked 2026-09-03) · Z6 ⬜.** Fable planned it; Opus writes the features, Sonnet
+**Status: Z1 ✅ · Z2 ✅ · Z3 ✅ · Z4 ✅ · Z5 🔄 (UI cleanup — wizard locked 2026-09-03; Z5a ✅, Z5b ⬜) · Z6 ⬜.** Fable planned it; Opus writes the features, Sonnet
 scaffolds, Haiku walks; Fable writes exactly two things — the `CalendarSchema` V2 step (a schema
 contract) and the editor's bounded paper surface with its handoff chain (Z3, an engine seam) — and
 reviews every phase. **Version stays `0.1.0-ratta` for the whole arc (the user's call at planning —
@@ -1719,7 +1719,7 @@ JVM-only. **Cost noted (BACKLOG candidate):** every navigation now pays the six-
 flip included — cache across a same-day half flip if it ever reads slow. User checklist: glyph legibility; Day
 labels vs. existing ink.
 
-### Z5 — UI cleanup ⬜ (**wizard locked 2026-09-03** — the user's five items + one Fable candidate; nothing else)
+### Z5 — UI cleanup 🔄 (**wizard locked 2026-09-03**; Z5a started 2026-09-03 — the user's five items + one Fable candidate; nothing else)
 The user's list (2026-09-03, walked one question at a time; screencaps: SN list on the Nomad, og's
 list + Ratta's Settings toggles on the Manta). Scope stays inside `:ext-calendar`; no API bump;
 version stays; no schema change. **Two sub-phases so the layout-only work does not wait on the two new
@@ -1748,6 +1748,27 @@ controls.**
    count latches) under the row, shown only for the picked latch. `RadioGroup` goes; the exclusivity
    moves to the same one-armed latch code the weekday row does NOT need (weekdays are multi) — so a
    tiny `LatchGroup` helper, pure and tested.
+
+**Z5a outcome ✅ (2026-09-03, Sonnet on a Fable brief, Fable review, Fable walked the Nomad by hand;
+2065 → 2072 JVM tests/variant):** all four items landed as written, no deviations. `EventRowView`
+returns one `shape_bordered` card per event (`:sn-screen`'s drawable — nothing added here); **the
+8 dp gap sits ABOVE the card**, so `rowHeightPx = toolbar_button_size + 24 dp + 8 dp` and the last
+card is flush at the band's bottom; header side padding 20 dp lines the label up with the badge
+column. Editor bar is `activity_events.xml`'s FrameLayout idiom (title first, 96 dp side margins,
+buttons last). `CalendarTemplate.note()` = a page-sized ARGB bitmap carrying only `bandLabel` at
+(0, 0) — transparent ground like `month()`; `NoteSurface` takes a `bakeTemplate` lambda, bakes in
+`applyPageSize` only when the size changes, recycles the old after `setTemplate`, and recycles the
+last in `release()`. The text half is a `noteTextHalf` wrapper (label + `inputNote`) and
+`applyKind` toggles the wrapper. `Editor.Latch` is the one latch style; `Editor.Weekday` extends it
+with no items. `LatchGroup<T>` (`pressed` / `resolve`, unknown selection → FIRST down, never none)
++ 7 tests. Walk: cards with regular weight + black meta, "Today"/"Upcoming" kept · Cancel left /
+title centred / Save right · "Notes" on the paper template and above the text field · Ends
+`[Never][On a date][After]` with the date button / count stepper under the row, dialog narrows and
+re-centres under the IME (cosmetic — a Dialogs.style window, expected). Crash buffer empty.
+**Trap (re-fired):** the calendar's top bar has TWO calendar-with-mark icons — `btnToday` (star,
+x≈705) and `btnEvents` (x≈1207); a walk that taps 709 opens nothing. `CalendarActivity` refuses a
+direct `am start` (`refused caller (none)`) — go in through the host library's calendar button.
+**User checklist (the Manta eye): the four Z5a items above, on the Manta if wanted.**
 
 **Z5b — the two controls (Opus on a Fable brief, Fable review):**
 5. **All-day → Ratta's pill toggle.** An `AppCompatCheckBox` with a two-state drawable and NO

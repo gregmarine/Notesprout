@@ -58,13 +58,18 @@ object RepeatDialog {
         val rowMonthly = view.findViewById<View>(R.id.rowMonthly)
         val radioDayOfMonth = view.findViewById<AppCompatRadioButton>(R.id.radioDayOfMonth)
         val radioOrdinal = view.findViewById<AppCompatRadioButton>(R.id.radioOrdinal)
-        val radioEndsNever = view.findViewById<AppCompatRadioButton>(R.id.radioEndsNever)
-        val radioEndsUntil = view.findViewById<AppCompatRadioButton>(R.id.radioEndsUntil)
-        val radioEndsCount = view.findViewById<AppCompatRadioButton>(R.id.radioEndsCount)
         val btnUntilDate = view.findViewById<Button>(R.id.btnUntilDate)
         val countGroup = view.findViewById<View>(R.id.countGroup)
         val tvCount = view.findViewById<TextView>(R.id.tvCount)
         val latches = weekdayLatches(view)
+
+        // The Ends row: one row of one-armed latches, `LatchGroup` the exclusivity.
+        val ends = LatchGroup(listOf(EndMode.NEVER, EndMode.UNTIL, EndMode.COUNT))
+        val endLatches: List<Pair<Button, EndMode>> = listOf(
+            view.findViewById<Button>(R.id.latchEndsNever) to EndMode.NEVER,
+            view.findViewById<Button>(R.id.latchEndsUntil) to EndMode.UNTIL,
+            view.findViewById<Button>(R.id.latchEndsCount) to EndMode.COUNT,
+        )
 
         fun render() {
             val d = working
@@ -77,9 +82,8 @@ object RepeatDialog {
             rowMonthly.visibility = if (d.freq == Freq.MONTHLY) View.VISIBLE else View.GONE
             if (d.freq == Freq.MONTHLY) renderMonthly(activity, d, radioDayOfMonth, radioOrdinal)
 
-            radioEndsNever.isChecked = d.endMode == EndMode.NEVER
-            radioEndsUntil.isChecked = d.endMode == EndMode.UNTIL
-            radioEndsCount.isChecked = d.endMode == EndMode.COUNT
+            // The latch background keys on `isSelected`, as the weekday row does.
+            ends.pressed(d.endMode).forEachIndexed { i, down -> endLatches[i].first.isSelected = down }
             btnUntilDate.visibility = if (d.endMode == EndMode.UNTIL) View.VISIBLE else View.GONE
             btnUntilDate.text = EventWording.dateWithYear(d.untilDate ?: d.startDate)
             countGroup.visibility = if (d.endMode == EndMode.COUNT) View.VISIBLE else View.GONE
@@ -108,9 +112,7 @@ object RepeatDialog {
         radioDayOfMonth.setOnClickListener { edit { it.withMonthlyMode(MonthlyMode.DAY_OF_MONTH) } }
         radioOrdinal.setOnClickListener { edit { it.withMonthlyMode(MonthlyMode.ORDINAL_WEEKDAY) } }
 
-        radioEndsNever.setOnClickListener { edit { it.withEndMode(EndMode.NEVER) } }
-        radioEndsUntil.setOnClickListener { edit { it.withEndMode(EndMode.UNTIL) } }
-        radioEndsCount.setOnClickListener { edit { it.withEndMode(EndMode.COUNT) } }
+        endLatches.forEach { (b, mode) -> b.setOnClickListener { edit { it.withEndMode(ends.resolve(it.endMode, mode)) } } }
         // The day picker opens over this dialog — its own window, so nothing here is torn down and
         // the working draft survives the trip.
         btnUntilDate.setOnClickListener {

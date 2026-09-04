@@ -1,5 +1,6 @@
 package com.symmetricalpalmtree.notesproutsn.ext.calendar
 
+import android.graphics.Bitmap
 import android.graphics.Rect
 import android.view.MotionEvent
 import android.view.View
@@ -37,6 +38,8 @@ import com.symmetricalpalmtree.notesproutsn.notebook.UndoRedoStack
  * 1:1 — the pad's rule. A note without one takes the area's size at its **first** layout, and holds
  * it: the keyboard shrinks the view under `adjustResize`, never the page. [mintedSize] is what Save
  * writes — the page's size once there is ink, and the stored size (possibly none) while there is not.
+ * The page carries one template (arc 24 / Z5a) — the "Notes" band label at the page's top-left,
+ * baked at the page's own size and rebaked only when that size changes.
  *
  * **Blocked is how the surface goes away.** While the keyboard is up, or the Text half is showing,
  * the view is `INVISIBLE` **and** the whole of it is an exclusion rect: an attached Ratta paper view
@@ -61,6 +64,9 @@ class NoteSurface(
     paperContainer: FrameLayout,
     selectionBarView: LinearLayout,
     deleteHint: String,
+    /** Bakes the note page's one template (arc 24 / Z5a) — the "Notes" band label — at the given
+     *  page size. Called only when the size actually changes; see [applyPageSize]. */
+    private val bakeTemplate: (width: Int, height: Int) -> Bitmap,
 ) {
 
     val paper: PaperView = GPaper.create(activity)
@@ -77,6 +83,10 @@ class NoteSurface(
     /** The size the event already holds for its note, 0 × 0 until a first stroke minted one. */
     private var storedWidth = 0f
     private var storedHeight = 0f
+
+    /** The page size the current [template] was baked at — null before the first bake. */
+    private var templateSize: Pair<Int, Int>? = null
+    private var template: Bitmap? = null
 
     /** The area at its first layout — the size a note without one of its own is minted at. */
     private var areaWidth = 0
@@ -271,7 +281,18 @@ class NoteSurface(
 
     private fun applyPageSize() {
         val (w, h) = pageSize()
-        if (w > 0f && h > 0f) paper.setPageSize(w.toInt(), h.toInt())
+        if (w <= 0f || h <= 0f) return
+        paper.setPageSize(w.toInt(), h.toInt())
+        val size = w.toInt() to h.toInt()
+        if (size == templateSize) return
+        // The replaced bitmap is recycled — g-paper holds only the one it was last given
+        // (`CalendarActivity.applyTemplate`'s rule).
+        val fresh = bakeTemplate(size.first, size.second)
+        val old = template
+        paper.setTemplate(fresh)
+        old?.recycle()
+        template = fresh
+        templateSize = size
     }
 
     private fun applyBlock() {
@@ -309,7 +330,11 @@ class NoteSurface(
     fun handoff() = paper.releaseForHandoff()
 
     /** The editor's `onDestroy`. */
-    fun release() = paper.release()
+    fun release() {
+        paper.release()
+        template?.recycle()
+        template = null
+    }
 
     private companion object {
         const val TAG = "NoteSurface"

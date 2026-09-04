@@ -134,9 +134,9 @@
 
     </LinearLayout>
 
-    <!-- Ends: three radios, each with the control its own answer needs indented under it. The two
-         dependent controls sit INSIDE the RadioGroup as plain children — a RadioGroup manages only
-         its RadioButton children, so nothing here can steal the exclusivity. -->
+    <!-- Ends (arc 24 / Z5a): one row of one-armed latches — [Never][On a date][After] — and the
+         dependent control (the date button / the count latches) under it, shown only for the picked
+         latch. `LatchGroup` is the exclusivity now; no RadioGroup. -->
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -145,79 +145,73 @@
         android:textColor="@color/inkBlack"
         android:textSize="16sp" />
 
-    <RadioGroup
-        android:id="@+id/endsGroup"
+    <LinearLayout
+        android:id="@+id/rowEnds"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical">
+        android:layout_marginTop="4dp"
+        android:orientation="horizontal">
 
-        <androidx.appcompat.widget.AppCompatRadioButton
-            android:id="@+id/radioEndsNever"
-            style="@style/Widget.Notesprout.RadioButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:minHeight="@dimen/editor_field_height"
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/latchEndsNever"
+            style="@style/Editor.Latch"
             android:text="@string/editor_ends_never" />
 
-        <androidx.appcompat.widget.AppCompatRadioButton
-            android:id="@+id/radioEndsUntil"
-            style="@style/Widget.Notesprout.RadioButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:minHeight="@dimen/editor_field_height"
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/latchEndsUntil"
+            style="@style/Editor.Latch"
             android:text="@string/editor_ends_on_date" />
 
         <androidx.appcompat.widget.AppCompatButton
-            android:id="@+id/btnUntilDate"
-            style="@style/Widget.Notesprout.OutlinedButton"
-            android:layout_width="wrap_content"
-            android:layout_height="@dimen/editor_field_height"
-            android:layout_marginStart="32dp"
-            android:layout_marginBottom="4dp"
-            android:minWidth="0dp"
-            android:textSize="16sp"
-            android:textStyle="normal"
-            android:visibility="gone" />
-
-        <androidx.appcompat.widget.AppCompatRadioButton
-            android:id="@+id/radioEndsCount"
-            style="@style/Widget.Notesprout.RadioButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:minHeight="@dimen/editor_field_height"
+            android:id="@+id/latchEndsCount"
+            style="@style/Editor.Latch"
             android:text="@string/editor_ends_after_short" />
 
-        <LinearLayout
-            android:id="@+id/countGroup"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="32dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:visibility="gone">
+    </LinearLayout>
 
-            <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnCountMinus"
-                style="@style/Widget.Notesprout.ToolbarButton"
-                android:contentDescription="@string/cd_editor_count_minus"
-                android:src="@drawable/ic_minus" />
+    <androidx.appcompat.widget.AppCompatButton
+        android:id="@+id/btnUntilDate"
+        style="@style/Widget.Notesprout.OutlinedButton"
+        android:layout_width="wrap_content"
+        android:layout_height="@dimen/editor_field_height"
+        android:layout_marginStart="0dp"
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="0dp"
+        android:minWidth="0dp"
+        android:textSize="16sp"
+        android:textStyle="normal"
+        android:visibility="gone" />
 
-            <TextView
-                android:id="@+id/tvCount"
-                style="@style/Editor.StepperValue" />
+    <LinearLayout
+        android:id="@+id/countGroup"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="0dp"
+        android:layout_marginTop="8dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:visibility="gone">
 
-            <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnCountPlus"
-                style="@style/Widget.Notesprout.ToolbarButton"
-                android:contentDescription="@string/cd_editor_count_plus"
-                android:src="@drawable/ic_plus" />
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCountMinus"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:contentDescription="@string/cd_editor_count_minus"
+            android:src="@drawable/ic_minus" />
 
-            <TextView
-                style="@style/Editor.Inline"
-                android:text="@string/editor_times" />
+        <TextView
+            android:id="@+id/tvCount"
+            style="@style/Editor.StepperValue" />
 
-        </LinearLayout>
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCountPlus"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:contentDescription="@string/cd_editor_count_plus"
+            android:src="@drawable/ic_plus" />
 
-    </RadioGroup>
+        <TextView
+            style="@style/Editor.Inline"
+            android:text="@string/editor_times" />
+
+    </LinearLayout>
 
 </LinearLayout>

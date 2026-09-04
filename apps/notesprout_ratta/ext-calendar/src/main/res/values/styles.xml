@@ -5,8 +5,10 @@
   any more: after the rebuild it is three rows of ordinary `Widget.Notesprout.*` controls, and a
   vocabulary for four remaining views would be a layer for its own sake.
 
-  `LatchButton` sets no size of its own, so `Editor.Weekday` sets both — the arc-23 trap, and the one
-  real reason a style earns its place here: seven latches is seven chances to forget.
+  `LatchButton` sets no size of its own, so `Editor.Latch` sets both — the arc-23 trap, and the one
+  real reason a style earns its place here: seven latches (or three) is that many chances to forget.
+  The latch style is shared by the weekday bar (multi-select, `Editor.Weekday`) and the Ends row
+  (one-armed, arc 24 / Z5a) — one definition, the same look both places.
 -->
 <resources>
 
@@ -30,8 +32,9 @@
         <item name="android:textColor">@color/inkBlack</item>
     </style>
 
-    <!-- One of the seven weekday latches — explicit width (weight) and height, the arc-23 trap. -->
-    <style name="Editor.Weekday" parent="Widget.Notesprout.LatchButton">
+    <!-- One latch in a one-row latch bar — explicit width (weight) and height, the arc-23 trap.
+         Shared by the weekday bar (multi-select) and the Ends row (one-armed, arc 24 / Z5a). -->
+    <style name="Editor.Latch" parent="Widget.Notesprout.LatchButton">
         <item name="android:layout_width">0dp</item>
         <item name="android:layout_height">@dimen/editor_field_height</item>
         <item name="android:layout_weight">1</item>
@@ -41,5 +44,8 @@
         <item name="android:paddingEnd">0dp</item>
         <item name="android:textSize">14sp</item>
     </style>
+
+    <!-- The weekday bar's own name for the same look — one definition, no drift. -->
+    <style name="Editor.Weekday" parent="Editor.Latch" />
 
 </resources>

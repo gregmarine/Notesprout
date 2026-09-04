@@ -9,6 +9,7 @@ import android.view.inputmethod.InputMethodManager
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.widget.doAfterTextChanged
@@ -129,7 +130,18 @@ class EventEditorActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityEventEditorBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        note = NoteSurface(this, binding.noteHost, binding.notePaper, binding.noteSelectionBar, getString(R.string.delete_selection_action))
+        // The note's one template (arc 24 / Z5a) — the same palette/density recipe CalendarActivity
+        // builds its grid bakes from.
+        val notePalette = CalendarTemplate.Palette(
+            ink = ContextCompat.getColor(this, R.color.inkBlack),
+            light = ContextCompat.getColor(this, R.color.inkLight),
+        )
+        val noteDensity = resources.displayMetrics.density
+        val notesLabel = getString(R.string.calendar_notes_label)
+        note = NoteSurface(
+            this, binding.noteHost, binding.notePaper, binding.noteSelectionBar,
+            getString(R.string.delete_selection_action),
+        ) { w, h -> CalendarTemplate.note(w, h, noteDensity, notePalette, notesLabel) }
         // followIme: the fields must stay visible with the keyboard up — the layout resizes, the
         // keyboard is never hidden.
         TopGuard.applyInsetPadding(binding.root, followIme = true)
@@ -357,7 +369,7 @@ class EventEditorActivity : AppCompatActivity() {
         val handwriting = noteKind == NoteKind.HANDWRITING
         binding.btnNoteHandwriting.isSelected = handwriting
         binding.btnNoteText.isSelected = !handwriting
-        binding.inputNote.visibility = if (handwriting) View.INVISIBLE else View.VISIBLE
+        binding.noteTextHalf.visibility = if (handwriting) View.INVISIBLE else View.VISIBLE
         note?.blocked = !handwriting || imeVisible
     }
 

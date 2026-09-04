@@ -17,8 +17,9 @@
 
   **Delete is not on this screen.** An event's one destructive verb lives on the events list, as a
   per-row trash icon (`EventRowView`) — the user's call. The top bar is therefore
-  `title … [Cancel] [Save]`, the folder picker's idiom (action buttons on the top bar, Cancel before
-  the action). System Back = Cancel, behind the same discard confirm.
+  `[Cancel] … title … [Save]` (arc 24 / Z5a) — Cancel at the left, the title centred on the SCREEN
+  (the events screen's FrameLayout idiom), Save at the right end, action buttons on the top bar and
+  Cancel before the action. System Back = Cancel, behind the same discard confirm.
 
   Heights: every bordered control takes `editor_field_height` (52dp — see dimens.xml for why not the
   62dp icon-button dimen), text 16sp throughout.
@@ -42,23 +43,28 @@
     android:background="@color/paperWhite"
     android:orientation="vertical">
 
-    <!-- The title reads "New Event" or "Edit Event" — the mode is the one thing the bar has to
-         say, and it says it at the start rather than centred, because two buttons live at the end. -->
-    <LinearLayout
+    <!-- The bar is `[Cancel] … title … [Save]` — Cancel before the action, per the standing rule,
+         and the title centred on the SCREEN rather than on the leftover space (the events screen's
+         FrameLayout idiom — the bar-centring trap: a weighted title is centred on leftover space,
+         which changes with the two buttons' own widths). Title FIRST, buttons LAST — a later
+         match_parent child would otherwise sit on top of an earlier button (activity_events.xml's
+         topBarRow trap). -->
+    <FrameLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
         android:layout_height="@dimen/toolbar_bar_thickness"
-        android:gravity="center_vertical"
-        android:orientation="horizontal">
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp">
 
         <TextView
             android:id="@+id/title"
-            android:layout_width="0dp"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
+            android:layout_gravity="center"
+            android:layout_marginStart="96dp"
+            android:layout_marginEnd="96dp"
             android:ellipsize="end"
-            android:paddingStart="16dp"
-            android:paddingEnd="8dp"
+            android:gravity="center"
             android:singleLine="true"
             android:text="@string/editor_title_new"
             android:textColor="@color/inkBlack"
@@ -69,6 +75,7 @@
             style="@style/Widget.Notesprout.TextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_gravity="start|center_vertical"
             android:text="@string/cancel" />
 
         <androidx.appcompat.widget.AppCompatButton
@@ -76,10 +83,11 @@
             style="@style/Widget.Notesprout.ElevatedButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_gravity="end|center_vertical"
             android:layout_marginEnd="8dp"
             android:text="@string/editor_save" />
 
-    </LinearLayout>
+    </FrameLayout>
 
     <View
         android:layout_width="match_parent"
@@ -302,25 +310,48 @@
                 android:layout_width="match_parent"
                 android:layout_height="match_parent" />
 
-            <!-- The text half. No border: the area's edges are the section's. gravity top so a
-                 short note sits where the ink would. -->
-            <EditText
-                android:id="@+id/inputNote"
+            <!-- The text half (arc 24 / Z5a): the "Notes" label — the same geometry
+                 `CalendarTemplate.bandLabel` draws on the paper half (14 sp, light ink, 8 dp in,
+                 4 dp down) — above the field. No border: the area's edges are the section's.
+                 gravity top so a short note sits where the ink would. The wrapper, not the
+                 EditText, is what shows/hides now — INVISIBLE, never GONE, so the field keeps the
+                 caret it was left with. -->
+            <LinearLayout
+                android:id="@+id/noteTextHalf"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:background="@null"
-                android:gravity="top|start"
-                android:hint="@string/editor_note_hint"
-                android:importantForAutofill="no"
-                android:inputType="textMultiLine|textCapSentences"
-                android:paddingStart="16dp"
-                android:paddingTop="8dp"
-                android:paddingEnd="16dp"
-                android:paddingBottom="8dp"
-                android:textColor="@color/inkBlack"
-                android:textColorHint="@color/inkLight"
-                android:textSize="16sp"
-                android:visibility="invisible" />
+                android:orientation="vertical"
+                android:visibility="invisible">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="8dp"
+                    android:paddingTop="4dp"
+                    android:includeFontPadding="false"
+                    android:text="@string/calendar_notes_label"
+                    android:textColor="@color/inkLight"
+                    android:textSize="14sp" />
+
+                <EditText
+                    android:id="@+id/inputNote"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:background="@null"
+                    android:gravity="top|start"
+                    android:hint="@string/editor_note_hint"
+                    android:importantForAutofill="no"
+                    android:inputType="textMultiLine|textCapSentences"
+                    android:paddingStart="16dp"
+                    android:paddingTop="8dp"
+                    android:paddingEnd="16dp"
+                    android:paddingBottom="8dp"
+                    android:textColor="@color/inkBlack"
+                    android:textColorHint="@color/inkLight"
+                    android:textSize="16sp" />
+
+            </LinearLayout>
 
             <!-- The lasso's bar — Delete only (there is nothing to send to). Built in code by
                  :sn-screen's InkSelectionBar; LAST so it is on top. -->

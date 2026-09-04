@@ -198,6 +198,20 @@ object CalendarTemplate {
     }
 
     /**
+     * The note page's one template (arc 24 / Z5a): the "Notes" band label, so the paper half says
+     * what it is the way the Month/Week Notes band does — nothing else on it, because a note has no
+     * grid, no header, no cells. Prepared exactly as [month] prepares its bitmap.
+     */
+    fun note(width: Int, height: Int, density: Float, palette: Palette, label: String): Bitmap {
+        val bmp = Bitmap.createBitmap(maxOf(1, width), maxOf(1, height), Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        val bounds = Rect()
+        bandLabel(canvas, p, bounds, 0f, 0f, density, palette, label)
+        return bmp
+    }
+
+    /**
      * One day cell, the shape og's `drawDayCell` has: the Sun/Mon/… label centred at the top (Week
      * only), the number below-left, **today's ring around that number**, the hairline under the
      * number row, and — since arc 24 / Z4 — the day's **event glyphs right-aligned on that same
