@@ -1684,7 +1684,7 @@ end of row 3** (a `Space` weight 1 between the glances and them), and the note a
 new. Note for Z6: an existing event's `show()` lands before the first layout — the page size then comes
 from the layout listener, and a stored size > 0 wins whenever it exists.
 
-### Z4 — Grid rendering ✅ (2026-09-03, 7c54c5a8; Opus code on a Fable brief · Fable review · **Fable walked the Nomad by hand** — Haiku not used, the wander trap)
+### Z4 — Grid rendering ✅ (2026-09-03, 7c54c5a8; Opus code on a Fable brief · Fable review · **Fable walked the Nomad by hand** — Haiku not used, the wander trap; **user checklist PASSED 2026-09-03** — "It all looks good")
 `DayMark` + `EventStore.marksFor` · `CalendarDocument` loads marks with the page · `CalendarTemplate`
 glyphs (Month/Week) and Day-row labels per the locks · `BakeKey.marksHash`. **JVM:** glyph slot
 arithmetic (distinct types, overflow `+`), Day-row bucketing (all-day rows from the top, timed at their
