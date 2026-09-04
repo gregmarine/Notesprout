@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The two-state pill (arc 24 / Z5b) — the background of `Widget.Notesprout.Toggle`, which is an
+  `AppCompatCheckBox` with no button and no text. A selector, not a transition drawable: there is no
+  animation on e-ink, and a thumb that slides is a thumb that ghosts.
+
+  OFF is paper with an outlined knob at the left; ON is ink with a paper knob at the right. The fill
+  is what carries the state at a glance — the caption beside it ("All day") says which question it
+  answers, so the toggle itself never spells out ON or OFF.
+
+  **The 56dp view width is part of this drawable's geometry.** The pill is a fixed 44 × 24dp centred
+  in the view, so its left edge sits at (56 − 44) / 2 = 6dp; the knob's 9dp inset is that 6dp plus
+  the 3dp of pill that must stay visible around it. Change the width in the style and these two
+  insets are wrong — change both or neither.
+-->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item android:state_checked="true">
+        <layer-list>
+            <item
+                android:width="44dp"
+                android:height="24dp"
+                android:gravity="center">
+                <shape android:shape="rectangle">
+                    <solid android:color="@color/inkBlack" />
+                    <corners android:radius="12dp" />
+                </shape>
+            </item>
+            <item
+                android:width="18dp"
+                android:height="18dp"
+                android:gravity="center_vertical|end"
+                android:right="9dp">
+                <shape android:shape="oval">
+                    <solid android:color="@color/paperWhite" />
+                </shape>
+            </item>
+        </layer-list>
+    </item>
+
+    <item>
+        <layer-list>
+            <item
+                android:width="44dp"
+                android:height="24dp"
+                android:gravity="center">
+                <shape android:shape="rectangle">
+                    <solid android:color="@color/paperWhite" />
+                    <stroke android:width="1dp" android:color="@color/inkBlack" />
+                    <corners android:radius="12dp" />
+                </shape>
+            </item>
+            <item
+                android:width="18dp"
+                android:height="18dp"
+                android:gravity="center_vertical|start"
+                android:left="9dp">
+                <shape android:shape="oval">
+                    <solid android:color="@color/paperWhite" />
+                    <stroke android:width="1dp" android:color="@color/inkBlack" />
+                </shape>
+            </item>
+        </layer-list>
+    </item>
+
+</selector>

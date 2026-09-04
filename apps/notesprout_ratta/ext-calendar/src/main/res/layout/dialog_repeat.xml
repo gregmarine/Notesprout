@@ -6,10 +6,15 @@
   Save/Cancel are the AlertDialog's own buttons rather than views here.
 
   Everything the editor's second and third groups used to hold, in one place and applied only on
-  **Save**: the interval stepper, the weekday bar (weekly only), the two monthly choices (monthly
-  only), and how the series ends. `RepeatDialog` flips the two conditional blocks from its working
-  draft; nothing here is `isEnabled = false` (invisible on e-ink) and nothing carries a divider of
-  its own.
+  **Save**: the interval, the weekday bar (weekly only), the two monthly choices (monthly only), and
+  how the series ends. `RepeatDialog` flips the two conditional blocks from its working draft;
+  nothing here is `isEnabled = false` (invisible on e-ink) and nothing carries a divider of its own.
+
+  The two counts — how often, and how many times — are the shared latch row
+  (`view_count_latches`, arc 24 / Z5b) under a sentence line saying what the number adds up to; the
+  ± steppers they replaced are gone from every screen. The row is `<include>`d TWICE here, so every
+  lookup inside one goes through that include's own id (`rowEvery` / `rowCount`) and never through
+  the dialog root — the two rows carry the same child ids.
 
   The arc-23 trap: `LatchButton` sets no size, so the seven weekday latches take `Editor.Weekday`
   (which sets both) and every other button below carries width and height explicitly.
@@ -20,39 +25,22 @@
     android:orientation="vertical"
     android:padding="16dp">
 
-    <!-- "Every − 2 + weeks" — the unit word follows the frequency and is singular at 1. -->
-    <LinearLayout
+    <!-- How often, as a sentence over the latch row that sets it. The sentence is
+         `EventWording.repeatGlance` — the same words the editor's glance button will read, so the
+         dialog cannot describe the repeat one way and the screen behind it another. -->
+    <TextView
+        android:id="@+id/tvEvery"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:gravity="center_vertical"
-        android:orientation="horizontal">
+        android:textColor="@color/inkBlack"
+        android:textSize="16sp" />
 
-        <TextView
-            style="@style/Editor.Inline"
-            android:layout_marginStart="0dp"
-            android:text="@string/editor_every" />
-
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnEveryMinus"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:contentDescription="@string/cd_editor_every_minus"
-            android:src="@drawable/ic_minus" />
-
-        <TextView
-            android:id="@+id/tvEvery"
-            style="@style/Editor.StepperValue" />
-
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnEveryPlus"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:contentDescription="@string/cd_editor_every_plus"
-            android:src="@drawable/ic_plus" />
-
-        <TextView
-            android:id="@+id/tvEveryUnit"
-            style="@style/Editor.Inline" />
-
-    </LinearLayout>
+    <include
+        android:id="@+id/rowEvery"
+        layout="@layout/view_count_latches"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp" />
 
     <!-- Weekly only: seven latches, Sun … Sat (the calendar's own column order), ISO in the set. -->
     <LinearLayout
@@ -182,35 +170,28 @@
         android:textStyle="normal"
         android:visibility="gone" />
 
+    <!-- "After" — the same sentence-over-latches shape as the interval above. -->
     <LinearLayout
         android:id="@+id/countGroup"
-        android:layout_width="wrap_content"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginStart="0dp"
         android:layout_marginTop="8dp"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
+        android:orientation="vertical"
         android:visibility="gone">
-
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnCountMinus"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:contentDescription="@string/cd_editor_count_minus"
-            android:src="@drawable/ic_minus" />
 
         <TextView
             android:id="@+id/tvCount"
-            style="@style/Editor.StepperValue" />
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/inkBlack"
+            android:textSize="16sp" />
 
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnCountPlus"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:contentDescription="@string/cd_editor_count_plus"
-            android:src="@drawable/ic_plus" />
-
-        <TextView
-            style="@style/Editor.Inline"
-            android:text="@string/editor_times" />
+        <include
+            android:id="@+id/rowCount"
+            layout="@layout/view_count_latches"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp" />
 
     </LinearLayout>
 

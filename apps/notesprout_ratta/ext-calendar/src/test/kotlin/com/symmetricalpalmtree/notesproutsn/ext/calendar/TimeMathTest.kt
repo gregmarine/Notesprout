@@ -6,7 +6,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** The time picker's arithmetic (arc 24 / Z2): a minute of day split three ways and put back
- *  together, and two steppers that wrap without ever carrying. */
+ *  together, on the face's five-minute grain. */
 class TimeMathTest {
 
     @Test
@@ -52,23 +52,6 @@ class TimeMathTest {
             assertEquals(TimeMath.snap(m % 60), back % 60)
             m += TimeMath.MINUTE_STEP
         }
-    }
-
-    @Test
-    fun theHourStepperWrapsInsideOneToTwelve() {
-        assertEquals(10, TimeMath.stepHour(9, 1))
-        assertEquals(8, TimeMath.stepHour(9, -1))
-        assertEquals(1, TimeMath.stepHour(12, 1))
-        assertEquals(12, TimeMath.stepHour(1, -1))
-    }
-
-    @Test
-    fun theMinuteStepperWrapsAndCarriesNothing() {
-        assertEquals(5, TimeMath.stepMinute(0, 1))
-        assertEquals(55, TimeMath.stepMinute(0, -1))
-        assertEquals(0, TimeMath.stepMinute(55, 1))
-        // Off-grid input is snapped first, so the stepper always lands on a position it can show.
-        assertEquals(10, TimeMath.stepMinute(7, 1))
     }
 
     @Test

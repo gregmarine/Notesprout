@@ -6,7 +6,7 @@
   THREE rows over the note area, and nothing else:
 
     1. the title field, with the event's TYPE named on the button beside it;
-    2. the two dates, the All day switch, and — while all-day is off — the two times;
+    2. the two dates, the All day toggle, and — while all-day is off — the two times;
     3. two GLANCE buttons, Repeat and Remind me.
 
   A glance button says the word alone when the thing is unset ("Repeat", "Remind me") and the value
@@ -33,7 +33,7 @@
   below carries both explicitly — or the screen dies at inflate, and `assembleDebug` does NOT catch
   it. Only running the screen does.
 
-  The two time buttons are `visibility="gone"` here; the Activity flips them with the switch. GONE,
+  The two time buttons are `visibility="gone"` here; the Activity flips them with the toggle. GONE,
   never `isEnabled = false` — a disabled control is invisible on e-ink.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -183,16 +183,18 @@
                 android:textColor="@color/inkBlack"
                 android:textSize="16sp" />
 
-            <!-- A plain SwitchCompat: the theme's inkBlack accent is what draws it, and a custom
-                 thumb/track would be one more monochrome drawable to keep in step with nothing. -->
-            <androidx.appcompat.widget.SwitchCompat
+            <!-- The pill toggle (arc 24 / Z5b) — :sn-screen's `Widget.Notesprout.Toggle`, which
+                 sets its own width and height (they are the drawable's geometry, not this row's).
+                 A `CompoundButton` still, so the Activity's `isChecked` / `setOnCheckedChangeListener`
+                 are unchanged; AppCompat's switch track is what went. No ON/OFF caption — the
+                 label beside it and the fill say everything. -->
+            <androidx.appcompat.widget.AppCompatCheckBox
                 android:id="@+id/swAllDay"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
+                style="@style/Widget.Notesprout.Toggle"
                 android:layout_marginStart="8dp"
                 android:contentDescription="@string/editor_all_day" />
 
-            <!-- Both GONE while all-day; the Activity flips them from the draft, never the switch. -->
+            <!-- Both GONE while all-day; the Activity flips them from the draft, never the toggle. -->
             <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/btnStartTime"
                 style="@style/Widget.Notesprout.OutlinedButton"

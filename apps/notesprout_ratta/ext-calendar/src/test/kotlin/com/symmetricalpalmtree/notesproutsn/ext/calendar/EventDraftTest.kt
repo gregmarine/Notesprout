@@ -208,6 +208,23 @@ class EventDraftTest {
     }
 
     @Test
+    fun aValueChosenOutrightTakesTheSameClampAsAStep() {
+        // The count latches and the keypad set the number outright (arc 24 / Z5b); the delta forms
+        // go through the same two setters, so there is exactly one rule about what a number may be.
+        assertEquals(EventRules.INTERVAL_RANGE.first, blank().withIntervalValue(0).interval)
+        assertEquals(EventRules.INTERVAL_RANGE.last, blank().withIntervalValue(5000).interval)
+        assertEquals(4, blank().withIntervalValue(4).interval)
+
+        assertEquals(EventRules.END_COUNT_RANGE.first, blank().withCountValue(0).endCount)
+        assertEquals(EventRules.END_COUNT_RANGE.last, blank().withCountValue(5000).endCount)
+        assertEquals(3, blank().withCountValue(3).endCount)
+
+        // A step is the value form with the arithmetic done first — not a second clamp.
+        assertEquals(blank().withIntervalValue(3), blank().withIntervalValue(2).withInterval(1))
+        assertEquals(blank().withCountValue(11), blank().withCount(1))
+    }
+
+    @Test
     fun endsOnSeedsItsDateSoTheControlIsNeverBlank() {
         val d = blank().withStartDate(sep3).withFreq(Freq.MONTHLY).withEndMode(EndMode.UNTIL)
         assertEquals(sep3, d.untilDate)

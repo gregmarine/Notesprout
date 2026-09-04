@@ -35,7 +35,7 @@ import java.time.LocalDate
  * the events screen, so there is no caller check to make: nothing outside this APK can start it.
  *
  * **The shape is three rows over the note area.** The title with the type beside it; the dates, the
- * All day switch and the times; then two **glance** buttons. A glance button says the word alone when
+ * All day toggle and the times; then two **glance** buttons. A glance button says the word alone when
  * the thing is unset ("Repeat", "Remind me") and the value concisely when it is set ("Every 2 weeks",
  * "1 week before"); the details live in [RepeatDialog] and [RemindDialog], which apply on their own
  * Save and discard on Cancel. So no stepper, latch bar, radio or chip is on this screen at all.
@@ -289,9 +289,9 @@ class EventEditorActivity : AppCompatActivity() {
             if (!ready()) return@setOnClickListener
             DayPickerDialog.show(this, draft.endDate) { picked -> edit { it.withEndDate(picked) } }
         }
-        // A switch reports its own state, so `render()` writing `isChecked` back would re-enter this
-        // listener on every redraw. The compare is what stops that: a checked value that already
-        // matches the draft is the render talking, not the person.
+        // A CompoundButton reports its own state, so `render()` writing `isChecked` back would
+        // re-enter this listener on every redraw. The compare is what stops that: a checked value
+        // that already matches the draft is the render talking, not the person.
         binding.swAllDay.setOnCheckedChangeListener { _, checked ->
             if (!loaded || checked == draft.allDay) return@setOnCheckedChangeListener
             if (!ready()) { binding.swAllDay.isChecked = draft.allDay; return@setOnCheckedChangeListener }

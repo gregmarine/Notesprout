@@ -2,10 +2,8 @@ package com.symmetricalpalmtree.notesproutsn.ext.calendar
 
 import android.app.Activity
 import android.widget.Button
-import android.widget.ImageButton
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
-import androidx.appcompat.widget.TooltipCompat
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
 
 /**
@@ -18,8 +16,11 @@ import com.symmetricalpalmtree.notesproutsn.core.Dialogs
  * it is the store's rule, and an event written before this screen existed may still carry three;
  * saving from here is what reduces it to one.
  *
+ * The amount is the shared [CountLatches] row since arc 24 / Z5b — six presets and a keypad past
+ * them, the same control the repeat dialog's two counts use.
+ *
  * **It applies on Save and discards on Cancel**: the amount and the unit are local `var`s until the
- * positive button hands a new draft back, which is what makes the stepper free to be tapped at.
+ * positive button hands a new draft back, which is what makes every latch free to be tapped at.
  */
 object RemindDialog {
 
@@ -30,7 +31,6 @@ object RemindDialog {
     fun show(activity: Activity, draft: EventDraft, onSaved: (EventDraft) -> Unit) {
         val view = activity.layoutInflater.inflate(R.layout.dialog_remind, null)
         val tvRemind = view.findViewById<TextView>(R.id.tvRemind)
-        val tvAmount = view.findViewById<TextView>(R.id.tvRemindAmount)
         val latchDays = view.findViewById<Button>(R.id.latchRemindDays)
         val latchWeeks = view.findViewById<Button>(R.id.latchRemindWeeks)
 
@@ -38,8 +38,12 @@ object RemindDialog {
         var amount = first?.amount?.coerceIn(REMIND_RANGE) ?: 1
         var unit = first?.unit ?: ReminderUnit.DAYS
 
+        // Declared before `render` and assigned after it: the row answers through `render`, so the
+        // knot only unties one way round (`RepeatDialog`'s two rows are wired the same way).
+        lateinit var amountLatches: CountLatches
+
         fun render() {
-            tvAmount.text = amount.toString()
+            amountLatches.render(amount)
             // Latches, not a toggle: the armed half is `isSelected`, which reads as a border on
             // e-ink, and tapping the half already armed is a no-op rather than a flip to the other.
             latchDays.isSelected = unit == ReminderUnit.DAYS
@@ -47,15 +51,11 @@ object RemindDialog {
             tvRemind.text = EventWording.reminderLabel(Reminder(amount, unit))
         }
 
-        fun stepper(id: Int, delta: Int) {
-            val button = view.findViewById<ImageButton>(id)
-            TooltipCompat.setTooltipText(button, button.contentDescription)
-            // Clamped, never disabled: a disabled control is invisible on e-ink, so at the ends the
-            // stepper simply has nothing left to do.
-            button.setOnClickListener { amount = (amount + delta).coerceIn(REMIND_RANGE); render() }
-        }
-        stepper(R.id.btnRemindMinus, -1)
-        stepper(R.id.btnRemindPlus, 1)
+        // Clamped, never refused: whatever the presets or the keypad answer, the range is what the
+        // reminder ends up inside.
+        amountLatches = CountLatches(
+            view.findViewById(R.id.rowRemind), activity, REMIND_RANGE, R.string.editor_remind,
+        ) { n -> amount = n.coerceIn(REMIND_RANGE); render() }
         latchDays.setOnClickListener { unit = ReminderUnit.DAYS; render() }
         latchWeeks.setOnClickListener { unit = ReminderUnit.WEEKS; render() }
         render()
@@ -69,12 +69,12 @@ object RemindDialog {
                 }
                 .setNegativeButton(R.string.cancel, null)
                 // "No reminder" is a real answer and needs a way back to it — the third button,
-                // because clearing is neither saving what the stepper says nor changing nothing.
+                // because clearing is neither saving what the latches say nor changing nothing.
                 .setNeutralButton(R.string.editor_remind_none) { _, _ -> onSaved(draft.withReminder(null)) }
                 .create(),
         ).show()
     }
 
-    /** The stepper's range. Ninety-nine days of lead is already more than a paper calendar gives you. */
+    /** The amount's range. Ninety-nine days of lead is already more than a paper calendar gives you. */
     private val REMIND_RANGE = 1..99
 }

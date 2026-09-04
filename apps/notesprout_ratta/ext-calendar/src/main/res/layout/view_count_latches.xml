@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The small-number row (arc 24 / Z5b) — `[1][2][3][4][5][6][More]`, `<include>`d wherever a count
+  used to have a ± stepper: the repeat interval, the "after N times" count, the reminder's amount.
+  One layout for all three, so the three cannot drift apart.
+
+  Every latch takes `Editor.Latch` — the same style the weekday bar and the Ends row take, and the
+  one that sets width (weight) and height, because `LatchButton` sets neither (the arc-23 inflate
+  trap). `CountLatches` writes every label: the six presets are numbers, which are not words and so
+  are not strings, and More's own label changes (it reads the number once the value leaves them).
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal">
+
+    <androidx.appcompat.widget.AppCompatButton
+        android:id="@+id/latchCount1"
+        style="@style/Editor.Latch" />
+
+    <androidx.appcompat.widget.AppCompatButton
+        android:id="@+id/latchCount2"
+        style="@style/Editor.Latch" />
+
+    <androidx.appcompat.widget.AppCompatButton
+        android:id="@+id/latchCount3"
+        style="@style/Editor.Latch" />
+
+    <androidx.appcompat.widget.AppCompatButton
+        android:id="@+id/latchCount4"
+        style="@style/Editor.Latch" />
+
+    <androidx.appcompat.widget.AppCompatButton
+        android:id="@+id/latchCount5"
+        style="@style/Editor.Latch" />
+
+    <androidx.appcompat.widget.AppCompatButton
+        android:id="@+id/latchCount6"
+        style="@style/Editor.Latch" />
+
+    <androidx.appcompat.widget.AppCompatButton
+        android:id="@+id/latchCountMore"
+        style="@style/Editor.Latch"
+        android:text="@string/editor_more" />
+
+</LinearLayout>

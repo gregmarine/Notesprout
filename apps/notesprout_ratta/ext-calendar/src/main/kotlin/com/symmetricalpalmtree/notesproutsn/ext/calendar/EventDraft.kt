@@ -180,10 +180,14 @@ data class EventDraft(
      *  offering its default. */
     fun withFreq(freq: Freq?): EventDraft = applyFreq(freq).copy(repeatTouched = true)
 
-    /** Every N units. Clamped to [EventRules.INTERVAL_RANGE] — the steppers never disable
-     *  (invisible on e-ink); they simply have nothing left to do at the ends. */
-    fun withInterval(delta: Int): EventDraft =
-        copy(interval = (interval + delta).coerceIn(EventRules.INTERVAL_RANGE))
+    /** Every N units, chosen outright — a preset latch, or a number off the keypad. Clamped to
+     *  [EventRules.INTERVAL_RANGE], which is the ONE clamp: nothing else in the editor decides what
+     *  an interval may be, whichever control the number came from. */
+    fun withIntervalValue(n: Int): EventDraft = copy(interval = n.coerceIn(EventRules.INTERVAL_RANGE))
+
+    /** Every N units, moved by [delta]. Clamped through [withIntervalValue] — a control that steps
+     *  never disables (invisible on e-ink); at the ends it simply has nothing left to do. */
+    fun withInterval(delta: Int): EventDraft = withIntervalValue(interval + delta)
 
     /** One weekday latch toggled ([iso] is `DayOfWeek.value`: Mon = 1 … Sun = 7). Clearing the last
      *  one is allowed: an empty set means "the day this event starts on", which is what
@@ -207,9 +211,12 @@ data class EventDraft(
     /** The "ends on" date. Not clamped to the start — see [withStartDate]. */
     fun withUntil(d: LocalDate): EventDraft = copy(untilDate = d)
 
-    /** The occurrence count, clamped to [EventRules.END_COUNT_RANGE]. */
-    fun withCount(delta: Int): EventDraft =
-        copy(endCount = (endCount + delta).coerceIn(EventRules.END_COUNT_RANGE))
+    /** The occurrence count, chosen outright, clamped to [EventRules.END_COUNT_RANGE] — the one
+     *  clamp, as [withIntervalValue] is for the interval. */
+    fun withCountValue(n: Int): EventDraft = copy(endCount = n.coerceIn(EventRules.END_COUNT_RANGE))
+
+    /** The occurrence count moved by [delta], clamped through [withCountValue]. */
+    fun withCount(delta: Int): EventDraft = withCountValue(endCount + delta)
 
     // ── Reminders ────────────────────────────────────────────────────────────
 

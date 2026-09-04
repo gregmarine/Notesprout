@@ -92,16 +92,6 @@
     <string name="editor_repeat_monthly">Monthly</string>
     <string name="editor_repeat_yearly">Yearly</string>
     <string name="editor_every">Every</string>
-    <string name="cd_editor_every_minus">Fewer</string>
-    <string name="cd_editor_every_plus">More</string>
-    <string name="editor_unit_days">days</string>
-    <string name="editor_unit_day">day</string>
-    <string name="editor_unit_weeks">weeks</string>
-    <string name="editor_unit_week">week</string>
-    <string name="editor_unit_months">months</string>
-    <string name="editor_unit_month">month</string>
-    <string name="editor_unit_years">years</string>
-    <string name="editor_unit_year">year</string>
     <string name="day_sun">Sun</string>
     <string name="day_mon">Mon</string>
     <string name="day_tue">Tue</string>
@@ -120,13 +110,16 @@
     <string name="editor_ends_never">Never</string>
     <string name="editor_ends_on_date">On a date</string>
     <string name="editor_ends_after_short">After</string>
-    <string name="cd_editor_count_minus">Fewer</string>
-    <string name="cd_editor_count_plus">More</string>
-    <string name="editor_times">times</string>
+    <string name="editor_times_one">1 time</string>
+    <string name="editor_times_n">%1$d times</string>
+
+    <!-- The shared count row (Z5b): six presets and the way past them. The presets themselves are
+         numbers, written by `CountLatches` — a digit is not a word. -->
+    <string name="editor_more">More</string>
+    <string name="cd_keypad_backspace">Backspace</string>
+    <string name="cd_keypad_done">Done</string>
 
     <!-- RemindDialog: one reminder, or None. -->
-    <string name="cd_editor_remind_minus">Fewer</string>
-    <string name="cd_editor_remind_plus">More</string>
     <string name="editor_days">Days</string>
     <string name="editor_weeks">Weeks</string>
     <string name="editor_remind_none">None</string>
@@ -157,12 +150,10 @@
     <string name="scope_following">This and following</string>
     <string name="scope_all">All events</string>
 
-    <!-- The time picker dialog (Z2). -->
+    <!-- The time picker dialog (Z2; the clock face is Z5b). -->
     <string name="time_title">Time</string>
-    <string name="cd_time_hour_minus">Earlier hour</string>
-    <string name="cd_time_hour_plus">Later hour</string>
-    <string name="cd_time_minute_minus">Earlier</string>
-    <string name="cd_time_minute_plus">Later</string>
+    <string name="cd_time_clock">Clock face</string>
+    <string name="time_separator">:</string>
     <string name="time_am">AM</string>
     <string name="time_pm">PM</string>
     <string name="type_sheet_title">Type</string>

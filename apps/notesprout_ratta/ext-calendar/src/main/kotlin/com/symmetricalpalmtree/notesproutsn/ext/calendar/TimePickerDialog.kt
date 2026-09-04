@@ -2,31 +2,26 @@ package com.symmetricalpalmtree.notesproutsn.ext.calendar
 
 import android.app.Activity
 import android.widget.Button
-import android.widget.ImageButton
-import android.widget.TextView
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AlertDialog
-import androidx.appcompat.widget.TooltipCompat
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
 
 /**
- * "What time?" — the editor's start/end time dialog (arc 24 / Z2), in [DayPickerDialog]'s shape:
- * the extension's own, built on the layout, and every rule it applies is [TimeMath]'s and
- * JVM-tested. This file is views and listeners only.
+ * "What time?" — the editor's start/end time dialog (arc 24 / Z2; the face is Z5b), in
+ * [DayPickerDialog]'s shape: the extension's own, built on the layout, and every rule it applies is
+ * [TimeMath]'s or [ClockFaceModel]'s and JVM-tested. This file is views and listeners only.
  *
- * **Three independent parts, not a clock.** Two steppers and a latch pair — hour 1..12 wrapping,
- * minutes in fives wrapping 0..55, AM/PM — because that is the whole vocabulary of "a time on a
- * calendar page" and it is four tap targets rather than a scrolling wheel nobody can land on with a
- * pen on e-ink. **Neither stepper carries into the other**: rolling the minutes past the top does
- * not move the hour, so no stepper can walk the value off the end of the day and nothing changes
- * behind the person's back.
+ * **A clock, and two taps.** Pick the hour on the dial and the face turns to minutes by itself; pick
+ * the minute and you are done. That one automatic step is the whole reason it is two taps rather
+ * than three, and the hour/minute latches above the dial are the way back from it — tapping either
+ * shows that face again, so a wrong hour is one tap from being right.
  *
- * The preview line above them is the same sentence the row will read once the dialog is gone
- * ([EventWording.minute]) — one wording, so the picker cannot describe the time one way and the
- * editor another.
+ * The minute face is on [TimeMath.MINUTE_STEP]'s grain, which is the same call the steppers this
+ * replaced made: five minutes is what a calendar entry is worth, and a sixty-position dial is one
+ * nobody lands on with a pen.
  *
  * OK and Cancel are the AlertDialog's own buttons: Cancel writes nothing at all, which is what makes
- * the steppers free to be tapped at.
+ * the whole face free to be tapped at.
  */
 object TimePickerDialog {
 
@@ -42,9 +37,9 @@ object TimePickerDialog {
         onPicked: (Int) -> Unit,
     ) {
         val view = activity.layoutInflater.inflate(R.layout.dialog_time_picker, null)
-        val tvTime = view.findViewById<TextView>(R.id.tvTime)
-        val tvHour = view.findViewById<TextView>(R.id.tvHour)
-        val tvMinute = view.findViewById<TextView>(R.id.tvMinute)
+        val tvHour = view.findViewById<Button>(R.id.tvHour)
+        val tvMinute = view.findViewById<Button>(R.id.tvMinute)
+        val clock = view.findViewById<ClockFaceView>(R.id.clockFace)
         val latchAm = view.findViewById<Button>(R.id.latchAm)
         val latchPm = view.findViewById<Button>(R.id.latchPm)
 
@@ -52,26 +47,34 @@ object TimePickerDialog {
         var hour = TimeMath.hour12(start)
         var minute = TimeMath.minuteOfHour(start)
         var pm = TimeMath.isPm(start)
+        var face = ClockFaceModel.Face.HOURS
 
         fun render() {
-            tvHour.text = hour.toString()
-            tvMinute.text = if (minute < 10) "0$minute" else minute.toString()
+            tvHour.text = ClockFaceModel.label(ClockFaceModel.Face.HOURS, hour)
+            tvMinute.text = ClockFaceModel.label(ClockFaceModel.Face.MINUTES, minute)
+            // The latch that is down is the face that is showing — one state, read two ways.
+            tvHour.isSelected = face == ClockFaceModel.Face.HOURS
+            tvMinute.isSelected = face == ClockFaceModel.Face.MINUTES
+            clock.face = face
+            clock.hour = hour
+            clock.minute = minute
             latchAm.isSelected = !pm
             latchPm.isSelected = pm
-            tvTime.text = EventWording.minute(TimeMath.minuteOfDay(hour, minute, pm))
         }
 
-        // Every icon button names itself on a long press — words read better than glyphs on e-ink,
-        // and a stepper arrow says nothing about *which* number it steps.
-        fun stepper(id: Int, onStep: () -> Unit) {
-            val button = view.findViewById<ImageButton>(id)
-            TooltipCompat.setTooltipText(button, button.contentDescription)
-            button.setOnClickListener { onStep(); render() }
+        clock.onPicked = { value ->
+            if (face == ClockFaceModel.Face.HOURS) {
+                hour = value
+                // The one automatic step. Nothing moves the face back on its own — that is the
+                // latches' job, so a person is never carried away from a face they are still using.
+                face = ClockFaceModel.Face.MINUTES
+            } else {
+                minute = value
+            }
+            render()
         }
-        stepper(R.id.btnHourMinus) { hour = TimeMath.stepHour(hour, -1) }
-        stepper(R.id.btnHourPlus) { hour = TimeMath.stepHour(hour, 1) }
-        stepper(R.id.btnMinuteMinus) { minute = TimeMath.stepMinute(minute, -1) }
-        stepper(R.id.btnMinutePlus) { minute = TimeMath.stepMinute(minute, 1) }
+        tvHour.setOnClickListener { face = ClockFaceModel.Face.HOURS; render() }
+        tvMinute.setOnClickListener { face = ClockFaceModel.Face.MINUTES; render() }
         // Latches, not a toggle: the armed half is `isSelected`, which reads as a border on e-ink,
         // and tapping the half that is already armed is a no-op rather than a flip to the other.
         latchAm.setOnClickListener { pm = false; render() }

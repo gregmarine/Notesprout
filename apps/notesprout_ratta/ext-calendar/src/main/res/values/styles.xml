@@ -1,39 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The repeat and reminder dialogs' three repeated pieces (arc 24 / Z2) — module-local, because no
-  other screen has a stepper row or a weekday bar. The editor SCREEN itself has no style of its own
-  any more: after the rebuild it is three rows of ordinary `Widget.Notesprout.*` controls, and a
-  vocabulary for four remaining views would be a layer for its own sake.
+  ONE piece, module-local (arc 24 / Z2, cut back at Z5b): the latch that every one-row bar on the
+  repeat and reminder dialogs is made of. The editor SCREEN has no style of its own — after the
+  rebuild it is rows of ordinary `Widget.Notesprout.*` controls — and Z5b's own two controls live
+  where they can be reused: the pill toggle in `:sn-screen`, the count row as a whole layout
+  (`view_count_latches.xml`).
 
   `LatchButton` sets no size of its own, so `Editor.Latch` sets both — the arc-23 trap, and the one
-  real reason a style earns its place here: seven latches (or three) is that many chances to forget.
-  The latch style is shared by the weekday bar (multi-select, `Editor.Weekday`) and the Ends row
-  (one-armed, arc 24 / Z5a) — one definition, the same look both places.
+  real reason a style earns its place here: seven latches is that many chances to forget. It is
+  shared by the weekday bar (multi-select, `Editor.Weekday`), the Ends row (one-armed, Z5a) and the
+  count row (Z5b) — one definition, the same look in all three.
 -->
 <resources>
 
-    <!-- A word inside a stepper row ("Every", "weeks", "times"). -->
-    <style name="Editor.Inline" parent="TextAppearance.Notesprout">
-        <item name="android:layout_width">wrap_content</item>
-        <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_marginStart">4dp</item>
-        <item name="android:layout_marginEnd">4dp</item>
-        <item name="android:textSize">16sp</item>
-        <item name="android:textColor">@color/inkBlack</item>
-    </style>
-
-    <!-- The number between a stepper's − and +. -->
-    <style name="Editor.StepperValue" parent="TextAppearance.Notesprout">
-        <item name="android:layout_width">wrap_content</item>
-        <item name="android:layout_height">wrap_content</item>
-        <item name="android:minWidth">44dp</item>
-        <item name="android:gravity">center</item>
-        <item name="android:textSize">18sp</item>
-        <item name="android:textColor">@color/inkBlack</item>
-    </style>
-
     <!-- One latch in a one-row latch bar — explicit width (weight) and height, the arc-23 trap.
-         Shared by the weekday bar (multi-select) and the Ends row (one-armed, arc 24 / Z5a). -->
+         Shared by the weekday bar (multi-select), the Ends row (one-armed, arc 24 / Z5a) and the
+         count row (arc 24 / Z5b). -->
     <style name="Editor.Latch" parent="Widget.Notesprout.LatchButton">
         <item name="android:layout_width">0dp</item>
         <item name="android:layout_height">@dimen/editor_field_height</item>

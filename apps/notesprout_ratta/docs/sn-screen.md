@@ -73,13 +73,17 @@ app's debug build consumes the library's debug variant, so the gate means exactl
 | `notebook/InkSelectionBar` | arc 23 / Y4 — the ONE Send-then-Delete floating bar an ink-on-paper extension screen puts over a lasso selection, replacing the pad's and the calendar's own `*SelectionToolbar` copies; built on `FloatingSelectionBar`, Send absent (never disabled) with no notebook behind the caller |
 
 Resources: `values/{colors,dimens,styles,themes}`, `values-sw720dp/dimens`,
-`values-sw960dp/dimens` (the Manta's card-grid minimum only — see `docs/library.md` § The grid), 54
-chrome `ic_*.xml` (grown one arc at a time since J1's move; the latest are arc 23 / Y4's
+`values-sw960dp/dimens` (the Manta's card-grid minimum only — see `docs/library.md` § The grid), 56
+chrome `ic_*.xml` (grown one arc at a time since J1's move; the latest is arc 24 / Z5b's
+`ic_backspace` — Tabler's own, the keypad's rub-out key — before it arc 23 / Y4's
 `ic_calendar_star`, `ic_calendar_month`, `ic_calendar_week` and `ic_calendar_day` (Tabler `calendar` with
 two ruled lines — a derivative, the `ic_notebook_plus` precedent), the calendar's
 Today button and its three view latches — `ic_calendar` itself dates to Y1 and is the extension's
 door on both host bars),
-the button/border/radio drawables the moved styles reference, and a `strings.xml` holding only `ok`
+the button/border/radio drawables the moved styles reference, `Widget.Notesprout.Toggle` +
+`toggle_pill` (arc 24 / Z5b — the yes/no pill; the style's 56dp width **is** the drawable's geometry,
+since the knob insets are computed from it, so change both or neither),
+and a `strings.xml` holding only `ok`
 and `cancel` — the two strings the moved helpers reference themselves. Every other string stays in
 `:app`.
 

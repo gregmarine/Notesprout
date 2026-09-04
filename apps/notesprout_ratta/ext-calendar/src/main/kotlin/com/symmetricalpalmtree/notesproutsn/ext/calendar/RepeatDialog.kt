@@ -3,12 +3,10 @@ package com.symmetricalpalmtree.notesproutsn.ext.calendar
 import android.app.Activity
 import android.view.View
 import android.widget.Button
-import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.widget.AppCompatRadioButton
-import androidx.appcompat.widget.TooltipCompat
 import com.symmetricalpalmtree.notesproutsn.core.ActionSheetDialog
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
 import com.symmetricalpalmtree.notesproutsn.extension.CalendarDates
@@ -26,10 +24,13 @@ import com.symmetricalpalmtree.notesproutsn.extension.CalendarDates
  * is a plain [EventDraft] held in this dialog; every tap runs one of the draft's own pure functions
  * over it and re-renders from the answer, and only the positive button hands it back. So a person can
  * open the dialog, walk the whole rule, and leave the event exactly as they found it — which is what
- * makes the steppers and the latches free to be tapped at.
+ * makes every latch on it free to be tapped at.
  *
  * The whole screen is redrawn after every tap, deliberately: choosing a frequency moves three other
  * controls, and six views updated one at a time is how one of them gets missed.
+ *
+ * Both counts are [CountLatches] rows since arc 24 / Z5b — the presets 1–6 and a keypad past them,
+ * over a sentence line that says what the number adds up to. The ± steppers are gone.
  */
 object RepeatDialog {
 
@@ -53,7 +54,6 @@ object RepeatDialog {
 
         val view = activity.layoutInflater.inflate(R.layout.dialog_repeat, null)
         val tvEvery = view.findViewById<TextView>(R.id.tvEvery)
-        val tvEveryUnit = view.findViewById<TextView>(R.id.tvEveryUnit)
         val rowWeekdays = view.findViewById<LinearLayout>(R.id.rowWeekdays)
         val rowMonthly = view.findViewById<View>(R.id.rowMonthly)
         val radioDayOfMonth = view.findViewById<AppCompatRadioButton>(R.id.radioDayOfMonth)
@@ -71,10 +71,16 @@ object RepeatDialog {
             view.findViewById<Button>(R.id.latchEndsCount) to EndMode.COUNT,
         )
 
+        // Declared before `render`, assigned after it: the two count rows call back into `edit`,
+        // which calls `render`, which has to redraw them — the knot only unties one way round.
+        lateinit var everyLatches: CountLatches
+        lateinit var countLatches: CountLatches
+
         fun render() {
             val d = working
-            tvEvery.text = d.interval.toString()
-            d.freq?.let { tvEveryUnit.setText(unitLabel(it, d.interval)) }
+            // The sentence the glance button will read — one wording for how often it repeats.
+            tvEvery.text = d.freq?.let { EventWording.repeatGlance(it, d.interval) }.orEmpty()
+            everyLatches.render(d.interval)
 
             rowWeekdays.visibility = if (d.freq == Freq.WEEKLY) View.VISIBLE else View.GONE
             latches.forEach { (button, iso) -> button.isSelected = iso in d.weekdays }
@@ -87,7 +93,12 @@ object RepeatDialog {
             btnUntilDate.visibility = if (d.endMode == EndMode.UNTIL) View.VISIBLE else View.GONE
             btnUntilDate.text = EventWording.dateWithYear(d.untilDate ?: d.startDate)
             countGroup.visibility = if (d.endMode == EndMode.COUNT) View.VISIBLE else View.GONE
-            tvCount.text = d.endCount.toString()
+            tvCount.text = if (d.endCount == 1) {
+                activity.getString(R.string.editor_times_one)
+            } else {
+                activity.getString(R.string.editor_times_n, d.endCount)
+            }
+            countLatches.render(d.endCount)
         }
 
         /** One rule applied, then the whole dialog redrawn from the answer. */
@@ -96,17 +107,16 @@ object RepeatDialog {
             render()
         }
 
-        // Every icon button names itself on a long press — a stepper arrow says nothing about
-        // *which* number it steps, and words read better than glyphs on e-ink.
-        fun stepper(id: Int, change: (EventDraft) -> EventDraft) {
-            val button = view.findViewById<ImageButton>(id)
-            TooltipCompat.setTooltipText(button, button.contentDescription)
-            button.setOnClickListener { edit(change) }
-        }
-        stepper(R.id.btnEveryMinus) { it.withInterval(-1) }
-        stepper(R.id.btnEveryPlus) { it.withInterval(1) }
-        stepper(R.id.btnCountMinus) { it.withCount(-1) }
-        stepper(R.id.btnCountPlus) { it.withCount(1) }
+        // The two counts: six presets and a keypad each (arc 24 / Z5b). Both answer through the
+        // draft's value-setters, so the clamp is the draft's — one rule, wherever the number arrives
+        // from. The keypad's title is the word the number belongs to.
+        everyLatches = CountLatches(
+            view.findViewById(R.id.rowEvery), activity, EventRules.INTERVAL_RANGE, R.string.editor_every,
+        ) { n -> edit { it.withIntervalValue(n) } }
+        countLatches = CountLatches(
+            view.findViewById(R.id.rowCount), activity, EventRules.END_COUNT_RANGE,
+            R.string.editor_ends_after_short,
+        ) { n -> edit { it.withCountValue(n) } }
 
         latches.forEach { (button, iso) -> button.setOnClickListener { edit { d -> d.toggleWeekday(iso) } } }
         radioDayOfMonth.setOnClickListener { edit { it.withMonthlyMode(MonthlyMode.DAY_OF_MONTH) } }
@@ -177,13 +187,5 @@ object RepeatDialog {
         Freq.WEEKLY -> R.string.editor_repeat_weekly
         Freq.MONTHLY -> R.string.editor_repeat_monthly
         Freq.YEARLY -> R.string.editor_repeat_yearly
-    }
-
-    /** The interval's unit word, singular at 1 — "Every 1 days" is not a sentence. */
-    private fun unitLabel(freq: Freq, interval: Int): Int = when (freq) {
-        Freq.DAILY -> if (interval == 1) R.string.editor_unit_day else R.string.editor_unit_days
-        Freq.WEEKLY -> if (interval == 1) R.string.editor_unit_week else R.string.editor_unit_weeks
-        Freq.MONTHLY -> if (interval == 1) R.string.editor_unit_month else R.string.editor_unit_months
-        Freq.YEARLY -> if (interval == 1) R.string.editor_unit_year else R.string.editor_unit_years
     }
 }
