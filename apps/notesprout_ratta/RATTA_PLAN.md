@@ -1768,7 +1768,7 @@ re-centres under the IME (cosmetic — a Dialogs.style window, expected). Crash 
 **Trap (re-fired):** the calendar's top bar has TWO calendar-with-mark icons — `btnToday` (star,
 x≈705) and `btnEvents` (x≈1207); a walk that taps 709 opens nothing. `CalendarActivity` refuses a
 direct `am start` (`refused caller (none)`) — go in through the host library's calendar button.
-**User checklist (the Manta eye): the four Z5a items above, on the Manta if wanted.**
+**User checklist PASSED 2026-09-03 — "All four passed".**
 
 **Z5b — the two controls (Opus on a Fable brief, Fable review):**
 5. **All-day → Ratta's pill toggle.** An `AppCompatCheckBox` with a two-state drawable and NO
