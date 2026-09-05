@@ -154,43 +154,41 @@ class CalendarGeometryTest {
     // ── Day ──────────────────────────────────────────────────────────────────
 
     @Test
-    fun dayRowsAreAFixedDpHeight_andTheSlackIsWhatIsLeft() {
+    fun dayRowsShareTheWholeHeightBetweenTheBars_andTheLastRowTakesTheRemainder() {
         val g = nomadDay
         assertEquals(2, g.hairline)
-        assertEquals(64, g.rowHeight)                          // round(34 × 1.875)
-        assertEquals(66, g.pitch)
+        // (1872 − 107 − 107 − 23 × 2) / 24 = 1612 / 24 = 67, remainder 4 px — the last row's.
+        assertEquals(67, g.rowHeight)
+        assertEquals(69, g.pitch)
         assertEquals(107, g.rowsTop)
         assertEquals(150, g.gutterLeft)                        // round(80 × 1.875)
         assertEquals(152, g.gutterRight)
         assertEquals(0, g.left)
         assertEquals(1404, g.right)
-        assertEquals(107 + 24 * 64 + 23 * 2, g.rowsBottom)      // 1689
-        for (i in 0 until CalendarGeometry.DAY_ROWS) assertEquals(107 + i * 66, g.rowTop(i))
+        assertEquals(1872 - 107, g.rowsBottom)                  // the bottom bar's top, exactly
+        for (i in 0 until CalendarGeometry.DAY_ROWS) assertEquals(107 + i * 69, g.rowTop(i))
+        for (i in 0 until CalendarGeometry.DAY_ROWS - 1) assertEquals(67, g.rowHeight(i))
+        assertEquals(67 + 4, g.rowHeight(23))
+        assertEquals(g.rowsBottom, g.rowTop(23) + g.rowHeight(23))
         for (i in 1..23) assertEquals(g.rowTop(i - 1) + g.rowHeight, g.rowDividerY(i))
-        // The closing hairline sits AT rowsBottom; the band opens after it.
-        assertEquals(g.rowsBottom + g.hairline, g.slackTop)
-        assertEquals(1872 - 107, g.slackBottom)
-        assertEquals(74, g.slackHeight)
-        assertTrue(g.slackHeight >= 0)
     }
 
     @Test
-    fun dayRowsAreNeverHeightProportional() {
-        // Twice the slack, the same rows: the band absorbs a taller page, the ledger does not.
+    fun dayRowsGrowWithThePage_theMantaGetsTallerRowsThanTheNomad() {
+        // A taller page is taller rows, not a band: the Day page is the one height-derived layout.
         val taller = CalendarGeometry.day(1404, 2400, 1.875f, 107, 107)
-        assertEquals(nomadDay.rowHeight, taller.rowHeight)
-        assertEquals(nomadDay.rowsBottom, taller.rowsBottom)
-        assertEquals(nomadDay.slackHeight + (2400 - 1872), taller.slackHeight)
+        assertTrue(taller.rowHeight > nomadDay.rowHeight)
+        assertEquals((2400 - 107 - 107 - 23 * 2) / 24, taller.rowHeight)
+        assertEquals(2400 - 107, taller.rowsBottom)
+        assertTrue(taller.rowHeight(23) - taller.rowHeight in 0 until CalendarGeometry.DAY_ROWS)
     }
 
     @Test
     fun aShortDayPageShrinksTheRowsRatherThanRunningUnderTheBar() {
         val g = CalendarGeometry.day(1404, 900, 1.875f, 107, 107)
-        assertTrue("row ${g.rowHeight}", g.rowHeight in 1 until 64)
-        assertEquals(107 + 24 * g.rowHeight + 23 * g.hairline, g.rowsBottom)
-        assertTrue("last row at ${g.rowTop(23) + g.rowHeight}", g.rowTop(23) + g.rowHeight <= 900 - 107)
-        assertTrue("slack ${g.slackHeight}", g.slackHeight >= 0)
-        assertTrue(g.slackBottom >= g.slackTop)
+        assertTrue("row ${g.rowHeight}", g.rowHeight in 1 until 67)
+        assertEquals(900 - 107, g.rowsBottom)
+        assertTrue("last row at ${g.rowTop(23) + g.rowHeight(23)}", g.rowTop(23) + g.rowHeight(23) <= 900 - 107)
     }
 
     @Test

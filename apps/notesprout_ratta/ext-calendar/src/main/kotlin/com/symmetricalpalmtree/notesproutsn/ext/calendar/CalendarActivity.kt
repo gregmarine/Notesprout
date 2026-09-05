@@ -533,7 +533,7 @@ class CalendarActivity : InkScreenActivity<InkAction>() {
         val marks = document?.marks.orEmpty()
         return when (t.kind) {
             CalendarTarget.KIND_WEEK -> CalendarTemplate.week(weekGeometry(), t.localDate, today, density, palette, notes, marks)
-            CalendarTarget.KIND_DAY -> CalendarTemplate.day(dayGeometry(), t.half, density, palette, notes, marks[t.localDate].orEmpty())
+            CalendarTarget.KIND_DAY -> CalendarTemplate.day(dayGeometry(), t.half, density, palette, marks[t.localDate].orEmpty())
             else -> CalendarTemplate.month(monthGeometry(), t.localDate, today, density, palette, notes, marks)
         }
     }

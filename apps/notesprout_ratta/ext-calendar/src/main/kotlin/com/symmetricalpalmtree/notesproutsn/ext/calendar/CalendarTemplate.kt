@@ -7,7 +7,6 @@ import android.graphics.Path
 import android.graphics.Rect
 import com.symmetricalpalmtree.notesproutsn.extension.CalendarDates
 import java.time.LocalDate
-import kotlin.math.roundToInt
 
 /**
  * Paints a calendar page's grid as the page **template** (arc 23 — Month, Week and Day): a
@@ -17,8 +16,8 @@ import kotlin.math.roundToInt
  *
  * og's three layouts verbatim. Month: Sun–Sat header, six rows of seven square cells. Week: 2×4
  * cells, each with its Sun/Mon/… label above the number, and an eighth cell left blank. Both close
- * with the Notes band. Day: half-hour rows with their time labels in the left gutter, and the slack
- * band below. Day numbers sit top-left with a hairline under the number row, out-of-month numbers
+ * with the Notes band. Day: half-hour rows filling the page, their time labels in the left gutter —
+ * no band. Day numbers sit top-left with a hairline under the number row, out-of-month numbers
  * take the light ink, and **today's number is ringed** — the one mark, because nothing selects; the
  * ring arithmetic lives in [dayCell] alone, so Month and Week can never draw it differently.
  *
@@ -139,10 +138,9 @@ object CalendarTemplate {
 
     /**
      * The Day page for one [half]: 24 half-hour rows across the full page width, their time labels
-     * in the left gutter, the gutter's own hairline running the rows' height, a closing hairline
-     * under the last row, and the slack band below it. **The band takes the Notes label only when it
-     * is tall enough to hold one** ([CalendarGeometry.SLACK_LABEL_MIN_DP]); otherwise it is blank
-     * paper, which is honest — a label crushed against the bottom bar names nothing.
+     * in the left gutter and the gutter's own hairline running the rows' height. **No Notes band and
+     * no closing hairline** — the rows fill the page to the bottom bar, whose own top border closes
+     * the ledger (Z5b, 2026-09-04).
      *
      * There is no header band: the page's title in the chrome already names the date and the half.
      *
@@ -155,7 +153,6 @@ object CalendarTemplate {
         half: Int,
         density: Float,
         palette: Palette,
-        notesLabel: String,
         marks: List<DayMark> = emptyList(),
     ): Bitmap {
         val bmp = Bitmap.createBitmap(maxOf(1, g.width), maxOf(1, g.height), Bitmap.Config.ARGB_8888)
@@ -170,11 +167,10 @@ object CalendarTemplate {
             val top = g.rowTop(slot)
             val label = CalendarGeometry.dayRowLabel(half, slot)
             p.getTextBounds(label, 0, label.length, bounds)
-            canvas.drawText(label, 12f * density, top + g.rowHeight / 2f - bounds.exactCenterY(), p)
+            canvas.drawText(label, 12f * density, top + g.rowHeight(slot) / 2f - bounds.exactCenterY(), p)
             if (slot > 0) hline(canvas, p, g.left, g.rowDividerY(slot), g.right, hp)
         }
         vline(canvas, p, g.gutterLeft, g.rowsTop, g.rowsBottom, hp)
-        hline(canvas, p, g.left, g.rowsBottom, g.right, hp)
 
         // ── The events in the rows — the gutter labels' own size and centring, mirrored.
         val buckets = DayRows.bucket(marks, half)
@@ -186,13 +182,9 @@ object CalendarTemplate {
                 val label = fit(p, DayRows.label(entries), maxWidth)
                 if (label.isEmpty()) continue
                 p.getTextBounds(label, 0, label.length, bounds)
-                canvas.drawText(label, g.right - 8f * density, g.rowTop(slot) + g.rowHeight / 2f - bounds.exactCenterY(), p)
+                canvas.drawText(label, g.right - 8f * density, g.rowTop(slot) + g.rowHeight(slot) / 2f - bounds.exactCenterY(), p)
             }
             p.textAlign = Paint.Align.LEFT
-        }
-
-        if (g.slackHeight >= (CalendarGeometry.SLACK_LABEL_MIN_DP * density).roundToInt()) {
-            bandLabel(canvas, p, bounds, g.left.toFloat(), g.slackTop.toFloat(), density, palette, notesLabel)
         }
         return bmp
     }

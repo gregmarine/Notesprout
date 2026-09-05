@@ -9,11 +9,14 @@ import kotlin.math.roundToInt
  * JVM-tested, no `android.graphics`. The template painter draws what this says and the finger
  * hit-test reads it back, so the two can never disagree.
  *
- * **Rule: every dimension is width- or dp-derived; height slack goes to a band; nothing is a
- * proportional slice of the height.** og's Day view sized its rows from the height and is a
- * ledgered bug for it; here the Month grid is square cells from the width, the Day page's rows are
- * a fixed dp height, and whatever height is left below either is a band — Notes on Month and Week,
- * blank paper (or Notes, when there is room to say so) on Day.
+ * **Rule for Month and Week: every dimension is width- or dp-derived; height slack goes to the
+ * Notes band; nothing is a proportional slice of the height.** The Month grid is square cells from
+ * the width and whatever height is left below is the Notes band; Week borrows both. **The Day page
+ * is the one exception, by decision (Z5b Manta check, 2026-09-04): its 24 rows share the whole
+ * height between the bars evenly and there is no band** — a day is a ledger, not a ledger over a
+ * note. og's height-derived Day rows were a ledgered bug because og's *canvas* changed height under
+ * the same page (the top guard); here the page is the whole screen, the bars overlay it and the
+ * guard is 0 on Ratta, so the height a page is laid out at is the height it is drawn at.
  *
  * **Hairlines are `round(density)` px on integer edges** — a 1 dp line at the Nomad's 1.875 density
  * is a coin flip otherwise (the standing trap). Every edge here is an `Int`.
@@ -26,19 +29,11 @@ object CalendarGeometry {
     /** The day-of-week header band, og's value. */
     const val DOW_HEADER_DP = 40f
 
-    /** One half-hour row on the Day page — a **fixed** height, never a slice of the page's
-     *  (og's height-proportional rows are the ledgered bug this arc does not repeat). */
-    const val DAY_ROW_DP = 34f
-
     /** The Day page's left gutter, where the time labels live — og's value. */
     const val DAY_GUTTER_DP = 80f
 
     /** Half-hour rows in one half of a day: twelve hours, two rows an hour. */
     const val DAY_ROWS = 24
-
-    /** A slack band shorter than this is left as blank paper: a label needs room to be a label
-     *  rather than a smudge against the bottom bar. */
-    const val SLACK_LABEL_MIN_DP = 24f
 
     /** The Month page's geometry. */
     class Month(
@@ -193,9 +188,11 @@ object CalendarGeometry {
     // ── Day ──────────────────────────────────────────────────────────────────
 
     /**
-     * The Day page's geometry: [DAY_ROWS] half-hour rows of a **fixed** height under the top inset,
-     * a time-label gutter down the left, and whatever height is left over as a slack band. The rows
-     * span the page's full width, as og's do — [left] and [right] are 0 and the width.
+     * The Day page's geometry: [DAY_ROWS] half-hour rows of **one even height** filling the page
+     * between the bars and a time-label gutter down the left. **The last row takes the integer
+     * division's remainder** (at most 23 px) so the rows meet the bottom bar exactly, and there is
+     * no closing hairline — the bar's own top border closes the ledger. The rows span the page's
+     * full width, as og's do — [left] and [right] are 0 and the width.
      */
     class Day(
         val width: Int,
@@ -206,11 +203,10 @@ object CalendarGeometry {
         /** The gutter hairline's right edge. */
         val gutterRight: Int,
         val rowsTop: Int,
+        /** Every row's height but the last's — see [rowHeight]. */
         val rowHeight: Int,
+        /** The last row's bottom edge: the bottom bar's top, exactly. */
         val rowsBottom: Int,
-        /** The band below the rows' closing hairline: never negative, and never a row's height. */
-        val slackTop: Int,
-        val slackBottom: Int,
     ) {
         val left: Int get() = 0
         val right: Int get() = width
@@ -218,37 +214,33 @@ object CalendarGeometry {
         /** From one row's top edge to the next: the row plus its divider. */
         val pitch: Int get() = rowHeight + hairline
 
-        val slackHeight: Int get() = maxOf(0, slackBottom - slackTop)
-
         /** Row [i]'s top edge, `i` in 0..[DAY_ROWS] − 1. */
         fun rowTop(i: Int): Int = rowsTop + i * pitch
+
+        /** Row [i]'s height: [rowHeight], except the last row, which runs to [rowsBottom]. */
+        fun rowHeight(i: Int): Int = if (i == DAY_ROWS - 1) rowsBottom - rowTop(i) else rowHeight
 
         /** The y of the hairline above row [i] (1..23), its top edge — the first row has none. */
         fun rowDividerY(i: Int): Int = rowTop(i) - hairline
     }
 
     /**
-     * The Day page for one half. Rows take [DAY_ROW_DP] flat; **only when a page is too short for
-     * 24 of them plus their 23 dividers** do they shrink to the tallest integer that fits (Month's
-     * `byHeight` rule), never below 1 px — a store carried from a smaller screen still shows the
-     * whole twelve hours rather than running under the bottom bar. The slack is what is left, and
-     * it is what absorbs a taller page: the rows never grow.
+     * The Day page for one half. The height between the bars, less the 23 dividers, is split evenly
+     * over the 24 rows (integer, never below 1 px); the remainder — at most 23 px — goes to the last
+     * row, so [Day.rowsBottom] is the bottom bar's top. A taller page means taller rows.
      */
     fun day(widthPx: Int, heightPx: Int, density: Float, topInsetPx: Int, bottomInsetPx: Int): Day {
         val hairline = maxOf(1, density.roundToInt())
         val rowsTop = topInsetPx
         val bottom = heightPx - bottomInsetPx
         val dividers = (DAY_ROWS - 1) * hairline
-        val byHeight = (bottom - rowsTop - dividers) / DAY_ROWS
-        val rowHeight = maxOf(1, minOf((DAY_ROW_DP * density).roundToInt(), byHeight))
-        val rowsBottom = rowsTop + DAY_ROWS * rowHeight + dividers
+        val rowHeight = maxOf(1, (bottom - rowsTop - dividers) / DAY_ROWS)
+        val rowsBottom = maxOf(bottom, rowsTop + DAY_ROWS * rowHeight + dividers)
         val gutterLeft = (DAY_GUTTER_DP * density).roundToInt()
-        val slackTop = rowsBottom + hairline     // the rows' closing hairline sits at rowsBottom
         return Day(
             width = widthPx, height = heightPx, hairline = hairline,
             gutterLeft = gutterLeft, gutterRight = gutterLeft + hairline,
             rowsTop = rowsTop, rowHeight = rowHeight, rowsBottom = rowsBottom,
-            slackTop = slackTop, slackBottom = maxOf(slackTop, bottom),
         )
     }
 

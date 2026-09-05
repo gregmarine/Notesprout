@@ -84,10 +84,13 @@ one replaced.
 
 `CalendarGeometry` (pure, no `android.graphics`, JVM-tested) is where every rect on a calendar page
 comes from — the template painter draws what it says and the finger hit-test reads it back, so the
-two can never disagree. The governing rule, stated in the file itself: **every dimension is width-
-or dp-derived; height slack goes to a band; nothing is a proportional slice of the height.** og's
-Day view sizes its rows from the available height, which is a ledgered bug (`BACKLOG.md`); nothing
-here repeats it.
+two can never disagree. The governing rule for Month and Week, stated in the file itself: **every
+dimension is width- or dp-derived; height slack goes to the Notes band; nothing is a proportional
+slice of the height.** The Day page is the one exception, by decision (Z5b Manta check, 2026-09-04):
+its rows share the whole height evenly and there is no band. og's height-derived Day rows were a
+ledgered bug (`BACKLOG.md`) because og's *canvas* changed height under the same page — the top
+guard; here the page is the whole screen, the bars overlay it and the guard is 0 on Ratta, so the
+height a page is laid out at is the height it is drawn at.
 
 - **Month** — a day-of-week header band (`DOW_HEADER_DP` 40), then a 6×7 grid of **square** cells
   sized from the content width (seven cells and six hairlines fit the width; only on a page too
@@ -99,15 +102,15 @@ here repeats it.
   rows, so the Notes band below it is Month's band to within the integer rounding of that halving
   (pinned as a range, not an exact match). The spare cell is blank paper, unlabeled, and hit-tests to
   null exactly like a hairline or a margin does — it is nobody's day.
-- **Day** — a fixed-height row (`DAY_ROW_DP` 34, never a slice of the page) repeated `DAY_ROWS` (24)
-  times for one half, a left gutter (`DAY_GUTTER_DP` 80) holding the time labels, a closing hairline
-  under the last row, and a slack band below that. Rows shrink only when a page is too short to hold
-  all 24 of them plus their 23 dividers (a store carried from a smaller screen still shows the whole
-  twelve hours rather than running under the bottom bar), and they never grow to fill a taller page —
-  the slack absorbs it. The slack band draws a "Notes" label only when it is at least
-  `SLACK_LABEL_MIN_DP` (24 dp) tall; shorter than that it is blank paper, because a label crushed
-  against the bottom bar names nothing. On the Nomad — the sw720dp tier, both bars 133 px (71 dp) —
-  the slack is 22 px (11 dp) and takes no label.
+- **Day** — `DAY_ROWS` (24) half-hour rows for one half sharing the height between the bars
+  **evenly** (the height less 23 dividers, integer-divided by 24, never below 1 px) and a left
+  gutter (`DAY_GUTTER_DP` 80) holding the time labels. **No Notes band and no closing hairline**:
+  the remainder of the integer division — at most 23 px — goes to the last row (`rowHeight(i)`), so
+  `rowsBottom` is the bottom bar's top exactly and the bar's own 1 dp border closes the ledger. A
+  taller page is taller rows (the Manta's rows are taller than the Nomad's); a shorter page is
+  shorter rows, so the whole twelve hours always show above the bar. Until Z5b the rows were a
+  fixed 34 dp with a labeled "Notes" slack band below — the Manta's taller page turned that band
+  into a section, and the decision was that a day is a ledger, not a ledger over a note.
 
 **Today** is a ring around the day's number, drawn once by `CalendarTemplate.dayCell` (shared by
 Month and Week so the ring arithmetic exists exactly once) — **nothing selects**. There is no
@@ -597,7 +600,7 @@ same gate the pad's screen calls, rather than a copy each screen kept for itself
 | `ext-ink/InkSqlTest` | the `stroke` table and index DDL through the host's real DDL validator, `putStroke`'s idempotent text and format-B geometry, both deletes, all three reads keeping `"order"` quoted |
 | `ext-ink/InkTransferSessionTest` | chunks accumulating and only the last one placing, fresh ids minted with the wire's geometry, a placement changed mid-transfer refused and the whole inbound dropped, the stroke and point caps, a missing store and a store that fails mid-placement both answering the one `STORE_UNAVAILABLE` text, `recordInboundPageSize`'s one documented difference, parked chunks probed past the end as empty, `end`/a second `begin` clearing everything |
 | `ext-calendar/CalendarSqlTest` | the schema shape, every statement passes the real host validator, period/page are `OR IGNORE` never `REPLACE`, page updates, stroke rows match the pad's, state rows, every read statement |
-| `ext-calendar/CalendarGeometryTest` | hairline rounding and integer edges, Month cells square from the width with the Notes band taking the rest, dividers on integer edges, a short page shrinking cells rather than running under the bar, Month `hitTest` on and off the grid, Week cells as Month's quarter with Month's band, Week `hitTest` incl. the spare cell, Day rows fixed-dp and never height-proportional, a short Day page shrinking rows, `dayRowLabel`'s 12-hour text |
+| `ext-calendar/CalendarGeometryTest` | hairline rounding and integer edges, Month cells square from the width with the Notes band taking the rest, dividers on integer edges, a short page shrinking cells rather than running under the bar, Month `hitTest` on and off the grid, Week cells as Month's quarter with Month's band, Week `hitTest` incl. the spare cell, Day rows sharing the height evenly with no band and the last row taking the remainder to the bar, a taller page growing the rows, a short Day page shrinking rows, `dayRowLabel`'s 12-hour text |
 | `ext-calendar/CalendarNavigationTest` | first run onto today's Month, honouring any bookmark kind, the anchor landing on today/this-week on toggle, anchoring on a period's own first day when it doesn't hold today, re-anchoring on today when stepping back into a period that does, a toggle preserving the anchor's half, a toggle to the showing view doing nothing, Today and the clock's half, a double-tap opening AM and moving the anchor (and doing nothing on a Day page), a pick moving the anchor, Day stepping AM → PM → next morning; `landed` re-anchoring a replay's page (and answering null for the showing one) |
 | `ext-calendar/CalendarStoreTest` | `open` declares the schema, reads the bookmark and writes nothing; a bad bookmark reads as none; reading a missing page writes nothing; reading a day's other half finds the period but no page; reading an existing page is the join then the strokes; `saveState` is one batch of three; `mintRows` is period-then-page both `OR IGNORE`; `receive` on no rows mints at zero size in one batch; `receive` on an existing page numbers after the max and mints nothing; a mid-way placement failure drops exactly what it minted; every store failure reads as `StoreUnavailable`; a placement onto an existing page reads its header and max order, never a blob |
 | `ext-calendar/CalendarDocumentTest` | showing an empty month writes only the bookmark; the first stroke mints period and page ahead of itself in one batch; an existing page is never re-minted and keeps its own size; the other half of a day joins the existing period; a zero-size page learns the surface once and only once; a stroke drawn and undone before the debounce mints nothing; leaving a page flushes it after reading the next; a replay on another page navigates there first; a replay for a page never shown this showing is skipped |

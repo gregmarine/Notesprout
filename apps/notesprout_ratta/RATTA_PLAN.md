@@ -682,7 +682,7 @@ titles, `LocalDate.toString()` only); store `period(kind, date UNIQUE) → page(
 **rows minted on the first stroke, never on open**, the bookmark on every show (written **before** the
 in-memory swap), **never `INSERT OR REPLACE` into `period`/`page`**, `periodId` resolved by subselect in
 the page insert, a placement mints at 0×0 and the screen sizes it, nothing deletes a period; geometry
-width-/dp-derived with height slack in a band (Day rows `DAY_ROW_DP` 34 fixed), today = ring only,
+width-/dp-derived with height slack in a band (Day rows `DAY_ROW_DP` 34 fixed — **superseded Z5b 2026-09-04: Day rows now share the height evenly, no band**), today = ring only,
 hairlines `round(density)` on integer edges, the template baked once per `BakeKey`; `CalendarNavigation`
 the pure anchor rule (toggle keeps anchor + half; open/step onto today's period anchors on today;
 double-tap ALWAYS Day AM; a replay re-anchors via `landed`); gestures = swipe (`SwipeMath`), double-tap
@@ -785,7 +785,7 @@ code-review phase in this arc, on the user's call.** Anything a phase meets outs
 | Entry doors | **Both of the pad's**: the library top bar (after `btnScratchPad`) and the notebook top bar's right cluster (after `btnScratchPad`). One entry class serves both; the notebook door hands the EPD pipeline over first. Buttons **GONE** without a trusted calendar installed. |
 | Store rows | **`period → page → stroke` + `state`**. `period(id, kind, date)` with `UNIQUE(kind, date)` — **no key prefix** (the kind column already says it); `date` is a plain ISO day for all three kinds (month = its first day, week = its Sunday, day = the day). `page(id, periodId, half, width, height, …)` — month and week own one page (`half` 0), a day owns two (0 = AM, 1 = PM). `stroke` = the pad's row (StrokeCodec format B). **Rows are minted on the first stroke, never on open** — browsing empty months writes nothing. |
 | Week start | **Sunday.** Sun–Sat columns; week pages dated by their Sunday. Never the device locale. |
-| Layouts | **og's three verbatim**: Month = Sun–Sat header + 6×7 **square** cells + a Notes band below · Week = 2×4 cells (7 days + 1 spare) + the same Notes band · Day = 24 half-hour rows per half, time labels in a left gutter. **One change:** Day rows take a **fixed row height with a slack band** at the bottom — og's height-proportional rows are a ledgered bug (`BACKLOG.md` "Calendar Day view — height-dependent geometry"). |
+| Layouts | **og's three verbatim**: Month = Sun–Sat header + 6×7 **square** cells + a Notes band below · Week = 2×4 cells (7 days + 1 spare) + the same Notes band · Day = 24 half-hour rows per half, time labels in a left gutter. **One change:** Day rows take a **fixed row height with a slack band** at the bottom — og's height-proportional rows are a ledgered bug (`BACKLOG.md` "Calendar Day view — height-dependent geometry"). **Superseded Z5b 2026-09-04 (user decision on the Manta): Day rows share the height evenly, no band — see § Z5b outcome.** |
 | Today mark | **Ring today's number only** (Month + Week). No selected-day border — nothing selects. The Day page's title names the date. |
 | Gestures | Finger **swipe** steps the period (the notebook's swipe guards, `SwipeMath`) · **double-tap a day cell** on Month/Week opens that day's Day page (AM); double-tap does nothing on Day · 2-finger stationary double-tap = undo, 3-finger = redo · **no long-press**. All finger gestures pen-activity-gated as everywhere. |
 | Tools + lasso | The notebook's tools, **fixed** (pen black at the notebook's width, eraser, smart lasso + scribble erase) — the pad's rule. Lasso bar: **Move (drag) · Send to Notebook (with a notebook behind) · Delete** (Delete last). **Both transfers ship**: calendar → notebook (top-bar Send = the whole page; selection Send = the lasso) and notebook → calendar (selection-bar button). |
@@ -1822,7 +1822,23 @@ by design; "Every 2 weeks" the moment it is not 1). **Trap (new):** the auto-mod
 classifier refused `adb install` three times in this session (plain, via the skill, absolute path)
 — the user ran the install by hand with `!`; nothing to fix in the tree.
 **User checklist: (1) tap the clock face with the PEN, not a finger — hour then minute — and
-confirm the inverted disc lands under the nib; (2) the pill's look on the Manta.**
+confirm the inverted disc lands under the nib; (2) the pill's look on the Manta.** Nomad checklist
+passed 2026-09-04; **Z5b signed off by the user 2026-09-04 ("That's a wrap on Z5b. I'm happy")
+after the Manta spot check + the Day-view fix below.** the Manta spot check (dev + all seven extensions installed there for it) found
+**the Day page's Notes band** — on the Manta's taller page the 34 dp rows left a band tall enough to
+read as a section. **Decision (user, 2026-09-04): no Notes section on the Day view; the 24 rows fill
+the whole height between the bars evenly.** Landed as a Z5b follow-up: `CalendarGeometry.day` now
+divides (height − bars − 23 dividers) by 24 (integer, ≥ 1 px); **the ≤ 23 px remainder goes to the
+last row** (`Day.rowHeight(i)`; the user's call on seeing the gap — "lucky slot"), `rowsBottom` is
+the bar's top exactly and **the closing hairline is gone** (the bar's own 1 dp border closes the
+ledger — two lines a few px apart read as a gap). `DAY_ROW_DP` / `SLACK_LABEL_MIN_DP` / the
+`Day.slack*` fields deleted, `CalendarTemplate.day` lost its `notesLabel`. **This overturns arc 23's "nothing is a slice of the height" rule for Day alone** —
+that rule guarded against og's canvas changing height under the same page (the top guard); here the
+page is the screen, the bars overlay it and the guard is 0 on Ratta, so a page is drawn at the
+height it was laid out at. Month and Week keep the rule and their Notes band. Tests: the Day
+geometry tests rewritten (even rows, the last row's remainder, a taller page = taller rows, a short
+page still shrinks); ext-calendar 291 green. Both Supernotes screencapped: a single line under
+11:30 PM, the bar's.
 
 **Not in Z5 (the user's calls 2026-09-03):** trash tap target ("not an issue") · the type button's
 140 dp minimum ("not an issue"). **Walk:** Nomad by hand (Haiku wanders), the user's own eye on the
