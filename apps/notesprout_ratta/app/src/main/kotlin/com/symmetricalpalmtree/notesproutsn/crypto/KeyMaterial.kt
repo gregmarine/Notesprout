@@ -41,7 +41,7 @@ object KeyMaterial {
         DerivedKeyStore.remove(context, fileId)
     }
 
-    /** Wipe every cached key (debug "Forget cached key" / future rotation). */
+    /** Wipe every cached key (the Encryption screen's Forget, arc 26 / U1; rotation from U3). */
     fun clearAll(context: Context) {
         ram.clear()
         DerivedKeyStore.clear(context)

@@ -136,6 +136,7 @@
     <string name="template_search_empty_body">Type some of the template\'s name first.</string>
     <string name="cd_templates">Templates</string>
     <string name="cd_backup">Backup</string>
+    <string name="cd_encryption">Encryption</string>
     <string name="cd_template_current">Current paper</string>
     <string name="template_render_failed_title">Couldn\'t draw that paper</string>
     <string name="template_render_failed_body">The template could not be rendered at this page\'s size. The page has been left as it was.</string>
@@ -323,6 +324,25 @@
          cleanly; anything a run could not do is a dialog naming the counts — never a path, never a
          secret. -->
     <string name="backup_title">Backup</string>
+
+    <!-- Encryption screen (arc 26 / U1). og's wording, "global passphrase" read as "recovery key". -->
+    <string name="encryption_title">Encryption</string>
+    <string name="encryption_key_caption">Recovery key</string>
+    <string name="encryption_key_set">Recovery key: set</string>
+    <string name="encryption_key_not_set">Recovery key: not on this device</string>
+    <string name="encryption_count_zero">No notebooks use this device\'s key</string>
+    <string name="encryption_count_one">1 notebook uses this device\'s key</string>
+    <string name="encryption_count_many">%1$d notebooks use this device\'s key</string>
+    <string name="encryption_reveal">Reveal recovery key…</string>
+    <string name="encryption_reveal_title">Recovery key</string>
+    <string name="encryption_reveal_body">The one secret that unlocks your library on another device or after a reinstall. Keep it safe.</string>
+    <string name="encryption_reveal_none_title">No recovery key</string>
+    <string name="encryption_reveal_none_body">There is no recovery key on this device.</string>
+    <string name="encryption_forget">Forget on this device…</string>
+    <string name="encryption_forget_title">Forget on this device</string>
+    <string name="encryption_forget_body">The recovery key will be removed from this device. The next launch will ask for it before the library opens. No notebooks will be decrypted or modified.</string>
+    <string name="encryption_forget_confirm">Forget</string>
+    <string name="encryption_close">Close</string>
     <string name="backup_folder_caption">Backup folder</string>
     <string name="backup_no_folder">No folder chosen</string>
     <string name="backup_choose">Choose…</string>

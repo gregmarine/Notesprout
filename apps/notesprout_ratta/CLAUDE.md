@@ -167,10 +167,15 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   **Read `DRIVE_PLAN.md`, not `RATTA_PLAN.md`, for any work on it.**)
   `gradle.properties` sets `android.nonTransitiveRClass=false` — undoing it breaks every
   `:sn-screen` resource reference from `:app`.
-- **Arc 26 "Keys" is PLANNED (wizard locked 2026-09-05, no phase started)** — og-parity encryption
-  (`PARITY_BACKLOG.md` item 1): the Encryption screen + library door, rotation, per-notebook scope,
-  recovery. **Read the standalone `ENCRYPTION_PLAN.md`, not `RATTA_PLAN.md`, for it** — phases U1–U7,
-  no code review, host-only, no ninth point.
+- **Arc 26 "Keys" is IN PROGRESS (wizard locked 2026-09-05; U1 landed 2026-09-05)** — og-parity
+  encryption (`PARITY_BACKLOG.md` item 1): the Encryption screen + library door, rotation, per-notebook
+  scope, recovery. **Read the standalone `ENCRYPTION_PLAN.md`, not `RATTA_PLAN.md`, for it** — phases
+  U1–U7, no code review, host-only, no ninth point. **U1:** `encryption/EncryptionActivity` behind
+  the library's new `btnEncryption` (`ic_lock`, `[Backup] [Encryption] [Import]`): status (the count
+  reads `keyScope`), Reveal (og's wording, Copy/Close, no re-auth), Forget on this device (ships in
+  release; clears `PassphraseStore` + `KeySession` + `KeyMaterial`, then **kills the process** —
+  `SnIndex` has no close, so a live process would answer READY with no key). The debug menu's
+  "Show recovery key" / "Forget cached key" are gone; every crypto walk starts at Reveal.
 - **Every extension APK wears the same icon — the Tabler "puzzle", byte-identical, no exception**
   (the user's call, 2026-09-05, which reversed the three per-subject glyphs granted along the way:
   `:ext-tags`' `tag`, `:ext-calendar`'s `calendar`, `:ext-cloud`'s `cloud`). A package is found by

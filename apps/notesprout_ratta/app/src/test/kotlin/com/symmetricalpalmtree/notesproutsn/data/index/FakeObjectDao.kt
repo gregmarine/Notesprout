@@ -31,6 +31,9 @@ class FakeObjectDao : ObjectDao {
     override suspend fun allAliveOfType(type: String): List<ObjectSummary> =
         rows.values.filter { it.type == type && it.deletedAt == null }.map { it.toSummary() }
 
+    override suspend fun countAliveNotebooksByScope(scope: String): Int =
+        rows.values.count { it.type == ObjectType.NOTEBOOK && it.deletedAt == null && it.keyScope == scope }
+
     override suspend fun aliveOfType(ids: List<String>, type: String): List<ObjectSummary> =
         ids.mapNotNull { rows[it] }.filter { it.type == type && it.deletedAt == null }.map { it.toSummary() }
 

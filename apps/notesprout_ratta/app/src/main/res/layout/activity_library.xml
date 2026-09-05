@@ -153,7 +153,7 @@
             android:textColor="@color/inkBlack" />
     </FrameLayout>
 
-    <!-- [Backup] [Import*]           |< < n/n > >|                     [Templates] [debug ⋯] -->
+    <!-- [Backup] [Encryption] [Import*] |< < n/n > >|                     [Templates] [debug ⋯] -->
     <!-- A FrameLayout, not a row: the pager is centred on the SCREEN, not on the space left over
          between the two groups — and neither group's width is a constant. The right one differs
          between debug and release (the ⋯ is only there in debug) and the left one differs with
@@ -167,8 +167,9 @@
         android:paddingStart="4dp"
         android:paddingEnd="4dp">
 
-        <!-- Backup, then Import — the user's 2026-08-28 placement call. Both are things you do to
-             the library itself, so they lead the bar; the pager sits between them and Templates. -->
+        <!-- Backup, Encryption, then Import — the user's 2026-08-28 placement call, Encryption
+             added 2026-09-05 (arc 26 / U1). All three are things you do to the library itself, so
+             they lead the bar; the pager sits between them and Templates. -->
         <LinearLayout
             android:id="@+id/bottomLeft"
             android:layout_width="wrap_content"
@@ -184,6 +185,15 @@
                 style="@style/Widget.Notesprout.ToolbarButton"
                 android:src="@drawable/ic_backup"
                 android:contentDescription="@string/cd_backup" />
+
+            <!-- Encryption (arc 26 / U1, decision 5), between Backup and Import: the door to the
+                 recovery key — reveal, change (U3), forget. Always visible, like Backup: the key is
+                 core. -->
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnEncryption"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_lock"
+                android:contentDescription="@string/cd_encryption" />
 
             <!-- Import (arc 16 / I1), right after Backup — moved here from the right-hand group at
                  K2 on the user's 2026-08-28 call. GONE unless a trusted importer extension is

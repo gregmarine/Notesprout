@@ -6,7 +6,7 @@ the root `CLAUDE.md` and `apps/notesprout_ratta/CLAUDE.md`. **Do not load `RATTA
 this arc** unless a standing trap needs checking; its protocol and traps are summarized at the end
 so this file is enough. `DRIVE_PLAN.md` is the shape this file copies.
 
-**Status:** wizard locked 2026-09-05 · U1 ⬜ · U2 ⬜ · U3 ⬜ · U4 ⬜ · U5 ⬜ · U6 ⬜ · U7 ⬜
+**Status:** wizard locked 2026-09-05 · U1 ✅ (2026-09-05) · U2 ⬜ · U3 ⬜ · U4 ⬜ · U5 ⬜ · U6 ⬜ · U7 ⬜
 
 ---
 
@@ -217,7 +217,7 @@ on-screen-keyboard taps; every SAF pick; the live library after a relaunch). The
 Every phase's crypto walk starts by **writing the Nomad's current recovery key down** (the
 Encryption screen, once U1 lands — the debug item is gone) so no walk can lock the dev library.
 
-### U1 ⬜ — The Encryption screen, the door, Reveal, Forget
+### U1 ✅ — The Encryption screen, the door, Reveal, Forget (2026-09-05)
 - `EncryptionActivity` (`encryption/`): top bar `Cancel` (left, closes) · title; body = status
   ("Recovery key: set" · "N notebooks use this device's key" — the count reads `keyScope`, so it
   is honest from U4 on) · **Reveal recovery key…** (dialog: monospace key, **Copy** / **Close**;
@@ -377,4 +377,22 @@ Encryption screen, once U1 lands — the debug item is gone) so no walk can lock
 
 ## Ledger
 
-*(empty — filled per phase)*
+### U1 — Outcome (2026-09-05)
+- **Built:** `encryption/EncryptionActivity` + `activity_encryption.xml` (Backup's shape: back arrow +
+  title, 1dp rule, scroll body; status lines, Reveal, Forget; `btnChange` present but GONE for U3),
+  manifest entry, `sn-screen` `ic_lock` (Tabler `lock`), library `btnEncryption` between Backup and
+  Import (tooltip, shelf-hidden with the group), `ObjectDao.countAliveNotebooksByScope` +
+  `IndexRepository.countGlobalNotebooks` (the count reads `keyScope`), 18 strings, both debug-menu
+  duplicates removed (`FakeObjectDao` gained the count).
+- **Wording:** og verbatim with "global passphrase" read as "recovery key" (phase-start question 1).
+- **Forget kills the process** after `finishAffinity` (the debug item's precedent): `SnIndex` has no
+  close, and a relaunch into the live process would answer READY with no key cached — recorded here so
+  U3's relaunch-through-Bootstrap design does not "simplify" it away.
+- **Walk (Nomad, by hand):** door → screen ("Recovery key: set", "44 notebooks use this device's
+  key") → Reveal shows the key monospace → Copy toasts → Forget confirm → process gone → Bootstrap →
+  Unlock → the key pasted from the clipboard (long-press the field → Paste — a 45-character key needs
+  no on-screen typing) → "Checking…" → library → a notebook opens (raw keys re-derived) → Encryption
+  screen reads "set" again. Row measured: `[Backup] [Encryption] [Import]` fits with the pager centred.
+- **Tests:** 989 in `:app`, 0 failures (no new pure logic beyond a count).
+- **Trap for the next walks:** Reveal → Copy puts the key on the system clipboard, and it survives the
+  process kill — the cheapest way to feed Unlock on a Supernote.

@@ -22,6 +22,7 @@ import com.symmetricalpalmtree.notesproutsn.core.OpeningOverlay
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.core.TopGuard
 import com.symmetricalpalmtree.notesproutsn.backup.BackupActivity
+import com.symmetricalpalmtree.notesproutsn.encryption.EncryptionActivity
 import com.symmetricalpalmtree.notesproutsn.crypto.KeyMaterial
 import com.symmetricalpalmtree.notesproutsn.data.backup.BackupPredicates
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
@@ -370,6 +371,8 @@ class LibraryActivity : AppCompatActivity() {
         // writers), and the backup screen opens no notebook — it is a plain chrome screen, and the
         // Activity's own singleTop-less relaunch is harmless.
         btnBackup.setOnClickListener { startActivity(BackupActivity.intent(this@LibraryActivity)) }
+        // Encryption (arc 26 / U1) — the same kind of door as Backup: a chrome screen, no `.soil`.
+        btnEncryption.setOnClickListener { startActivity(EncryptionActivity.intent(this@LibraryActivity)) }
         btnSort.setOnClickListener { showSortSheet() }
         btnNewFolder.setOnClickListener { showNewFolderDialog() }
         btnNewNotebook.setOnClickListener { launchNewNotebook() }
@@ -379,7 +382,7 @@ class LibraryActivity : AppCompatActivity() {
         btnNext.setOnClickListener { goToPage(pageIndex + 1) }
         btnLast.setOnClickListener { goToPage(pageCount - 1) }
 
-        listOf(btnPinned, btnRecents, btnSearch, btnCloseMode, btnTemplates, btnBackup, btnSort,
+        listOf(btnPinned, btnRecents, btnSearch, btnCloseMode, btnTemplates, btnBackup, btnEncryption, btnSort,
                btnNewFolder, btnNewNotebook, btnUp, btnFirst, btnPrev, btnNext, btnLast)
             .forEach { TooltipCompat.setTooltipText(it, it.contentDescription) }
     }
@@ -423,8 +426,8 @@ class LibraryActivity : AppCompatActivity() {
         btnPinned.isSelected = mode == BrowseMode.PINNED
         btnRecents.isSelected = mode == BrowseMode.RECENTS
         btnSearch.isSelected = searching
-        // The bottom bar's actions go with the create buttons, for the same reason: Backup, Import
-        // and Templates all act on the library — the folder tree you are standing in — and a shelf
+        // The bottom bar's actions go with the create buttons, for the same reason: Backup,
+        // Encryption, Import and Templates all act on the library — the folder tree you are standing in — and a shelf
         // is not standing anywhere. The **group** is hidden rather than its buttons, because
         // `ImportFlow` owns btnImport's own visibility (GONE without an importer, re-checked every
         // resume) and two owners of one flag is a race. The pager stays: a shelf paginates like any

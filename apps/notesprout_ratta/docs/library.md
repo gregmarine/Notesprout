@@ -90,6 +90,12 @@ replacing K2's `device-floppy`). A tap opens
 `launching`: that latch guards the doors onto a `.soil` (two NotebookActivities is two SQLCipher
 writers), and the backup screen opens no notebook.
 
+**Encryption** (arc 26 / U1, decision 5), right after Backup — `[Backup] [Encryption] [Import]`,
+measured on the Nomad. Icon `ic_lock` (Tabler `lock`, drawn in `:sn-screen`), hint "Encryption". A
+tap opens `EncryptionActivity`: the recovery key's status and count, **Reveal recovery key…**,
+**Change passphrase…** (U3) and **Forget on this device…**. The same kind of door as Backup — a
+chrome screen, no `.soil`, not latched. The arc's reference is `docs/encryption.md` (U7).
+
 **Import** (arc 16 / I1), just before Templates — the user's placement call. Icon `ic_import`: the
 `ic_notebook_plus` recipe (the create button's notebook-with-spine-tabs glyph) with an **input
 arrow** in the corner notch where the plus sits on that icon, pointing into the notebook — drawn
@@ -134,9 +140,9 @@ is not a place to create into. Sort stays active **except in Search**, whose ord
 active mode's top-bar button takes `isSelected = true`, so `bg_toolbar_button`'s border says which
 shelf you are on.
 
-**The bottom bar's actions go too** (arc 20, the user's call on seeing it): Backup, Import and
-Templates all act on the library — the folder tree you are standing in — and a shelf is not standing
-anywhere. The **group** (`bottomLeft`) is hidden rather than its two buttons, because `ImportFlow`
+**The bottom bar's actions go too** (arc 20, the user's call on seeing it): Backup, Encryption,
+Import and Templates all act on the library — the folder tree you are standing in — and a shelf is not standing
+anywhere. The **group** (`bottomLeft`) is hidden rather than its three buttons, because `ImportFlow`
 owns `btnImport`'s own visibility (GONE without an importer, re-checked every resume) and two owners
 of one flag is a race; `btnTemplates` is hidden on its own so the debug ⋯ beside it stays where a
 debug build put it. **The pager stays**: a shelf paginates like any other listing.

@@ -117,6 +117,13 @@
             android:exported="false"
             android:screenOrientation="portrait" />
 
+        <!-- Encryption (arc 26 / U1): reveal / change (U3) / forget the recovery key. A plain chrome
+             screen behind IndexGuard, opened from the library's bottom bar. -->
+        <activity
+            android:name=".encryption.EncryptionActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
         <activity
             android:name=".library.FolderPickerActivity"
             android:exported="false"

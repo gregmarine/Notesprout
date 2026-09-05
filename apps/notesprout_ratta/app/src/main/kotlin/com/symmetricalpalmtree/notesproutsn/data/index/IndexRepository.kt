@@ -24,6 +24,10 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
      *  the search shelf's listing (arc 20 / Q1). */
     suspend fun allNotebooks(): List<ObjectSummary> = dao.allAliveOfType(ObjectType.NOTEBOOK)
 
+    /** Alive notebooks opened by this device's global key (arc 26 / U1). Reads the `keyScope`
+     *  column, so it is honest once U4 writes `NOTEBOOK` there; until then it is every notebook. */
+    suspend fun countGlobalNotebooks(): Int = dao.countAliveNotebooksByScope(KEY_SCOPE_GLOBAL)
+
     /** Every alive folder, anywhere in the tree — the search shelf's other half (arc 20 / Q1). It
      *  doubles as the parent-name table its notebook cards' second line is built from. */
     suspend fun allFolders(): List<ObjectSummary> = dao.allAliveOfType(ObjectType.FOLDER)

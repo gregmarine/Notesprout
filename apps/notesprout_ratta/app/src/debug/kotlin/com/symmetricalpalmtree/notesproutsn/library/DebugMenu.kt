@@ -2,8 +2,6 @@ package com.symmetricalpalmtree.notesproutsn.library
 
 import android.content.ClipData
 import android.content.ClipboardManager
-import android.os.Handler
-import android.os.Looper
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.Toast
@@ -15,9 +13,7 @@ import androidx.lifecycle.lifecycleScope
 import com.symmetricalpalmtree.notesproutsn.R
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
 import com.symmetricalpalmtree.notesproutsn.core.Slog
-import com.symmetricalpalmtree.notesproutsn.crypto.KeyMaterial
 import com.symmetricalpalmtree.notesproutsn.crypto.KeySession
-import com.symmetricalpalmtree.notesproutsn.crypto.PassphraseStore
 import com.symmetricalpalmtree.notesproutsn.crypto.SoilCrypto
 import com.symmetricalpalmtree.notesproutsn.crypto.SoilFileKind
 import com.symmetricalpalmtree.notesproutsn.data.extensionStoreFile
@@ -42,9 +38,8 @@ import java.io.File
 /**
  * Debug build only (this file has a no-op twin in `src/release`): a ⋯ button at the right of the
  * library's bottom bar with the actions that make key and store testing practical on a device —
- *  - **Show recovery key** — reveal + copy the global passphrase.
- *  - **Forget cached key** — clear the Keystore-cached passphrase and raw keys, then kill the
- *    process; the next launch must land on the Unlock screen with the file intact.
+ *  (Its first two items, **Show recovery key** and **Forget cached key**, were removed at arc 26 / U1
+ *  — the Encryption screen carries both in every build now, decision 14.)
  *  - **Extension store self-test** (arc 11 / J2, grown to tables at arc 22 / X1) — the store's only
  *    on-device check, because SQLCipher, `SharedMemory` and a real `Binder` cannot run on the JVM.
  *    Through a **real** [ExtensionStoreBinder] (calling uid = our own, so the gate's uid check
@@ -91,16 +86,12 @@ object DebugMenu {
 
     private fun showSheet(activity: AppCompatActivity) {
         val labels = arrayOf<CharSequence>(
-            "Show recovery key",
-            "Forget cached key (relaunch → Unlock)",
             "Extension store self-test",
             "Cloud status",
             "Cloud probe",
             "WEBP encoder measurement",
         )
         val actions = listOf<() -> Unit>(
-            { showKey(activity) },
-            { confirmForget(activity) },
             { storeSelfTest(activity) },
             { cloudStatus(activity) },
             { cloudProbe(activity) },
@@ -414,46 +405,5 @@ object DebugMenu {
         } finally {
             db.close()
         }
-    }
-
-    private fun showKey(activity: AppCompatActivity) {
-        val key = PassphraseStore.getGlobalPassphrase(activity) ?: "(none cached)"
-        Dialogs.style(
-            AlertDialog.Builder(activity)
-                .setTitle("Recovery key")
-                .setMessage(key)
-                .setPositiveButton("Copy") { _, _ ->
-                    val cm = activity.getSystemService(AppCompatActivity.CLIPBOARD_SERVICE) as ClipboardManager
-                    cm.setPrimaryClip(
-                        ClipData.newPlainText(activity.getString(R.string.recovery_clip_label), key)
-                    )
-                    Toast.makeText(activity, R.string.recovery_copied, Toast.LENGTH_SHORT).show()
-                }
-                .setNegativeButton("Close", null)
-                .create()
-        ).show()
-    }
-
-    private fun confirmForget(activity: AppCompatActivity) {
-        Dialogs.style(
-            AlertDialog.Builder(activity)
-                .setTitle("Forget cached key?")
-                .setMessage("Clears the Keystore-cached passphrase and raw keys and closes the app. " +
-                    "The next launch shows the Unlock screen. Have the recovery key ready.")
-                .setPositiveButton("Forget & close") { _, _ ->
-                    PassphraseStore.clearGlobalPassphrase(activity)
-                    KeyMaterial.clearAll(activity)
-                    KeySession.clear()
-                    Toast.makeText(activity, "Forgotten — relaunch Notesprout SN", Toast.LENGTH_SHORT).show()
-                    activity.finishAffinity()
-                    // The index is still open in this process; a relaunch of the same process would
-                    // find it READY. Kill the process so the next launch really re-runs bootstrap.
-                    Handler(Looper.getMainLooper()).postDelayed({
-                        android.os.Process.killProcess(android.os.Process.myPid())
-                    }, 400L)
-                }
-                .setNegativeButton("Cancel", null)
-                .create()
-        ).show()
     }
 }

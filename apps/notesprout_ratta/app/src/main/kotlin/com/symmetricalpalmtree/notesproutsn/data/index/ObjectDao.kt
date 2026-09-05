@@ -53,6 +53,11 @@ interface ObjectDao {
     @Query("SELECT $SUMMARY_COLS FROM objects WHERE type = :type AND deletedAt IS NULL")
     suspend fun allAliveOfType(type: String): List<ObjectSummary>
 
+    /** How many alive notebooks carry [scope] in `keyScope` (arc 26 / U1 — the Encryption screen's
+     *  count line). A count, not a listing: the screen never needs the rows. */
+    @Query("SELECT count(*) FROM objects WHERE type = 'notebook' AND deletedAt IS NULL AND keyScope = :scope")
+    suspend fun countAliveNotebooksByScope(scope: String): Int
+
     /** The alive rows of [type] among [ids], blob-free (arc 13 / G5 — one read for a whole pinned
      *  or recents shelf). Empty [ids] never hits the database. */
     @Query(
