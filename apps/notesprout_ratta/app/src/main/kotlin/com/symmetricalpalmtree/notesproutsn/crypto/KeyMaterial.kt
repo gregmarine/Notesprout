@@ -7,8 +7,11 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * Single entry point for a file's SQLCipher **raw key** (the derive-once cache).
  *
- * Resolution: process RAM → [DerivedKeyStore] (Keystore) → derive + persist. SN has only the
- * GLOBAL scope, so every key is persisted. Blocking on a miss (KDF) — call on Dispatchers.IO.
+ * Resolution: process RAM → [DerivedKeyStore] (Keystore) → derive + persist. Every key is
+ * persisted, a `NOTEBOOK`-scope notebook's included (arc 26 / U4, decision 12: the raw key is
+ * cached for speed; the passphrase never is — the prompt still asks on every open, and a silent
+ * read is gated by [NotebookUnlocks], not by this cache). Blocking on a miss (KDF) — call on
+ * Dispatchers.IO.
  */
 object KeyMaterial {
 

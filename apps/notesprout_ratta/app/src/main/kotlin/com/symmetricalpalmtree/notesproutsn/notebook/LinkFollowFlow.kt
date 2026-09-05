@@ -9,11 +9,16 @@ import com.symmetricalpalmtree.notesproutsn.R
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
 import com.symmetricalpalmtree.notesproutsn.core.OpeningOverlay
 import com.symmetricalpalmtree.notesproutsn.core.Slog
+import com.symmetricalpalmtree.notesproutsn.crypto.KeyResolver
+import com.symmetricalpalmtree.notesproutsn.crypto.KeyScope
+import com.symmetricalpalmtree.notesproutsn.crypto.NotebookPassphrasePrompt
+import com.symmetricalpalmtree.notesproutsn.crypto.PassphraseCache
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectType
 import com.symmetricalpalmtree.notesproutsn.data.prefs.LinkTrail
 import com.symmetricalpalmtree.notesproutsn.data.prefs.TrailCodec
 import com.symmetricalpalmtree.notesproutsn.data.prefs.TrailEntry
+import com.symmetricalpalmtree.notesproutsn.data.soil.SoilDao
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilDatabase
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilSchema
 import kotlinx.coroutines.Dispatchers
@@ -136,9 +141,21 @@ class LinkFollowFlow(
                         }
                     is LinkNav.Back.OtherNotebook -> {
                         val summary = notebookSummary(plan.notebookId)
-                        if (summary != null && foreignPageAlive(plan.notebookId, plan.pageId)) {
+                        // Arc 26 / U4: a walk-back into a NOTEBOOK-scope notebook is as deliberate
+                        // an open as a follow, so it asks — a silent read would answer "locked",
+                        // and this loop would skip a perfectly live notebook as though the page had
+                        // been deleted. A cancelled prompt ends the walk and **puts the entry
+                        // back**: "not now" must not cost the user their way home.
+                        var typed: String? = null
+                        if (summary != null && KeyScope.of(summary.keyScope) == KeyScope.NOTEBOOK) {
+                            typed = NotebookPassphrasePrompt.ask(activity, plan.notebookId, summary.name)
+                            if (typed == null) { trail.push(entry); busy = false; return@launch }
+                        }
+                        if (summary != null && foreignPageAlive(plan.notebookId, plan.pageId, typed)) {
                             if (!alive()) { busy = false; return@launch }
                             Slog.d(TAG) { "back: → ${plan.notebookId} page ${plan.pageId}" }
+                            // One prompt per hop — the notebook screen's own open takes this.
+                            typed?.let { PassphraseCache.storeOnce(plan.notebookId, it) }
                             leaveFor(plan.notebookId, summary.name, plan.pageId)   // busy stays set
                             return@launch
                         }
@@ -162,7 +179,18 @@ class LinkFollowFlow(
             deadTarget(link, R.string.link_target_notebook_gone_body)
             return
         }
-        if (plan.pageId != null && !foreignPageAlive(plan.notebookId, plan.pageId)) {
+        // Arc 26 / U4: a NOTEBOOK-scope target is asked for on every deliberate open, and a follow
+        // is one (decision 12). Cancelled = the tap did nothing, quietly — no dialog: the person
+        // just said no, which is not a dead target.
+        var typed: String? = null
+        if (KeyScope.of(summary.keyScope) == KeyScope.NOTEBOOK) {
+            typed = NotebookPassphrasePrompt.ask(activity, plan.notebookId, summary.name)
+            if (typed == null) { busy = false; return }
+        }
+        // The pre-check carries the passphrase itself rather than waiting for the prompt's raw-key
+        // warm to land (~9 s on the device); a GLOBAL target keeps the resolver's own answer.
+        val alivePage = plan.pageId == null || foreignPageAlive(plan.notebookId, plan.pageId, typed)
+        if (!alivePage) {
             busy = false
             deadTarget(link, R.string.link_target_page_gone_body)
             return
@@ -170,6 +198,10 @@ class LinkFollowFlow(
         if (!alive()) { busy = false; return }
         pushOrigin()
         Slog.d(TAG) { "follow: ${link.id} → ${plan.notebookId} page ${plan.pageId ?: "(remembered)"}" }
+        // One prompt per follow: the notebook screen prompts on its own open too, so park the
+        // verified passphrase for that single open to take silently. Single-use and RAM-only —
+        // every later open of that notebook asks again.
+        typed?.let { PassphraseCache.storeOnce(plan.notebookId, it) }
         leaveFor(plan.notebookId, summary.name, plan.pageId)   // busy stays set — we are leaving
     }
 
@@ -208,15 +240,25 @@ class LinkFollowFlow(
      * Only ever called for a genuinely foreign notebook — [LinkNav] routes every current-notebook
      * target to `SamePage`/`NoOp` — so this can never be a second connection to the live session's
      * own file.
+     *
+     * [typed] is the passphrase the follow just collected for a `NOTEBOOK`-scope target (arc 26 /
+     * U4): the read carries it rather than resolving, which would answer `NeedsPrompt` until the
+     * prompt's raw-key warm finishes and turn a live page into a dead one.
      */
-    private suspend fun foreignPageAlive(notebookId: String, pageId: String): Boolean =
-        SoilDatabase.readOnce(activity.applicationContext, notebookId) { dao ->
+    private suspend fun foreignPageAlive(notebookId: String, pageId: String, typed: String?): Boolean {
+        val ctx = activity.applicationContext
+        val check: suspend (SoilDao) -> Boolean = { dao ->
             val row = dao.byId(pageId)
             row != null &&
                 row.deletedAt == null &&
                 row.type == SoilSchema.TYPE_PAGE &&
                 row.parentId == notebookId
-        } ?: false
+        }
+        val answer =
+            if (typed == null) SoilDatabase.readOnce(ctx, notebookId, check)
+            else SoilDatabase.readOnce(ctx, notebookId, KeyResolver.Resolved.Passphrases(typed), check)
+        return answer ?: false
+    }
 
     // ── The dead-target dialog ───────────────────────────────────────────────
 

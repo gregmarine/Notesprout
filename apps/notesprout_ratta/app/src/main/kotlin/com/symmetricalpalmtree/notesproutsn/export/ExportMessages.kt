@@ -29,6 +29,7 @@ object ExportMessages {
     fun of(problem: ExportArtifact.Problem): Int = when (problem) {
         ExportArtifact.Problem.IN_USE -> R.string.export_in_use_body
         ExportArtifact.Problem.NO_KEY -> R.string.export_locked_body
+        ExportArtifact.Problem.LOCKED -> R.string.export_notebook_locked_body
         ExportArtifact.Problem.MISSING -> R.string.export_missing_body
         ExportArtifact.Problem.UNREADABLE -> R.string.export_unreadable_body
         ExportArtifact.Problem.COPY_FAILED -> R.string.export_prepare_failed_body
@@ -40,6 +41,7 @@ object ExportMessages {
     fun of(problem: ExportRender.Problem): Int = when (problem) {
         ExportRender.Problem.IN_USE -> R.string.export_in_use_body
         ExportRender.Problem.NO_KEY -> R.string.export_locked_body
+        ExportRender.Problem.LOCKED -> R.string.export_notebook_locked_body
         ExportRender.Problem.MISSING -> R.string.export_missing_body
         ExportRender.Problem.UNREADABLE -> R.string.export_unreadable_body
         ExportRender.Problem.EMPTY -> R.string.export_empty_body
@@ -54,6 +56,7 @@ object ExportMessages {
     fun of(problem: ExportText.Problem): Int = when (problem) {
         ExportText.Problem.IN_USE -> R.string.export_in_use_body
         ExportText.Problem.NO_KEY -> R.string.export_locked_body
+        ExportText.Problem.LOCKED -> R.string.export_notebook_locked_body
         ExportText.Problem.MISSING -> R.string.export_missing_body
         ExportText.Problem.UNREADABLE -> R.string.export_unreadable_body
         ExportText.Problem.NO_DOCUMENT -> R.string.export_no_document_body
@@ -66,6 +69,7 @@ object ExportMessages {
     fun of(problem: DocumentPdfRender.Problem): Int = when (problem) {
         DocumentPdfRender.Problem.IN_USE -> R.string.export_in_use_body
         DocumentPdfRender.Problem.NO_KEY -> R.string.export_locked_body
+        DocumentPdfRender.Problem.LOCKED -> R.string.export_notebook_locked_body
         DocumentPdfRender.Problem.MISSING -> R.string.export_missing_body
         DocumentPdfRender.Problem.UNREADABLE -> R.string.export_unreadable_body
         DocumentPdfRender.Problem.NO_DOCUMENT -> R.string.export_no_document_body

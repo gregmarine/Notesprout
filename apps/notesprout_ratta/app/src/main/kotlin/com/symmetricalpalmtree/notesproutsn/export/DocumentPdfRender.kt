@@ -9,6 +9,7 @@ import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
 import android.util.Log
+import com.symmetricalpalmtree.notesproutsn.crypto.KeyResolver
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.data.extensionStoreFile
 import com.symmetricalpalmtree.notesproutsn.data.extstore.ExtensionStores
@@ -76,6 +77,10 @@ object DocumentPdfRender {
         /** No key session (the process was killed and nothing has unlocked since). */
         NO_KEY,
 
+        /** This notebook has its own passphrase and nothing in this process has typed it
+         *  (arc 26 / U4) — not a missing key, one notebook that is still shut. */
+        LOCKED,
+
         /** The `.soil` is missing or empty — the index row outlived its file. */
         MISSING,
 
@@ -117,10 +122,11 @@ object DocumentPdfRender {
         context: Context,
         notebookId: String,
         progress: suspend (Int, Int) -> Unit,
+        resolved: KeyResolver.Resolved? = null,
     ): Outcome = withContext(Dispatchers.IO) {
         // The bake's own failures are caught inside the open, not around it: they mean the *render*
         // failed, which is a different sentence from the file not opening — and the seal still runs.
-        val opened = ExportOpen.readOnly(context, notebookId, "render the document") { db ->
+        val opened = ExportOpen.readOnly(context, notebookId, "render the document", resolved) { db ->
             try {
                 bake(context, db, notebookId, progress)
             } catch (e: CancellationException) {
@@ -147,6 +153,7 @@ object DocumentPdfRender {
         ExportOpen.Guard.MISSING -> Problem.MISSING
         ExportOpen.Guard.IN_USE -> Problem.IN_USE
         ExportOpen.Guard.NO_KEY -> Problem.NO_KEY
+        ExportOpen.Guard.LOCKED -> Problem.LOCKED
         ExportOpen.Guard.UNREADABLE -> Problem.UNREADABLE
     }
 

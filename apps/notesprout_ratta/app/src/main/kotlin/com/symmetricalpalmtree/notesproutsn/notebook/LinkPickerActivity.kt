@@ -22,6 +22,9 @@ import com.symmetricalpalmtree.notesproutsn.core.IndexGuard
 import com.symmetricalpalmtree.notesproutsn.core.ListSwipe
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.core.TopGuard
+import com.symmetricalpalmtree.notesproutsn.crypto.KeyScope
+import com.symmetricalpalmtree.notesproutsn.crypto.NotebookPassphrasePrompt
+import com.symmetricalpalmtree.notesproutsn.crypto.NotebookUnlocks
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectSummary
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectType
@@ -410,7 +413,7 @@ class LinkPickerActivity : AppCompatActivity() {
         val notebooks = repo.notebooks(browseFolderId).filter { it.id != showing.notebookId }
         browseItems = SortRules.foldersFirst(folders + notebooks, sortPrefs.field, sortPrefs.order).map {
             if (it.type == ObjectType.FOLDER) CardItem.Folder(it)
-            else CardItem.Notebook(it, pinned = it.id in pinned)
+            else CardItem.Notebook(it, pinned = it.id in pinned, locked = isLocked(it))
         }
 
         showEmpty(browseItems.isEmpty(), R.string.link_picker_no_notebooks)
@@ -420,6 +423,18 @@ class LinkPickerActivity : AppCompatActivity() {
             else GridMath.clampPage(pageIndex, pageCount)
         bindCurrentPage()
     }
+
+    /**
+     * Is this browsed notebook still **locked** for this picker (arc 26 / U4, decision 11)?
+     *
+     * Unlike the library, which locks a notebook-scoped card unconditionally, the picker's grid is
+     * a chooser: once the person has typed the passphrase here, the row is an ordinary card again
+     * (its cover column is null anyway, so it draws the no-cover placeholder) and a second tap
+     * drills straight in. Notebook-scoped notebooks are **listed either way** — hiding them would
+     * make a notebook the person owns look deleted from the one screen that asks "where to?".
+     */
+    private fun isLocked(s: ObjectSummary): Boolean =
+        KeyScope.of(s.keyScope) == KeyScope.NOTEBOOK && !NotebookUnlocks.has(s.id)
 
     /** The grid page holding a prefilled selection — a chosen card sitting on page 3 must not read
      *  as "nothing is selected". Nothing selected (or not found) stays on the first page. */
@@ -446,7 +461,8 @@ class LinkPickerActivity : AppCompatActivity() {
             val grid = libraryGrid ?: return
             val range = GridMath.pageRange(pageIndex, grid.cardsPerPage, browseItems.size)
             val missing = range
-                .mapNotNull { (browseItems[it] as? CardItem.Notebook)?.summary?.id }
+                // A locked card is a lock glyph, never a thumbnail (arc 26 / U4): no blob read.
+                .mapNotNull { (browseItems[it] as? CardItem.Notebook)?.takeIf { c -> !c.locked }?.summary?.id }
                 .filter { it !in coverCache }
             if (missing.isNotEmpty()) {
                 val fetched = withContext(Dispatchers.IO) {
@@ -517,8 +533,17 @@ class LinkPickerActivity : AppCompatActivity() {
                     selectedNotebookId = if (selectedNotebookId == item.summary.id) null else item.summary.id
                     lifecycleScope.launch { bindCurrentPage() }
                 }
+                // A locked notebook is asked for its passphrase before the drill (arc 26 / U4): the
+                // typed one goes straight into the foreign open, because the prompt only *warms*
+                // the raw key and a cold derive is far slower than a person expects a tap to be.
+                // Cancel leaves the browse exactly as it was — a cancelled prompt is not an error.
                 PickMode.NOTEBOOK_PAGE -> lifecycleScope.launch {
-                    openDrill(item.summary)
+                    val summary = item.summary
+                    val passphrase = if (item.locked) {
+                        NotebookPassphrasePrompt.ask(this@LinkPickerActivity, summary.id, summary.name)
+                            ?: return@launch
+                    } else null
+                    openDrill(summary, passphrase)
                     pageIndex = 0
                     refresh()
                 }
@@ -578,14 +603,19 @@ class LinkPickerActivity : AppCompatActivity() {
         }
     }
 
-    /** Open a browsed notebook's pages. At most one foreign open exists at a time — the previous
-     *  one is sealed here, not left to the destroy. */
-    private fun openDrill(summary: ObjectSummary) {
+    /**
+     * Open a browsed notebook's pages. At most one foreign open exists at a time — the previous
+     * one is sealed here, not left to the destroy.
+     *
+     * [passphrase] is the one just typed for a notebook-scoped notebook (arc 26 / U4), handed to
+     * the source for its opens and held nowhere else on this screen.
+     */
+    private fun openDrill(summary: ObjectSummary, passphrase: String? = null) {
         leaveDrill()
         drilledNotebookId = summary.id
         drilledNotebookName = summary.name
         selectedNotebookId = summary.id     // half the KIND_NOTEBOOK_PAGE target, already known
-        foreign = ForeignPageSource(this, summary.id)
+        foreign = ForeignPageSource(this, summary.id, passphrase = passphrase)
         Slog.d(TAG) { "drilled into ${summary.id}" }
     }
 

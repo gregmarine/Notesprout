@@ -1,5 +1,6 @@
 package com.symmetricalpalmtree.notesproutsn.data.backup
 
+import com.symmetricalpalmtree.notesproutsn.crypto.KeyScope
 import com.symmetricalpalmtree.notesproutsn.data.index.NotebookFlags
 
 /**
@@ -50,8 +51,17 @@ object BackupPredicates {
 
     // ── Work-list math ───────────────────────────────────────────────────────
 
-    /** One notebook as the work-list decision sees it — identity, clock, policy, nothing else. */
-    data class Candidate(val id: String, val updatedAt: Long, val flags: Int?)
+    /** One notebook as the work-list decision sees it — identity, clock, policy, and (arc 26 /
+     *  U4) which key opens it. [keyScope] takes no part in the *work-list* decision: a
+     *  `NOTEBOOK`-scope notebook is still copied like any other — its bytes are bytes. It rides
+     *  here because the copy's one *open* step, the pre-copy compaction, must be skipped for it
+     *  (no key is available unattended), and the per-notebook loop is where that is known. */
+    data class Candidate(
+        val id: String,
+        val updatedAt: Long,
+        val flags: Int?,
+        val keyScope: KeyScope = KeyScope.GLOBAL,
+    )
 
     /**
      * What a run will do: [toCopy] in the order given (the caller's listing order), plus the

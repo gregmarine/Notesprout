@@ -254,6 +254,11 @@ no folder would ever look empty again once a card had rendered.
   (arc 12, [`notebook.md`](notebook.md)) deliberately does not write it, because with per-page
   paper there is no longer one true answer for a whole notebook — and a real cover snapshot, minted
   on every close, supersedes the placeholder anyway.
+- **Lock card** (arc 26 / U4, decision 11) → a `NOTEBOOK`-scope notebook (its own passphrase,
+  `ObjectSummary.keyScope`) shows the Tabler `ic_lock` at a third of the card's width in the cover's
+  place and **nothing else**: the index holds no cover for it (`setEncryptionState` nulls the blob,
+  the seal never captures one), so the grid never fetches a thumbnail. `CardItem.Notebook.locked`.
+  Tapping it opens the notebook screen, which prompts (`NotebookPassphrasePrompt`) on every open.
 - **Text-document cover** (arc 19) → `TextCover`'s own render of the document's opening text takes
   this slot instead, never the paper placeholder above (`LibraryCards.isTextDocument(flags)`
   branches before the placeholder is ever reached); a not-yet-rendered or undecodable one falls back

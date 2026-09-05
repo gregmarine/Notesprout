@@ -38,6 +38,8 @@ class FakeObjectDao : ObjectDao {
         rows.values.filter { it.type == ObjectType.NOTEBOOK && it.deletedAt == null && it.keyScope == scope }
             .sortedWith(compareBy({ it.name.lowercase() }, { it.id })).map { it.id }
 
+    override suspend fun keyScopeOf(id: String): String? = rows[id]?.takeIf { it.deletedAt == null }?.keyScope
+
     override suspend fun setKeyScope(id: String, scope: String) {
         rows[id]?.let { rows[id] = it.copy(keyScope = scope) }
     }
@@ -125,5 +127,5 @@ class FakeObjectDao : ObjectDao {
         rows[id]?.takeIf { it.type == "backup" }?.blob
 
     private fun ObjectEntity.toSummary() =
-        ObjectSummary(id, type, name, parentId, createdAt, updatedAt, pageCount, flags, templateKind)
+        ObjectSummary(id, type, name, parentId, createdAt, updatedAt, pageCount, flags, templateKind, keyScope)
 }

@@ -5,6 +5,7 @@ import com.symmetricalpalmtree.notesproutsn.R
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
 import com.symmetricalpalmtree.notesproutsn.core.FuzzyRank
 import com.symmetricalpalmtree.notesproutsn.core.Slog
+import com.symmetricalpalmtree.notesproutsn.crypto.KeyScope
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectSummary
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectType
@@ -138,6 +139,9 @@ class LibrarySearch(
             cards += CardItem.Notebook(
                 hit.notebook,
                 pinned = hit.notebook.id in pinnedIds,
+                // The shelf obeys the same rule as every other card (arc 26 / U4, decision 11):
+                // a notebook-scoped notebook is a lock, found by name or tag or not.
+                locked = KeyScope.of(hit.notebook.keyScope) == KeyScope.NOTEBOOK,
                 subtitle = hit.matchedTag?.let { activity.getString(R.string.search_where_and_tag, where, it) } ?: where,
             )
         }

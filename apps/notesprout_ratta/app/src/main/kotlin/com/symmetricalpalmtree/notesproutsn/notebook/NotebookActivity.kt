@@ -33,10 +33,15 @@ import com.symmetricalpalmtree.notesproutsn.core.IndexGuard
 import com.symmetricalpalmtree.notesproutsn.core.OpeningOverlay
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.core.SnClipboard
+import com.symmetricalpalmtree.notesproutsn.crypto.KeyResolver
+import com.symmetricalpalmtree.notesproutsn.crypto.KeyScope
+import com.symmetricalpalmtree.notesproutsn.crypto.NotebookPassphrasePrompt
 import com.symmetricalpalmtree.notesproutsn.data.clip.ClipEnvelope
 import com.symmetricalpalmtree.notesproutsn.data.clip.ClipStore
+import com.symmetricalpalmtree.notesproutsn.data.soil.SoilDatabase
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilSchema
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
+import com.symmetricalpalmtree.notesproutsn.data.index.ObjectSummary
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectType
 import com.symmetricalpalmtree.notesproutsn.data.prefs.BrowseState
 import com.symmetricalpalmtree.notesproutsn.data.prefs.LinkTrail
@@ -162,6 +167,18 @@ class NotebookActivity : AppCompatActivity() {
 
     private var opened = false
     private var closing = false
+
+    /**
+     * Which key this notebook opened under (arc 26 / U4) — read from the index row once, in
+     * [keyFor], and never again: the scope is changed only by the Encryption screen, which cannot
+     * run while this one is on the glass. `GLOBAL` before the open, which is the honest answer for
+     * a screen that has not read the row yet and the safe one for the cover question below.
+     *
+     * The seal-time cover capture asks it: a `NOTEBOOK`-scope notebook's card is a lock and the
+     * index holds no cover for it (decision 11), so nothing here may write one back.
+     */
+    @Volatile
+    private var keyScope: KeyScope = KeyScope.GLOBAL
 
     /**
      * The document hooks' `alive` gate (arc 19 / M11): flipped immediately before this screen's
@@ -619,8 +636,18 @@ class NotebookActivity : AppCompatActivity() {
         try {
             val alive = withContext(Dispatchers.IO) { repo.alive(notebookId) }
             if (alive == null) { failOpen("not in the library"); return }
-            when (val r = session.open()) {
-                is NotebookSession.OpenResult.Failed -> { failOpen(r.reason); return }
+            val resolved = keyFor(alive) ?: return   // cancelled prompt: leave quietly
+            when (val r = session.open(resolved)) {
+                is NotebookSession.OpenResult.Failed -> {
+                    // A NOTEBOOK-scope open that failed *after* the prompt verified the passphrase
+                    // is a real failure, not a locked file — but the reason is a crypto message, so
+                    // the words the person reads are ours. Structural reasons keep their own.
+                    failOpen(
+                        if (r.keyed && keyScope == KeyScope.NOTEBOOK) getString(R.string.notebook_open_locked_body)
+                        else r.reason
+                    )
+                    return
+                }
                 NotebookSession.OpenResult.Ok -> Unit
             }
             if (isFinishing || closing) { sealAbandonedOpen(); return }
@@ -681,6 +708,37 @@ class NotebookActivity : AppCompatActivity() {
             Log.e(TAG, "open crashed", t)
             failOpen(t.message ?: t.javaClass.simpleName)
         }
+    }
+
+    /**
+     * The key this notebook opens under (arc 26 / U4), decided once per open from the index row's
+     * scope — and the one place this screen may prompt for a passphrase.
+     *
+     * `GLOBAL`: [SoilDatabase.resolve], which also carries a mid-rotation second candidate.
+     * `NOTEBOOK`: [NotebookPassphrasePrompt], on **every** open (decision 12) — the box comes down
+     * while the dialog is up (it shields every touch under it and a dialog behind a grey pane reads
+     * as a hang) and goes back up for the open that follows. A cancelled prompt is not an error:
+     * null answers, the screen leaves quietly with no dialog, and the library's last-open pointer
+     * is cleared exactly as [failOpen] clears it — a cancelled open must not be restored into on
+     * the next cold launch.
+     *
+     * The typed passphrase is returned inside the [KeyResolver.Resolved] and goes straight into the
+     * open; it is never held in a field, logged, or put in an Intent.
+     */
+    private suspend fun keyFor(alive: ObjectSummary): KeyResolver.Resolved? {
+        val scope = KeyScope.of(alive.keyScope)
+        keyScope = scope
+        if (scope == KeyScope.GLOBAL) return SoilDatabase.resolve(this, notebookId)
+        binding.openingOverlay.root.visibility = View.GONE
+        val typed = NotebookPassphrasePrompt.ask(this, notebookId, alive.name)
+        if (typed == null) {
+            Slog.d(TAG) { "open cancelled at the passphrase prompt" }
+            BrowseState(this).lastOpenNotebookId = null
+            finish()
+            return null
+        }
+        if (!isFinishing && !isDestroyed) binding.openingOverlay.root.visibility = View.VISIBLE
+        return KeyResolver.Resolved.Passphrases(typed)
     }
 
     /**
@@ -2873,6 +2931,10 @@ class NotebookActivity : AppCompatActivity() {
      * seal-after-flush, and `onStop`'s mid-session capture is a bonus on the same terms.
      */
     private suspend fun captureCover(p: PaperView, s: NotebookSession, id: String) {
+        // Arc 26 / U4, decision 11: a NOTEBOOK-scope notebook shows a lock, and the index must hold
+        // no picture of its contents — not a page snapshot, not the opening lines of its document.
+        // The scope was read once at open (`keyScope`), so this costs nothing per stop.
+        if (keyScope == KeyScope.NOTEBOOK) return
         if (s.isTextDocument) TextCover.render(repo, id, s.documents.get(id)?.text.orEmpty())
         else if (opened) CoverSnapshot.capture(p, id, repo)
     }

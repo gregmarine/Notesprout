@@ -8,11 +8,12 @@ import com.symmetricalpalmtree.gpaper.core.model.Bounds
 import com.symmetricalpalmtree.gpaper.core.model.Stroke
 import com.symmetricalpalmtree.notesproutsn.core.Bitmaps
 import com.symmetricalpalmtree.notesproutsn.core.Slog
-import com.symmetricalpalmtree.notesproutsn.crypto.KeySession
+import com.symmetricalpalmtree.notesproutsn.crypto.KeyResolver
 import com.symmetricalpalmtree.notesproutsn.data.clip.ClipEnvelope
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.index.NotebookFlags
 import com.symmetricalpalmtree.notesproutsn.data.soil.DocumentRepository
+import com.symmetricalpalmtree.notesproutsn.data.soil.KEY_SCOPE_GLOBAL
 import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookMeta
 import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookMetaStore
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilCompactor
@@ -103,7 +104,10 @@ class NotebookSession(
 
     sealed class OpenResult {
         object Ok : OpenResult()
-        class Failed(val reason: String) : OpenResult()
+        /** [keyed] marks the one failure the *key* could be behind — the open itself threw. The
+         *  caller substitutes its own words there (arc 26 / U4); a structural failure (missing
+         *  file, no pages) keeps [reason], which already reads as an explanation. */
+        class Failed(val reason: String, val keyed: Boolean = false) : OpenResult()
     }
 
     /**
@@ -111,15 +115,20 @@ class NotebookSession(
      * the only creator), read the page list and the last-open page, decode its template. A
      * missing/empty file or a file with no pages is a [OpenResult.Failed] — the caller explains
      * and finishes; nothing is ever fabricated here.
+     *
+     * **The key comes in** (arc 26 / U4): [resolved] is the caller's answer for this notebook's
+     * scope — `SoilDatabase.resolve` for a `GLOBAL` one (which also carries a rotation's second
+     * candidate), or `Passphrases(typed)` straight out of [NotebookPassphrasePrompt] for a
+     * `NOTEBOOK` one. The session never asks a key store itself and never holds the passphrase: it
+     * goes into the open and out of scope with this call.
      */
-    suspend fun open(): OpenResult = withContext(Dispatchers.IO) {
-        val passphrase = KeySession.get() ?: return@withContext OpenResult.Failed("No key session")
+    suspend fun open(resolved: KeyResolver.Resolved): OpenResult = withContext(Dispatchers.IO) {
         if (!file.exists() || file.length() == 0L) return@withContext OpenResult.Failed("Notebook file is missing")
         try {
-            db = SoilDatabase.open(app, notebookId, file, passphrase)
+            db = SoilDatabase.open(app, notebookId, file, resolved)
         } catch (e: Exception) {
             Log.e(TAG, "open failed for $notebookId", e)
-            return@withContext OpenResult.Failed(e.message ?: "Could not open notebook")
+            return@withContext OpenResult.Failed(e.message ?: "Could not open notebook", keyed = true)
         }
         writer = SoilWriter { repo.touch(notebookId) }
         store = StrokeStore(db.dao(), writer)
@@ -531,7 +540,14 @@ class NotebookSession(
      *  index is the authority and the meta field only mirrors it, so a refresh that carried the
      *  previous meta forward would wipe the flag the first time the file was written by anything
      *  that had not seen it (og's meta-refresh-wipe trap). Every meta writer in this app sources it
-     *  the same way. */
+     *  the same way.
+     *
+     *  `keyScope` follows exactly the same rule (arc 26 / U4): straight off the index row, never
+     *  from [existing] and never from the data class's `GLOBAL` default — a NOTEBOOK-scope file
+     *  whose meta was refreshed from a stale previous row would describe itself as globally keyed,
+     *  which is the same wipe wearing a different name. `cover` stays null for both scopes: SN has
+     *  never stamped a cover into `notebook_meta` (the index holds it), and the explicit null is
+     *  what makes decision 11 — no cover anywhere for a NOTEBOOK notebook — true by construction. */
     suspend fun refreshMeta(appVersionCode: Int) = withContext(Dispatchers.IO) {
         if (!isOpen) return@withContext
         val row = repo.get(notebookId) ?: return@withContext
@@ -539,6 +555,8 @@ class NotebookSession(
         NotebookMetaStore.write(db.raw(), NotebookMeta(
             notebookId = notebookId, name = row.name,
             createdAt = existing?.createdAt ?: row.createdAt, updatedAt = row.updatedAt,
+            keyScope = row.keyScope ?: KEY_SCOPE_GLOBAL,
+            cover = null,
             folderPath = repo.ancestry(row.parentId), appVersionCode = appVersionCode,
             textDocument = textDocumentBit(row.flags),
         ))

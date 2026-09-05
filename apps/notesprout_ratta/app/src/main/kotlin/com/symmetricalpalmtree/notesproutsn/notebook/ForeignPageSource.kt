@@ -4,7 +4,7 @@ import android.content.Context
 import android.util.Log
 import androidx.room.withTransaction
 import com.symmetricalpalmtree.notesproutsn.core.Slog
-import com.symmetricalpalmtree.notesproutsn.crypto.KeySession
+import com.symmetricalpalmtree.notesproutsn.crypto.KeyResolver
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilDatabase
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilObjectEntity
@@ -26,8 +26,10 @@ import kotlinx.coroutines.withContext
  * must never come through here (the picker hides it in both Notebook modes; its file is already
  * open by the session, and one file never has two connections — the family rule).
  *
- * Opened lazily on the first read, through the one [SoilDatabase.open] door (global key from
- * [KeySession], cached-raw-key fast path; **never creates** the file). The picker holds at most one
+ * Opened lazily on the first read, through the one [SoilDatabase.open] door — the key comes from
+ * [SoilDatabase.resolve] (the global passphrase, plus a rotation's second candidate), or, for a
+ * notebook-scoped one the picker has just unlocked, from the [passphrase] it was constructed with
+ * (**never creates** the file). The picker holds at most one
  * instance at a time (per drilled notebook) and MUST [sealAsync] it when the drill is left — mode
  * switch, a different notebook, or the screen's destroy. The seal runs on a process-scoped IO job
  * under [NonCancellable], because the destroy path's lifecycle scope is already dead when it fires;
@@ -47,6 +49,17 @@ class ForeignPageSource(
     context: Context,
     private val notebookId: String,
     private val repo: IndexRepository = IndexRepository(),
+    /**
+     * The passphrase for a `NOTEBOOK`-scope notebook the picker just prompted for (arc 26 / U4) —
+     * used for the open and nothing else; never logged, never stored, never in an Intent.
+     *
+     * It is **carried for the source's lifetime**, not cleared after the first open, because a
+     * drill is re-entered after every [sealAsync] and the source re-opens each time. It cannot
+     * lean on `Resolved.Unlocked` instead: the prompt only *warms* the raw key, and a cold derive
+     * is ~9 s on the device, so the open that follows the unlock must carry the passphrase itself.
+     * The source dies with the picker screen.
+     */
+    private val passphrase: String? = null,
 ) : PickerPageSource {
 
     private val app = context.applicationContext
@@ -132,11 +145,19 @@ class ForeignPageSource(
         // Cheap and safe across different notebooks too, so it is not keyed. Never our own seal:
         // sealAsync flips [sealed] synchronously, and withDb answers null before reaching here.
         lastSeal?.join()
-        val passphrase = KeySession.get() ?: run { failed = true; return null }
+        val resolved = passphrase?.let { KeyResolver.Resolved.Passphrases(it) }
+            ?: SoilDatabase.resolve(app, notebookId)
+        // No key to try — no global passphrase yet, or a locked notebook nobody unlocked. Browsing
+        // is silent: the drill shows its empty state, and the honest "you must unlock this" moment
+        // belongs to the tap that started the drill, not to a read behind it.
+        if (resolved is KeyResolver.Resolved.NeedsPrompt || resolved is KeyResolver.Resolved.NoKey) {
+            failed = true
+            return null
+        }
         val file = soilFile(app, notebookId)
         if (!file.exists() || file.length() == 0L) { failed = true; return null }
         return try {
-            withContext(Dispatchers.IO) { SoilDatabase.open(app, notebookId, file, passphrase) }
+            withContext(Dispatchers.IO) { SoilDatabase.open(app, notebookId, file, resolved) }
                 .also { db = it }
         } catch (e: Exception) {
             Log.w(TAG, "foreign open failed for $notebookId", e)

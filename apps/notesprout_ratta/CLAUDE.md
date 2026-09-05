@@ -167,7 +167,7 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   **Read `DRIVE_PLAN.md`, not `RATTA_PLAN.md`, for any work on it.**)
   `gradle.properties` sets `android.nonTransitiveRClass=false` — undoing it breaks every
   `:sn-screen` resource reference from `:app`.
-- **Arc 26 "Keys" is IN PROGRESS (wizard locked 2026-09-05; U1 + U2 + U3 landed 2026-09-05)** — og-parity
+- **Arc 26 "Keys" is IN PROGRESS (wizard locked 2026-09-05; U1–U4 landed 2026-09-05)** — og-parity
   encryption (`PARITY_BACKLOG.md` item 1): the Encryption screen + library door, rotation, per-notebook
   scope, recovery. **Read the standalone `ENCRYPTION_PLAN.md`, not `RATTA_PLAN.md`, for it** — phases
   U1–U7, no code review, host-only, no ninth point. **U1:** `encryption/EncryptionActivity` behind
@@ -196,6 +196,19 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   the walk: `RawKeyDerivation.deriveKey` goes through the platform PBKDF2 and `KeyOpener.warm` is
   serialized — the hand HMAC loop churns ~80 MB of native memory per derive and a burst of cold opens
   after a rotation killed the process (Scudo OOM). Do not put the loop back on the hot path.**
+  **U4 (notebook scope core, 2026-09-05):** `crypto/KeyScope` + `KeyResolver` (pure decision:
+  `Passphrases([global, markerNew])` / `Unlocked(rawKey)` / `NeedsPrompt` / `NoKey`) +
+  `NotebookUnlocks` (per-process unlocked ids) + `NotebookPassphrasePrompt` (THE one notebook
+  passphrase dialog — bucket = notebook id, IME never hidden). **Every `.soil` open goes
+  `SoilDatabase.resolve(context, id)` → `SoilDatabase.open(…, resolved)`; `KeySession.get()` is
+  for the GLOBAL passphrase only and never receives a notebook's.** A silent reader (`readOnce`,
+  backup compaction, the cloud snapshot) never prompts: a locked notebook answers null / is
+  skipped; the notebook screen, a link follow, the picker's lock row and the Export screen prompt
+  on every open. **A caller that just prompted passes `Passphrases(typed)` into its read — the
+  raw-key warm is ~9 s on the Nomad, so `Unlocked` is never there in time.** `ObjectSummary.
+  keyScope` rides every listing; `IndexRepository.setEncryptionState` (cover nulled, both stamps
+  cleared, unlock forgotten, `updatedAt` untouched) is the only scope writer; a NOTEBOOK card is
+  a lock (`ic_lock`), never a cover, and the seal never captures one. Debug: *Change key scope*.
 - **Every extension APK wears the same icon — the Tabler "puzzle", byte-identical, no exception**
   (the user's call, 2026-09-05, which reversed the three per-subject glyphs granted along the way:
   `:ext-tags`' `tag`, `:ext-calendar`'s `calendar`, `:ext-cloud`'s `cloud`). A package is found by

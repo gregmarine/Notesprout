@@ -135,7 +135,9 @@ internal object CloudBackupLeg {
                 else -> {
                     // VACUUM twice in one run is a minute for nothing: whichever leg got here first
                     // already compacted this notebook, and the file is what it now is.
-                    if (compacted.add(candidate.id)) BackupEngine.compactPass(app, candidate.id, source)
+                    if (compacted.add(candidate.id)) {
+                        BackupEngine.compactPass(app, candidate.id, source, candidate.keyScope)
+                    }
                     val name = BackupPredicates.soilName(candidate.id)
                     when (val sent = send(app, ref, path, source, name, candidate.id, listing)) {
                         is Sent.Ok -> {

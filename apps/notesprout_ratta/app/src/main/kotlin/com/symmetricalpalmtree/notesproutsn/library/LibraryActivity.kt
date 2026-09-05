@@ -25,6 +25,7 @@ import com.symmetricalpalmtree.notesproutsn.backup.BackupActivity
 import com.symmetricalpalmtree.notesproutsn.bootstrap.BootstrapActivity
 import com.symmetricalpalmtree.notesproutsn.encryption.EncryptionActivity
 import com.symmetricalpalmtree.notesproutsn.crypto.KeyMaterial
+import com.symmetricalpalmtree.notesproutsn.crypto.KeyScope
 import com.symmetricalpalmtree.notesproutsn.data.backup.BackupPredicates
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectSummary
@@ -541,11 +542,24 @@ class LibraryActivity : AppCompatActivity() {
         bindCurrentPage()
     }
 
+    /**
+     * Is this notebook's card a **lock** rather than a cover (arc 26 / U4, decision 11)?
+     *
+     * In the library the answer is the scope alone — a notebook-scoped notebook shows a lock even
+     * once it has been unlocked this process, because there is no cover in the index to show
+     * instead (`setEncryptionState` nulls the blob when the scope changes) and a card that
+     * silently changed picture after an unlock would be a second, invisible state to learn. The
+     * link picker, whose grid is a chooser rather than a shelf, uses the live unlock set instead.
+     *
+     * The scope rides the listing's own `SUMMARY_COLS` — no extra query, no blob.
+     */
+    private fun isLocked(s: ObjectSummary): Boolean = KeyScope.of(s.keyScope) == KeyScope.NOTEBOOK
+
     private suspend fun normalItems(pinnedIds: Set<String>): List<CardItem> {
         val all = repo.folders(folderId) + repo.notebooks(folderId)
         return SortRules.foldersFirst(all, sortPrefs.field, sortPrefs.order).map {
             if (it.type == ObjectType.FOLDER) CardItem.Folder(it)
-            else CardItem.Notebook(it, pinned = it.id in pinnedIds)
+            else CardItem.Notebook(it, pinned = it.id in pinnedIds, locked = isLocked(it))
         }
     }
 
@@ -557,7 +571,7 @@ class LibraryActivity : AppCompatActivity() {
     private suspend fun pinnedItems(pinnedIds: List<String>): List<CardItem> {
         val summaries = pinnedIds.mapNotNull { repo.alive(it) }
         return SortRules.sort(summaries, sortPrefs.field, sortPrefs.order)
-            .map { CardItem.Notebook(it, pinned = true) }
+            .map { CardItem.Notebook(it, pinned = true, locked = isLocked(it)) }
     }
 
     /**
@@ -585,7 +599,7 @@ class LibraryActivity : AppCompatActivity() {
             val parent = s.parentId
             val subtitle = if (parent == null) getString(R.string.recents_parent_root)
             else folderNames.getOrPut(parent) { repo.alive(parent)?.name ?: getString(R.string.recents_parent_root) }
-            CardItem.Notebook(s, pinned = id in pinnedIds, subtitle = subtitle)
+            CardItem.Notebook(s, pinned = id in pinnedIds, subtitle = subtitle, locked = isLocked(s))
         }
         recentsPrefs.pruneDeleted(alive.keys)
         return cards
@@ -603,7 +617,13 @@ class LibraryActivity : AppCompatActivity() {
             // A page card shows its **notebook's** cover (arc 21 / W4) and its summary is that
             // notebook's, so it asks for a cover like any other card — and two page hits from one
             // notebook share the fetch, because the map is keyed by notebook id.
-            .mapNotNull { items[it].takeIf { c -> c !is CardItem.Folder }?.summary?.id }
+            // A locked card draws a lock and never a thumbnail (arc 26 / U4): asking for its cover
+            // would be a blob read for a picture that will not be painted — and, for a notebook
+            // whose scope changed, a read of a column already nulled.
+            .mapNotNull {
+                items[it].takeIf { c -> c !is CardItem.Folder && !(c is CardItem.Notebook && c.locked) }
+                    ?.summary?.id
+            }
             .distinct()
             .filter { it !in coverCache }
         if (missing.isNotEmpty()) {

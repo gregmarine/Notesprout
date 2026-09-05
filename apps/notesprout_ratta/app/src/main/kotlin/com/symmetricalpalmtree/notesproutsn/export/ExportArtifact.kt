@@ -3,10 +3,13 @@ package com.symmetricalpalmtree.notesproutsn.export
 import android.content.Context
 import android.util.Log
 import com.symmetricalpalmtree.notesproutsn.core.Slog
+import com.symmetricalpalmtree.notesproutsn.crypto.KeyResolver
+import com.symmetricalpalmtree.notesproutsn.crypto.KeyScope
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.index.NotebookFlags
 import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookMeta
 import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookMetaStore
+import com.symmetricalpalmtree.notesproutsn.data.soil.KEY_SCOPE_GLOBAL
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilDatabase
 import com.symmetricalpalmtree.notesproutsn.data.soilFile
 import kotlinx.coroutines.Dispatchers
@@ -53,6 +56,10 @@ object ExportArtifact {
         /** No key session (the process was killed and nothing has unlocked since). */
         NO_KEY,
 
+        /** This notebook has its own passphrase and nothing in this process has typed it
+         *  (arc 26 / U4) — not a missing key, one notebook that is still shut. */
+        LOCKED,
+
         /** The `.soil` is missing or empty — the index row outlived its file. */
         MISSING,
 
@@ -79,11 +86,15 @@ object ExportArtifact {
         notebookId: String,
         repo: IndexRepository,
         appVersionCode: Int,
+        /** The key the screen already holds (arc 26 / U4) — what the person typed for a
+         *  `NOTEBOOK`-scope notebook. Null lets [ExportOpen] resolve it, which is right for every
+         *  `GLOBAL` notebook and answers `LOCKED` for a notebook nobody has unlocked. */
+        resolved: KeyResolver.Resolved? = null,
     ): Outcome = withContext(Dispatchers.IO) {
         val source = soilFile(context, notebookId)
         // The stamp runs inside the open and the copy after it: the seal is what makes the whole
         // notebook be in the main file, so nothing may be copied while the connection still stands.
-        val opened = ExportOpen.readOnly(context, notebookId, "export") { db ->
+        val opened = ExportOpen.readOnly(context, notebookId, "export", resolved) { db ->
             stampExportedAt(db, notebookId, repo, appVersionCode)
         }
         if (opened is ExportOpen.Opened.Blocked) return@withContext Outcome.Failed(problemOf(opened.guard))
@@ -139,6 +150,7 @@ object ExportArtifact {
         ExportOpen.Guard.MISSING -> Problem.MISSING
         ExportOpen.Guard.IN_USE -> Problem.IN_USE
         ExportOpen.Guard.NO_KEY -> Problem.NO_KEY
+        ExportOpen.Guard.LOCKED -> Problem.LOCKED
         ExportOpen.Guard.UNREADABLE -> Problem.UNREADABLE
     }
 
@@ -158,6 +170,9 @@ object ExportArtifact {
             // The blob-free projection: the full row would drag the cover out of the encrypted
             // index only to discard it, and nothing here needs the pixels.
             val row = repo.summary(notebookId) ?: return
+            // From the index row, never from `existing` — the same authority rule the
+            // `textDocument` bit keeps below (og's meta-refresh-wipe trap).
+            val scope = KeyScope.of(row.keyScope)
             val existing = NotebookMetaStore.read(db.raw())
             NotebookMetaStore.write(
                 db.raw(),
@@ -166,7 +181,11 @@ object ExportArtifact {
                     name = row.name,
                     createdAt = existing?.createdAt ?: row.createdAt,
                     updatedAt = row.updatedAt,
-                    cover = existing?.cover,
+                    // Arc 26 / U4, decision 11: a `NOTEBOOK`-scope notebook has no cover anywhere
+                    // — the index blob is nulled with the scope, and the meta must not carry one
+                    // out of the app either.
+                    cover = if (scope == KeyScope.NOTEBOOK) null else existing?.cover,
+                    keyScope = row.keyScope ?: KEY_SCOPE_GLOBAL,
                     folderPath = repo.ancestry(row.parentId),
                     exportedAt = System.currentTimeMillis(),
                     appVersionCode = appVersionCode,

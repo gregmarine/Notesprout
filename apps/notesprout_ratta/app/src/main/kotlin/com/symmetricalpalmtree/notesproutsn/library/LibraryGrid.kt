@@ -50,11 +50,17 @@ sealed class CardItem(val summary: ObjectSummary) {
      *   list, so no card ever asks the index on its own.
      * @param subtitle replaces the last-modified line when set. Recents uses it for the parent
      *   folder name: on that shelf "where is it" is the useful second line, not "when".
+     * @param locked draws a **lock in the cover's place** and fetches no thumbnail (arc 26 / U4,
+     *   decision 11). In the library it is simply `KeyScope.of(summary.keyScope) == NOTEBOOK`: a
+     *   notebook-scoped notebook shows a lock whatever this process has unlocked, because the index
+     *   holds no cover for it to show instead. The link picker sets it `!NotebookUnlocks.has(id)`,
+     *   so a notebook unlocked there this process reads as an ordinary (coverless) card again.
      */
     class Notebook(
         s: ObjectSummary,
         val pinned: Boolean = false,
         val subtitle: String? = null,
+        val locked: Boolean = false,
     ) : CardItem(s)
 
     /**
@@ -201,7 +207,7 @@ class LibraryGrid(
             ?: "${DateFormat.getMediumDateFormat(context).format(d)} ${DateFormat.getTimeFormat(context).format(d)}"
 
         view.findViewById<View>(R.id.pinBadge).visibility = if (item.pinned) View.VISIBLE else View.GONE
-        paintCover(view, context, s, coverBytes)
+        if (item.locked) paintLock(view) else paintCover(view, context, s, coverBytes)
         return view
     }
 
@@ -235,6 +241,27 @@ class LibraryGrid(
         view.findViewById<View>(R.id.pinBadge).visibility = View.GONE
         paintCover(view, context, item.summary, coverBytes)
         return view
+    }
+
+    /**
+     * The lock that stands **in place of** a cover for a notebook-scoped notebook (arc 26 / U4,
+     * decision 11) — a padlock on blank paper, the name and date line unchanged beneath it.
+     *
+     * Not a badge over a thumbnail: the index deliberately holds no cover for such a notebook (a
+     * cover is a picture of its contents, and those are the locked thing), so there is nothing to
+     * badge. The caller fetches no blob for it either. The glyph is inkBlack stroke on paperWhite,
+     * inset to roughly a third of the card's width — big enough to read across a grid on e-ink,
+     * small enough to still look like a mark on a page rather than a picture filling it.
+     *
+     * No content description: the card already carries the notebook's name, and a card is not a
+     * button.
+     */
+    private fun paintLock(view: View) {
+        val cover = view.findViewById<ImageView>(R.id.coverImage)
+        val inset = (cardWidth * LOCK_INSET_FRACTION).toInt()
+        cover.setPadding(inset, inset, inset, inset)
+        cover.scaleType = ImageView.ScaleType.FIT_CENTER
+        cover.setImageResource(R.drawable.ic_lock)
     }
 
     /** The card's picture: the cover snapshot, else a text-document glyph, else the paper. Shared by
@@ -286,5 +313,11 @@ class LibraryGrid(
          *  width — it leaves the icon at roughly 40% of the card, small enough to read as a mark on
          *  a page rather than as a picture that fills it. */
         const val GLYPH_INSET_FRACTION = 0.3f
+
+        /** White space each side of the lock glyph, as a fraction of the card's width. The cover
+         *  band is taller than it is wide, so the width is the constraint under `FIT_CENTER`: a
+         *  third each side leaves the padlock at **a third of the card's width**, a shade larger
+         *  than the text-document glyph because it is the card's only picture. */
+        const val LOCK_INSET_FRACTION = 1f / 3f
     }
 }

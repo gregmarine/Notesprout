@@ -3,13 +3,16 @@ package com.symmetricalpalmtree.notesproutsn.data.index
 import androidx.room.withTransaction
 import com.symmetricalpalmtree.notesproutsn.data.soil.FolderRef
 import com.symmetricalpalmtree.notesproutsn.data.soil.KEY_SCOPE_GLOBAL
-import com.symmetricalpalmtree.notesproutsn.data.soil.KEY_SCOPE_NOTEBOOK
+import com.symmetricalpalmtree.notesproutsn.crypto.KeyScope
+import com.symmetricalpalmtree.notesproutsn.crypto.NotebookUnlocks
+import com.symmetricalpalmtree.notesproutsn.data.backup.BackupStore
 import java.util.UUID
 
 /**
  * Every read and write against the global index. Suspend functions; Room dispatches to its own
  * executor, so callers may be on Main. Names never leave the index for prefs; covers are stored here
- * and nowhere else (SN has only the GLOBAL scope, so a cover is always allowed).
+ * and nowhere else — and never for a `NOTEBOOK`-scope notebook (arc 26 / U4, decision 11: its
+ * card is a lock; [setEncryptionState] nulls the blob and the seal's capture skips it).
  */
 class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
 
@@ -33,10 +36,31 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
     suspend fun globalNotebookIds(): List<String> = dao.aliveNotebookIdsByScope(KEY_SCOPE_GLOBAL)
 
     /** Arc 26 / U3's quarantine: a notebook the rotation could open under neither key becomes
-     *  `NOTEBOOK` scope (the lock card from U4 on) and its backup stamps go, so the next run copies
-     *  whatever key it turns out to be under. `updatedAt` untouched. */
-    suspend fun quarantine(id: String) {
-        dao.setKeyScope(id, KEY_SCOPE_NOTEBOOK)
+     *  `NOTEBOOK` scope (the lock card) and its backup stamps go, so the next run copies whatever
+     *  key it turns out to be under. `updatedAt` untouched. Since U4 the general
+     *  [setEncryptionState] — quarantine is the `NOTEBOOK` case of it. */
+    suspend fun quarantine(id: String) = setEncryptionState(id, KeyScope.NOTEBOOK)
+
+    /** The scope [id] opens under (arc 26 / U4). A missing row answers `GLOBAL`: the open that
+     *  follows fails on the file, not on a guess about the key. */
+    suspend fun keyScope(id: String): KeyScope = KeyScope.of(dao.keyScopeOf(id))
+
+    /**
+     * Record that [id]'s file is now keyed under [scope] (arc 26 / U4, D3) — the index half of a
+     * scope change, a notebook-passphrase change (both re-key through `SoilRekey`), and the
+     * rotation's quarantine. Decision 11: a `NOTEBOOK` notebook's card is a lock, not a cover, so
+     * the cover blob is **nulled** here (and the seal's cover refresh skips it from now on); a
+     * return to `GLOBAL` leaves the blob null until the next seal paints one. **Never bumps
+     * `updatedAt`** (sacred — a re-key is not an edit); the backup stamps are cleared instead,
+     * in both maps, because a stamp that compares `updatedAt` would otherwise keep the old-key
+     * copy in every backup forever (the arc-16 import precedent). Whatever this process had
+     * unlocked under the old key is forgotten too.
+     */
+    suspend fun setEncryptionState(id: String, scope: KeyScope) {
+        dao.setKeyScope(id, scope.column)
+        if (scope == KeyScope.NOTEBOOK) dao.setCover(id, null)
+        BackupStore(dao).clearStamp(id)
+        NotebookUnlocks.forget(id)
     }
 
     /** Every alive folder, anywhere in the tree — the search shelf's other half (arc 20 / Q1). It
@@ -64,7 +88,7 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
     /** Alive folder or notebook with this id, else null. */
     suspend fun alive(id: String): ObjectSummary? =
         dao.byId(id)?.takeIf { it.deletedAt == null }?.let {
-            ObjectSummary(it.id, it.type, it.name, it.parentId, it.createdAt, it.updatedAt, it.pageCount, it.flags, it.templateKind)
+            ObjectSummary(it.id, it.type, it.name, it.parentId, it.createdAt, it.updatedAt, it.pageCount, it.flags, it.templateKind, it.keyScope)
         }
 
     /** The alive notebooks among [ids], blob-free, keyed by id (arc 10 — one read for a whole

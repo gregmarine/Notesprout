@@ -23,7 +23,10 @@ import com.symmetricalpalmtree.notesproutsn.core.IndexGuard
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.core.TopGuard
 import com.symmetricalpalmtree.notesproutsn.crypto.ExportKeying
+import com.symmetricalpalmtree.notesproutsn.crypto.KeyResolver
+import com.symmetricalpalmtree.notesproutsn.crypto.KeyScope
 import com.symmetricalpalmtree.notesproutsn.crypto.KeySession
+import com.symmetricalpalmtree.notesproutsn.crypto.NotebookPassphrasePrompt
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.prefs.ExportPrefs
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilDatabase
@@ -208,6 +211,28 @@ class ExportActivity : AppCompatActivity() {
      *  collects it, the host consumes it, and nothing about it crosses the exporter seam. */
     private var typedPassphrase: String? = null
 
+    /**
+     * **The key this screen reads the notebook with** (arc 26 / U4) — resolved once, at the first
+     * discovery, and held for this screen's lifetime.
+     *
+     * A `GLOBAL` notebook resolves prompt-free ([SoilDatabase.resolve], which also carries a
+     * rotation's second candidate). A `NOTEBOOK`-scope one is asked for **once, up front**
+     * ([NotebookPassphrasePrompt]) rather than at each of the three or four reads this screen makes
+     * — the document question, the artifact copy, the keying transform — because being asked the
+     * same passphrase three times to export one notebook is not a security property, it is a bug.
+     * A cancelled prompt leaves quietly: it is an answer, not an error.
+     *
+     * The same hygiene as [typedPassphrase] and [typedExportSecret], and for the same reasons: it
+     * dies with the screen, is **never** written to `onSaveInstanceState`, never put in an Intent,
+     * never logged, and never reaches [KeySession] — a notebook passphrase is not the device's.
+     * A screen rebuilt behind the picker asks again, exactly as the rekey field is re-collected.
+     */
+    private var sourceKey: KeyResolver.Resolved? = null
+
+    /** The scope [sourceKey] answers for — what tells the keying step whose passphrase the source
+     *  file is under (a `NOTEBOOK` notebook's is the typed one, never the session's). */
+    private var sourceScope: KeyScope = KeyScope.GLOBAL
+
     /** The password typed for a *protected* export (arc 18 / D2) — the same lifecycle as
      *  [typedPassphrase] to the letter, and for the same reasons, with one difference: this one is
      *  handed to the exporter on [ExportSpec.exportSecret], because protecting the output is the
@@ -368,11 +393,15 @@ class ExportActivity : AppCompatActivity() {
      *  Export is only ever entered from the library, with the notebook closed — and its null means
      *  "cannot answer", which is not an answer to build a chooser row on. Asked **once** and then
      *  remembered ([documentAnswer]): the exporters can change under a standing screen, the
-     *  document cannot. */
+     *  document cannot.
+     *
+     *  It is also where the notebook's own key is settled ([resolveSourceKey]) — **before** the
+     *  document question, because that question is the screen's first read of the file. */
     private suspend fun loadCandidates(): List<Candidate> {
+        if (!resolveSourceKey()) return emptyList()
         loadCloud()
         hasDocument = documentAnswer
-            ?: SoilDatabase.readOnce(this, notebookId) { it.hasLiveDocument() }
+            ?: SoilDatabase.readOnce(this, notebookId, sourceKey!!) { it.hasLiveDocument() }
                 ?.also { documentAnswer = it }
             ?: false
         val refs = ExtensionRegistry.exporters(this)
@@ -391,6 +420,41 @@ class ExportActivity : AppCompatActivity() {
         }
         return kept
     }
+
+    /**
+     * Fill [sourceKey] — the one prompt this screen may put up (arc 26 / U4).
+     *
+     * False means *leave*: the person cancelled the passphrase, which is an answer and not a
+     * failure, so the screen finishes with no dialog behind it (the family's cancelled-prompt
+     * rule). Every caller treats that as "no candidates" and the standing `isFinishing` guards
+     * upstream keep the empty list from being reported as "no exporters".
+     */
+    private suspend fun resolveSourceKey(): Boolean {
+        if (sourceKey != null) return true
+        val scope = repo.keyScope(notebookId)
+        sourceScope = scope
+        if (scope == KeyScope.GLOBAL) {
+            sourceKey = SoilDatabase.resolve(this, notebookId)
+            return true
+        }
+        val typed = NotebookPassphrasePrompt.ask(this, notebookId, notebookName)
+        if (typed == null) {
+            Slog.d(TAG) { "notebook passphrase cancelled — leaving" }
+            finish()
+            return false
+        }
+        // The typed value itself, not a wait on the raw-key warm (~9 s on the Nomad): every read
+        // this screen makes happens in the next few seconds.
+        sourceKey = KeyResolver.Resolved.Passphrases(typed)
+        return true
+    }
+
+    /** The source file's own passphrase when it has one of its own — what the keying transform
+     *  must read the artifact with. Null for a `GLOBAL` notebook, whose key is the session's. */
+    private fun sourceNotebookPassphrase(): String? =
+        if (sourceScope == KeyScope.NOTEBOOK) {
+            (sourceKey as? KeyResolver.Resolved.Passphrases)?.candidates?.firstOrNull()
+        } else null
 
     /**
      * The cloud half of a discovery (arc 25 / V3): is a trusted provider installed, and what does
@@ -1080,7 +1144,7 @@ class ExportActivity : AppCompatActivity() {
      * will stream — which from there on is the only file this flow talks about.
      */
     private suspend fun keyedArtifact(c: Candidate): StreamSource {
-        val prepared = ExportArtifact.prepare(applicationContext, notebookId, repo, versionCode())
+        val prepared = ExportArtifact.prepare(applicationContext, notebookId, repo, versionCode(), sourceKey)
         if (prepared is ExportArtifact.Outcome.Failed) {
             return StreamSource.Failed(getString(ExportMessages.of(prepared.problem)))
         }
@@ -1096,9 +1160,11 @@ class ExportActivity : AppCompatActivity() {
             return StreamSource.Failed(getString(R.string.export_passphrase_lost_body))
         }
         if (plan == ExportKeying.Plan.KEEP) return StreamSource.Ready(artifact.file)
-        // Both transforms read the artifact, so both need the device key. Keep needs none, which is
-        // why the session is only asked here.
-        val devicePassphrase = KeySession.get()
+        // Both transforms read the artifact, so both need **the source file's own** key — the
+        // device's for a `GLOBAL` notebook, the one the person typed for a `NOTEBOOK`-scope one
+        // (arc 26 / U4). Keep needs none, which is why either is only asked for here.
+        val devicePassphrase = sourceNotebookPassphrase()
+            ?: KeySession.get()
             ?: return StreamSource.Failed(getString(R.string.export_locked_body))
         stage(if (plan == ExportKeying.Plan.REKEY) R.string.export_rekeying else R.string.export_decrypting)
         return try {
@@ -1127,7 +1193,7 @@ class ExportActivity : AppCompatActivity() {
      * bundle for an extension to add or remove afterwards.
      */
     private suspend fun renderedPages(includeTemplate: Boolean): StreamSource {
-        val outcome = ExportRender.render(applicationContext, notebookId, includeTemplate, pageProgress())
+        val outcome = ExportRender.render(applicationContext, notebookId, includeTemplate, pageProgress(), sourceKey)
         return when (outcome) {
             is ExportRender.Outcome.Ready -> StreamSource.Ready(outcome.file)
             is ExportRender.Outcome.Failed -> StreamSource.Failed(getString(ExportMessages.of(outcome.problem)))
@@ -1143,7 +1209,7 @@ class ExportActivity : AppCompatActivity() {
     private suspend fun assembledDocument(c: Candidate): StreamSource {
         stage(R.string.export_assembling)
         val outcome = ExportText.assemble(
-            applicationContext, notebookId, ExportOptions.textFormat(c.info, values),
+            applicationContext, notebookId, ExportOptions.textFormat(c.info, values), sourceKey,
         )
         return when (outcome) {
             is ExportText.Outcome.Ready -> StreamSource.Ready(outcome.file)
@@ -1161,7 +1227,7 @@ class ExportActivity : AppCompatActivity() {
      * row is not even on screen while this branch is the live one.
      */
     private suspend fun renderedDocumentPages(): StreamSource {
-        val outcome = DocumentPdfRender.render(applicationContext, notebookId, pageProgress())
+        val outcome = DocumentPdfRender.render(applicationContext, notebookId, pageProgress(), sourceKey)
         return when (outcome) {
             is DocumentPdfRender.Outcome.Ready -> StreamSource.Ready(outcome.file)
             is DocumentPdfRender.Outcome.Failed -> StreamSource.Failed(getString(ExportMessages.of(outcome.problem)))
@@ -1185,6 +1251,9 @@ class ExportActivity : AppCompatActivity() {
      */
     private suspend fun reselectAfterRestore(): Candidate? {
         candidates = loadCandidates()
+        // A cancelled passphrase prompt has already called finish(): the flow's own problem dialog
+        // would be a second sentence about a decision the person already made.
+        if (isFinishing || isDestroyed) return null
         val pick = candidates.firstOrNull { it.ref.packageName == chosenPackage }
             ?: candidates.takeIf { chosenPackage == null }?.firstOrNull()
         if (pick != null && !isFinishing && !isDestroyed) select(pick, keepValues = true)

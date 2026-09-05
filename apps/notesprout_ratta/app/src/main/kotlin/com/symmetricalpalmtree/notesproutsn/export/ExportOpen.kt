@@ -2,7 +2,7 @@ package com.symmetricalpalmtree.notesproutsn.export
 
 import android.content.Context
 import android.util.Log
-import com.symmetricalpalmtree.notesproutsn.crypto.KeySession
+import com.symmetricalpalmtree.notesproutsn.crypto.KeyResolver
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilDatabase
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilOpenFiles
 import com.symmetricalpalmtree.notesproutsn.data.soilFile
@@ -20,8 +20,11 @@ import com.symmetricalpalmtree.notesproutsn.data.soilFile
  *  2. **The file is not held.** One file, one connection: [SoilOpenFiles] is the door written down,
  *     so this checks rather than assumes — **first**, because opening it to find out is the very
  *     thing being prevented.
- *  3. **There is a key.** No session means the process was killed and nothing has unlocked since;
- *     asked before the open because the open needs it.
+ *  3. **There is a key.** Asked before the open because the open needs it, and asked of
+ *     [SoilDatabase.resolve] rather than of the session (arc 26 / U4): a `GLOBAL` notebook answers
+ *     with the cached global passphrase (plus a rotation's second candidate), a `NOTEBOOK` one
+ *     answers [Guard.LOCKED] unless the caller already holds the key it typed for. No session at
+ *     all means the process was killed and nothing has unlocked since — [Guard.NO_KEY].
  *  4. **Read-only open** through the one [SoilDatabase.open] door.
  *  5. **Seal, always, in a `finally`** — an unsealed open strands the connection and its WAL sidecar
  *     for the process lifetime (the R6 lesson). It runs whatever the body did, exception included.
@@ -51,6 +54,15 @@ object ExportOpen {
         /** No key session (the process was killed and nothing has unlocked since). */
         NO_KEY,
 
+        /**
+         * **After [NO_KEY] on purpose** (arc 26 / U4): the file is there, it is not in use, and
+         * this process simply holds no key for it — a `NOTEBOOK`-scope notebook nobody has typed
+         * the passphrase for. Not a missing session and not a damaged file: the library is open,
+         * this one notebook is not, and the way out is to open it once (or to hand [readOnly] the
+         * key the caller just collected).
+         */
+        LOCKED,
+
         /** The file would not open (wrong key, damaged). */
         UNREADABLE,
     }
@@ -68,11 +80,18 @@ object ExportOpen {
      * flow it came from; it is never a path and never a name. [body]'s own exceptions are the
      * caller's to catch — they mean the *work* failed, which is a different sentence from the file
      * not opening, and the seal in the `finally` runs for them either way.
+     *
+     * [resolved] is the key a caller **already holds** (arc 26 / U4) — the screen that has just
+     * put up [com.symmetricalpalmtree.notesproutsn.crypto.NotebookPassphrasePrompt] passes
+     * `Passphrases(typed)`, so its export does not wait on the raw-key warm and does not ask a
+     * second time. Left null, the key is resolved here, and a `NOTEBOOK`-scope notebook nothing
+     * has unlocked is [Guard.LOCKED]: **this door never prompts** — a prompt belongs to a screen.
      */
     suspend fun <T> readOnly(
         context: Context,
         notebookId: String,
         label: String,
+        resolved: KeyResolver.Resolved? = null,
         body: suspend (SoilDatabase) -> T,
     ): Opened<T> {
         val source = soilFile(context, notebookId)
@@ -81,10 +100,15 @@ object ExportOpen {
             Log.w(TAG, "refusing to $label a notebook that is open in this process")
             return Opened.Blocked(Guard.IN_USE)
         }
-        val passphrase = KeySession.get() ?: return Opened.Blocked(Guard.NO_KEY)
+        val key = resolved ?: SoilDatabase.resolve(context, notebookId)
+        when (key) {
+            is KeyResolver.Resolved.NoKey -> return Opened.Blocked(Guard.NO_KEY)
+            is KeyResolver.Resolved.NeedsPrompt -> return Opened.Blocked(Guard.LOCKED)
+            else -> Unit
+        }
 
         val db = try {
-            SoilDatabase.open(context, notebookId, source, passphrase)
+            SoilDatabase.open(context, notebookId, source, key)
         } catch (e: Exception) {
             Log.w(TAG, "$label open failed", e)
             return Opened.Blocked(Guard.UNREADABLE)

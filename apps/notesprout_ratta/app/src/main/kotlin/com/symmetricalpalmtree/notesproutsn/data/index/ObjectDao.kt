@@ -7,7 +7,7 @@ import androidx.room.Query
 import com.symmetricalpalmtree.notesproutsn.data.clip.ClipHeader
 
 private const val SUMMARY_COLS =
-    "id, type, name, parentId, createdAt, updatedAt, pageCount, flags, templateKind"
+    "id, type, name, parentId, createdAt, updatedAt, pageCount, flags, templateKind, keyScope"
 
 @Dao
 interface ObjectDao {
@@ -68,6 +68,11 @@ interface ObjectDao {
      *  `NOTEBOOK` here; U4's `setEncryptionState` grows it with the cover rule. */
     @Query("UPDATE objects SET keyScope = :scope WHERE id = :id")
     suspend fun setKeyScope(id: String, scope: String)
+
+    /** One notebook's `keyScope` column, or null when the row is gone (arc 26 / U4 — what every
+     *  open site asks before it asks [com.symmetricalpalmtree.notesproutsn.crypto.KeyResolver]). */
+    @Query("SELECT keyScope FROM objects WHERE id = :id AND deletedAt IS NULL")
+    suspend fun keyScopeOf(id: String): String?
 
     /** The alive rows of [type] among [ids], blob-free (arc 13 / G5 — one read for a whole pinned
      *  or recents shelf). Empty [ids] never hits the database. */

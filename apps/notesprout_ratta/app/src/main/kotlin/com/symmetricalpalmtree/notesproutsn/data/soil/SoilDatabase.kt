@@ -7,8 +7,10 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteOpenHelper
+import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.crypto.KeyOpener
-import com.symmetricalpalmtree.notesproutsn.crypto.KeySession
+import com.symmetricalpalmtree.notesproutsn.crypto.KeyResolver
+import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.crypto.SoilCrypto
 import com.symmetricalpalmtree.notesproutsn.data.soilFile
 import java.io.File
@@ -55,6 +57,28 @@ abstract class SoilDatabase : RoomDatabase() {
             return build(context, file, factory).also { forceOpen(it); SoilOpenFiles.claim(file) }
         }
 
+        /**
+         * [open] over a [KeyResolver] answer (arc 26 / U4): the door for a notebook whose scope the
+         * caller has resolved — `Passphrases` candidates, an `Unlocked` raw key — and a
+         * [com.symmetricalpalmtree.notesproutsn.crypto.SoilLockedException] for `NeedsPrompt` /
+         * `NoKey`, which this path never answers itself. IO thread.
+         */
+        fun open(context: Context, notebookId: String, file: File, resolved: KeyResolver.Resolved): SoilDatabase {
+            if (!SoilOpenFiles.awaitClosed(file)) {
+                Log.w(TAG, "opening ${file.name} while a prior claim still stands")
+            }
+            SoilCrypto.requireExisting(file)
+            val factory = KeyOpener.roomFactoryFor(context, notebookId, file, resolved)
+            return build(context, file, factory).also { forceOpen(it); SoilOpenFiles.claim(file) }
+        }
+
+        /** The prompt-free key for [notebookId] (arc 26 / U4): its scope from the index, then
+         *  [KeyResolver]. Suspends on the index read; the Keystore peek runs on IO. */
+        suspend fun resolve(context: Context, notebookId: String): KeyResolver.Resolved {
+            val scope = IndexRepository().keyScope(notebookId)
+            return withContext(Dispatchers.IO) { KeyResolver.forOpen(context, notebookId, scope) }
+        }
+
         /** Create a brand-new notebook file with the schema in place. New-notebook flow only. IO thread. */
         fun create(context: Context, notebookId: String, file: File, passphrase: String): SoilDatabase {
             require(!file.exists() || file.length() == 0L) { "refusing to create over an existing file: ${file.name}" }
@@ -68,7 +92,7 @@ abstract class SoilDatabase : RoomDatabase() {
 
         /**
          * One-shot **read-only** visit to a notebook that is open nowhere else: open through the
-         * one [open] door (global key from [KeySession]), run [block] over the DAO, and **always**
+         * one [open] door (the key from [resolve]), run [block] over the DAO, and **always**
          * seal — an unsealed open strands the connection and its WAL sidecar for the process
          * lifetime (the R6 lesson). This is the single owner of that ritual (K5 review) — never
          * hand-roll the open → read → seal-in-finally shape at a call site.
@@ -76,14 +100,30 @@ abstract class SoilDatabase : RoomDatabase() {
          * Null on any failure at all (no key session, file missing/empty, unreadable, [block]
          * threw): callers treat null as "cannot answer", never as data. MUST NOT be pointed at a
          * notebook whose `.soil` is already open — one file, one connection, family-wide.
+         *
+         * **Arc 26 / U4:** a `NOTEBOOK`-scope notebook answers null unless the person unlocked it
+         * this process ([com.symmetricalpalmtree.notesproutsn.crypto.NotebookUnlocks]) — a silent
+         * read never prompts and never reads a locked notebook.
          */
-        suspend fun <T> readOnce(context: Context, notebookId: String, block: suspend (SoilDao) -> T): T? =
-            withContext(Dispatchers.IO) {
-                val passphrase = KeySession.get() ?: return@withContext null
+        suspend fun <T> readOnce(context: Context, notebookId: String, block: suspend (SoilDao) -> T): T? {
+            val resolved = resolve(context, notebookId)
+            if (resolved is KeyResolver.Resolved.NeedsPrompt || resolved is KeyResolver.Resolved.NoKey) {
+                Slog.d(TAG) { "readOnce: $notebookId is locked this process" }
+                return null
+            }
+            return readOnce(context, notebookId, resolved, block)
+        }
+
+        /** [readOnce] with the key already in hand — a caller that just prompted passes
+         *  `Passphrases(typed)` so its read does not wait on the raw-key warm. */
+        suspend fun <T> readOnce(
+            context: Context, notebookId: String, resolved: KeyResolver.Resolved, block: suspend (SoilDao) -> T,
+        ): T? {
+            return withContext(Dispatchers.IO) {
                 val file = soilFile(context, notebookId)
                 if (!file.exists() || file.length() == 0L) return@withContext null
                 val db = try {
-                    open(context, notebookId, file, passphrase)
+                    open(context, notebookId, file, resolved)
                 } catch (e: Exception) {
                     Log.w(TAG, "readOnce could not open $notebookId", e)
                     return@withContext null
@@ -97,6 +137,7 @@ abstract class SoilDatabase : RoomDatabase() {
                     db.seal(file)   // never throws (its own contract)
                 }
             }
+        }
 
         private fun build(context: Context, file: File, factory: SupportSQLiteOpenHelper.Factory): SoilDatabase =
             Room.databaseBuilder(context.applicationContext, SoilDatabase::class.java, file.absolutePath)

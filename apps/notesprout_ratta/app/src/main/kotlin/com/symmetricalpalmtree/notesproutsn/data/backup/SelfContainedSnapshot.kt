@@ -24,11 +24,21 @@ import java.io.File
  * probing as encrypted is uploaded. Anything else answers null and that file is refused this run —
  * counted failed, retried next run, nothing uploaded and nothing deleted.
  *
- * **The key.** The copy is opened with the file's cached raw key ([KeyMaterial.peekOrLoad] — the
- * notebook id for a `.soil`, [KeyMaterial.INDEX_FILE_ID] for the index,
- * `ExtensionStores.fileIdFor(pkg)` for a store), and only falls back to the session passphrase when
- * no key has been derived on this device yet. Neither ever leaves this process, and neither is
- * logged: the lines here carry byte counts and booleans.
+ * **The key — and when none is needed at all.** The checkpoint is the only step that opens
+ * anything, so it runs **only when a live WAL was actually copied** (arc 26 / U4). A sealed
+ * notebook has no sidecar: its main file is already the whole story, the copy of it is whole too,
+ * and asking for a key to prove that would be asking for a key to do nothing. That is what lets a
+ * `NOTEBOOK`-scope notebook — whose passphrase this unattended run does not have — be backed up
+ * like any other for as long as it is closed, which is every run that is not racing its own
+ * notebook screen.
+ *
+ * When there *is* a WAL, the copy is opened with the file's cached raw key
+ * ([KeyMaterial.peekOrLoad] — the notebook id for a `.soil`, [KeyMaterial.INDEX_FILE_ID] for the
+ * index, `ExtensionStores.fileIdFor(pkg)` for a store), and only falls back to the session
+ * passphrase when no key has been derived on this device yet. Neither ever leaves this process,
+ * and neither is logged: the lines here carry byte counts and booleans. A file no key on this
+ * device fits is **refused, not failed** — logged at debug and counted failed so the next run
+ * tries again, because "this notebook is locked right now" is an expected state, not an error.
  *
  * The work happens in [dir], which is **wiped before every file** and by the caller's `finally` —
  * a plaintext-free but still key-shaped copy of the library has no business outliving the run.
@@ -67,8 +77,15 @@ object SelfContainedSnapshot {
             // Main first, then the WAL: frames the WAL holds beyond the main copy replay forward on
             // open, which is exactly what the checkpoint below is about to fold in.
             val liveWal = File(live.path + BackupPredicates.WAL_SUFFIX)
-            if (liveWal.exists() && liveWal.length() > 0L) liveWal.copyTo(snapWal, overwrite = true)
-            absorbWal(context, snap, fileId)
+            val copiedWal = liveWal.exists() && liveWal.length() > 0L
+            if (copiedWal) liveWal.copyTo(snapWal, overwrite = true)
+            // No sidecar, no open: the copy is already one whole file and the probe below is the
+            // proof of it. This is the whole reason a locked notebook can still be backed up.
+            if (copiedWal) absorbWal(context, snap, fileId) else Slog.d(TAG) { "no live WAL — no open needed" }
+        } catch (e: LockedFile) {
+            Slog.d(TAG) { "snapshot refused: no key this process holds fits this file" }
+            runCatching { dir.deleteRecursively() }
+            return null
         } catch (e: Exception) {
             Log.w(TAG, "snapshot of a ${live.length()}-byte file failed", e)
             runCatching { dir.deleteRecursively() }
@@ -92,6 +109,10 @@ object SelfContainedSnapshot {
      * is the one place a key is needed at all, and a copy that will not open is a copy that cannot
      * be trusted whole — the caller's probe is what turns that into a refusal.
      */
+    /** No key in this process opens this file — expected (a `NOTEBOOK`-scope notebook mid-write),
+     *  never an error, and so never a stack trace. The run counts the file failed and retries. */
+    private class LockedFile : Exception("no key this process holds fits this file")
+
     private fun absorbWal(context: Context, snap: File, fileId: String) {
         // KeyOpener's recipe, not a bare peek (the V4 walk's finding): a cached key can be STALE
         // for a file this process has not opened — a store wiped and re-minted since the key was
@@ -107,8 +128,21 @@ object SelfContainedSnapshot {
         val db = if (rawKey != null) {
             SoilCrypto.openRawKey(snap, rawKey)
         } else {
-            val passphrase = KeySession.get() ?: throw IllegalStateException("no key session")
-            SoilCrypto.openRaw(snap, passphrase)
+            // One KDF, not two (arc 26 / U4): the open IS the verify. The session passphrase does
+            // not fit a notebook that has its own, and that is a refusal with a sentence, not a
+            // SQLCipher "file is not a database" under a Log.w stack trace every single run.
+            val passphrase = KeySession.get() ?: throw LockedFile()
+            try {
+                SoilCrypto.openRaw(snap, passphrase).also { db ->
+                    // A wrong key surfaces on the first read, not the open.
+                    val ok = runCatching { db.rawQuery("SELECT count(*) FROM sqlite_master", null).use { it.moveToFirst() } }.isSuccess
+                    if (!ok) { runCatching { db.close() }; throw LockedFile() }
+                }
+            } catch (e: LockedFile) {
+                throw e
+            } catch (e: Exception) {
+                throw LockedFile()
+            }
         }
         try {
             db.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null).use { it.moveToFirst() }

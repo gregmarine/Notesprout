@@ -195,6 +195,7 @@
     <string name="export_prepare_failed_body">A copy of the notebook could not be made — the device may be out of space. Nothing was exported and your notebook is untouched.</string>
     <string name="export_in_use_body">This notebook is open somewhere else in the app. Close it, then export again.</string>
     <string name="export_locked_body">The library is locked. Unlock Notesprout SN, then export again.</string>
+    <string name="export_notebook_locked_body">This notebook has its own passphrase. Open it once, then export.</string>
     <string name="export_missing_body">This notebook\'s file is no longer on the device, so there is nothing to export.</string>
     <string name="export_unreadable_body">This notebook could not be read just now. Nothing was exported and the file was left untouched.</string>
 
@@ -348,6 +349,13 @@
     <string name="encryption_resume_banner">A passphrase change is in progress.</string>
     <string name="encryption_resume">Resume</string>
     <string name="encryption_continue">Continue</string>
+    <!-- Arc 26 / U4: the notebook passphrase prompt (NotebookPassphrasePrompt) -->
+    <string name="notebook_passphrase_title">Passphrase needed</string>
+    <string name="notebook_passphrase_body">"%1$s" has its own passphrase. Enter it to open the notebook.</string>
+    <string name="notebook_passphrase_hint">Notebook passphrase</string>
+    <string name="notebook_passphrase_wrong">Wrong passphrase. Try again.</string>
+    <string name="notebook_passphrase_checking">Checking…</string>
+    <string name="notebook_passphrase_open">Open</string>
     <string name="encryption_current_title">Current passphrase</string>
     <string name="encryption_current_body">Enter the current recovery key or passphrase to continue.</string>
     <string name="encryption_current_hint">Recovery key or passphrase</string>
@@ -545,6 +553,7 @@
     <!-- Notebook -->
     <string name="notebook_opening">Opening…</string>
     <string name="notebook_open_failed_title">Couldn\'t open notebook</string>
+    <string name="notebook_open_locked_body">That passphrase was accepted, but this notebook still wouldn\'t open. Nothing was changed.</string>
 
     <!-- Notebook pages -->
     <string name="page_template_action">Page template</string>

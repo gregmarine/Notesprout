@@ -5,8 +5,10 @@ import android.util.Log
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.crypto.KeyMaterial
 import com.symmetricalpalmtree.notesproutsn.crypto.SoilCrypto
+import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.sidecarsOf
 import com.symmetricalpalmtree.notesproutsn.data.soil.FolderRef
+import com.symmetricalpalmtree.notesproutsn.data.soil.KEY_SCOPE_GLOBAL
 import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookMeta
 import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookMetaStore
 import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookRemap
@@ -397,8 +399,16 @@ object NotebookImport {
                     createdAt = existing?.createdAt ?: now,
                     updatedAt = now,
                     // The cover never travels for an encrypted file (the family rule), and the row
-                    // it would have described belongs to whatever used to be behind this id.
+                    // it would have described belongs to whatever used to be behind this id. A
+                    // `NOTEBOOK`-scope notebook has none anywhere (arc 26 / U4, decision 11), so
+                    // this line is right for both scopes for two different reasons.
                     cover = null,
+                    // From the index row, never from `existing` (arc 26 / U4) — the index is the
+                    // authority and the meta field mirrors it, the same rule `textDocument` keeps.
+                    // An import lands `GLOBAL` today, so this changes nothing yet; it is what stops
+                    // a later meta refresh from silently telling a re-keyed file it is `GLOBAL`
+                    // again (og's meta-refresh-wipe trap).
+                    keyScope = IndexRepository().get(notebookId)?.keyScope ?: KEY_SCOPE_GLOBAL,
                     folderPath = folderPath,
                     appVersionCode = appVersionCode,
                     textDocument = textDocument,

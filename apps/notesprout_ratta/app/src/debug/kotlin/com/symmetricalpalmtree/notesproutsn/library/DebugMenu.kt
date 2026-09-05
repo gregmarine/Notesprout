@@ -13,15 +13,26 @@ import androidx.lifecycle.lifecycleScope
 import com.symmetricalpalmtree.notesproutsn.R
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
 import com.symmetricalpalmtree.notesproutsn.core.Slog
+import com.symmetricalpalmtree.notesproutsn.crypto.KeyScope
 import com.symmetricalpalmtree.notesproutsn.crypto.KeySession
+import com.symmetricalpalmtree.notesproutsn.crypto.NotebookPassphrasePrompt
+import com.symmetricalpalmtree.notesproutsn.crypto.PassphraseCache
+import com.symmetricalpalmtree.notesproutsn.crypto.PassphraseRules
 import com.symmetricalpalmtree.notesproutsn.crypto.SoilCrypto
+import com.symmetricalpalmtree.notesproutsn.crypto.SoilRekey
 import com.symmetricalpalmtree.notesproutsn.crypto.SoilFileKind
 import com.symmetricalpalmtree.notesproutsn.data.extensionStoreFile
 import com.symmetricalpalmtree.notesproutsn.data.extstore.ExtensionStoreBinder
 import com.symmetricalpalmtree.notesproutsn.data.extstore.ExtensionStores
 import com.symmetricalpalmtree.notesproutsn.data.extstore.StoreFormat
+import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.index.SnIndex
+import com.symmetricalpalmtree.notesproutsn.data.soil.KEY_SCOPE_GLOBAL
+import com.symmetricalpalmtree.notesproutsn.data.soil.KEY_SCOPE_NOTEBOOK
+import com.symmetricalpalmtree.notesproutsn.data.soil.SoilOpenFiles
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilSchema
+import com.symmetricalpalmtree.notesproutsn.data.soilFile
+import com.symmetricalpalmtree.notesproutsn.databinding.DialogPassphraseNewBinding
 import com.symmetricalpalmtree.notesproutsn.extension.CloudClient
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionCallException
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
@@ -36,6 +47,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.coroutines.resume
 
 /**
  * Debug build only (this file has a no-op twin in `src/release`): a ⋯ button at the right of the
@@ -67,6 +79,12 @@ import java.io.File
  *    the on-device proof of `SoilRekey`: global → throwaway → global with `integrity_check` and row
  *    counts before/between/after, and a hand-made "death between the two renames" that the next
  *    launch's `recoverGarden` must put right (the process is killed on purpose, like Forget).
+ *  - **Change key scope (debug)** (arc 26 / U4) — the only way to *make* a `NOTEBOOK`-scope
+ *    notebook until U5 puts the door on the glass: pick a notebook, and it re-keys in place either
+ *    onto a passphrase you type (GLOBAL → NOTEBOOK) or back onto the device's own (NOTEBOOK →
+ *    GLOBAL, after the real unlock prompt has verified the current one). Both directions are one
+ *    `SoilRekey.rekeyInPlace` plus `IndexRepository.setEncryptionState`, which is exactly what U5's
+ *    real door will do — so what is walked here is the shipping path, not a stand-in.
  *  - **WEBP encoder measurement** ([WebpProbe]) — lossless vs lossy-q100 on this device's own page
  *    size, for the open question in `BuiltInTemplates.toWebp`. Skia's encoders are the subject, so
  *    no host tool can answer it; run it on every device tier before changing the format.
@@ -98,6 +116,7 @@ object DebugMenu {
             "WEBP encoder measurement",
             "Rekey one notebook round-trip (debug)",
             "Break a rekey commit (debug)",
+            "Change key scope (debug)",
         )
         val actions = listOf<() -> Unit>(
             { storeSelfTest(activity) },
@@ -106,6 +125,7 @@ object DebugMenu {
             { webpProbe(activity) },
             { pickNotebook(activity, "Rekey round-trip") { id -> rekeyRoundTrip(activity, id) } },
             { pickNotebook(activity, "Break a rekey commit") { id -> breakRekeyCommit(activity, id) } },
+            { pickNotebook(activity, "Change key scope") { id -> changeKeyScope(activity, id) } },
         )
         Dialogs.style(
             AlertDialog.Builder(activity)
@@ -132,6 +152,147 @@ object DebugMenu {
                     .create()
             ).show()
         }
+    }
+
+    /**
+     * **Change key scope** (arc 26 / U4) — GLOBAL ⇄ NOTEBOOK for one notebook, on the device.
+     *
+     * Both directions are the same three steps in the same order, and the order is the safety:
+     * re-key the file first ([SoilRekey.rekeyInPlace], which is atomic and leaves the original
+     * untouched on any failure), then record the scope in the index
+     * ([IndexRepository.setEncryptionState], which nulls the cover, clears both backup stamps and
+     * forgets the unlock), then park the new passphrase for the very next open
+     * ([PassphraseCache.storeOnce]) so the walk is not asked for what it typed a second ago. An
+     * index that disagrees with the file is the one state worth avoiding, and a re-key that failed
+     * never reaches step two.
+     *
+     * The current passphrase is never guessed: going *to* NOTEBOOK it is the session's, going
+     * *back* it is collected by the real [NotebookPassphrasePrompt], which verifies against the
+     * file before this ever runs. A notebook open in this process is refused outright — one file,
+     * one connection, and a re-key under a live writer is not a thing to find out about later.
+     */
+    private fun changeKeyScope(activity: AppCompatActivity, notebookId: String) {
+        val file = soilFile(activity, notebookId)
+        if (SoilOpenFiles.isOpen(file)) {
+            Toast.makeText(activity, "That notebook is open in this process — close it first.", Toast.LENGTH_LONG).show()
+            return
+        }
+        activity.lifecycleScope.launch {
+            val repo = IndexRepository()
+            val name = repo.summary(notebookId)?.name.orEmpty().ifEmpty { notebookId }
+            when (repo.keyScope(notebookId)) {
+                KeyScope.GLOBAL -> {
+                    val session = KeySession.get()
+                    if (session == null) {
+                        Dialogs.problem(activity, "Change key scope", "No global key in session.")
+                        return@launch
+                    }
+                    val typed = askNewPassphrase(activity, name) ?: return@launch
+                    runRekey(activity, "Now NOTEBOOK scope") {
+                        SoilRekey.rekeyInPlace(
+                            activity, file, notebookId,
+                            oldPassphrase = session, newPassphrase = typed,
+                            keyScope = KEY_SCOPE_NOTEBOOK,
+                        )
+                        repo.setEncryptionState(notebookId, KeyScope.NOTEBOOK)
+                        PassphraseCache.storeOnce(notebookId, typed)
+                    }
+                }
+
+                KeyScope.NOTEBOOK -> {
+                    // The shipping prompt, not a debug one: it verifies against the file, so the
+                    // passphrase this hands back is known to be the one the re-key must read with.
+                    val current = NotebookPassphrasePrompt.ask(activity, notebookId, name) ?: return@launch
+                    val session = KeySession.get()
+                    if (session == null) {
+                        Dialogs.problem(activity, "Change key scope", "No global key in session.")
+                        return@launch
+                    }
+                    runRekey(activity, "Now GLOBAL scope") {
+                        SoilRekey.rekeyInPlace(
+                            activity, file, notebookId,
+                            oldPassphrase = current, newPassphrase = session,
+                            keyScope = KEY_SCOPE_GLOBAL,
+                        )
+                        repo.setEncryptionState(notebookId, KeyScope.GLOBAL)
+                    }
+                }
+            }
+        }
+    }
+
+    /** New + confirm, [PassphraseRules] on the way out, and the IME never hidden (a Ratta hardware
+     *  keyboard types only while it is shown). The "new passphrase" layout with its mode radios
+     *  taken away — a debug tool that only ever chooses its own. */
+    private suspend fun askNewPassphrase(activity: AppCompatActivity, name: String): String? =
+        kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+            val view = DialogPassphraseNewBinding.inflate(activity.layoutInflater)
+            view.modeGroup.visibility = android.view.View.GONE
+            view.ownFields.visibility = android.view.View.VISIBLE
+            var accepted: String? = null
+            val dialog = Dialogs.style(
+                AlertDialog.Builder(activity)
+                    .setTitle("Passphrase for $name")
+                    .setView(view.root)
+                    .setPositiveButton("Set", null)
+                    .setNegativeButton("Cancel", null)
+                    .create()
+            )
+            dialog.window?.setSoftInputMode(
+                android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE or
+                    android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+            )
+            dialog.setOnDismissListener { if (cont.isActive) cont.resume(accepted) }
+            cont.invokeOnCancellation { runCatching { dialog.dismiss() } }
+            dialog.show()
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val typed = view.newField.text?.toString().orEmpty()
+                val confirm = view.confirmField.text?.toString().orEmpty()
+                when (PassphraseRules.check(typed, confirm)) {
+                    PassphraseRules.Verdict.OK -> {
+                        accepted = PassphraseRules.normalize(typed)
+                        dialog.dismiss()
+                    }
+
+                    PassphraseRules.Verdict.TOO_SHORT -> showError(view, "At least ${PassphraseRules.MIN_LENGTH} characters.")
+                    PassphraseRules.Verdict.MISMATCH -> showError(view, "The two entries do not match.")
+                    PassphraseRules.Verdict.SAME_AS_CURRENT -> showError(view, "That is the passphrase already in force.")
+                }
+            }
+        }
+
+    private fun showError(view: DialogPassphraseNewBinding, message: String) {
+        view.error.visibility = android.view.View.VISIBLE
+        view.error.text = message
+    }
+
+    /** The re-key itself under a non-cancellable dialog — 4–8 s on the Nomad, and a screen that
+     *  says nothing for that long reads as a hang on e-ink. */
+    private suspend fun runRekey(activity: AppCompatActivity, done: String, work: suspend () -> Unit) {
+        val progress = Dialogs.style(
+            AlertDialog.Builder(activity)
+                .setTitle("Change key scope")
+                .setMessage("Re-keying…")
+                .setCancelable(false)
+                .create()
+        ).also { it.show() }
+        val error = try {
+            work()
+            null
+        } catch (e: Exception) {
+            e
+        } finally {
+            runCatching { progress.dismiss() }
+        }
+        if (error != null) {
+            Slog.d("DebugMenu") { "change key scope failed: ${error.javaClass.simpleName}" }
+            Dialogs.problem(activity, "Change key scope", error.message ?: error.javaClass.simpleName)
+            return
+        }
+        Toast.makeText(activity, done, Toast.LENGTH_LONG).show()
+        // The library's cards are built from the index row this just changed — the cover is gone
+        // and a lock belongs in its place, and only a rebind will show that.
+        activity.recreate()
     }
 
     private fun rekeyRoundTrip(activity: AppCompatActivity, notebookId: String) {

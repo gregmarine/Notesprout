@@ -5,6 +5,8 @@ import android.net.Uri
 import android.util.Log
 import com.symmetricalpalmtree.notesproutsn.BuildConfig
 import com.symmetricalpalmtree.notesproutsn.core.Slog
+import com.symmetricalpalmtree.notesproutsn.crypto.KeyResolver
+import com.symmetricalpalmtree.notesproutsn.crypto.KeyScope
 import com.symmetricalpalmtree.notesproutsn.crypto.KeySession
 import com.symmetricalpalmtree.notesproutsn.crypto.SoilCrypto
 import com.symmetricalpalmtree.notesproutsn.crypto.SoilFileKind
@@ -183,7 +185,9 @@ object BackupEngine {
         if (legs.none) return Outcome(problem = Problem.NO_DESTINATION)
 
         val notebooks = repo.allNotebooks()
-        val candidates = notebooks.map { BackupPredicates.Candidate(it.id, it.updatedAt, it.flags) }
+        val candidates = notebooks.map {
+            BackupPredicates.Candidate(it.id, it.updatedAt, it.flags, KeyScope.of(it.keyScope))
+        }
         val aliveIds = notebooks.mapTo(HashSet()) { it.id }
         val stores = extensionStoreFiles(app)
 
@@ -245,7 +249,7 @@ object BackupEngine {
                 !source.exists() || source.length() == 0L -> missing++
                 SoilOpenFiles.isOpen(source) -> held++
                 else -> {
-                    compactPass(app, candidate.id, source)
+                    compactPass(app, candidate.id, source, candidate.keyScope)
                     compacted += candidate.id
                     if (copyNotebook(writer, dest, candidate.id, source)) {
                         copied++
@@ -306,11 +310,26 @@ object BackupEngine {
      * seal — the checkpoint inside seal absorbs the result, so the main file alone is a complete
      * copy. **Best effort by og's rule**: a notebook that will not open unattended is still backed
      * up as the bytes it is — failure here is never a reason to skip the copy that follows.
+     *
+     * **A `NOTEBOOK`-scope notebook is never opened here** (arc 26 / U4, og's rule): a backup runs
+     * unattended and holds no key for it, and a prompt in the middle of a run is not a thing this
+     * engine may do. It is still copied — the compaction is an optimisation, the copy is the
+     * point — it simply travels un-vacuumed, which is exactly what an excluded compaction means
+     * everywhere else in this function.
+     *
+     * The key comes from [SoilDatabase.resolve] rather than the session (U4): a `GLOBAL` notebook
+     * mid-rotation may already be under the new passphrase, and the resolver is the one place that
+     * knows both candidates.
      */
-    internal fun compactPass(context: Context, notebookId: String, source: File) {
-        val passphrase = KeySession.get() ?: return
+    internal suspend fun compactPass(context: Context, notebookId: String, source: File, scope: KeyScope) {
+        if (scope == KeyScope.NOTEBOOK) {
+            Slog.d(TAG) { "compact pass skipped: this notebook has its own passphrase" }
+            return
+        }
+        val resolved = SoilDatabase.resolve(context, notebookId)
+        if (resolved is KeyResolver.Resolved.NoKey || resolved is KeyResolver.Resolved.NeedsPrompt) return
         val db = try {
-            SoilDatabase.open(context, notebookId, source, passphrase)
+            SoilDatabase.open(context, notebookId, source, resolved)
         } catch (e: Exception) {
             Log.w(TAG, "compact pass could not open — copying as-is", e)
             return

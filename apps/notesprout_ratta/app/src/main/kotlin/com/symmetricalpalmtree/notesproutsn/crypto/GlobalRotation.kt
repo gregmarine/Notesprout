@@ -236,8 +236,7 @@ object GlobalRotation {
         }
         val outcome = rotateFile(app, file, id, RotationPlan.Kind.NOTEBOOK, old, new, KEY_SCOPE_GLOBAL)
         if (outcome == FileOutcome.QUARANTINED) {
-            repository.quarantine(id)
-            BackupStore().clearStamp(id)
+            repository.quarantine(id)   // setEncryptionState: scope, cover nulled, both stamps cleared
             Log.w(TAG, "notebook quarantined to NOTEBOOK scope (opens under neither key)")
         }
         return outcome

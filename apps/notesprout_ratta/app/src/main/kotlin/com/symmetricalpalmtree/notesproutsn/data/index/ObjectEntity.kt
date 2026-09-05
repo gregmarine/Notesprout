@@ -136,4 +136,6 @@ data class ObjectSummary(
     val pageCount: Int?,
     val flags: Int?,
     val templateKind: String?,
+    /** The `keyScope` column (arc 26 / U4) — read through `KeyScope.of`; null means `GLOBAL`. */
+    val keyScope: String? = null,
 )

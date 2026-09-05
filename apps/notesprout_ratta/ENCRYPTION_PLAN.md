@@ -6,7 +6,7 @@ the root `CLAUDE.md` and `apps/notesprout_ratta/CLAUDE.md`. **Do not load `RATTA
 this arc** unless a standing trap needs checking; its protocol and traps are summarized at the end
 so this file is enough. `DRIVE_PLAN.md` is the shape this file copies.
 
-**Status:** wizard locked 2026-09-05 · U1 ✅ (2026-09-05) · U2 ✅ (2026-09-05) · U3 ✅ (2026-09-05) · U4 ⬜ · U5 ⬜ · U6 ⬜ · U7 ⬜
+**Status:** wizard locked 2026-09-05 · U1 ✅ (2026-09-05) · U2 ✅ (2026-09-05) · U3 ✅ (2026-09-05) · U4 ✅ (2026-09-05) · U5 ⬜ · U6 ⬜ · U7 ⬜
 
 ---
 
@@ -264,7 +264,7 @@ Encryption screen, once U1 lands — the debug item is gone) so no walk can lock
   "Extension data", the index "Library index"), footer "Keep the app open. This can take a
   while.", Cancel only.
 
-### U4 ⬜ — Notebook scope: resolver, prompt, lock card, every open site
+### U4 ✅ — Notebook scope: resolver, prompt, lock card, every open site (2026-09-05)
 - `KeyScope`, `KeyResolver`, `NotebookUnlocks`, `NotebookPassphrasePrompt` per D3 (Fable the
   resolver + the prompt's verify loop; Opus the call sites; Sonnet the layouts/strings).
 - `IndexRepository.encryptionInfo` / `setEncryptionState` (cover nulling, stamp clearing);
@@ -279,8 +279,14 @@ Encryption screen, once U1 lands — the debug item is gone) so no walk can lock
   the picker/readOnce rules, the card model.
 - Walk: Sonnet for the library/picker/export/backup visibility; **Fable by hand** for the prompt
   (typing on the on-screen keyboard), the lockout, and the link follow.
-- **Questions at phase start:** (1) the picker hide rule vs a greyed row — default hide (GONE,
-  never disabled). (2) the cloud-leg skip wording on the Backup status line.
+- **Questions at phase start (answered 2026-09-05):** (1) picker rule → **show a lock row that
+  prompts** (not hide): the row wears the lock glyph in the cover's place; tapping it opens
+  `NotebookPassphrasePrompt`, and on success the pages load and `NotebookUnlocks` records the
+  id. (2) cloud-leg skip wording → **none**: a sealed notebook has no WAL (`SoilDatabase.seal`
+  checkpoints TRUNCATE), so `SelfContainedSnapshot` **skips the open entirely when no sidecar was
+  copied** (probe alone decides) and needs a key only to absorb a leftover WAL; a `NOTEBOOK`-scope
+  file with a leftover WAL and no cached raw key falls into the existing "refused this run,
+  counted failed, retried next run" outcome — no new status-line wording.
 
 ### U5 ⬜ — Notebook scope: the doors
 - New Notebook scope choice; library sheet Change passphrase / Change encryption scope (both
@@ -491,3 +497,68 @@ Encryption screen, once U1 lands — the debug item is gone) so no walk can lock
   open` wants the same second candidate; (2) `IndexRepository.quarantine` is U3's minimal
   `setEncryptionState` — U4 grows it with the cover-null + `notebook_meta` restamp; (3) the Unlock hint
   is now generic — the `NSPT-…` hint is gone on purpose.
+
+### U4 — Outcome (2026-09-05)
+- **Phase-start answers:** the picker shows a **lock row that prompts** (not hide); no cloud-leg
+  wording — `SelfContainedSnapshot` skips the open when no WAL was copied (a sealed notebook has
+  none), so a locked notebook backs up without a key; a locked file WITH a leftover WAL is refused at
+  `Slog` level (`LockedFile`) and counted failed like any other unabsorbed WAL.
+- **Built (`crypto/`, Fable):** `KeyScope` (typed face of the column; `of(null)` = GLOBAL) ·
+  `NotebookUnlocks` (per-process id set; `mark/has/forget/clear`) · `KeyResolver` (pure `decide`
+  table: GLOBAL → `Passphrases([global, markerNew])` — the marker second candidate — / `NoKey`;
+  NOTEBOOK → `Unlocked(rawKey)` only when unlocked this process AND the raw key is cached, else
+  `NeedsPrompt`; `forOpen` wires the stores) · `KeyOpener.roomFactoryFor(…, resolved)` (one
+  candidate = today's cold path; two = verify each; `Unlocked` verified, stale → invalidate + forget)
+  · `NotebookPassphrasePrompt.ask(activity, id, name): String?` — the ONE dialog: `PassphraseCache.
+  takeOnce` first (still verified), verify-then-accept loop, bucket = notebook id, entry row GONE +
+  countdown while locked out (error cleared when it lifts), IME never hidden, field auto-focused; on
+  success `recordSuccess` + `NotebookUnlocks.mark` + `KeyOpener.warm`, returns the typed passphrase.
+- **Seams:** `SoilDatabase.open(…, resolved)` + `suspend resolve(context, id)` (index scope →
+  resolver); `readOnce` answers null for a locked notebook and has an overload taking a `Resolved` —
+  **a caller that just prompted passes `Passphrases(typed)`; the raw-key warm is ~9 s on the Nomad so
+  an immediate read can never wait for `Unlocked`.** `ObjectSummary.keyScope` (in `SUMMARY_COLS`, so
+  every listing sees scope blob-free); `ObjectDao.keyScopeOf`; `IndexRepository.keyScope(id)` +
+  `setEncryptionState(id, scope)` (column, cover blob nulled for NOTEBOOK, both stamps cleared,
+  `NotebookUnlocks.forget`; `updatedAt` untouched) — `quarantine` is now its NOTEBOOK case.
+- **Every open site (Opus, three lanes):** notebook screen (`NotebookActivity.keyFor`: GLOBAL →
+  `resolve`; NOTEBOOK → overlay down, prompt, overlay up; cancel = clear last-open pointer + finish,
+  no dialog; `OpenResult.Failed.keyed` picks the user-grade sentence) · `NotebookSession.open(
+  resolved)` · `refreshMeta` sources `keyScope` from the index row, `cover = null` (SN never stamped a
+  meta cover) · `captureCover` skipped for NOTEBOOK (both onStop and close) · `LinkFollowFlow`:
+  follow AND walk-back prompt for a NOTEBOOK target, cancel on walk-back pushes the trail entry back;
+  `PassphraseCache.storeOnce` before `leaveFor` = one prompt per hop · link picker: lock row visible,
+  tap → prompt → `openDrill(summary, passphrase)`; `ForeignPageSource(passphrase)` carries it for the
+  source's lifetime (re-opens after every `sealAsync`); `PickMode.NOTEBOOK` (link-to-notebook) does
+  not prompt — nothing is opened · library grid: `CardItem.Notebook.locked`, `paintLock` = `ic_lock`
+  at ⅓ card width, cover fetch skipped (`LibraryActivity`, `LibrarySearch`, picker) · export:
+  `ExportActivity.resolveSourceKey` prompts ONCE at the head of `loadCandidates`, `sourceKey` threaded
+  into `ExportOpen.readOnly(…, resolved)` via `ExportArtifact.prepare` / `ExportRender.render` /
+  `ExportText.assemble` / `DocumentPdfRender.render`; `Guard.LOCKED` / `Problem.LOCKED` +
+  `export_notebook_locked_body` for the resolver-less path; `keyedArtifact` hands `ExportKeying`
+  the SOURCE file's passphrase (typed for NOTEBOOK, session for GLOBAL) · backup: `Candidate.keyScope`,
+  `compactPass` is suspend, **skipped for NOTEBOOK**, GLOBAL via `resolve`; `NotebookImport.
+  refreshMeta` + `ExportArtifact.stampExportedAt` source scope from the index · Forget clears
+  `NotebookUnlocks` · rotation's list was already scope-filtered.
+- **Debug:** *Change key scope (debug)* — GLOBAL → NOTEBOOK (new + confirm under `PassphraseRules`,
+  `SoilRekey.rekeyInPlace` → `setEncryptionState` → `PassphraseCache.storeOnce`) and NOTEBOOK →
+  GLOBAL (the real prompt verifies, then rekey back); refuses an open notebook; "Re-keying…" dialog;
+  `recreate()`. Kept for U5's sheet, then removed.
+- **Tests:** 1049 in `:app` (14 new — `KeyResolverTest` decision table, `KeyScopeTest`,
+  `NotebookUnlocksTest`; `FakeObjectDao` grew `keyScopeOf` + the summary column).
+- **Walk (Nomad, Fable by hand + adb):** debug → `20260905_142626` → `notebook1` typed on the
+  on-screen keyboard → **lock card** → tap → opened silently on the parked passphrase (cold open,
+  warm queued) → back → tap → **prompt** → `wrongpass` → inline error, dialog + IME stay → `notebook1`
+  → raw-key open (warm had landed) → back → three wrong entries → **"Too many attempts. Try again in
+  26 s."**, entry row GONE → lifted → Cancel → library, no dialog → long-press → Export → **prompt** →
+  Export screen with candidates → Backup → *compact pass skipped* in the log, **1 copied** (stamps
+  cleared by the scope change), 43 up to date → debug → NOTEBOOK → GLOBAL (prompt verified, rekey)
+  → plain card, no lock, no cover → opens prompt-free under `walkpass1`. Nomad library left every
+  notebook GLOBAL. Not driven by adb (user checklist): the link follow / walk-back, the picker lock
+  row + drill, the export's SAF pick, the cloud leg with a locked notebook.
+- **Planner notes for U5:** (1) the debug item IS the D4 core (rekey → `setEncryptionState` → cache
+  seed) — the sheet's rows call the same three steps; (2) og's downgrade rule (typed == global →
+  stays GLOBAL) is not enforced by the debug item — the sheet and the import chooser must; (3) the
+  "Keep encryption" label + scope restamp in `ext-soil` / `ExportKeying` are still U5's; (4) the
+  three export renderers take `resolved` — a new export path must thread it too; (5) a NOTEBOOK
+  notebook's `.soil` export carries `keyScope = NOTEBOOK` in its meta, which is what the import
+  chooser keys on.

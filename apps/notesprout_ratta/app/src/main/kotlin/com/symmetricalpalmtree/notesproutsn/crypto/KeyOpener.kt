@@ -47,6 +47,45 @@ object KeyOpener {
         return SoilCrypto.roomFactory(passphrase)
     }
 
+    /**
+     * [roomFactoryFor] over a [KeyResolver] answer (arc 26 / U4). `Passphrases` tries the cached raw key
+     * first as always, then its candidates: one candidate is used as-is (today's cold path, no
+     * verify); two — a rotation in flight — are each verified (one KDF apiece) and the first that
+     * fits is used. `Unlocked` verifies the raw key and uses it. `NeedsPrompt` / `NoKey` throw
+     * [SoilLockedException]: this path never prompts, and a caller that can must resolve first.
+     */
+    fun roomFactoryFor(context: Context, fileId: String, file: File, resolved: KeyResolver.Resolved): SupportSQLiteOpenHelper.Factory {
+        SoilCrypto.requireExisting(file)
+        when (resolved) {
+            is KeyResolver.Resolved.Passphrases -> {
+                val candidates = resolved.candidates
+                if (candidates.size == 1) return roomFactoryFor(context, fileId, file, candidates[0])
+                val cached = KeyMaterial.peekOrLoad(context, fileId)
+                if (cached != null) {
+                    if (SoilCrypto.verifyRawKey(file, cached)) return SoilCrypto.roomFactoryRawKey(cached)
+                    KeyMaterial.invalidate(context, fileId)
+                }
+                val fitting = candidates.firstOrNull { SoilCrypto.verifyPassphrase(file, it) }
+                    ?: throw SoilLockedException("no candidate key opens $fileId")
+                warm(context, fileId, file, fitting)
+                Slog.d(TAG) { "passphrase open (cold; candidate ${candidates.indexOf(fitting)}): $fileId" }
+                return SoilCrypto.roomFactory(fitting)
+            }
+            is KeyResolver.Resolved.Unlocked -> {
+                if (SoilCrypto.verifyRawKey(file, resolved.rawKey)) {
+                    Slog.d(TAG) { "raw-key open (unlocked): $fileId" }
+                    return SoilCrypto.roomFactoryRawKey(resolved.rawKey)
+                }
+                Slog.d(TAG) { "unlocked raw key stale for $fileId — invalidating" }
+                KeyMaterial.invalidate(context, fileId)
+                NotebookUnlocks.forget(fileId)
+                throw SoilLockedException("stale raw key for $fileId")
+            }
+            KeyResolver.Resolved.NeedsPrompt -> throw SoilLockedException("$fileId needs its passphrase")
+            KeyResolver.Resolved.NoKey -> throw SoilLockedException("no global key")
+        }
+    }
+
     /** Derive + cache [file]'s raw key in the background. No-op if cached. Never throws. */
     fun warm(context: Context, fileId: String, file: File, passphrase: String) {
         val app = context.applicationContext

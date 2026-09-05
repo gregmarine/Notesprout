@@ -2,6 +2,7 @@ package com.symmetricalpalmtree.notesproutsn.export
 
 import android.content.Context
 import android.util.Log
+import com.symmetricalpalmtree.notesproutsn.crypto.KeyResolver
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.data.soil.DocumentDao
 import com.symmetricalpalmtree.notesproutsn.data.soil.DocumentRepository
@@ -62,6 +63,10 @@ object ExportText {
         /** No key session (the process was killed and nothing has unlocked since). */
         NO_KEY,
 
+        /** This notebook has its own passphrase and nothing in this process has typed it
+         *  (arc 26 / U4) — not a missing key, one notebook that is still shut. */
+        LOCKED,
+
         /** The `.soil` is missing or empty — the index row outlived its file. */
         MISSING,
 
@@ -90,11 +95,12 @@ object ExportText {
         context: Context,
         notebookId: String,
         format: String,
+        resolved: KeyResolver.Resolved? = null,
     ): Outcome = withContext(Dispatchers.IO) {
         // The assembly's own failures are caught inside the open, not around it: they mean the
         // *write* failed, which is a different sentence from the file not opening — and the seal
         // still runs.
-        val opened = ExportOpen.readOnly(context, notebookId, "assemble") { db ->
+        val opened = ExportOpen.readOnly(context, notebookId, "assemble", resolved) { db ->
             try {
                 val markdown = markdownOf(db, notebookId)
                 if (markdown == null) Outcome.Failed(Problem.NO_DOCUMENT)
@@ -118,6 +124,7 @@ object ExportText {
         ExportOpen.Guard.MISSING -> Problem.MISSING
         ExportOpen.Guard.IN_USE -> Problem.IN_USE
         ExportOpen.Guard.NO_KEY -> Problem.NO_KEY
+        ExportOpen.Guard.LOCKED -> Problem.LOCKED
         ExportOpen.Guard.UNREADABLE -> Problem.UNREADABLE
     }
 
