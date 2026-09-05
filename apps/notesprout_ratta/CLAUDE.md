@@ -143,7 +143,10 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   with it); API version **8**; store
   `DriveSchema.V1` = `account(key, value)` (refresh token, account label, cached folder ids), every
   SQL string in `DriveSql`; `DRIVE_CLIENT_ID` / `DRIVE_CLIENT_SECRET` compiled from the shell env into
-  this APK only, `ROOT_FOLDER_NAME` "Notesprout SN" / "Notesprout SN Dev" by build type. **Read
+  this APK only, `ROOT_FOLDER_NAME` "Notesprout SN" / "Notesprout SN Dev" by build type. **V3 (2026-09-04):
+  the Export screen's Destination row + host-drawn `cloud/CloudBrowserDialog` over `Exports/` — the
+  exporter writes to `cacheDir/export/out.<ext>`, the host uploads; the browser only lists, creates
+  only from New folder, never deletes remotely.** **Read
   `DRIVE_PLAN.md`, not `RATTA_PLAN.md`, for any work on it.**)
   `gradle.properties` sets `android.nonTransitiveRClass=false` — undoing it breaks every
   `:sn-screen` resource reference from `:app`.

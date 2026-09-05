@@ -27,7 +27,16 @@ import com.symmetricalpalmtree.notesproutsn.crypto.KeySession
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.prefs.ExportPrefs
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilDatabase
+import com.symmetricalpalmtree.notesproutsn.cloud.CloudBrowserDialog
+import com.symmetricalpalmtree.notesproutsn.cloud.CloudBrowserRules
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityExportBinding
+import com.symmetricalpalmtree.notesproutsn.extension.CloudClient
+import com.symmetricalpalmtree.notesproutsn.extension.CloudConnectEntry
+import com.symmetricalpalmtree.notesproutsn.extension.CloudEntry
+import com.symmetricalpalmtree.notesproutsn.extension.CloudNetworkException
+import com.symmetricalpalmtree.notesproutsn.extension.CloudNotConnectedException
+import com.symmetricalpalmtree.notesproutsn.extension.CloudStatus
+import com.symmetricalpalmtree.notesproutsn.extension.ExtensionCallException
 import com.symmetricalpalmtree.notesproutsn.extension.ExporterClient
 import com.symmetricalpalmtree.notesproutsn.extension.ExporterContract
 import com.symmetricalpalmtree.notesproutsn.extension.ExporterInfo
@@ -44,12 +53,18 @@ import java.io.File
 /**
  * **Export** (arc 15 / E1) — the host's whole side of getting a notebook out of the app.
  *
- * **Over the ~800-line rule, with reason (arc 19 / M9):** the growth is the third source kind —
- * the Source row, the `hasDocument` gate and the document/preview branches of the prepare step.
- * It stays here because the screen's one `runExport` flow is the invariant: the guard order, the
- * keying lifecycle, the conditional-deletion rule and the per-kind verification all run in one
- * sequence that must not be split across files to be auditable — every reviewer of a keying or
- * deletion change reads the whole flow, and a split would hide half of it.
+ * **Over the ~800-line rule, with reason — two growths, one justification (arc 19 / M9 · arc 25 /
+ * V3):** the first was the third source kind (the Source row, the `hasDocument` gate and the
+ * document/preview branches of the prepare step); the second is the **cloud destination** (the
+ * Destination row, the browser and replace-by-name confirmation in place of the SAF picker, and the
+ * upload leg after verification). Both stay here because the screen's one `runExport` flow is the
+ * invariant: the guard order, the keying lifecycle, the conditional-deletion rule and the per-kind
+ * verification all run in one sequence that must not be split across files to be auditable — every
+ * reviewer of a keying or deletion change reads the whole flow, and a split would hide half of it.
+ * The cloud destination makes that stricter, not looser: the file the exporter writes and the bytes
+ * that go up are the same bytes, and the only way to see that is to read the sequence whole. What
+ * *is* split out is everything pure — [ExportDestination]'s rules, [CloudBrowserRules]'s, and
+ * [ExportVerification.cloudVerdict] — and the browser, which is a screen, not a step of this flow.
  *
  * The seam in one sentence: *the host keys, the extension delivers.* This screen owns the entry, the
  * choice of format, the options panel, the transient checkpoint, the cache copy and the SAF
@@ -67,10 +82,20 @@ import java.io.File
  *     single-choice option with one choice collapses the same way — a control that cannot be
  *     operated reads as broken, not as settled. Re-run on every resume, because a package can be
  *     disabled or replaced under a standing screen.
+ *  2b. **Ask where it goes** (arc 25 / V3). The Destination row exists only while a trusted cloud
+ *     provider is installed ([ExportDestination]) — **GONE otherwise, never disabled** — and its
+ *     `status()` is re-asked at every discovery, because the Connect door changes it under a
+ *     standing screen. A standing *cloud* answer is forced back to *local* the moment the row
+ *     leaves, exactly as the Source row's answer is.
  *  3. **Export → the picker.** SAF `ACTION_CREATE_DOCUMENT` with the exporter's MIME type and the
  *     filename [ExportNaming] made from the index name. (An `ActivityResultContracts.CreateDocument`
  *     takes its MIME at *registration*, and this screen does not know it until `describe()` has
  *     answered — so it is the family's explicit-Intent form, as the templates screen uses.)
+ *     **Or → the cloud browser** ([CloudBrowserDialog]) when the destination is the cloud: the
+ *     filename is [ExportNaming]'s and is not offered for editing (there is no field to offer it
+ *     in), so a folder already holding that name gets the *Replace <name>?* dialog that stands in
+ *     for SAF's overwrite confirmation — an upload is replace-by-name, and a silent replace is not
+ *     the family's way. A cancel anywhere in there is the picker's cancel, to the letter.
  *  4. **Prepare, key, hand over, verify.** What gets prepared depends on the exporter's declared
  *     source kind, and that is the only place the kinds differ (arc 18 / D1): a
  *     [ExporterContract.SOURCE_SOIL] exporter streams the `.soil` — [ExportArtifact] seals a cold
@@ -87,6 +112,13 @@ import java.io.File
  *     `export()` runs under its own timeout and [ExportVerification] judges the result **per source
  *     kind** before anything says the word "exported". An exporter that died mid-stream must never
  *     read as success.
+ *  4b. **Upload, for a cloud destination** (arc 25 / V3). The exporter never learns the difference:
+ *     it is handed a write fd on a file in this app's own export cache, and step 4's verification
+ *     runs against that file's real length exactly as it always has. Only then does the flow send
+ *     the bytes — `CloudClient.upload`, replace-by-name — and judge the provider's account of them
+ *     with [ExportVerification.cloudVerdict], which is corroboration and never authority: a
+ *     disagreement is *check the file*, **never** a delete. Nothing in this phase deletes anything
+ *     in the cloud, and every failure before the upload says so in as many words.
  *  5. **Confirm and finish**, back to the library: a dialog, not a toast, because this screen is
  *     closing under it and a toast would confirm something the user no longer has a screen to read.
  *     Every failure instead explains itself in a dialog naming what went wrong —
@@ -137,6 +169,33 @@ class ExportActivity : AppCompatActivity() {
      *  exporter that never offered it. */
     private var documentSource = false
 
+    /** The host's own Destination answer (arc 25 / V3): local, or the one installed cloud provider.
+     *  Saved and restored like the pick, and forced back to local whenever the row that asks the
+     *  question is not on screen ([ExportDestination.settled]) — the Source row's rule, for the
+     *  same reason: a provider uninstalled under a standing screen must not leave an export aimed
+     *  at a cloud that is no longer there. */
+    private var destinationChoice = ExportDestination.Choice.LOCAL
+
+    /** The connect door, and the provider behind it. Registered in `onCreate` (a launcher may not
+     *  be registered later) and closed in `onDestroy` — the Backup screen's backstop, so a bind
+     *  cannot outlive the screen that opened it. */
+    private var cloud: CloudConnectEntry? = null
+
+    /** The provider found at the last discovery, or null. **Not saved into instance state** — a
+     *  package can be disabled or replaced under a standing screen, so the answer is only ever the
+     *  fresh one. */
+    private var cloudRef: ProviderRef? = null
+
+    /** What that provider last said about its account; null when it did not answer. Re-asked at
+     *  **every** discovery on purpose (unlike `hasDocument`, which cannot change under this
+     *  screen): the Connect door changes it, and a stale "connected" would send an export at an
+     *  account that has since been disconnected. */
+    private var cloudStatus: CloudStatus? = null
+
+    /** Set by the connect result so the next discovery can adopt the cloud answer for the person —
+     *  they went to the trouble of signing in from this screen's own offer. Cleared as it is read. */
+    private var selectCloudOnDiscovery = false
+
     /** True from the Export tap until the flow ends. A second tap in the e-ink feedback gap does
      *  nothing — and it also stands down the resume-time re-discovery, which would otherwise
      *  rebuild the panel under an export that is already running. */
@@ -160,16 +219,24 @@ class ExportActivity : AppCompatActivity() {
     ) { result ->
         val uri = result.data?.data
         if (result.resultCode == Activity.RESULT_OK && uri != null) {
-            runExport(uri)
+            runExport(Destination.Saf(uri))
         } else {
-            // Cancelled at the picker: nothing was created, nothing to explain, screen stays.
-            // The secret collected at the tap goes with the flow it was collected for — its
-            // documented lifetime ends here, not at the next tap (arc-15 review).
-            typedPassphrase = null
-            typedExportSecret = null
-            busy = false
-            Slog.d(TAG) { "destination picker cancelled" }
+            cancelledAtThePicker()
         }
+    }
+
+    /**
+     * The picker (SAF's, or the cloud browser's, or the replace confirmation) came back with no
+     * destination. Nothing was created, nothing to explain, the screen stays.
+     *
+     * The secret collected at the tap goes with the flow it was collected for — its documented
+     * lifetime ends here, not at the next tap (arc-15 review) — and the latch comes off.
+     */
+    private fun cancelledAtThePicker() {
+        typedPassphrase = null
+        typedExportSecret = null
+        busy = false
+        Slog.d(TAG) { "destination picker cancelled" }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -200,9 +267,18 @@ class ExportActivity : AppCompatActivity() {
         TooltipCompat.setTooltipText(binding.btnBack, binding.btnBack.contentDescription)
         binding.btnExport.setOnClickListener { onExportTap() }
 
+        // Registered here and nowhere else: a launcher may not be registered after STARTED, so the
+        // door has to exist before anyone can be offered it. A sign-in that succeeded takes the
+        // cloud answer with it at the discovery its result triggers.
+        cloud = CloudConnectEntry(this) { wasConnected ->
+            if (wasConnected) selectCloudOnDiscovery = true
+            discover()
+        }
+
         savedInstanceState?.let { state ->
             chosenPackage = state.getString(KEY_PACKAGE)
             documentSource = state.getBoolean(KEY_SOURCE)
+            if (state.getBoolean(KEY_DESTINATION)) destinationChoice = ExportDestination.Choice.CLOUD
             state.getBundle(KEY_VALUES)?.let { b -> b.keySet().forEach { k -> b.getString(k)?.let { values[k] = it } } }
         }
         discover()
@@ -220,6 +296,12 @@ class ExportActivity : AppCompatActivity() {
         // leaving it up past the teardown leaks it.
         if (IndexGuard.bounced(this)) { super.onDestroy(); return }
         hideProgress()
+        // The browser is attached to this window, and the connect bind must not outlive the screen
+        // that opened it (the Backup screen's backstop).
+        browser?.dismiss()
+        browser = null
+        cloud?.close()
+        cloud = null
         super.onDestroy()
     }
 
@@ -227,6 +309,7 @@ class ExportActivity : AppCompatActivity() {
         super.onSaveInstanceState(outState)
         outState.putString(KEY_PACKAGE, chosenPackage)
         outState.putBoolean(KEY_SOURCE, documentSource)
+        outState.putBoolean(KEY_DESTINATION, destinationChoice == ExportDestination.Choice.CLOUD)
         outState.putBundle(KEY_VALUES, Bundle().also { b -> values.forEach { (k, v) -> b.putString(k, v) } })
     }
 
@@ -258,6 +341,13 @@ class ExportActivity : AppCompatActivity() {
                 problemAndClose(R.string.export_none_title, R.string.export_none_body)
                 return@launch
             }
+            // The connect offer's follow-through: the person signed in from this screen, so the
+            // answer they were reaching for is taken for them. Only when the fresh status agrees —
+            // a sign-in that came back OK but does not read as connected is not an answer.
+            if (selectCloudOnDiscovery) {
+                selectCloudOnDiscovery = false
+                if (cloudStatus?.connected == true) destinationChoice = ExportDestination.Choice.CLOUD
+            }
             val standing = kept.firstOrNull { it.ref.packageName == chosenPackage }
             // A re-discovery keeps what the user already answered — the descriptor is usually the
             // same one — and falling back to another exporter starts from its own defaults.
@@ -280,6 +370,7 @@ class ExportActivity : AppCompatActivity() {
      *  remembered ([documentAnswer]): the exporters can change under a standing screen, the
      *  document cannot. */
     private suspend fun loadCandidates(): List<Candidate> {
+        loadCloud()
         hasDocument = documentAnswer
             ?: SoilDatabase.readOnce(this, notebookId) { it.hasLiveDocument() }
                 ?.also { documentAnswer = it }
@@ -300,6 +391,38 @@ class ExportActivity : AppCompatActivity() {
         }
         return kept
     }
+
+    /**
+     * The cloud half of a discovery (arc 25 / V3): is a trusted provider installed, and what does
+     * it say about its account.
+     *
+     * **Both are asked every time**, and neither is remembered across a resume: a package can be
+     * disabled or replaced under a standing screen (the discovery rule the exporters already keep),
+     * and the account can be connected or disconnected from the Backup screen or from this screen's
+     * own offer while this one stands. A provider that does not answer keeps its row with a null
+     * status — GONE is for *not installed*, and the tap will say what it can (`OFFER_CONNECT`).
+     *
+     * `status()` never touches the network by contract, which is what makes it cheap enough to be a
+     * discovery step at all.
+     */
+    private suspend fun loadCloud() {
+        val ref = cloud?.discover()
+        cloudRef = ref
+        if (ref == null) { cloudStatus = null; return }
+        cloudStatus = try {
+            CloudClient.status(this, ref)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: ExtensionCallException) {
+            Slog.d(TAG) { "cloud status unavailable: ${e.javaClass.simpleName}" }
+            null
+        }
+    }
+
+    /** What every cloud sentence on this screen calls the provider — its own name, or the
+     *  extension's label when it gave none. */
+    private fun cloudName(): String =
+        ExportDestination.providerName(cloudStatus, cloudRef?.label?.toString().orEmpty())
 
     private suspend fun describe(ref: ProviderRef): ExporterInfo? = try {
         ExporterClient(this, ref).describe()
@@ -413,6 +536,10 @@ class ExportActivity : AppCompatActivity() {
             }
         }
 
+        // Where the finished file goes (arc 25 / V3) — the host's second question, after everything
+        // about what is in the file and before the secret block, which is about neither.
+        renderDestination()
+
         // The consequences the host owns. Both blocks are XML-static, so a half-typed secret
         // survives the rebuild the options loop above just did — which is why nothing here clears a
         // field: a mere toggle is not a change of question, and only picking another exporter is
@@ -435,6 +562,79 @@ class ExportActivity : AppCompatActivity() {
         )
         binding.plainWarning.visibility =
             if (ExportOptions.showsPlainWarning(info, values)) View.VISIBLE else View.GONE
+    }
+
+    /**
+     * The Destination row (arc 25 / V3), rebuilt with the rest of the panel.
+     *
+     * The row is on screen only while a provider is installed; when it is not, the answer goes with
+     * it ([ExportDestination.settled]) — the Source row's rule. The two radios are the panel's, and
+     * re-tapping the checked one is a no-op for the reason the chooser has: a grazed tap on e-ink
+     * must not rebuild the panel under a half-typed secret.
+     */
+    private fun renderDestination() {
+        binding.destination.removeAllViews()
+        val visible = ExportDestination.rowVisible(cloudRef != null)
+        destinationChoice = ExportDestination.settled(destinationChoice, visible)
+        // GONE, never disabled: with no provider there is only one place a file can go, and a
+        // control that cannot be operated reads as broken rather than as settled.
+        binding.destination.visibility = if (visible) View.VISIBLE else View.GONE
+        if (!visible) return
+
+        binding.destination.addView(panel.caption(getString(R.string.export_destination_caption)))
+        val local = destinationChoice == ExportDestination.Choice.LOCAL
+        binding.destination.addView(
+            panel.choice(getString(R.string.export_destination_local), local) {
+                if (!local) { destinationChoice = ExportDestination.Choice.LOCAL; render() }
+            }
+        )
+        binding.destination.addView(
+            panel.choice(cloudName(), !local) {
+                if (local) onCloudDestinationTap()
+            }
+        )
+    }
+
+    /**
+     * A tap on the cloud radio. Only a live connection takes the answer; everything else says why
+     * not, and then the panel is rebuilt so the tick goes back where it was — a radio left standing
+     * on an answer the screen refused would be the screen lying about its own state.
+     */
+    private fun onCloudDestinationTap() {
+        when (ExportDestination.onCloudTap(cloudStatus)) {
+            ExportDestination.Tap.SELECT -> {
+                destinationChoice = ExportDestination.Choice.CLOUD
+                render()
+            }
+            ExportDestination.Tap.NOT_CONFIGURED -> {
+                render()
+                Dialogs.problem(this, R.string.cloud_not_configured_title, R.string.cloud_not_configured_body)
+            }
+            ExportDestination.Tap.OFFER_CONNECT -> {
+                render()
+                offerConnect()
+            }
+        }
+    }
+
+    /**
+     * The inline Connect offer — the same door the Backup screen has, put where the person is
+     * standing. Two buttons and nothing else: Connect opens the provider's own sign-in, and the
+     * result comes back through [CloudConnectEntry]'s callback, which re-runs discovery and takes
+     * the cloud answer when the fresh status says it can.
+     */
+    private fun offerConnect() {
+        val entry = cloud ?: return
+        if (!entry.isAvailable) return
+        val name = cloudName()
+        Dialogs.style(
+            AlertDialog.Builder(this)
+                .setTitle(getString(R.string.cloud_connect_offer_title, name))
+                .setMessage(getString(R.string.cloud_connect_offer_body, name))
+                .setPositiveButton(R.string.cloud_connect) { _, _ -> entry.open() }
+                .setNegativeButton(R.string.cancel, null)
+                .create()
+        ).show()
     }
 
     /** The flow's modal progress dialog while an export is running (the Backup screen's pattern —
@@ -519,6 +719,15 @@ class ExportActivity : AppCompatActivity() {
             }
             if (protect) typedExportSecret = typed else typedPassphrase = typed
         }
+        // The cloud fork (arc 25 / V3). The secret checks above are shared — they are about what is
+        // in the file, not where it goes — and the latch is taken here for the same reason it is
+        // taken for the picker: the browser is a showing, and a second Export tap under it would
+        // start a second flow.
+        if (destinationChoice == ExportDestination.Choice.CLOUD) {
+            busy = true
+            openCloudBrowser(c)
+            return
+        }
         // Both the type and the name come from ExportDocumentRules, not from the descriptor: a
         // document exporter's format choice is host-executed, and a `.txt` export must not be
         // offered to the picker as `text/markdown` under a `.md` name (arc 19 / M9). Every other
@@ -542,25 +751,141 @@ class ExportActivity : AppCompatActivity() {
         }
     }
 
+    /** Where the finished bytes go. The flow only parts on this twice — at the destination fd and
+     *  at the end — which is what keeps the one sequence one sequence. */
+    private sealed class Destination {
+        /** A document the SAF picker named on this device. */
+        class Saf(val uri: Uri) : Destination()
+
+        /** A file called [name] under [path] in the provider's tree, uploaded replace-by-name. */
+        class Cloud(val path: List<String>, val name: String, val mime: String) : Destination()
+    }
+
+    /** The browser while it is up, so `onDestroy` can take it down with the screen. */
+    private var browser: CloudBrowserDialog? = null
+
     /**
-     * The whole flow behind the picker: prepare, hand over, verify, confirm. Every failure deletes
-     * the document the picker created — a partial file must never stand there silently — and says
-     * what happened.
+     * The cloud's stand-in for the SAF picker: browse the provider's `Exports/` tree and choose a
+     * folder. The filename is not asked for — it is [ExportNaming]'s, as it is for the picker's
+     * offered title, and there is nowhere here to type over it (decision 7).
+     *
+     * Every way out of the browser lands on one of three things, and the latch comes off in all of
+     * them: a folder (which may still stop at the replace confirmation), the Connect offer (the
+     * provider has no account, so there was nothing to browse), or the picker-cancel rule.
      */
-    private fun runExport(uri: Uri) {
+    private fun openCloudBrowser(c: Candidate) {
+        val ref = cloudRef
+        if (ref == null) {
+            cancelledAtThePicker()
+            Dialogs.problem(this, R.string.export_failed_title, getString(R.string.export_cloud_gone_body))
+            return
+        }
+        browser?.dismiss()
+        val dialog = CloudBrowserDialog(
+            activity = this,
+            ref = ref,
+            providerName = cloudName(),
+            mode = CloudBrowserDialog.Mode.PICK_FOLDER,
+            basePath = listOf(CLOUD_EXPORTS_FOLDER),
+            onPicked = { pick ->
+                browser = null
+                when (pick) {
+                    is CloudBrowserDialog.Pick.Folder -> confirmThenUpload(c, pick.path, pick.listing)
+                    // PICK_FOLDER cannot answer with a file; if it ever did, it is not a place to
+                    // save and the honest thing is to end the flow rather than to guess.
+                    is CloudBrowserDialog.Pick.File -> cancelledAtThePicker()
+                }
+            },
+            onNotConnected = {
+                browser = null
+                cancelledAtThePicker()
+                // The account went away between the tap and the listing. The offer is the only
+                // thing that can help, and nothing was uploaded to say otherwise.
+                lifecycleScope.launch {
+                    loadCloud()
+                    if (isFinishing || isDestroyed) return@launch
+                    render()
+                    offerConnect()
+                }
+            },
+            onCancelled = {
+                browser = null
+                cancelledAtThePicker()
+            },
+        )
+        browser = dialog
+        dialog.show()
+    }
+
+    /**
+     * The chosen folder, and the one question SAF asks for us everywhere else: *is something of
+     * this name already there?* An upload is replace-by-name, so a same-named file would be
+     * replaced silently — and a silent replace is not the family's way.
+     *
+     * The listing is the one the browser last drew, so this costs no second round trip; a file that
+     * appeared in the folder since is a race the upload's own replace-by-name handles, and the
+     * person's own cloud is where they would see it.
+     */
+    private fun confirmThenUpload(c: Candidate, path: List<String>, listing: List<CloudEntry>) {
+        val name = ExportNaming.suggestedFileName(
+            notebookName, notebookId, ExportDocumentRules.fileExtension(c.info, values),
+        )
+        val destination = Destination.Cloud(path, name, ExportDocumentRules.mimeType(c.info, values))
+        if (CloudBrowserRules.fileNamed(listing, name) == null) {
+            runExport(destination)
+            return
+        }
+        if (isFinishing || isDestroyed) { cancelledAtThePicker(); return }
+        var replacing = false
+        Dialogs.style(
+            AlertDialog.Builder(this)
+                .setTitle(getString(R.string.cloud_replace_title, name))
+                .setMessage(R.string.cloud_replace_body)
+                .setPositiveButton(R.string.cloud_replace_confirm) { _, _ ->
+                    replacing = true
+                    runExport(destination)
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .create()
+        ).also {
+            // Back-dismissed as well as cancelled: either way nothing was chosen, and the flow ends
+            // exactly as a cancel at the picker does.
+            it.setOnDismissListener { if (!replacing) cancelledAtThePicker() }
+        }.show()
+    }
+
+    /**
+     * The whole flow behind the picker: prepare, hand over, verify, confirm — and, for a cloud
+     * destination, upload and verify that too. Every failure deletes the document the picker
+     * created — a partial file must never stand there silently — and says what happened. Nothing
+     * in the cloud is ever deleted: an upload is replace-by-name, so retrying is safe and removing
+     * a file the host is not sure about would be the one irreversible thing here.
+     */
+    private fun runExport(destination: Destination) {
         busy = true
         showProgress(R.string.export_preparing)
         lifecycleScope.launch {
+            val saf = destination as? Destination.Saf
             // What a failure may delete (arc-15 review): the picker's overwrite confirmation hands
             // back a PRE-EXISTING document's URI, and a failure that never wrote a byte must not
             // take the user's previous good file with it. Deletion is allowed only once the
             // truncating open has destroyed the old content anyway — or when the document was
             // verifiably empty to begin with (a fresh creation).
-            val sizesAtStart = withContext(Dispatchers.IO) { destinationSizes(uri) }
+            //
+            // None of it applies to the cloud leg: what a cloud destination writes to first is a
+            // file in this app's own cache, wiped in the `finally` whatever happens, and nothing
+            // has reached the provider until the upload — so every failure before it says exactly
+            // that and deletes nothing anywhere.
+            val sizesAtStart =
+                if (saf != null) withContext(Dispatchers.IO) { destinationSizes(saf.uri) } else emptyList()
             val emptyAtStart = sizesAtStart.isNotEmpty() && sizesAtStart.all { it == 0L }
             var destinationTouched = false
             suspend fun failed(@StringRes titleRes: Int, message: String) =
-                fail(uri, titleRes, message, mayDelete = destinationTouched || emptyAtStart)
+                if (saf != null) {
+                    fail(saf.uri, titleRes, message, mayDelete = destinationTouched || emptyAtStart)
+                } else {
+                    failCloud(titleRes, message)
+                }
             try {
                 // DocumentsUI is another process on a memory-tight e-ink device, so this screen can
                 // be rebuilt behind it: the result arrives before the recreated screen's discovery
@@ -637,20 +962,30 @@ class ExportActivity : AppCompatActivity() {
                     failed(R.string.export_failed_title, getString(R.string.export_prepare_failed_body))
                     return@launch
                 }
-                val destination = withContext(Dispatchers.IO) { openDestination(uri) }
-                if (destination == null) {
+                // The one place the flow parts on where the file is going. A cloud destination
+                // writes into this app's own export cache — the same directory `prepare` just
+                // made, so this open comes AFTER it — and the exporter is never told: an fd is an
+                // fd, which is exactly why no exporter needed changing for this arc.
+                val cloudFile =
+                    if (saf == null) File(File(cacheDir, ExportArtifact.DIR), "out." + ExportDocumentRules.fileExtension(c.info, values))
+                    else null
+                val sink = withContext(Dispatchers.IO) {
+                    if (saf != null) openDestination(saf.uri) else openCacheDestination(cloudFile!!)
+                }
+                if (sink == null) {
                     withContext(Dispatchers.IO) { runCatching { source.close() } }
                     failed(R.string.export_failed_title, getString(R.string.export_destination_body))
                     return@launch
                 }
                 // The truncating open has run: whatever the document held is gone, and from here a
-                // failure's delete removes only wreckage, never the user's old file.
+                // failure's delete removes only wreckage, never the user's old file. (Meaningless
+                // for the cloud leg, where the file is this app's own cache copy.)
                 destinationTouched = true
 
                 // Both descriptors are the client's from here — it closes them in `finally`,
                 // success, failure or timeout.
                 val result = try {
-                    ExporterClient(this@ExportActivity, c.ref).export(source, destination, spec)
+                    ExporterClient(this@ExportActivity, c.ref).export(source, sink, spec)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -667,7 +1002,11 @@ class ExportActivity : AppCompatActivity() {
                 // over a stale answer would destroy the very thing that was just made; any
                 // agreeing answer is enough, and a unanimous disagreement is an honest
                 // check-the-file dialog rather than a delete.
-                val onDisk = withContext(Dispatchers.IO) { destinationSizes(uri) }
+                // The cloud's destination account is the cache file's own length: the exporter
+                // wrote it here, in this process, and there is no provider metadata in it to lag.
+                val onDisk = withContext(Dispatchers.IO) {
+                    if (saf != null) destinationSizes(saf.uri) else listOf(cloudFile!!.length())
+                }
                 when (ExportVerification.verdict(c.info.sourceKind, result.bytesWritten, streamBytes, onDisk)) {
                     ExportVerification.Verdict.SHORT -> {
                         Log.w(TAG, "short export: ${result.bytesWritten} written, $streamBytes streamed, destination $onDisk")
@@ -688,6 +1027,18 @@ class ExportActivity : AppCompatActivity() {
                 }
 
                 Slog.d(TAG) { "exported ${result.bytesWritten} bytes" }
+
+                // The cloud leg (arc 25 / V3). Everything above has already run and passed: the
+                // file is whole, in this app's cache, and this is the only step that can still put
+                // it somewhere the person will look for it. Nothing before this line touched the
+                // provider, which is why every failure above says "nothing was uploaded" and means
+                // it.
+                val cloudDestination = destination as? Destination.Cloud
+                if (cloudDestination != null) {
+                    uploadAndConfirm(c, cloudDestination, cloudFile!!)
+                    return@launch
+                }
+
                 // "Last used" is written by an export that finished, never by a tap the picker
                 // then abandoned — the next fresh Export screen defaults to this format.
                 exportPrefs.lastExporter = c.ref.packageName
@@ -840,6 +1191,133 @@ class ExportActivity : AppCompatActivity() {
         return pick
     }
 
+    /**
+     * **The upload leg** (arc 25 / V3), and the only step of the flow that touches the provider.
+     *
+     * It runs after the export has already been verified whole against the cache file, so what goes
+     * up is known-good bytes and the only question left is whether they arrived. The provider's
+     * account of the finished file is corroboration ([ExportVerification.cloudVerdict]) and never
+     * authority: a disagreement is the arc-15 *check the file* dialog, `lastExporter` is not
+     * written, and **nothing is deleted** — a provider's metadata can lag its own write, and
+     * deleting over a stale answer would destroy the very thing that was just made.
+     *
+     * The three failures are three different sentences because they mean three different things,
+     * and the one that matters is the last: a provider that did not answer at all says nothing
+     * about whether the bytes landed, so the honest wording is *check it before exporting again* —
+     * and a retry is safe, because an upload is replace-by-name.
+     */
+    private suspend fun uploadAndConfirm(c: Candidate, cloud: Destination.Cloud, file: File) {
+        val ref = cloudRef
+        if (ref == null) {
+            failCloud(R.string.export_failed_title, getString(R.string.export_cloud_gone_body))
+            return
+        }
+        val name = cloudName()
+        stage(getString(R.string.export_uploading, name))
+        val bytes = withContext(Dispatchers.IO) { file.length() }
+        val pfd = withContext(Dispatchers.IO) {
+            runCatching { ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY) }.getOrNull()
+        }
+        if (pfd == null) {
+            failCloud(R.string.export_failed_title, getString(R.string.export_prepare_failed_body))
+            return
+        }
+        // The client owns the descriptor from here and closes it on every path, refusals included.
+        val entry = try {
+            CloudClient.upload(
+                this@ExportActivity, ref, cloud.path.toTypedArray(), cloud.name, cloud.mime, pfd, bytes,
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: CloudNotConnectedException) {
+            hideProgress()
+            if (isFinishing || isDestroyed) return
+            // Offered from the dialog, because Connect is the only thing that helps here.
+            Dialogs.style(
+                AlertDialog.Builder(this@ExportActivity)
+                    .setTitle(R.string.export_failed_title)
+                    .setMessage(getString(R.string.export_cloud_not_connected_body, name))
+                    .setPositiveButton(R.string.cloud_connect) { _, _ -> offerConnectAfterFailure() }
+                    .setNegativeButton(R.string.ok, null)
+                    .create()
+            ).show()
+            return
+        } catch (e: CloudNetworkException) {
+            failCloud(R.string.export_failed_title, getString(R.string.export_cloud_network_body, name))
+            return
+        } catch (e: Exception) {
+            // No answer, or a timeout: the file may or may not have arrived, and the host has no
+            // way to find out without asking again. It says so, and deletes nothing.
+            Slog.d(TAG) { "upload failed: ${e.javaClass.simpleName}" }
+            hideProgress()
+            if (isFinishing || isDestroyed) return
+            Dialogs.problem(
+                this@ExportActivity,
+                R.string.export_failed_title,
+                getString(R.string.export_cloud_unanswered_body, name),
+            )
+            return
+        }
+
+        when (ExportVerification.cloudVerdict(entry.sizeBytes, bytes)) {
+            ExportVerification.Verdict.OK -> Unit
+            else -> {
+                Log.w(TAG, "the provider reports ${entry.sizeBytes} for $bytes uploaded bytes")
+                hideProgress()
+                if (isFinishing || isDestroyed) return
+                Dialogs.problem(
+                    this@ExportActivity,
+                    R.string.export_verify_title,
+                    getString(R.string.export_cloud_verify_body, name),
+                )
+                return
+            }
+        }
+
+        Slog.d(TAG) { "uploaded $bytes bytes" }
+        exportPrefs.lastExporter = c.ref.packageName
+        hideProgress()
+        if (isFinishing || isDestroyed) return
+        Dialogs.confirm(
+            this@ExportActivity,
+            R.string.export_done_title,
+            getString(R.string.export_cloud_done_body, name),
+        ) { finish() }
+    }
+
+    /** The Connect offer reached from a failed upload. The status is re-read first: the account may
+     *  simply have been disconnected elsewhere, and the offer should be built on what is true now. */
+    private fun offerConnectAfterFailure() {
+        lifecycleScope.launch {
+            loadCloud()
+            if (isFinishing || isDestroyed) return@launch
+            render()
+            offerConnect()
+        }
+    }
+
+    /**
+     * Every cloud failure **before** the upload ends here, and every one of them means the same
+     * thing about the provider: nothing reached it. The sentence says so, and nothing anywhere is
+     * deleted — the cache copy goes with the flow's own `finally`, as it always did.
+     */
+    private fun failCloud(@StringRes titleRes: Int, message: String) {
+        hideProgress()
+        if (isFinishing || isDestroyed) return
+        Dialogs.problem(this, titleRes, "$message ${getString(R.string.export_nothing_uploaded_note)}")
+    }
+
+    /** The cloud leg's destination: a plain file in this app's export cache, opened `rwt`. It is
+     *  made **after** `prepare`, which wipes that directory, and taken away by the same `clean`
+     *  that takes the artifact. */
+    private fun openCacheDestination(file: File): ParcelFileDescriptor? = runCatching {
+        ParcelFileDescriptor.open(
+            file,
+            ParcelFileDescriptor.MODE_READ_WRITE or ParcelFileDescriptor.MODE_CREATE or
+                ParcelFileDescriptor.MODE_TRUNCATE,
+        )
+    }.onFailure { Log.w(TAG, "could not open the cache destination: ${it.javaClass.simpleName}") }.getOrNull()
+
     /** Best-effort truncating write handle. Providers differ on which modes they accept, so the
      *  documented one is tried first and plain "w" is the fallback. */
     private fun openDestination(uri: Uri): ParcelFileDescriptor? {
@@ -924,6 +1402,12 @@ class ExportActivity : AppCompatActivity() {
         private const val KEY_PACKAGE = "export.package"
         private const val KEY_VALUES = "export.values"
         private const val KEY_SOURCE = "export.documentSource"
+        private const val KEY_DESTINATION = "export.cloudDestination"
+
+        /** The one folder of the provider's tree an export ever writes into (decision 5). The
+         *  browser opens on it and never climbs above it; `Exports/` itself is created by the
+         *  upload on the way past, because browsing creates nothing. */
+        private const val CLOUD_EXPORTS_FOLDER = "Exports"
 
         /** The Source row's two answers, in the order they read: the notebook first, because that
          *  is what this screen has always exported and what the default false means. */

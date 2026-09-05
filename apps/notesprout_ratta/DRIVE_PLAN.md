@@ -5,7 +5,7 @@ arc — read it whole at every phase start, together with the root `CLAUDE.md` a
 `apps/notesprout_ratta/CLAUDE.md`. **Do not load `RATTA_PLAN.md` for this arc** unless a standing
 trap needs checking; its protocol and traps are summarized below so this file is enough.
 
-**Status:** planned 2026-09-04 · V1 ✅ (2026-09-04) · V2 ✅ (2026-09-04) · V3 ⬜ · V4 ⬜ · V5 ⬜ · V6 ⬜
+**Status:** planned 2026-09-04 · V1 ✅ (2026-09-04) · V2 ✅ (2026-09-04) · V3 ✅ (2026-09-04) · V4 ⬜ · V5 ⬜ · V6 ⬜
 
 ---
 
@@ -132,14 +132,70 @@ ink). Then docs / memory / `CLAUDE.md`, **commit + push**, user runs `/clear`. *
   account); confirm the email shows; Disconnect; reconnect.
 - Measure on device: `status`, `list`, `upload` 1 MiB / 20 MiB, `download` — fill `CloudTimeouts`.
 
-### V3 ⬜ — Export to cloud
-- Export screen: **Destination** row (Local file / <providerName>), GONE without a provider;
-  cloud + not connected → inline Connect offer. Cloud path: `CloudBrowserDialog` over
-  `Exports/` (browse, New folder…), then the flow writes the exporter's output to
-  `cacheDir/export/out.<ext>` through the **same two-fd call** (destination fd on the cache file),
-  verifies the count, then `upload(...)`. Verification per `ExportVerification`: the returned
-  `CloudEntry.sizeBytes` corroborates; disagreement = *check the file*, never delete (the arc-15
-  rule). `lastExporter` still written from OK only. Failure table grows cloud rows.
+### V3 ✅ — Export to cloud (2026-09-04)
+
+**Design (Fable, 2026-09-04 — binding for the phase).**
+
+- **Destination row** on the Export screen, host-drawn in `render()` after the exporter's options
+  and before the passphrase block: caption *Destination*, two radios — *File on this device* /
+  `<providerName>` (the provider's own name from `status()`, else the extension label). The row is
+  **GONE without a provider** (`ExtensionRegistry.cloud()` re-asked in `loadCandidates`, so every
+  resume re-asks, as the exporters are); a standing *cloud* answer is forced back to *local* whenever
+  the row is not on screen (the `documentSource` rule). The answer is host state: saved/restored,
+  `KEY_DESTINATION`. Pure rules in `export/ExportDestination.kt` (JVM-tested): row visible? · the
+  forced-back rule · which tap does what (below).
+- **`status()` at discovery**, remembered like `hasDocument` is NOT — it is re-asked on every
+  discovery because the connect door changes it. A provider that does not answer keeps the row (GONE
+  is for *not installed* only); its label is the extension's.
+- **Tapping the cloud radio**: connected → select. `!configured` → the Backup screen's *not set up*
+  problem dialog. Otherwise (not connected, or status unanswered) → the **inline Connect offer**: a
+  two-button dialog *Connect to <provider>?* [Connect] [Cancel]; Connect opens `CloudConnectEntry`
+  (registered in `onCreate` — a launcher may not register later); its `onChanged` re-runs discovery
+  and, when the result was `RESULT_OK` and the fresh status says connected, selects the cloud radio.
+  `CloudConnectEntry.close()` in `onDestroy` (the Backup screen's backstop).
+- **Export tap, cloud**: the secret checks run exactly as today, then instead of the SAF picker the
+  **`CloudBrowserDialog`** opens over `Exports/` (busy latched from the tap; a cancel unlatches and
+  drops the typed secrets, the picker-cancel rule). The dialog answers a folder **path** (names under
+  the root, `["Exports", …]`) plus the listing it last drew. Filename = `ExportNaming.suggestedFileName`
+  — fixed, not editable (decision 7). If that listing already holds a **file of that name**, a
+  *Replace <name>?* [Replace] [Cancel] dialog stands in for SAF's overwrite confirmation — upload is
+  replace-by-name, and a silent replace is not the family's way.
+- **`CloudBrowserDialog`** (`cloud/CloudBrowserDialog.kt` + `dialog_cloud_browser.xml`, pure rules in
+  `cloud/CloudBrowserRules.kt`): the host-drawn list, **shared with V5** — `Mode.PICK_FOLDER` (V3:
+  folders enter on tap, files are drawn but inert, the action is *Save here*) and `Mode.PICK_FILE`
+  (V5 builds it: files tappable, no action button). Full-screen e-ink dialog in the Contents dialog's
+  shape: top bar = Up arrow · breadcrumb `<provider> › Exports › …` · Cancel · **Save here** (action
+  after Cancel, top bar); 1 dp rule; rows paged like the Contents dialog (bottom bar pager-only, no
+  scroll); first row of every folder is **New folder…** (`NameDialog`, `CloudArgs.requireName` says
+  why a name will not go; a name already listed as a folder just enters it; otherwise
+  `ensureFolder(path + name)` then enter). **Browsing creates nothing** — the browser only ever
+  `list`s; `Exports/` itself is made by the upload on the way. Each navigation is one `list` under
+  a *Loading…* body; `NOT_CONNECTED` closes the browser into the Connect offer; `NETWORK` and a
+  no-answer are problem dialogs over the browser, which stays where it was. Up at `Exports/` does
+  nothing (Cancel is the way out). Folder rows take Tabler `folder`, files `file-text` (present);
+  a `folder-plus` for the New row (download if absent — outline, 24, stroke 2).
+- **The cloud flow** (`runExport` grows a `Destination` sealed type: `Saf(uri)` / `Cloud(path, name,
+  mime)`; the prepare → key/render/assemble → two-fd `export()` sequence stays ONE sequence in
+  `ExportActivity` — the file's over-800 reason is extended, not split): the destination fd is
+  `cacheDir/export/out.<ext>` opened `rwt` **after** prepare (prepare wipes the directory); the
+  exporter never learns it. Verification per `ExportVerification` with the cache file's own length
+  as the one destination account. Then stage *Uploading to <provider>…* and
+  `CloudClient.upload(path, name, mime, pfd(out), out.length())` under `uploadBudgetMs`. The returned
+  `sizeBytes` corroborates: agree → *Exported* (body names the provider) and `lastExporter` written;
+  disagree → the arc-15 *check the file* dialog, **never** a delete, `lastExporter` NOT written
+  (the SAF UNCONFIRMED rule). Pure verdict in `ExportVerification.cloudVerdict(reported, uploaded)`.
+- **Failure rows (cloud)**: before the upload, every existing failure message stands and nothing is
+  in the cloud — the note is *Nothing was uploaded.* · `CloudNotConnectedException` → *no account is
+  connected; connect and export again* (offer Connect from the dialog) · `CloudNetworkException` →
+  *<provider> could not be reached; nothing was uploaded; try again* · plain
+  `ExtensionCallException` (no answer, timeout) → *the provider did not answer; the file may or may
+  not have arrived — check <provider> before exporting again* (no delete: the upload is
+  replace-by-name, so a retry is safe). No remote delete anywhere in this phase.
+- **Cache hygiene**: `ExportArtifact.clean` in the existing `finally` takes `out.<ext>` with the
+  artifact; `CloudClient` closes the upload fd. Nothing else new touches disk.
+- **Tests**: `ExportDestination` rules · `CloudBrowserRules` (crumb text, paging, the
+  same-named-file and same-named-folder lookups, the New-folder outcome) · `cloudVerdict`. No code
+  review (decision 12).
 - Walk: Sonnet drives everything up to the upload (browser dialog, folder create) and verifies via
   shell that the cache is wiped; the actual sign-in stays a checklist item, the upload result is
   checked by the user in Drive.
@@ -282,3 +338,54 @@ URI is the credential).
 
 **Traps met.** The Write tool landed a raw BEL in a test string literal again — caught by the
 byte-scan. `am start` of the bootstrap needed the second call (standing).
+
+### V3 — Export to cloud (2026-09-04) ✅
+
+**Outcome.** A notebook exports straight into `Notesprout SN Dev/Exports/<folder>/` from the Export
+screen. Host only — no seam change, `:ext-drive` untouched. `export/ExportDestination` (pure: row
+visible · forced-back · the cloud-radio tap → SELECT / NOT_CONFIGURED / OFFER_CONNECT), the
+Destination row after the exporter's options (`ExtensionRegistry.cloud()` + `status()` re-asked at
+every discovery; GONE without a provider), the inline Connect offer through `CloudConnectEntry`
+(registered in `onCreate`, closed in `onDestroy`; a `RESULT_OK` selects the cloud radio after a
+fresh status), `cloud/CloudBrowserDialog` + `CloudBrowserRules` (Contents-dialog shape: Up ·
+breadcrumb · Cancel · **Save here**; paged rows, pager-only bottom bar, *New folder…* first row;
+browsing only `list`s, `ensureFolder` only from New folder; NOT_CONNECTED closes into the Connect
+offer, NETWORK / no-answer stay put; `Mode.PICK_FILE` + `Pick.File` declared for V5, files inert),
+the *Replace <name>?* confirmation when the chosen listing holds the name, `runExport` over a
+`Destination` sealed type (`Saf(uri)` / `Cloud(path, name, mime)`) with the cache file
+`cacheDir/export/out.<ext>` as the exporter's destination fd, local verification against that file's
+length, then `upload` under `uploadBudgetMs` and `ExportVerification.cloudVerdict` (agree → done
+naming the provider + `lastExporter`; disagree → check-the-file, no delete, no `lastExporter`). The
+cloud failure rows as designed; no remote delete anywhere. `ExportActivity` 944 → 1428 lines, its
+over-800 reason extended. New drawable `ic_arrow_up` (Tabler).
+
+**Tests.** 2281 → **2302 JVM tests/variant** (+8 `ExportDestination`, +11 `CloudBrowserRules`, +2
+`cloudVerdict`). No code review (decision 12).
+
+**Walk (Sonnet, Nomad `.dev`) — all nine steps passed.** Section order Format → Source/options →
+Destination; the connected radio selects at once (`status` 109 ms warm); the browser over `Exports/`
+listed V2's `probe`; New folder `Walk` (`ensureFolder` depth 2, 1 790 ms) entered it; Up/enter/Cancel
+left the screen unlatched and a second Export reopened the browser fresh; Save here ran *Rendering
+page 1 of 1…* → *Uploading to Google Drive…* → **"Exported — Your notebook was exported to Google
+Drive."** and closed to the library; `cache/export` gone afterwards; the second export to `Walk`
+raised **"Replace Events Ideas.pdf?"** and the replace agreed (`upload: 283443 B → 283443 B
+reported, agrees=true in 2 775 ms`); the local destination still opens the SAF picker. No `Log.w`,
+nothing grey or clipped.
+
+**Design calls not in the wizard (recorded, binding unless the user says otherwise).** Name matches
+are exact · a New folder past `MAX_PATH_DEPTH` is refused in the rules, before any bind · a
+same-named *file* does not block a New folder · the Up button is `INVISIBLE` at the base folder and
+its no-op is silent · `Pick.Folder` carries the listing it was drawn from (the replace question costs
+no second `list`) · `PICK_FILE` hides the action button and the New-folder row · New-folder failures
+share the browser's list-failure table · the upload's NOT_CONNECTED dialog offers Connect as its
+positive button and re-reads `status()` first · a provider gone between tap and upload is
+`export_cloud_gone_body` · the destination answer is NOT remembered across screens (a fresh Export
+screen defaults to the local file — the walk noted it; a remembered destination is a future call).
+
+**Traps met.** Opus wrote `"out.${'$'}{…}"` for the cache filename — a literal `${…}` in the name,
+harmless to the upload (the cloud name is `ExportNaming`'s) but wrong; caught on the orchestrator's
+read-through, fixed before the install. No control bytes this phase.
+
+**User checklist.** 1. In Drive, `Notesprout SN Dev/Exports/Walk/Events Ideas.pdf` opens and shows
+the page. 2. `Exports/probe` is still empty. (Delete `Walk` whenever you like — nothing reads it.)
+

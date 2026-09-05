@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One cloud browser row: [icon] [name], min height 68dp, 1 dp separator below — the Contents
+     row's measurements, so the two paginated lists read as one family. The icon says folder / file
+     / new folder; the name carries the meaning, so the icon has no content description of its own. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:id="@+id/cloudRowContent"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="68dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="8dp"
+        android:paddingEnd="12dp">
+
+        <androidx.appcompat.widget.AppCompatImageView
+            android:id="@+id/cloudRowIcon"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:layout_marginEnd="12dp"
+            android:src="@drawable/ic_folder" />
+
+        <TextView
+            android:id="@+id/cloudRowLabel"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textColor="@color/inkBlack"
+            android:textSize="18sp"
+            android:singleLine="true"
+            android:ellipsize="middle" />
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:background="@color/inkBlack" />
+</LinearLayout>

@@ -109,6 +109,16 @@
                 android:layout_height="wrap_content"
                 android:orientation="vertical" />
 
+            <!-- Destination (arc 25 / V3): the host's own second question, below the exporter's
+                 options and above the secret block, because it is about where the finished file
+                 goes rather than about what is in it. Built in code like the options above it —
+                 there are two rows or none, and none is GONE, never disabled. -->
+            <LinearLayout
+                android:id="@+id/destination"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+
             <!-- The secret fields (arc 15 / E2, second tenant arc 18 / D2). Static in the layout,
                  not built by the panel: the options above are rebuilt whole after every tap, and a
                  field rebuilt under a half-typed secret would lose it. `saveEnabled="false"` on

@@ -67,4 +67,23 @@ object ExportVerification {
         // verification must never default to trust.
         else -> Verdict.SHORT
     }
+
+    /**
+     * **The cloud leg's own verdict** (arc 25 / V3), asked after the upload and only then.
+     *
+     * By the time this runs the export has already been verified whole: the exporter wrote into a
+     * file in this app's cache, [verdict] judged it against that file's real length, and the bytes
+     * this leg then handed to the provider are exactly those. So the one question left is whether
+     * the provider's account of what it now holds agrees with what was sent — which is
+     * **corroboration, never authority**: a provider's metadata can lag its own write (the arc's
+     * standing trap), so a disagreement is an honest *check the file* and never a delete. That is
+     * why there is no [SHORT] here: a short *upload* is not a thing this can see — the provider
+     * refuses a stream that does not match `expectedBytes`, and that refusal arrives as an
+     * exception, not as a verdict.
+     *
+     * [reportedBytes] is [com.symmetricalpalmtree.notesproutsn.extension.CloudEntry.sizeBytes] as
+     * the provider gave it back; [uploadedBytes] is the length of the file the host streamed.
+     */
+    fun cloudVerdict(reportedBytes: Long, uploadedBytes: Long): Verdict =
+        if (reportedBytes == uploadedBytes) Verdict.OK else Verdict.UNCONFIRMED
 }

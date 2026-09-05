@@ -68,4 +68,23 @@ class ExportVerificationTest {
         assertEquals(Verdict.UNCONFIRMED, document(100L, 100L, listOf(37L, 38L)))
         assertEquals(Verdict.OK, document(100L, 100L, listOf(37L, 100L)))
     }
+
+    // ── The cloud leg (arc 25 / V3): corroboration only. The export has already been verified
+    // whole against the cache file, so the one question left is whether the provider's account of
+    // what it now holds agrees — and a disagreement is "check the file", never a delete.
+
+    @Test
+    fun `an agreeing provider is the whole of the cloud verdict`() {
+        assertEquals(Verdict.OK, ExportVerification.cloudVerdict(4096L, 4096L))
+        assertEquals(Verdict.OK, ExportVerification.cloudVerdict(0L, 0L))
+    }
+
+    @Test
+    fun `a disagreeing provider is UNCONFIRMED and never SHORT`() {
+        assertEquals(Verdict.UNCONFIRMED, ExportVerification.cloudVerdict(0L, 4096L))
+        assertEquals(Verdict.UNCONFIRMED, ExportVerification.cloudVerdict(4095L, 4096L))
+        // Larger disagrees too — a provider that says more than was sent is no more trustworthy
+        // than one that says less, and the honest answer to both is the same sentence.
+        assertEquals(Verdict.UNCONFIRMED, ExportVerification.cloudVerdict(4097L, 4096L))
+    }
 }

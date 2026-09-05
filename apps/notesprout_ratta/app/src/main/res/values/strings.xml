@@ -243,6 +243,20 @@
     <string name="export_assembling">Assembling the document…</string>
     <string name="export_no_document_body">Nothing has been written in this notebook yet, so there is no document to export. Nothing was exported and your notebook is untouched.</string>
 
+    <!-- Destination: this device, or the cloud (arc 25 / V3). The row is GONE when no cloud
+         provider is installed. Every cloud sentence names the provider rather than saying "the
+         cloud", and none of them ever carries a path, a folder name or the account. -->
+    <string name="export_destination_caption">Destination</string>
+    <string name="export_destination_local">File on this device</string>
+    <string name="export_uploading">Uploading to %1$s…</string>
+    <string name="export_cloud_done_body">Your notebook was exported to %1$s.</string>
+    <string name="export_nothing_uploaded_note">Nothing was uploaded.</string>
+    <string name="export_cloud_gone_body">The cloud extension is no longer available on this device.</string>
+    <string name="export_cloud_not_connected_body">No account is connected to %1$s, so nothing was uploaded. Connect an account and export again.</string>
+    <string name="export_cloud_network_body">%1$s could not be reached, so nothing was uploaded. Your notebook is untouched — try again.</string>
+    <string name="export_cloud_unanswered_body">%1$s didn\'t answer. The file may or may not have arrived — check %1$s before exporting again.</string>
+    <string name="export_cloud_verify_body">The whole file was uploaded, but %1$s reports a different size. Open it, or export it again, before relying on it.</string>
+
     <!-- Import (arc 16 / I1). Export's tone, in the other direction: a toast only confirms an
          import that happened, and every failure is a sentence naming what went wrong — never a
          path, never a secret — and saying that the library was left as it was. -->
@@ -349,6 +363,35 @@
     <string name="cloud_disconnecting">Disconnecting…</string>
     <string name="cloud_disconnect_failed_title">Couldn\'t disconnect</string>
     <string name="cloud_disconnect_failed_body">The cloud extension did not answer, so the account is still connected. Nothing has been changed. Try again.</string>
+
+    <!-- The inline Connect offer (arc 25 / V3): shown wherever the cloud is chosen without an
+         account behind it. Two buttons — Connect opens the provider's own sign-in. -->
+    <string name="cloud_connect_offer_title">Connect to %1$s?</string>
+    <string name="cloud_connect_offer_body">Sign in to %1$s so Notesprout SN can put files there. Nothing is uploaded until you choose where to save.</string>
+
+    <!-- Replace-by-name: an upload updates a file of the same name in place, so the browser asks
+         first. This is the cloud's stand-in for the file picker's overwrite confirmation. -->
+    <string name="cloud_replace_title">Replace %1$s?</string>
+    <string name="cloud_replace_body">A file of that name is already in this folder. Exporting will replace what it holds.</string>
+    <string name="cloud_replace_confirm">Replace</string>
+
+    <!-- The host-drawn cloud browser (arc 25 / V3). Browsing creates nothing: only New folder
+         does, and only when you ask it to. -->
+    <string name="cloud_browser_save_here">Save here</string>
+    <string name="cloud_browser_crumb_separator"> › </string>
+    <string name="cloud_browser_loading">Loading…</string>
+    <string name="cloud_browser_creating">Creating the folder…</string>
+    <string name="cloud_browser_empty">This folder is empty.</string>
+    <string name="cloud_browser_new_folder">New folder…</string>
+    <string name="cloud_browser_new_folder_title">New folder</string>
+    <string name="cloud_browser_new_folder_confirm">Create</string>
+    <string name="cloud_browser_new_folder_hint">Folder name</string>
+    <string name="cloud_browser_name_title">That name can\'t be used</string>
+    <string name="cloud_browser_name_body">A folder name can\'t be empty, can\'t contain a slash, and can\'t be longer than 255 characters. Folders can be eight deep at most. Nothing was created.</string>
+    <string name="cloud_browser_network_title">Couldn\'t reach %1$s</string>
+    <string name="cloud_browser_network_body">%1$s could not be reached just now. Nothing has been changed — try again.</string>
+    <string name="cloud_browser_failed_title">No answer</string>
+    <string name="cloud_browser_failed_body">The cloud extension didn\'t answer, so this folder couldn\'t be read. Nothing has been changed.</string>
     <string name="backup_excluded_toast">Excluded from backup</string>
     <string name="backup_included_toast">Included in backup</string>
 
