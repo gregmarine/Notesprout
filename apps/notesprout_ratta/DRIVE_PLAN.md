@@ -5,7 +5,7 @@ arc — read it whole at every phase start, together with the root `CLAUDE.md` a
 `apps/notesprout_ratta/CLAUDE.md`. **Do not load `RATTA_PLAN.md` for this arc** unless a standing
 trap needs checking; its protocol and traps are summarized below so this file is enough.
 
-**Status:** planned 2026-09-04 · V1 ✅ (2026-09-04) · V2 ⬜ · V3 ⬜ · V4 ⬜ · V5 ⬜ · V6 ⬜
+**Status:** planned 2026-09-04 · V1 ✅ (2026-09-04) · V2 ✅ (2026-09-04) · V3 ⬜ · V4 ⬜ · V5 ⬜ · V6 ⬜
 
 ---
 
@@ -120,7 +120,7 @@ ink). Then docs / memory / `CLAUDE.md`, **commit + push**, user runs `/clear`. *
 - Walk: both APKs installed, debug menu shows the provider discovered and `not connected`.
 - **Questions at phase start:** none pending (wizard complete).
 
-### V2 ⬜ — Connect
+### V2 ✅ — Connect (2026-09-04)
 - `:ext-drive`: `DriveAuth` (PKCE verifier/challenge, auth URL, code exchange, silent refresh —
   pure parts JVM-tested), `ConnectActivity` (WebView, Chrome UA, redirect intercept, result codes;
   no extras on the Intent), token + label persisted through the store, `DriveApi` REST core
@@ -232,3 +232,53 @@ control char inside a `' '` — the byte-scan caught both (the standing trap, no
 literal*: spell control characters as `'\uXXXX'` and scan). `am start` of the bootstrap on a device
 whose foreground was Ratta Settings needed a second `am start` — the first only raised the task.
 
+### V2 — Connect (2026-09-04) ✅
+
+**Outcome.** An account connects, disconnects and reconnects on the Nomad, and every file op on the
+seam is real. **The seam grew two tail methods** — `beginConnect(store)` / `endConnect()` — because
+the sign-in screen must write the token it wins into a store only the host can lend: Connect is the
+tier-2 recipe (the tag manager's held bracket, `CloudConnectClient.open/finish` host-side,
+`ConnectSession` extension-side); file ops stay bind-per-call. No API bump (the point was born this
+arc, nothing shipped). `:ext-drive` takes **kotlinx.serialization** (already on the graph via `:app`,
+no new library) — V1's "hand-rolled JSON" note is superseded. `DriveAuth` (pure PKCE/OAuth core, the
+RFC 7636 vector in its tests) · `DriveHttp` (`HttpTransport` seam, the one production impl over
+`HttpURLConnection`; every transport failure is the verbatim `NETWORK`) · `DriveTokens` (access token
+**in memory only**, refresh from the store; `invalid_grant` forgets the account → `NOT_CONNECTED`) ·
+`DriveApi` (REST v3: about, find/create/ensure, paged+sorted+truncated list, multipart ≤ 5 MiB /
+resumable above, replace-by-name, download with fsync, delete; root id cached, re-resolved once on
+404) · `DriveOps` (the testable body the service delegates to) · `ConnectActivity` (WebView, Chrome UA
+before `loadUrl`, redirect intercepted, `RESULT_OK` only after both store writes; consent declined =
+plain cancel; every other failure a dialog that leaves on dismiss). Host: `CloudClient` whole
+(`CloudArgs` refuses before any bind), `CloudConnectEntry`, `CloudWording`, the Backup screen's
+**Cloud section** (GONE without a provider; status line · "Back up to <provider>" tick persisted as
+`BackupConfig.cloudEnabled` — **the plan's `CloudPrefs` row is superseded by growing this row**; V4
+adds the device folder + second stamp map there · Connect/Disconnect), debug menu **"Cloud probe"**
+(the measurement tool; `Exports/probe/`, deletes what it wrote).
+
+**Measured (Nomad, wifi) → `CloudTimeouts`.** status 772 ms cold / 51 warm → 4 s · ensureFolder
+(2 segments + root, all created) 3 981 ms → 30 s · list 530/805/1 056 ms at depth 0/1/2 → 20 s ·
+upload 1 MiB 2 901 ms → 60 s · upload 20 MiB 6 435 ms (≈ 4.3 MB/s) → **120 s per 20 MiB** (was
+180 s) · download 20 MiB 4 343 ms → 120 s flat · delete 729 ms → 15 s · disconnect ≈ 160 ms → 15 s.
+Size corroboration agreed on both uploads and the download.
+
+**Tests.** 2119 → **2281 JVM tests/variant** (+17 `DriveAuth`, +114 `:ext-drive` REST/ops/tokens,
++31 `:app`). No code review (decision 12).
+
+**Walk (Sonnet, Nomad `.dev`) + user checklist.** Cloud section rendered; Connect opened Google's
+sign-in (no `disallowed_useragent`); cancel closed the bracket (`beginConnect` → `endConnect` →
+unbind + revoke); shell launch of the screen refused (behavioural — `HostCallerCheck` in the
+stdlib-only contract module logs nothing); no URL/token/email in any log line. User: signed in, the
+email showed on the Backup line and in Cloud status, the probe ran clean, `Notesprout SN Dev/Exports/
+probe` seen empty in Drive, Disconnect (revoke http 200) then reconnect — all passed.
+
+**Design calls not in the wizard (recorded, all binding unless the user says otherwise).** Held bind
+for the connect showing · serialization in the extension · `cloudEnabled` on `BackupConfig` · host
+validators throw `ExtensionCallException` (a bad name must be sayable) · `CloudClient` owns and closes
+the fds it is handed · upload size is corroborated by the caller, never refused by the client · a 401
+on a streaming leg never retries (an fd cannot be rewound) · uploading over a same-named folder is
+refused, never created beside · a listing row the seam cannot describe is skipped (Drive allows `/`)
+· revoke before forget, revoke failure swallowed · the resumable PUT carries no bearer (the session
+URI is the credential).
+
+**Traps met.** The Write tool landed a raw BEL in a test string literal again — caught by the
+byte-scan. `am start` of the bootstrap needed the second call (standing).

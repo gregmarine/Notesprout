@@ -99,6 +99,60 @@
                 android:layout_marginTop="12dp"
                 android:text="@string/backup_choose" />
 
+            <!-- Cloud (arc 25 / V2, DRIVE_PLAN decision 8): where a cloud provider is offered, and
+                 the only place in the app where an account is connected or forgotten.
+
+                 The whole block is GONE unless a trusted provider is installed — re-asked on every
+                 onResume, because a package can be disabled or replaced under a standing screen.
+                 Never disabled: on e-ink a disabled control is invisible and reads as broken.
+
+                 One button, whose text flips between Connect and Disconnect by status. It is a body
+                 control rather than a top-bar action for the same reason "Choose…" is: it changes
+                 the thing written directly above it, and the top bar belongs to "Back up now". -->
+            <LinearLayout
+                android:id="@+id/cloudSection"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginTop="28dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/cloud_caption"
+                    android:textColor="@color/inkBlack"
+                    android:textSize="13sp" />
+
+                <!-- The account line. Secondary text stays inkBlack and gets smaller — inkLight is
+                     for text meant NOT to be read, and which account the backups go to is the one
+                     thing here that must be. -->
+                <TextView
+                    android:id="@+id/cloudStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:textColor="@color/inkBlack"
+                    android:textSize="16sp" />
+
+                <androidx.appcompat.widget.AppCompatCheckBox
+                    android:id="@+id/cloudEnabled"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:minHeight="@dimen/toolbar_button_size"
+                    android:textColor="@color/inkBlack"
+                    android:textSize="16sp" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnCloudConnect"
+                    style="@style/Widget.Notesprout.OutlinedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/cloud_connect" />
+            </LinearLayout>
+
             <TextView
                 android:id="@+id/status"
                 android:layout_width="match_parent"

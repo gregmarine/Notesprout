@@ -136,7 +136,11 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   editor's surface reclaims in `onResume` and releases before every `finish()`) ·
   `:ext-drive` (**NSE · Google Drive**, arc 25 / V1 — `:extension-api` + `:sn-screen`, never `:app`;
   the ONLY module with `INTERNET`; one service + a screen: `DriveService` on the cloud point and
-  `ConnectActivity` behind `HostCallerCheck.enforceActivity`; API version **8**; store
+  `ConnectActivity` behind `HostCallerCheck.enforceActivity` (V2: the WebView PKCE sign-in — the
+  connect showing is the ONE held bind on this point, `beginConnect`/`endConnect`, the tag manager's
+  bracket; file ops stay bind-per-call; the access token lives in memory only, the refresh token in
+  the store; `DriveApi` over `HttpURLConnection` + kotlinx.serialization, the only extension module
+  with it); API version **8**; store
   `DriveSchema.V1` = `account(key, value)` (refresh token, account label, cached folder ids), every
   SQL string in `DriveSql`; `DRIVE_CLIENT_ID` / `DRIVE_CLIENT_SECRET` compiled from the shell env into
   this APK only, `ROOT_FOLDER_NAME` "Notesprout SN" / "Notesprout SN Dev" by build type. **Read

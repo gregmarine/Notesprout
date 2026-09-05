@@ -15,6 +15,12 @@ import kotlinx.serialization.json.Json
  *
  * [decode] never throws: a corrupt blob reads as a fresh config, whose worst case is re-copying
  * everything — the safe direction for a backup.
+ *
+ * **Growing this row is additive** (arc 25 / V2): a new field with a default is readable by an older
+ * build (`ignoreUnknownKeys`) and an older blob is readable by a newer one (the default fills in), so
+ * [VERSION] does **not** move for one. V4 adds the cloud device-folder name and a **second** stamp
+ * map here — the cloud destination's own, never the SAF one, because a stamp is a statement about
+ * one destination.
  */
 @Serializable
 data class BackupConfig(
@@ -29,6 +35,11 @@ data class BackupConfig(
     val lastSkipped: Int? = null,
     /** notebookId → the `updatedAt` its last successful copy carried. */
     val stamps: Map<String, Long> = emptyMap(),
+    /** Whether "Back up now" also copies to the connected cloud provider (arc 25 / V2 — the Backup
+     *  screen's Cloud checkbox). The engine does not read it until V4; until then it is the
+     *  person's stated intention and nothing more. False for every config written before it
+     *  existed, which is the honest reading: nobody asked for a cloud backup. */
+    val cloudEnabled: Boolean = false,
 ) {
     companion object {
         /** Config grammar version. Written into the row's `flags` too. */

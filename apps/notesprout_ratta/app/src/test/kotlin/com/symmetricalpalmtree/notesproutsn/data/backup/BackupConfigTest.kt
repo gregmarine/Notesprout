@@ -1,7 +1,9 @@
 package com.symmetricalpalmtree.notesproutsn.data.backup
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -51,5 +53,31 @@ class BackupConfigTest {
         assertEquals("t", config.treeUri)
         assertEquals(5L, config.lastRunAt)
         assertEquals(mapOf("a" to 1L), config.stamps)
+    }
+
+    @Test
+    fun `a blob written before cloudEnabled existed decodes with it false`() {
+        // The additive-growth promise (arc 25 / V2): an old row has no such field, and the default
+        // fills in as "nobody asked for a cloud backup" — the honest reading, and the safe one.
+        val old = """{"version":1,"treeUri":"content://tree/x","lastRunAt":5,"stamps":{"nb":9}}"""
+        val config = BackupConfig.decode(old.toByteArray())
+        assertEquals("content://tree/x", config.treeUri)
+        assertEquals(mapOf("nb" to 9L), config.stamps)
+        assertFalse(config.cloudEnabled)
+    }
+
+    @Test
+    fun `cloudEnabled round-trips true`() {
+        val config = BackupConfig(cloudEnabled = true)
+        val decoded = BackupConfig.decode(BackupConfig.encode(config))
+        assertTrue(decoded.cloudEnabled)
+        assertEquals(config, decoded)
+    }
+
+    @Test
+    fun `an unknown future field does not break the decode`() {
+        val future = """{"version":1,"cloudEnabled":true,"cloudFolder":"Nomad"}"""
+        val config = BackupConfig.decode(future.toByteArray())
+        assertTrue(config.cloudEnabled)
     }
 }

@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.DocumentsContract
 import android.util.Log
+import android.view.View
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -14,11 +15,19 @@ import androidx.lifecycle.lifecycleScope
 import com.symmetricalpalmtree.notesproutsn.R
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
 import com.symmetricalpalmtree.notesproutsn.core.IndexGuard
+import com.symmetricalpalmtree.notesproutsn.core.RecognizingOverlay
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.core.TopGuard
 import com.symmetricalpalmtree.notesproutsn.data.backup.BackupEngine
 import com.symmetricalpalmtree.notesproutsn.data.backup.BackupStore
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityBackupBinding
+import com.symmetricalpalmtree.notesproutsn.extension.CloudClient
+import com.symmetricalpalmtree.notesproutsn.extension.CloudConnectEntry
+import com.symmetricalpalmtree.notesproutsn.extension.CloudNetworkException
+import com.symmetricalpalmtree.notesproutsn.extension.CloudStatus
+import com.symmetricalpalmtree.notesproutsn.extension.CloudWording
+import com.symmetricalpalmtree.notesproutsn.extension.CloudWords
+import com.symmetricalpalmtree.notesproutsn.extension.ExtensionCallException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -47,6 +56,14 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * The status line is read back from the config rather than the [BackupEngine.Result], so it says
  * the same thing after a relaunch as it does the moment a run ends.
+ *
+ * **The Cloud section** (arc 25 / V2, `DRIVE_PLAN.md` decision 8) is the one part of the screen that
+ * is not always there: it is **GONE** unless a trusted cloud provider is installed, re-asked on
+ * every `onResume` because a package can be disabled or replaced under a standing screen. It is
+ * never *disabled* — on e-ink that is invisible. It holds the account line, the "back up to it" tick
+ * (V4 is what will read it; V2 only records the intention), and one button that flips between
+ * Connect and Disconnect. `status()` never touches the network, so reading it on every resume costs
+ * a bind and nothing else.
  */
 class BackupActivity : AppCompatActivity() {
 
@@ -60,6 +77,21 @@ class BackupActivity : AppCompatActivity() {
     /** The run's progress dialog while one is up. Non-cancelable — a backup is not something to
      *  half-leave, and the engine's Binder-free IO has no cancel to offer anyway. */
     private var progress: AlertDialog? = null
+
+    /** The connect door: discovery, the busy latch, the held bracket around the provider's sign-in
+     *  screen. Constructed in [onCreate] because it registers an `ActivityResultLauncher`. */
+    private var cloud: CloudConnectEntry? = null
+
+    /** The last status the provider gave, or null when it did not answer (or is not installed).
+     *  What the button reads and what the line says are both decided from this one value. */
+    private var cloudStatus: CloudStatus? = null
+
+    /** The last provider display name seen, so an *unavailable* line still has something to name.
+     *  Falls back to the extension's own label, which is the only other name the host knows. */
+    private var cloudName: String? = null
+
+    /** True from a Connect/Disconnect tap until it resolves — the e-ink feedback gap again. */
+    private var cloudBusy = false
 
     /**
      * The SAF folder pick. A tree URI is worthless without a persisted grant — the next launch
@@ -87,8 +119,19 @@ class BackupActivity : AppCompatActivity() {
         TooltipCompat.setTooltipText(binding.btnBack, binding.btnBack.contentDescription)
         binding.btnChoose.setOnClickListener { onChooseTap() }
         binding.btnRun.setOnClickListener { onRunTap() }
+        // Registered here and nowhere else: a launcher may not be registered after STARTED.
+        cloud = CloudConnectEntry(this) { lifecycleScope.launch { renderCloud() } }
+        binding.btnCloudConnect.setOnClickListener { onCloudButtonTap() }
 
         lifecycleScope.launch { render() }
+    }
+
+    /** Re-ask whether a provider is installed, and re-read the account. Both can change while this
+     *  screen is stopped — a sign-in happened, or the extension was disabled. */
+    override fun onResume() {
+        super.onResume()
+        if (IndexGuard.bounced(this)) return
+        lifecycleScope.launch { renderCloud() }
     }
 
     override fun onDestroy() {
@@ -98,6 +141,9 @@ class BackupActivity : AppCompatActivity() {
         // The dialog is attached to this window; leaving it up past the teardown leaks it.
         progress?.let { runCatching { it.dismiss() } }
         progress = null
+        // The connect bracket must not outlive the screen that opened it, result or no result.
+        cloud?.close()
+        cloud = null
         super.onDestroy()
     }
 
@@ -334,6 +380,157 @@ class BackupActivity : AppCompatActivity() {
                     result.storesFailed,
                 )
             )
+        }
+    }
+
+    // ── The Cloud section (arc 25 / V2) ──────────────────────────────────────
+
+    /**
+     * The whole section, from one discovery and one `status()`.
+     *
+     * Discovery decides whether the section exists at all — **GONE**, never disabled. The status
+     * decides the line and the button. A provider that is installed but does not answer is its own
+     * case: the line says *unavailable* and the button stays **Connect**, because a screen that
+     * could not ask has no business claiming the account is gone.
+     *
+     * Every step re-checks that the screen is still here: a `status()` is a bind and a Binder call,
+     * and the person can leave in the middle of one.
+     */
+    private suspend fun renderCloud() {
+        val entry = cloud ?: return
+        val ref = entry.discover()
+        if (isFinishing || isDestroyed) return
+        if (ref == null) {
+            cloudStatus = null
+            binding.cloudSection.visibility = View.GONE
+            return
+        }
+        binding.cloudSection.visibility = View.VISIBLE
+        val status = try {
+            CloudClient.status(this, ref)
+        } catch (e: ExtensionCallException) {
+            Slog.d(TAG) { "cloud status unavailable: ${e.javaClass.simpleName}: ${e.message}" }
+            null
+        }
+        if (isFinishing || isDestroyed) return
+        cloudStatus = status
+        if (status != null) cloudName = status.providerName
+        // The provider's own name when it gave one; otherwise the extension's label — the only other
+        // name the host has, and better than an unnamed line.
+        val name = cloudName ?: ref.label.toString()
+        binding.cloudStatus.text = if (status == null) {
+            CloudWording.unavailableLine(name, cloudWords(), ::cloudLine)
+        } else {
+            CloudWording.statusLine(status, cloudWords(), ::cloudLine)
+        }
+        binding.btnCloudConnect.setText(
+            if (CloudWording.showsDisconnect(status)) R.string.cloud_disconnect else R.string.cloud_connect
+        )
+        binding.cloudEnabled.text = getString(R.string.cloud_backup_enabled, name)
+        val config = store.read()
+        if (isFinishing || isDestroyed) return
+        // Detached while the box is set, so restoring the stored state never reads as a user tap.
+        binding.cloudEnabled.setOnCheckedChangeListener(null)
+        binding.cloudEnabled.isChecked = config.cloudEnabled
+        binding.cloudEnabled.setOnCheckedChangeListener { _, checked -> onCloudEnabledChanged(checked) }
+    }
+
+    private fun cloudWords() = CloudWords(
+        notConnected = getString(R.string.cloud_state_not_connected),
+        connected = getString(R.string.cloud_state_connected),
+        notConfigured = getString(R.string.cloud_state_not_configured),
+        unavailable = getString(R.string.cloud_state_unavailable),
+    )
+
+    private fun cloudLine(provider: String, detail: String): String =
+        getString(R.string.cloud_status_line, provider, detail)
+
+    /** The tick is an intention, not an action: it is written to the config and nothing else runs.
+     *  V4 is what reads it, when there is a cloud destination for a run to write to. */
+    private fun onCloudEnabledChanged(checked: Boolean) {
+        lifecycleScope.launch {
+            val config = store.read()
+            if (config.cloudEnabled == checked) return@launch
+            store.write(config.copy(cloudEnabled = checked))
+            Slog.d(TAG) { "cloud backup enabled=$checked" }
+        }
+    }
+
+    /** One button, two meanings — decided by the status the line is already showing. */
+    private fun onCloudButtonTap() {
+        if (cloudBusy) { Slog.d(TAG) { "cloud tap ignored: busy" }; return }
+        val status = cloudStatus
+        if (CloudWording.showsDisconnect(status)) confirmDisconnect() else connect()
+    }
+
+    /**
+     * Connect. An **unconfigured** build is refused here rather than at the sign-in screen: the
+     * extension was built without its credentials, so nobody can sign in on this build at all, and
+     * opening a WebView that cannot work would be a worse way to say so.
+     *
+     * A provider that did not answer its `status()` is *not* refused — it may simply have been cold,
+     * and the open will explain itself if it fails too.
+     */
+    private fun connect() {
+        val entry = cloud ?: return
+        val status = cloudStatus
+        if (status != null && !status.configured) {
+            Dialogs.problem(this, R.string.cloud_not_configured_title, R.string.cloud_not_configured_body)
+            return
+        }
+        entry.open()
+    }
+
+    private fun confirmDisconnect() {
+        val name = cloudName ?: cloud?.ref?.label?.toString() ?: return
+        Dialogs.style(
+            AlertDialog.Builder(this)
+                .setTitle(getString(R.string.cloud_disconnect_title, name))
+                .setMessage(R.string.cloud_disconnect_body)
+                .setPositiveButton(R.string.cloud_disconnect) { _, _ -> disconnect() }
+                .setNegativeButton(R.string.cancel, null)
+                .create()
+        ).show()
+    }
+
+    /**
+     * Forget the account.
+     *
+     * **A network failure here is not a failure to report.** The provider revokes its token with its
+     * service best-effort and forgets it locally either way, so the account is disconnected on this
+     * device whatever the network did — saying "it didn't work" would leave the person tapping at
+     * something that is already done. Anything else (the provider did not answer at all) is a
+     * problem dialog, because then nothing is known.
+     */
+    private fun disconnect() {
+        val entry = cloud ?: return
+        val ref = entry.ref ?: return
+        cloudBusy = true
+        RecognizingOverlay.show(this, R.string.cloud_disconnecting)
+        lifecycleScope.launch {
+            var failed = false
+            try {
+                CloudClient.disconnect(this@BackupActivity, ref)
+            } catch (e: CloudNetworkException) {
+                // The revoke could not reach the service; the token is forgotten locally regardless.
+                Slog.d(TAG) { "disconnect: revoke could not reach the provider — forgotten locally" }
+            } catch (e: ExtensionCallException) {
+                Slog.d(TAG) { "disconnect failed: ${e.javaClass.simpleName}: ${e.message}" }
+                failed = true
+            } finally {
+                RecognizingOverlay.hide(this@BackupActivity)
+                cloudBusy = false
+            }
+            if (isFinishing || isDestroyed) return@launch
+            renderCloud()
+            if (isFinishing || isDestroyed) return@launch
+            if (failed) {
+                Dialogs.problem(
+                    this@BackupActivity,
+                    R.string.cloud_disconnect_failed_title,
+                    R.string.cloud_disconnect_failed_body,
+                )
+            }
         }
     }
 

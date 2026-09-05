@@ -61,6 +61,11 @@ import java.io.File
  *    discovered and binds: `ExtensionRegistry.cloud()` then one `CloudClient.status()`, reported in
  *    a dialog (provider, api version, provider name, configured, connected, account). Package
  *    visibility, the signature check and the API-8 floor cannot be exercised on the JVM.
+ *  - **Cloud probe** ([CloudProbe], arc 25 / V2) — the measurement tool that fills in
+ *    `CloudTimeouts`: every method of the cloud seam once, in order, timed, with a 1 MiB and a
+ *    20 MiB upload and a 20 MiB download against the person's real account. Durations land in a
+ *    dialog **and** in logcat as `probe: <op> <n> ms`. It writes to `Exports/probe/` and deletes
+ *    what it wrote.
  *  - **WEBP encoder measurement** ([WebpProbe]) — lossless vs lossy-q100 on this device's own page
  *    size, for the open question in `BuiltInTemplates.toWebp`. Skia's encoders are the subject, so
  *    no host tool can answer it; run it on every device tier before changing the format.
@@ -90,6 +95,7 @@ object DebugMenu {
             "Forget cached key (relaunch → Unlock)",
             "Extension store self-test",
             "Cloud status",
+            "Cloud probe",
             "WEBP encoder measurement",
         )
         val actions = listOf<() -> Unit>(
@@ -97,6 +103,7 @@ object DebugMenu {
             { confirmForget(activity) },
             { storeSelfTest(activity) },
             { cloudStatus(activity) },
+            { cloudProbe(activity) },
             { webpProbe(activity) },
         )
         Dialogs.style(
@@ -195,6 +202,56 @@ object DebugMenu {
                     .setTitle("Cloud status")
                     .setMessage(text)
                     .setPositiveButton("Close", null)
+                    .create()
+            ).show()
+        }
+    }
+
+    /**
+     * The V2 measurement run ([CloudProbe]). A progress dialog names each step as it lands, because
+     * the whole thing is a minute or more of network on a Supernote and a screen that says nothing
+     * for that long reads as a hang; every row is also in logcat by the time it appears there.
+     *
+     * The report gets a Copy button for the same reason [webpProbe]'s does — these numbers go
+     * straight into `CloudTimeouts` and into the phase note.
+     */
+    private fun cloudProbe(activity: AppCompatActivity) {
+        activity.lifecycleScope.launch {
+            val ref = ExtensionRegistry.cloud(activity)
+            if (ref == null) {
+                Dialogs.style(
+                    AlertDialog.Builder(activity)
+                        .setTitle("Cloud probe")
+                        .setMessage("No cloud provider installed (or none trusted).")
+                        .setPositiveButton("Close", null)
+                        .create()
+                ).show()
+                return@launch
+            }
+            val progress = Dialogs.style(
+                AlertDialog.Builder(activity)
+                    .setTitle("Cloud probe")
+                    .setMessage("Starting…")
+                    .setCancelable(false)
+                    .create()
+            ).also { it.show() }
+            val text = try {
+                CloudProbe.run(activity, ref) { step ->
+                    activity.runOnUiThread { progress.setMessage("${step.op}: ${step.ms} ms") }
+                }
+            } finally {
+                runCatching { progress.dismiss() }
+            }
+            Dialogs.style(
+                AlertDialog.Builder(activity)
+                    .setTitle("Cloud probe")
+                    .setMessage(text)
+                    .setPositiveButton("Copy") { _, _ ->
+                        val cm = activity.getSystemService(AppCompatActivity.CLIPBOARD_SERVICE) as ClipboardManager
+                        cm.setPrimaryClip(ClipData.newPlainText("cloud probe", text))
+                        Toast.makeText(activity, "Copied", Toast.LENGTH_SHORT).show()
+                    }
+                    .setNegativeButton("Close", null)
                     .create()
             ).show()
         }

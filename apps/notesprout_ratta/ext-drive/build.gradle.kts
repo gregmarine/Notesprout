@@ -1,6 +1,10 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    // V2: the token endpoint and Drive's REST v3 speak JSON; kotlinx.serialization is the repo's one
+    // JSON rule (zero reflection, code-generated) and is already on the graph through :app — no
+    // new library. The V1 note about "hand-rolled JSON" is superseded by this.
+    id("org.jetbrains.kotlin.plugin.serialization")
 }
 
 android {
@@ -73,10 +77,10 @@ dependencies {
     // design system its V2 connect screen will draw from (colors, dimens, styles, `Dialogs`,
     // `TopGuard`, `Slog`) — the same reason every other tier-2 extension takes it. Never `:app`: the
     // host stays without INTERNET permission and without OAuth of its own; this module is the only
-    // networked process in the app. No OkHttp, no Gson — V2's REST core is HttpsURLConnection and
-    // hand-rolled JSON, the way og Notesprout's Drive client already is, so no new Gradle dependency
-    // is needed for it.
+    // networked process in the app. No OkHttp, no Gson — V2's REST core is HttpsURLConnection plus
+    // kotlinx.serialization (the same artifact :app already uses, so nothing new on the graph).
     implementation(project(":extension-api"))
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation(project(":sn-screen"))
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")

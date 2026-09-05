@@ -164,9 +164,10 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   in place** — og's events with reminders, three recurring scopes and a handwriting + text note
   per event, as two in-process screens (`EventsActivity`, `EventEditorActivity`) and a
   `CalendarSchema.V2` step inside `:ext-calendar`; NOT an eighth point, no `API_VERSION` bump
-  (still 7), version still `0.1.0-ratta`. **Arc 25 "Drive" (V1 landed 2026-09-04, V2–V6 open) IS
+  (still 7), version still `0.1.0-ratta`. **Arc 25 "Drive" (V1 + V2 landed 2026-09-04, V3–V6 open) IS
   the EIGHTH point** — generic `ACTION_CLOUD_STORAGE` served by `:ext-drive` "NSE · Google Drive"
-  (THIRTEEN modules, `API_VERSION` 8, 2119 JVM tests/variant); its plan is the **standalone
+  (THIRTEEN modules, `API_VERSION` 8, 2281 JVM tests/variant; V2 = a real account connects from the
+  Backup screen's Cloud section, every file op real, `CloudTimeouts` measured on the Nomad); its plan is the **standalone
   `apps/notesprout_ratta/DRIVE_PLAN.md`** — read that (not `RATTA_PLAN.md`) for Drive work. **No
   NINTH extension point and no other arc without another user decision.** **Read
   `apps/notesprout_ratta/RATTA_PLAN.md` first for ANY other work there** — it

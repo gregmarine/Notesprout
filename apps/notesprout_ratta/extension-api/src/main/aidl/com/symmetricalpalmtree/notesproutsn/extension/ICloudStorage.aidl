@@ -13,10 +13,18 @@ import com.symmetricalpalmtree.notesproutsn.extension.IExtensionStore;
  *
  * STORE-TAKING, BIND-PER-CALL -- the tag manager's second call shape. The store rides every call:
  * minted per bind by the host, uid-bound, revoked with the unbind. There is no held bind and no
- * session: every operation is one Binder call under a host timeout sized by on-device measurement
- * (CloudTimeouts), because a Binder call cannot be cancelled. The provider persists its account
- * (token, label, cached folder ids) ONLY through the store it is handed -- an extension writes
- * nothing to disk itself, ever.
+ * session for an OPERATION: every file operation is one Binder call under a host timeout sized by
+ * on-device measurement (CloudTimeouts), because a Binder call cannot be cancelled. The provider
+ * persists its account (token, label, cached folder ids) ONLY through the store it is handed -- an
+ * extension writes nothing to disk itself, ever.
+ *
+ * THE ONE HELD BIND IS THE CONNECT SHOWING (arc 25 / V2): the sign-in is a screen the extension
+ * owns (ACTION_CLOUD_STORAGE_SCREEN), and the screen must write the token it wins into the store
+ * -- which only the host can lend. So Connect is the tier-2 recipe, the tag manager's bracket:
+ * the host pre-opens the store, holds one bind, calls beginConnect(store), launches the screen for
+ * a result, and on the result calls endConnect() then unbinds + revokes, in one finally on every
+ * path. Nothing rides the screen's Intent. The screen answers RESULT_OK only after the token is IN
+ * the store; RESULT_CANCELED otherwise -- so the host's next status() is the truth.
  *
  * A path is folder NAMES under the provider's own root (CloudContract.requireValidPath: at most
  * MAX_PATH_DEPTH segments, each a legal name); an empty path is the root itself. An entry id is the
@@ -36,6 +44,14 @@ interface ICloudStorage {
     /** Revoke the token with the provider (best effort, bounded) and forget it from the store.
      *  Idempotent; not-connected is not an error here. */
     void disconnect(IExtensionStore store);
+
+    /** Open the connect showing: park [store] for the screen the host is about to launch. A second
+     *  beginConnect while one is parked replaces it (the host restarted -- the older is stale). */
+    void beginConnect(IExtensionStore store);
+
+    /** The connect showing is over: forget the parked store. Idempotent. The host revokes the
+     *  binder right after, so anything the screen still holds is dead from here. */
+    void endConnect();
 
     /**
      * The folders and files directly under [path] (the root when empty), folders first then files,

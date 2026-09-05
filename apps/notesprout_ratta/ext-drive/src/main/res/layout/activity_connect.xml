@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Google Drive connect screen (arc 25 / V2) — a tier-2 screen the extension owns, and the only
+  screen in Notesprout SN that is mostly somebody else's HTML. There is no paper on it: no
+  `PaperView`, no g-paper call, no EPD handoff (the tag screen's precedent, measured at arc 21 / M3).
+
+  Chrome sits flush at the top edge (the top guard is 0 on Ratta), the divider is 1dp inkBlack
+  (borderGray is invisible on e-ink), and Cancel is the only control — there is nothing to confirm
+  here, because the confirming happens on Google's page. Bottom bars are pager-only, so there is no
+  bottom bar at all.
+
+  The WebView and the "Signing in…" line share one frame: while the code is being exchanged the
+  glass shows a sentence instead of a page nobody should tap.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/paperWhite"
+    android:orientation="vertical">
+
+    <!-- A FrameLayout, not a weighted row: the title is centred on the SCREEN, so it stays put
+         whatever flanks it (the bar-centring trap). -->
+    <FrameLayout
+        android:id="@+id/topBarRow"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/toolbar_bar_thickness"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp">
+
+        <TextView
+            android:id="@+id/title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:layout_marginStart="52dp"
+            android:layout_marginEnd="16dp"
+            android:ellipsize="end"
+            android:singleLine="true"
+            android:text="@string/drive_connect_title"
+            android:textColor="@color/inkBlack"
+            android:textSize="16sp" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCancel"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_gravity="start|center_vertical"
+            android:contentDescription="@string/cd_drive_connect_cancel"
+            android:src="@drawable/ic_x" />
+
+    </FrameLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <WebView
+            android:id="@+id/web"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <TextView
+            android:id="@+id/busy"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@color/paperWhite"
+            android:gravity="center"
+            android:padding="24dp"
+            android:text="@string/drive_connect_signing_in"
+            android:textColor="@color/inkBlack"
+            android:textSize="16sp"
+            android:visibility="gone" />
+
+    </FrameLayout>
+
+</LinearLayout>

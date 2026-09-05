@@ -329,6 +329,26 @@
     <string name="backup_folder_failed_body">Notesprout SN could not keep lasting access to that folder. Choose it again — the backup folder has not been changed.</string>
     <string name="backup_no_picker_title">No folder picker</string>
     <string name="backup_no_picker_body">This device has no app for choosing a folder, so a backup folder cannot be chosen here.</string>
+    <!-- Cloud (arc 25 / V2): the Backup screen's Cloud section, and the connect door. The provider
+         names itself ("Google Drive") — nothing here spells a provider's name. -->
+    <string name="cloud_caption">Cloud</string>
+    <string name="cloud_status_line">%1$s: %2$s</string>
+    <string name="cloud_state_not_connected">not connected</string>
+    <string name="cloud_state_connected">connected</string>
+    <string name="cloud_state_not_configured">not configured</string>
+    <string name="cloud_state_unavailable">unavailable</string>
+    <string name="cloud_connect">Connect</string>
+    <string name="cloud_disconnect">Disconnect</string>
+    <string name="cloud_backup_enabled">Back up to %1$s</string>
+    <string name="cloud_connect_failed_title">Couldn\'t open sign-in</string>
+    <string name="cloud_connect_failed_body">The cloud extension did not answer, so its sign-in screen could not be opened. Nothing has been changed. Try again — and if it keeps happening, check that the extension is still installed and enabled.</string>
+    <string name="cloud_not_configured_title">Not set up in this build</string>
+    <string name="cloud_not_configured_body">This build of the cloud extension was made without its sign-in credentials, so no account can be connected. Nothing has been changed.</string>
+    <string name="cloud_disconnect_title">Disconnect %1$s?</string>
+    <string name="cloud_disconnect_body">Backups and exports to it will stop until you connect again. Nothing already there is removed.</string>
+    <string name="cloud_disconnecting">Disconnecting…</string>
+    <string name="cloud_disconnect_failed_title">Couldn\'t disconnect</string>
+    <string name="cloud_disconnect_failed_body">The cloud extension did not answer, so the account is still connected. Nothing has been changed. Try again.</string>
     <string name="backup_excluded_toast">Excluded from backup</string>
     <string name="backup_included_toast">Included in backup</string>
 

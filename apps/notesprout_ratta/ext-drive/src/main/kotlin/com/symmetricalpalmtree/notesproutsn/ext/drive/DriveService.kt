@@ -11,82 +11,75 @@ import com.symmetricalpalmtree.notesproutsn.extension.CloudStatus
 import com.symmetricalpalmtree.notesproutsn.extension.HostCallerCheck
 import com.symmetricalpalmtree.notesproutsn.extension.ICloudStorage
 import com.symmetricalpalmtree.notesproutsn.extension.IExtensionStore
+import java.io.FileInputStream
+import java.io.FileOutputStream
 
 /**
- * The CLOUD_STORAGE point (arc 25 / V1) — scaffold only. Every method: `HostCallerCheck.enforce`
- * first, exactly the tag manager's and calendar's rule.
+ * The CLOUD_STORAGE point (arc 25 / V1 scaffold, V2 real) — every method: `HostCallerCheck.enforce`
+ * first, **inside** the `try` whose `finally` closes any fd, exactly the tag manager's and
+ * calendar's rule.
  *
  * **Store-taking, bind-per-call** (`DRIVE_PLAN.md` § "the seam"): the store rides every call, minted
- * per bind, uid-bound. There is no held bind and no session — a Binder call cannot be cancelled, so
- * the host times every operation itself (`CloudTimeouts`, host-side).
+ * per bind, uid-bound. There is no held bind and no session for an operation — a Binder call cannot
+ * be cancelled, so the host times every operation itself (`CloudTimeouts`, host-side). The one
+ * exception is the **connect showing**, whose bracket is `beginConnect` / `endConnect` and whose
+ * parked store [ConnectActivity] reads out of [ConnectSession].
  *
- * V1 has no network code at all — `DriveApi` and `DriveAuth` land in V2. `status` answers what the
- * store already knows (configured from `BuildConfig`, connected from a stored token) without ever
- * touching the network, exactly as [CloudStatus]'s contract requires. Every file operation
- * (`list` / `ensureFolder` / `upload` / `download` / `delete`) validates its arguments against
- * [CloudContract] — the same checks the host itself runs — closes any fd it was handed, and then
- * refuses with `IllegalStateException(CloudContract.NOT_CONNECTED)`: there is no account to reach
- * yet, whether or not one is technically connected, because there is no REST core to reach it with.
+ * The stub itself is thin on purpose: check the caller, validate against [CloudContract] (the same
+ * checks the host runs — both sides, always), open the streams, and hand off to [DriveOps], which
+ * is a plain class and therefore JVM-testable. `status` still never touches the network.
  *
- * The account label is user content: **never logged on either side**. Only `SecurityException`,
- * `IllegalArgumentException` and `IllegalStateException` may leave a stub method.
+ * **Only `SecurityException` / `IllegalArgumentException` / `IllegalStateException` may leave a
+ * stub.** Everything else — a serialization failure, an NPE, an `IOException` that escaped
+ * [DriveHttp] — is funnelled through [DriveFailures.marshalable]: a non-marshalable exception kills
+ * the transaction silently and the host waits out its whole timeout for nothing (the arc-2 trap).
+ *
+ * The account label is user content: **never logged on either side.**
  */
 class DriveService : Service() {
 
     private val binder = object : ICloudStorage.Stub() {
 
-        override fun status(store: IExtensionStore?): CloudStatus {
+        override fun status(store: IExtensionStore?): CloudStatus = answering {
             enforce()
             requireNotNull(store) { "store is null" }
-            val configured = BuildConfig.DRIVE_CLIENT_ID.isNotBlank() && BuildConfig.DRIVE_CLIENT_SECRET.isNotBlank()
-            val drive = DriveStore(store)
-            val token = try {
-                drive.value(DriveSql.Keys.REFRESH_TOKEN)
-            } catch (e: StoreUnavailable) {
-                throw IllegalStateException(STORE_UNAVAILABLE)
-            }
-            val label = try {
-                drive.value(DriveSql.Keys.ACCOUNT_LABEL)
-            } catch (e: StoreUnavailable) {
-                throw IllegalStateException(STORE_UNAVAILABLE)
-            }
-            val connected = configured && !token.isNullOrBlank()
-            // Never the label or the token — only shape.
-            Slog.d(TAG) { "status: configured=$configured connected=$connected" }
-            return CloudStatus(
-                connected = connected,
-                configured = configured,
-                accountLabel = if (connected) (label ?: "") else "",
-                providerName = PROVIDER_NAME,
-            )
+            opsFor(store).status()
         }
 
-        override fun disconnect(store: IExtensionStore?) {
+        override fun disconnect(store: IExtensionStore?) = answering {
             enforce()
             requireNotNull(store) { "store is null" }
-            // The revoke call with Google is V2's — this only forgets the token locally, which is
-            // still a correct (if incomplete) disconnect: the host never sees this account again
-            // until Connect runs.
-            try {
-                DriveStore(store).clear()
-            } catch (e: StoreUnavailable) {
-                throw IllegalStateException(STORE_UNAVAILABLE)
+            opsFor(store).disconnect()
+        }
+
+        override fun beginConnect(store: IExtensionStore?) = answering {
+            enforce()
+            requireNotNull(store) { "store is null" }
+            synchronized(ConnectSession) {
+                ConnectSession.clear()
+                ConnectSession.store = store
             }
-            Slog.d(TAG) { "disconnect" }
+            Slog.d(TAG) { "beginConnect" }
         }
 
-        override fun list(store: IExtensionStore?, path: Array<String>?): Array<CloudEntry> {
+        override fun endConnect() = answering {
             enforce()
-            requireNotNull(store) { "store is null" }
-            CloudContract.requireValidPath(path)
-            throw IllegalStateException(CloudContract.NOT_CONNECTED)
+            ConnectSession.clear()
+            Slog.d(TAG) { "endConnect" }
         }
 
-        override fun ensureFolder(store: IExtensionStore?, path: Array<String>?): CloudEntry {
+        override fun list(store: IExtensionStore?, path: Array<String>?): Array<CloudEntry> = answering {
             enforce()
             requireNotNull(store) { "store is null" }
-            CloudContract.requireValidPath(path)
-            throw IllegalStateException(CloudContract.NOT_CONNECTED)
+            val validPath = CloudContract.requireValidPath(path)
+            opsFor(store).list(validPath)
+        }
+
+        override fun ensureFolder(store: IExtensionStore?, path: Array<String>?): CloudEntry = answering {
+            enforce()
+            requireNotNull(store) { "store is null" }
+            val validPath = CloudContract.requireValidPath(path)
+            opsFor(store).ensureFolder(validPath)
         }
 
         override fun upload(
@@ -98,16 +91,20 @@ class DriveService : Service() {
             expectedBytes: Long,
         ): CloudEntry {
             try {
-                enforce()
-                requireNotNull(store) { "store is null" }
-                CloudContract.requireValidPath(path)
-                requireNotNull(name) { "name is null" }
-                require(CloudContract.isName(name)) { "name is not a name" }
-                requireNotNull(mime) { "mime is null" }
-                require(CloudContract.isMime(mime)) { "mime is not a mime type" }
-                requireNotNull(source) { "source is null" }
-                require(expectedBytes >= 0) { "expectedBytes is negative ($expectedBytes)" }
-                throw IllegalStateException(CloudContract.NOT_CONNECTED)
+                return answering {
+                    enforce()
+                    requireNotNull(store) { "store is null" }
+                    val validPath = CloudContract.requireValidPath(path)
+                    requireNotNull(name) { "name is null" }
+                    require(CloudContract.isName(name)) { "name is not a name" }
+                    requireNotNull(mime) { "mime is null" }
+                    require(CloudContract.isMime(mime)) { "mime is not a mime type" }
+                    requireNotNull(source) { "source is null" }
+                    require(expectedBytes >= 0) { "expectedBytes is negative ($expectedBytes)" }
+                    FileInputStream(source.fileDescriptor).use { input ->
+                        opsFor(store).upload(validPath, name, mime, input, expectedBytes)
+                    }
+                }
             } finally {
                 runCatching { source?.close() }
             }
@@ -115,29 +112,67 @@ class DriveService : Service() {
 
         override fun download(store: IExtensionStore?, entryId: String?, destination: ParcelFileDescriptor?): Long {
             try {
-                enforce()
-                requireNotNull(store) { "store is null" }
-                requireNotNull(entryId) { "entryId is null" }
-                require(CloudContract.isEntryId(entryId)) { "entryId is not an id" }
-                requireNotNull(destination) { "destination is null" }
-                throw IllegalStateException(CloudContract.NOT_CONNECTED)
+                return answering {
+                    enforce()
+                    requireNotNull(store) { "store is null" }
+                    requireNotNull(entryId) { "entryId is null" }
+                    require(CloudContract.isEntryId(entryId)) { "entryId is not an id" }
+                    requireNotNull(destination) { "destination is null" }
+                    FileOutputStream(destination.fileDescriptor).use { out ->
+                        // Truncate first (the seam says so) — best effort, because a destination
+                        // that is not a seekable file has nothing to truncate.
+                        runCatching { out.channel.truncate(0L) }
+                        val written = opsFor(store).download(entryId, out)
+                        out.flush()
+                        // Durability is the seam's promise, not the host's: the bytes are on the
+                        // platter before the count crosses back.
+                        out.fd.sync()
+                        written
+                    }
+                }
             } finally {
                 runCatching { destination?.close() }
             }
         }
 
-        override fun delete(store: IExtensionStore?, entryId: String?) {
+        override fun delete(store: IExtensionStore?, entryId: String?) = answering {
             enforce()
             requireNotNull(store) { "store is null" }
             requireNotNull(entryId) { "entryId is null" }
             require(CloudContract.isEntryId(entryId)) { "entryId is not an id" }
-            throw IllegalStateException(CloudContract.NOT_CONNECTED)
+            opsFor(store).delete(entryId)
         }
 
         private fun enforce() = HostCallerCheck.enforce(this@DriveService, BuildConfig.HOST_PACKAGE)
     }
 
     override fun onBind(intent: Intent?): IBinder = binder
+
+    /**
+     * Everything a call needs, built fresh per call — the store binder is only good for this call
+     * anyway, and the one thing worth keeping between calls (the access token) lives in the
+     * process-wide [DriveTokens] cache rather than here.
+     */
+    private fun opsFor(store: IExtensionStore): DriveOps {
+        val driveStore = DriveStore(store)
+        val tokens = TokenSource(
+            store = driveStore,
+            cache = DriveTokens.cache,
+            transport = DriveHttp,
+            clientId = BuildConfig.DRIVE_CLIENT_ID,
+            clientSecret = BuildConfig.DRIVE_CLIENT_SECRET,
+        )
+        val api = DriveApi(DriveHttp, tokens, driveStore, BuildConfig.ROOT_FOLDER_NAME)
+        return DriveOps(driveStore, api, tokens, PROVIDER_NAME, configured())
+    }
+
+    /** The last gate before a stub returns — see the class note. */
+    private fun <T> answering(block: () -> T): T =
+        try {
+            block()
+        } catch (e: Throwable) {
+            throw DriveFailures.marshalable(e)
+        }
 
     companion object {
         private const val TAG = "DriveService"
@@ -147,5 +182,10 @@ class DriveService : Service() {
 
         /** The store binder is gone, or could not be reached at all. */
         const val STORE_UNAVAILABLE = "store unavailable"
+
+        /** Whether this APK was built with its OAuth client at all (blank env vars → false, and the
+         *  host dialogs rather than offering a Connect that cannot work). */
+        fun configured(): Boolean =
+            BuildConfig.DRIVE_CLIENT_ID.isNotBlank() && BuildConfig.DRIVE_CLIENT_SECRET.isNotBlank()
     }
 }
