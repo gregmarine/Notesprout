@@ -526,6 +526,6 @@ shapes (Opus's scan of every changed file was clean).
 **User checklist.** 1. In Drive, `Notesprout SN Dev/Backups/waltest/` holds 42 `.soil` files, 7 `.db`
 files and `notesprout.db` — and **no `-wal` file anywhere**. 2. `Backups/Supernote-Nomad-4a4bd938/`
 also exists from the first run (delete it whenever you like — nothing reads it; the device folder is
-now `waltest`, rename it back on the Backup screen if you prefer the minted name). 3. Optional: on
-another device or og, nothing. (Restore is not this arc.)
+now `waltest`, rename it back on the Backup screen if you prefer the minted name). **Both passed (user,
+2026-09-04) — V4 signed off.**
 
