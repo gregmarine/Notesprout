@@ -18,9 +18,9 @@ import kotlinx.serialization.json.Json
  *
  * **Growing this row is additive** (arc 25 / V2): a new field with a default is readable by an older
  * build (`ignoreUnknownKeys`) and an older blob is readable by a newer one (the default fills in), so
- * [VERSION] does **not** move for one. V4 adds the cloud device-folder name and a **second** stamp
- * map here — the cloud destination's own, never the SAF one, because a stamp is a statement about
- * one destination.
+ * [VERSION] does **not** move for one. V4 added the cloud device-folder name, the cloud leg's own
+ * last-run counts, and a **second** stamp map here — the cloud destination's own, never the SAF
+ * one, because a stamp is a statement about one destination.
  */
 @Serializable
 data class BackupConfig(
@@ -36,10 +36,23 @@ data class BackupConfig(
     /** notebookId → the `updatedAt` its last successful copy carried. */
     val stamps: Map<String, Long> = emptyMap(),
     /** Whether "Back up now" also copies to the connected cloud provider (arc 25 / V2 — the Backup
-     *  screen's Cloud checkbox). The engine does not read it until V4; until then it is the
-     *  person's stated intention and nothing more. False for every config written before it
-     *  existed, which is the honest reading: nobody asked for a cloud backup. */
+     *  screen's Cloud checkbox). Since V4 the engine reads it: with a provider installed it is
+     *  what makes the cloud leg exist. False for every config written before it existed, which is
+     *  the honest reading: nobody asked for a cloud backup. */
     val cloudEnabled: Boolean = false,
+    /** The per-device folder under `Backups/` in the provider's tree (arc 25 / V4). Null until the
+     *  Backup screen or a run mints one ([DeviceFolder]); a hardware serial is never used. */
+    val cloudDeviceFolder: String? = null,
+    /** The cloud destination's **own** stamp map — notebookId → the `updatedAt` its last successful
+     *  upload carried. Never shared with [stamps]: a stamp is a statement about ONE destination,
+     *  and a folder that has never seen a file cannot claim it holds it. */
+    val cloudStamps: Map<String, Long> = emptyMap(),
+    /** Device-local epoch-ms of the last cloud leg in which at least one upload landed. */
+    val cloudLastRunAt: Long? = null,
+    /** That leg's copied count — the second status line survives a relaunch. */
+    val cloudLastCopied: Int? = null,
+    /** That leg's skipped count (up-to-date + excluded + held + missing). */
+    val cloudLastSkipped: Int? = null,
 ) {
     companion object {
         /** Config grammar version. Written into the row's `flags` too. */

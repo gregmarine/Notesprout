@@ -18,13 +18,25 @@ import com.symmetricalpalmtree.notesproutsn.data.soil.SoilCompactor
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilDatabase
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilOpenFiles
 import com.symmetricalpalmtree.notesproutsn.data.soilFile
+import com.symmetricalpalmtree.notesproutsn.extension.ExtensionRegistry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * One manual backup run (arc 17 / K2) — og's engine reshaped for SN's single LOCAL destination.
- * **The order is the design** (og D9, index last):
+ * One manual backup run (arc 17 / K2, **two legs since arc 25 / V4**) — og's engine reshaped for
+ * SN's destinations: the **local** one (the persisted SAF tree) and, since V4, the **cloud** one
+ * (`Backups/<device folder>/` in the connected provider's own root, [CloudBackupLeg]).
+ *
+ * **Which legs exist is decided from the config at run start** ([CloudBackupRules.legs]): the local
+ * leg when a folder is chosen, the cloud leg when the tick is on *and* discovery still finds a
+ * provider — re-asked here, because a run never trusts a stale discovery. Local first, then cloud;
+ * neither, and the run does nothing and says [Problem.NO_DESTINATION]. The two legs share nothing
+ * in the config: **a stamp is a statement about one destination**, so the cloud has its own map.
+ * They do share the work of compaction — whichever leg reaches a notebook first pays for the
+ * `VACUUM` and the other takes the file as it now is.
+ *
+ * **The local leg's order is the design** (og D9, index last):
  *
  *  1. Resolve the destination — the persisted SAF tree, plus `dev/` in a debug build (debug and
  *     release coexist on the Nomad and must not share a root). Fail-fast with a problem the
@@ -65,19 +77,31 @@ object BackupEngine {
     /** The cache subdirectory holding the index snapshot, wiped per run. */
     private const val DIR = "backup"
 
-    /** Why a run could not start at all. Each maps to one sentence on screen. */
+    /** Why a run, or one leg of it, could not do what it was asked. Each maps to one sentence. */
     enum class Problem {
-        /** No backup folder has been chosen yet. */
-        NO_FOLDER,
+        /** Neither leg exists: no folder is chosen and no cloud destination is set up. */
+        NO_DESTINATION,
 
         /** The chosen folder no longer resolves — deleted, ejected, or the grant was revoked. */
         FOLDER_GONE,
 
         /** No key session (the process was killed and nothing has unlocked since). */
         NO_KEY,
+
+        /** Cloud leg: no account is connected — connect and back up again. */
+        CLOUD_NOT_CONNECTED,
+
+        /** Cloud leg: the provider could not reach its service; nothing more was uploaded. */
+        CLOUD_NETWORK,
+
+        /** Cloud leg: the provider did not answer — nothing is known about what landed. */
+        CLOUD_UNANSWERED,
+
+        /** Cloud leg: the provider is no longer on this device. */
+        CLOUD_GONE,
     }
 
-    /** What a finished run did — the honest per-count summary the dialog renders. */
+    /** What one finished leg did — the honest per-count summary the dialog renders for it. */
     data class Result(
         val problem: Problem? = null,
         /** Notebooks copied and stamped. */
@@ -102,12 +126,29 @@ object BackupEngine {
         val succeeded: Boolean get() = copied > 0 || storesCopied > 0 || indexCopied
     }
 
-    data class Progress(val done: Int, val total: Int)
+    /**
+     * What a whole run did (arc 25 / V4) — **one result per leg, and a leg that did not run is
+     * null, never a zero result**: "0 copied to the cloud" and "there is no cloud destination" are
+     * different sentences, and the report must not say the first when it means the second.
+     *
+     * [problem] is the run-level one — the two answers that are about neither destination in
+     * particular ([Problem.NO_DESTINATION], [Problem.NO_KEY]). Everything else belongs to a leg.
+     */
+    data class Outcome(
+        val local: Result? = null,
+        val cloud: Result? = null,
+        val problem: Problem? = null,
+    )
+
+    /** Which destination the progress dialog is describing. */
+    enum class Leg { LOCAL, CLOUD }
+
+    data class Progress(val done: Int, val total: Int, val leg: Leg = Leg.LOCAL)
 
     suspend fun run(
         context: Context,
         onProgress: (Progress) -> Unit = {},
-    ): Result = withContext(Dispatchers.IO) {
+    ): Outcome = withContext(Dispatchers.IO) {
         try {
             runInner(context.applicationContext, onProgress)
         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -117,37 +158,82 @@ object BackupEngine {
             // the guarded steps — disk full inside a Room write, most likely — becomes a failed
             // count the dialog can report instead of an app crash under the progress dialog.
             Log.e(TAG, "backup run failed", e)
-            Result(failed = 1)
+            Outcome(local = Result(failed = 1))
         }
     }
 
     private suspend fun runInner(
         app: Context,
         onProgress: (Progress) -> Unit,
-    ): Result {
+    ): Outcome {
         val store = BackupStore()
         val repo = IndexRepository()
 
-        var config = store.read()
-        val treeUri = config.treeUri ?: return Result(problem = Problem.NO_FOLDER)
-        KeySession.get() ?: return Result(problem = Problem.NO_KEY)
+        val state = RunState(store.read(), store)
+        KeySession.get() ?: return Outcome(problem = Problem.NO_KEY)
 
+        // Discovery is re-asked at run start — a run never trusts a stale one. The tick alone is an
+        // intention; a provider that has been uninstalled since cannot be uploaded to.
+        val cloudRef = if (state.config.cloudEnabled) ExtensionRegistry.cloud(app) else null
+        val legs = CloudBackupRules.legs(
+            hasFolder = state.config.treeUri != null,
+            cloudEnabled = state.config.cloudEnabled,
+            hasProvider = cloudRef != null,
+        )
+        if (legs.none) return Outcome(problem = Problem.NO_DESTINATION)
+
+        val notebooks = repo.allNotebooks()
+        val candidates = notebooks.map { BackupPredicates.Candidate(it.id, it.updatedAt, it.flags) }
+        val aliveIds = notebooks.mapTo(HashSet()) { it.id }
+        val stores = extensionStoreFiles(app)
+
+        // Both work lists are built here, before either leg runs: the two stamp maps are separate
+        // statements about separate destinations, and the progress total owes the user both.
+        val localWork = if (legs.local) BackupPredicates.workList(candidates, state.config.stamps) else null
+        val cloudWork = if (legs.cloud) BackupPredicates.workList(candidates, state.config.cloudStamps) else null
+        val total = CloudBackupRules.total(
+            localWork?.let { CloudBackupRules.units(it.toCopy.size, stores.size) } ?: 0,
+            cloudWork?.let { CloudBackupRules.units(it.toCopy.size, stores.size) } ?: 0,
+        )
+        var done = 0
+        var leg = if (legs.local) Leg.LOCAL else Leg.CLOUD
+        val tick = { done++; onProgress(Progress(done, total, leg)) }
+        onProgress(Progress(0, total, leg))
+
+        // Compaction is a VACUUM — a minute on a large notebook. Whichever leg reaches a notebook
+        // first pays for it, and the other one takes the file as it now is.
+        val compacted = HashSet<String>()
+
+        val local = localWork?.let { runLocalLeg(app, state, it, stores, aliveIds, compacted, tick) }
+        val cloud = if (cloudWork != null && cloudRef != null) {
+            leg = Leg.CLOUD
+            CloudBackupLeg.run(app, cloudRef, state, cloudWork, stores, aliveIds, compacted, tick)
+        } else null
+
+        Slog.d(TAG) { "run: local=${local != null} cloud=${cloud != null} of $total units" }
+        return Outcome(local = local, cloud = cloud)
+    }
+
+    /**
+     * **The local leg** — og's D9 whole, unchanged from arc 17 but for where its config comes from
+     * and where its progress goes. Every rule in the class doc above is this function's.
+     */
+    private suspend fun runLocalLeg(
+        app: Context,
+        state: RunState,
+        work: BackupPredicates.WorkList,
+        stores: List<File>,
+        aliveIds: Set<String>,
+        compacted: MutableSet<String>,
+        tick: () -> Unit,
+    ): Result {
+        val treeUri = state.config.treeUri ?: return Result(problem = Problem.FOLDER_GONE)
         val writer = SafBackupWriter(app.contentResolver, Uri.parse(treeUri))
         val root = writer.root() ?: return Result(problem = Problem.FOLDER_GONE)
         val dest = if (BuildConfig.DEBUG) {
             writer.ensureDir(root, BackupPredicates.DEV_SUBDIR)
                 ?: return Result(problem = Problem.FOLDER_GONE)
         } else root
-
-        val notebooks = repo.allNotebooks()
-        val work = BackupPredicates.workList(
-            notebooks.map { BackupPredicates.Candidate(it.id, it.updatedAt, it.flags) },
-            config.stamps,
-        )
-        val stores = extensionStoreFiles(app)
-        val total = work.toCopy.size + stores.size + 1 // the index is the last unit of progress
-        var done = 0
-        onProgress(Progress(done, total))
 
         var copied = 0
         var held = 0
@@ -160,20 +246,18 @@ object BackupEngine {
                 SoilOpenFiles.isOpen(source) -> held++
                 else -> {
                     compactPass(app, candidate.id, source)
+                    compacted += candidate.id
                     if (copyNotebook(writer, dest, candidate.id, source)) {
                         copied++
                         // Stamp per success, immediately — a kill mid-run keeps every stamp
                         // already earned, and a failed copy below never reaches this line.
                         // Guarded: a stamp that fails to persist only re-copies next run, and
                         // must not abort the run (the never-throws contract, K3 review).
-                        config = config.copy(stamps = config.stamps + (candidate.id to candidate.updatedAt))
-                        runCatching { store.write(config) }
-                            .onFailure { Log.w(TAG, "stamp write failed", it) }
+                        state.update { it.copy(stamps = it.stamps + (candidate.id to candidate.updatedAt)) }
                     } else failed++
                 }
             }
-            done++
-            onProgress(Progress(done, total))
+            tick()
         }
 
         // Extension stores, before the index and after the notebooks: a store is content, and the
@@ -188,13 +272,11 @@ object BackupEngine {
                 copyStore(app, writer, dest, file) -> storesCopied++
                 else -> storesFailed++
             }
-            done++
-            onProgress(Progress(done, total))
+            tick()
         }
 
         val indexCopied = copyIndex(app, writer, dest)
-        done++
-        onProgress(Progress(done, total))
+        tick()
 
         val result = Result(
             copied = copied, upToDate = work.upToDate, excluded = work.excluded,
@@ -202,16 +284,17 @@ object BackupEngine {
             storesCopied = storesCopied, storesFailed = storesFailed, indexCopied = indexCopied,
         )
         if (result.succeeded) {
-            config = config.copy(
-                lastRunAt = System.currentTimeMillis(),
-                lastCopied = result.copied,
-                lastSkipped = result.upToDate + result.excluded + result.held + result.missing,
-                stamps = BackupPredicates.pruneStamps(config.stamps, notebooks.mapTo(HashSet()) { it.id }),
-            )
-            store.write(config)
+            state.update {
+                it.copy(
+                    lastRunAt = System.currentTimeMillis(),
+                    lastCopied = result.copied,
+                    lastSkipped = result.upToDate + result.excluded + result.held + result.missing,
+                    stamps = BackupPredicates.pruneStamps(it.stamps, aliveIds),
+                )
+            }
         }
         Slog.d(TAG) {
-            "run: $copied copied, ${result.upToDate} up to date, ${result.excluded} excluded, " +
+            "local: $copied copied, ${result.upToDate} up to date, ${result.excluded} excluded, " +
                 "$held held, $missing missing, $failed failed, " +
                 "stores $storesCopied copied / $storesFailed failed, index=$indexCopied"
         }
@@ -224,7 +307,7 @@ object BackupEngine {
      * copy. **Best effort by og's rule**: a notebook that will not open unattended is still backed
      * up as the bytes it is — failure here is never a reason to skip the copy that follows.
      */
-    private fun compactPass(context: Context, notebookId: String, source: File) {
+    internal fun compactPass(context: Context, notebookId: String, source: File) {
         val passphrase = KeySession.get() ?: return
         val db = try {
             SoilDatabase.open(context, notebookId, source, passphrase)
@@ -354,5 +437,22 @@ object BackupEngine {
         }
         runCatching { dir.deleteRecursively() }
         return mainOk && walOk
+    }
+}
+
+/**
+ * The run's config, carried across both legs (arc 25 / V4).
+ *
+ * Every stamp is written **the moment it is earned** — a kill mid-run keeps what already landed —
+ * which means the config is read once and then only ever moved forward through here. A write that
+ * fails is logged and swallowed: its worst case is copying that file again next run, which is the
+ * safe direction for a backup and never a reason to abort one.
+ */
+internal class RunState(var config: BackupConfig, private val store: BackupStore) {
+
+    suspend fun update(change: (BackupConfig) -> BackupConfig) {
+        config = change(config)
+        runCatching { store.write(config) }
+            .onFailure { Log.w("BackupEngine", "config write failed", it) }
     }
 }

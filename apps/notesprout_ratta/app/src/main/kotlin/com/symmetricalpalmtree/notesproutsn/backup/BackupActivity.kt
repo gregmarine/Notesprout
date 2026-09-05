@@ -20,7 +20,10 @@ import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.core.TopGuard
 import com.symmetricalpalmtree.notesproutsn.data.backup.BackupEngine
 import com.symmetricalpalmtree.notesproutsn.data.backup.BackupStore
+import com.symmetricalpalmtree.notesproutsn.data.backup.CloudBackupRules
+import com.symmetricalpalmtree.notesproutsn.data.backup.DeviceFolder
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityBackupBinding
+import com.symmetricalpalmtree.notesproutsn.extension.CloudArgs
 import com.symmetricalpalmtree.notesproutsn.extension.CloudClient
 import com.symmetricalpalmtree.notesproutsn.extension.CloudConnectEntry
 import com.symmetricalpalmtree.notesproutsn.extension.CloudNetworkException
@@ -28,6 +31,9 @@ import com.symmetricalpalmtree.notesproutsn.extension.CloudStatus
 import com.symmetricalpalmtree.notesproutsn.extension.CloudWording
 import com.symmetricalpalmtree.notesproutsn.extension.CloudWords
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionCallException
+import com.symmetricalpalmtree.notesproutsn.extension.ProviderRef
+import com.symmetricalpalmtree.notesproutsn.library.NameDialog
+import com.symmetricalpalmtree.notesproutsn.library.NameRules
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -57,12 +63,18 @@ import java.util.concurrent.atomic.AtomicBoolean
  * The status line is read back from the config rather than the [BackupEngine.Result], so it says
  * the same thing after a relaunch as it does the moment a run ends.
  *
+ * **Two destinations since arc 25 / V4.** "Back up now" runs the local leg and then the cloud one,
+ * whichever of them the config says exist ([BackupEngine.Outcome] carries a result per leg). The
+ * screen shows a status line for each — the local one at the foot of the screen, the cloud one at
+ * the foot of its own section — and one report dialog with a block per leg that ran. A leg that did
+ * not run has no block: a sentence about a destination nobody chose is noise.
+ *
  * **The Cloud section** (arc 25 / V2, `DRIVE_PLAN.md` decision 8) is the one part of the screen that
  * is not always there: it is **GONE** unless a trusted cloud provider is installed, re-asked on
  * every `onResume` because a package can be disabled or replaced under a standing screen. It is
- * never *disabled* — on e-ink that is invisible. It holds the account line, the "back up to it" tick
- * (V4 is what will read it; V2 only records the intention), and one button that flips between
- * Connect and Disconnect. `status()` never touches the network, so reading it on every resume costs
+ * never *disabled* — on e-ink that is invisible. It holds the account line, the device folder with
+ * its Rename…, the "back up to it" tick (read by the engine since V4), one button that flips
+ * between Connect and Disconnect, and the cloud's own status line. `status()` never touches the network, so reading it on every resume costs
  * a bind and nothing else.
  */
 class BackupActivity : AppCompatActivity() {
@@ -93,6 +105,10 @@ class BackupActivity : AppCompatActivity() {
     /** True from a Connect/Disconnect tap until it resolves — the e-ink feedback gap again. */
     private var cloudBusy = false
 
+    /** This device's folder under `Backups/`, as last rendered. Minted the first time the Cloud
+     *  section is drawn and then it is the person's — nothing re-derives it. */
+    private var deviceFolder: String? = null
+
     /**
      * The SAF folder pick. A tree URI is worthless without a persisted grant — the next launch
      * would find it and be refused — so the grant is taken first and a folder whose grant will not
@@ -122,6 +138,7 @@ class BackupActivity : AppCompatActivity() {
         // Registered here and nowhere else: a launcher may not be registered after STARTED.
         cloud = CloudConnectEntry(this) { lifecycleScope.launch { renderCloud() } }
         binding.btnCloudConnect.setOnClickListener { onCloudButtonTap() }
+        binding.btnCloudRename.setOnClickListener { onRenameFolderTap() }
 
         lifecycleScope.launch { render() }
     }
@@ -242,10 +259,11 @@ class BackupActivity : AppCompatActivity() {
     // ── The run ──────────────────────────────────────────────────────────────
 
     /**
-     * One run, start to finish. The no-folder case is answered here rather than by leaving the
-     * button dead: the engine would return [BackupEngine.Problem.NO_FOLDER] anyway, but asking
-     * first means the user never watches a progress dialog appear only to be told there was
-     * nowhere to put anything.
+     * One run, start to finish. The nowhere-to-put-it case is answered here rather than by leaving
+     * the button dead: the engine would return [BackupEngine.Problem.NO_DESTINATION] anyway, but
+     * asking first means the user never watches a progress dialog appear only to be told there was
+     * nowhere to put anything. The question is the engine's own two-leg rule
+     * ([CloudBackupRules.legs]), asked of the same three facts.
      */
     private fun onRunTap() {
         if (!running.compareAndSet(false, true)) {
@@ -254,11 +272,18 @@ class BackupActivity : AppCompatActivity() {
         }
         lifecycleScope.launch {
             val config = store.read()
-            if (config.treeUri == null) {
+            // The engine's own two-leg rule, asked here first so nobody watches a progress dialog
+            // appear only to be told there was nowhere to put anything.
+            val ref = cloud?.discover()
+            if (isFinishing || isDestroyed) { running.set(false); return@launch }
+            val legs = CloudBackupRules.legs(
+                hasFolder = config.treeUri != null,
+                cloudEnabled = config.cloudEnabled,
+                hasProvider = ref != null,
+            )
+            if (legs.none) {
                 running.set(false)
-                if (!isFinishing && !isDestroyed) {
-                    Dialogs.problem(this@BackupActivity, R.string.backup_no_folder_title, R.string.backup_no_folder_body)
-                }
+                if (!isFinishing && !isDestroyed) noDestination(ref)
                 return@launch
             }
             showProgress()
@@ -272,13 +297,14 @@ class BackupActivity : AppCompatActivity() {
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "backup run threw", e)
-                BackupEngine.Result(failed = 1)
+                BackupEngine.Outcome(local = BackupEngine.Result(failed = 1))
             } finally {
                 running.set(false)
                 hideProgress()
             }
-            // The status line is refreshed either way — a partly successful run still moved it.
+            // Both status lines are refreshed either way — a partly successful run still moved one.
             render()
+            renderCloud()
             report(result)
         }
     }
@@ -293,9 +319,17 @@ class BackupActivity : AppCompatActivity() {
         ).also { it.show() }
     }
 
+    /** The message names the leg: *Backing up…* is the folder on this device, *Uploading to X…*
+     *  is the cloud — the same counter, two very different waits. */
     private fun updateProgress(p: BackupEngine.Progress) {
         if (isFinishing || isDestroyed) return
-        progress?.setMessage(getString(R.string.backup_progress, p.done, p.total))
+        progress?.setMessage(
+            if (p.leg == BackupEngine.Leg.CLOUD) {
+                getString(R.string.backup_progress_cloud, providerName(), p.done, p.total)
+            } else {
+                getString(R.string.backup_progress, p.done, p.total)
+            }
+        )
     }
 
     private fun hideProgress() {
@@ -308,6 +342,12 @@ class BackupActivity : AppCompatActivity() {
      * this screen is the entire reason the run happened, and "N copied, M skipped" is exactly the
      * number a toast would let slip past unread.
      *
+     * **One dialog, one block per leg** (arc 25 / V4). A leg that did not run has no block at all —
+     * "0 copied to the cloud" said to someone who never asked for a cloud backup is noise, and said
+     * to someone whose provider was uninstalled it is a lie. The title is the whole run's: anything
+     * either leg could not do makes it *Backup didn't finish*, because a backup that half happened
+     * is not one the person should walk away from believing in.
+     *
      * "Skipped" is one number covering four honest reasons — already up to date, deliberately
      * excluded, open elsewhere in the app, or a file no longer on the device. The distinction
      * matters to the engine and not to the person reading the line.
@@ -316,43 +356,93 @@ class BackupActivity : AppCompatActivity() {
      * notebooks, so folding them into "N copied" would make a number the user can check against
      * the library stop matching it.
      */
-    private fun report(result: BackupEngine.Result) {
+    private fun report(outcome: BackupEngine.Outcome) {
         if (isFinishing || isDestroyed) return
-        val skipped = result.upToDate + result.excluded + result.held + result.missing
-        when {
-            result.problem == BackupEngine.Problem.NO_FOLDER ->
-                Dialogs.problem(this, R.string.backup_no_folder_title, R.string.backup_no_folder_body)
-
-            result.problem == BackupEngine.Problem.FOLDER_GONE ->
-                Dialogs.problem(this, R.string.backup_folder_gone_title, R.string.backup_folder_gone_body)
-
-            // Behind IndexGuard this should be unreachable — the process cannot have a live index
+        when (outcome.problem) {
+            // Behind IndexGuard NO_KEY should be unreachable — the process cannot have a live index
             // and no key session — but a run that quietly did nothing would be the worst possible
             // way to find out otherwise.
-            result.problem == BackupEngine.Problem.NO_KEY ->
-                Dialogs.problem(this, R.string.backup_locked_title, R.string.backup_locked_body)
+            BackupEngine.Problem.NO_KEY ->
+                return Dialogs.problem(this, R.string.backup_locked_title, R.string.backup_locked_body)
 
-            result.failed > 0 || result.storesFailed > 0 || !result.indexCopied -> Dialogs.problem(
+            BackupEngine.Problem.NO_DESTINATION -> return noDestination(cloud?.ref)
+            else -> Unit
+        }
+        val body = buildString {
+            outcome.local?.let { append(localBlock(it)) }
+            outcome.cloud?.let {
+                if (isNotEmpty()) append("\n\n")
+                append(cloudBlock(it))
+            }
+        }
+        if (CloudBackupRules.clean(outcome)) {
+            Dialogs.confirm(this, R.string.backup_done_title, body) { finish() }
+        } else {
+            Dialogs.problem(
                 this,
                 R.string.backup_problem_title,
-                getString(
-                    R.string.backup_problem_body,
-                    result.copied,
-                    skipped,
-                    result.failed,
-                    getString(
-                        if (result.indexCopied) R.string.backup_index_copied else R.string.backup_index_failed
-                    ),
-                    storesLine(result),
-                ),
+                body + "\n\n" + getString(R.string.backup_problem_tail),
             )
-
-            else -> Dialogs.confirm(
-                this,
-                R.string.backup_done_title,
-                getString(R.string.backup_done_body, result.copied, skipped) + storesLine(result),
-            ) { finish() }
         }
+    }
+
+    /** Neither leg exists. Both ways out are named where a provider is installed to be ticked; with
+     *  none there is only the folder, and the old sentence is still the whole truth. */
+    private fun noDestination(ref: ProviderRef?) {
+        if (isFinishing || isDestroyed) return
+        if (ref != null) {
+            Dialogs.problem(
+                this,
+                R.string.backup_no_destination_title,
+                getString(R.string.backup_no_destination_body, providerName(ref)),
+            )
+        } else {
+            Dialogs.problem(this, R.string.backup_no_folder_title, R.string.backup_no_folder_body)
+        }
+    }
+
+    /** The local leg's block. A folder that has gone replaces the counts — there are none to give. */
+    private fun localBlock(r: BackupEngine.Result): String {
+        if (r.problem == BackupEngine.Problem.FOLDER_GONE) return getString(R.string.backup_local_folder_gone)
+        val clean = CloudBackupRules.legClean(r)
+        val skipped = r.upToDate + r.excluded + r.held + r.missing
+        return buildString {
+            append(
+                if (clean) getString(R.string.backup_done_body, r.copied, skipped)
+                else getString(R.string.backup_counts_failed, r.copied, skipped, r.failed)
+            )
+            append(storesLine(r))
+            if (!clean) { append('\n'); append(getString(indexSentence(r))) }
+        }
+    }
+
+    /** The cloud leg's block: the same shape, headed by the provider's name, and closed by the one
+     *  sentence saying why the leg stopped where it did. */
+    private fun cloudBlock(r: BackupEngine.Result): String {
+        val name = providerName()
+        val clean = CloudBackupRules.legClean(r)
+        val skipped = r.upToDate + r.excluded + r.held + r.missing
+        return buildString {
+            append(
+                if (clean) getString(R.string.cloud_counts, name, r.copied, skipped)
+                else getString(R.string.cloud_counts_failed, name, r.copied, skipped, r.failed)
+            )
+            append(storesLine(r))
+            if (!clean) { append('\n'); append(getString(indexSentence(r))) }
+            cloudProblem(r.problem)?.let { append('\n'); append(getString(it, name)) }
+        }
+    }
+
+    private fun indexSentence(r: BackupEngine.Result): Int =
+        if (r.indexCopied) R.string.backup_index_copied else R.string.backup_index_failed
+
+    /** The four cloud stops, one sentence each — they mean four different things. */
+    private fun cloudProblem(problem: BackupEngine.Problem?): Int? = when (problem) {
+        BackupEngine.Problem.CLOUD_NOT_CONNECTED -> R.string.cloud_problem_not_connected
+        BackupEngine.Problem.CLOUD_NETWORK -> R.string.cloud_problem_network
+        BackupEngine.Problem.CLOUD_UNANSWERED -> R.string.cloud_problem_unanswered
+        BackupEngine.Problem.CLOUD_GONE -> R.string.cloud_problem_gone
+        else -> null
     }
 
     /**
@@ -427,13 +517,92 @@ class BackupActivity : AppCompatActivity() {
             if (CloudWording.showsDisconnect(status)) R.string.cloud_disconnect else R.string.cloud_connect
         )
         binding.cloudEnabled.text = getString(R.string.cloud_backup_enabled, name)
-        val config = store.read()
+        var config = store.read()
         if (isFinishing || isDestroyed) return
+        // Minted lazily, here — the first time anyone is shown that a cloud destination exists.
+        // A fresh folder has never held a file, so it starts with no stamps against it.
+        if (config.cloudDeviceFolder == null) {
+            config = config.copy(cloudDeviceFolder = DeviceFolder.mint(), cloudStamps = emptyMap())
+            store.write(config)
+            if (isFinishing || isDestroyed) return
+            Slog.d(TAG) { "device folder minted on first render" }
+        }
+        deviceFolder = config.cloudDeviceFolder
+        binding.cloudFolder.text = config.cloudDeviceFolder
+        val at = config.cloudLastRunAt
+        binding.cloudLast.text = if (at == null) {
+            getString(R.string.cloud_status_never, name)
+        } else {
+            getString(
+                R.string.cloud_status_last,
+                DateFormat.getDateTimeInstance().format(Date(at)),
+                config.cloudLastCopied ?: 0,
+                config.cloudLastSkipped ?: 0,
+            )
+        }
         // Detached while the box is set, so restoring the stored state never reads as a user tap.
         binding.cloudEnabled.setOnCheckedChangeListener(null)
         binding.cloudEnabled.isChecked = config.cloudEnabled
         binding.cloudEnabled.setOnCheckedChangeListener { _, checked -> onCloudEnabledChanged(checked) }
     }
+
+    /**
+     * Rename the device folder.
+     *
+     * **A different folder resets the cloud stamp map**, for the same reason a different SAF folder
+     * resets the local one ([adoptFolder]): a stamp says "this notebook has been copied as of that
+     * edit", which is a statement about *a destination* and is not true of a folder that has never
+     * seen it. Re-typing the name it already has changes nothing and keeps them.
+     *
+     * Two checks, in order: the family's own name rules (this is a name the person typed, judged
+     * exactly as a notebook's is), then the seam's bounds — a name the cloud contract will not carry
+     * is refused here, before anything is stored, rather than at the first upload that tries to use
+     * it.
+     */
+    private fun onRenameFolderTap() {
+        val current = deviceFolder ?: return
+        var accepting = false
+        NameDialog.show(
+            this,
+            titleRes = R.string.cloud_device_folder_title,
+            confirmRes = R.string.action_rename,
+            initial = current,
+            hintRes = R.string.cloud_device_folder_hint,
+        ) { name, dismiss ->
+            if (accepting) return@show
+            if (name == current) { dismiss(); return@show }
+            val problem = NameRules.validate(name)
+            if (problem != null) {
+                Dialogs.problem(this, R.string.name_problem_title, NameDialog.problemMessage(this, problem))
+                return@show
+            }
+            val carries = runCatching { CloudArgs.requireName(name) }.isSuccess
+            if (!carries) {
+                Dialogs.problem(
+                    this,
+                    R.string.name_problem_title,
+                    getString(R.string.cloud_device_folder_problem_body),
+                )
+                return@show
+            }
+            accepting = true
+            dismiss()
+            lifecycleScope.launch {
+                try {
+                    val config = store.read()
+                    store.write(config.copy(cloudDeviceFolder = name, cloudStamps = emptyMap()))
+                    Slog.d(TAG) { "device folder renamed — cloud stamps reset" }
+                    renderCloud()
+                } finally {
+                    accepting = false
+                }
+            }
+        }
+    }
+
+    /** The provider's own name where it gave one, the extension's label otherwise. */
+    private fun providerName(ref: ProviderRef? = cloud?.ref): String =
+        cloudName ?: ref?.label?.toString() ?: getString(R.string.cloud_caption)
 
     private fun cloudWords() = CloudWords(
         notConnected = getString(R.string.cloud_state_not_connected),

@@ -135,6 +135,35 @@
                     android:textColor="@color/inkBlack"
                     android:textSize="16sp" />
 
+                <!-- The device folder (arc 25 / V4): every device that backs up to this account
+                     gets its own folder under Backups/, so two devices never write over each
+                     other. Minted here the first time this section renders, then it is the
+                     person's — Rename… is a body control, under the line it changes, for the same
+                     reason "Choose…" is. -->
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="@string/cloud_device_folder_caption"
+                    android:textColor="@color/inkBlack"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:id="@+id/cloudFolder"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:textColor="@color/inkBlack"
+                    android:textSize="16sp" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnCloudRename"
+                    style="@style/Widget.Notesprout.OutlinedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/cloud_device_folder_rename" />
+
                 <androidx.appcompat.widget.AppCompatCheckBox
                     android:id="@+id/cloudEnabled"
                     android:layout_width="wrap_content"
@@ -151,6 +180,16 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
                     android:text="@string/cloud_connect" />
+
+                <!-- The cloud's own status line, at the section's foot — the local one is at the
+                     foot of the screen, and each says what its own destination last received. -->
+                <TextView
+                    android:id="@+id/cloudLast"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="20dp"
+                    android:textColor="@color/inkBlack"
+                    android:textSize="13sp" />
             </LinearLayout>
 
             <TextView

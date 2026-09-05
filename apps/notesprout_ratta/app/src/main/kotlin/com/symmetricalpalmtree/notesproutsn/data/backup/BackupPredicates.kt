@@ -23,6 +23,11 @@ object BackupPredicates {
     /** The previous good copy, moved aside for the swap and deleted after it. */
     const val OLD_SUFFIX = ".old"
 
+    /** The cloud tree's first segment (arc 25 / V4): `Backups/<device folder>/` under the
+     *  provider's own root. Debug builds get **no** `dev/` inside it — the provider's root is
+     *  already "Notesprout SN Dev" in a debug build (`DRIVE_PLAN.md` decision 9). */
+    const val CLOUD_BACKUPS_FOLDER = "Backups"
+
     /** Debug builds write here inside the chosen tree — debug and release coexist on the Nomad
      *  and must not share a root (the arc-17 wizard's per-device answer). */
     const val DEV_SUBDIR = "dev"

@@ -5,7 +5,7 @@ arc — read it whole at every phase start, together with the root `CLAUDE.md` a
 `apps/notesprout_ratta/CLAUDE.md`. **Do not load `RATTA_PLAN.md` for this arc** unless a standing
 trap needs checking; its protocol and traps are summarized below so this file is enough.
 
-**Status:** planned 2026-09-04 · V1 ✅ (2026-09-04) · V2 ✅ (2026-09-04) · V3 ✅ (2026-09-04) · V4 ⬜ · V5 ⬜ · V6 ⬜
+**Status:** planned 2026-09-04 · V1 ✅ (2026-09-04) · V2 ✅ (2026-09-04) · V3 ✅ (2026-09-04) · V4 ✅ (2026-09-04) · V5 ⬜ · V6 ⬜
 
 ---
 
@@ -200,15 +200,96 @@ ink). Then docs / memory / `CLAUDE.md`, **commit + push**, user runs `/clear`. *
   shell that the cache is wiped; the actual sign-in stays a checklist item, the upload result is
   checked by the user in Drive.
 
-### V4 ⬜ — Backup to cloud
-- `BackupEngine` grows a second destination (`CloudDestination` beside the SAF one): same
-  incremental stamp rule, its **own** stamp map, index last, WAL-alongside rule (seal first; a
-  `-wal` still holding frames refuses that file), extension stores included (W5), per-device
-  subfolder `Backups/<device folder>/` with the folder name editable on the Backup screen
-  (`NameRules` charset, no separators). "Back up now" runs local then cloud when both are
-  enabled; the status line reports both. Cloud upload replaces by name (never duplicates —
-  og's find-then-update rule).
-- Walk: enable cloud backup, run, verify stamps and status line; user confirms files in Drive.
+### V4 ✅ — Backup to cloud (2026-09-04)
+
+**Wizard line (kept for the record).** `BackupEngine` grows a second destination: same incremental
+stamp rule, its **own** stamp map, index last, WAL rule, extension stores included (W5), per-device
+subfolder `Backups/<device folder>/` with the folder name editable on the Backup screen (`NameRules`
+charset, no separators). "Back up now" runs local then cloud when both are enabled; the status line
+reports both. Cloud upload replaces by name (never duplicates — og's find-then-update rule).
+
+**Design (Fable, 2026-09-04 — binding for the phase). Host only; no seam change, `:ext-drive`
+untouched.**
+
+- **Two legs, one run.** `BackupEngine.run` decides which legs exist from the config: the **local
+  leg** when `treeUri` is set (unchanged code path — the SAF writer, its `.part`/`.old` swap and its
+  WAL-alongside rule are not touched), the **cloud leg** when `cloudEnabled` **and**
+  `ExtensionRegistry.cloud()` finds a provider (re-asked at run start — a run never trusts a stale
+  discovery). Local first, then cloud. Neither → the run does nothing and says so (`NO_DESTINATION`);
+  the screen pre-checks the same rule so nobody watches a progress dialog appear for nothing. The
+  return type becomes an `Outcome(local: Result?, cloud: Result?)` — a leg that did not run is null,
+  never a zero result. `Progress` carries which leg it is in, so the dialog can read *Backing up…*
+  then *Uploading to <provider>…*; the total is both legs' units summed at the start (the cloud
+  leg's is counted from the same work list before either leg runs).
+- **Config (additive, `VERSION` stays 1):** `cloudDeviceFolder: String?` · `cloudStamps` (the
+  second map — a stamp is a statement about one destination) · `cloudLastRunAt` / `cloudLastCopied`
+  / `cloudLastSkipped`. **Nothing shares a field with the local leg.**
+- **Device folder.** `data/backup/DeviceFolder.kt`: default = sanitized `Build.MODEL` + `-` + 8 hex
+  from a random UUID, og's D4 shape, pure `DeviceFolder.name(model, suffix)` JVM-tested (runs of
+  anything outside `[a-zA-Z0-9_-]` collapse to `-`, ends trimmed, empty model → `device`). Minted
+  **lazily**: the Backup screen mints and stores one when it renders the Cloud section and finds
+  none, and the engine mints if still absent (a run started before the screen ever showed the
+  section). Shown in the Cloud section as a *Device folder* line with a **Rename…** button
+  (`NameDialog`; `NameRules.validate` → the library's name-problem dialog, then
+  `CloudArgs.requireName` for the seam's bounds). **A different device folder resets `cloudStamps`**
+  (the `adoptFolder` reasoning — a stamp is about a destination, and a new folder has never seen the
+  files); re-entering the same name keeps them. Hardware serial is never used (og's rule).
+- **The tree.** `Backups/<device folder>/` under the provider's root — `BackupPredicates.CLOUD_BACKUPS_FOLDER`.
+  Debug builds get no `dev/` subfolder: the root is already `Notesprout SN Dev` (decision 9).
+- **The cloud never holds a sidecar.** The local leg can land a `.soil` and its `-wal` as a pair
+  because the SAF swap makes them near-atomic; the cloud has no swap — two uploads can tear, and a
+  fresh main + stale `-wal` corrupts on restore. So the wizard's "a `-wal` still holding frames
+  refuses that file" is met by **absorbing the WAL first**: `data/backup/SelfContainedSnapshot.kt`
+  copies main + `-wal` into `cacheDir/backup/cloud/`, opens the copy with the file's **cached raw
+  key** (`KeyMaterial.peekOrLoad` — the notebook id, `KeyMaterial.INDEX_FILE_ID`,
+  `ExtensionStores.fileIdFor(pkg)`; passphrase open as the fallback), runs
+  `PRAGMA wal_checkpoint(TRUNCATE)`, closes, and answers the single file only if the copy's `-wal`
+  is now absent or empty and the copy probes `Encrypted`. Anything else answers null and that file
+  is **refused this run** (counted failed, retried next run). Every cloud upload is one
+  self-contained file. A stale `<name>-wal` found in the folder's listing is deleted **before the
+  stamp**, verifiably — the local leg's rule, kept for the day something else ever puts one there.
+- **The cloud leg** (`data/backup/CloudBackupLeg.kt`, so `BackupEngine` stays under its line
+  budget; the shared pieces — `compactPass`, the work list, the store checkpoint, the index
+  purge+checkpoint — are called, not copied):
+  1. `ensureFolder(["Backups", device])` — fail fast: `CloudNotConnectedException` → `Problem.CLOUD_NOT_CONNECTED`,
+     `CloudNetworkException` → `CLOUD_NETWORK`, other `ExtensionCallException` → `CLOUD_UNANSWERED`,
+     provider gone between discovery and the call → `CLOUD_GONE`. Nothing uploaded on any of them.
+  2. **One `list` of the device folder** at leg start → a name → entry map, kept current by the leg
+     (an upload replaces its row, a delete removes it). It serves every stale-sidecar decision — one
+     listing per leg, never one per file (the SAF writer's one-listing-per-write, scaled to the
+     seam's cost: a `list` is ~800 ms).
+  3. Work list over `cloudStamps`. Per notebook: missing / held counted as the local leg counts
+     them; `compactPass` **unless the local leg already compacted that id this run** (a
+     `compactedThisRun` set handed across — VACUUM twice is a minute for nothing); snapshot; `upload`
+     (MIME `application/octet-stream`, budget `uploadBudgetMs(length)`); corroborate with
+     `ExportVerification.cloudVerdict` — agree → stale sidecar check → **stamp per success,
+     immediately** (the local rule); disagree → failed, **nothing deleted**, retried next run
+     (replace-by-name makes a retry safe).
+  4. Every extension store: `checkpointIfOpen` → snapshot → upload → corroborate; no stamps.
+  5. The index last: `compactIfNeeded(0)` + `checkpoint` → snapshot → upload → corroborate.
+  6. `cloudLastRunAt` / counts when at least one upload landed; `cloudStamps` pruned.
+  **Mid-leg failure.** `CloudNotConnectedException` / `CloudNetworkException` / a no-answer on any
+  upload **ends the leg** with that `Problem` **and the counts so far** — every stamp already earned
+  stays (a no-answer is most likely a timeout, and continuing would pile 60–120 s budgets on a dead
+  link). A corroboration miss is per-file and does not end the leg.
+- **The screen.** Cloud section grows: the *Device folder* line + Rename… under the account line;
+  a second status line *Last cloud backup: <date> — N copied, M skipped* / *Never backed up to
+  <provider>* at the section's foot. `onRunTap` pre-check = the engine's two-leg rule; neither leg →
+  problem dialog naming both ways out when a provider is installed, the old no-folder text when
+  none is. Progress dialog message per leg. **One report dialog**: both clean → *Backup complete*
+  (confirm, finishes) with the local block, a blank line, then `<provider>: N copied, M skipped.` +
+  its stores/index sentences; any problem in either leg → *Backup didn't finish* with the same two
+  blocks, the cloud problem as one sentence (*not connected — connect and back up again* · *could
+  not be reached; nothing more was uploaded; try again* · *didn't answer; check <provider> before
+  relying on it* · *no longer available on this device*); a leg that did not run has no block.
+  "Untouched / tried again next time" stays true for both legs.
+- **Tests**: `DeviceFolder` · `BackupConfig` round-trip + old-blob decode with the new fields ·
+  pure leg rules in `CloudBackupRules` (which legs run · stale-sidecar lookup from a listing · the
+  progress total · the mid-leg stop table · the report's block/line selection) · the existing
+  `BackupPredicates` cover the second map. No code review (decision 12).
+- Walk (Sonnet, Nomad `.dev`): Cloud section shows the device folder, Rename resets stamps, enable
+  → Back up now runs both legs (`logcat` shows ensureFolder, one list, uploads, sizes agree), the
+  status lines move, a second run reports up to date; user checklist covers the files in Drive.
 
 ### V5 ⬜ — Import from cloud
 - Library Import: source choice (Local file / <providerName>) when a provider is installed;
@@ -388,4 +469,63 @@ read-through, fixed before the install. No control bytes this phase.
 
 **User checklist.** 1. In Drive, `Notesprout SN Dev/Exports/Walk/Events Ideas.pdf` opens and shows
 the page. 2. `Exports/probe` is still empty. (Delete `Walk` whenever you like — nothing reads it.) **Both passed (user, 2026-09-04) — V3 signed off.**
+
+### V4 — Backup to cloud (2026-09-04) ✅
+
+**Outcome.** "Back up now" runs two legs — the SAF folder as before, then `Backups/<device folder>/`
+under the provider's root — each with its own stamp map and status line. Host only, `:ext-drive`
+untouched. `BackupConfig` grew `cloudDeviceFolder` / `cloudStamps` / `cloudLastRunAt|Copied|Skipped`
+(additive, `VERSION` 1). `DeviceFolder` (og's D4 shape, `Supernote-Nomad-4a4bd938` on the walk, no
+serial). `SelfContainedSnapshot` — **the cloud never holds a sidecar**: main + `-wal` copied to
+`cacheDir/backup/cloud/`, opened with the cached raw key, `wal_checkpoint(TRUNCATE)`, probed, and only
+a whole file is uploaded. `CloudBackupLeg` (`ensureFolder` → ONE `list` kept current → notebooks →
+stores → index; stamp per success; typed failures end the leg keeping the stamps earned; a
+corroboration miss is per file and never deletes; the stale `<name>-wal` delete is the arc's one
+remote delete). `CloudBackupRules` (pure: legs, units/total, stale sidecar, failure → problem, ends-leg,
+clean/block). `BackupEngine.run` → `Outcome(local, cloud, problem)`, leg-aware `Progress`. The Backup
+screen: Device folder line + Rename… (`NameRules` then `CloudArgs.requireName`; a new name resets
+`cloudStamps`), lazy mint, second status line, two-leg pre-check, *Uploading to <provider>…* progress,
+one report dialog with a block per leg.
+
+**Tests.** 2302 → **2329 JVM tests/variant** (+9 `DeviceFolder`, +18 `CloudBackupRules`, +2
+`BackupConfig`). No code review (decision 12).
+
+**Walk (Sonnet, Nomad `.dev`) — passed.** Section order and nothing grey/clipped; first run
+`ensureFolder` depth 2 in 3 162 ms, exactly one `list`, 42 `.soil` uploads all `agrees=true`, index
+uploaded; both status lines matched the dialog; second run 0 copied / 43 skipped with only the 7 `.db`
+uploads (stores + index) — no `.soil` re-uploads; Rename → `waltest` reset the stamps and the next run
+re-copied all 42 into `Backups/waltest/`; unticking the box ran the local leg alone and reported clean;
+`cache/backup/cloud` gone after every run. **Not walked:** the *Nowhere to back up* dialog — the screen
+has no way to unset a chosen SAF folder (there is no "clear folder" affordance; a future call) and the
+walk device had one; the rule is JVM-tested. Progress/report dialogs drew offset to the right on the
+walk's screencaps — screencap artefact or window params, cosmetic, not chased.
+
+**Bug found on the walk and fixed.** One 7 MB store (not opened this session) failed every run with
+*file is not a database* from `openRawKey`: `KeyMaterial.peekOrLoad` hands back a **stale** cached
+key for a file re-minted since the key was derived, and only `KeyOpener` verifies-and-invalidates.
+`SelfContainedSnapshot.absorbWal` now takes `KeyOpener`'s recipe — verify the cached key against the
+copy, invalidate a stale one, open with the passphrase. Re-walk: `cached raw key stale … invalidating`
+→ `snapshot ready: 7012352 B` → `agrees=true`, `stores 7 copied / 0 failed`, **Backup complete**.
+
+**Design calls not in the wizard (recorded, binding unless the user says otherwise).**
+`Problem.NO_FOLDER` is gone — `NO_DESTINATION` replaces it (old wording without a provider, both ways
+out with one) · a local `FOLDER_GONE` is a leg result and does not stop the cloud leg · `CLOUD_GONE`
+is decided by re-asking discovery after a plain `ExtensionCallException` · a store whose package cannot
+be derived from its filename counts `storesFailed` on the cloud leg · the index sentence appears only in
+a leg's not-clean block · a minted device folder uses a charset narrower than `NameRules` (no dot, no
+space; model capped at 48) so it is legal to both `NameRules` and `CloudContract`, pinned by a test ·
+Rename… judges with `NameRules` first, then `CloudArgs.requireName` (its own body under
+`name_problem_title`) · the cloud leg re-runs the index purge + checkpoint even after the local leg (a
+near no-op) · a finished run re-renders the Cloud section (one extra discovery + `status()`) · the
+cloud index copy, like the local one, is taken **before** `cloudLastRunAt` is written (index-last
+means every stamp is in it; the run stamp is not).
+
+**Traps met.** None new in the code; the classifier blocked the orchestrator's own byte-scan command
+shapes (Opus's scan of every changed file was clean).
+
+**User checklist.** 1. In Drive, `Notesprout SN Dev/Backups/waltest/` holds 42 `.soil` files, 7 `.db`
+files and `notesprout.db` — and **no `-wal` file anywhere**. 2. `Backups/Supernote-Nomad-4a4bd938/`
+also exists from the first run (delete it whenever you like — nothing reads it; the device folder is
+now `waltest`, rename it back on the Backup screen if you prefer the minted name). 3. Optional: on
+another device or og, nothing. (Restore is not this arc.)
 

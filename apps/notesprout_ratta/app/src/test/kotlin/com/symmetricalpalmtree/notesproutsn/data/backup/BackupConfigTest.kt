@@ -3,6 +3,7 @@ package com.symmetricalpalmtree.notesproutsn.data.backup
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -72,6 +73,41 @@ class BackupConfigTest {
         val decoded = BackupConfig.decode(BackupConfig.encode(config))
         assertTrue(decoded.cloudEnabled)
         assertEquals(config, decoded)
+    }
+
+    @Test
+    fun `the V4 cloud fields round-trip`() {
+        val config = BackupConfig(
+            treeUri = "content://tree/x",
+            lastRunAt = 1L,
+            lastCopied = 2,
+            lastSkipped = 3,
+            stamps = mapOf("nb-1" to 100L),
+            cloudEnabled = true,
+            cloudDeviceFolder = "Nomad-1a2b3c4d",
+            cloudStamps = mapOf("nb-1" to 90L, "nb-2" to 200L),
+            cloudLastRunAt = 4L,
+            cloudLastCopied = 5,
+            cloudLastSkipped = 6,
+        )
+        val decoded = BackupConfig.decode(BackupConfig.encode(config))
+        assertEquals(config, decoded)
+        // The two maps are separate statements about separate destinations and must never merge.
+        assertEquals(mapOf("nb-1" to 100L), decoded.stamps)
+        assertEquals(mapOf("nb-1" to 90L, "nb-2" to 200L), decoded.cloudStamps)
+    }
+
+    @Test
+    fun `a blob written before the V4 fields existed decodes with their defaults`() {
+        val old = """{"version":1,"treeUri":"content://tree/x","lastRunAt":5,"stamps":{"nb":9},"cloudEnabled":true}"""
+        val config = BackupConfig.decode(old.toByteArray())
+        assertEquals(mapOf("nb" to 9L), config.stamps)
+        assertTrue(config.cloudEnabled)
+        assertNull(config.cloudDeviceFolder)
+        assertEquals(emptyMap<String, Long>(), config.cloudStamps)
+        assertNull(config.cloudLastRunAt)
+        assertNull(config.cloudLastCopied)
+        assertNull(config.cloudLastSkipped)
     }
 
     @Test

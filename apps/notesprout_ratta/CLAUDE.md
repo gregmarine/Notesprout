@@ -146,8 +146,11 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   this APK only, `ROOT_FOLDER_NAME` "Notesprout SN" / "Notesprout SN Dev" by build type. **V3 (2026-09-04):
   the Export screen's Destination row + host-drawn `cloud/CloudBrowserDialog` over `Exports/` — the
   exporter writes to `cacheDir/export/out.<ext>`, the host uploads; the browser only lists, creates
-  only from New folder, never deletes remotely.** **Read
-  `DRIVE_PLAN.md`, not `RATTA_PLAN.md`, for any work on it.**)
+  only from New folder, never deletes remotely. **V4 (2026-09-04): the backup run's second leg** —
+  `Backups/<device folder>/` with its own stamp map (`BackupConfig.cloudStamps`), every upload a
+  `SelfContainedSnapshot` (WAL absorbed in a cache copy — **the cloud never holds a sidecar**), one
+  `list` per leg, replace-by-name, corroborated never deleted; `CloudBackupLeg` beside `BackupEngine`.**
+  **Read `DRIVE_PLAN.md`, not `RATTA_PLAN.md`, for any work on it.**)
   `gradle.properties` sets `android.nonTransitiveRClass=false` — undoing it breaks every
   `:sn-screen` resource reference from `:app`.
 - **SN has EIGHT extension points** — each added on its own explicit user decision, and
