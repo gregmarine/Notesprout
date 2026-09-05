@@ -24,7 +24,7 @@ Z4 ✅ 7c54c5a8 (grid glyphs + Day-row labels, marks in the bake key) · Z5 ✅ 
 ed6b7b54 (UI cleanup: cards, pill toggle, clock face, count latches + keypad, even Day rows) · Z6 ✅
 (docs/ledger/freeze, no code review — the user's call). **Not a point, not an `API_VERSION` bump,
 host untouched**: two in-process screens and five tables inside `:ext-calendar`; version stays
-`0.1.0-ratta`; **2087 JVM tests/variant**. **NO NEXT ARC IS PLANNED — ask the user first.**
+`0.1.0-ratta`; **2087 JVM tests/variant**. **Arc 25 "Drive" (the EIGHTH point, `ACTION_CLOUD_STORAGE`, granted 2026-09-04) is planned in its OWN file — `DRIVE_PLAN.md`; read that, not this, for arc-25 work.**
 
 ---
 
