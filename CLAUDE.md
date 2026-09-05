@@ -148,36 +148,14 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   commits are in git history).
 - `ratta` — **the active feature branch** (cut 2026-08-20): Notesprout SN, a from-scratch
   Supernote-only rebuild under `apps/notesprout_ratta/`. **Arcs 1–25 complete + frozen**
-  (2026-09-05; the per-arc feature references are `apps/notesprout_ratta/docs/*.md`). THIRTEEN
-  modules (host + `:sn-screen` + `:markdown` + `:extension-api` + `:ext-ink` + eight extension
-  APKs: mlkit, scratchpad, soil, pdf, document, tags, calendar, drive), EIGHT
-  extension points (recognizer · scratch pad · exporter · importer · document editor · tag
-  manager · calendar · cloud storage), g-paper pin 0.1.23, version `0.1.0-ratta`, 2340 JVM tests/variant. Arc 22
-  "Tables" (X1–X5, 2026-09-01) made the extension store real SQLite tables behind gated
-  parameterized SQL — `IExtensionStore` v6 (`applySchema` / `exec` / `query` / `next` /
-  `close`), the KV API removed, `API_VERSION` 6 with a store floor, legacy stores wiped on open,
-  and the scratch pad (no page ceiling), tags (two paged queries, the transaction is the lock)
-  and the document editor (`prefs` / `word` / `caret`) all on rows. **Arc 23 "Calendar" (Y1–Y4,
-  2026-09-02) shipped the SEVENTH point** — `ACTION_CALENDAR` (granted 2026-09-01) — a writable
-  Month/Week/Day organizer as `:ext-calendar` + the shared `:ext-ink` library, `API_VERSION` 7
-  with a per-action floor. **Arc 24 "Events" (Z1–Z6, 2026-09-02 → 09-04) grew the calendar point
-  in place** — og's events with reminders, three recurring scopes and a handwriting + text note
-  per event, as two in-process screens (`EventsActivity`, `EventEditorActivity`) and a
-  `CalendarSchema.V2` step inside `:ext-calendar`; NOT an eighth point, no `API_VERSION` bump
-  (still 7), version still `0.1.0-ratta`. **Arc 25 "Drive" (V1–V6, 2026-09-04 → 09-05) IS the
-  EIGHTH point — complete + frozen** — generic `ACTION_CLOUD_STORAGE` served by `:ext-drive`
-  "NSE · Google Drive" (THIRTEEN modules, `API_VERSION` 8, 2340 JVM tests/variant; a real account
-  connects from the Backup screen's Cloud section, every file op real, `CloudTimeouts` measured on
-  the Nomad; export destination, backup leg, import source all real — **no restore**); its
-  reference is `apps/notesprout_ratta/docs/cloud.md`, its plan the **standalone
-  `apps/notesprout_ratta/DRIVE_PLAN.md`** — read that (not `RATTA_PLAN.md`) for Drive work. **No
-  NINTH extension point and no other arc without another user decision.** **Read
-  `apps/notesprout_ratta/RATTA_PLAN.md` first for ANY other work there** — it
-  holds the working protocol, model recipe, standing traps, and the per-arc ledger of
-  still-binding decisions. Subsystem detail: `apps/notesprout_ratta/docs/` + that app's
-  CLAUDE.md. Full frozen-arc phase records live in git history
-  (`git show 90a9198:apps/notesprout_ratta/RATTA_PLAN.md` for arcs 1–18; later arcs at the end
-  of the plan file).
+  (2026-09-05). Drive work (arc 25, the EIGHTH point): read the **standalone
+  `apps/notesprout_ratta/DRIVE_PLAN.md`** (not `RATTA_PLAN.md`). **No NINTH extension point
+  and no other arc without another user decision. Read `apps/notesprout_ratta/RATTA_PLAN.md`
+  first for ANY other work there** — it holds the working protocol, model recipe, standing
+  traps, and the per-arc ledger of still-binding decisions. Subsystem detail:
+  `apps/notesprout_ratta/docs/` + that app's CLAUDE.md. Full frozen-arc phase records live in
+  git history (`git show 90a9198:apps/notesprout_ratta/RATTA_PLAN.md` for arcs 1–18; later
+  arcs at the end of the plan file).
 - `germination` — previous post-MVP feature branch (reference, not active)
 - The former feature branches (`seed`, `sprout`, `sapling`, `supernote`, `paper`) are merged and
   **deleted** (local + remote) — "on sprout/sapling/supernote/paper" means `main`; history lives under
