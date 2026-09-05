@@ -22,7 +22,11 @@ at all. See [The document exporter](#the-document-exporter-arc-19) below. The th
 split into two behavioral shapes — a verbatim byte stream (`.soil`, and now the document text) or
 a host-rendered page bundle the extension only assembles (PDF, in either of its two modes) — which
 is why the seam itself grew a second shape to carry both; see
-[The source-kind seam](#the-source-kind-seam-arc-18) below.
+[The source-kind seam](#the-source-kind-seam-arc-18) below. Arc 25 / V3 grew the screen a second
+kind of *destination*, orthogonal to all three exporters: the panel's **Destination** row can send
+the finished file to the one installed cloud provider instead of a SAF document — see
+[Cloud destination](#cloud-destination-arc-25--v3) below and [`docs/cloud.md`](cloud.md) for the
+seam it rides on.
 
 This is the feature doc. The seam it rides on — the point, the AIDL, the fd handshake, the
 source-kind tail, the export-secret carrier, trust — is [`docs/extensions.md`](extensions.md)
@@ -38,7 +42,9 @@ defaults to the last-used exporter (`1a18036`) · D2 the two options — page-te
 password protection (`ff71644`) + post-D2 the progress dialog (`57e8413`) · D3 this documentation
 pass. **Arc 19 "Document" M9 complete** — the document exporter (`SOURCE_DOCUMENT`, `NSE ·
 Document`) + the host-side Source row + Document-mode PDF-of-preview, all end to end on the Nomad
-(commit `62964e6`).
+(commit `62964e6`). **Arc 25 "Drive" V3 complete** — the Destination row + the host-drawn cloud
+browser + the upload leg, all three exporters unaware, walked on the Nomad (2302 JVM tests, user
+checklist passed 2026-09-04).
 
 ---
 
@@ -101,6 +107,12 @@ top bar's right edge, the bottom of the screen holds nothing.
   `SOURCE_PAGES` (today, `NSE · PDF Export`), the panel grows a host-owned Notebook pages / Document
   choice deciding what gets rendered into the page bundle. It is `GONE`, not disabled, the moment
   either condition stops holding. See [The document exporter](#the-document-exporter-arc-19) below.
+- **The Destination row (arc 25 / V3).** After the exporter's own options and before the passphrase
+  block, a second host-owned choice — *File on this device* / the cloud provider's own name — asks
+  where the finished file goes, independent of which exporter made it. `GONE`, not disabled, while
+  no trusted cloud provider is installed, and its own standing answer is forced back to *local* the
+  moment the row leaves, exactly as the Source row's is. See
+  [Cloud destination](#cloud-destination-arc-25--v3) below.
 
 Discovery re-runs on every `onResume` while not busy (a package can be disabled or replaced under a
 standing screen) and again, from scratch, if the flow finds itself running with no descriptors in
@@ -442,6 +454,98 @@ it, dropping that exporter at discovery like any other bad descriptor) but still
 
 ---
 
+## Cloud destination (arc 25 / V3)
+
+The Destination row on the Export screen is a second, orthogonal choice on top of everything
+above: whichever exporter and options were picked, the finished bytes can go to a SAF document (as
+every export before this arc did) or to the one installed cloud provider's own tree, through
+`:ext-drive` (**NSE · Google Drive**) on the eighth extension point, `ACTION_CLOUD_STORAGE`. No
+exporter learns the difference — it still receives a write fd on a plain file and streams into it
+exactly as before; only *where the host's fd points afterward* changes. The full seam — the
+`ICloudStorage` interface, the provider's tree, the Backup screen's Connect door, the measured
+`CloudTimeouts` — is [`docs/cloud.md`](cloud.md); this section is the export screen's own use of it.
+
+**The row and the tap.** `ExportDestination` (`export/ExportDestination.kt`, pure, JVM-tested) is
+the whole decision core: `rowVisible` (a trusted provider installed — GONE otherwise, never
+disabled), `settled` (a standing *cloud* answer forced back to *local* the moment the row leaves,
+the Source row's rule), and `onCloudTap` — what tapping the cloud radio does, given the last
+`CloudStatus` the provider gave (null when it did not answer): a live connection selects it
+outright; a build with no credentials (`!status.configured`) gets the Backup screen's own *not set
+up* problem dialog; anything else — no account, or no answer at all — gets the **inline Connect
+offer**, a two-button *Connect to `<provider>`?* dialog. Connect opens through
+`extension/CloudConnectEntry` (registered in `onCreate`, since a launcher may not register later;
+closed in `onDestroy`), and its callback re-runs discovery and selects the cloud radio when the
+fresh status says connected. `status()` is re-asked at every discovery, never remembered across
+resumes — the connect door changes it under a standing screen, and a stale "connected" would send
+an export at a provider that has since been disconnected.
+
+**Export, cloud branch.** The secret checks (empty/mismatched passphrase or password, the length
+cap) run exactly as they do for a SAF export — they are about what is in the file, not where it
+goes. Then, in place of `ACTION_CREATE_DOCUMENT`, `cloud/CloudBrowserDialog` opens in
+`Mode.PICK_FOLDER` over `Exports/` (`CLOUD_EXPORTS_FOLDER`, `ExportActivity`'s own constant) — the
+Contents dialog's shape: Up arrow, a `<provider> › Exports › …` breadcrumb, Cancel and a **Save
+here** action button (top bar, after Cancel), paged rows with a pager-only bottom bar, and a first
+*New folder…* row (`NameDialog` + `CloudArgs.requireName`) that either enters an already-listed
+folder of that name or calls `ensureFolder` then enters. **The browser only ever `list`s** —
+`Exports/` itself is created by the upload on its way through, never by browsing. The filename is
+[`ExportNaming`](#the-flow-step-by-step)'s own, fixed rather than editable (there is no field to
+type it into); if the chosen folder's last-drawn listing already holds a file of that name, a
+*Replace `<name>`?* dialog stands in for SAF's overwrite confirmation, because an upload is
+replace-by-name and a silent replace is not the family's way. `NOT_CONNECTED` closes the browser
+straight into the Connect offer; a network failure or no answer leaves the browser exactly where it
+was, over a problem dialog. Purely pure browser rules — crumb text, paging, the same-named lookups,
+the New-folder outcome — live in `cloud/CloudBrowserRules.kt`.
+
+**Prepare, key, upload, verify.** Steps 4–5 of [the flow](#the-flow-step-by-step) run completely
+unchanged — the artifact is sealed, copied and keyed exactly as for a SAF export — except the
+destination fd now opens `cacheDir/export/out.<ext>` instead of the SAF document (the exporter
+never learns which). Verification against that cache file's own length is the same corroboration
+step 8 already does. Only once that passes does the flow send the bytes:
+`CloudClient.upload(path, name, mime, pfd(out), out.length())`, under `uploadBudgetMs(length)`
+([`docs/cloud.md`](cloud.md) § timeouts), staged in the progress dialog as *Uploading to
+`<provider>`…*. The provider's own reported size then corroborates against what was actually sent —
+`ExportVerification.cloudVerdict(reportedBytes, uploadedBytes)` — agreeing is `Verdict.OK` and the
+confirm dialog names the provider; disagreeing is `Verdict.UNCONFIRMED`, the arc-15 *check the
+file* dialog, and **never a delete** — the same corroboration-not-authority rule the SAF
+destination's own metadata check already lives by. **No remote delete anywhere in this phase**: an
+upload is replace-by-name, so a retry after any cloud failure is always safe, and a failure before
+the upload leaves the cloud completely untouched (the cache file is wiped in the flow's usual
+`finally`, same as always).
+
+**Failure rows (cloud).** Before the upload every existing failure message stands and nothing is
+in the cloud, so each one's body says *nothing was uploaded*. After the tap: `CloudNotConnectedException`
+→ *no account is connected to `<provider>`; connect and export again* (`export_cloud_not_connected_body`,
+with a Connect offer from the dialog); `CloudNetworkException` → *`<provider>` could not be reached;
+nothing was uploaded; try again* (`export_cloud_network_body`); a plain `ExtensionCallException` (no
+answer, or a timeout) → *`<provider>` didn't answer; the file may or may not have arrived — check
+`<provider>` before exporting again* (`export_cloud_unanswered_body`, no delete, because a retry
+over replace-by-name is safe either way); the provider gone between the tap and discovery →
+`export_cloud_gone_body`.
+
+**Measured (Nomad, `DRIVE_PLAN.md` § V3 ledger).** `status` selecting the radio at 109 ms warm; a
+folder listing over `Exports/` walked cleanly; a New folder at depth 2 (`ensureFolder`) took
+1 790 ms; a 283 443-byte PDF uploaded and corroborated (`agrees=true`) in 2 775 ms, on both the
+first upload and a same-named replace. `cache/export` was gone in every case checked afterward, and
+the local (SAF) destination was unaffected — it still opens the ordinary picker.
+
+**Design calls recorded at V3 (binding unless the user says otherwise).** Destination-row name
+matches are exact; a New folder past `CloudContract.MAX_PATH_DEPTH` is refused in the pure rules
+before any bind; a same-named *file* never blocks a New folder of the same name; the Up button is
+`INVISIBLE`, not disabled, at the browser's base folder, and its no-op there is silent;
+`Mode.PICK_FOLDER`'s `Pick.Folder` carries the listing it was drawn from, so the replace question
+costs no second `list`; a provider gone between the tap and the upload gets its own
+`export_cloud_gone_body` rather than the generic failed-export sentence; and — the one thing
+recorded as **not yet done** — the Destination answer is **not remembered across screens**: a fresh
+Export screen always defaults back to *File on this device*, even right after a cloud export. A
+remembered destination is a future call, not made here.
+
+**Trap met.** Opus's first pass named the cache file with a literal, unescaped `${…}` in its
+extension (`"out.${'$'}{…}"`) — harmless to the upload itself (the cloud name is `ExportNaming`'s,
+never the cache filename) but wrong; caught on the read-through and fixed before the phase's
+install.
+
+---
+
 ## Timeouts
 
 A Binder call cannot be cancelled, so both of `ExporterContract`'s timeouts are measured, not
@@ -576,6 +680,8 @@ reported honestly, because the delete is best-effort.
   model, the notebook document's merge join `ExportText.markdownOf` reuses, the editor Preview
   metrics `DocumentPdfMetrics` mirrors, text documents.
 - [`docs/library.md`](library.md) — the notebook long-press sheet, where the **Export…** row sits.
+- [`docs/cloud.md`](cloud.md) — the eighth extension point this arc's Destination row rides on:
+  `ACTION_CLOUD_STORAGE`, `:ext-drive`, the provider's tree, the Connect door, `CloudTimeouts`.
 - `apps/notesprout_ratta/RATTA_PLAN.md` §§ "Phases — Arc 15 \"Export\"," "Phases — Arc 18 \"PDF\","
   and "Phases — Arc 19 \"Document\"" (phase M9) — the wizard's locked decisions and each phase's
   outcome, in full.

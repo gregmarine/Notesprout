@@ -5,7 +5,7 @@ arc — read it whole at every phase start, together with the root `CLAUDE.md` a
 `apps/notesprout_ratta/CLAUDE.md`. **Do not load `RATTA_PLAN.md` for this arc** unless a standing
 trap needs checking; its protocol and traps are summarized below so this file is enough.
 
-**Status:** planned 2026-09-04 · V1 ✅ (2026-09-04) · V2 ✅ (2026-09-04) · V3 ✅ (2026-09-04) · V4 ✅ (2026-09-04) · V5 ✅ (2026-09-05) · V6 ⬜
+**Status:** planned 2026-09-04 · V1 ✅ (2026-09-04) · V2 ✅ (2026-09-04) · V3 ✅ (2026-09-04) · V4 ✅ (2026-09-04) · V5 ✅ (2026-09-05) · V6 ✅ (2026-09-05) · **ARC COMPLETE + FROZEN**
 
 ---
 
@@ -298,7 +298,7 @@ untouched.**
   remap → staged Garden write) with the importer matched by extension. Cache wiped in `finally`.
 - Walk: Sonnet drives the browser; user checklist covers the pick of a real file.
 
-### V6 ⬜ — Docs + freeze
+### V6 ✅ — Docs + freeze (2026-09-05)
 - `docs/cloud.md` (the feature: seam, tree, connect, three consumers, timeouts table, failure
   table), `docs/extensions.md` (the eighth point section + boundary audit rows),
   `docs/export.md` / `docs/backup.md` / `docs/import.md` (cloud paragraphs), app `CLAUDE.md`
@@ -596,3 +596,31 @@ byte-scanned all 11 files; the orchestrator re-scanned after its own edits).
 **User checklist.** 1. In Drive, nothing new appeared anywhere under `Notesprout SN Dev/` (import reads
 only — `Backups/waltest/` still holds its 61 files). 2. On the Nomad, the library has a new
 `20260822_Headings Copy 2 Copy` notebook that opens with its 13 pages — delete it whenever you like.
+
+### V6 — Docs + freeze (2026-09-05) ✅
+
+**Outcome.** Docs only — no code, no tests changed (2340 JVM tests/variant stands), no code review
+(decision 12). New `docs/cloud.md` (673 lines: decisions, the seam with the seven-method `ICloudStorage`
+verbatim, `:ext-drive` (OAuth, token lifecycle, REST core, `ExactCopy`, `DriveFailures`, the tree), host
+side with the measured `CloudTimeouts` table, the three consumers, failure table, what the Nomad walks
+proved, design calls, standing traps, debug tooling, futures). `docs/extensions.md` (2101 → 2377):
+arc-25 intro paragraph (the seventh fresh user decision), `:ext-drive` in the module layout, both
+actions in `<queries>`, `## The cloud-storage point (arc 25)` before the boundary audit, **audit rows
+35–42**, Privacy + Identity paragraphs and the `:ext-drive` identity table. Cloud sections in
+`docs/export.md` (V3), `docs/backup.md` (V4 — its pre-arc "Drive deferred" claim corrected),
+`docs/import.md` (V5), a pointer paragraph in `docs/library.md`. App `CLAUDE.md` (doc index line for
+`cloud.md`, eight points in the extensions line, V6 line), root `CLAUDE.md` (arcs 1–25 frozen, THIRTEEN
+modules, EIGHT points, 2340 tests), `RATTA_PLAN.md` pointer line, memory.
+
+**Plan-vs-code drift the writers found (code wins in the docs; recorded here so the plan's early
+sketch is not mistaken for the contract):** `ICloudStorage` has SEVEN methods (V2 added
+`beginConnect`/`endConnect`); `CloudStatus` has a fourth field `configured`; the extension package is
+`…notesproutsn.ext.drive` (the family's convention), not the decision table's literal `.drive`;
+`Mode.PICK_FILE` is a V5 growth of decision 7's browser.
+
+**Trap met (again).** The `cloud.md` writer landed a raw BEL byte in the very sentence describing the
+raw-control-byte trap; the mandatory byte-scan caught it. Every changed file scanned clean before commit.
+
+**Futures (recorded, each needs a user decision):** library restore from `Backups/`, a provider
+chooser, remembering the destination/source across screens, a rate-based `DOWNLOAD_MS`, the
+`ICloudHost` stub if an extension ever needs the cloud itself. **No ninth point, no next arc.**

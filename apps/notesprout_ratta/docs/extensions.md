@@ -81,33 +81,51 @@ changed shape — and the first with a **per-action** floor, replacing the singl
 `MIN_API_VERSION_FOR_STORE` set with a map. The rule survives once more, another word wider: **no
 *eighth* capability point without another user decision** (`apps/notesprout_ratta/CLAUDE.md`).
 
+**Arc 25 "Drive" is the seventh fresh user decision, on 2026-09-04.** The user asked for Google
+Drive as a backup/export/import destination, so SN gains an **eighth** capability point,
+`ACTION_CLOUD_STORAGE` + `ACTION_CLOUD_STORAGE_SCREEN` — the first point that is **generic over a
+provider** (folders, files, bytes, never a provider's own terms) rather than over a feature, served
+by **`NSE · Google Drive`** (`:ext-drive`), the **thirteenth** module and the **only** one carrying
+`INTERNET`. The shape is the tag manager's second call shape — store-taking, bind-per-call, no held
+bind — with one held-bind exception the tag manager also has: the connect *showing*
+(`beginConnect`/`endConnect`), because the sign-in screen has to persist a token only the host can
+lend it a place for. Three existing host features consume it — export destination, backup
+destination, import source — and **no other extension is aware a cloud exists**: an exporter or
+importer only ever sees the two fds the host hands it, so a cloud destination changes only where
+the host's fd points (§ "Why no extension is aware," `DRIVE_PLAN.md`). V1 (seam + scaffold) through
+V5 (import from cloud) landed 2026-09-04 → 2026-09-05; the arc is complete and frozen at V6
+(2026-09-05). The rule survives once more, another word wider: **no *ninth* capability point
+without another user decision** (`apps/notesprout_ratta/CLAUDE.md`).
+
 The pad as a **feature** has its own reference — [`docs/scratchpad.md`](scratchpad.md); export has
 its own — [`docs/export.md`](export.md); import has its own too — [`docs/import.md`](import.md);
 documents likewise — [`docs/document.md`](document.md); tags likewise —
-[`docs/tags.md`](tags.md); the calendar likewise — [`docs/calendar.md`](calendar.md). This doc is
-the seam for all seven points, and the store rebuild that underlies three of them.
+[`docs/tags.md`](tags.md); the calendar likewise — [`docs/calendar.md`](calendar.md); the cloud
+likewise — [`docs/cloud.md`](cloud.md). This doc is the seam for all eight points, and the store
+rebuild that underlies three of them.
 
 Fresh code. Paper's own extension arcs (`PAPER_EXTENSIONS_PLAN.md`, `PAPER_RECOGNITION_PLAN.md`,
 `PAPER_SCRATCHPAD_PLAN.md`, its `:extension-api` / `:ext-mlkit` / `:ext-scratchpad`) are the shape
-reference — nothing is copied, and SN's AIDL is scoped to its **seven** points rather than Paper's
-broader capability set. Paper never built export, import, documents, tags or a calendar, so it has
-nothing to say about the third through seventh; og's `docs/full-notebook-export.md` § Import was
-the fourth's reading reference, og's `docs/documents.md` the fifth's, and og's own
-`docs/calendar.md` (`CalendarActivity` / `CalendarTemplateRenderer`, at the monorepo root) the
-seventh's — the three layouts and the navigation, not the seam; nothing is copied. Tags have no og
+reference — nothing is copied, and SN's AIDL is scoped to its **eight** points rather than Paper's
+broader capability set. Paper never built export, import, documents, tags, a calendar or a cloud
+destination, so it has nothing to say about the third through eighth; og's
+`docs/full-notebook-export.md` § Import was the fourth's reading reference, og's `docs/documents.md`
+the fifth's, og's own `docs/calendar.md` (`CalendarActivity` / `CalendarTemplateRenderer`, at the
+monorepo root) the seventh's, and og's own `docs/backup.md` § "Google Drive REST/OAuth Path" the
+eighth's — the tree shape and the OAuth flow, not the seam; nothing is copied. Tags have no og
 reading reference — the feature is new to this family.
 
 ---
 
 ## Module layout
 
-Twelve modules, SN's own Gradle root:
+Thirteen modules, SN's own Gradle root:
 
 | Module | Type | Depends on | Holds |
 |---|---|---|---|
 | `:sn-screen` | Android library | g-paper (`api`) + androidx; **never** `:app`, **never** `:extension-api` | the design resources and the screen helpers every paper surface needs — including `FloatingSelectionBar` (arc 23 / Y1, moved here from the pad so the calendar's floating bar is not a sibling copy), `ic_calendar`, and (arc 23 / Y4) `PenIdle` (the shared frame-silence gate) and `InkSelectionBar` (the ONE Send-then-Delete floating bar over `FloatingSelectionBar`, replacing `ScratchSelectionToolbar` and `CalendarSelectionToolbar`) — see [`sn-screen.md`](sn-screen.md) |
 | `:markdown` | Android library | nothing in this project — stdlib + the android SDK its spans use (arc 19 / M1) | the shared pure markdown engine `:app` and `:ext-document` both consume — parser, renderer, `HeadingTypography`, `MarkdownDraw`, `MarkdownFormatter`, `TextBuffer`, `MarkdownReflow`, `TextSearch`, `DocumentDraft`, `MarkdownText`, `MarkdownPaginator`. One engine, no drift: the host renders text-document covers and the PDF preview, the extension renders the editor's Preview |
-| `:extension-api` | Android library | nothing in `:app`, no library beyond the Kotlin stdlib (`build.gradle.kts` says so explicitly) | the AIDL (`IHandwritingRecognizer`, `InkStroke.aidl`; `IExtensionStore`, `StorePayload.aidl`, `StoreResult.aidl`, `StoreSchema.aidl`; `IScratchPad`, `WireStroke.aidl`, `InkBundle.aidl`; `INotebookExporter`, `ExporterInfo.aidl`, `ExportSpec.aidl`, `ExportResult.aidl`; `INotebookImporter`, `ImporterInfo.aidl`, `ImportSpec.aidl`, `ImportResult.aidl`; `IDocumentEditor`, `IDocumentHost`, `DocumentPageState.aidl`; `ITagManager`, `TagShowing.aidl`, `TagRecord.aidl`, `AssignmentRecord.aidl`; `ICalendar`, `CalendarTarget.aidl`), the hand-written `InkStroke` / `StorePayload` / `StoreResult` / `StoreSchema` / `WireStroke` / `InkBundle` / `ExporterInfo` / `OptionDescriptor` / `ExportSpec` / `ExportResult` / `ImporterInfo` / `ImportSpec` / `ImportResult` / `DocumentPageState` / `TagShowing` / `TagRecord` / `AssignmentRecord` / `CalendarTarget` parcelables, `PageBundle` (the arc-18 page-bundle container — pure `java.io`, no Android types), `SharedBytes`, `InkChunks`, `TextChunks`, `RecognizerStatus`, `ExtensionContract`, `ExporterContract`, `ImporterContract`, `DocumentContract`, `HostCallerCheck`, `CalendarDates` (arc 23 / Y1, pure `java.time` date arithmetic — Sunday weeks, hand-list titles, `step`/`periodDate`/`isNormalized`), and — the store seam rebuilt at arc 22 / X1 — `StoreCodec` (`Cell`, `Statement`, `Row`, `StoreRows`, `StoreChunker`), `StoreSql` / `StoreNames` (the validator), `StoreReads` (the extension-side `query`/`exec` loop), `TagRules` (arc 21, `isId` case-insensitive since X3) and `TagPages` (arc 22 / X3, the one paging loop both sides run). Arc 21's `TagIndex` / `TagCodec` / `CompactId` are **deleted** with the one-blob layout they served; `TagIndex` survives as `:ext-tags`' own in-memory query model, not a file shared by both sides |
+| `:extension-api` | Android library | nothing in `:app`, no library beyond the Kotlin stdlib (`build.gradle.kts` says so explicitly) | the AIDL (`IHandwritingRecognizer`, `InkStroke.aidl`; `IExtensionStore`, `StorePayload.aidl`, `StoreResult.aidl`, `StoreSchema.aidl`; `IScratchPad`, `WireStroke.aidl`, `InkBundle.aidl`; `INotebookExporter`, `ExporterInfo.aidl`, `ExportSpec.aidl`, `ExportResult.aidl`; `INotebookImporter`, `ImporterInfo.aidl`, `ImportSpec.aidl`, `ImportResult.aidl`; `IDocumentEditor`, `IDocumentHost`, `DocumentPageState.aidl`; `ITagManager`, `TagShowing.aidl`, `TagRecord.aidl`, `AssignmentRecord.aidl`; `ICalendar`, `CalendarTarget.aidl`; `ICloudStorage`, `CloudStatus.aidl`, `CloudEntry.aidl`), the hand-written `InkStroke` / `StorePayload` / `StoreResult` / `StoreSchema` / `WireStroke` / `InkBundle` / `ExporterInfo` / `OptionDescriptor` / `ExportSpec` / `ExportResult` / `ImporterInfo` / `ImportSpec` / `ImportResult` / `DocumentPageState` / `TagShowing` / `TagRecord` / `AssignmentRecord` / `CalendarTarget` / `CloudStatus` / `CloudEntry` parcelables, `PageBundle` (the arc-18 page-bundle container — pure `java.io`, no Android types), `SharedBytes`, `InkChunks`, `TextChunks`, `RecognizerStatus`, `ExtensionContract`, `ExporterContract`, `ImporterContract`, `DocumentContract`, `CloudContract` (arc 25 / V1, path/name/id/MIME bounds and the two verbatim refusals `NOT_CONNECTED`/`NETWORK`), `HostCallerCheck`, `CalendarDates` (arc 23 / Y1, pure `java.time` date arithmetic — Sunday weeks, hand-list titles, `step`/`periodDate`/`isNormalized`), and — the store seam rebuilt at arc 22 / X1 — `StoreCodec` (`Cell`, `Statement`, `Row`, `StoreRows`, `StoreChunker`), `StoreSql` / `StoreNames` (the validator), `StoreReads` (the extension-side `query`/`exec` loop), `TagRules` (arc 21, `isId` case-insensitive since X3) and `TagPages` (arc 22 / X3, the one paging loop both sides run). Arc 21's `TagIndex` / `TagCodec` / `CompactId` are **deleted** with the one-blob layout they served; `TagIndex` survives as `:ext-tags`' own in-memory query model, not a file shared by both sides |
 | `:ext-mlkit` | Android application (its own installable APK) | `:extension-api` + `com.google.mlkit:digital-ink-recognition:19.0.0` | `HandwritingRecognizerService`, `ModelManager`, `MlKitEngine`, `PageText`, `StrokeSegmenter`, `Dots`, `Box` |
 | `:ext-ink` | Android library | `:extension-api` (`api`) + `:sn-screen` (`api` — g-paper's `Stroke` reaches it that way, plus `StrokeCodec` and `Slog`) + coroutines + (since Y4) `api(appcompat)` — `InkScreenActivity` is an `AppCompatActivity` a consumer extends, the same version both consumers already declared, no new library on the graph — + `implementation(lifecycle-runtime-ktx)`; **never** `:app`, no manifest components, no resources | the ink-on-rows library the scratch pad and the calendar share since arc 23 / Y1, so neither is a sibling copy of the other: `InkWire` (wire ⇄ paper, the extension-side twin of the host's `TransferCaps` — the twin stays deliberate), `StrokeRows` + `StrokeBlob` (row ⇄ stroke, `StrokeCodec` format B, a bad row a dropped stroke and never a lost page), `StoreBatches` (splitting a write into `exec` batches at the store's byte/statement caps), `StrokeReadPlan` (planning a page's stroke read into `BETWEEN` ranges so a page of any size comes back without meeting `STORE_RESULT_LARGE`), `InkDocument` (the `TreeMap<order, Stroke>` + op log + `flushUntilClean`, taking its two stroke statements through a small `StrokeSql` interface so each consumer's SQL stays its own), `InkAction` (`Drew`/`Erased`/`Moved`/`Pasted`, the stroke-level replay), and the abstract `InkStore` base (`StoreUnavailable`, `PageInk`, `execAll`/`run`/`compensated`/`guard`/`readStrokes`) the pad's and the calendar's own stores extend. Moved out of `:ext-scratchpad` at Y1 under neutral names, tests included. **Since arc 23 / Y4** (the code-review fix that closed a second sibling copy the Y1 move left below the store line): `InkSql` (the shared `stroke` DDL and its six statements, byte-identical to what each consumer used to spell out), `InkPage` (the ink half of a consumer's document as a contract — `pageId`/`strokes`/`pageWidth`/`pageHeight`/`erase`/`move`/`flushUntilClean`, `ScratchDocument` and `CalendarDocument` implement it), `InkTransferSession<P, R>` (the process-wide showing state and the two transfer stubs' bodies, `receiveChunk`/`outgoing`, under one monitor, the placement bound by the first chunk), and `InkScreenActivity<A>` (the abstract tier-2 screen skeleton: the page-op lock, undo/redo replay with the `followReplay` hook, the bounded-debounce-vs-unbounded-leave flush, the EPD handoff order) |
 | `:ext-scratchpad` | Android application (its own installable APK) | `:extension-api` + `:sn-screen` (g-paper arrives through its `api`) + `:ext-ink` + androidx; **never** `:app`, no Room / SQLCipher / serialization | `ScratchPadApplication`, `ScratchPadService` (thin on `:ext-ink`'s `InkTransferSession` since Y4 — supplies only the placement int's own check, the page-list read at `begin`, and its own log wording), `ScratchPadActivity` (thin on `:ext-ink`'s `InkScreenActivity` since Y4 — keeps the page list, the pager, inserts, delete confirm, its own `consumeReceived` head), `ScratchSession` (an `InkTransferSession<Int, ScratchStore.Received>(recordInboundPageSize = true)`), `ScratchSchema` (arc 22 / X2, schema v1: `page`/`stroke`/`state` — the `stroke` half is `:ext-ink`'s `InkSql` since Y4), `ScratchSql` (`: InkDocument.StrokeSql by InkSql` since Y4), `ScratchStore` (extends `:ext-ink`'s `InkStore`), `ScratchDocument` (thin over `:ext-ink`'s `InkDocument` — the pad's own layer keeps only the page list and its structural edits — and implements `:ext-ink`'s `InkPage` since Y4), `ScratchUndo` (`ScratchAction` sealed: `Ink(InkAction)` · `Page`, the pad's own page-level action), `ScratchPages`, `ScratchToolbar` — `ScratchInk`, `ScratchBatches`, `ScratchReadPlan` and `StrokeRows` **moved to `:ext-ink`** (arc 23 / Y1) under neutral names, and `ScratchSelectionToolbar` **deleted** (arc 23 / Y4) in favour of `:sn-screen`'s `InkSelectionBar` |
@@ -116,7 +134,8 @@ Twelve modules, SN's own Gradle root:
 | `:ext-document` | Android application (its own installable APK) | `:extension-api` + `:sn-screen` + `:markdown` + `com.darkrockstudios:symspellkt:3.4.0` (module-local — approved 2026-08-30, the pdfbox precedent); **never** `:app`, no Application class, no drawing engine | one package, TWO services + a screen: `DocumentEditorService` + `DocumentEditorActivity` (the editor — arc 19 / M3–M7, with `EditorSession`, `DocumentSaver`, `AutosaveGovernor`, `ChunkPush`, `PendingPark`, `EditorSchema` (arc 22 / X4, schema v1: `prefs`/`word`/`caret`), `EditorSql`, `EditorStore`, `EditorPrefs` (the thin facade callers keep using), the format bar, find & replace, and the `proofread/` engine over the bundled `assets/proofread/en_82765.dict`), `TextImporterService` (M8, on the importer point) and `DocumentExporterService` (M9, on the exporter point) — see [`document.md`](document.md) |
 | `:ext-tags` | Android application (its own installable APK) | `:extension-api` + `:sn-screen` (g-paper arrives through its `api` and is deliberately never touched); **never** `:app`, no Application class, no drawing engine | the TENTH module (arc 21 / W1–W4, grown onto rows at arc 22 / X3, **NSE · Tags**, Tabler `tag` icon): one service + a screen, `TagManagerService` + `TagsActivity`, over `TagSession` (the `ScratchSession` shape — the two share a process), `TagSchema` (schema v1: `tag`/`assignment`), `TagSql`, `TagStore`, `TagIndex` (moved here from `:extension-api` at X3 — the screen's query-only in-memory model, built from two reads), `TagManage`, `TagPaging`, `TagRowView` — see [`tags.md`](tags.md) |
 | `:ext-calendar` | Android application (its own installable APK) | `:extension-api` + `:sn-screen` (g-paper arrives through its `api`) + `:ext-ink` + androidx; **never** `:app`, no Room / SQLCipher / serialization | the TWELFTH module (arc 23 / Y1–Y3, **NSE · Calendar**, Tabler `calendar` icon): `CalendarApplication` (registers `RattaEngine` — its own process), `CalendarService` (the `ICalendar` stub, thin on `:ext-ink`'s `InkTransferSession` since Y4 — supplies only the target's own null check and the log wording), `CalendarSession` (an `InkTransferSession<CalendarTarget, CalendarStore.Received>(recordInboundPageSize = false)`), `CalendarSchema` (schema v1: `period`/`page`/`stroke`/`state` — the `stroke` half is `:ext-ink`'s `InkSql` since Y4), `CalendarSql` (`: InkDocument.StrokeSql by InkSql` since Y4), `CalendarStore` (on `:ext-ink`'s `InkStore`), `CalendarDocument` (thin over `:ext-ink`'s `InkDocument` — the calendar's own layer keeps which period/page is showing, whether its rows exist yet, and its size — and implements `:ext-ink`'s `InkPage` since Y4), `CalendarGeometry`, `CalendarTemplate`, `CalendarNavigation`, `DayPickerModel`, `DayPickerDialog`, `CalendarToolbar`, `CalendarActivity` (thin on `:ext-ink`'s `InkScreenActivity` since Y4 — keeps navigation, template bake, the picker, double-tap, `followReplay()`) — `CalendarSelectionToolbar` **deleted** (arc 23 / Y4) in favour of `:sn-screen`'s `InkSelectionBar`; **grown in place by arc 24 "Events" (Z1–Z5, not a point, no API bump — still declares 7)**: two more in-process screens, `EventsActivity` (the day's list) and `EventEditorActivity` (one event), both `exported="false"` and launched only in-process with an `ActivityResultLauncher` (the list by `CalendarActivity`, the editor by the list) — same process, so neither needs a `HostCallerCheck`; `CalendarSchema.V2` (V1's step untouched + one events step: `event` / `event_weekday` / `event_exception` / `event_reminder` / `note_stroke`); `EventStore : InkStore, MarkSource`, `EventSql`, `NoteSql : InkDocument.StrokeSql`, `Recurrence`, `EventRules`, `EventWrites`, `EventRows`, `Upcoming`, `EventWording`, `EventDraft`, `GridMarks`, `DayRows`; and `NoteSurface`, a second g-paper surface in the same process (the calendar hands nothing over before the list; the editor's surface releases before every `finish()`) — see [`docs/calendar.md`](calendar.md) |
-| `:app` (`extension/` package) | part of the host APK | `:extension-api` | `ExtensionRegistry`, `ExtensionBinder`, `ExtensionCallException`, `InkCaps`, `RecognizerClient`, `RecognizerReadiness`, `HeldInkClient` (arc 23 / Y4 — the pad's and the calendar's held-bind lifecycle written once: `HeldInkPoint` is the per-point names/budgets interface, `DrainedInk` the one drained-result class), `ExtensionScreenEntry` (Y4 — the pad's and the calendar's entry-button door written once: `InkSend` the one outbound-ink class, `EntryWording` the four strings), `TransferSelection` (Y4 — the pure ink-only/writing-order rule both lasso sends obey), `ScratchPadClient` / `CalendarClient` / `ScratchPadEntry` / `CalendarEntry` (since Y4, thin points on the two classes above — a point's companion is a `HeldInkPoint`, its constructor a set of `ExtensionScreenEntry` wiring), `TransferCaps`, `ExporterClient`, `ImporterClient`, `DocumentEditorClient`, `DocumentEditorEntry`, `DocumentHostBinder`, `DocumentHostSession`, `TagClient`, `TagManagerEntry`; and in `data/extstore/`, the extension store — rebuilt on `SupportSQLiteOpenHelper` at arc 22 / X1, Room's `KvEntity`/`KvDao` deleted with it (`ExtensionStores`, `ExtensionStoreDatabase`, `StoreFormat`, `StoreExecutor` / `SupportStoreExecutor`, `ExtensionStoreGate`, `ExtensionStoreBinder`) — plus, in `export/` and `crypto/`, export's own host-side half (`ExportActivity`, `ExportPanel`, `ExportOptions`, `ExportArtifact`, `ExportNaming`, `ExportKeying`, `SoilOpenFiles`, and arc 19's `ExportText`, `ExportDocumentRules`, `DocumentPdfRender`, `DocumentPdfMetrics`), in `importing/` and `crypto/`, import's (`ImportFlow`, `NotebookImport`, `ImporterMatch`, `ImportNames`, `AncestryPlan`, `SafeImportId`, `ImportDialogs`, `ImportOverlay`, `ImportKeying`, `NotebookRemap` in `data/soil/`, and arc 19's `TextImport`), in `notebook/`, tags' own host-side half (`TagsPopup`, `TagTargets`, `TagSelection`), and in `notebook/`, the calendar's own host-side half (`CalendarTargets`, arc 23 / Y3 — the four Send-to-Calendar choices, every one through `CalendarTarget.of`) |
+| `:ext-drive` | Android application (its own installable APK) | `:extension-api` + `:sn-screen` (g-paper is never touched — this point has no paper) + `kotlinx.serialization` (arc 25 / V2 — already on the graph via `:app`, no new library); **never** `:app`; the **only** module carrying `INTERNET` | the THIRTEENTH module (arc 25 / V1–V5, **NSE · Google Drive**, Tabler `cloud` icon): one service + a screen on SN's eighth point, `DriveService` (the `ICloudStorage` stub — every method `HostCallerCheck.enforce`'d, thin over `DriveOps`) + `ConnectActivity` (the tier-2 sign-in behind `HostCallerCheck.enforceActivity` — WebView PKCE, Chrome UA spoofed before `loadUrl`, the `http://localhost/oauth2callback` redirect intercepted, `RESULT_OK` only after both store writes land), `ConnectSession` (the parked store between `beginConnect`/`endConnect`, one monitor), `DriveSchema` (schema v1: one table, `account(key, value)` — refresh token, account label, cached root/`Exports`/`Backups` folder ids), `DriveSql` (every statement against it — `account` has no children, so a plain `INSERT OR REPLACE` is safe, unlike the tag manager's tables), `DriveStore` (on the host's `IExtensionStore`), `DriveAuth` (pure PKCE/OAuth core), `DriveHttp` (the one `HttpTransport` impl, over `HttpURLConnection`), `DriveTokens` (the access token in memory only, refreshed from the store), `DriveApi` (REST v3: about/find/create/ensure/list/multipart-or-resumable-upload/download/delete, replace-by-name throughout), `DriveOps` (the testable body the service delegates to), `DriveFailures` (the marshalable funnel — every transport failure becomes the verbatim `NETWORK`), `DRIVE_CLIENT_ID`/`DRIVE_CLIENT_SECRET` compiled from the shell env into this APK only, `ROOT_FOLDER_NAME` "Notesprout SN" / "Notesprout SN Dev" by build type (`DRIVE_PLAN.md` decision 9) — see [`docs/cloud.md`](cloud.md) |
+| `:app` (`extension/` package) | part of the host APK | `:extension-api` | `ExtensionRegistry`, `ExtensionBinder`, `ExtensionCallException`, `InkCaps`, `RecognizerClient`, `RecognizerReadiness`, `HeldInkClient` (arc 23 / Y4 — the pad's and the calendar's held-bind lifecycle written once: `HeldInkPoint` is the per-point names/budgets interface, `DrainedInk` the one drained-result class), `ExtensionScreenEntry` (Y4 — the pad's and the calendar's entry-button door written once: `InkSend` the one outbound-ink class, `EntryWording` the four strings), `TransferSelection` (Y4 — the pure ink-only/writing-order rule both lasso sends obey), `ScratchPadClient` / `CalendarClient` / `ScratchPadEntry` / `CalendarEntry` (since Y4, thin points on the two classes above — a point's companion is a `HeldInkPoint`, its constructor a set of `ExtensionScreenEntry` wiring), `TransferCaps`, `ExporterClient`, `ImporterClient`, `DocumentEditorClient`, `DocumentEditorEntry`, `DocumentHostBinder`, `DocumentHostSession`, `TagClient`, `TagManagerEntry`, and (arc 25) `CloudClient` (the store-taking, bind-per-call file ops — no held bind), `CloudConnectClient` (the one held bind on the point, the connect showing's bracket), `CloudConnectEntry` (the entry-button door over it — registered in `onCreate`, closed in `onDestroy`, always answers even on the sign-in-could-not-open path), `CloudArgs` (host-side checks run before any bind), `CloudTimeouts` (the measured per-method budget table), `CloudWording`, `CloudNotConnectedException` / `CloudNetworkException`; and in `data/extstore/`, the extension store — rebuilt on `SupportSQLiteOpenHelper` at arc 22 / X1, Room's `KvEntity`/`KvDao` deleted with it (`ExtensionStores`, `ExtensionStoreDatabase`, `StoreFormat`, `StoreExecutor` / `SupportStoreExecutor`, `ExtensionStoreGate`, `ExtensionStoreBinder`) — plus, in `export/` and `crypto/`, export's own host-side half (`ExportActivity`, `ExportPanel`, `ExportOptions`, `ExportArtifact`, `ExportNaming`, `ExportKeying`, `SoilOpenFiles`, and arc 19's `ExportText`, `ExportDocumentRules`, `DocumentPdfRender`, `DocumentPdfMetrics`), in `importing/` and `crypto/`, import's (`ImportFlow`, `NotebookImport`, `ImporterMatch`, `ImportNames`, `AncestryPlan`, `SafeImportId`, `ImportDialogs`, `ImportOverlay`, `ImportKeying`, `NotebookRemap` in `data/soil/`, and arc 19's `TextImport`), in `notebook/`, tags' own host-side half (`TagsPopup`, `TagTargets`, `TagSelection`), and in `notebook/`, the calendar's own host-side half (`CalendarTargets`, arc 23 / Y3 — the four Send-to-Calendar choices, every one through `CalendarTarget.of`); and, arc 25, the cloud point's three consumers' own host-side halves — in `export/`, `ExportDestination` (the pure Destination-row rules) and `cloud/CloudBrowserDialog` + `CloudBrowserRules` (the host-drawn folder/file browser, shared with import); in `data/backup/`, `DeviceFolder`, `SelfContainedSnapshot` (the WAL-absorbing cache copy — the cloud never holds a sidecar) and `CloudBackupLeg` + `CloudBackupRules` (the backup run's second leg); in `importing/`, `CloudImportRules` (the download's three-way byte corroboration) |
 
 `:sn-screen` is deliberately **not** in that dependency chain: it never sees `:extension-api`, so a
 shared screen helper can never quietly become part of the wire contract. **`:ext-ink` is the one
@@ -175,14 +194,21 @@ The host's `AndroidManifest.xml` declares package-visibility for the point (API 
     <intent>
         <action android:name="…extension.CALENDAR_SCREEN" />
     </intent>
+    <intent>
+        <action android:name="…extension.CLOUD_STORAGE" />
+    </intent>
+    <intent>
+        <action android:name="…extension.CLOUD_STORAGE_SCREEN" />
+    </intent>
 </queries>
 ```
 
-The four screen-owning points (scratch pad, document editor, tag manager, calendar) need **both**
-of their actions listed: one to discover and bind the service, one to resolve and launch the
-screen. The exporter and importer points need only one each — `describe()` and the delivery call
-both ride the same bind-per-call service. Plus `ACCESS_NETWORK_STATE`, for the readiness flow's
-offline pre-check (below).
+The five screen-owning points (scratch pad, document editor, tag manager, calendar, cloud storage)
+need **both** of their actions listed: one to discover and bind the service, one to resolve and
+launch the screen — the cloud point's screen is the connect showing, not a feature screen, but the
+rule is the same one. The exporter and importer points need only one each — `describe()` and the
+delivery call both ride the same bind-per-call service. Plus `ACCESS_NETWORK_STATE`, for the
+readiness flow's offline pre-check (below).
 
 **Missing either of a screen-owning point's two actions from this block is a silent-zero trap, not
 a mismatch.** Arc 21 / W1 cost an hour to it: with the service's own action present but the
@@ -1888,6 +1914,219 @@ failure table, tests and traps — is [`docs/calendar.md`](calendar.md) § Event
 
 ---
 
+## The cloud-storage point (arc 25)
+
+> The cloud **as a feature** — the tree, the connect flow, the three consumers (export
+> destination, backup leg, import source), the measured `CloudTimeouts` table, the failure table —
+> is [`docs/cloud.md`](cloud.md). What follows is the **seam**: the point, the two call shapes, the
+> wire types, and what each side is allowed to know.
+
+`ACTION_CLOUD_STORAGE` + `ACTION_CLOUD_STORAGE_SCREEN` — SN's **eighth** point, granted 2026-09-04,
+and the first that is **generic over a provider** rather than over a feature: the contract speaks
+folders, files and bytes, never a provider's own terms, so a second provider is a new extension on
+this same point, not a new point. Served by **`NSE · Google Drive`** (`:ext-drive`), the only
+module carrying `INTERNET` — the host itself has none, never has, and never will (`DRIVE_PLAN.md`
+decision 3). V1–V5 landed 2026-09-04 → 2026-09-05; the arc is complete and frozen at V6.
+
+### Store-taking, bind-per-call — the tag manager's second call shape
+
+Every file operation is one bind, one call, one unbind: the store rides the call as an argument,
+minted per bind by the host on IO **before** the bind (the pre-open rule — a cold SQLCipher KDF is
+seconds on the Nomad and must never sit inside a call timeout), uid-bound, and revoked in `finally`
+whatever happened. There is **no held bind** for an operation, because a Binder call cannot be
+cancelled: `CloudClient` times every call itself against `CloudTimeouts`, a table sized by
+on-device measurement rather than chosen — a budget that runs out leaves the provider still
+working while the host has already told the person nothing happened, so every operation here is
+either idempotent (`disconnect`, `delete`) or replace-by-name (`upload`), and nothing is retried
+automatically.
+
+```
+interface ICloudStorage {
+    CloudStatus status(IExtensionStore store);
+    void        disconnect(IExtensionStore store);
+    void        beginConnect(IExtensionStore store);
+    void        endConnect();
+    CloudEntry[] list(IExtensionStore store, in String[] path);
+    CloudEntry   ensureFolder(IExtensionStore store, in String[] path);
+    CloudEntry   upload(IExtensionStore store, in String[] path, String name, String mime,
+                        in ParcelFileDescriptor source, long expectedBytes);
+    long         download(IExtensionStore store, String entryId, in ParcelFileDescriptor destination);
+    void         delete(IExtensionStore store, String entryId);
+}
+```
+
+`status` never touches the network — it is what the store says, not what the provider would say if
+asked, so it is cheap enough to call on a screen's resume. Every method calls `HostCallerCheck.enforce`
+first, **inside** the `try` whose `finally` closes any fd (the exporter's E1 rule, restated for a
+fourth store-taking-shaped point); only `SecurityException` / `IllegalArgumentException` /
+`IllegalStateException` ever leave a stub, and `DriveFailures.marshalable` is the funnel that keeps
+a transport failure from silently killing the transaction the way an unfunnelled one did on the
+recognizer's own seam.
+
+### The one held bind is the connect showing
+
+`beginConnect`/`endConnect` are the two tail methods V2 added, and they exist for one reason: the
+sign-in screen has to **persist** what it wins, and an extension writes nothing to disk itself,
+ever — the store has to outlive a single call, which is exactly what a held bind is for. The
+bracket is the tag manager's, on purpose:
+
+1. `CloudConnectClient` pre-opens the store on IO and mints a uid-bound `ExtensionStoreBinder`;
+2. `ExtensionBinder.hold` — the signature re-checked at the bind, not only at discovery;
+3. `beginConnect(store)` parks it in the extension's own `ConnectSession` (one monitor) for the
+   screen the host is about to launch;
+4. the host launches `ConnectActivity` through an `ActivityResultLauncher` — **nothing rides the
+   Intent**, no extras at all; a plain `startActivity` leaves `callingPackage` null and
+   `HostCallerCheck.enforceActivity` refuses it before anything is inflated;
+5. on the result, `CloudConnectClient.finish`: `endConnect()` best-effort, then unbind and revoke
+   in one `finally` on every path.
+
+`ConnectActivity` answers `RESULT_OK` only **after the token is in the store**, so the bracket
+itself teaches the host nothing — its next `status()` call is the truth, and that is what every
+caller re-reads either way. **The posted-result-after-`onResume` trap** (found on the V5 walk):
+`CloudConnectEntry`'s result callback runs on a coroutine posted *after* the launching Activity's
+own `onResume`, so a safety net that clears a "connect pending" latch from `onResume` fires first
+and a successful sign-in would never be seen to continue the caller's flow. The fix is structural,
+not a timing patch: `CloudConnectEntry.open()` calls `onChanged(false)` on the sign-in-could-not-open
+path too, so **a result always arrives** and every caller (`ExportDestination`, the Backup screen's
+Cloud section, the library's Import source) reacts to the result alone, never to a resume-time
+sweep. `CloudConnectEntry` is registered in the caller's `onCreate` (a launcher may not register
+later) and closed in `onDestroy` as the standing backstop.
+
+### The wire types and the `requireValid` bounds
+
+`CloudStatus(connected, configured, accountLabel, providerName)` and
+`CloudEntry(id, name, isFolder, sizeBytes, modifiedAt)` are plain hand-written parcelables whose
+constructor `require`s **are** the validation, both directions — unmarshal is validation, the
+family rule since E1. `configured` is the fourth field V1 added beyond the wizard's three: it is
+false when the extension APK was built with blank `DRIVE_CLIENT_ID`/`DRIVE_CLIENT_SECRET`, so a
+blank-credentials build reports itself and the host dialogs on it rather than offering a Connect
+that cannot work; `connected` implies `configured`, and `accountLabel` is non-empty only when
+`connected` is true.
+
+A path is folder **names** under the provider's own root, never the root itself and never anything
+above it — `CloudContract.requireValidPath` bounds it at `MAX_PATH_DEPTH` (8 segments) and runs
+`isName` on each: non-blank, at most `MAX_NAME_CHARS` (255), no `/` or `\`, no control character,
+not `.` or `..`, no leading or trailing whitespace. An entry id is opaque — the provider minted it,
+the provider reads it back — bounded only at `MAX_ENTRY_ID_CHARS` (256) with no whitespace or
+control character. A MIME string is `type/subtype` shaped, bounded at `MAX_MIME_CHARS` (128). Every
+one of these checks runs on **both** sides: `CloudContract`'s functions inside the parcelables'
+constructors and `DriveService`'s own call sites, and `CloudArgs` host-side **before any bind** — a
+bad name is a host bug that should be refused in microseconds, not by waking another process to say
+no.
+
+### The three exceptions, and the two verbatim `IllegalStateException` messages
+
+Only `SecurityException`, `IllegalArgumentException` and `IllegalStateException` may leave a stub —
+the recognizer's rule, restated for the fifth time. Two `IllegalStateException` messages are typed
+constants the host compares **verbatim, never as a substring**: `CloudContract.NOT_CONNECTED`
+("not connected" — no account, or one revoked out from under the extension; the host offers
+Connect) and `CloudContract.NETWORK` ("network" — the provider could not be reached; nothing
+changed, try again). `CloudClient` maps them to `CloudNotConnectedException` /
+`CloudNetworkException`; any other message is the plain `ExtensionCallException` every other client
+throws, and reads as "the provider didn't answer."
+
+### What never crosses
+
+No secret, no device path, no URL crosses this seam in either direction. The extension owns the
+OAuth client id and secret (compiled only into its own APK), the refresh token and the access token
+(the token lives in memory only, refreshed from the store — never parceled). The host sees a path
+of folder **names**, an opaque entry id, a MIME string, and file descriptors. The account label is
+user content — an email, usually — and is **never logged on either side**; every log line on both
+ends (`DriveService`, `CloudClient`, `CloudConnectClient`, `CloudConnectEntry`) carries booleans,
+counts and durations only.
+
+### The extension owns OAuth — because the host has no INTERNET
+
+`ConnectActivity`'s WebView carries the whole PKCE flow (auth URL, code exchange, silent refresh):
+Google refuses sign-in from a WebView identifying as Android WebView
+(`disallowed_useragent`), so the Chrome UA is spoofed **before** `loadUrl()` — a standing trap
+inherited from og's own Drive work (`DRIVE_PLAN.md` § "Standing traps"). The redirect
+(`http://localhost/oauth2callback`) is intercepted in the WebView rather than actually reaching a
+server; consent declined is a plain cancel, every other failure a dialog that leaves on dismiss.
+None of this could live in the host: the host has no `INTERNET` permission by design, so the
+extension is the **only** networked process in the app, and it is the extension's job to keep the
+client secret out of every log line even though, for this OAuth client type (Desktop app), Google's
+own model does not treat it as truly secret.
+
+### The tier-2 screen, and its launch
+
+`ConnectActivity` is exported under `ACTION_CLOUD_STORAGE_SCREEN` with `<category DEFAULT>` (without
+which implicit resolution never matches it) and refuses any caller that is not the host, checked by
+`HostCallerCheck.enforceActivity` first thing in `onCreate`, before anything is inflated. The host
+launches it only through an `ActivityResultLauncher`, after `beginConnect` has already succeeded on
+the held bind — the tier-2 recipe's fourth use. Nothing rides its Intent, not even a boolean: the
+scratch pad's two booleans and the calendar's three were the last things to ride an Intent on any SN
+seam, and this point's screen carries none at all, because its whole job is the sign-in, not a
+choice the host needs to hand it.
+
+### The store — one table, and the cold-open cost
+
+`DriveSchema.V1` declares a single table:
+
+```sql
+account (key TEXT PRIMARY KEY, value TEXT NOT NULL)
+```
+
+A handful of rows hold the whole account — the refresh token, the account label, and cached
+folder ids — the document editor's `prefs` table is the precedent for reaching for one key/value
+table rather than a wider one. Every statement lives in `DriveSql`; because `account` has no
+children and nothing to cascade, `upsertValue` is a plain `INSERT OR REPLACE` — safe here in a way
+it is not on the tag manager's or the calendar's tables, where REPLACE's delete would cascade away
+a row's children. `CloudClient`/`CloudConnectClient` pre-open the store on IO before every bind, the
+same rule as every other store-taking point — a cold KDF is measured at ≈ 3 s on the Nomad and must
+never sit inside a call's own timeout budget.
+
+### `API_VERSION` 8, and why no other floor moves
+
+The point was born at API version 8 — `CloudContract.MIN_API_VERSION_FOR_CLOUD` — the calendar's
+per-action shape again: a compatible *addition*, since nothing about `IExtensionStore`,
+`ITagManager`, `IDocumentEditor` or `ICalendar` changed shape, so **every extension that already
+declared a version keeps declaring exactly what it declared before** and no existing door closes.
+`ExtensionContract.MIN_API_VERSIONS` grew one more entry
+(`CloudContract.ACTION_CLOUD_STORAGE to CloudContract.MIN_API_VERSION_FOR_CLOUD`); `accepts` is
+unchanged in shape, still `minApiVersion(action)..API_VERSION`. Because the point did not exist
+before V1, there was never a phase — unlike the pad's, the tag manager's and the editor's between
+X1 and their own X-phase — where `:ext-drive`'s door was live but skipped: `DriveService` declares 8
+from the moment it exists.
+
+### Single provider — `ExtensionRegistry.cloud()`
+
+`cloud(context)` discovers `ACTION_CLOUD_STORAGE` and keeps the first by `(label, package)`, the
+same rule every singular point runs — but for a different reason than the calendar's: two Drive
+accounts are not two of anything broken, they are a question this arc does not ask, so a second
+installed provider is dropped with a `Log.w` (not a `Slog.d` — a real configuration oddity, not
+routine noise) rather than offered a chooser. A chooser among providers is a future decision, not
+this arc's. Re-run every time a cloud door is about to be offered (Export's Destination row, the
+Backup screen's Cloud section, the library's Import source) — a package can be disabled or replaced
+under a standing screen, and every one of those doors is **GONE**, never disabled, when this
+answers null.
+
+### Why no extension is aware of the cloud
+
+An export is host-driven end to end: the host draws the chooser, keys the source, opens two fds and
+hands them to the exporter, which only streams source → destination. Import is the mirror; backup
+is host-only code. So a cloud destination changes only **where the host's write fd points** —
+`NSE · Soil Export`, `NSE · PDF Export` and `NSE · Document` need zero changes and cannot tell a
+Drive upload from a SAF file. The recorded future shape, **if an extension ever needs the cloud for
+itself** (not built): a host-side `ICloudHost` stub minted per showing and revoked with the unbind
+(`IDocumentHost`'s recipe — the first host-side stub on any SN seam), plus a presence boolean extra
+on a tier-2 launch (`EXTRA_CALENDAR_SCRATCH_PAD_AVAILABLE`'s precedent). Whoever needs it builds it,
+under a fresh user decision.
+
+### What V1–V5 proved on the Nomad
+
+Every phase walked clean: discovery and bind on V1 (`Cloud status` debug dialog); sign-in,
+disconnect and reconnect on V2, with every timeout row in `CloudTimeouts` measured live and no
+`disallowed_useragent`; a notebook exported straight to `Exports/<folder>/` on V3, replace-by-name
+confirmed on a second export; a two-leg backup run on V4 with one `list` per leg and a WAL-absorbing
+snapshot catching a stale cached raw key (fixed via `KeyOpener`'s verify-and-invalidate recipe); a
+notebook imported from `Backups/` on V5, the importer matched before any bytes moved. No stroke,
+page, notebook id, path, token or URL ever surfaced in a log line across any phase. The measured
+timeouts, the failure tables per consumer, and the full walk transcripts are
+[`docs/cloud.md`](cloud.md) and `DRIVE_PLAN.md`'s ledger.
+
+---
+
 ## Boundary audit
 
 What crosses the process boundary, in which direction, and what guards it. **Re-walk this table
@@ -1908,7 +2147,11 @@ tables. Rows 27–33 are the calendar point, walked against the code at the arc-
 and are not repeated; what follows is what the calendar's own shape adds. Row 34 is arc 24
 "Events" (2026-09-02), walked against the code at the arc-24 freeze — it added two more
 in-process screens and five more store tables but touched no contract, so it is one row rather
-than a run.
+than a run. Rows 35–42 are the cloud-storage point, walked against the code at the arc-25 freeze
+(2026-09-05, V6) — the store-taking half of the seam is the tag manager's second call shape, so
+rows 24–26 (the SQL gate, the reserved name spaces) hold for it unchanged and are not repeated;
+what follows is what the cloud point's own shape adds: the held connect bracket, the two verbatim
+refusals, the path/name/id bounds, and the three consumers' own doors.
 
 | # | The claim | Where it holds |
 |---|---|---|
@@ -1949,6 +2192,14 @@ than a run.
 | 32 | **The calendar's schema is `period → page → stroke` + `state`, and the cascade is what keeps a `period`/`page` insert safe to retry.** Foreign keys are ON for the store connection (the family rule), so `stroke.pageId` and `page.periodId` both declare `ON DELETE CASCADE` — which is exactly why `CalendarSql.insertPeriod`/`insertPage` are `INSERT OR IGNORE` and **never** `INSERT OR REPLACE`: REPLACE deletes the conflicting row first, and that delete would cascade, taking a period's pages and their strokes, or a page's strokes, with it (X2's trap, inherited by `CalendarSql : InkDocument.StrokeSql`). Rows are minted on the first stroke only (`CalendarStore.receive`/`CalendarDocument`'s `statementsFor`), never on open — `CalendarStore.readPage` is read-only — and nothing in this arc issues a `DELETE FROM period` at all. | `CalendarSchema.V1`, `CalendarSql.insertPeriod`/`.insertPage`/`.putStroke`/`.dropStroke` (JVM-tested via `CalendarSqlTest`), `CalendarStore.mintRows`/`.receive`, `CalendarDocument.statementsFor` |
 | 33 | **The host computes no calendar arithmetic of its own — `CalendarTargets` routes every choice through the contract's `CalendarDates`.** The Send-to-Calendar sheet's four rows (Today AM · Today PM · This week · This month) are each `CalendarTarget.of(kind, today, half)`, which normalizes through `CalendarDates.periodDate` inside `:extension-api` — the host never derives "this week's Sunday" itself. That is deliberate, not merely convenient: the week rule lives in one place, so a host-side guess could never come to disagree with the extension's own and mint a duplicate row for the week the two definitions parted ways. | `notebook/CalendarTargets.kt` (`CalendarTargetsTest`, JVM-tested), `CalendarTarget.of`, `CalendarDates.periodDate` |
 | 34 | **Arc 24's two in-process Intents carry a date and an event id — never event text — and the events screens are reachable from nowhere but `CalendarActivity`.** `EventsActivity.EXTRA_DAY` and `EventEditorActivity.EXTRA_DAY`/`EXTRA_EVENT_ID` are the whole of what either Intent holds — an ISO day string and, for the editor, the id of the event being opened (absent on a new one); no title, note text, reminder or recurrence rule has anywhere to ride. Both Activities are `exported="false"`, so no `HostCallerCheck` is needed or possible — Android itself refuses a launch from outside `:ext-calendar`'s own process — and `EventsActivity` hands its result back the same way, `EXTRA_ENDED_ON`, one more ISO day. Event text stays inside the process end to end: `EventStore`/`EventRules`/`EventWording` log counts, ids and durations only, never a title or a note (`EventStore`'s own KDoc states the rule). | `EventsActivity.EXTRA_DAY`/`.EXTRA_ENDED_ON`, `EventEditorActivity.EXTRA_DAY`/`.EXTRA_EVENT_ID`, the `:ext-calendar` manifest (`exported="false"` on both), `CalendarActivity.openEvents`/`eventsLauncher` |
+| 35 | **The store handle rides every one of the cloud point's nine calls, uid-bound and minted per bind — never held across two of them except the connect bracket.** `CloudClient.status`/`.disconnect`/`.list`/`.ensureFolder`/`.upload`/`.download`/`.delete` each open the store on IO **before** binding (the pre-open rule), mint a fresh `ExtensionStoreBinder` bound to `getPackageUid(ref.packageName)`, hand it to the single call as an argument, and `revoke()` it in `finally` whatever happened — a new binder every time, unlike the pad's or the calendar's showing-lifetime one. `CloudConnectClient`'s `beginConnect`/`endConnect` pair is the one exception: the binder there is held across the whole connect showing because the sign-in screen must write into the same store instance the token lands in. | `CloudClient` (every method's `openStore`/`revoke`), `CloudConnectClient.open`/`.finish`, `ExtensionStoreBinder`, `ExtensionStoreGate` |
+| 36 | **`status` answers a `CloudStatus` out — connected, configured, and an account label that is user content — and never touches the network to build it.** `DriveService.status` reads `DriveOps.status()` off the store alone; `CloudStatus`'s own constructor `require`s enforce `connected` implies `configured` and `accountLabel` is non-empty only when `connected`. The host logs `configured=… connected=…` and a duration — never the label — on every call, cheap enough to run on a screen's `onResume`. | `ICloudStorage.status`, `CloudStatus` (constructor `require`s, JVM-tested), `DriveService.status`, `DriveOps.status`, `CloudClient.status` |
+| 37 | **`path`/`name` cross inward on `list`/`ensureFolder`/`upload` as folder *names* under the provider's own root, validated on both sides before either side acts on them.** `CloudContract.requireValidPath` bounds a path at `MAX_PATH_DEPTH` (8) segments, each an `isName` (non-blank, ≤ `MAX_NAME_CHARS` 255, no `/`\ or control character, not `.`/`..`, no outer whitespace); `CloudArgs.requirePath`/`.requireName` run the identical checks host-side, **before any bind**, so a bad name costs microseconds rather than a wake of another process. Neither a path nor a name can ever hold a device path or a URL — the checks are the same ones a filename anywhere in the family already obeys. | `CloudContract.requireValidPath`/`.isName` (JVM-tested), `CloudArgs.requirePath`/`.requireName`, `DriveService.list`/`.ensureFolder`/`.upload` |
+| 38 | **`upload`'s inward argument is a source fd plus the byte count the host promises to write, and its outward answer is the `CloudEntry` the provider now reports — corroborated by the caller, never trusted blind.** `expectedBytes` is `CloudArgs.requireExpectedBytes`-checked (negative refused, zero legal — an empty page's export is not an error); the stub closes the fd it was handed in `finally`; a short or long read on the provider's own count is `IllegalStateException`. `CloudEntry.sizeBytes` on the reply is what the provider says it now holds, and every caller (`ExportVerification.cloudVerdict`, `CloudBackupRules`) treats a disagreement with `expectedBytes` as "check the file," never as a reason to delete — the arc-15 rule extended to a fourth kind of destination. | `ICloudStorage.upload`, `CloudArgs.requireExpectedBytes`, `CloudEntry` (constructor `require`s, JVM-tested), `DriveService.upload`, `DriveOps.upload`, `ExportVerification.cloudVerdict`, `CloudBackupRules` |
+| 39 | **`download`'s inward argument is a destination fd, and its outward answer is a plain byte count the caller corroborates against everything else it already knows about the file.** The stub truncates the destination first, streams into it, fsyncs, and closes it in `finally`; the returned `long` is the only thing that crosses back — no entry, no metadata. `CloudImportRules.downloadVerdict` (V5) treats it as one of **three** accounts to agree (reported bytes, landed bytes, the listing's own size) rather than the sole authority — a listing that lags its own write is corroborated, never overruled, the same og-inherited lesson `ExportVerification` already applies to an upload. | `ICloudStorage.download`, `DriveService.download`, `DriveOps.download`, `CloudImportRules.downloadVerdict` (JVM-tested) |
+| 40 | **`entryId` is an opaque string the provider minted and reads back — never a path, never parsed, never displayed** — the argument to `download`/`delete`, and the field a `list`/`ensureFolder`/`upload` reply names an entry by. `CloudContract.isEntryId` bounds it at `MAX_ENTRY_ID_CHARS` (256) with no whitespace or control character and nothing else; the host never inspects its shape beyond that bound, and `CloudArgs.requireEntryId` runs the identical check before any bind. A caller that no longer knows an id (the file was deleted or moved out from under it) gets `IllegalStateException`, not a crash. | `CloudContract.isEntryId`, `CloudArgs.requireEntryId`, `ICloudStorage.download`/`.delete`, `CloudEntry.id` |
+| 41 | **The connect screen's launch carries no extras and answers only through result codes — the token itself never rides an Intent in either direction.** `CloudConnectClient.open()` builds `Intent(ACTION_CLOUD_STORAGE_SCREEN).setPackage(ref.packageName)` with nothing added to it; the host launches it only through an `ActivityResultLauncher`, after `beginConnect` already parked the store, and reads back only `RESULT_OK`/`RESULT_CANCELED` — never a token, a code or an email. `ConnectActivity` answers `RESULT_OK` only once both store writes (token, label) have landed, so the result code alone is the truth the host's next `status()` call confirms. | `CloudConnectClient.open`/`.finish`, `ConnectActivity` (`onCreate`, the redirect intercept), `CloudContract.ACTION_CLOUD_STORAGE_SCREEN`, `HostCallerCheck.enforceActivity` |
+| 42 | **No secret, no device path, no URL crosses this seam in either direction, and the account label is the one piece of user content that does — logged nowhere.** The refresh token, the access token, the OAuth client id and secret, and every Drive URL live and die inside `:ext-drive`'s own process and its store; the host never receives, requests or logs any of them. `accountLabel` is the sole exception to "nothing personal crosses," and it is bounded (`MAX_ACCOUNT_LABEL_CHARS` 254) and printable-only (`isLabel` refuses control characters) precisely because it is display text the host's Cloud section and Destination/Source rows must show — every log line on both sides of the seam (`DriveService`, `CloudClient`, `CloudConnectClient`, `CloudConnectEntry`) prints its length only, never its value. | `CloudStatus.accountLabel`, `CloudContract.isLabel`/`MAX_ACCOUNT_LABEL_CHARS`, `DriveAuth`/`DriveTokens` (token lifecycle, never parceled), `DriveService`/`CloudClient`/`CloudConnectClient`/`CloudConnectEntry` (log lines) |
 
 **One recorded asymmetry.** The host forces inbound colour to opaque black; the extension does not
 force it on the ink the host sends. That is not an oversight and not a hole: SN's ink is fixed
@@ -1992,19 +2243,32 @@ kind/date/half in N ms`) — a target's `kind`/`date`/`half` are logged because 
 *what*, the same distinction `configureShowing`'s debug line draws for the tag manager's mode and
 target kind.
 
+**The cloud point's one piece of user content is the account label, and it is never logged on
+either side** (arc 25): an email, usually, kept out of every log line in `DriveService`,
+`DriveOps`, `CloudClient`, `CloudConnectClient` and `CloudConnectEntry`, which print booleans,
+counts and durations only (`status: configured=… connected=… in N ms`,
+`upload: N B → N B reported, agrees=true in N ms`). The refresh token, the access token and the
+OAuth client secret never reach the host at all, so there is nothing there to log by mistake — the
+extension's own `DriveTokens` keeps the access token in memory only and never parcels it, and every
+failure funnel on the seam (`DriveFailures.marshalable`) carries the exception's **class name
+only**, the same principle the document editor's and the importer's funnels already apply, since a
+transport exception's own message could name a URL or a path.
+
 ---
 
 ## Identity
 
-All seven extensions share one recipe; only the name and the point differ. (`:ext-soil` serves
+All eight extensions share one recipe; only the name and the point differ. (`:ext-soil` serves
 **two** points — exporter and importer — under one identity: the user's arc-16 call was no rename,
 so the label stays `NSE · Soil Export` even though it imports too. `:ext-pdf` is the second
 exporter on the same point — arc 18, no new point. `:ext-document` serves **three** points under
 one identity — its own editor point plus one service each on the exporter and importer points.
-`:ext-tags` and `:ext-calendar` are the two extensions in the family whose icon is **not** the
-shared Tabler "puzzle" — each on its own wizard call, an app icon of Tabler `tag` and Tabler
-`calendar` respectively, because each is a point a person is likely to find by name in
-Settings → Apps rather than by process of elimination.)
+`:ext-tags`, `:ext-calendar` and `:ext-drive` are the three extensions in the family whose icon is
+**not** the shared Tabler "puzzle" — each on its own wizard call, an app icon of Tabler `tag`,
+Tabler `calendar` and Tabler `cloud` respectively, because each is a point a person is likely to
+find by name in Settings → Apps rather than by process of elimination. `:ext-drive` is also the
+**only** extension carrying `INTERNET` — the host has none, so it is the one process in the whole
+app that talks to the network.)
 
 **`:ext-scratchpad`**
 
@@ -2085,6 +2349,18 @@ Settings → Apps rather than by process of elimination.)
 | versionName | host lockstep: `0.1.0-ratta` (`-dev` suffixed in debug), bumped together with `:app` at arc freezes |
 | Release APK | ≈ 6.9 MB signed (the Y4 build; the pad's is 6.9 MB too) — no module-local dependency beyond `:extension-api`, `:sn-screen` and `:ext-ink`; no Room, no SQLCipher, no serialization library (the calendar's rows live in the host's extension store, not in a file this APK owns) — almost exactly the pad's own size, the two sharing `:ext-ink` |
 | API version | declares **7** (`MIN_API_VERSION_FOR_CALENDAR`) from its first phase — the point was born at 7, so unlike the pad, the tag manager and the editor, `:ext-calendar` was never live-but-skipped between a store rebuild and its own redeclaration: there was no lower number for it to have declared first |
+
+**`:ext-drive`** (arc 25 / V1–V5, the THIRTEENTH module — `DriveService` + `ConnectActivity`, one APK on one point)
+
+| | |
+|---|---|
+| Label | **"NSE · Google Drive"** (`"NSE · Google Drive Dev"` in debug — a build-type string override, not a suffix) |
+| Package | `com.symmetricalpalmtree.notesproutsn.ext.drive` (`.dev` in debug) |
+| Icon | **not** the family's puzzle — Tabler `cloud`, ink-black outline only, the wizard's own call at V1: the third point (after tags and the calendar) whose subject already has a glyph everyone reads, so it wears its own mark rather than the shared one. Same adaptive-icon geometry as every other extension's (108dp viewport, Tabler's 24-unit grid × 3.1 centred at 54) |
+| Launcher activity | **None** — the connect `<activity>` is exported under its own action with `<category DEFAULT>` and is refused unless launched for a result by the host; the Supernote launcher shows the package anyway, the family recipe |
+| versionName | host lockstep: `0.1.0-ratta` (`-dev` suffixed in debug), bumped together with `:app` at arc freezes |
+| Release APK | ≈ 7.2 MB — the one module carrying `INTERNET`; `kotlinx.serialization` is already on the graph via `:app` (no new library), and there is no OkHttp/Gson — V2's REST core is `HttpURLConnection` plus the same serializer |
+| API version | declares **8** (`CloudContract.MIN_API_VERSION_FOR_CLOUD`) from its first phase — the point was born at 8, so like the calendar, `:ext-drive` was never live-but-skipped between a store rebuild and its own redeclaration: there was no lower number for it to have declared first |
 
 ---
 

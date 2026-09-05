@@ -147,12 +147,12 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
 - `main` — stable release branch (v1.0 "Seed" through v1.3 "Supernote" shipped; the release merge
   commits are in git history).
 - `ratta` — **the active feature branch** (cut 2026-08-20): Notesprout SN, a from-scratch
-  Supernote-only rebuild under `apps/notesprout_ratta/`. **Arcs 1–24 complete + frozen**
-  (2026-09-04; the per-arc feature references are `apps/notesprout_ratta/docs/*.md`). TWELVE
-  modules (host + `:sn-screen` + `:markdown` + `:extension-api` + `:ext-ink` + seven extension
-  APKs: mlkit, scratchpad, soil, pdf, document, tags, calendar), SEVEN
+  Supernote-only rebuild under `apps/notesprout_ratta/`. **Arcs 1–25 complete + frozen**
+  (2026-09-05; the per-arc feature references are `apps/notesprout_ratta/docs/*.md`). THIRTEEN
+  modules (host + `:sn-screen` + `:markdown` + `:extension-api` + `:ext-ink` + eight extension
+  APKs: mlkit, scratchpad, soil, pdf, document, tags, calendar, drive), EIGHT
   extension points (recognizer · scratch pad · exporter · importer · document editor · tag
-  manager · calendar), g-paper pin 0.1.23, version `0.1.0-ratta`, 2087 JVM tests/variant. Arc 22
+  manager · calendar · cloud storage), g-paper pin 0.1.23, version `0.1.0-ratta`, 2340 JVM tests/variant. Arc 22
   "Tables" (X1–X5, 2026-09-01) made the extension store real SQLite tables behind gated
   parameterized SQL — `IExtensionStore` v6 (`applySchema` / `exec` / `query` / `next` /
   `close`), the KV API removed, `API_VERSION` 6 with a store floor, legacy stores wiped on open,
@@ -164,11 +164,12 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   in place** — og's events with reminders, three recurring scopes and a handwriting + text note
   per event, as two in-process screens (`EventsActivity`, `EventEditorActivity`) and a
   `CalendarSchema.V2` step inside `:ext-calendar`; NOT an eighth point, no `API_VERSION` bump
-  (still 7), version still `0.1.0-ratta`. **Arc 25 "Drive" (V1–V4 landed 2026-09-04, V5 2026-09-05, V6 open) IS
-  the EIGHTH point** — generic `ACTION_CLOUD_STORAGE` served by `:ext-drive` "NSE · Google Drive"
-  (THIRTEEN modules, `API_VERSION` 8, 2340 JVM tests/variant; V2 = a real account connects from the
-  Backup screen's Cloud section, every file op real, `CloudTimeouts` measured on the Nomad; V3–V5 =
-  export destination, backup leg, import source all real); its plan is the **standalone
+  (still 7), version still `0.1.0-ratta`. **Arc 25 "Drive" (V1–V6, 2026-09-04 → 09-05) IS the
+  EIGHTH point — complete + frozen** — generic `ACTION_CLOUD_STORAGE` served by `:ext-drive`
+  "NSE · Google Drive" (THIRTEEN modules, `API_VERSION` 8, 2340 JVM tests/variant; a real account
+  connects from the Backup screen's Cloud section, every file op real, `CloudTimeouts` measured on
+  the Nomad; export destination, backup leg, import source all real — **no restore**); its
+  reference is `apps/notesprout_ratta/docs/cloud.md`, its plan the **standalone
   `apps/notesprout_ratta/DRIVE_PLAN.md`** — read that (not `RATTA_PLAN.md`) for Drive work. **No
   NINTH extension point and no other arc without another user decision.** **Read
   `apps/notesprout_ratta/RATTA_PLAN.md` first for ANY other work there** — it

@@ -18,14 +18,19 @@ the same way and forks the host into a wholly different, `.soil`-free path after
 This is the feature doc. The seam it rides on — the point, the AIDL, the trust boundary — is
 [`docs/extensions.md`](extensions.md) § "The importer point (arc 16)"; the button it hangs off is
 [`docs/library.md`](library.md); the feature the text importer lands into is
-[`docs/document.md`](document.md).
+[`docs/document.md`](document.md). Arc 25 "Drive" / V5 grew the button a second **source**: with a
+trusted cloud provider installed, the tap asks *Import from* before it opens anything — see
+[Import from the cloud](#import-from-the-cloud-arc-25--v5) below and
+[`docs/cloud.md`](cloud.md) for the seam it reads from.
 
 **Status: arc 16 complete + frozen 2026-08-28** — I1 the point + the whole pipeline, all keyings,
 placement and the remap (`ecf0443`, user checklist passed) · I2 review fixes (9/10, the two
 Replace data-loss paths the headline), boundary audit, this doc (`20b6306`, checklist re-run
 passed against the fixed build). **Arc 19 "Document" M8 complete** — the text importer + the
 result-kind tail + text documents end to end on the Nomad, user checklist passed (commits
-`70e0218` + `1051cba`).
+`70e0218` + `1051cba`). **Arc 25 "Drive" V5 complete** — the *Import from* source question, the
+cloud browser and the download-then-match pipeline, all end to end on the Nomad (2340 JVM tests,
+user checklist passed 2026-09-05).
 
 Entry stays the library's **one** Import button (arc-16's single-entry lock): the picker's MIME
 union and extension-match discovery, [below](#the-button), already cover `.md`/`.txt` with no
@@ -55,6 +60,9 @@ after `STARTED`.
   an **input arrow** in the corner notch where the plus sits on the create icon, pointing *into* the
   notebook. Drawn this way on the user's own call: the Tabler file-import glyph read as "a file," not
   "a notebook," and importing is a notebook arriving, the same visual family as `+Notebook`.
+- **The source question (arc 25 / V5).** With a trusted cloud provider installed, the tap no longer
+  goes straight to the picker: it asks *Import from* — *This device* / the provider's own name —
+  first. See [Import from the cloud](#import-from-the-cloud-arc-25--v5) below.
 
 The Import button and the Export… row are deliberately not the same kind of control: exporting is
 something you do *to* a notebook (a row on its long-press sheet), importing is something you do to
@@ -357,6 +365,102 @@ encrypted like any other create. New refusals: `Problem.NOT_TEXT` (failed the UT
 
 ---
 
+## Import from the cloud (arc 25 / V5)
+
+A cloud source is the mirror of arc 25 / V3's cloud destination on the export side, and reuses its
+decision core rather than growing a second one: `ImportSource` (`importing/ImportSource.kt`, pure)
+answers only *whether* a second source exists — `choices(providerInstalled)` is `[LOCAL]` alone
+without a trusted provider, `[LOCAL, CLOUD]` with one — and *what a tap on the cloud answer then
+does* is `export.ExportDestination.onCloudTap`, called as-is: a live connection opens the browser
+outright, `!configured` gets the *not set up* problem dialog, and anything else — no account, or no
+answer — gets the inline Connect offer, worded for import
+(`import_cloud_connect_offer_body`) rather than export. The seam itself — `ICloudStorage`, the
+provider's tree, `CloudTimeouts` — is [`docs/cloud.md`](cloud.md).
+
+**The tap.** Without a provider, `onTap()` behaves exactly as arc 16 built it — straight to
+`ACTION_OPEN_DOCUMENT`, no dialog, nothing to dismiss. With one, `ImportDialogs.pickFromList`
+offers *Import from* — *This device* / the provider's own name (`import_source_title`,
+`import_source_device`) — first. `ImportFlow` owns one `CloudConnectEntry` for the whole flow
+(constructed alongside it in the library's `onCreate`, closed from `LibraryActivity.onDestroy`,
+the same lifecycle the Backup and Export screens' own copies keep), and `status()` is re-asked on
+every discovery for the same reason those two do: the connect door changes it under a standing
+library screen.
+
+**The browser.** Choosing the cloud answer opens `cloud/CloudBrowserDialog` in **`Mode.PICK_FILE`**
+— the mode V3 declared and left unused — over the provider's own **root** (`basePath = []`, legal
+on the seam), not over `Exports/`/`Backups/` as two separate doors: a root listing shows both
+folders plus anything else under the app's own tree, the host still never lists outside it, and Up
+is invisible there since there is nowhere higher to go. Every file row is tappable (there is no
+extension filtering — og's never-hide-the-file rule, carried over from the picker's own MIME union);
+folders enter on tap; there is no action button and no *New folder…* row, because a browse-to-pick
+creates nothing. `NOT_CONNECTED` closes the browser into the Connect offer exactly as the export
+browser's does; a network failure or no answer leaves it standing over a problem dialog.
+
+**Match before download.** The picked entry's *name* decides which installed importer accepts it
+(`ImporterMatch.matching`, the same rule a SAF pick is judged by) **before a single byte moves** — a
+file the picker's own union of extensions rejects gets the ordinary *Can't import that file* dialog
+at zero network cost, never a wasted download. Only once an importer is chosen does
+`ImportFlow.download` run: `ImportOverlay.stage` shows *Downloading from `<provider>`…*
+(`import_stage_downloading`), and `CloudClient.download` streams the entry into
+`cacheDir/import/cloud/download.bin` — a sibling of `incoming.soil` inside the same import cache,
+wiped by the same `NonCancellable finally` whichever way the flow ends. Nothing in the cloud is
+ever touched by an import: `download` only reads.
+
+**Three accounts, corroborated.** `CloudImportRules.downloadVerdict(reported, landed, listed)`
+(`importing/CloudImportRules.kt`, pure) checks what the provider says it wrote, what the cache file
+actually holds, and what the browser's own listing claimed for that entry — the same
+corroboration-not-authority shape the delivery step already uses for a SAF pick, pointed at a
+listing instead of a content-provider column. `reported != landed` is `Verdict.SHORT` outright — a
+truncated stream. A listing that claims **more** than landed is also `SHORT`, because that cannot
+be explained by a lagging listing; a listing that claims *less*, or otherwise merely disagrees
+(`Verdict.DISAGREE`), is logged and the import carries on — the probe and the keying acceptance
+downstream answer for what the bytes actually are, the V4 lag trap applied to a read instead of a
+write. A listing that gave no usable size (negative) contradicts nothing. Once the download
+verifies, the downloaded file is handed into the **unchanged** `.soil` pipeline exactly as a picked
+document is (`Delivery` sealed type: `Document(uri)` / `Cached(file)`) — probe, unlock, the
+unconditional re-key, the manifest, all three questions, both writes, all run precisely as
+[the flow above](#the-flow-step-by-step) describes them, with no idea the bytes arrived by
+download rather than by picker.
+
+**Failure dialogs (`CloudImportFailure`).** Four kinds, each ending the same way — **nothing is
+imported, nothing in the cloud is touched, the cache is wiped**: `GONE` (the provider vanished
+between the tap and the call) → `import_cloud_gone_body`; `NOT_CONNECTED` → `import_cloud_not_connected_body`
+with a **Connect** positive button that re-reads `status()` first; `NETWORK` →
+`import_cloud_network_body`; `UNANSWERED` → `import_cloud_unanswered_body`. None of them is a plain
+`NotebookImport.Problem` — `CloudImportFailure` is its own type precisely because the
+not-connected case needs a Connect button the `Problem` table's one-body-per-value shape has
+nowhere to put.
+
+**Measured (Nomad, `DRIVE_PLAN.md` § V5 ledger).** The root browser's crumb read the provider's own
+name alone, with no Up, no Save-here, no New-folder row; `list depth=0` took 894 ms cold, ~550 ms
+warm. A `.soil` picked from `Backups/waltest` (61 rows, paged five deep) downloaded 253 952 bytes in
+905 ms, delivered cleanly, and landed through the ordinary id-collision dialog (*Keep both*) and
+placement question exactly as a SAF import would. A `.db` file picked from the root got *Can't
+import that file* with no `download` call at all — the match-before-download rule paying for
+itself.
+
+**Design calls recorded at V5 (binding unless the user says otherwise).** The browser opens on the
+provider's root rather than on two separate doors for `Exports/` and `Backups/` · the importer is
+matched **before** the download and then streams the already-downloaded file — "every import goes
+through an importer" stays literally true, at the cost of one local copy · no extension filtering
+in the browser, ever — a non-importable pick gets the existing dialog rather than being hidden ·
+picking a backup `.soil` out of `Backups/` runs the ordinary notebook pipeline, id collision and
+all — the arc's one "restore a notebook" path, and deliberately not a whole-library restore ·
+`CloudTimeouts.DOWNLOAD_MS` stays flat 120 s rather than scaling with size, so a very large file
+over a slow link reads as `UNANSWERED` with nothing imported (the cache is wiped either way); a rate
+like the upload budget's is a future call if a measurement ever needs it · **the source answer is
+not remembered** — a fresh Import tap always asks again when a provider is installed.
+
+**Trap met.** `CloudConnectEntry`'s result callback runs on a coroutine **posted after** the
+library's `onResume` fires — a "stranded connect" safety net Opus first wrote into `refresh()`
+would have cleared the pending-connect flag before that posted callback ever ran, silently
+swallowing a successful sign-in that should have continued straight into the browser. Removed in
+favour of fixing the root cause: `CloudConnectEntry.open()` now calls `onChanged(false)` on the
+sign-in-could-not-open path too, so a result **always** arrives and the Backup and Export screens'
+own callers, which re-render unconditionally on it, needed no safety net of their own either.
+
+---
+
 ## Timeouts
 
 `ImporterContract` shares `ExporterContract`'s timeouts **by reference** rather than re-deriving
@@ -364,6 +468,12 @@ them: `DESCRIBE_TIMEOUT_MS` is 3 s, `IMPORT_TIMEOUT_MS` is `EXPORT_TIMEOUT_MS`, 
 the same copy running in the other direction, so the arc-15 Nomad measurement (a 100 MB flash copy
 at ~0.45 s, ~525 MB/s `dd`) transfers directly. Two minutes comfortably covers a 1 GB `.soil` even
 through a slow DocumentsProvider at 10 MB/s.
+
+**The cloud download (arc 25 / V5) has its own, separate budget** — `CloudTimeouts.DOWNLOAD_MS`,
+120 s flat, measured on the Nomad against a 20 MiB file (4 343 ms, `docs/cloud.md` § timeouts) and
+never scaled by size: a very large file over a slow link would read as an unanswered call with
+nothing imported, rather than a longer wait, and a rate like the upload budget's is a future call
+if that ever needs measuring.
 
 ---
 
@@ -400,6 +510,12 @@ is [`docs/extensions.md`](extensions.md) § "Boundary audit," rows 9–11.
 | Back / the back arrow tapped while an import runs | "Import in progress" dialog; the flow continues untouched | `showBusyGuard` (`import_busy_body`) |
 | Any other exception escapes the pipeline | problem dialog, generic "couldn't be finished"; exception logged by **class name only** | `runImport` catch-all → `import_generic_body` |
 | Import succeeded | confirm dialog, "Imported" (body names the folder when it's not the current one) | `confirmImported` |
+| No installed importer's declared extensions match the picked cloud entry (arc 25 / V5) | problem dialog, "Can't import that file" — no `download` call at all | `chooseImporter` → `import_unsupported_*` |
+| Cloud source: the provider vanished between the tap and the call | problem dialog naming the extension gone; nothing downloaded | `CloudImportFailure.Kind.GONE` → `import_cloud_gone_body` |
+| Cloud source: no account connected | problem dialog with a **Connect** button that re-checks status first; nothing downloaded | `CloudImportFailure.Kind.NOT_CONNECTED` → `import_cloud_not_connected_body` |
+| Cloud source: the provider could not be reached | problem dialog; nothing downloaded | `CloudImportFailure.Kind.NETWORK` → `import_cloud_network_body` |
+| Cloud source: the provider did not answer | problem dialog; nothing imported either way | `CloudImportFailure.Kind.UNANSWERED` → `import_cloud_unanswered_body` |
+| Cloud source: the download landed short of what was reported, or the listing claimed more than landed | problem dialog, "Only part of that file arrived" — the same sentence a SAF short delivery gets | `CloudImportRules.downloadVerdict` → `Verdict.SHORT` → `import_short_body` |
 
 The rule behind the column is arc 15's, carried over whole: **a toast only confirms something that
 already happened; anything explaining why a tap didn't work is a dialog.** Import's own success case
@@ -420,7 +536,8 @@ then leaves the library exactly as it was.
   `ImporterInfo`, `ImportSpec`, `ImportResult` — 890 JVM tests total across the arc-16 freeze
   point. Arc 19 / M8 added `TextImportTest` (strict UTF-8, the NUL refusal, BOM strip, `\r\n`/`\r`
   folding, both caps) and `ImportRoutingTest` (the result-kind fork and the empty-delivery rule,
-  provable as pure logic rather than a device walk).
+  provable as pure logic rather than a device walk). Arc 25 / V5 added `ImportSourceTest`,
+  `CloudImportRulesTest`, and `CloudBrowserRulesTest`'s file-tappable case — 2340 JVM tests total.
 - **Device.** A SAF pick cannot be driven by `adb` (the standing G4 trap) — everything through the
   picker is a human checklist item; agents verify up to the picker's launch and inspect pulled
   results afterward. The foreign-passphrase prompt is typed by a person for the same reason
@@ -434,7 +551,9 @@ then leaves the library exactly as it was.
   both proven at the id-collision dialog; both placement answers; the folder-naming confirm dialog
   when the destination isn't the current folder. Arc 19 / M8's own checklist (passed) added a real
   SAF import of a `.md` file — the picker is not `adb`-drivable — landing straight in the editor
-  with no questions asked.
+  with no questions asked. Arc 25 / V5's checklist (passed 2026-09-05) added a real pick of a
+  `.soil` from the cloud browser's `Backups/` folder, landing through the ordinary id-collision and
+  placement questions with a new notebook visible in the library afterward.
 
 ---
 
@@ -450,6 +569,8 @@ then leaves the library exactly as it was.
   acceptance rules `ImportKeying` reuses in the inward direction; also `SOURCE_DOCUMENT`, the
   export half's own arc-19 addition on the sibling point.
 - [`docs/library.md`](library.md) — the bottom bar, where the Import button sits.
+- [`docs/cloud.md`](cloud.md) — the eighth extension point the cloud source rides on:
+  `ACTION_CLOUD_STORAGE`, `:ext-drive`, the provider's tree, `CloudTimeouts`, the three consumers.
 - `apps/notesprout_ratta/RATTA_PLAN.md` §§ "Phases — Arc 16 \"Import\"" and "Phases — Arc 19
   \"Document\"" (phase M8) — the wizard's locked decisions and each phase's outcome, in full.
 - og's `docs/full-notebook-export.md` § Import (monorepo root) — the reading reference for the

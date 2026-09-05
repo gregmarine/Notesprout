@@ -102,6 +102,13 @@ import pipeline; see [`docs/import.md`](import.md). Import sits on its own bar r
 notebook's long-press sheet on purpose: exporting is something you do *to* a notebook, importing is
 something you do to the library itself.
 
+With a trusted cloud provider installed (arc 25 "Drive" / V5), the tap asks one question first —
+*Import from*: *This device* / the provider's own name — before it opens anything; without one the
+tap behaves exactly as it always did, straight to the SAF picker. Choosing the cloud answer opens
+the same host-drawn browser the Backup and Export screens use, over the provider's own root, and a
+tapped file is downloaded and matched into the identical import pipeline below. See
+[`docs/import.md`](import.md) § "Import from the cloud" and [`docs/cloud.md`](cloud.md).
+
 The Templates screen is reachable from here only; paper is *picked* from New Notebook and from the
 notebook's page-template row, which go straight to `TemplatesActivity.pickIntent`.
 

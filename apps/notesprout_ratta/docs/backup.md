@@ -13,10 +13,14 @@ direction:
   (og's D8 stamp rule) and the index **last**, with an **Exclude from backup** toggle on the
   library's long-press sheet.
 
-**Pure core — no extension involvement** (the arc wizard's first lock). Everything a backup
-touches is host-only by the standing seam rule anyway: keys, Garden paths, the index. SN stays at
-**four** capability points; Google Drive backup is deferred to a future arc *as an extension*, and
-that will be its own capability-point user decision — nothing here scaffolds for it.
+**Pure core — no extension involvement** (the arc wizard's first lock, true as written at K1/K2).
+Everything a backup touches is host-only by the standing seam rule anyway: keys, Garden paths, the
+index. **Arc 25 "Drive" / V4 grew a second destination onto the same run** — a cloud leg to
+`Backups/<device folder>/`, through the eighth extension point (`ACTION_CLOUD_STORAGE`,
+`:ext-drive`) the wizard's deferral above named — without touching anything K1–K3 built: the local
+leg is unchanged code, and the two legs share only the run's shape. See
+[The cloud leg](#the-cloud-leg-arc-25--v4) below and [`docs/cloud.md`](cloud.md) for the seam
+itself.
 
 **Backup only — no restore.** A single notebook is already recoverable through arc 16's Import
 (every backup file is a self-describing `.soil` with `notebook_meta`); whole-library restore is its
@@ -28,7 +32,9 @@ copied.
 
 **Status: arc 17 complete** — K1 compaction (`73d6490`) · K2 backup (`7fb0aa2`, user checklist
 passed) · K3 review (high, 10/10 findings fixed — the destination-integrity cluster the headline),
-this doc. **Grown by arc 21 / W5** (extension stores).
+this doc. **Grown by arc 21 / W5** (extension stores). **Grown by arc 25 "Drive" / V4** (the cloud
+leg — `Backups/<device folder>/`, its own stamp map, `SelfContainedSnapshot`; 2329 JVM tests, user
+checklist passed 2026-09-04).
 
 ---
 
@@ -113,6 +119,12 @@ a button that runs one, and what the last run did. Wording is plain verbs (the u
   not the reader.
 - The status line is read back from the stored config, not the in-memory result, so it says the
   same thing after a relaunch.
+- **The Cloud section (arc 25 / V2, grown V4)**, under the local folder line: a status line naming
+  the connected account, Connect/Disconnect, and an enable checkbox ("Back up to `<provider>`") —
+  `GONE`, not disabled, while no trusted provider is installed. V4 adds the **Device folder** line
+  and a **Rename…** button beneath it, and a second status line at the section's foot, *Last cloud
+  backup: `<date>` — N copied, M skipped* (or *Never backed up to `<provider>`*). See
+  [The cloud leg](#the-cloud-leg-arc-25--v4) below.
 
 **Choosing the folder** takes the persistable read+write grant first — a tree URI without a
 lasting grant is worthless next launch — and **releases the previous folder's grant** when the
@@ -235,6 +247,122 @@ A restore screen for the whole library, stores included, is in the monorepo `BAC
 
 ---
 
+## The cloud leg (arc 25 / V4)
+
+"Back up now" can run **two legs in one tap** — the SAF folder above, unchanged, and a second
+destination under the one installed cloud provider's own root: `Backups/<device folder>/`, through
+`:ext-drive` on the eighth extension point. Neither leg knows the other exists beyond
+`BackupEngine.run` deciding, at the top of each run, which legs exist this time — local when
+`treeUri` is set, cloud when `cloudEnabled` **and** a fresh `ExtensionRegistry.cloud()` discovery
+finds a provider (re-asked at every run start, never trusted stale) — and running local first, then
+cloud. **Neither leg → the run does nothing and says so** (`Problem.NO_DESTINATION`, the old
+`NO_FOLDER` renamed and widened); the screen pre-checks the identical rule so a tap with nowhere to
+go never raises a progress dialog for nothing. The seam itself — `ICloudStorage`, the provider's
+tree, `CloudTimeouts` — is [`docs/cloud.md`](cloud.md); this section is what the backup run does
+with it.
+
+**One result per leg, and a leg that did not run is `null`, never a zero result** —
+`BackupEngine.Outcome(local: Result?, cloud: Result?, problem: Problem?)` — because "0 copied to the
+cloud" and "there is no cloud destination" are different sentences and the report must never say the
+first when it means the second. `Progress` names which leg it is in, so the dialog reads *Backing
+up…* then *Uploading to `<provider>`…*, and the total is both legs' units summed before either runs.
+
+**The cloud never holds a sidecar.** The local leg can land a `.soil` and its `-wal` as a
+near-atomic pair because the SAF `.part`/`.old` swap makes them so; the cloud has no swap, so two
+separate uploads can tear, and a fresh main file paired with a stale `-wal` corrupts on restore.
+`data/backup/SelfContainedSnapshot.kt` absorbs the WAL first: it copies main + `-wal` into
+`cacheDir/backup/cloud/`, opens the copy with the file's cached raw key (falling back to the
+passphrase, and — the bug the walk found, below — verifying that cached key against the copy and
+invalidating it if stale, `KeyOpener`'s own recipe), runs `PRAGMA wal_checkpoint(TRUNCATE)`, closes,
+and answers the file only if the copy's `-wal` is now empty or gone and the copy probes
+`Encrypted`. Anything else answers `null` and that file is **refused this run** — counted failed,
+retried next run, nothing uploaded. Every cloud upload is therefore one self-contained file, never a
+pair. A stale `<name>-wal` still sitting in the folder's own listing is deleted **before the
+stamp**, verifiably — the arc's **one remote delete** — kept for the day something else ever leaves
+one there.
+
+**`CloudBackupLeg.run`** (`data/backup/CloudBackupLeg.kt`, beside `BackupEngine` so neither file
+grows past its line budget; it **calls** the engine's shared pieces — `compactPass`, the work list,
+the store checkpoint, the index purge — rather than copying them):
+
+1. `ensureFolder(["Backups", device])` — fail fast, uploading nothing, on any of the four typed
+   failures below.
+2. **One `list` of the device folder at leg start**, kept current in place as the leg goes (an
+   upload replaces its row, a delete removes one) — a `list` costs most of a second on this seam,
+   so the leg pays it once, not once per file.
+3. The work list, same source as the local leg's: per notebook, `compactPass` unless the local leg
+   already compacted that id this run (a shared `compactedThisRun` set — VACUUM twice is a minute
+   for nothing), snapshot, `upload` (MIME `application/octet-stream`, budget
+   `CloudTimeouts.uploadBudgetMs(length)`), corroborate with `ExportVerification.cloudVerdict` — the
+   same pure function the export destination uses. Agreeing stamps `BackupConfig.cloudStamps`
+   **per success, immediately**, the local rule; disagreeing counts the file failed and stamps
+   nothing, safe to retry because an upload is replace-by-name.
+4. Every extension store — checkpoint if this process holds it open, snapshot, upload, corroborate;
+   no stamps, the index's own treatment.
+5. The index last: `compactIfNeeded(0)` + checkpoint, then snapshot, upload, corroborate.
+6. `cloudLastRunAt`/`cloudLastCopied`/`cloudLastSkipped` written only when at least one upload
+   landed, and `cloudStamps` pruned.
+
+**Mid-leg failure ends the leg, keeping every stamp already earned.** A `CloudNotConnectedException`,
+a `CloudNetworkException`, or a plain no-answer on any single upload stops the leg there and then —
+continuing would pile 60–120 second upload budgets onto a dead link one file at a time. A
+corroboration miss, by contrast, is per file and never ends the leg: only that one file is retried
+next run.
+
+**The device folder** (`data/backup/DeviceFolder.kt`) defaults to a sanitized `Build.MODEL` plus
+eight hex from a random UUID — og's D4 shape, never the hardware serial (a durable identifier has no
+business sitting in the person's cloud forever). Minted lazily: the Backup screen mints and stores
+one the first time it renders the Cloud section and finds none; the engine mints one itself if a run
+starts before the screen ever has. The screen offers **Rename…** (`NameDialog`, judged by
+`library.NameRules` first and then `CloudArgs.requireName` for the seam's own bounds) — **a
+different name resets `cloudStamps`**, because a stamp is a statement about one destination and a
+folder that has never seen a file cannot claim to hold it; re-entering the same name keeps them.
+
+**Config (`BackupConfig`, additive, `VERSION` stays 1).** `cloudEnabled` (arc 25 / V2's checkbox) ·
+`cloudDeviceFolder` · `cloudStamps` (the **second** stamp map, sharing no field with the local
+leg's `stamps`) · `cloudLastRunAt` / `cloudLastCopied` / `cloudLastSkipped`. A field with a default
+is readable by an older build and an older blob reads fine into a newer one, which is why none of
+this moved the version.
+
+**The report.** One dialog covers both legs: both clean → *Backup complete*, the local block, a
+blank line, then `<provider>: N copied, M skipped.` plus its own stores/index sentences; any problem
+in either leg → *Backup didn't finish* with the same two blocks and the cloud problem as one
+sentence — *not connected — connect and back up again* · *could not be reached; nothing more was
+uploaded; try again* · *didn't answer; check `<provider>` before relying on it* · *no longer
+available on this device*. A leg that did not run carries no block at all. "Untouched / tried again
+next time" stays true for both legs alike.
+
+**Measured (Nomad, `DRIVE_PLAN.md` § V4 ledger).** First run: `ensureFolder` at depth 2 in
+3 162 ms, exactly one `list`, 42 `.soil` uploads all `agrees=true`, the index uploaded. Second run:
+0 copied / 43 skipped, only the 7 store `.db` files plus the index re-uploaded — no `.soil`
+re-uploads. Rename to a fresh device folder reset the stamps and re-copied all 42 files into the new
+folder.
+
+**Design calls recorded at V4 (binding unless the user says otherwise).** `Problem.NO_FOLDER` is
+gone — `NO_DESTINATION` replaces it, one sentence covering both ways out · a local `FOLDER_GONE`
+result is a leg outcome and does not stop the cloud leg from running · `CLOUD_GONE` is decided by
+re-asking discovery after a plain, otherwise-unexplained call failure · a store whose package cannot
+be derived from its own filename counts against `storesFailed` on the cloud leg · the minted device
+folder's charset is narrower than the one `NameRules` allows a typed name (no dot, no space; model
+capped at 48 characters) so a minted name is always legal at the seam · Rename… judges with
+`NameRules` first and `CloudArgs.requireName` second · the cloud leg re-runs the index purge and
+checkpoint even right after the local leg already did (a near no-op, but two legs must not disagree
+about which of them owns it) · a finished run re-renders the Cloud section (one extra discovery plus
+a `status()` call).
+
+**Not walked; JVM-tested instead.** The *Nowhere to back up* dialog — the walk's device already had
+a SAF folder chosen, and the screen has no affordance to clear one, so the `NO_DESTINATION` path was
+never exercised live; `CloudBackupRules`' pure rule for it is pinned by test.
+
+**Bug found on the walk and fixed.** A 7 MB extension store that this session had not opened failed
+every run with "file is not a database": `KeyMaterial.peekOrLoad` can hand back a **stale** cached
+key for a file re-minted since the key was derived, and only `KeyOpener` knows to verify-and-
+invalidate it. `SelfContainedSnapshot.absorbWal` now takes `KeyOpener`'s own recipe instead —
+verify the cached key against the copy, invalidate a stale one, fall back to the passphrase — and
+the re-walk showed the invalidation firing, then a clean snapshot and a clean upload.
+
+---
+
 ## The destination writer
 
 `SafBackupWriter` — hand-rolled over platform `DocumentsContract` (`androidx.documentfile` is not
@@ -280,6 +408,14 @@ safe.
 | Extension store is zero length | Skipped silently (a create that never finished); the destination keeps whatever good copy it has. |
 | Anything else throws | The top-level catch turns it into a `failed` count and the dialog says the run didn't finish; the app never crashes under the progress dialog. |
 | Corrupt `backup` config blob | Reads as a fresh config; worst case is re-copying everything. |
+| Neither a SAF folder nor a connected cloud provider (arc 25 / V4) | `Problem.NO_DESTINATION` dialog before anything runs; the screen pre-checks the same rule. |
+| Cloud leg: no account connected | Leg stops there; report names it *not connected — connect and back up again*; every stamp already earned this run stays. |
+| Cloud leg: provider unreachable | Leg stops there; *could not be reached; nothing more was uploaded; try again*. |
+| Cloud leg: provider didn't answer | Leg stops there; *didn't answer; check `<provider>` before relying on it*. |
+| Cloud leg: provider uninstalled mid-run | Leg stops there; *no longer available on this device*. |
+| Cloud leg: a file's upload lands but the provider's reported size disagrees | Counted failed, **not stamped**, no delete; retried next run (upload is replace-by-name). |
+| Cloud leg: a stale `<name>-wal` cannot be verifiably removed | That file's stamp is withheld, exactly as the local leg's own stale-sidecar rule. |
+| Cloud leg: a notebook file will not absorb its WAL into a self-contained snapshot | Refused this run — counted failed, retried next run, nothing uploaded. |
 
 ---
 
@@ -287,6 +423,12 @@ safe.
 
 - **No restore** (arc 16's Import recovers a single notebook; whole-library restore is a future arc,
   and arc 21 / W5 confirmed the same answer for extension stores — the manual copy-back is
-  documented above and a restore screen is in `BACKLOG.md`). - **No automatic runs**, no scheduler.
-  - **No per-device subfolder** (og's LOCAL shape; only debug's `dev/` split). - **No Drive** — a
-  future arc, as an extension, behind its own capability-point user decision.
+  documented above and a restore screen is in `BACKLOG.md`). Arc 25 / V4 confirms the identical
+  answer for the cloud leg: uploading is the whole of it, there is no restore-from-cloud path, and
+  a backup `.soil` picked up by hand from Drive is recoverable the same way any other export is —
+  through arc 16's ordinary Import. - **No automatic runs**, no scheduler.
+  - **No per-device subfolder for the local (SAF) leg** (og's LOCAL shape; only debug's `dev/`
+  split) — the cloud leg's own `Backups/<device folder>/` is arc 25 / V4's addition and does not
+  change the local leg's flat shape. - **Drive landed** (arc 25 "Drive," V4, 2026-09-04) as the
+  cloud leg documented above, through the eighth extension point rather than as backup-specific
+  code — see [`docs/cloud.md`](cloud.md).

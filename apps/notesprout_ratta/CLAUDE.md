@@ -27,10 +27,10 @@ table, and the abandoned generator idea) ·
 half's long-press sheet and the object half's Copy/Cut, tap-to-place and lasso popup, both
 within and **across notebooks**, where a copied link's own-notebook target is re-pointed at the
 notebook it came from) ·
-`docs/extensions.md` (the **seam**: the seven extension points — the recognizer, arc 11's
+`docs/extensions.md` (the **seam**: the eight extension points — the recognizer, arc 11's
 screen-owning scratch pad, arc 15's generic exporter point, arc 16's generic importer point,
-arc 19's screen-owning document editor with its host-callback binder, arc 21's tag manager and
-arc 23's screen-owning calendar —
+arc 19's screen-owning document editor with its host-callback binder, arc 21's tag manager,
+arc 23's screen-owning calendar and arc 25's store-taking bind-per-call cloud-storage point —
 **the extension store, rebuilt on real SQLite tables behind gated SQL in arc 22**, the tier-2
 recipe for an extension-owned screen, and **the boundary audit**) ·
 `docs/export.md` (arc 15, grown arc 18: notebook export as a feature — the library sheet's Export…
@@ -63,6 +63,11 @@ both transfers, failure table) ·
 `period` / `page` / `stroke` / `state` tables with rows minted on the first stroke, navigation and
 the bookmark, both transfers, the failure table, plus arc 24's **Events** — the day list and
 editor, recurrence, the handwriting-or-text note, and the grid glyphs) ·
+`docs/cloud.md` (arc 25: **the cloud** — `ACTION_CLOUD_STORAGE` as a generic seam, `NSE · Google
+Drive` owning OAuth and the only `INTERNET` in the app, the Drive tree under its own root, the
+Backup screen's Cloud section and the inline Connect offer, the host-drawn browser, the three
+consumers — export destination, backup leg, import source — the measured `CloudTimeouts` table
+and the failure table; **no restore**, no extension is aware of the cloud) ·
 `docs/sn-screen.md` (arc 11 / J1: the shared `:sn-screen` paper-screen library — what may live
 there, what may not depend on it, and the `nonTransitiveRClass` flag that holds it together).
 
@@ -152,7 +157,8 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   `list` per leg, replace-by-name, corroborated never deleted; `CloudBackupLeg` beside `BackupEngine`. **V5 (2026-09-05): the library's Import button asks
   *Import from* when a provider is installed** — the browser in `PICK_FILE` over the provider's root,
   the importer matched before any download, `download` into `cacheDir/import/cloud/` and the matched
-  importer streams it into the unchanged pipeline; nothing remote deleted.**
+  importer streams it into the unchanged pipeline; nothing remote deleted.** **V6 (2026-09-05):
+  docs + freeze — arc 25 is complete and frozen; `docs/cloud.md` is the reference.**
   **Read `DRIVE_PLAN.md`, not `RATTA_PLAN.md`, for any work on it.**)
   `gradle.properties` sets `android.nonTransitiveRClass=false` — undoing it breaks every
   `:sn-screen` resource reference from `:app`.
