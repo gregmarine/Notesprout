@@ -5,7 +5,7 @@ arc — read it whole at every phase start, together with the root `CLAUDE.md` a
 `apps/notesprout_ratta/CLAUDE.md`. **Do not load `RATTA_PLAN.md` for this arc** unless a standing
 trap needs checking; its protocol and traps are summarized below so this file is enough.
 
-**Status:** planned 2026-09-04 · V1 ⬜ · V2 ⬜ · V3 ⬜ · V4 ⬜ · V5 ⬜ · V6 ⬜
+**Status:** planned 2026-09-04 · V1 ✅ (2026-09-04) · V2 ⬜ · V3 ⬜ · V4 ⬜ · V5 ⬜ · V6 ⬜
 
 ---
 
@@ -105,7 +105,7 @@ background agents. Gate: JVM tests for all pure logic, a Sonnet walk for what ad
 **short numbered user checklist** for what it cannot (every OAuth sign-in, every SAF pick, live
 ink). Then docs / memory / `CLAUDE.md`, **commit + push**, user runs `/clear`. **No code review.**
 
-### V1 ⬜ — Seam + scaffold
+### V1 ✅ — Seam + scaffold (2026-09-04)
 - `:extension-api`: `CloudContract`, `ICloudStorage.aidl`, `CloudStatus` / `CloudEntry`
   (parcelables + tests), `API_VERSION` 8, `MIN_API_VERSION_FOR_CLOUD` 8 in the floor map, the
   ledger line in `ExtensionContract`'s KDoc.
@@ -197,4 +197,38 @@ ink). Then docs / memory / `CLAUDE.md`, **commit + push**, user runs `/clear`. *
 
 ## Ledger
 
-(Outcomes appended per phase.)
+### V1 — Seam + scaffold (2026-09-04) ✅
+
+**Outcome.** The eighth point exists and is discoverable on the Nomad. `:extension-api`:
+`CloudContract` (actions, `MIN_API_VERSION_FOR_CLOUD` 8, path/name/id/MIME checks, the two verbatim
+refusals `NOT_CONNECTED` / `NETWORK`), `CloudStatus` (`connected · configured · accountLabel ·
+providerName` — **`configured` is a fourth field**, added so a blank-credentials build reports itself
+rather than offering a Connect that cannot work), `CloudEntry`, `ICloudStorage.aidl` (seven methods
+as designed), `API_VERSION` 7 → 8, the cloud row in the floor map. Host: `<queries>` for both
+actions, `ExtensionRegistry.cloud()` (first-wins + `Log.w` on a second provider), `CloudClient`
+(`status()` only — store pre-opened on IO, one bind, verbatim refusal mapping to
+`CloudNotConnectedException` / `CloudNetworkException`), `CloudTimeouts` (eight rows incl.
+`DELETE_MS`, all UNMEASURED with the V2 measurement named beside each), debug menu **"Cloud status"**
+dialog. `:ext-drive` (`NSE · Google Drive`, package `com.symmetricalpalmtree.notesproutsn.ext.drive`
+— the family's `.ext.<name>` spelling, not the wizard table's `.drive`; same meaning): INTERNET, the
+service at API 8, `ConnectActivity` behind `HostCallerCheck.enforceActivity` (cancels — V2's
+WebView lands there), `DriveSchema.V1` = `account(key, value)`, `DriveSql` (four statements),
+`DriveStore`, `DriveService` (`status()` real from the store; `disconnect()` clears; the five file
+ops validate, close their fds in `finally`, then refuse `NOT_CONNECTED`), Tabler "cloud" icon,
+`DRIVE_CLIENT_ID` / `DRIVE_CLIENT_SECRET` compiled from the env, `ROOT_FOLDER_NAME` per build type.
+
+**Tests.** 2087 → **2119 JVM tests/variant** (+14 contract, +6 `DriveSql`, +6 `DriveStore`, the
+floor test grown). No code review (decision 12).
+
+**Walk (Nomad, `.dev`).** Both APKs installed; Debug tools → Cloud status → `Provider: NSE · Google
+Drive Dev (…ext.drive.dev, api 8) · Name: Google Drive · Configured: yes · Connected: no ·
+Account: —`. Logcat: `ExtensionRegistry … CLOUD_STORAGE: 1 provider(s) of 1 candidate(s)`,
+`DriveService: status: configured=true connected=false`, `CloudClient: status … in 717 ms` (cold
+store open included host-side — the first `STATUS_MS` data point). `Garden/…ext.drive.dev.db`
+minted by the pre-open. No user checklist this phase (nothing adb cannot see).
+
+**Traps met.** The Write tool landed a raw BEL byte inside a Kotlin `'\u0007'` char literal and a raw
+control char inside a `' '` — the byte-scan caught both (the standing trap, now seen on a *char
+literal*: spell control characters as `'\uXXXX'` and scan). `am start` of the bootstrap on a device
+whose foreground was Ratta Settings needed a second `am start` — the first only raised the task.
+

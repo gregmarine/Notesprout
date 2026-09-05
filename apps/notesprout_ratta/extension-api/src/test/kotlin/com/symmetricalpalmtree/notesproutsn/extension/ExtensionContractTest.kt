@@ -20,8 +20,10 @@ class ExtensionContractTest {
         // knows no `ITagManager` at all); 5 since arc 21 / W4 (TagShowing's wire form — the first
         // non-tail break); 6 since arc 22 / X1 (IExtensionStore REPLACED — the second non-tail
         // break, and the first with a floor); 7 since arc 23 / Y1 (the CALENDAR point — a compatible
-        // addition, with the floor made per action). Bumping this again is a contract event.
-        assertEquals(7, ExtensionContract.API_VERSION)
+        // addition, with the floor made per action); 8 since arc 25 / V1 (the CLOUD_STORAGE point —
+        // a compatible addition on the calendar's pattern, floored at 8). Bumping this again is a
+        // contract event.
+        assertEquals(8, ExtensionContract.API_VERSION)
         assertEquals(6, ExtensionContract.MIN_API_VERSION_FOR_STORE)
         assertEquals(7, ExtensionContract.MIN_API_VERSION_FOR_CALENDAR)
         assertEquals(2_000, ExtensionContract.MAX_INK_STROKES)
@@ -66,6 +68,14 @@ class ExtensionContractTest {
         assertEquals(
             "com.symmetricalpalmtree.notesproutsn.extension.CALENDAR_SCREEN",
             ExtensionContract.ACTION_CALENDAR_SCREEN,
+        )
+        assertEquals(
+            "com.symmetricalpalmtree.notesproutsn.extension.CLOUD_STORAGE",
+            CloudContract.ACTION_CLOUD_STORAGE,
+        )
+        assertEquals(
+            "com.symmetricalpalmtree.notesproutsn.extension.CLOUD_STORAGE_SCREEN",
+            CloudContract.ACTION_CLOUD_STORAGE_SCREEN,
         )
     }
 
@@ -162,15 +172,25 @@ class ExtensionContractTest {
             assertTrue(action, !ExtensionContract.accepts(action, 5))
             assertTrue(action, ExtensionContract.accepts(action, 6))
             assertTrue(action, ExtensionContract.accepts(action, 7))
+            assertTrue(action, ExtensionContract.accepts(action, 8))
             assertTrue(action, !ExtensionContract.accepts(action, ExtensionContract.API_VERSION + 1))
         }
         val calendar = ExtensionContract.ACTION_CALENDAR
         assertEquals(7, ExtensionContract.minApiVersion(calendar))
         assertTrue(!ExtensionContract.accepts(calendar, 6))
         assertTrue(ExtensionContract.accepts(calendar, 7))
+        assertTrue(ExtensionContract.accepts(calendar, 8))
         assertTrue(!ExtensionContract.accepts(calendar, ExtensionContract.API_VERSION + 1))
+        // The cloud point (arc 25 / V1): born at 8, listed only there. The calendar's door did not move.
+        val cloud = CloudContract.ACTION_CLOUD_STORAGE
+        assertEquals(8, ExtensionContract.minApiVersion(cloud))
+        assertEquals(CloudContract.MIN_API_VERSION_FOR_CLOUD, ExtensionContract.minApiVersion(cloud))
+        assertTrue(!ExtensionContract.accepts(cloud, 7))
+        assertTrue(ExtensionContract.accepts(cloud, 8))
+        assertTrue(!ExtensionContract.accepts(cloud, ExtensionContract.API_VERSION + 1))
         // The screen action is not a service action — it carries no floor of its own.
         assertEquals(1, ExtensionContract.minApiVersion(ExtensionContract.ACTION_CALENDAR_SCREEN))
+        assertEquals(1, ExtensionContract.minApiVersion(CloudContract.ACTION_CLOUD_STORAGE_SCREEN))
         for (action in listOf(
             ExtensionContract.ACTION_HANDWRITING_RECOGNIZER,
             ExporterContract.ACTION_NOTEBOOK_EXPORTER,

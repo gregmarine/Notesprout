@@ -12,7 +12,8 @@ package com.symmetricalpalmtree.notesproutsn.extension
  * other family's host.
  *
  * Since then: arc 15's exporters, arc 16's importers, arc 19's document editor, arc 21's tag
- * manager and arc 23's calendar — each on its own explicit user decision, seven points in all.
+ * manager, arc 23's calendar and arc 25's cloud storage ([CloudContract]) — each on its own explicit
+ * user decision, eight points in all.
  *
  * `IExtensionStore` (arc 11 / J2, rebuilt arc 22 / X1) is not a capability point but the
  * **service** the host offers an extension it has bound: a per-package encrypted SQLite store the
@@ -70,8 +71,14 @@ object ExtensionContract {
      * floor became **per action** with it ([minApiVersion]): a point born at 7 has no older shape to
      * accept, so a calendar service is listed only at [MIN_API_VERSION_FOR_CALENDAR]; the three
      * arc-22 store-taking points keep their floor of 6 and the stateless points their floor of 1.
+     *
+     * **8 since arc 25 / V1** — the CLOUD_STORAGE point ([CloudContract.ACTION_CLOUD_STORAGE], SN's
+     * EIGHTH capability point, granted by the user 2026-09-04 — `DRIVE_PLAN.md`). The calendar's
+     * shape again: a compatible *addition*, nothing existing changes, every existing extension keeps
+     * its declaration, no door vanishes; the new point is listed only at
+     * [CloudContract.MIN_API_VERSION_FOR_CLOUD] because it was never reachable below it.
      */
-    const val API_VERSION: Int = 7
+    const val API_VERSION: Int = 8
 
     /**
      * The floor for a service on a **store-taking** point (arc 22 / X1): the host accepts such a
@@ -92,7 +99,8 @@ object ExtensionContract {
      * The lowest API version the host accepts for a service on [action] — **per action** since arc
      * 23 / Y1: [MIN_API_VERSION_FOR_STORE] for the three arc-22 store-taking points
      * ([ACTION_SCRATCH_PAD], [DocumentContract.ACTION_DOCUMENT_EDITOR], [ACTION_TAG_MANAGER]),
-     * [MIN_API_VERSION_FOR_CALENDAR] for [ACTION_CALENDAR], 1 for every other. The range rule at
+     * [MIN_API_VERSION_FOR_CALENDAR] for [ACTION_CALENDAR], [CloudContract.MIN_API_VERSION_FOR_CLOUD]
+     * for [CloudContract.ACTION_CLOUD_STORAGE] (arc 25 / V1), 1 for every other. The range rule at
      * [API_VERSION] applies above it. A point that is not in the map has the floor of 1 — a new
      * point that needs one adds its row here, and the test that pins the map fails until it does.
      */
@@ -109,6 +117,7 @@ object ExtensionContract {
             DocumentContract.ACTION_DOCUMENT_EDITOR to MIN_API_VERSION_FOR_STORE,
             ACTION_TAG_MANAGER to MIN_API_VERSION_FOR_STORE,
             ACTION_CALENDAR to MIN_API_VERSION_FOR_CALENDAR,
+            CloudContract.ACTION_CLOUD_STORAGE to CloudContract.MIN_API_VERSION_FOR_CLOUD,
         )
     }
 

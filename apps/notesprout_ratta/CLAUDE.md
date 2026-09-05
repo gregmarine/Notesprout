@@ -72,7 +72,7 @@ All root `CLAUDE.md` rules apply (Kotlin/17, kotlinx-serialization only, no new 
 deps without discussion, no Material Components, no `runBlocking` on main, `Slog.d` not
 `Log.d`, e-ink design system, Tabler icons only). Plus, for this app:
 
-- **Twelve modules, own Gradle root**: `:app` (the
+- **Thirteen modules, own Gradle root**: `:app` (the
   host) · `:markdown` (arc 19 / M1 — the shared markdown engine: parser, renderer, formatter,
   reflow, search, draft, paginator; stdlib only, depends on **nothing** in this project and
   nothing beyond the android SDK its spans use — `:app` and `:ext-document` consume it, one
@@ -133,14 +133,23 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   it. Event text (title, note) is user content: never logged (counts/ids/durations only), never
   outside the calendar's own process. The editor's note is a second g-paper surface
   (`NoteSurface`) in the same process — the calendar hands nothing over before the list; the
-  editor's surface reclaims in `onResume` and releases before every `finish()`).
+  editor's surface reclaims in `onResume` and releases before every `finish()`) ·
+  `:ext-drive` (**NSE · Google Drive**, arc 25 / V1 — `:extension-api` + `:sn-screen`, never `:app`;
+  the ONLY module with `INTERNET`; one service + a screen: `DriveService` on the cloud point and
+  `ConnectActivity` behind `HostCallerCheck.enforceActivity`; API version **8**; store
+  `DriveSchema.V1` = `account(key, value)` (refresh token, account label, cached folder ids), every
+  SQL string in `DriveSql`; `DRIVE_CLIENT_ID` / `DRIVE_CLIENT_SECRET` compiled from the shell env into
+  this APK only, `ROOT_FOLDER_NAME` "Notesprout SN" / "Notesprout SN Dev" by build type. **Read
+  `DRIVE_PLAN.md`, not `RATTA_PLAN.md`, for any work on it.**)
   `gradle.properties` sets `android.nonTransitiveRClass=false` — undoing it breaks every
   `:sn-screen` resource reference from `:app`.
-- **SN has SEVEN extension points** — each added on its own explicit user decision, and
-  **no EIGHTH may be added without another** (arc 21's `ACTION_TAG_MANAGER` was the sixth's,
-  granted 2026-08-31; **the SEVENTH, `ACTION_CALENDAR`, was granted 2026-09-01 for arc 23 and
-  landed at Y1** with the `:ext-ink` + `:ext-calendar` modules, `RATTA_PLAN.md` § "Phases —
-  Arc 23"). The full seam — contracts, caps, trust, the
+- **SN has EIGHT extension points** — each added on its own explicit user decision, and
+  **no NINTH may be added without another** (arc 21's `ACTION_TAG_MANAGER` was the sixth's,
+  granted 2026-08-31; the SEVENTH, `ACTION_CALENDAR`, was granted 2026-09-01 for arc 23 and
+  landed at Y1 with the `:ext-ink` + `:ext-calendar` modules, `RATTA_PLAN.md` § "Phases —
+  Arc 23"; **the EIGHTH, `CloudContract.ACTION_CLOUD_STORAGE`, was granted 2026-09-04 for arc 25
+  "Drive" and landed at V1** with `:ext-drive` — its plan is the standalone `DRIVE_PLAN.md`). The
+  full seam — contracts, caps, trust, the
   boundary audit — is `docs/extensions.md`; the rules that bind every point:
   - `ACTION_HANDWRITING_RECOGNIZER` (headings + the markdown engine are core, the engine is
     swappable). **Only `prepare()` may start a model download** (host consent dialog first;
@@ -209,6 +218,19 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
     (`RESULT_CALENDAR_OPEN_SCRATCH_PAD`) that ask the host, not the calendar itself, to open the pad
     and bring the calendar back at its bookmark once the pad closes without sending — a compatible
     addition, the calendar keeps declaring 7.
+  - `ACTION_CLOUD_STORAGE` + `_SCREEN` (arc 25 / V1, `CloudContract`) — the eighth point and the
+    first **generic over a provider**: folders, files and bytes, never a provider's terms; served by
+    `:ext-drive`. **Store-taking, bind-per-call** (the tag manager's second call shape): the store
+    rides every call, no held bind, every operation one Binder call under a `CloudTimeouts` row
+    sized by on-device measurement. The extension owns the network, the OAuth flow, the client
+    credentials and the refresh token (rows in its store); the host has no INTERNET permission and
+    sees a `CloudStatus` (connected? configured? account label) and file ops by name under a root
+    the provider owns. **No secret, no device path, no URL crosses** in either direction; the
+    account label is user content — never logged on either side. Two `IllegalStateException`
+    messages are compared verbatim by the host: `NOT_CONNECTED` (offer Connect) and `NETWORK`
+    (nothing changed, try again). **No other extension is aware of the cloud** — exporters and
+    importers only ever see fds, so a cloud destination changes only where the host's fd points.
+    Consumers this arc: export destination, backup destination, import source; no restore.
 
   All of them get the **extension store** (`IExtensionStore` — per-package,
   encrypted under the global key at `Garden/<pkg>.db`, minted per bind, uid-bound, revoked with
@@ -235,8 +257,9 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   Action strings are
   SN-namespaced so Paper's extensions are never discovered; trust is same-signature both ways
   (discovery + bind-time re-check host-side, `HostCallerCheck` first thing in every stub method);
-  `ExtensionContract.API_VERSION` = **7** and the host accepts `minApiVersion(action)..7` — **the
-  floor is per action since arc 23 / Y1** (`minApiVersion` is a map, not a single set): 7 for
+  `ExtensionContract.API_VERSION` = **8** and the host accepts `minApiVersion(action)..8` — **the
+  floor is per action since arc 23 / Y1** (`minApiVersion` is a map, not a single set): 8 for
+  `ACTION_CLOUD_STORAGE` (`CloudContract.MIN_API_VERSION_FOR_CLOUD`, arc 25 / V1), 7 for
   `ACTION_CALENDAR` (`MIN_API_VERSION_FOR_CALENDAR` — a point born at 7 has no older shape to
   accept), `MIN_API_VERSION_FOR_STORE` 6 for the three arc-22 store-taking points, 1 for every
   stateless point — nothing about an existing interface changed, so no existing door vanished with
@@ -258,7 +281,8 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   since neither takes a store) · **7 = arc 23 / Y1, the calendar point — the first PER-ACTION
   floor**: `ACTION_CALENDAR` is listed only at `MIN_API_VERSION_FOR_CALENDAR`, every other point's
   declared floor is unchanged, so no consequence like X1's — a point born at 7 was never reachable
-  at any lower number to begin with.
+  at any lower number to begin with. · **8 = arc 25 / V1, the cloud point** — the calendar's shape again:
+  a compatible addition, floored at 8, no existing door moved.
   Meta-data is **per service**.
 - **The Scratch Pad is not ours to change from here** (arc 11, `docs/scratchpad.md`). It is the
   `:ext-scratchpad` APK: its own process, its own g-paper surface, its own undo stack, and it

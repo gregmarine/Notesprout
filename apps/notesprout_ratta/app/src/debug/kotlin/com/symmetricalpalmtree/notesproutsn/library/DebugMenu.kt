@@ -24,7 +24,10 @@ import com.symmetricalpalmtree.notesproutsn.data.extensionStoreFile
 import com.symmetricalpalmtree.notesproutsn.data.extstore.ExtensionStoreBinder
 import com.symmetricalpalmtree.notesproutsn.data.extstore.ExtensionStores
 import com.symmetricalpalmtree.notesproutsn.data.extstore.StoreFormat
+import com.symmetricalpalmtree.notesproutsn.extension.CloudClient
+import com.symmetricalpalmtree.notesproutsn.extension.ExtensionCallException
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
+import com.symmetricalpalmtree.notesproutsn.extension.ExtensionRegistry
 import com.symmetricalpalmtree.notesproutsn.extension.IExtensionStore
 import com.symmetricalpalmtree.notesproutsn.extension.Statement
 import com.symmetricalpalmtree.notesproutsn.extension.StoreCodec
@@ -54,6 +57,10 @@ import java.io.File
  *    → `exec` before `applySchema` refused with `STORE_SCHEMA_UNAPPLIED` → wrong uid / revoked
  *    refused → a **legacy-shaped file** (`Garden/probe.legacy.db`, built by the probe itself with a
  *    `kv` table at `user_version 1`) opens as a wipe to format version 2. Timings in the summary.
+ *  - **Cloud status** (arc 25 / V1) — the one on-device proof that a trusted cloud provider is
+ *    discovered and binds: `ExtensionRegistry.cloud()` then one `CloudClient.status()`, reported in
+ *    a dialog (provider, api version, provider name, configured, connected, account). Package
+ *    visibility, the signature check and the API-8 floor cannot be exercised on the JVM.
  *  - **WEBP encoder measurement** ([WebpProbe]) — lossless vs lossy-q100 on this device's own page
  *    size, for the open question in `BuiltInTemplates.toWebp`. Skia's encoders are the subject, so
  *    no host tool can answer it; run it on every device tier before changing the format.
@@ -82,12 +89,14 @@ object DebugMenu {
             "Show recovery key",
             "Forget cached key (relaunch → Unlock)",
             "Extension store self-test",
+            "Cloud status",
             "WEBP encoder measurement",
         )
         val actions = listOf<() -> Unit>(
             { showKey(activity) },
             { confirmForget(activity) },
             { storeSelfTest(activity) },
+            { cloudStatus(activity) },
             { webpProbe(activity) },
         )
         Dialogs.style(
@@ -139,6 +148,53 @@ object DebugMenu {
                         Toast.makeText(activity, "Copied", Toast.LENGTH_SHORT).show()
                     }
                     .setNegativeButton("Close", null)
+                    .create()
+            ).show()
+        }
+    }
+
+    /**
+     * Arc 25 / V1's one on-device proof: that the host **discovers** a trusted cloud provider and can
+     * **bind** it and get an answer back. Nothing else on the glass reaches the cloud point until V2,
+     * and neither package visibility, the same-signature check, the API floor nor a real Binder can
+     * be exercised on the JVM.
+     *
+     * A dialog, not a toast: it is a small table the tester has to read (and often paste into a
+     * phase note), and on e-ink a toast that has already faded reads as "nothing happened".
+     *
+     * The account label is shown here — this is the person's own screen — but it is **never logged**;
+     * [CloudClient]'s own line carries the booleans and the duration only.
+     */
+    private fun cloudStatus(activity: AppCompatActivity) {
+        activity.lifecycleScope.launch {
+            val ref = ExtensionRegistry.cloud(activity)
+            if (ref == null) {
+                Dialogs.style(
+                    AlertDialog.Builder(activity)
+                        .setTitle("Cloud status")
+                        .setMessage("No cloud provider installed (or none trusted).")
+                        .setPositiveButton("Close", null)
+                        .create()
+                ).show()
+                return@launch
+            }
+            val text = try {
+                val status = CloudClient.status(activity, ref)
+                buildString {
+                    append("Provider: ${ref.label} (${ref.packageName}, api ${ref.apiVersion})\n")
+                    append("Name: ${status.providerName}\n")
+                    append("Configured: ${if (status.configured) "yes" else "no"}\n")
+                    append("Connected: ${if (status.connected) "yes" else "no"}\n")
+                    append("Account: ${status.accountLabel.ifEmpty { "—" }}")
+                }
+            } catch (e: ExtensionCallException) {
+                "Cloud status: FAIL — ${e.message}"
+            }
+            Dialogs.style(
+                AlertDialog.Builder(activity)
+                    .setTitle("Cloud status")
+                    .setMessage(text)
+                    .setPositiveButton("Close", null)
                     .create()
             ).show()
         }

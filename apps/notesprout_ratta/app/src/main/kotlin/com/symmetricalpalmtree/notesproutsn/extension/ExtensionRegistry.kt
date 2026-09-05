@@ -4,6 +4,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.util.Log
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -17,13 +18,13 @@ data class ProviderRef(
 )
 
 /**
- * Discovery + trust for SN's seven extension points. A candidate `<service>` is kept only if it is
+ * Discovery + trust for SN's eight extension points. A candidate `<service>` is kept only if it is
  * exported, its `<meta-data>` API version is one [ExtensionContract.accepts] for the point — the
  * range `1..API_VERSION` (the declared number is what the extension *requires* of the host — the
  * arc-18 / D3 skew guard, reasoned at the constant), **with the floor** the point carries
  * ([ExtensionContract.minApiVersion] — 6 on the three store-taking points since arc 22 / X1, because
  * a replaced `IExtensionStore` breaks the old-extension/new-host direction too; 7 on the calendar
- * point, born there in arc 23 / Y1) — and it is signed
+ * point, born there in arc 23 / Y1; 8 on the cloud point, born there in arc 25 / V1) — and it is signed
  * with the host's own certificate (`checkSignatures == SIGNATURE_MATCH` — same-signature only).
  * Everything else is skipped with a `Slog.d`. Disabled packages/components are never returned by the
  * query, so `pm disable` == uninstalled from the host's point of view.
@@ -89,6 +90,30 @@ object ExtensionRegistry {
     suspend fun calendar(context: Context): ProviderRef? = withContext(Dispatchers.IO) {
         val all = discover(context.applicationContext, ExtensionContract.ACTION_CALENDAR)
         for (extra in all.drop(1)) Slog.d(TAG) { "ignoring additional calendar ${extra.component.flattenToShortString()}" }
+        all.firstOrNull()
+    }
+
+    /**
+     * The one trusted cloud provider, or null (arc 25 / V1 — SN's **eighth** capability point, and
+     * the first that is **generic over a provider**: `NSE · Google Drive` is the first one, a second
+     * provider would be another extension on this same point, not another point).
+     *
+     * First-wins like every other singular point, but for a different reason than the calendar's:
+     * two providers are not two of anything broken, they are a question this arc does not ask — a
+     * chooser is a future decision (`DRIVE_PLAN.md` § "Host side"). So the extras are dropped, and
+     * because more than one installed provider is a real configuration oddity rather than routine
+     * noise it is a `Log.w` and not a `Slog.d`; the ordinary "how many did discovery keep" line
+     * stays a `Slog.d` inside [discover].
+     *
+     * Re-run every time a cloud door is about to be offered — a package can be disabled or replaced
+     * under a standing screen, and every one of those doors is **GONE** when this answers null.
+     */
+    suspend fun cloud(context: Context): ProviderRef? = withContext(Dispatchers.IO) {
+        val all = discover(context.applicationContext, CloudContract.ACTION_CLOUD_STORAGE)
+        if (all.size > 1) {
+            Log.w(TAG, "${all.size} cloud providers installed — using ${all[0].packageName}, ignoring the rest")
+            for (extra in all.drop(1)) Slog.d(TAG) { "ignoring additional cloud provider ${extra.component.flattenToShortString()}" }
+        }
         all.firstOrNull()
     }
 
