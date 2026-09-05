@@ -28,9 +28,11 @@ import kotlin.coroutines.resume
  * locked out the entry row is GONE and the countdown takes its place (Unlock's shape). The IME is
  * never hidden — on Ratta a hardware keyboard types only while it is shown.
  *
- * [PassphraseCache.takeOnce] is consulted first (decision 12): the create and import doors park
- * the passphrase they just collected, so the first open after setting one does not re-ask. It is
- * still verified — a parked value is a hand-off, not a promise.
+ * [PassphraseCache] is **not** consulted here. The parked hand-off (create, import, a scope
+ * change, a link follow) belongs to the notebook screen's own open alone — [takeParked] is what
+ * that screen calls first — so a picker drill or an export never silently spends it and the next
+ * open of the notebook asks as expected. A parked value is still verified before it is accepted:
+ * a hand-off, not a promise.
  *
  * On success the passphrase is returned to the caller for the open, the notebook is marked in
  * [NotebookUnlocks], and the raw key is warmed ([KeyOpener.warm]) so later silent reads and the
@@ -43,16 +45,22 @@ object NotebookPassphrasePrompt {
      *  is going away). Suspends across the whole verify loop; call from the activity's scope. */
     suspend fun ask(activity: Activity, notebookId: String, name: String): String? {
         if (activity.isFinishing || activity.isDestroyed) return null
-        val file = soilFile(activity, notebookId)
-        PassphraseCache.takeOnce(notebookId)?.let { parked ->
-            if (withContext(Dispatchers.IO) { SoilCrypto.verifyPassphrase(file, parked) }) {
-                accept(activity, notebookId, parked)
-                return parked
-            }
-        }
         val typed = dialog(activity, notebookId, name) ?: return null
         accept(activity, notebookId, typed)
         return typed
+    }
+
+    /**
+     * The notebook screen's first question (arc 26 / U4): a passphrase parked for this one open by
+     * the door that just collected it — verified against the file, accepted like a typed one, and
+     * gone. Null when nothing is parked, it expired, or it does not fit; the caller then [ask]s.
+     */
+    suspend fun takeParked(activity: Activity, notebookId: String): String? {
+        val parked = PassphraseCache.takeOnce(notebookId) ?: return null
+        val file = soilFile(activity, notebookId)
+        if (!withContext(Dispatchers.IO) { SoilCrypto.verifyPassphrase(file, parked) }) return null
+        accept(activity, notebookId, parked)
+        return parked
     }
 
     private fun accept(activity: Activity, notebookId: String, passphrase: String) {

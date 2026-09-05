@@ -555,6 +555,14 @@ Encryption screen, once U1 lands — the debug item is gone) so no walk can lock
   → plain card, no lock, no cover → opens prompt-free under `walkpass1`. Nomad library left every
   notebook GLOBAL. Not driven by adb (user checklist): the link follow / walk-back, the picker lock
   row + drill, the export's SAF pick, the cloud leg with a locked notebook.
+- **Post-walk fix (the user's finding: "sometimes it asked, sometimes not"):** the parked hand-off was
+  taken by whichever prompt came first — an Export or a picker drill spent it silently and the next
+  notebook open asked. Now **only the notebook screen's open takes it** (`NotebookPassphrasePrompt.
+  takeParked`, called by `NotebookActivity.keyFor`; `ask` never consults the cache) and a parked value
+  **expires after `PassphraseCache.TTL_MS` = 60 s**. Re-walked: scope change → Export prompts → open
+  after the window prompts. The other designed silent path — resuming an already-open notebook
+  screen (home and back) — is not an open and stays silent, as in og. `PassphraseCacheTest` (4).
+  1053 tests.
 - **Planner notes for U5:** (1) the debug item IS the D4 core (rekey → `setEncryptionState` → cache
   seed) — the sheet's rows call the same three steps; (2) og's downgrade rule (typed == global →
   stays GLOBAL) is not enforced by the debug item — the sheet and the import chooser must; (3) the

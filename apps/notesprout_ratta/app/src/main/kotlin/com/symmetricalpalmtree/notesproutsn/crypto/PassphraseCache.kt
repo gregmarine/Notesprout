@@ -13,15 +13,32 @@ import java.util.concurrent.ConcurrentHashMap
  */
 object PassphraseCache {
 
-    private val once = ConcurrentHashMap<String, String>()
+    /** How long a parked value waits to be taken (arc 26 / U4): long enough for the screen change
+     *  it was parked for, short enough that a hand-off nothing took cannot surface later as an
+     *  open that "did not ask". */
+    const val TTL_MS = 60_000L
 
-    /** Park [passphrase] for exactly one [takeOnce] of [notebookId]; replaces any earlier value. */
-    fun storeOnce(notebookId: String, passphrase: String) {
-        once[notebookId] = passphrase
+    private class Parked(val passphrase: String, val at: Long)
+
+    private val once = ConcurrentHashMap<String, Parked>()
+
+    /** Park [passphrase] for exactly one [takeOnce] of [notebookId] within [TTL_MS]; replaces any
+     *  earlier value. */
+    fun storeOnce(notebookId: String, passphrase: String, now: Long = System.currentTimeMillis()) {
+        once[notebookId] = Parked(passphrase, now)
     }
 
-    /** The parked passphrase for [notebookId], removed as it is read. Null when none is waiting. */
-    fun takeOnce(notebookId: String): String? = once.remove(notebookId)
+    /**
+     * The parked passphrase for [notebookId], removed as it is read; null when none is waiting or
+     * the one waiting is older than [TTL_MS] (dropped on the way out). **Only the notebook screen's
+     * own open takes it** (`NotebookActivity.keyFor`) — the door it was parked for. Every other
+     * prompt (a link follow, the picker's lock row, the Export screen) asks regardless, so "which
+     * door came first" never decides whether a prompt appears.
+     */
+    fun takeOnce(notebookId: String, now: Long = System.currentTimeMillis()): String? {
+        val parked = once.remove(notebookId) ?: return null
+        return parked.passphrase.takeIf { now - parked.at in 0..TTL_MS }
+    }
 
     /** Drop everything parked (the Encryption screen's Forget). */
     fun clear() = once.clear()

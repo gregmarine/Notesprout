@@ -729,6 +729,9 @@ class NotebookActivity : AppCompatActivity() {
         val scope = KeyScope.of(alive.keyScope)
         keyScope = scope
         if (scope == KeyScope.GLOBAL) return SoilDatabase.resolve(this, notebookId)
+        // The one door that takes a parked hand-off (create / import / scope change / link follow):
+        // a silent first open right after the passphrase was typed elsewhere, then every open asks.
+        NotebookPassphrasePrompt.takeParked(this, notebookId)?.let { return KeyResolver.Resolved.Passphrases(it) }
         binding.openingOverlay.root.visibility = View.GONE
         val typed = NotebookPassphrasePrompt.ask(this, notebookId, alive.name)
         if (typed == null) {

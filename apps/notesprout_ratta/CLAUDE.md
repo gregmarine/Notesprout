@@ -207,7 +207,9 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   on every open. **A caller that just prompted passes `Passphrases(typed)` into its read — the
   raw-key warm is ~9 s on the Nomad, so `Unlocked` is never there in time.** `ObjectSummary.
   keyScope` rides every listing; `IndexRepository.setEncryptionState` (cover nulled, both stamps
-  cleared, unlock forgotten, `updatedAt` untouched) is the only scope writer; a NOTEBOOK card is
+  cleared, unlock forgotten, `updatedAt` untouched) is the only scope writer; the parked hand-off
+  (`PassphraseCache`, 60 s TTL) is taken by the notebook screen's open ONLY — every other prompt
+  asks regardless; a NOTEBOOK card is
   a lock (`ic_lock`), never a cover, and the seal never captures one. Debug: *Change key scope*.
 - **Every extension APK wears the same icon — the Tabler "puzzle", byte-identical, no exception**
   (the user's call, 2026-09-05, which reversed the three per-subject glyphs granted along the way:
