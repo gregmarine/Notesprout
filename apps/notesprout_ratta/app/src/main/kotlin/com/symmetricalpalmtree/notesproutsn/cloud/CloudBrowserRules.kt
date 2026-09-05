@@ -101,6 +101,17 @@ object CloudBrowserRules {
      *  opened on ([baseDepth]) — Cancel is the way out of that one. */
     fun canGoUp(depth: Int, baseDepth: Int): Boolean = depth > baseDepth
 
+    /**
+     * Whether a **file** row answers a tap (arc 25 / V5). A folder row always does — entering one is
+     * navigation, not an answer — and a file row does only where a file is what is being picked.
+     * [picksFiles] rather than the dialog's own enum, so this file stays free of the view it serves.
+     *
+     * Where it is false the row is still drawn, and drawn as what it is: **not greyed, not
+     * disabled** (the family rule — a disabled control is invisible on e-ink). A file in a folder
+     * being picked to save into is information, not an offer.
+     */
+    fun fileTappable(picksFiles: Boolean): Boolean = picksFiles
+
     /** The folder called [name] in this listing, or null. Exact match. */
     fun folderNamed(entries: List<CloudEntry>, name: String): CloudEntry? =
         entries.firstOrNull { it.isFolder && it.name == name }

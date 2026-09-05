@@ -63,13 +63,15 @@ import kotlinx.coroutines.launch
  *  - **A tap that did nothing gets a dialog, never a toast** (the family rule), and no log line ever
  *    carries a folder name, a file name or the account: counts, depths and durations only.
  *
- * **[Mode.PICK_FILE] is declared, not yet wired.** The browser navigates identically in both modes;
- * what a file *row* does is the difference, and in this phase a file row is drawn and inert in both.
- * V5 (import from cloud) makes a file row tappable under [Mode.PICK_FILE] and answers
- * [Pick.File] — the result type is here already so that the two consumers were designed together
- * rather than one being bent around the other later. Under [Mode.PICK_FILE] the action button and
- * the *New folder…* row are both absent: picking a file is not a place to save, and making a folder
- * is not part of finding one.
+ * **The two modes differ in one thing only** (arc 25 / V5 wired [Mode.PICK_FILE]): the browser
+ * navigates identically in both, and what a file *row* does is the whole difference. Under
+ * [Mode.PICK_FOLDER] a file row is drawn and inert — a file in a folder being saved into is
+ * information, not an offer — and the answer is *Save here* ([Pick.Folder]). Under [Mode.PICK_FILE]
+ * a file row **is** the answer ([Pick.File]), the action button and the *New folder…* row are both
+ * absent (picking a file is not a place to save, and making a folder is not part of finding one),
+ * and **nothing is filtered by extension**: which importer can read the tapped file is decided
+ * afterwards, by the host, on its name — the family's rule that the browser never hides the very
+ * file the person came for.
  *
  * Exactly one of [onPicked], [onNotConnected] and [onCancelled] runs, once. The caller's busy latch
  * is held across the whole showing, so a cancel here is the SAF picker's cancel — the caller drops
@@ -308,6 +310,18 @@ class CloudBrowserDialog(
     }
 
     /**
+     * A file row under [Mode.PICK_FILE] — the browser's other answer (arc 25 / V5), the mirror of
+     * [onSaveHere]. The entry travels with the folder it was found in; nothing is read here, and
+     * nothing about the file is logged but whether it had a size.
+     */
+    private fun onFilePicked(entry: CloudEntry) {
+        if (loading) { Slog.d(TAG) { "file tap ignored: a listing is running" }; return }
+        Slog.d(TAG) { "picked a file at depth ${path.size} (${entry.sizeBytes} B listed)" }
+        answer { onPicked(Pick.File(entry, path)) }
+        dismiss()
+    }
+
+    /**
      * *New folder…* — the only thing in this browser that creates anything.
      *
      * The name is judged before anything is sent ([CloudBrowserRules.newFolderOutcome]): a name the
@@ -429,9 +443,11 @@ class CloudBrowserDialog(
                 label.text = entry.name
                 if (entry.isFolder) {
                     view.setOnClickListener { navigate(path + entry.name) }
+                } else if (CloudBrowserRules.fileTappable(mode == Mode.PICK_FILE)) {
+                    view.setOnClickListener { onFilePicked(entry) }
                 }
-                // A file row carries no listener in this phase — see the class doc. Not disabled,
-                // not greyed: it is a thing that is there, drawn as what it is.
+                // Where a file row carries no listener it is still drawn as what it is — not
+                // disabled, not greyed (a disabled control is invisible on e-ink).
             }
         }
         return view

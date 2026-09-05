@@ -44,6 +44,17 @@ object ImportOverlay {
         stageIn(overlay, textRes)
     }
 
+    /**
+     * The same move, for a stage whose sentence names something the app cannot know at build time —
+     * the cloud provider (arc 25 / V5). A second overlay for one line of text would be a second
+     * thing to keep hidden; the box is the same box.
+     */
+    fun stage(activity: Activity, text: CharSequence) {
+        val overlay = find(activity) ?: return
+        if (overlay.visibility != View.VISIBLE) return
+        overlay.findViewById<TextView>(R.id.importStage)?.text = text
+    }
+
     fun hide(activity: Activity) {
         find(activity)?.visibility = View.GONE
     }

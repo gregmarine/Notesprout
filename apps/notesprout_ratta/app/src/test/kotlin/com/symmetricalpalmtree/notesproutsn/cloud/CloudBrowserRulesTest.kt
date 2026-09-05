@@ -136,4 +136,12 @@ class CloudBrowserRulesTest {
             CloudBrowserRules.newFolderOutcome("Trips", emptyList(), depth = CloudContract.MAX_PATH_DEPTH),
         )
     }
+
+    // ── What a file row does (arc 25 / V5) ───────────────────────────────────
+
+    @Test
+    fun `a file row answers a tap only where a file is what is being picked`() {
+        assertTrue(CloudBrowserRules.fileTappable(picksFiles = true))
+        assertFalse(CloudBrowserRules.fileTappable(picksFiles = false))
+    }
 }

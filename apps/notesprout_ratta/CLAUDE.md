@@ -149,7 +149,10 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   only from New folder, never deletes remotely. **V4 (2026-09-04): the backup run's second leg** —
   `Backups/<device folder>/` with its own stamp map (`BackupConfig.cloudStamps`), every upload a
   `SelfContainedSnapshot` (WAL absorbed in a cache copy — **the cloud never holds a sidecar**), one
-  `list` per leg, replace-by-name, corroborated never deleted; `CloudBackupLeg` beside `BackupEngine`.**
+  `list` per leg, replace-by-name, corroborated never deleted; `CloudBackupLeg` beside `BackupEngine`. **V5 (2026-09-05): the library's Import button asks
+  *Import from* when a provider is installed** — the browser in `PICK_FILE` over the provider's root,
+  the importer matched before any download, `download` into `cacheDir/import/cloud/` and the matched
+  importer streams it into the unchanged pipeline; nothing remote deleted.**
   **Read `DRIVE_PLAN.md`, not `RATTA_PLAN.md`, for any work on it.**)
   `gradle.properties` sets `android.nonTransitiveRClass=false` — undoing it breaks every
   `:sn-screen` resource reference from `:app`.

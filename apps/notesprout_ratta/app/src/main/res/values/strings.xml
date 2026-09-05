@@ -266,6 +266,9 @@
     <string name="import_done_title">Imported</string>
     <string name="import_done_body">Your notebook was imported.</string>
     <string name="import_done_body_in">Your notebook was imported to %1$s.</string>
+    <string name="import_source_title">Import from</string>
+    <string name="import_source_device">This device</string>
+    <string name="import_stage_downloading">Downloading from %1$s…</string>
     <string name="import_stage_reading">Reading…</string>
     <string name="import_stage_unlocking">Unlocking…</string>
     <string name="import_stage_keying">Preparing…</string>
@@ -290,6 +293,10 @@
     <string name="import_write_body">The notebook could not be written — the device may be out of space. Nothing was imported.</string>
     <string name="import_not_text_body">That file isn\'t readable text. Nothing was imported.</string>
     <string name="import_text_too_long_body">That text file is too big. Text files up to 10 MB can be imported. Nothing was imported.</string>
+    <string name="import_cloud_gone_body">The cloud extension is no longer available on this device. Nothing was imported.</string>
+    <string name="import_cloud_not_connected_body">No account is connected to %1$s, so nothing was downloaded. Connect an account and import again.</string>
+    <string name="import_cloud_network_body">%1$s could not be reached, so nothing was downloaded. Nothing was imported — try again.</string>
+    <string name="import_cloud_unanswered_body">%1$s didn\'t answer, so nothing was imported. Try again.</string>
     <string name="import_interrupted_body">The import was interrupted before that folder could be used. Nothing was imported — try again.</string>
     <string name="import_busy_title">Import in progress</string>
     <string name="import_busy_body">Wait for the import to finish — leaving now could leave a half-imported notebook behind.</string>
@@ -386,6 +393,7 @@
          account behind it. Two buttons — Connect opens the provider's own sign-in. -->
     <string name="cloud_connect_offer_title">Connect to %1$s?</string>
     <string name="cloud_connect_offer_body">Sign in to %1$s so Notesprout SN can put files there. Nothing is uploaded until you choose where to save.</string>
+    <string name="import_cloud_connect_offer_body">Sign in to %1$s so Notesprout SN can read the files it put there. Nothing is downloaded until you choose a file.</string>
 
     <!-- Replace-by-name: an upload updates a file of the same name in place, so the browser asks
          first. This is the cloud's stand-in for the file picker's overwrite confirmation. -->
@@ -396,7 +404,7 @@
     <!-- The host-drawn cloud browser (arc 25 / V3). Browsing creates nothing: only New folder
          does, and only when you ask it to. -->
     <string name="cloud_browser_save_here">Save here</string>
-    <string name="cloud_browser_crumb_separator"> › </string>
+    <string name="cloud_browser_crumb_separator">" › "</string>
     <string name="cloud_browser_loading">Loading…</string>
     <string name="cloud_browser_creating">Creating the folder…</string>
     <string name="cloud_browser_empty">This folder is empty.</string>

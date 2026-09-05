@@ -5,7 +5,7 @@ arc — read it whole at every phase start, together with the root `CLAUDE.md` a
 `apps/notesprout_ratta/CLAUDE.md`. **Do not load `RATTA_PLAN.md` for this arc** unless a standing
 trap needs checking; its protocol and traps are summarized below so this file is enough.
 
-**Status:** planned 2026-09-04 · V1 ✅ (2026-09-04) · V2 ✅ (2026-09-04) · V3 ✅ (2026-09-04) · V4 ✅ (2026-09-04) · V5 ⬜ · V6 ⬜
+**Status:** planned 2026-09-04 · V1 ✅ (2026-09-04) · V2 ✅ (2026-09-04) · V3 ✅ (2026-09-04) · V4 ✅ (2026-09-04) · V5 ✅ (2026-09-05) · V6 ⬜
 
 ---
 
@@ -291,7 +291,7 @@ untouched.**
   → Back up now runs both legs (`logcat` shows ensureFolder, one list, uploads, sizes agree), the
   status lines move, a second run reports up to date; user checklist covers the files in Drive.
 
-### V5 ⬜ — Import from cloud
+### V5 ✅ — Import from cloud (2026-09-05)
 - Library Import: source choice (Local file / <providerName>) when a provider is installed;
   `CloudBrowserDialog` over `Exports/` + `Backups/` (files only tappable); `download` into
   `cacheDir/import/` then the **unchanged** import pipeline (probe → unlock → re-key → placement →
@@ -529,3 +529,70 @@ also exists from the first run (delete it whenever you like — nothing reads it
 now `waltest`, rename it back on the Backup screen if you prefer the minted name). **Both passed (user,
 2026-09-04) — V4 signed off.**
 
+### V5 — Import from cloud (2026-09-05) ✅
+
+**Outcome.** The library's Import button has a second source. With a trusted provider installed the
+tap asks **Import from** — *This device* / *<providerName>* (`ImportDialogs.pickFromList`; without a
+provider nothing changed, straight to SAF). The cloud answer goes through `ExportDestination.onCloudTap`
+(reused, not copied): connected → the browser; not configured → the *Not set up* dialog; no account or
+no answer → the inline Connect offer in import wording (`import_cloud_connect_offer_body`), and a
+sign-in that succeeds **continues the beat** into the browser. `ImportFlow` owns a `CloudConnectEntry`
+(constructed with the flow — the library's `onCreate` — and closed from `LibraryActivity.onDestroy`).
+`CloudBrowserDialog` in `Mode.PICK_FILE` opens on the provider's **root** (`basePath = []`, legal on the
+seam — `Exports/` and `Backups/` one tap away, Up invisible there), every file row tappable, answering
+`Pick.File`; the action button and *New folder…* stay absent. The importer is matched by the entry's
+name **before any bytes move** (a refused file costs no download — the existing *Can't import that
+file* dialog), then `download` lands in `cacheDir/import/cloud/download.bin` — a sibling of the incoming
+copy — and `CloudImportRules.downloadVerdict` corroborates three accounts (reported ≠ landed → SHORT;
+listing > landed → SHORT; listing < landed → logged and carried on — the V4 lag trap); then the matched
+importer streams that file into `incoming.soil` exactly as it streams a SAF document (`Delivery` sealed
+type: `Document(uri)` / `Cached(file)`), so the text-vs-notebook fork, probe, unlock, keying, manifest,
+three questions and both writes are **untouched**. One latched `try/finally` for both origins; the cache
+wipe takes the download with it. Failure dialogs: `CloudImportFailure` GONE / NOT_CONNECTED (positive
+button **Connect**, status re-read first) / NETWORK / UNANSWERED. Nothing remote is ever deleted.
+Host only — `:ext-drive` and the seam untouched; `ImportFlow` 851 → 1267 lines, its over-800 reason
+extended. `ImportOverlay.stage(CharSequence)` for *Downloading from <provider>…*.
+
+**Tests.** 2329 → **2340 JVM tests/variant** (+4 `ImportSource`, +6 `CloudImportRules`, +1
+`CloudBrowserRules.fileTappable`). No code review (decision 12).
+
+**Walk (Sonnet, Nomad `.dev`) — all ten steps passed.** *Import from* dialog as designed, Cancel
+unlatched; root browser crumb `Google Drive` alone, no Up, no Save here, no New folder, `list depth=0`
+894 ms cold / ~550 ms warm; `Exports › Walk › Events Ideas.pdf` → *Can't import that file*, no
+`download` line; `Backups › waltest` paged 61 rows over 5 pages, pager flips both ways; a `.soil` pick →
+`download: 253952 B in 905 ms` → `delivered 253952` → opens under this device's key → *Already in your
+library* (Keep both) → *Where should it go?* (Notebook's folders) → **Imported**, and the `… Copy` card
+appeared; a `.db` pick → *Can't import that file*, no download; browser Cancel unlatched; `cache/import`
+gone; crash buffer empty, zero `W/`/`E/` from our tags. The walk reported *Preparing…* rather than
+*Downloading…* — the download stage lasted 905 ms and fell between screenshots; and a 46 s gap between
+manifest and Garden write — the walker answering the two questions, which sit there by design.
+
+**Bugs found on read-through and fixed before the install.** (1) Opus added a "stranded connect" safety
+net in `refresh()` (the library's `onResume`) — but `CloudConnectEntry` delivers its result on a posted
+coroutine **after** `onResume`, so the net would have cleared `connectPending` first and a successful
+sign-in would never have continued into the browser. Removed; the root cause fixed instead:
+`CloudConnectEntry.open()` now calls `onChanged(false)` on the sign-in-could-not-open path too, so **a
+result always arrives** (the Backup and Export callers just re-render on it). (2) V3's crumb separator
+`" › "` was an unquoted XML string — AAPT trimmed it to `›` (the walk saw `Google Drive›Exports`); now
+quoted, verified on the Nomad as `Google Drive › Exports`.
+
+**Design calls not in the wizard (recorded, binding unless the user says otherwise).** The browser
+opens on the provider's **root**, not on `Exports/` and `Backups/` as two doors — a root listing shows
+both plus anything else under the app's own root (e.g. `probe`), and the host still never lists outside
+it · **the importer is matched before the download and streams the downloaded file** — "every import goes
+through an importer" stays literally true, at the cost of one local copy (~0.5 s per 100 MB on the
+Nomad's flash) · no extension filtering in the browser: every file is tappable and a non-importable one
+gets the existing dialog (og's never-hide-the-file rule) · a backup `.soil` picked from `Backups/` runs
+the ordinary notebook pipeline — id collision offers Replace/Keep both, which is the arc's one
+"restore a notebook" path and deliberately not a library restore · `DOWNLOAD_MS` stays flat 120 s; a
+very large file over a slow link would read as UNANSWERED with nothing imported (the cache is wiped) —
+make it a rate like upload if a measurement ever needs it · the source answer is not remembered.
+
+**Traps met.** The posted-result ordering above (a launcher result callback that itself posts runs
+after the activity's `onResume`) — any latch held across a `CloudConnectEntry` showing must be released
+by the result, never by a resume-time sweep. `${'$'}`-free and control-byte-free this phase (Opus
+byte-scanned all 11 files; the orchestrator re-scanned after its own edits).
+
+**User checklist.** 1. In Drive, nothing new appeared anywhere under `Notesprout SN Dev/` (import reads
+only — `Backups/waltest/` still holds its 61 files). 2. On the Nomad, the library has a new
+`20260822_Headings Copy 2 Copy` notebook that opens with its 13 pages — delete it whenever you like.

@@ -250,6 +250,9 @@ class LibraryActivity : AppCompatActivity() {
         if (::scratchPad.isInitialized) scratchPad.close()
         if (::calendar.isInitialized) calendar.close()
         if (::tags.isInitialized) tags.close()
+        // The import flow holds the cloud connect door and, while it is up, the cloud browser
+        // (arc 25 / V5) — both are this window's.
+        if (::importFlow.isInitialized) importFlow.close()
         super.onDestroy()
     }
 

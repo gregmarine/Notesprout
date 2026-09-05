@@ -31,8 +31,8 @@ import kotlinx.coroutines.launch
  *
  * What it deliberately does **not** own: the account. The screen answers `RESULT_OK` only after the
  * token is in the store, so this class learns nothing from the result beyond "something may have
- * changed" — [onChanged] runs on **every** result, cancelled or not, because the caller re-reads
- * `status()` and that read is the truth. [wasConnected] tells the caller whether the result was the
+ * changed" — [onChanged] runs on **every** result, cancelled or not — and on a sign-in that could
+ * not be opened at all — because the caller re-reads `status()` and that read is the truth. [wasConnected] tells the caller whether the result was the
  * `RESULT_OK` one, for a caller that wants to say so.
  *
  * There is **no EPD handoff here and there must not be one** — the sign-in carries no paper.
@@ -93,6 +93,10 @@ class CloudConnectEntry(
                     Dialogs.problem(activity, R.string.cloud_connect_failed_title, R.string.cloud_connect_failed_body)
                     // It may have been disabled or replaced under us — ask again before it is offered.
                     discover()
+                    // A result ALWAYS arrives (arc 25 / V5): a caller holding a latch across the
+                    // sign-in — the import flow's source question — would otherwise wait for one
+                    // that never comes. Not connected, and the caller re-renders as after a cancel.
+                    if (!activity.isFinishing && !activity.isDestroyed) onChanged(false)
                     return@launch
                 }
                 launcher.launch(intent)
