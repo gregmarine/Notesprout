@@ -149,7 +149,9 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
 - `ratta` — **the active feature branch** (cut 2026-08-20): Notesprout SN, a from-scratch
   Supernote-only rebuild under `apps/notesprout_ratta/`. **Arcs 1–25 complete + frozen**
   (2026-09-05). Drive work (arc 25, the EIGHTH point): read the **standalone
-  `apps/notesprout_ratta/DRIVE_PLAN.md`** (not `RATTA_PLAN.md`). **No NINTH extension point
+  `apps/notesprout_ratta/DRIVE_PLAN.md`** (not `RATTA_PLAN.md`). **Arc 26 "Keys" (full encryption, PARITY_BACKLOG item 1) is PLANNED, wizard locked
+  2026-09-05: read the standalone `apps/notesprout_ratta/ENCRYPTION_PLAN.md` (not `RATTA_PLAN.md`)
+  — phases U1–U7, no code review, host-only, no ninth point.** **No NINTH extension point
   and no other arc without another user decision. Read `apps/notesprout_ratta/RATTA_PLAN.md`
   first for ANY other work there** — it holds the working protocol, model recipe, standing
   traps, and the per-arc ledger of still-binding decisions. Subsystem detail:

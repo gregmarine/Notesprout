@@ -15,12 +15,13 @@ written here is *what* and *why*, plus the user's own directives and the traps a
 **SN has EIGHT extension points and no NINTH may be added without an explicit user decision**
 binds every item here.
 
-**Status:** none started. No ordering has been decided — the numbering below is the order the user
-listed them in, not a priority.
+**Status:** item 1 **planned** (wizard locked 2026-09-05 — arc 26 "Keys", phases U1–U7, standalone
+`ENCRYPTION_PLAN.md`; read that file, not this section, for the work). Items 2–7 not started. No
+ordering has been decided — the numbering below is the order the user listed them in, not a priority.
 
 ---
 
-## 1. Full encryption implementation, matching og
+## 1. Full encryption implementation, matching og — PLANNED → `ENCRYPTION_PLAN.md` (arc 26 "Keys")
 
 **User's call:** "Let's do a full encryption implementation that closely matches og."
 
