@@ -95,12 +95,14 @@ object ExtensionRegistry {
 
     /**
      * The one trusted cloud provider, or null (arc 25 / V1 — SN's **eighth** capability point, and
-     * the first that is **generic over a provider**: `NSE · Google Drive` is the first one, a second
-     * provider would be another extension on this same point, not another point).
+     * the first that is **generic over a provider**: `NSE · Cloud Storage` is the one extension on
+     * it, and a second provider is baked in *there* beside Google Drive rather than shipped as a
+     * second extension — the user's call, 2026-09-05, `docs/cloud.md` decision 15).
      *
      * First-wins like every other singular point, but for a different reason than the calendar's:
-     * two providers are not two of anything broken, they are a question this arc does not ask — a
-     * chooser is a future decision (`DRIVE_PLAN.md` § "Host side"). So the extras are dropped, and
+     * two installed packages are not two of anything broken, they are a question this arc does not
+     * ask — a chooser is a future decision (`DRIVE_PLAN.md` § "Host side"), and after decision 15 a
+     * chooser is over *providers inside one extension*, not over packages. So the extras are dropped, and
      * because more than one installed provider is a real configuration oddity rather than routine
      * noise it is a `Log.w` and not a `Slog.d`; the ordinary "how many did discovery keep" line
      * stays a `Slog.d` inside [discover].

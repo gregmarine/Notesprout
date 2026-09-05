@@ -139,8 +139,13 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   outside the calendar's own process. The editor's note is a second g-paper surface
   (`NoteSurface`) in the same process — the calendar hands nothing over before the list; the
   editor's surface reclaims in `onResume` and releases before every `finish()`) ·
-  `:ext-drive` (**NSE · Google Drive**, arc 25 / V1 — `:extension-api` + `:sn-screen`, never `:app`;
-  the ONLY module with `INTERNET`; one service + a screen: `DriveService` on the cloud point and
+  `:ext-cloud` (**NSE · Cloud Storage** — renamed from `:ext-drive` / `NSE · Google Drive` post-freeze
+  on 2026-09-05, the user's call: **a second cloud provider is baked in HERE beside Google Drive,
+  never as a second extension**, so the module, package/applicationId (`…ext.cloud`), label and the
+  point's service (`DriveService` → `CloudService`) are generic while the `Drive*` classes stay
+  honestly named as Google Drive's OAuth flow and REST v3 client — `docs/cloud.md` decision 15.
+  Arc 25 / V1 — `:extension-api` + `:sn-screen`, never `:app`;
+  the ONLY module with `INTERNET`; one service + a screen: `CloudService` on the cloud point and
   `ConnectActivity` behind `HostCallerCheck.enforceActivity` (V2: the WebView PKCE sign-in — the
   connect showing is the ONE held bind on this point, `beginConnect`/`endConnect`, the tag manager's
   bracket; file ops stay bind-per-call; the access token lives in memory only, the refresh token in
@@ -162,12 +167,17 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   **Read `DRIVE_PLAN.md`, not `RATTA_PLAN.md`, for any work on it.**)
   `gradle.properties` sets `android.nonTransitiveRClass=false` — undoing it breaks every
   `:sn-screen` resource reference from `:app`.
+- **Every extension APK wears the same icon — the Tabler "puzzle", byte-identical, no exception**
+  (the user's call, 2026-09-05, which reversed the three per-subject glyphs granted along the way:
+  `:ext-tags`' `tag`, `:ext-calendar`'s `calendar`, `:ext-cloud`'s `cloud`). A package is found by
+  its **label** in Settings → Apps; the glyph only says which family it belongs to. A new extension
+  copies `ext-soil/src/main/res/drawable/ic_launcher_foreground.xml` and does not ask.
 - **SN has EIGHT extension points** — each added on its own explicit user decision, and
   **no NINTH may be added without another** (arc 21's `ACTION_TAG_MANAGER` was the sixth's,
   granted 2026-08-31; the SEVENTH, `ACTION_CALENDAR`, was granted 2026-09-01 for arc 23 and
   landed at Y1 with the `:ext-ink` + `:ext-calendar` modules, `RATTA_PLAN.md` § "Phases —
   Arc 23"; **the EIGHTH, `CloudContract.ACTION_CLOUD_STORAGE`, was granted 2026-09-04 for arc 25
-  "Drive" and landed at V1** with `:ext-drive` — its plan is the standalone `DRIVE_PLAN.md`). The
+  "Drive" and landed at V1** with `:ext-cloud` — its plan is the standalone `DRIVE_PLAN.md`). The
   full seam — contracts, caps, trust, the
   boundary audit — is `docs/extensions.md`; the rules that bind every point:
   - `ACTION_HANDWRITING_RECOGNIZER` (headings + the markdown engine are core, the engine is
@@ -239,7 +249,7 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
     addition, the calendar keeps declaring 7.
   - `ACTION_CLOUD_STORAGE` + `_SCREEN` (arc 25 / V1, `CloudContract`) — the eighth point and the
     first **generic over a provider**: folders, files and bytes, never a provider's terms; served by
-    `:ext-drive`. **Store-taking, bind-per-call** (the tag manager's second call shape): the store
+    `:ext-cloud`. **Store-taking, bind-per-call** (the tag manager's second call shape): the store
     rides every call, no held bind, every operation one Binder call under a `CloudTimeouts` row
     sized by on-device measurement. The extension owns the network, the OAuth flow, the client
     credentials and the refresh token (rows in its store); the host has no INTERNET permission and

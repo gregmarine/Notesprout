@@ -2,9 +2,11 @@
 
 Arc 25 "Drive" (V1–V5, 2026-09-04 → 09-05) is SN's **eighth extension point**,
 `CloudContract.ACTION_CLOUD_STORAGE` — the first point that is *generic over a provider*: the
-contract speaks folders, files and bytes, never a provider's own terms. `NSE · Google Drive`
-(`:ext-drive`) is the first (and so far only) provider; a second provider would be a new extension
-on this same point, not a new point. The full plan and phase ledger — every design call, every
+contract speaks folders, files and bytes, never a provider's own terms. `NSE · Cloud Storage`
+(`:ext-cloud`) is the one extension on the point, and Google Drive is the first (and so far only)
+provider inside it: **a second provider is baked into this same extension, not shipped as a second
+one** (decision 15). The point stays singular either way — the host's `ExtensionRegistry.cloud()`
+is first-wins. The full plan and phase ledger — every design call, every
 on-device measurement, every trap — lives in `DRIVE_PLAN.md`; this document is the settled
 reference for the feature it left behind. **Do not load `RATTA_PLAN.md` for this arc.**
 
@@ -12,7 +14,7 @@ reference for the feature it left behind. **Do not load `RATTA_PLAN.md` for this
 
 | # | Decision |
 |---|---|
-| 1 | Eighth point granted. Module `:ext-drive`, label `NSE · Google Drive`. |
+| 1 | Eighth point granted. Module `:ext-drive`, label `NSE · Google Drive` — **amended by decision 15**: the module is `:ext-cloud` and the label `NSE · Cloud Storage`. |
 | 2 | Generic cloud storage — `ACTION_CLOUD_STORAGE` + `ACTION_CLOUD_STORAGE_SCREEN`. |
 | 3 | **The extension owns all of OAuth** — client id/secret compiled only into the extension APK, refresh token in the extension store. The host sees status and file ops only. |
 | 4 | Consumers this arc: export destination, backup destination, import source. **No whole-library restore.** |
@@ -26,6 +28,8 @@ reference for the feature it left behind. **Do not load `RATTA_PLAN.md` for this
 | 12 | **No code review** on any phase of this arc (the user's call). |
 | 13 | Device: Nomad only; Sonnet drives the walks, not Haiku. |
 | 14 | OAuth scope is `drive.file` — the app sees only what it created. |
+| 15 | **The extension is generic, 2026-09-05 (post-freeze, the user's call).** `:ext-drive` → `:ext-cloud`, `NSE · Google Drive` → **`NSE · Cloud Storage`**, package/applicationId `…ext.drive` → `…ext.cloud`, `DriveService` → `CloudService`. **A second cloud provider is baked in HERE, beside Google Drive, never as a second extension** — which is what makes the generic name the honest one. The `Drive*` implementation classes keep their names (they *are* Google Drive's OAuth flow and REST v3 client); a second provider arrives as `Dropbox*.kt` beside them, `CloudService.PROVIDER_NAME` + `opsFor` being the fork. Nothing on the seam moved. The applicationId change makes it a new package: uninstall the old one, and re-connect once (the refresh token lives in the host's `Garden/<pkg>.db`, which is keyed by package). |
+| 16 | **The whole extension family wears one icon, 2026-09-05 (the same call).** The Tabler "puzzle" glyph, byte-identical, with no exception — reversing the three per-subject icons granted along the way (`:ext-tags` `tag`, `:ext-calendar` `calendar`, the cloud's `cloud`). The **label** is what a person reads in Settings → Apps; the glyph only says which family a package belongs to. |
 
 ## Why no other extension is aware of the cloud
 
@@ -135,10 +139,17 @@ single set). The cloud point was born at 8, so there is no older cloud shape a h
 a service declaring less is simply not a provider this host knows. No other point's floor moved,
 so no existing door vanished with this bump.
 
-## The extension: `:ext-drive`
+## The extension: `:ext-cloud`
 
-Module facts: `com.symmetricalpalmtree.notesproutsn.ext.drive` (applicationId
-`…ext.drive`, `.dev` suffix in debug), depends on `:extension-api` + `:sn-screen` only, **never**
+Renamed from `:ext-drive` / `NSE · Google Drive` on 2026-09-05 (decision 15). The module, package,
+applicationId, label and the point's service (`DriveService` → `CloudService`) are generic; the
+implementation stays honestly provider-named — `DriveApi`, `DriveAuth`, `DriveHttp`, `DriveTokens`,
+`DriveOps`, `DriveStore`, `DriveSql`, `DriveSchema`, `DriveFailures`, `DriveJson`, `DriveMultipart`,
+`DriveRest` are Google Drive's own OAuth flow and REST v3 client. A second provider is a
+`Dropbox*.kt` set beside them behind the same `CloudService`, never a second APK.
+
+Module facts: `com.symmetricalpalmtree.notesproutsn.ext.cloud` (applicationId
+`…ext.cloud`, `.dev` suffix in debug), depends on `:extension-api` + `:sn-screen` only, **never**
 `:app` — the host keeps zero INTERNET permission and zero OAuth of its own; this is the only
 networked process in the app. `INTERNET` is its one manifest permission beyond the usual. No
 Application class (no drawing engine to register). Takes `kotlinx.serialization` (already on the
@@ -173,11 +184,11 @@ The flow, as og Notesprout runs it and Google documents for a **Desktop-app** cl
 
 The client id/secret are `BuildConfig.DRIVE_CLIENT_ID` / `DRIVE_CLIENT_SECRET`, populated from the
 same shell env vars og Notesprout reads (`buildConfigField` reading `System.getenv(...)`), compiled
-**only** into this APK. Blank credentials make `DriveService.configured()` false; the host dialogs
+**only** into this APK. Blank credentials make `CloudService.configured()` false; the host dialogs
 on `configured = false` rather than offering a Connect that cannot work, and `ConnectActivity`
 itself refuses to even inflate when it is not configured.
 
-`ConnectSession` is process-wide state shared by `DriveService` (the host's held bind) and
+`ConnectSession` is process-wide state shared by `CloudService` (the host's held bind) and
 `ConnectActivity` (the sign-in screen), the `TagSession` shape — it holds only the store binder the
 host lent for this one showing; `endConnect` clears it and the host revokes the binder right after.
 
@@ -225,7 +236,7 @@ shapes differ because this seam speaks paths-of-names under a provider-owned roo
   streams **exactly** `expectedBytes` from the host's fd, refusing a short read
   (`IllegalStateException("short read")`) or a long one (`"long read"`) — an fd cannot be rewound,
   so a stream upload is never retried after a 401.
-- **Download** — streams into the host's fd, which the `DriveService` stub truncates first and
+- **Download** — streams into the host's fd, which the `CloudService` stub truncates first and
   `fsync`s after (`out.fd.sync()`), then answers the byte count.
 - **Delete** — one DELETE; 204/200/404 all count as done (idempotent on an id already gone).
 - **Retry discipline** — a call whose body can be replayed (`call`) retries once after a 401 (token
@@ -659,13 +670,16 @@ import ever needs it · the source answer is not remembered across screens eithe
   stub minted per showing and revoked with the unbind (the `IDocumentHost` recipe), plus a presence
   boolean extra on the tier-2 launch (`EXTRA_CALENDAR_SCRATCH_PAD_AVAILABLE`'s precedent). Recorded
   in `DRIVE_PLAN.md`, not built, and needs its own user decision before it is.
-- **No second provider.** A second cloud service is a new extension on this same point
-  (`ACTION_CLOUD_STORAGE`), never a ninth extension point.
+- **No second provider.** When there is one, it is baked into `:ext-cloud` beside Google Drive
+  (decision 15) — a `Dropbox*.kt` set behind the same `CloudService`, never a second APK and never
+  a ninth extension point. That fork also needs the two things this arc did not build: a provider
+  chooser (`ExtensionRegistry.cloud()` is first-wins over packages, not over providers inside one)
+  and a per-provider `account` namespace in `DriveSchema`'s one table.
 
 ## Tests
 
 2340 JVM tests/variant as of V5 (2026-09-05) — the arc's running total: 2087 → 2119 (V1, +14
-contract/+6 `DriveSql`/+6 `DriveStore`) → 2281 (V2, +17 `DriveAuth`/+114 `:ext-drive`
+contract/+6 `DriveSql`/+6 `DriveStore`) → 2281 (V2, +17 `DriveAuth`/+114 `:ext-cloud`
 REST-ops-tokens/+31 `:app`) → 2302 (V3, +8 `ExportDestination`/+11 `CloudBrowserRules`/+2
 `cloudVerdict`) → 2329 (V4, +9 `DeviceFolder`/+18 `CloudBackupRules`/+2 `BackupConfig`) → 2340 (V5,
 +4 `ImportSource`/+6 `CloudImportRules`/+1 `CloudBrowserRules.fileTappable`). **No code review any

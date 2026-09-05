@@ -7,6 +7,26 @@ trap needs checking; its protocol and traps are summarized below so this file is
 
 **Status:** planned 2026-09-04 · V1 ✅ (2026-09-04) · V2 ✅ (2026-09-04) · V3 ✅ (2026-09-04) · V4 ✅ (2026-09-04) · V5 ✅ (2026-09-05) · V6 ✅ (2026-09-05) · **ARC COMPLETE + FROZEN**
 
+> **Post-freeze amendment, 2026-09-05 (the user's call — no arc reopened, no code behaviour
+> changed).** The extension was **renamed generic**: `:ext-drive` → **`:ext-cloud`**,
+> `NSE · Google Drive` → **`NSE · Cloud Storage`**, package/applicationId
+> `…notesproutsn.ext.drive` → `…notesproutsn.ext.cloud`, `DriveService` → `CloudService`. The
+> reason, and the thing that makes the generic name honest: **a second cloud provider is baked
+> into this same extension, beside Google Drive — never a separate extension per provider.**
+> The `Drive*` classes keep their names; they *are* Google Drive's OAuth flow and REST v3 client,
+> and a second provider arrives as `Dropbox*.kt` next to them behind the same `CloudService`.
+> Nothing on the seam moved (`CloudStatus.providerName` still reports "Google Drive"; the host
+> discovers by intent action, never by package). The applicationId change makes it a new package —
+> the old one is uninstalled and the account is re-connected once, because the token store is the
+> host's `Garden/<pkg>.db`. Separately, the whole extension family went back to **one icon**, the
+> Tabler "puzzle", reversing this arc's Tabler `cloud` along with `:ext-tags`' `tag` and
+> `:ext-calendar`'s `calendar`.
+>
+> **Everything below this line is the arc's record as it was written and is left unedited** —
+> `:ext-drive`, `NSE · Google Drive` and `DriveService` in the phase records and the decision table
+> are the names of the day. The settled reference for the feature as it stands now is
+> [`docs/cloud.md`](docs/cloud.md), whose decisions 15 and 16 carry this amendment.
+
 ---
 
 ## What this arc is

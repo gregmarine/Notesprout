@@ -570,7 +570,7 @@ then leaves the library exactly as it was.
   export half's own arc-19 addition on the sibling point.
 - [`docs/library.md`](library.md) — the bottom bar, where the Import button sits.
 - [`docs/cloud.md`](cloud.md) — the eighth extension point the cloud source rides on:
-  `ACTION_CLOUD_STORAGE`, `:ext-drive`, the provider's tree, `CloudTimeouts`, the three consumers.
+  `ACTION_CLOUD_STORAGE`, `:ext-cloud`, the provider's tree, `CloudTimeouts`, the three consumers.
 - `apps/notesprout_ratta/RATTA_PLAN.md` §§ "Phases — Arc 16 \"Import\"" and "Phases — Arc 19
   \"Document\"" (phase M8) — the wizard's locked decisions and each phase's outcome, in full.
 - og's `docs/full-notebook-export.md` § Import (monorepo root) — the reading reference for the

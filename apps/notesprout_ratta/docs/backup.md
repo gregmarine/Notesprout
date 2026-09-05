@@ -17,7 +17,7 @@ direction:
 Everything a backup touches is host-only by the standing seam rule anyway: keys, Garden paths, the
 index. **Arc 25 "Drive" / V4 grew a second destination onto the same run** — a cloud leg to
 `Backups/<device folder>/`, through the eighth extension point (`ACTION_CLOUD_STORAGE`,
-`:ext-drive`) the wizard's deferral above named — without touching anything K1–K3 built: the local
+`:ext-cloud`) the wizard's deferral above named — without touching anything K1–K3 built: the local
 leg is unchanged code, and the two legs share only the run's shape. See
 [The cloud leg](#the-cloud-leg-arc-25--v4) below and [`docs/cloud.md`](cloud.md) for the seam
 itself.
@@ -251,7 +251,7 @@ A restore screen for the whole library, stores included, is in the monorepo `BAC
 
 "Back up now" can run **two legs in one tap** — the SAF folder above, unchanged, and a second
 destination under the one installed cloud provider's own root: `Backups/<device folder>/`, through
-`:ext-drive` on the eighth extension point. Neither leg knows the other exists beyond
+`:ext-cloud` on the eighth extension point. Neither leg knows the other exists beyond
 `BackupEngine.run` deciding, at the top of each run, which legs exist this time — local when
 `treeUri` is set, cloud when `cloudEnabled` **and** a fresh `ExtensionRegistry.cloud()` discovery
 finds a provider (re-asked at every run start, never trusted stale) — and running local first, then

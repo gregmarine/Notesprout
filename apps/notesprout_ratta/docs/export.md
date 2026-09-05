@@ -459,7 +459,7 @@ it, dropping that exporter at discovery like any other bad descriptor) but still
 The Destination row on the Export screen is a second, orthogonal choice on top of everything
 above: whichever exporter and options were picked, the finished bytes can go to a SAF document (as
 every export before this arc did) or to the one installed cloud provider's own tree, through
-`:ext-drive` (**NSE · Google Drive**) on the eighth extension point, `ACTION_CLOUD_STORAGE`. No
+`:ext-cloud` (**NSE · Cloud Storage**) on the eighth extension point, `ACTION_CLOUD_STORAGE`. No
 exporter learns the difference — it still receives a write fd on a plain file and streams into it
 exactly as before; only *where the host's fd points afterward* changes. The full seam — the
 `ICloudStorage` interface, the provider's tree, the Backup screen's Connect door, the measured
@@ -681,7 +681,7 @@ reported honestly, because the delete is best-effort.
   metrics `DocumentPdfMetrics` mirrors, text documents.
 - [`docs/library.md`](library.md) — the notebook long-press sheet, where the **Export…** row sits.
 - [`docs/cloud.md`](cloud.md) — the eighth extension point this arc's Destination row rides on:
-  `ACTION_CLOUD_STORAGE`, `:ext-drive`, the provider's tree, the Connect door, `CloudTimeouts`.
+  `ACTION_CLOUD_STORAGE`, `:ext-cloud`, the provider's tree, the Connect door, `CloudTimeouts`.
 - `apps/notesprout_ratta/RATTA_PLAN.md` §§ "Phases — Arc 15 \"Export\"," "Phases — Arc 18 \"PDF\","
   and "Phases — Arc 19 \"Document\"" (phase M9) — the wizard's locked decisions and each phase's
   outcome, in full.

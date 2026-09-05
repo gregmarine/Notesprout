@@ -3,9 +3,10 @@ package com.symmetricalpalmtree.notesproutsn.extension
 /**
  * The CLOUD_STORAGE point (arc 25 / V1) — SN's EIGHTH capability point, granted by the user
  * 2026-09-04 (`DRIVE_PLAN.md` decision 1), and the first that is **generic over a provider**: the
- * contract speaks folders, files and bytes, never a provider's own terms. `NSE · Google Drive`
- * (`:ext-drive`) is the first provider; a second provider is a new extension on this same point,
- * not a new point.
+ * contract speaks folders, files and bytes, never a provider's own terms. `NSE · Cloud Storage`
+ * (`:ext-cloud`) is the one extension on the point and Google Drive the first provider inside it;
+ * a second provider is baked into that same extension (the user's call, 2026-09-05 — `docs/cloud.md`
+ * decision 15), never a second extension and never a new point.
  *
  * **The extension owns the network and the account** (decision 3): the OAuth flow, the client id
  * and secret (compiled only into the extension APK), the refresh token (rows in its extension
