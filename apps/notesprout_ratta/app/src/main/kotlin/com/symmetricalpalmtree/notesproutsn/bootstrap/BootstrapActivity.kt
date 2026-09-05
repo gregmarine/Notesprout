@@ -1,5 +1,7 @@
 package com.symmetricalpalmtree.notesproutsn.bootstrap
 
+import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
@@ -15,11 +17,12 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.symmetricalpalmtree.notesproutsn.R
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
+import com.symmetricalpalmtree.notesproutsn.crypto.GlobalRotation
 import com.symmetricalpalmtree.notesproutsn.crypto.KeySession
 import com.symmetricalpalmtree.notesproutsn.crypto.PassphraseStore
-import com.symmetricalpalmtree.notesproutsn.crypto.SoilCrypto
 import com.symmetricalpalmtree.notesproutsn.crypto.SoilRekey
 import com.symmetricalpalmtree.notesproutsn.data.index.SnIndex
+import com.symmetricalpalmtree.notesproutsn.encryption.EncryptionActivity
 import com.symmetricalpalmtree.notesproutsn.library.LibraryActivity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -29,7 +32,8 @@ import kotlinx.coroutines.launch
  * ([SnIndex.ensureReady]) behind a plain paper-white screen, then forwards:
  *  - first launch (or the recovery key was never acknowledged) → [RecoveryKeyActivity]
  *  - needs unlock → [UnlockActivity]
- *  - otherwise → [LibraryActivity]
+ *  - a rotation marker exists (arc 26 / U3) → the Encryption screen, whose banner is the resume
+ *  - otherwise → [LibraryActivity] ([BootstrapRoute] is the decision)
  *
  * `noHistory` + `finish()`: never on the back stack. Every other screen bounces back here through
  * `IndexGuard` when the index isn't open (a task Android rebuilt after a background kill).
@@ -86,15 +90,14 @@ class BootstrapActivity : AppCompatActivity() {
                 // Arc 26 / U2: finish any rekey commit a kill interrupted — `X.rekey.tmp` /
                 // `X.old.bak` beside a Garden file — before the library can list it. The cached
                 // global is the trusted key; a file it does not open is left exactly where it is.
-                KeySession.get()?.let { pass ->
-                    SoilRekey.recoverGarden(this) { SoilCrypto.verifyPassphrase(it, pass) }
-                }
+                // The verifier knows a rotation marker's new key too (arc 26 / U3) — the files a
+                // rotation already re-keyed verify under it, not under the cached global.
+                if (KeySession.get() != null) SoilRekey.recoverGarden(this, GlobalRotation.trustedVerifier(this))
                 // Arc 17 / K1: purge soft-deleted index rows while nothing else is reading —
                 // gated on an EXISTS probe, so the ordinary launch pays one trivial query.
                 SnIndex.compactIfNeeded()
-                val next = if (PassphraseStore.isRecoveryKeyAcknowledged(this)) LibraryActivity::class.java
-                           else RecoveryKeyActivity::class.java
-                forward(next)
+                forwardAfterOpen(this, intent.getBooleanExtra(EXTRA_THEN_BACKUP, false))
+                finish()
             }
             SnIndex.PrepareOutcome.NEEDS_UNLOCK -> forward(UnlockActivity::class.java)
             SnIndex.PrepareOutcome.FOREIGN_FILE -> throw IllegalStateException(getString(R.string.boot_error_foreign))
@@ -135,5 +138,40 @@ class BootstrapActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "BootstrapActivity"
         private const val REVEAL_DELAY_MS = 450L
+
+        /** Arc 26 / U3: a rotation's completion dialog chose *Back up now* — the library opens the
+         *  Backup screen once it is up. A boolean, never a secret. */
+        const val EXTRA_THEN_BACKUP = "then_backup"
+
+        /**
+         * The relaunch a finished rotation ends in: a clean task rooted here, so the index (closed
+         * for its own rekey) reopens under the new key and every screen is rebuilt behind
+         * `IndexGuard`. The caller calls `finishAffinity()` after starting this.
+         */
+        fun relaunchIntent(context: Context, thenBackup: Boolean): Intent =
+            Intent(context, BootstrapActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                .putExtra(EXTRA_THEN_BACKUP, thenBackup)
+
+        /**
+         * Send an opened index's person on ([BootstrapRoute.afterOpen]) — shared by this screen,
+         * Unlock and the recovery-key screen's Continue. Starts the next Activity; the caller
+         * finishes itself. [thenBackup] rides along where [BootstrapRoute.carriesThenBackup] says.
+         */
+        fun forwardAfterOpen(from: Activity, thenBackup: Boolean) {
+            val next = BootstrapRoute.afterOpen(
+                acknowledged = PassphraseStore.isRecoveryKeyAcknowledged(from),
+                hasMarker = GlobalRotation.hasMarker(from),
+            )
+            val target = when (next) {
+                BootstrapRoute.Next.RECOVERY_KEY -> RecoveryKeyActivity::class.java
+                BootstrapRoute.Next.ENCRYPTION -> EncryptionActivity::class.java
+                BootstrapRoute.Next.LIBRARY -> LibraryActivity::class.java
+            }
+            // A clean in-app intent — never the received launcher intent.
+            val intent = Intent(from, target)
+            if (thenBackup && BootstrapRoute.carriesThenBackup(next)) intent.putExtra(EXTRA_THEN_BACKUP, true)
+            from.startActivity(intent)
+        }
     }
 }

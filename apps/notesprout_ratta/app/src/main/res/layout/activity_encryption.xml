@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Encryption (arc 26 / U1): the one screen where a person can SEE the secret that opens the
-     library, replace it (U3) and drop it from this device. Backup's shape: back arrow + title on
-     the top bar, a 1dp rule, a scrolling body of captions and outlined buttons.
+<!-- Encryption (arc 26 / U1 + U3): the one screen where a person can SEE the secret that opens the
+     library, replace it and drop it from this device. Backup's shape: back arrow + title on the
+     top bar, a 1dp rule, a scrolling body of captions and outlined buttons.
 
-     Every control is a door to a dialog, so the top bar carries no action of its own yet — Change
-     passphrase… lands in U3 and until then the control does not exist (a not-built control is
-     GONE, never disabled). Nothing here is ever disabled: on e-ink a disabled control is invisible
-     and reads as broken. -->
+     Every control is a door to a dialog, so the top bar carries no action of its own. The resume
+     banner (U3) sits above the status lines and only exists while a rotation marker does — while
+     it shows, Change passphrase and Forget are GONE, because neither is a safe thing to start on
+     top of a half-finished rotation. Nothing here is ever disabled: on e-ink a disabled control is
+     invisible and reads as broken. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/root"
     android:layout_width="match_parent"
@@ -63,6 +64,38 @@
             android:paddingTop="12dp"
             android:paddingBottom="16dp">
 
+            <!-- Resume (U3, resume path 1): a passphrase change that stopped between files. Only
+                 exists while the marker does; Change passphrase and Forget are GONE beside it. -->
+            <LinearLayout
+                android:id="@+id/resumeBanner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginBottom="16dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/encryption_resume_banner"
+                    android:textColor="@color/inkBlack"
+                    android:textSize="16sp" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnResume"
+                    style="@style/Widget.Notesprout.OutlinedButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/encryption_resume" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="16dp"
+                    android:background="@color/inkBlack" />
+            </LinearLayout>
+
             <!-- Status. Both lines carry information, so they stay inkBlack; the count is the
                  smaller of the two. The count reads the index's keyScope column — honest from U4
                  on, and "every notebook" until then. -->
@@ -92,14 +125,16 @@
                 android:layout_marginTop="24dp"
                 android:text="@string/encryption_reveal" />
 
-            <!-- Change passphrase… (U3). Absent until it is built. -->
+            <!-- Change passphrase… (U3): verify the current key, pick or generate the new one,
+                 confirm the backups warning, then the whole library is re-keyed under a progress
+                 dialog and the app relaunches. GONE while a rotation is already in progress. -->
             <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/btnChange"
                 style="@style/Widget.Notesprout.OutlinedButton"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:visibility="gone" />
+                android:text="@string/encryption_change" />
 
             <!-- Forget: confirm dialog, then the cached key and every raw key leave this device and
                  the app closes; the next launch is Unlock (decision 6, ships in release). -->

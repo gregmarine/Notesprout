@@ -74,6 +74,36 @@ class BackupStoreTest {
     }
 
     @Test
+    fun `clearStamp forgets both destinations' stamps`() = runBlocking {
+        // Arc 26 / U3: the reason for forgetting — the bytes changed under an unchanged updatedAt —
+        // holds for the cloud copy exactly as for the SAF one.
+        val store = BackupStore(FakeObjectDao())
+        store.write(BackupConfig(stamps = mapOf("a" to 1L, "b" to 2L), cloudStamps = mapOf("a" to 5L, "c" to 6L)))
+        store.clearStamp("a")
+        assertEquals(mapOf("b" to 2L), store.read().stamps)
+        assertEquals(mapOf("c" to 6L), store.read().cloudStamps)
+        store.clearStamp("c") // stamped only in the cloud map
+        assertEquals(mapOf("b" to 2L), store.read().stamps)
+        assertEquals(emptyMap<String, Long>(), store.read().cloudStamps)
+    }
+
+    @Test
+    fun `clearAllStamps empties both maps and keeps everything else`() = runBlocking {
+        // Decision 4: after a rotation every backup copy is under the old key; the next run must
+        // replace them all, and only the stamps say otherwise.
+        val store = BackupStore(FakeObjectDao())
+        val before = BackupConfig(
+            treeUri = "content://tree/x", lastRunAt = 9L, lastCopied = 3, cloudEnabled = true,
+            cloudDeviceFolder = "Nomad", stamps = mapOf("a" to 1L), cloudStamps = mapOf("a" to 2L),
+        )
+        store.write(before)
+        store.clearAllStamps()
+        assertEquals(before.copy(stamps = emptyMap(), cloudStamps = emptyMap()), store.read())
+        store.clearAllStamps() // idempotent (a resume repeats it)
+        assertEquals(before.copy(stamps = emptyMap(), cloudStamps = emptyMap()), store.read())
+    }
+
+    @Test
     fun `a Replace import preserves the exclude flag`() = runBlocking {
         // K3 review: importNotebookRow rewrote flags wholesale, silently dropping the user's
         // "Exclude from backup" on an id-collision Replace.

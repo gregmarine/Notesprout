@@ -8,6 +8,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteOpenHelper
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.crypto.GlobalKey
+import com.symmetricalpalmtree.notesproutsn.crypto.GlobalRotation
 import com.symmetricalpalmtree.notesproutsn.crypto.KeyMaterial
 import com.symmetricalpalmtree.notesproutsn.crypto.KeySession
 import com.symmetricalpalmtree.notesproutsn.crypto.PassphraseStore
@@ -74,10 +75,13 @@ object SnIndex {
             // Recover with the cached passphrase before the probe can ever answer "create". With no
             // cached passphrase nothing can be verified and nothing is touched: DAMAGED_FILE, and
             // both files stay for a person to look at.
+            // The verifier accepts the cached global AND a rotation marker's new passphrase (arc 26 /
+            // U3): the index is the rotation's last file, so its leftovers verify under the new key.
             if ((!file.exists() || file.length() == 0L) && SoilRekey.hasLeftovers(file)) {
-                val pass = PassphraseStore.getGlobalPassphrase(app)
-                    ?: return@withContext PrepareOutcome.DAMAGED_FILE
-                val result = SoilRekey.recoverOne(file) { SoilCrypto.verifyPassphrase(it, pass) }
+                if (PassphraseStore.getGlobalPassphrase(app) == null && PassphraseStore.getRotationMarker(app) == null) {
+                    return@withContext PrepareOutcome.DAMAGED_FILE
+                }
+                val result = SoilRekey.recoverOne(file, GlobalRotation.trustedVerifier(app))
                 Log.w(TAG, "index rekey leftovers: $result")
                 if (!file.exists() || file.length() == 0L) return@withContext PrepareOutcome.DAMAGED_FILE
             }
@@ -95,7 +99,7 @@ object SnIndex {
                     file.parentFile?.mkdirs()
                     val db = build(app, file, SoilCrypto.roomFactory(pass))
                     forceOpen(db) // creates file + schema (the one native KDF)
-                    finishOpen(db, pass)
+                    finishOpen(app, db, pass)
                     // The file now has a salt — cache its raw key so later launches skip the KDF.
                     runCatching { KeyMaterial.rawKey(app, KeyMaterial.INDEX_FILE_ID, file, pass) }
                         .onFailure { Log.w(TAG, "raw-key warm failed after create", it) }
@@ -104,22 +108,22 @@ object SnIndex {
 
                 SoilFileKind.Encrypted -> {
                     val pass = PassphraseStore.getGlobalPassphrase(app)
-                        ?: return@withContext PrepareOutcome.NEEDS_UNLOCK
+                        ?: return@withContext openUnderMarkerOrUnlock(app, file)
                     val key = KeyMaterial.rawKey(app, KeyMaterial.INDEX_FILE_ID, file, pass)
                     if (!SoilCrypto.verifyRawKey(file, key)) {
                         // The cached material no longer opens this file (restored from elsewhere,
                         // etc.). Drop the derived key; if the passphrase itself is right, re-derive.
                         KeyMaterial.invalidate(app, KeyMaterial.INDEX_FILE_ID)
-                        if (!SoilCrypto.verifyPassphrase(file, pass)) return@withContext PrepareOutcome.NEEDS_UNLOCK
+                        if (!SoilCrypto.verifyPassphrase(file, pass)) return@withContext openUnderMarkerOrUnlock(app, file)
                         val fresh = KeyMaterial.rawKey(app, KeyMaterial.INDEX_FILE_ID, file, pass)
                         val db = build(app, file, SoilCrypto.roomFactoryRawKey(fresh))
                         forceOpen(db)
-                        finishOpen(db, pass)
+                        finishOpen(app, db, pass)
                         return@withContext PrepareOutcome.READY
                     }
                     val db = build(app, file, SoilCrypto.roomFactoryRawKey(key))
                     forceOpen(db)
-                    finishOpen(db, pass)
+                    finishOpen(app, db, pass)
                     PrepareOutcome.READY
                 }
 
@@ -144,7 +148,7 @@ object SnIndex {
             val key = KeyMaterial.rawKey(app, KeyMaterial.INDEX_FILE_ID, file, passphrase)
             val db = build(app, file, SoilCrypto.roomFactoryRawKey(key))
             forceOpen(db)
-            finishOpen(db, passphrase)
+            finishOpen(app, db, passphrase)
             true
         }
     }
@@ -169,9 +173,39 @@ object SnIndex {
         }
     }
 
-    private fun finishOpen(db: IndexDatabase, passphrase: String) {
+    /**
+     * Arc 26 / U3 — resume path 3. The cached global (if any) does not open the index. A rotation
+     * that died **after the index's own rekey and before its commit** leaves exactly this: the index
+     * under the marker's new passphrase, the cache still holding the old one. Try the marker's key;
+     * if it opens, finish the rotation here ([GlobalRotation.commit] — the same commit the engine
+     * runs) and answer READY. No marker, or a marker whose key does not fit either → NEEDS_UNLOCK,
+     * and nothing is touched. Runs under the prepare mutex.
+     */
+    private fun openUnderMarkerOrUnlock(app: Context, file: java.io.File): PrepareOutcome {
+        val marker = PassphraseStore.getRotationMarker(app) ?: return PrepareOutcome.NEEDS_UNLOCK
+        val pass = marker.newPassphrase
+        if (!SoilCrypto.verifyPassphrase(file, pass)) return PrepareOutcome.NEEDS_UNLOCK
+        Log.w(TAG, "index opens under the rotation marker's key; committing the rotation")
+        KeyMaterial.invalidate(app, KeyMaterial.INDEX_FILE_ID)
+        val key = KeyMaterial.rawKey(app, KeyMaterial.INDEX_FILE_ID, file, pass)
+        val db = build(app, file, SoilCrypto.roomFactoryRawKey(key))
+        forceOpen(db)
+        finishOpen(app, db, pass) // commits the rotation: the marker's key is now the session's
+        // The commit clears every raw key (all derived against old salts) — re-warm the index's
+        // own afterwards so the next launch is a raw-key open again.
+        runCatching { KeyMaterial.rawKey(app, KeyMaterial.INDEX_FILE_ID, file, pass) }
+            .onFailure { Log.w(TAG, "raw-key warm failed after rotation commit", it) }
+        return PrepareOutcome.READY
+    }
+
+    private fun finishOpen(app: Context, db: IndexDatabase, passphrase: String) {
         instance = db
         KeySession.set(passphrase)
+        // A rotation that died between `setGlobalPassphrase(new)` and clearing its marker: the
+        // cached global IS the marker's key, so everything is done — finish the commit here rather
+        // than send the person through a Resume that would only skip every file.
+        val marker = PassphraseStore.getRotationMarker(app)
+        if (marker != null && marker.newPassphrase == passphrase) GlobalRotation.commit(app, marker)
     }
 
     private fun build(context: Context, file: java.io.File, factory: SupportSQLiteOpenHelper.Factory): IndexDatabase =

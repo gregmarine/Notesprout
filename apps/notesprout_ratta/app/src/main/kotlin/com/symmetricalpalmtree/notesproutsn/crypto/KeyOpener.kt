@@ -23,7 +23,11 @@ import java.io.File
 object KeyOpener {
 
     private const val TAG = "KeyOpener"
-    private val warmScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    /** One derive at a time (arc 26 / U3): a run that opens many cold files in a row must queue
+     *  its warms, not race them — each is a full KDF, and a burst of concurrent ones is what
+     *  exhausted native memory on the Nomad. */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val warmScope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
 
     /** Room factory for the existing encrypted [file] identified by [fileId]. Throws
      *  [SoilLockedException] if the file is missing/empty — this path never creates. */
@@ -47,7 +51,9 @@ object KeyOpener {
     fun warm(context: Context, fileId: String, file: File, passphrase: String) {
         val app = context.applicationContext
         warmScope.launch {
+            val t0 = android.os.SystemClock.elapsedRealtime()
             runCatching { KeyMaterial.rawKey(app, fileId, file, passphrase) }
+                .onSuccess { Slog.d(TAG) { "warmed $fileId in ${android.os.SystemClock.elapsedRealtime() - t0} ms" } }
                 .onFailure { Slog.d(TAG) { "warm failed for $fileId: ${it.message}" } }
         }
     }

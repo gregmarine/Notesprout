@@ -3,6 +3,7 @@ package com.symmetricalpalmtree.notesproutsn.data.index
 import androidx.room.withTransaction
 import com.symmetricalpalmtree.notesproutsn.data.soil.FolderRef
 import com.symmetricalpalmtree.notesproutsn.data.soil.KEY_SCOPE_GLOBAL
+import com.symmetricalpalmtree.notesproutsn.data.soil.KEY_SCOPE_NOTEBOOK
 import java.util.UUID
 
 /**
@@ -27,6 +28,16 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
     /** Alive notebooks opened by this device's global key (arc 26 / U1). Reads the `keyScope`
      *  column, so it is honest once U4 writes `NOTEBOOK` there; until then it is every notebook. */
     suspend fun countGlobalNotebooks(): Int = dao.countAliveNotebooksByScope(KEY_SCOPE_GLOBAL)
+
+    /** The rotation's work list (arc 26 / U3): every alive `GLOBAL` notebook id, by name. */
+    suspend fun globalNotebookIds(): List<String> = dao.aliveNotebookIdsByScope(KEY_SCOPE_GLOBAL)
+
+    /** Arc 26 / U3's quarantine: a notebook the rotation could open under neither key becomes
+     *  `NOTEBOOK` scope (the lock card from U4 on) and its backup stamps go, so the next run copies
+     *  whatever key it turns out to be under. `updatedAt` untouched. */
+    suspend fun quarantine(id: String) {
+        dao.setKeyScope(id, KEY_SCOPE_NOTEBOOK)
+    }
 
     /** Every alive folder, anywhere in the tree — the search shelf's other half (arc 20 / Q1). It
      *  doubles as the parent-name table its notebook cards' second line is built from. */

@@ -22,6 +22,7 @@ import com.symmetricalpalmtree.notesproutsn.core.OpeningOverlay
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.core.TopGuard
 import com.symmetricalpalmtree.notesproutsn.backup.BackupActivity
+import com.symmetricalpalmtree.notesproutsn.bootstrap.BootstrapActivity
 import com.symmetricalpalmtree.notesproutsn.encryption.EncryptionActivity
 import com.symmetricalpalmtree.notesproutsn.crypto.KeyMaterial
 import com.symmetricalpalmtree.notesproutsn.data.backup.BackupPredicates
@@ -207,6 +208,14 @@ class LibraryActivity : AppCompatActivity() {
         binding.btnImport.setOnClickListener { importFlow.onTap() }
         TooltipCompat.setTooltipText(binding.btnImport, binding.btnImport.contentDescription)
         DebugMenu.install(this, binding.bottomRight)
+
+        // Arc 26 / U3: a rotation's completion dialog chose *Back up now* — the request rode the
+        // relaunch through Bootstrap (and the recovery-key screen if the key was minted) to here.
+        // Once per cold launch, never on a recreate.
+        if (coldLaunch && intent.getBooleanExtra(BootstrapActivity.EXTRA_THEN_BACKUP, false)) {
+            intent.removeExtra(BootstrapActivity.EXTRA_THEN_BACKUP)
+            startActivity(BackupActivity.intent(this))
+        }
 
         // The grid cannot be sized until the band it lives in has been laid out.
         binding.gridContainer.viewTreeObserver.addOnGlobalLayoutListener {

@@ -26,10 +26,10 @@
 
     <!-- Unlock -->
     <string name="unlock_title">Unlock Notesprout SN</string>
-    <string name="unlock_body">Enter your recovery key to open your library on this device.</string>
-    <string name="unlock_hint">NSPT-…</string>
+    <string name="unlock_body">Enter your recovery key — or the passphrase you chose — to open your library on this device.</string>
+    <string name="unlock_hint">Recovery key or passphrase</string>
     <string name="unlock_button">Unlock</string>
-    <string name="unlock_wrong">That key didn\'t open your library. Try again.</string>
+    <string name="unlock_wrong">That didn\'t open your library. Try again.</string>
     <string name="unlock_checking">Checking…</string>
     <string name="unlock_locked_out">Too many attempts. Try again in %1$s.</string>
 
@@ -343,6 +343,50 @@
     <string name="encryption_forget_body">The recovery key will be removed from this device. The next launch will ask for it before the library opens. No notebooks will be decrypted or modified.</string>
     <string name="encryption_forget_confirm">Forget</string>
     <string name="encryption_close">Close</string>
+    <!-- Rotation (arc 26 / U3) -->
+    <string name="encryption_change">Change passphrase…</string>
+    <string name="encryption_resume_banner">A passphrase change is in progress.</string>
+    <string name="encryption_resume">Resume</string>
+    <string name="encryption_continue">Continue</string>
+    <string name="encryption_current_title">Current passphrase</string>
+    <string name="encryption_current_body">Enter the current recovery key or passphrase to continue.</string>
+    <string name="encryption_current_hint">Recovery key or passphrase</string>
+    <string name="encryption_current_wrong">Wrong passphrase. Try again.</string>
+    <string name="encryption_new_title">New passphrase</string>
+    <string name="encryption_new_generate">Generate a new recovery key</string>
+    <string name="encryption_new_choose">Choose my own</string>
+    <string name="encryption_new_hint">New passphrase</string>
+    <string name="encryption_confirm_hint">Confirm passphrase</string>
+    <string name="encryption_new_helper">At least 8 characters.</string>
+    <string name="encryption_rule_short">At least 8 characters.</string>
+    <string name="encryption_rule_mismatch">The two entries do not match.</string>
+    <string name="encryption_rule_same">That is the current passphrase.</string>
+    <string name="encryption_change_title">Change passphrase</string>
+    <string name="encryption_change_body">Every notebook, the extension data and the library index will be re-keyed. Keep the app open — this can take a while.\n\nExisting backups, local and cloud, open only with the current key until the next backup run replaces them. You can start one when this finishes.</string>
+    <string name="encryption_change_minted">The new recovery key will be shown once when the app restarts.</string>
+    <string name="encryption_change_confirm">Change</string>
+    <string name="encryption_progress_title">Changing passphrase</string>
+    <string name="encryption_progress_count">Re-keying %1$d of %2$d…</string>
+    <string name="encryption_progress_notebook">Notebook</string>
+    <string name="encryption_progress_stores">Extension data</string>
+    <string name="encryption_progress_index">Library index</string>
+    <string name="encryption_progress_keep_open">Keep the app open. This can take a while.</string>
+    <string name="encryption_progress_stopping">Stopping after this file…</string>
+    <string name="encryption_done_title">Passphrase changed</string>
+    <string name="encryption_done_zero">No notebooks needed re-keying.</string>
+    <string name="encryption_done_one">1 notebook re-keyed.</string>
+    <string name="encryption_done_many">%1$d notebooks re-keyed.</string>
+    <string name="encryption_done_quarantined_one">1 notebook could not be re-keyed and now needs its own passphrase.</string>
+    <string name="encryption_done_quarantined_many">%1$d notebooks could not be re-keyed and now need their own passphrase.</string>
+    <string name="encryption_done_backup">Back up now</string>
+    <string name="encryption_done_finish">Done</string>
+    <string name="encryption_paused_title">Change paused</string>
+    <string name="encryption_paused_one">1 file still to re-key. Resume from this screen when you are ready.</string>
+    <string name="encryption_paused_many">%1$d files still to re-key. Resume from this screen when you are ready.</string>
+    <string name="encryption_failed_title">Change interrupted</string>
+    <string name="encryption_failed_no_key">The current key is no longer on this device. Unlock with it and resume from this screen.</string>
+    <string name="encryption_failed_transient">A file could not be re-keyed. Resume from this screen to try again.</string>
+    <string name="encryption_failed_stuck">A file could not be opened with either key. Nothing was deleted, but the change cannot continue on its own.</string>
     <string name="backup_folder_caption">Backup folder</string>
     <string name="backup_no_folder">No folder chosen</string>
     <string name="backup_choose">Choose…</string>

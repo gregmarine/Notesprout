@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Arc 26 / U3: "New passphrase" — generate a fresh recovery key (the default) or choose your own.
+     The two fields exist only while "Choose my own" is picked (GONE, never disabled), and the
+     helper line is the only inkLight text here: it is a hint, not information. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="24dp"
+    android:paddingEnd="24dp"
+    android:paddingTop="8dp"
+    android:paddingBottom="0dp">
+
+    <RadioGroup
+        android:id="@+id/modeGroup"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <androidx.appcompat.widget.AppCompatRadioButton
+            android:id="@+id/modeGenerate"
+            style="@style/Widget.Notesprout.RadioButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:checked="true"
+            android:text="@string/encryption_new_generate" />
+
+        <androidx.appcompat.widget.AppCompatRadioButton
+            android:id="@+id/modeChoose"
+            style="@style/Widget.Notesprout.RadioButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/encryption_new_choose" />
+    </RadioGroup>
+
+    <LinearLayout
+        android:id="@+id/ownFields"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginTop="4dp"
+        android:visibility="gone">
+
+        <androidx.appcompat.widget.AppCompatEditText
+            android:id="@+id/newField"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/shape_bordered"
+            android:padding="12dp"
+            android:hint="@string/encryption_new_hint"
+            android:textColorHint="@color/inkLight"
+            android:textColor="@color/inkBlack"
+            android:textSize="16sp"
+            android:inputType="textVisiblePassword|textNoSuggestions"
+            android:maxLines="1"
+            android:singleLine="true" />
+
+        <androidx.appcompat.widget.AppCompatEditText
+            android:id="@+id/confirmField"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/shape_bordered"
+            android:padding="12dp"
+            android:hint="@string/encryption_confirm_hint"
+            android:textColorHint="@color/inkLight"
+            android:textColor="@color/inkBlack"
+            android:textSize="16sp"
+            android:inputType="textVisiblePassword|textNoSuggestions"
+            android:maxLines="1"
+            android:singleLine="true" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/encryption_new_helper"
+            android:textColor="@color/inkLight"
+            android:textSize="13sp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/error"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:textColor="@color/inkBlack"
+        android:textSize="14sp"
+        android:visibility="gone" />
+</LinearLayout>

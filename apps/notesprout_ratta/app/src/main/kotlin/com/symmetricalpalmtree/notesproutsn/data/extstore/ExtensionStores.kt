@@ -33,7 +33,8 @@ import java.io.File
  * pure table those callbacks act on.
  *
  * Process-lifetime cache: one open DB per package, never closed except by [closeAll] (tests /
- * debug). The `.db` outlives the extension — uninstalling or disabling one leaves its store in
+ * debug — and the global rotation, arc 26 / U3, before it re-keys the store files; a store is
+ * reopened on the next bind, under whatever `KeySession` then holds). The `.db` outlives the extension — uninstalling or disabling one leaves its store in
  * place, because removing an extension's data is a deliberate act, not a side effect.
  *
  * **Pre-open rule:** callers open the store on IO **before** binding the extension, so a cold open
@@ -100,7 +101,7 @@ object ExtensionStores {
         }.onFailure { Slog.d(TAG) { "checkpoint failed for $pkg: ${it.message}" } }
     }
 
-    /** Close every cached store (tests / debug). Never throws. */
+    /** Close every cached store (tests / debug / the rotation's cold-file rule). Never throws. */
     @Synchronized
     fun closeAll() {
         for ((pkg, db) in cache) {

@@ -48,6 +48,20 @@ class RawKeyDerivationTest {
     }
 
     @Test
+    fun deriveKey_platformAndLoopAgree() {
+        // deriveKey prefers the platform's PBKDF2 (one native call) and falls back to the loop; the
+        // two must be byte-identical for ASCII and non-ASCII passphrases alike, or a cached raw
+        // key would stop opening a file it once opened.
+        val salt = ByteArray(RawKeyDerivation.SALT_LEN) { (it * 7 + 3).toByte() }
+        val file = java.io.File.createTempFile("salt", ".soil").apply { writeBytes(salt); deleteOnExit() }
+        for (pass in listOf("NSPT-1YDE-38ZS", "pässwörd ✓ 日本")) {
+            val loop = RawKeyDerivation.pbkdf2HmacSha512(
+                com.symmetricalpalmtree.notesproutsn.crypto.SoilCrypto.keyBytes(pass), salt, RawKeyDerivation.KDF_ITER, RawKeyDerivation.KEY_LEN)
+            org.junit.Assert.assertArrayEquals(pass, loop, RawKeyDerivation.deriveKey(file, pass))
+        }
+    }
+
+    @Test
     fun constants_areStockSqlcipher4() {
         assertEquals(256_000, RawKeyDerivation.KDF_ITER)
         assertEquals(32, RawKeyDerivation.KEY_LEN)

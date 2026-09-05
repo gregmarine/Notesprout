@@ -15,8 +15,9 @@ import com.symmetricalpalmtree.notesproutsn.databinding.ActivityRecoveryKeyBindi
 import com.symmetricalpalmtree.notesproutsn.library.LibraryActivity
 
 /**
- * First launch only: reveals the auto-minted recovery key (the global passphrase). Continue requires
- * the "I've saved it" checkbox; the acknowledgement is persisted so the screen is never shown again.
+ * First launch — and after a minted rotation (arc 26 / U3), which clears the acknowledgement —
+ * reveals the auto-minted recovery key (the global passphrase). Continue requires the "I've saved
+ * it" checkbox; the acknowledgement is persisted so the screen is never shown again.
  * The key is displayed and copied to the clipboard on request — never logged, never in an Intent.
  */
 class RecoveryKeyActivity : AppCompatActivity() {
@@ -49,7 +50,10 @@ class RecoveryKeyActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
             PassphraseStore.setRecoveryKeyAcknowledged(this)
-            startActivity(Intent(this, LibraryActivity::class.java))
+            // Arc 26 / U3: after a minted rotation this screen shows the NEW key; *Back up now*
+            // rides through to the library.
+            BootstrapActivity.forwardAfterOpen(
+                this, thenBackup = intent.getBooleanExtra(BootstrapActivity.EXTRA_THEN_BACKUP, false))
             finish()
         }
     }

@@ -34,6 +34,14 @@ class FakeObjectDao : ObjectDao {
     override suspend fun countAliveNotebooksByScope(scope: String): Int =
         rows.values.count { it.type == ObjectType.NOTEBOOK && it.deletedAt == null && it.keyScope == scope }
 
+    override suspend fun aliveNotebookIdsByScope(scope: String): List<String> =
+        rows.values.filter { it.type == ObjectType.NOTEBOOK && it.deletedAt == null && it.keyScope == scope }
+            .sortedWith(compareBy({ it.name.lowercase() }, { it.id })).map { it.id }
+
+    override suspend fun setKeyScope(id: String, scope: String) {
+        rows[id]?.let { rows[id] = it.copy(keyScope = scope) }
+    }
+
     override suspend fun aliveOfType(ids: List<String>, type: String): List<ObjectSummary> =
         ids.mapNotNull { rows[it] }.filter { it.type == type && it.deletedAt == null }.map { it.toSummary() }
 

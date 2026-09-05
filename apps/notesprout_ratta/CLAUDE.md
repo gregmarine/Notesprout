@@ -167,7 +167,7 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   **Read `DRIVE_PLAN.md`, not `RATTA_PLAN.md`, for any work on it.**)
   `gradle.properties` sets `android.nonTransitiveRClass=false` — undoing it breaks every
   `:sn-screen` resource reference from `:app`.
-- **Arc 26 "Keys" is IN PROGRESS (wizard locked 2026-09-05; U1 + U2 landed 2026-09-05)** — og-parity
+- **Arc 26 "Keys" is IN PROGRESS (wizard locked 2026-09-05; U1 + U2 + U3 landed 2026-09-05)** — og-parity
   encryption (`PARITY_BACKLOG.md` item 1): the Encryption screen + library door, rotation, per-notebook
   scope, recovery. **Read the standalone `ENCRYPTION_PLAN.md`, not `RATTA_PLAN.md`, for it** — phases
   U1–U7, no code review, host-only, no ninth point. **U1:** `encryption/EncryptionActivity` behind
@@ -183,7 +183,19 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   before it could ever treat a missing file as a fresh install; `SnIndex.closeForRotation()` is the one
   door that closes the index (rotation only — after it, dialogs then a relaunch, nothing else).
   `PassphraseRules` (≥ 8 after trim, confirm, not-current) and single-use `PassphraseCache` exist for
-  U3–U5. Debug menu: *Rekey one notebook round-trip* / *Break a rekey commit* (`RekeyProbe`).
+  U3–U5. Debug menu: *Rekey one notebook round-trip* / *Break a rekey commit* (`RekeyProbe`). **U3
+  (rotation, 2026-09-05):** `crypto/GlobalRotation` + `RotationMarker` (journal in `PassphraseStore`,
+  written before any file is touched) + pure `RotationPlan` — notebooks → `ext:<pkg>` stores → **index
+  last**, both backup stamp maps cleared while the index is still open, `closeForRotation`, then
+  commit (`setGlobalPassphrase(new)` first, marker cleared last, ack cleared for a minted key) and a
+  relaunch through `BootstrapActivity.relaunchIntent`. Three resume paths: the Encryption screen's
+  banner, `BootstrapRoute.afterOpen` (key screen → marker → library; shared by Bootstrap, Unlock and
+  the recovery-key screen), and `SnIndex` trying the marker's key for an index the cached global no
+  longer opens and committing itself. A resume re-lists notebooks/stores minted since the marker. A
+  notebook under neither key is quarantined to `NOTEBOOK` scope, never deleted. **Standing rule from
+  the walk: `RawKeyDerivation.deriveKey` goes through the platform PBKDF2 and `KeyOpener.warm` is
+  serialized — the hand HMAC loop churns ~80 MB of native memory per derive and a burst of cold opens
+  after a rotation killed the process (Scudo OOM). Do not put the loop back on the hot path.**
 - **Every extension APK wears the same icon — the Tabler "puzzle", byte-identical, no exception**
   (the user's call, 2026-09-05, which reversed the three per-subject glyphs granted along the way:
   `:ext-tags`' `tag`, `:ext-calendar`'s `calendar`, `:ext-cloud`'s `cloud`). A package is found by

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Arc 26 / U3: "Current passphrase" — the first step of a rotation. One plain field, because the
+     recovery key is 45 characters and people paste it (long-press → Paste must work), and an inline
+     error that lets the dialog stay open on a wrong entry. The IME is never hidden from here: on
+     Ratta a hardware keyboard types only while it is shown. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="24dp"
+    android:paddingEnd="24dp"
+    android:paddingTop="8dp"
+    android:paddingBottom="0dp">
+
+    <androidx.appcompat.widget.AppCompatEditText
+        android:id="@+id/field"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/shape_bordered"
+        android:padding="12dp"
+        android:hint="@string/encryption_current_hint"
+        android:textColorHint="@color/inkLight"
+        android:textColor="@color/inkBlack"
+        android:textSize="16sp"
+        android:inputType="textVisiblePassword|textNoSuggestions"
+        android:maxLines="1"
+        android:singleLine="true" />
+
+    <TextView
+        android:id="@+id/error"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="@string/encryption_current_wrong"
+        android:textColor="@color/inkBlack"
+        android:textSize="14sp"
+        android:visibility="gone" />
+</LinearLayout>

@@ -58,6 +58,17 @@ interface ObjectDao {
     @Query("SELECT count(*) FROM objects WHERE type = 'notebook' AND deletedAt IS NULL AND keyScope = :scope")
     suspend fun countAliveNotebooksByScope(scope: String): Int
 
+    /** Every alive notebook id under [scope], by name — the rotation's work list (arc 26 / U3).
+     *  Ids only: the marker holds ids, never names. */
+    @Query("SELECT id FROM objects WHERE type = 'notebook' AND deletedAt IS NULL AND keyScope = :scope ORDER BY name COLLATE NOCASE, id")
+    suspend fun aliveNotebookIdsByScope(scope: String): List<String>
+
+    /** Rewrite one notebook's `keyScope`. **Never touches `updatedAt`** (sacred — a scope change is
+     *  not an edit; the backup stamp is cleared instead). Arc 26 / U3's quarantine writes
+     *  `NOTEBOOK` here; U4's `setEncryptionState` grows it with the cover rule. */
+    @Query("UPDATE objects SET keyScope = :scope WHERE id = :id")
+    suspend fun setKeyScope(id: String, scope: String)
+
     /** The alive rows of [type] among [ids], blob-free (arc 13 / G5 — one read for a whole pinned
      *  or recents shelf). Empty [ids] never hits the database. */
     @Query(

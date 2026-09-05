@@ -87,7 +87,9 @@ class UnlockActivity : AppCompatActivity() {
                 AttemptLimiter.recordSuccess(this@UnlockActivity)
                 // The user just typed the key — they have it; don't show the reveal screen again.
                 PassphraseStore.setRecoveryKeyAcknowledged(this@UnlockActivity)
-                startActivity(Intent(this@UnlockActivity, LibraryActivity::class.java))
+                // The library — or the Encryption screen's resume banner if a rotation was in
+                // flight when the key left this device (arc 26 / U3).
+                BootstrapActivity.forwardAfterOpen(this@UnlockActivity, thenBackup = false)
                 finish()
             } else {
                 AttemptLimiter.recordFailure(this@UnlockActivity)

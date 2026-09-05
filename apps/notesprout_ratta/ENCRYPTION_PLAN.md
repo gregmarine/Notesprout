@@ -6,7 +6,7 @@ the root `CLAUDE.md` and `apps/notesprout_ratta/CLAUDE.md`. **Do not load `RATTA
 this arc** unless a standing trap needs checking; its protocol and traps are summarized at the end
 so this file is enough. `DRIVE_PLAN.md` is the shape this file copies.
 
-**Status:** wizard locked 2026-09-05 · U1 ✅ (2026-09-05) · U2 ✅ (2026-09-05) · U3 ⬜ · U4 ⬜ · U5 ⬜ · U6 ⬜ · U7 ⬜
+**Status:** wizard locked 2026-09-05 · U1 ✅ (2026-09-05) · U2 ✅ (2026-09-05) · U3 ✅ (2026-09-05) · U4 ⬜ · U5 ⬜ · U6 ⬜ · U7 ⬜
 
 ---
 
@@ -244,7 +244,7 @@ Encryption screen, once U1 lands — the debug item is gone) so no walk can lock
   reproduced by hand (`.old.bak` left behind → Bootstrap recovers it).
 - **Questions at phase start:** none pending.
 
-### U3 ⬜ — Rotation
+### U3 ✅ — Rotation (2026-09-05)
 - `crypto/GlobalRotation` + `RotationMarker` per D2 (Fable); `SnIndex.ensureReady`'s marker path;
   Bootstrap's marker forward; `EXTRA_THEN_BACKUP`.
 - Encryption screen (Opus): Change passphrase flow, Generate / Choose my own, backups warning,
@@ -258,8 +258,11 @@ Encryption screen, once U1 lands — the debug item is gone) so no walk can lock
   Unlock with the typed one → kill mid-rotation (adb `am force-stop` between files) → Bootstrap →
   Encryption screen banner → Resume → clean. The old local backup folder is then checked to be
   unopenable under the new key and replaced by one backup run.
-- **Questions at phase start:** (1) does Cancel mid-rotation leave the resume banner (og) or
-  offer "finish now / later"? Default: og. (2) the progress dialog's wording.
+- **Questions at phase start (answered 2026-09-05):** (1) Cancel mid-rotation → **og: stop after
+  the current file, leave the banner**; no "finish now / later". (2) Progress dialog → title
+  "Changing passphrase", **"Re-keying n of t…" + the current name** on its own line (stores read
+  "Extension data", the index "Library index"), footer "Keep the app open. This can take a
+  while.", Cancel only.
 
 ### U4 ⬜ — Notebook scope: resolver, prompt, lock card, every open site
 - `KeyScope`, `KeyResolver`, `NotebookUnlocks`, `NotebookPassphrasePrompt` per D3 (Fable the
@@ -430,3 +433,61 @@ Encryption screen, once U1 lands — the debug item is gone) so no walk can lock
   costs two KDF verifies per file on top of the copy — the progress dialog's per-file estimate on the
   Nomad is ~4 s + copy time, not "instant".
 
+### U3 — Outcome (2026-09-05)
+- **Built (`crypto/`):** `RotationMarker` (kotlinx JSON in `PassphraseStore` — `pendingIds`,
+  `newPassphrase`, `minted`, `total`, `notebookCount`, `startedAt`, `quarantined`; `commit()` writes,
+  never `apply()`), `RotationPlan` (pure: `order` notebooks → `ext:<pkg>` stores → index LAST, `kindOf`,
+  the `decide` / `afterFailure` outcome tables, `commitSteps`, `resumeCandidates`), `GlobalRotation`
+  (`start` / `resume` / `commit`; cheap "still under the old key" via the cached raw key before any KDF;
+  `ExtensionStores.closeAll()` before the first store; `BackupStore.clearAllStamps()` — BOTH maps —
+  then `SnIndex.closeForRotation()` before the index; quarantine = `IndexRepository.quarantine` +
+  `clearStamp`; each file under `NonCancellable`; Cancel honoured between files). `trustedVerifier`
+  accepts the cached global OR the marker's key — Bootstrap's `recoverGarden`, rotation resume and the
+  index-leftover guard all use it (U2's planner notes 1 + 2).
+- **A resume re-lists the library** (a planner addition): the library is reachable between a Cancel
+  and a Resume, so a notebook created/imported since (`createdAt`/`updatedAt ≥ startedAt`, or a raw key
+  that still opens it) and every store on disk join the list — nothing is left under the old key.
+- **Three resume paths, all walked:** the banner (`btnResume`; Change + Forget GONE meanwhile) ·
+  `BootstrapRoute.afterOpen` (key screen first, then the marker, then the library; shared by Bootstrap,
+  Unlock and the recovery-key screen's Continue — Unlock no longer hardwires the library) ·
+  `SnIndex.openUnderMarkerOrUnlock` (the marker's key tried when the cached global does not open the
+  index; `finishOpen` also self-commits when the cached global already IS the marker's key).
+- **UI (Opus on a brief):** Change passphrase… → Current passphrase (string match + Crockford fold,
+  wrong entry keeps the dialog, IME never touched) → New passphrase (Generate / Choose my own, two
+  fields, `PassphraseRules` verdicts inline) → confirm with the backups warning (+ "shown once on
+  restart" for a minted key) → progress "Re-keying n of t…" + name / "Extension data" / "Library
+  index", Cancel swaps the last line to "Stopping after this file…" and goes GONE → Passphrase changed
+  (Back up now / Done → `BootstrapActivity.relaunchIntent(thenBackup)`; `EXTRA_THEN_BACKUP` rides the
+  recovery-key screen into `LibraryActivity`, which opens Backup once per cold launch) · Change paused
+  (index still open — no relaunch) · Change interrupted (relaunch on dismiss: the index may be closed).
+  Two dialog layouts (`dialog_passphrase_current` / `_new`); 43 strings. Unlock's wording now says
+  "recovery key — or the passphrase you chose".
+- **Tests:** 1035 in `:app` (21 new — `RotationMarkerTest`, `RotationPlanTest`, `BootstrapRouteTest`,
+  `BackupStoreTest` both-map + `clearAllStamps`, `RawKeyDerivationTest` platform/loop agreement).
+- **Walk (Nomad, Fable by hand):** Reveal matched the key on file → Change → paste current → Generate
+  → Change → "Re-keying 2 of 52…" (45 notebooks + 6 stores + index, ~4.4 s/file) → Cancel at 5 →
+  paused, banner up, Change/Forget gone → `am force-stop` → relaunch lands on the Encryption screen
+  (path 2) → Resume from 6 → force-stop at 8, Garden clean → relaunch → Resume → committed at 15:15
+  (`minted=true, quarantined=0`) → Back up now → Bootstrap → **new key shown once** → library → Backup
+  screen → run copies everything (stamps cleared). Then the typed leg: paste current → Choose my own →
+  `walkpass1` twice via the on-screen keyboard → committed in 3m53s, native heap flat at 26 MB → Back
+  up now → library (no key screen — typed) → 44 copied / 7 stores / index → notebook + calendar open →
+  Forget → Unlock with `walkpass1` → library. **The Nomad dev library's key is now `walkpass1`.**
+- **The bug the walk found (fixed in this phase): a cold-derive burst kills the process.** The first
+  post-rotation backup died at 10/104 — `Scudo OOM: exhausted 256M for size class 288/352`, native heap
+  42 → 663 MB in 20 s. Cause: `RawKeyDerivation`'s hand loop calls Conscrypt `Mac.doFinal` 256,000× per
+  key and every call leaves a native HMAC context for the GC (~80 MB churn per derive); the commit's
+  `KeyMaterial.clearAll` made every file cold and the backup's compaction opened 45 in a row, each
+  spawning a background warm on `Dispatchers.IO` — several concurrent derives exhausted the allocator's
+  per-size-class budget. Latent since arc 1 (raw keys were always warm before). Fix: `deriveKey` goes
+  through the platform `SecretKeyFactory("PBKDF2WithHmacSHA512")` (one native call, byte-identical —
+  the loop stays as the fallback, and `KeyOpener` verifies a raw key before use so a provider mismatch
+  could only cost a slow open), and `KeyOpener.warm` runs on `limitedParallelism(1)`. Measured: a
+  derive is **8.8 s** on the Nomad via the platform (vs ~2–3 s for the loop) but native stays flat;
+  after a rotation the ~45 warms drain serially in ~7 min of background CPU while opens fall back to
+  SQLCipher's own KDF (~1.5 s each). Recorded here so nobody "optimises" the loop back in.
+- **Planner notes for U4:** (1) a rotated GLOBAL notebook is unopenable mid-rotation until commit —
+  `KeyResolver`'s marker second candidate is what fixes that (D2's last bullet), and `ExtensionStores.
+  open` wants the same second candidate; (2) `IndexRepository.quarantine` is U3's minimal
+  `setEncryptionState` — U4 grows it with the cover-null + `notebook_meta` restamp; (3) the Unlock hint
+  is now generic — the `NSPT-…` hint is gone on purpose.

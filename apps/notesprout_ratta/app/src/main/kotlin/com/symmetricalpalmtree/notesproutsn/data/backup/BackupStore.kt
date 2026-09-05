@@ -28,7 +28,24 @@ class BackupStore(private val dao: ObjectDao = SnIndex.dao()) {
      */
     suspend fun clearStamp(notebookId: String) {
         val config = read()
-        if (notebookId in config.stamps) write(config.copy(stamps = config.stamps - notebookId))
+        if (notebookId in config.stamps || notebookId in config.cloudStamps) {
+            // Both maps (arc 26 / U3): a stamp is a statement about one destination, and the reason
+            // for forgetting it — the bytes changed under an unchanged `updatedAt` — holds for both.
+            write(config.copy(stamps = config.stamps - notebookId, cloudStamps = config.cloudStamps - notebookId))
+        }
+    }
+
+    /**
+     * Forget every stamp in both maps (arc 26 / U3 — the global rotation, decision 4). A rekey
+     * leaves `updatedAt` untouched, so without this every backup would keep its old-key copy of
+     * every file forever; after it the next run replaces them all. Called while the index is still
+     * open, right before the index's own rekey; harmless to repeat on a resume.
+     */
+    suspend fun clearAllStamps() {
+        val config = read()
+        if (config.stamps.isNotEmpty() || config.cloudStamps.isNotEmpty()) {
+            write(config.copy(stamps = emptyMap(), cloudStamps = emptyMap()))
+        }
     }
 
     /** Persist [config], replacing whatever was there. False if it would not encode (never

@@ -1,7 +1,10 @@
 package com.symmetricalpalmtree.notesproutsn.crypto
 
 import java.io.File
+import java.security.GeneralSecurityException
 import java.util.Locale
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.PBEKeySpec
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
@@ -32,8 +35,32 @@ object RawKeyDerivation {
     }
 
     /** Expensive — call on Dispatchers.IO/Default and cache. Passphrase bytes are UTF-8. */
-    fun deriveKey(file: File, passphrase: String): ByteArray =
-        pbkdf2HmacSha512(SoilCrypto.keyBytes(passphrase), readSalt(file), KDF_ITER, KEY_LEN)
+    fun deriveKey(file: File, passphrase: String): ByteArray {
+        val salt = readSalt(file)
+        return platformPbkdf2(passphrase, salt) ?: pbkdf2HmacSha512(SoilCrypto.keyBytes(passphrase), salt, KDF_ITER, KEY_LEN)
+    }
+
+    /**
+     * The platform's PBKDF2 in **one** native call. The hand loop below is byte-identical but
+     * drives `Mac.doFinal` 256,000 times, and on Android every call leaves a native HMAC context
+     * behind for the GC to reclaim — ~80 MB of native churn per key. One cold derive is harmless;
+     * a burst of them (arc 26 / U3's rotation clears every cached raw key, and the next backup
+     * run then opens forty cold files in a row) exhausted the allocator's per-size-class budget
+     * and killed the process on the Nomad. Null when the platform has no such factory (the loop
+     * takes over); the raw key is verified against the file before every use either way, so a
+     * provider that encoded the passphrase differently could only cost a slow open, never a lockout.
+     */
+    private fun platformPbkdf2(passphrase: String, salt: ByteArray): ByteArray? = try {
+        val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA512")
+        val spec = PBEKeySpec(passphrase.toCharArray(), salt, KDF_ITER, KEY_LEN * 8)
+        try {
+            factory.generateSecret(spec).encoded
+        } finally {
+            spec.clearPassword()
+        }
+    } catch (_: GeneralSecurityException) {
+        null
+    }
 
     /** SQLCipher raw-key literal `x'<hex>'`. */
     fun rawKeyLiteral(rawKey: ByteArray): String = "x'${toHex(rawKey)}'"
