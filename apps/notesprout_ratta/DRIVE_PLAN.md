@@ -387,5 +387,5 @@ harmless to the upload (the cloud name is `ExportNaming`'s) but wrong; caught on
 read-through, fixed before the install. No control bytes this phase.
 
 **User checklist.** 1. In Drive, `Notesprout SN Dev/Exports/Walk/Events Ideas.pdf` opens and shows
-the page. 2. `Exports/probe` is still empty. (Delete `Walk` whenever you like — nothing reads it.)
+the page. 2. `Exports/probe` is still empty. (Delete `Walk` whenever you like — nothing reads it.) **Both passed (user, 2026-09-04) — V3 signed off.**
 
