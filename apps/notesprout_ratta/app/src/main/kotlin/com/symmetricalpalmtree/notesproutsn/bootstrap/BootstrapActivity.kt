@@ -15,7 +15,10 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.symmetricalpalmtree.notesproutsn.R
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
+import com.symmetricalpalmtree.notesproutsn.crypto.KeySession
 import com.symmetricalpalmtree.notesproutsn.crypto.PassphraseStore
+import com.symmetricalpalmtree.notesproutsn.crypto.SoilCrypto
+import com.symmetricalpalmtree.notesproutsn.crypto.SoilRekey
 import com.symmetricalpalmtree.notesproutsn.data.index.SnIndex
 import com.symmetricalpalmtree.notesproutsn.library.LibraryActivity
 import kotlinx.coroutines.CancellationException
@@ -80,6 +83,12 @@ class BootstrapActivity : AppCompatActivity() {
         when (SnIndex.ensureReady(this)) {
             SnIndex.PrepareOutcome.READY,
             SnIndex.PrepareOutcome.FIRST_LAUNCH -> {
+                // Arc 26 / U2: finish any rekey commit a kill interrupted — `X.rekey.tmp` /
+                // `X.old.bak` beside a Garden file — before the library can list it. The cached
+                // global is the trusted key; a file it does not open is left exactly where it is.
+                KeySession.get()?.let { pass ->
+                    SoilRekey.recoverGarden(this) { SoilCrypto.verifyPassphrase(it, pass) }
+                }
                 // Arc 17 / K1: purge soft-deleted index rows while nothing else is reading —
                 // gated on an EXISTS probe, so the ordinary launch pays one trivial query.
                 SnIndex.compactIfNeeded()

@@ -150,7 +150,9 @@ object ExportKeying {
      * meta to `encrypted: true` / [keyScope] — then accept nothing unverified: the output must
      * probe [SoilFileKind.Encrypted], open under [destPassphrase], answer `integrity_check` with
      * `ok` and hold the source's version. A failure deletes only the unaccepted output and throws
-     * with a path-free message built on [what].
+     * with a path-free message built on [what]. [restamp] is false for a file with no
+     * `notebook_meta` at all — an extension store or the index under [SoilRekey] — so the
+     * best-effort restamp does not log a miss it was always going to have.
      */
     internal suspend fun exportAndKeyToPrimary(
         out: File,
@@ -159,6 +161,7 @@ object ExportKeying {
         destPassphrase: String,
         keyScope: String?,
         what: String,
+        restamp: Boolean = true,
     ): File = withContext(Dispatchers.IO) {
         val sourceVersion: Long
         val dest = try {
@@ -173,7 +176,7 @@ object ExportKeying {
                 sourceVersion = queryLong(dest, "PRAGMA old_src.user_version")
                 dest.rawQuery("SELECT sqlcipher_export('main', 'old_src')", null).use { it.moveToFirst() }
                 copyUserVersion(dest, from = "old_src", to = "main")
-                restampMeta(dest, schema = "main", encrypted = true, keyScope = keyScope)
+                if (restamp) restampMeta(dest, schema = "main", encrypted = true, keyScope = keyScope)
             } finally {
                 dest.execSQL("DETACH DATABASE old_src")
             }

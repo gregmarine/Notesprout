@@ -167,7 +167,7 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   **Read `DRIVE_PLAN.md`, not `RATTA_PLAN.md`, for any work on it.**)
   `gradle.properties` sets `android.nonTransitiveRClass=false` — undoing it breaks every
   `:sn-screen` resource reference from `:app`.
-- **Arc 26 "Keys" is IN PROGRESS (wizard locked 2026-09-05; U1 landed 2026-09-05)** — og-parity
+- **Arc 26 "Keys" is IN PROGRESS (wizard locked 2026-09-05; U1 + U2 landed 2026-09-05)** — og-parity
   encryption (`PARITY_BACKLOG.md` item 1): the Encryption screen + library door, rotation, per-notebook
   scope, recovery. **Read the standalone `ENCRYPTION_PLAN.md`, not `RATTA_PLAN.md`, for it** — phases
   U1–U7, no code review, host-only, no ninth point. **U1:** `encryption/EncryptionActivity` behind
@@ -175,7 +175,15 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   reads `keyScope`), Reveal (og's wording, Copy/Close, no re-auth), Forget on this device (ships in
   release; clears `PassphraseStore` + `KeySession` + `KeyMaterial`, then **kills the process** —
   `SnIndex` has no close, so a live process would answer READY with no key). The debug menu's
-  "Show recovery key" / "Forget cached key" are gone; every crypto walk starts at Reveal.
+  "Show recovery key" / "Forget cached key" are gone; every crypto walk starts at Reveal. **U2 (rekey
+  core, 2026-09-05):** `crypto/SoilRekey` is **the only thing that changes the key a file on disk is
+  under** — export-and-key into `X.rekey.tmp`, `RekeyCommit.commitReplace` (og's fsync'd rename order,
+  `X.old.bak`), `RekeyRecovery` (delete nothing unless the survivor verifies); Bootstrap runs
+  `recoverGarden` after the index opens and `SnIndex.ensureReady` recovers the index's own leftovers
+  before it could ever treat a missing file as a fresh install; `SnIndex.closeForRotation()` is the one
+  door that closes the index (rotation only — after it, dialogs then a relaunch, nothing else).
+  `PassphraseRules` (≥ 8 after trim, confirm, not-current) and single-use `PassphraseCache` exist for
+  U3–U5. Debug menu: *Rekey one notebook round-trip* / *Break a rekey commit* (`RekeyProbe`).
 - **Every extension APK wears the same icon — the Tabler "puzzle", byte-identical, no exception**
   (the user's call, 2026-09-05, which reversed the three per-subject glyphs granted along the way:
   `:ext-tags`' `tag`, `:ext-calendar`'s `calendar`, `:ext-cloud`'s `cloud`). A package is found by

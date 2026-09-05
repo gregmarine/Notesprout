@@ -20,6 +20,8 @@ import com.symmetricalpalmtree.notesproutsn.data.extensionStoreFile
 import com.symmetricalpalmtree.notesproutsn.data.extstore.ExtensionStoreBinder
 import com.symmetricalpalmtree.notesproutsn.data.extstore.ExtensionStores
 import com.symmetricalpalmtree.notesproutsn.data.extstore.StoreFormat
+import com.symmetricalpalmtree.notesproutsn.data.index.SnIndex
+import com.symmetricalpalmtree.notesproutsn.data.soil.SoilSchema
 import com.symmetricalpalmtree.notesproutsn.extension.CloudClient
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionCallException
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
@@ -61,6 +63,10 @@ import java.io.File
  *    20 MiB upload and a 20 MiB download against the person's real account. Durations land in a
  *    dialog **and** in logcat as `probe: <op> <n> ms`. It writes to `Exports/probe/` and deletes
  *    what it wrote.
+ *  - **Rekey one notebook round-trip** / **Break a rekey commit** ([RekeyProbe], arc 26 / U2) —
+ *    the on-device proof of `SoilRekey`: global → throwaway → global with `integrity_check` and row
+ *    counts before/between/after, and a hand-made "death between the two renames" that the next
+ *    launch's `recoverGarden` must put right (the process is killed on purpose, like Forget).
  *  - **WEBP encoder measurement** ([WebpProbe]) — lossless vs lossy-q100 on this device's own page
  *    size, for the open question in `BuiltInTemplates.toWebp`. Skia's encoders are the subject, so
  *    no host tool can answer it; run it on every device tier before changing the format.
@@ -90,17 +96,107 @@ object DebugMenu {
             "Cloud status",
             "Cloud probe",
             "WEBP encoder measurement",
+            "Rekey one notebook round-trip (debug)",
+            "Break a rekey commit (debug)",
         )
         val actions = listOf<() -> Unit>(
             { storeSelfTest(activity) },
             { cloudStatus(activity) },
             { cloudProbe(activity) },
             { webpProbe(activity) },
+            { pickNotebook(activity, "Rekey round-trip") { id -> rekeyRoundTrip(activity, id) } },
+            { pickNotebook(activity, "Break a rekey commit") { id -> breakRekeyCommit(activity, id) } },
         )
         Dialogs.style(
             AlertDialog.Builder(activity)
                 .setTitle("Debug tools")
                 .setItems(labels) { _, which -> actions[which]() }
+                .create()
+        ).show()
+    }
+
+    /** A one-tap list of the alive notebooks, by name, for the two rekey tools. */
+    private fun pickNotebook(activity: AppCompatActivity, title: String, onPick: (String) -> Unit) {
+        activity.lifecycleScope.launch {
+            val rows = withContext(Dispatchers.IO) {
+                SnIndex.dao().allAliveOfType(SoilSchema.TYPE_NOTEBOOK).sortedBy { it.name.lowercase() }
+            }
+            if (rows.isEmpty()) {
+                Dialogs.problem(activity, title, "No notebooks in the library.")
+                return@launch
+            }
+            Dialogs.style(
+                AlertDialog.Builder(activity)
+                    .setTitle(title)
+                    .setItems(rows.map { it.name.ifEmpty { it.id } as CharSequence }.toTypedArray()) { _, which -> onPick(rows[which].id) }
+                    .create()
+            ).show()
+        }
+    }
+
+    private fun rekeyRoundTrip(activity: AppCompatActivity, notebookId: String) {
+        val progress = Dialogs.style(
+            AlertDialog.Builder(activity)
+                .setTitle("Rekey round-trip")
+                .setMessage("Re-keying — two KDFs and two full copies…")
+                .setCancelable(false)
+                .create()
+        ).also { it.show() }
+        activity.lifecycleScope.launch {
+            val text = try {
+                RekeyProbe.roundTrip(activity, notebookId)
+            } finally {
+                runCatching { progress.dismiss() }
+            }
+            Slog.d("DebugMenu") { "rekey round-trip\n$text" }
+            Dialogs.style(
+                AlertDialog.Builder(activity)
+                    .setTitle("Rekey round-trip")
+                    .setMessage(text)
+                    .setPositiveButton("Copy") { _, _ ->
+                        val cm = activity.getSystemService(AppCompatActivity.CLIPBOARD_SERVICE) as ClipboardManager
+                        cm.setPrimaryClip(ClipData.newPlainText("rekey round-trip", text))
+                        Toast.makeText(activity, "Copied", Toast.LENGTH_SHORT).show()
+                    }
+                    .setNegativeButton("Close", null)
+                    .create()
+            ).show()
+        }
+    }
+
+    /** Variant chooser, then the file ops, then the process ends (Forget's shape) so the next
+     *  launch is a real Bootstrap over the broken Garden. */
+    private fun breakRekeyCommit(activity: AppCompatActivity, notebookId: String) {
+        val variants = arrayOf<CharSequence>(
+            "A — tmp verifies (Bootstrap renames the tmp in)",
+            "B — tmp is garbage (Bootstrap renames .old.bak back)",
+        )
+        Dialogs.style(
+            AlertDialog.Builder(activity)
+                .setTitle("Break a rekey commit")
+                .setItems(variants) { _, which ->
+                    val variant = if (which == 0) RekeyProbe.Break.TMP_VERIFIES else RekeyProbe.Break.TMP_GARBAGE
+                    activity.lifecycleScope.launch {
+                        val text = RekeyProbe.breakCommit(activity, notebookId, variant)
+                        Slog.d("DebugMenu") { "break rekey commit: $text" }
+                        val broke = !text.startsWith("FAIL")
+                        Dialogs.style(
+                            AlertDialog.Builder(activity)
+                                .setTitle("Break a rekey commit")
+                                .setMessage(text + if (broke) "\n\nClosing the app now." else "")
+                                .setCancelable(false)
+                                .setPositiveButton("OK") { _, _ ->
+                                    if (broke) {
+                                        activity.finishAffinity()
+                                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                            android.os.Process.killProcess(android.os.Process.myPid())
+                                        }, 300L)
+                                    }
+                                }
+                                .create()
+                        ).show()
+                    }
+                }
                 .create()
         ).show()
     }

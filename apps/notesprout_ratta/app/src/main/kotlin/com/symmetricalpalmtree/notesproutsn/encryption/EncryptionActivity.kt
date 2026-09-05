@@ -22,6 +22,7 @@ import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.core.TopGuard
 import com.symmetricalpalmtree.notesproutsn.crypto.KeyMaterial
 import com.symmetricalpalmtree.notesproutsn.crypto.KeySession
+import com.symmetricalpalmtree.notesproutsn.crypto.PassphraseCache
 import com.symmetricalpalmtree.notesproutsn.crypto.PassphraseStore
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityEncryptionBinding
@@ -152,6 +153,7 @@ class EncryptionActivity : AppCompatActivity() {
                 PassphraseStore.clearGlobalPassphrase(this@EncryptionActivity)
                 KeyMaterial.clearAll(this@EncryptionActivity)
                 KeySession.clear()
+                PassphraseCache.clear()
             }
             Slog.d(TAG) { "recovery key forgotten on this device; closing" }
             finishAffinity()

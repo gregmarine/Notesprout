@@ -6,12 +6,14 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteOpenHelper
+import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.crypto.GlobalKey
 import com.symmetricalpalmtree.notesproutsn.crypto.KeyMaterial
 import com.symmetricalpalmtree.notesproutsn.crypto.KeySession
 import com.symmetricalpalmtree.notesproutsn.crypto.PassphraseStore
 import com.symmetricalpalmtree.notesproutsn.crypto.SoilCrypto
 import com.symmetricalpalmtree.notesproutsn.crypto.SoilFileKind
+import com.symmetricalpalmtree.notesproutsn.crypto.SoilRekey
 import com.symmetricalpalmtree.notesproutsn.data.indexFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -25,8 +27,11 @@ import kotlinx.coroutines.withContext
  * **`BootstrapActivity` is the only caller of [ensureReady] / [unlockAndOpen].** Every other
  * screen checks [isReady] through `IndexGuard` in `onCreate` and bounces back to Bootstrap when
  * the answer is no (a task Android rebuilt after a background process kill lands there).
- * **Nothing ever closes it** — it opens once per process and stays open — which is what makes a
- * single `onCreate` check sufficient.
+ * **Nothing closes it in ordinary life** — it opens once per process and stays open — which is
+ * what makes a single `onCreate` check sufficient. The one exception is [closeForRotation]
+ * (arc 26 / U2): the global rotation must re-key the index file, which cannot happen under a live
+ * Room connection; after it the Encryption screen touches nothing but dialogs and the only way out
+ * is a relaunch through Bootstrap (`IndexGuard` bounces every other screen).
  *
  * Open state machine (probe the file header, never open to find out):
  *  - `Invalid` + no file (or zero bytes) → mint (or reuse) the global key → create encrypted →
@@ -63,6 +68,19 @@ object SnIndex {
             if (instance != null) return@withContext PrepareOutcome.READY
             val app = context.applicationContext
             val file = indexFile(app)
+
+            // Arc 26 / U2: an index missing because a rekey commit died between its two renames is
+            // NOT a fresh install — its bytes are `notesprout.db.rekey.tmp` / `.old.bak` beside it.
+            // Recover with the cached passphrase before the probe can ever answer "create". With no
+            // cached passphrase nothing can be verified and nothing is touched: DAMAGED_FILE, and
+            // both files stay for a person to look at.
+            if ((!file.exists() || file.length() == 0L) && SoilRekey.hasLeftovers(file)) {
+                val pass = PassphraseStore.getGlobalPassphrase(app)
+                    ?: return@withContext PrepareOutcome.DAMAGED_FILE
+                val result = SoilRekey.recoverOne(file) { SoilCrypto.verifyPassphrase(it, pass) }
+                Log.w(TAG, "index rekey leftovers: $result")
+                if (!file.exists() || file.length() == 0L) return@withContext PrepareOutcome.DAMAGED_FILE
+            }
 
             when (SoilCrypto.probe(file)) {
                 SoilFileKind.Invalid -> {
@@ -128,6 +146,26 @@ object SnIndex {
             forceOpen(db)
             finishOpen(db, passphrase)
             true
+        }
+    }
+
+    /**
+     * Arc 26 / U2 — the one door that closes the index: checkpoint, close, forget the instance.
+     * For the global rotation only, which must re-key the file and cannot while Room holds it.
+     * Every other screen is behind `IndexGuard` and bounces to Bootstrap from here on; the caller
+     * exits through a relaunch and never calls [dao] again. Idempotent; never throws. IO.
+     */
+    suspend fun closeForRotation() = withContext(Dispatchers.IO) {
+        prepareMutex.withLock {
+            val db = instance ?: return@withLock
+            try {
+                db.openHelper.writableDatabase.query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }
+            } catch (e: Exception) {
+                Log.w(TAG, "checkpoint before close failed", e)
+            }
+            runCatching { db.close() }.onFailure { Log.w(TAG, "close failed", it) }
+            instance = null
+            Slog.d(TAG) { "index closed for rotation" }
         }
     }
 

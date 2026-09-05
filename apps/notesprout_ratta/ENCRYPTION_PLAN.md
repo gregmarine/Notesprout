@@ -6,7 +6,7 @@ the root `CLAUDE.md` and `apps/notesprout_ratta/CLAUDE.md`. **Do not load `RATTA
 this arc** unless a standing trap needs checking; its protocol and traps are summarized at the end
 so this file is enough. `DRIVE_PLAN.md` is the shape this file copies.
 
-**Status:** wizard locked 2026-09-05 · U1 ✅ (2026-09-05) · U2 ⬜ · U3 ⬜ · U4 ⬜ · U5 ⬜ · U6 ⬜ · U7 ⬜
+**Status:** wizard locked 2026-09-05 · U1 ✅ (2026-09-05) · U2 ✅ (2026-09-05) · U3 ⬜ · U4 ⬜ · U5 ⬜ · U6 ⬜ · U7 ⬜
 
 ---
 
@@ -232,7 +232,7 @@ Encryption screen, once U1 lands — the debug item is gone) so no walk can lock
 - **Questions at phase start:** (1) exact wording of the three dialogs — take og's verbatim unless
   told otherwise. Nothing else.
 
-### U2 ⬜ — The in-place rekey core
+### U2 ✅ — The in-place rekey core (2026-09-05)
 - `crypto/SoilRekey` per D1 (Fable): `rekeyInPlace(file, fileId, old, new, scope?)`, `commitReplace`,
   `recoverGarden`; `SnIndex.closeForRotation()`; `ExtensionStores.closeAll()` already exists.
 - `crypto/PassphraseRules` (pure; decision 13) + tests. `crypto/PassphraseCache` (single-use, RAM).
@@ -396,3 +396,37 @@ Encryption screen, once U1 lands — the debug item is gone) so no walk can lock
 - **Tests:** 989 in `:app`, 0 failures (no new pure logic beyond a count).
 - **Trap for the next walks:** Reveal → Copy puts the key on the system clipboard, and it survives the
   process kill — the cheapest way to feed Unlock on a Supernote.
+
+### U2 — Outcome (2026-09-05)
+- **Built (`crypto/`):** `SoilRekey` (`rekeyInPlace` = cold check → WAL absorb by raw open +
+  `wal_checkpoint(TRUNCATE)` + sidecar sweep, refusing a WAL that stays non-empty → `ExportKeying.
+  exportAndKeyToPrimary` into `X.rekey.tmp` → `RekeyCommit.commitReplace` → `KeyMaterial.invalidate`;
+  `recoverGarden` / `recoverOne` / `hasLeftovers`), `RekeyNames` (`.rekey.tmp` / `.old.bak`, the
+  leftover grouping), `RekeyCommit` (og's order over an injected `RekeyFs`, five outcomes — Committed /
+  RefusedLiveWal / OriginalNotMoved / RolledBack / BothKept), `RekeyRecovery` (the D1 decision table +
+  an executor that re-verifies the survivor before every delete), `RekeyFs` + `RealRekeyFs` (fsync'd),
+  `PassphraseRules` (≥ 8 after trim, confirm, not-current), `PassphraseCache` (single-use RAM).
+  `ExportKeying.exportAndKeyToPrimary` gained `restamp` (false for a store / the index — no meta).
+- **Doors:** `SnIndex.closeForRotation()` (checkpoint, close, `instance = null`, under the prepare
+  mutex — the one door that closes the index); **`SnIndex.ensureReady` recovers the index's own
+  leftovers before the probe** — a missing `notesprout.db` with a `.rekey.tmp` / `.old.bak` beside it is
+  never a fresh install: recovered with the cached passphrase, else `DAMAGED_FILE` (nothing touched).
+  Bootstrap runs `recoverGarden` (verifier = the cached global) right after the index opens, before
+  the K1 compaction. Forget also clears `PassphraseCache`.
+- **Debug (`.dev` only, `library/RekeyProbe` + two `DebugMenu` items):** *Rekey one notebook
+  round-trip* and *Break a rekey commit* (variant A tmp verifies / B tmp garbage; kills the process
+  like Forget). Both stay for U3–U6's walks.
+- **Tests:** 1014 in `:app` (25 new — `RekeyCommitTest`, `RekeyRecoveryTest`, `PassphraseRulesTest`
+  incl. the cache; `FakeRekeyFs` logs every op so the ORDER is pinned, not just the end state).
+- **Walk (Nomad, Fable by hand, throwaway notebook `20260905_142626`):** round-trip PASS — `integrity_
+  check` ok / 2 rows / 24576 B before, mid (under the throwaway) and after; global no longer opens
+  mid-way, throwaway no longer opens after; raw key invalidated and re-warmed; ~4.0 s per direction
+  (two KDF verifies + the copy on a 24 KiB file — the KDF dominates); the notebook opens on the raw-key
+  path afterwards. Break A → kill → Bootstrap `RESTORED_TMP`, only the `.soil` left, opens. Break B →
+  kill → Bootstrap `RESTORED_BAK`, only the `.soil` left, opens.
+- **Planner notes for U3:** (1) rotation's verifier must accept BOTH the cached global and the marker's
+  new passphrase (`recoverGarden` takes a `(File) -> Boolean` for exactly this); (2) the index-leftover
+  guard in `ensureReady` uses only the cached global today — U3's marker path extends it; (3) a rekey
+  costs two KDF verifies per file on top of the copy — the progress dialog's per-file estimate on the
+  Nomad is ~4 s + copy time, not "instant".
+
