@@ -1157,22 +1157,34 @@ arc's scope — the arc-23 wizard never asked for one, and the pad has never had
 picks this up should decide first whether it is a new `sourceKind` on the existing exporter point
 or a reason the exporter contract needs to know about a non-notebook source at all.
 
-## Notesprout SN — arc 23 "Calendar" (2026-09-02): events / tasks / the day window / history / day notes / the Today dashboard as later extensions
+## Notesprout SN — arc 23 "Calendar" (2026-09-02) → arc 24 "Events" close (2026-09-04): tasks / the day window / history / day notes / the Today dashboard as later extensions
 
-**Arc 23 is a writable Month/Week/Day surface and nothing else, on the user's explicit call.**
-og's calendar carries attached events with reminders, a materialized task/routine system, a
-four-view "day window" (Events/Note/Notebooks/History), day notes, and a Today dashboard that
-reads across all of it — none of that exists here. Each was named and set aside at the arc-23
-wizard (`RATTA_PLAN.md` § Arc 23: "Not in this arc, on the user's call: events, tasks, reminders,
-the day window, history, day notes, calendar export, the Today dashboard. Each may become its own
-extension later — a fresh user decision each time.").
+**Arc 23 was a writable Month/Week/Day surface and nothing else, on the user's explicit call; arc
+24 has since closed the "events" line of this entry.** og's calendar carries attached events with
+reminders, a materialized task/routine system, a four-view "day window" (Events/Note/Notebooks/
+History), day notes, and a Today dashboard that reads across all of it. At arc 23's wizard all of
+it was named and set aside (`RATTA_PLAN.md` § Arc 23: "Not in this arc, on the user's call: events,
+tasks, reminders, the day window, history, day notes, calendar export, the Today dashboard. Each
+may become its own extension later — a fresh user decision each time.").
 
-The shape question a future decision has to answer isn't "should these exist" but "whose seam do
-they live behind": events/tasks/reminders touch notification plumbing this app has none of yet; a
-day window and a Today dashboard both read *across* the calendar and the library, which no current
-extension point does (every existing point is scoped to one notebook, one store, or one showing);
-and any of them could be the **EIGHTH** extension point, which — per the arc-21/22/23 pattern —
-needs its own explicit grant before anyone writes a line of code toward it.
+**Events are done.** Arc 24 "Events" (Z1–Z6, user decision 2026-09-02, frozen 2026-09-04) built
+og's events — with reminders and three recurring scopes (this / following / all) — inside
+`:ext-calendar` itself, with no eighth extension point: `EventsActivity` (the day's list) and
+`EventEditorActivity` (one event) as two in-process, `exported="false"` Activities launched from
+`CalendarActivity`, and `CalendarSchema.V2` adding the events tables alongside V1's. That shipped
+shape answers the entry's own "whose seam" question for events — the calendar's own store and
+process, not a new point — and no notification plumbing was needed to get there because SN events
+carry no notifications of any kind (a look-ahead *Upcoming* section only, per
+`apps/notesprout_ratta/RATTA_PLAN.md` § Arc 24).
+
+The remaining list — **tasks/routines, the day window, history, day notes, calendar export, the
+Today dashboard** — is still open, and the shape question arc 23 posed for it still stands: "should
+these exist" is answered per item by a future user decision, but "whose seam do they live behind"
+is not. Tasks/routines and a day window/Today dashboard that reads *across* the calendar and the
+library still fit no current extension point (every existing point, `:ext-calendar` included, is
+scoped to one notebook, one store, or one showing) and any one of them could still be the
+**EIGHTH** extension point, which — per the arc-21/22/23/24 pattern — needs its own explicit grant
+before anyone writes a line of code toward it.
 
 ## Notesprout SN — arc 23 "Calendar" Y2 (2026-09-02): the day picker narrows in month mode
 
@@ -1195,3 +1207,69 @@ never revoked between an extension's batches. What is still owed is the number �
 cap-sized selection (a `.soil` written by hand, or the pasted-selection trick run in a loop) and read
 `receiveInk: N strokes placed … in N ms` off the Nomad; if it approaches the budget, the budget moves,
 not the rule. Applies to the pad and the calendar alike (one shared client since Y4).
+
+## Notesprout SN — arc 24 "Events" Z1 (2026-09-02): a THIS-scope note past the batch cap loses the edit, not just the ink
+
+**A THIS-scope edit whose note exceeds one `exec` batch (> 4 MiB or > 10 000 statements of ink on
+one event note) and then fails on a later batch leaves the exception already landed on the
+original event and the compensation deleting the override** — so that occurrence is gone until
+re-added, not merely un-noted. `EventStore.edit(scope)` composes `EventWrites.editWithScope` /
+`editLandsUnder` as ordinary multi-batch writes, and a THIS-scope edit is, underneath, "delete this
+occurrence's prior override (if any), insert a fresh `event_exception` row, insert the note's
+stroke op log" — if the note batch is the one that fails, the occurrence-level write already
+committed. Under the cap (the overwhelming case — a page of handwriting plus a text note) it is one
+transaction and this does not apply. Condition to act: anyone actually observes a multi-batch note
+in the field, i.e. a single event note running past 4 MiB or 10 000 ink statements.
+
+## Notesprout SN — arc 24 "Events" Z4 (2026-09-03): every navigation pays the six-query marks read
+
+**Every navigation — a Day AM↔PM (`half`) flip included — re-runs `EventStore.marksFor`'s full six
+queries**, because `CalendarDocument.show(next, refreshMarks)` only skips the store round-trip when
+`next` is already showing, and a half flip is a different `CalendarTarget`. Left as measured-fine at
+Z4 (a Month page's 42 cells cost the same six queries as a single Day half). Cache marks across a
+same-day half flip only if it is ever observed to read slow on the Nomad — measure before changing.
+
+## Notesprout SN — arc 24 "Events" Z4 (2026-09-03): the `+` glyph overflow is unprovable on the Nomad
+
+**`GridMarks`' overflow `+` (Month/Week cells past the ones og's six glyphs — cake · heart ·
+suitcase · people · clock · dot — can fit) has only ever been exercised on the JVM.** A Nomad
+Month cell measures roughly 198 px, wide enough to hold all six distinct types before overflow is
+reachable, so no on-device walk has ever forced it. Nothing to do unless a narrower device arrives.
+
+## Notesprout SN — arc 24 "Events" Z2/Z3 (2026-09-03): events have no door but the calendar's own button
+
+**Events are reachable ONLY through `CalendarActivity`'s `btnEvents`** — no library or notebook
+entry point, no Today-dashboard surfacing, no search over event titles, no export of events (the
+arc-23 "calendar export" gap above applies to events too), and no notifications of any kind (only
+the in-app *Upcoming* look-ahead). Each of these was a planner call at Z2/Z3, not an oversight, and
+each is a fresh user decision to open — none is implied by anything else in this arc.
+
+## Notesprout SN — arc 24 "Events" Z2 (2026-09-03): the editor holds one reminder while the store keeps three
+
+**`EventEditorActivity`/`EventDraft.withReminder` carries at most ONE reminder, while
+`EventRules.REMINDERS_MAX` and the store underneath it allow three.** Saving an event that somehow
+already holds more than one reminder back through the editor reduces its reminder list to the one
+the editor shows. Revisit only if someone wants several reminders on one event; the store's cap
+does not need to move to get there, only the editor's `RemindDialog`.
+
+## Notesprout SN — arc 24 "Events" Z5b (2026-09-04): cosmetic — "Weekly" reads twice at interval 1
+
+**Left as is.** At interval 1, `RepeatDialog`'s details screen shows its own "Weekly" title with
+`EventWording.repeatGlance`'s sentence line reading "Weekly" directly underneath it — the same word
+twice, once as heading and once as the interval-1 wording. Cosmetic only; not fixed on the user's
+call.
+
+## Notesprout SN — arc 24 "Events" Z3 (2026-09-03): a note stroke that exits the area keeps its out-of-area points
+
+**A stroke that starts inside an event's note area and is dragged out of it keeps its full,
+un-clipped points in the stored model** — the firmware paints nothing past the view's edge and the
+committed render clips to the view, so what the person sees stays consistent, but `NoteWrite`'s
+saved geometry does not. Accepted at Z3; clip at write time only if it ever matters in practice —
+there is no export of notes to make the extra geometry visible today.
+
+## Notesprout SN — arc 24 "Events" (2026-09-03): declined on sight
+
+**Do not re-raise.** Two cosmetic asks were named and declined by the user during the arc-24 walk,
+not deferred for a later pass: a bigger trash tap target on `EventRowView`'s per-row delete icon in
+the events list, and the type button's (`btnType`, `activity_event_editor.xml`) `140dp` minimum
+width. Both stand as shipped.

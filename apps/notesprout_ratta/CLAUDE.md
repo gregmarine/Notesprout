@@ -59,9 +59,10 @@ names its notebook, the two-query search merge, the tag screen's three modes, th
 arc 23 / Y1: the Scratch Pad as a feature — screen,
 tools, pages, the `page` / `stroke` / `state` tables and the op-log flush with no page ceiling,
 both transfers, failure table) ·
-`docs/calendar.md` (arc 23: the calendar as a feature — the three pages Month/Week/Day, the
+`docs/calendar.md` (arcs 23–24: the calendar as a feature — the three pages Month/Week/Day, the
 `period` / `page` / `stroke` / `state` tables with rows minted on the first stroke, navigation and
-the bookmark, both transfers, the failure table) ·
+the bookmark, both transfers, the failure table, plus arc 24's **Events** — the day list and
+editor, recurrence, the handwriting-or-text note, and the grid glyphs) ·
 `docs/sn-screen.md` (arc 11 / J1: the shared `:sn-screen` paper-screen library — what may live
 there, what may not depend on it, and the `nonTransitiveRClass` flag that holds it together).
 
@@ -120,7 +121,19 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   version **7**; the fourth tier-2 screen and the second with paper; store `CalendarSchema.V1` =
   `period` / `page` / `stroke` / `state`, every SQL string in `CalendarSql`, rows minted on the
   first stroke never on open, NEVER `INSERT OR REPLACE` into `period`/`page` (the cascade takes
-  the ink), nothing deletes a period).
+  the ink), nothing deletes a period. **Grown in place by arc 24 "Events" (Z1–Z5, 2026-09-02 —
+  not a point, no API bump, still 7):** two more in-process screens, `EventsActivity` +
+  `EventEditorActivity`, both `exported="false"`, launched only in-process with an
+  `ActivityResultLauncher` (the list by `CalendarActivity`, the editor by the list); `CalendarSchema.V2` = V1's step untouched + one events step (`event` /
+  `event_weekday` / `event_exception` / `event_reminder` / `note_stroke`), every SQL string in
+  `EventSql` / `NoteSql` / `CalendarSql`, `event` NEVER `INSERT OR REPLACE`d (it has children —
+  the cascade would take them), the one hard delete in the arc (`EventSql.deleteEvent`), ISO text
+  dates throughout. The recurrence engine's WEEKLY interval counts weeks from **Sunday**, not
+  og's ISO Monday — a deliberate divergence from og's own calendar, recorded so no reviewer "fixes"
+  it. Event text (title, note) is user content: never logged (counts/ids/durations only), never
+  outside the calendar's own process. The editor's note is a second g-paper surface
+  (`NoteSurface`) in the same process — the calendar hands nothing over before the list; the
+  editor's surface reclaims in `onResume` and releases before every `finish()`).
   `gradle.properties` sets `android.nonTransitiveRClass=false` — undoing it breaks every
   `:sn-screen` resource reference from `:app`.
 - **SN has SEVEN extension points** — each added on its own explicit user decision, and
@@ -299,6 +312,11 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   (`~/git/g-paper/docs/host-responsibilities.md`): page swap = `clearForContentSwap` →
   `setPageSize`/`setTemplate` → `loadStrokes`; undo/redo via `addStrokes`/`removeStrokes`;
   chrome via `setExclusionRects`; lifecycle `resumeDrawing`/`releaseForHandoff`/`release`.
+- **An attached Ratta paper view keeps the pen claimed whatever its visibility** (arc 24 / Z3's
+  on-device finding, `:ext-calendar`'s `NoteSurface`) — `View.INVISIBLE` alone does not release it,
+  so hiding one behind another control needs `INVISIBLE` **and** a whole-view exclusion rect. Also
+  why the app never hides the IME itself on Ratta: the person dismisses the keyboard with its own
+  key, never a call from the app.
 - **Frame-silence rule:** never present an app frame while `paper.isPenActive` — route chrome
   text/updates through a pen-idle gate. The recorded exceptions (each one chrome frame at a
   deliberate act or a boundary, never under live ink) are **ledgered with their justifications

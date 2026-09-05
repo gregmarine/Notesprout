@@ -8,14 +8,23 @@ A from-scratch, Supernote-only rebuild of Notesprout in the spirit of the Paper 
 Original Notesprout (`apps/notesprout_android`) and Notesprout Paper (`apps/notesprout_paper`)
 are **reading references — no app code is copied**.
 
-**Arcs 1–23 are complete and frozen.** Their entries below are compact ledgers: status, what
+**Arcs 1–24 are complete and frozen.** Their entries below are compact ledgers: status, what
 still binds, and the reference doc. **The full phase-by-phase records (outcomes, findings,
 walk logs) live in git history — arcs 1–18 at `git show 90a9198:apps/notesprout_ratta/RATTA_PLAN.md`,
-arcs 19–22's full phase records at the end of this file until the next compaction** — and each
+arcs 19–24's full phase records at the end of this file until the next compaction** — and each
 feature's authoritative reference is its `docs/` file. **Arc 22 "Tables" is complete and frozen
-(2026-09-01) — X1–X5 all ✅: the extension store is real SQLite tables behind gated parameterized
-SQL. Arc 23 "Calendar" is PLANNED (wizard locked 2026-09-01, § "Phases — Arc 23"
-below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd) · **Y4 ✅** (2026-09-02: the user reversed "no code review" — `/code-review high` on the arc range, ten findings, all ten fixed incl. two sibling-copy refactors; docs + ledger; Nomad walks; user checklist passed). **Arcs 1–23 are complete and frozen.** The SEVENTH point is live; no EIGHTH without another decision. **Arc 24 "Events" is IN PROGRESS (wizard locked 2026-09-02, § "Phases — Arc 24" below) — Z1 ✅ (893b20e1 — `CalendarSchema.V2` + store + engine, 1965 JVM tests/variant) · **Z2 ✅** (2846d770 — events screen + editor + the calendar's door; editor rebuilt to the user's design 2026-09-03, 2014 JVM tests/variant) · **Z3 ✅** (1404fea6 — the note section: `NoteSurface` bounded paper + text half behind one toggle, no calendar handoff needed, 2027 JVM tests/variant) · **Z4 ✅** (7c54c5a8 — grid rendering — glyphs on Month/Week, labels in the Day rows, marks loaded with the page and in the bake key, 2065 JVM tests/variant) · Z5 🔄 (UI cleanup — wizard locked 2026-09-03: **Z5a layout ✅ 5b17333a 2026-09-03**, 2072 JVM tests/variant · **Z5b controls ✅ e77cc160 2026-09-04**, 2087 JVM tests/variant) · Z6 ⬜ docs/freeze; not a point, not an `API_VERSION` bump: two in-process screens and five tables inside `:ext-calendar`.**
+(2026-09-01)** — the extension store is real SQLite tables behind gated parameterized SQL. **Arc 23
+"Calendar" is complete and frozen (2026-09-02)** — the SEVENTH point, a writable Month/Week/Day
+organizer as `:ext-calendar` over `:ext-ink`; no EIGHTH point without another user decision.
+**Arc 24 "Events" is complete and frozen (2026-09-04, § "Phases — Arc 24" below)** — og's calendar
+events grown INSIDE the calendar point: Z1 ✅ 893b20e1 (`CalendarSchema.V2` + store + engine) · Z2 ✅
+2846d770 → 5a08f150 (events screen + editor rebuilt to the user's design + the calendar's door) ·
+Z3 ✅ 1404fea6 (the note: a bounded paper surface + a text half behind one toggle, no calendar handoff) ·
+Z4 ✅ 7c54c5a8 (grid glyphs + Day-row labels, marks in the bake key) · Z5 ✅ 5b17333a + e77cc160 +
+ed6b7b54 (UI cleanup: cards, pill toggle, clock face, count latches + keypad, even Day rows) · Z6 ✅
+(docs/ledger/freeze, no code review — the user's call). **Not a point, not an `API_VERSION` bump,
+host untouched**: two in-process screens and five tables inside `:ext-calendar`; version stays
+`0.1.0-ratta`; **2087 JVM tests/variant**. **NO NEXT ARC IS PLANNED — ask the user first.**
 
 ---
 
@@ -60,7 +69,7 @@ below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd) · **Y4 �
 | App icon | Tabler seedling **mirrored** (outermost group `scaleX="-1"`, pivot 54), black outline on white adaptive icon; all icons Tabler outline. |
 | Crypto UX | Identical to Paper v0: `NSPT-` recovery key = the immutable global passphrase, attempt-limiter thresholds (1–2 free · 3–4 → 30 s · 5–9 → 5 min · ≥10 → 1 h), confusable-folding unlock, 450 ms "Preparing…". Unlock never hides the IME while the key field has focus (Ratta rule). |
 
-## Architecture (current — after arc 23)
+## Architecture (current — after arc 24)
 
 - **Own Gradle root** at `apps/notesprout_ratta/`. Gradle 8.14, AGP 8.11.1, Kotlin 2.2.20,
   KSP, compileSdk/targetSdk 35, minSdk 29, Java 17 via `org.gradle.java.home` (Temurin-17).
@@ -82,7 +91,14 @@ below) — Y1 ✅ (6a16017a) · Y2 ✅ (eaf8d8ce) · Y3 ✅ (b8ec3fbd) · **Y4 �
   `StrokeRows` + `StrokeBlob`, `StoreBatches`, `StrokeReadPlan`, `InkDocument`, `InkAction`, the
   `InkStore` base, and since Y4 the shared transfer session, stroke SQL and ink-screen skeleton;
   one copy, no drift) · **`:ext-calendar`** (**NSE · Calendar**, arc 23 — one service + a screen
-  with paper, the fourth tier-2 and the second with paper; `period`/`page`/`stroke`/`state`).
+  with paper, the fourth tier-2 and the second with paper; `period`/`page`/`stroke`/`state`;
+  **since arc 24 also the events**: `CalendarSchema.V2` adds `event` + `event_weekday` /
+  `event_exception` / `event_reminder` / `note_stroke`, and two in-process screens —
+  `EventsActivity` (launched by `CalendarActivity`) + `EventEditorActivity` (launched by the list),
+  both `exported="false"` — the editor's `NoteSurface` being the first SECOND paper surface in one
+  process, for which the CALENDAR makes no `releaseForHandoff` call (Z3's probe: g-paper's
+  process-local `inkOwner` guard covers the chain; the editor's surface releases before every
+  `finish()`). Still API 7; nothing crossed the seam).
   Full table: app `CLAUDE.md` + `docs/extensions.md`.
 - **g-paper pin: 0.1.23** in `sn-screen/build.gradle.kts` — `gpaper-core` + `gpaper-ratta`
   only. No Onyx, no jetifier, no pickFirsts, no `tools:replace`.
@@ -699,12 +715,77 @@ implementation the pad's and the calendar's thin classes sit on. Extension side:
 `ScratchDocument`'s stroke half (moved), both `…SelectionToolbar`s, `CalendarClient.Drained`/
 `CalendarEntry.Send` and the pad's twins (one `DrainedInk`/`InkSend`). Not in this arc, on the user's
 call: events, tasks, reminders, the day window, history, day notes, calendar export, the Today
-dashboard (`BACKLOG.md`). Traps added: `Widget.Notesprout.TextButton`/`LatchButton` set no
+dashboard (`BACKLOG.md`) — **events + reminders landed in arc 24, inside this point**; the rest stay open. Traps added: `Widget.Notesprout.TextButton`/`LatchButton` set no
 `layout_width`; two sequential adb taps miss the double-tap window; a transfer paste lands SELECTED so
 the notebook's pasted selection stands in for a lasso when adb-driving both directions. Version stays
 `0.1.0-ratta`; **1857 JVM tests/variant**. Refs: `docs/calendar.md`, `docs/extensions.md` § the
 calendar point + audit rows 27–33, `docs/scratchpad.md`, `docs/sn-screen.md`, `docs/notebook.md`,
 `docs/library.md`, `BACKLOG.md` (six arc-23 entries).
+
+### Arc 24 "Events" ✅ frozen 2026-09-04 (Z1 893b20e1 · Z2 2846d770 → 5a08f150 · Z3 1404fea6 · Z4 7c54c5a8 · Z5a 5b17333a · Z5b e77cc160 + ed6b7b54 · Z6)
+og's calendar **events**, re-derived and re-tested, grown INSIDE the calendar point — **not an eighth
+point, not an `API_VERSION` bump, host untouched** (`ICalendar` / `CalendarTarget` / `ExtensionContract`
+/ `<queries>` unchanged, the calendar still declares 7). Still binding: **no EIGHTH point without another
+user decision**; `CalendarSchema.V2` = V1's step untouched + ONE events step (`event` + `event_weekday` /
+`event_exception` / `event_reminder` / `note_stroke`, 4 cascades, hard delete, ISO text dates, columnar —
+a landed step is never edited; `open()` logs `schema v1 → v2`); **never `INSERT OR REPLACE` into `event`**
+(upsert = `INSERT OR IGNORE` + `UPDATE`, child sets `DELETE` + `INSERT OR IGNORE`, the cascade would take
+the children); **no `IN (…)` reads** (span overlap + every `recurring = 1` row expanded in Kotlin,
+children by JOIN); Save = ONE transaction incl. the note's stroke op log, Cancel writes nothing (ink
+included); a NEW event's failed multi-batch save compensates with one `DELETE FROM event`, an existing
+one drops exactly the minted stroke ids; `event.recurring` mirrors `freq IS NOT NULL` and `EventRows`
+drops a row where they disagree (a bad row = a dropped event, never a lost day; an unknown type is
+dropped, never folded to OTHER); caps in `EventRules` (title ≤ 200 · noteText ≤ 10 000 · reminders ≤ 3 ·
+interval 1..99 · endCount 1..999; a `Problem` is `IllegalArgumentException`, not `StoreUnavailable`);
+**`Recurrence` is a fresh pure port of og's semantics with ONE deliberate divergence — WEEKLY interval
+weeks are counted from SUNDAYS** (anchor Sat 09-05 `{Sun}` interval 2 → 09-13; no reviewer "fixes" it);
+`Upcoming` = og's look-ahead (no reminder → never surfaces); og's THREE scopes (this / following /
+all — overrides and new series carry reminders AND the note; `editLandsUnder` is the one answer to
+"which id"); `EventWording` from ints + hand lists, 12-hour, never a formatter; **event text is user
+content** (never logged, never in an Intent beyond the calendar's own package — the two launches carry a
+date and an id — never in prefs). Screens: the door is `btnEvents` on the calendar's TOP bar between Send
+and the pad (`ic_calendar_event`), launch day Month → 1st / Week → Sunday / Day → that day, **the
+calendar follows the day the list ended on** (`nav.picked` + `showMove(forceBake = true)` = the marks-only
+hop); the list (launched by the calendar) = one bordered card per event (regular weight, meta
+black-and-smaller — NOT og's inkLight), Today + Upcoming, greedy height paging, the day pager + picker +
+swipe on the bottom bar, **Delete = the trash on the card** (scope sheet + named confirm); the editor
+(launched by the list) = **the user's own three-row design** (title + type · dates + the pill toggle +
+times · Repeat / Remind glances + the `[Handwriting][Text]` latches at row 3's right end; `Cancel ·
+centred title · Save`), the details in `RepeatDialog` / `RemindDialog` (apply on Save, discard on
+Cancel), **no steppers anywhere** — a static `ClockFaceView` at 5-minute grain, count latches
+`[1..6][More]` → `KeypadDialog`, `LatchGroup` for the one-armed rows; the editor holds ONE reminder while
+the store keeps three. **The note** (NEW vs og): one page of handwriting on `NoteSurface` (bounded
+g-paper, page size = stored if > 0 else the area's FIRST layout — 1404 × 1277 px on the Nomad — never
+re-measured, minted with the first stroke; pen + eraser + lasso Move/Delete; in-memory undo) + a text
+half behind one toggle (`NoteKind.defaultFor`: strokes → HW · text only → Text · neither → HW);
+**blocked = `INVISIBLE` AND a whole-view exclusion rect** (an attached Ratta view keeps the pen claimed
+whatever its visibility); **the app never hides the IME**; a copy under a new event id takes FRESH
+stroke ids (`NoteWrite.copy` — `note_stroke.id` is the PK); **the calendar makes NO `releaseForHandoff`
+call before the list** (Z3's probe replaced the planner's default: g-paper's process-local `inkOwner`
+guard covers calendar → list → editor; only the editor's `NoteSurface` reclaims in `onResume` and
+releases — `handoff()` IS `releaseForHandoff` — before every `finish()`); NO note indicator anywhere.
+**The grid**: `MarkSource` is the document's read seam (`EventStore : InkStore, MarkSource`), page +
+marks in ONE IO hop, og's six glyphs distinct-only + `+` (ring-aware on today's cell), Day rows get
+right-aligned titles / "N events" in a second pass, **`BakeKey.marks` is the map itself — structural, NOT
+a hash** (a collision would keep a deleted event on the page). **Day geometry (user, Manta 2026-09-04): 24
+rows share the height evenly, remainder to the last row, NO Notes band, NO closing hairline — overturns
+arc 23's "nothing is a slice of the height" for Day ALONE**; Month/Week keep their band. `:sn-screen`
+grew `ic_calendar_event`, `ic_backspace`, `Widget.Notesprout.Toggle` + `toggle_pill` (the style's 56 dp
+width IS the drawable's geometry — change both or neither) and `DialogButton`'s 16 dp air; `:ext-ink`
+`InkDocument.pendingStatements()`. Deleted: `SwitchCompat`, every stepper (`Editor.StepperValue`,
+`TimeMath.stepHour/stepMinute`, `editor_unit_*`), `CalendarTemplate.day`'s `notesLabel`, `DAY_ROW_DP`.
+Not in this arc (BACKLOG): a library/notebook door, the Today dashboard, search over titles, export of
+events, notifications; the >1-batch THIS-scope edge; the per-navigation marks read; declined — trash
+target, type-button minWidth. Traps added: conditional rows' dividers flip WITH the row; Haiku walk
+agents wander out of the app on the Supernote — walk by hand; the calendar bar has TWO
+calendar-with-mark icons (`btnToday` x≈705 · `btnEvents` x≈1207) and `CalendarActivity` refuses a direct
+`am start` — enter through the library; `mResumedActivity` lies on the Nomad (`mCurrentFocus` +
+screencap are the truth); an existing event's `show()` lands before the first layout (a stored size > 0
+wins); the auto-mode classifier may refuse `adb install` (the user runs it with `!`); **a subagent may
+`git checkout --` files it does not own** (Z6 — three agents' work reverted mid-phase, replayed from
+their transcripts; tell doc agents in writing: never run git). Version stays `0.1.0-ratta`; **2087 JVM
+tests/variant** (+230). Refs: `docs/calendar.md` § Events, `docs/extensions.md` § the calendar point
+(arc 24 note) + audit row 34, `docs/sn-screen.md`, `BACKLOG.md` (arc-24 entries).
 
 ---
 
@@ -1271,9 +1352,9 @@ pad → calendar chain). **Y4 CLOSED. Arc 23 "Calendar" frozen 2026-09-02.**
 
 ---
 
-## Phases — Arc 24 "Events" ⬜ PLANNED (wizard locked 2026-09-02)
+## Phases — Arc 24 "Events" ✅ COMPLETE + FROZEN 2026-09-04 (wizard locked 2026-09-02)
 
-**Status: Z1 ✅ · Z2 ✅ · Z3 ✅ · Z4 ✅ · Z5 ✅ (UI cleanup — wizard locked 2026-09-03; Z5a ✅ · Z5b ✅ 2026-09-04) · Z6 ⬜.** Fable planned it; Opus writes the features, Sonnet
+**Status: Z1 ✅ · Z2 ✅ · Z3 ✅ · Z4 ✅ · Z5 ✅ (UI cleanup — wizard locked 2026-09-03; Z5a ✅ · Z5b ✅ 2026-09-04) · Z6 ✅ 2026-09-04 — ARC COMPLETE + FROZEN.** Fable planned it; Opus writes the features, Sonnet
 scaffolds, Haiku walks; Fable writes exactly two things — the `CalendarSchema` V2 step (a schema
 contract) and the editor's bounded paper surface with its handoff chain (Z3, an engine seam) — and
 reviews every phase. **Version stays `0.1.0-ratta` for the whole arc (the user's call at planning —
@@ -1844,7 +1925,7 @@ page still shrinks); ext-calendar 291 green. Both Supernotes screencapped: a sin
 140 dp minimum ("not an issue"). **Walk:** Nomad by hand (Haiku wanders), the user's own eye on the
 Manta. Tests: JVM for the pure pieces (`LatchGroup`, `ClockFaceModel`, keypad model, paging heights).
 
-### Z6 — Docs, ledger, freeze ⬜ (Sonnet docs in parallel · Fable read-back · optional review)
+### Z6 — Docs, ledger, freeze ✅ (2026-09-04; Sonnet docs in parallel · Fable read-back · **no code review — the user's call at phase start**)
 `docs/calendar.md` § Events (the store, the engine, the two screens, the note, the grid, the failure
 table rows, tests, traps) · `docs/extensions.md` (a note that the calendar point grew two in-process
 screens with no contract change; the module table's `:ext-calendar` row) · `docs/sn-screen.md`
@@ -1853,6 +1934,28 @@ Architecture, the Arc 24 ledger entry, this section marked complete · `BACKLOG.
 later extension"; add what Z1–Z4 deferred) · memory · byte-scan · commit · push.
 **Questions at phase start: ONE — run `/code-review` on the arc range, or not?** (The user's planning
 answer is no; ask anyway — they said they may change their mind.) Version: **not asked, stays.**
+
+**Outcome (2026-09-04; Fable orchestrating, three Sonnet doc agents in parallel, Fable read-back against
+the code; no code, no code review — the user's phase-start answer was no):** `docs/calendar.md` → "The
+Calendar (arcs 23–24)" with a new § Events (store · recurrence engine · events screen · editor as
+shipped, not as planned · note · handoff finding · grid), events rows in the failure table and entry
+points, ~35 new rows in Where the code is, a row per new test class, the arc's traps (647 → ~1200
+lines); `docs/extensions.md` (`:ext-calendar` module row, § "Arc 24 — events, inside the point",
+boundary-audit row 34, the `API_VERSION` ledger's "arc 24 did NOT bump it"); `docs/sn-screen.md`
+(`ic_calendar_event` named, `DialogButton`'s 16 dp air); both CLAUDE.mds; root `CLAUDE.md` branch
+paragraph; `BACKLOG.md` (the arc-23 "events as a later extension" entry closed for events, kept for
+tasks / day window / history / day notes / export / Today; eight new arc-24 entries incl. the
+declined pair); this file (header, Architecture, the Arc 24 ledger entry among the frozen arcs, this
+section); memory. **Read-back corrections (Fable):** the `inkOwner` guard is g-paper's
+(`RattaPaperView`), not `:ext-ink`'s; the recurring/`freq` mismatch is dropped by `EventRows`, not
+refused by `EventRules`; and the handoff claim was over-stated in three places — **the CALENDAR makes
+no `releaseForHandoff` call before the list, but the editor's `NoteSurface.handoff()` IS
+`releaseForHandoff`, called before every `finish()`**. **Incident:** the calendar.md agent ran `git checkout --` on the six files it did not own (it
+believed its own research forks had written them), reverting the other two agents' work and Fable's
+plan edits mid-phase; all 18 lost edits were replayed from the agents' transcripts and re-verified, the
+plan edits redone — new standing trap in the ledger. `./gradlew test` = **2087/2087 per variant,
+0 failures** on the committed tree; NUL scan clean on the changed files. Version stays `0.1.0-ratta`.
+**Arc 24 is complete and frozen. No next arc is planned — the user decides.**
 
 ### Planner calls the wizard didn't cover (implementer follows; the user can override at phase start)
 - The events screen and editor are **not** reachable from the library or the notebook — the calendar's
