@@ -284,3 +284,31 @@ Host (`apps/notesprout_sn`) — verified against the code:
   whether **"1 Thessalonians"** and **"Song of Solomon"** fit inside two lines at 14sp or hit the
   ellipsis; whether a 6-row grid of 62 dp cells plus the header leaves the dialog inside the screen;
   and whether flipping levels or paging repaints cleanly (no full-screen flash) on e-ink.
+
+### B4 — Nomad walk + pruning ✅ 2026-09-13 (adb half; the hand half is the user's)
+
+Walked over adb on the Nomad `.dev` build after B3:
+- **Index**: books page 1 → arrows page to Psalms (page 2) → Psalms' chapter grid → 23 → Psalm 23
+  renders as print (italic superscription, hanging poetry indents, verse numbers in the margin,
+  footnote callers). Book names fit their cells at 14sp on the 62 dp tier ("Song of Solomon",
+  "1 Chronicles" one line each).
+- **Pruning (the one fix)**: the last page of a grid was shorter than the others (2 John's one-row
+  chapter grid, the canon's 12-book last page), so the bordered dialog shrank and **re-centred under
+  the finger** — a mis-tap on e-ink. `IndexModel.grid` now pads every page to the full
+  `rows × columns` (spacer rows), so the dialog has one height everywhere; two tests re-pinned.
+- **Chapter edges**: Revelation 22 → last page → further swipes are silent no-ops (no chapter load
+  logged); Genesis 1 page 1 → a back-swipe is a silent no-op.
+- **Long chapter**: Psalm 119 — 30 pages in 1,245 ms (cold, on IO; the reader stays responsive).
+- **Prose keep-with-next**: Luke 1 page 1 ends after verse 4 with white space below — the next
+  heading + reference + verse 5 did not fit and `trimDanglingOpeners` kept them together on page 2.
+  Print behaviour, not a bug.
+- Timings: chapter opens 265–480 ms cold, 2 ms from the prefetch cache; open-screen 570–770 ms warm.
+
+**Left to the user's hand walk** (adb cannot judge feel): the swipe's travel/velocity feel against
+`SwipeMath`'s 30 %/50 % rule; a resting pen or a pen drag over the page never turning it (the
+stylus sequence is dropped by `ListSwipe`); the page-turn ghosting cadence with no forced flash.
+
+**Open for a user decision (not changed):** the title and the running head say "Psalms 23" — the
+`book.name` row is "Psalms"; print says "Psalm 23". A one-word special case in the title only, if
+wanted.
+

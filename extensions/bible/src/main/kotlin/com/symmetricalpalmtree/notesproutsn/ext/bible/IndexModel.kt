@@ -12,9 +12,11 @@ package com.symmetricalpalmtree.notesproutsn.ext.bible
  * and no testament label is shown, because a page break there would leave Malachi's page
  * two-thirds empty for the sake of a word this reader never says.
  *
- * Every page's last row is padded with nulls to a full row, so the caller can add a spacer and
- * keep the columns where they are — a short final row that re-centres itself reads as a different
- * grid.
+ * **Every page is padded with nulls to the full grid** — rows × columns — not just its last row
+ * to a full row. The dialog is a bordered window centred on the glass, and a last page with fewer
+ * rows would shrink it and re-centre it: on e-ink that is a second frame of chrome jumping under a
+ * finger that has already aimed (the B4 walk caught it on 2 John's one-row chapter grid). A spacer
+ * row costs nothing; a dialog that moves costs a mis-tap.
  */
 object IndexModel {
 
@@ -29,12 +31,12 @@ object IndexModel {
     const val CHAPTERS_PER_PAGE = CHAPTER_COLUMNS * CHAPTER_ROWS
 
     /**
-     * [books] as pages → rows → cells, in the order given (the canon's). A row is always
-     * [BOOK_COLUMNS] slots wide; only the last row of the last page can carry nulls, and a page
-     * is only as tall as it needs to be.
+     * [books] as pages → rows → cells, in the order given (the canon's). Every page is
+     * [BOOK_ROWS] rows of [BOOK_COLUMNS] slots; the last page carries nulls where the canon ran
+     * out.
      */
     fun bookPages(books: List<BookRow>): List<List<List<BookRow?>>> =
-        grid(books, BOOKS_PER_PAGE, BOOK_COLUMNS)
+        grid(books, BOOK_ROWS, BOOK_COLUMNS)
 
     /** The page [usfm] sits on, or 0 when the source does not carry that book. */
     fun bookPageOf(books: List<BookRow>, usfm: String): Int {
@@ -43,11 +45,11 @@ object IndexModel {
     }
 
     /**
-     * Chapters `1..count` as pages → rows → cells, [CHAPTER_COLUMNS] wide. A book of one chapter
-     * is one row with five spacers in it, not one lonely cell stretched across the dialog.
+     * Chapters `1..count` as pages → rows → cells, every page [CHAPTER_ROWS] × [CHAPTER_COLUMNS].
+     * A book of one chapter is one cell and thirty-five spacers — the same dialog as Psalms'.
      */
     fun chapterPages(count: Int): List<List<List<Int?>>> =
-        grid((1..count).toList(), CHAPTERS_PER_PAGE, CHAPTER_COLUMNS)
+        grid((1..count).toList(), CHAPTER_ROWS, CHAPTER_COLUMNS)
 
     /** The page chapter [chapter] sits on. Below 1 is page 0 — there is no page before the first. */
     fun chapterPageOf(chapter: Int): Int =
@@ -61,12 +63,13 @@ object IndexModel {
     fun clampPage(page: Int, pageCount: Int): Int =
         if (pageCount <= 0) 0 else page.coerceIn(0, pageCount - 1)
 
-    /** Pages of [perPage] items, each split into rows of [columns] with the last row padded. */
-    private fun <T> grid(items: List<T>, perPage: Int, columns: Int): List<List<List<T?>>> =
-        items.chunked(perPage).map { page ->
-            page.chunked(columns).map { row ->
+    /** Pages of `rows × columns` items; every page padded with nulls to exactly [rows] full rows. */
+    private fun <T> grid(items: List<T>, rows: Int, columns: Int): List<List<List<T?>>> =
+        items.chunked(rows * columns).map { page ->
+            val filled = page.chunked(columns).map { row ->
                 val cells: List<T?> = row
                 cells + List(columns - cells.size) { null }
             }
+            filled + List(rows - filled.size) { List<T?>(columns) { null } }
         }
 }

@@ -8,8 +8,8 @@ import org.junit.Test
 /**
  * The index's arithmetic (arc 37 / B3). The grid a finger taps is proved here rather than on a
  * device: how many pages the canon makes, which page a book or a chapter lands on, and that every
- * row is a full row of slots — a short final row would re-centre itself and read as a different
- * grid.
+ * page is a FULL grid of slots — a shorter last page would shrink the dialog and re-centre it under
+ * a finger that has already aimed (the B4 walk's 2 John mis-tap).
  */
 class IndexModelTest {
 
@@ -34,11 +34,16 @@ class IndexModelTest {
     }
 
     @Test
-    fun `a short last row is padded with nulls`() {
-        // 64 books = 3 full pages + a page of 10: three full rows and a row of one + two spacers.
+    fun `a short last page is padded to the full grid`() {
+        // 64 books = 3 full pages + a page of 10: three full rows, a row of one + two spacers,
+        // and two whole spacer rows so the page is still BOOK_ROWS tall.
         val page = IndexModel.bookPages(books.take(64)).last()
-        assertEquals(4, page.size)
-        assertEquals(listOf("3 John", null, null), page.last().map { it?.name })
+        assertEquals(IndexModel.BOOK_ROWS, page.size)
+        assertEquals(listOf("3 John", null, null), page[3].map { it?.name })
+        assertEquals(List(IndexModel.BOOK_COLUMNS) { null }, page[4])
+        assertEquals(List(IndexModel.BOOK_COLUMNS) { null }, page[5])
+        // The canon's own last page: 12 books in four rows, then two spacer rows.
+        assertEquals(IndexModel.BOOK_ROWS, IndexModel.bookPages(books).last().size)
     }
 
     @Test
@@ -67,20 +72,22 @@ class IndexModelTest {
         val pages = IndexModel.chapterPages(150)
         assertEquals(5, pages.size)
         assertEquals(6, pages.last().sumOf { row -> row.count { it != null } })
+        assertEquals(IndexModel.CHAPTER_ROWS, pages.last().size)   // padded to the full grid
         assertEquals(1, pages.first().first().first())
-        assertEquals(150, pages.last().last().filterNotNull().last())
+        assertEquals(150, pages.last().flatten().filterNotNull().last())
     }
 
     @Test
-    fun `a one-chapter book is one row with five spacers`() {
+    fun `a one-chapter book is one cell and thirty-five spacers`() {
         val pages = IndexModel.chapterPages(1)
         assertEquals(1, pages.size)
-        assertEquals(1, pages.first().size)
+        assertEquals(IndexModel.CHAPTER_ROWS, pages.first().size)   // the same dialog as Psalms'
         val row = pages.first().first()
         assertEquals(IndexModel.CHAPTER_COLUMNS, row.size)
         assertEquals(1, row.first())
         assertEquals(5, row.count { it == null })
         assertNull(row.last())
+        assertEquals(35, pages.first().sumOf { r -> r.count { it == null } })
     }
 
     @Test
