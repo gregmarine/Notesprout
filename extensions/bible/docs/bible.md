@@ -420,8 +420,9 @@ branching in code on `IndexLayout.fullScreen`: the sidebar takes `shape_index_si
 inkBlack right edge) over a transparent scrim whose tap dismisses, the full-screen form is plain
 paper with the back arrow. **Rows**: a book is `item_index_book.xml` —
 `[+/− toggle | chapter count 52 dp | 1 dp divider | name 20 sp]`, the Contents' row with the page
-number's slot holding the book's length; **the whole row is the toggle** (a book is not a
-destination, its chapters are — the glyph only says which way it goes). A chapter row is built in
+number's slot holding the book's length; **the `+`/`−` toggle shows or hides the chapters, and a
+tap on the row itself opens the book at chapter 1** — the Contents' own split of tap = go, toggle
+= show (the user's call, replacing a first cut where the whole row toggled). A chapter row is built in
 code to exactly a book row's slot (`IndexLayout.rowPx`) so the list stays uniform, indented past
 the toggle so it reads as the book's child, its cells the B3 cells (`shape_bordered` /
 `bg_index_selected`, weight-1 wide, `@dimen/toolbar_button_size` tall — never a literal number;

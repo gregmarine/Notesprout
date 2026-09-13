@@ -31,8 +31,9 @@ import com.symmetricalpalmtree.notesproutsn.core.Slog
  * transparent scrim whose tap dismisses.
  *
  * **Every book is a root entry** — `[+/− toggle | chapter count | 1 dp divider | name]`, the
- * Contents' row with the page number's slot holding the book's length. Tapping the row (or its
- * toggle) opens the book, and an open book is followed by its **chapters as a grid**, six
+ * Contents' row with the page number's slot holding the book's length. The toggle opens the
+ * book; the row itself navigates to its **first chapter** (the Contents' split: tap = go, +/− =
+ * show). An open book is followed by its **chapters as a grid**, six
  * bordered numbers to a row (the B3 grid, kept; a number needs a square, not a row of its own).
  * The book being read opens expanded, on the list page holding its current chapter; that book's
  * row takes the Contents' 5 dp right-edge bar and that chapter's cell is filled black with white
@@ -215,9 +216,12 @@ class IndexPanel(
             activity.getString(if (item.expanded) R.string.cd_bible_collapse else R.string.cd_bible_expand)
         TooltipCompat.setTooltipText(btnToggle, btnToggle.contentDescription)
         btnToggle.setOnClickListener { toggle(item.book) }
-        // A book is not a destination — its chapters are — so the whole row is the toggle, the
-        // glyph only says which way it will go.
-        row.setOnClickListener { toggle(item.book) }
+        // The Contents' split (the user's call): the toggle opens the chapters, the row itself is
+        // a destination — the book's first chapter.
+        row.setOnClickListener {
+            dialog.dismiss()
+            onPicked(ChapterRef(item.book.usfm, 1))
+        }
         row.background = if (item.book.usfm.equals(current.usfm, ignoreCase = true)) {
             ContextCompat.getDrawable(activity, R.drawable.bg_index_active_entry)
         } else {

@@ -357,7 +357,8 @@ button kept as a second door. Decision 11 amended in place.
   pagination, body swipe, pager footer, scrim); `dialog_index.xml` rewritten, `item_index_book.xml`,
   `shape_index_sidebar` + `bg_index_active_entry` copied in; `BibleActivity` opens it from the
   button, the title and the reader's `ListSwipe.onSwipeDown`, one at a time, dismissed in
-  `onDestroy`. Judgment calls: the whole book row toggles (a book is not a destination); the page
+  `onDestroy`. Judgment calls: the `+`/`−` toggles the chapters and a tap on the book row opens
+  chapter 1 (the user's correction of a first cut where the whole row toggled); the page
   number's slot shows the chapter count; a toggle re-anchors the page on the toggled row; no
   BLOCK_ALL (no paper here). 17 tests (`IndexModelTest` 13, `IndexLayoutTest` 4) — `:ext-bible`
   52, `:sn-screen` 101, all green.
