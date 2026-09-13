@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The index (arc 37 / B3) — the calendar's day picker in a second subject: a bordered dialog whose
+  header pages one grid and whose title flips between two. Books (3 × 6 names) ↔ chapters
+  (6 × 6 numbers); the book and chapter being read are filled black with white text. The cells are
+  built in code from IndexModel — a grid of eighteen or thirty-six slots is not a layout, it is a
+  loop — so this file is only the header row and the grid's empty host.
+
+  The root is match_parent on purpose: the grid's cells are weight-1 over a 0 dp width, and under a
+  wrap_content parent they would measure to nothing — and the WINDOW is sized in code to three
+  quarters of the screen, so match_parent here means "the dialog's width", not the screen's.
+-->
+<!-- No background of its own: the window's shape_dialog_bordered is the white AND the 2 dp border,
+     and its stroke carries no padding, so an opaque root painted over the whole window would cover
+     the border — the dialog-border trap the day picker paid for. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/toolbar_bar_thickness">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnIndexPrev"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_gravity="start|center_vertical"
+            android:contentDescription="@string/cd_bible_index_prev"
+            android:src="@drawable/ic_page_prev" />
+
+        <!-- "Books", or the book's name — and in the chapters grid it is also the way back, the
+             day picker's title flip. Kept clear of both arrows by a margin the width of a button:
+             this view is added after btnIndexPrev, so at full width it would sit ON TOP of the
+             left arrow and take its taps. -->
+        <TextView
+            android:id="@+id/tvIndexTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/toolbar_button_size"
+            android:layout_marginEnd="@dimen/toolbar_button_size"
+            android:layout_gravity="center"
+            android:ellipsize="end"
+            android:focusable="true"
+            android:gravity="center"
+            android:minHeight="@dimen/toolbar_button_size"
+            android:singleLine="true"
+            android:textColor="@color/inkBlack"
+            android:textSize="16sp" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnIndexNext"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_gravity="end|center_vertical"
+            android:contentDescription="@string/cd_bible_index_next"
+            android:src="@drawable/ic_page_next" />
+
+    </FrameLayout>
+
+    <!-- The book (or chapter) grid — rows of weight-1 cells, built in code from IndexModel. -->
+    <LinearLayout
+        android:id="@+id/llIndexGrid"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="vertical" />
+
+</LinearLayout>

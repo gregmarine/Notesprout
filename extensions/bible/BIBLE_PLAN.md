@@ -238,3 +238,49 @@ Host (`apps/notesprout_sn`) — verified against the code:
   Revelation 22 / Genesis 1 no-ops being silent rather than stuck-looking, whether the neighbour
   prefetch actually makes an edge crossing feel like a page turn, and the reopen-at-verse after a
   Back (and after process death).
+
+### B3 — The index ✅ 2026-09-13
+
+- **`IndexModel.kt`** (pure): the arithmetic of two grids and nothing else. Books **3 × 6** (a
+  book's *name* has to fit), chapters **6 × 6** (a number wants a square) — `bookPages` /
+  `chapterPages` return pages → rows → cells with **every row padded to a full row** (a short last
+  row would re-centre itself and read as a different grid), plus `bookPageOf` / `chapterPageOf` /
+  `clampPage`. Books flow in **canon order**: the OT/NT boundary is *not* a page boundary and no
+  testament label is shown — a break there would leave Malachi's page two-thirds empty for a word
+  this reader never says. Nonsense is absorbed rather than thrown: an unknown usfm, a chapter below
+  1 and an empty page count all answer page 0.
+- **`IndexDialog.kt` + `res/layout/dialog_index.xml`** — the day picker's shape, subject for
+  subject: the same header (prev · a centred title kept off both arrows by a button-width margin ·
+  next), the same code-built grid host, the same `Dialogs.style` + `setNegativeButton(cancel)` +
+  **window sized to 0.75 of the screen after `show()`**, and the same **no background on the root**
+  (the window's `shape_dialog_bordered` is the border; an opaque root covers it — the trap the Y2–Y4
+  picker paid for). Two levels behind one pair of arrows: **Books** (title "Books", **not** a tap
+  target there — there is nowhere to flip back to) opening on the current book's page with that book
+  **filled black, white bold**; tapping a book opens its **chapters**, titled with the book's name,
+  which is also the way back (the day picker's title flip, `cd_bible_index_flip`). The current
+  chapter is filled **only in the current book**. Cells are the month cell's recipe —
+  `shape_bordered` / `bg_index_selected` (a copy of `bg_month_selected` into the extension's own
+  drawables), `maxLines = 2` + ellipsize end for the long names, gravity centre, weight-1 wide and
+  **`@dimen/toolbar_button_size` tall**, never a literal — and a null cell is a spacer that holds
+  its column. **The arrows are never disabled**: at either end `clampPage` returns the page it was
+  already on and nothing repaints at all (a greyed control is invisible on e-ink; a needless repaint
+  on e-ink is a flash).
+- **`BibleActivity`**: `btnIndex` **and the title** both call `openIndex()` — "Genesis 1" is the
+  obvious thing to tap when you want to be somewhere else — and the title gained the same long-press
+  hint the buttons have. The books come from `ChapterLoader.booksNow()`: B2's `source()` already
+  read the `book` table for the cursor, so the index costs **no second query** and the dialog never
+  touches the database. Before the first chapter has shown there are no books and the tap is a
+  **silent no-op** — a "not ready" dialog would be noise for the half-second it is true. A picked
+  chapter goes down the chapter-edge path (`openChapter(picked) { 0 }`), so the latch, the neighbour
+  prefetch and the position write all follow from the show exactly as they do for a turn.
+- Gate: `:ext-bible:assembleDebug` + `:ext-bible:testDebugUnitTest` green from a `--rerun-tasks`
+  build, **46 tests** (B2's 34 + `IndexModelTest` 12 — the canon's 18/18/18/12, every row three
+  slots wide, the padded short row, Malachi and Matthew as neighbours, GEN/PSA/REV's pages, an
+  unknown book, Psalms' five chapter pages, the one-chapter book's five spacers, `chapterPageOf`'s
+  1/36/37/150 and `clampPage`'s bounds). Zero Kotlin warnings; every touched file byte-scanned clean
+  (no NUL/BEL). Not installed on any device.
+- **Not verifiable without the Nomad — B4's walk owns it:** the cell sizes at the 62 dp tier and
+  0.75 width (three book columns of roughly 340 px each, minus 3 dp margins), and specifically
+  whether **"1 Thessalonians"** and **"Song of Solomon"** fit inside two lines at 14sp or hit the
+  ellipsis; whether a 6-row grid of 62 dp cells plus the header leaves the dialog inside the screen;
+  and whether flipping levels or paging repaints cleanly (no full-screen flash) on e-ink.

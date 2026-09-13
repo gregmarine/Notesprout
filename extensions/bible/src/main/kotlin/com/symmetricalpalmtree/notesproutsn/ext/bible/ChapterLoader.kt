@@ -50,6 +50,7 @@ class ChapterLoader(private val context: Context) {
     private var bible: BibleDatabase? = null
     private var typography: ReaderTypography? = null
     private var cursor: ChapterCursor? = null
+    private var books: List<BookRow> = emptyList()
     private var closed = false
 
     /** Built chapters, oldest evicted first. Guarded by [lock]; see [CACHE_MAX]. */
@@ -68,6 +69,14 @@ class ChapterLoader(private val context: Context) {
      * afterwards without blocking.
      */
     fun cursorNow(): ChapterCursor? = synchronized(lock) { cursor }
+
+    /**
+     * The source's own `book` table — read once beside the cursor, out of the same one query, and
+     * handed to the index (arc 37 / B3) so the dialog never touches the database itself. Empty
+     * until the first chapter has been built; the index's door is a silent no-op until then.
+     * Cheap — safe on Main.
+     */
+    fun booksNow(): List<BookRow> = synchronized(lock) { books }
 
     /** A chapter already built and still cached, or null. Cheap — safe on Main. */
     fun cached(ref: ChapterRef): ChapterPages? = synchronized(lock) { cache[ref] }
@@ -150,7 +159,8 @@ class ChapterLoader(private val context: Context) {
         val file = ContentInstaller(context)
             .ensureInstalled(ContentInstaller.BSB_ASSET, ContentInstaller.BSB_NAME)
         val opened = BibleDatabase.open(file.absolutePath)
-        val counts = opened.books().associate { it.usfm to it.chapterCount }
+        val table = opened.books()
+        val counts = table.associate { it.usfm to it.chapterCount }
         synchronized(lock) {
             val existing = bible
             if (closed || existing != null) {
@@ -160,8 +170,10 @@ class ChapterLoader(private val context: Context) {
             }
             bible = opened
             // The chain of chapters comes from the source itself, not from a hardcoded table:
-            // read once here, beside the open that made it readable.
+            // read once here, beside the open that made it readable. The index reads the same
+            // rows — one query answers both.
             cursor = ChapterCursor(counts)
+            books = table
             return opened
         }
     }

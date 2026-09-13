@@ -97,29 +97,43 @@ V5 (import from cloud) landed 2026-09-04 → 2026-09-05; the arc is complete and
 (2026-09-05). The rule survives once more, another word wider: **no *ninth* capability point
 without another user decision** (`apps/notesprout_sn/CLAUDE.md`).
 
+**Arc 37 "Bible" is the eighth fresh user decision, on 2026-09-13.** The user asked for a Bible
+reader, so SN gains a **ninth** capability point, `ACTION_BIBLE` + `ACTION_BIBLE_SCREEN` — the
+fifth screen-owning point and the second with **no paper** (the tag manager's shape: a held bind,
+the store lent at `begin`, nothing else on the interface, nothing on the Intent) — served by
+**`NSE · Bible`** (`:ext-bible`), the **fifteenth** module and **the first living outside
+`apps/notesprout_sn`** (`extensions/bible/`, included into SN's Gradle root by `projectDir` — the
+pattern recorded for every future extension). `API_VERSION` 10 → 11, a compatible addition floored
+at 11 (`MIN_API_VERSION_FOR_BIBLE`) — no existing floor moves, no other extension redeclares. Plan
+`extensions/bible/BIBLE_PLAN.md`; reference doc once frozen `extensions/bible/docs/bible.md`. The
+rule survives once more, another word wider: **no *tenth* capability point without another user
+decision** (`apps/notesprout_sn/CLAUDE.md`).
+
 The pad as a **feature** has its own reference — [`docs/scratchpad.md`](scratchpad.md); export has
 its own — [`docs/export.md`](export.md); import has its own too — [`docs/import.md`](import.md);
 documents likewise — [`docs/document.md`](document.md); tags likewise —
 [`docs/tags.md`](tags.md); the calendar likewise — [`docs/calendar.md`](calendar.md); the cloud
-likewise — [`docs/cloud.md`](cloud.md). This doc is the seam for all eight points, and the store
+likewise — [`docs/cloud.md`](cloud.md); the Bible reader likewise —
+`extensions/bible/docs/bible.md`. This doc is the seam for all nine points, and the store
 rebuild that underlies three of them.
 
 Fresh code. Paper's own extension arcs (`PAPER_EXTENSIONS_PLAN.md`, `PAPER_RECOGNITION_PLAN.md`,
 `PAPER_SCRATCHPAD_PLAN.md`, its `:extension-api` / `:ext-mlkit` / `:ext-scratchpad`) are the shape
-reference — nothing is copied, and SN's AIDL is scoped to its **eight** points rather than Paper's
-broader capability set. Paper never built export, import, documents, tags, a calendar or a cloud
-destination, so it has nothing to say about the third through eighth; og's
+reference — nothing is copied, and SN's AIDL is scoped to its **nine** points rather than Paper's
+broader capability set. Paper never built export, import, documents, tags, a calendar, a cloud
+destination or a Bible reader, so it has nothing to say about the third through ninth; og's
 `docs/full-notebook-export.md` § Import was the fourth's reading reference, og's `docs/documents.md`
 the fifth's, og's own `docs/calendar.md` (`CalendarActivity` / `CalendarTemplateRenderer`, at the
-monorepo root) the seventh's, and og's own `docs/backup.md` § "Google Drive REST/OAuth Path" the
-eighth's — the tree shape and the OAuth flow, not the seam; nothing is copied. Tags have no og
-reading reference — the feature is new to this family.
+monorepo root) the seventh's, og's own `docs/backup.md` § "Google Drive REST/OAuth Path" the
+eighth's — the tree shape and the OAuth flow, not the seam — and `~/git/Biblesprout` (a sister
+project, not og) the ninth's: its paginator and typography were ported, not copied wholesale;
+nothing of its app shell. Tags have no og reading reference — the feature is new to this family.
 
 ---
 
 ## Module layout
 
-Fourteen modules, SN's own Gradle root:
+Fifteen modules (fourteen in this folder and one at the monorepo root), SN's own Gradle root:
 
 | Module | Type | Depends on | Holds |
 |---|---|---|---|
@@ -136,7 +150,8 @@ Fourteen modules, SN's own Gradle root:
 | `:ext-calendar` | Android application (its own installable APK) | `:extension-api` + `:sn-screen` (g-paper arrives through its `api`) + `:ext-ink` + androidx; **never** `:app`, no Room / SQLCipher / serialization | the TWELFTH module (arc 23 / Y1–Y3, **NSE · Calendar**, Tabler `calendar` icon): `CalendarApplication` (registers `RattaEngine` — its own process), `CalendarService` (the `ICalendar` stub, thin on `:ext-ink`'s `InkTransferSession` since Y4 — supplies only the target's own null check and the log wording), `CalendarSession` (an `InkTransferSession<CalendarTarget, CalendarStore.Received>(recordInboundPageSize = false)`), `CalendarSchema` (schema v1: `period`/`page`/`stroke`/`state` — the `stroke` half is `:ext-ink`'s `InkSql` since Y4), `CalendarSql` (`: InkDocument.StrokeSql by InkSql` since Y4), `CalendarStore` (on `:ext-ink`'s `InkStore`), `CalendarDocument` (thin over `:ext-ink`'s `InkDocument` — the calendar's own layer keeps which period/page is showing, whether its rows exist yet, and its size — and implements `:ext-ink`'s `InkPage` since Y4), `CalendarGeometry`, `CalendarTemplate`, `CalendarNavigation`, `DayPickerModel`, `DayPickerDialog`, `CalendarToolbar`, `CalendarActivity` (thin on `:ext-ink`'s `InkScreenActivity` since Y4 — keeps navigation, template bake, the picker, double-tap, `followReplay()`) — `CalendarSelectionToolbar` **deleted** (arc 23 / Y4) in favour of `:sn-screen`'s `InkSelectionBar`; **grown in place by arc 24 "Events" (Z1–Z5, not a point, no API bump — still declares 7)**: two more in-process screens, `EventsActivity` (the day's list) and `EventEditorActivity` (one event), both `exported="false"` and launched only in-process with an `ActivityResultLauncher` (the list by `CalendarActivity`, the editor by the list) — same process, so neither needs a `HostCallerCheck`; `CalendarSchema.V2` (V1's step untouched + one events step: `event` / `event_weekday` / `event_exception` / `event_reminder` / `note_stroke`); `EventStore : InkStore, MarkSource`, `EventSql`, `NoteSql : InkDocument.StrokeSql`, `Recurrence`, `EventRules`, `EventWrites`, `EventRows`, `Upcoming`, `EventWording`, `EventDraft`, `GridMarks`, `DayRows`; and `NoteSurface`, a second g-paper surface in the same process (the calendar hands nothing over before the list; the editor's surface releases before every `finish()`) — see [`docs/calendar.md`](calendar.md) |
 | `:ext-cloud` | Android application (its own installable APK) | `:extension-api` + `:sn-screen` (g-paper is never touched — this point has no paper) + `kotlinx.serialization` (arc 25 / V2 — already on the graph via `:app`, no new library); **never** `:app`; the **only** module carrying `INTERNET` | the THIRTEENTH module (arc 25 / V1–V5, **NSE · Cloud Storage**, the family's puzzle icon): one service + a screen on SN's eighth point, `CloudService` (the `ICloudStorage` stub — every method `HostCallerCheck.enforce`'d, thin over `DriveOps`) + `ConnectActivity` (the tier-2 sign-in behind `HostCallerCheck.enforceActivity` — WebView PKCE, Chrome UA spoofed before `loadUrl`, the `http://localhost/oauth2callback` redirect intercepted, `RESULT_OK` only after both store writes land), `ConnectSession` (the parked store between `beginConnect`/`endConnect`, one monitor), `DriveSchema` (schema v1: one table, `account(key, value)` — refresh token, account label, cached root/`Exports`/`Backups` folder ids), `DriveSql` (every statement against it — `account` has no children, so a plain `INSERT OR REPLACE` is safe, unlike the tag manager's tables), `DriveStore` (on the host's `IExtensionStore`), `DriveAuth` (pure PKCE/OAuth core), `DriveHttp` (the one `HttpTransport` impl, over `HttpURLConnection`), `DriveTokens` (the access token in memory only, refreshed from the store), `DriveApi` (REST v3: about/find/create/ensure/list/multipart-or-resumable-upload/download/delete, replace-by-name throughout), `DriveOps` (the testable body the service delegates to), `DriveFailures` (the marshalable funnel — every transport failure becomes the verbatim `NETWORK`), `DRIVE_CLIENT_ID`/`DRIVE_CLIENT_SECRET` compiled from the shell env into this APK only, `ROOT_FOLDER_NAME` "Notesprout SN" / "Notesprout SN Dev" by build type (`DRIVE_PLAN.md` decision 9) — see [`docs/cloud.md`](cloud.md) |
 | `:ext-image` | Android application (its own installable APK) | `:extension-api` only | the FOURTEENTH module (arc 31 / HV1, **NSE · Image Export**, the family's puzzle icon byte-identical): `ImageExporterService` (a third exporter on arc 15's one `NOTEBOOK_EXPORTER` point, bound stateless like `:ext-soil` and `:ext-pdf`), `ImageDescriptor` (PNG image · `png` · `image/png` · one page-template toggle · `SOURCE_PAGES` · `bundleVersion = PageBundle.VERSION_1` · `delivery = DELIVERY_PER_PAGE`), `ImageExportSpec` (unknown option ids and any export secret refused, not ignored — the opposite of `:ext-soil`'s forward-compat rule, because an id this build cannot act on can only mean a host or a descriptor this process does not understand), `ImageAssembly` (`requireOnePage` — a multi-page bundle is an `IllegalStateException`, never its first page; a bounded RGB_565 decode checked against the bundle's declared size, PNG at quality 100 through `CountingOutputStream`, the `S_ISREG` fsync rule), `CountingOutputStream` (the `:ext-pdf` shape, module-local in both — the only honest count for a transform, never the container's own size). Manifest declares API version **9** (`ExporterContract.MIN_API_VERSION_FOR_DELIVERY`) — an API-8 host would read no `delivery` tail, bake a whole notebook into one bundle and hand it here as if it were one page, so it must skip this service at discovery instead. Fifteen JVM tests |
-| `:app` (`extension/` package) | part of the host APK | `:extension-api` | `ExtensionRegistry`, `ExtensionBinder`, `ExtensionCallException`, `InkCaps`, `RecognizerClient`, `RecognizerReadiness`, `HeldInkClient` (arc 23 / Y4 — the pad's and the calendar's held-bind lifecycle written once: `HeldInkPoint` is the per-point names/budgets interface, `DrainedInk` the one drained-result class), `ExtensionScreenEntry` (Y4 — the pad's and the calendar's entry-button door written once: `InkSend` the one outbound-ink class, `EntryWording` the four strings), `TransferSelection` (Y4 — the pure ink-only/writing-order rule both lasso sends obey), `ScratchPadClient` / `CalendarClient` / `ScratchPadEntry` / `CalendarEntry` (since Y4, thin points on the two classes above — a point's companion is a `HeldInkPoint`, its constructor a set of `ExtensionScreenEntry` wiring), `TransferCaps`, `ExporterClient`, `ImporterClient`, `DocumentEditorClient`, `DocumentEditorEntry`, `DocumentHostBinder`, `DocumentHostSession`, `TagClient`, `TagManagerEntry`, and (arc 25) `CloudClient` (the store-taking, bind-per-call file ops — no held bind), `CloudConnectClient` (the one held bind on the point, the connect showing's bracket), `CloudConnectEntry` (the entry-button door over it — registered in `onCreate`, closed in `onDestroy`, always answers even on the sign-in-could-not-open path), `CloudArgs` (host-side checks run before any bind), `CloudTimeouts` (the measured per-method budget table), `CloudWording`, `CloudNotConnectedException` / `CloudNetworkException`; and in `data/extstore/`, the extension store — rebuilt on `SupportSQLiteOpenHelper` at arc 22 / X1, Room's `KvEntity`/`KvDao` deleted with it (`ExtensionStores`, `ExtensionStoreDatabase`, `StoreFormat`, `StoreExecutor` / `SupportStoreExecutor`, `ExtensionStoreGate`, `ExtensionStoreBinder`) — plus, in `export/` and `crypto/`, export's own host-side half (`ExportActivity`, `ExportPanel`, `ExportOptions`, `ExportArtifact`, `ExportNaming`, `ExportKeying`, `SoilOpenFiles`, and arc 19's `ExportText`, `ExportDocumentRules`, `DocumentPdfRender`, `DocumentPdfMetrics`), in `importing/` and `crypto/`, import's (`ImportFlow`, `NotebookImport`, `ImporterMatch`, `ImportNames`, `AncestryPlan`, `SafeImportId`, `ImportDialogs`, `ImportOverlay`, `ImportKeying`, `NotebookRemap` in `data/soil/`, and arc 19's `TextImport`), in `notebook/`, tags' own host-side half (`TagsPopup`, `TagTargets`, `TagSelection`), and in `notebook/`, the calendar's own host-side half (`CalendarTargets`, arc 23 / Y3 — the four Send-to-Calendar choices, every one through `CalendarTarget.of`); and, arc 25, the cloud point's three consumers' own host-side halves — in `export/`, `ExportDestination` (the pure Destination-row rules) and `cloud/CloudBrowserDialog` + `CloudBrowserRules` (the host-drawn folder/file browser, shared with import); in `data/backup/`, `DeviceFolder`, `SelfContainedSnapshot` (the WAL-absorbing cache copy — the cloud never holds a sidecar) and `CloudBackupLeg` + `CloudBackupRules` (the backup run's second leg); in `importing/`, `CloudImportRules` (the download's three-way byte corroboration) |
+| `:ext-bible` | Android application (its own installable APK) | `:extension-api` + `:sn-screen`; **never** `:app`, no Room / SQLCipher / serialization | the FIFTEENTH module (arc 37 / B0–B3, **NSE · Bible**, the family's puzzle icon, the first extension living outside `apps/notesprout_sn` — `extensions/bible/`, included by `projectDir`): `BibleService` (the `IBible` stub — `begin(store)`/`end()`, `HostCallerCheck.enforce` first), `BibleSession`, `BibleSchema` (schema v1: one `state(key, value)` table — the calendar's `state` / the editor's `prefs` precedent; `INSERT OR REPLACE` safe, no children), `BibleSql`, `BibleStore`, `ContentInstaller` (the bundled `assets/bible/bsb.bible` → `noBackupFilesDir/bible/`, stamped `lastUpdateTime:size` — **the one sanctioned "extension writes to disk" exception**: re-derivable APK content, never user data, ML Kit's own model's class), `BibleDatabase`, `VerseKey`/`Canon`, `ChapterCursor`, `Position`, `ChapterLoader`, `reader/` (`Atom`, `ChapterPaginator` with its `BodyMeasurer` seam, `ReaderTypography`, `ReaderView`), `BibleActivity`, `IndexModel`/`IndexDialog` — see `extensions/bible/docs/bible.md` |
+| `:app` (`extension/` package) | part of the host APK | `:extension-api` | `ExtensionRegistry`, `ExtensionBinder`, `ExtensionCallException`, `InkCaps`, `RecognizerClient`, `RecognizerReadiness`, `HeldInkClient` (arc 23 / Y4 — the pad's and the calendar's held-bind lifecycle written once: `HeldInkPoint` is the per-point names/budgets interface, `DrainedInk` the one drained-result class), `ExtensionScreenEntry` (Y4 — the pad's and the calendar's entry-button door written once: `InkSend` the one outbound-ink class, `EntryWording` the four strings), `TransferSelection` (Y4 — the pure ink-only/writing-order rule both lasso sends obey), `ScratchPadClient` / `CalendarClient` / `ScratchPadEntry` / `CalendarEntry` (since Y4, thin points on the two classes above — a point's companion is a `HeldInkPoint`, its constructor a set of `ExtensionScreenEntry` wiring), `TransferCaps`, `ExporterClient`, `ImporterClient`, `DocumentEditorClient`, `DocumentEditorEntry`, `DocumentHostBinder`, `DocumentHostSession`, `TagClient`, `TagManagerEntry`, and (arc 25) `CloudClient` (the store-taking, bind-per-call file ops — no held bind), `CloudConnectClient` (the one held bind on the point, the connect showing's bracket), `CloudConnectEntry` (the entry-button door over it — registered in `onCreate`, closed in `onDestroy`, always answers even on the sign-in-could-not-open path), `CloudArgs` (host-side checks run before any bind), `CloudTimeouts` (the measured per-method budget table), `CloudWording`, `CloudNotConnectedException` / `CloudNetworkException`; and in `data/extstore/`, the extension store — rebuilt on `SupportSQLiteOpenHelper` at arc 22 / X1, Room's `KvEntity`/`KvDao` deleted with it (`ExtensionStores`, `ExtensionStoreDatabase`, `StoreFormat`, `StoreExecutor` / `SupportStoreExecutor`, `ExtensionStoreGate`, `ExtensionStoreBinder`) — plus, in `export/` and `crypto/`, export's own host-side half (`ExportActivity`, `ExportPanel`, `ExportOptions`, `ExportArtifact`, `ExportNaming`, `ExportKeying`, `SoilOpenFiles`, and arc 19's `ExportText`, `ExportDocumentRules`, `DocumentPdfRender`, `DocumentPdfMetrics`), in `importing/` and `crypto/`, import's (`ImportFlow`, `NotebookImport`, `ImporterMatch`, `ImportNames`, `AncestryPlan`, `SafeImportId`, `ImportDialogs`, `ImportOverlay`, `ImportKeying`, `NotebookRemap` in `data/soil/`, and arc 19's `TextImport`), in `notebook/`, tags' own host-side half (`TagsPopup`, `TagTargets`, `TagSelection`), and in `notebook/`, the calendar's own host-side half (`CalendarTargets`, arc 23 / Y3 — the four Send-to-Calendar choices, every one through `CalendarTarget.of`); and, arc 25, the cloud point's three consumers' own host-side halves — in `export/`, `ExportDestination` (the pure Destination-row rules) and `cloud/CloudBrowserDialog` + `CloudBrowserRules` (the host-drawn folder/file browser, shared with import); in `data/backup/`, `DeviceFolder`, `SelfContainedSnapshot` (the WAL-absorbing cache copy — the cloud never holds a sidecar) and `CloudBackupLeg` + `CloudBackupRules` (the backup run's second leg); in `importing/`, `CloudImportRules` (the download's three-way byte corroboration); and, arc 37, the Bible point's own host-side half — `BibleClient` (`TagClient`'s shape minus `configureShowing` — the Bible interface has nothing to tell the reader) and `BibleEntry` (`TagManagerEntry`'s skeleton + `ExtensionScreenEntry`'s surface-stack push/pop, since unlike Tags the Bible IS a restore surface — `Surface.BIBLE`) |
 
 `:sn-screen` is deliberately **not** in that dependency chain: it never sees `:extension-api`, so a
 shared screen helper can never quietly become part of the wire contract. **`:ext-ink` is the one
@@ -201,15 +216,22 @@ The host's `AndroidManifest.xml` declares package-visibility for the point (API 
     <intent>
         <action android:name="…extension.CLOUD_STORAGE_SCREEN" />
     </intent>
+    <intent>
+        <action android:name="…extension.BIBLE" />
+    </intent>
+    <intent>
+        <action android:name="…extension.BIBLE_SCREEN" />
+    </intent>
 </queries>
 ```
 
-The five screen-owning points (scratch pad, document editor, tag manager, calendar, cloud storage)
-need **both** of their actions listed: one to discover and bind the service, one to resolve and
-launch the screen — the cloud point's screen is the connect showing, not a feature screen, but the
-rule is the same one. The exporter and importer points need only one each — `describe()` and the
-delivery call both ride the same bind-per-call service. Plus `ACCESS_NETWORK_STATE`, for the
-readiness flow's offline pre-check (below).
+The six screen-owning points (scratch pad, document editor, tag manager, calendar, cloud storage,
+Bible) need **both** of their actions listed: one to discover and bind the service, one to resolve
+and launch the screen — the cloud point's screen is the connect showing and the Bible point's is
+the reader, not a feature screen in the cloud's case, but the rule is the same one. The exporter and
+importer points need only one each — `describe()` and the delivery call both ride the same
+bind-per-call service. Plus `ACCESS_NETWORK_STATE`, for the readiness flow's offline pre-check
+(below).
 
 **Missing either of a screen-owning point's two actions from this block is a silent-zero trap, not
 a mismatch.** Arc 21 / W1 cost an hour to it: with the service's own action present but the
@@ -263,7 +285,7 @@ loading as one busy state), `UNAVAILABLE` (3). The host treats anything outside 
 
 | Constant | Value | Purpose |
 |---|---|---|
-| `API_VERSION` | **10** (arc 35 / HA1; 9 = arc 31 / HV1, 8 = arc 25 / V1, 7 = arc 23 / Y1) | the host accepts a service whose `<meta-data>` is in `minApiVersion(action)..API_VERSION` (`ExtensionContract.accepts`) — the declared number is what the extension *requires* of the host. `minApiVersion` answers **`MIN_API_VERSION_FOR_STORE`** (6) for the three arc-22 **store-taking** points (scratch pad, document editor, tag manager), **`MIN_API_VERSION_FOR_CALENDAR`** (7) for the calendar, and 1 for every stateless point — a service below its floor is skipped even though the ceiling alone would admit it. Meta-data is **per service**: the PDF exporter declares 2 (the `sourceKind` tail), `:ext-document`'s text importer and document exporter declare 3 (the `resultKind` tail / `SOURCE_DOCUMENT`), its editor service declares **6** (arc 22 / X4, since it takes a store), `:ext-tags`' one service declares **6** (arc 22 / X3), `:ext-scratchpad`'s one service declares **6** (arc 22 / X2), `:ext-calendar`'s one service declares **10** since arc 35 / HA1 (`advanceOutgoing`; 9 from arc 31 / HV4 for the two appended `ICalendar` methods; 7 from arc 23 / Y1 to HV3 — the point was born at 7, so there is no lower number to consider), everything else (`:ext-mlkit`, `:ext-soil`) at 1. **The ledger:** 2 = arc 18's `sourceKind` tail · 3 = arc 19 / M8's `resultKind` tail · 4 = arc 21 / W1, the tag point itself · 5 = arc 21 / W4, the first bump that is not a compatible tail · 6 = arc 22 / X1, the second break and the first that carries a floor · **7 = arc 23 / Y1, the calendar point — a compatible *addition* (no existing interface changes shape) and the first bump with a *per-action* floor** — see the version note below. **Arc 24 "Events" (2026-09-02) did NOT bump it** — the first arc since 21 to leave the ledger alone: it grew the calendar's own screen in place, touched no existing interface and opened no new point, so `:ext-calendar`'s service keeps declaring the same 7 it declared at Y1. **Arc 28 "Objects" (2026-09-06) did NOT bump it either** — the `bundleVersion` tail added at H6 is compatible in exactly the shape `sourceKind` already was, so `:ext-pdf` keeps declaring whatever it already declared. **8 = arc 25 / V1, the cloud point** — the calendar's shape, floored at 8 (`CloudContract.MIN_API_VERSION_FOR_CLOUD`), no existing door moved. **9 = arc 31 / HV1, `ExporterInfo`'s third compatible tail `delivery`** (`DELIVERY_ONE_FILE` / `DELIVERY_PER_PAGE`, absent = one file) — and, at HV4 under the same number, two methods appended to `ICalendar` (`render`, `outgoingTarget`). **Not a ninth point and no floor moves**: `MIN_API_VERSIONS` is untouched, every existing extension keeps its declaration. The bump is the arc-18 skew guard, not a parcel need: a per-page exporter facing an API-8 host would be handed a whole-notebook bundle and asked for one file, so `:ext-image` declares **9** (`ExporterContract.MIN_API_VERSION_FOR_DELIVERY`) and an older host skips it at discovery; the host itself reads the `delivery` tail only from a service declaring ≥ 9 (`ExportDelivery.delivery`), so the declaration and the tail can never disagree about what the host will do. The calendar's `render` is a *method* floor (offered only to a calendar declaring 9), never an action floor — a 7 still binds for everything it always did. **10 = arc 35 / HA1, `ICalendar.advanceOutgoing`** — a Day's whole-page send parks both halves and the host drains them in turn; appended after `outgoingTarget`, method floor `MIN_API_VERSION_FOR_CALENDAR_DAY_SEND` = 10, no action floor moved, no other extension redeclares |
+| `API_VERSION` | **11** (arc 37 / B0; 10 = arc 35 / HA1, 9 = arc 31 / HV1, 8 = arc 25 / V1, 7 = arc 23 / Y1) | the host accepts a service whose `<meta-data>` is in `minApiVersion(action)..API_VERSION` (`ExtensionContract.accepts`) — the declared number is what the extension *requires* of the host. `minApiVersion` answers **`MIN_API_VERSION_FOR_STORE`** (6) for the three arc-22 **store-taking** points (scratch pad, document editor, tag manager), **`MIN_API_VERSION_FOR_CALENDAR`** (7) for the calendar, **`MIN_API_VERSION_FOR_BIBLE`** (11) for the Bible point, and 1 for every stateless point — a service below its floor is skipped even though the ceiling alone would admit it. Meta-data is **per service**: the PDF exporter declares 2 (the `sourceKind` tail), `:ext-document`'s text importer and document exporter declare 3 (the `resultKind` tail / `SOURCE_DOCUMENT`), its editor service declares **6** (arc 22 / X4, since it takes a store), `:ext-tags`' one service declares **6** (arc 22 / X3), `:ext-scratchpad`'s one service declares **6** (arc 22 / X2), `:ext-calendar`'s one service declares **10** since arc 35 / HA1 (`advanceOutgoing`; 9 from arc 31 / HV4 for the two appended `ICalendar` methods; 7 from arc 23 / Y1 to HV3 — the point was born at 7, so there is no lower number to consider), everything else (`:ext-mlkit`, `:ext-soil`) at 1. **The ledger:** 2 = arc 18's `sourceKind` tail · 3 = arc 19 / M8's `resultKind` tail · 4 = arc 21 / W1, the tag point itself · 5 = arc 21 / W4, the first bump that is not a compatible tail · 6 = arc 22 / X1, the second break and the first that carries a floor · **7 = arc 23 / Y1, the calendar point — a compatible *addition* (no existing interface changes shape) and the first bump with a *per-action* floor** — see the version note below. **Arc 24 "Events" (2026-09-02) did NOT bump it** — the first arc since 21 to leave the ledger alone: it grew the calendar's own screen in place, touched no existing interface and opened no new point, so `:ext-calendar`'s service keeps declaring the same 7 it declared at Y1. **Arc 28 "Objects" (2026-09-06) did NOT bump it either** — the `bundleVersion` tail added at H6 is compatible in exactly the shape `sourceKind` already was, so `:ext-pdf` keeps declaring whatever it already declared. **8 = arc 25 / V1, the cloud point** — the calendar's shape, floored at 8 (`CloudContract.MIN_API_VERSION_FOR_CLOUD`), no existing door moved. **9 = arc 31 / HV1, `ExporterInfo`'s third compatible tail `delivery`** (`DELIVERY_ONE_FILE` / `DELIVERY_PER_PAGE`, absent = one file) — and, at HV4 under the same number, two methods appended to `ICalendar` (`render`, `outgoingTarget`). **Not a ninth point and no floor moves**: `MIN_API_VERSIONS` is untouched, every existing extension keeps its declaration. The bump is the arc-18 skew guard, not a parcel need: a per-page exporter facing an API-8 host would be handed a whole-notebook bundle and asked for one file, so `:ext-image` declares **9** (`ExporterContract.MIN_API_VERSION_FOR_DELIVERY`) and an older host skips it at discovery; the host itself reads the `delivery` tail only from a service declaring ≥ 9 (`ExportDelivery.delivery`), so the declaration and the tail can never disagree about what the host will do. The calendar's `render` is a *method* floor (offered only to a calendar declaring 9), never an action floor — a 7 still binds for everything it always did. **10 = arc 35 / HA1, `ICalendar.advanceOutgoing`** — a Day's whole-page send parks both halves and the host drains them in turn; appended after `outgoingTarget`, method floor `MIN_API_VERSION_FOR_CALENDAR_DAY_SEND` = 10, no action floor moved, no other extension redeclares. **11 = arc 37 / B0, the Bible point** — the calendar's/cloud's shape: a compatible addition floored at 11 (`MIN_API_VERSION_FOR_BIBLE`), no existing floor moved, only `:ext-bible` declares 11 |
 | `MIN_API_VERSION_FOR_STORE` | 6 (arc 22 / X1) | the floor `minApiVersion` answers for a service on one of the three arc-22 store-taking points |
 | `MIN_API_VERSION_FOR_CALENDAR` | 7 (arc 23 / Y1) | the floor `minApiVersion` answers for `ACTION_CALENDAR` — the point was born at API version 7, so there is no older calendar shape for the host to accept; every other point without a row here keeps a floor of 1 |
 | `ACTION_HANDWRITING_RECOGNIZER` | `…notesproutsn.extension.HANDWRITING_RECOGNIZER` | SN-namespaced action string |
@@ -2392,6 +2414,65 @@ timeouts, the failure tables per consumer, and the full walk transcripts are
 
 ---
 
+## The Bible point (arc 37)
+
+> The Bible reader **as a feature** — the slim BSB database, the paginated print-look page, the
+> swipe and chapter-flow model, the index, the stored position — is
+> `extensions/bible/docs/bible.md`. What follows is the **seam**.
+
+### The held bind
+
+`IBible` is `begin(store)` / `end()` and nothing else — the tag manager's showing bracket minus
+`configureShowing`: the host has nothing to tell the reader, because the reader owns its own index
+and its own position and asks the host for none of it. `BibleClient` is `TagClient.open`'s shape:
+`ExtensionStores.lease` on IO (the pre-open rule) → `ExtensionBinder.hold` → `begin(store)` →
+`Intent(ACTION_BIBLE_SCREEN).setPackage(pkg)` launched for a result; `finish()` is `end()`
+best-effort, then close + revoke in `finally` on every path, idempotent.
+
+`BibleEntry` is `TagManagerEntry`'s skeleton wearing `ExtensionScreenEntry`'s surface-stack
+push/pop — because unlike Tags **the Bible IS a restore surface**, `Surface.BIBLE` (decision 13):
+the launcher is registered in the field initializer, `stack.attach(stackEntry)` only after
+`ScreenLaunch.attempt` answers `Launched`, `onResult` pops synchronously first and then finishes
+the client on `MainScope()`, and `close()` pops and finishes together.
+
+### The second tier-2 screen with no paper
+
+`BibleActivity` carries no `PaperView`, no g-paper call, and therefore no EPD handoff — the tag
+manager's recorded answer, not a new finding. No `releaseForHandoff`, no `EXTRA_CHROME_HIDDEN`, no
+Application class: the screen's Intent is the action + `setPackage` and not one extra.
+
+### The store, and the one file the extension owns
+
+`BibleSchema.V1` is one table, `state(key, value)` — the calendar's `state` / the editor's `prefs`
+precedent — holding a single row, `position` → `USFM:chapter:verse`, written on every turn.
+Scripture text never crosses the seam and is never logged (book/chapter numbers, page counts,
+durations only). The bundled `assets/bible/bsb.bible` is copied once to the extension's own
+`noBackupFilesDir/bible/`, stamped `lastUpdateTime:size` — **the one sanctioned "extension writes to
+disk" exception**: re-derivable APK content, never user data, ML Kit's own model's class. The
+backup engine never sees it (it is not in Garden); uninstalling the extension removes it; a
+re-install re-stamps and re-copies it.
+
+### The doors
+
+Both **bottom** bars — the first non-pager control on a bottom bar, a deliberate exception to the
+"bottom bars are pager-only" rule (decision 3). Library: `btnBible` in `bottomRight`, **left of
+Templates**. Notebook: **far right** of the bottom strip, and mirrored in the arc-36 collapsed
+overflow. `GONE`, never disabled, without a trusted reader installed, re-discovered on every
+`onResume` — `BibleEntry` owns the button's visibility, same as every other extension door.
+
+### What B0 proved on the Nomad
+
+Discovery answered `1 provider(s) of 1 candidate(s)`; the button appeared on both bars; a tap
+opened `begin` → the screen (cold open 2.6 s, warm 0.7 s); Back closed it (`end` → unbind); a shell
+`am start` of the screen was refused, leaving the notebook focused; a force-stop of host and
+extension in **one** shell command, then a relaunch, restored `[BIBLE]` above the notebook. Two
+traps recorded: `am crash` on the host lets Android relaunch the task before a second kill lands,
+so a launch-restore test must force-stop both processes together, never crash the host first; and a
+stale `extension-api/build/` left over from the `notesprout_ratta` → `notesprout_sn` rename fails
+`mergeLibDexDebug` ("located outside the root directory") until it is removed by hand.
+
+---
+
 ## Boundary audit
 
 What crosses the process boundary, in which direction, and what guards it. **Re-walk this table
@@ -2481,6 +2562,10 @@ and grows no contract, so it is one row rather than a run, the same shape as row
 | 50 | **One boolean about the person's own way of working, both directions, no version gate and no floor.** `EXTRA_CHROME_HIDDEN` (arc 33 / F3) rides the pad's and the calendar's launch Intent — whether the host's paper screens currently hide their chrome, absent = shown — and rides the **same key** back on the result Intent, on any result code, as the screen's echo of the chrome state it was left in. No content, no id, no path, no secret — the shape every other boolean on this seam already keeps. `ExtensionScreenEntry.open()` puts it right after `decorateIntent`, entry-level, so every door on both hosts carries it with no per-point code; `ExtensionScreenEntry.onResult` reads it with pure `ChromeResult.read` synchronously, right after `stack.pop` and before the launched coroutine, and persists it to the host's own `ChromePrefs` — the extension never writes it anywhere. A missing key on the result (a killed process, an extension that predates the extra) writes nothing: the flag the person set stands. The extension itself persists nothing either; `InkScreenActivity.initChrome()` only applies it as the screen's starting chrome state and `finishWithHandoff` only echoes whatever `ChromeToggle.hidden` currently is. | `ExtensionContract.EXTRA_CHROME_HIDDEN`, `ExtensionScreenEntry.open`/`.onResult`, `extension/ChromeResult.read`/`.decode`, `data/prefs/ChromePrefs`, `ink/InkScreenActivity.initChrome`/`.finishWithHandoff` |
 | 51 | **A screen Intent the system refuses is a dialog, never a crash — and never a leaked showing** (arc 34 / M8). `HeldInkClient.open` validates the *service*; the screen is another component, and the launch can still be refused (`ActivityNotFoundException` — the package replaced or disabled between the bind and the launch; `SecurityException` — an export or permission the host does not hold). Pure `ScreenLaunch.attempt` is the instant between a good `begin` and the screen: the Intent is `resolveActivity`d **before** `beforeLaunch()`, so the common refusal never releases the notebook's EPD pipeline at all; a refusal thrown by the launch itself runs the entry's `afterLaunchFailed` (the notebook's `resumeDrawing()` — this screen never paused, so its `onResume` would not re-arm) and is answered as `Refused`, which takes the ordinary failure road: `fail(fresh)` — bind finished (`end()` + unbind + revoke), latch cleared, box down, the point's "unavailable" dialog, re-discovery. Anything else the launch throws is a bug and propagates as before. The extension observes nothing new: a `begin` followed by an `end` with no screen between them, which the tag manager's cancel already looks like. | `extension/ScreenLaunch.attempt`, `ExtensionScreenEntry.open` (+ `afterLaunchFailed`), `ScratchPadEntry` / `CalendarEntry`, `NotebookActivity` (the two entries' `afterLaunchFailed = { paper.resumeDrawing() }`) |
 
+| 52 | **Outward on `begin` is the uid-bound store binder only — nothing on the Intent, inward nothing.** `begin(store)` is `IBible`'s whole opening call, the tag manager's shape once more: an `ExtensionStoreBinder` minted in `BibleClient.open` after `ExtensionStores.lease` on IO, uid-bound, revoked in `finally` on every path. The screen's Intent is the action + `setPackage` and not one extra; there is no result payload — `RESULT_OK` and `RESULT_CANCELED` both mean "closed," the tag manager's cancel shape exactly. | `IBible.aidl`, `BibleClient.open`/`.finish`, `ExtensionBinder.hold`, `ExtensionStoreBinder`, `BibleService.begin`/`.end`, `BibleSession` |
+| 53 | **The store holds one `state` row, and scripture never crosses the seam.** `BibleSchema.V1`'s `state(key, value)` holds a single `position` row (`USFM:chapter:verse`), the only thing the extension ever writes through its store binder; the reader's text is read straight off `BibleDatabase`, its own read-only `SQLiteDatabase`, never through `IExtensionStore` and never logged. | `BibleSchema`, `BibleSql`, `BibleStore`, `BibleDatabase` (`OPEN_READONLY`) |
+| 54 | **The extension's own file is read-only APK content outside Garden — the disk exception, recorded once.** `ContentInstaller` copies `assets/bible/bsb.bible` to `noBackupFilesDir/bible/bsb.bible`, stamped `lastUpdateTime:size`; it is the one place in the whole family an extension writes to disk on its own, sanctioned because the bytes are re-derivable APK content, never user data — ML Kit's own bundled model is the precedent. The backup engine's Garden walk never sees it; uninstalling `:ext-bible` removes it; a re-install re-stamps and re-copies it. | `ContentInstaller.install` |
+
 **One recorded asymmetry.** The host forces inbound colour to opaque black; the extension does not
 force it on the ink the host sends. That is not an oversight and not a hole: SN's ink is fixed
 black, so the host has no other colour to send, and the sender is signature-matched. The *untrusted*
@@ -2545,11 +2630,17 @@ lent it for the one call, and answers with pixels — `CalendarRender`'s log lin
 already draws; an event's title or a stroke's geometry never leaves the bitmap they were painted
 into.
 
+**Scripture is not the user's content, but the reader logs "where, not what" anyway** (arc 37 /
+B0): `BibleService`, `BibleClient` and `BibleEntry` log book and chapter numbers, page counts and
+durations only — never a verse of text. The position value itself (`BibleStore`'s one `state` row)
+is never logged either, on the same principle every other stored value on this seam is held to,
+even though it is nothing more than a chapter and verse number.
+
 ---
 
 ## Identity
 
-All nine extensions share one recipe; only the name and the point differ. (`:ext-soil` serves
+All ten extensions share one recipe; only the name and the point differ. (`:ext-soil` serves
 **two** points — exporter and importer — under one identity: the user's arc-16 call was no rename,
 so the label stays `NSE · Soil Export` even though it imports too. `:ext-pdf` is the second
 exporter on the same point — arc 18, no new point — and `:ext-image` (arc 31 / HV1) is the third,
@@ -2682,6 +2773,19 @@ APK is a different package: it must be uninstalled, and because the token store 
 | versionName | host lockstep: `0.1.0-sn` (`-dev` suffixed in debug), bumped together with `:app` at arc freezes |
 | Release APK | no module-local dependency beyond `:extension-api` — the framework's own `Bitmap.compress` is the whole encoder, so this is the smallest exporter APK in the family (no pdfbox, no bouncycastle) |
 | API version | declares **9** (`ExporterContract.MIN_API_VERSION_FOR_DELIVERY`) from its first phase — the exporter was born declaring the `delivery` tail, so unlike `:ext-pdf`'s `sourceKind` floor it was never live-but-skipped at a lower number; an API-8 host skips this service at discovery entirely |
+
+**`:ext-bible`** (arc 37 / B0–B3, the FIFTEENTH module and the first living outside
+`apps/notesprout_sn` — `BibleService` + `BibleActivity`, one APK on one point)
+
+| | |
+|---|---|
+| Label | **"NSE · Bible"** (`"NSE · Bible Dev"` in debug — a build-type string override, not a suffix) |
+| Package | `com.symmetricalpalmtree.notesproutsn.ext.bible` (`.dev` in debug) |
+| Icon | the same Tabler "puzzle" glyph as every other extension, byte-identical vector — the family mark, granted without asking (the 2026-09-05 rule) |
+| Launcher activity | **None** — the reader `<activity>` is exported under its own action with `<category DEFAULT>` and is refused unless launched for a result by the host; the Supernote launcher shows the package anyway, the family recipe |
+| versionName | host lockstep: `0.1.0-sn` (`-dev` suffixed in debug), bumped together with `:app` at arc freezes |
+| Release APK | ≈ 21.8 MB (debug) — the 11.6 MB `bsb.bible` (slim, formatted layer only) and ≈ 2.2 MB of bundled Noto Serif (regular/bold/italic, OFL) ride inside |
+| API version | declares **11** (`MIN_API_VERSION_FOR_BIBLE`) from its first phase — the point was born at 11, so like the calendar and the cloud point, `:ext-bible` was never live-but-skipped between a store rebuild and its own redeclaration: there was no lower number for it to have declared first |
 
 ---
 

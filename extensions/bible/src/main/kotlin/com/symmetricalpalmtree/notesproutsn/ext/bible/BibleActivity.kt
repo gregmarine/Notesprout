@@ -60,7 +60,10 @@ import kotlinx.coroutines.withContext
  * **Nothing about what is read is ever logged** — book and chapter numbers, page counts and
  * durations only ("where, not what"), on this side of the seam as on the other.
  *
- * B3 adds the index behind the title and `btnIndex`.
+ * B3's addition: **the index** (decision 11) — `btnIndex` and the title both open it, a bordered
+ * Book grid ↔ Chapter grid over the source's own book table, which the loader already read for the
+ * cursor. Picking a chapter opens it at its first page, down the same path a chapter edge takes.
+ * A tap before the first chapter has shown is a silent no-op: there is nothing to index yet.
  */
 class BibleActivity : AppCompatActivity() {
 
@@ -126,7 +129,12 @@ class BibleActivity : AppCompatActivity() {
         binding.title.setText(R.string.bible_title)
         binding.btnBack.setOnClickListener { leave() }
         binding.btnBack.setOnLongClickListener { hint(R.string.cd_bible_back) }
+        // Two doors to the same dialog: the button, and the title that names where you are —
+        // "Genesis 1" is the obvious thing to tap when you want to be somewhere else.
+        binding.btnIndex.setOnClickListener { openIndex() }
         binding.btnIndex.setOnLongClickListener { hint(R.string.cd_bible_index) }
+        binding.title.setOnClickListener { openIndex() }
+        binding.title.setOnLongClickListener { hint(R.string.cd_bible_index) }
         binding.btnPrevPage.setOnClickListener { turnTo(pageIndex - 1) }
         binding.btnPrevPage.setOnLongClickListener { hint(R.string.cd_bible_prev_page) }
         binding.btnNextPage.setOnClickListener { turnTo(pageIndex + 1) }
@@ -253,6 +261,22 @@ class BibleActivity : AppCompatActivity() {
         binding.pageIndicator.text =
             getString(R.string.bible_page_indicator, index + 1, pages.size)
         remember(pages, index)
+    }
+
+    // --- the index ----------------------------------------------------------
+
+    /**
+     * The Book ↔ Chapter index (arc 37 / B3). The books come from the loader's one read of the
+     * source's `book` table; before the first chapter has shown there are none, and the tap does
+     * **nothing** — a dialog that said "not ready" would be noise for the half-second it is true.
+     * A picked chapter opens at its first page; the position write follows from the show, as it
+     * does for every other turn.
+     */
+    private fun openIndex() {
+        val books = loader.booksNow()
+        val at = chapter?.ref ?: return
+        if (books.isEmpty()) return
+        IndexDialog.show(this, books, at) { picked -> openChapter(picked) { 0 } }
     }
 
     // --- where the user was -------------------------------------------------

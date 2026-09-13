@@ -13,9 +13,10 @@ are reading references — **no app code is copied from either**. Devices: **Nom
 The Manta identifies as a Nomad — target by serial.
 
 **Status: arcs 1–36 are all COMPLETE + FROZEN (2026-09-11) and `PARITY_BACKLOG.md` is closed.**
-The build effort ("ratta paper", 2026-08-20 → 2026-09-11) is over; what remains is maintenance.
-No NINTH extension point, no new arc, and no re-raising of any waived / declined review finding
-without a fresh user decision.
+The build effort ("ratta paper", 2026-08-20 → 2026-09-11) is over; what remains is maintenance,
+plus **arc 37 "Bible" — a fresh user decision granted 2026-09-13, in progress on branch `bible`**
+(plan + ledger: `extensions/bible/BIBLE_PLAN.md`). No TENTH extension point beyond it, no other
+new arc, and no re-raising of any waived / declined review finding without a fresh user decision.
 
 **Maintenance protocol (replaces the per-arc phase protocol):**
 
@@ -111,7 +112,10 @@ built**, the sticky editor with its transfer singleton and EPD handoff chain, se
 undo kinds / clipboard arms / whole-object erase, PDF endnotes over `PageBundle` v2 +
 `bundleVersion`, the failure table, the design calls, the traps, the Nomad walks and the tests) ·
 `docs/sn-screen.md` (arc 11 / J1: the shared `:sn-screen` paper-screen library — what may live
-there, what may not depend on it, and the `nonTransitiveRClass` flag that holds it together).
+there, what may not depend on it, and the `nonTransitiveRClass` flag that holds it together) ·
+`extensions/bible/docs/bible.md` (arc 37 "Bible": **NSE · Bible** as a feature — the slim BSB
+SQLite build, the paginated print-look reader, single-finger swipe and chapter/book flow, the
+Book/Chapter index, the stored position, the `extensions/` monorepo-root pattern).
 
 ## Standing rules
 
@@ -128,7 +132,10 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   and does not want "fixing": pulling `:sn-screen` into an exporter for a log line would put a
   paper-screen library inside a module that draws no paper.
 
-- **Fourteen modules, own Gradle root**: `:app` (the
+- **Fifteen modules, own Gradle root — the fifteenth lives outside it.** Fourteen sit under this
+  app's own Gradle root; the fifteenth, `:ext-bible` (arc 37, **NSE · Bible**), lives at the
+  monorepo root (`extensions/bible/`) and is pulled in by `settings.gradle.kts`'s `projectDir`
+  include — the pattern recorded for every future extension. `:app` (the
   host) · `:markdown` (arc 19 / M1 — the shared markdown engine: parser, renderer, formatter,
   reflow, search, draft, paginator; stdlib only, depends on **nothing** in this project and
   nothing beyond the android SDK its spans use — `:app` and `:ext-document` consume it, one
@@ -224,7 +231,15 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   `ImageAssembly` (`requireOnePage` — a multi-page bundle is an `IllegalStateException`, never its
   first page; RGB_565 decode, dimension check against the declaration, PNG 100 through a counting
   stream + the `S_ISREG` fsync rule). It never sees a notebook, a `.soil`, or more than one page —
-  the host bakes once and splits (`BundleSplit`) and calls it once per page.)
+  the host bakes once and splits (`BundleSplit`) and calls it once per page.) ·
+  `:ext-bible` (**NSE · Bible**, arc 37 / B0 — the fifteenth module, and the only one at the
+  monorepo root, `extensions/bible/`, included by `projectDir`): `:extension-api` + `:sn-screen`
+  only, **never** `:app`, no Room / SQLCipher / serialization. Declares `API_VERSION` **11**
+  (`MIN_API_VERSION_FOR_BIBLE`) from its first phase. `ContentInstaller` copying its bundled
+  `assets/bible/bsb.bible` to its own `noBackupFilesDir` is **the one sanctioned "extension writes
+  to disk" exception** in the whole family — re-derivable APK content, never user data, ML Kit's
+  own model's class. Its door is a deliberate exception to "bottom bars are pager-only": `btnBible`
+  sits on both the library's and the notebook's bottom bars (arc 37 / B0, decision 3).
   `gradle.properties` sets `android.nonTransitiveRClass=false` — undoing it breaks every
   `:sn-screen` resource reference from `:app`.
 - **Arcs 26–35 are each COMPLETE + FROZEN.** Each has ONE reference doc and ONE standalone plan
@@ -331,13 +346,15 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   `:ext-tags`' `tag`, `:ext-calendar`'s `calendar`, `:ext-cloud`'s `cloud`). A package is found by
   its **label** in Settings → Apps; the glyph only says which family it belongs to. A new extension
   copies `ext-soil/src/main/res/drawable/ic_launcher_foreground.xml` and does not ask.
-- **SN has EIGHT extension points** — each added on its own explicit user decision, and
-  **no NINTH may be added without another** (arc 21's `ACTION_TAG_MANAGER` was the sixth's,
+- **SN has NINE extension points** — each added on its own explicit user decision, and
+  **no TENTH may be added without another** (arc 21's `ACTION_TAG_MANAGER` was the sixth's,
   granted 2026-08-31; the SEVENTH, `ACTION_CALENDAR`, was granted 2026-09-01 for arc 23 and
   landed at Y1 with the `:ext-ink` + `:ext-calendar` modules, `RATTA_PLAN.md` § "Phases —
   Arc 23"; **the EIGHTH, `CloudContract.ACTION_CLOUD_STORAGE`, was granted 2026-09-04 for arc 25
-  "Drive" and landed at V1** with `:ext-cloud` — its plan is the standalone `DRIVE_PLAN.md`). The
-  full seam — contracts, caps, trust, the
+  "Drive" and landed at V1** with `:ext-cloud` — its plan is the standalone `DRIVE_PLAN.md`; **the
+  NINTH, `ACTION_BIBLE`, was granted 2026-09-13 for arc 37 "Bible" and landed at B0** with
+  `:ext-bible` at the monorepo root — its plan is the standalone `extensions/bible/BIBLE_PLAN.md`).
+  The full seam — contracts, caps, trust, the
   boundary audit — is `docs/extensions.md`; the rules that bind every point:
   - `ACTION_HANDWRITING_RECOGNIZER` (headings + the markdown engine are core, the engine is
     swappable). **Only `prepare()` may start a model download** (host consent dialog first;
@@ -419,6 +436,16 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
     (nothing changed, try again). **No other extension is aware of the cloud** — exporters and
     importers only ever see fds, so a cloud destination changes only where the host's fd points.
     Consumers this arc: export destination, backup destination, import source; no restore.
+  - `ACTION_BIBLE` + `_SCREEN` (arc 37 / B0, granted 2026-09-13) — the fifth screen-owning point
+    and the second with **no paper** (the tag manager's shape): `IBible` is a held bind,
+    `begin(store)` / `end()` and nothing else, the store lent for the showing exactly as the tag
+    manager's is. Nothing rides the screen's Intent — no extras at all, the editor's and the cloud
+    connect screen's precedent. The store holds one `state` row (`position` →
+    `USFM:chapter:verse`); scripture text never crosses the seam and is never logged. Served by
+    **`NSE · Bible`** (`:ext-bible`), the ONE module living outside this app's own Gradle root
+    (`extensions/bible/`, included by `projectDir`), and the source of the family's one sanctioned
+    disk exception: `ContentInstaller` copies the bundled `.bible` file to its own
+    `noBackupFilesDir` — re-derivable APK content, never user data, ML Kit's own model's class.
 
   All of them get the **extension store** (`IExtensionStore` — per-package,
   encrypted under the global key at `Garden/<pkg>.db`, minted per bind, uid-bound, revoked with
@@ -445,8 +472,9 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   Action strings are
   SN-namespaced so Paper's extensions are never discovered; trust is same-signature both ways
   (discovery + bind-time re-check host-side, `HostCallerCheck` first thing in every stub method);
-  `ExtensionContract.API_VERSION` = **10** and the host accepts `minApiVersion(action)..10` — **the
-  floor is per action since arc 23 / Y1** (`minApiVersion` is a map, not a single set): 8 for
+  `ExtensionContract.API_VERSION` = **11** and the host accepts `minApiVersion(action)..11` — **the
+  floor is per action since arc 23 / Y1** (`minApiVersion` is a map, not a single set): 11 for
+  `ACTION_BIBLE` (`MIN_API_VERSION_FOR_BIBLE`, arc 37 / B0), 8 for
   `ACTION_CLOUD_STORAGE` (`CloudContract.MIN_API_VERSION_FOR_CLOUD`, arc 25 / V1), 7 for
   `ACTION_CALENDAR` (`MIN_API_VERSION_FOR_CALENDAR` — a point born at 7 has no older shape to
   accept), `MIN_API_VERSION_FOR_STORE` 6 for the three arc-22 store-taking points, 1 for every
@@ -479,7 +507,10 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   re-pinned to 8). Not a ninth point. · **10 = arc 35 / HA1, one compatible tail and NO floor
   moved**: `ICalendar.advanceOutgoing()` appended after `outgoingTarget` (method floor
   `MIN_API_VERSION_FOR_CALENDAR_DAY_SEND` 10 — a Day's whole-page Send parks both halves and the
-  host drains them in turn; only `:ext-calendar` redeclares).
+  host drains them in turn; only `:ext-calendar` redeclares) · **11 = arc 37 / B0, the BIBLE
+  point** — compatible addition floored at 11, no floor moved: `ACTION_BIBLE` is listed only at
+  `MIN_API_VERSION_FOR_BIBLE`, every other point's declared floor is unchanged; only `:ext-bible`
+  declares 11.
   Meta-data is **per service**.
 - **The Scratch Pad is not ours to change from here** (arc 11, `docs/scratchpad.md`). It is the
   `:ext-scratchpad` APK: its own process, its own g-paper surface, its own undo stack, and it
@@ -573,6 +604,10 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
 - **Supernote swallows `adb shell input text`** — scripted device tests tap the on-screen
   keyboard or avoid text entry. EPD live ink is invisible to screencap; only committed
   strokes screenshot-verify.
+- **Bottom bars are pager-only, with one recorded exception** — the Bible button (arc 37 / B0,
+  decision 3), the first non-pager control ever placed on a bottom bar, on both the library's and
+  the notebook's. It is a deliberate, one-time exception, not a precedent: a future door still
+  goes on a top bar or a long-press sheet unless the user grants another one explicitly.
 
 ## Build & install
 
