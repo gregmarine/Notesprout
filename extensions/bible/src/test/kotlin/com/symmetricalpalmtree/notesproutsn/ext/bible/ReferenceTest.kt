@@ -103,6 +103,18 @@ class ReferenceTest {
     }
 
     @Test
+    fun `wholeChapter parks a chapter the way a typed one reads (B9 Send)`() {
+        val whole = ReferenceCodec.wholeChapter(ChapterRef("JHN", 3))
+        assertEquals("JHN:3:0-3:999", ReferenceCodec.encode(listOf(whole)))
+        assertEquals("John 3", whole.format())
+        // The same wire and label a typed "John 3" resolves to — the reader and the dialog agree.
+        assertEquals(ReferenceCodec.encode(ReferenceParser.parseAll("John 3")), ReferenceCodec.encode(listOf(whole)))
+        assertEquals(listOf(whole), ReferenceCodec.decode("JHN:3:0-3:999"))
+        // The canonical form, as a typed "Psalm 23" resolves — not the reader title's "Psalm 23".
+        assertEquals("Psalms 23", ReferenceCodec.wholeChapter(ChapterRef("PSA", 23)).format())
+    }
+
+    @Test
     fun `adjacent ranges of one book fold into one passage`() {
         val back = ReferenceCodec.decode("JHN:3:14-3:16,JHN:3:18-3:18")!!
         assertEquals(1, back.size)

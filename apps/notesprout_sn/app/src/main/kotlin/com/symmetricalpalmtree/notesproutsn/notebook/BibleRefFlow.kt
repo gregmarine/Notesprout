@@ -155,6 +155,19 @@ class BibleRefFlow(
     }
 
     /**
+     * The reader's **Send to notebook** (B9, the user's decision 2026-09-13): a reference the
+     * extension already resolved — the chapter being read, or the passage on screen — lands at
+     * the page centre exactly as an Insert does, with **the canonical label as its words** (the
+     * one door where there are no user's words to keep). No dialog, no resolve: the wire came
+     * from the reader itself. Selected under the lasso, so it can be moved; one undo step; the
+     * same toast.
+     */
+    fun insertResolved(resolved: ResolvedReference) {
+        if (!host.alive) return
+        insert(host.pageId, resolved.label, resolved)
+    }
+
+    /**
      * **Edit** on a lone selected Bible link — the reference dialog, never the page picker (the
      * locked decision: a Bible link's target is a passage, and the picker has nothing to say about
      * one). A Bible link wraps exactly one text object by construction; a link that does not is a

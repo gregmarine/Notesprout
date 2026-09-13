@@ -232,6 +232,17 @@ object ReferenceCodec {
         return out
     }
 
+    /**
+     * A whole chapter as one passage (B9 "Send") — what the reader's Send parks while a chapter
+     * is on screen: the `USFM:c:0-c:999` range, so it decodes and labels exactly like a typed
+     * "John 3" (`format()` names a whole chapter bare).
+     */
+    fun wholeChapter(ref: ChapterRef): Passage {
+        val book = Canon.byUsfm(ref.usfm)
+        val (start, end) = VerseKey.chapterBounds(book.ordinal, ref.chapter)
+        return Passage(book, listOf(VerseRange(start, end)))
+    }
+
     /** The canonical label of a decoded wire — the passages' `format()`s joined by `; `. */
     fun label(passages: List<Passage>): String = passages.joinToString("; ") { it.format() }
 }

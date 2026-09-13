@@ -24,7 +24,9 @@ import com.symmetricalpalmtree.notesproutsn.core.TopGuard
 import com.symmetricalpalmtree.notesproutsn.ext.bible.databinding.ActivityBibleBinding
 import com.symmetricalpalmtree.notesproutsn.ext.bible.reader.ChapterPaginator
 import com.symmetricalpalmtree.notesproutsn.ext.bible.reader.ReaderView
+import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
 import com.symmetricalpalmtree.notesproutsn.extension.HostCallerCheck
+import com.symmetricalpalmtree.notesproutsn.extension.ResolvedReference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -104,6 +106,15 @@ import kotlinx.coroutines.withContext
  * there is; anything else is words, searched on IO ([BibleDatabase.search]) and shown as a
  * ranked list in the panel, a row opening its chapter on that verse's page (a pick too). The last
  * results outlive the panel for the life of this screen, so closing it does not lose them.
+ *
+ * B9's addition (the user's decision 2026-09-13): **Send to notebook** — `btnSend` at the far
+ * right, shown only when the host opened the reader from a notebook
+ * (`EXTRA_BIBLE_SEND_ENABLED`). A tap parks the current reference — the chapter being read as a
+ * whole chapter, or the passage on screen — in [BibleSession.outgoing] for the host's
+ * `takeOutgoingReference` and finishes with `RESULT_BIBLE_SEND`; the host lands it on the page as
+ * a Bible reference object, selected, so it can be moved. The reader closes (the calendar's
+ * rule: what landed is what the person is looking at). Our own Full chapter launch forwards the
+ * flag, and its Send is echoed up so the passage instance finishes with it too.
  */
 class BibleActivity : AppCompatActivity() {
 
@@ -130,6 +141,10 @@ class BibleActivity : AppCompatActivity() {
 
     /** The reference this showing opens on, read once from [BibleSession] in [onCreate]. */
     private var openingReference: String? = null
+
+    /** A notebook is behind this showing (B9): the host's `EXTRA_BIBLE_SEND_ENABLED`, forwarded
+     *  to our own Full chapter launch. */
+    private var sendEnabled = false
 
     /** The in-process Full chapter launch (arc 38 / R2). Registered in [onCreate]. */
     private lateinit var fullChapter: ActivityResultLauncher<Intent>
@@ -186,10 +201,17 @@ class BibleActivity : AppCompatActivity() {
         bibleStore = BibleSession.store?.let { BibleStore(it) }
         loader = ChapterLoader(this)
         passages = PassageLoader(loader)
-        fullChapter = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-            // Nothing to do: the chapter instance read and wrote its own position, and this one
-            // is exactly the passage it was. The registration exists so the launch is a
-            // `startActivityForResult` — which is what makes `callingPackage` us.
+        sendEnabled = intent?.getBooleanExtra(ExtensionContract.EXTRA_BIBLE_SEND_ENABLED, false) ?: false
+        fullChapter = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            // The chapter instance read and wrote its own position, and this one is exactly the
+            // passage it was — nothing to do, unless it Sent (B9): the parked reference is
+            // already in the session, so this instance only has to carry the result code up.
+            // The registration exists so the launch is a `startActivityForResult` — which is what
+            // makes `callingPackage` us.
+            if (result.resultCode == ExtensionContract.RESULT_BIBLE_SEND) {
+                setResult(ExtensionContract.RESULT_BIBLE_SEND)
+                finish()
+            }
         }
 
         readerView = ReaderView(this)
@@ -226,13 +248,16 @@ class BibleActivity : AppCompatActivity() {
         binding.btnSearch.setOnLongClickListener { hint(R.string.cd_bible_search) }
         binding.btnFullChapter.setOnClickListener { openFullChapter() }
         binding.btnFullChapter.setOnLongClickListener { hint(R.string.bible_full_chapter) }
+        binding.btnSend.visibility = if (sendEnabled) View.VISIBLE else View.GONE
+        binding.btnSend.setOnClickListener { sendToNotebook() }
+        binding.btnSend.setOnLongClickListener { hint(R.string.cd_bible_send) }
         binding.btnPrevPage.setOnClickListener { turnTo(pageIndex - 1) }
         binding.btnPrevPage.setOnLongClickListener { hint(R.string.cd_bible_prev_page) }
         binding.btnNextPage.setOnClickListener { turnTo(pageIndex + 1) }
         binding.btnNextPage.setOnLongClickListener { hint(R.string.cd_bible_next_page) }
         for (button in listOf<View>(
             binding.btnBack, binding.btnContents, binding.btnSearch, binding.btnRecents,
-            binding.btnFullChapter, binding.btnPrevPage, binding.btnNextPage,
+            binding.btnFullChapter, binding.btnSend, binding.btnPrevPage, binding.btnNextPage,
         )) {
             TooltipCompat.setTooltipText(button, button.contentDescription)
         }
@@ -680,8 +705,38 @@ class BibleActivity : AppCompatActivity() {
             Intent(this, BibleActivity::class.java)
                 .putExtra(EXTRA_USFM, pages.openAt.usfm)
                 .putExtra(EXTRA_CHAPTER, pages.openAt.chapter)
-                .putExtra(EXTRA_VERSE, pages.openVerse),
+                .putExtra(EXTRA_VERSE, pages.openVerse)
+                .putExtra(ExtensionContract.EXTRA_BIBLE_SEND_ENABLED, sendEnabled),
         )
+    }
+
+    // --- Send to notebook (B9) ----------------------------------------------
+
+    /**
+     * What Send carries: the passage on screen as it is, or the chapter being read as a whole
+     * chapter (the user's call — "John 3", never the verse at the top of the page). Null while
+     * nothing is open yet.
+     */
+    private fun currentReference(): ResolvedReference? {
+        passage?.let { return ResolvedReference(it.wire, it.label) }
+        val ref = chapter?.ref ?: return null
+        val whole = ReferenceCodec.wholeChapter(ref)
+        return ResolvedReference(ReferenceCodec.encode(listOf(whole)), whole.format())
+    }
+
+    /**
+     * Park the current reference for the host and leave with [ExtensionContract.RESULT_BIBLE_SEND].
+     * The host reads it back over the bind it is still holding (`takeOutgoingReference`) and lands
+     * it on the page selected; the reader closes, the calendar's rule. A tap before anything is
+     * open, or while a load runs, does nothing — there is no reference to send yet.
+     */
+    private fun sendToNotebook() {
+        if (loading) return
+        val reference = currentReference() ?: return
+        synchronized(BibleSession) { BibleSession.outgoing = reference }
+        Slog.d(TAG) { "send to notebook: ${if (passage != null) "passage" else "chapter"}" }
+        setResult(ExtensionContract.RESULT_BIBLE_SEND)
+        finish()
     }
 
     /** Our own chapter launch, or null for every launch the host made. Total: an extra set this

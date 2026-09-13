@@ -40,4 +40,15 @@ interface IBible {
      * of just those verses, with the Full chapter door. Paired with the same `end()`.
      */
     void beginAt(IExtensionStore store, String reference);
+
+    /**
+     * B9 "Send" (2026-09-13) — a compatible tail (transaction code 5) behind the METHOD floor
+     * `ExtensionContract.MIN_API_VERSION_FOR_BIBLE_SEND` (13): the reference the reader's Send
+     * to notebook button parked — the chapter being read as a whole chapter, or the passage on
+     * screen — as a resolved reference (wire + canonical label), or null when nothing was parked.
+     * Once-only: the parked reference is cleared on the way out, and `end()` clears it too. The
+     * host calls it on the held bind right after the screen returned `RESULT_BIBLE_SEND`, before
+     * `end()` — the calendar's `takeOutgoing` shape on a reference instead of ink. Never logged.
+     */
+    ResolvedReference takeOutgoingReference();
 }

@@ -461,3 +461,34 @@ slim build carries a full-text index again.
   the list were left to the user's hand — **walked by the user on the Nomad the same day: "Looks
   and works good!"** B8 is complete.
 
+
+### B9 — Send to notebook ✅ 2026-09-13 (post-freeze, the user's decision)
+
+The user, after B8: "Let's add a way to create a Bible reference link in a notebook from the Bible
+using the current chapter or reference. It should work like the calendar does. When opening the
+Bible from a notebook, give a toolbar button to send that reference to the notebook as the current
+selection so it can be moved." Wizard answers (one at a time): **the canonical label as-is** lands
+(no prefilled dialog); in chapter mode **the whole chapter** (not the top verse); Send **closes**
+the reader (the calendar's rule); the button at **the far right** of the top bar; freeze = Nomad
+hand walk, **no code review**.
+
+- **Seam:** `IBible.takeOutgoingReference()` — a compatible tail (transaction 5) behind the METHOD
+  floor `MIN_API_VERSION_FOR_BIBLE_SEND` = 13, `API_VERSION` 12 → 13, the manifest 13;
+  `MIN_API_VERSIONS` untouched. `EXTRA_BIBLE_SEND_ENABLED` (boolean, the calendar's shape) +
+  `RESULT_BIBLE_SEND` (1). Judgment call: the reference comes back over the held bind, not the
+  result Intent (`beginAt`'s reasoning in reverse).
+- **Extension:** `BibleSession.outgoing` + `takeOutgoing()` (once-only, cleared by `end()`);
+  `BibleService.takeOutgoingReference`; `ReferenceCodec.wholeChapter(ref)` (+1 JVM test → 112);
+  `BibleActivity` `btnSend` far right (GONE without the flag), `currentReference()` (passage as-is
+  / whole chapter), `sendToNotebook()`; the Full chapter launch forwards the flag and its result
+  callback echoes `RESULT_BIBLE_SEND` up.
+- **Host:** `BibleClient.open(reference, sendEnabled)` + `takeOutgoingReference()`;
+  `BibleEntry(sendEnabled, onSent)` + `supportsSend`, `onResult` takes-then-finishes;
+  `BibleRefFlow.insertResolved` (the Insert landing, no dialog, the label as the words);
+  `NotebookActivity` passes `sendEnabled = true` and routes `onSent`; the library's door is
+  unchanged. `:app` 1679 tests green.
+- **Walked over adb on the Nomad:** chapter Send (Proverbs 3 → selected at the centre, lasso
+  armed, selection bar up), passage Send via Full chapter → "John 3" echoed up and landed, the
+  library's reader with no Send. Left to the user's hand: the move by pen after the landing.
+- Docs: `docs/bible.md` § Send to notebook, `extensions.md` (module row, API row, audit row 57),
+  both `CLAUDE.md`.

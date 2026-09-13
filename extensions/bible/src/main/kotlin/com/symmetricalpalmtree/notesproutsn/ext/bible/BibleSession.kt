@@ -1,6 +1,7 @@
 package com.symmetricalpalmtree.notesproutsn.ext.bible
 
 import com.symmetricalpalmtree.notesproutsn.extension.IExtensionStore
+import com.symmetricalpalmtree.notesproutsn.extension.ResolvedReference
 
 /**
  * Process-wide state shared by [BibleService] (the host's held bind) and [BibleActivity] (the
@@ -23,9 +24,22 @@ object BibleSession {
     @Volatile
     var reference: String? = null
 
+    /**
+     * The reference the screen's Send to notebook parked (B9) — read once by
+     * `BibleService.takeOutgoingReference` on the held bind, the calendar's `outbound` shape on
+     * a reference instead of ink. Cleared by that read and by `end()`. Never logged.
+     */
+    @Volatile
+    var outgoing: ResolvedReference? = null
+
+    /** Once-only: the parked reference, cleared on the way out. */
+    @Synchronized
+    fun takeOutgoing(): ResolvedReference? = outgoing.also { outgoing = null }
+
     @Synchronized
     fun clear() {
         store = null
         reference = null
+        outgoing = null
     }
 }

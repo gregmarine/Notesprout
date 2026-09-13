@@ -622,6 +622,62 @@ for everything else here.
 
 ---
 
+## Send to notebook (B9)
+
+The user's decision 2026-09-13, after B8: "a way to create a Bible reference link in a notebook
+from the Bible using the current chapter or reference. It should work like the calendar does." The
+calendar's return road, on a reference instead of ink.
+
+**The door.** `btnSend` (Tabler `pencil-down`, the calendar's Send glyph) at the **far right** of
+the top bar, after the clock — the user's placement. It exists only when the host opened the reader
+**from a notebook**: `BibleClient.open` puts `ExtensionContract.EXTRA_BIBLE_SEND_ENABLED` on the
+screen Intent for the notebook's door and never for the library's (`BibleEntry(sendEnabled =
+true)` in `NotebookActivity`, the default `false` in `LibraryActivity`), and only against a reader
+declaring `MIN_API_VERSION_FOR_BIBLE_SEND` (13). The button is GONE otherwise — never disabled.
+It is the second boolean a Bible Intent has ever carried after none (`EXTRA_CALENDAR_SEND_ENABLED`'s
+shape: a boolean, no content, no id, no path — audit row 57).
+
+**What it carries** (`currentReference()`): in passage mode the passage **as it is** (the wire the
+host handed in and its canonical label); in chapter mode **the whole chapter** —
+`ReferenceCodec.wholeChapter(ref)` → `JHN:3:0-3:999` / "John 3", the user's call over the verse at
+the top of the page. The label is the canonical form a typed reference resolves to (`Passage
+.format()` — "Psalms 23", not the reader title's "Psalm 23"), so a sent chapter and a typed one are
+the same object on the page.
+
+**The road.** The tap parks a `ResolvedReference` in `BibleSession.outgoing` and the screen leaves
+with `RESULT_BIBLE_SEND` (the reader **closes** — the calendar's rule: what landed is what the person
+is looking at). `BibleEntry.onResult` sees the code, calls `IBible.takeOutgoingReference()` on the
+bind it is **still holding** (once-only on the reader's side; `end()` clears it too), hands the
+answer to `onSent` on Main, and only then finishes the bind — drain-then-finish, the calendar's
+order. `NotebookActivity` routes `onSent` to `BibleRefFlow.insertResolved`, which is the Insert
+door's landing with no dialog and no resolve: **the canonical label as the object's words** (the
+one door with no user's words to keep), `TextPlacement.centred`, wrapped in a `KIND_BIBLE` link,
+**selected under the lasso so it can be moved**, one `BibleRefCreated` undo step, the "Linked …"
+toast. Nothing lands when the screen returned any other code, when the reader parked nothing, or
+when the notebook is on its way out.
+
+**Full chapter.** Our own in-process chapter launch forwards the flag, so the chapter instance has
+the button too; its Send parks the reference in the same session and the passage instance's
+`fullChapter` result callback echoes `RESULT_BIBLE_SEND` up and finishes — one Send, whichever
+instance it was tapped on.
+
+**Judgment calls stated, not asked:** a tap while a load runs, or before anything is open, does
+nothing (there is no reference yet); a sent reference is not stamped as a recent (the chapter being
+read is dropped from the Recents anyway); the reference crosses the held bind, never the result
+Intent (the `beginAt` reasoning, in reverse).
+
+**Privacy:** the wire is never logged — `BibleService` / `BibleClient` log "a reference" or
+"nothing", `BibleRefFlow` a character count.
+
+**Walked over adb on the Nomad** (`.dev` host + `.dev` Bible, 2026-09-13): launch restore reopened
+the reader behind the notebook with Send at the far right; Send on Proverbs 3 → "Proverbs 3" landed
+at the page centre, selected under the lasso with the selection bar; a finger tap on the page's
+John 3:14–17 link → the passage view with Send beside Full chapter (the title still fits); Full
+chapter → Send → "John 3" landed, the passage instance closed with it; the library's door showed
+no Send. The move by pen is the user's hand.
+
+---
+
 ## Bible references (arc 38)
 
 A fresh user decision (2026-09-13, `extensions/bible/REFERENCE_PLAN.md`): a lassoed or typed
@@ -970,6 +1026,7 @@ The host side of arc 38 (`LinkPayload`, `LinkNav`, `BibleRefFlow`'s pure edges) 
 
 ## Not in this arc (recorded futures, each needing a user decision)
 
+- ~~**Send to notebook**~~ — DONE by B9 (§ [Send to notebook](#send-to-notebook-b9)).
 - ~~**Search**~~ — DONE by B8 (§ [Search](#search-b8)). Still not there: typo tolerance (the
   match is prefix-AND, as Biblesprout's), an OR fallback when AND finds nothing, a search history.
 - **Bookmarks** beyond the single remembered reading position and the Recents' history of picked

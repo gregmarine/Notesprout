@@ -40,9 +40,14 @@ works good!" — the lasso conversion included; the eleven-button lasso bar fits
 the user's call, the same waiver arc 37 took. Walk trap, not ours: the `.dev` host binds the
 RELEASE ML Kit first (`caller is not the host`), so
 `com.symmetricalpalmtree.notesproutsn.ext.mlkit` is `pm disable-user`'d on the Nomad beside the
-release pad and calendar. No TENTH extension point, no next Bible phase (search,
-bookmarks, cross references, footnotes) and no other new arc without a fresh user decision; no
-re-raising of any waived / declined review finding.
+release pad and calendar. **B9 "Send to notebook" (2026-09-13, the user's decision after B8):**
+the reader's far-right Send button (only with a notebook behind it — `EXTRA_BIBLE_SEND_ENABLED`)
+parks the current chapter (whole) or passage, `RESULT_BIBLE_SEND`, the host takes it over the held
+bind (`IBible.takeOutgoingReference`, `API_VERSION` 12 → 13 as the method floor
+`MIN_API_VERSION_FOR_BIBLE_SEND`) and lands it as a selected Bible reference object at the page
+centre (`BibleRefFlow.insertResolved`); the reader closes — `docs/bible.md` § Send to notebook.
+No TENTH extension point, no next Bible phase (bookmarks, cross references, footnotes) and no
+other new arc without a fresh user decision; no re-raising of any waived / declined review finding.
 
 **Maintenance protocol (replaces the per-arc phase protocol):**
 

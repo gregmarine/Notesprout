@@ -17,7 +17,9 @@
              API version 11 — born here, listed only at `MIN_API_VERSION_FOR_BIBLE`, because the
              point was never reachable at any lower number. **12 since arc 38 / R1**: `resolve` +
              `beginAt` behind the method floor `MIN_API_VERSION_FOR_BIBLE_REFERENCE`; the host
-             offers the notebook's reference doors only to a reader declaring it. The
+             offers the notebook's reference doors only to a reader declaring it. **13 since
+             B9 "Send"**: `takeOutgoingReference` behind `MIN_API_VERSION_FOR_BIBLE_SEND`; the
+             host sets `EXTRA_BIBLE_SEND_ENABLED` only against a reader declaring it. The
              `android:value` below is the host-compat gate — it is the line that matters, and
              this comment must move with it. -->
         <service
@@ -28,7 +30,7 @@
             </intent-filter>
             <meta-data
                 android:name="com.symmetricalpalmtree.notesproutsn.extension.API_VERSION"
-                android:value="12" />
+                android:value="13" />
         </service>
 
         <!-- The extension-owned screen (tier 2): exported, custom action, NO launcher filter;

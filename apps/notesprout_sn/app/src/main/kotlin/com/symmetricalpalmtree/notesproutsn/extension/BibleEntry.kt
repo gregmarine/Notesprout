@@ -40,6 +40,12 @@ import java.util.UUID
  * **Arc 38 / R3** gave it the reference half of the point: [supportsReferences] (the method floor,
  * re-read on every discovery and reported through `onAvailabilityChanged` so the notebook's doors
  * can track it), [open] on a passage, and [resolve] — the one call that shows nothing at all.
+ *
+ * **B9 "Send"** (2026-09-13) gave it the calendar's return road: a caller with a notebook behind
+ * it passes `sendEnabled`, the reader shows its Send to notebook button, and when the screen
+ * returns `RESULT_BIBLE_SEND` the parked reference is taken over the bind still held and handed
+ * to [onSent] **before** the bind is finished. Gated on [supportsSend] — an older reader is opened
+ * without the flag and never shows the button.
  */
 class BibleEntry(
     private val activity: AppCompatActivity,
@@ -51,6 +57,17 @@ class BibleEntry(
      * references and not merely one that exists. Called on Main; the value is [supportsReferences].
      */
     private val onAvailabilityChanged: (supportsReferences: Boolean) -> Unit = {},
+    /**
+     * B9: whether this door has a notebook behind it — the notebook screen's is true, the
+     * library's false. Only a true here, against a reader that [supportsSend], puts the Send
+     * button on the reader.
+     */
+    private val sendEnabled: Boolean = false,
+    /**
+     * B9: the reference the reader's Send parked, on Main, before the bind is finished — the
+     * notebook lands it on the page as a Bible reference object. Never called for the library.
+     */
+    private val onSent: (ResolvedReference) -> Unit = {},
 ) {
 
     private val launcher: ActivityResultLauncher<Intent> =
@@ -78,6 +95,11 @@ class BibleEntry(
     var supportsReferences: Boolean = false
         private set
 
+    /** B9: the discovered reader understands Send to notebook (`takeOutgoingReference`) — a
+     *  reader declaring [ExtensionContract.MIN_API_VERSION_FOR_BIBLE_SEND] or above. */
+    var supportsSend: Boolean = false
+        private set
+
     /** Whether a trusted reader is installed **right now**. Suspends — it is a package query. */
     suspend fun discovered(): Boolean {
         val found = ExtensionRegistry.bible(activity)
@@ -85,6 +107,8 @@ class BibleEntry(
         ref = found
         supportsReferences =
             found != null && found.apiVersion >= ExtensionContract.MIN_API_VERSION_FOR_BIBLE_REFERENCE
+        supportsSend =
+            found != null && found.apiVersion >= ExtensionContract.MIN_API_VERSION_FOR_BIBLE_SEND
         button.visibility = if (found == null) View.GONE else View.VISIBLE
         onAvailabilityChanged(supportsReferences)
         return found != null
@@ -124,7 +148,7 @@ class BibleEntry(
             activity.lifecycleScope.launch {
                 val fresh = BibleClient(activity, provider)
                 client = fresh
-                val intent = fresh.open(reference)
+                val intent = fresh.open(reference, sendEnabled = sendEnabled && supportsSend)
                 if (activity.isFinishing || activity.isDestroyed) {
                     client = null; opening = false; fresh.finish(); return@launch
                 }
@@ -173,7 +197,14 @@ class BibleEntry(
         discovered()
     }
 
-    /** One showing is over. The bind is finished on a detached scope — the caller may be leaving. */
+    /**
+     * One showing is over. The bind is finished on a detached scope — the caller may be leaving.
+     *
+     * B9: on `RESULT_BIBLE_SEND` the parked reference is taken **first**, on the bind still held,
+     * and handed to [onSent] before `finish` — the calendar's drain-then-finish order. A Send
+     * from a door without a notebook behind it (there is none: the flag was never set) or from a
+     * reader that parked nothing lands nothing, silently: the reader already closed.
+     */
     private fun onResult(result: ActivityResult) {
         // First, and synchronously (arc 32 / RS1): a result callback runs **before** the host's own
         // `onResume`, whose `markTop` drops everything above it — this entry must already be gone.
@@ -181,11 +212,19 @@ class BibleEntry(
         val open = client
         client = null
         Slog.d(TAG) { "bible screen returned: resultCode=${result.resultCode}" }
+        val sent = result.resultCode == ExtensionContract.RESULT_BIBLE_SEND && sendEnabled
         MainScope().launch {
             try {
-                open?.finish()
+                if (sent && open != null) {
+                    val reference = open.takeOutgoingReference()
+                    if (reference != null && !activity.isFinishing && !activity.isDestroyed) onSent(reference)
+                }
             } finally {
-                opening = false
+                try {
+                    open?.finish()
+                } finally {
+                    opening = false
+                }
             }
         }
     }

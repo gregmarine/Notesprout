@@ -30,6 +30,13 @@ import kotlinx.coroutines.CancellationException
  * [ExtensionContract.MIN_API_VERSION_FOR_BIBLE_REFERENCE] has; the gate is [BibleEntry]'s.
  * A reference — the user's own words on the way in, the canonical wire on the way back — is
  * **never logged on either side**: a reference names where the user has read.
+ *
+ * **B9 "Send"** gave the showing its one launch extra ([open]'s `sendEnabled` →
+ * `EXTRA_BIBLE_SEND_ENABLED`, a boolean — the calendar's shape, still no content on the Intent)
+ * and one more call on the held bind, [takeOutgoingReference]: the reference the reader's Send
+ * parked, read right after the screen returned `RESULT_BIBLE_SEND` and before [finish]. Only
+ * against a reader declaring [ExtensionContract.MIN_API_VERSION_FOR_BIBLE_SEND] ([BibleEntry]'s
+ * gate).
  */
 class BibleClient(context: Context, val ref: ProviderRef) {
 
@@ -40,7 +47,7 @@ class BibleClient(context: Context, val ref: ProviderRef) {
     val isOpen: Boolean get() = held != null
 
     /** Pre-open the store, hold the bind, `begin`, and build the screen Intent — or null (logged). */
-    suspend fun open(): Intent? = open(reference = null)
+    suspend fun open(): Intent? = open(reference = null, sendEnabled = false)
 
     /**
      * The showing, opened on a passage (arc 38 / R3): `beginAt(store, reference)` in place of
@@ -52,7 +59,7 @@ class BibleClient(context: Context, val ref: ProviderRef) {
      * [ExtensionContract.MIN_API_VERSION_FOR_BIBLE_REFERENCE] or above ([BibleEntry] is the one
      * that does). The reference itself is never logged.
      */
-    suspend fun open(reference: String?): Intent? {
+    suspend fun open(reference: String?, sendEnabled: Boolean = false): Intent? {
         if (held != null) { Slog.d(TAG) { "open: already open" }; return null }
         val t0 = System.currentTimeMillis()
         val store = ExtensionStores.lease(appContext, ref.packageName, TAG) ?: return null
@@ -79,8 +86,33 @@ class BibleClient(context: Context, val ref: ProviderRef) {
             finish()
             return null
         }
-        Slog.d(TAG) { "open: ready in ${System.currentTimeMillis() - t0} ms (passage=${reference != null})" }
-        return Intent(ExtensionContract.ACTION_BIBLE_SCREEN).setPackage(ref.packageName)
+        Slog.d(TAG) { "open: ready in ${System.currentTimeMillis() - t0} ms (passage=${reference != null}, send=$sendEnabled)" }
+        return Intent(ExtensionContract.ACTION_BIBLE_SCREEN).setPackage(ref.packageName).apply {
+            // B9: the one boolean the Bible Intent carries, and only when a notebook is behind the
+            // reader — the library's door never sets it, so the reader shows no Send there.
+            if (sendEnabled) putExtra(ExtensionContract.EXTRA_BIBLE_SEND_ENABLED, true)
+        }
+    }
+
+    /**
+     * B9 — the reference the reader's Send parked, over the bind this showing still holds: the
+     * calendar's `drainOutgoing` on a reference instead of ink. Null when nothing was parked, when
+     * the bind is gone, or when the call failed (logged) — every one of which means nothing lands.
+     * Once-only on the reader's side. The reference is never logged.
+     */
+    suspend fun takeOutgoingReference(): ResolvedReference? {
+        val binding = held ?: return null
+        if (binding.isDead) return null
+        return try {
+            val taken = binding.call(CALL_TIMEOUT_MS) { it.takeOutgoingReference() }
+            Slog.d(TAG) { "takeOutgoingReference: ${if (taken == null) "nothing" else "a reference"}" }
+            taken
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: ExtensionCallException) {
+            Slog.d(TAG) { "takeOutgoingReference failed: ${e.message}" }
+            null
+        }
     }
 
     /** `end()` (best effort, ≤ [CALL_TIMEOUT_MS]), then unbind + revoke in `finally`. Idempotent. */

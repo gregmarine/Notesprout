@@ -877,6 +877,10 @@ class NotebookActivity : AppCompatActivity() {
             onAvailabilityChanged = { supported ->
                 if (::insertBar.isInitialized) insertBar.offer(InsertBar.Kind.BIBLE, supported)
             },
+            // B9: this door has a notebook behind it, so the reader gets its Send to notebook
+            // button; what it parks lands here as a Bible reference object, selected.
+            sendEnabled = true,
+            onSent = { reference -> bibleRefFlow.insertResolved(reference) },
         )
         binding.btnBible.setOnClickListener {
             if (!opened || closing) return@setOnClickListener

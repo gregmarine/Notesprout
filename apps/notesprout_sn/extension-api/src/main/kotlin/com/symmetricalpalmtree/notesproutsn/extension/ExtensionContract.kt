@@ -105,8 +105,13 @@ object ExtensionContract {
      * [MIN_API_VERSION_FOR_BIBLE_REFERENCE]. The calendar's `render` shape: `MIN_API_VERSIONS` is
      * untouched, a reader declaring 11 still binds for the plain door, and only `:ext-bible`
      * redeclares. Not a tenth point.
+     *
+     * **13 since B9 "Send" (2026-09-13)** — one compatible tail appended to `IBible` after
+     * `beginAt` (`takeOutgoingReference()`: the reader's Send to notebook — the calendar's
+     * `takeOutgoing` shape on a reference instead of ink), behind the METHOD floor
+     * [MIN_API_VERSION_FOR_BIBLE_SEND]. `MIN_API_VERSIONS` untouched; only `:ext-bible` redeclares.
      */
-    const val API_VERSION: Int = 12
+    const val API_VERSION: Int = 13
 
     /**
      * The floor for a service on a **store-taking** point (arc 22 / X1): the host accepts such a
@@ -136,6 +141,14 @@ object ExtensionContract {
      * Not an action floor: [MIN_API_VERSION_FOR_BIBLE] stays 11 and the plain door still binds.
      */
     const val MIN_API_VERSION_FOR_BIBLE_REFERENCE: Int = 12
+
+    /**
+     * The **method** floor for `IBible.takeOutgoingReference` (B9 "Send", 2026-09-13): the host
+     * puts [EXTRA_BIBLE_SEND_ENABLED] on the reader's Intent only against a reader declaring at
+     * least this — an older reader would show no Send button anyway, and the host would land
+     * transaction code 5 on nothing. Not an action floor: [MIN_API_VERSION_FOR_BIBLE] stays 11.
+     */
+    const val MIN_API_VERSION_FOR_BIBLE_SEND: Int = 13
 
     /**
      * The lowest API version the host accepts for a service on [action] — **per action** since arc
@@ -217,6 +230,19 @@ object ExtensionContract {
      *  `startActivity` leaves `callingPackage` null and the screen refuses it. */
     const val ACTION_BIBLE_SCREEN: String =
         "com.symmetricalpalmtree.notesproutsn.extension.BIBLE_SCREEN"
+
+    /**
+     * Boolean launch extra on the Bible screen (B9 "Send", 2026-09-13) — true when the reader is
+     * opened from a **notebook** (it shows its Send to notebook button); absent from the library's
+     * door. The calendar's `EXTRA_CALENDAR_SEND_ENABLED` shape: a boolean, no content, no id, no
+     * path — the reference itself comes back over the held bind (`takeOutgoingReference`), never
+     * on an Intent. Set only against a reader declaring [MIN_API_VERSION_FOR_BIBLE_SEND].
+     */
+    const val EXTRA_BIBLE_SEND_ENABLED: String = "bibleSendEnabled"
+
+    /** Activity result code: the reader parked a reference for `takeOutgoingReference`
+     *  (= `Activity.RESULT_FIRST_USER`). */
+    const val RESULT_BIBLE_SEND: Int = 1
 
     /** `<meta-data>` name (on the `<service>`) carrying the extension's API version. */
     const val META_API_VERSION: String =

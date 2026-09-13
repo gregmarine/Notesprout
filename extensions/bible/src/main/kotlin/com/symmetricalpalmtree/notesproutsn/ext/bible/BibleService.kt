@@ -27,6 +27,10 @@ import com.symmetricalpalmtree.notesproutsn.extension.ResolvedReference
  * **Arc 38 / R1** appended two compatible tails behind the method floor 12: [resolve] (bind-per-
  * call, no store — the notebook's reference dialog asks it whether the words are a reference this
  * Bible knows) and [beginAt] (the showing bracket opened on a passage). `REFERENCE_PLAN.md`.
+ *
+ * **B9 "Send"** appended a third behind the method floor 13: [takeOutgoingReference] — the
+ * reference the screen's Send to notebook parked in [BibleSession], read once by the host on the
+ * held bind after the screen returned `RESULT_BIBLE_SEND`.
  */
 class BibleService : Service() {
 
@@ -89,6 +93,14 @@ class BibleService : Service() {
                 BibleSession.reference = reference
             }
             Slog.d(TAG) { "beginAt" }
+        }
+
+        /** B9 — once-only: the parked reference or null; the wire is never logged. */
+        override fun takeOutgoingReference(): ResolvedReference? {
+            HostCallerCheck.enforce(this@BibleService, BuildConfig.HOST_PACKAGE)
+            val taken = BibleSession.takeOutgoing()
+            Slog.d(TAG) { "takeOutgoingReference: ${if (taken == null) "nothing" else "a reference"}" }
+            return taken
         }
     }
 
