@@ -163,8 +163,10 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   `<ARC>_PLAN.md` files there are history (plan + ledger — read for *why*, never resumed). **No
   NINTH extension point and no new arc without a user decision; no re-raising waived review
   findings.**
-- `bible` — active feature branch for `extensions/bible` (**NSE · Bible**), Notesprout SN's ninth
-  extension point (arc 37), from `main` 2026-09-13.
+- `bible` — feature branch for `extensions/bible` (**NSE · Bible**), Notesprout SN's ninth
+  extension point (arc 37), from `main` 2026-09-13; **the initial arc is COMPLETE + FROZEN
+  2026-09-13** (B0–B5, the user's Nomad walk) and the branch stays open for the next Bible
+  decision — not yet merged to `main`.
 - `germination` — previous post-MVP feature branch (reference, not active)
 - The former feature branches (`seed`, `sprout`, `sapling`, `supernote`, `paper`) are merged and
   **deleted** (local + remote) — "on sprout/sapling/supernote/paper" means `main`; history lives under

@@ -14,9 +14,12 @@ The Manta identifies as a Nomad — target by serial.
 
 **Status: arcs 1–36 are all COMPLETE + FROZEN (2026-09-11) and `PARITY_BACKLOG.md` is closed.**
 The build effort ("ratta paper", 2026-08-20 → 2026-09-11) is over; what remains is maintenance,
-plus **arc 37 "Bible" — a fresh user decision granted 2026-09-13, in progress on branch `bible`**
-(plan + ledger: `extensions/bible/BIBLE_PLAN.md`). No TENTH extension point beyond it, no other
-new arc, and no re-raising of any waived / declined review finding without a fresh user decision.
+plus **arc 37 "Bible" — a fresh user decision granted 2026-09-13, COMPLETE + FROZEN 2026-09-13
+on branch `bible`** (plan + ledger: `extensions/bible/BIBLE_PLAN.md`; reference
+`extensions/bible/docs/bible.md`; no code review — the user's call; frozen on the user's own Nomad
+walk). No TENTH extension point, no next Bible phase (search, bookmarks, cross references,
+footnotes, the "Psalm 23" title) and no other new arc without a fresh user decision; no re-raising
+of any waived / declined review finding.
 
 **Maintenance protocol (replaces the per-arc phase protocol):**
 

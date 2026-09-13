@@ -12,7 +12,8 @@ code sits at the monorepo root, `extensions/bible/`, pulled into SN's build by
 `settings.gradle.kts`'s `projectDir`, on branch `bible`. `extensions/bible/BIBLE_PLAN.md` is both
 the plan and the ledger: the fourteen locked decisions, the architecture sketch, and the phase-by-
 phase record (B0–B4) that every number and trap below comes from. **There was no code review at
-the freeze** — the user's call; the freeze is a Nomad walk instead (B4). The seam itself —
+the freeze** — the user's call; the freeze is a Nomad walk instead (B4), and **the arc was frozen
+2026-09-13 on the user's own hand walk** ("it all passes and looks great for this phase"). The seam itself —
 `IBible`, the held bind, the store, the boundary-audit rows — is documented once, in
 [`apps/notesprout_sn/docs/extensions.md`](../../../apps/notesprout_sn/docs/extensions.md) § "The
 Bible point (arc 37)"; this doc is the feature side and links there rather than repeating it.
@@ -569,7 +570,7 @@ source:
   zone was not built.
 - **A "Psalm 23" title special case** — `book.name` is "Psalms" (plural, matching the source), so the
   title and running head currently read "Psalms 23" where print convention would say "Psalm 23."
-  Left open at the B4 freeze as a one-word special case the user may or may not want.
+  Left open at the freeze as a one-word special case the user may or may not want.
 
 ---
 

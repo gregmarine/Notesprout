@@ -328,3 +328,12 @@ wanted.
 - **Freeze condition:** the user's hand walk on the Nomad — swipe feel, pen over the page — and the
   "Psalm 23" title decision. Until then the arc is complete but not frozen.
 
+### FREEZE ✅ 2026-09-13
+
+The user walked the Nomad by hand after B5 (swipe feel, the pen over the page, the
+force-stop-both-then-relaunch replay landing back on the Bible at Psalm 131): **"it all passes and
+looks great for this phase."** Arc 37 "Bible" — B0–B5 — is COMPLETE + FROZEN, no code review (the
+user's call). The "Psalm 23" title is left as it is (`book.name` = "Psalms") until asked for.
+Everything in `docs/bible.md` § "Not in this arc" needs a fresh user decision; this file's phases
+are history from here.
+
