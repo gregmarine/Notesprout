@@ -60,13 +60,22 @@ import kotlinx.coroutines.withContext
  * **Nothing about what is read is ever logged** — book and chapter numbers, page counts and
  * durations only ("where, not what"), on this side of the seam as on the other.
  *
- * B3's addition, reshaped by B6: **the index** (decision 11, amended) — a side panel in the
- * notebook Contents' shape ([IndexPanel]) over the source's own book table, which the loader
- * already read for the cursor. Three doors: `btnIndex`, the title, and — B6 — a **one-finger
- * swipe down over the page**, the gesture the notebook teaches for its Contents, on the same
- * `ListSwipe` that turns the page (the two axes are exclusive by dominance). Picking a chapter
- * opens it at its first page, down the same path a chapter edge takes. A tap before the first
- * chapter has shown is a silent no-op: there is nothing to index yet.
+ * B3's addition, reshaped by B6 and named by B7: **the Contents** (decision 11, amended; "Index"
+ * until B7) — a side panel in the notebook Contents' shape ([ContentsPanel]) over the source's
+ * own book table, which the loader already read for the cursor. Three doors: `btnContents`, the
+ * title, and — B6 — a **one-finger swipe down over the page**, the gesture the notebook teaches
+ * for its Contents, on the same `ListSwipe` that turns the page (the two axes are exclusive by
+ * dominance). Picking a chapter opens it at its first page, down the same path a chapter edge
+ * takes. A tap before the first chapter has shown is a silent no-op: there is nothing to list yet.
+ *
+ * B7's addition: **the Recents** — the notebook's Recents panel in a second subject, mirrored to
+ * the right ([RecentsPanel]): the chapters the user has **picked** (from the Contents, or from
+ * this panel — never a page turn or a chapter the swipe flowed into), newest first, in the host's
+ * `recent` table. Two doors, the notebook's own: `btnRecents` (the clock) at the bar's right
+ * edge, and a **two-finger swipe down over the page** — `ListSwipe.onTwoFingerSwipeDown`, the
+ * detector the flip and the Contents swipe already ride. Neither door is gated: "No recent
+ * chapters" is a real answer the panel gives, never a reason to hide a control. A tap opens the
+ * chapter at its first page and re-stamps it at the front of the list.
  */
 class BibleActivity : AppCompatActivity() {
 
@@ -86,8 +95,12 @@ class BibleActivity : AppCompatActivity() {
     /** The one-finger flip — and swipe-down — over the reading band. Built in [onCreate]. */
     private var swipe: ListSwipe? = null
 
-    /** The index while it is up; null otherwise. One panel at a time, dismissed on the way out. */
-    private var indexPanel: IndexPanel? = null
+    /** The Contents while it is up; null otherwise. One panel at a time, dismissed on the way out. */
+    private var contentsPanel: ContentsPanel? = null
+
+    /** The Recents while it is up; null otherwise. [gatheringRecents] covers the read before it. */
+    private var recentsPanel: RecentsPanel? = null
+    private var gatheringRecents = false
 
     /** Position writes: the one in flight, and the latest one that arrived while it was. */
     private var writing = false
@@ -131,7 +144,8 @@ class BibleActivity : AppCompatActivity() {
             region = { readerView },
             onFlipNext = { turnTo(pageIndex + 1) },
             onFlipPrevious = { turnTo(pageIndex - 1) },
-            onSwipeDown = { openIndex() },
+            onSwipeDown = { openContents() },
+            onTwoFingerSwipeDown = { openRecents() },
         )
 
         binding.title.setText(R.string.bible_title)
@@ -139,15 +153,19 @@ class BibleActivity : AppCompatActivity() {
         binding.btnBack.setOnLongClickListener { hint(R.string.cd_bible_back) }
         // Two doors to the same dialog: the button, and the title that names where you are —
         // "Genesis 1" is the obvious thing to tap when you want to be somewhere else.
-        binding.btnIndex.setOnClickListener { openIndex() }
-        binding.btnIndex.setOnLongClickListener { hint(R.string.cd_bible_index) }
-        binding.title.setOnClickListener { openIndex() }
-        binding.title.setOnLongClickListener { hint(R.string.cd_bible_index) }
+        binding.btnContents.setOnClickListener { openContents() }
+        binding.btnContents.setOnLongClickListener { hint(R.string.cd_bible_contents) }
+        binding.title.setOnClickListener { openContents() }
+        binding.title.setOnLongClickListener { hint(R.string.cd_bible_contents) }
+        binding.btnRecents.setOnClickListener { openRecents() }
+        binding.btnRecents.setOnLongClickListener { hint(R.string.cd_bible_recents) }
         binding.btnPrevPage.setOnClickListener { turnTo(pageIndex - 1) }
         binding.btnPrevPage.setOnLongClickListener { hint(R.string.cd_bible_prev_page) }
         binding.btnNextPage.setOnClickListener { turnTo(pageIndex + 1) }
         binding.btnNextPage.setOnLongClickListener { hint(R.string.cd_bible_next_page) }
-        for (button in listOf(binding.btnBack, binding.btnIndex, binding.btnPrevPage, binding.btnNextPage)) {
+        for (button in listOf(
+            binding.btnBack, binding.btnContents, binding.btnRecents, binding.btnPrevPage, binding.btnNextPage,
+        )) {
             TooltipCompat.setTooltipText(button, button.contentDescription)
         }
 
@@ -164,7 +182,8 @@ class BibleActivity : AppCompatActivity() {
         if (!admitted) return
         // A Dialog outliving its finishing Activity is a window leak (a config-change recreate,
         // "don't keep activities" — destroys that bypass leave()).
-        indexPanel?.dismiss()
+        contentsPanel?.dismiss()
+        recentsPanel?.dismiss()
         binding.root.removeCallbacks(showLoading)
         loader.close()
     }
@@ -274,26 +293,78 @@ class BibleActivity : AppCompatActivity() {
         remember(pages, index)
     }
 
-    // --- the index ----------------------------------------------------------
+    // --- the Contents -------------------------------------------------------
 
     /**
-     * The index panel (arc 37 / B3, reshaped by B6). The books come from the loader's one read of
-     * the source's `book` table; before the first chapter has shown there are none, and the
+     * The Contents panel (arc 37 / B3, reshaped by B6). The books come from the loader's one read
+     * of the source's `book` table; before the first chapter has shown there are none, and the
      * call does **nothing** — a panel that said "not ready" would be noise for the half-second it
      * is true. While one is already up a second call is a no-op too (the swipe and the button
      * can land together). A picked chapter opens at its first page; the position write follows
      * from the show, as it does for every other turn.
      */
-    private fun openIndex() {
-        if (indexPanel != null) return
+    private fun openContents() {
+        if (contentsPanel != null) return
         val books = loader.booksNow()
         val at = chapter?.ref ?: return
         if (books.isEmpty()) return
-        indexPanel = IndexPanel(
+        contentsPanel = ContentsPanel(
             this, books, at,
-            onDismissed = { indexPanel = null },
-            onPicked = { picked -> openChapter(picked) { 0 } },
+            onDismissed = { contentsPanel = null },
+            onPicked = { picked -> goTo(picked) },
         ).also { it.show() }
+    }
+
+    /**
+     * A **pick** — a chapter chosen by name from the Contents or the Recents, as opposed to a
+     * turn: it opens at its first page and is recorded as a recent. Dropped whole while a load is
+     * running (the same latch a turn hits), so a pick that did not open is never remembered.
+     */
+    private fun goTo(ref: ChapterRef) {
+        if (loading) return
+        recordRecent(ref)
+        openChapter(ref) { 0 }
+    }
+
+    // --- the Recents --------------------------------------------------------
+
+    /**
+     * The Recents panel (arc 37 / B7). The rows are read from the store on IO first — a store
+     * that will not answer, or none lent, is an empty list, never a dialog — then selected by
+     * [RecentChapters.select] (stored order, the chapter being read dropped) and shown. One
+     * showing at a time, and one gather at a time: the button and the swipe can land together.
+     */
+    private fun openRecents() {
+        if (recentsPanel != null || gatheringRecents) return
+        gatheringRecents = true
+        lifecycleScope.launch {
+            val began = SystemClock.elapsedRealtime()
+            val store = bibleStore
+            val stored = withContext(Dispatchers.IO) {
+                runCatching { store?.readRecents(RecentChapters.KEEP) }.getOrNull().orEmpty()
+            }
+            gatheringRecents = false
+            if (recentsPanel != null || isFinishing || isDestroyed) return@launch
+            val rows = RecentChapters.select(stored, chapter?.ref)
+            Slog.d(TAG) { "recents: ${rows.size} of ${stored.size} in ${SystemClock.elapsedRealtime() - began} ms" }
+            recentsPanel = RecentsPanel(
+                this@BibleActivity, rows,
+                onDismissed = { recentsPanel = null },
+                onPicked = { picked -> goTo(picked) },
+            ).also { it.show() }
+        }
+    }
+
+    /** Stamps [ref] at the front of the recents, fire-and-forget on IO; the table is trimmed to
+     *  [RecentChapters.KEEP] in the same batch. A failure is a log line, never a dialog — and the
+     *  reference itself is never logged. */
+    private fun recordRecent(ref: ChapterRef) {
+        val store = bibleStore ?: return
+        val at = System.currentTimeMillis()
+        lifecycleScope.launch(Dispatchers.IO) {
+            runCatching { store.writeRecent(ref, at, RecentChapters.KEEP) }
+                .onFailure { Slog.d(TAG) { "recent not saved" } }
+        }
     }
 
     // --- where the user was -------------------------------------------------

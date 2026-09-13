@@ -64,8 +64,8 @@ extensions/bible/                       (:ext-bible — application module, own 
     reader/ReaderView.kt   draws one ReaderPage (title/number on page 1 + body layout) at 44dp/10dp pads
     reader/ChapterCursor.kt   pure: next/prev (book, chapter) over the canon's chapter counts
     BibleActivity.kt     the tier-2 screen (no paper): HostCallerCheck first, TopGuard, top bar, ReaderView, pager row, ListSwipe over the ReaderView
-    IndexDialog.kt + IndexModel.kt   Book grid ↔ Chapter grid bordered dialog (DayPickerDialog shape; model pure + tested)
-  src/test/kotlin/...   VerseKey/Canon/ChapterCursor/IndexModel/ChapterPaginator(trim+fit with a fake measurer)/BibleSql tests
+    IndexDialog.kt + ContentsModel.kt   Book grid ↔ Chapter grid bordered dialog (DayPickerDialog shape; model pure + tested)
+  src/test/kotlin/...   VerseKey/Canon/ChapterCursor/ContentsModel/ChapterPaginator(trim+fit with a fake measurer)/BibleSql tests
 tools/bible/build_bible_db.py           copy of Biblesprout's builder with a `--slim` flag (skips word layer + FTS); README with the two source URLs
 ```
 
@@ -102,7 +102,7 @@ Host (`apps/notesprout_sn`) — verified against the code:
 
 **B2 — Swipe + chapter flow + position**: `ListSwipe`, `ChapterCursor`, cross-chapter/book flow, store-backed position (write on every turn, read on open, verse-anchored reopen), "Book Chapter" title.
 
-**B3 — Index**: `IndexModel` (pure, tested) + `IndexDialog` (Book grid ↔ Chapter grid, arrows page books, title flips levels, current filled); title tap + Index button open it.
+**B3 — Index**: `ContentsModel` (pure, tested) + `IndexDialog` (Book grid ↔ Chapter grid, arrows page books, title flips levels, current filled); title tap + Index button open it.
 
 **B4 — Nomad walk + pruning**: hand walk on the Nomad (swipe cannot be adb-driven reliably — user checklist for swipe feel, pen-over-page no-op, chapter flow both directions, Rev 22 / Gen 1 no-ops, reopen position, process death, launch restore, poetry/heading look in Psalms 23, Genesis 1, Matthew 5, John 1).
 
@@ -173,7 +173,7 @@ Host (`apps/notesprout_sn`) — verified against the code:
   `blocksForChapter`/`footnotesForChapter` → `atomsForBlocks` → `paginate` → every page laid out,
   **all on `Dispatchers.IO`**, Main only draws. Title "Genesis 1"
   (`bible_chapter_title`), indicator "n / N", pager steps within the chapter and **no-ops** at the
-  edges (never disabled). `btnIndex` keeps its tooltip and does nothing (B3). A failed open is
+  edges (never disabled). `btnContents` keeps its tooltip and does nothing (B3). A failed open is
   `Dialogs.problem`, never a blank band; "Loading…" appears only past 300 ms (no spinner).
   Logs carry book/chapter, page counts and durations — never text.
 - The `.bible` file checks out against the ported SQL: all 16 block kinds it contains are covered
@@ -241,7 +241,7 @@ Host (`apps/notesprout_sn`) — verified against the code:
 
 ### B3 — The index ✅ 2026-09-13
 
-- **`IndexModel.kt`** (pure): the arithmetic of two grids and nothing else. Books **3 × 6** (a
+- **`ContentsModel.kt`** (pure): the arithmetic of two grids and nothing else. Books **3 × 6** (a
   book's *name* has to fit), chapters **6 × 6** (a number wants a square) — `bookPages` /
   `chapterPages` return pages → rows → cells with **every row padded to a full row** (a short last
   row would re-centre itself and read as a different grid), plus `bookPageOf` / `chapterPageOf` /
@@ -249,7 +249,7 @@ Host (`apps/notesprout_sn`) — verified against the code:
   testament label is shown — a break there would leave Malachi's page two-thirds empty for a word
   this reader never says. Nonsense is absorbed rather than thrown: an unknown usfm, a chapter below
   1 and an empty page count all answer page 0.
-- **`IndexDialog.kt` + `res/layout/dialog_index.xml`** — the day picker's shape, subject for
+- **`IndexDialog.kt` + `res/layout/dialog_contents.xml`** — the day picker's shape, subject for
   subject: the same header (prev · a centred title kept off both arrows by a button-width margin ·
   next), the same code-built grid host, the same `Dialogs.style` + `setNegativeButton(cancel)` +
   **window sized to 0.75 of the screen after `show()`**, and the same **no background on the root**
@@ -259,13 +259,13 @@ Host (`apps/notesprout_sn`) — verified against the code:
   **filled black, white bold**; tapping a book opens its **chapters**, titled with the book's name,
   which is also the way back (the day picker's title flip, `cd_bible_index_flip`). The current
   chapter is filled **only in the current book**. Cells are the month cell's recipe —
-  `shape_bordered` / `bg_index_selected` (a copy of `bg_month_selected` into the extension's own
+  `shape_bordered` / `bg_contents_selected` (a copy of `bg_month_selected` into the extension's own
   drawables), `maxLines = 2` + ellipsize end for the long names, gravity centre, weight-1 wide and
   **`@dimen/toolbar_button_size` tall**, never a literal — and a null cell is a spacer that holds
   its column. **The arrows are never disabled**: at either end `clampPage` returns the page it was
   already on and nothing repaints at all (a greyed control is invisible on e-ink; a needless repaint
   on e-ink is a flash).
-- **`BibleActivity`**: `btnIndex` **and the title** both call `openIndex()` — "Genesis 1" is the
+- **`BibleActivity`**: `btnContents` **and the title** both call `openContents()` — "Genesis 1" is the
   obvious thing to tap when you want to be somewhere else — and the title gained the same long-press
   hint the buttons have. The books come from `ChapterLoader.booksNow()`: B2's `source()` already
   read the `book` table for the cursor, so the index costs **no second query** and the dialog never
@@ -274,7 +274,7 @@ Host (`apps/notesprout_sn`) — verified against the code:
   chapter goes down the chapter-edge path (`openChapter(picked) { 0 }`), so the latch, the neighbour
   prefetch and the position write all follow from the show exactly as they do for a turn.
 - Gate: `:ext-bible:assembleDebug` + `:ext-bible:testDebugUnitTest` green from a `--rerun-tasks`
-  build, **46 tests** (B2's 34 + `IndexModelTest` 12 — the canon's 18/18/18/12, every row three
+  build, **46 tests** (B2's 34 + `ContentsModelTest` 12 — the canon's 18/18/18/12, every row three
   slots wide, the padded short row, Malachi and Matthew as neighbours, GEN/PSA/REV's pages, an
   unknown book, Psalms' five chapter pages, the one-chapter book's five spacers, `chapterPageOf`'s
   1/36/37/150 and `clampPage`'s bounds). Zero Kotlin warnings; every touched file byte-scanned clean
@@ -294,7 +294,7 @@ Walked over adb on the Nomad `.dev` build after B3:
   "1 Chronicles" one line each).
 - **Pruning (the one fix)**: the last page of a grid was shorter than the others (2 John's one-row
   chapter grid, the canon's 12-book last page), so the bordered dialog shrank and **re-centred under
-  the finger** — a mis-tap on e-ink. `IndexModel.grid` now pads every page to the full
+  the finger** — a mis-tap on e-ink. `ContentsModel.grid` now pads every page to the full
   `rows × columns` (spacer rows), so the dialog has one height everywhere; two tests re-pinned.
 - **Chapter edges**: Revelation 22 → last page → further swipes are silent no-ops (no chapter load
   logged); Genesis 1 page 1 → a back-swipe is a silent no-op.
@@ -351,16 +351,16 @@ button kept as a second door. Decision 11 amended in place.
   are unchanged by construction) and `ListSwipe` gained optional `onSwipeDown` / `onSwipeUp`
   callbacks judged against the region's height, exclusive with the flip by dominance. 10 tests
   (`SwipeMathVerticalTest`).
-- **Extension**: `IndexDialog` deleted; `IndexModel` rewritten as one flat list of uniform rows
-  (`Book` / `Chapters` of six); `IndexLayout` (the Contents' numbers, copied — `ContentsLayout`
-  lives in `:app`); `IndexPanel` (`ContentsDialog`'s shape: sidebar / full-screen forms, measured
-  pagination, body swipe, pager footer, scrim); `dialog_index.xml` rewritten, `item_index_book.xml`,
-  `shape_index_sidebar` + `bg_index_active_entry` copied in; `BibleActivity` opens it from the
+- **Extension**: `IndexDialog` deleted; `ContentsModel` rewritten as one flat list of uniform rows
+  (`Book` / `Chapters` of six); `ContentsLayout` (the Contents' numbers, copied — `ContentsLayout`
+  lives in `:app`); `ContentsPanel` (`ContentsDialog`'s shape: sidebar / full-screen forms, measured
+  pagination, body swipe, pager footer, scrim); `dialog_contents.xml` rewritten, `item_contents_book.xml`,
+  `shape_contents_sidebar` + `bg_contents_active_entry` copied in; `BibleActivity` opens it from the
   button, the title and the reader's `ListSwipe.onSwipeDown`, one at a time, dismissed in
   `onDestroy`. Judgment calls: the `+`/`−` toggles the chapters and a tap on the book row opens
   chapter 1 (the user's correction of a first cut where the whole row toggled); the page
   number's slot shows the chapter count; a toggle re-anchors the page on the toggled row; no
-  BLOCK_ALL (no paper here). 17 tests (`IndexModelTest` 13, `IndexLayoutTest` 4) — `:ext-bible`
+  BLOCK_ALL (no paper here). 17 tests (`ContentsModelTest` 13, `ContentsLayoutTest` 4) — `:ext-bible`
   52, `:sn-screen` 101, all green.
 - **Nomad walk (adb)**: from Psalm 133, a 1000 px swipe down opened the sidebar form (842 px,
   12 rows/page, 91 items, page 4/8) with Psalms open, 133 filled, the row page holding it; tapping
@@ -368,4 +368,50 @@ button kept as a second door. Decision 11 amended in place.
   Proverbs row expanded it (8 → 9 pages, page held); a horizontal body swipe flipped to 5/9; a scrim
   tap dismissed. **Left to the user's hand**: the swipe-down's feel against the page turn (both
   ride one detector; dominance decides), the pen over the page never opening it.
+
+### B7 — Recents, and "Index" → "Contents" ✅ 2026-09-13 (post-freeze, the user's decision)
+
+The user, after B6: "implement recents in the Bible extension … recent book/chapter based on the
+user's selection from the Index … rename `Index` to `Contents` to match notebook … a paginated
+list like in notebook … on the right … a two-finger swipe down will reveal it … a toolbar button
+with the clock icon … tapping an item will take the user to that location."
+
+- **The rename**: every user-facing "Index" is "Contents" (the button hint, the panel title) and
+  the code followed — `ContentsPanel` / `ContentsModel` / `ContentsLayout`, `dialog_contents.xml`,
+  `item_contents_book.xml`, the `bg_contents_*` / `shape_contents_sidebar` drawables, the
+  `btnContents` / `openContents` names, the `*_contents_*` string ids; docs and the host's
+  `extensions.md` row updated. The top bar now runs the notebook's order:
+  `[Back] [Contents] · title · [Recents]` (the title's margins widened to clear two tablet-tier
+  buttons, symmetric so the centre holds).
+- **Host (`:sn-screen`)**: `ListSwipe` gained an optional `onTwoFingerSwipeDown` — a second finger
+  landing on a one-finger drag that has *not* yet qualified starts a centroid-measured two-finger
+  sequence, judged by `SwipeMath.vertical` at the drop back to one finger (or a third finger's
+  landing), only **down** claimed; the late-arrival commit is unchanged. `commit` now reports
+  whether it fired so the two cannot both. No new pure rule — `SwipeMath` unchanged, 101 tests.
+- **Extension**: `BibleSchema.V2` = V1's step untouched + `recent(usfm, chapter, at, PRIMARY KEY
+  (usfm, chapter))`, `CURRENT` declared on every call; `BibleSql` gained `SELECT_RECENTS` /
+  `UPSERT_RECENT` / `TRIM_RECENTS` (a `DELETE … NOT IN (SELECT …)` — checked against the host's
+  exec gate in the test); `BibleStore.readRecents(limit)` (lenient: an unreadable row is dropped)
+  and `writeRecent(ref, at, keep)` (one two-statement batch: upsert + trim to `KEEP` = 30);
+  `RecentChapters` + `RecentRef` (pure: stored order, the chapter being read dropped, duplicates
+  collapsed, "Psalm 23" labels, 50 % sidebar, measured `itemsPerPage`); `RecentsPanel`
+  (`RecentsDialog`'s shape — right sidebar, left-edge rule, title-then-arrow header, two-line rows,
+  measured pagination, body swipe, "No recent chapters" in the body); `BibleActivity.goTo` is the
+  one recorder (both panels' picks route through it; turns never do; a pick during a load is
+  dropped whole and not recorded), `openRecents` gathers on IO then shows (one showing, one gather
+  at a time), `recordRecent` fire-and-forget, `btnRecents` + the two-finger swipe as the doors,
+  `onDestroy` dismisses it. Judgment calls, stated rather than asked: a recent is a **pick**, never
+  a page turn or a flowed-into chapter; the chapter **being read is dropped** from the list (the
+  notebook's rule); a tap **re-stamps**; the store keeps **30**; no gating on either door.
+- Tests: `BibleSqlTest` 4 → 7, `RecentChaptersTest` 10 — `:ext-bible` **65**, `:sn-screen` 101,
+  all green; `:ext-bible:assembleDebug` green.
+- **Nomad walk (adb, the `.dev` Bible over the `.dev` host)**: the bar read
+  `[Back 8–124] [Contents 124–240] · title 622–782 (centred: 702 = 1404 / 2) · [Recents
+  1280–1396]`; the clock opened the right sidebar (702 px, 12 rows/page) on "No recent chapters"
+  with the v2 schema applied silently; the Contents' title read "Contents"; picking Job (row →
+  chapter 1) then Esther recorded both, and Recents then showed **Job 1** only ("1 of 2" — Esther,
+  being read, dropped) with its stamp; tapping the row opened Job 1 (183 ms) and Recents then
+  showed **Esther 1** only (Job re-stamped to the front, then dropped as current); a scrim tap
+  dismissed. **Left to the user's hand**: the two-finger swipe-down itself (adb has no
+  multi-finger gesture), its feel against the one-finger Contents swipe, a resting palm.
 

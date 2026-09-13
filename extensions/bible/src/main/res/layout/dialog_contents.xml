@@ -1,20 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The index panel (arc 37 / B6) — the notebook Contents' dialog_contents.xml in a second
+<!-- The Contents panel (arc 37 / B6, "Index" until B7) — the notebook Contents' dialog_contents.xml in a second
      subject: one layout for both forms — the panel owner branches in code on window width to pick
      full-screen vs. a left sidebar (panel width set from code; the back arrow shows only in the
      full-screen form). Header + divider · rows (paginated) · divider · pager. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/indexRoot"
+    android:id="@+id/contentsRoot"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@android:color/transparent">
 
     <LinearLayout
-        android:id="@+id/indexPanel"
+        android:id="@+id/contentsPanel"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical"
-        android:background="@drawable/shape_index_sidebar"
+        android:background="@drawable/shape_contents_sidebar"
         android:clickable="true"
         android:focusable="true">
 
@@ -27,17 +27,17 @@
             android:paddingEnd="12dp">
 
             <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnIndexBack"
+                android:id="@+id/btnContentsBack"
                 style="@style/Widget.Notesprout.ToolbarButton"
                 android:src="@drawable/ic_arrow_left"
                 android:contentDescription="@string/cd_bible_back" />
 
             <TextView
-                android:id="@+id/indexTitle"
+                android:id="@+id/contentsTitle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="12dp"
-                android:text="@string/bible_index_title"
+                android:text="@string/bible_contents_title"
                 android:textColor="@color/inkBlack"
                 android:textSize="20sp"
                 android:textStyle="bold" />
@@ -49,13 +49,13 @@
             android:background="@color/inkBlack" />
 
         <FrameLayout
-            android:id="@+id/indexBody"
+            android:id="@+id/contentsBody"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1">
 
             <LinearLayout
-                android:id="@+id/indexRows"
+                android:id="@+id/contentsRows"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:orientation="vertical"
@@ -70,7 +70,7 @@
             android:background="@color/inkBlack" />
 
         <LinearLayout
-            android:id="@+id/indexPager"
+            android:id="@+id/contentsPager"
             android:layout_width="match_parent"
             android:layout_height="@dimen/toolbar_bar_thickness"
             android:orientation="horizontal"
@@ -80,19 +80,19 @@
             android:visibility="invisible">
 
             <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnIndexFirst"
+                android:id="@+id/btnContentsFirst"
                 style="@style/Widget.Notesprout.ToolbarButton"
                 android:src="@drawable/ic_page_first"
-                android:contentDescription="@string/cd_bible_index_first" />
+                android:contentDescription="@string/cd_bible_contents_first" />
 
             <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnIndexPrev"
+                android:id="@+id/btnContentsPrev"
                 style="@style/Widget.Notesprout.ToolbarButton"
                 android:src="@drawable/ic_page_prev"
-                android:contentDescription="@string/cd_bible_index_prev" />
+                android:contentDescription="@string/cd_bible_contents_prev" />
 
             <TextView
-                android:id="@+id/indexPageLabel"
+                android:id="@+id/contentsPageLabel"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:minWidth="56dp"
@@ -101,16 +101,16 @@
                 android:textColor="@color/inkBlack" />
 
             <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnIndexNext"
+                android:id="@+id/btnContentsNext"
                 style="@style/Widget.Notesprout.ToolbarButton"
                 android:src="@drawable/ic_page_next"
-                android:contentDescription="@string/cd_bible_index_next" />
+                android:contentDescription="@string/cd_bible_contents_next" />
 
             <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnIndexLast"
+                android:id="@+id/btnContentsLast"
                 style="@style/Widget.Notesprout.ToolbarButton"
                 android:src="@drawable/ic_page_last"
-                android:contentDescription="@string/cd_bible_index_last" />
+                android:contentDescription="@string/cd_bible_contents_last" />
         </LinearLayout>
     </LinearLayout>
 </FrameLayout>

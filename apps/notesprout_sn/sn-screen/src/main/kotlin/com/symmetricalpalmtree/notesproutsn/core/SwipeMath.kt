@@ -30,7 +30,7 @@ object SwipeMath {
     /** Rightward travel: back — the previous page. */
     const val BACK = -1
 
-    /** Downward travel: a swipe down — the Contents, the Recents, the Bible's index. */
+    /** Downward travel: a swipe down — the Contents, the Recents, the Bible's Contents and Recents. */
     const val DOWN = 1
 
     /** Upward travel: a swipe up — the notebook's trail walk-back. */
@@ -63,7 +63,7 @@ object SwipeMath {
      * dominance tests are mutually exclusive: at most one of [flip] and this fires for a drag.
      *
      * Written once here for the notebook's `PageGestures` (the Contents swipe-down and the trail
-     * swipe-up) and for [ListSwipe]'s optional vertical callbacks (the Bible's index panel).
+     * swipe-up) and for [ListSwipe]'s optional vertical callbacks (the Bible's Contents and Recents panels).
      */
     fun vertical(dx: Float, dy: Float, vy: Float, height: Float, minVelocity: Float): Int {
         if (height <= 0f) return NONE

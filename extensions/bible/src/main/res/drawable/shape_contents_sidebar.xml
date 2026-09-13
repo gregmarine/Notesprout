@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Index sidebar panel (sidebar form, wide windows): the host's shape_contents_sidebar in the
+<!-- Contents sidebar panel (sidebar form, wide windows): the host's shape_contents_sidebar in the
      extension's own copy — paperWhite with a 2dp inkBlack border on the right edge only (the other
      three edges are pushed out of bounds; the inset is wider than the stroke). -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">

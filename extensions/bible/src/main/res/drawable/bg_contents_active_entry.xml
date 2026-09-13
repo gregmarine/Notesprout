@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Index: the row of the book being read — a 5dp inkBlack bar at the row's right edge (the
+<!-- Contents: the row of the book being read — a 5dp inkBlack bar at the row's right edge (the
      host's bg_contents_active_entry, copied). -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item

@@ -16,7 +16,7 @@ package com.symmetricalpalmtree.notesproutsn.ext.bible
  * in-memory state, handed in as [expanded]; this object only answers what the list looks like
  * and where a given book or chapter falls in it.
  */
-object IndexModel {
+object ContentsModel {
 
     /** The chapters grid: six numbers to a row — the width the B3 grid settled on. */
     const val CHAPTER_COLUMNS = 6

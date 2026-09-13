@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Index book row (arc 37 / B6): the Contents' item_contents_entry.xml with the page number's
+<!-- Contents book row (arc 37 / B6, "Index" until B7): the Contents' item_contents_entry.xml with the page number's
      slot holding the book's chapter count — [+/− toggle] [count 52dp] [1dp divider] [name],
-     min height 68dp, 1dp separator below. The book being read takes bg_index_active_entry
+     min height 68dp, 1dp separator below. The book being read takes bg_contents_active_entry
      (5dp bar, right edge). The toggle shows/hides the chapters; a tap on the row itself opens
      the book at chapter 1 (the Contents' split). -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/indexEntryRoot"
+    android:id="@+id/contentsEntryRoot"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical">

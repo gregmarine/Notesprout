@@ -13,7 +13,7 @@ import kotlin.math.roundToInt
  * the sidebar: Nomad 749 dp / Manta 1024 dp at density 1.875). Rows — a book's, and a row of its
  * chapter grid alike — are one uniform height, so rows-per-page is a single division.
  */
-object IndexLayout {
+object ContentsLayout {
 
     /** Below this window width the panel fills the screen (the Contents' rule). */
     const val SIDEBAR_MIN_DP = 480
@@ -21,7 +21,7 @@ object IndexLayout {
     /** The sidebar's share of the window width. */
     const val SIDEBAR_WIDTH_FRACTION = 0.60f
 
-    /** Row height + separator (dp) — `item_index_book.xml`'s minHeight and its 1 dp line; a
+    /** Row height + separator (dp) — `item_contents_book.xml`'s minHeight and its 1 dp line; a
      *  chapter row is built to the same total so the list stays uniform. */
     const val ROW_HEIGHT_DP = 68f
     const val ROW_SEPARATOR_DP = 1f

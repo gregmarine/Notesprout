@@ -1,9 +1,10 @@
 # Bible (arc 37)
 
-**NSE · Bible** is a read-only scripture reader inside Notesprout SN: a book/chapter index, a
-paginated print-look page, and single-finger swipe that flows across chapter and book boundaries.
-No search, no bookmarks beyond the one remembered position, no cross-reference taps, no footnote
-popups. Berean Standard Bible only.
+**NSE · Bible** is a read-only scripture reader inside Notesprout SN: a book/chapter **Contents**
+panel, a paginated print-look page, single-finger swipe that flows across chapter and book
+boundaries, and — B7 — a **Recents** panel of the chapters picked by name. No search, no bookmarks
+beyond the one remembered position and that history, no cross-reference taps, no footnote popups.
+Berean Standard Bible only.
 
 This is the **eighth fresh user decision** on the SN extension seam (granted 2026-09-13), landing
 SN's **ninth** extension point (`ACTION_BIBLE` / `ACTION_BIBLE_SCREEN`) and its **fifteenth**
@@ -48,14 +49,17 @@ The user's, locked 2026-09-13 (`BIBLE_PLAN.md`):
    lines (`r`) small italic (plain, not tappable), footnote callers as a superscript `*` (also not
    tappable). Red letters are stored in the source but **not rendered**.
 9. **Reader chrome**: top bar (Back · "Book Chapter" title, tap = index · Index button) + bottom
-   pager bar `[‹] [n / N] [›]`; the arrows also turn pages.
+   pager bar `[‹] [n / N] [›]`; the arrows also turn pages. **Amended by B7 (2026-09-13, the
+   user's call): the bar runs the notebook's order — `[Back] [Contents] · title · [Recents]` —
+   "Index" is now "Contents" everywhere the user reads it, and the clock is the Recents door.**
 10. **Swipe past a chapter edge flows** into the next/previous chapter, across books; Genesis 1
     page 1 and Revelation 22's last page are silent no-ops.
 11. **Index = a bordered dialog, Book grid ↔ Chapter grid** — the day picker's shape — current
     book/chapter filled. **Amended post-freeze (B6, 2026-09-13, the user's call): the index is a
     paginated side panel in the notebook Contents' shape** — every book a root row, an open book
     followed by its chapters as a six-wide grid, opened by the Index button, the title, or a
-    **one-finger swipe down** on the page (§ The index).
+    **one-finger swipe down** on the page (§ The Contents). **Renamed "Contents" by B7** (the
+    notebook's word; the code followed — `ContentsPanel` / `ContentsModel` / `ContentsLayout`).
 12. **Text size is fixed** at 30sp × 1.5 line height (Biblesprout's numbers); no size preference
     this arc.
 13. **The Bible joins the cold-launch restore stack** as `Surface.BIBLE` — unlike the tag manager,
@@ -195,7 +199,7 @@ not user data, and read-only means nothing here can ever write to it. Three meth
 (call off Main):
 
 - `books()` — the whole `book` table in ordinal order, into `BookRow`s. Read once by
-  `ChapterLoader` and handed to both the chapter cursor and the index dialog, so neither touches the
+  `ChapterLoader` and handed to both the chapter cursor and the Contents panel, so neither touches the
   database a second time.
 - `blocksForChapter(usfm, chapter)` — a chapter's `block` rows in reading order, each carrying its
   own `verse_marker` spans (`RenderBlock` + `VerseMark`), joined in Kotlin rather than SQL so the
@@ -345,9 +349,11 @@ process out of sight, because `onDestroy` ran straight into `lateinit` teardown 
 were never built. `admitted` is set only after the check passes, and `onDestroy` returns immediately
 when it is false — the root `IndexGuard.bounced` rule, restated in the extension's own shape.
 
-**Chrome**: a top bar (Back · a centred title that is also a tap target for the index · Index
-button, `FrameLayout`-centred on the *screen*, not weight-centred between its neighbours, so it
-never drifts when one side's content changes width) and a bottom pager bar (`[‹] n / N [›]`). The
+**Chrome**: a top bar — `[Back] [Contents]` at the start, a centred title that is also a tap target
+for the Contents, `[Recents]` (the clock) at the end; the notebook's own order since B7. The title
+is `FrameLayout`-centred on the *screen*, not weight-centred between its neighbours, so it never
+drifts when one side's content changes width; its side margins are symmetric and clear two
+tablet-tier buttons (2 × 62 dp) — and a bottom pager bar (`[‹] n / N [›]`). The
 first non-pager control on either the library's or the notebook's bottom bar is the Bible button
 itself — that lives on the **host** side, not here (see The doors, `extensions.md`).
 
@@ -388,15 +394,16 @@ already happened on every turn).
 
 ---
 
-## The index
+## The Contents
 
-Reshaped post-freeze by **B6** (2026-09-13, the user's decision): B3's bordered two-grid dialog is
-gone, and the index is **the notebook Contents' side panel, subject for subject** — the same
+Reshaped post-freeze by **B6** (2026-09-13, the user's decision) and **named by B7** ("Index"
+until then — the notebook's word won, in the strings and in the class names alike): B3's bordered
+two-grid dialog is gone, and the Contents is **the notebook Contents' side panel, subject for subject** — the same
 paginated rows, the same sidebar/full-screen forms, the same pager footer and body swipe, the same
 swipe-down door — with one deliberate difference: **a book's second level is a grid of chapter
 numbers, not rows** (the B3 grid kept; a number wants a square, not a line of its own).
 
-**`IndexModel`** (pure, no views, JVM-tested) answers what the list looks like: **one flat list of
+**`ContentsModel`** (pure, no views, JVM-tested) answers what the list looks like: **one flat list of
 uniform-height rows** — every book a `Book` row in canon order, an *expanded* book followed by its
 `Chapters` rows of exactly [`CHAPTER_COLUMNS`] = 6 slots, the last row padded with `null`s so a
 column never collapses (2 John: one cell, five spacers). Flat and uniform on purpose: it lets the
@@ -407,30 +414,30 @@ Psalms' 25 chapter rows simply run on across pages like any long outline. `index
 page 0 or one page rather than throwing. Expansion state is the panel's, handed in as a set of
 USFM codes (case-insensitive).
 
-**`IndexLayout`** (pure, JVM-tested) is the host's `ContentsLayout` in the extension's own copy —
+**`ContentsLayout`** (pure, JVM-tested) is the host's `ContentsLayout` in the extension's own copy —
 that object lives in `:app`, which an extension never depends on — with **the Contents' numbers on
 purpose**: full screen below 480 dp, a 60 % left sidebar at or above (both real devices take the
 sidebar: Nomad 749 dp / Manta 1024 dp), 68 dp rows + 1 dp separator, `itemsPerPage` ≥ 1 from the
 measured body. A change to one belongs in the other.
 
-**`IndexPanel`** is `ContentsDialog` reused: a full-window `Dialog` (`Theme_Notesprout`, transparent
-background, no dim, no elevation) over the reader; `dialog_index.xml` is `dialog_contents.xml` with
-the extension's ids — header (`Index`, a back arrow only in the full-screen form) · rows · pager —
-branching in code on `IndexLayout.fullScreen`: the sidebar takes `shape_index_sidebar` (2 dp
+**`ContentsPanel`** is `ContentsDialog` reused: a full-window `Dialog` (`Theme_Notesprout`, transparent
+background, no dim, no elevation) over the reader; `dialog_contents.xml` is `dialog_contents.xml` with
+the extension's ids — header (`Contents`, a back arrow only in the full-screen form) · rows · pager —
+branching in code on `ContentsLayout.fullScreen`: the sidebar takes `shape_contents_sidebar` (2 dp
 inkBlack right edge) over a transparent scrim whose tap dismisses, the full-screen form is plain
-paper with the back arrow. **Rows**: a book is `item_index_book.xml` —
+paper with the back arrow. **Rows**: a book is `item_contents_book.xml` —
 `[+/− toggle | chapter count 52 dp | 1 dp divider | name 20 sp]`, the Contents' row with the page
 number's slot holding the book's length; **the `+`/`−` toggle shows or hides the chapters, and a
 tap on the row itself opens the book at chapter 1** — the Contents' own split of tap = go, toggle
 = show (the user's call, replacing a first cut where the whole row toggled). A chapter row is built in
-code to exactly a book row's slot (`IndexLayout.rowPx`) so the list stays uniform, indented past
+code to exactly a book row's slot (`ContentsLayout.rowPx`) so the list stays uniform, indented past
 the toggle so it reads as the book's child, its cells the B3 cells (`shape_bordered` /
-`bg_index_selected`, weight-1 wide, `@dimen/toolbar_button_size` tall — never a literal number;
+`bg_contents_selected`, weight-1 wide, `@dimen/toolbar_button_size` tall — never a literal number;
 a `null` a bare spacer `View`). A chapter tap dismisses and hands the `ChapterRef` up.
 
 **Opening state**: the book being read is the one open (**expansion is in-memory only** — every
 open starts from the current book alone, several may be opened during one showing), its row takes
-`bg_index_active_entry` (the Contents' 5 dp right-edge bar), its current chapter's cell is filled
+`bg_contents_active_entry` (the Contents' 5 dp right-edge bar), its current chapter's cell is filled
 black/white-bold, and the list opens on the page holding that chapter's row — the panel opens
 looking at where you are. `itemsPerPage` is measured once from the real body height after the
 first layout (the Nomad: 12 rows a page, 842 px wide). A toggle **re-anchors the page on the
@@ -439,39 +446,112 @@ toggled book's row**, so a collapse below the fold never leaves the reader on an
 showing, nothing repaints), the footer is `INVISIBLE` at one page. A **one-finger horizontal swipe
 over the body** flips pages too — `core/ListSwipe` fed from the *dialog's* `dispatchTouchEvent`,
 because a `Dialog` owns its own window: the reader's swipe behind the panel never sees a stroke of
-it, and the page underneath cannot turn while the index is up.
+it, and the page underneath cannot turn while the Contents is up.
 
-**Three doors** to `BibleActivity.openIndex()`: `btnIndex`, the title ("Genesis 1" is the obvious
+**Three doors** to `BibleActivity.openContents()`: `btnContents` (beside Back, as the notebook's), the title ("Genesis 1" is the obvious
 thing to tap when you want to be somewhere else; it carries the same long-press hint), and — B6 —
 a **one-finger swipe down over the page**, the gesture the notebook teaches for its Contents. The
 swipe rides the *same* `ListSwipe` that turns the page, through its new optional `onSwipeDown`
 (`SwipeMath.vertical`, the flip's rule rotated 90° against the region's height; the two axes are
-exclusive by dominance, so one drag is a turn or a call for the index, never both; stylus sequences
+exclusive by dominance, so one drag is a turn or a call for the Contents, never both; stylus sequences
 are dropped as ever). One panel at a time — a second call while one is up is a no-op (the swipe and
 the button can land together) — and the activity's `onDestroy` dismisses a showing panel (a Dialog
 outliving its finishing Activity is a window leak). The books list comes from
 `ChapterLoader.booksNow()` — B2's `source()` already read the `book` table once for the cursor, so
-opening the index costs **no second database query** and the panel never touches the database.
+opening the Contents costs **no second database query** and the panel never touches the database.
 Before the first chapter has ever shown, `booksNow()` is empty and the call is a **silent no-op**.
-A picked chapter goes down the ordinary chapter-edge path (`openChapter(picked) { 0 }`), so the
-load latch, the neighbour prefetch, and the position write all follow exactly as they do for any
-other turn. There is no BLOCK_ALL / exclusion push here, unlike the Contents: the Bible has no
+A picked chapter is a **pick** (`goTo`, B7): it is recorded as a recent first (§ The Recents) and
+then goes down the ordinary chapter-edge path (`openChapter(picked) { 0 }`), so the load latch, the
+neighbour prefetch, and the position write all follow exactly as they do for any other turn — and a
+pick that lands while a load is running is dropped whole, so a chapter that did not open is never
+remembered. There is no BLOCK_ALL / exclusion push here, unlike the Contents: the Bible has no
 paper and no ink daemon underneath.
+
+---
+
+## The Recents
+
+Added by **B7** (2026-09-13, the user's decision — "recents in the Bible extension … a paginated
+list like in notebook … on the right … a two-finger swipe down … a toolbar button with the clock
+icon"): the notebook's Recents panel in a second subject, **the Contents' twin, mirrored to the
+right**. It lists the chapters the user has **picked by name** — from the Contents (a book row's
+chapter 1, or a cell of the chapter grid) or from this panel itself — newest first, and opens the
+one tapped.
+
+**What counts as a recent is a pick, never a turn.** Reading from Genesis 1 through to Genesis 9
+by swipe went to Genesis once; the history answers "where did I deliberately go", not "which
+chapters have I seen" — the latter would be every chapter, in order, which is the canon. So
+`BibleActivity.goTo` is the one recorder: the Contents' `onPicked` and the Recents' `onPicked` both
+route through it, `turnTo` (swipe, pager, chapter flow) never does. The first open (the stored
+position) is not a pick either.
+
+**The store** (§ The store): `recent(usfm, chapter, at)` with the chapter as the primary key, so a
+re-pick **re-stamps** the row it already has rather than duplicating it — the notebook's "opening
+is what puts it at the front" rule, on rows. `BibleStore.writeRecent` is one two-statement batch:
+the upsert, then `TRIM_RECENTS` keeping the newest [`RecentChapters.KEEP`] = **30** — a history,
+not an archive; the two ride one `exec` so the trim can never run against a store the upsert did
+not reach. Fire-and-forget on IO from `recordRecent`; a failure is `Slog.d("recent not saved")`,
+never a dialog, and the reference itself is never logged.
+
+**`RecentChapters`** (pure, JVM-tested) is the notebook's `RecentRows` in the extension's copy:
+`select` keeps **stored order** (a sort would turn the history into the canon), drops the chapter
+**being read** (the notebook's "the one you are in is never offered" clause — so right after a
+pick the panel shows the pick *before* it), and collapses duplicates to the first; `label` names a
+row as the running head does (`Canon.chapterTitleName` — "Psalm 23", "Genesis 1"); `RecentRef.of`
+is the lenient row decoder (an unknown book code or a chapter below 1 is a dropped row, never a
+dialog — decision 7's rule extended to the history); `SIDEBAR_WIDTH_FRACTION` = **50 %** (narrower
+than the Contents' 60 % — a row is a name and a time) and `itemsPerPage` from a **measured** row.
+
+**`RecentsPanel`** is `RecentsDialog` reused: `dialog_recents.xml` is `dialog_contents.xml`
+mirrored — panel anchored `end`, the 2 dp inkBlack rule on the **left** edge
+(`shape_recents_sidebar`), header running title-then-arrow so the dismissal sits nearest the edge
+the panel came from; full screen below 480 dp (`ContentsLayout.fullScreen` — the breakpoint is
+decided once), the sidebar over a transparent scrim at or above. Rows (`item_recent_entry.xml`)
+are two lines — the chapter at 20 sp and `<medium date>, <time>` at 13 sp, both inkBlack
+(secondary text is *smaller*, never grey). One row is inflated and measured at the real panel
+width after the first layout and `itemsPerPage` follows (the Nomad: 12 rows a page, 702 px); the
+pager footer is `INVISIBLE` at one page; a one-finger horizontal swipe over the body flips pages
+(the dialog's own `dispatchTouchEvent`). **"No recent chapters"** is shown in the body when the list
+is empty — a real answer, never a reason to hide a door.
+
+**Two doors** to `BibleActivity.openRecents()`, the notebook's own and **neither gated**:
+`btnRecents` (Tabler `clock`) at the top bar's right edge — the panel comes in from that side —
+and a **two-finger swipe down over the page**. The swipe rides the same `ListSwipe` that turns the
+page and opens the Contents, through its new optional `onTwoFingerSwipeDown` (`:sn-screen`, B7):
+a second finger landing on a one-finger drag that has **not** yet qualified starts a two-finger
+sequence measured at the centroid and judged by `SwipeMath.vertical` when the sequence drops back
+to one finger (or a third lands on a qualifying one); only **down** is claimed. A second finger
+landing on an *already-qualifying* one-finger drag is still the late arrival it always was — the
+flip (or the Contents call) commits and the rest is stood down; so, as on the notebook, land both
+fingers together. The open **gathers first**: the rows are read on IO (`readRecents(KEEP)`, a
+failure or an absent store an empty list), selected against the chapter being read, then shown —
+one showing at a time and one gather at a time, so the button and the swipe landing together
+cost one panel. `onDestroy` dismisses a showing panel, as it does the Contents.
+
+**A tap** hands the `ChapterRef` up to `goTo`: the chapter opens at its first page and is
+re-stamped at the front — it then disappears from the panel (it is the one being read) and the
+chapter it was picked *from* takes its place.
 
 ---
 
 ## The store
 
-One row, one table, the calendar's `state` / the document editor's `prefs` precedent:
-`BibleSchema.V1` = `state(key TEXT PRIMARY KEY, value TEXT NOT NULL)`. The one key it ever holds is
-`position` (`BibleSql.KEY_POSITION`); `INSERT OR REPLACE` (`BibleSql.UPSERT_STATE`) is safe because
-`state` has no children for a replacement to cascade away.
+Two tables, the calendar's `state` / the document editor's `prefs` precedent, in two schema steps:
+`BibleSchema.V1` = `state(key TEXT PRIMARY KEY, value TEXT NOT NULL)` (B0), and `BibleSchema.V2` =
+that step untouched plus `recent(usfm TEXT NOT NULL, chapter INTEGER NOT NULL, at INTEGER NOT
+NULL, PRIMARY KEY (usfm, chapter))` (B7); `BibleSchema.CURRENT` is what every call declares, and
+the host runs only the steps a store has not seen. **A landed step is never edited.** The one key
+`state` ever holds is `position` (`BibleSql.KEY_POSITION`); `recent` holds the picked chapters
+(§ The Recents). `INSERT OR REPLACE` (`UPSERT_STATE`, `UPSERT_RECENT`) is safe on both because
+neither table has children for a replacement to cascade away. Every statement is pinned as exact
+text in `BibleSql` and run through the host's `StoreSql` query/exec gate in `BibleSqlTest`, so a
+shape the host refuses fails on the JVM, never at the seam.
 
 **`Position`**'s wire form is deliberately boring and human-readable: `GEN:1:1` (`encode()`).
 `decode` is **total** — wrong field count, a non-integer chapter or verse, an unrecognized book code,
 or a chapter/verse below 1 all yield `null` rather than throwing, and `BibleActivity` falls back to
 `Position.GENESIS_1` in every one of those cases (decision 7's promise: a lost or malformed bookmark
-is never a dialog). `applySchema(BibleSchema.V1)` runs on **every** call into `BibleStore` — read or
+is never a dialog). `applySchema(BibleSchema.CURRENT)` runs on **every** call into `BibleStore` — read or
 write — because it is idempotent (one `SELECT` host-side once applied) and it is the *only* door: the
 host's own gate refuses `exec`/`query` on a binder that has never declared its schema.
 
@@ -488,7 +568,8 @@ the reader does about it (fall back silently).
 numbers, page counts, durations, and the bare fact of `begin`/`end`. **The position value itself is
 never logged** — `remember`'s own failure path (`Slog.d(TAG) { "position not saved" }`) deliberately
 omits the value it just failed to write, because that value names exactly where the user has been
-reading. Scripture text never crosses the seam at all: `BibleService` hands the extension a store
+reading. The same rule covers the recents (B7): `recordRecent`'s failure line names no chapter,
+and `openRecents` logs counts and a duration only. Scripture text never crosses the seam at all: `BibleService` hands the extension a store
 binder and nothing else; the reader reads what it shows out of its own installed `.bible` file, never
 from the host.
 
@@ -502,7 +583,12 @@ from the host.
 | The bundled asset copy fails (disk full, permission) | `Dialogs.problem(bible_unavailable_title, bible_unavailable_body)` — never a blank reading band | `BibleActivity.openChapter`'s `onFailure`, `ContentInstaller.ensureInstalled` |
 | A chapter reference with no `block` rows (a hole in the source) | Same problem dialog — `ChapterLoader.build` throws on an empty block list, caught the same way as any other open failure | `ChapterLoader.build` (`check(blocks.isNotEmpty())`) |
 | A swipe or pager tap at Genesis 1 page 1, or off Revelation 22's last page | Nothing — a silent no-op, never a disabled button or a bounce | `BibleActivity.turnTo`, `ChapterCursor.prev`/`next` returning `null` |
-| A tap on Index before the first chapter has ever shown | Nothing — `booksNow()` is empty and the dialog never opens | `BibleActivity.openIndex` |
+| A tap on Contents before the first chapter has ever shown | Nothing — `booksNow()` is empty and the panel never opens | `BibleActivity.openContents` |
+| Recents opened with no store lent, or a store that will not answer | The panel opens with "No recent chapters" — a read failure and an absent store are the same empty list, never a dialog | `BibleActivity.openRecents`, `BibleStore.readRecents` |
+| A `recent` row this build cannot read (unknown book code, chapter below 1, wrong cell class) | That row is dropped; the rest show | `BibleStore.readRecents`, `RecentRef.of` |
+| A pick (Contents or Recents) while a chapter is still loading | Dropped whole — not opened and **not recorded**, the turn's latch | `BibleActivity.goTo` |
+| A recent tapped that cannot be opened (a hole in the source) | The same problem dialog as any other open; the row was already re-stamped | `BibleActivity.goTo` → `openChapter`'s `onFailure` |
+| The store revoked mid-showing, then a pick | The chapter opens; the recent is silently not saved (`Slog.d`) | `BibleActivity.recordRecent` |
 | The host revoked the store mid-showing | Position writes silently fail and are swallowed (`Slog.d`, never surfaced); reading continues normally, just unremembered | `BibleActivity.remember`, `BibleStore.guard` → `StoreUnavailable` |
 | A refused caller (a shell `am start`, or any non-host launcher) | `finish()` runs before a single view is inflated — no crash, no visible screen at all | `BibleActivity.onCreate`, `HostCallerCheck.enforceActivity` |
 
@@ -517,7 +603,7 @@ focused; force-stopping host and extension **in one shell command**, then relaun
 `[BIBLE]` above the notebook.
 
 **B4** (adb half; the hand-feel half is the user's separately):
-- **Index**: books page 1 → arrows paged to Psalms (page 2) → Psalms' chapter grid → 23 → Psalm 23
+- **Index** (now the Contents): books page 1 → arrows paged to Psalms (page 2) → Psalms' chapter grid → 23 → Psalm 23
   rendered as print — italic superscription, hanging poetry indents, verse numbers in the margin,
   footnote callers. Book names fit their cells at 14sp on the 62dp tier ("Song of Solomon", "1
   Chronicles" each stayed one line).
@@ -564,18 +650,19 @@ focused; force-stopping host and extension **in one shell command**, then relaun
 
 ## Tests
 
-**46 JVM tests** across seven files (`src/test/kotlin/.../ext/bible/`), counted directly from the
-source:
+**65 JVM tests** across nine files (`src/test/kotlin/.../ext/bible/`), counted directly from the
+source (46 at the freeze; +1 the Psalm title, +5 B6's reshape after its rewrite, +13 B7):
 
 | File | Tests | Pins |
 |---|---|---|
-| `BibleSqlTest.kt` | 4 | The two SQL statement strings verbatim, the `position` key literal, and that the schema is exactly one version of one statement |
+| `BibleSqlTest.kt` | 7 | Every SQL statement string verbatim (state and recents), the `position` key literal, every statement passing the host's `StoreSql` query/exec gate, V1 as exactly one version of one statement, V2 as V1's step untouched plus the recents step (the chapter as the primary key) and `CURRENT` = V2 |
+| `RecentChaptersTest.kt` | 10 | Stored order kept against a canon-order and a stamp-order trap, the chapter being read dropped (case-insensitively), a sibling chapter kept, duplicates collapsing to the newest, nothing invented, the row label in the running head's form ("Psalm 23"), the lenient row decoder dropping an unknown code or chapter 0, the 50 % width under the Contents' 60 %, `itemsPerPage` whole rows ≥ 1 and safe on an unmeasured row, `KEEP` = 30 |
 | `CanonTest.kt` | 5 | 66 books, ordinals 1–66 in order, the 39/27 OT/NT split, unique three-character USFM codes, case-insensitive/ordinal-addressed lookup |
 | `VerseKeyTest.kt` | 5 | The packing formula, encode/decode round-trip, reading-order sort, chapter bounds covering exactly one chapter, a verse range containing only its own span |
 | `PositionTest.kt` | 4 | Wire-form round-trip, Genesis 1 as the default, lowercase book codes normalizing, every malformed shape decoding to `null` |
 | `ChapterCursorTest.kt` | 7 | Ordinary in-book stepping, book-to-book flow both directions, Genesis 1 having nothing before it, the last book's last chapter having nothing after it, a book the source omits being skipped in both directions, a zero count or unknown code walking nowhere |
-| `IndexModelTest.kt` | 13 | Six-wide chapter rows with a padded last row, a one-chapter book as one cell and five spacers, the collapsed list as one row per book in canon order, an expanded book followed by its rows then the next book, case-insensitive keys, several books open at once, `indexOfBook` / `indexOfChapter` (only while open; Psalm 119 on the twentieth row), `pageOf` / `pageCount` / `clampPage` arithmetic, an empty source |
-| `IndexLayoutTest.kt` | 4 | The 480 dp sidebar branch (Nomad and Manta both take it), the 60 % width rounding, a row's slot at both densities, `itemsPerPage` flooring to ≥ 1 |
+| `ContentsModelTest.kt` | 13 | Six-wide chapter rows with a padded last row, a one-chapter book as one cell and five spacers, the collapsed list as one row per book in canon order, an expanded book followed by its rows then the next book, case-insensitive keys, several books open at once, `indexOfBook` / `indexOfChapter` (only while open; Psalm 119 on the twentieth row), `pageOf` / `pageCount` / `clampPage` arithmetic, an empty source |
+| `ContentsLayoutTest.kt` | 4 | The 480 dp sidebar branch (Nomad and Manta both take it), the 60 % width rounding, a row's slot at both densities, `itemsPerPage` flooring to ≥ 1 |
 | `reader/ChapterPaginatorTest.kt` | 9 | Blocks becoming headings/numbers/words with a spliced footnote caller, minor heading kinds mapping to `MINOR`, a page never ending on a bare verse number, forced progress when nothing fits, `fitCount` returning zero when even one atom overflows, a page anchoring to the verse in effect at its first word, a verse-less opening page anchoring to verse 1, `pageContaining` picking the last page at or before a verse, and a real pagination round-tripping every page's anchor back to that same page |
 
 ---
@@ -584,7 +671,8 @@ source:
 
 - **Search** — no free-text or reference lookup; `Canon`'s alias/normalize table was deliberately
   left behind in the Biblesprout port rather than carried forward unused.
-- **Bookmarks** beyond the single remembered reading position.
+- **Bookmarks** beyond the single remembered reading position and B7's history of picked chapters
+  (the Recents — not bookmarks: nothing is pinned, the list is the newest 30 picks).
 - **Cross references** — the `xref` table is built and shipped but nothing reads it; the `r`
   (parallel-passage) lines and footnote callers render as plain, non-tappable text.
 - **Footnote popups** — footnote bodies (`footnote.text`) are stored and joined at chapter load but
@@ -599,7 +687,7 @@ source:
   zone was not built.
 - ~~**A "Psalm 23" title special case**~~ — **done at the freeze, the user's call**:
   `Canon.chapterTitleName(usfm)` answers "Psalm" for `PSA` and the book's name otherwise, so the
-  page heading and the running head say "Psalm 23" while the index still lists the book as
+  page heading and the running head say "Psalm 23" while the Contents still lists the book as
   "Psalms" (`book.name`, matching the source). One helper, one test.
 
 ---

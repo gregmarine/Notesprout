@@ -8,19 +8,27 @@
 
     <!-- Every icon button needs a long-press hint naming it, and the hint is its content description. -->
     <string name="cd_bible_back">Back</string>
-    <string name="cd_bible_index">Index</string>
+    <string name="cd_bible_contents">Contents</string>
+    <string name="cd_bible_recents">Recents</string>
     <string name="cd_bible_prev_page">Previous page</string>
     <string name="cd_bible_next_page">Next page</string>
 
-    <!-- The index panel (arc 37 / B6): the notebook Contents' shape — book rows that open into a
+    <!-- The Contents panel (arc 37 / B6, renamed from "Index" by B7): the notebook Contents' shape — book rows that open into a
          chapter grid, paginated, with the library-shape pager below. -->
-    <string name="bible_index_title">Index</string>
+    <string name="bible_contents_title">Contents</string>
     <string name="cd_bible_expand">Show chapters</string>
     <string name="cd_bible_collapse">Hide chapters</string>
-    <string name="cd_bible_index_first">First page</string>
-    <string name="cd_bible_index_prev">Previous page</string>
-    <string name="cd_bible_index_next">Next page</string>
-    <string name="cd_bible_index_last">Last page</string>
+    <string name="cd_bible_contents_first">First page</string>
+    <string name="cd_bible_contents_prev">Previous page</string>
+    <string name="cd_bible_contents_next">Next page</string>
+    <string name="cd_bible_contents_last">Last page</string>
+
+    <!-- The Recents panel (arc 37 / B7): the notebook Recents' shape, mirrored to the right —
+         the chapters picked from the Contents, newest first; its pager reuses the Contents' hints. -->
+    <string name="bible_recents_title">Recent chapters</string>
+    <string name="bible_recents_empty">No recent chapters</string>
+    <!-- "<medium date>, <time>" — when a chapter was picked. -->
+    <string name="bible_recents_when">%1$s, %2$s</string>
 
     <string name="bible_title">Bible</string>
     <string name="bible_page_indicator">%1$d / %2$d</string>

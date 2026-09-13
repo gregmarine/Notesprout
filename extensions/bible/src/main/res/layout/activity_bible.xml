@@ -4,8 +4,8 @@
   tier-2 screen with no paper on it, so there is no full-bleed surface, no exclusion rects and no
   EPD handoff: an ordinary vertical stack of chrome.
 
-  Top to bottom: the top bar (title + back + index) · the reader band, empty for now (B1 replaces
-  it with the actual reader) · the pager. Chrome sits flush at the top edge — the top guard is 0
+  Top to bottom: the top bar ([Back] [Contents] · title · [Recents] — the notebook's own order,
+  B7) · the reader band (the ReaderView, added from code) · the pager. Chrome sits flush at the top edge — the top guard is 0
   on Ratta. Dividers are 1dp inkBlack; borderGray is invisible on the panel.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -17,7 +17,8 @@
 
     <!-- A FrameLayout, not a weighted row: the title is centred on the SCREEN, so it stays put
          whatever flanks it (the bar-centring trap — a weight-centred title moves with its
-         neighbours). -->
+         neighbours). Its side margins clear TWO tablet-tier buttons (2 × 62dp + the bar's padding),
+         symmetric so the centre holds. -->
     <FrameLayout
         android:id="@+id/topBarRow"
         android:layout_width="match_parent"
@@ -30,27 +31,42 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center"
-            android:layout_marginStart="52dp"
-            android:layout_marginEnd="52dp"
+            android:layout_marginStart="132dp"
+            android:layout_marginEnd="132dp"
             android:ellipsize="end"
             android:singleLine="true"
             android:text="@string/bible_title"
             android:textColor="@color/inkBlack"
             android:textSize="16sp" />
 
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnBack"
-            style="@style/Widget.Notesprout.ToolbarButton"
+        <!-- Back then Contents, as the notebook's bar runs. -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
             android:layout_gravity="start|center_vertical"
-            android:contentDescription="@string/cd_bible_back"
-            android:src="@drawable/ic_arrow_left" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
 
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnBack"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_bible_back"
+                android:src="@drawable/ic_arrow_left" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnContents"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_bible_contents"
+                android:src="@drawable/ic_list" />
+        </LinearLayout>
+
+        <!-- Recents at the right edge — the panel comes in from that side (B7). -->
         <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnIndex"
+            android:id="@+id/btnRecents"
             style="@style/Widget.Notesprout.ToolbarButton"
             android:layout_gravity="end|center_vertical"
-            android:contentDescription="@string/cd_bible_index"
-            android:src="@drawable/ic_list" />
+            android:contentDescription="@string/cd_bible_recents"
+            android:src="@drawable/ic_clock" />
 
     </FrameLayout>
 

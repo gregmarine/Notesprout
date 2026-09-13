@@ -19,7 +19,10 @@ on branch `bible`** (plan + ledger: `extensions/bible/BIBLE_PLAN.md`; reference
 `extensions/bible/docs/bible.md`; no code review — the user's call; frozen on the user's own Nomad
 walk; **post-freeze B6 2026-09-13 on the user's decision: the index became a Contents-shaped side
 panel with a one-finger swipe-down door — `SwipeMath.vertical` + `ListSwipe`'s optional vertical
-callbacks landed in `:sn-screen` for it**). No TENTH extension point, no next Bible phase (search,
+callbacks landed in `:sn-screen` for it; post-freeze B7 the same day: "Index" renamed "Contents"
+(strings and classes), and a Recents panel — the notebook's, mirrored right — of the chapters
+picked by name, behind a clock button and a two-finger swipe down (`ListSwipe`'s optional
+`onTwoFingerSwipeDown`, `:sn-screen`); the store grew to `BibleSchema.V2` with a `recent` table**). No TENTH extension point, no next Bible phase (search,
 bookmarks, cross references, footnotes) and no other new arc without a fresh user decision; no
 re-raising of any waived / declined review finding.
 
@@ -120,8 +123,9 @@ undo kinds / clipboard arms / whole-object erase, PDF endnotes over `PageBundle`
 there, what may not depend on it, and the `nonTransitiveRClass` flag that holds it together) ·
 `extensions/bible/docs/bible.md` (arc 37 "Bible": **NSE · Bible** as a feature — the slim BSB
 SQLite build, the paginated print-look reader, single-finger swipe and chapter/book flow, the
-Contents-shaped index side panel (book rows → chapter grid; swipe down opens it), the stored
-position, the `extensions/` monorepo-root pattern).
+Contents side panel (book rows → chapter grid; swipe down opens it), the Recents side panel (the
+chapters picked by name; clock button + two-finger swipe down), the stored position and the
+`recent` table, the `extensions/` monorepo-root pattern).
 
 ## Standing rules
 
@@ -241,7 +245,8 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   `:ext-bible` (**NSE · Bible**, arc 37 / B0 — the fifteenth module, and the only one at the
   monorepo root, `extensions/bible/`, included by `projectDir`): `:extension-api` + `:sn-screen`
   only, **never** `:app`, no Room / SQLCipher / serialization. Declares `API_VERSION` **11**
-  (`MIN_API_VERSION_FOR_BIBLE`) from its first phase. `ContentInstaller` copying its bundled
+  (`MIN_API_VERSION_FOR_BIBLE`) from its first phase. Store `BibleSchema.V2` = `state` (B0) +
+  `recent` (B7), `INSERT OR REPLACE` safe on both (no children). `ContentInstaller` copying its bundled
   `assets/bible/bsb.bible` to its own `noBackupFilesDir` is **the one sanctioned "extension writes
   to disk" exception** in the whole family — re-derivable APK content, never user data, ML Kit's
   own model's class. Its door is a deliberate exception to "bottom bars are pager-only": `btnBible`
