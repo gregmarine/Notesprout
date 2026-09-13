@@ -661,6 +661,12 @@ the button too; its Send parks the reference in the same session and the passage
 `fullChapter` result callback echoes `RESULT_BIBLE_SEND` up and finishes — one Send, whichever
 instance it was tapped on.
 
+**Where it lands when the centre is taken** (the user's decision 2026-09-13, after the hand walk
+found a Send stacking on a sticky at the centre): the **nearest clear spot to the centre** —
+`FreePlacement.nearCentre`, the rule every centre drop in the notebook now obeys (Insert's Text,
+shapes, Sticky, Bible, and this Send), with an 8 dp gap, ink counted as occupied, and the centre
+as the fallback on a full page. `docs/objects.md` § files.
+
 **Judgment calls stated, not asked:** a tap while a load runs, or before anything is open, does
 nothing (there is no reference yet); a sent reference is not stamped as a recent (the chapter being
 read is dropped from the Recents anyway); the reference crosses the held bind, never the result

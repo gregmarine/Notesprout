@@ -69,7 +69,8 @@ Star point count came up as an H4 phase-start question and was **fixed at 5** (`
 | `notebook/TextFlow.kt` | `TextFlow` + `TextFlow.Host` — insert/convert/edit out of the activity; nothing exists until Save on an insert |
 | `notebook/TextEditDialog.kt` | The plain markdown edit dialog, `HeadingEditDialog`'s shape |
 | `notebook/TextLines.kt` | Pure: `normalize` (recognized ink) vs `typed` (dialog text) — two deliberately different whitespace rules |
-| `notebook/TextPlacement.kt` | Pure: `centred` box placement for an inserted text |
+| `notebook/TextPlacement.kt` | Pure: `centred` box placement for an inserted text — since 2026-09-13 the first candidate `FreePlacement` tries |
+| `notebook/FreePlacement.kt` | Pure (2026-09-13, the user's decision after B9's Send stacked on a sticky): **every centre drop** — Insert's Text, the six shapes, Sticky, Bible, and the Bible reader's Send — lands at the centre when it is clear, else at the **nearest clear spot**, searched outward in 16 dp rings with an 8 dp gap; occupied = `NotebookActivity.occupiedBounds()` (texts, shapes' padded AABB, stickies, headings, links **and the live ink**); a full page or an over-size box falls back to the centre, never a refusal. Each flow's `Host` gained `occupied()`; `ShapeDefaults.at` / `StickyDefaults.at` still size, no longer decide where |
 | `notebook/ShapeRows.kt` | `PageShape`, `ShapeType`, `ShapeFlags` (pack/unpack of aspect/pointCount/rotation) — pure, JVM-tested |
 | `notebook/ShapeStore.kt` | Shape row writes on the shared `SoilWriter` |
 | `notebook/ShapeGeometry.kt` | Pure: `outline`, `tightBounds`, `aabb`, the thin `pathFor` — one object for geometry and hit-bounds alike |

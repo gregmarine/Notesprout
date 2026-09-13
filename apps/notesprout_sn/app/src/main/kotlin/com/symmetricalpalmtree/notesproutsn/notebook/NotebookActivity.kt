@@ -182,11 +182,13 @@ class NotebookActivity : AppCompatActivity() {
         override val pageId: String get() = displayedPageId
         override val objects: PageObjects get() = pageObjects
         override val paper: PaperView get() = this@NotebookActivity.paper
+        override val density: Float get() = resources.displayMetrics.density
         override fun strokesIn(ids: Set<String>) = liveStrokes.values.filter { it.id in ids }
         override fun dropLiveStrokes(ids: List<String>) { ids.forEach { liveStrokes.remove(it) } }
         override fun record(action: Action) = undo.record(action)
         override fun selectAsText(text: PageText) = this@NotebookActivity.selectAsText(text)
         override fun armLassoForLanding() = this@NotebookActivity.armLassoForLanding()
+        override fun occupied(): List<Bounds> = occupiedBounds()
         override fun armPendingSelection(select: () -> Unit) { pendingSelection = select }
         override fun drainPendingSelection() { pendingSelection?.let { pendingSelection = null; it() } }
     })
@@ -218,6 +220,7 @@ class NotebookActivity : AppCompatActivity() {
         override fun liveLink(id: String): PageLink? = liveLinks[id]
         override fun relandEditedLink(link: PageLink) = this@NotebookActivity.relandEditedLink(link)
         override fun armLassoForLanding() = this@NotebookActivity.armLassoForLanding()
+        override fun occupied(): List<Bounds> = occupiedBounds()
         override fun toast(text: String) = this@NotebookActivity.toast(text)
     })
 
@@ -236,6 +239,7 @@ class NotebookActivity : AppCompatActivity() {
         override fun record(action: Action) = undo.record(action)
         override fun selectAsShape(shape: PageShape) = this@NotebookActivity.selectAsShape(shape)
         override fun armLassoForLanding() = this@NotebookActivity.armLassoForLanding()
+        override fun occupied(): List<Bounds> = occupiedBounds()
         override fun restoreToolAfterLanding() = restoreToolAfterTransferPaste()
         override fun dismissSelectionChrome() {
             selectionActive = false
@@ -271,6 +275,7 @@ class NotebookActivity : AppCompatActivity() {
         override fun runPageOp(block: suspend () -> Unit) = this@NotebookActivity.runPageOp(block)
         override fun selectAsSticky(sticky: PageSticky) = this@NotebookActivity.selectAsSticky(sticky)
         override fun armLassoForLanding() = this@NotebookActivity.armLassoForLanding()
+        override fun occupied(): List<Bounds> = occupiedBounds()
         override fun endTransformIfRunning() = this@NotebookActivity.endTransformIfRunning()
         override fun reclaimPipeline() { if (this@NotebookActivity::paper.isInitialized) this@NotebookActivity.paper.resumeDrawing() }
         override fun dismissFloatingChrome() {
@@ -3533,6 +3538,26 @@ class NotebookActivity : AppCompatActivity() {
      * It lands **selected with the lasso armed** and says so — [landTransferred], which the
      * received-page road (arc 31 / HV5) shares rather than copying.
      */
+
+    /**
+     * Every box on the displayed page, for [FreePlacement] (the user's decision 2026-09-13: a
+     * centre drop lands at the nearest clear spot, never on what is there): the working copies of
+     * texts, shapes (their padded AABB), stickies, headings and links, plus the **live ink** — a
+     * text dropped over handwriting is the same stacking. Read on Main at the drop, so what the
+     * user sees is what is avoided.
+     */
+    private fun occupiedBounds(): List<Bounds> {
+        val density = resources.displayMetrics.density
+        val out = ArrayList<Bounds>()
+        pageObjects.texts.values.mapTo(out) { Bounds(it.x, it.y, it.x + it.width, it.y + it.height) }
+        pageObjects.shapes.values.mapTo(out) { ShapeGeometry.aabb(it, density) }
+        pageObjects.stickies.values.mapTo(out) { Bounds(it.x, it.y, it.x + it.width, it.y + it.height) }
+        liveHeadings.values.mapTo(out) { it.bounds }
+        liveLinks.values.mapTo(out) { it.bounds }
+        liveStrokes.values.mapTo(out) { it.bounds }
+        return out
+    }
+
     private fun pasteTransferred(
         wire: List<WireStroke>,
         truncated: Boolean,

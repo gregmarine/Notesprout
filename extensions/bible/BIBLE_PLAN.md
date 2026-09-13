@@ -492,3 +492,14 @@ hand walk, **no code review**.
   library's reader with no Send. Left to the user's hand: the move by pen after the landing.
 - Docs: `docs/bible.md` § Send to notebook, `extensions.md` (module row, API row, audit row 57),
   both `CLAUDE.md`.
+- **Hand walk 2026-09-13 — "It looks and works well for the most part"**; the one finding: a Send
+  onto a page with something already at the centre **stacked**. The user's follow-up decision
+  (wizard, one question): when the centre is taken, land at the **nearest free spot** (not
+  straight below, not a diagonal cascade), and fix **every** centre drop, not just Send. Landed as
+  `notebook/FreePlacement.kt` (pure, 7 JVM tests → `:app` 1686): rings of 16 dp around the centre,
+  8 dp gap, occupied = texts + shapes (padded AABB) + stickies + headings + links + **live ink**
+  (`NotebookActivity.occupiedBounds()`), centre kept when clear, centre as the fallback. All five
+  doors route through it (Text, shapes, Sticky, Bible insert, Bible Send); the flows' `Host`s
+  gained `occupied()`, `TextFlow.Host` a `density`. Walked over adb on the Nomad: a rectangle
+  inserted at the centre, then Send → "John 1" landed just above it, not on it. B9 stays complete
+  pending the user's second look.

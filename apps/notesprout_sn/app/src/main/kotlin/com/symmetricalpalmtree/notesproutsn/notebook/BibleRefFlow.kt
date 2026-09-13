@@ -110,6 +110,11 @@ class BibleRefFlow(
          *  wrap. */
         fun armLassoForLanding()
 
+        /** Every box already on the displayed page — texts, shapes, stickies, headings, links and
+         *  the live ink — for [FreePlacement]: a drop lands at the nearest clear spot to the
+         *  centre, never on top of what is there. */
+        fun occupied(): List<Bounds>
+
         /** One line at the bottom naming what the reference matched — a toast confirms something
          *  that already happened, which is the one thing a toast is for. */
         fun toast(text: String)
@@ -262,7 +267,7 @@ class BibleRefFlow(
         Slog.d(TAG) { "converted ${strokeIds.size} strokes → a Bible reference of ${source.length} chars" }
     }
 
-    /** The success half of an insert: [TextPlacement.centred], then the same wrap. The ink list is
+    /** The success half of an insert: [FreePlacement.nearCentre], then the same wrap. The ink list is
      *  empty, so the undo entry's revive is a no-op — an insert is a conversion of nothing. */
     private fun insert(pageId: String, source: String, resolved: ResolvedReference) {
         if (!host.alive || pageId != host.pageId) return
@@ -270,7 +275,10 @@ class BibleRefFlow(
         // Measured at x = 0 first: that is the widest column this page can offer, so the natural
         // width it comes back with is the one the centre is computed from (TextFlow.insert's rule).
         val (w0, h0) = host.objects.measure(source, 0f, page.width)
-        val (x, y) = TextPlacement.centred(page.width.toFloat(), page.height.toFloat(), w0, h0)
+        // The centre when it is clear, else the nearest clear spot (FreePlacement).
+        val (x, y) = FreePlacement.nearCentre(
+            page.width.toFloat(), page.height.toFloat(), w0, h0, host.occupied(), host.density,
+        )
         val (w, h) = if (page.width - x < w0) host.objects.measure(source, x, page.width) else w0 to h0
         val text = PageText(
             id = UUID.randomUUID().toString(), text = source,
