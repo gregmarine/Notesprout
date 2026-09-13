@@ -151,3 +151,36 @@ Host (`apps/notesprout_sn`) — verified against the code:
   use `am force-stop <host>; am force-stop <ext>` in one shell command, never `am crash` first.
 - Build trap: a stale `extension-api/build/` from the `notesprout_ratta` → `notesprout_sn` rename
   fails `mergeLibDexDebug` ("located outside the root directory") — `rm -rf extension-api/build`.
+
+### B1 — Content + reader core ✅ 2026-09-13
+
+- Ported from Biblesprout (each file says so once, KDoc kept where it still applies):
+  `VerseKey.kt` verbatim · `Canon.kt` minus the alias/normalize lookup (no free-text reference
+  parsing in this reader — it would have dragged `Reference.kt` in) · `ContentInstaller.kt` with
+  the destination moved to **`noBackupFilesDir/bible/`** and the copy made crash-safe
+  (stamp deleted → `.part` → `fd.sync()` → rename → stamp written last) · `BibleDatabase.kt`
+  (plain `android.database.sqlite`, `OPEN_READONLY`, the SQL copied exactly) + `Rows.kt`
+  (`BookRow` / `VerseMark` / `RenderBlock` / `Footnote`) · `reader/Atom.kt` (link, word-layer and
+  highlight fields dropped; `minor: Boolean` → `HeadingKind` MAJOR/MINOR/REFERENCE/SUPERSCRIPTION)
+  · `reader/ChapterPaginator.kt` (xrefs and the plain-verse `atomsFor` dropped; the typography
+  parameter became the `fun interface BodyMeasurer`, which is what makes `paginate`/`fitCount`
+  JVM-testable) · `reader/ReaderTypography.kt` (the char-mark bookkeeping left with everything
+  that hit-tested it; it now **is** the `BodyMeasurer`) · `reader/ReaderView.kt` (highlights
+  dropped; `show(page)` is the one door and an identical page is a no-op — a self-repainting
+  surface ghosts).
+- `BibleActivity`: head unchanged (caller check first, inflate, `TopGuard`); the `ReaderView` goes
+  into `readerBand` as child 0, and the band's **first layout** starts the load — install → open →
+  `blocksForChapter`/`footnotesForChapter` → `atomsForBlocks` → `paginate` → every page laid out,
+  **all on `Dispatchers.IO`**, Main only draws. Title "Genesis 1"
+  (`bible_chapter_title`), indicator "n / N", pager steps within the chapter and **no-ops** at the
+  edges (never disabled). `btnIndex` keeps its tooltip and does nothing (B3). A failed open is
+  `Dialogs.problem`, never a blank band; "Loading…" appears only past 300 ms (no spinner).
+  Logs carry book/chapter, page counts and durations — never text.
+- The `.bible` file checks out against the ported SQL: all 16 block kinds it contains are covered
+  by `flowFor`/`headingFor`, and its 66 `book` rows match `Canon` usfm-for-usfm, name-for-name.
+- Gate: `:ext-bible:assembleDebug` + `:ext-bible:testDebugUnitTest` green, **20 tests** (B0's 4 +
+  `VerseKeyTest` 5, `CanonTest` 5, `ChapterPaginatorTest` 6 — the Psalm-23-shaped block list, the
+  heading kinds, "a page never ends on a verse number", progress when nothing fits, `fitCount`,
+  `firstVerseKey`). Zero Kotlin warnings. Not installed on any device — the look of the page
+  (poetry indents, headings, the first page's title + chapter number) and the open duration are
+  B4's walk.

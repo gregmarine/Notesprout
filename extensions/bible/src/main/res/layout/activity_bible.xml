@@ -59,13 +59,29 @@
         android:layout_height="1dp"
         android:background="@color/inkBlack" />
 
-    <!-- Empty for now — B1 replaces this band with the reader. -->
+    <!-- The reader band. The `ReaderView` is added as the FIRST child at runtime (arc 37 / B1),
+         so it sits under the loading line; it is not in the XML because it is sized and drawn
+         from code, not from attributes. -->
     <FrameLayout
         android:id="@+id/readerBand"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:background="@color/paperWhite" />
+        android:background="@color/paperWhite">
+
+        <!-- Shown only if the first open outlasts 300 ms (the asset copy on a fresh install).
+             A word, never a spinner: nothing on an e-ink screen animates. -->
+        <TextView
+            android:id="@+id/loading"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:text="@string/bible_loading"
+            android:textColor="@color/inkBlack"
+            android:textSize="16sp"
+            android:visibility="gone" />
+
+    </FrameLayout>
 
     <View
         android:layout_width="match_parent"
