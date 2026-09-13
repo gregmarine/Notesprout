@@ -94,3 +94,38 @@ Read first: `extensions/bible/docs/bible.md`, `apps/notesprout_sn/docs/links.md`
 ## Ledger
 
 - **R1 seam + parser — ✅ 2026-09-13.** `IBible` grew `resolve(String): ResolvedReference?` and `beginAt(store, reference)` after `end()` (codes 3/4); `ResolvedReference(wire, label)` Parcelable in `:extension-api` (constructor `require`s = the host's whole check of the wire: `[A-Z0-9:,-]`, ≤ 512); `API_VERSION` 11 → 12 with the METHOD floor `MIN_API_VERSION_FOR_BIBLE_REFERENCE` = 12 (`MIN_API_VERSIONS` untouched); `:ext-bible` manifest declares 12. Extension: `Canon` got Biblesprout's alias table + `lookup`/`normalize` back; `Reference.kt` = `Passage` (+ `format`), `ReferenceParser` (`parse` / `parseAll` — any bad part refuses the whole line), `ReferenceCodec` (`encode` / total `decode` folding one book's adjacent ranges / `label`), `ReferenceResolver.valid` (pure over `chapterCount` + `verseExists`); `BibleDatabase` is `Closeable` and gained `versesForRange` (the `verse` table) + `verseExists`; `BibleService.resolve` opens the source per call (`use`), logs a count and a duration only; `beginAt` requires a decodable wire and parks it in `BibleSession.reference`. Tests: `ReferenceTest` (12) — `:ext-bible` 77, `:extension-api` green.
+
+- **R2 passage view + Full chapter + Recents rows — ✅ 2026-09-13.** `BibleActivity` is one screen
+  in **two modes**, `passage: PassagePages?` the only flag: `BibleSession.reference` is read once
+  in `onCreate`, and non-null-and-decodable opens the passage — the reference's canonical label as
+  the title, the reader band, the pager, a **silent no-op** past either end (no chapter flow in a
+  citation) and **no position write**. Contents and Recents keep both doors in both modes (the
+  Contents highlights `passage.openAt`); a chapter pick from either switches the screen to chapter
+  mode **in place**, done in `openChapter`'s success so a failed open leaves the screen as it was.
+  `PassageLoader` (+ the pure `PassageAtoms`) builds the pages through the new
+  `ChapterLoader.withSource` — one open source, one `TextPaint`, one thread measuring it — reading
+  the `verse` table's plain text (a MAJOR heading + one paragraph per chapter run, a number and
+  words per verse) and paginating with equal first/other heights; a range the source has nothing
+  for is skipped, a wire that yields nothing is the problem dialog
+  (`bible_passage_unavailable_body`). **Full chapter** is a text button
+  (`Widget.Notesprout.OutlinedButton`, `minHeight` = the button dimen) in a new end group with
+  `btnRecents`, which keeps the right edge because its panel comes in from there; the title's
+  margins are re-balanced against the two groups' **measured** widths
+  (`BibleActivity.balanceTitle`) so the screen-centre holds in both modes. It launches a **second
+  in-process `BibleActivity`** (`ActivityResultLauncher`, extras `USFM`/`CHAPTER`/`VERSE`) — the
+  caller check admits `callingPackage == packageName` FIRST, before `HostCallerCheck.enforceActivity`
+  (which finishes the Activity when it refuses, so the short-circuit is load-bearing); that
+  instance ignores the session reference, opens on `pageContaining(verse)`, writes position like
+  any reading, and is **not** a pick. Store: `BibleSchema.V3` = V2's steps untouched + `recent_ref
+  (ref TEXT PRIMARY KEY, at INTEGER NOT NULL)`; `BibleSql.SELECT_RECENT_REFS` /
+  `UPSERT_RECENT_REF` / `TRIM_RECENT_REFS`; `BibleStore.readRecentRefs` (lenient — an undecodable
+  wire is dropped, never thrown) / `writeRecentRef` (upsert + trim in one batch). `RecentEntry`
+  (`Chapter` · `Reference`) is the union `RecentChapters.select` now merges **by `at`, descending
+  and stable** — two histories, each already stored newest-first — dropping the current chapter or
+  the current wire, deduping each kind, capped at `KEEP`; `RecentsPanel` renders either and a
+  reference row calls `onPickedPassage(wire)`, which re-opens the passage in place and re-stamps
+  it. A passage opened from the host is a pick, stamped fire-and-forget on IO when it first shows.
+  Strings: `bible_full_chapter`, `bible_passage_unavailable_body`, and "Recent chapters"/"No recent
+  chapters" → "Recents"/"No recents". Nothing logs a wire or a label — page counts and durations
+  only. Tests: `PassageAtomsTest` (9), `BibleSqlTest` +2, `RecentChaptersTest` rewritten for the
+  union (11 → 16) — `:ext-bible` 77 → **93**, `assembleDebug` green.

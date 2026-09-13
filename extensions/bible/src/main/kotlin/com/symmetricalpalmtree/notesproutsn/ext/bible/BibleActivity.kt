@@ -1,6 +1,7 @@
 package com.symmetricalpalmtree.notesproutsn.ext.bible
 
 import android.app.Activity
+import android.content.Intent
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
@@ -10,6 +11,8 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.TooltipCompat
 import androidx.core.view.doOnLayout
@@ -68,6 +71,21 @@ import kotlinx.coroutines.withContext
  * dominance). Picking a chapter opens it at its first page, down the same path a chapter edge
  * takes. A tap before the first chapter has shown is a silent no-op: there is nothing to list yet.
  *
+ * **Arc 38 / R2 — the passage view.** The same screen in a second **mode**: when the host opened
+ * the showing with `beginAt` ([BibleSession.reference]), the reader shows exactly the verses of
+ * that reference — the pages [PassageLoader] built — under the reference's own canonical label,
+ * with a **Full chapter** door at the bar's end. Two rules make it a mode and not a screen: a
+ * turn past either end is a **silent no-op** (a passage has no neighbours to flow into — the
+ * chapter flow belongs to reading, not to a citation), and **no position is written** (a passage
+ * is not a place the reader was left; the bookmark still names the chapter they were reading).
+ * The Contents and the Recents keep both their doors, and picking a chapter from either switches
+ * this screen **into chapter mode in place** — the title changes, Full chapter goes.
+ *
+ * **Full chapter** launches a SECOND instance of this Activity in our own process, in chapter
+ * mode, at the first range's verse — the only launch that is not the host's, which is why the
+ * caller check admits our own package first. Its Back finishes back onto the passage; the
+ * passage's Back finishes to the host, as it always did.
+ *
  * B7's addition: **the Recents** — the notebook's Recents panel in a second subject, mirrored to
  * the right ([RecentsPanel]): the chapters the user has **picked** (from the Contents, or from
  * this panel — never a page turn or a chapter the swipe flowed into), newest first, in the host's
@@ -75,19 +93,38 @@ import kotlinx.coroutines.withContext
  * edge, and a **two-finger swipe down over the page** — `ListSwipe.onTwoFingerSwipeDown`, the
  * detector the flip and the Contents swipe already ride. Neither door is gated: "No recent
  * chapters" is a real answer the panel gives, never a reason to hide a control. A tap opens the
- * chapter at its first page and re-stamps it at the front of the list.
+ * chapter at its first page and re-stamps it at the front of the list. Since R2 the list is the
+ * merge of two histories — chapters picked by name, and passages followed here from a notebook —
+ * and a passage row opens the passage view in place.
  */
 class BibleActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityBibleBinding
     private lateinit var readerView: ReaderView
     private lateinit var loader: ChapterLoader
+    private lateinit var passages: PassageLoader
 
     /** The host's store, or null when the showing arrived without one — see [remember]. */
     private var bibleStore: BibleStore? = null
 
     private var chapter: ChapterPages? = null
+
+    /** The passage on screen (arc 38 / R2). **Non-null is passage mode** — the one flag the
+     *  screen branches on; [chapter] is null while it stands, and vice versa. */
+    private var passage: PassagePages? = null
+
     private var pageIndex = 0
+
+    /** A chapter-mode landing from our own Full chapter button, read from the Intent in
+     *  [onCreate]; null for every launch the host made. Its presence wins over
+     *  [BibleSession.reference] — extras are how *we* open this screen. */
+    private var landing: Landing? = null
+
+    /** The reference this showing opens on, read once from [BibleSession] in [onCreate]. */
+    private var openingReference: String? = null
+
+    /** The in-process Full chapter launch (arc 38 / R2). Registered in [onCreate]. */
+    private lateinit var fullChapter: ActivityResultLauncher<Intent>
 
     /** True while a chapter is being built. The latch that makes a fast flip drop, not queue. */
     private var loading = false
@@ -114,12 +151,19 @@ class BibleActivity : AppCompatActivity() {
     private var admitted = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        if (!HostCallerCheck.enforceActivity(this, BuildConfig.HOST_PACKAGE)) {
+        // Our own package FIRST (arc 38 / R2): the Full chapter door is a `startActivityForResult`
+        // from this very process, so `callingPackage` is us — and `enforceActivity` finishes the
+        // Activity when it refuses, which short-circuiting is what keeps it from doing so here.
+        if (callingPackage != packageName && !HostCallerCheck.enforceActivity(this, BuildConfig.HOST_PACKAGE)) {
             super.onCreate(savedInstanceState)
             return
         }
         super.onCreate(savedInstanceState)
         admitted = true
+        landing = landingFromIntent()
+        // A landing is our own chapter launch and ignores the showing's reference; otherwise the
+        // reference — read ONCE here — decides the mode for the life of this instance.
+        openingReference = if (landing != null) null else BibleSession.reference
         binding = ActivityBibleBinding.inflate(layoutInflater)
         setContentView(binding.root)
         TopGuard.applyInsetPadding(binding.root)
@@ -128,6 +172,12 @@ class BibleActivity : AppCompatActivity() {
         // scripture out of its own installed file, never out of the store.
         bibleStore = BibleSession.store?.let { BibleStore(it) }
         loader = ChapterLoader(this)
+        passages = PassageLoader(loader)
+        fullChapter = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            // Nothing to do: the chapter instance read and wrote its own position, and this one
+            // is exactly the passage it was. The registration exists so the launch is a
+            // `startActivityForResult` — which is what makes `callingPackage` us.
+        }
 
         readerView = ReaderView(this)
         binding.readerBand.addView(
@@ -159,22 +209,28 @@ class BibleActivity : AppCompatActivity() {
         binding.title.setOnLongClickListener { hint(R.string.cd_bible_contents) }
         binding.btnRecents.setOnClickListener { openRecents() }
         binding.btnRecents.setOnLongClickListener { hint(R.string.cd_bible_recents) }
+        binding.btnFullChapter.setOnClickListener { openFullChapter() }
+        binding.btnFullChapter.setOnLongClickListener { hint(R.string.bible_full_chapter) }
         binding.btnPrevPage.setOnClickListener { turnTo(pageIndex - 1) }
         binding.btnPrevPage.setOnLongClickListener { hint(R.string.cd_bible_prev_page) }
         binding.btnNextPage.setOnClickListener { turnTo(pageIndex + 1) }
         binding.btnNextPage.setOnLongClickListener { hint(R.string.cd_bible_next_page) }
-        for (button in listOf(
-            binding.btnBack, binding.btnContents, binding.btnRecents, binding.btnPrevPage, binding.btnNextPage,
+        for (button in listOf<View>(
+            binding.btnBack, binding.btnContents, binding.btnRecents, binding.btnFullChapter,
+            binding.btnPrevPage, binding.btnNextPage,
         )) {
             TooltipCompat.setTooltipText(button, button.contentDescription)
         }
+        // The title is centred on the SCREEN, so its margins must clear the WIDER of the two
+        // groups — and the end one grows by a word when Full chapter shows (arc 38 / R2).
+        binding.topBarRow.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> balanceTitle() }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() = leave()
         })
 
         // Pagination needs the band's real size, so nothing starts before its first layout.
-        binding.readerBand.doOnLayout { openWhereWeLeftOff() }
+        binding.readerBand.doOnLayout { openFirst() }
     }
 
     override fun onDestroy() {
@@ -197,8 +253,21 @@ class BibleActivity : AppCompatActivity() {
 
     // --- reading ------------------------------------------------------------
 
-    /** The first open: the stored position, or Genesis 1 when there is none to be had. */
-    private fun openWhereWeLeftOff() {
+    /**
+     * The first open, in the mode this instance was launched in: our own Full chapter landing,
+     * else the showing's reference (arc 38 / R2), else the stored position — or Genesis 1 when
+     * there is none to be had.
+     */
+    private fun openFirst() {
+        landing?.let { at ->
+            openChapter(at.ref) { pages -> ChapterPaginator.pageContaining(pages.anchors, at.verse) }
+            return
+        }
+        openingReference?.let { wire ->
+            // Followed from a notebook: a deliberate move, and therefore a pick.
+            openPassage(wire, stamp = true)
+            return
+        }
         lifecycleScope.launch {
             val raw = withContext(Dispatchers.IO) {
                 runCatching { bibleStore?.readPosition() }.getOrNull()
@@ -229,6 +298,11 @@ class BibleActivity : AppCompatActivity() {
             built
                 .onSuccess { pages ->
                     chapter = pages
+                    // A chapter established: whatever passage stood here is over (a Contents or
+                    // Recents pick made from the passage view lands exactly here). Done on
+                    // SUCCESS only — a failed open must leave the screen as it was.
+                    passage = null
+                    applyMode()
                     Slog.d(TAG) {
                         "chapter ${pages.usfm} ${pages.chapter}: ${pages.size} page(s) in " +
                             "${SystemClock.elapsedRealtime() - began} ms"
@@ -242,6 +316,54 @@ class BibleActivity : AppCompatActivity() {
                     // The chapter reference, never its text: "where, not what".
                     Log.w(TAG, "could not open ${ref.usfm} ${ref.chapter}", e)
                     Dialogs.problem(this@BibleActivity, R.string.bible_unavailable_title, R.string.bible_unavailable_body)
+                }
+        }
+    }
+
+    /**
+     * Opens a passage (arc 38 / R2): [wire] decoded, read, flowed and paginated by
+     * [PassageLoader], then page 1. [stamp] records it as a pick — true for the reference the
+     * host opened us on and for a row re-picked from the Recents, and there is no other way in.
+     *
+     * The same `loading` latch a chapter takes: while one build runs nothing else starts, so a
+     * fast Contents pick over a passage cannot land twice. A wire the source has nothing for is
+     * the problem dialog — **the wire itself is never logged**, here or on failure.
+     */
+    private fun openPassage(wire: String, stamp: Boolean) {
+        if (loading) return
+        val width = readerView.readingWidth()
+        val height = readerView.readingHeight()
+        if (width <= 0 || height <= 0) return
+        loading = true
+        binding.root.postDelayed(showLoading, LOADING_DELAY_MS)
+        lifecycleScope.launch {
+            val began = SystemClock.elapsedRealtime()
+            val built = withContext(Dispatchers.IO) {
+                runCatching { passages.passage(wire, width, height) }
+            }
+            binding.root.removeCallbacks(showLoading)
+            binding.loading.visibility = View.GONE
+            loading = false
+            built
+                .onSuccess { pages ->
+                    passage = pages
+                    chapter = null
+                    Slog.d(TAG) {
+                        "passage: ${pages.size} page(s) in ${SystemClock.elapsedRealtime() - began} ms"
+                    }
+                    binding.title.text = pages.label
+                    applyMode()
+                    show(0)
+                    if (stamp) recordRecentReference(pages.wire)
+                }
+                .onFailure { e ->
+                    // Not even the reference: a passage names where the user has read.
+                    Log.w(TAG, "could not open a passage", e)
+                    Dialogs.problem(
+                        this@BibleActivity,
+                        R.string.bible_unavailable_title,
+                        R.string.bible_passage_unavailable_body,
+                    )
                 }
         }
     }
@@ -273,6 +395,12 @@ class BibleActivity : AppCompatActivity() {
      */
     private fun turnTo(index: Int) {
         if (loading) return
+        // Passage mode has no neighbours: a turn past either end is a silent no-op, because the
+        // chapter flow belongs to reading and a citation is not a place in the book (arc 38 / R2).
+        passage?.let { pages ->
+            if (index in 0 until pages.size) show(index)
+            return
+        }
         val pages = chapter ?: return
         when {
             index in 0 until pages.size -> show(index)
@@ -283,8 +411,16 @@ class BibleActivity : AppCompatActivity() {
         }
     }
 
-    /** Draws page [index] and remembers it — every committed turn is a written position. */
+    /** Draws page [index] and remembers it — every committed turn in **chapter** mode is a
+     *  written position; a passage writes none (arc 38 / R2). */
     private fun show(index: Int) {
+        passage?.let { pages ->
+            pageIndex = index
+            readerView.show(pages.rendered[index])
+            binding.pageIndicator.text =
+                getString(R.string.bible_page_indicator, index + 1, pages.size)
+            return
+        }
         val pages = chapter ?: return
         pageIndex = index
         readerView.show(pages.rendered[index])
@@ -306,7 +442,8 @@ class BibleActivity : AppCompatActivity() {
     private fun openContents() {
         if (contentsPanel != null) return
         val books = loader.booksNow()
-        val at = chapter?.ref ?: return
+        // In passage mode the chapter the Contents highlights is the passage's first (arc 38 / R2).
+        val at = currentChapter() ?: return
         if (books.isEmpty()) return
         contentsPanel = ContentsPanel(
             this, books, at,
@@ -326,6 +463,13 @@ class BibleActivity : AppCompatActivity() {
         openChapter(ref) { 0 }
     }
 
+    /** A **passage** pick — a reference chosen by name from the Recents (arc 38 / R2). It opens
+     *  in place, whichever mode the screen is in, and is re-stamped as the newest recent. */
+    private fun goToPassage(wire: String) {
+        if (loading) return
+        openPassage(wire, stamp = true)
+    }
+
     // --- the Recents --------------------------------------------------------
 
     /**
@@ -340,17 +484,25 @@ class BibleActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val began = SystemClock.elapsedRealtime()
             val store = bibleStore
+            // Two tables, one read: the chapters picked by name and the passages followed here
+            // (arc 38 / R2). Either failing costs its half of the history, never a dialog.
             val stored = withContext(Dispatchers.IO) {
-                runCatching { store?.readRecents(RecentChapters.KEEP) }.getOrNull().orEmpty()
+                runCatching { store?.readRecents(RecentChapters.KEEP) }.getOrNull().orEmpty() to
+                    runCatching { store?.readRecentRefs(RecentChapters.KEEP) }.getOrNull().orEmpty()
             }
             gatheringRecents = false
             if (recentsPanel != null || isFinishing || isDestroyed) return@launch
-            val rows = RecentChapters.select(stored, chapter?.ref)
-            Slog.d(TAG) { "recents: ${rows.size} of ${stored.size} in ${SystemClock.elapsedRealtime() - began} ms" }
+            val (storedChapters, storedRefs) = stored
+            val rows = RecentChapters.select(storedChapters, storedRefs, chapter?.ref, passage?.wire)
+            Slog.d(TAG) {
+                "recents: ${rows.size} of ${storedChapters.size}+${storedRefs.size} in " +
+                    "${SystemClock.elapsedRealtime() - began} ms"
+            }
             recentsPanel = RecentsPanel(
                 this@BibleActivity, rows,
                 onDismissed = { recentsPanel = null },
                 onPicked = { picked -> goTo(picked) },
+                onPickedPassage = { wire -> goToPassage(wire) },
             ).also { it.show() }
         }
     }
@@ -364,6 +516,17 @@ class BibleActivity : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             runCatching { store.writeRecent(ref, at, RecentChapters.KEEP) }
                 .onFailure { Slog.d(TAG) { "recent not saved" } }
+        }
+    }
+
+    /** [recordRecent] for a passage (arc 38 / R2): the wire is the row's key, and — like every
+     *  other reference in this class — it is never logged. */
+    private fun recordRecentReference(wire: String) {
+        val store = bibleStore ?: return
+        val at = System.currentTimeMillis()
+        lifecycleScope.launch(Dispatchers.IO) {
+            runCatching { store.writeRecentRef(wire, at, RecentChapters.KEEP) }
+                .onFailure { Slog.d(TAG) { "recent reference not saved" } }
         }
     }
 
@@ -397,7 +560,74 @@ class BibleActivity : AppCompatActivity() {
         }
     }
 
+    // --- the passage's doors ------------------------------------------------
+
+    /**
+     * **Full chapter** (arc 38 / R2): a SECOND instance of this Activity, in our own process, in
+     * chapter mode, opened at the first range's verse. A second instance rather than a mode flip
+     * because the chapter is somewhere the reader has *gone*: Back must come back to the passage,
+     * which is exactly what an Activity on the stack means — and the chapter instance then reads,
+     * flows and bookmarks like any other reading, with the whole screen's behaviour for free.
+     *
+     * The extras never cross a process boundary (this is `this` launching `this`), so they are
+     * not the seam and carry no contract; [BibleSession.store] is process-wide, so the second
+     * instance finds the same lent store.
+     */
+    private fun openFullChapter() {
+        val pages = passage ?: return
+        fullChapter.launch(
+            Intent(this, BibleActivity::class.java)
+                .putExtra(EXTRA_USFM, pages.openAt.usfm)
+                .putExtra(EXTRA_CHAPTER, pages.openAt.chapter)
+                .putExtra(EXTRA_VERSE, pages.openVerse),
+        )
+    }
+
+    /** Our own chapter launch, or null for every launch the host made. Total: an extra set this
+     *  build cannot read opens the reader where it was left, never a failure. */
+    private fun landingFromIntent(): Landing? {
+        val extras = intent ?: return null
+        val book = Canon.tryUsfm(extras.getStringExtra(EXTRA_USFM) ?: return null) ?: return null
+        val chapter = extras.getIntExtra(EXTRA_CHAPTER, 0)
+        if (chapter < 1) return null
+        return Landing(
+            ChapterRef(book.usfm, chapter),
+            extras.getIntExtra(EXTRA_VERSE, 1).coerceAtLeast(1),
+        )
+    }
+
+    /** Where the Contents and the Recents think the reader is: the chapter, or the passage's
+     *  first (arc 38 / R2). */
+    private fun currentChapter(): ChapterRef? = chapter?.ref ?: passage?.openAt
+
     // --- chrome -------------------------------------------------------------
+
+    /** The chrome the mode owns: the Full chapter door, which belongs to a passage and to
+     *  nothing else. GONE, never disabled — a disabled button is invisible on e-ink. */
+    private fun applyMode() {
+        binding.btnFullChapter.visibility = if (passage != null) View.VISIBLE else View.GONE
+    }
+
+    /**
+     * Keeps the title's centre honest (arc 38 / R2). The title is centred on the SCREEN, so its
+     * two margins must be equal and must clear the **wider** of the bar's two groups — and the
+     * end group grows by a word whenever Full chapter shows. Measured, never a dp constant: the
+     * width of "Full chapter" is a font's answer, not a designer's.
+     *
+     * Runs from the bar's layout and does nothing when the margins already match, so the extra
+     * pass it asks for settles immediately instead of looping.
+     */
+    private fun balanceTitle() {
+        val widest = maxOf(binding.startGroup.width, binding.endGroup.width)
+        if (widest <= 0) return
+        val params = binding.title.layoutParams as? ViewGroup.MarginLayoutParams ?: return
+        if (params.marginStart == widest && params.marginEnd == widest) return
+        params.marginStart = widest
+        params.marginEnd = widest
+        // Posted: we are inside the bar's own layout pass, and a requestLayout from in there is
+        // the "improperly called during layout" trap.
+        binding.title.post { binding.title.requestLayout() }
+    }
 
     private fun leave() {
         setResult(Activity.RESULT_OK)
@@ -410,10 +640,19 @@ class BibleActivity : AppCompatActivity() {
         return true
     }
 
+    /** Where our own Full chapter launch lands: the chapter, and the verse to open on. */
+    private class Landing(val ref: ChapterRef, val verse: Int)
+
     companion object {
         private const val TAG = "BibleScreen"
 
         /** A load faster than this says nothing; only a slow one gets a word on screen. */
         private const val LOADING_DELAY_MS = 300L
+
+        // The Full chapter launch's extras (arc 38 / R2). In-process only — this screen launching
+        // itself — so they are not part of any contract and nothing outside this file writes them.
+        private const val EXTRA_USFM = "com.symmetricalpalmtree.notesproutsn.ext.bible.USFM"
+        private const val EXTRA_CHAPTER = "com.symmetricalpalmtree.notesproutsn.ext.bible.CHAPTER"
+        private const val EXTRA_VERSE = "com.symmetricalpalmtree.notesproutsn.ext.bible.VERSE"
     }
 }

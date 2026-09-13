@@ -63,6 +63,17 @@ class NotebookRemapTest {
     }
 
     @Test
+    fun aBibleReferenceIsUntouched() {
+        // Arc 38 / R3: the reference wire rides the notebookId *slot*, but a decoded Bible payload
+        // reports no notebook id at all — so an import's re-point can never rewrite a passage into
+        // a notebook, whatever the ids of the day happen to be.
+        val payload = LinkPayload.encode(
+            LinkPayload.CHROME_UNDERLINE, LinkPayload.KIND_BIBLE, "JHN:3:14-3:18,PRO:3:5-3:6", null,
+        )
+        assertNull(NotebookRemap.remapLinkPayload(payload, oldId, newId))
+    }
+
+    @Test
     fun anUnusablePayloadIsLeftExactlyAsItCame() {
         // Rewriting a grammar we cannot read would corrupt it — a foreign or future payload is
         // simply not our business.

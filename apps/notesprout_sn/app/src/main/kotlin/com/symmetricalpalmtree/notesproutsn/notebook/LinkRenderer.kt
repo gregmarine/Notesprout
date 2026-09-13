@@ -113,6 +113,19 @@ class LinkRenderer(
         }
     }
 
+    /**
+     * Drop one link's cached composite so the next [update] rebuilds it (arc 38 / R3).
+     *
+     * [update]'s cache rule is "same padded size ⇒ same picture", which is true of every mutation
+     * the earlier arcs could make: a move does not change the picture, and a create / unlink /
+     * undo changes the wrapped set and therefore the size. **Editing a Bible reference breaks
+     * that**: the wrapped text's words change while its measured box very often does not
+     * ("John 3:16" → "John 3:17"), and the reused bitmap would show the old reference forever.
+     * The one caller is that edit — and its undo replay, which reloads the page but meets the same
+     * cache.
+     */
+    fun invalidate(id: String) { composites.remove(id) }
+
     override fun draw(canvas: Canvas) = draw(canvas, emptySet())
 
     override fun draw(canvas: Canvas, excludedContentIds: Set<String>) {

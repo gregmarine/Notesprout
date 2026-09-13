@@ -36,11 +36,21 @@ import java.util.UUID
  * There is **no EPD handoff here and there must not be one**, and **no chrome flag** crosses: the
  * reader carries no paper (the tag manager's two recorded answers, `docs/extensions.md` § "The
  * first tier-2 screen with no paper").
+ *
+ * **Arc 38 / R3** gave it the reference half of the point: [supportsReferences] (the method floor,
+ * re-read on every discovery and reported through `onAvailabilityChanged` so the notebook's doors
+ * can track it), [open] on a passage, and [resolve] — the one call that shows nothing at all.
  */
 class BibleEntry(
     private val activity: AppCompatActivity,
     /** The standing bottom-bar button this entry shows or hides on every [refresh]. */
     private val button: View,
+    /**
+     * What the discovered reader can do, told after every [discovered] (arc 38 / R3) — the notebook
+     * screen's Bible-reference doors track it, because they need a reader that understands
+     * references and not merely one that exists. Called on Main; the value is [supportsReferences].
+     */
+    private val onAvailabilityChanged: (supportsReferences: Boolean) -> Unit = {},
 ) {
 
     private val launcher: ActivityResultLauncher<Intent> =
@@ -57,12 +67,26 @@ class BibleEntry(
     private val token: String = UUID.randomUUID().toString()
     private val stackEntry: SurfaceEntry get() = SurfaceEntry(token, Surface.BIBLE)
 
+    /**
+     * Whether the discovered reader understands **references** (arc 38 / R3) — a reader declaring
+     * [ExtensionContract.MIN_API_VERSION_FOR_BIBLE_REFERENCE] or above. The R1 tails are a *method*
+     * floor, not an action floor: an older reader still serves the plain door, so this is read
+     * separately from "is there a reader at all" and is what every reference door is gated on.
+     *
+     * Re-read after every [discovered], never captured — a package can be replaced under us.
+     */
+    var supportsReferences: Boolean = false
+        private set
+
     /** Whether a trusted reader is installed **right now**. Suspends — it is a package query. */
     suspend fun discovered(): Boolean {
         val found = ExtensionRegistry.bible(activity)
         if (activity.isFinishing || activity.isDestroyed) return false
         ref = found
+        supportsReferences =
+            found != null && found.apiVersion >= ExtensionContract.MIN_API_VERSION_FOR_BIBLE_REFERENCE
         button.visibility = if (found == null) View.GONE else View.VISIBLE
+        onAvailabilityChanged(supportsReferences)
         return found != null
     }
 
@@ -77,15 +101,30 @@ class BibleEntry(
      * a result. Any failure hides the box and explains itself in a dialog (a tap that did nothing
      * is never a toast on e-ink).
      */
-    fun open() {
+    fun open() = show(reference = null)
+
+    /**
+     * Open the reader on one passage (arc 38 / R3) — a Bible link's follow. Identical in every
+     * respect to [open] (the same overlay, the same one-showing-at-a-time latch, the same surface
+     * stack) but for the opening call the client makes. Refused, silently, when the discovered
+     * reader is too old to understand references: the caller (`LinkFollowFlow`) asks
+     * [supportsReferences] first and explains in a dialog instead.
+     */
+    fun open(reference: String) = show(reference)
+
+    private fun show(reference: String?) {
         val provider = ref ?: return
         if (opening) { Slog.d(TAG) { "open: already showing" }; return }
+        if (reference != null && !supportsReferences) {
+            Slog.d(TAG) { "open: the installed reader does not serve references" }
+            return
+        }
         opening = true
         OpeningOverlay.showThen(activity) {
             activity.lifecycleScope.launch {
                 val fresh = BibleClient(activity, provider)
                 client = fresh
-                val intent = fresh.open()
+                val intent = fresh.open(reference)
                 if (activity.isFinishing || activity.isDestroyed) {
                     client = null; opening = false; fresh.finish(); return@launch
                 }
@@ -107,6 +146,21 @@ class BibleEntry(
                 stack.attach(stackEntry)
             }
         }
+    }
+
+    /**
+     * Ask the reader to read [text] as scripture references (arc 38 / R3) — bind-per-call, no
+     * showing, nothing on screen. Null when there is no reader, when the one installed is too old
+     * to be asked, or when the call failed or timed out: all four are the same answer to the
+     * caller — **this was not checked, so nothing is created**, which is the arc's locked rule that
+     * a dead Bible link can never exist.
+     *
+     * Neither the text nor the answer is logged here or in the client.
+     */
+    suspend fun resolve(text: String): ResolvedReference? {
+        val provider = ref ?: return null
+        if (!supportsReferences) return null
+        return BibleClient.resolve(activity, provider, text)
     }
 
     private suspend fun fail(fresh: BibleClient) {

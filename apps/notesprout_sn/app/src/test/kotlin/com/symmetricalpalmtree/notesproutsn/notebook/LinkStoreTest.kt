@@ -230,6 +230,28 @@ class LinkStoreTest {
     }
 
     @Test
+    fun `updateBounds rewrites the box only — payload, order and children untouched`() = runBlocking {
+        val dao = FakeSoilDao()
+        val (links, writer, stores) = make(dao)
+        seed(dao, writer, stores)
+        val l = link("l1", emptyList(), emptyList())
+        links.create("page", l)
+        writer.drain()
+        // Arc 38 / R3: the one non-move mutation of a link's bounds — a Bible link whose wrapped
+        // text was re-measured by an edit.
+        links.updateBounds("l1", 10f, 20f, 200f, 80f)
+        writer.drain()
+        val row = dao.rows["l1"]!!
+        assertEquals(10f, row.x)
+        assertEquals(20f, row.y)
+        assertEquals(200f, row.width)
+        assertEquals(80f, row.height)
+        assertEquals(payload, row.text)
+        assertEquals(0, row.order)
+        writer.close()
+    }
+
+    @Test
     fun `relink revives in place — the snapshot's stale order never rewrites the row's z-order`() = runBlocking {
         val dao = FakeSoilDao()
         val (links, writer, stores) = make(dao)

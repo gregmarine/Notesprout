@@ -10,6 +10,8 @@
     <string name="cd_bible_back">Back</string>
     <string name="cd_bible_contents">Contents</string>
     <string name="cd_bible_recents">Recents</string>
+    <!-- A text button, not a glyph: there is no icon for "the whole chapter this came from". -->
+    <string name="bible_full_chapter">Full chapter</string>
     <string name="cd_bible_prev_page">Previous page</string>
     <string name="cd_bible_next_page">Next page</string>
 
@@ -23,11 +25,13 @@
     <string name="cd_bible_contents_next">Next page</string>
     <string name="cd_bible_contents_last">Last page</string>
 
-    <!-- The Recents panel (arc 37 / B7): the notebook Recents' shape, mirrored to the right —
-         the chapters picked from the Contents, newest first; its pager reuses the Contents' hints. -->
-    <string name="bible_recents_title">Recent chapters</string>
-    <string name="bible_recents_empty">No recent chapters</string>
-    <!-- "<medium date>, <time>" — when a chapter was picked. -->
+    <!-- The Recents panel (arc 37 / B7, grown by arc 38 / R2): the notebook Recents' shape,
+         mirrored to the right — the chapters picked from the Contents AND the passages followed
+         from a notebook, newest first; its pager reuses the Contents' hints. The wording lost the
+         word "chapters" when references joined the list. -->
+    <string name="bible_recents_title">Recents</string>
+    <string name="bible_recents_empty">No recents</string>
+    <!-- "<medium date>, <time>" — when a chapter or a passage was opened. -->
     <string name="bible_recents_when">%1$s, %2$s</string>
 
     <string name="bible_title">Bible</string>
@@ -38,4 +42,6 @@
 
     <string name="bible_unavailable_title">Bible unavailable</string>
     <string name="bible_unavailable_body">This chapter could not be opened. Close the Bible and open it again.</string>
+    <!-- The passage view's half of the same failure (arc 38 / R2). -->
+    <string name="bible_passage_unavailable_body">This passage could not be opened. Close the Bible and open it again.</string>
 </resources>

@@ -179,6 +179,40 @@ object NotebookUndo {
         ) : Action
 
         /**
+         * A **Bible reference** made (arc 38 / R3) — the lasso bar's Bible button or the Insert
+         * bar's: one text object holding the user's own words, wrapped in a [link] whose payload
+         * names the passage, and (for a conversion) the ink both replaced. Three rows in one act,
+         * so **one entry**: [TextCreated] and [LinkCreated] composed, never recorded as two, or the
+         * user would undo half a reference and be left with a text object that had been a link.
+         *
+         * Undo unwraps, deletes the text and revives the ink **in place** (writing order is
+         * load-bearing — the arc-3 trap); redo restores the text, re-wraps it and re-deletes the
+         * ink. [strokeIds] is empty for an insert, which makes the same arm cover both.
+         */
+        data class BibleRefCreated(
+            override val pageId: String,
+            val link: PageLink,
+            val text: PageText,
+            val strokeIds: List<String> = emptyList(),
+        ) : Action
+
+        /**
+         * A **Bible reference edited** (arc 38 / R3) — the reference dialog's Save on a lone Bible
+         * link: the wrapped text's words, the link's payload and the link's re-derived box all
+         * change together, so all three ride one entry.
+         *
+         * Both sides are the whole [PageLink] **carrying its one wrapped text**, and the replay
+         * writes one side over the rows (the text's content, the link's payload, the link's box).
+         * Nothing is created or destroyed — [before] and [after] are the same two row ids — which
+         * is why a snapshot pair is enough and neither side needs an id list.
+         */
+        data class BibleRefEdited(
+            override val pageId: String,
+            val before: PageLink,
+            val after: PageLink,
+        ) : Action
+
+        /**
          * A text object created (arc 28 / H2): either an **insert** from the Insert bar, whose
          * [strokeIds] is empty, or a **conversion** of lassoed ink, whose [strokeIds] is the ink
          * the text replaced. Undo erases the text row and revives the ink **in place** (writing

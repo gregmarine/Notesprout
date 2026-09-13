@@ -9,7 +9,8 @@ class StoreUnavailable(cause: Throwable) : Exception(cause.message, cause)
 
 /**
  * The reader's per-device state over the host's `IExtensionStore` (arc 37 / B0, the tag
- * manager's `TagStore` shape; grown by B7 with the recents). **Blocking** — every call runs on
+ * manager's `TagStore` shape; grown by B7 with the recent chapters and by arc 38 / R2 with the
+ * recent references). **Blocking** — every call runs on
  * `Dispatchers.IO` (the screen) or a Binder thread (the service's `begin`/`end`), never Main. The
  * extension writes nothing to disk itself: this store is the host's, lent for the showing.
  *
@@ -68,6 +69,41 @@ class BibleStore(private val store: IExtensionStore) {
             listOf(
                 Statement(BibleSql.UPSERT_RECENT, ref.usfm, ref.chapter.toLong(), at),
                 Statement(BibleSql.TRIM_RECENTS, keep.toLong()),
+            ),
+        )
+        Unit
+    }
+
+    /**
+     * The recent references, newest first, at most [limit] (arc 38 / R2). A row whose wire this
+     * build cannot decode — a reference written by a later shape of the grammar, a truncated
+     * write — is dropped, not thrown: a malformed history row is never a dialog. Decoded here,
+     * on IO, so a panel row names itself without parsing on Main.
+     */
+    fun readRecentRefs(limit: Int): List<RecentEntry.Reference> = guard {
+        store.applySchema(BibleSchema.CURRENT)
+        val rows = StoreReads.all(store, Statement(BibleSql.SELECT_RECENT_REFS, limit.toLong()))
+        rows.rows.mapNotNull { row ->
+            runCatching {
+                val wire = row.text("ref")
+                val passages = ReferenceCodec.decode(wire) ?: return@runCatching null
+                RecentEntry.Reference(wire, passages, row.long("at"))
+            }.getOrNull()
+        }
+    }
+
+    /**
+     * Record a passage opened, stamped [at], and trim the table to its newest [keep] rows — one
+     * two-statement batch, [writeRecent]'s shape exactly. The wire is the key, so re-opening the
+     * same reference re-stamps the row it already has.
+     */
+    fun writeRecentRef(wire: String, at: Long, keep: Int) = guard {
+        store.applySchema(BibleSchema.CURRENT)
+        StoreReads.exec(
+            store,
+            listOf(
+                Statement(BibleSql.UPSERT_RECENT_REF, wire, at),
+                Statement(BibleSql.TRIM_RECENT_REFS, keep.toLong()),
             ),
         )
         Unit

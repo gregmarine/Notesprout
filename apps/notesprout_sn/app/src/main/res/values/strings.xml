@@ -766,6 +766,9 @@
     <string name="link_target_notebook_gone_body">The notebook this link points to no longer exists.</string>
     <string name="link_target_page_gone_body">The page this link points to no longer exists.</string>
     <string name="link_target_unreadable_body">This link was made by a newer or different version of Notesprout, so where it points can\'t be read here.</string>
+    <!-- Arc 38 / R3: the link is fine; the reader is not there. Its own wording, because
+         "update NSE · Bible" is an action the user can take and "the page is gone" is not. -->
+    <string name="link_target_bible_body">This link opens a Bible passage, but NSE · Bible is not installed or needs updating.</string>
 
     <!-- Arc 34 / M7: a page op (Erase page, Delete page, a paste, an undo) hit a database or disk
          failure. Plain problem dialog — a tap that did nothing must say so. -->
@@ -797,6 +800,20 @@
     <string name="cd_bible">Bible</string>
     <string name="bible_failed_title">Bible unavailable</string>
     <string name="bible_failed_body">The Bible could not be opened. The extension may have been disabled or removed.</string>
+
+    <!-- Bible references in the notebook (arc 38 / R3) — the lasso bar's Bible button, the Insert
+         bar's, and the Edit of a lone Bible link. The words on the page stay the user's own; the
+         toast names the passage they matched, once. -->
+    <string name="bible_reference_action">Bible reference</string>
+    <string name="insert_bible_reference">Bible reference</string>
+    <string name="bible_reference_title">Bible reference</string>
+    <string name="bible_reference_hint">John 3:16</string>
+    <string name="bible_reference_checking">Checking reference…</string>
+    <string name="bible_reference_linked_toast">Linked to %1$s</string>
+    <string name="bible_reference_unknown_title">Not a Bible reference</string>
+    <string name="bible_reference_unknown_body">“%1$s” is not a reference this Bible knows. Check the book name and the chapter and verse numbers.</string>
+    <string name="bible_reference_problem_title">Can\'t edit this reference</string>
+    <string name="bible_reference_unwrappable">This link doesn\'t hold a single piece of text, so there is no reference to edit. Unlink it and make a new one.</string>
 
     <!-- The notebook's tag button and its secondary toolbar (arc 21 / W2). The three doors are
          icon-only and name themselves on a long press — the user's W2 call, and the recipe every

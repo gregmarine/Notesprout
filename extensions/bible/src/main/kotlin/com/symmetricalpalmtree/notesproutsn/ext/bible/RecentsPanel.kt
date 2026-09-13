@@ -40,16 +40,23 @@ import java.util.Date
  * horizontal swipe over the body flips pages too — taken from the *dialog's* `dispatchTouchEvent`,
  * because a `Dialog` owns its own window and the reader behind it never sees a stroke of it.
  *
+ * **Two kinds of row** (arc 38 / R2): a chapter picked by name, and a **passage** followed here
+ * from a notebook's Bible link. They read the same — a name and a time — because they answer the
+ * same question; only the tap differs, and [RecentChapters.select] has already merged the two
+ * histories by when they happened.
+ *
  * A modal snapshot: what it shows is what [BibleActivity] gathered before opening it — nothing is
- * cached and nothing invalidates. A row tap dismisses and hands its [ChapterRef] up; "No recent
- * chapters" is a real answer, shown in the body, never a reason to hide the door.
+ * cached and nothing invalidates. A row tap dismisses and hands its entry up; "No recents" is a
+ * real answer, shown in the body, never a reason to hide the door.
  */
 class RecentsPanel(
     private val activity: Activity,
-    private val rows: List<RecentRef>,
+    private val rows: List<RecentEntry>,
     private val onDismissed: () -> Unit,
     /** The chosen chapter; the panel has dismissed itself by the time this runs. */
     private val onPicked: (ChapterRef) -> Unit,
+    /** The chosen passage, as its wire (arc 38 / R2); the panel has dismissed itself first. */
+    private val onPickedPassage: (String) -> Unit,
 ) {
     private val listSwipe = ListSwipe(
         region = { body },
@@ -187,13 +194,16 @@ class RecentsPanel(
         val timeFormat = DateFormat.getTimeFormat(activity)
         for (entry in rows.subList(start, end)) {
             val row = inflater.inflate(R.layout.item_recent_entry, list, false)
-            row.findViewById<TextView>(R.id.recentName).text = RecentChapters.label(entry.ref)
+            row.findViewById<TextView>(R.id.recentName).text = RecentChapters.label(entry)
             val at = Date(entry.at)
             row.findViewById<TextView>(R.id.recentWhen).text =
                 activity.getString(R.string.bible_recents_when, dateFormat.format(at), timeFormat.format(at))
             row.setOnClickListener {
                 dialog.dismiss()
-                onPicked(entry.ref)
+                when (entry) {
+                    is RecentEntry.Chapter -> onPicked(entry.ref)
+                    is RecentEntry.Reference -> onPickedPassage(entry.wire)
+                }
             }
             list.addView(row)
         }

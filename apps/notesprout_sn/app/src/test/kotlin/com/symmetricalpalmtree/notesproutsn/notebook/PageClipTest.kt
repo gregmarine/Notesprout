@@ -330,6 +330,16 @@ class PageClipTest {
     }
 
     @Test
+    fun `a Bible reference crosses verbatim — it names no notebook to re-point`() {
+        // Arc 38 / R3, the ObjectClip rule in its page-sized twin.
+        val payload = LinkPayload.encode(
+            LinkPayload.CHROME_UNDERLINE, LinkPayload.KIND_BIBLE, "JHN:3:14-3:18,PRO:3:5-3:6", null,
+        )
+        assertEquals(payload, pastedLink(payload, "nb-dest"))
+        assertEquals(payload, pastedLink(payload, notebookId))
+    }
+
+    @Test
     fun `a link to the page being pasted follows the copy`() {
         val link = row("lnk-self", pageId, SoilSchema.TYPE_LINK, text = ownPage(pageId))
         val env = PageClip.capture(pageRow, null, listOf(link), notebookId, now)

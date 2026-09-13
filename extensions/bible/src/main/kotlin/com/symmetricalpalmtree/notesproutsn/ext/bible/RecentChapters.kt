@@ -22,14 +22,46 @@ data class RecentRef(val usfm: String, val chapter: Int, val at: Long) {
 }
 
 /**
- * What the reader's Recents panel shows, as arithmetic (arc 37 / B7 — pure Kotlin, JVM-tested):
- * the notebook's `RecentRows` in the extension's own copy, subject for subject. **Stored order
- * wins** — recents is a history, and a sort would turn "what I was just reading" into the canon —
- * with the notebook's one clause: the chapter you are *in* is never offered as somewhere to go.
+ * A row of the Recents panel (arc 38 / R2): a chapter picked by name, or a **reference** the
+ * notebook followed here. Two tables, one list — see [RecentChapters.select].
  *
- * A recent is a **pick** — a chapter chosen from the Contents or from this panel — never a page
- * turn or a chapter the swipe flowed into: the list answers "where did I deliberately go", and a
- * reader who swiped from Genesis 1 to Genesis 9 went to Genesis once.
+ * Pure — no Android, no store. Never logged: either kind names where the user has read.
+ */
+sealed interface RecentEntry {
+
+    /** When it was picked. The merge's only sort key, and the only thing both kinds share. */
+    val at: Long
+
+    /** A chapter picked from the Contents or from this panel — [RecentRef]'s row, wrapped. */
+    data class Chapter(val ref: ChapterRef, override val at: Long) : RecentEntry
+
+    /**
+     * A passage. [wire] is its identity in the store and what re-opening it hands back to
+     * `beginAt`'s screen; [passages] is that wire already decoded, so a row can name itself
+     * without re-parsing on Main.
+     */
+    data class Reference(
+        val wire: String,
+        val passages: List<Passage>,
+        override val at: Long,
+    ) : RecentEntry
+}
+
+/**
+ * What the reader's Recents panel shows, as arithmetic (arc 37 / B7, grown by arc 38 / R2 — pure
+ * Kotlin, JVM-tested): the notebook's `RecentRows` in the extension's own copy, subject for
+ * subject. Recents is a **history**, never a canon — with the notebook's one clause: where you
+ * *are* is never offered as somewhere to go.
+ *
+ * A recent is a **pick** — a chapter chosen from the Contents or from this panel, or a passage
+ * followed from the notebook — never a page turn, a chapter the swipe flowed into, or a Full
+ * chapter opened out of a passage: the list answers "where did I deliberately go", and a reader
+ * who swiped from Genesis 1 to Genesis 9 went to Genesis once.
+ *
+ * **Two tables, one list** (arc 38 / R2). Each is stored newest-first already, so the merge sorts
+ * the union by `at` and nothing else: interleaving two histories by anything but when they
+ * happened would put one subject permanently above the other, which is exactly the canon B7
+ * refused. The sort is stable, so rows stamped in the same millisecond keep their stored order.
  */
 object RecentChapters {
 
@@ -37,19 +69,44 @@ object RecentChapters {
     const val KEEP = 30
 
     /**
-     * The rows to render, newest first: [recents] in their stored order, never [current], each
-     * chapter at most once (a duplicate can only be a corrupted store, so the first — newest —
-     * wins).
+     * The rows to render, newest first: [chapters] and [references] merged by their stamps,
+     * never the chapter ([currentChapter]) or the passage ([currentReference]) in front of the
+     * user, each chapter and each wire at most once (a duplicate can only be a corrupted store,
+     * so the first — newest — wins), and at most [KEEP] of the union.
      */
-    fun select(recents: List<RecentRef>, current: ChapterRef?): List<RecentRef> {
-        val seen = HashSet<ChapterRef>(recents.size)
-        return recents.filter { r ->
-            val ref = r.ref
-            !ref.matches(current) && seen.add(ref)
+    fun select(
+        chapters: List<RecentRef>,
+        references: List<RecentEntry.Reference>,
+        currentChapter: ChapterRef?,
+        currentReference: String?,
+    ): List<RecentEntry> {
+        val merged = ArrayList<RecentEntry>(chapters.size + references.size)
+        chapters.mapTo(merged) { RecentEntry.Chapter(it.ref, it.at) }
+        merged.addAll(references)
+        merged.sortByDescending { it.at }   // stable: a tie keeps each table's stored order
+        val seenChapters = HashSet<ChapterRef>(chapters.size)
+        val seenWires = HashSet<String>(references.size)
+        val out = ArrayList<RecentEntry>(KEEP)
+        for (entry in merged) {
+            val keep = when (entry) {
+                is RecentEntry.Chapter -> !entry.ref.matches(currentChapter) && seenChapters.add(entry.ref)
+                is RecentEntry.Reference -> entry.wire != currentReference && seenWires.add(entry.wire)
+            }
+            if (!keep) continue
+            out.add(entry)
+            if (out.size == KEEP) break
         }
+        return out
     }
 
-    /** A row's name: the running head's own form — "Psalm 23", "Genesis 1". */
+    /** A row's name: a chapter in the running head's form ("Psalm 23"), a passage in the
+     *  canonical form the notebook's link wears ("John 3:14–18; Proverbs 3:5–6"). */
+    fun label(entry: RecentEntry): String = when (entry) {
+        is RecentEntry.Chapter -> label(entry.ref)
+        is RecentEntry.Reference -> ReferenceCodec.label(entry.passages)
+    }
+
+    /** A chapter row's name: the running head's own form — "Psalm 23", "Genesis 1". */
     fun label(ref: ChapterRef): String = "${Canon.chapterTitleName(ref.usfm)} ${ref.chapter}"
 
     /**

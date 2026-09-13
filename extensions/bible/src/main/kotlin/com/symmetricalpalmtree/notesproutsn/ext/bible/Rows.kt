@@ -49,3 +49,19 @@ data class Footnote(
     val label: String?,
     val text: String,
 )
+
+/**
+ * One verse of the source's `verse` table — the plain-text layer, clean of block structure
+ * (arc 38 / R1, read by [BibleDatabase.versesForRange]). The **passage view** flows these as
+ * prose (arc 38 / R2): the rich block layer belongs to a whole chapter, and a passage is a
+ * handful of verses out of the middle of one.
+ *
+ * Pure data, like every other row here, so the atom builder over it is JVM-testable.
+ */
+data class VerseRow(
+    val verseKey: Int,
+    val usfm: String,
+    val chapter: Int,
+    val verse: Int,
+    val text: String,
+)

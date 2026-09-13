@@ -6,9 +6,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The reader's SQL, pinned as exact text (arc 37 / B0, grown by B7) — the tag manager's
- * `TagSqlTest` style. `StoreSchema` validates DDL at construction, so constructing
- * [BibleSchema.V2] is itself a check that the host's validator would accept it; the statements
+ * The reader's SQL, pinned as exact text (arc 37 / B0, grown by B7 and by arc 38 / R2) — the tag
+ * manager's `TagSqlTest` style. `StoreSchema` validates DDL at construction, so constructing
+ * [BibleSchema.V3] is itself a check that the host's validator would accept it; the statements
  * are run through the host's query/exec gate here so a shape it refuses fails on the JVM, never
  * at the seam.
  */
@@ -39,14 +39,28 @@ class BibleSqlTest {
         )
     }
 
+    @Test
+    fun `reference statements are pinned`() {
+        assertEquals("SELECT ref, at FROM recent_ref ORDER BY at DESC LIMIT ?", BibleSql.SELECT_RECENT_REFS)
+        assertEquals("INSERT OR REPLACE INTO recent_ref(ref, at) VALUES (?, ?)", BibleSql.UPSERT_RECENT_REF)
+        assertEquals(
+            "DELETE FROM recent_ref WHERE rowid NOT IN " +
+                "(SELECT rowid FROM recent_ref ORDER BY at DESC LIMIT ?)",
+            BibleSql.TRIM_RECENT_REFS,
+        )
+    }
+
     /** The host gates every statement by kind; each of ours must pass the gate it is sent through. */
     @Test
     fun everyStatementPassesTheHostGate() {
         StoreSql.checkQuery(BibleSql.SELECT_STATE)
         StoreSql.checkQuery(BibleSql.SELECT_RECENTS)
+        StoreSql.checkQuery(BibleSql.SELECT_RECENT_REFS)
         StoreSql.checkExec(BibleSql.UPSERT_STATE)
         StoreSql.checkExec(BibleSql.UPSERT_RECENT)
         StoreSql.checkExec(BibleSql.TRIM_RECENTS)
+        StoreSql.checkExec(BibleSql.UPSERT_RECENT_REF)
+        StoreSql.checkExec(BibleSql.TRIM_RECENT_REFS)
     }
 
     /** V1 is exactly what B0 shipped — a landed step is never edited. */
@@ -72,6 +86,23 @@ class BibleSqlTest {
         assertTrue(step[0].startsWith("CREATE TABLE recent"))
         assertTrue("the chapter is the key", "PRIMARY KEY (usfm, chapter)" in step[0])
         assertTrue("the stamp", "at INTEGER NOT NULL" in step[0])
-        assertEquals(BibleSchema.V2, BibleSchema.CURRENT)
+    }
+
+    /** V3 is V2's two steps untouched plus the reference-recents step — a landed step is never
+     *  edited — and it is what every call declares. */
+    @Test
+    fun v3IsV2PlusTheRecentReferenceStep() {
+        assertEquals(3, BibleSchema.V3.version)
+        assertEquals(3, BibleSchema.V3.steps.size)
+        assertEquals(BibleSchema.V2.steps[0], BibleSchema.V3.steps[0])
+        assertEquals(BibleSchema.V2.steps[1], BibleSchema.V3.steps[1])
+        val step = BibleSchema.V3.steps[2]
+        assertEquals(BibleSchema.RECENT_REF_STEP, step)
+        assertEquals(1, step.size)
+        assertEquals(
+            "CREATE TABLE recent_ref (ref TEXT PRIMARY KEY, at INTEGER NOT NULL);",
+            step[0],
+        )
+        assertEquals(BibleSchema.V3, BibleSchema.CURRENT)
     }
 }

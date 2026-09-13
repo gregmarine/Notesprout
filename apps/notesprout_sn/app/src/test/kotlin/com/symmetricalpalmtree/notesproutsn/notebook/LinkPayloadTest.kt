@@ -12,6 +12,9 @@ import org.junit.Test
  */
 class LinkPayloadTest {
 
+    /** A resolved reference's wire form, as the extension's `ReferenceCodec` writes one. */
+    private val WIRE = "JHN:3:14-3:18,PRO:3:5-3:6"
+
     // ── Paper-grammar fixtures (byte-exact) ──────────────────────────────────
 
     @Test
@@ -36,6 +39,81 @@ class LinkPayloadTest {
             "L1|1|2|nb-id|pg-id",
             LinkPayload.encode(LinkPayload.CHROME_UNDERLINE, LinkPayload.KIND_NOTEBOOK_PAGE, "nb-id", "pg-id"),
         )
+    }
+
+    // ── Kind 3, the Bible reference (arc 38 / R3) ────────────────────────────
+
+    @Test
+    fun `a Bible reference encodes with the wire in the notebookId slot`() {
+        assertEquals(
+            "L1|1|3|JHN:3:14-3:18,PRO:3:5-3:6|",
+            LinkPayload.encode(LinkPayload.CHROME_UNDERLINE, LinkPayload.KIND_BIBLE, WIRE, null),
+        )
+    }
+
+    @Test
+    fun `a Bible reference round-trips through reference, not notebookId`() {
+        for (chrome in listOf(LinkPayload.CHROME_NONE, LinkPayload.CHROME_UNDERLINE)) {
+            val d = LinkPayload.decode(LinkPayload.encode(chrome, LinkPayload.KIND_BIBLE, WIRE, null))!!
+            assertEquals(chrome, d.chrome)
+            assertEquals(LinkPayload.KIND_BIBLE, d.kind)
+            assertEquals(WIRE, d.reference)
+            // The slot carried it; the decoded notebookId must not, or a re-pointer would rewrite
+            // a reference as though it were a notebook id.
+            assertNull(d.notebookId)
+            assertNull(d.pageId)
+        }
+    }
+
+    @Test
+    fun `referenceOf answers only for a Bible payload`() {
+        assertEquals(
+            WIRE,
+            LinkPayload.referenceOf(
+                LinkPayload.encode(LinkPayload.CHROME_UNDERLINE, LinkPayload.KIND_BIBLE, WIRE, null)
+            ),
+        )
+        assertNull(LinkPayload.referenceOf("L1|1|0||page-1-id"))
+        assertNull(LinkPayload.referenceOf("L1|0|1|nb-id|"))
+        assertNull(LinkPayload.referenceOf("garbage"))
+    }
+
+    @Test
+    fun `encode refuses a wire the payload could not carry`() {
+        // The separator above all — a wire holding one would make a six-part payload.
+        assertThrows(IllegalArgumentException::class.java) {
+            LinkPayload.encode(LinkPayload.CHROME_UNDERLINE, LinkPayload.KIND_BIBLE, "JHN:3:16|X", null)
+        }
+        // Blank, lower case, whitespace and over-cap are all "not a wire" to ResolvedReference.
+        assertThrows(IllegalArgumentException::class.java) {
+            LinkPayload.encode(LinkPayload.CHROME_UNDERLINE, LinkPayload.KIND_BIBLE, "", null)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            LinkPayload.encode(LinkPayload.CHROME_UNDERLINE, LinkPayload.KIND_BIBLE, "jhn:3:16", null)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            LinkPayload.encode(LinkPayload.CHROME_UNDERLINE, LinkPayload.KIND_BIBLE, "JHN:3:16 PRO:3:5", null)
+        }
+        // And a pageId the kind does not carry.
+        assertThrows(IllegalArgumentException::class.java) {
+            LinkPayload.encode(LinkPayload.CHROME_UNDERLINE, LinkPayload.KIND_BIBLE, WIRE, "pg")
+        }
+    }
+
+    @Test
+    fun `a Bible payload with a pageId or a bad wire decodes null`() {
+        assertNull(LinkPayload.decode("L1|1|3|$WIRE|pg"))
+        assertNull(LinkPayload.decode("L1|1|3||"))
+        assertNull(LinkPayload.decode("L1|1|3|jhn:3:16|"))
+        assertNull(LinkPayload.decode("L1|1|3|" + "J".repeat(513) + "|"))
+    }
+
+    @Test
+    fun `kind 4 is still unknown`() {
+        assertNull(LinkPayload.decode("L1|1|4|x|"))
+        assertThrows(IllegalArgumentException::class.java) {
+            LinkPayload.encode(LinkPayload.CHROME_NONE, 4, "x", null)
+        }
     }
 
     @Test

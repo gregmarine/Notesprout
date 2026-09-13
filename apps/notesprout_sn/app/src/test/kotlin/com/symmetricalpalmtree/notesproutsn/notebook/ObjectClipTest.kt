@@ -303,6 +303,17 @@ class ObjectClipTest {
     }
 
     @Test
+    fun `a Bible reference crosses verbatim — it names no notebook to re-point`() {
+        // Arc 38 / R3: kind 3's notebookId *slot* holds a reference wire, so a re-pointer that
+        // rewrote it would turn a passage into a notebook id. Only KIND_PAGE is ever re-pointed.
+        val payload = LinkPayload.encode(
+            LinkPayload.CHROME_UNDERLINE, LinkPayload.KIND_BIBLE, "JHN:3:14-3:18,PRO:3:5-3:6", null,
+        )
+        assertEquals(payload, pastedLinkPayload(payload, otherNotebook))
+        assertEquals(payload, pastedLinkPayload(payload, notebookId))
+    }
+
+    @Test
     fun `a payload this build cannot read crosses verbatim rather than being invented a target`() {
         for (payload in listOf("L9|1|0||page-9", "", "not a payload at all")) {
             assertEquals(payload, pastedLinkPayload(payload, otherNotebook))

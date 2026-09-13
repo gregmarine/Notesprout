@@ -119,9 +119,6 @@ class BibleDatabase private constructor(
 
     // --- arc 38 / R1: what a reference needs ----------------------------------
 
-    /** One verse of the `verse` table's plain text (the passage view's source, arc 38 / R2). */
-    data class VerseRow(val verseKey: Int, val usfm: String, val chapter: Int, val verse: Int, val text: String)
-
     /**
      * The verses whose key falls in `[startKey, endKey]`, in reading order — the `verse` table's
      * clean plain text (no block structure: the passage view flows them as prose). Keys are

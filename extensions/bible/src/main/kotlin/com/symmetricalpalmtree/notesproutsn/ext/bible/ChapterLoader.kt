@@ -102,6 +102,19 @@ class ChapterLoader(private val context: Context) {
         }
     }
 
+    /**
+     * Runs [block] against the opened source and the one typography, under the build monitor
+     * (arc 38 / R2) — the door [PassageLoader] builds a passage through, so a passage and a
+     * chapter can never measure the shared `TextPaint` from two threads at once. Opening and
+     * font loading happen **outside** the monitor, exactly as [chapter] does them. Blocking —
+     * IO only.
+     */
+    fun <T> withSource(block: (BibleDatabase, ReaderTypography) -> T): T {
+        val db = source()
+        val typo = typography()
+        synchronized(buildLock) { return block(db, typo) }
+    }
+
     /** Closes the source. Main-safe: it never waits on a build, only on the field lock. */
     fun close() {
         val open = synchronized(lock) {
@@ -191,8 +204,9 @@ class ChapterLoader(private val context: Context) {
     }
 
     companion object {
-        /** Slack under the measured page height — a rounding error must never clip a line. */
-        private const val SAFETY_PAD_DP = 8f
+        /** Slack under the measured page height — a rounding error must never clip a line.
+         *  Not private since arc 38 / R2: a passage is paginated against the same band. */
+        const val SAFETY_PAD_DP = 8f
 
         /** The current chapter and its two neighbours, with room for the pair behind them. */
         private const val CACHE_MAX = 5

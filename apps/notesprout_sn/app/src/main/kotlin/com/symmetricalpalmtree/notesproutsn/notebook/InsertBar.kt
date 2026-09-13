@@ -9,12 +9,15 @@ import com.symmetricalpalmtree.notesproutsn.R
 
 /**
  * The Insert button's sub-bar (arc 28 / H1, D4) — a small bordered bar hung under `ic_plus` in the
- * notebook's top bar, holding the eight things a page can be given that are not ink:
+ * notebook's top bar, holding the things a page can be given that are not ink:
  *
- *  **Sticky · Text · Rectangle · Ellipse · Triangle · Line · Arrow · Star**
+ *  **Sticky · Text · Rectangle · Ellipse · Triangle · Line · Arrow · Star · Bible reference**
  *
- * left to right, in that order, always. Placement, the button recipe and the rects are
- * [AnchoredBar]'s — the arc-8 lasso popup's bar and the arc-21 tag bar's, and one shape has one
+ * left to right, in that order, always — arc 38 / R3 appended the ninth, and appended it rather
+ * than placing it beside Text because the eight were measured against the Nomad's bar as a row and
+ * a new kind joins the end of that row, never the middle of it.
+ *
+ * Placement, the button recipe and the rects are [AnchoredBar]'s — the arc-8 lasso popup's bar and the arc-21 tag bar's, and one shape has one
  * implementation.
  *
  * **Insert is a command, not a tool.** Picking one of these places an object at the page centre and
@@ -23,9 +26,11 @@ import com.symmetricalpalmtree.notesproutsn.R
  *
  * **Every button is [offer]ed by its own phase, and hidden until then** (J4: GONE, never disabled
  * — a control that does nothing does not exist, and on e-ink a greyed control is invisible anyway).
- * That staging is finished: H2 offered [Kind.TEXT], H4 the six shapes ([shapeType] is the mapping)
- * and H5 [Kind.STICKY], so **all eight are offered in every build** and the bar the Nomad was
- * measured with in H1 is the bar that ships.
+ * H2 offered [Kind.TEXT], H4 the six shapes ([shapeType] is the mapping) and H5 [Kind.STICKY], so
+ * the arc-28 eight are offered in every build. **[Kind.BIBLE] is the one that still comes and goes**
+ * (arc 38 / R3): it is offered only while a trusted Bible reader that understands references is
+ * installed, re-offered from the entry's own discovery on every resume — the same rule the lasso
+ * bar's Bible button follows, and the reason [offer] stayed a verb rather than becoming history.
  *
  * The screen owns *when* it closes — a pick, another bar button, a tool switch, a page swap, a
  * finger gesture, an outside tap — and unions [rects] into the exclusion rects and the
@@ -42,8 +47,9 @@ class InsertBar(
     private val onInsert: (Kind) -> Unit,
 ) {
 
-    /** What the eight buttons insert — the order they sit in is this enum's order (D4). */
-    enum class Kind { STICKY, TEXT, RECTANGLE, ELLIPSE, TRIANGLE, LINE, ARROW, STAR }
+    /** What the buttons insert — the order they sit in is this enum's order (D4), and a new kind
+     *  is appended, never inserted. [BIBLE] is arc 38 / R3's. */
+    enum class Kind { STICKY, TEXT, RECTANGLE, ELLIPSE, TRIANGLE, LINE, ARROW, STAR, BIBLE }
 
     private val bar = AnchoredBar(root, bar, anchor, bandBottom)
 
@@ -88,7 +94,7 @@ class InsertBar(
          * the screen routes an insert through, here because the enum is this class's.
          */
         fun shapeType(kind: Kind): ShapeType? = when (kind) {
-            Kind.STICKY, Kind.TEXT -> null
+            Kind.STICKY, Kind.TEXT, Kind.BIBLE -> null
             Kind.RECTANGLE -> ShapeType.RECTANGLE
             Kind.ELLIPSE -> ShapeType.ELLIPSE
             Kind.TRIANGLE -> ShapeType.TRIANGLE
@@ -108,6 +114,7 @@ class InsertBar(
             Kind.LINE -> R.drawable.ic_shape_line
             Kind.ARROW -> R.drawable.ic_shape_arrow
             Kind.STAR -> R.drawable.ic_shape_star
+            Kind.BIBLE -> R.drawable.ic_bible
         }
 
         /** Icon-only with a long-press hint, the recipe every floating bar in this screen follows. */
@@ -120,6 +127,7 @@ class InsertBar(
             Kind.LINE -> R.string.insert_line
             Kind.ARROW -> R.string.insert_arrow
             Kind.STAR -> R.string.insert_star
+            Kind.BIBLE -> R.string.insert_bible_reference
         }
     }
 }

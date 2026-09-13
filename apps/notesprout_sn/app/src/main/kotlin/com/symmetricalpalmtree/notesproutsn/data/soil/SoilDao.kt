@@ -187,6 +187,13 @@ interface SoilDao {
     @Query("UPDATE notebook SET x = :x, y = :y, width = :width, height = :height, flags = :flags, updatedAt = :at WHERE id = :id")
     suspend fun setShapeGeometry(id: String, x: Float, y: Float, width: Float, height: Float, flags: Long, at: Long)
 
+    /** Rewrite a row's whole box — top-left **and** size (arc 38 / R3). The one mutation a link's
+     *  bounds have besides a move: a Bible link wraps one text object, and re-writing that text
+     *  re-measures it, so the link's box has to follow it. `flags` and `text` are untouched, which
+     *  is what keeps it off [setShapeGeometry]'s toes. */
+    @Query("UPDATE notebook SET x = :x, y = :y, width = :width, height = :height, updatedAt = :at WHERE id = :id")
+    suspend fun setBox(id: String, x: Float, y: Float, width: Float, height: Float, at: Long)
+
     /** Live sticky rows of a page in z-order (arc 28) — icons only; content is read per note. */
     @Query("SELECT * FROM notebook WHERE parentId = :pageId AND type = 'sticky_note' AND deletedAt IS NULL ORDER BY `order`")
     suspend fun stickiesOf(pageId: String): List<SoilObjectEntity>
