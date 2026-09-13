@@ -812,6 +812,8 @@
     <string name="bible_reference_linked_toast">Linked to %1$s</string>
     <string name="bible_reference_unknown_title">Not a Bible reference</string>
     <string name="bible_reference_unknown_body">“%1$s” is not a reference this Bible knows. Check the book name and the chapter and verse numbers.</string>
+    <!-- The refusal's positive button: reopen the dialog with the words kept. "Edit", not "Edit link" — no link exists yet (R4 walk). -->
+    <string name="bible_reference_edit_action">Edit</string>
     <string name="bible_reference_problem_title">Can\'t edit this reference</string>
     <string name="bible_reference_unwrappable">This link doesn\'t hold a single piece of text, so there is no reference to edit. Unlink it and make a new one.</string>
 

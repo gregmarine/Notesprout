@@ -43,6 +43,12 @@ renderer and the follow all live in `:app`. Deliberate differences are listed at
 `SelectionToolbar`, `PageGestures`, `UndoRedoStack`, `NotebookSession` and `NotebookActivity` all
 grew link duties — described below, detailed in [`notebook.md`](notebook.md).
 
+**Arc 38 "Reference"** (2026-09-13) added a fourth kind, [`KIND_BIBLE`](#the-bible-kind-arc-38) —
+a link whose target is not a row of ours at all, but a passage of scripture resolved by **NSE ·
+Bible**. `notebook/BibleRefFlow` (§ below) is its collaborator, alongside the ones above; the
+reader's own half of the seam is [`extensions/bible/docs/bible.md`](../../../extensions/bible/docs/bible.md)
+§ "Bible references".
+
 ---
 
 ## Data model
@@ -89,12 +95,64 @@ family-compatible in both directions; a cross-app id simply resolves dead (the d
 ```
 
 `chrome` `0|1` (none/underline) · `kind` `0` page-of-this-notebook (no notebookId) · `1` whole
-notebook (no pageId) · `2` page of another notebook (both). Versioned tag, `|` separator (ids are
-UUIDs), empty slot for each id the kind doesn't carry, 2000-char cap **in both directions** (a
-file is untrusted input). `encode` throws — only our own flows compose payloads; `decode` returns
-null for anything unusable (unknown version, bad kind, forbidden/oversized ids) and **never
-throws**: chrome falls back to `CHROME_NONE` (content still renders) and a follow lands in the
-dead-target dialog, never a crash.
+notebook (no pageId) · `2` page of another notebook (both) · **`3` a passage of scripture (arc 38 —
+no pageId; see below)**. Versioned tag, `|` separator (ids are UUIDs), empty slot for each id the
+kind doesn't carry, 2000-char cap **in both directions** (a file is untrusted input). `encode`
+throws — only our own flows compose payloads; `decode` returns null for anything unusable (unknown
+version, bad kind, forbidden/oversized ids) and **never throws**: chrome falls back to
+`CHROME_NONE` (content still renders) and a follow lands in the dead-target dialog, never a crash.
+
+| kind | payload | carries |
+|---|---|---|
+| `KIND_PAGE` (0) | `"L1\|1\|0\|\|<pageId>"` | a page of the link's own notebook — no `notebookId` |
+| `KIND_NOTEBOOK` (1) | `"L1\|0\|1\|<notebookId>\|"` | another notebook — no `pageId` |
+| `KIND_NOTEBOOK_PAGE` (2) | `"L1\|1\|2\|<notebookId>\|<pageId>"` | a page of another notebook |
+| `KIND_BIBLE` (3) | `"L1\|1\|3\|<wire>\|"` | a passage of scripture — no `pageId`, and no `notebookId` either once decoded (below) |
+
+### The Bible kind (arc 38)
+
+`KIND_BIBLE` is the one kind whose target is not a row of ours: the **notebookId slot** carries a
+resolved reference's opaque wire form (`JHN:3:14-3:18,PRO:3:5-3:6` — grammar and examples in
+[`extensions/bible/docs/bible.md`](../../../extensions/bible/docs/bible.md) § "Bible references");
+the extension's `ReferenceCodec` is its only reader, and `ResolvedReference.isWire` is the whole of
+what `LinkPayload` itself checks (a wire is longer than a UUID, is not one, and carries its own
+comma/colon grammar, but neither it nor an id may hold the payload's `|` separator).
+
+**`decode()` reports `Decoded.notebookId = null` for a Bible payload** and hands the wire back as
+the new `Decoded.reference` field instead — deliberately, so nothing that re-points a notebook id
+(`NotebookRemap`, `ObjectClip`, `PageClip`) can ever mistake a reference for one; each of those
+three was checked against the new kind at R3 and needed no change, because none of them reaches a
+`reference` field. `LinkPayload.referenceOf(payload)` is the one predicate the notebook screen asks
+to tell a Bible link from any other.
+
+**Paper and og decode kind 3 as unusable** — a dead link there, accepted at the arc-38 wizard: the
+family format gained a fourth kind neither of those apps knows, and a payload they cannot read
+already degrades to `CHROME_NONE` + the dead-target dialog by the family's own `decode`-never-
+throws rule, so nothing new had to be built for that direction.
+
+`LinkNav.planFollow` answers a fourth `Follow` case, `Follow.Bible(reference)` — **not** a place in
+the library at all: `LinkFollowFlow.follow`'s handler for it neither pushes the trail nor seals the
+notebook, because the Bible reader owns its own screen and returns by result onto this same page.
+It asks the host's `BibleEntry.open(reference)` — **true** only when a trusted reader declaring
+`MIN_API_VERSION_FOR_BIBLE_REFERENCE` (12) is installed and the showing was actually asked for;
+**false** (no reader, or one too old) is the dead-target dialog, with its own wording
+(`link_target_bible_body`, "This link opens a Bible passage, but NSE · Bible is not installed or
+needs updating") rather than the page-gone or notebook-gone text every other kind's refusal uses.
+The `busy` door is released **before** the async `openBible` call (unlike a same-notebook or
+cross-notebook hop, which holds it until the screen actually leaves) — the notebook is never left,
+so there is nothing for a second tap to collide with once the reader is asked for.
+
+**Edit** on a lone Bible link routes to `BibleRefFlow.edit`, never the page picker (K1/K2's Edit
+path checks the payload's kind first): the reference dialog opens prefilled with the wrapped text
+object's own words, Save re-resolves through `BibleEntry.resolve` and rewrites both the text and
+the payload in one `Action.BibleRefEdited` undo entry. Because editing can change the wrapped
+text's words while its measured box very often does not ("John 3:16" → "John 3:17" is the same
+width), the ordinary link-composite cache rule — "same padded size ⇒ same picture" — is wrong for
+this one path, so `LinkRenderer.invalidate(id)` drops the cached bitmap and the edit's own reload
+rebuilds it; every other link mutation still relies on the cache rule unchanged. `LinkStore.
+updateBounds` is the matching write: the **only** rewrite of a link's own box that is not a move,
+because the wrapped text's re-measured box changes the link's box (and with it the hit target and
+the underline band), and nothing else about a Bible link's geometry does.
 
 Two locked family deltas from Paper's rows, both in `LinkRows`: `style` is **written null**
 (Paper put its provider identity there; SN has no provider) and **read leniently** — a
@@ -386,6 +444,11 @@ that hits no link never takes the flow's door.
   "reopen the notebook you are in" has no honest meaning. A **page targeting itself** (foreign or
   hand-edited payload) is the same silent no-op (K5): pushing would stack self-entries that eat a
   real walk-back hop each and crowd genuine origins off the capped trail.
+- **A Bible passage** (`KIND_BIBLE`, arc 38): not a hop to anywhere in the library, so neither the
+  trail nor the page-op lock is touched — `openBible(reference)` opens the reader over this same
+  screen and returns by result. Refused (no reader ≥ 12, or none at all) is the dead-target dialog
+  with its own wording, never the notebook/page-gone text. § [The Bible kind](#the-bible-kind-arc-38)
+  above has the payload's own detail; this is only the follow's branch of it.
 - **Dead or unusable target**: the **dead-target dialog** — a problem dialog (never a toast),
   with distinct wording for notebook-gone / page-gone / payload-unreadable and a positive
   **"Edit link"** button that opens the picker prefilled to retarget on the spot. The link row is
@@ -451,15 +514,20 @@ the failure table: [`docs/encryption.md`](encryption.md).
 
 ## JVM tests
 
-`LinkPayloadTest` (round-trips, Paper-grammar fixtures, decode rejections, caps),
+`LinkPayloadTest` (round-trips, Paper-grammar fixtures, decode rejections, caps — **19 tests** since
+arc 38 / R3 added the `KIND_BIBLE` round-trip, the `reference`-not-`notebookId` decode rule, the
+`isWire` boundary and the Paper/og dead-kind fixture),
 `LinkRowsTest` (row mapping, lenient `style`, `unionBounds` + `bandBottom` + `withUnderlineBand`), `LinkStoreTest`
 (wrap/unlink/relink/remove/restore/move transactions over `FakeSoilDao`, chunking, K5's
-revive-in-place order preservation),
+revive-in-place order preservation, plus arc 38's `updateBounds` write — **18 tests**),
 `LinkCompositeTest` (pad/size math), `LinkPickerModelTest` (modes, prefills,
 exclusion-beside-numbering, `gridPageOf`, K3 placement/inherit/buttons, `composeOk` incl. the
 self-target refusal), `PageLabelsTest`, `PageReadsTest`, `PreviewMathTest`, `SchemePrefillTest`,
-`LinkNavTest` (all plan shapes incl. the current-notebook reroutes), `TrailCodecTest` (cap, LIFO,
+`LinkNavTest` (all plan shapes incl. the current-notebook reroutes and, since R3, `Follow.Bible` —
+**12 tests**), `TrailCodecTest` (cap, LIFO,
 untrusted decode). The stores test against the injected-`transact` seam — no Room in JVM tests.
+`NotebookRemapTest`, `ObjectClipTest` and `PageClipTest` each grew one fixture confirming a Bible
+payload passes through untouched (no `notebookId` to remap).
 
 ## Deliberate differences from Paper / og
 

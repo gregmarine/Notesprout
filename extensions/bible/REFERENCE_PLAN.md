@@ -129,3 +129,71 @@ Read first: `extensions/bible/docs/bible.md`, `apps/notesprout_sn/docs/links.md`
   chapters" → "Recents"/"No recents". Nothing logs a wire or a label — page counts and durations
   only. Tests: `PassageAtomsTest` (9), `BibleSqlTest` +2, `RecentChaptersTest` rewritten for the
   union (11 → 16) — `:ext-bible` 77 → **93**, `assembleDebug` green.
+
+- **R3 host: object + doors + follow — ✅ 2026-09-13.** The host's whole half, landed the same
+  commit as R2. `LinkPayload.KIND_BIBLE` = 3 (`notebook/LinkPayload.kt`): the wire rides the
+  `notebookId` slot, checked by `ResolvedReference.isWire` rather than the id rules; `decode()`
+  reports `Decoded.notebookId = null` and a new `Decoded.reference` field instead, so
+  `NotebookRemap`/`ObjectClip`/`PageClip` can never mistake a reference for a notebook id (each
+  checked — none needed a change). `BibleRefFlow` (`notebook/BibleRefFlow.kt`) is the three doors
+  in one place, kept out of `NotebookActivity` the way `TextFlow`/`LinkPickFlow` are: `convert`
+  (the lasso bar's Bible — `HeadingConvert.run(multiLine = false)`, then the dialog prefilled),
+  `insertAtCentre` (the Insert bar's Bible — the dialog empty), `edit` (a lone Bible link, checked
+  `link.texts.singleOrNull()` with every other wrapped list empty before trusting it). All three
+  share one `dialog()` → `host.resolve(typed)` → success wraps, failure raises the "Not a Bible
+  reference" problem dialog whose positive button reopens the dialog prefilled (judgment call: the
+  fix is almost always one character). `BibleRefDialog` is `HeadingEditDialog`'s one-field shape,
+  with the one deliberate difference that **a blank Save is a Cancel here** (a Bible link's text
+  *is* its reference; blank means nothing honest to keep, never "delete"). One undo step per act —
+  `NotebookUndo.Action.BibleRefCreated`/`.BibleRefEdited`, composing what would otherwise be a
+  `TextCreated` + `LinkCreated`/`LinkEdited` pair — because undoing them separately would strand a
+  plain text object that used to be a link. `LinkRenderer.invalidate(id)` is the one new escape
+  hatch from the link-composite cache's "same padded size ⇒ same picture" rule, needed because an
+  edited reference's re-measured box very often does not change size while its words do.
+  `LinkStore.updateBounds` is the matching write — the only rewrite of a link's own box that is
+  not a move. `LinkNav.Follow.Bible(reference)` and `LinkFollowFlow`'s handler for it neither push
+  the trail nor seal the notebook (the reader returns by result onto this same page); refused
+  (`BibleEntry.openBible` answering `false`) is the dead-target dialog with its own wording
+  (`link_target_bible_body`). Both doors — the lasso bar's Bible (`SelectionToolbar.onBible`,
+  `STROKES`-only) and the Insert bar's ninth kind (`InsertBar.Kind.BIBLE`, appended, never
+  inserted mid-row) — are gated on `BibleEntry.supportsReferences`, the **method** floor, not
+  merely "a reader is installed." `BibleClient` grew a bind-per-call `Companion.resolve` and an
+  `open(reference)` overload; `BibleEntry` grew `supportsReferences`/`resolve`/`open(reference)`.
+  Tests: `LinkPayloadTest` (19 total, incl. the new kind's round-trip and the Paper/og dead-kind
+  fixture), `LinkNavTest` (12, incl. `Follow.Bible`), `LinkStoreTest` (18, incl. `updateBounds`),
+  `NotebookRemapTest`/`ObjectClipTest`/`PageClipTest` + one Bible-payload pass-through fixture
+  each — `:app` 1667 → **1679** tests.
+  R2 + R3 landed as one commit (`1ec24961`), `:ext-bible` 93 / `:app` 1679.
+
+- **R4 the Nomad walk — ✅ 2026-09-13** (adb-driven `.dev` builds; the lasso conversion and hand
+  feel left to the user's own hand, since adb cannot drive a lasso). Insert → Bible → typed "jn
+  3:16-18, prov 3:5-6" → resolved in the extension in 465 ms (first call, cold process; 1,136 ms
+  round trip host-side) → landed as an underlined link showing the user's own words, selected in
+  LINK mode. A finger tap → `beginAt` → the passage view showed "John 3:16–18; Proverbs 3:5–6"
+  with a "John 3" heading, verses 16–18, a "Proverbs 3" heading, verses 5–6, on one page (316 ms);
+  Full chapter opened John 3 on page 3/6, the page holding verse 16 (581 ms); Back returned to the
+  passage; Recents (while the passage was showing) listed 3 chapters and dropped the passage
+  itself ("3 of 3+1"); picking Job 1 then reopening Recents listed the reference row first;
+  tapping it reopened the passage view in place (55 ms, cached); Back from the passage returned to
+  the notebook (`end` ran, the bind closed). "hezekiah 3" was refused in 3 ms → the "Not a Bible
+  reference" dialog quoted the words back; its Edit button reopened the dialog prefilled. **One
+  post-walk fix**: that button's label had reused "Edit link" — wrong, since no link exists yet at
+  that point; it now reads plain "Edit" (`bible_reference_edit_action`). **Left to the user's
+  hand**: the lasso-bar conversion, Edit on an existing reference, undo/redo of both a create and
+  an edit, and the eleven-button lasso bar's width on the Nomad. **Trap recorded**: the reference
+  dialog centres at y≈935 px before the IME shows and rises to y≈587 once it is up — an adb walk
+  must tap the field at the pre-IME position first.
+
+- **R5 docs — ✅ 2026-09-13.** `extensions/bible/docs/bible.md` grew a major "Bible references
+  (arc 38)" section (the seam tails, `Reference.kt`, the wire grammar, the passage view, the
+  Recents' second table, privacy, a failure-table addendum) plus updates to the intro, the
+  decisions list, the store section (`BibleSchema.V3`), the tests table (93 tests, 11 files) and
+  "Not in this arc"; the R4 walk numbers were added to "What the walks proved." `docs/links.md`
+  gained the Bible kind's payload row, `Decoded.reference`, `LinkNav.Follow.Bible`, the follow
+  path, and updated JVM-test counts. `docs/objects.md` gained the selection-toolbar Bible column,
+  the Insert bar's ninth kind, `BibleRefFlow`/`BibleRefDialog` in the collaborators table, the two
+  undo actions, and the one-text-per-Bible-link invariant. `docs/extensions.md` gained "Arc 38's
+  two tails" under § The Bible point, boundary-audit rows 55–56, and the `API_VERSION` 12 ledger
+  entry. Both `CLAUDE.md` files and this ledger were updated. No code disagreed with the plan;
+  the R4 fix (the Edit-button string) was the only place the walk found something worth recording
+  beyond what R2/R3 already built.

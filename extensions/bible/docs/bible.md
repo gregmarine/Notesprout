@@ -6,6 +6,13 @@ boundaries, and — B7 — a **Recents** panel of the chapters picked by name. N
 beyond the one remembered position and that history, no cross-reference taps, no footnote popups.
 Berean Standard Bible only.
 
+**Arc 38 "Reference"** (2026-09-13, a fresh user decision, § [Bible references](#bible-references-arc-38)
+below) grew a second door **in**, from the notebook: a lassoed or typed reference ("John 3:16-18,
+Proverbs 3:5-6") becomes a text object wrapped in a link, and a finger tap opens this reader on
+**just those verses** — a passage view, distinct from the chapter reading this doc otherwise
+describes — with a **Full chapter** door back into the ordinary reading model. Nothing about this
+is a tenth extension point; the seam grew two compatible tails on the ninth.
+
 This is the **eighth fresh user decision** on the SN extension seam (granted 2026-09-13), landing
 SN's **ninth** extension point (`ACTION_BIBLE` / `ACTION_BIBLE_SCREEN`) and its **fifteenth**
 module. It is also the **first module living outside `apps/notesprout_sn`'s own Gradle root** —
@@ -67,6 +74,12 @@ The user's, locked 2026-09-13 (`BIBLE_PLAN.md`):
 14. **Label `NSE · Bible` / `NSE · Bible Dev`**, package
     `com.symmetricalpalmtree.notesproutsn.ext.bible` (`.dev` in debug), the family's byte-identical
     puzzle icon, `versionName` in lockstep with `:app` (`0.1.0-sn`).
+
+**Arc 38 "Reference"** (2026-09-13) is a separate fresh decision, made after this arc froze — its
+own fourteen locked decisions and judgment calls live in `extensions/bible/REFERENCE_PLAN.md`, not
+here. What it added to *this reader* — the passage mode, Full chapter, and the Recents' second
+table — is § [Bible references](#bible-references-arc-38) below; nothing above this line changed
+to accommodate it.
 
 ---
 
@@ -534,18 +547,200 @@ chapter it was picked *from* takes its place.
 
 ---
 
+## Bible references (arc 38)
+
+A fresh user decision (2026-09-13, `extensions/bible/REFERENCE_PLAN.md`): a lassoed or typed
+scripture reference in a notebook becomes a text object wrapped in a link, and a finger tap opens
+**this same `BibleActivity`**, one screen further, on **just those verses**. Nothing here is a
+tenth extension point — the ninth (`ACTION_BIBLE`) grew two compatible method tails. The seam
+itself (`IBible.resolve`/`beginAt`, `ResolvedReference`, `LinkPayload.KIND_BIBLE`, `BibleRefFlow`,
+the doors) is the host's half and is documented in
+[`apps/notesprout_sn/docs/extensions.md`](../../../apps/notesprout_sn/docs/extensions.md) § "The
+Bible point" and [`apps/notesprout_sn/docs/links.md`](../../../apps/notesprout_sn/docs/links.md);
+what follows is what this reader itself grew to serve it.
+
+### The seam tails
+
+`IBible` gained two methods after `end()` (transaction codes 3 and 4, the calendar's `render`
+precedent), both behind a **method** floor: `MIN_API_VERSION_FOR_BIBLE_REFERENCE` = 12
+(`ExtensionContract.API_VERSION` moved 11 → 12 to make 12 expressible). `MIN_API_VERSION_FOR_BIBLE`
+— the **action** floor that gates the point's existence at all — stays 11: a reader that only
+declares 11 still serves the plain door (open the reader, read where you left off); the host offers
+the notebook's two reference doors, and follows a Bible link, only against a reader declaring 12 or
+above. This is deliberate and matches the calendar's `render`/`advanceOutgoing` precedent exactly —
+a compatible *addition*, not a break, so an 11-only reader is never disabled by the bump, only left
+without the newer doors.
+
+- **`resolve(text: String): ResolvedReference?`** — bind-per-call, no store, ≤ 2 s budget host-side
+  (`BibleClient.RESOLVE_TIMEOUT_MS` = 8 s, sized for the cold case: a freshly installed reader's
+  *first* call also carries `ContentInstaller`'s 11.6 MB asset copy out of the APK). Parses [text]
+  and checks it against the installed source; null means "not a reference this Bible knows" **or**
+  "could not ask" — the host treats both as one answer, because either way nothing may be created
+  (`BIBLE_PLAN.md`'s "a dead Bible link cannot be created" carried into arc 38). Neither the text
+  nor the answer is ever logged, on either side of the seam — a count of passages and a duration
+  only (`BibleService.resolve`'s own `Slog.d` line).
+- **`beginAt(store, reference)`** — `begin`'s second opening: the same store-lending bracket, plus
+  a resolved reference's wire form to open the screen on. `BibleSession.reference` is set alongside
+  `BibleSession.store` and read **once**, in `BibleActivity.onCreate`, deciding passage mode for
+  the life of that showing.
+
+`ResolvedReference(wire, label)` (`:extension-api`) is the one value that crosses back: `wire` is
+opaque to the host (only `ReferenceCodec` here reads its grammar) but its constructor `require`s
+the host's whole check — ASCII, no `|` (the link payload's separator), no whitespace, ≤
+`MAX_WIRE_CHARS` (512) — so a wire that could break a payload never unmarshals; `label` is the
+canonical display form ("John 3:16–18; Proverbs 3:5–6"), read once into a confirmation toast and
+never stored. Unmarshal is validation, the seam's whole-family rule.
+
+### `Reference.kt` — parser, codec, resolver
+
+Ported from Biblesprout's `data/Reference.kt` and stripped of `rawText` (decision 2 of arc 38: the
+user's own words stay on the notebook page, never here) — three pure objects, JVM-tested with no
+database:
+
+- **`Passage`** — a `CanonBook` plus an ordered, non-empty list of `VerseRange`s. `format()` is the
+  canonical rendering a reader would write by hand: chapter prefixes drop once a chapter is already
+  established ("John 3:16–18, 22" not "John 3:16–18, John 3:22"), a whole chapter is the bare
+  number ("Genesis 1", "Genesis 1–2").
+- **`ReferenceParser`** — `parse(input)` splits book from spec at the first digit (so "1 Cor 13:4"
+  and spaceless "Ps23" both work), resolves the book through `Canon.lookup` (case/punctuation/
+  abbreviation tolerant), and reads the spec as chapter-level, cross-chapter (`"1:5-2:3"`), or
+  verse-level-with-carried-chapter (`"3:14-16,18"`). `parseAll(input)` splits on `,`/`;`, lets a
+  bare number continue the previous book ("John 3:16, 18"), and — the locked rule — **any one bad
+  chunk empties the whole result**: a half-dead reference can never be linked, because *this* is
+  where that rule is enforced, not downstream of it.
+- **`ReferenceCodec`** — `encode(passages)` writes the wire grammar (below); `decode(wire)` is
+  **total** (a wire this build cannot read is `null`, never a throw — a store row or a link payload
+  is untrusted input); adjacent ranges of one book fold back into one `Passage` on decode, so
+  `format()` can drop repeated chapter prefixes the same way the writer's own input did.
+- **`ReferenceResolver.valid`** — pure over two callbacks (`chapterCount`, `verseExists`) so it is
+  JVM-tested without `BibleDatabase`: every named book must be in the canon, every chapter ≤ the
+  book's chapter count, and every explicitly named verse must **exist** — a whole-chapter range
+  (`v == 0..MAX_VERSE`) needs only its chapters to exist, a verse range needs its two **endpoints**
+  to exist (the verses between are the source's to have or not; a hole would still render what is
+  there). `John 3:99` is refused; `John 3` whole is fine.
+
+### The wire grammar
+
+What crosses the seam in `ResolvedReference.wire`, what a Bible link's payload stores (riding the
+notebookId slot — see `docs/links.md`), and what `beginAt` takes back: one `USFM:c:v-c:v` per
+range, ranges joined by `,`, a whole chapter as `USFM:c:0-c:999` (`VerseKey.MAX_VERSE`). ASCII, no
+whitespace, no `|`, capped at 512 chars. Examples:
+
+| Written | Wire |
+|---|---|
+| `John 3:16` | `JHN:3:16-3:16` |
+| `John 3:14-18, Proverbs 3:5-6` | `JHN:3:14-3:18,PRO:3:5-3:6` |
+| `Genesis 1` (whole chapter) | `GEN:1:0-1:999` |
+
+`ReferenceCodec` is the **only** reader of this grammar on either side — the host treats a stored
+wire as opaque and checks nothing but `ResolvedReference.isWire`'s character set.
+
+### The passage view
+
+A second **mode** of the same `BibleActivity` (`docs/bible.md` § The screen, above), not a second
+screen: `passage: PassagePages?` is the one flag it branches on, exactly the way `chapter:
+ChapterPages?` already did — non-null-and-decodable read of `BibleSession.reference` in `onCreate`
+opens the passage; a `landing` (our own Full chapter launch) or the stored position otherwise open
+chapter mode as always. `PassagePages` (`PassageLoader`) carries no `ChapterRef` of its own and
+writes **no position** — a passage is not a place the reader was left; the bookmark still names
+whatever chapter they were last actually reading — and a turn past either end of it is a **silent
+no-op**, because the chapter flow belongs to reading, not to a citation.
+
+**Atoms** (`PassageAtoms.atomsFor`, pure, JVM-tested against `VerseRow`s, no database or font):
+flattens the `verse` table's plain text, ranges concatenated in the order they were written, into
+one atom stream — a `HeadingAtom(HeadingKind.MAJOR)` naming the book and chapter at every (book,
+chapter) crossing, a fresh paragraph break under it, then each verse's superscript number and its
+words split on spaces. A passage is **not** a chapter: the rich block layer's paragraphs, poetry
+indents and section headings describe a whole chapter's typesetting, and half of it read out of
+the middle would open on a hanging indent or a heading belonging to verses that are not here — so
+the passage view deliberately reads the plain-text `verse` table instead, Biblesprout's own passage
+shape.
+
+**Pagination**: `PassageLoader.passage(wire, width, height)` decodes the wire, reads every range's
+verses through `ChapterLoader.withSource` (one open source, one `TextPaint`, one measuring thread —
+the screen never opens a second database or typography for the passage), and paginates with
+`ChapterPaginator.paginate(atoms, typo, width, firstPageHeight = height − safety, otherPageHeight =
+height − safety)` — **both page heights equal**, unlike a chapter's shorter first page, because a
+passage usually does not open at a chapter's own beginning and has no big chapter number to make
+room for. A range the source has nothing for is **skipped** (a reference can outlive a source that
+omits a book); a wire that yields **no** verses at all throws, and the screen shows its own problem
+dialog (`bible_passage_unavailable_body`) rather than a blank page.
+
+**Chrome**: the notebook's own bar order, `[Back] [Contents] · <canonical label> · [Full chapter]
+[Recents]` — the passage's canonical label (`ReferenceCodec.label`) stands in for "Book Chapter" as
+the title, and **Full chapter** is a new end-group text button (words read better than glyphs) that
+appears only in passage mode (`applyMode`, `GONE` not disabled). The title stays screen-centred
+against the bar's two **measured** end groups (`balanceTitle`) — Full chapter widens the end group
+by a word, so both margins are re-measured on every layout change rather than assumed.
+
+**Full chapter** launches a **second `BibleActivity` instance, in our own process**, in chapter
+mode, at the first range's book/chapter/verse — extras that never cross a process boundary (this
+screen launching itself) and therefore carry no contract. This is the one launch that is **not**
+the host's, which is why the caller check admits `callingPackage == packageName` **first**, before
+`HostCallerCheck.enforceActivity` — load-bearing, because `enforceActivity` finishes the Activity
+on a refusal, so the short-circuit is what lets our own launch through at all. The chapter instance
+reads, flows and bookmarks like any ordinary reading (it is **not** a pick, and writes position
+like any turn); it is *not* told about the passage that opened it.
+
+**The back chain**: the chapter instance's Back finishes back onto the passage (an ordinary Activity
+pop — Back always meant this); the passage's own Back finishes with `RESULT_OK` to the **host**, as
+it always did. A passage is one hop deep off the notebook, never two.
+
+### The Recents' second table
+
+`BibleSchema.V3` adds `recent_ref(ref TEXT PRIMARY KEY, at INTEGER NOT NULL)` — a **second** table,
+never an edit of B7's landed `recent` (the family's "a landed step is never edited" rule). A
+passage opened from the notebook (or re-picked from the Recents) is a **pick**, stamped exactly as
+a chapter pick is: `BibleStore.writeRecentRef` is one two-statement batch, upsert then
+`TRIM_RECENT_REFS` keeping the newest `RecentChapters.KEEP` (30) — the wire is the row's key, so
+re-opening the same reference re-stamps rather than duplicates.
+
+`RecentEntry` (sealed: `Chapter(ref, at)` / `Reference(wire, passages, at)`) is what
+`RecentChapters.select` now returns — the **union of both tables, merged by `at` descending and
+stable** (each table is already stored newest-first, so a plain stamp-order merge is the only rule
+that cannot make one subject permanently outrank the other, which is exactly the "never a canon"
+rule B7's Recents was built on). The passage **currently showing** is dropped from its own list the
+same way the chapter being read always was; each kind dedupes to its newest row. `RecentsPanel`
+renders either kind as a name-and-time row (`RecentChapters.label`) and only the tap differs:
+`onPicked(ref)` for a chapter, `onPickedPassage(wire)` for a reference — which re-opens the passage
+view **in place**, whichever mode the screen was already in, and re-stamps it at the front.
+
+### Privacy
+
+**"Where, not what," carried into this arc without exception.** `resolve`'s `Slog.d` logs a count
+of passages and a duration, never the text or the answer; `beginAt` logs the bare fact of the call;
+`openPassage`'s failure path logs nothing about the wire, not even on a problem dialog; a passage's
+own recording (`recordRecentReference`) fails silently exactly as `recordRecent` always did. A
+reference names where the user has read — the same sentence this doc has used since B0, now true
+of a citation as well as a chapter.
+
+### Failure table (arc 38 additions)
+
+| Situation | What the user sees | Where |
+|---|---|---|
+| Typed or recognized text is not a reference this Bible knows | The "Not a Bible reference" dialog, quoting the words back; its **Edit** button reopens the dialog prefilled with them | `BibleRefFlow.notAReference` (host), `BibleService.resolve` returning `null` |
+| A verse past its chapter's end, or a chapter past the book's end | Same as above — `ReferenceResolver.valid` refuses before `resolve` ever returns a wire | `BibleService.resolve`, `ReferenceResolver.valid` |
+| A follow of a Bible link against a reader declaring only 11 (or no reader at all) | The dead-target dialog, its own wording ("update NSE · Bible") — the link itself is untouched | `LinkFollowFlow.deadTarget` via `link_target_bible_body`, `BibleEntry.supportsReferences` |
+| A decodable wire whose ranges yield no verses at all (a source that has dropped every named book) | The problem dialog (`bible_passage_unavailable_body`), never a blank page | `BibleActivity.openPassage`'s `onFailure`, `PassageLoader.passage` (`check(verses.isNotEmpty())`) |
+| The store is unavailable (or was never lent) at the moment a passage would be stamped as a recent | The passage opens and reads normally; the pick is silently not recorded (`Slog.d`, never a dialog) | `BibleActivity.recordRecentReference`, `BibleStore.writeRecentRef` → `StoreUnavailable` |
+
+---
+
 ## The store
 
-Two tables, the calendar's `state` / the document editor's `prefs` precedent, in two schema steps:
-`BibleSchema.V1` = `state(key TEXT PRIMARY KEY, value TEXT NOT NULL)` (B0), and `BibleSchema.V2` =
-that step untouched plus `recent(usfm TEXT NOT NULL, chapter INTEGER NOT NULL, at INTEGER NOT
-NULL, PRIMARY KEY (usfm, chapter))` (B7); `BibleSchema.CURRENT` is what every call declares, and
-the host runs only the steps a store has not seen. **A landed step is never edited.** The one key
-`state` ever holds is `position` (`BibleSql.KEY_POSITION`); `recent` holds the picked chapters
-(§ The Recents). `INSERT OR REPLACE` (`UPSERT_STATE`, `UPSERT_RECENT`) is safe on both because
-neither table has children for a replacement to cascade away. Every statement is pinned as exact
-text in `BibleSql` and run through the host's `StoreSql` query/exec gate in `BibleSqlTest`, so a
-shape the host refuses fails on the JVM, never at the seam.
+Two tables through B7, a third since arc 38 / R2 — the calendar's `state` / the document editor's
+`prefs` precedent, in three schema steps: `BibleSchema.V1` = `state(key TEXT PRIMARY KEY, value
+TEXT NOT NULL)` (B0), `BibleSchema.V2` = that step untouched plus `recent(usfm TEXT NOT NULL,
+chapter INTEGER NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (usfm, chapter))` (B7), and
+`BibleSchema.V3` = V2 untouched plus `recent_ref(ref TEXT PRIMARY KEY, at INTEGER NOT NULL)` (arc
+38 / R2, § [Bible references](#bible-references-arc-38)); `BibleSchema.CURRENT` is what every call
+declares, and the host runs only the steps a store has not seen. **A landed step is never edited.**
+The one key `state` ever holds is `position` (`BibleSql.KEY_POSITION`); `recent` holds the picked
+chapters and `recent_ref` the picked passages (§ The Recents, § Bible references). `INSERT OR
+REPLACE` (`UPSERT_STATE`, `UPSERT_RECENT`, `UPSERT_RECENT_REF`) is safe on all three because none
+has children for a replacement to cascade away. Every statement is pinned as exact text in
+`BibleSql` and run through the host's `StoreSql` query/exec gate in `BibleSqlTest`, so a shape the
+host refuses fails on the JVM, never at the seam.
 
 **`Position`**'s wire form is deliberately boring and human-readable: `GEN:1:1` (`encode()`).
 `decode` is **total** — wrong field count, a non-integer chapter or verse, an unrecognized book code,
@@ -619,6 +814,30 @@ focused; force-stopping host and extension **in one shell command**, then relaun
 - **Timings**: chapter opens ranged 265–480 ms cold, ~2 ms from the prefetch cache; screen opens
   570–770 ms warm.
 
+**R4** (arc 38, 2026-09-13, adb on the Nomad `.dev` builds — the lasso itself left to the user's
+hand, adb cannot drive it):
+- **Insert → Bible → typed** "jn 3:16-18, prov 3:5-6" resolved **in the extension in 465 ms** (the
+  first call against a cold process; **1,136 ms** round trip host-side, the asset-copy cost this
+  doc's `resolve` budget is sized for) → the object landed as an underlined link showing the user's
+  own words, selected in LINK mode (Edit/Unlink).
+- **A finger tap → `beginAt`** → the passage view showed "John 3:16–18; Proverbs 3:5–6" with a
+  "John 3" heading, verses 16–18, a "Proverbs 3" heading, verses 5–6, on **one page** (316 ms).
+- **Full chapter** opened John 3 on page 3/6 — the page holding verse 16 — in 581 ms.
+- **Back** returned to the passage; **Recents**, opened while the passage was showing, listed 3
+  chapters and dropped the passage itself ("3 of 3+1"); picking Job 1 then reopening Recents
+  listed the reference row "John 3:16–18; Proverbs 3:5–6" **first**; tapping it reopened the
+  passage view in place in **55 ms** (cached); Back from the passage returned to the notebook
+  (`end` ran, the bind closed).
+- **A refusal**: "hezekiah 3" was refused by the extension in **3 ms** → the "Not a Bible
+  reference" dialog quoted the words back; its Edit button reopened the dialog prefilled.
+- **One post-walk fix**: the refusal dialog's positive button had reused the string "Edit link" —
+  wrong, because no link exists yet at that point. It now reads plain "Edit"
+  (`bible_reference_edit_action`).
+- **Left to the user's hand**: the lasso-bar conversion, Edit on an existing reference, undo/redo
+  of both a create and an edit, and the eleven-button lasso bar's width on the Nomad.
+- **A trap for the record**: the reference dialog centres at y≈935 px before the IME shows and
+  rises to y≈587 once it is up — an adb walk must tap the field at the **pre-IME** position first.
+
 ---
 
 ## Traps
@@ -650,14 +869,18 @@ focused; force-stopping host and extension **in one shell command**, then relaun
 
 ## Tests
 
-**65 JVM tests** across nine files (`src/test/kotlin/.../ext/bible/`), counted directly from the
-source (46 at the freeze; +1 the Psalm title, +5 B6's reshape after its rewrite, +13 B7):
+**93 JVM tests** across eleven files (`src/test/kotlin/.../ext/bible/`), counted directly from the
+source with `grep -c "@Test"` (46 at the arc-37 freeze; +1 the Psalm title, +5 B6's reshape after
+its rewrite, +13 B7 → 65; **+11 `ReferenceTest` and +9 `PassageAtomsTest` at arc 38 / R1–R2, +2 into
+`BibleSqlTest` and +6 into `RecentChaptersTest`'s rewrite for the union → 93**):
 
 | File | Tests | Pins |
 |---|---|---|
-| `BibleSqlTest.kt` | 7 | Every SQL statement string verbatim (state and recents), the `position` key literal, every statement passing the host's `StoreSql` query/exec gate, V1 as exactly one version of one statement, V2 as V1's step untouched plus the recents step (the chapter as the primary key) and `CURRENT` = V2 |
-| `RecentChaptersTest.kt` | 10 | Stored order kept against a canon-order and a stamp-order trap, the chapter being read dropped (case-insensitively), a sibling chapter kept, duplicates collapsing to the newest, nothing invented, the row label in the running head's form ("Psalm 23"), the lenient row decoder dropping an unknown code or chapter 0, the 50 % width under the Contents' 60 %, `itemsPerPage` whole rows ≥ 1 and safe on an unmeasured row, `KEEP` = 30 |
-| `CanonTest.kt` | 5 | 66 books, ordinals 1–66 in order, the 39/27 OT/NT split, unique three-character USFM codes, case-insensitive/ordinal-addressed lookup |
+| `BibleSqlTest.kt` | 9 | Every SQL statement string verbatim (state, recents and, since R2, recent references), the `position` key literal, every statement passing the host's `StoreSql` query/exec gate, V1/V2/V3 each as the step before it untouched plus one new step, `CURRENT` = V3 |
+| `ReferenceTest.kt` | 11 | Arc 38 / R1 — `ReferenceParser.parse`/`.parseAll` (book/spec split, cross-chapter spans, carried-chapter verse lists, any one bad chunk emptying the whole result), `ReferenceCodec.encode`/`.decode` round-tripping including a whole chapter's `c:0-c:999` sentinel and adjacent-range folding, `decode` total over malformed wires, `ReferenceResolver.valid` over fake `chapterCount`/`verseExists` callbacks (a chapter past the book's end, a verse that does not exist, a whole chapter needing only its chapters to exist) |
+| `PassageAtomsTest.kt` | 9 | Arc 38 / R2 — a heading + paragraph break at every (book, chapter) crossing, no heading inside one run, verse numbers and words in order, words split on spaces, an empty verse list producing no atoms |
+| `RecentChaptersTest.kt` | 16 | Stored order kept against a canon-order and a stamp-order trap, the chapter being read dropped (case-insensitively), a sibling chapter kept, duplicates collapsing to the newest, nothing invented, the row label in the running head's form ("Psalm 23"), the lenient row decoder dropping an unknown code or chapter 0, the 50 % width under the Contents' 60 %, `itemsPerPage` whole rows ≥ 1 and safe on an unmeasured row, `KEEP` = 30, and — arc 38 / R2's rewrite — the two-table union sorted by stamp alone (never canon order), the current passage dropped by wire, a passage row's label via `ReferenceCodec.label`, ties keeping each table's own stored order |
+| `CanonTest.kt` | 6 | 66 books, ordinals 1–66 in order, the 39/27 OT/NT split, unique three-character USFM codes, case-insensitive/ordinal-addressed lookup |
 | `VerseKeyTest.kt` | 5 | The packing formula, encode/decode round-trip, reading-order sort, chapter bounds covering exactly one chapter, a verse range containing only its own span |
 | `PositionTest.kt` | 4 | Wire-form round-trip, Genesis 1 as the default, lowercase book codes normalizing, every malformed shape decoding to `null` |
 | `ChapterCursorTest.kt` | 7 | Ordinary in-book stepping, book-to-book flow both directions, Genesis 1 having nothing before it, the last book's last chapter having nothing after it, a book the source omits being skipped in both directions, a zero count or unknown code walking nowhere |
@@ -665,14 +888,20 @@ source (46 at the freeze; +1 the Psalm title, +5 B6's reshape after its rewrite,
 | `ContentsLayoutTest.kt` | 4 | The 480 dp sidebar branch (Nomad and Manta both take it), the 60 % width rounding, a row's slot at both densities, `itemsPerPage` flooring to ≥ 1 |
 | `reader/ChapterPaginatorTest.kt` | 9 | Blocks becoming headings/numbers/words with a spliced footnote caller, minor heading kinds mapping to `MINOR`, a page never ending on a bare verse number, forced progress when nothing fits, `fitCount` returning zero when even one atom overflows, a page anchoring to the verse in effect at its first word, a verse-less opening page anchoring to verse 1, `pageContaining` picking the last page at or before a verse, and a real pagination round-tripping every page's anchor back to that same page |
 
+The host side of arc 38 (`LinkPayload`, `LinkNav`, `BibleRefFlow`'s pure edges) is tested in
+`:app`, not here — `docs/links.md` and `docs/objects.md` carry those counts.
+
 ---
 
 ## Not in this arc (recorded futures, each needing a user decision)
 
 - **Search** — no free-text or reference lookup; `Canon`'s alias/normalize table was deliberately
-  left behind in the Biblesprout port rather than carried forward unused.
-- **Bookmarks** beyond the single remembered reading position and B7's history of picked chapters
-  (the Recents — not bookmarks: nothing is pinned, the list is the newest 30 picks).
+  left behind in the Biblesprout port rather than carried forward unused. Arc 38's reference dialog
+  is not search either: it accepts only a reference the user already knows how to write, never a
+  word or phrase.
+- **Bookmarks** beyond the single remembered reading position and the Recents' history of picked
+  chapters and, since arc 38, followed passages (nothing is pinned, the list is the newest 30
+  picks of the union).
 - **Cross references** — the `xref` table is built and shipped but nothing reads it; the `r`
   (parallel-passage) lines and footnote callers render as plain, non-tappable text.
 - **Footnote popups** — footnote bodies (`footnote.text`) are stored and joined at chapter load but
@@ -696,10 +925,17 @@ source (46 at the freeze; +1 the Psalm title, +5 B6's reshape after its rewrite,
 
 - [`apps/notesprout_sn/docs/extensions.md`](../../../apps/notesprout_sn/docs/extensions.md) § "The
   Bible point (arc 37)" — the seam in full: the held bind, the second no-paper tier-2 screen, the
-  store and its one sanctioned disk exception, the doors, and the boundary-audit row.
-- `extensions/bible/BIBLE_PLAN.md` — the plan and the ledger: every locked decision, the
+  store and its one sanctioned disk exception, the doors, the boundary-audit rows, and (arc 38) the
+  two method-floored tails.
+- [`apps/notesprout_sn/docs/links.md`](../../../apps/notesprout_sn/docs/links.md) — the Bible
+  link kind (`KIND_BIBLE`), the payload grammar row, `LinkNav.Follow.Bible`, the follow path.
+- [`apps/notesprout_sn/docs/objects.md`](../../../apps/notesprout_sn/docs/objects.md) — the
+  selection toolbar's Bible button, the Insert bar's ninth kind, `BibleRefFlow`'s two undo actions.
+- `extensions/bible/BIBLE_PLAN.md` — arc 37's plan and ledger: every locked decision, the
   architecture sketch verified against the code, and the B0–B4 phase records this doc draws every
   number and trap from.
+- `extensions/bible/REFERENCE_PLAN.md` — arc 38 "Reference"'s plan and ledger: the fourteen locked
+  decisions, the judgment calls, and the R1–R5 phase records § "Bible references" draws from.
 - `apps/notesprout_sn/CLAUDE.md` — the module-table entry, the ninth-point summary, and the
   "bottom bars are pager-only, with one recorded exception" rule.
 - `tools/bible/README.md` — the exact build command and result for `bsb.bible`.

@@ -215,7 +215,7 @@ class BibleRefFlow(
             AlertDialog.Builder(activity)
                 .setTitle(R.string.bible_reference_unknown_title)
                 .setMessage(activity.getString(R.string.bible_reference_unknown_body, typed))
-                .setPositiveButton(R.string.link_edit_action) { _, _ -> dialog(typed, onResolved) }
+                .setPositiveButton(R.string.bible_reference_edit_action) { _, _ -> dialog(typed, onResolved) }
                 .setNegativeButton(R.string.cancel, null)
                 .create()
         ).show()
