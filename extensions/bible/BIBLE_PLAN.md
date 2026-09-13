@@ -501,5 +501,5 @@ hand walk, **no code review**.
   (`NotebookActivity.occupiedBounds()`), centre kept when clear, centre as the fallback. All five
   doors route through it (Text, shapes, Sticky, Bible insert, Bible Send); the flows' `Host`s
   gained `occupied()`, `TextFlow.Host` a `density`. Walked over adb on the Nomad: a rectangle
-  inserted at the centre, then Send → "John 1" landed just above it, not on it. B9 stays complete
-  pending the user's second look.
+  inserted at the centre, then Send → "John 1" landed just above it, not on it. **Walked by the user on the Nomad the same day: "Looks and works well!"** — B9 and
+  FreePlacement are COMPLETE.
