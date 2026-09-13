@@ -197,3 +197,4 @@ Read first: `extensions/bible/docs/bible.md`, `apps/notesprout_sn/docs/links.md`
   entry. Both `CLAUDE.md` files and this ledger were updated. No code disagreed with the plan;
   the R4 fix (the Edit-button string) was the only place the walk found something worth recording
   beyond what R2/R3 already built.
+- **FREEZE — ✅ 2026-09-13, the user's hand walk on the Nomad** ("Looks and works good!"): the lasso-bar conversion of handwritten "John 3:14-18", the dialog, the link, the follow. One walk finding, not ours: the `.dev` host bound the RELEASE ML Kit first ("The recognizer extension didn't respond" — `caller is not the host`), the arc-36 standing trap; `com.symmetricalpalmtree.notesproutsn.ext.mlkit` was `pm disable-user`'d on the Nomad (re-enable on request). The eleven-button lasso bar fits the Nomad. No code review (decision 5). **Arc 38 is COMPLETE + FROZEN; branch `bible` not merged to `main`.**

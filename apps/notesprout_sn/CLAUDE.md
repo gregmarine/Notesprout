@@ -33,7 +33,12 @@ R2 the passage view + Full chapter + `BibleSchema.V3`'s `recent_ref` table, R3 t
 2026-09-13 (adb; the lasso and hand-feel left to the user)** — every path but the lasso conversion
 passed, one post-walk fix (the refusal dialog's Edit button), **R5 docs COMPLETE 2026-09-13**:
 plan + ledger `extensions/bible/REFERENCE_PLAN.md`; reference `extensions/bible/docs/bible.md`
-§ "Bible references". No code review — the user's call, the same waiver arc 37 took. No TENTH extension point, no next Bible phase (search,
+§ "Bible references". **FROZEN 2026-09-13 on the user's own hand walk on the Nomad** ("Looks and
+works good!" — the lasso conversion included; the eleven-button lasso bar fits). No code review —
+the user's call, the same waiver arc 37 took. Walk trap, not ours: the `.dev` host binds the
+RELEASE ML Kit first (`caller is not the host`), so
+`com.symmetricalpalmtree.notesproutsn.ext.mlkit` is `pm disable-user`'d on the Nomad beside the
+release pad and calendar. No TENTH extension point, no next Bible phase (search,
 bookmarks, cross references, footnotes) and no other new arc without a fresh user decision; no
 re-raising of any waived / declined review finding.
 

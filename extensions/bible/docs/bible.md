@@ -10,7 +10,8 @@ Berean Standard Bible only.
 below) grew a second door **in**, from the notebook: a lassoed or typed reference ("John 3:16-18,
 Proverbs 3:5-6") becomes a text object wrapped in a link, and a finger tap opens this reader on
 **just those verses** — a passage view, distinct from the chapter reading this doc otherwise
-describes — with a **Full chapter** door back into the ordinary reading model. Nothing about this
+describes — with a **Full chapter** door back into the ordinary reading model. **Arc 38 was frozen
+2026-09-13 on the user's own Nomad hand walk** ("Looks and works good!"). Nothing about this
 is a tenth extension point; the seam grew two compatible tails on the ninth.
 
 This is the **eighth fresh user decision** on the SN extension seam (granted 2026-09-13), landing
