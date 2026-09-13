@@ -52,7 +52,10 @@ The user's, locked 2026-09-13 (`BIBLE_PLAN.md`):
 10. **Swipe past a chapter edge flows** into the next/previous chapter, across books; Genesis 1
     page 1 and Revelation 22's last page are silent no-ops.
 11. **Index = a bordered dialog, Book grid ↔ Chapter grid** — the day picker's shape — current
-    book/chapter filled.
+    book/chapter filled. **Amended post-freeze (B6, 2026-09-13, the user's call): the index is a
+    paginated side panel in the notebook Contents' shape** — every book a root row, an open book
+    followed by its chapters as a six-wide grid, opened by the Index button, the title, or a
+    **one-finger swipe down** on the page (§ The index).
 12. **Text size is fixed** at 30sp × 1.5 line height (Biblesprout's numbers); no size preference
     this arc.
 13. **The Bible joins the cold-launch restore stack** as `Surface.BIBLE` — unlike the tag manager,
@@ -387,50 +390,72 @@ already happened on every turn).
 
 ## The index
 
-**`IndexModel`** (pure, no views, JVM-tested) is the day picker's arithmetic one arc over: two grids
-behind one pair of arrows. Books are **3 × 6** (18/page) — a book's *name* has to fit, and "1
-Thessalonians" at three columns is already tight; chapters are **6 × 6** (36/page) — a number wants a
-square, not a column. Both flow in **canon order**, with **no testament boundary shown or paged on**
-— a break at the OT/NT line would leave Malachi's page two-thirds empty for a word ("Old Testament" /
-"New Testament") this reader never says anywhere.
+Reshaped post-freeze by **B6** (2026-09-13, the user's decision): B3's bordered two-grid dialog is
+gone, and the index is **the notebook Contents' side panel, subject for subject** — the same
+paginated rows, the same sidebar/full-screen forms, the same pager footer and body swipe, the same
+swipe-down door — with one deliberate difference: **a book's second level is a grid of chapter
+numbers, not rows** (the B3 grid kept; a number wants a square, not a line of its own).
 
-**Every page is padded to the full `rows × columns` grid**, not just its last row to a full row —
-the B4 finding: a short last page (2 John's one-chapter book; the canon's own 12-book last page) was
-shrinking the bordered dialog and **re-centring it under the finger mid-tap**. `IndexModel.grid` now
-pads with spacer rows so the dialog has exactly one height everywhere it opens; two tests were
-re-pinned to the padded shape. Nonsense inputs are absorbed rather than thrown: an unknown book code,
-a chapter below 1, or an empty page count all answer page 0.
+**`IndexModel`** (pure, no views, JVM-tested) answers what the list looks like: **one flat list of
+uniform-height rows** — every book a `Book` row in canon order, an *expanded* book followed by its
+`Chapters` rows of exactly [`CHAPTER_COLUMNS`] = 6 slots, the last row padded with `null`s so a
+column never collapses (2 John: one cell, five spacers). Flat and uniform on purpose: it lets the
+panel paginate the way the Contents paginates headings — rows per page from one division — and
+Psalms' 25 chapter rows simply run on across pages like any long outline. `indexOfBook` /
+`indexOfChapter` (the row holding a chapter, only while its book is open) find the opening page;
+`pageOf` / `pageCount` / `clampPage` are the paging arithmetic, every nonsense input answering
+page 0 or one page rather than throwing. Expansion state is the panel's, handed in as a set of
+USFM codes (case-insensitive).
 
-**`IndexDialog`** is the calendar day picker's shape reused subject for subject: the same header
-(prev arrow · centred title kept clear of both arrows by a button-width margin · next arrow), the
-same code-built grid host, `Dialogs.style` + `setNegativeButton(cancel)`, and the window sized to
-**0.75 of the screen width after `show()`** (before `show()` there is no window to size, and the
-weighted cells must measure against this width, not the screen's). **No background on the root
-view** — the window's own `shape_dialog_bordered` supplies both the white fill and the border, and an
-opaque root would paint over it; this is the same dialog-border trap the day picker itself paid for
-first.
+**`IndexLayout`** (pure, JVM-tested) is the host's `ContentsLayout` in the extension's own copy —
+that object lives in `:app`, which an extension never depends on — with **the Contents' numbers on
+purpose**: full screen below 480 dp, a 60 % left sidebar at or above (both real devices take the
+sidebar: Nomad 749 dp / Manta 1024 dp), 68 dp rows + 1 dp separator, `itemsPerPage` ≥ 1 from the
+measured body. A change to one belongs in the other.
 
-Two levels behind one pair of arrows: **Books** (title "Books", not a tap target — there is nowhere
-above it to flip back to) opens on the current book's page with that book filled black/white-bold.
-Tapping a book opens its **chapters**, titled with the book's own name — which doubles as the way
-back out (the day picker's title-flip trick, `cd_bible_index_flip`). The current chapter is filled
-only **inside its own book's** grid. Cells are the month-cell recipe: `shape_bordered` /
-`bg_index_selected` (copied into the extension's own drawables from `bg_month_selected`), centred,
-`maxLines = 2` + ellipsize-end for long names, weight-1 wide, `@dimen/toolbar_button_size` tall —
-never a literal number. A `null` cell renders as a bare spacer `View` that holds its column open.
-**The arrows never disable**: at either end, `clampPage` returns the page already showing and the tap
-repaints nothing at all — a greyed control is invisible on e-ink, and a needless repaint on e-ink is
-a flash.
+**`IndexPanel`** is `ContentsDialog` reused: a full-window `Dialog` (`Theme_Notesprout`, transparent
+background, no dim, no elevation) over the reader; `dialog_index.xml` is `dialog_contents.xml` with
+the extension's ids — header (`Index`, a back arrow only in the full-screen form) · rows · pager —
+branching in code on `IndexLayout.fullScreen`: the sidebar takes `shape_index_sidebar` (2 dp
+inkBlack right edge) over a transparent scrim whose tap dismisses, the full-screen form is plain
+paper with the back arrow. **Rows**: a book is `item_index_book.xml` —
+`[+/− toggle | chapter count 52 dp | 1 dp divider | name 20 sp]`, the Contents' row with the page
+number's slot holding the book's length; **the whole row is the toggle** (a book is not a
+destination, its chapters are — the glyph only says which way it goes). A chapter row is built in
+code to exactly a book row's slot (`IndexLayout.rowPx`) so the list stays uniform, indented past
+the toggle so it reads as the book's child, its cells the B3 cells (`shape_bordered` /
+`bg_index_selected`, weight-1 wide, `@dimen/toolbar_button_size` tall — never a literal number;
+a `null` a bare spacer `View`). A chapter tap dismisses and hands the `ChapterRef` up.
 
-`BibleActivity.openIndex()` is reached from **both** `btnIndex` and the title itself — "Genesis 1" is
-the obvious thing to tap when you want to be somewhere else, and the title carries the same
-long-press hint the icon buttons do. The books list comes from `ChapterLoader.booksNow()` — B2's
-`source()` already read the `book` table once for the cursor, so opening the index costs **no second
-database query** and the dialog itself never touches the database. Before the first chapter has ever
-shown, `booksNow()` is empty and the tap is a **silent no-op** — a "not ready" dialog would be noise
-for the half-second window in which it would ever be true. A picked chapter goes down the ordinary
-chapter-edge path (`openChapter(picked) { 0 }`), so the load latch, the neighbour prefetch, and the
-position write all follow exactly as they do for any other turn.
+**Opening state**: the book being read is the one open (**expansion is in-memory only** — every
+open starts from the current book alone, several may be opened during one showing), its row takes
+`bg_index_active_entry` (the Contents' 5 dp right-edge bar), its current chapter's cell is filled
+black/white-bold, and the list opens on the page holding that chapter's row — the panel opens
+looking at where you are. `itemsPerPage` is measured once from the real body height after the
+first layout (the Nomad: 12 rows a page, 842 px wide). A toggle **re-anchors the page on the
+toggled book's row**, so a collapse below the fold never leaves the reader on an emptied page.
+**The pager never disables**: a tap at a bound is a no-op (`clampPage` returns the page already
+showing, nothing repaints), the footer is `INVISIBLE` at one page. A **one-finger horizontal swipe
+over the body** flips pages too — `core/ListSwipe` fed from the *dialog's* `dispatchTouchEvent`,
+because a `Dialog` owns its own window: the reader's swipe behind the panel never sees a stroke of
+it, and the page underneath cannot turn while the index is up.
+
+**Three doors** to `BibleActivity.openIndex()`: `btnIndex`, the title ("Genesis 1" is the obvious
+thing to tap when you want to be somewhere else; it carries the same long-press hint), and — B6 —
+a **one-finger swipe down over the page**, the gesture the notebook teaches for its Contents. The
+swipe rides the *same* `ListSwipe` that turns the page, through its new optional `onSwipeDown`
+(`SwipeMath.vertical`, the flip's rule rotated 90° against the region's height; the two axes are
+exclusive by dominance, so one drag is a turn or a call for the index, never both; stylus sequences
+are dropped as ever). One panel at a time — a second call while one is up is a no-op (the swipe and
+the button can land together) — and the activity's `onDestroy` dismisses a showing panel (a Dialog
+outliving its finishing Activity is a window leak). The books list comes from
+`ChapterLoader.booksNow()` — B2's `source()` already read the `book` table once for the cursor, so
+opening the index costs **no second database query** and the panel never touches the database.
+Before the first chapter has ever shown, `booksNow()` is empty and the call is a **silent no-op**.
+A picked chapter goes down the ordinary chapter-edge path (`openChapter(picked) { 0 }`), so the
+load latch, the neighbour prefetch, and the position write all follow exactly as they do for any
+other turn. There is no BLOCK_ALL / exclusion push here, unlike the Contents: the Bible has no
+paper and no ink daemon underneath.
 
 ---
 
@@ -520,9 +545,11 @@ focused; force-stopping host and extension **in one shell command**, then relaun
   (`rm -rf extension-api/build`).
 - **A `README.md` inside `res/font/` breaks the resource merger** — recorded in `FONTS.md` instead;
   the license note for the bundled Noto Serif faces lives there, not as a resource-directory file.
-- **The dialog re-centre trap.** A grid page shorter than its siblings shrinks the bordered dialog and
-  visibly re-centres it under whatever finger just tapped — the B4 finding fixed by padding every
-  `IndexModel` page to the full grid rather than only its last row to a full row.
+- **The dialog re-centre trap** (history — the B3 dialog is gone since B6, but the rule stands for
+  any centred bordered dialog). A grid page shorter than its siblings shrinks the dialog and visibly
+  re-centres it under whatever finger just tapped — the B4 finding, then fixed by padding every page
+  to the full grid. The side panel is immune by shape: it is anchored to the screen edge and its
+  rows are uniform, so a short last page leaves white space, not a moved control.
 - **The `onDestroy` bounce.** A caller-check refusal still runs `onDestroy` (Android calls it
   regardless of what `onCreate` did), so a screen that built nothing must guard its teardown with an
   `admitted` flag rather than assume `onCreate` finished — the root `IndexGuard.bounced` shape,
@@ -546,7 +573,8 @@ source:
 | `VerseKeyTest.kt` | 5 | The packing formula, encode/decode round-trip, reading-order sort, chapter bounds covering exactly one chapter, a verse range containing only its own span |
 | `PositionTest.kt` | 4 | Wire-form round-trip, Genesis 1 as the default, lowercase book codes normalizing, every malformed shape decoding to `null` |
 | `ChapterCursorTest.kt` | 7 | Ordinary in-book stepping, book-to-book flow both directions, Genesis 1 having nothing before it, the last book's last chapter having nothing after it, a book the source omits being skipped in both directions, a zero count or unknown code walking nowhere |
-| `IndexModelTest.kt` | 12 | The canon's four book pages, every row exactly three (or six) slots wide, a short last page padded to the full grid, canon-order paging across the testament boundary, `bookPageOf`/`chapterPageOf`/`clampPage`'s arithmetic, Psalms' five chapter pages, a one-chapter book as one cell plus thirty-five spacers, an empty book table making no pages |
+| `IndexModelTest.kt` | 13 | Six-wide chapter rows with a padded last row, a one-chapter book as one cell and five spacers, the collapsed list as one row per book in canon order, an expanded book followed by its rows then the next book, case-insensitive keys, several books open at once, `indexOfBook` / `indexOfChapter` (only while open; Psalm 119 on the twentieth row), `pageOf` / `pageCount` / `clampPage` arithmetic, an empty source |
+| `IndexLayoutTest.kt` | 4 | The 480 dp sidebar branch (Nomad and Manta both take it), the 60 % width rounding, a row's slot at both densities, `itemsPerPage` flooring to ≥ 1 |
 | `reader/ChapterPaginatorTest.kt` | 9 | Blocks becoming headings/numbers/words with a spliced footnote caller, minor heading kinds mapping to `MINOR`, a page never ending on a bare verse number, forced progress when nothing fits, `fitCount` returning zero when even one atom overflows, a page anchoring to the verse in effect at its first word, a verse-less opening page anchoring to verse 1, `pageContaining` picking the last page at or before a verse, and a real pagination round-tripping every page's anchor back to that same page |
 
 ---

@@ -238,6 +238,10 @@ either end is a no-op, because it goes through the same `goToPage` the pager but
 
 The same flip is on every paginated list in the app: the folder picker, the link picker, the
 template browser (`docs/templates.md`), and the Contents and Recents panels (`docs/notebook.md`).
+`ListSwipe` also takes optional `onSwipeDown` / `onSwipeUp` callbacks — `SwipeMath.vertical`, the
+flip's rule rotated 90° against the region's *height*, exclusive with the flip by dominance — for a
+host whose surface wants the notebook's swipe-down too (the Bible reader's index,
+`extensions/bible/docs/bible.md`); a host that leaves them null has the horizontal-only detector.
 
 **Empty-state trap:** `emptyState` is a sibling of the grid inside `gridContainer`. `bind()` removes
 only the `GridLayout` it added last. A `removeAllViews()` there would delete the empty message and

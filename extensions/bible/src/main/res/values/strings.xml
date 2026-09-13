@@ -12,12 +12,15 @@
     <string name="cd_bible_prev_page">Previous page</string>
     <string name="cd_bible_next_page">Next page</string>
 
-    <!-- The index dialog (arc 37 / B3): two grids behind one pair of arrows, and a title that is
-         also the way back out of the chapters grid. -->
+    <!-- The index panel (arc 37 / B6): the notebook Contents' shape — book rows that open into a
+         chapter grid, paginated, with the library-shape pager below. -->
+    <string name="bible_index_title">Index</string>
+    <string name="cd_bible_expand">Show chapters</string>
+    <string name="cd_bible_collapse">Hide chapters</string>
+    <string name="cd_bible_index_first">First page</string>
     <string name="cd_bible_index_prev">Previous page</string>
     <string name="cd_bible_index_next">Next page</string>
-    <string name="cd_bible_index_flip">Back to books</string>
-    <string name="bible_index_books">Books</string>
+    <string name="cd_bible_index_last">Last page</string>
 
     <string name="bible_title">Bible</string>
     <string name="bible_page_indicator">%1$d / %2$d</string>

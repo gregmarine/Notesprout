@@ -1,123 +1,139 @@
 package com.symmetricalpalmtree.notesproutsn.ext.bible
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The index's arithmetic (arc 37 / B3). The grid a finger taps is proved here rather than on a
- * device: how many pages the canon makes, which page a book or a chapter lands on, and that every
- * page is a FULL grid of slots — a shorter last page would shrink the dialog and re-centre it under
- * a finger that has already aimed (the B4 walk's 2 John mis-tap).
+ * The index panel's arithmetic (arc 37 / B3, reshaped by B6). The list a finger taps is proved
+ * here rather than on a device: every book a root row, an expanded book followed by rows of six
+ * chapter numbers, the last row padded so a column never collapses, and the paging that finds
+ * the row the current chapter sits in.
  */
 class IndexModelTest {
 
-    /** The real 66 books, with the canon's own chapter counts nowhere in sight — only the shape
-     *  of the list matters here, so [Canon]'s rows stand in for the source's `book` table. */
-    private val books: List<BookRow> = Canon.books.map {
-        BookRow(it.usfm, it.ordinal, it.name, it.testament, chapterCount = 1)
+    /** The real 66 books with the canon's shape; chapter counts are set per test where they matter. */
+    private fun books(chapters: (CanonBook) -> Int = { 1 }): List<BookRow> = Canon.books.map {
+        BookRow(it.usfm, it.ordinal, it.name, it.testament, chapterCount = chapters(it))
     }
 
-    @Test
-    fun `the canon makes four book pages`() {
-        val pages = IndexModel.bookPages(books)
-        assertEquals(4, pages.size)
-        assertEquals(listOf(18, 18, 18, 12), pages.map { page -> page.sumOf { row -> row.count { it != null } } })
-    }
-
-    @Test
-    fun `every book row is three slots wide`() {
-        for (page in IndexModel.bookPages(books)) {
-            for (row in page) assertEquals(IndexModel.BOOK_COLUMNS, row.size)
+    private fun realish(): List<BookRow> = books {
+        when (it.usfm) {
+            "GEN" -> 50
+            "PSA" -> 150
+            "2JN" -> 1
+            else -> 3
         }
     }
 
     @Test
-    fun `a short last page is padded to the full grid`() {
-        // 64 books = 3 full pages + a page of 10: three full rows, a row of one + two spacers,
-        // and two whole spacer rows so the page is still BOOK_ROWS tall.
-        val page = IndexModel.bookPages(books.take(64)).last()
-        assertEquals(IndexModel.BOOK_ROWS, page.size)
-        assertEquals(listOf("3 John", null, null), page[3].map { it?.name })
-        assertEquals(List(IndexModel.BOOK_COLUMNS) { null }, page[4])
-        assertEquals(List(IndexModel.BOOK_COLUMNS) { null }, page[5])
-        // The canon's own last page: 12 books in four rows, then two spacer rows.
-        assertEquals(IndexModel.BOOK_ROWS, IndexModel.bookPages(books).last().size)
+    fun `chapter rows are six wide and the last is padded`() {
+        val rows = IndexModel.chapterRows(50)
+        assertEquals(9, rows.size)
+        for (row in rows) assertEquals(IndexModel.CHAPTER_COLUMNS, row.size)
+        assertEquals(listOf(1, 2, 3, 4, 5, 6), rows.first())
+        assertEquals(listOf(49, 50, null, null, null, null), rows.last())
     }
 
     @Test
-    fun `book pages run in canon order across the testaments`() {
-        val pages = IndexModel.bookPages(books)
-        // Malachi (39) and Matthew (40) are neighbours: the OT/NT split is not a page boundary.
-        assertEquals("Malachi", pages[2][0][2]?.name)
-        assertEquals("Matthew", pages[2][1][0]?.name)
+    fun `a one-chapter book is one cell and five spacers`() {
+        assertEquals(listOf(listOf(1, null, null, null, null, null)), IndexModel.chapterRows(1))
     }
 
     @Test
-    fun `bookPageOf finds the page a book sits on`() {
-        assertEquals(0, IndexModel.bookPageOf(books, "GEN"))
-        assertEquals(1, IndexModel.bookPageOf(books, "PSA"))   // ordinal 19, the first of page 1
-        assertEquals(3, IndexModel.bookPageOf(books, "REV"))   // ordinal 66, the last of page 3
+    fun `no chapters is no rows`() {
+        assertTrue(IndexModel.chapterRows(0).isEmpty())
     }
 
     @Test
-    fun `an unknown book opens the first page`() {
-        assertEquals(0, IndexModel.bookPageOf(books, "XYZ"))
-        assertEquals(0, IndexModel.bookPageOf(emptyList(), "GEN"))
+    fun `collapsed, the list is one row per book in canon order`() {
+        val items = IndexModel.items(realish(), emptySet())
+        assertEquals(66, items.size)
+        assertTrue(items.all { it is IndexModel.Item.Book && !it.expanded })
+        assertEquals("GEN", (items.first() as IndexModel.Item.Book).book.usfm)
+        assertEquals("REV", (items.last() as IndexModel.Item.Book).book.usfm)
     }
 
     @Test
-    fun `Psalms makes five chapter pages`() {
-        val pages = IndexModel.chapterPages(150)
-        assertEquals(5, pages.size)
-        assertEquals(6, pages.last().sumOf { row -> row.count { it != null } })
-        assertEquals(IndexModel.CHAPTER_ROWS, pages.last().size)   // padded to the full grid
-        assertEquals(1, pages.first().first().first())
-        assertEquals(150, pages.last().flatten().filterNotNull().last())
-    }
-
-    @Test
-    fun `a one-chapter book is one cell and thirty-five spacers`() {
-        val pages = IndexModel.chapterPages(1)
-        assertEquals(1, pages.size)
-        assertEquals(IndexModel.CHAPTER_ROWS, pages.first().size)   // the same dialog as Psalms'
-        val row = pages.first().first()
-        assertEquals(IndexModel.CHAPTER_COLUMNS, row.size)
-        assertEquals(1, row.first())
-        assertEquals(5, row.count { it == null })
-        assertNull(row.last())
-        assertEquals(35, pages.first().sumOf { r -> r.count { it == null } })
-    }
-
-    @Test
-    fun `every chapter row is six slots wide`() {
-        for (page in IndexModel.chapterPages(150)) {
-            for (row in page) assertEquals(IndexModel.CHAPTER_COLUMNS, row.size)
+    fun `an expanded book is followed by its chapter rows, then the next book`() {
+        val items = IndexModel.items(realish(), setOf("GEN"))
+        assertEquals(66 + 9, items.size)
+        val first = items[0] as IndexModel.Item.Book
+        assertTrue(first.expanded)
+        for (i in 1..9) {
+            val row = items[i] as IndexModel.Item.Chapters
+            assertEquals("GEN", row.book.usfm)
         }
+        assertEquals("EXO", (items[10] as IndexModel.Item.Book).book.usfm)
     }
 
     @Test
-    fun `chapterPageOf finds the page a chapter sits on`() {
-        assertEquals(0, IndexModel.chapterPageOf(1))
-        assertEquals(0, IndexModel.chapterPageOf(36))    // the last of the first page
-        assertEquals(1, IndexModel.chapterPageOf(37))    // the first of the second
-        assertEquals(4, IndexModel.chapterPageOf(150))
-        assertEquals(0, IndexModel.chapterPageOf(0))     // nonsense opens the first page
+    fun `expansion keys are case-insensitive`() {
+        assertEquals(66 + 9, IndexModel.items(realish(), setOf("gen")).size)
     }
 
     @Test
-    fun `clampPage keeps a page inside the grid`() {
+    fun `several books can be open at once`() {
+        val items = IndexModel.items(realish(), setOf("GEN", "PSA"))
+        assertEquals(66 + 9 + 25, items.size)
+    }
+
+    @Test
+    fun `indexOfBook finds the row and misses politely`() {
+        val items = IndexModel.items(realish(), setOf("GEN"))
+        assertEquals(0, IndexModel.indexOfBook(items, "GEN"))
+        assertEquals(10, IndexModel.indexOfBook(items, "exo"))
+        assertEquals(-1, IndexModel.indexOfBook(items, "XYZ"))
+    }
+
+    @Test
+    fun `indexOfChapter is the row holding it, only while the book is open`() {
+        val open = IndexModel.items(realish(), setOf("GEN"))
+        assertEquals(1, IndexModel.indexOfChapter(open, "GEN", 1))
+        assertEquals(1, IndexModel.indexOfChapter(open, "GEN", 6))
+        assertEquals(2, IndexModel.indexOfChapter(open, "gen", 7))
+        assertEquals(9, IndexModel.indexOfChapter(open, "GEN", 50))
+        assertEquals(-1, IndexModel.indexOfChapter(open, "GEN", 51))
+        val closed = IndexModel.items(realish(), emptySet())
+        assertEquals(-1, IndexModel.indexOfChapter(closed, "GEN", 1))
+    }
+
+    @Test
+    fun `Psalm 119 lands on the twentieth chapter row`() {
+        val items = IndexModel.items(realish(), setOf("PSA"))
+        val psalms = IndexModel.indexOfBook(items, "PSA")
+        assertEquals(psalms + 20, IndexModel.indexOfChapter(items, "PSA", 119))
+    }
+
+    @Test
+    fun `paging math`() {
+        assertEquals(0, IndexModel.pageOf(0, 12))
+        assertEquals(0, IndexModel.pageOf(11, 12))
+        assertEquals(1, IndexModel.pageOf(12, 12))
+        assertEquals(0, IndexModel.pageOf(-1, 12))
+        assertEquals(0, IndexModel.pageOf(5, 0))
+        assertEquals(1, IndexModel.pageCount(0, 12))
+        assertEquals(1, IndexModel.pageCount(12, 12))
+        assertEquals(2, IndexModel.pageCount(13, 12))
+        assertEquals(6, IndexModel.pageCount(66, 12))
+        assertEquals(1, IndexModel.pageCount(66, 0))
+    }
+
+    @Test
+    fun `clampPage is a no-op at either end and never negative`() {
         assertEquals(0, IndexModel.clampPage(-1, 4))
-        assertEquals(0, IndexModel.clampPage(0, 4))
-        assertEquals(3, IndexModel.clampPage(3, 4))
-        assertEquals(3, IndexModel.clampPage(4, 4))      // the no-op at the end
-        assertEquals(0, IndexModel.clampPage(2, 0))      // nothing to page through
+        assertEquals(3, IndexModel.clampPage(9, 4))
+        assertEquals(2, IndexModel.clampPage(2, 4))
+        assertEquals(0, IndexModel.clampPage(5, 0))
     }
 
     @Test
-    fun `an empty book table makes no pages`() {
-        assertTrue(IndexModel.bookPages(emptyList()).isEmpty())
-        assertTrue(IndexModel.chapterPages(0).isEmpty())
+    fun `an empty source is an empty list`() {
+        assertTrue(IndexModel.items(emptyList(), setOf("GEN")).isEmpty())
+        assertEquals(-1, IndexModel.indexOfBook(emptyList(), "GEN"))
+        assertNull(IndexModel.items(emptyList(), emptySet()).firstOrNull())
+        assertFalse(IndexModel.items(books(), emptySet()).any { it is IndexModel.Item.Chapters })
     }
 }

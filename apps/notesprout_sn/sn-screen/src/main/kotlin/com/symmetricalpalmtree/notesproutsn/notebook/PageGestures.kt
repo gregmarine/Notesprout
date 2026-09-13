@@ -296,15 +296,10 @@ class PageGestures(
         if (dx < 0) listener.onInsertAfter() else listener.onInsertBefore()
     }
 
-    /** The flip's rule rotated 90° — vertical-dominant, far enough, fast or simply long enough. */
-    private fun qualifiesVerticalSwipe(vy: Float, dx: Float, dy: Float): Boolean {
-        val absDy = abs(dy)
-        if (absDy <= abs(dx)) return false
-        if (absDy < PAGE_SWIPE_MIN_DISTANCE_FRAC * height) return false
-        val fast = abs(vy) >= minFlingVel
-        val long = absDy >= PAGE_SWIPE_LONG_DISTANCE_FRAC * height
-        return fast || long
-    }
+    /** The flip's rule rotated 90° — vertical-dominant, far enough, fast or simply long enough;
+     *  [SwipeMath.vertical] is the one place it is written, shared with `ListSwipe`. */
+    private fun qualifiesVerticalSwipe(vy: Float, dx: Float, dy: Float): Boolean =
+        SwipeMath.vertical(dx, dy, vy, height, minFlingVel) != SwipeMath.NONE
 
     /** Direction from displacement, never velocity — one evaluation, routed on the `dy` sign, so
      *  the Contents swipe-down and the trail swipe-up (arc 6) can never both fire. */

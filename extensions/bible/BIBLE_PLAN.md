@@ -339,3 +339,32 @@ the running head; the index keeps "Psalms". Checked on the Nomad (Psalm 131). 47
 Everything in `docs/bible.md` § "Not in this arc" needs a fresh user decision; this file's phases
 are history from here.
 
+### B6 — The index as a side panel ✅ 2026-09-13 (post-freeze, the user's decision)
+
+The user, after the freeze: "change the index to be more like the table of contents for
+notebooks" — a paginated ToC side panel revealed by a single-finger swipe down on any page, every
+book a root entry, a book opening into its chapters **as a grid of numbers** (not rows), the Index
+button kept as a second door. Decision 11 amended in place.
+
+- **Host (`:sn-screen`)**: `SwipeMath.vertical` — the flip's rule rotated 90°, written once;
+  `PageGestures.qualifiesVerticalSwipe` now calls it (the notebook's own Contents / trail swipes
+  are unchanged by construction) and `ListSwipe` gained optional `onSwipeDown` / `onSwipeUp`
+  callbacks judged against the region's height, exclusive with the flip by dominance. 10 tests
+  (`SwipeMathVerticalTest`).
+- **Extension**: `IndexDialog` deleted; `IndexModel` rewritten as one flat list of uniform rows
+  (`Book` / `Chapters` of six); `IndexLayout` (the Contents' numbers, copied — `ContentsLayout`
+  lives in `:app`); `IndexPanel` (`ContentsDialog`'s shape: sidebar / full-screen forms, measured
+  pagination, body swipe, pager footer, scrim); `dialog_index.xml` rewritten, `item_index_book.xml`,
+  `shape_index_sidebar` + `bg_index_active_entry` copied in; `BibleActivity` opens it from the
+  button, the title and the reader's `ListSwipe.onSwipeDown`, one at a time, dismissed in
+  `onDestroy`. Judgment calls: the whole book row toggles (a book is not a destination); the page
+  number's slot shows the chapter count; a toggle re-anchors the page on the toggled row; no
+  BLOCK_ALL (no paper here). 17 tests (`IndexModelTest` 13, `IndexLayoutTest` 4) — `:ext-bible`
+  52, `:sn-screen` 101, all green.
+- **Nomad walk (adb)**: from Psalm 133, a 1000 px swipe down opened the sidebar form (842 px,
+  12 rows/page, 91 items, page 4/8) with Psalms open, 133 filled, the row page holding it; tapping
+  145 dismissed and opened Psalm 145 (304 ms); the Index button reopened at 145; tapping the
+  Proverbs row expanded it (8 → 9 pages, page held); a horizontal body swipe flipped to 5/9; a scrim
+  tap dismissed. **Left to the user's hand**: the swipe-down's feel against the page turn (both
+  ride one detector; dominance decides), the pen over the page never opening it.
+

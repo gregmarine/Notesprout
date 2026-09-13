@@ -29,11 +29,19 @@ import android.view.ViewConfiguration
  *
  * **Finger only.** A stylus sequence is dropped whole (the user's call): the pen writes, the hand
  * navigates, and that is the same division `PageGestures` draws on the page itself.
+ *
+ * **Optionally vertical too.** A host that gives [onSwipeDown] / [onSwipeUp] gets the flip's rule
+ * rotated 90° ([SwipeMath.vertical], judged against the region's *height*) — the Bible reader's
+ * swipe-down for its index, the same travel the notebook teaches for its Contents. The two
+ * evaluations are exclusive by dominance, so one drag is a flip or a vertical swipe, never both;
+ * a host that leaves them null keeps the horizontal-only detector every list has always had.
  */
 class ListSwipe(
     private val region: () -> View?,
     private val onFlipNext: () -> Unit,
     private val onFlipPrevious: () -> Unit,
+    private val onSwipeDown: (() -> Unit)? = null,
+    private val onSwipeUp: (() -> Unit)? = null,
     /** While true the detector refuses to arm and drops a sequence in flight — an overlay, a
      *  half-built screen, anything that owns the contact instead. Default: nothing stands it down. */
     private val standDown: () -> Boolean = { false },
@@ -43,6 +51,7 @@ class ListSwipe(
     private var startX = 0f
     private var startY = 0f
     private var regionWidth = 0f
+    private var regionHeight = 0f
     private var tracker: VelocityTracker? = null
     private var minFlingVelocity = 0f
 
@@ -61,6 +70,7 @@ class ListSwipe(
                 active = true
                 startX = ev.rawX; startY = ev.rawY
                 regionWidth = view.width.toFloat()
+                regionHeight = view.height.toFloat()
                 tracker = VelocityTracker.obtain().also { it.addMovement(ev) }
             }
             MotionEvent.ACTION_MOVE -> if (active) tracker?.addMovement(ev)
@@ -87,8 +97,13 @@ class ListSwipe(
         val dx = ev.rawX - startX
         val dy = ev.rawY - startY
         when (SwipeMath.flip(dx, dy, t.getXVelocity(0), regionWidth, minFlingVelocity)) {
-            SwipeMath.FORWARD -> onFlipNext()
-            SwipeMath.BACK -> onFlipPrevious()
+            SwipeMath.FORWARD -> { onFlipNext(); return }
+            SwipeMath.BACK -> { onFlipPrevious(); return }
+        }
+        if (onSwipeDown == null && onSwipeUp == null) return
+        when (SwipeMath.vertical(dx, dy, t.getYVelocity(0), regionHeight, minFlingVelocity)) {
+            SwipeMath.DOWN -> onSwipeDown?.invoke()
+            SwipeMath.UP -> onSwipeUp?.invoke()
         }
     }
 

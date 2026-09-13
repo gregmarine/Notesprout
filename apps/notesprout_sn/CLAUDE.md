@@ -17,9 +17,11 @@ The build effort ("ratta paper", 2026-08-20 → 2026-09-11) is over; what remain
 plus **arc 37 "Bible" — a fresh user decision granted 2026-09-13, COMPLETE + FROZEN 2026-09-13
 on branch `bible`** (plan + ledger: `extensions/bible/BIBLE_PLAN.md`; reference
 `extensions/bible/docs/bible.md`; no code review — the user's call; frozen on the user's own Nomad
-walk). No TENTH extension point, no next Bible phase (search, bookmarks, cross references,
-footnotes) and no other new arc without a fresh user decision; no re-raising
-of any waived / declined review finding.
+walk; **post-freeze B6 2026-09-13 on the user's decision: the index became a Contents-shaped side
+panel with a one-finger swipe-down door — `SwipeMath.vertical` + `ListSwipe`'s optional vertical
+callbacks landed in `:sn-screen` for it**). No TENTH extension point, no next Bible phase (search,
+bookmarks, cross references, footnotes) and no other new arc without a fresh user decision; no
+re-raising of any waived / declined review finding.
 
 **Maintenance protocol (replaces the per-arc phase protocol):**
 
@@ -118,7 +120,8 @@ undo kinds / clipboard arms / whole-object erase, PDF endnotes over `PageBundle`
 there, what may not depend on it, and the `nonTransitiveRClass` flag that holds it together) ·
 `extensions/bible/docs/bible.md` (arc 37 "Bible": **NSE · Bible** as a feature — the slim BSB
 SQLite build, the paginated print-look reader, single-finger swipe and chapter/book flow, the
-Book/Chapter index, the stored position, the `extensions/` monorepo-root pattern).
+Contents-shaped index side panel (book rows → chapter grid; swipe down opens it), the stored
+position, the `extensions/` monorepo-root pattern).
 
 ## Standing rules
 

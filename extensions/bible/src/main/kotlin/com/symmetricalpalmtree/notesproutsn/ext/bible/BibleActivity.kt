@@ -60,10 +60,13 @@ import kotlinx.coroutines.withContext
  * **Nothing about what is read is ever logged** — book and chapter numbers, page counts and
  * durations only ("where, not what"), on this side of the seam as on the other.
  *
- * B3's addition: **the index** (decision 11) — `btnIndex` and the title both open it, a bordered
- * Book grid ↔ Chapter grid over the source's own book table, which the loader already read for the
- * cursor. Picking a chapter opens it at its first page, down the same path a chapter edge takes.
- * A tap before the first chapter has shown is a silent no-op: there is nothing to index yet.
+ * B3's addition, reshaped by B6: **the index** (decision 11, amended) — a side panel in the
+ * notebook Contents' shape ([IndexPanel]) over the source's own book table, which the loader
+ * already read for the cursor. Three doors: `btnIndex`, the title, and — B6 — a **one-finger
+ * swipe down over the page**, the gesture the notebook teaches for its Contents, on the same
+ * `ListSwipe` that turns the page (the two axes are exclusive by dominance). Picking a chapter
+ * opens it at its first page, down the same path a chapter edge takes. A tap before the first
+ * chapter has shown is a silent no-op: there is nothing to index yet.
  */
 class BibleActivity : AppCompatActivity() {
 
@@ -80,8 +83,11 @@ class BibleActivity : AppCompatActivity() {
     /** True while a chapter is being built. The latch that makes a fast flip drop, not queue. */
     private var loading = false
 
-    /** The one-finger flip over the reading band. Built in [onCreate], once the view exists. */
+    /** The one-finger flip — and swipe-down — over the reading band. Built in [onCreate]. */
     private var swipe: ListSwipe? = null
+
+    /** The index while it is up; null otherwise. One panel at a time, dismissed on the way out. */
+    private var indexPanel: IndexPanel? = null
 
     /** Position writes: the one in flight, and the latest one that arrived while it was. */
     private var writing = false
@@ -119,11 +125,13 @@ class BibleActivity : AppCompatActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT,
             ),
         )
-        // Armed on the reading band only — a drag across the chrome is not a page turn.
+        // Armed on the reading band only — a drag across the chrome is not a page turn, and not
+        // a call for the index either.
         swipe = ListSwipe(
             region = { readerView },
             onFlipNext = { turnTo(pageIndex + 1) },
             onFlipPrevious = { turnTo(pageIndex - 1) },
+            onSwipeDown = { openIndex() },
         )
 
         binding.title.setText(R.string.bible_title)
@@ -154,6 +162,9 @@ class BibleActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         if (!admitted) return
+        // A Dialog outliving its finishing Activity is a window leak (a config-change recreate,
+        // "don't keep activities" — destroys that bypass leave()).
+        indexPanel?.dismiss()
         binding.root.removeCallbacks(showLoading)
         loader.close()
     }
@@ -266,17 +277,23 @@ class BibleActivity : AppCompatActivity() {
     // --- the index ----------------------------------------------------------
 
     /**
-     * The Book ↔ Chapter index (arc 37 / B3). The books come from the loader's one read of the
-     * source's `book` table; before the first chapter has shown there are none, and the tap does
-     * **nothing** — a dialog that said "not ready" would be noise for the half-second it is true.
-     * A picked chapter opens at its first page; the position write follows from the show, as it
-     * does for every other turn.
+     * The index panel (arc 37 / B3, reshaped by B6). The books come from the loader's one read of
+     * the source's `book` table; before the first chapter has shown there are none, and the
+     * call does **nothing** — a panel that said "not ready" would be noise for the half-second it
+     * is true. While one is already up a second call is a no-op too (the swipe and the button
+     * can land together). A picked chapter opens at its first page; the position write follows
+     * from the show, as it does for every other turn.
      */
     private fun openIndex() {
+        if (indexPanel != null) return
         val books = loader.booksNow()
         val at = chapter?.ref ?: return
         if (books.isEmpty()) return
-        IndexDialog.show(this, books, at) { picked -> openChapter(picked) { 0 } }
+        indexPanel = IndexPanel(
+            this, books, at,
+            onDismissed = { indexPanel = null },
+            onPicked = { picked -> openChapter(picked) { 0 } },
+        ).also { it.show() }
     }
 
     // --- where the user was -------------------------------------------------

@@ -1314,7 +1314,9 @@ Thresholds (Paper-v0 parity — the numbers are the feel):
 A swipe must be **horizontal-dominant** (`|dx| > |dy|`) and qualify on *velocity or* length;
 **direction comes from the sign of `dx`, never velocity**, because a decelerating finger can flip
 the velocity sign at the end of the drag. The vertical swipes (C1, K4) are the same rule rotated
-90° — vertical-dominant, the same three constants against the screen *height*, judged at the same
+90° — `SwipeMath.vertical`, vertical-dominant, the same three constants against the screen
+*height* (written once in `:sn-screen`, shared with `ListSwipe`'s optional vertical callbacks that
+the Bible reader's index rides), judged at the same
 `ACTION_UP` right after the flip evaluation (the two dominance tests are mutually exclusive) — and
 one sign-routed evaluation: `dy > 0` opens the Contents, `dy < 0` walks back the link trail (K4),
 so the two can never both fire. The one-finger **tap** (K4) is the inverse recogniser: sub-slop
