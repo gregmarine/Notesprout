@@ -457,6 +457,7 @@ slim build carries a full-text index again.
   "Psalm 23:1" opened Psalm 23 page 1 (139 ms); re-opening showed the list with the query and no
   keyboard; with the keyboard up the list re-measured to 5 rows/page; "gen 2" → Genesis 2 as a
   chapter (286 ms); "john 3:16-18" → the passage view with Full chapter (47 ms); Recents showed
-  Genesis 2 and Psalm 23 stamped; "pppo" → "No results for “pppo”". **Left to the user's hand:**
-  the feel, the swipe over the list, a hardware keyboard.
+  Genesis 2 and Psalm 23 stamped; "pppo" → "No results for “pppo”". The feel and the swipe over
+  the list were left to the user's hand — **walked by the user on the Nomad the same day: "Looks
+  and works good!"** B8 is complete.
 
