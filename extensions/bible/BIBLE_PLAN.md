@@ -412,6 +412,7 @@ with the clock icon … tapping an item will take the user to that location."
   chapter 1) then Esther recorded both, and Recents then showed **Job 1** only ("1 of 2" — Esther,
   being read, dropped) with its stamp; tapping the row opened Job 1 (183 ms) and Recents then
   showed **Esther 1** only (Job re-stamped to the front, then dropped as current); a scrim tap
-  dismissed. **Left to the user's hand**: the two-finger swipe-down itself (adb has no
-  multi-finger gesture), its feel against the one-finger Contents swipe, a resting palm.
+  dismissed. The two-finger swipe-down itself (adb has no multi-finger gesture), its feel
+  against the one-finger Contents swipe, and a resting palm were left to the user's hand —
+  **walked by the user on the Nomad the same day: "This looks and works good!"** B7 is complete.
 
