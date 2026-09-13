@@ -312,3 +312,19 @@ stylus sequence is dropped by `ListSwipe`); the page-turn ghosting cadence with 
 `book.name` row is "Psalms"; print says "Psalm 23". A one-word special case in the title only, if
 wanted.
 
+### B5 — Docs ✅ 2026-09-13 (freeze pending the user's hand walk)
+
+- `extensions/bible/docs/bible.md` — the feature reference (data, reading model, screen, index,
+  store, privacy, failure table, walks, traps, tests, recorded futures); links to
+  `apps/notesprout_sn/docs/extensions.md` § "The Bible point (arc 37)" for the seam rather than
+  repeating it.
+- Host docs (landed with B3, `848ea775`): `docs/extensions.md` (the arc-37 paragraph, the module
+  table row, `<queries>`, the API ledger at 11, the ninth-point section, boundary-audit rows 52–54,
+  privacy, identity), SN `CLAUDE.md` (fifteen modules, NINE points / no TENTH, API 11, the
+  bottom-bar exception), root `CLAUDE.md` (`extensions/` folder, docs table, branch), `docs/library.md`
+  (`BIBLE` on the restore stack, the bottom bar).
+- Final gate: every module assembles; **3,148 JVM tests** green (`:app` 1667 · `:extension-api`
+  232 · `:ext-bible` 46 · the rest unchanged).
+- **Freeze condition:** the user's hand walk on the Nomad — swipe feel, pen over the page — and the
+  "Psalm 23" title decision. Until then the arc is complete but not frozen.
+
