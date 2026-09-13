@@ -44,6 +44,7 @@ import com.symmetricalpalmtree.notesproutsn.data.soilFile
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityLibraryBinding
 import com.symmetricalpalmtree.notesproutsn.export.ExportActivity
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionRegistry
+import com.symmetricalpalmtree.notesproutsn.extension.BibleEntry
 import com.symmetricalpalmtree.notesproutsn.extension.CalendarEntry
 import com.symmetricalpalmtree.notesproutsn.extension.CalendarTarget
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
@@ -139,6 +140,10 @@ class LibraryActivity : AppCompatActivity() {
         startActivity(ExportActivity.intent(this, target))
     }
     private lateinit var tags: TagManagerEntry
+
+    /** The Bible reader (arc 37 / B0) — the bottom bar's Bible button, left of Templates. GONE
+     *  unless a trusted reader is installed; the entry owns the button's visibility. */
+    private lateinit var bible: BibleEntry
 
     /** Import (arc 16) — the bottom bar's Import button (left group, right after Backup since
      *  arc 17 / K2) and the whole pipeline behind it. GONE unless a trusted importer is installed. */
@@ -257,6 +262,10 @@ class LibraryActivity : AppCompatActivity() {
         )
         binding.btnImport.setOnClickListener { importFlow.onTap() }
         TooltipCompat.setTooltipText(binding.btnImport, binding.btnImport.contentDescription)
+        // The Bible (arc 37 / B0). A launcher, so built here; no paper behind it, so no handoff.
+        bible = BibleEntry(activity = this, button = binding.btnBible)
+        binding.btnBible.setOnClickListener { bible.open() }
+        TooltipCompat.setTooltipText(binding.btnBible, binding.btnBible.contentDescription)
         DebugMenu.install(this, binding.bottomRight)
 
         // Arc 26 / U3: a rotation's completion dialog chose *Back up now* — the request rode the
@@ -309,6 +318,7 @@ class LibraryActivity : AppCompatActivity() {
         // No button to show or hide, but the search dialog's hint asks whether tags are searchable
         // (arc 21 / W4), and that answer goes stale the same way every other one does.
         if (::tags.isInitialized) tags.refresh()
+        if (::bible.isInitialized) bible.refresh()
         if (gridMeasured) lifecycleScope.launch { refresh() }
     }
 
@@ -320,6 +330,7 @@ class LibraryActivity : AppCompatActivity() {
         if (::scratchPad.isInitialized) scratchPad.close()
         if (::calendar.isInitialized) calendar.close()
         if (::tags.isInitialized) tags.close()
+        if (::bible.isInitialized) bible.close()
         // The import flow holds the cloud connect door and, while it is up, the cloud browser
         // (arc 25 / V5) — both are this window's.
         if (::importFlow.isInitialized) importFlow.close()
@@ -488,6 +499,13 @@ class LibraryActivity : AppCompatActivity() {
                     }
                     if (!standingForReplay()) return@launch
                     openPadOverCalendar()
+                }
+                Surface.BIBLE -> {
+                    if (!bible.discovered()) {
+                        Slog.d(TAG) { "restore: the bible reader is not installed — dropped" }
+                        return@launch
+                    }
+                    if (standingForReplay()) bible.open()
                 }
                 // Not a shape this screen can produce — the editor only ever stands over a
                 // notebook — so it is dropped rather than guessed at.

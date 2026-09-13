@@ -216,11 +216,25 @@
 
             </LinearLayout>
 
-            <!-- The right half of the row: nothing but the space that keeps the pager centred. -->
-            <View
+            <!-- The right half of the row: the same weight as the name's half, so the pager stays
+                 centred — and, since arc 37 / B0, the Bible's door at its far end on the user's
+                 call: the first non-pager control on this strip. GONE unless a trusted reader is
+                 installed; BibleEntry owns it. -->
+            <LinearLayout
                 android:layout_width="0dp"
-                android:layout_height="0dp"
-                android:layout_weight="1"/>
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:orientation="horizontal"
+                android:gravity="end|center_vertical">
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnBible"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:src="@drawable/ic_bible"
+                    android:visibility="gone"
+                    android:contentDescription="@string/cd_bible"/>
+
+            </LinearLayout>
 
         </LinearLayout>
 

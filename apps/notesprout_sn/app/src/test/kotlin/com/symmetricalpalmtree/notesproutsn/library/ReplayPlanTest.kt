@@ -97,6 +97,37 @@ class ReplayPlanTest {
         assertEquals(ReplayPlan.LibraryLevel(Surface.SCRATCH_PAD, true), ReplayPlan.of(stack))
     }
 
+    // ── the Bible (arc 37 / B0): a one-screen chain wherever it stands ──────
+
+    @Test
+    fun `a lone bible entry answers LibraryLevel with no calendar beneath`() {
+        assertEquals(ReplayPlan.LibraryLevel(Surface.BIBLE, false), ReplayPlan.of(listOf(entry(Surface.BIBLE))))
+    }
+
+    @Test
+    fun `a notebook with a bible above it carries the bible`() {
+        val stack = listOf(entry(Surface.NOTEBOOK, notebookId = "nb-1"), entry(Surface.BIBLE))
+        assertEquals(ReplayPlan.Notebook("nb-1", false, listOf(Surface.BIBLE)), ReplayPlan.of(stack))
+    }
+
+    @Test
+    fun `a bible over a calendar at library level reopens the bible and never latches`() {
+        val stack = listOf(entry(Surface.CALENDAR), entry(Surface.BIBLE))
+        assertEquals(ReplayPlan.LibraryLevel(Surface.BIBLE, false), ReplayPlan.of(stack))
+    }
+
+    @Test
+    fun `legalAbove leaves a lone bible unchanged and truncates anything after it`() {
+        assertEquals(listOf(Surface.BIBLE), ReplayPlan.legalAbove(listOf(Surface.BIBLE)))
+        assertEquals(listOf(Surface.BIBLE), ReplayPlan.legalAbove(listOf(Surface.BIBLE, Surface.CALENDAR)))
+        assertEquals(listOf(Surface.CALENDAR), ReplayPlan.legalAbove(listOf(Surface.CALENDAR, Surface.BIBLE)))
+    }
+
+    @Test
+    fun `decodeAbove reads a bible name`() {
+        assertEquals(listOf(Surface.BIBLE), ReplayPlan.decodeAbove(listOf("BIBLE")))
+    }
+
     @Test
     fun `a notebook on top of a library-level entry is not a shape and answers Nothing`() {
         val stack = listOf(entry(Surface.CALENDAR), entry(Surface.NOTEBOOK, notebookId = "nb-1"))

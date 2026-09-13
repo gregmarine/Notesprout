@@ -60,6 +60,7 @@ import com.symmetricalpalmtree.notesproutsn.data.prefs.ChromePrefs
 import com.symmetricalpalmtree.notesproutsn.data.prefs.SnapPrefs
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityNotebookBinding
 import com.symmetricalpalmtree.notesproutsn.core.markdown.HeadingPrefix
+import com.symmetricalpalmtree.notesproutsn.extension.BibleEntry
 import com.symmetricalpalmtree.notesproutsn.extension.CalendarEntry
 import com.symmetricalpalmtree.notesproutsn.extension.CalendarTarget
 import com.symmetricalpalmtree.notesproutsn.extension.DocumentEditorEntry
@@ -152,6 +153,9 @@ class NotebookActivity : AppCompatActivity() {
     private lateinit var documentSeedFlow: DocumentSeedFlow
     /** The tag manager's entry (arc 21 / W2) — the sixth point's door, and the owner of `btnTags`. */
     private lateinit var tagEntry: TagManagerEntry
+    /** The Bible reader's entry (arc 37 / B0) — the ninth point's door, and the owner of the bottom
+     *  strip's `btnBible`. No paper behind it: no handoff, no chrome flag. */
+    private lateinit var bible: BibleEntry
     /** The three tag doors that button opens (arc 21 / W2). */
     private lateinit var tagsPopup: TagsPopup
     /** The Insert button's sub-bar (arc 28 / H1) — Sticky, Text and the six shapes. */
@@ -824,6 +828,15 @@ class NotebookActivity : AppCompatActivity() {
         }
         TooltipCompat.setTooltipText(binding.btnTags, binding.btnTags.contentDescription)
 
+        // The Bible (arc 37 / B0) — the tag manager's shape: a launcher, so built here; a
+        // non-drawing screen, so no handoff. Its button is on the bottom strip (the user's call).
+        bible = BibleEntry(activity = this, button = binding.btnBible)
+        binding.btnBible.setOnClickListener {
+            if (!opened || closing) return@setOnClickListener
+            bible.open()
+        }
+        TooltipCompat.setTooltipText(binding.btnBible, binding.btnBible.contentDescription)
+
         // Insert (arc 28 / H1, D4) — the sub-bar and the button that opens it. Every one of the
         // eight buttons is GONE until its own phase offers it (J4): a control that does nothing
         // does not exist. H2 gave one of them — Text — something to do in every build, which is
@@ -922,6 +935,9 @@ class NotebookActivity : AppCompatActivity() {
                     if (tagsPopup.isShowing) hideTagsPopup() else showTagsPopup(anchor)
                 },
                 CollapsedChrome.Entry.mirroring(R.drawable.ic_clock, binding.btnRecents),
+                // The Bible's bar button is on the bottom strip, but a door is a door: mirrored
+                // here before Calendar so the pad stays last (arc 37 / B0).
+                CollapsedChrome.Entry.mirroring(R.drawable.ic_bible, binding.btnBible),
                 CollapsedChrome.Entry.mirroring(R.drawable.ic_calendar, binding.btnCalendar),
                 CollapsedChrome.Entry.mirroring(R.drawable.ic_sketching, binding.btnScratchPad),
             ),
@@ -1222,6 +1238,13 @@ class NotebookActivity : AppCompatActivity() {
                         return@launch
                     }
                     if (standingForReplay()) scratchPad.open()
+                }
+                Surface.BIBLE -> {
+                    if (!bible.discovered()) {
+                        Slog.d(TAG) { "restore: the bible reader is not installed — dropped" }
+                        return@launch
+                    }
+                    if (standingForReplay()) bible.open()
                 }
                 Surface.DOCUMENT_EDITOR -> {
                     if (!documentEntry.discovered()) {
@@ -4228,6 +4251,7 @@ class NotebookActivity : AppCompatActivity() {
         }
         if (::documentEntry.isInitialized) documentEntry.refresh()
         if (::tagEntry.isInitialized) tagEntry.refresh()
+        if (::bible.isInitialized) bible.refresh()
         refreshExportAvailable()
     }
 
@@ -4372,6 +4396,8 @@ class NotebookActivity : AppCompatActivity() {
         // The tag screen's held bind, same rule. It reaches back into nothing of ours — the index
         // is the extension's own store value — so it needs no ordering against the seal below.
         if (::tagEntry.isInitialized) tagEntry.close()
+        // The Bible's held bind, same rule and the same reason as the tag screen's.
+        if (::bible.isInitialized) bible.close()
         // Same rule for the editor's held bind — and it matters more here, because its host binder
         // reaches back into this session: released before the seal below, never after. The close's
         // Job is what enforces "never after" (M11): the seal coroutine joins it, so the extension's

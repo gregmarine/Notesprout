@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The extension's own strings. `ok` and `cancel` come from :sn-screen (Dialogs / ActionSheetDialog
+  reference them from inside the module) and are deliberately not repeated here.
+-->
+<resources>
+    <string name="ext_label">NSE · Bible</string>
+
+    <!-- Every icon button needs a long-press hint naming it, and the hint is its content description. -->
+    <string name="cd_bible_back">Back</string>
+    <string name="cd_bible_index">Index</string>
+    <string name="cd_bible_prev_page">Previous page</string>
+    <string name="cd_bible_next_page">Next page</string>
+
+    <string name="bible_title">Bible</string>
+    <string name="bible_page_indicator">%1$d / %2$d</string>
+</resources>

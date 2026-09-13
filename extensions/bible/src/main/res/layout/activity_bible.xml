@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Bible reader's placeholder screen (arc 37 / B0) — the tag manager's shape: the second
+  tier-2 screen with no paper on it, so there is no full-bleed surface, no exclusion rects and no
+  EPD handoff: an ordinary vertical stack of chrome.
+
+  Top to bottom: the top bar (title + back + index) · the reader band, empty for now (B1 replaces
+  it with the actual reader) · the pager. Chrome sits flush at the top edge — the top guard is 0
+  on Ratta. Dividers are 1dp inkBlack; borderGray is invisible on the panel.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/paperWhite"
+    android:orientation="vertical">
+
+    <!-- A FrameLayout, not a weighted row: the title is centred on the SCREEN, so it stays put
+         whatever flanks it (the bar-centring trap — a weight-centred title moves with its
+         neighbours). -->
+    <FrameLayout
+        android:id="@+id/topBarRow"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/toolbar_bar_thickness"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp">
+
+        <TextView
+            android:id="@+id/title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:layout_marginStart="52dp"
+            android:layout_marginEnd="52dp"
+            android:ellipsize="end"
+            android:singleLine="true"
+            android:text="@string/bible_title"
+            android:textColor="@color/inkBlack"
+            android:textSize="16sp" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnBack"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_gravity="start|center_vertical"
+            android:contentDescription="@string/cd_bible_back"
+            android:src="@drawable/ic_arrow_left" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnIndex"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_gravity="end|center_vertical"
+            android:contentDescription="@string/cd_bible_index"
+            android:src="@drawable/ic_list" />
+
+    </FrameLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!-- Empty for now — B1 replaces this band with the reader. -->
+    <FrameLayout
+        android:id="@+id/readerBand"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="@color/paperWhite" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!-- Pager only, centred on the SCREEN (bottom bars are pager-only — the F2 rule). -->
+    <FrameLayout
+        android:id="@+id/pager"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/toolbar_bar_thickness"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:layout_gravity="center"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnPrevPage"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_bible_prev_page"
+                android:src="@drawable/ic_page_prev" />
+
+            <TextView
+                android:id="@+id/pageIndicator"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:minWidth="56dp"
+                android:singleLine="true"
+                android:textColor="@color/inkBlack"
+                android:textSize="14sp" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnNextPage"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_bible_next_page"
+                android:src="@drawable/ic_page_next" />
+        </LinearLayout>
+
+    </FrameLayout>
+
+</LinearLayout>
