@@ -28,7 +28,8 @@ class ExtensionContractTest {
         // method floor, no action floor moved); 11 since arc 37 / B0 (the BIBLE point — a
         // compatible addition on the calendar's pattern, floored at 11). Bumping this again is a
         // contract event.
-        assertEquals(11, ExtensionContract.API_VERSION)
+        // 12 since arc 38 / R1 (two `IBible` tails behind a method floor; no action floor moved).
+        assertEquals(12, ExtensionContract.API_VERSION)
         assertEquals(9, ExporterContract.MIN_API_VERSION_FOR_DELIVERY)
         assertEquals(6, ExtensionContract.MIN_API_VERSION_FOR_STORE)
         assertEquals(7, ExtensionContract.MIN_API_VERSION_FOR_CALENDAR)
@@ -37,6 +38,7 @@ class ExtensionContractTest {
         // Floors pin to their birth number, never to API_VERSION (the HV1 lesson).
         assertEquals(10, ExtensionContract.MIN_API_VERSION_FOR_CALENDAR_DAY_SEND)
         assertEquals(11, ExtensionContract.MIN_API_VERSION_FOR_BIBLE)
+        assertEquals(12, ExtensionContract.MIN_API_VERSION_FOR_BIBLE_REFERENCE)
         assertEquals(2_000, ExtensionContract.MAX_INK_STROKES)
         assertEquals(60_000, ExtensionContract.MAX_INK_POINTS)
         assertEquals(20, ExtensionContract.MAX_PRECONTEXT_CHARS)

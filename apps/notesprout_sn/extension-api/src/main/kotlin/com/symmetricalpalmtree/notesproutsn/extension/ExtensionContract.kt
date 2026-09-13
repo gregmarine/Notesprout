@@ -98,8 +98,15 @@ object ExtensionContract {
      * (`begin(store)` / `end()`), listed only at [MIN_API_VERSION_FOR_BIBLE] because it was never
      * reachable below it; nothing existing changes, every existing extension keeps its declaration,
      * no door vanishes. The first extension module living outside `apps/notesprout_sn`.
+     *
+     * **12 since arc 38 / R1** — two compatible tails appended to `IBible` after `end()`
+     * (`resolve(text)` and `beginAt(store, reference)`, the Bible reference objects of
+     * `extensions/bible/REFERENCE_PLAN.md`), behind the METHOD floor
+     * [MIN_API_VERSION_FOR_BIBLE_REFERENCE]. The calendar's `render` shape: `MIN_API_VERSIONS` is
+     * untouched, a reader declaring 11 still binds for the plain door, and only `:ext-bible`
+     * redeclares. Not a tenth point.
      */
-    const val API_VERSION: Int = 11
+    const val API_VERSION: Int = 12
 
     /**
      * The floor for a service on a **store-taking** point (arc 22 / X1): the host accepts such a
@@ -121,6 +128,14 @@ object ExtensionContract {
      * service declaring less is not a Bible reader this host knows.
      */
     const val MIN_API_VERSION_FOR_BIBLE: Int = 11
+
+    /**
+     * The **method** floor for `IBible.resolve` / `IBible.beginAt` (arc 38 / R1): the host offers
+     * the notebook's Bible-reference doors, and opens a Bible link, only against a reader
+     * declaring at least this — an 11 reader would land transaction codes 3 and 4 on nothing.
+     * Not an action floor: [MIN_API_VERSION_FOR_BIBLE] stays 11 and the plain door still binds.
+     */
+    const val MIN_API_VERSION_FOR_BIBLE_REFERENCE: Int = 12
 
     /**
      * The lowest API version the host accepts for a service on [action] — **per action** since arc

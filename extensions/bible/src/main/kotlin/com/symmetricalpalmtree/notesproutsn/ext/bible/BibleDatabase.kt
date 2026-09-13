@@ -1,6 +1,7 @@
 package com.symmetricalpalmtree.notesproutsn.ext.bible
 
 import android.database.sqlite.SQLiteDatabase
+import java.io.Closeable
 
 /**
  * Read-only accessor for the bundled Bible source (`bsb.bible`, installed by
@@ -19,11 +20,11 @@ class BibleDatabase private constructor(
     private val db: SQLiteDatabase,
     /** The source's `metadata` table as a plain map (id, title, versification…). */
     val metadata: Map<String, String>,
-) {
+) : Closeable {
     val id: String get() = metadata["id"] ?: "unknown"
     val title: String get() = metadata["title"] ?: id
 
-    fun close() = db.close()
+    override fun close() = db.close()
 
     /** The source's books in canonical order, with the chapter count of each. */
     fun books(): List<BookRow> {
@@ -115,6 +116,35 @@ class BibleDatabase private constructor(
         }
         return out
     }
+
+    // --- arc 38 / R1: what a reference needs ----------------------------------
+
+    /** One verse of the `verse` table's plain text (the passage view's source, arc 38 / R2). */
+    data class VerseRow(val verseKey: Int, val usfm: String, val chapter: Int, val verse: Int, val text: String)
+
+    /**
+     * The verses whose key falls in `[startKey, endKey]`, in reading order — the `verse` table's
+     * clean plain text (no block structure: the passage view flows them as prose). Keys are
+     * app-controlled integers, so binding them is a formality kept anyway.
+     */
+    fun versesForRange(startKey: Int, endKey: Int): List<VerseRow> {
+        val out = ArrayList<VerseRow>()
+        db.rawQuery(
+            "SELECT verse_key, usfm, chapter, verse, text FROM verse " +
+                "WHERE verse_key BETWEEN ? AND ? ORDER BY verse_key",
+            arrayOf(startKey.toString(), endKey.toString()),
+        ).use { c ->
+            while (c.moveToNext()) {
+                out.add(VerseRow(c.getInt(0), c.getString(1), c.getInt(2), c.getInt(3), c.getString(4)))
+            }
+        }
+        return out
+    }
+
+    /** Whether exactly this verse exists in the source. */
+    fun verseExists(verseKey: Int): Boolean =
+        db.rawQuery("SELECT 1 FROM verse WHERE verse_key = ? LIMIT 1", arrayOf(verseKey.toString()))
+            .use { it.moveToFirst() }
 
     companion object {
         /** Opens an installed `.bible` file read-only. Blocking. */
