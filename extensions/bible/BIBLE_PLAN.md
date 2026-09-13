@@ -184,3 +184,57 @@ Host (`apps/notesprout_sn`) — verified against the code:
   `firstVerseKey`). Zero Kotlin warnings. Not installed on any device — the look of the page
   (poetry indents, headings, the first page's title + chapter number) and the open duration are
   B4's walk.
+
+### B2 — Swipe + chapter flow + stored position ✅ 2026-09-13
+
+- **`ChapterCursor.kt`** (pure, package root — not `reader/` as the architecture sketch had it:
+  it walks the canon, it renders nothing): `ChapterRef(usfm, chapter)` + `next`/`prev` over the
+  **source's own** chapter counts (`BibleDatabase.books()`, read once), ordered by `Canon`'s
+  ordinal rather than the map's iteration order. A book the map does not carry is **skipped**, a
+  count below 1 is no book at all, and `prev(GEN 1)` / `next(REV 22)` are `null` — the reader's
+  silent no-ops (decision 10).
+- **`Position.kt`** (pure): `GEN:1:1` on the wire, `decode` **total** — wrong arity, a non-int, an
+  unknown usfm, a chapter or verse below 1 all yield `null` and the reader falls back to
+  `Position.GENESIS_1` (decision 7). A lost bookmark is never a dialog.
+- **Page anchors** in `ChapterPaginator`: `anchorVerses(pages)` — the verse **in effect** at each
+  page's first word (a number, or a heading then a number, opens the page; otherwise the verse
+  carried in from the page before; a heading-only opening page anchors to 1) — and
+  `pageContaining(anchors, verse)`, the LAST page at or before the verse. **`firstVerseKey` was
+  replaced by these rather than kept beside them** (a second anchor rule is a drift waiting to
+  happen); its B1 test became the three anchor tests. A verse spilling over two pages anchors
+  both, so a reopen lands on the last of them — recorded, not a bug.
+- **`ChapterLoader.kt`** — extracted from `BibleActivity` (which would otherwise have grown past
+  its budget): the installed source, the typography, the cursor, `buildChapter`, and a
+  **5-chapter `LinkedHashMap` cache** keyed on `ChapterRef`, oldest evicted, emptied whole if the
+  band's geometry ever changes. `ChapterPages` moved here and now carries `ref` + `anchors`. Two
+  monitors on purpose: the field lock (never held across the 12 MB first-run copy or an open) and
+  a **build lock** — one `ReaderTypography` means one shared `TextPaint`, and a `Paint` measured
+  from two threads at once is not safe, so a foreground load can wait for one already-running
+  prefetch build.
+- **`BibleActivity`**: head unchanged (caller check first). Opens on the stored position — read on
+  IO at the band's first layout, `pageContaining(anchors, verse)` picks the page — and writes
+  `Position(usfm, chapter, anchors[pageIndex])` on every committed turn **and** the first show,
+  fire-and-forget on IO, **coalesced** (a write in flight parks the latest one and takes it next,
+  so ten fast flips cost two writes) and swallowed with a `Slog.d` on failure. A turn past the
+  last page opens the next chapter at page 0, a turn back off page 0 the previous at its **last**
+  page, across books; the title follows. **A chapter load latches** further turns away rather than
+  queueing them — on e-ink a queued turn arrives long after the hand gave up on it. After each
+  show, both neighbours are built on IO into the loader's cache, so the edge is usually one
+  `invalidate()`. `ListSwipe(region = { readerView }, …)` built in `onCreate` and fed from
+  `dispatchTouchEvent` **before** `super` — observer only, consumes nothing, pager buttons
+  untouched, and it drops stylus/eraser sequences itself, so a pen over the page never turns it.
+  No tap zones (the user's call).
+- **Hardening found on the way:** `onDestroy` ran straight into `lateinit` teardown on a
+  caller-check bounce (B1's shape — the shell `am start` in the B0 walk was refusing the launch
+  *and* crashing the extension process out of sight). It now returns on an `admitted` flag first,
+  the root `IndexGuard.bounced` rule in the extension's shape.
+- Gate: `:ext-bible:assembleDebug` + `:ext-bible:testDebugUnitTest` green from a `--rerun-tasks`
+  build, **34 tests** (B1's 20 + `ChapterCursorTest` 7 + `PositionTest` 4 + 3 more in
+  `ChapterPaginatorTest`, whose `firstVerseKey` test was replaced). Zero Kotlin warnings; every
+  touched file byte-scanned clean (no NUL/BEL).
+- **Not installed on any device — B4's walk owns all of this:** the swipe's *feel* (how far a
+  Nomad finger has to travel before `SwipeMath` calls it, and that a resting pen never turns the
+  page), the flow at Genesis 50 → Exodus 1 and back off Exodus 1 into Genesis 50's last page, the
+  Revelation 22 / Genesis 1 no-ops being silent rather than stuck-looking, whether the neighbour
+  prefetch actually makes an edge crossing feel like a page turn, and the reopen-at-verse after a
+  Back (and after process death).

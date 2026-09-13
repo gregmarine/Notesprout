@@ -199,11 +199,41 @@ object ChapterPaginator {
     }
 
     /**
-     * The verse key of the first verse number on a page, or null when the page
-     * opens mid-verse (its text carried over from the page before). This is the
-     * reader's position anchor — B2 stores it, and a reopen picks the page whose
-     * range contains it.
+     * The verse **in effect** at the top of each page — the reader's position anchor (arc 37 / B2).
+     *
+     * A page's anchor is the verse whose text its first line belongs to: the last verse number
+     * standing before the page's first word (a number, or a heading then a number, may open the
+     * page), and otherwise the verse carried in from the page before, because a page that opens
+     * mid-verse is still *inside* that verse. A page with no verse anywhere before or on it — a
+     * lone heading page at a chapter's start — anchors to verse 1, the chapter's own beginning.
+     *
+     * Anchors are non-decreasing by construction, which is what makes [pageContaining] a plain
+     * scan, and what makes "write the anchor on every turn, reopen on the page containing it"
+     * round-trip: the page a verse lands on is the page it was written from.
      */
-    fun firstVerseKey(page: List<Atom>): Int? =
-        page.firstNotNullOfOrNull { (it as? NumberAtom)?.verseKey }
+    fun anchorVerses(pages: List<List<Atom>>): List<Int> {
+        val anchors = ArrayList<Int>(pages.size)
+        var carried = 0 // the last verse number seen on any earlier page; 0 = none yet
+        for (page in pages) {
+            var opening = 0 // the last number standing before this page's first content atom
+            for (atom in page) {
+                if (atom is WordAtom || atom is FootnoteAtom) break
+                if (atom is NumberAtom) opening = atom.number
+            }
+            anchors.add(if (opening > 0) opening else carried.coerceAtLeast(1))
+            for (atom in page) if (atom is NumberAtom) carried = atom.number
+        }
+        return anchors
+    }
+
+    /**
+     * The page [verse] is read on: the **last** page whose anchor is at or before it, or page 0
+     * when none is (a verse before the first anchor, or no pages measured at all). Total by
+     * design — a stored position from a differently-sized page run must still open something.
+     */
+    fun pageContaining(anchors: List<Int>, verse: Int): Int {
+        var page = 0
+        for (index in anchors.indices) if (anchors[index] <= verse) page = index
+        return page
+    }
 }

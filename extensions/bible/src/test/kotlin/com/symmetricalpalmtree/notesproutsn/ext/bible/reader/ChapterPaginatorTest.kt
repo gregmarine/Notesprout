@@ -5,7 +5,6 @@ import com.symmetricalpalmtree.notesproutsn.ext.bible.RenderBlock
 import com.symmetricalpalmtree.notesproutsn.ext.bible.VerseKey
 import com.symmetricalpalmtree.notesproutsn.ext.bible.VerseMark
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -128,17 +127,74 @@ class ChapterPaginatorTest {
     }
 
     @Test
-    fun `firstVerseKey is the page's first verse number, or null mid-verse`() {
-        val page = listOf(
-            BreakAtom(Flow.PARAGRAPH),
-            NumberAtom(2, key(23, 2)),
-            WordAtom("The"),
-            NumberAtom(3, key(23, 3)),
+    fun `a page anchors to the verse in effect at its first word`() {
+        val pages = listOf(
+            // Page 1 opens the chapter on verse 1…
+            listOf(
+                BreakAtom(Flow.PARAGRAPH),
+                NumberAtom(1, key(23, 1)),
+                WordAtom("The"),
+                WordAtom("LORD"),
+                NumberAtom(2, key(23, 2)),
+                WordAtom("He"),
+                NumberAtom(3, key(23, 3)),
+                WordAtom("He"),
+            ),
+            // …page 2 opens mid-verse 3: its text carried over, so it IS verse 3.
+            listOf(WordAtom("restores"), WordAtom("my"), WordAtom("soul.")),
+            // A heading stands before the number, and the number still wins.
+            listOf(
+                HeadingAtom("He Guides Me", HeadingKind.MAJOR),
+                BreakAtom(Flow.PARAGRAPH),
+                NumberAtom(5, key(23, 5)),
+                WordAtom("You"),
+            ),
         )
-        assertEquals(key(23, 2), ChapterPaginator.firstVerseKey(page))
-        // A page that opens inside a verse carries no number of its own.
-        assertNull(ChapterPaginator.firstVerseKey(listOf(WordAtom("shepherd;"), WordAtom("I"))))
-        assertNull(ChapterPaginator.firstVerseKey(emptyList()))
+        assertEquals(listOf(1, 3, 5), ChapterPaginator.anchorVerses(pages))
+    }
+
+    @Test
+    fun `a page with no verse before or on it anchors to verse 1`() {
+        val pages = listOf(
+            // A chapter that opens on a heading tall enough to own the whole first page.
+            listOf(HeadingAtom("The LORD Is My Shepherd", HeadingKind.MAJOR)),
+            listOf(BreakAtom(Flow.POETRY1), NumberAtom(1, key(23, 1)), WordAtom("The")),
+        )
+        assertEquals(listOf(1, 1), ChapterPaginator.anchorVerses(pages))
+        assertEquals(emptyList<Int>(), ChapterPaginator.anchorVerses(emptyList()))
+    }
+
+    @Test
+    fun `pageContaining is the last page at or before the verse`() {
+        val anchors = listOf(1, 3, 5)
+        assertEquals(0, ChapterPaginator.pageContaining(anchors, 1))
+        assertEquals(0, ChapterPaginator.pageContaining(anchors, 2))
+        assertEquals(1, ChapterPaginator.pageContaining(anchors, 3))
+        assertEquals(1, ChapterPaginator.pageContaining(anchors, 4))
+        assertEquals(2, ChapterPaginator.pageContaining(anchors, 5))
+        // Past the end of a shorter run of pages than the position was written from.
+        assertEquals(2, ChapterPaginator.pageContaining(anchors, 9))
+        // Nothing to land on, and nothing before the first anchor: page 0 either way.
+        assertEquals(0, ChapterPaginator.pageContaining(emptyList(), 4))
+        assertEquals(0, ChapterPaginator.pageContaining(listOf(3, 5), 1))
+    }
+
+    @Test
+    fun `a real pagination anchors every page, and every anchor finds its verse again`() {
+        val atoms = poem()
+        val pages = ChapterPaginator.paginate(atoms, tenEach, WIDTH, 35, 50)
+        val anchors = ChapterPaginator.anchorVerses(pages)
+
+        assertEquals(pages.size, anchors.size)
+        for (index in anchors.indices) {
+            assertTrue("anchors never fall", index == 0 || anchors[index - 1] <= anchors[index])
+            // A stored anchor comes back to a page showing that same verse. Not always the page
+            // it was written from: a verse spilling over two pages anchors both, and the reopen
+            // takes the LAST of them by design.
+            val reopened = ChapterPaginator.pageContaining(anchors, anchors[index])
+            assertEquals(anchors[index], anchors[reopened])
+            assertTrue("never before the verse begins", reopened >= index)
+        }
     }
 
     /** Twelve verses of three words each, in poetry lines — enough for several pages. */
