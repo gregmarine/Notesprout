@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One search hit (arc 37 / B8): the verse's address bold ("John 3:16"), then two lines of its
+     text — always two (minLines = maxLines), so every row is one height and the page count is a
+     division, measured once. Both inkBlack: secondary text is smaller, never grey. 1dp separator
+     below, inset like the Recents row's. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/searchHitRoot"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp">
+
+        <TextView
+            android:id="@+id/searchHitRef"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/inkBlack"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:singleLine="true"
+            android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/searchHitText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textColor="@color/inkBlack"
+            android:textSize="15sp"
+            android:lineSpacingMultiplier="1.15"
+            android:minLines="2"
+            android:maxLines="2"
+            android:ellipsize="end" />
+
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="24dp"
+        android:background="@color/inkBlack" />
+
+</LinearLayout>

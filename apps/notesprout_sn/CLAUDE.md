@@ -21,7 +21,9 @@ walk; **post-freeze B6 2026-09-13 on the user's decision: the index became a Con
 panel with a one-finger swipe-down door — `SwipeMath.vertical` + `ListSwipe`'s optional vertical
 callbacks landed in `:sn-screen` for it; post-freeze B7 the same day: "Index" renamed "Contents"
 (strings and classes), and a Recents panel — the notebook's, mirrored right — of the chapters
-picked by name, behind a clock button and a two-finger swipe down (`ListSwipe`'s optional
+picked by name, behind a clock button and a two-finger swipe down; **post-freeze B8 the same
+day: a Search panel — reference or words, Biblesprout's shape, FTS4 in the slim build + a
+Kotlin BM25 — behind a search button left of the clock** (`ListSwipe`'s optional
 `onTwoFingerSwipeDown`, `:sn-screen`); the store grew to `BibleSchema.V2` with a `recent` table**).
 **Arc 38 "Reference" (2026-09-13, a fresh user decision, branch `bible`) grew the Bible point
 in place** — a lassoed or typed scripture reference becomes a linked passage object in the
@@ -140,7 +142,8 @@ there, what may not depend on it, and the `nonTransitiveRClass` flag that holds 
 `extensions/bible/docs/bible.md` (arc 37 "Bible": **NSE · Bible** as a feature — the slim BSB
 SQLite build, the paginated print-look reader, single-finger swipe and chapter/book flow, the
 Contents side panel (book rows → chapter grid; swipe down opens it), the Recents side panel (the
-chapters picked by name; clock button + two-finger swipe down), the stored position and the
+chapters picked by name; clock button + two-finger swipe down), the Search side panel (B8: a
+reference goes there, words are ranked hits — FTS4 + BM25), the stored position and the
 `recent` table, the `extensions/` monorepo-root pattern; grown by **arc 38 "Reference"**:
 notebook-linked Bible reference objects — the reference parser/codec, the passage view, Full
 chapter, and the Recents' `recent_ref` table of followed passages).

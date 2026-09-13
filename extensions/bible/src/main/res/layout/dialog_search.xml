@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Search panel (arc 37 / B8): dialog_recents.xml's shape — anchored `end`, its border rule
+     on the LEFT edge, the panel width set from code (the Contents' 60 %: a row carries a verse).
+     The header is the field itself: [reference or words] [search] [back — full-screen form only].
+     Below it a one-line summary ("12 results for “shepherd”"), then the body — the paginated hit
+     rows, or the help (two example groups), or a one-line message ("Searching…", "No results") —
+     then the pager. The window resizes for the IME, and the rows re-measure when it does. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/searchRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/transparent">
+
+    <LinearLayout
+        android:id="@+id/searchPanel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_gravity="end"
+        android:orientation="vertical"
+        android:background="@drawable/shape_recents_sidebar"
+        android:clickable="true"
+        android:focusable="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/toolbar_bar_thickness"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp">
+
+            <androidx.appcompat.widget.AppCompatEditText
+                android:id="@+id/searchInput"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="@drawable/shape_bordered"
+                android:hint="@string/bible_search_hint"
+                android:imeOptions="actionSearch"
+                android:inputType="text"
+                android:maxLines="1"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"
+                android:singleLine="true"
+                android:textColor="@color/inkBlack"
+                android:textColorHint="@color/inkLight"
+                android:textSize="16sp" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnSearchGo"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_search"
+                android:contentDescription="@string/cd_bible_search" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnSearchBack"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_arrow_left"
+                android:contentDescription="@string/cd_bible_back" />
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
+
+        <!-- The count line. Smaller, never grey: it carries information. GONE until a search
+             has answered. -->
+        <TextView
+            android:id="@+id/searchSummary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:textColor="@color/inkBlack"
+            android:textSize="13sp"
+            android:visibility="gone" />
+
+        <FrameLayout
+            android:id="@+id/searchBody"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <LinearLayout
+                android:id="@+id/searchRows"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp" />
+
+            <!-- What the field takes, shown until the first search (Biblesprout's help). -->
+            <LinearLayout
+                android:id="@+id/searchHelp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="20dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/bible_search_help_jump_title"
+                    android:textColor="@color/inkBlack"
+                    android:textSize="17sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:lineSpacingMultiplier="1.4"
+                    android:text="@string/bible_search_help_jump_examples"
+                    android:textColor="@color/inkBlack"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="20dp"
+                    android:text="@string/bible_search_help_words_title"
+                    android:textColor="@color/inkBlack"
+                    android:textSize="17sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:lineSpacingMultiplier="1.4"
+                    android:text="@string/bible_search_help_words_examples"
+                    android:textColor="@color/inkBlack"
+                    android:textSize="14sp" />
+            </LinearLayout>
+
+            <!-- "Searching…" / "No results for …": a word, never a spinner. -->
+            <TextView
+                android:id="@+id/searchMessage"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:padding="20dp"
+                android:textColor="@color/inkBlack"
+                android:textSize="15sp"
+                android:visibility="gone" />
+        </FrameLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
+
+        <LinearLayout
+            android:id="@+id/searchPager"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/toolbar_bar_thickness"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:visibility="invisible">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnSearchFirst"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_page_first"
+                android:contentDescription="@string/cd_bible_contents_first" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnSearchPrev"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_page_prev"
+                android:contentDescription="@string/cd_bible_contents_prev" />
+
+            <TextView
+                android:id="@+id/searchPageLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="56dp"
+                android:gravity="center"
+                android:textSize="14sp"
+                android:textColor="@color/inkBlack" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnSearchNext"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_page_next"
+                android:contentDescription="@string/cd_bible_contents_next" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnSearchLast"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_page_last"
+                android:contentDescription="@string/cd_bible_contents_last" />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

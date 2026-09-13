@@ -12,9 +12,10 @@ import java.io.Closeable
  * All methods are blocking; call them off the main thread (`Dispatchers.IO`).
  *
  * Ported from Biblesprout (`data/BibleDatabase.kt`), trimmed to what the reader
- * needs — the SQL is copied exactly. Search (FTS), cross-references, the word
- * layer, concordance and verse slices are gone: the slim build carries no word
- * layer, and this reader has no search.
+ * needs — the SQL is copied exactly. Cross-references, the word layer,
+ * concordance and verse slices are gone: the slim build carries no word layer.
+ * Search (arc 37 / B8) is here, over the slim build's **FTS4** index — see
+ * [search].
  */
 class BibleDatabase private constructor(
     private val db: SQLiteDatabase,
@@ -137,6 +138,51 @@ class BibleDatabase private constructor(
         }
         return out
     }
+
+    // --- arc 37 / B8: search ------------------------------------------------
+
+    /**
+     * The verses [query]'s words are found in, best first (arc 37 / B8): Biblesprout's
+     * `search()`, over FTS4 instead of FTS5 — the platform `android.database.sqlite` this file
+     * is opened with carries FTS3/4 on every Android release and cannot be assumed to carry
+     * FTS5, and the extension bundles no engine of its own. FTS4 has no `rank`, so the ranking is
+     * ours: every matching row's `matchinfo` blob is read (rowid + a few dozen bytes — cheap even
+     * for a ubiquitous prefix), scored by [SearchRank.bm25] on the caller's thread, and only the
+     * best [SearchQuery.MAX_HITS] rows are then read in full. The count is the true count.
+     *
+     * The match expression is bound, never interpolated; [SearchQuery] guarantees it is a
+     * syntax-safe list of lowercase prefix tokens. **Neither the query nor a hit is logged.**
+     */
+    fun search(query: String): SearchResults {
+        val tokens = SearchQuery.tokens(query)
+        val match = SearchQuery.matchExpression(query) ?: return SearchResults(query, tokens, emptyList(), 0)
+        val scored = ArrayList<Pair<Int, Double>>()
+        db.rawQuery(
+            "SELECT rowid, matchinfo(verse_fts, 'pcnalx') FROM verse_fts WHERE verse_fts MATCH ?",
+            arrayOf(match),
+        ).use { c ->
+            while (c.moveToNext()) scored.add(c.getInt(0) to SearchRank.bm25(c.getBlob(1)))
+        }
+        if (scored.isEmpty()) return SearchResults(query, tokens, emptyList(), 0)
+        val keys = SearchRank.top(scored, SearchQuery.MAX_HITS)
+        val rows = HashMap<Int, SearchHit>(keys.size * 2)
+        // Keys are app-controlled integers straight out of the index, so the IN list is built
+        // from them directly; there is nothing user-typed in it.
+        db.rawQuery(
+            "SELECT verse_key, usfm, chapter, verse, text FROM verse WHERE verse_key IN (${keys.joinToString(",")})",
+            null,
+        ).use { c ->
+            while (c.moveToNext()) {
+                rows[c.getInt(0)] = SearchHit(c.getInt(0), c.getString(1), c.getInt(2), c.getInt(3), c.getString(4))
+            }
+        }
+        return SearchResults(query, tokens, keys.mapNotNull { rows[it] }, scored.size)
+    }
+
+    /** The chapter count of [usfm] in the source, or 0 for a book it does not carry. */
+    fun chapterCount(usfm: String): Int =
+        db.rawQuery("SELECT chapter_count FROM book WHERE usfm = ?", arrayOf(usfm))
+            .use { if (it.moveToFirst()) it.getInt(0) else 0 }
 
     /** Whether exactly this verse exists in the source. */
     fun verseExists(verseKey: Int): Boolean =

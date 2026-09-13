@@ -416,3 +416,47 @@ with the clock icon … tapping an item will take the user to that location."
   against the one-finger Contents swipe, and a resting palm were left to the user's hand —
   **walked by the user on the Nomad the same day: "This looks and works good!"** B7 is complete.
 
+### B8 — Search ✅ 2026-09-13 (post-freeze, the user's decision)
+
+The user's ask, verbatim in substance: "a search feature similar to the Biblesprout search. It
+can be by reference or a fuzzy text search. If it's a reference, it just goes to that
+reference/those references. If fuzzy search, it should display a list of possible hits just like
+Biblesprout has. Put a search button to the left of the recent button." Decision 5 amended: the
+slim build carries a full-text index again.
+
+- **Data:** the slim build's `verse_fts` is **FTS4** (`content='verse'`, `tokenize=unicode61`),
+  not Biblesprout's FTS5 — the platform `android.database.sqlite` the extension opens with is
+  built with FTS3/4 everywhere and cannot be assumed to have FTS5, and the extension bundles no
+  engine. `tools/bible/build_bible_db.py --slim` now emits it (`metadata.layers` = `display,fts4`);
+  the asset went 11.6 → 14.6 MB (the `ContentInstaller` stamp re-copies it on update).
+- **Pure Kotlin** (`Search.kt`, 18 JVM tests → 111): `SearchQuery` (lowercase prefix-AND
+  expression, injection-proof by construction), `SearchRank` (BM25 over `matchinfo('pcnalx')`,
+  the FTS5 `rank` FTS4 lacks; ties canonical), `SearchRoute` (whole chapter → `Chapter`; any
+  other parse → `Passage`; else `Words`), `SearchSnippet` (bold match ranges + a 36-char window
+  to the first match — the one place this goes past Biblesprout, whose two-line clip hides a
+  late match).
+- **`BibleDatabase.search`**: rowid + matchinfo for every match, ranked in Kotlin, the best 100
+  read by `IN`; the total is honest. `ChapterLoader.withDatabase` — the source without the
+  typography and without the build monitor. `BibleDatabase.chapterCount` for the chapter check.
+- **`SearchPanel`** + `dialog_search.xml` + `item_search_hit.xml`: the Recents' shape mirrored
+  right at the Contents' 60 %; the header is the field; help / message / rows body; measured
+  pagination re-run on every body-height change (the IME); `ADJUST_RESIZE`; the IME hidden on
+  submit unless a hardware keyboard is attached; results kept in `BibleActivity.lastSearch` for
+  the screen's life.
+- **`BibleActivity`:** `btnSearch` left of the clock; `search()` classifies, checks the source
+  on IO (a dead reference falls through to words, as Biblesprout), dismisses and `goTo` /
+  `goToPassage` for a reference (both stamped — typing a place is a pick), else searches and
+  hands the list back; `goTo(ref, verse)` lands a hit on its verse's page.
+- **Judgment calls stated, not asked:** a lone whole chapter opens as a chapter (reading model),
+  every other reference as a passage; both reference routes record a recent; results survive the
+  panel's closing; the panel is 60 % wide; no gesture door; bold + windowed snippets.
+- **Walked over adb on the Nomad** (`.dev` host + `.dev` Bible; typed via on-screen keyboard
+  taps — `input text` is swallowed, the colon and dash live on the `#+=` page): the panel opened
+  with the keyboard and the help; "shepherd" → "First 100 of 114 results" in 124 ms, 10 rows/page,
+  matches bold, "2 Kings 10:12" windowed with "…"; the keyboard went down on submit; tapping
+  "Psalm 23:1" opened Psalm 23 page 1 (139 ms); re-opening showed the list with the query and no
+  keyboard; with the keyboard up the list re-measured to 5 rows/page; "gen 2" → Genesis 2 as a
+  chapter (286 ms); "john 3:16-18" → the passage view with Full chapter (47 ms); Recents showed
+  Genesis 2 and Psalm 23 stamped; "pppo" → "No results for “pppo”". **Left to the user's hand:**
+  the feel, the swipe over the list, a hardware keyboard.
+

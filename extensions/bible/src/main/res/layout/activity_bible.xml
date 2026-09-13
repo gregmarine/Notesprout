@@ -4,9 +4,9 @@
   tier-2 screen with no paper on it, so there is no full-bleed surface, no exclusion rects and no
   EPD handoff: an ordinary vertical stack of chrome.
 
-  Top to bottom: the top bar ([Back] [Contents] · title · [Full chapter] [Recents] — the
-  notebook's own order, B7; the Full chapter button is GONE except in the passage view, arc 38 /
-  R2) · the reader band (the ReaderView, added from code) · the pager. Chrome sits flush at the top edge — the top guard is 0
+  Top to bottom: the top bar ([Back] [Contents] · title · [Full chapter] [Search] [Recents] — the
+  notebook's own order, B7, Search added left of Recents by B8; the Full chapter button is GONE
+  except in the passage view, arc 38 / R2) · the reader band (the ReaderView, added from code) · the pager. Chrome sits flush at the top edge — the top guard is 0
   on Ratta. Dividers are 1dp inkBlack; borderGray is invisible on the panel.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -66,7 +66,7 @@
                 android:src="@drawable/ic_list" />
         </LinearLayout>
 
-        <!-- Full chapter then Recents. Recents keeps the right EDGE — its panel comes in from
+        <!-- Full chapter, Search, then Recents. Recents keeps the right EDGE — its panel comes in from
              that side (B7), and an action button displacing it would break that reading; the
              passage's one action sits inside it (arc 38 / R2). -->
         <LinearLayout
@@ -90,6 +90,12 @@
                 android:minHeight="@dimen/toolbar_button_size"
                 android:text="@string/bible_full_chapter"
                 android:visibility="gone" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnSearch"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_bible_search"
+                android:src="@drawable/ic_search" />
 
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnRecents"

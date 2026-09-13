@@ -3,8 +3,9 @@
 
 Origin: copied from Biblesprout's `data/tools/build_bible_db.py` and adapted
 for Notesprout — CLI paths via argparse (no hardcoded repo-relative
-directories) and a `--slim` build that drops the word (interlinear) layer and
-FTS, which Notesprout's Bible extension does not use. Notesprout ships the
+directories) and a `--slim` build that drops the word (interlinear) layer,
+which Notesprout's Bible extension does not use, and carries its full-text
+index as FTS4 (the platform SQLite's) rather than FTS5. Notesprout ships the
 slim build only.
 
 Source of truth: the per-book USFM (66 files, one per book), downloaded from
@@ -47,12 +48,12 @@ Android's StaticLayout can turn them straight into spans:
 markers, footnote text, heading text or cross-reference labels.
 
 `--slim` skips the whole word layer (no table parsing/alignment, no
-`morphology` / `form` / `word` tables or their indexes) and skips FTS (no
-`verse_fts` virtual table). Everything else — `metadata`, `book`, `verse`,
+`morphology` / `form` / `word` tables or their indexes) and builds
+`verse_fts` as FTS4 (unicode61) instead of FTS5 — see SLIM_FTS_SCHEMA_SQL. Everything else — `metadata`, `book`, `verse`,
 `block` (+`block_chapter` index), `verse_marker`, `redletter`, `footnote`,
 `xref` and their indexes, and the final `VACUUM` — is identical to the full
 build. `metadata`'s `layers` row records which layers are present:
-`"display"` for a slim build, `"display,words,fts"` for a full one.
+`"display,fts4"` for a slim build, `"display,words,fts"` for a full one.
 """
 
 import argparse
@@ -692,7 +693,7 @@ class Builder:
             self._write_blocks(db)
             if not self.slim:
                 self._write_words(db)
-                self._write_fts(db)
+            self._write_fts(db)
             db.commit()
             db.execute("VACUUM")
         finally:
@@ -702,6 +703,8 @@ class Builder:
         sql = BASE_SCHEMA_SQL
         if not self.slim:
             sql += WORD_SCHEMA_SQL + FTS_SCHEMA_SQL
+        else:
+            sql += SLIM_FTS_SCHEMA_SQL
         return sql
 
     def _write_meta(self, db):
@@ -710,7 +713,7 @@ class Builder:
             "type": "bible", "language": "en", "versification": "english",
             "license": "Public Domain", "source_url": SOURCE_URL,
             "schema_version": str(SCHEMA_VERSION),
-            "layers": "display" if self.slim else "display,words,fts",
+            "layers": "display,fts4" if self.slim else "display,words,fts",
         }
         db.executemany("INSERT INTO metadata(key, value) VALUES (?, ?)",
                        list(meta.items()))
@@ -939,12 +942,27 @@ CREATE INDEX word_verse ON word(verse_key, sort);
 CREATE INDEX word_strongs ON word(strongs);
 """
 
-# Full-text search — omitted from a --slim build.
+# Full-text search (full build): FTS5, which Biblesprout's bundled SQLCipher
+# engine carries.
 FTS_SCHEMA_SQL = """
 CREATE VIRTUAL TABLE verse_fts USING fts5(
   text,
   content='verse',
   content_rowid='verse_key'
+);
+"""
+
+# Full-text search (--slim build, Notesprout's Bible extension): FTS4, because
+# the extension opens the file through the PLATFORM android.database.sqlite,
+# which is built with FTS3/FTS4 on every Android release and cannot be assumed
+# to carry FTS5. External content over verse (verse_key is verse's rowid), the
+# unicode61 tokenizer for FTS5-like case/diacritic folding; matchinfo() feeds
+# the extension's own BM25 ranking, so the docsize table is kept (default).
+SLIM_FTS_SCHEMA_SQL = """
+CREATE VIRTUAL TABLE verse_fts USING fts4(
+  text,
+  content='verse',
+  tokenize=unicode61
 );
 """
 
@@ -959,7 +977,7 @@ def parse_args():
                          f"(default: {DEFAULT_TABLES_PATH})")
     p.add_argument("--out", required=True, help="Output .bible SQLite path")
     p.add_argument("--slim", action="store_true",
-                    help="Skip the word (interlinear) layer and FTS")
+                    help="Skip the word (interlinear) layer; FTS4 instead of FTS5")
     return p.parse_args()
 
 

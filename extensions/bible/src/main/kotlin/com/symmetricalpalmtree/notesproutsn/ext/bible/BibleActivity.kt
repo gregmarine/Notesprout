@@ -96,6 +96,14 @@ import kotlinx.coroutines.withContext
  * chapter at its first page and re-stamps it at the front of the list. Since R2 the list is the
  * merge of two histories — chapters picked by name, and passages followed here from a notebook —
  * and a passage row opens the passage view in place.
+ *
+ * B8's addition (the user's decision 2026-09-13): **Search** — `btnSearch` left of the clock,
+ * [SearchPanel] on the right. One field, two answers ([SearchRoute]): a reference that the
+ * source has verses for **goes there** — a lone whole chapter as a chapter pick, anything else
+ * as a passage, both stamped as recents because typing a place is the most deliberate pick
+ * there is; anything else is words, searched on IO ([BibleDatabase.search]) and shown as a
+ * ranked list in the panel, a row opening its chapter on that verse's page (a pick too). The last
+ * results outlive the panel for the life of this screen, so closing it does not lose them.
  */
 class BibleActivity : AppCompatActivity() {
 
@@ -138,6 +146,11 @@ class BibleActivity : AppCompatActivity() {
     /** The Recents while it is up; null otherwise. [gatheringRecents] covers the read before it. */
     private var recentsPanel: RecentsPanel? = null
     private var gatheringRecents = false
+
+    /** The Search while it is up; null otherwise. [lastSearch] is what it re-opens on. */
+    private var searchPanel: SearchPanel? = null
+    private var lastSearch: SearchResults? = null
+    private var searching = false
 
     /** Position writes: the one in flight, and the latest one that arrived while it was. */
     private var writing = false
@@ -209,6 +222,8 @@ class BibleActivity : AppCompatActivity() {
         binding.title.setOnLongClickListener { hint(R.string.cd_bible_contents) }
         binding.btnRecents.setOnClickListener { openRecents() }
         binding.btnRecents.setOnLongClickListener { hint(R.string.cd_bible_recents) }
+        binding.btnSearch.setOnClickListener { openSearch() }
+        binding.btnSearch.setOnLongClickListener { hint(R.string.cd_bible_search) }
         binding.btnFullChapter.setOnClickListener { openFullChapter() }
         binding.btnFullChapter.setOnLongClickListener { hint(R.string.bible_full_chapter) }
         binding.btnPrevPage.setOnClickListener { turnTo(pageIndex - 1) }
@@ -216,8 +231,8 @@ class BibleActivity : AppCompatActivity() {
         binding.btnNextPage.setOnClickListener { turnTo(pageIndex + 1) }
         binding.btnNextPage.setOnLongClickListener { hint(R.string.cd_bible_next_page) }
         for (button in listOf<View>(
-            binding.btnBack, binding.btnContents, binding.btnRecents, binding.btnFullChapter,
-            binding.btnPrevPage, binding.btnNextPage,
+            binding.btnBack, binding.btnContents, binding.btnSearch, binding.btnRecents,
+            binding.btnFullChapter, binding.btnPrevPage, binding.btnNextPage,
         )) {
             TooltipCompat.setTooltipText(button, button.contentDescription)
         }
@@ -240,6 +255,7 @@ class BibleActivity : AppCompatActivity() {
         // "don't keep activities" — destroys that bypass leave()).
         contentsPanel?.dismiss()
         recentsPanel?.dismiss()
+        searchPanel?.dismiss()
         binding.root.removeCallbacks(showLoading)
         loader.close()
     }
@@ -528,6 +544,91 @@ class BibleActivity : AppCompatActivity() {
             runCatching { store.writeRecentRef(wire, at, RecentChapters.KEEP) }
                 .onFailure { Slog.d(TAG) { "recent reference not saved" } }
         }
+    }
+
+    // --- the Search ---------------------------------------------------------
+
+    /**
+     * The Search panel (arc 37 / B8). One showing at a time; it opens on the last results, if
+     * any. A store is not needed: search reads the source alone, so the door is never gated.
+     */
+    private fun openSearch() {
+        if (searchPanel != null) return
+        searchPanel = SearchPanel(
+            this, lastSearch,
+            onDismissed = { searchPanel = null },
+            onQuery = { typed -> search(typed) },
+            onPicked = { hit -> goTo(hit.ref, hit.verse) },
+        ).also { it.show() }
+    }
+
+    /**
+     * What was typed, answered. A reference is checked against the source on IO — a reference
+     * the source has no verses for is searched as words, as Biblesprout does — and then opened
+     * through the same doors a Contents or Recents pick takes, the panel dismissed first. Words
+     * are searched on IO and handed back to the panel. One search at a time: a second submit
+     * while one runs is dropped, not queued.
+     *
+     * **Nothing typed is ever logged**, and neither is what was found.
+     */
+    private fun search(typed: String) {
+        if (searching) return
+        val panel = searchPanel ?: return
+        searching = true
+        lifecycleScope.launch {
+            val began = SystemClock.elapsedRealtime()
+            val route = SearchRoute.classify(typed)
+            val exists = when (route) {
+                is SearchRoute.Words -> false
+                is SearchRoute.Chapter -> withContext(Dispatchers.IO) {
+                    runCatching {
+                        loader.withDatabase { db -> route.ref.chapter <= db.chapterCount(route.ref.usfm) }
+                    }.getOrDefault(false)
+                }
+                is SearchRoute.Passage -> withContext(Dispatchers.IO) {
+                    runCatching {
+                        loader.withDatabase { db ->
+                            ReferenceResolver.valid(route.passages, db::chapterCount, db::verseExists)
+                        }
+                    }.getOrDefault(false)
+                }
+            }
+            if (isFinishing || isDestroyed) { searching = false; return@launch }
+            if (exists) {
+                searching = false
+                panel.dismiss()
+                when (route) {
+                    is SearchRoute.Chapter -> goTo(route.ref)
+                    is SearchRoute.Passage -> goToPassage(route.wire)
+                    is SearchRoute.Words -> Unit
+                }
+                return@launch
+            }
+            if (panel.isShowing) panel.showSearching()
+            val found = withContext(Dispatchers.IO) {
+                runCatching { loader.withDatabase { db -> db.search(typed) } }
+            }
+            searching = false
+            found
+                .onSuccess { results ->
+                    lastSearch = results
+                    Slog.d(TAG) {
+                        "search: ${results.hits.size} of ${results.total} in ${SystemClock.elapsedRealtime() - began} ms"
+                    }
+                    if (panel.isShowing) panel.showResults(results)
+                }
+                .onFailure { e ->
+                    Log.w(TAG, "search failed", e)
+                    if (panel.isShowing) panel.showResults(SearchResults(typed, emptyList(), emptyList(), 0))
+                }
+        }
+    }
+
+    /** A [goTo] that lands on the page carrying [verse] — a search hit's door (arc 37 / B8). */
+    private fun goTo(ref: ChapterRef, verse: Int) {
+        if (loading) return
+        recordRecent(ref)
+        openChapter(ref) { pages -> ChapterPaginator.pageContaining(pages.anchors, verse) }
     }
 
     // --- where the user was -------------------------------------------------

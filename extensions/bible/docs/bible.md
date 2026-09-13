@@ -2,7 +2,8 @@
 
 **NSE · Bible** is a read-only scripture reader inside Notesprout SN: a book/chapter **Contents**
 panel, a paginated print-look page, single-finger swipe that flows across chapter and book
-boundaries, and — B7 — a **Recents** panel of the chapters picked by name. No search, no bookmarks
+boundaries, — B7 — a **Recents** panel of the chapters picked by name, and — B8 — a **Search**
+panel: a reference goes there, words are found in the text (§ [Search](#search-b8)). No bookmarks
 beyond the one remembered position and that history, no cross-reference taps, no footnote popups.
 Berean Standard Bible only.
 
@@ -45,9 +46,11 @@ The user's, locked 2026-09-13 (`BIBLE_PLAN.md`):
 4. **The bundled `.bible` file is copied once to the extension's own `noBackupFilesDir`** — the
    one sanctioned "extension writes to disk" exception in the whole family (ML Kit's model is the
    precedent): re-derivable APK content, never user data.
-5. **Slim formatted DB (~12 MB)**: blocks, verse markers, footnotes, cross-references and
-   red-letter spans are kept; the word/form/morphology (interlinear) layer and FTS are dropped —
-   this reader has no search and no word popup.
+5. **Slim formatted DB (~15 MB)**: blocks, verse markers, footnotes, cross-references and
+   red-letter spans are kept; the word/form/morphology (interlinear) layer is dropped — this
+   reader has no word popup. *Amended by B8 (2026-09-13, the user's decision): the full-text
+   index is back, as **FTS4** (the platform SQLite's) rather than Biblesprout's FTS5, for
+   search.*
 6. **Bundle Noto Serif** (regular/bold/italic, OFL) from Biblesprout — a print typeface, not the
    system sans.
 7. **Last-read position = book + chapter + first verse on the page**, in the host store's `state`
@@ -91,12 +94,17 @@ to accommodate it.
 `tools/bible/build_bible_db.py --slim` is a copy of Biblesprout's builder (same schema version,
 same USFM parsing), adapted for CLI paths and given a `--slim` flag that skips two whole layers:
 the interlinear **word layer** (`morphology` / `form` / `word` tables and their indexes — original-
-language parsing, transliteration, Strong's numbers, concordance) and **FTS** (`verse_fts`, the
-plain-text search index). Both exist because Biblesprout's own reader uses them; Notesprout's does
-not — no word popup, no search. Everything else is identical to a full build: `metadata`, `book`,
-`verse` (clean plain text, unused by this reader but kept for schema parity), `block` (+
+language parsing, transliteration, Strong's numbers, concordance) — it exists because
+Biblesprout's own reader uses it; Notesprout's does not (no word popup). Since **B8** the slim
+build carries a full-text index after all, but as **FTS4** where the full build has FTS5:
+`verse_fts` is `fts4(text, content='verse', tokenize=unicode61)`, external content over `verse`
+(whose `verse_key` is its rowid), because the extension opens the file through the **platform**
+`android.database.sqlite`, which is built with FTS3/4 on every Android release and cannot be
+assumed to carry FTS5 (Biblesprout bundles SQLCipher for that; this extension bundles no engine).
+`metadata.layers` reads `display,fts4`. Everything else is identical to a full build: `metadata`,
+`book`, `verse` (clean plain text — the search corpus and the passage view's source), `block` (+
 `block_chapter` index), `verse_marker`, `redletter`, `footnote`, `xref` (+ `xref_source`), and the
-closing `VACUUM`.
+closing `VACUUM`. The asset grew from 11.6 MB to 14.6 MB.
 
 Sources, both public domain (Berean Bible):
 - USFM: `https://bereanbible.com/bsb_usfm.zip`
@@ -548,6 +556,72 @@ chapter it was picked *from* takes its place.
 
 ---
 
+## Search (B8)
+
+Added by **B8** (2026-09-13, the user's decision — "a search feature similar to the Biblesprout
+search … by reference or a fuzzy text search … a search button to the left of the recent
+button"): Biblesprout's `FindActivity` in the reader's shape. `btnSearch` (Tabler `search`) sits
+left of the clock; the bar runs `[Back][Contents] · title · [Full chapter][Search][Recents]`.
+No gesture door — the one- and two-finger swipe-downs are taken — and no gating: search reads the
+source alone, never the store.
+
+**The panel** ([`SearchPanel`](../src/main/kotlin/com/symmetricalpalmtree/notesproutsn/ext/bible/SearchPanel.kt),
+`dialog_search.xml`) is the Recents' shape mirrored right — a full-window `Dialog`, right sidebar
+at the **Contents' 60 %** (a row carries a verse; the Recents' 50 % is for a name and a time),
+full-screen behind a back arrow below 480 dp. **The header is the field**: one `AppCompatEditText`
+("Reference or words", `shape_bordered`, `imeOptions=actionSearch`) and a search button. Below it
+a count line, the body, the pager. The body is one of three things: the **help** (two example
+groups, until the first search), a one-line **message** ("Searching…", "No results for “x”"), or
+a page of **hit rows**. The window is `SOFT_INPUT_ADJUST_RESIZE`; the keyboard comes up with a
+fresh panel (`STATE_VISIBLE`) and stays down on a re-opened one (`STATE_HIDDEN` — the field is a
+tap away). On submit the IME is hidden **unless a hardware keyboard is attached**
+(`hardKeyboardHidden == NO`), the host reference dialog's rule: on Supernote a hardware keyboard
+types only while the IME shows.
+
+**One field, two answers** — `SearchRoute.classify` (pure, in `Search.kt`), then the source:
+
+| Typed | Route | What happens |
+|---|---|---|
+| a lone whole chapter — "Psalm 23", "1 Cor 13" | `Chapter` | checked against `book.chapter_count`; the panel dismisses and it is a **chapter pick** (`goTo`: page 1, stamped in `recent`) |
+| any other reference that parses — "John 3:16", "Gen 1-2", "John 3:14-17, Acts 1:3" | `Passage` | checked by `ReferenceResolver.valid` against the source; the panel dismisses and it opens the **passage view** in place, stamped in `recent_ref` |
+| a reference the source has nothing for — "John 3:999" | falls through | searched as words, as Biblesprout does |
+| anything else | `Words` | `BibleDatabase.search` on IO; the panel shows "Searching…" then the list |
+
+Typing a place is the most deliberate pick there is, so both reference routes record a recent.
+The wire and the label are `ReferenceCodec`'s, the same as a notebook link's.
+
+**The words search** is Biblesprout's `Fts.matchExpression` + `search()`, in FTS4 terms:
+`SearchQuery.matchExpression` lowercases and splits on `[\p{L}\p{N}]+`, gives every token a
+trailing `*` (prefix — "love" also finds "loved"), and space-joins them (**AND**). Lowercasing is
+what makes it injection-proof: FTS4's `OR`/`NOT`/`NEAR` are upper-case only and the token regex
+admits no punctuation. FTS4 has no `rank`, so the ranking is ours — **`SearchRank.bm25`** over
+`matchinfo(verse_fts, 'pcnalx')`, the formula FTS5's `rank` computes (k1 1.2, b 0.75, idf
+clamped at 0 so a ubiquitous prefix like `the*` ties every row and the canonical tie-break
+decides). Two queries: `rowid + matchinfo` for every matching row (a few dozen bytes each — 114 ms
+for "shepherd" on the Nomad), scored and sorted in Kotlin, then the best **100** read in full by
+an `IN` list. The count is the **true** count: the header reads "12 results for “x”" (a plural),
+or "First 100 of 412 results for “x”" — Biblesprout caps silently.
+
+**Rows** (`item_search_hit.xml`): the verse's address in bold ("Psalm 23:1", the running head's
+book name) over **exactly two lines** of its text (`minLines = maxLines = 2`, so every row is one
+measured height and rows-per-page is one division, `RecentChapters.itemsPerPage`), re-measured
+whenever the body's height changes — the IME coming or going (10 rows/page on the Nomad; 5 with
+the keyboard up). `SearchSnippet` improves on Biblesprout's plain two-line clip in two ways: the
+matched words are **bold**, and a match deeper than 36 characters into the verse **windows** the
+text to a word boundary before it, prefixed "…" — so the hit is never on an invisible third line.
+A row tap dismisses and opens the chapter **on that verse's page** (`goTo(ref, verse)` →
+`ChapterPaginator.pageContaining`), stamped as a chapter pick.
+
+**State.** The panel keeps none; `BibleActivity.lastSearch` holds the last results for the life of
+the screen, and a re-opened panel shows them (query in the field, keyboard down) — Biblesprout's
+Back-to-the-list, in a panel. A reference submit does not replace them. One search at a time
+(`searching` latch): a second submit while one runs is dropped, not queued.
+
+**Privacy:** what is typed and what is found are never logged — counts and milliseconds only, as
+for everything else here.
+
+---
+
 ## Bible references (arc 38)
 
 A fresh user decision (2026-09-13, `extensions/bible/REFERENCE_PLAN.md`): a lassoed or typed
@@ -870,10 +944,10 @@ hand, adb cannot drive it):
 
 ## Tests
 
-**93 JVM tests** across eleven files (`src/test/kotlin/.../ext/bible/`), counted directly from the
+**111 JVM tests** across twelve files (`src/test/kotlin/.../ext/bible/`), counted directly from the
 source with `grep -c "@Test"` (46 at the arc-37 freeze; +1 the Psalm title, +5 B6's reshape after
 its rewrite, +13 B7 → 65; **+11 `ReferenceTest` and +9 `PassageAtomsTest` at arc 38 / R1–R2, +2 into
-`BibleSqlTest` and +6 into `RecentChaptersTest`'s rewrite for the union → 93**):
+`BibleSqlTest` and +6 into `RecentChaptersTest`'s rewrite for the union → 93; **+18 `SearchTest` at B8 → 111**):
 
 | File | Tests | Pins |
 |---|---|---|
@@ -896,10 +970,8 @@ The host side of arc 38 (`LinkPayload`, `LinkNav`, `BibleRefFlow`'s pure edges) 
 
 ## Not in this arc (recorded futures, each needing a user decision)
 
-- **Search** — no free-text or reference lookup; `Canon`'s alias/normalize table was deliberately
-  left behind in the Biblesprout port rather than carried forward unused. Arc 38's reference dialog
-  is not search either: it accepts only a reference the user already knows how to write, never a
-  word or phrase.
+- ~~**Search**~~ — DONE by B8 (§ [Search](#search-b8)). Still not there: typo tolerance (the
+  match is prefix-AND, as Biblesprout's), an OR fallback when AND finds nothing, a search history.
 - **Bookmarks** beyond the single remembered reading position and the Recents' history of picked
   chapters and, since arc 38, followed passages (nothing is pinned, the list is the newest 30
   picks of the union).

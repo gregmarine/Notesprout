@@ -115,6 +115,14 @@ class ChapterLoader(private val context: Context) {
         synchronized(buildLock) { return block(db, typo) }
     }
 
+    /**
+     * Runs [block] against the opened source alone — no typography, and **not** under the build
+     * monitor (arc 37 / B8): a search reads the index and touches no `TextPaint`, so it need not
+     * wait behind a prefetch build. The one connection serialises the reads itself. Blocking —
+     * IO only.
+     */
+    fun <T> withDatabase(block: (BibleDatabase) -> T): T = block(source())
+
     /** Closes the source. Main-safe: it never waits on a build, only on the field lock. */
     fun close() {
         val open = synchronized(lock) {

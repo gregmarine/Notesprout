@@ -34,6 +34,25 @@
     <!-- "<medium date>, <time>" — when a chapter or a passage was opened. -->
     <string name="bible_recents_when">%1$s, %2$s</string>
 
+    <!-- Search (arc 37 / B8): the field takes a reference or words; the panel reuses the
+         Contents' pager hints. -->
+    <string name="cd_bible_search">Search</string>
+    <string name="bible_search_hint">Reference or words</string>
+    <string name="bible_search_help_jump_title">Go to a passage</string>
+    <string name="bible_search_help_jump_examples">John 3:16 · Gen 1:5-10 · Psalm 23\nJohn 3:14-17, Acts 1:3 · 1 Cor 13</string>
+    <string name="bible_search_help_words_title">Search the text</string>
+    <string name="bible_search_help_words_examples">shepherd · love your enemies · living water</string>
+    <string name="bible_searching">Searching\u2026</string>
+    <!-- %1$s = what was typed -->
+    <string name="bible_search_none">No results for \u201C%1$s\u201D</string>
+    <!-- %1$d = the count, %2$s = what was typed -->
+    <plurals name="bible_search_count">
+        <item quantity="one">%1$d result for \u201C%2$s\u201D</item>
+        <item quantity="other">%1$d results for \u201C%2$s\u201D</item>
+    </plurals>
+    <!-- The list is capped; the count is not. %1$d = shown, %2$d = found, %3$s = what was typed -->
+    <string name="bible_search_capped">First %1$d of %2$d results for \u201C%3$s\u201D</string>
+
     <string name="bible_title">Bible</string>
     <string name="bible_page_indicator">%1$d / %2$d</string>
     <!-- Book name + chapter number, the reader's top-bar title (e.g. "Genesis 1"). -->
