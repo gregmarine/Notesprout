@@ -333,7 +333,9 @@ wanted.
 The user walked the Nomad by hand after B5 (swipe feel, the pen over the page, the
 force-stop-both-then-relaunch replay landing back on the Bible at Psalm 131): **"it all passes and
 looks great for this phase."** Arc 37 "Bible" — B0–B5 — is COMPLETE + FROZEN, no code review (the
-user's call). The "Psalm 23" title is left as it is (`book.name` = "Psalms") until asked for.
+user's call). The "Psalm 23" title was asked for right after the freeze and landed the same day:
+`Canon.chapterTitleName` ("Psalm" for `PSA`, the book name otherwise) feeds the page heading and
+the running head; the index keeps "Psalms". Checked on the Nomad (Psalm 131). 47 JVM tests.
 Everything in `docs/bible.md` § "Not in this arc" needs a fresh user decision; this file's phases
 are history from here.
 

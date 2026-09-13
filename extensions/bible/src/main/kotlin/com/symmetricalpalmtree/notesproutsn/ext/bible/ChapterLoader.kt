@@ -126,9 +126,10 @@ class ChapterLoader(private val context: Context) {
         val footnotes = db.footnotesForChapter(ref.usfm, ref.chapter)
         check(blocks.isNotEmpty()) { "no blocks for ${ref.usfm} ${ref.chapter}" }
         val atoms = ChapterPaginator.atomsForBlocks(blocks, footnotes)
-        // Canon's names are the ones `build_bible_db.py` wrote into the `book` table, so the
-        // title on the page and the row in the database say the same thing.
-        val bookName = Canon.byUsfm(ref.usfm).name
+        // Canon's names are the ones `build_bible_db.py` wrote into the `book` table — except that
+        // a CHAPTER of Psalms is "Psalm 23", not "Psalms 23" (`Canon.chapterTitleName`); the index
+        // still lists the book as "Psalms".
+        val bookName = Canon.chapterTitleName(ref.usfm)
         val safety = typo.dp(SAFETY_PAD_DP)
         val headingHeight = typo.headingHeight(bookName, ref.chapter, width)
         val pages = ChapterPaginator.paginate(

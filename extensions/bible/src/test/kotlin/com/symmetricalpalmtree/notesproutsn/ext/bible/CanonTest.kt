@@ -42,6 +42,16 @@ class CanonTest {
     }
 
     @Test
+    fun `a chapter of Psalms is a Psalm and every other book names its chapters as itself`() {
+        assertEquals("Psalm", Canon.chapterTitleName("PSA"))
+        assertEquals("Psalm", Canon.chapterTitleName("psa"))
+        assertEquals("Psalms", Canon.byUsfm("PSA").name)   // the index keeps the book's name
+        assertEquals("Genesis", Canon.chapterTitleName("GEN"))
+        assertEquals("Song of Solomon", Canon.chapterTitleName("SNG"))
+        assertEquals("Revelation", Canon.chapterTitleName("REV"))
+    }
+
+    @Test
     fun `lookup is case-insensitive and ordinal-addressed`() {
         assertEquals("Psalms", Canon.byUsfm("psa").name)
         assertEquals("Psalms", Canon.byOrdinal(19).name)

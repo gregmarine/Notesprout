@@ -568,9 +568,10 @@ source:
 - **A text-size preference** — decision 12 fixed 30sp × 1.5 line height for this arc only.
 - **Tap zones** — the reader turns pages by swipe only, on the user's explicit call; a tap-to-turn
   zone was not built.
-- **A "Psalm 23" title special case** — `book.name` is "Psalms" (plural, matching the source), so the
-  title and running head currently read "Psalms 23" where print convention would say "Psalm 23."
-  Left open at the freeze as a one-word special case the user may or may not want.
+- ~~**A "Psalm 23" title special case**~~ — **done at the freeze, the user's call**:
+  `Canon.chapterTitleName(usfm)` answers "Psalm" for `PSA` and the book's name otherwise, so the
+  page heading and the running head say "Psalm 23" while the index still lists the book as
+  "Psalms" (`book.name`, matching the source). One helper, one test.
 
 ---
 

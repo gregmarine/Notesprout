@@ -108,5 +108,14 @@ object Canon {
 
     fun tryUsfm(usfm: String): CanonBook? = byUsfm[usfm.uppercase()]
 
+    /**
+     * The name a **chapter** wears — on the page heading and in the running head — as distinct
+     * from the name the **book** wears in the index. They differ for exactly one book: the book
+     * is "Psalms" but a chapter of it is "Psalm 23", the way every printed Bible says it (the
+     * user's call at the arc-37 freeze). Every other book names its chapters as itself.
+     */
+    fun chapterTitleName(usfm: String): String =
+        if (usfm.equals("PSA", ignoreCase = true)) "Psalm" else byUsfm(usfm).name
+
     fun byOrdinal(ordinal: Int): CanonBook = books[ordinal - 1]
 }
