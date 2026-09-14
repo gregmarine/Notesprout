@@ -51,6 +51,9 @@ class BibleLookupActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         // A recreate (never expected — the manifest pins the config) has no park to take: leave.
         if (savedInstanceState != null) { finish(); return }
+        // Not `IndexGuard.ready(this)`: that bounces the whole task through the bootstrap
+        // screen, and this is a result trampoline the editor is waiting on — a closed index is
+        // answered as a failed lookup (the editor's "unavailable" alert), never a task restart.
         if (!SnIndex.isReady()) { Slog.d(TAG) { "refused: index not open" }; finish(); return }
         val parked = LookupHandoff.take(callingPackage)
         if (parked == null) {

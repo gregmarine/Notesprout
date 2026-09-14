@@ -198,10 +198,12 @@ class ReaderTypography(context: Context) : BodyMeasurer {
             layout(chapter.toString(), chapterNumber, width, Layout.Alignment.ALIGN_CENTER)
 
     /** Total height a first-page heading (book title + big chapter number) needs. */
-    fun headingHeight(bookName: String, chapter: Int, width: Int): Int {
-        val (title, number) = headingLayouts(bookName, chapter, width)
-        return title.height + gap1 + number.height + gap2
-    }
+    fun headingHeight(bookName: String, chapter: Int, width: Int): Int =
+        headingHeight(headingLayouts(bookName, chapter, width))
+
+    /** [headingHeight] from layouts already built — a chapter build lays the heading out once. */
+    fun headingHeight(heading: Pair<StaticLayout, StaticLayout>): Int =
+        heading.first.height + gap1 + heading.second.height + gap2
 
     companion object {
         const val BLACK = 0xFF000000.toInt()

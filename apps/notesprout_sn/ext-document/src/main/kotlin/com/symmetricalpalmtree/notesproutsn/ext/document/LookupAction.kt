@@ -87,7 +87,7 @@ internal class LookupAction(
         val text = LookupText.prepare(raw)
         if (text == null) {
             Slog.d(TAG) { "lookup: nothing worth asking (${raw?.length ?: 0} chars)" }
-            unknown(raw?.toString().orEmpty().trim())
+            unknown(raw?.toString().orEmpty().trim().let(LookupText::preview))
             return
         }
         inFlight = true

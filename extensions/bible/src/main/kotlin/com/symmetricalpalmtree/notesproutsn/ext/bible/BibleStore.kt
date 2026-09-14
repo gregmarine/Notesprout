@@ -25,12 +25,28 @@ class StoreUnavailable(cause: Throwable) : Exception(cause.message, cause)
  */
 class BibleStore(private val store: IExtensionStore) {
 
+    /** True once this binder has declared the schema — every later call skips the round trip. */
+    @Volatile private var declared = false
+
     /** Declare the schema. Idempotent, and the only door — nothing may reach the store before it. */
-    fun load() = guard { store.applySchema(BibleSchema.CURRENT) }
+    fun load() = declare()
+
+    /**
+     * The declaration, made once per binder: the host's gate refuses `exec` / `query` on a binder
+     * that has not declared, and a matching version still costs a Binder round trip plus a
+     * host-side `SELECT` — on the path of every page turn. A store that later fails clears the
+     * flag, so the next call declares again rather than trusting a binder that may have been
+     * replaced.
+     */
+    private fun declare() {
+        if (declared) return
+        guard { store.applySchema(BibleSchema.CURRENT) }
+        declared = true
+    }
 
     /** The last-read position, or null when nothing has been saved yet. */
     fun readPosition(): String? = guard {
-        store.applySchema(BibleSchema.CURRENT)
+        declare()
         val rows = StoreReads.all(store, Statement(BibleSql.SELECT_STATE, BibleSql.KEY_POSITION))
         rows.rows.firstOrNull()?.text("value")
     }
@@ -38,7 +54,7 @@ class BibleStore(private val store: IExtensionStore) {
     /** Save the last-read position. One statement — `INSERT OR REPLACE` is safe because `state`
      *  has no children for a replacement to cascade away. */
     fun writePosition(value: String) = guard {
-        store.applySchema(BibleSchema.CURRENT)
+        declare()
         StoreReads.exec(store, Statement(BibleSql.UPSERT_STATE, BibleSql.KEY_POSITION, value))
         Unit
     }
@@ -49,7 +65,7 @@ class BibleStore(private val store: IExtensionStore) {
      * a malformed history row is never a dialog.
      */
     fun readRecents(limit: Int): List<RecentRef> = guard {
-        store.applySchema(BibleSchema.CURRENT)
+        declare()
         val rows = StoreReads.all(store, Statement(BibleSql.SELECT_RECENTS, limit.toLong()))
         rows.rows.mapNotNull { row ->
             runCatching {
@@ -63,7 +79,7 @@ class BibleStore(private val store: IExtensionStore) {
      * two-statement batch, so the trim can never run against a store the upsert did not reach.
      */
     fun writeRecent(ref: ChapterRef, at: Long, keep: Int) = guard {
-        store.applySchema(BibleSchema.CURRENT)
+        declare()
         StoreReads.exec(
             store,
             listOf(
@@ -81,7 +97,7 @@ class BibleStore(private val store: IExtensionStore) {
      * on IO, so a panel row names itself without parsing on Main.
      */
     fun readRecentRefs(limit: Int): List<RecentEntry.Reference> = guard {
-        store.applySchema(BibleSchema.CURRENT)
+        declare()
         val rows = StoreReads.all(store, Statement(BibleSql.SELECT_RECENT_REFS, limit.toLong()))
         rows.rows.mapNotNull { row ->
             runCatching {
@@ -98,7 +114,7 @@ class BibleStore(private val store: IExtensionStore) {
      * same reference re-stamps the row it already has.
      */
     fun writeRecentRef(wire: String, at: Long, keep: Int) = guard {
-        store.applySchema(BibleSchema.CURRENT)
+        declare()
         StoreReads.exec(
             store,
             listOf(
@@ -117,6 +133,7 @@ class BibleStore(private val store: IExtensionStore) {
         } catch (e: StoreUnavailable) {
             throw e
         } catch (e: Exception) {
+            declared = false
             throw StoreUnavailable(e)
         }
 }

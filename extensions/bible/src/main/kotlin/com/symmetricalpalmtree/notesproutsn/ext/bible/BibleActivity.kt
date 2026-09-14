@@ -34,6 +34,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
+ * **Over the ~800-line rule, with reason:** this one screen is the reader's whole surface — the
+ * chapter flow (B1–B2), the three side panels' doors (B3, B6–B8), the passage mode with its Full
+ * chapter door (arc 38 / R2), Send (B9) and the verses chooser (arc 40) — and every door shares the
+ * one `loading` latch, the one mode pair and the one position writer. Splitting the doors out
+ * would spread that latch across files; the panels themselves already live in their own.
+ *
  * The Bible reader's screen (arc 37 / B1, grown by B2; UI-rule tier 2) — SN's **fifth**
  * screen-owning point and, like the tag manager, one whose screen carries **no paper**. There is
  * no `PaperView`, no g-paper call and therefore **no EPD handoff**. Do not add one.
@@ -209,8 +215,13 @@ class BibleActivity : AppCompatActivity() {
             // already in the session, so this instance only has to carry the result code up.
             // The registration exists so the launch is a `startActivityForResult` — which is what
             // makes `callingPackage` us.
-            if (result.resultCode == ExtensionContract.RESULT_BIBLE_SEND) {
-                setResult(ExtensionContract.RESULT_BIBLE_SEND)
+            // Both Send codes (B9's reference, arc 40's verses): the chapter instance can be in
+            // passage mode itself — a passage picked from its Recents or Search — and its
+            // "The verses" answer carries the same parked reference under code 2.
+            if (result.resultCode == ExtensionContract.RESULT_BIBLE_SEND ||
+                result.resultCode == ExtensionContract.RESULT_BIBLE_SEND_TEXT
+            ) {
+                setResult(result.resultCode)
                 finish()
             }
         }
@@ -603,7 +614,12 @@ class BibleActivity : AppCompatActivity() {
         searching = true
         lifecycleScope.launch {
             val began = SystemClock.elapsedRealtime()
-            val route = SearchRoute.classify(typed)
+            // Classified against the source's chapter counts, so "Jude 5" is the verse, not a
+            // fifth chapter Jude does not have; a source that will not open classifies blind.
+            val route = withContext(Dispatchers.IO) {
+                runCatching { loader.withDatabase { db -> SearchRoute.classify(typed, db::chapterCount) } }
+                    .getOrElse { SearchRoute.classify(typed) }
+            }
             val exists = when (route) {
                 is SearchRoute.Words -> false
                 is SearchRoute.Chapter -> withContext(Dispatchers.IO) {

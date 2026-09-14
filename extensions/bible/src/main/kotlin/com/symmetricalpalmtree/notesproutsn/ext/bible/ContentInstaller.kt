@@ -38,7 +38,19 @@ class ContentInstaller(private val context: Context) {
      * file), never a half one. The stamp is written **after** the rename and
      * deleted **before** the copy, so a torn install can never look complete.
      */
-    fun ensureInstalled(assetPath: String, destName: String): File {
+    fun ensureInstalled(assetPath: String, destName: String): File = synchronized(installLock) {
+        installLocked(assetPath, destName)
+    }
+
+    /**
+     * [ensureInstalled] under [installLock]. The lock is process-wide because the callers are
+     * not one: the screen's first chapter build, a search submitted while it copies, and the
+     * host's held-bind `resolve` / `passageText` on a Binder thread all reach here, and two
+     * copies to the same `.part` would leave the loser renaming a file the winner already
+     * moved — then deleting the installed database and throwing. One copies; the rest wait
+     * and find the stamp.
+     */
+    private fun installLocked(assetPath: String, destName: String): File {
         val dest = File(contentDir, destName)
         val stampFile = File(contentDir, "$destName.stamp")
         val stamp = bundledStamp(assetPath)
@@ -93,6 +105,9 @@ class ContentInstaller(private val context: Context) {
         }
 
     companion object {
+        /** Serialises installs across every [ContentInstaller] in the process. */
+        private val installLock = Any()
+
         /** The subdirectory of `noBackupFilesDir` the source is installed into. */
         const val DIR = "bible"
 

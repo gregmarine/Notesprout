@@ -19,7 +19,7 @@ This is the **eighth fresh user decision** on the SN extension seam (granted 202
 SN's **ninth** extension point (`ACTION_BIBLE` / `ACTION_BIBLE_SCREEN`) and its **fifteenth**
 module. It is also the **first module living outside `apps/notesprout_sn`'s own Gradle root** —
 code sits at the monorepo root, `extensions/bible/`, pulled into SN's build by
-`settings.gradle.kts`'s `projectDir`, on branch `bible`. `extensions/bible/BIBLE_PLAN.md` is both
+`settings.gradle.kts`'s `projectDir`; built on branch `bible`, on `main` since 2026-09-13. `extensions/bible/BIBLE_PLAN.md` is both
 the plan and the ledger: the fourteen locked decisions, the architecture sketch, and the phase-by-
 phase record (B0–B4) that every number and trap below comes from. **There was no code review at
 the freeze** — the user's call; the freeze is a Nomad walk instead (B4), and **the arc was frozen
@@ -764,6 +764,13 @@ database:
   (`v == 0..MAX_VERSE`) needs only its chapters to exist, a verse range needs its two **endpoints**
   to exist (the verses between are the source's to have or not; a hole would still render what is
   there). `John 3:99` is refused; `John 3` whole is fine.
+- **`ReferenceResolver.normalize`** (review 2026-09-13) — runs before `valid` wherever a chapter
+  count is to hand (`BibleService.resolve`, the reader's Search): on a book the source says has
+  **one chapter** (Obadiah, Philemon, 2 John, 3 John, Jude), a bare number is the verse the
+  citation means — `Jude 24` → `1:24`, `Philemon 4-7` → `1:4-7`; a bare `1` alone stays the whole
+  book. Without it the parser (which knows no counts) read `Jude 24` as a 24th chapter and `valid`
+  refused it. The parser itself refuses any number `VerseKey` cannot pack (chapter ≥ 1000, verse
+  ≥ 999) instead of overflowing the key and throwing — typed text reaches it from the Search field.
 
 ### The wire grammar
 
@@ -988,6 +995,23 @@ hand, adb cannot drive it):
 
 ## Traps
 
+- **Review 2026-09-13 (branch `bible`, all four arcs)** — fixed on the branch: the `:extension-api`
+  contract pin was red across three `API_VERSION` bumps (**run `:extension-api:testDebugUnitTest`
+  at every bump**); the passage instance relayed only `RESULT_BIBLE_SEND` from its Full chapter
+  instance and dropped a nested "The verses" send; `ContentInstaller` had no lock, so a Search
+  submitted during the first-run copy could truncate the `.part` and delete the installed file;
+  the manifest lacked `configChanges="keyboard|keyboardHidden"` (a keyboard attach recreated the
+  reader — panel gone, passage re-stamped over the chapter the reader had gone to); a psalm's
+  superscription rendered its inline `\v 1` digit ("1 A Psalm of David"); `SearchPanel`'s
+  keyboard-driven remeasure replaced "Searching…" with the help text; a moved verses link kept its
+  written width and clipped at the page edge (`PageLink.withTextsRemeasured`, applied at every
+  load and after a horizontal drag); Edit on a Bible link with no reader installed said "not a
+  reference". The user's two further calls the same day: **Psalm superscriptions are verse
+  text** (`d` joined `BODY_KINDS` in `build_bible_db.py`, asset rebuilt — search finds
+  "choirmaster", a placed "Psalm 51:1" reads as the BSB prints it) and **a chapter-crossing
+  range is allowed** under the ten-verse cap (`withinCap` counts what the reference can know,
+  `BibleService.passageText` counts the rows read). The reader's `MAX_VERSES` stays a content rule.
+
 - **`am crash` vs. `force-stop` for a restore test.** `am crash` on the host lets Android relaunch
   the task, and the library's own `onResume` resets the surface stack to `[]` before a second kill
   can land — a launch-restore test must `am force-stop` the host **and** the extension in one shell
@@ -1034,7 +1058,7 @@ B8 → 111; **+8 `PassageMarkdownTest` at arc 40 / V1 → 120**):
 | `ContentsModelTest.kt` | 13 | Six-wide chapter rows with a padded last row, a one-chapter book as one cell and five spacers, the collapsed list as one row per book in canon order, an expanded book followed by its rows then the next book, case-insensitive keys, several books open at once, `indexOfBook` / `indexOfChapter` (only while open; Psalm 119 on the twentieth row), `pageOf` / `pageCount` / `clampPage` arithmetic, an empty source |
 | `ContentsLayoutTest.kt` | 4 | The 480 dp sidebar branch (Nomad and Manta both take it), the 60 % width rounding, a row's slot at both densities, `itemsPerPage` flooring to ≥ 1 |
 | `reader/ChapterPaginatorTest.kt` | 9 | Blocks becoming headings/numbers/words with a spliced footnote caller, minor heading kinds mapping to `MINOR`, a page never ending on a bare verse number, forced progress when nothing fits, `fitCount` returning zero when even one atom overflows, a page anchoring to the verse in effect at its first word, a verse-less opening page anchoring to verse 1, `pageContaining` picking the last page at or before a verse, and a real pagination round-tripping every page's anchor back to that same page |
-| `PassageMarkdownTest.kt` | 8 | Arc 40 / V1 — `withinCap` refusing a whole-chapter range, a cross-chapter range and more than ten verses as named (never as read back), accepting exactly ten; `build`'s bold label line, one paragraph per (book, chapter) run, a second bold label at a later crossing, plain verse numbers, an empty verse list building nothing |
+| `PassageMarkdownTest.kt` | 8 | Arc 40 / V1 — `withinCap` refusing a whole-chapter range and more than ten verses as named (never as read back), accepting exactly ten, a chapter-crossing range counted by its last chapter plus one and then by its rows (review 2026-09-13); `build`'s bold label line, one paragraph per (book, chapter) run, a second bold label at a later crossing, plain verse numbers, an empty verse list building nothing |
 
 The host side of arc 38 (`LinkPayload`, `LinkNav`, `BibleRefFlow`'s pure edges) is tested in
 `:app`, not here — `docs/links.md` and `docs/objects.md` carry those counts.
@@ -1114,7 +1138,7 @@ canonical form the reference resolved to — then the verses as prose with plain
 paragraph per chapter run, breaking exactly where `PassageAtoms` puts a heading, so a passage read
 across a chapter edge starts a fresh paragraph there and one across books gets a second bold label
 of its own. `withinCap(passages)` is what `passageText` asks before it ever reads a row: no
-whole-chapter range at all (`sv == 0 || ev == MAX_VERSE` refuses it), no cross-chapter range, and
+whole-chapter range at all (`sv == 0 || ev == MAX_VERSE` refuses it), a chapter-crossing range counted by its last chapter's verses plus one (the rows read settle it exactly — the user's call 2026-09-13), and
 at most `MAX_VERSES` (10) verses **as named** by the endpoints — a hole in the source can only make
 a passage *shorter*, never longer, so the cap is checked against what was asked for, not what came
 back.

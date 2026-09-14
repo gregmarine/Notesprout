@@ -38,10 +38,15 @@
         <!-- The extension-owned screen (tier 2): exported, custom action, NO launcher filter;
              launched only by the host for a result — it verifies its caller first thing in
              onCreate. <category DEFAULT> is required or implicit resolution will not match it.
-             No windowSoftInputMode / configChanges: this screen has no text entry, so there is no
-             field to strand under a hardware-keyboard config change and no IME to keep shown. -->
+             `configChanges="keyboard|keyboardHidden"` since B8 gave the screen a text field (the
+             Search panel): a keyboard attached or removed on the Nomad must not recreate the
+             Activity — a recreate would dismiss the panel with the typed words and the results,
+             and reopen a passage showing on its reference over whatever chapter the reader had
+             gone to. The tag manager's and the editor's rule. No windowSoftInputMode: the panel
+             sets its own. -->
         <activity
             android:name=".BibleActivity"
+            android:configChanges="keyboard|keyboardHidden"
             android:exported="true"
             android:screenOrientation="portrait">
             <intent-filter>

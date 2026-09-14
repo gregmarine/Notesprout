@@ -288,6 +288,11 @@ scripture the user may want to trim or annotate, not a reference to re-resolve. 
 page width, wrapping at the page's right edge, because a text object's width is re-derived from
 `pageWidth − x` on every load and a centred column could not survive a reload; see
 `extensions/bible/docs/bible.md` § "Verses on the page" for the reference doors it lands from.
+That re-derivation reaches a text **under a link** too (review 2026-09-13): `PageObjects.remeasured`
+only ever saw loose texts, so a wrapped one kept the width it was written at and a verses block
+dragged to the right clipped at the page edge — `PageLink.withTextsRemeasured` now re-measures a
+link's wrapped texts at every load (`NotebookActivity.correctedForDevice`, beside the underline
+band) and after any horizontal drag (`remeasureMovedLinks`, which also writes the corrected rows).
 
 A stylus tap on a lone selected text object opens `TextEditDialog` (the same gesture that opens a
 heading, tried after the heading lookup misses). `SelectionMode.TEXT` (`SelectionModes.classify`)

@@ -69,7 +69,12 @@ class PassageMarkdownTest {
     }
 
     @Test
-    fun `a cross-chapter range is refused`() {
-        assertFalse(PassageMarkdown.withinCap(passages("JHN:3:35-4:2")))
+    fun `a cross-chapter range counts its last chapter's verses plus one, and the rows decide`() {
+        assertTrue(PassageMarkdown.withinCap(passages("JHN:3:35-4:2")))
+        assertFalse(PassageMarkdown.withinCap(passages("JHN:3:35-4:10")))
+        val rows = (1..11).map { verse("JHN", if (it < 3) 3 else 4, it, "w") }
+        assertFalse(PassageMarkdown.rowsWithinCap(rows))
+        assertTrue(PassageMarkdown.rowsWithinCap(rows.take(10)))
+        assertFalse(PassageMarkdown.rowsWithinCap(emptyList()))
     }
 }

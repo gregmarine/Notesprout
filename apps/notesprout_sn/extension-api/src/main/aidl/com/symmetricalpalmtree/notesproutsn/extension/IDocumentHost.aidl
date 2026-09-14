@@ -105,7 +105,7 @@ interface IDocumentHost {
     void closeNotebook(int mode);
 
     /**
-     * Arc 39 "Lookup" (2026-09-13) -- a compatible tail (transaction code 12) behind the
+     * Arc 39 "Lookup" (2026-09-13) -- a compatible tail (the eleventh method, transaction code 11) behind the
      * extension-side declaration floor DocumentContract.MIN_API_VERSION_FOR_DOCUMENT_LOOKUP (14):
      * open NSE . Bible on the scripture reference [text] names (the editor's selection -- the
      * user's own words, prepared but not parsed), OVER the editor. The host resolves the words

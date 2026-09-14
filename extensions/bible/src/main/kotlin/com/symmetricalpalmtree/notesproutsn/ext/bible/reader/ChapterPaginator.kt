@@ -96,6 +96,21 @@ object ChapterPaginator {
         }
     }
 
+    /** [block]'s content with every verse-marker span (and the space after it) cut out. */
+    private fun withoutMarkers(block: RenderBlock): String {
+        if (block.verses.isEmpty()) return block.content
+        val sb = StringBuilder(block.content.length)
+        var i = 0
+        for (m in block.verses.sortedBy { it.start }) {
+            if (m.start < i || m.end > block.content.length) continue
+            sb.append(block.content, i, m.start)
+            i = m.end
+            if (i < block.content.length && block.content[i] == ' ') i++
+        }
+        sb.append(block.content, i, block.content.length)
+        return sb.toString().trim()
+    }
+
     private fun flowFor(kind: String): Flow = when (kind) {
         "q1" -> Flow.POETRY1
         "q2", "q3" -> Flow.POETRY2
@@ -109,7 +124,9 @@ object ChapterPaginator {
         "s1", "ms", "ms1" -> HeadingAtom(block.content, HeadingKind.MAJOR)
         "s2", "s3", "mr", "qa", "sr", "sp" -> HeadingAtom(block.content, HeadingKind.MINOR)
         "r" -> HeadingAtom(block.content, HeadingKind.REFERENCE)
-        "d" -> HeadingAtom(block.content, HeadingKind.SUPERSCRIPTION)
+        // A psalm's superscription carries its `\v 1` marker inline ("1 A Psalm of David…"): the
+        // digit is the builder's, not the heading's, and a heading has no number.
+        "d" -> HeadingAtom(withoutMarkers(block), HeadingKind.SUPERSCRIPTION)
         else -> null
     }
 

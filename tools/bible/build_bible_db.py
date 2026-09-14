@@ -124,13 +124,15 @@ def encode(ordinal, chapter, verse):
 # Block kinds whose text is scripture prose that belongs to a verse (and so
 # feeds verse.text / FTS). Headings, titles, acrostic labels and stanza breaks
 # are excluded.
+# A psalm superscription (`\d \v 1 A Psalm of David...`) is verse 1 in the
+# original, the translation tables gloss it, and the BSB's own verse 1 carries
+# it — so it IS body text (the user's decision 2026-09-13): search finds
+# "choirmaster", and a passage or a placed "Psalm 51:1" reads as the BSB
+# prints it. Biblesprout kept `d` out of this set; Notesprout does not.
 BODY_KINDS = {"p", "pmo", "pc", "pi", "pm", "mi", "nb", "q1", "q2", "q3",
-              "qr", "qc", "li1", "li2", "li3"}
-# Kinds the word layer aligns against. A psalm superscription (`\d \v 1 A Psalm
-# of David...`) is verse 1 in the original and the translation tables gloss it,
-# but it is kept out of BODY_KINDS so it never reaches verse.text or FTS. It
-# still gets words, so its Hebrew is tappable like any other line.
-WORD_KINDS = BODY_KINDS | {"d"}
+              "qr", "qc", "li1", "li2", "li3", "d"}
+# Kinds the word layer aligns against.
+WORD_KINDS = BODY_KINDS
 # Markers that open a new display block (paragraph / poetry / heading / break).
 PARAGRAPH_KINDS = BODY_KINDS | {"b", "d", "qa", "s1", "s2", "s3", "ms", "ms1",
                                 "mr", "r", "sp", "sr"}

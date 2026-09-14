@@ -89,6 +89,10 @@ class BibleRefFlow(
          */
         suspend fun resolve(text: String): ResolvedReference?
 
+        /** Whether a reader that can [resolve] is installed right now — [edit]'s gate, so a
+         *  missing reader is named as missing rather than the words called wrong. */
+        val supportsReferences: Boolean
+
         /** Arc 40: whether the discovered reader serves `passageText` — the verses doors' gate,
          *  read at every showing (discovery re-runs on every resume). */
         val supportsVerses: Boolean
@@ -217,9 +221,11 @@ class BibleRefFlow(
         val wire = LinkPayload.referenceOf(link.payload)
         if (wire == null || LinkPayload.isBibleText(link.payload)) return
         val pageId = host.pageId
-        val label = link.texts.singleOrNull()?.text ?: link.id
         // The label the reader answers is canonical; the placed words are the user's own, and it
-        // is those the alerts should name — they are what is on the page.
+        // is those the alerts should name — they are what is on the page. Cut to the contract's
+        // cap: a label over it would refuse the whole tap in silence.
+        val label = link.texts.singleOrNull()?.text?.take(ResolvedReference.MAX_LABEL_CHARS)
+            ?.ifBlank { null } ?: link.id
         val resolved = runCatching { ResolvedReference(wire, label) }.getOrNull() ?: return
         readVerses(resolved) { text ->
             val anchor = Bounds(link.x, link.y, link.x + link.width, link.y + link.height)
@@ -272,6 +278,13 @@ class BibleRefFlow(
      */
     fun edit(link: PageLink) {
         if (!host.alive) return
+        if (!host.supportsReferences) {
+            // The dead-target dialog's own Edit lands here with no reader to ask: say that,
+            // never "not a reference" over words the app cannot check.
+            Slog.d(TAG) { "edit: no reader to resolve against" }
+            Dialogs.problem(activity, R.string.bible_reference_problem_title, R.string.link_target_bible_body)
+            return
+        }
         val text = link.texts.singleOrNull()
         if (text == null || link.strokes.isNotEmpty() || link.headings.isNotEmpty() ||
             link.shapes.isNotEmpty() || link.stickies.isNotEmpty()
@@ -402,6 +415,9 @@ class BibleRefFlow(
         val (w, h) = host.objects.measure(markdown, x, page.width)
         val occupied = host.occupied().let { all ->
             when {
+                // The ink being converted is excluded by identity — its strokes' own boxes — never
+                // by the selection's bounding box, which can hold an unselected word between lines.
+                strokeIds.isNotEmpty() -> VersePlacement.without(all, host.strokesIn(strokeIds.toSet()).map { it.bounds })
                 inkBounds != null -> VersePlacement.without(all, inkBounds)
                 anchor != null -> all.filterNot { it.left == anchor.left && it.top == anchor.top && it.right == anchor.right && it.bottom == anchor.bottom }
                 else -> all

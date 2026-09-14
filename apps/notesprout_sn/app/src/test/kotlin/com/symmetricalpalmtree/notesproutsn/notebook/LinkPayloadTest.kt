@@ -109,10 +109,12 @@ class LinkPayloadTest {
     }
 
     @Test
-    fun `kind 4 is still unknown`() {
-        assertNull(LinkPayload.decode("L1|1|4|x|"))
+    fun `kind 5 is still unknown`() {
+        // Kind 4 became KIND_BIBLE_TEXT (arc 40); the next number is the unknown one, and it is
+        // refused with a wire that would otherwise pass — the kind alone decides.
+        assertNull(LinkPayload.decode("L1|1|5|JHN:3:16-3:16|"))
         assertThrows(IllegalArgumentException::class.java) {
-            LinkPayload.encode(LinkPayload.CHROME_NONE, 4, "x", null)
+            LinkPayload.encode(LinkPayload.CHROME_NONE, 5, "JHN:3:16-3:16", null)
         }
     }
 

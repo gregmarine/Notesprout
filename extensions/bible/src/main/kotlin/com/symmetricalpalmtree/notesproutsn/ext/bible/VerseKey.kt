@@ -17,6 +17,9 @@ object VerseKey {
     const val BOOK_FACTOR = 1_000_000
     const val CHAPTER_FACTOR = 1_000
 
+    /** Chapters pack into three digits: a chapter number must be below this. */
+    const val CHAPTER_LIMIT = BOOK_FACTOR / CHAPTER_FACTOR
+
     /** "Rest of this chapter" sentinel; real verse numbers never approach it. */
     const val MAX_VERSE = 999
 

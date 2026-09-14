@@ -152,7 +152,9 @@ class ChapterLoader(private val context: Context) {
         // still lists the book as "Psalms".
         val bookName = Canon.chapterTitleName(ref.usfm)
         val safety = typo.dp(SAFETY_PAD_DP)
-        val headingHeight = typo.headingHeight(bookName, ref.chapter, width)
+        // Laid out once: the pagination needs the height, the first page the layouts.
+        val heading = typo.headingLayouts(bookName, ref.chapter, width)
+        val headingHeight = typo.headingHeight(heading)
         val pages = ChapterPaginator.paginate(
             atoms,
             typo,
@@ -162,7 +164,6 @@ class ChapterLoader(private val context: Context) {
         )
         check(pages.isNotEmpty()) { "no pages for ${ref.usfm} ${ref.chapter}" }
         // Lay every page out here, on IO: a page turn then costs one invalidate on Main.
-        val heading = typo.headingLayouts(bookName, ref.chapter, width)
         val rendered = pages.mapIndexed { index, page ->
             val body = typo.bodyLayout(page, width)
             if (index == 0) ReaderPage(body, heading.first, heading.second) else ReaderPage(body)

@@ -651,7 +651,7 @@ no extension knows another exists — so the tap is **two steps through the host
 
 1. `IDocumentHost.openReference(text)` — the twelfth method on the host callback binder (a
    compatible tail, `API_VERSION` 13 → 14; the editor service redeclares **14** since it calls
-   transaction code 12, which a 13 host would land on nothing). The words go across prepared and
+   transaction code 11, which a 13 host would land on nothing). The words go across prepared and
    unparsed (`LookupText.prepare`: trimmed, whitespace folded to one space, refused blank or over
    `MAX_REFERENCE_CHARS` = 512 without a call). The notebook resolves them through the reader
    (`IBible.resolve`, bind-per-call) and **parks** the resolved wire in-process (`LookupHandoff`),

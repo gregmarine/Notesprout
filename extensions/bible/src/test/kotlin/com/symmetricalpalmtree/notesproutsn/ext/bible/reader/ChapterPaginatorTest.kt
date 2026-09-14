@@ -55,7 +55,7 @@ class ChapterPaginatorTest {
                 HeadingAtom("(John 10:1–21)", HeadingKind.REFERENCE),
                 // A psalm superscription is a heading, so its verse marker stays
                 // inline in the heading's own text — it is not lifted out.
-                HeadingAtom("1 A Psalm of David.", HeadingKind.SUPERSCRIPTION),
+                HeadingAtom("A Psalm of David.", HeadingKind.SUPERSCRIPTION), // the marker digit is cut
                 BreakAtom(Flow.POETRY1),
                 NumberAtom(2, key(23, 2)),
                 WordAtom("The"),

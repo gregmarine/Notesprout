@@ -23,9 +23,12 @@ object PassageMarkdown {
     const val MAX_VERSES = 10
 
     /**
-     * Whether [passages] may be asked for as text: no whole-chapter range, and at most
-     * [MAX_VERSES] verses **as named** — the difference between the endpoints, not the rows the
-     * source has (a hole in the source makes a passage shorter, never longer). Pure.
+     * Whether [passages] may be asked for as text, from the reference alone: no whole-chapter
+     * range, and at most [MAX_VERSES] verses **as named** — the difference between the endpoints,
+     * not the rows the source has (a hole in the source makes a passage shorter, never longer).
+     * A range crossing a chapter ("3:36–4:2", the user's call 2026-09-13) is counted by what the
+     * reference alone can know — its last chapter's verses plus one — and the rows decide the
+     * rest ([rowsWithinCap] over the verses read). Pure.
      */
     fun withinCap(passages: List<Passage>): Boolean {
         var verses = 0
@@ -34,15 +37,16 @@ object PassageMarkdown {
                 val sv = VerseKey.verseOf(range.startKey)
                 val ev = VerseKey.verseOf(range.endKey)
                 if (sv == 0 || ev == VerseKey.MAX_VERSE) return false
-                // A range never crosses a chapter here (the parser writes cross-chapter references
-                // as one range, so count them by keys: every key in between is at most one verse).
-                if (VerseKey.chapterOf(range.startKey) != VerseKey.chapterOf(range.endKey)) return false
-                verses += ev - sv + 1
+                val crossing = VerseKey.chapterOf(range.startKey) != VerseKey.chapterOf(range.endKey)
+                verses += if (crossing) ev + 1 else ev - sv + 1
                 if (verses > MAX_VERSES) return false
             }
         }
         return verses in 1..MAX_VERSES
     }
+
+    /** The cap over the rows actually read — the exact answer for a chapter-crossing range. */
+    fun rowsWithinCap(verses: List<VerseRow>): Boolean = verses.size in 1..MAX_VERSES
 
     /**
      * [verses] (in reading order, the ranges concatenated as written, the rows the source has)

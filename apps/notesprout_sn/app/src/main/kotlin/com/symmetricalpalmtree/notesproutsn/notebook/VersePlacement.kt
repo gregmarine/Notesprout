@@ -22,8 +22,9 @@ object VersePlacement {
     /** The column's left edge as a fraction of the page width. */
     const val LEFT_FRACTION = 0.10f
 
-    const val GAP_DP = 8f
-    const val STEP_DP = 16f
+    /** [FreePlacement]'s air and grid — one rule for every landing, read rather than copied. */
+    const val GAP_DP = FreePlacement.GAP_DP
+    const val STEP_DP = FreePlacement.STEP_DP
 
     fun leftEdge(pageW: Float): Float = if (pageW.isFinite() && pageW > 0f) pageW * LEFT_FRACTION else 0f
 
@@ -85,14 +86,22 @@ object VersePlacement {
         return nearY(x, y, w, h, pageH, occupied, density)
     }
 
+    /** [occupied] without exactly [consumed] — the boxes of the ink a conversion is about to
+     *  erase, which must not block the spot it stood on. Equal boxes, not identity: the caller
+     *  reads both lists off the same working copies. */
+    fun without(occupied: List<Bounds>, consumed: List<Bounds>): List<Bounds> {
+        if (consumed.isEmpty()) return occupied
+        return occupied.filterNot { box ->
+            consumed.any { it.left == box.left && it.top == box.top && it.right == box.right && it.bottom == box.bottom }
+        }
+    }
+
     /** [occupied] without the boxes that lie inside [within] — the ink a conversion is about to
      *  erase must not block the spot it stood on. */
     fun without(occupied: List<Bounds>, within: Bounds): List<Bounds> = occupied.filterNot {
         it.left >= within.left && it.top >= within.top && it.right <= within.right && it.bottom <= within.bottom
     }
 
-    private fun clear(x: Float, y: Float, w: Float, h: Float, gap: Float, occupied: List<Bounds>): Boolean {
-        val box = Bounds(x - gap, y - gap, x + w + gap, y + h + gap)
-        return occupied.none { it.intersects(box) }
-    }
+    private fun clear(x: Float, y: Float, w: Float, h: Float, gap: Float, occupied: List<Bounds>): Boolean =
+        FreePlacement.clear(x, y, w, h, gap, occupied)
 }

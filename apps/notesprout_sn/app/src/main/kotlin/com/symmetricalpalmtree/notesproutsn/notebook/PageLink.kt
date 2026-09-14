@@ -73,6 +73,28 @@ data class PageLink(
      * this build cannot decode, and shrinking to the union of what we *can* read would cut the
      * link down. Applied at page load, next to the heading remeasure.
      */
+    /**
+     * The wrapped texts re-measured by [measure] (og's rule: a text's width is `pageWidth − x`,
+     * derived on every load, never stored as truth) and the box grown to hold them. A loose text
+     * gets this from `PageObjects.remeasured`; a wrapped one lives under the link and would
+     * otherwise keep the width it was written at — a verses block (arc 40) fills its column, so
+     * a drag to the right left its lines clipped at the page edge. Idempotent; the row is
+     * corrected whenever the link is next written.
+     */
+    fun withTextsRemeasured(measure: (PageText) -> Pair<Float, Float>, density: Float): PageLink {
+        if (texts.isEmpty()) return this
+        var changed = false
+        val sized = texts.map { t ->
+            val (w, h) = measure(t)
+            if (w == t.width && h == t.height) t else { changed = true; t.copy(width = w, height = h) }
+        }
+        if (!changed) return this
+        val b = unionBounds(strokes, headings, density, sized, shapes, stickies) ?: return copy(texts = sized)
+        // The union holds everything wrapped, so the right edge follows it both ways (a text
+        // narrows when it moves right); the band below only ever grows, as withUnderlineBand's.
+        return copy(texts = sized, width = b.right - x, height = max(height, b.bottom - y))
+    }
+
     fun withUnderlineBand(density: Float): PageLink {
         val b = unionBounds(strokes, headings, density, texts, shapes, stickies) ?: return this
         val needed = b.bottom - y

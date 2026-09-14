@@ -14,6 +14,46 @@ class ReferenceTest {
 
     private fun key(ordinal: Int, c: Int, v: Int) = VerseKey.encode(ordinal, c, v)
 
+    // --- bounds -------------------------------------------------------------
+
+    @Test
+    fun `a number the key cannot pack is not a reference, never a throw`() {
+        assertNull(ReferenceParser.parse("John 1:5-99999999999:3"))
+        assertNull(ReferenceParser.parse("John 3:1-2147483647"))
+        assertNull(ReferenceParser.parse("John 1-2147483"))
+        assertNull(ReferenceParser.parse("Psalm 1000"))
+        assertNull(ReferenceParser.parse("John 3:999"))
+        assertTrue(ReferenceParser.parseAll("John 3:1-2147483647").isEmpty())
+        assertNull(ReferenceCodec.decode("JHN:1000:1-1000:2"))
+        assertEquals("JHN:999:1-999:2", ReferenceCodec.encode(ReferenceParser.parseAll("John 999:1-2")))
+    }
+
+    // --- one-chapter books --------------------------------------------------
+
+    private val oneChapter = { usfm: String -> if (usfm == "JUD" || usfm == "PHM") 1 else 21 }
+
+    @Test
+    fun `a bare number after a one-chapter book is a verse`() {
+        val jude24 = ReferenceResolver.normalize(ReferenceParser.parseAll("Jude 24"), oneChapter)
+        assertEquals(listOf(VerseRange.verse(65, 1, 24)), jude24.single().ranges)
+        assertEquals("Jude 1:24", jude24.single().format())
+        val phm = ReferenceResolver.normalize(ReferenceParser.parseAll("Philemon 4-7"), oneChapter)
+        assertEquals(listOf(VerseRange.verses(57, 1, 4, 7)), phm.single().ranges)
+        assertTrue(ReferenceResolver.valid(jude24, oneChapter) { true })
+    }
+
+    @Test
+    fun `a bare 1 after a one-chapter book stays the whole book`() {
+        val jude = ReferenceResolver.normalize(ReferenceParser.parseAll("Jude 1"), oneChapter)
+        assertEquals(listOf(VerseRange.chapters(65, 1, 1)), jude.single().ranges)
+    }
+
+    @Test
+    fun `normalize leaves every other book alone`() {
+        val parsed = ReferenceParser.parseAll("John 3, Jude 1:3")
+        assertEquals(parsed, ReferenceResolver.normalize(parsed, oneChapter))
+    }
+
     // --- Canon aliases ------------------------------------------------------
 
     @Test

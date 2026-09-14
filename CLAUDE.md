@@ -11,7 +11,7 @@ devices first (BOOX), expanding to iPad, Android tablets, phones, and web.
   2026-09-11; its own `CLAUDE.md`, `docs/`, Gradle root, and module set — read that `CLAUDE.md`
   before any work there)
 - `extensions/bible` — **NSE · Bible**, the Bible-reader extension for Notesprout SN (the ninth SN
-  extension point, arc 37, 2026-09-13; branch `bible`, grown by arc 38 "Reference" the same day
+  extension point, arc 37, 2026-09-13; built on branch `bible`, **merged to `main` 2026-09-13**, grown by arc 38 "Reference" the same day
   with notebook-linked scripture reference objects, and by arc 40 "Verses" the same day (the verses
   themselves on the page as a linked text object)): lives at the monorepo root and is included
   into `apps/notesprout_sn`'s Gradle root by `projectDir` — the pattern for every future extension;
@@ -166,11 +166,11 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   `<ARC>_PLAN.md` files there are history (plan + ledger — read for *why*, never resumed). **No
   NINTH extension point and no new arc without a user decision; no re-raising waived review
   findings.**
-- `bible` — feature branch for `extensions/bible` (**NSE · Bible**), Notesprout SN's ninth
-  extension point (arc 37), from `main` 2026-09-13; **the initial arc is COMPLETE + FROZEN
-  2026-09-13** (B0–B5, the user's Nomad walk; post-freeze B6 the same day reshaped the index into
-  a Contents-shaped side panel, B7 renamed it "Contents" and added the Recents panel) and the
-  branch stays open for the next Bible decision — not yet merged to `main`.
+- `bible` — **merged to `main` 2026-09-13 (`--no-ff`) and deleted** (local + remote) — "on
+  bible" means `main`. It carried `extensions/bible` (**NSE · Bible**), SN's ninth extension
+  point: arc 37 (B0–B9), arc 38 "Reference", arc 39 "Lookup", arc 40 "Verses", all COMPLETE +
+  FROZEN on the user's Nomad walks, plus the full-branch code review of 2026-09-13 (fixes in
+  `extensions/bible/docs/bible.md` § Traps). The per-arc `*_PLAN.md` files there are history.
 - `germination` — previous post-MVP feature branch (reference, not active)
 - The former feature branches (`seed`, `sprout`, `sapling`, `supernote`, `paper`) are merged and
   **deleted** (local + remote) — "on sprout/sapling/supernote/paper" means `main`; history lives under

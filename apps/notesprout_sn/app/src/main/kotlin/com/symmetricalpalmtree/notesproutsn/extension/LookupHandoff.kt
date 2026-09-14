@@ -35,13 +35,17 @@ object LookupHandoff {
         parked = Parked(reader, wire, callerPackage, SystemClock.elapsedRealtime())
     }
 
-    /** The park for [callerPackage], if one is fresh — cleared on the way out either way. */
+    /**
+     * The park for [callerPackage], if one is fresh — cleared once taken or once stale. A start
+     * from any other package (the screen is exported on its action) is refused **without**
+     * clearing it, so the editor's own launch a moment later still finds its park.
+     */
     @Synchronized
     fun take(callerPackage: String?): Parked? {
-        val p = parked
+        val p = parked ?: return null
+        if (SystemClock.elapsedRealtime() - p.at > TTL_MS) { parked = null; return null }
+        if (callerPackage == null || p.callerPackage != callerPackage) return null
         parked = null
-        if (p == null || callerPackage == null || p.callerPackage != callerPackage) return null
-        if (SystemClock.elapsedRealtime() - p.at > TTL_MS) return null
         return p
     }
 

@@ -214,6 +214,8 @@ class NotebookActivity : AppCompatActivity() {
         override fun record(action: Action) = undo.record(action)
         override suspend fun resolve(text: String): ResolvedReference? =
             if (::bible.isInitialized) bible.resolve(text) else null
+        // Read at the call, never captured — discovery re-runs on resume.
+        override val supportsReferences: Boolean get() = ::bible.isInitialized && bible.supportsReferences
         // Arc 40 "Verses": both read at the call, never captured — discovery re-runs on resume.
         override val supportsVerses: Boolean get() = ::bible.isInitialized && bible.supportsText
         override suspend fun passageText(wire: String): PassageText? =
@@ -1241,7 +1243,7 @@ class NotebookActivity : AppCompatActivity() {
         val page = if (idx >= 0 && idx != session.currentIndex) session.goTo(idx) else session.currentPage
         val strokes = session.store.loadPage(page.id)
         val headings = remeasureForDevice(session.headings.loadPage(page.id))
-        val links = withUnderlineBand(session.links.loadPage(page.id))
+        val links = correctedForDevice(session.links.loadPage(page.id), page.width)
         // Arc 28: the page's texts, shapes and sticky icons, read here with everything else — the
         // texts already re-measured for this device (the heading remeasure's rule, PageObjects).
         val objects = pageObjects.load(session, page.id, page.width)
@@ -1341,6 +1343,7 @@ class NotebookActivity : AppCompatActivity() {
                     if (standingForReplay()) bible.open()
                 }
                 Surface.DOCUMENT_EDITOR -> {
+                    bible.discovered() // the editor's Bible item is decided at the launch (arc 39)
                     if (!documentEntry.discovered()) {
                         Slog.d(TAG) { "restore: the document editor is not installed — dropped" }
                         return@launch
@@ -1458,6 +1461,11 @@ class NotebookActivity : AppCompatActivity() {
         // pre-draw + post — the trap that overlay exists for). Both are the same layout and both
         // moves happen in this one Main message, so the swap costs no frame and shows no gap.
         binding.openingOverlay.root.visibility = View.GONE
+        // The editor's Bible item (arc 39) is decided at this launch from the reader's discovery,
+        // which onResume only fires and forgets — a cold launch straight into a text document
+        // would otherwise race it and open the editor without the item. A package query, cheap.
+        bible.discovered()
+        if (!opened || closing) return
         documentEntry.open()
         watchForAnEditorThatNeverOpens()
     }
@@ -1663,6 +1671,7 @@ class NotebookActivity : AppCompatActivity() {
                 // does the same in memory, so the composite (translation-invariant) is reused as-is.
                 session.links.move(linkIds, move.dx, move.dy)
                 for (id in linkIds) liveLinks[id]?.let { liveLinks[id] = it.translated(move.dx, move.dy) }
+                if (move.dx != 0f) remeasureMovedLinks(linkIds)
                 linkRenderer.update(liveLinks.values.toList())
             }
             // Arc 28: texts, shapes and stickies that rode the same drag. Each store's move is a
@@ -2172,7 +2181,7 @@ class NotebookActivity : AppCompatActivity() {
             page = session.goTo(index)
             strokes = session.store.loadPage(page.id)
             headings = remeasureForDevice(session.headings.loadPage(page.id))
-            links = withUnderlineBand(session.links.loadPage(page.id))
+            links = correctedForDevice(session.links.loadPage(page.id), page.width)
             objects = pageObjects.load(session, page.id, page.width)
             // Composites raster off Main here, inside the buffered-commit window — never in the
             // display block below, where a link-heavy page would stall the flip frame (K5 review).
@@ -2635,6 +2644,41 @@ class NotebookActivity : AppCompatActivity() {
     private fun withUnderlineBand(links: List<PageLink>): List<PageLink> =
         if (links.isEmpty()) links
         else links.map { it.withUnderlineBand(resources.displayMetrics.density) }
+
+    /**
+     * Every in-memory correction a loaded link gets: its wrapped texts re-measured for THIS
+     * device at `pageWidth − x` ([PageLink.withTextsRemeasured] — the loose texts' rule, which a
+     * text under a link never had), then the underline band. Rows are corrected when next written.
+     */
+    private fun correctedForDevice(links: List<PageLink>, pageWidth: Int): List<PageLink> {
+        if (links.isEmpty()) return links
+        val density = resources.displayMetrics.density
+        return links.map { link ->
+            link.withTextsRemeasured({ t -> pageObjects.measure(t.text, t.x, pageWidth) }, density)
+                .withUnderlineBand(density)
+        }
+    }
+
+    /**
+     * A moved link whose wrapped texts now sit at another `x`: their wrap width changed with it
+     * (`pageWidth − x`), so re-measure, and when that moved the box, write the rows the store's
+     * delta move could not know about and drop the composite so it rasters at the new size.
+     * Nothing to do for a link wrapping no text — the common case, one map lookup.
+     */
+    private fun remeasureMovedLinks(ids: List<String>) {
+        val pageWidth = session.currentPage.width
+        val density = resources.displayMetrics.density
+        for (id in ids) {
+            val moved = liveLinks[id] ?: continue
+            if (moved.texts.isEmpty()) continue
+            val sized = moved.withTextsRemeasured({ t -> pageObjects.measure(t.text, t.x, pageWidth) }, density)
+            if (sized === moved) continue
+            liveLinks[id] = sized
+            for (t in sized.texts) if (t !in moved.texts) session.texts.updateContent(t)
+            session.links.updateBounds(id, sized.x, sized.y, sized.width, sized.height)
+            linkRenderer.invalidate(id)
+        }
+    }
 
     /**
      * The bar with the right mode: pure strokes → CONVERT's H + Link, one heading alone → CHANGE's H
@@ -3221,7 +3265,7 @@ class NotebookActivity : AppCompatActivity() {
             // In-memory corrections a page load would make too: heading boxes re-measured for THIS
             // device, and any under-sized underline band grown. Rows are corrected when next written.
             val headings = remeasureForDevice(plan.headings)
-            val links = withUnderlineBand(plan.links)
+            val links = correctedForDevice(plan.links, page.width)
             // Arc 28: a pasted text is re-measured for THIS device too — same correction, same
             // reason (the row is corrected whenever the text is next written).
             val texts = pageObjects.remeasured(plan.texts, page.width)

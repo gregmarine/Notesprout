@@ -81,6 +81,8 @@ class SearchPanel(
     private var itemsPerPage = 1
     private var rowHeightPx = 0
     private var results: SearchResults? = initial
+    /** True from [showSearching] until [showResults]: the body holds the searching word. */
+    private var searching = false
 
     private lateinit var input: EditText
     private lateinit var summary: TextView
@@ -182,6 +184,7 @@ class SearchPanel(
 
     /** The screen is looking: a word in the body, the old list gone. */
     fun showSearching() {
+        searching = true
         results = null
         summary.visibility = View.GONE
         help.visibility = View.GONE
@@ -194,6 +197,7 @@ class SearchPanel(
 
     /** What the screen found — a list, or "No results" as a real answer. */
     fun showResults(found: SearchResults) {
+        searching = false
         results = found
         listPage = 0
         renderState()
@@ -246,6 +250,9 @@ class SearchPanel(
     /** The body from [results]: the help, "No results", or a page of rows. */
     private fun renderState() {
         val found = results
+        // The keyboard going down on submit resizes the body and lands here through the
+        // remeasure; the word on screen is "Searching…", and it stays until an answer.
+        if (found == null && searching) return
         list.removeAllViews()
         if (found == null) {
             summary.visibility = View.GONE

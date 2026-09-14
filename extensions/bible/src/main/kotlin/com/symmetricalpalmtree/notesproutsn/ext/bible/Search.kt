@@ -114,9 +114,53 @@ object SearchRank {
      * order** — the same verse key ordering the book has.
      */
     fun top(scored: List<Pair<Int, Double>>, limit: Int): List<Int> =
-        scored.sortedWith(compareByDescending<Pair<Int, Double>> { it.second }.thenBy { it.first })
-            .take(limit)
-            .map { it.first }
+        Scored().also { s -> for ((key, score) in scored) s.add(key, score) }.top(limit)
+
+    /**
+     * Scored rows held as two primitive arrays — no object per row — with [top] as a bounded
+     * selection: a min-heap of at most `limit` indices, so the ubiquitous prefix costs
+     * O(n log k), not a sort of everything to keep a hundred.
+     */
+    class Scored {
+        private var keys = IntArray(256)
+        private var scores = DoubleArray(256)
+        var size = 0
+            private set
+
+        fun add(key: Int, score: Double) {
+            if (size == keys.size) {
+                keys = keys.copyOf(size * 2)
+                scores = scores.copyOf(size * 2)
+            }
+            keys[size] = key
+            scores[size] = score
+            size++
+        }
+
+        /** Best first; equal scores in canonical (ascending key) order. */
+        fun top(limit: Int): List<Int> {
+            if (limit <= 0 || size == 0) return emptyList()
+            // "Worse" = lower score, or the same score and a later key: the heap's head is the
+            // worst of the kept, and a newcomer replaces it only when it beats it.
+            val worse = Comparator<Int> { a, b ->
+                val byScore = scores[a].compareTo(scores[b])
+                if (byScore != 0) byScore else keys[b].compareTo(keys[a])
+            }
+            val heap = java.util.PriorityQueue<Int>(limit.coerceAtMost(size) + 1, worse)
+            for (i in 0 until size) {
+                if (heap.size < limit) {
+                    heap.add(i)
+                } else if (worse.compare(i, heap.peek()!!) > 0) {
+                    heap.poll()
+                    heap.add(i)
+                }
+            }
+            val out = IntArray(heap.size)
+            var n = out.size
+            while (n > 0) out[--n] = keys[heap.poll()!!]
+            return out.toList()
+        }
+    }
 
     private fun toInts(blob: ByteArray): IntArray {
         val buf = ByteBuffer.wrap(blob).order(ByteOrder.LITTLE_ENDIAN)
@@ -143,9 +187,14 @@ sealed interface SearchRoute {
     data class Words(val query: String) : SearchRoute
 
     companion object {
-        fun classify(query: String): SearchRoute {
+        /**
+         * [chapterCount] lets a one-chapter book's verse-only citation ("Jude 5") route as the
+         * passage it names ([ReferenceResolver.normalize]); without one every bare number is a
+         * chapter, as the parser reads it.
+         */
+        fun classify(query: String, chapterCount: (usfm: String) -> Int = { 0 }): SearchRoute {
             val trimmed = query.trim()
-            val passages = ReferenceParser.parseAll(trimmed)
+            val passages = ReferenceResolver.normalize(ReferenceParser.parseAll(trimmed), chapterCount)
             if (passages.isEmpty()) return Words(trimmed)
             if (passages.size == 1 && passages[0].ranges.size == 1) {
                 val r = passages[0].ranges[0]

@@ -82,6 +82,9 @@ class SearchTest {
     fun `top keeps the best first and ties in canonical order`() {
         val scored = listOf(43003016 to 2.0, 1001001 to 2.0, 19023001 to 5.0, 66022021 to 0.5)
         assertEquals(listOf(19023001, 1001001, 43003016), SearchRank.top(scored, 3))
+        assertEquals(listOf(19023001, 1001001), SearchRank.top(scored, 2))
+        assertEquals(emptyList<Int>(), SearchRank.top(scored, 0))
+        assertEquals(SearchRank.top(scored, scored.size), SearchRank.top(scored, 99))
     }
 
     // --- the route ----------------------------------------------------------
@@ -155,5 +158,15 @@ class SearchTest {
         val hit = SearchHit(1001001, "GEN", 1, 1, "")
         assertTrue(SearchResults("x", listOf("x"), listOf(hit), 2).capped)
         assertTrue(!SearchResults("x", listOf("x"), listOf(hit), 1).capped)
+    }
+
+    @Test
+    fun `a one-chapter book's verse routes as a passage against the source's counts`() {
+        val counts = { usfm: String -> if (usfm == "JUD") 1 else 21 }
+        val route = SearchRoute.classify("Jude 5", counts)
+        assertTrue(route is SearchRoute.Passage)
+        assertEquals("JUD:1:5-1:5", (route as SearchRoute.Passage).wire)
+        assertTrue(SearchRoute.classify("Jude 5") is SearchRoute.Chapter)
+        assertTrue(SearchRoute.classify("Jude 1", counts) is SearchRoute.Chapter)
     }
 }

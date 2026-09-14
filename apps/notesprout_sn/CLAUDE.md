@@ -15,7 +15,7 @@ The Manta identifies as a Nomad — target by serial.
 **Status: arcs 1–36 are all COMPLETE + FROZEN (2026-09-11) and `PARITY_BACKLOG.md` is closed.**
 The build effort ("ratta paper", 2026-08-20 → 2026-09-11) is over; what remains is maintenance,
 plus **arc 37 "Bible" — a fresh user decision granted 2026-09-13, COMPLETE + FROZEN 2026-09-13
-on branch `bible`** (plan + ledger: `extensions/bible/BIBLE_PLAN.md`; reference
+on branch `bible`, merged to `main` 2026-09-13 with arcs 38–40 and the branch review** (plan + ledger: `extensions/bible/BIBLE_PLAN.md`; reference
 `extensions/bible/docs/bible.md`; no code review — the user's call; frozen on the user's own Nomad
 walk; **post-freeze B6 2026-09-13 on the user's decision: the index became a Contents-shaped side
 panel with a one-finger swipe-down door — `SwipeMath.vertical` + `ListSwipe`'s optional vertical
@@ -305,7 +305,8 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   `:ext-bible` (**NSE · Bible**, arc 37 / B0, grown by arc 38 / R1–R2 — the fifteenth module, and
   the only one at the monorepo root, `extensions/bible/`, included by `projectDir`):
   `:extension-api` + `:sn-screen` only, **never** `:app`, no Room / SQLCipher / serialization.
-  Declares `API_VERSION` **12** since arc 38 / R1 (`MIN_API_VERSION_FOR_BIBLE` = 11 from its first
+  Declares `API_VERSION` **15** since arc 40 "Verses" (12 at arc 38 / R1, 13 at B9, 15 at arc 40;
+  `MIN_API_VERSION_FOR_BIBLE` = 11 from its first
   phase still gates the point's own existence; `MIN_API_VERSION_FOR_BIBLE_REFERENCE` = 12, a
   method floor, gates `resolve`/`beginAt` and the notebook's two reference doors — an 11-only
   reader still serves the plain door). Store `BibleSchema.V3` = `state` (B0) + `recent` (B7) +
@@ -555,7 +556,7 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   Action strings are
   SN-namespaced so Paper's extensions are never discovered; trust is same-signature both ways
   (discovery + bind-time re-check host-side, `HostCallerCheck` first thing in every stub method);
-  `ExtensionContract.API_VERSION` = **12** and the host accepts `minApiVersion(action)..12` — **the
+  `ExtensionContract.API_VERSION` = **15** and the host accepts `minApiVersion(action)..15` — **the
   floor is per action since arc 23 / Y1** (`minApiVersion` is a map, not a single set): 11 for
   `ACTION_BIBLE` (`MIN_API_VERSION_FOR_BIBLE`, arc 37 / B0), 8 for
   `ACTION_CLOUD_STORAGE` (`CloudContract.MIN_API_VERSION_FOR_CLOUD`, arc 25 / V1), 7 for
@@ -597,7 +598,14 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   `IBible.beginAt` appended after `end()`, gated by the **method** floor
   `MIN_API_VERSION_FOR_BIBLE_REFERENCE` 12 — `MIN_API_VERSIONS` untouched,
   `MIN_API_VERSION_FOR_BIBLE` still 11 and a reader declaring only 11 still binds for the plain
-  door. Not a tenth point; only `:ext-bible` declares 12.
+  door. Not a tenth point; only `:ext-bible` declares 12. · **13 = B9 "Send"**:
+  `IBible.takeOutgoingReference`, method floor `MIN_API_VERSION_FOR_BIBLE_SEND` 13. · **14 = arc
+  39 "Lookup"**: `IDocumentHost.openReference`, method floor
+  `DocumentContract.MIN_API_VERSION_FOR_DOCUMENT_LOOKUP` 14 (`:ext-document` declares 14). ·
+  **15 = arc 40 "Verses"**: `IBible.passageText`, method floor `MIN_API_VERSION_FOR_BIBLE_TEXT`
+  15 (`:ext-bible` declares 15). No action floor moved at any of the three; the pin lives in
+  `ExtensionContractTest`, which **must be run** (`:extension-api:testDebugUnitTest`) at every
+  bump — it went red across three bumps unnoticed once.
   Meta-data is **per service**.
 - **The Scratch Pad is not ours to change from here** (arc 11, `docs/scratchpad.md`). It is the
   `:ext-scratchpad` APK: its own process, its own g-paper surface, its own undo stack, and it

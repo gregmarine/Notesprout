@@ -86,7 +86,8 @@ object FreePlacement {
         return centre
     }
 
-    private fun clear(x: Float, y: Float, w: Float, h: Float, gap: Float, occupied: List<Bounds>): Boolean {
+    /** The one clearance test — [VersePlacement] measures its column with it too. */
+    internal fun clear(x: Float, y: Float, w: Float, h: Float, gap: Float, occupied: List<Bounds>): Boolean {
         val box = Bounds(x - gap, y - gap, x + w + gap, y + h + gap)
         return occupied.none { it.intersects(box) }
     }

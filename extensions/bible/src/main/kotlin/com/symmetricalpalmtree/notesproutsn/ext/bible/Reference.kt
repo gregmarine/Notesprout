@@ -1,5 +1,7 @@
 package com.symmetricalpalmtree.notesproutsn.ext.bible
 
+import com.symmetricalpalmtree.notesproutsn.extension.ResolvedReference
+
 /**
  * A parsed reference (arc 38 / R1): an ordered set of [VerseRange]s that all belong to one
  * [book]. `John 3:14-16,18` becomes two ranges; `Genesis 1` one whole-chapter range. Ported from
@@ -121,12 +123,12 @@ object ReferenceParser {
                 val dash = seg.indexOf('-')
                 if (dash < 0) {
                     val c = seg.toIntOrNull() ?: return null
-                    if (c < 1) return null
+                    if (!chapterOk(c)) return null
                     ranges.add(VerseRange.chapters(ordinal, c, c))
                 } else {
                     val a = seg.substring(0, dash).toIntOrNull()
                     val b = seg.substring(dash + 1).toIntOrNull()
-                    if (a == null || b == null || a < 1 || b < a) return null
+                    if (a == null || b == null || !chapterOk(a) || !chapterOk(b) || b < a) return null
                     ranges.add(VerseRange.chapters(ordinal, a, b))
                 }
             }
@@ -135,8 +137,9 @@ object ReferenceParser {
 
         // Whole-spec cross-chapter verse span, e.g. "1:5-2:3".
         crossChapterSpan.find(spec)?.let { span ->
-            val (c1, v1, c2, v2) = span.groupValues.drop(1).map { it.toInt() }
-            if (c1 < 1 || v1 < 1 || c2 < 1 || v2 < 1) return null
+            val nums = span.groupValues.drop(1).map { it.toIntOrNull() ?: return null }
+            val (c1, v1, c2, v2) = nums
+            if (!chapterOk(c1) || !verseOk(v1) || !chapterOk(c2) || !verseOk(v2)) return null
             val start = VerseKey.encode(ordinal, c1, v1)
             val end = VerseKey.encode(ordinal, c2, v2)
             if (end < start) return null
@@ -155,21 +158,27 @@ object ReferenceParser {
                 vspec = seg.substring(colon + 1)
             }
             val ch = chapter ?: return null // a bare verse with no chapter context
-            if (ch < 1) return null
+            if (!chapterOk(ch)) return null
             val dash = vspec.indexOf('-')
             if (dash < 0) {
                 val v = vspec.toIntOrNull() ?: return null
-                if (v < 1) return null
+                if (!verseOk(v)) return null
                 ranges.add(VerseRange.verse(ordinal, ch, v))
             } else {
                 val a = vspec.substring(0, dash).toIntOrNull()
                 val b = vspec.substring(dash + 1).toIntOrNull()
-                if (a == null || b == null || a < 1 || b < a) return null
+                if (a == null || b == null || !verseOk(a) || !verseOk(b) || b < a) return null
                 ranges.add(VerseRange.verses(ordinal, ch, a, b))
             }
         }
         return ranges.ifEmpty { null }
     }
+
+    // A number [VerseKey] cannot pack is not a reference — "Psalm 1000" would wrap into chapter
+    // 0, and a verse past `Int` would overflow the key and throw out of `VerseRange`. Typed text
+    // reaches this parser straight from the reader's Search field, so it must never throw.
+    private fun chapterOk(c: Int) = c in 1 until VerseKey.CHAPTER_LIMIT
+    private fun verseOk(v: Int) = v in 1 until VerseKey.MAX_VERSE
 }
 
 /**
@@ -185,8 +194,8 @@ object ReferenceParser {
  */
 object ReferenceCodec {
 
-    /** Mirrors `ResolvedReference.MAX_WIRE_CHARS` on the extension side. */
-    const val MAX_WIRE_CHARS = 512
+    /** The host's cap on a wire ([ResolvedReference.MAX_WIRE_CHARS]) — one number, not a mirror. */
+    const val MAX_WIRE_CHARS = ResolvedReference.MAX_WIRE_CHARS
 
     fun encode(passages: List<Passage>): String =
         passages.joinToString(",") { p ->
@@ -216,7 +225,8 @@ object ReferenceCodec {
             val v1 = fields[2].substring(0, dash).toIntOrNull() ?: return null
             val c2 = fields[2].substring(dash + 1).toIntOrNull() ?: return null
             val v2 = fields[3].toIntOrNull() ?: return null
-            if (c1 < 1 || c2 < 1 || v1 < 0 || v2 < 0 || v1 > VerseKey.MAX_VERSE || v2 > VerseKey.MAX_VERSE) return null
+            if (c1 !in 1 until VerseKey.CHAPTER_LIMIT || c2 !in 1 until VerseKey.CHAPTER_LIMIT) return null
+            if (v1 !in 0..VerseKey.MAX_VERSE || v2 !in 0..VerseKey.MAX_VERSE) return null
             val start = VerseKey.encode(b.ordinal, c1, v1)
             val end = VerseKey.encode(b.ordinal, c2, v2)
             if (end < start) return null
@@ -259,6 +269,27 @@ object ReferenceCodec {
  * (a chapter has no holes in the BSB, and a hole would still render what is there).
  */
 object ReferenceResolver {
+
+    /**
+     * The one-chapter books (Obadiah, Philemon, 2 John, 3 John, Jude) are cited by verse alone —
+     * "Jude 24", "Philemon 6" — and the parser, which knows no chapter counts, reads every bare
+     * number as a chapter. Rewrites such a whole-chapter range on a book [chapterCount] says has
+     * exactly one chapter into the verses of chapter 1: `Jude 24` → `1:24`, `Jude 3-5` → `1:3-5`.
+     * A bare `1` alone stays the whole book, as written. Every other passage passes untouched.
+     * Pure; runs before [valid], which would otherwise refuse the chapter as out of range.
+     */
+    fun normalize(passages: List<Passage>, chapterCount: (usfm: String) -> Int): List<Passage> =
+        passages.map { p ->
+            if (chapterCount(p.book.usfm) != 1) return@map p
+            val ranges = p.ranges.map { r ->
+                val c1 = VerseKey.chapterOf(r.startKey)
+                val c2 = VerseKey.chapterOf(r.endKey)
+                val whole = VerseKey.verseOf(r.startKey) == 0 && VerseKey.verseOf(r.endKey) == VerseKey.MAX_VERSE
+                if (!whole || (c1 == 1 && c2 == 1)) r
+                else VerseRange.verses(p.book.ordinal, 1, c1, c2)
+            }
+            if (ranges == p.ranges) p else Passage(p.book, ranges)
+        }
 
     fun valid(
         passages: List<Passage>,

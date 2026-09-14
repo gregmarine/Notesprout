@@ -84,7 +84,9 @@ class BibleEntry(
             onResult(result)
         }
 
-    private var ref: ProviderRef? = null
+    // Written on Main by `discovered()`, read on a Binder thread by the notebook's
+    // `lookupBibleReference` (arc 39) — volatile so the read sees the latest discovery.
+    @Volatile private var ref: ProviderRef? = null
     private var client: BibleClient? = null
     private var opening = false
 
@@ -100,19 +102,19 @@ class BibleEntry(
      *
      * Re-read after every [discovered], never captured — a package can be replaced under us.
      */
-    var supportsReferences: Boolean = false
+    @Volatile var supportsReferences: Boolean = false
         private set
 
     /** B9: the discovered reader understands Send to notebook (`takeOutgoingReference`) — a
      *  reader declaring [ExtensionContract.MIN_API_VERSION_FOR_BIBLE_SEND] or above. */
-    var supportsSend: Boolean = false
+    @Volatile var supportsSend: Boolean = false
         private set
 
     /** Arc 40 "Verses": the discovered reader serves `passageText` — a reader declaring
      *  [ExtensionContract.MIN_API_VERSION_FOR_BIBLE_TEXT] or above. Every verses door is gated on
      *  it; the reader's own Send chooser needs no flag, because a reader declaring 15 never binds
      *  a host below 15. */
-    var supportsText: Boolean = false
+    @Volatile var supportsText: Boolean = false
         private set
 
     /** Whether a trusted reader is installed **right now**. Suspends — it is a package query. */

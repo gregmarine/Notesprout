@@ -16,6 +16,15 @@ internal object LookupText {
 
     private val whitespace = Regex("\\s+")
 
+    /** The most of a refused selection an alert quotes back — a select-all is not a dialog body. */
+    const val PREVIEW_CHARS = 60
+
+    /** [words] cut to [PREVIEW_CHARS] with an ellipsis, whitespace folded — for the alert only. */
+    fun preview(words: String): String {
+        val folded = words.trim().replace(whitespace, " ")
+        return if (folded.length <= PREVIEW_CHARS) folded else folded.substring(0, PREVIEW_CHARS).trimEnd() + "…"
+    }
+
     /** The words to send, or null when the selection is not worth sending. */
     fun prepare(selected: CharSequence?): String? {
         if (selected == null) return null

@@ -156,15 +156,18 @@ class BibleDatabase private constructor(
     fun search(query: String): SearchResults {
         val tokens = SearchQuery.tokens(query)
         val match = SearchQuery.matchExpression(query) ?: return SearchResults(query, tokens, emptyList(), 0)
-        val scored = ArrayList<Pair<Int, Double>>()
+        // A ubiquitous prefix ("the*") matches most of the book: the rows are scored into
+        // primitive arrays and only the best MAX_HITS are kept, never a boxed pair per row and a
+        // full sort to take a hundred.
+        val scored = SearchRank.Scored()
         db.rawQuery(
             "SELECT rowid, matchinfo(verse_fts, 'pcnalx') FROM verse_fts WHERE verse_fts MATCH ?",
             arrayOf(match),
         ).use { c ->
-            while (c.moveToNext()) scored.add(c.getInt(0) to SearchRank.bm25(c.getBlob(1)))
+            while (c.moveToNext()) scored.add(c.getInt(0), SearchRank.bm25(c.getBlob(1)))
         }
-        if (scored.isEmpty()) return SearchResults(query, tokens, emptyList(), 0)
-        val keys = SearchRank.top(scored, SearchQuery.MAX_HITS)
+        if (scored.size == 0) return SearchResults(query, tokens, emptyList(), 0)
+        val keys = scored.top(SearchQuery.MAX_HITS)
         val rows = HashMap<Int, SearchHit>(keys.size * 2)
         // Keys are app-controlled integers straight out of the index, so the IN list is built
         // from them directly; there is nothing user-typed in it.
@@ -193,7 +196,13 @@ class BibleDatabase private constructor(
         /** Opens an installed `.bible` file read-only. Blocking. */
         fun open(path: String): BibleDatabase {
             val db = SQLiteDatabase.openDatabase(path, null, SQLiteDatabase.OPEN_READONLY)
-            return BibleDatabase(db, readMetadata(db))
+            val meta = try {
+                readMetadata(db)
+            } catch (e: Exception) {
+                db.close() // a torn install: the handle must not outlive the failure
+                throw e
+            }
+            return BibleDatabase(db, meta)
         }
 
         /** Reads a source database's `metadata` key/value table into a map. */

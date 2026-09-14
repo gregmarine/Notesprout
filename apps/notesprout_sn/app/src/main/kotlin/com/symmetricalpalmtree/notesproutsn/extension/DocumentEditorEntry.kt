@@ -88,7 +88,7 @@ class DocumentEditorEntry(
             onResult(result)
         }
 
-    private var ref: ProviderRef? = null
+    @Volatile private var ref: ProviderRef? = null // read on a Binder thread (arc 39 lookup)
     private var client: DocumentEditorClient? = null
 
     /** The surface stack this door pushes onto (arc 32 / RS1) — the prefs door, nothing more. */

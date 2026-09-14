@@ -63,15 +63,18 @@ class BibleService : Service() {
         override fun resolve(text: String?): ResolvedReference? {
             HostCallerCheck.enforce(this@BibleService, BuildConfig.HOST_PACKAGE)
             val began = SystemClock.elapsedRealtime()
-            val passages = ReferenceParser.parseAll(text.orEmpty())
-            if (passages.isEmpty()) {
+            val parsed = ReferenceParser.parseAll(text.orEmpty())
+            if (parsed.isEmpty()) {
                 Slog.d(TAG) { "resolve: not a reference (${SystemClock.elapsedRealtime() - began} ms)" }
                 return null
             }
+            var passages = parsed
             val ok = runCatching {
-                openSource().use { db ->
+                openSource().let { db ->
                     val counts = db.books().associate { it.usfm to it.chapterCount }
-                    ReferenceResolver.valid(passages, { counts[it] ?: 0 }, db::verseExists)
+                    val count = { usfm: String -> counts[usfm] ?: 0 }
+                    passages = ReferenceResolver.normalize(parsed, count)
+                    ReferenceResolver.valid(passages, count, db::verseExists)
                 }
             }.getOrElse { e ->
                 Log.w(TAG, "resolve: source unavailable", e)
@@ -124,11 +127,14 @@ class BibleService : Service() {
                 return PassageText.tooLong()
             }
             val text = runCatching {
-                openSource().use { db ->
+                openSource().let { db ->
                     val verses = ArrayList<VerseRow>()
                     for (passage in passages) {
                         for (range in passage.ranges) verses.addAll(db.versesForRange(range.startKey, range.endKey))
                     }
+                    // A chapter-crossing range is counted here, by its rows — the one count the
+                    // reference alone could not make.
+                    if (!PassageMarkdown.rowsWithinCap(verses)) return PassageText.tooLong()
                     PassageMarkdown.build(ReferenceCodec.label(passages), verses)
                 }
             }.getOrElse { e ->
@@ -140,13 +146,27 @@ class BibleService : Service() {
         }
     }
 
-    /** The installed source, opened for one call and closed by the caller's `use`. Blocking. */
-    private fun openSource(): BibleDatabase {
+    /** The source, opened on the first call that needs it and closed in [onDestroy]. */
+    private var source: BibleDatabase? = null
+
+    /**
+     * The installed source, opened once for the life of this service — the host's `resolve` and
+     * `passageText` land back to back on one held bind (the reference dialog's "Insert the
+     * verses"), and the install check plus a fresh open per call was the larger half of each.
+     * Blocking — a Binder thread, never Main.
+     */
+    private fun openSource(): BibleDatabase = synchronized(this) {
+        source?.let { return it }
         val file = ContentInstaller(this).ensureInstalled(ContentInstaller.BSB_ASSET, ContentInstaller.BSB_NAME)
-        return BibleDatabase.open(file.absolutePath)
+        BibleDatabase.open(file.absolutePath).also { source = it }
     }
 
     override fun onBind(intent: Intent?): IBinder = binder
+
+    override fun onDestroy() {
+        synchronized(this) { source?.close(); source = null }
+        super.onDestroy()
+    }
 
     private companion object {
         const val TAG = "BibleService"
