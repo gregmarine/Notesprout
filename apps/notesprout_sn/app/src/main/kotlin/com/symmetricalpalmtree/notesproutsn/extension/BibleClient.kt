@@ -115,6 +115,27 @@ class BibleClient(context: Context, val ref: ProviderRef) {
         }
     }
 
+    /**
+     * Arc 40 "Verses" — the verses of [wire] as Markdown, over the bind this showing still holds:
+     * the reader's Send chose the words, so the host asks for them right after
+     * [takeOutgoingReference] and before [finish]. Null when the bind is gone or the call failed
+     * (logged); a `STATUS_TOO_LONG` reply is the reader's own refusal. Never logged.
+     */
+    suspend fun passageText(wire: String): PassageText? {
+        val binding = held ?: return null
+        if (binding.isDead) return null
+        return try {
+            val text = binding.call(TEXT_TIMEOUT_MS) { it.passageText(wire) }
+            Slog.d(TAG) { "passageText: ${text?.toString() ?: "nothing"}" }
+            text
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: ExtensionCallException) {
+            Slog.d(TAG) { "passageText failed: ${e.message}" }
+            null
+        }
+    }
+
     /** `end()` (best effort, ≤ [CALL_TIMEOUT_MS]), then unbind + revoke in `finally`. Idempotent. */
     suspend fun finish() {
         val binding = held ?: return
@@ -150,6 +171,10 @@ class BibleClient(context: Context, val ref: ProviderRef) {
          */
         const val RESOLVE_TIMEOUT_MS = 8_000L
 
+        /** `passageText`'s budget — one open of the source and one short read, the same cold case
+         *  `resolve` allows for (a fresh reader's first call copies the asset out of the APK). */
+        const val TEXT_TIMEOUT_MS = RESOLVE_TIMEOUT_MS
+
         /**
          * **Bind-per-call, no store** (the tag manager's second call shape): read [text] — the
          * user's own words — as one or more scripture references and answer the canonical form, or
@@ -179,6 +204,31 @@ class BibleClient(context: Context, val ref: ProviderRef) {
                 throw e
             } catch (e: ExtensionCallException) {
                 Slog.d(TAG) { "resolve failed: ${e.message}" }
+                null
+            }
+        }
+
+        /**
+         * Arc 40 "Verses" — **bind-per-call, no store**, `resolve`'s twin: the verses of [wire]
+         * as Markdown for the notebook's two dialog-side doors (the reference dialog's switch and
+         * the lasso bar's Verses), where no showing is open. Null covers "could not ask" and "could
+         * not read"; a `STATUS_TOO_LONG` reply is the reader's refusal, which the caller explains.
+         * Neither the wire nor the text is logged — a status, a length and a duration.
+         */
+        suspend fun passageText(context: Context, ref: ProviderRef, wire: String): PassageText? {
+            val t0 = System.currentTimeMillis()
+            return try {
+                val answer = ExtensionBinder.call(
+                    context.applicationContext, ref, ExtensionContract.ACTION_BIBLE, TAG,
+                    asInterface = { IBible.Stub.asInterface(it) },
+                    callTimeoutMs = TEXT_TIMEOUT_MS,
+                ) { iface -> iface.passageText(wire) }
+                Slog.d(TAG) { "passageText: ${answer?.toString() ?: "nothing"} in ${System.currentTimeMillis() - t0} ms" }
+                answer
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: ExtensionCallException) {
+                Slog.d(TAG) { "passageText failed: ${e.message}" }
                 null
             }
         }

@@ -1,6 +1,7 @@
 package com.symmetricalpalmtree.notesproutsn.extension;
 
 import com.symmetricalpalmtree.notesproutsn.extension.IExtensionStore;
+import com.symmetricalpalmtree.notesproutsn.extension.PassageText;
 import com.symmetricalpalmtree.notesproutsn.extension.ResolvedReference;
 
 /**
@@ -51,4 +52,16 @@ interface IBible {
      * `end()` — the calendar's `takeOutgoing` shape on a reference instead of ink. Never logged.
      */
     ResolvedReference takeOutgoingReference();
+
+    /**
+     * Arc 40 "Verses" (2026-09-13) — a compatible tail (transaction code 6) behind the METHOD
+     * floor `ExtensionContract.MIN_API_VERSION_FOR_BIBLE_TEXT` (15), and **the first method
+     * through which scripture crosses this seam**: the verses [wire] names, as Markdown the host
+     * lands on the page as a text object (a bold canonical label line, then the verses with plain
+     * numbers, one paragraph per chapter run). Bind-per-call or on the held bind — no store.
+     * A whole chapter, or more than the reader's verse cap, is refused with
+     * `PassageText.STATUS_TOO_LONG`; a wire this reader cannot read, or a source it cannot open,
+     * is null. Neither the wire nor a character of the text is ever logged on either side.
+     */
+    PassageText passageText(String wire);
 }

@@ -73,6 +73,7 @@ import com.symmetricalpalmtree.notesproutsn.export.ExportActivity
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionRegistry
 import com.symmetricalpalmtree.notesproutsn.extension.InkSend
 import com.symmetricalpalmtree.notesproutsn.extension.RecognizerClient
+import com.symmetricalpalmtree.notesproutsn.extension.PassageText
 import com.symmetricalpalmtree.notesproutsn.extension.ResolvedReference
 import com.symmetricalpalmtree.notesproutsn.extension.ScratchPadEntry
 import com.symmetricalpalmtree.notesproutsn.extension.TagManagerEntry
@@ -213,6 +214,10 @@ class NotebookActivity : AppCompatActivity() {
         override fun record(action: Action) = undo.record(action)
         override suspend fun resolve(text: String): ResolvedReference? =
             if (::bible.isInitialized) bible.resolve(text) else null
+        // Arc 40 "Verses": both read at the call, never captured — discovery re-runs on resume.
+        override val supportsVerses: Boolean get() = ::bible.isInitialized && bible.supportsText
+        override suspend fun passageText(wire: String): PassageText? =
+            if (::bible.isInitialized) bible.passageText(wire) else null
         override fun wrapTextAsLink(
             pageId: String,
             text: PageText,
@@ -679,6 +684,14 @@ class NotebookActivity : AppCompatActivity() {
             // resume, and what is read here is whether the reader it found understands *references*
             // — an older one still serves the bottom bar's plain door and must not offer this.
             isBibleAvailable = { ::bible.isInitialized && bible.supportsReferences },
+            // Arc 40 "Verses": a lone placed Bible *reference* (never one already holding the
+            // verses), against a reader declaring the text floor.
+            onVerses = { loneSelectedLink()?.let { bibleRefFlow.expand(it) } },
+            isVersesAvailable = {
+                val link = loneSelectedLink()
+                link != null && LinkPayload.referenceOf(link.payload) != null &&
+                    !LinkPayload.isBibleText(link.payload) && ::bible.isInitialized && bible.supportsText
+            },
         )
         // The transform mode's own floating bar (arc 28 / H4). It is not part of the selection
         // toolbar: the mode is not a selection, and the two are never up at the same time.
@@ -894,6 +907,8 @@ class NotebookActivity : AppCompatActivity() {
             // button; what it parks lands here as a Bible reference object, selected.
             sendEnabled = true,
             onSent = { reference -> bibleRefFlow.insertResolved(reference) },
+            // Arc 40 "Verses": the Send that chose the words — the reference and its Markdown.
+            onSentText = { reference, text -> bibleRefFlow.insertVersesSent(reference, text) },
         )
         binding.btnBible.setOnClickListener {
             if (!opened || closing) return@setOnClickListener
@@ -2876,8 +2891,12 @@ class NotebookActivity : AppCompatActivity() {
      */
     private fun editLinkTarget(link: PageLink) {
         if (!opened || closing) return
-        if (LinkPayload.referenceOf(link.payload) != null) bibleRefFlow.edit(link)
-        else linkPickFlow.beginEdit(link)
+        when {
+            // Arc 40: the verses on the page — the words are scripture, so Edit is the text dialog.
+            LinkPayload.isBibleText(link.payload) -> bibleRefFlow.editVerses(link)
+            LinkPayload.referenceOf(link.payload) != null -> bibleRefFlow.edit(link)
+            else -> linkPickFlow.beginEdit(link)
+        }
     }
 
     /**

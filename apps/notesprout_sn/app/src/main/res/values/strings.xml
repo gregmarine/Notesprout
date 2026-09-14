@@ -817,6 +817,20 @@
     <string name="bible_reference_problem_title">Can\'t edit this reference</string>
     <string name="bible_reference_unwrappable">This link doesn\'t hold a single piece of text, so there is no reference to edit. Unlink it and make a new one.</string>
 
+    <!-- The verses on the page (arc 40 "Verses"): the reference dialog's switch, the lasso bar's
+         Verses on a placed reference, the reader's Send, and the two refusals — alerts with OK,
+         never toasts (the user's rule). -->
+    <string name="bible_verses_action">Verses</string>
+    <string name="bible_verses_switch">Insert the verses</string>
+    <string name="bible_verses_reading">Reading verses…</string>
+    <string name="bible_verses_too_long_title">Too long for a page</string>
+    <string name="bible_verses_too_long_body">%1$s is more than ten verses, or a whole chapter. Only a short passage can be placed on a page as text.</string>
+    <string name="bible_verses_no_room_title">No room on this page</string>
+    <string name="bible_verses_no_room_body">The verses of %1$s don\'t fit on this page. Try a page with more free space.</string>
+    <string name="bible_verses_unavailable_title">Verses unavailable</string>
+    <string name="bible_verses_unavailable_body">The verses could not be read from the Bible. The extension may have been disabled, removed, or needs updating.</string>
+    <string name="bible_verses_placed_toast">Placed %1$s</string>
+
     <!-- The notebook's tag button and its secondary toolbar (arc 21 / W2). The three doors are
          icon-only and name themselves on a long press — the user's W2 call, and the recipe every
          floating bar in the notebook follows. -->

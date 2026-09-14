@@ -39,6 +39,10 @@
     <string name="cd_bible_search">Search</string>
     <!-- B9: the reader's Send to notebook (the calendar's wording) -->
     <string name="cd_bible_send">Send to notebook</string>
+    <!-- Arc 40 "Verses": in passage mode Send asks which of the two should land. -->
+    <string name="bible_send_title">Send to notebook</string>
+    <string name="bible_send_reference">The reference</string>
+    <string name="bible_send_verses">The verses</string>
     <string name="bible_search_hint">Reference or words</string>
     <string name="bible_search_help_jump_title">Go to a passage</string>
     <string name="bible_search_help_jump_examples">John 3:16 · Gen 1:5-10 · Psalm 23\nJohn 3:14-17, Acts 1:3 · 1 Cor 13</string>

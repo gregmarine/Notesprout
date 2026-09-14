@@ -207,6 +207,33 @@ class LinkPayloadTest {
         }
     }
 
+    // ── KIND_BIBLE_TEXT (arc 40 "Verses") ────────────────────────────────────
+
+    @Test
+    fun `a verses payload is the Bible shape with kind 4 and the same wire`() {
+        val payload = LinkPayload.encode(LinkPayload.CHROME_UNDERLINE, LinkPayload.KIND_BIBLE_TEXT, WIRE, null)
+        assertEquals("L1|1|4|$WIRE|", payload)
+        val d = LinkPayload.decode(payload)!!
+        assertEquals(LinkPayload.KIND_BIBLE_TEXT, d.kind)
+        assertNull(d.notebookId)
+        assertNull(d.pageId)
+        assertEquals(WIRE, d.reference)
+        assertEquals(WIRE, LinkPayload.referenceOf(payload))
+        assertEquals(true, LinkPayload.isBibleText(payload))
+        assertEquals(false, LinkPayload.isBibleText(LinkPayload.encode(LinkPayload.CHROME_UNDERLINE, LinkPayload.KIND_BIBLE, WIRE, null)))
+        assertEquals(false, LinkPayload.isBibleText("L1|1|0||p"))
+    }
+
+    @Test
+    fun `a verses payload takes the Bible slot rules`() {
+        assertNull(LinkPayload.decode("L1|1|4||"))
+        assertNull(LinkPayload.decode("L1|1|4|$WIRE|p"))
+        assertNull(LinkPayload.decode("L1|1|4|not a wire|"))
+        assertThrows(IllegalArgumentException::class.java) {
+            LinkPayload.encode(LinkPayload.CHROME_UNDERLINE, LinkPayload.KIND_BIBLE_TEXT, WIRE, "p")
+        }
+    }
+
     // ── chromeOf ─────────────────────────────────────────────────────────────
 
     @Test

@@ -118,8 +118,14 @@ object ExtensionContract {
      * The first bump for a HOST-side stub: the number an editor declares is what it requires of
      * the host, so an editor that calls code 12 declares 14 and never binds a 13 host.
      * `MIN_API_VERSIONS` untouched; only `:ext-document`'s editor service redeclares.
+     *
+     * **15 since arc 40 "Verses" (2026-09-13)** — one compatible tail appended to `IBible` after
+     * `takeOutgoingReference` (`passageText(wire)`: the verses of a small passage as Markdown for
+     * a text object on the page — the first time scripture crosses the seam,
+     * `extensions/bible/VERSES_PLAN.md`), behind the METHOD floor
+     * [MIN_API_VERSION_FOR_BIBLE_TEXT]. `MIN_API_VERSIONS` untouched; only `:ext-bible` redeclares.
      */
-    const val API_VERSION: Int = 14
+    const val API_VERSION: Int = 15
 
     /**
      * The floor for a service on a **store-taking** point (arc 22 / X1): the host accepts such a
@@ -157,6 +163,14 @@ object ExtensionContract {
      * transaction code 5 on nothing. Not an action floor: [MIN_API_VERSION_FOR_BIBLE] stays 11.
      */
     const val MIN_API_VERSION_FOR_BIBLE_SEND: Int = 13
+
+    /**
+     * The **method** floor for `IBible.passageText` (arc 40 "Verses", 2026-09-13): the host offers
+     * the three verses doors — the reader's Send chooser, the reference dialog's switch and the
+     * lasso bar's Verses — only against a reader declaring at least this; an older reader would
+     * land transaction code 6 on nothing. Not an action floor: [MIN_API_VERSION_FOR_BIBLE] stays 11.
+     */
+    const val MIN_API_VERSION_FOR_BIBLE_TEXT: Int = 15
 
     /**
      * The lowest API version the host accepts for a service on [action] — **per action** since arc
@@ -251,6 +265,13 @@ object ExtensionContract {
     /** Activity result code: the reader parked a reference for `takeOutgoingReference`
      *  (= `Activity.RESULT_FIRST_USER`). */
     const val RESULT_BIBLE_SEND: Int = 1
+
+    /** Activity result code (arc 40 "Verses"): the reader parked a reference for
+     *  `takeOutgoingReference` **and** asks for its verses to land — the host follows the take
+     *  with `passageText(wire)` on the same held bind (= `RESULT_FIRST_USER + 1`). Only a reader
+     *  shown a passage with [EXTRA_BIBLE_SEND_ENABLED] against
+     *  [MIN_API_VERSION_FOR_BIBLE_TEXT] ever returns it. */
+    const val RESULT_BIBLE_SEND_TEXT: Int = 2
 
     /** `<meta-data>` name (on the `<service>`) carrying the extension's API version. */
     const val META_API_VERSION: String =

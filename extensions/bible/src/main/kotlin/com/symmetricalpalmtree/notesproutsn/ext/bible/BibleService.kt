@@ -9,6 +9,7 @@ import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.extension.HostCallerCheck
 import com.symmetricalpalmtree.notesproutsn.extension.IBible
 import com.symmetricalpalmtree.notesproutsn.extension.IExtensionStore
+import com.symmetricalpalmtree.notesproutsn.extension.PassageText
 import com.symmetricalpalmtree.notesproutsn.extension.ResolvedReference
 
 /**
@@ -101,6 +102,41 @@ class BibleService : Service() {
             val taken = BibleSession.takeOutgoing()
             Slog.d(TAG) { "takeOutgoingReference: ${if (taken == null) "nothing" else "a reference"}" }
             return taken
+        }
+
+        /**
+         * Arc 40 "Verses" — the verses [wire] names as Markdown ([PassageMarkdown]), or a
+         * `STATUS_TOO_LONG` refusal for a whole chapter or more than [PassageMarkdown.MAX_VERSES],
+         * or null for a wire this build cannot read or a source it cannot open. Opens the source
+         * for the call, like `resolve`. **Neither the wire nor the text is logged**: a status, a
+         * count and a duration.
+         */
+        override fun passageText(wire: String?): PassageText? {
+            HostCallerCheck.enforce(this@BibleService, BuildConfig.HOST_PACKAGE)
+            val began = SystemClock.elapsedRealtime()
+            val passages = ReferenceCodec.decode(wire)
+            if (passages == null) {
+                Slog.d(TAG) { "passageText: unreadable wire" }
+                return null
+            }
+            if (!PassageMarkdown.withinCap(passages)) {
+                Slog.d(TAG) { "passageText: over the cap (${SystemClock.elapsedRealtime() - began} ms)" }
+                return PassageText.tooLong()
+            }
+            val text = runCatching {
+                openSource().use { db ->
+                    val verses = ArrayList<VerseRow>()
+                    for (passage in passages) {
+                        for (range in passage.ranges) verses.addAll(db.versesForRange(range.startKey, range.endKey))
+                    }
+                    PassageMarkdown.build(ReferenceCodec.label(passages), verses)
+                }
+            }.getOrElse { e ->
+                Log.w(TAG, "passageText: source unavailable", e)
+                return null
+            }
+            Slog.d(TAG) { "passageText: ${text.length} chars in ${SystemClock.elapsedRealtime() - began} ms" }
+            return runCatching { PassageText(PassageText.STATUS_OK, text) }.getOrNull()
         }
     }
 

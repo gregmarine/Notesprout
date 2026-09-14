@@ -55,7 +55,7 @@ object LinkNav {
                 else Follow.OtherNotebook(d.notebookId!!, d.pageId)
             // Arc 38 / R3: not a place in the library at all — decode() has already checked the
             // wire, and only the Bible extension knows what is inside it.
-            LinkPayload.KIND_BIBLE -> Follow.Bible(d.reference!!)
+            LinkPayload.KIND_BIBLE, LinkPayload.KIND_BIBLE_TEXT -> Follow.Bible(d.reference!!)
             // decode() already refused unknown kinds — belt to its braces, never a crash.
             else -> Follow.Dead
         }

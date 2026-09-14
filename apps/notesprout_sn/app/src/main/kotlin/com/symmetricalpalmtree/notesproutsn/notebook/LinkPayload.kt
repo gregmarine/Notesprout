@@ -21,6 +21,7 @@ import com.symmetricalpalmtree.notesproutsn.extension.ResolvedReference
  * | [KIND_NOTEBOOK] | `"L1|0|1|<notebookId>|"` | another notebook — **no** pageId |
  * | [KIND_NOTEBOOK_PAGE] | `"L1|1|2|<notebookId>|<pageId>"` | a page of another notebook |
  * | [KIND_BIBLE] | `"L1|1|3|<wire>|"` | a passage of scripture — **no** pageId |
+ * | [KIND_BIBLE_TEXT] | `"L1|1|4|<wire>|"` | the same passage, wrapping its **verses** rather than a reference to them — **no** pageId |
  *
  * **[KIND_BIBLE] (arc 38 / R3)** is the one kind whose target is not a row of ours: the notebookId
  * *slot* carries a resolved reference's opaque wire form (`JHN:3:14-3:18,PRO:3:5-3:6` — the
@@ -29,7 +30,14 @@ import com.symmetricalpalmtree.notesproutsn.extension.ResolvedReference
  * wire back as [Decoded.reference] instead, so nothing that re-points notebook ids
  * (`NotebookRemap`, `ObjectClip`, `PageClip`) can ever mistake a reference for one.
  *
- * Paper and og decode kind 3 as unusable — a dead link there, accepted (the arc-38 plan).
+ * **[KIND_BIBLE_TEXT] (arc 40 "Verses")** is [KIND_BIBLE] with different words inside: the wrapped
+ * text object holds the passage's verses (a bold label line, then the numbered verses) rather
+ * than the user's own reference to them. Same wire in the same slot, same follow (the passage
+ * view), and the one thing the kind changes is what an **Edit** means — the words are scripture,
+ * not a reference to resolve, so Edit is the ordinary text dialog and the payload is left alone.
+ * [referenceOf] answers the wire for both kinds; [isBibleText] tells them apart.
+ *
+ * Paper and og decode kinds 3 and 4 as unusable — a dead link there, accepted (the arc-38 plan).
  *
  * Pure Kotlin — JVM-tested, with fixtures against Paper's grammar. [encode] throws on a caller
  * bug (only our own flows compose payloads); [decode] never throws: an unknown version is a
@@ -54,6 +62,10 @@ object LinkPayload {
      *  SN's own, with no Paper counterpart: the family reads it as an unusable payload. */
     const val KIND_BIBLE = 3
 
+    /** The verses of a passage (arc 40 "Verses") — [KIND_BIBLE]'s slot rules exactly, with the
+     *  wrapped text holding the words themselves. SN's own; the family reads it as unusable. */
+    const val KIND_BIBLE_TEXT = 4
+
     /** Paper's `MAX_LINK_PAYLOAD_CHARS` — enforced in both directions (a file is untrusted input). */
     const val MAX_PAYLOAD_CHARS = 2_000
 
@@ -66,7 +78,8 @@ object LinkPayload {
         val kind: Int,
         val notebookId: String?,
         val pageId: String?,
-        /** The resolved reference's wire form when [kind] is [KIND_BIBLE], else null (arc 38 / R3).
+        /** The resolved reference's wire form when [kind] is [KIND_BIBLE] or [KIND_BIBLE_TEXT], else
+         *  null (arc 38 / R3, arc 40).
          *  It travelled in the notebookId slot; it arrives here so that a reference is never a
          *  notebook id to anything downstream. Opaque — only the Bible extension reads it. */
         val reference: String? = null,
@@ -96,11 +109,11 @@ object LinkPayload {
                 requireId(notebookId, "notebookId")
                 requireId(pageId, "pageId")
             }
-            KIND_BIBLE -> {
+            KIND_BIBLE, KIND_BIBLE_TEXT -> {
                 require(notebookId != null && ResolvedReference.isWire(notebookId)) {
-                    "KIND_BIBLE carries a reference wire"
+                    "a Bible kind carries a reference wire"
                 }
-                require(pageId == null) { "KIND_BIBLE carries no pageId" }
+                require(pageId == null) { "a Bible kind carries no pageId" }
             }
             else -> throw IllegalArgumentException("unknown destination kind $kind")
         }
@@ -135,7 +148,7 @@ object LinkPayload {
             KIND_NOTEBOOK_PAGE -> {
                 if (!validId(notebookId) || !validId(pageId)) return null
             }
-            KIND_BIBLE -> {
+            KIND_BIBLE, KIND_BIBLE_TEXT -> {
                 if (pageId != null) return null
                 if (notebookId == null || !ResolvedReference.isWire(notebookId)) return null
                 // The wire travelled in the notebookId slot and stops there: a decoded Bible
@@ -147,9 +160,14 @@ object LinkPayload {
         return Decoded(chrome, kind, notebookId, pageId)
     }
 
-    /** The reference wire a Bible payload names, or null for every other payload (arc 38 / R3) —
-     *  the one predicate the notebook screen asks to tell a Bible link from any other. */
+    /** The reference wire a Bible payload names — either kind — or null for every other payload
+     *  (arc 38 / R3) — the one predicate the notebook screen asks to tell a Bible link from any
+     *  other. */
     fun referenceOf(payload: String): String? = decode(payload)?.reference
+
+    /** Whether [payload] is a [KIND_BIBLE_TEXT] link — the verses on the page (arc 40), whose
+     *  Edit is the text dialog rather than the reference dialog. */
+    fun isBibleText(payload: String): Boolean = decode(payload)?.kind == KIND_BIBLE_TEXT
 
     /** The chrome a stored payload asks for — [CHROME_NONE] when the payload is unusable, so a
      *  foreign or future link still renders its content, just without chrome. */

@@ -17,6 +17,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.TooltipCompat
 import androidx.core.view.doOnLayout
 import androidx.lifecycle.lifecycleScope
+import com.symmetricalpalmtree.notesproutsn.core.ActionSheetDialog
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
 import com.symmetricalpalmtree.notesproutsn.core.ListSwipe
 import com.symmetricalpalmtree.notesproutsn.core.Slog
@@ -733,9 +734,31 @@ class BibleActivity : AppCompatActivity() {
     private fun sendToNotebook() {
         if (loading) return
         val reference = currentReference() ?: return
+        if (passage == null) {
+            leaveWith(reference, ExtensionContract.RESULT_BIBLE_SEND)
+            return
+        }
+        // Arc 40 "Verses": a passage can go as its reference or as its words. A chapter cannot —
+        // the user's rule — so chapter mode never asks. The host behind a reader declaring 15
+        // understands both codes (the declared number is what we require of the host).
+        ActionSheetDialog(this)
+            .title(getString(R.string.bible_send_title))
+            .addAction(null, getString(R.string.bible_send_reference)) {
+                leaveWith(reference, ExtensionContract.RESULT_BIBLE_SEND)
+            }
+            .addAction(null, getString(R.string.bible_send_verses)) {
+                leaveWith(reference, ExtensionContract.RESULT_BIBLE_SEND_TEXT)
+            }
+            .show()
+    }
+
+    /** Park [reference] and close with [code] — `RESULT_BIBLE_SEND` for the reference alone,
+     *  `RESULT_BIBLE_SEND_TEXT` when the host should follow the take with `passageText`. */
+    private fun leaveWith(reference: ResolvedReference, code: Int) {
+        if (isFinishing) return
         synchronized(BibleSession) { BibleSession.outgoing = reference }
-        Slog.d(TAG) { "send to notebook: ${if (passage != null) "passage" else "chapter"}" }
-        setResult(ExtensionContract.RESULT_BIBLE_SEND)
+        Slog.d(TAG) { "send to notebook: ${if (passage != null) "passage" else "chapter"}, code $code" }
+        setResult(code)
         finish()
     }
 

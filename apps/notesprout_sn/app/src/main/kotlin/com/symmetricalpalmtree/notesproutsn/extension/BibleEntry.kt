@@ -68,6 +68,14 @@ class BibleEntry(
      * notebook lands it on the page as a Bible reference object. Never called for the library.
      */
     private val onSent: (ResolvedReference) -> Unit = {},
+    /**
+     * Arc 40 "Verses": the reader's Send chose the words — the parked reference **and** its verses
+     * as Markdown, on Main, before the bind is finished; the notebook lands them as a text object
+     * wrapped in the Bible link. A `STATUS_TOO_LONG` reply arrives here too, and so does a null
+     * (the read failed after the reader had closed), so the notebook can explain either in its
+     * own alert rather than land nothing silently. Never called for the library.
+     */
+    private val onSentText: (ResolvedReference, PassageText?) -> Unit = { _, _ -> },
 ) {
 
     private val launcher: ActivityResultLauncher<Intent> =
@@ -100,6 +108,13 @@ class BibleEntry(
     var supportsSend: Boolean = false
         private set
 
+    /** Arc 40 "Verses": the discovered reader serves `passageText` — a reader declaring
+     *  [ExtensionContract.MIN_API_VERSION_FOR_BIBLE_TEXT] or above. Every verses door is gated on
+     *  it; the reader's own Send chooser needs no flag, because a reader declaring 15 never binds
+     *  a host below 15. */
+    var supportsText: Boolean = false
+        private set
+
     /** Whether a trusted reader is installed **right now**. Suspends — it is a package query. */
     suspend fun discovered(): Boolean {
         val found = ExtensionRegistry.bible(activity)
@@ -109,6 +124,8 @@ class BibleEntry(
             found != null && found.apiVersion >= ExtensionContract.MIN_API_VERSION_FOR_BIBLE_REFERENCE
         supportsSend =
             found != null && found.apiVersion >= ExtensionContract.MIN_API_VERSION_FOR_BIBLE_SEND
+        supportsText =
+            found != null && found.apiVersion >= ExtensionContract.MIN_API_VERSION_FOR_BIBLE_TEXT
         button.visibility = if (found == null) View.GONE else View.VISIBLE
         onAvailabilityChanged(supportsReferences)
         return found != null
@@ -191,6 +208,17 @@ class BibleEntry(
         return BibleClient.resolve(activity, provider, text)
     }
 
+    /**
+     * Arc 40 "Verses": the verses of [wire] as Markdown — bind-per-call, no showing. Null when
+     * there is no reader, when the one installed is too old to be asked, or when the call failed:
+     * nothing lands. A `STATUS_TOO_LONG` reply is the reader's refusal, for the caller to explain.
+     */
+    suspend fun passageText(wire: String): PassageText? {
+        val provider = ref ?: return null
+        if (!supportsText) return null
+        return BibleClient.passageText(activity, provider, wire)
+    }
+
     private suspend fun fail(fresh: BibleClient) {
         client = null
         opening = false
@@ -217,11 +245,20 @@ class BibleEntry(
         client = null
         Slog.d(TAG) { "bible screen returned: resultCode=${result.resultCode}" }
         val sent = result.resultCode == ExtensionContract.RESULT_BIBLE_SEND && sendEnabled
+        // Arc 40 "Verses": the same take, followed by the verses over the same held bind.
+        val sentText = result.resultCode == ExtensionContract.RESULT_BIBLE_SEND_TEXT && sendEnabled && supportsText
         MainScope().launch {
             try {
-                if (sent && open != null) {
+                if ((sent || sentText) && open != null) {
                     val reference = open.takeOutgoingReference()
-                    if (reference != null && !activity.isFinishing && !activity.isDestroyed) onSent(reference)
+                    if (reference != null && !activity.isFinishing && !activity.isDestroyed) {
+                        if (sent) {
+                            onSent(reference)
+                        } else {
+                            val text = open.passageText(reference.wire)
+                            if (!activity.isFinishing && !activity.isDestroyed) onSentText(reference, text)
+                        }
+                    }
                 }
             } finally {
                 try {

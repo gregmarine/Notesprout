@@ -141,6 +141,12 @@ class SelectionToolbar(
      *  every [show], the pad's rule, and the method floor rather than the action floor: a reader
      *  that only serves the plain door leaves this button absent. */
     private val isBibleAvailable: () -> Boolean = { false },
+    /** Land the verses of the lone selected Bible reference beside it (arc 40 "Verses"). Which
+     *  link that is is the screen's to resolve at tap time. */
+    private val onVerses: () -> Unit = {},
+    /** Whether the lone selected link is a Bible *reference* (not already the verses) and the
+     *  reader declares the text floor — re-read on every [show], the pad's rule. */
+    private val isVersesAvailable: () -> Boolean = { false },
 ) {
 
     private val density = root.resources.displayMetrics.density
@@ -156,6 +162,7 @@ class SelectionToolbar(
     private val calendarButton: AppCompatImageButton
     private val tagButton: AppCompatImageButton
     private val bibleButton: AppCompatImageButton
+    private val versesButton: AppCompatImageButton
     /** Index 0 is H1 — `levelButtons[n - 1]` is level `n`. */
     private val levelButtons: List<AppCompatImageButton>
 
@@ -261,6 +268,14 @@ class SelectionToolbar(
             onBible()
         }
         bar.addView(bibleButton)
+        // Arc 40 "Verses": the one verb a placed Bible reference has beyond Edit/Unlink — put the
+        // passage's words on the page beside it. Lone-link only, and only a reference (a link
+        // that already holds the verses has nothing to expand).
+        versesButton = button(R.drawable.ic_quote, ctx.getString(R.string.bible_verses_action)) {
+            releaseRender()
+            onVerses()
+        }
+        bar.addView(versesButton)
 
         bar.addView(
             // Delete last, alone on the far edge — the one destructive verb, kept away from the
@@ -318,6 +333,8 @@ class SelectionToolbar(
             if (TagSelection.offered(mode, isTagAvailable())) View.VISIBLE else View.GONE
         bibleButton.visibility =
             if (mode == SelectionMode.STROKES && isBibleAvailable()) View.VISIBLE else View.GONE
+        versesButton.visibility =
+            if (mode == SelectionMode.LINK && isVersesAvailable()) View.VISIBLE else View.GONE
 
         val rootLoc = IntArray(2).also { root.getLocationInWindow(it) }
         val paperLoc = IntArray(2).also { paperView.getLocationInWindow(it) }
