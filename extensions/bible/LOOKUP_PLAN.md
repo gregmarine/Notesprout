@@ -105,5 +105,6 @@ Bible point. The rules of `apps/notesprout_sn/CLAUDE.md` bind throughout.
   state intact; lookup 2 → free (58 ms open); Preview mode → lookup 3 → the same; `get_state`
   after each says `mode=…, caret=9, dirty=false`. Walk traps: the automation action is
   `….ext.document.AUTOMATION` (no `.dev`), and a payload with a space must ride `--es file`.
-- **K4 — docs — ✅ 2026-09-13.** As the phase table says. **FROZEN pending the user's hand walk
-  of the selection toolbar on the Nomad** (select a reference in Write and in Preview, tap Bible).
+- **K4 — docs — ✅ 2026-09-13.** As the phase table says. **FROZEN 2026-09-13 on the user's own hand walk on
+  the Nomad ("It works great!")** — the selection toolbar's Bible item in Write and in Preview.
+  Arc 39 COMPLETE. No next Bible or editor phase without a fresh user decision.

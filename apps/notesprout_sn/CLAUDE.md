@@ -56,8 +56,8 @@ parks (`LookupHandoff`), and the editor starts the host's exported `BibleLookupA
 trampoline — **the stopped notebook must never launch the reader itself: it cannot see the
 result until the editor closes and the bind stays held** (measured; the first design failed
 exactly so). Alerts, never toasts, for "not a reference" and "unavailable" (the user's call).
-Walked over adb on the Nomad (Write, Preview, Back, a second lookup, the alert); the selection
-toolbar itself is the user's hand walk. Plan + ledger `extensions/bible/LOOKUP_PLAN.md`; reference
+Walked over adb on the Nomad (Write, Preview, Back, a second lookup, the alert) and **FROZEN
+2026-09-13 on the user's own hand walk ("It works great!")**. Plan + ledger `extensions/bible/LOOKUP_PLAN.md`; reference
 `docs/document.md` § "Bible lookup", `docs/extensions.md` rows 58–59, `bible.md` § "Lookup from
 the document editor". No code review — the user's call.
 No TENTH extension point, no next Bible phase (bookmarks, cross references, footnotes) and no
