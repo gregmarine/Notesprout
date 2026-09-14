@@ -103,4 +103,27 @@ interface IDocumentHost {
     /** M8, text documents only: how the showing should end -- CLOSE_SHOW_PAGES / CLOSE_TO_LIBRARY.
      *  Advisory state the host reads when the result lands; the editor still finishes normally. */
     void closeNotebook(int mode);
+
+    /**
+     * Arc 39 "Lookup" (2026-09-13) -- a compatible tail (transaction code 12) behind the
+     * extension-side declaration floor DocumentContract.MIN_API_VERSION_FOR_DOCUMENT_LOOKUP (14):
+     * open NSE . Bible on the scripture reference [text] names (the editor's selection -- the
+     * user's own words, prepared but not parsed), OVER the editor. The host resolves the words
+     * through the Bible reader and parks the resolved reference; the editor then starts the
+     * host's lookup screen (DocumentContract.ACTION_DOCUMENT_LOOKUP_SCREEN, for a result, no
+     * extras), a live host screen that opens the reader on the passage and finishes when the
+     * reader does -- the notebook itself is stopped behind the editor and would not see a child's
+     * result until the editor closed. The editor stays exactly where it is and is what Back
+     * returns to. Synchronous: the editor shows its own wait for the call's life, because the
+     * host can paint nothing.
+     *
+     * Answers one of DocumentContract.REFERENCE_OPENED (parked -- start the lookup screen),
+     * REFERENCE_UNKNOWN (the reader does not know [text] as a reference) or
+     * REFERENCE_UNAVAILABLE (no reader, one too old to be asked, or the ask failed) -- a code,
+     * never an exception, so the editor can word each one. Blank or over
+     * MAX_REFERENCE_CHARS is refused with IllegalArgumentException. The text is never logged on
+     * either side. The host offers the door only by putting EXTRA_DOCUMENT_BIBLE_AVAILABLE on
+     * the editor's Intent; an editor that was not offered it never calls this.
+     */
+    int openReference(String text);
 }

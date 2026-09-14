@@ -34,6 +34,7 @@ class EditorPrefsTest {
         override fun cancelRequest() = no()
         override fun renameNotebook(name: String?) = no()
         override fun closeNotebook(mode: Int) = no()
+        override fun openReference(text: String?): Int = no()
         override fun asBinder(): IBinder? = null
     }
 

@@ -110,8 +110,16 @@ object ExtensionContract {
      * `beginAt` (`takeOutgoingReference()`: the reader's Send to notebook — the calendar's
      * `takeOutgoing` shape on a reference instead of ink), behind the METHOD floor
      * [MIN_API_VERSION_FOR_BIBLE_SEND]. `MIN_API_VERSIONS` untouched; only `:ext-bible` redeclares.
+     *
+     * **14 since arc 39 "Lookup" (2026-09-13)** — one compatible tail appended to `IDocumentHost`
+     * after `closeNotebook` (`openReference(text)`: the editor's selection opens NSE · Bible over
+     * the editor, walked by the host — `extensions/bible/LOOKUP_PLAN.md`), behind the
+     * extension-side declaration floor [DocumentContract.MIN_API_VERSION_FOR_DOCUMENT_LOOKUP].
+     * The first bump for a HOST-side stub: the number an editor declares is what it requires of
+     * the host, so an editor that calls code 12 declares 14 and never binds a 13 host.
+     * `MIN_API_VERSIONS` untouched; only `:ext-document`'s editor service redeclares.
      */
-    const val API_VERSION: Int = 13
+    const val API_VERSION: Int = 14
 
     /**
      * The floor for a service on a **store-taking** point (arc 22 / X1): the host accepts such a

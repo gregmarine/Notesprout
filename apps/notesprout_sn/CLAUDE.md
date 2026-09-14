@@ -46,6 +46,20 @@ parks the current chapter (whole) or passage, `RESULT_BIBLE_SEND`, the host take
 bind (`IBible.takeOutgoingReference`, `API_VERSION` 12 → 13 as the method floor
 `MIN_API_VERSION_FOR_BIBLE_SEND`) and lands it as a selected Bible reference object at the page
 centre (`BibleRefFlow.insertResolved`); the reader closes — `docs/bible.md` § Send to notebook.
+**Arc 39 "Lookup" (2026-09-13, a fresh user decision, branch `bible`): the Bible from the
+document editor** — select a reference in Write or Preview, tap **Bible** in the system
+text-selection toolbar, the passage view opens over the editor, Back returns to the editor as it
+was. `IDocumentHost.openReference` (`API_VERSION` 13 → 14; `:ext-document`'s editor service
+redeclares 14, `DocumentContract.MIN_API_VERSION_FOR_DOCUMENT_LOOKUP`), one boolean on the
+editor's Intent (`EXTRA_DOCUMENT_BIBLE_AVAILABLE`, the host's discovery), the host resolves and
+parks (`LookupHandoff`), and the editor starts the host's exported `BibleLookupActivity`
+trampoline — **the stopped notebook must never launch the reader itself: it cannot see the
+result until the editor closes and the bind stays held** (measured; the first design failed
+exactly so). Alerts, never toasts, for "not a reference" and "unavailable" (the user's call).
+Walked over adb on the Nomad (Write, Preview, Back, a second lookup, the alert); the selection
+toolbar itself is the user's hand walk. Plan + ledger `extensions/bible/LOOKUP_PLAN.md`; reference
+`docs/document.md` § "Bible lookup", `docs/extensions.md` rows 58–59, `bible.md` § "Lookup from
+the document editor". No code review — the user's call.
 No TENTH extension point, no next Bible phase (bookmarks, cross references, footnotes) and no
 other new arc without a fresh user decision; no re-raising of any waived / declined review finding.
 

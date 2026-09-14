@@ -68,6 +68,10 @@ class DocumentEditorEntry(
     private val hooks: DocumentHostBinder.Hooks,
     /** Run immediately before the screen is launched, and only after a successful `begin`. */
     private val beforeLaunch: () -> Unit = {},
+    /** Arc 39 "Lookup": whether a Bible reader that understands references is installed **right
+     *  now** — the host's own discovery, read at the open and put on the editor's Intent as its one
+     *  boolean so the editor can offer its selection-toolbar Bible item. */
+    private val bibleAvailable: () -> Boolean = { false },
     /**
      * The showing ended (M6). Runs at the **top** of [onResult], on the caller's Main thread and
      * **before** the detached `finish()` coroutine — so the caller reads the page the editor ended
@@ -144,6 +148,10 @@ class DocumentEditorEntry(
     /** Whether a trusted extension is installed right now. */
     val isAvailable: Boolean get() = ref != null
 
+    /** Arc 39 "Lookup": the editor's package — the one caller the host's lookup screen admits for
+     *  a reference parked on this editor's behalf. */
+    val providerPackage: String? get() = ref?.packageName
+
     /**
      * Tap. Raises the box, then — behind it — pre-opens the store on IO, mints both binders, holds
      * the bind, `begin`s, runs [beforeLaunch] and launches the screen for a result. Any failure
@@ -162,7 +170,7 @@ class DocumentEditorEntry(
         OpeningOverlay.showThen(activity) {
             activity.lifecycleScope.launch {
                 val fresh = DocumentEditorClient(activity, provider)
-                val intent = fresh.open(hooks)
+                val intent = fresh.open(hooks, bibleAvailable())
                 if (activity.isFinishing || activity.isDestroyed) {
                     opening = false; fresh.finish(); return@launch
                 }

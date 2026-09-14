@@ -21,11 +21,16 @@ import kotlinx.coroutines.withContext
  * uid-bound [DocumentHostBinder] over a fresh [DocumentHostSession] → [ExtensionBinder.hold]
  * (signature re-checked at bind) → `begin(store, host)` ≤ [CALL_TIMEOUT_MS] → the screen Intent.
  *
- * **The Intent carries nothing.** No ids, no page key, no text, not a single extra — everything
- * this seam moves crosses the two binders, which is what makes the whole of it uid-gated and
- * revocable. (The scratch pad's two booleans were the last thing to ride an Intent on any SN seam;
- * this point starts with none.) The caller launches with an `ActivityResultLauncher` — a plain
- * `startActivity` leaves the extension's `callingPackage` null and its screen refuses it.
+ * **The Intent carries one boolean and nothing else** (arc 39 "Lookup" — it carried nothing from
+ * M3 to arc 38). No ids, no page key, no text — everything this seam moves crosses the two
+ * binders, which is what makes the whole of it uid-gated and revocable. The one boolean is
+ * [DocumentContract.EXTRA_DOCUMENT_BIBLE_AVAILABLE], the calendar's scratch-pad shape: the host's
+ * own discovery says whether a Bible reader that understands references is there, so the editor
+ * can offer (or not build) its selection-toolbar Bible item — an extension never queries for
+ * another. Set only against an editor declaring
+ * [DocumentContract.MIN_API_VERSION_FOR_DOCUMENT_LOOKUP]. The caller launches with an
+ * `ActivityResultLauncher` — a plain `startActivity` leaves the extension's `callingPackage` null
+ * and its screen refuses it.
  *
  * [finish]: `end()` ≤ [END_TIMEOUT_MS] in a `try`, then in `finally` unbind, revoke the store
  * binder and revoke the host binder (which drops the showing's read window and any half-received
@@ -46,9 +51,11 @@ class DocumentEditorClient(context: Context, val ref: ProviderRef) {
      * Pre-open the store, mint both binders, hold the bind, `begin(store, host)` and build the
      * screen Intent — or null on any failure (reason logged; everything opened so far released).
      * [hooks] is the open notebook's read/write half — see [DocumentHostBinder.Hooks] for the
-     * thread contract it runs under.
+     * thread contract it runs under. [bibleAvailable] (arc 39) is the host's own discovery answer
+     * — a reader that understands references is installed — and rides the Intent as its one
+     * boolean, only against an editor new enough to have the door.
      */
-    suspend fun open(hooks: DocumentHostBinder.Hooks): Intent? {
+    suspend fun open(hooks: DocumentHostBinder.Hooks, bibleAvailable: Boolean = false): Intent? {
         if (held != null) { Slog.d(TAG) { "open: already open" }; return null }
         val t0 = System.currentTimeMillis()
         val store: ExtensionStoreBinder
@@ -90,9 +97,13 @@ class DocumentEditorClient(context: Context, val ref: ProviderRef) {
             return null
         }
         Slog.d(TAG) { "open: begin ok in ${System.currentTimeMillis() - t0} ms" }
-        // Nothing rides the Intent — see the class doc. Only the package, so the exported screen of
-        // some other app can never answer this action.
-        return Intent(DocumentContract.ACTION_DOCUMENT_EDITOR_SCREEN).setPackage(ref.packageName)
+        // One boolean rides the Intent (arc 39) — see the class doc. Only the package otherwise, so
+        // the exported screen of some other app can never answer this action.
+        val offerBible = bibleAvailable && ref.apiVersion >= DocumentContract.MIN_API_VERSION_FOR_DOCUMENT_LOOKUP
+        Slog.d(TAG) { "open: bible lookup ${if (offerBible) "offered" else "not offered"}" }
+        return Intent(DocumentContract.ACTION_DOCUMENT_EDITOR_SCREEN).setPackage(ref.packageName).apply {
+            if (offerBible) putExtra(DocumentContract.EXTRA_DOCUMENT_BIBLE_AVAILABLE, true)
+        }
     }
 
     /**

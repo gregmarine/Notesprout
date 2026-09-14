@@ -136,6 +136,10 @@ class BibleEntry(
      */
     fun open(reference: String) = show(reference)
 
+    /** Arc 39 "Lookup": the discovered reader, for the notebook to park a lookup against — read
+     *  at the call, never captured (a package can be replaced under us). */
+    val provider: ProviderRef? get() = ref
+
     private fun show(reference: String?) {
         val provider = ref ?: return
         if (opening) { Slog.d(TAG) { "open: already showing" }; return }

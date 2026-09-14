@@ -106,6 +106,16 @@
     <string name="fmt_proofread">Proofread</string>
     <string name="fmt_more">More tools</string>
 
+    <!-- Bible lookup (arc 39). The selection toolbar's item, the wait held up while the host walks
+         the reader's door (a Binder call, no Cancel), and the two alerts — alerts with an OK, never
+         toasts: the writer needs time to read them (the user's call). -->
+    <string name="document_lookup_action">Bible</string>
+    <string name="document_lookup_opening">Opening the Bible…</string>
+    <string name="document_lookup_unknown_title">Not a reference</string>
+    <string name="document_lookup_unknown_body">“%1$s” is not a scripture reference this Bible knows.</string>
+    <string name="document_lookup_unavailable_title">Bible unavailable</string>
+    <string name="document_lookup_unavailable_body">NSE · Bible could not be opened. It may be busy, disabled or removed.</string>
+
     <!-- Proofread (M10). A check runs on its own as the writer types; this sheet is for the
          occasional full pass, the dictionary, and the switch. When the feature is off the sheet
          offers only "Turn on" — the other rows are absent rather than greyed, because a disabled

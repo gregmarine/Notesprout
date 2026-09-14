@@ -187,6 +187,26 @@
             android:exported="false"
             android:screenOrientation="portrait" />
 
+        <!-- The Bible lookup screen (arc 39 "Lookup"): a translucent trampoline the document editor
+             starts for a result after the notebook answered REFERENCE_OPENED. Exported because the
+             editor is another package; gated in code on the index being open, on the calling
+             package being the editor the notebook parked the reference for, and on that park being
+             fresh — every refusal is a silent finish. Nothing rides its Intent. keyboard|keyboardHidden
+             for the notebook's reason: a recreate under the reader would drop the result it exists
+             to receive. excludeFromRecents: it is a moment, not a place. -->
+        <activity
+            android:name=".extension.BibleLookupActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Notesprout.Translucent"
+            android:configChanges="keyboard|keyboardHidden"
+            android:excludeFromRecents="true"
+            android:screenOrientation="portrait">
+            <intent-filter>
+                <action android:name="com.symmetricalpalmtree.notesproutsn.extension.DOCUMENT_LOOKUP_SCREEN" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
     </application>
 
 </manifest>

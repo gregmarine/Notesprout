@@ -1030,6 +1030,24 @@ The host side of arc 38 (`LinkPayload`, `LinkNav`, `BibleRefFlow`'s pure edges) 
 
 ---
 
+## Lookup from the document editor (arc 39 "Lookup", 2026-09-13)
+
+The reader's fourth door, and the first from another extension: select a reference in the
+document editor (Write or Preview), tap **Bible** in the text-selection toolbar, and this reader
+opens on those verses **over** the editor; Back returns to the editor as it was. **Nothing in this
+module changed for it** — the editor's selection reaches the reader as an ordinary
+`resolve(text)` followed by an ordinary `beginAt(store, wire)` showing, opened without
+`EXTRA_BIBLE_SEND_ENABLED` (the editor, not a page, is behind the reader — no Send button). The
+reader's `callingPackage` is the host as always: the door is walked by the host's
+`BibleLookupActivity`, a live host screen the editor starts, because the notebook stopped behind
+the editor cannot see a child's result until the editor closes. The passage lands in Recents like
+any followed reference. The plumbing — `IDocumentHost.openReference` (`API_VERSION` 14), the
+in-process park, the trampoline, the two alerts — is documented on the editor's side:
+`apps/notesprout_sn/docs/document.md` § "Bible lookup" and `docs/extensions.md` audit rows 58–59;
+the user's decisions and the ledger are `extensions/bible/LOOKUP_PLAN.md`.
+
+---
+
 ## Not in this arc (recorded futures, each needing a user decision)
 
 - ~~**Send to notebook**~~ — DONE by B9 (§ [Send to notebook](#send-to-notebook-b9)).

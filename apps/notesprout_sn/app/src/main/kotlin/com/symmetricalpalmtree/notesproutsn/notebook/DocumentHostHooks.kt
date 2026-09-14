@@ -98,6 +98,14 @@ class DocumentHostHooks(
      * never document text), then writes index + meta + its own header.
      */
     private val rename: (String) -> Unit = { throw IllegalArgumentException("Not a text document.") },
+    /**
+     * Arc 39 "Lookup": resolve the editor's selection through the Bible reader and open the
+     * passage view over the editor — the screen's half, because the reader's door (`BibleEntry`)
+     * is the screen's. Runs on a Binder thread and blocks for the whole of it; answers a
+     * `DocumentContract.REFERENCE_*` code. The default is the honest answer of a host with no
+     * Bible door at all.
+     */
+    private val lookupReference: (String) -> Int = { DocumentContract.REFERENCE_UNAVAILABLE },
 ) : DocumentHostBinder.Hooks {
 
     /** A seed the notebook built **before** the launch and handed over for the first `current()`
@@ -472,6 +480,13 @@ class DocumentHostHooks(
     override fun closeNotebook(mode: Int) {
         require(isTextDocument()) { "Not a text document." }
         closeMode = mode
+    }
+
+    /** Arc 39: the door is the screen's ([lookupReference]); the binder already checked the text's
+     *  shape. Gated on [alive] like every hook — a closing host opens nothing. */
+    override fun openReference(text: String): Int {
+        if (!alive()) return DocumentContract.REFERENCE_UNAVAILABLE
+        return lookupReference(text)
     }
 
     /**

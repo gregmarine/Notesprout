@@ -634,10 +634,71 @@ build, and it never assigns its peer at all in release.
 
 ---
 
+## Bible lookup (arc 39 "Lookup", 2026-09-13)
+
+**Select a reference, tap Bible, read the verses, come back.** While typing notes about a verse,
+select "John 3:16" — in Write or in Preview — and tap **Bible** in the text-selection toolbar (the
+system's own, the one the writer already gets for Copy and Paste; `setCustomSelectionActionModeCallback`
+on both the `EditText` and the selectable Preview `TextView`, `LookupAction`). NSE · Bible opens on
+just those verses **over** the editor; Back lands on the editor exactly as it was — caret, undo
+stack, unsaved text untouched. Selection only (the user's call): with nothing selected there is no
+item, and no caret-run guessing. The user's decisions and the phase ledger are in
+`extensions/bible/LOOKUP_PLAN.md`; the reader's side is `extensions/bible/docs/bible.md`
+§ "Lookup from the document editor".
+
+**The editor cannot open the Bible itself.** The reader admits only the host as its caller, and
+no extension knows another exists — so the tap is **two steps through the host**:
+
+1. `IDocumentHost.openReference(text)` — the twelfth method on the host callback binder (a
+   compatible tail, `API_VERSION` 13 → 14; the editor service redeclares **14** since it calls
+   transaction code 12, which a 13 host would land on nothing). The words go across prepared and
+   unparsed (`LookupText.prepare`: trimmed, whitespace folded to one space, refused blank or over
+   `MAX_REFERENCE_CHARS` = 512 without a call). The notebook resolves them through the reader
+   (`IBible.resolve`, bind-per-call) and **parks** the resolved wire in-process (`LookupHandoff`),
+   answering a code: `REFERENCE_OPENED` / `REFERENCE_UNKNOWN` / `REFERENCE_UNAVAILABLE`. The call
+   is synchronous on a Binder thread and the host can paint nothing, so the editor holds an
+   "Opening the Bible…" `ReadingPopup` up for its life (no Cancel — a Binder call cannot be taken
+   back).
+2. On `REFERENCE_OPENED` the editor starts the host's **lookup screen** for a result
+   (`ACTION_DOCUMENT_LOOKUP_SCREEN`, `setPackage(<the host>)`, nothing on the Intent).
+   `BibleLookupActivity` is a translucent host trampoline: it takes the park (only for the calling
+   package it was made for, only while fresh, once), shows the "Opening…" box, opens the reader's
+   showing (`BibleClient.open` on the passage, no Send) and launches the reader; when the reader
+   returns it finishes the bind and itself. **Why a screen at all:** the notebook is *stopped*
+   behind the editor and a child's result is delivered before `onResume` — it would never see the
+   reader close until the editor closed, leaving the bind held and the one-showing latch stale
+   (measured on the Nomad: the second lookup answered "already showing"). A live host Activity gets
+   the result the moment the reader closes.
+
+**Offered, or absent.** The editor installs the item only when the host's Intent carries
+`EXTRA_DOCUMENT_BIBLE_AVAILABLE` — the host's own discovery (`BibleEntry.supportsReferences`: a
+reader declaring the arc-38 reference floor), stamped by `DocumentEditorClient.open` only against
+an editor declaring 14. The editor's Intent carried nothing from M3 to arc 38; it now carries this
+one boolean and still no content, id or path. Without the offer there is no item — never a
+disabled one.
+
+**The two alerts** (the user's call: an alert with an OK, never a toast — the writer needs time
+to read it): the reader's "no" (or a selection not worth asking about) → *Not a reference —
+"<the words>" is not a scripture reference this Bible knows.*; no reader / too old / the ask
+failed / the lookup screen came back `RESULT_LOOKUP_FAILED` → *Bible unavailable — NSE · Bible
+could not be opened…*. `resolve`'s null covers "not a reference" and "could not ask" alike (arc
+38's one answer), so a reader that failed to answer reads as *Not a reference*; the client logs
+the failure either way.
+
+**Debug automation:** `lookup` (`--es file …` — the payload is user content; a space in `--es text`
+is the arc-22 trap) runs the item's path on the payload, so the seam walks over adb end to end;
+the selection toolbar itself is the hand walk. Nothing selected, prepared, resolved or answered is
+logged on either side — lengths, codes and durations.
+
+---
+
 ## Failure table
 
 | Failure | What happens |
 |---|---|
+| Bible lookup: the selection is blank or over 512 chars | `LookupText.prepare` refuses without a Binder call — the *Not a reference* alert, the same as the reader's own "no" (arc 39) |
+| Bible lookup: `openReference` answers `REFERENCE_UNAVAILABLE`, throws, or the lookup screen returns `RESULT_LOOKUP_FAILED` / is not installed | The *Bible unavailable* alert; the editor is untouched (arc 39) |
+| Bible lookup: the lookup screen is started with no fresh park, by another package, or with the index closed | A silent finish — the editor sees an ordinary return and shows nothing (arc 39) |
 | Bring in tapped with no recognizer ready | `SEED_UNAVAILABLE` typed refusal; the sheet still opens, but recognition never runs |
 | A page over the recognizer's per-call caps | Never a refusal since 2026-09-11: `InkBudget.fit` splits it into calls in writing order and decimates points to fit (see § Seeding) |
 | A drafted commit's parked watermark died before it landed | `NO_DRAFT_PENDING`; the editor downgrades — claim cleared, same text resent as an ordinary save, only provenance lost |

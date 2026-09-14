@@ -61,6 +61,8 @@ import com.symmetricalpalmtree.notesproutsn.data.prefs.SnapPrefs
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityNotebookBinding
 import com.symmetricalpalmtree.notesproutsn.core.markdown.HeadingPrefix
 import com.symmetricalpalmtree.notesproutsn.extension.BibleEntry
+import com.symmetricalpalmtree.notesproutsn.extension.DocumentContract
+import com.symmetricalpalmtree.notesproutsn.extension.LookupHandoff
 import com.symmetricalpalmtree.notesproutsn.extension.CalendarEntry
 import com.symmetricalpalmtree.notesproutsn.extension.CalendarTarget
 import com.symmetricalpalmtree.notesproutsn.extension.DocumentEditorEntry
@@ -823,6 +825,8 @@ class NotebookActivity : AppCompatActivity() {
             // M8: the flag both editor-only hooks are gated on, and the flag every state carries.
             isTextDocument = { isTextDocument() },
             rename = { name -> renameTextDocument(name) },
+            // Arc 39 "Lookup": the editor's selection → the passage view over the editor.
+            lookupReference = { text -> lookupBibleReference(text) },
         )
         // Before the reconnect below, and before anything can ask for state: a host killed behind
         // the editor must come back pointing at the page — and, since M7, the scope — the editor
@@ -835,6 +839,10 @@ class NotebookActivity : AppCompatActivity() {
             activity = this,
             button = binding.btnDocument,
             hooks = documentHooks,
+            // Arc 39: the editor offers its Bible item only when the reader here understands
+            // references — the host's discovery answer, read at the open (the entry below is
+            // built a few lines down; nothing opens the editor before onResume).
+            bibleAvailable = { ::bible.isInitialized && bible.supportsReferences },
             // The showing is over — see [documentShowingEnded]. For an ordinary notebook that is the
             // catch-up (og's `navigateToPage(endedOn)`); since M8 a text document can also mean
             // "now show me the pages" or "seal and go".
@@ -1351,6 +1359,31 @@ class NotebookActivity : AppCompatActivity() {
     /** Still worth raising a screen over: the same `opened && !closing` gate every extension button
      *  reads, plus the two Activity flags, re-asked after every suspension in [replayAbove]. */
     private fun standingForReplay(): Boolean = opened && !closing && !isFinishing && !isDestroyed
+
+    /**
+     * Arc 39 "Lookup" — the editor's selection, arriving on a **Binder thread** through
+     * [DocumentHostHooks]: ask the reader to resolve it (bind-per-call, off any screen) and park
+     * the answer for the host's lookup screen ([LookupHandoff] → `BibleLookupActivity`), which the
+     * editor starts next. **This screen launches nothing**: it is stopped behind the editor, and a
+     * child's result would not reach it until the editor closed — the stale-latch trap the lookup
+     * screen exists for. `runBlocking` here is the allowed case (a Binder thread, never the UI
+     * thread); the editor holds a wait dialog up for the call's life. Answers a [DocumentContract]
+     * `REFERENCE_*` code; the text is never logged.
+     *
+     * `resolve`'s null covers "not a reference" and "could not ask" alike (arc 38's one answer),
+     * so a reader that failed to answer reads as unknown here — the honest alternative would be a
+     * second call, and the failure is logged by the client either way.
+     */
+    private fun lookupBibleReference(text: String): Int = runBlocking {
+        if (!opened || closing || !::bible.isInitialized || !bible.supportsReferences) {
+            return@runBlocking DocumentContract.REFERENCE_UNAVAILABLE
+        }
+        val reader = bible.provider ?: return@runBlocking DocumentContract.REFERENCE_UNAVAILABLE
+        val editor = documentEntry.providerPackage ?: return@runBlocking DocumentContract.REFERENCE_UNAVAILABLE
+        val resolved = bible.resolve(text) ?: return@runBlocking DocumentContract.REFERENCE_UNKNOWN
+        LookupHandoff.park(reader, resolved.wire, editor)
+        DocumentContract.REFERENCE_OPENED
+    }
 
     /**
      * The text-document open (M8): the **lightweight** setup and the editor, with no stroke
