@@ -70,8 +70,8 @@ untouched at 11) is the first and only Bible-seam call to answer with scripture 
 reference to it. `VersePlacement` puts the column at 10 % of the page width, wrapping at the page's
 right edge (the text model re-derives width from `x` on every load, so a centred column cannot
 survive a reload); a refusal — too long, or no clear room on the page — is an alert with OK, never a
-toast. Walked over adb on the Nomad (`.dev` builds), **FROZEN 2026-09-13** on the user's own hand
-walk; one finding fixed mid-walk (a successor selection's transfer-paste latch was cleared too
+toast. Walked over adb on the Nomad (`.dev` builds), **COMPLETE + FROZEN 2026-09-13 on the user's own
+hand walk ("This looks and works good")**; one finding fixed mid-walk (a successor selection's transfer-paste latch was cleared too
 early and left it stranded under PEN) and one after (a page with no clear band no longer stacks the
 verses on what is already there — "No room on this page" instead). Plan + ledger
 `extensions/bible/VERSES_PLAN.md`; reference `extensions/bible/docs/bible.md` § "Verses on the

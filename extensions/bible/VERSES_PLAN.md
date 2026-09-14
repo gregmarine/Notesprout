@@ -102,3 +102,9 @@ first time — one compatible tail, one method floor, nothing on an Intent.
   there is unreadable twice over). Left to the user's hand: the lasso convert with the pill, a
   Save from the verses' Edit, undo/redo, the move by pen, and the look of the column's right
   edge (the text runs to the page edge — a right margin needs a stored wrap column, declined).
+- **V5 docs — ✅ 2026-09-13 `414f58b6`.** `bible.md` § Verses on the page, `extensions.md` (ledger
+  15, module row, audit row 60), `objects.md`, `links.md`, both `CLAUDE.md`.
+- **FREEZE — ✅ 2026-09-13, the user's own hand walk on the Nomad ("This looks and works good").
+  Arc 40 COMPLETE + FROZEN.** No code review (the user's call, the arc 37–39 waiver). No next
+  Bible phase — longer or multi-page passages, a stored wrap column, a right margin — without a
+  fresh user decision.
