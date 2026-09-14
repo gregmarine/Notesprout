@@ -26,8 +26,13 @@ data class ProviderRef(
  * a replaced `IExtensionStore` breaks the old-extension/new-host direction too; 7 on the calendar
  * point, born there in arc 23 / Y1; 8 on the cloud point, born there in arc 25 / V1; 11 on the Bible
  * point, born there in arc 37 / B0) — and it is signed
- * with the host's own certificate (`checkSignatures == SIGNATURE_MATCH` — same-signature only).
- * Everything else is skipped with a `Slog.d`. Disabled packages/components are never returned by the
+ * with the host's own certificate (`checkSignatures == SIGNATURE_MATCH` — same-signature only),
+ * **and it is the host's own build** ([sameBuild] — a `.dev` host keeps only `.dev` extensions, the
+ * release host only release ones). The last rule exists because the two builds share one signing
+ * key on a developer's device: without it the dev host discovered the release extensions too, sorted
+ * "NSE · Bible" ahead of "NSE · Bible Dev", bound the release one, and was refused by its
+ * `HostCallerCheck` (`HOST_PACKAGE` is per build type on the extension side — this is the host-side
+ * half of the same rule). Everything else is skipped with a `Slog.d`. Disabled packages/components are never returned by the
  * query, so `pm disable` == uninstalled from the host's point of view.
  */
 object ExtensionRegistry {
@@ -176,6 +181,10 @@ object ExtensionRegistry {
                 Slog.d(TAG) { "skip $component: signature mismatch" }
                 continue
             }
+            if (!sameBuild(context.packageName, si.packageName)) {
+                Slog.d(TAG) { "skip $component: other build (host ${context.packageName})" }
+                continue
+            }
             val label = si.applicationInfo?.loadLabel(pm) ?: si.packageName
             kept += ProviderRef(component, si.packageName, label, apiVersion)
         }
@@ -183,4 +192,15 @@ object ExtensionRegistry {
         Slog.d(TAG) { "$action: ${sorted.size} provider(s) of ${candidates.size} candidate(s)" }
         return sorted
     }
+
+    private const val DEV_SUFFIX = ".dev"
+
+    /**
+     * True when the extension package belongs to the same build as the host: both `.dev`
+     * (`applicationIdSuffix` on every debug build in the SN Gradle root) or neither. Pure so it is
+     * JVM-tested; the signature check stays the trust gate — this only stops the two builds of the
+     * same family, installed side by side under one key, from pairing across the line.
+     */
+    internal fun sameBuild(hostPackage: String, extensionPackage: String): Boolean =
+        hostPackage.endsWith(DEV_SUFFIX) == extensionPackage.endsWith(DEV_SUFFIX)
 }

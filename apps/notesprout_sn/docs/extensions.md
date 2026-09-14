@@ -383,7 +383,12 @@ signed with.
   `1..ExtensionContract.API_VERSION` (the D3 skew guard — the declared number is the version the
   extension requires of the host, reasoned at the constant), and
   `PackageManager.checkSignatures(host, candidate) ==
-  SIGNATURE_MATCH`. A disabled package or component never appears in the query at all, so `pm
+  SIGNATURE_MATCH`, **and it is the host's own build** (`ExtensionRegistry.sameBuild`, 2026-09-13:
+  a `.dev` host keeps only `.dev` packages, the release host only release ones — the host-side
+  half of the extension's per-build `HOST_PACKAGE`; needed because both builds are signed with one
+  key on a developer's device, so the dev host used to discover the release extensions, sort
+  "NSE · Bible" ahead of "NSE · Bible Dev", bind it and be refused; dev and release can now be
+  installed side by side). A disabled package or component never appears in the query at all, so `pm
   disable` reads as "uninstalled" from the host's point of view. When more than one candidate
   survives, the first by `(label, package)` is kept and the rest are dropped with a log line —
   choosing among engines is a future arc's problem, not this one's.
