@@ -12,8 +12,8 @@ package com.symmetricalpalmtree.notesproutsn.extension
  * other family's host.
  *
  * Since then: arc 15's exporters, arc 16's importers, arc 19's document editor, arc 21's tag
- * manager, arc 23's calendar and arc 25's cloud storage ([CloudContract]) — each on its own explicit
- * user decision, eight points in all.
+ * manager, arc 23's calendar, arc 25's cloud storage ([CloudContract]) and arc 37's Bible reader
+ * ([ACTION_BIBLE]) — each on its own explicit user decision, nine points in all.
  *
  * `IExtensionStore` (arc 11 / J2, rebuilt arc 22 / X1) is not a capability point but the
  * **service** the host offers an extension it has bound: a per-package encrypted SQLite store the
@@ -88,8 +88,44 @@ object ExtensionContract {
      * existing extension keeps its declaration, no door vanishes. The calendar's render is a
      * method floor, not an action floor — the host offers it only to a calendar declaring 9 and
      * still binds a 7 for everything else.
+     *
+     * **10 since arc 35 / HA1** — `ICalendar.advanceOutgoing`, a compatible tail behind the method
+     * floor [MIN_API_VERSION_FOR_CALENDAR_DAY_SEND]; no action floor moved.
+     *
+     * **11 since arc 37 / B0** — the BIBLE point ([ACTION_BIBLE], SN's NINTH capability point,
+     * granted by the user 2026-09-13 — `extensions/bible/BIBLE_PLAN.md`). The calendar's and the
+     * cloud's shape once more: a compatible *addition*, store-taking behind a held bind
+     * (`begin(store)` / `end()`), listed only at [MIN_API_VERSION_FOR_BIBLE] because it was never
+     * reachable below it; nothing existing changes, every existing extension keeps its declaration,
+     * no door vanishes. The first extension module living outside `apps/notesprout_sn`.
+     *
+     * **12 since arc 38 / R1** — two compatible tails appended to `IBible` after `end()`
+     * (`resolve(text)` and `beginAt(store, reference)`, the Bible reference objects of
+     * `extensions/bible/REFERENCE_PLAN.md`), behind the METHOD floor
+     * [MIN_API_VERSION_FOR_BIBLE_REFERENCE]. The calendar's `render` shape: `MIN_API_VERSIONS` is
+     * untouched, a reader declaring 11 still binds for the plain door, and only `:ext-bible`
+     * redeclares. Not a tenth point.
+     *
+     * **13 since B9 "Send" (2026-09-13)** — one compatible tail appended to `IBible` after
+     * `beginAt` (`takeOutgoingReference()`: the reader's Send to notebook — the calendar's
+     * `takeOutgoing` shape on a reference instead of ink), behind the METHOD floor
+     * [MIN_API_VERSION_FOR_BIBLE_SEND]. `MIN_API_VERSIONS` untouched; only `:ext-bible` redeclares.
+     *
+     * **14 since arc 39 "Lookup" (2026-09-13)** — one compatible tail appended to `IDocumentHost`
+     * after `closeNotebook` (`openReference(text)`: the editor's selection opens NSE · Bible over
+     * the editor, walked by the host — `extensions/bible/LOOKUP_PLAN.md`), behind the
+     * extension-side declaration floor [DocumentContract.MIN_API_VERSION_FOR_DOCUMENT_LOOKUP].
+     * The first bump for a HOST-side stub: the number an editor declares is what it requires of
+     * the host, so an editor that calls code 12 declares 14 and never binds a 13 host.
+     * `MIN_API_VERSIONS` untouched; only `:ext-document`'s editor service redeclares.
+     *
+     * **15 since arc 40 "Verses" (2026-09-13)** — one compatible tail appended to `IBible` after
+     * `takeOutgoingReference` (`passageText(wire)`: the verses of a small passage as Markdown for
+     * a text object on the page — the first time scripture crosses the seam,
+     * `extensions/bible/VERSES_PLAN.md`), behind the METHOD floor
+     * [MIN_API_VERSION_FOR_BIBLE_TEXT]. `MIN_API_VERSIONS` untouched; only `:ext-bible` redeclares.
      */
-    const val API_VERSION: Int = 10
+    const val API_VERSION: Int = 15
 
     /**
      * The floor for a service on a **store-taking** point (arc 22 / X1): the host accepts such a
@@ -107,11 +143,42 @@ object ExtensionContract {
     const val MIN_API_VERSION_FOR_CALENDAR: Int = 7
 
     /**
+     * The floor for the Bible point (arc 37 / B0): born at API version 11 and store-taking, so a
+     * service declaring less is not a Bible reader this host knows.
+     */
+    const val MIN_API_VERSION_FOR_BIBLE: Int = 11
+
+    /**
+     * The **method** floor for `IBible.resolve` / `IBible.beginAt` (arc 38 / R1): the host offers
+     * the notebook's Bible-reference doors, and opens a Bible link, only against a reader
+     * declaring at least this — an 11 reader would land transaction codes 3 and 4 on nothing.
+     * Not an action floor: [MIN_API_VERSION_FOR_BIBLE] stays 11 and the plain door still binds.
+     */
+    const val MIN_API_VERSION_FOR_BIBLE_REFERENCE: Int = 12
+
+    /**
+     * The **method** floor for `IBible.takeOutgoingReference` (B9 "Send", 2026-09-13): the host
+     * puts [EXTRA_BIBLE_SEND_ENABLED] on the reader's Intent only against a reader declaring at
+     * least this — an older reader would show no Send button anyway, and the host would land
+     * transaction code 5 on nothing. Not an action floor: [MIN_API_VERSION_FOR_BIBLE] stays 11.
+     */
+    const val MIN_API_VERSION_FOR_BIBLE_SEND: Int = 13
+
+    /**
+     * The **method** floor for `IBible.passageText` (arc 40 "Verses", 2026-09-13): the host offers
+     * the three verses doors — the reader's Send chooser, the reference dialog's switch and the
+     * lasso bar's Verses — only against a reader declaring at least this; an older reader would
+     * land transaction code 6 on nothing. Not an action floor: [MIN_API_VERSION_FOR_BIBLE] stays 11.
+     */
+    const val MIN_API_VERSION_FOR_BIBLE_TEXT: Int = 15
+
+    /**
      * The lowest API version the host accepts for a service on [action] — **per action** since arc
      * 23 / Y1: [MIN_API_VERSION_FOR_STORE] for the three arc-22 store-taking points
      * ([ACTION_SCRATCH_PAD], [DocumentContract.ACTION_DOCUMENT_EDITOR], [ACTION_TAG_MANAGER]),
      * [MIN_API_VERSION_FOR_CALENDAR] for [ACTION_CALENDAR], [CloudContract.MIN_API_VERSION_FOR_CLOUD]
-     * for [CloudContract.ACTION_CLOUD_STORAGE] (arc 25 / V1), 1 for every other. The range rule at
+     * for [CloudContract.ACTION_CLOUD_STORAGE] (arc 25 / V1), [MIN_API_VERSION_FOR_BIBLE] for
+     * [ACTION_BIBLE] (arc 37 / B0), 1 for every other. The range rule at
      * [API_VERSION] applies above it. A point that is not in the map has the floor of 1 — a new
      * point that needs one adds its row here, and the test that pins the map fails until it does.
      */
@@ -129,6 +196,7 @@ object ExtensionContract {
             ACTION_TAG_MANAGER to MIN_API_VERSION_FOR_STORE,
             ACTION_CALENDAR to MIN_API_VERSION_FOR_CALENDAR,
             CloudContract.ACTION_CLOUD_STORAGE to CloudContract.MIN_API_VERSION_FOR_CLOUD,
+            ACTION_BIBLE to MIN_API_VERSION_FOR_BIBLE,
         )
     }
 
@@ -170,6 +238,40 @@ object ExtensionContract {
      *  `startActivity` leaves `callingPackage` null and the screen refuses it. */
     const val ACTION_CALENDAR_SCREEN: String =
         "com.symmetricalpalmtree.notesproutsn.extension.CALENDAR_SCREEN"
+
+    /** Intent action a Bible-reader `<service>` declares in its intent-filter (arc 37 / B0 — SN's
+     *  NINTH capability point, granted by the user 2026-09-13; no TENTH without another). The
+     *  fifth screen-owning point and the second with **no paper** (the tag manager's shape): a
+     *  held bind for the showing, the store lent at `begin`, nothing else on the interface and
+     *  nothing on the Intent. Served by `:ext-bible` at `extensions/bible/`. */
+    const val ACTION_BIBLE: String =
+        "com.symmetricalpalmtree.notesproutsn.extension.BIBLE"
+
+    /** Intent action the Bible extension's exported screen `<activity>` declares. Resolved with
+     *  `setPackage(<the discovered service's package>)` and launched for a result; a plain
+     *  `startActivity` leaves `callingPackage` null and the screen refuses it. */
+    const val ACTION_BIBLE_SCREEN: String =
+        "com.symmetricalpalmtree.notesproutsn.extension.BIBLE_SCREEN"
+
+    /**
+     * Boolean launch extra on the Bible screen (B9 "Send", 2026-09-13) — true when the reader is
+     * opened from a **notebook** (it shows its Send to notebook button); absent from the library's
+     * door. The calendar's `EXTRA_CALENDAR_SEND_ENABLED` shape: a boolean, no content, no id, no
+     * path — the reference itself comes back over the held bind (`takeOutgoingReference`), never
+     * on an Intent. Set only against a reader declaring [MIN_API_VERSION_FOR_BIBLE_SEND].
+     */
+    const val EXTRA_BIBLE_SEND_ENABLED: String = "bibleSendEnabled"
+
+    /** Activity result code: the reader parked a reference for `takeOutgoingReference`
+     *  (= `Activity.RESULT_FIRST_USER`). */
+    const val RESULT_BIBLE_SEND: Int = 1
+
+    /** Activity result code (arc 40 "Verses"): the reader parked a reference for
+     *  `takeOutgoingReference` **and** asks for its verses to land — the host follows the take
+     *  with `passageText(wire)` on the same held bind (= `RESULT_FIRST_USER + 1`). Only a reader
+     *  shown a passage with [EXTRA_BIBLE_SEND_ENABLED] against
+     *  [MIN_API_VERSION_FOR_BIBLE_TEXT] ever returns it. */
+    const val RESULT_BIBLE_SEND_TEXT: Int = 2
 
     /** `<meta-data>` name (on the `<service>`) carrying the extension's API version. */
     const val META_API_VERSION: String =

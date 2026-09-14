@@ -9,6 +9,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.TooltipCompat
@@ -132,6 +133,16 @@ class DocumentEditorActivity : AppCompatActivity() {
     /** The size both surfaces are drawn at, and the sheet that picks it. */
     private lateinit var textSize: TextSizeControl
 
+    /** The selection toolbar's Bible item on both surfaces (arc 39) — built always, installed only
+     *  when the host's Intent offered it (a reader that understands references is installed). */
+    private lateinit var lookup: LookupAction
+
+    /** The host's lookup screen, started for a result (arc 39). Registered here, at construction —
+     *  a launcher may not be registered after STARTED, and a refused caller never uses it. */
+    private val lookupScreen = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (this::lookup.isInitialized) lookup.onLookupScreenReturned(result)
+    }
+
     /** The last state the host answered with — what the arrows' edge check and the strip's line are
      *  read from, so neither costs a Binder call. Null until the first load lands. */
     private var lastState: DocumentPageState? = null
@@ -189,6 +200,11 @@ class DocumentEditorActivity : AppCompatActivity() {
         installWatcher()
         // After the screen's own watcher, so proofread's runs second — never mid-list-continuation.
         proofread = ProofreadController.install(this, binding.editor, lifecycleScope)
+        // Arc 39: the one boolean the editor's Intent carries — the host's own discovery answer.
+        // Not offered = no item, never a disabled one (a disabled control is invisible on e-ink).
+        lookup = LookupAction(this, lifecycleScope, binding.editor, binding.previewText, lookupScreen)
+        if (intent.getBooleanExtra(DocumentContract.EXTRA_DOCUMENT_BIBLE_AVAILABLE, false)) lookup.install()
+        else Slog.d(TAG) { "bible lookup not offered by the host" }
 
         // Registered by identity so a recreated screen's hooks — installed in ITS onCreate, which
         // runs BEFORE this instance's onDestroy — are never cleared by the instance going away.
@@ -245,6 +261,7 @@ class DocumentEditorActivity : AppCompatActivity() {
         if (this::flips.isInitialized) flips.close()
         if (this::strip.isInitialized) strip.close()
         if (this::proofread.isInitialized) proofread.dispose()
+        if (this::lookup.isInitialized) lookup.close()
     }
 
     // ── Chrome ────────────────────────────────────────────────────────────────
@@ -804,6 +821,11 @@ class DocumentEditorActivity : AppCompatActivity() {
         override fun showPages(): Boolean = this@DocumentEditorActivity.showPages.tap()
         override fun rename(name: String): Boolean = this@DocumentEditorActivity.rename.rename(name)
         override fun title(): String = binding.title.text.toString()
+
+        // ── Arc 39 ────────────────────────────────────────────────────────────
+        // The words are user content: they cross here and are never logged.
+
+        override fun lookup(text: String) = this@DocumentEditorActivity.lookup.lookup(text)
     }
 
     private companion object {

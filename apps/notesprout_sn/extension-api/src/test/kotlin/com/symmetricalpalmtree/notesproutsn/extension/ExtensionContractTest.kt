@@ -25,15 +25,25 @@ class ExtensionContractTest {
         // (ExporterInfo's `delivery` tail + the ICalendar render methods — a compatible tail whose
         // bump is the skew guard for per-page exporters, no floor moved); 10 since arc 35 / HA1
         // (ICalendar.advanceOutgoing — a Day send parks both halves; a compatible tail with a
-        // method floor, no action floor moved). Bumping this again is a contract event.
-        assertEquals(10, ExtensionContract.API_VERSION)
+        // method floor, no action floor moved); 11 since arc 37 / B0 (the BIBLE point — a
+        // compatible addition on the calendar's pattern, floored at 11). Bumping this again is a
+        // contract event.
+        // 12 since arc 38 / R1 (two `IBible` tails behind a method floor; no action floor moved);
+        // 13 since B9 "Send" (`takeOutgoingReference`); 14 since arc 39 / K1
+        // (`IDocumentHost.openReference`); 15 since arc 40 "Verses" (`IBible.passageText`).
+        assertEquals(15, ExtensionContract.API_VERSION)
         assertEquals(9, ExporterContract.MIN_API_VERSION_FOR_DELIVERY)
         assertEquals(6, ExtensionContract.MIN_API_VERSION_FOR_STORE)
         assertEquals(7, ExtensionContract.MIN_API_VERSION_FOR_CALENDAR)
         // HV4: the render is a METHOD floor under 9 — the map above is untouched.
         assertEquals(9, ExtensionContract.MIN_API_VERSION_FOR_CALENDAR_RENDER)
+        // Floors pin to their birth number, never to API_VERSION (the HV1 lesson).
         assertEquals(10, ExtensionContract.MIN_API_VERSION_FOR_CALENDAR_DAY_SEND)
-        assertEquals(ExtensionContract.API_VERSION, ExtensionContract.MIN_API_VERSION_FOR_CALENDAR_DAY_SEND)
+        assertEquals(11, ExtensionContract.MIN_API_VERSION_FOR_BIBLE)
+        assertEquals(12, ExtensionContract.MIN_API_VERSION_FOR_BIBLE_REFERENCE)
+        assertEquals(13, ExtensionContract.MIN_API_VERSION_FOR_BIBLE_SEND)
+        assertEquals(15, ExtensionContract.MIN_API_VERSION_FOR_BIBLE_TEXT)
+        assertEquals(14, DocumentContract.MIN_API_VERSION_FOR_DOCUMENT_LOOKUP)
         assertEquals(2_000, ExtensionContract.MAX_INK_STROKES)
         assertEquals(60_000, ExtensionContract.MAX_INK_POINTS)
         assertEquals(20, ExtensionContract.MAX_PRECONTEXT_CHARS)
@@ -80,6 +90,14 @@ class ExtensionContractTest {
         assertEquals(
             "com.symmetricalpalmtree.notesproutsn.extension.CLOUD_STORAGE",
             CloudContract.ACTION_CLOUD_STORAGE,
+        )
+        assertEquals(
+            "com.symmetricalpalmtree.notesproutsn.extension.BIBLE",
+            ExtensionContract.ACTION_BIBLE,
+        )
+        assertEquals(
+            "com.symmetricalpalmtree.notesproutsn.extension.BIBLE_SCREEN",
+            ExtensionContract.ACTION_BIBLE_SCREEN,
         )
         assertEquals(
             "com.symmetricalpalmtree.notesproutsn.extension.CLOUD_STORAGE_SCREEN",
@@ -196,7 +214,15 @@ class ExtensionContractTest {
         assertTrue(!ExtensionContract.accepts(cloud, 7))
         assertTrue(ExtensionContract.accepts(cloud, 8))
         assertTrue(!ExtensionContract.accepts(cloud, ExtensionContract.API_VERSION + 1))
+        // The Bible point (arc 37 / B0): born at 11, listed only there. No other door moved.
+        val bible = ExtensionContract.ACTION_BIBLE
+        assertEquals(11, ExtensionContract.minApiVersion(bible))
+        assertEquals(ExtensionContract.MIN_API_VERSION_FOR_BIBLE, ExtensionContract.minApiVersion(bible))
+        assertTrue(!ExtensionContract.accepts(bible, 10))
+        assertTrue(ExtensionContract.accepts(bible, 11))
+        assertTrue(!ExtensionContract.accepts(bible, ExtensionContract.API_VERSION + 1))
         // The screen action is not a service action — it carries no floor of its own.
+        assertEquals(1, ExtensionContract.minApiVersion(ExtensionContract.ACTION_BIBLE_SCREEN))
         assertEquals(1, ExtensionContract.minApiVersion(ExtensionContract.ACTION_CALENDAR_SCREEN))
         assertEquals(1, ExtensionContract.minApiVersion(CloudContract.ACTION_CLOUD_STORAGE_SCREEN))
         for (action in listOf(

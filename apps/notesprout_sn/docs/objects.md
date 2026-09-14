@@ -69,7 +69,9 @@ Star point count came up as an H4 phase-start question and was **fixed at 5** (`
 | `notebook/TextFlow.kt` | `TextFlow` + `TextFlow.Host` — insert/convert/edit out of the activity; nothing exists until Save on an insert |
 | `notebook/TextEditDialog.kt` | The plain markdown edit dialog, `HeadingEditDialog`'s shape |
 | `notebook/TextLines.kt` | Pure: `normalize` (recognized ink) vs `typed` (dialog text) — two deliberately different whitespace rules |
-| `notebook/TextPlacement.kt` | Pure: `centred` box placement for an inserted text |
+| `notebook/TextPlacement.kt` | Pure: `centred` box placement for an inserted text — since 2026-09-13 the first candidate `FreePlacement` tries |
+| `notebook/FreePlacement.kt` | Pure (2026-09-13, the user's decision after B9's Send stacked on a sticky): **every centre drop** — Insert's Text, the six shapes, Sticky, Bible, and the Bible reader's Send — lands at the centre when it is clear, else at the **nearest clear spot**, searched outward in 16 dp rings with an 8 dp gap; occupied = `NotebookActivity.occupiedBounds()` (texts, shapes' padded AABB, stickies, headings, links **and the live ink**); a full page or an over-size box falls back to the centre, never a refusal. Each flow's `Host` gained `occupied()`; `ShapeDefaults.at` / `StickyDefaults.at` still size, no longer decide where |
+| `notebook/VersePlacement.kt` | Pure (arc 40 "Verses", 2026-09-13): `FreePlacement`'s sibling for the one column that is not centred — a fixed 10 % left edge, `nearY` scanning the same 16 dp rings for a clear `y`, `below` for the expand door. **Unlike `FreePlacement`, no room is no spot**: `nearY` answers `null` rather than falling back to a stacked centre, because a block of verses over what is already there is unreadable twice over (the arc's V4 walk found exactly this) |
 | `notebook/ShapeRows.kt` | `PageShape`, `ShapeType`, `ShapeFlags` (pack/unpack of aspect/pointCount/rotation) — pure, JVM-tested |
 | `notebook/ShapeStore.kt` | Shape row writes on the shared `SoilWriter` |
 | `notebook/ShapeGeometry.kt` | Pure: `outline`, `tightBounds`, `aabb`, the thin `pathFor` — one object for geometry and hit-bounds alike |
@@ -89,7 +91,9 @@ Star point count came up as an H4 phase-start question and was **fixed at 5** (`
 | `notebook/StickyClip.kt` | Pure: copy = stroke rows parented to the sticky id; paste = stroke rows only, `leftOut` measured against what was dropped |
 | `notebook/StickyDefaults.kt` | Pure: 72 dp icon size; `contentSize(windowW, windowH)` computed by the notebook — the whole window since arc 33 / F2, the `topBarPx` parameter removed (not zeroed) now that the editor's paper is full-bleed |
 | `notebook/StickyPageRects.kt` | Arc 33 / F2, pure: `offPage(pageW, pageH, viewW, viewH): List<Band>` — the band(s) an older, shorter note leaves over in the full-bleed view (below full-width, right page-height, never overlapping); `Band.toRect()` is the one Android line |
-| `notebook/InsertBar.kt` | `InsertBar.Kind` (8 values), `shapeType(kind)` routing, the floating sub-bar (`AnchoredBar` recipe) |
+| `notebook/InsertBar.kt` | `InsertBar.Kind` (9 values since arc 38 / R3 — `BIBLE` appended), `shapeType(kind)` routing (`BIBLE` maps to no `ShapeType`, `STICKY`'s and `TEXT`'s own answer), the floating sub-bar (`AnchoredBar` recipe), `offer(kind, offered)` — the one kind that still comes and goes after H5, gated on a Bible reader that understands references |
+| `notebook/BibleRefFlow.kt` | Arc 38 / R3 — convert / insert / edit for a Bible reference: the recognizer, the reference dialog, the one resolve call, the wrap, the two undo actions. Kept out of `NotebookActivity` the way `TextFlow`/`LinkPickFlow` are |
+| `notebook/BibleRefDialog.kt` | Arc 38 / R3 — the one-field reference dialog (`HeadingEditDialog`'s shape); a blank Save is a Cancel here, the one deliberate difference from every other object dialog |
 | `notebook/SelectionModes.kt` | `SelectionModes.classify` — the pure `when` deciding `SelectionMode` from a selection's contents |
 | `notebook/PageObjects.kt` | The three renderers + working copies (`texts`/`shapes`/`stickies`), a view-model beside the activity |
 | `notebook/PagePreview.kt` | `PagePreview.drawContent` — the one page-layering recipe (PDF bake, link-picker preview), D8 order |
@@ -232,6 +236,16 @@ button carries a long-press hint. Measured on the Nomad first: **all eight fit i
 (~940 of 1404 px at `toolbar_button_size`) — the two-row wrap contingency in the design was never
 needed.
 
+**A ninth kind, arc 38 / R3: Bible reference.** `InsertBar.Kind.BIBLE` is **appended**, never
+inserted beside Text — the eight arc-28 kinds were measured against the Nomad's bar as a row, and a
+new kind joins the row's end, not its middle. It is the one kind that still comes and goes after
+H5 offered the last of the original eight (`InsertBar.offer`, `GONE` until offered): re-offered
+from `BibleEntry`'s own discovery on every `onResume`, gated the same way the lasso bar's Bible
+button is — a reader declaring `MIN_API_VERSION_FOR_BIBLE_REFERENCE` (12), not merely one being
+installed. A tap calls `BibleRefFlow.insertAtCentre()`, which opens the reference dialog **empty**
+— nothing exists until it resolves, the same "no placeholder row, no minted id" rule every other
+Insert-bar kind follows on Cancel.
+
 Insert is a **command**, not a tool: the armed tool is unchanged by an insert, and the inserted
 object lands selected under the lasso — but a host-landed selection under a pen tool is a picture
 the pen just inks through, neither draggable nor tappable. This was H2's one walk failure (an
@@ -264,6 +278,21 @@ recognizer's line breaks are a guess (`normalize` — collapse, per-line trim, a
 blank line) while a typed line break is the author's decision (`typed` — per-line `trimEnd`, only
 outer blank lines trimmed). `TextPlacement.centred` is the pure box-placement helper both the
 Insert path and (via clamping) the paste path use.
+
+**A verses object** (arc 40 "Verses", 2026-09-13) is an ordinary text row like any other — nothing
+new in the data model — holding the words of a small Bible passage as Markdown, wrapped in a
+`LinkPayload.KIND_BIBLE_TEXT` link rather than the plain link a lassoed or typed reference gets. Its
+Edit is `TextEditDialog` (`BibleRefFlow.editVerses`), not the reference dialog: the words are
+scripture the user may want to trim or annotate, not a reference to re-resolve. Placement is
+`VersePlacement`'s, not `TextPlacement`'s or `FreePlacement`'s — a left edge fixed at 10 % of the
+page width, wrapping at the page's right edge, because a text object's width is re-derived from
+`pageWidth − x` on every load and a centred column could not survive a reload; see
+`extensions/bible/docs/bible.md` § "Verses on the page" for the reference doors it lands from.
+That re-derivation reaches a text **under a link** too (review 2026-09-13): `PageObjects.remeasured`
+only ever saw loose texts, so a wrapped one kept the width it was written at and a verses block
+dragged to the right clipped at the page edge — `PageLink.withTextsRemeasured` now re-measures a
+link's wrapped texts at every load (`NotebookActivity.correctedForDevice`, beside the underline
+band) and after any horizontal drag (`remeasureMovedLinks`, which also writes the corrected rows).
 
 A stylus tap on a lone selected text object opens `TextEditDialog` (the same gesture that opens a
 heading, tried after the heading lookup misses). `SelectionMode.TEXT` (`SelectionModes.classify`)
@@ -457,20 +486,31 @@ debounce window, since every earlier stroke is already a row.
 `SelectionModes.classify` (`notebook/SelectionModes.kt`) is the pure `when` a test can read
 directly:
 
-| Mode | Snap·Copy·Cut·Delete | H | Text (convert) | Link | Edit | Transform | Tag | Pad·Calendar |
-|---|---|---|---|---|---|---|---|---|
-| `STROKES` | ✓ | ✓ | ✓ | ✓ | | | ✓ | ✓ |
-| `HEADING` | ✓ | ✓ | | ✓ | stylus tap | | ✓ | |
-| `TEXT` | ✓ | | | ✓ | stylus tap opens the dialog | | | |
-| `SHAPE` | ✓ | | | ✓ | | ✓ | | |
-| `STICKY` | ✓ | | | ✓ | finger tap opens the editor (no bar button) | | | |
-| `LINK` / `MIXED_WITH_LINK` | as today | | | | | | | |
-| `MIXED` | ✓ | | | ✓ (link-free) | | | | hidden if any new kind is inside |
+| Mode | Snap·Copy·Cut·Delete | H | Text (convert) | Link | Edit | Transform | Tag | Pad·Calendar | Bible |
+|---|---|---|---|---|---|---|---|---|---|
+| `STROKES` | ✓ | ✓ | ✓ | ✓ | | | ✓ | ✓ | ✓ |
+| `HEADING` | ✓ | ✓ | | ✓ | stylus tap | | ✓ | | |
+| `TEXT` | ✓ | | | ✓ | stylus tap opens the dialog | | | | |
+| `SHAPE` | ✓ | | | ✓ | | ✓ | | | |
+| `STICKY` | ✓ | | | ✓ | finger tap opens the editor (no bar button) | | | | |
+| `LINK` / `MIXED_WITH_LINK` | as today | | | | | | | | |
+| `MIXED` | ✓ | | | ✓ (link-free) | | | | hidden if any new kind is inside | hidden |
 
 The classify rule, in order: exactly one content object with no ink and no link → its own lone
 mode; a link anywhere else in the set → `MIXED_WITH_LINK`; ink alone → `STROKES`; anything else →
 `MIXED`. **Both Sends (Pad and Calendar) hide (GONE, never disabled)** whenever the selection holds
 any of the three new kinds — the same rule that already hides them for non-ink content.
+
+**Bible** (arc 38 / R3) is `STROKES`-only, added beside Pad and Calendar for the same reason those
+two are: `SelectionToolbar`'s `onBible` reads this ink selection through the recognizer first (the
+same `HeadingConvert.run` machinery H and Text already share) and hands the recognized line to
+`BibleRefFlow.convert`, which offers it in the reference dialog for the user to correct before it
+is resolved. It is gated on `isBibleAvailable()` — re-read on every `show()`, the pad's own rule —
+but **narrower than "installed"**: the gate is `BibleEntry.supportsReferences`, a reader declaring
+`MIN_API_VERSION_FOR_BIBLE_REFERENCE` (12), the **method** floor, not the action floor `IBible`
+itself binds at (11). An 11-only reader still serves the plain door from the library and notebook
+bottom bars, but this button — and the Insert bar's ninth kind, below — stay `GONE` against it,
+because neither `resolve` nor `beginAt` exists on that reader to call.
 
 `NotebookUndo.Action` gained six kinds and widened four existing ones:
 `TextCreated(text, strokeIds)` (empty strokeIds for a plain insert), `TextEdited(before, after)`,
@@ -483,6 +523,26 @@ field that misses one is a silent no-op, and every new action is tested both way
 unchanged: mutate the store → `drain()` → `refreshToPage(pageId)`; new rows revive **in place**.
 `recordWithStickies` defers a sticky-holding delete's content snapshot (taken via
 `StickyStore.withContent` **before** the row goes) into the same one-gesture undo entry.
+
+**Arc 38 / R3 added two more, over the existing `link`/`text` machinery rather than a new row
+kind**: `BibleRefCreated(pageId, link, text, strokeIds)` and `BibleRefEdited(pageId, before, after:
+PageLink)`. A Bible reference is a text object wrapped in a link — three rows for a conversion (the
+text, the link, the erased ink), two for an insert — and each act is **one** undo entry covering
+all of them: undoing a `TextCreated` + `LinkCreated` composed separately would let the user undo
+"half a reference" and be left with a plain text object that used to be a link, which is exactly
+the outcome the arc's "one act, one undo step" rule exists to prevent. `BibleRefCreated`'s replay
+unwraps, deletes the text and revives the ink **in place** (the writing-order rule — arc 3's
+standing trap); `BibleRefEdited` carries the **whole** `PageLink` on both sides, each **carrying
+its one wrapped text**, so a single snapshot pair is enough and neither side needs a separate id
+list — replay writes the text's content, the link's payload and the link's re-derived box back
+over the same three row ids in one pass.
+
+**The invariant `BibleRefFlow.edit` leans on**: a Bible link wraps **exactly one text object and
+nothing else** — by construction, since only this flow ever creates one. A link that does not
+(hand-edited, imported, or corrupted) is a row this flow refuses to touch rather than guesses at:
+`edit()` checks `link.texts.singleOrNull()` plus every other wrapped-kind list being empty before
+opening the dialog, and explains itself (`bible_reference_unwrappable`) rather than crashing or
+silently editing the wrong thing.
 
 `ObjectClip.plan`'s `when (out.type)` gained the three kinds; `NotebookSession.ORDERED_TYPES` is
 now `[stroke, heading, link, text, shape, sticky_note]` (6 entries); `captureObjects` reads a
@@ -631,6 +691,14 @@ the rows verbatim, encrypted or not as the notebook already is.
   trap, not a code trap, but it cost a round trip).
 - **A capped endnote page must build its `PageBundle.Link` from the post-clamp size** — building it
   from the plan side before the size clamp made a capped page refuse its own caption link (H6).
+- **A successor selection injected at a dismissal must keep the transfer-paste latch, not clear it**
+  (arc 40 "Verses" V4's Nomad finding). An insert-landed selection acted on by its own bar (Verses on
+  a just-sent reference) is dismissed with a *successor* selection queued (`pendingSelection`) —
+  clearing the latch in `onSelectionDismissed` before the successor is injected puts PEN back under
+  it, and a selection under PEN can be neither dragged nor tapped. The latch is kept and fires at
+  the successor's own dismissal instead (`NotebookActivity.onSelectionDismissed`); any new flow that
+  can queue a successor at a landing must check whether it, too, is reached from an already-selected
+  object.
 
 ## What the Nomad walks proved
 

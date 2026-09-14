@@ -29,6 +29,13 @@ object LinkNav {
          *  which opens at its own remembered page (`refId`). */
         data class OtherNotebook(val notebookId: String, val pageId: String?) : Follow
 
+        /**
+         * A passage of scripture (arc 38 / R3): open the Bible reader on [reference] and **stay
+         * here** — the reader is a screen of its own that comes back by result, so the notebook is
+         * never left and nothing is pushed on the trail.
+         */
+        data class Bible(val reference: String) : Follow
+
         /** Unusable payload (foreign, future, corrupt) — the dead-target dialog. */
         object Dead : Follow
 
@@ -46,6 +53,9 @@ object LinkNav {
             LinkPayload.KIND_NOTEBOOK_PAGE ->
                 if (d.notebookId == currentNotebookId) Follow.SamePage(d.pageId!!)
                 else Follow.OtherNotebook(d.notebookId!!, d.pageId)
+            // Arc 38 / R3: not a place in the library at all — decode() has already checked the
+            // wire, and only the Bible extension knows what is inside it.
+            LinkPayload.KIND_BIBLE, LinkPayload.KIND_BIBLE_TEXT -> Follow.Bible(d.reference!!)
             // decode() already refused unknown kinds — belt to its braces, never a crash.
             else -> Follow.Dead
         }

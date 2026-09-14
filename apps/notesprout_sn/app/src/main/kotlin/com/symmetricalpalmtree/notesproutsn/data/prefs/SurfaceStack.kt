@@ -6,11 +6,12 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 
 /**
- * The screens a cold launch can put back (arc 32 "Resume", decision 1). Templates, Backup, Export,
- * Tags, Encryption, Restore and every picker are deliberately **not** here: a surface that is not
- * named cannot be restored, which is the whole of the exclusion rule.
+ * The screens a cold launch can put back (arc 32 "Resume", decision 1; the Bible reader joined at
+ * arc 37 / B0 on the user's call). Templates, Backup, Export, Tags, Encryption, Restore and every
+ * picker are deliberately **not** here: a surface that is not named cannot be restored, which is
+ * the whole of the exclusion rule.
  */
-enum class Surface { NOTEBOOK, CALENDAR, SCRATCH_PAD, DOCUMENT_EDITOR }
+enum class Surface { NOTEBOOK, CALENDAR, SCRATCH_PAD, DOCUMENT_EDITOR, BIBLE }
 
 /**
  * One screen on the surface stack. **Ids and enum names only** — never a name, never a page:

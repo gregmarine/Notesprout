@@ -56,13 +56,11 @@ class HandwritingRecognizerService : Service() {
             val ink = checkInk(strokes)
             require(areaWidth > 0f && areaHeight > 0f) { "non-positive writing area" }
             val recognizer = ready(INK_READY_WAIT_MS)
-            // The host's area is the whole selection box, which can span more than one written
-            // line — Dots must scale its tiny-stroke threshold from a LINE height, so derive one
-            // from the ink itself (the same segmenter the page path trusts).
-            val layout = StrokeSegmenter.segment(ink)
-            val dotLineHeight = if (layout.medianLineHeight > 0f) layout.medianLineHeight else areaHeight
+            // The same segment-then-recognize walk as a page: reading order from geometry, the
+            // host's preContext seeding the first line, each line's height (not the selection box's)
+            // as the writing area — so Dots scales from a LINE and a two-line selection reads right.
             val text = engine {
-                MlKitEngine.recognizeInk(recognizer, ink, areaWidth, areaHeight, preContext ?: "", deadline, dotLineHeight)
+                MlKitEngine.recognizeInk(recognizer, ink, areaWidth, areaHeight, preContext ?: "", deadline)
             }
             if (BuildConfig.DEBUG) {
                 Log.d(TAG, "recognizeInk: ${ink.size} strokes → ${text.length} chars in ${System.currentTimeMillis() - t0} ms")

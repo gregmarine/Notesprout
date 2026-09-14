@@ -133,6 +133,16 @@ internal interface AutomationPeer {
 
     /** The header's title as it now reads. */
     fun title(): String
+
+    // ── Arc 39's Bible lookup ─────────────────────────────────────────────────
+
+    /**
+     * The selection toolbar's Bible item, on [text] in place of a selection (a walk cannot drag a
+     * selection handle, and the toolbar is the ROM's). Asynchronous: the reader opens over this
+     * screen, or an alert is shown — a walk reads the screen afterwards. Silent when the host never
+     * offered the door.
+     */
+    fun lookup(text: String)
 }
 
 /**

@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Bible reader's placeholder screen (arc 37 / B0) — the tag manager's shape: the second
+  tier-2 screen with no paper on it, so there is no full-bleed surface, no exclusion rects and no
+  EPD handoff: an ordinary vertical stack of chrome.
+
+  Top to bottom: the top bar ([Back] [Contents] · title · [Full chapter] [Search] [Recents] — the
+  notebook's own order, B7, Search added left of Recents by B8; the Full chapter button is GONE
+  except in the passage view, arc 38 / R2) · the reader band (the ReaderView, added from code) · the pager. Chrome sits flush at the top edge — the top guard is 0
+  on Ratta. Dividers are 1dp inkBlack; borderGray is invisible on the panel.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/paperWhite"
+    android:orientation="vertical">
+
+    <!-- A FrameLayout, not a weighted row: the title is centred on the SCREEN, so it stays put
+         whatever flanks it (the bar-centring trap — a weight-centred title moves with its
+         neighbours). Its side margins clear TWO tablet-tier buttons (2 × 62dp + the bar's padding),
+         symmetric so the centre holds — and since arc 38 / R2 the screen re-balances them against
+         the two groups' MEASURED widths (`BibleActivity.balanceTitle`), because the Full chapter
+         button makes the end group wider than the start one and a word's width is not a number
+         worth hardcoding. What stands here is the chapter view's answer, and what shows before
+         the first layout. -->
+    <FrameLayout
+        android:id="@+id/topBarRow"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/toolbar_bar_thickness"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp">
+
+        <TextView
+            android:id="@+id/title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:layout_marginStart="132dp"
+            android:layout_marginEnd="132dp"
+            android:ellipsize="end"
+            android:singleLine="true"
+            android:text="@string/bible_title"
+            android:textColor="@color/inkBlack"
+            android:textSize="16sp" />
+
+        <!-- Back then Contents, as the notebook's bar runs. -->
+        <LinearLayout
+            android:id="@+id/startGroup"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:layout_gravity="start|center_vertical"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnBack"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_bible_back"
+                android:src="@drawable/ic_arrow_left" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnContents"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_bible_contents"
+                android:src="@drawable/ic_list" />
+        </LinearLayout>
+
+        <!-- Full chapter, Search, then Recents. Recents keeps the right EDGE — its panel comes in from
+             that side (B7), and an action button displacing it would break that reading; the
+             passage's one action sits inside it (arc 38 / R2). -->
+        <LinearLayout
+            android:id="@+id/endGroup"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:layout_gravity="end|center_vertical"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <!-- The passage view's one door out, and a text button because there is no glyph for
+                 "the whole chapter this came from". GONE in the chapter view — never disabled
+                 (invisible on e-ink). The tap target is dimen-driven like every other. -->
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnFullChapter"
+                style="@style/Widget.Notesprout.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:contentDescription="@string/bible_full_chapter"
+                android:minHeight="@dimen/toolbar_button_size"
+                android:text="@string/bible_full_chapter"
+                android:visibility="gone" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnSearch"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_bible_search"
+                android:src="@drawable/ic_search" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnRecents"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_bible_recents"
+                android:src="@drawable/ic_clock" />
+
+            <!-- Send to notebook (B9) — the far-right button, the user's call; the calendar's
+                 glyph. GONE unless the host opened the reader from a notebook
+                 (`EXTRA_BIBLE_SEND_ENABLED`) — never disabled (invisible on e-ink). -->
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnSend"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_bible_send"
+                android:src="@drawable/ic_pencil_down"
+                android:visibility="gone" />
+        </LinearLayout>
+
+    </FrameLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!-- The reader band. The `ReaderView` is added as the FIRST child at runtime (arc 37 / B1),
+         so it sits under the loading line; it is not in the XML because it is sized and drawn
+         from code, not from attributes. -->
+    <FrameLayout
+        android:id="@+id/readerBand"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="@color/paperWhite">
+
+        <!-- Shown only if the first open outlasts 300 ms (the asset copy on a fresh install).
+             A word, never a spinner: nothing on an e-ink screen animates. -->
+        <TextView
+            android:id="@+id/loading"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:text="@string/bible_loading"
+            android:textColor="@color/inkBlack"
+            android:textSize="16sp"
+            android:visibility="gone" />
+
+    </FrameLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!-- Pager only, centred on the SCREEN (bottom bars are pager-only — the F2 rule). -->
+    <FrameLayout
+        android:id="@+id/pager"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/toolbar_bar_thickness"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:layout_gravity="center"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnPrevPage"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_bible_prev_page"
+                android:src="@drawable/ic_page_prev" />
+
+            <TextView
+                android:id="@+id/pageIndicator"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:minWidth="56dp"
+                android:singleLine="true"
+                android:textColor="@color/inkBlack"
+                android:textSize="14sp" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnNextPage"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:contentDescription="@string/cd_bible_next_page"
+                android:src="@drawable/ic_page_next" />
+        </LinearLayout>
+
+    </FrameLayout>
+
+</LinearLayout>

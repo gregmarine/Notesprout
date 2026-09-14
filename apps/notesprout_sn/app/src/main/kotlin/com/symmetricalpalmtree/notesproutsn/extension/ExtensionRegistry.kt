@@ -18,15 +18,21 @@ data class ProviderRef(
 )
 
 /**
- * Discovery + trust for SN's eight extension points. A candidate `<service>` is kept only if it is
+ * Discovery + trust for SN's nine extension points. A candidate `<service>` is kept only if it is
  * exported, its `<meta-data>` API version is one [ExtensionContract.accepts] for the point — the
  * range `1..API_VERSION` (the declared number is what the extension *requires* of the host — the
  * arc-18 / D3 skew guard, reasoned at the constant), **with the floor** the point carries
  * ([ExtensionContract.minApiVersion] — 6 on the three store-taking points since arc 22 / X1, because
  * a replaced `IExtensionStore` breaks the old-extension/new-host direction too; 7 on the calendar
- * point, born there in arc 23 / Y1; 8 on the cloud point, born there in arc 25 / V1) — and it is signed
- * with the host's own certificate (`checkSignatures == SIGNATURE_MATCH` — same-signature only).
- * Everything else is skipped with a `Slog.d`. Disabled packages/components are never returned by the
+ * point, born there in arc 23 / Y1; 8 on the cloud point, born there in arc 25 / V1; 11 on the Bible
+ * point, born there in arc 37 / B0) — and it is signed
+ * with the host's own certificate (`checkSignatures == SIGNATURE_MATCH` — same-signature only),
+ * **and it is the host's own build** ([sameBuild] — a `.dev` host keeps only `.dev` extensions, the
+ * release host only release ones). The last rule exists because the two builds share one signing
+ * key on a developer's device: without it the dev host discovered the release extensions too, sorted
+ * "NSE · Bible" ahead of "NSE · Bible Dev", bound the release one, and was refused by its
+ * `HostCallerCheck` (`HOST_PACKAGE` is per build type on the extension side — this is the host-side
+ * half of the same rule). Everything else is skipped with a `Slog.d`. Disabled packages/components are never returned by the
  * query, so `pm disable` == uninstalled from the host's point of view.
  */
 object ExtensionRegistry {
@@ -90,6 +96,18 @@ object ExtensionRegistry {
     suspend fun calendar(context: Context): ProviderRef? = withContext(Dispatchers.IO) {
         val all = discover(context.applicationContext, ExtensionContract.ACTION_CALENDAR)
         for (extra in all.drop(1)) Slog.d(TAG) { "ignoring additional calendar ${extra.component.flattenToShortString()}" }
+        all.firstOrNull()
+    }
+
+    /**
+     * The one trusted Bible reader, or null (arc 37 / B0 — SN's **ninth** capability point, the
+     * fifth screen-owning one and the second with no paper). Same filter and first-wins rule as
+     * [calendar]: a second installed reader is ignored with a `Slog.d`, because two readers would be
+     * two bookmarks. Re-run on every resume of a screen that shows the Bible's entry button.
+     */
+    suspend fun bible(context: Context): ProviderRef? = withContext(Dispatchers.IO) {
+        val all = discover(context.applicationContext, ExtensionContract.ACTION_BIBLE)
+        for (extra in all.drop(1)) Slog.d(TAG) { "ignoring additional bible reader ${extra.component.flattenToShortString()}" }
         all.firstOrNull()
     }
 
@@ -163,6 +181,10 @@ object ExtensionRegistry {
                 Slog.d(TAG) { "skip $component: signature mismatch" }
                 continue
             }
+            if (!sameBuild(context.packageName, si.packageName)) {
+                Slog.d(TAG) { "skip $component: other build (host ${context.packageName})" }
+                continue
+            }
             val label = si.applicationInfo?.loadLabel(pm) ?: si.packageName
             kept += ProviderRef(component, si.packageName, label, apiVersion)
         }
@@ -170,4 +192,15 @@ object ExtensionRegistry {
         Slog.d(TAG) { "$action: ${sorted.size} provider(s) of ${candidates.size} candidate(s)" }
         return sorted
     }
+
+    private const val DEV_SUFFIX = ".dev"
+
+    /**
+     * True when the extension package belongs to the same build as the host: both `.dev`
+     * (`applicationIdSuffix` on every debug build in the SN Gradle root) or neither. Pure so it is
+     * JVM-tested; the signature check stays the trust gate — this only stops the two builds of the
+     * same family, installed side by side under one key, from pairing across the line.
+     */
+    internal fun sameBuild(hostPackage: String, extensionPackage: String): Boolean =
+        hostPackage.endsWith(DEV_SUFFIX) == extensionPackage.endsWith(DEV_SUFFIX)
 }

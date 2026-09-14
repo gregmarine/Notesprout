@@ -125,6 +125,10 @@ class FakeSoilDao : SoilDao {
         rows[id]?.let { rows[id] = it.copy(text = text, width = width, height = height, updatedAt = at) }
         events += "setTextContent:$id"
     }
+    override suspend fun setBox(id: String, x: Float, y: Float, width: Float, height: Float, at: Long) {
+        rows[id]?.let { rows[id] = it.copy(x = x, y = y, width = width, height = height, updatedAt = at) }
+        events += "setBox:$id"
+    }
     override suspend fun setShapeGeometry(id: String, x: Float, y: Float, width: Float, height: Float, flags: Long, at: Long) {
         rows[id]?.let { rows[id] = it.copy(x = x, y = y, width = width, height = height, flags = flags, updatedAt = at) }
         events += "setShapeGeometry:$id"

@@ -70,7 +70,7 @@ store pre-opened on IO before any bind). **GONE without a trusted calendar**, re
 **Bottom bar** — a `FrameLayout`, not a row:
 
 ```
-[Backup] [Import]       |<  <  n / n  >  >|                [Templates] [debug ⋯]
+[Backup] [Import]       |<  <  n / n  >  >|                [Bible] [Templates] [debug ⋯]
 
 in a shelf:                 |<  <  n / n  >  >|                        [debug ⋯]
 ```
@@ -114,6 +114,13 @@ tap behaves exactly as it always did, straight to the SAF picker. Choosing the c
 the same host-drawn browser the Backup and Export screens use, over the provider's own root, and a
 tapped file is downloaded and matched into the identical import pipeline below. See
 [`docs/import.md`](import.md) § "Import from the cloud" and [`docs/cloud.md`](cloud.md).
+
+**Bible** (arc 37 / B0, decision 3), `btnBible`, sits in `bottomRight` **left of Templates** — the
+first non-pager control ever placed on a bottom bar, a deliberate exception the user made rather
+than a top-bar or sheet door. `GONE`, never disabled, without a trusted Bible reader installed,
+re-discovered on every `onResume`; `BibleEntry` owns the button the way every other extension
+door's entry owns its own. A tap opens the reader where it was last left; see
+`extensions/bible/docs/bible.md`.
 
 The Templates screen is reachable from here only; paper is *picked* from New Notebook and from the
 notebook's page-template row, which go straight to `TemplatesActivity.pickIntent`.
@@ -231,6 +238,10 @@ either end is a no-op, because it goes through the same `goToPage` the pager but
 
 The same flip is on every paginated list in the app: the folder picker, the link picker, the
 template browser (`docs/templates.md`), and the Contents and Recents panels (`docs/notebook.md`).
+`ListSwipe` also takes optional `onSwipeDown` / `onSwipeUp` callbacks — `SwipeMath.vertical`, the
+flip's rule rotated 90° against the region's *height*, exclusive with the flip by dominance — for a
+host whose surface wants the notebook's swipe-down too (the Bible reader's index,
+`extensions/bible/docs/bible.md`); a host that leaves them null has the horizontal-only detector.
 
 **Empty-state trap:** `emptyState` is a sibling of the grid inside `gridContainer`. `bind()` removes
 only the `GridLayout` it added last. A `removeAllViews()` there would delete the empty message and
@@ -881,10 +892,11 @@ A cold launch (`savedInstanceState == null`, and only on `BootstrapRoute.Next.LI
 structural) reopens the **whole chain** of screens the user had open, not just the last notebook:
 library → notebook → one extension screen over it, or library → the calendar, or the calendar's own
 pad door (the calendar latched beneath the pad). Back walks out exactly as it always has. The
-surfaces that can ride the stack are `NOTEBOOK`, `CALENDAR`, `SCRATCH_PAD` and `DOCUMENT_EDITOR`
-only (decision 1) — Templates, Backup, Encryption, Import, Tags, Export, Restore, every picker, New
-notebook and the sticky editor are never restore targets, because a surface that is not named
-cannot be restored.
+surfaces that can ride the stack are `NOTEBOOK`, `CALENDAR`, `SCRATCH_PAD`, `DOCUMENT_EDITOR` and
+`BIBLE` only (decision 1; `BIBLE` added arc 37 / B0, decision 13 — the Bible reader IS a restore
+surface, unlike the tag manager it otherwise resembles) — Templates, Backup, Encryption, Import,
+Tags, Export, Restore, every picker, New notebook and the sticky editor are never restore targets,
+because a surface that is not named cannot be restored.
 
 ### The stack model
 
@@ -941,7 +953,9 @@ successor) runs from the first-layout listener over the local copy through the p
 `ReplayPlan.legalAbove` normalizes an above-list to the only two shapes SN can actually reopen —
 one screen, or `CALENDAR, SCRATCH_PAD` (exactly one extension screen is ever showing at a time, so
 nothing deeper exists) — cutting anything else to its longest legal prefix, and treating a
-`NOTEBOOK` first as nothing standing at all.
+`NOTEBOOK` first as nothing standing at all. A `BIBLE` (arc 37 / B0) is a one-screen chain like the
+document editor's: it never latches beneath or above anything else, so it truncates anything after
+it in an above-list the same way any other lone screen does.
 
 **The notebook arm.** The three validity gates are kept verbatim: an alive index row, type
 `NOTEBOOK`, and its `.soil` present on disk. All three hold → `openNotebook(id, name, viaLink,
@@ -968,7 +982,9 @@ the pad over the latched calendar (`openPadOverCalendar()`), each awaiting the e
 (fired from `onResume`) and this replay are two coroutines whose finishing order is a race, so a
 caller that awaits `discovered()` has the real answer instead of one it might lose the race to. A
 library-level `DOCUMENT_EDITOR` is logged and dropped — the editor only ever stands over a
-notebook, so it is not a shape the library can reopen.
+notebook, so it is not a shape the library can reopen. A library-level `BIBLE` (arc 37 / B0) opens
+the same way: `bible.discovered()` awaited, then `bible.open()` — a Bible reader has no notebook to
+stand over, so the library-level arm is its ordinary shape, not a special case.
 
 **Drop rules.** A notebook that is not alive, not type `NOTEBOOK`, or has no `.soil` on disk empties
 the **whole** chain — nothing above it can stand. A missing, untrusted, or below-floor extension

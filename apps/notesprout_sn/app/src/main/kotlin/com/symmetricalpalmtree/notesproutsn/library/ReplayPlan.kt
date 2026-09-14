@@ -8,7 +8,9 @@ import com.symmetricalpalmtree.notesproutsn.data.prefs.SurfaceEntry
  * the stack's shape, so the library's replay is one `when` over an answer the JVM tests own.
  *
  * Only two shapes exist in SN: a notebook at the bottom with the chain above it handed down as
- * `EXTRA_RESUME_ABOVE`, or an extension screen the library itself opened. The validity gates
+ * `EXTRA_RESUME_ABOVE`, or an extension screen the library itself opened. The Bible reader (arc 37
+ * / B0) is a one-screen chain in either place — it has no door to another extension, so `BIBLE`
+ * is only ever the last surface, and anything after it is truncated by [legalAbove]. The validity gates
  * (alive row · type NOTEBOOK · `.soil` on disk · a trusted service) are the caller's — they are
  * IO, and a failed one drops the entry by the rules in `RESUME_PLAN.md`.
  *
@@ -52,7 +54,7 @@ sealed class ReplayPlan {
          * The chain above a notebook, cut down to what SN can actually reopen (arc 32 / RS2).
          * Exactly one extension screen is showing at a time, so the only legal shapes are nothing,
          * one screen, or `CALENDAR, SCRATCH_PAD` — the calendar's own pad door, the one place two
-         * of them are stacked. Anything else is a stack this build did not write (or wrote across
+         * of them are stacked (a `BIBLE` is one screen like any other, and never latches). Anything else is a stack this build did not write (or wrote across
          * a surface it has since dropped), and is truncated to its **longest legal prefix** rather
          * than refused: what is below the first illegal entry was really open, and the entries
          * above a dropped one can never stand.

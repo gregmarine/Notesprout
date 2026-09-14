@@ -20,7 +20,11 @@
              `MIN_API_VERSION_FOR_STORE` (6) and above; until this line said 6, every Document door
              on the device was gone by design. The two services below stay at 3 — meta-data is per
              service, and neither of them takes a store. The `android:value` below is the
-             host-compat gate — it is the line that matters, and this comment must move with it. -->
+             host-compat gate — it is the line that matters, and this comment must move with it.
+             **14 since arc 39 "Lookup" (2026-09-13)**: the editor calls `IDocumentHost.openReference`
+             (transaction code 12), which only a 14 host serves — a 13 host would land the call on
+             nothing, so this editor must never bind one (the arc-18 skew guard, on a HOST-side stub
+             for the first time). The two services below still declare 3. -->
         <service
             android:name=".DocumentEditorService"
             android:exported="true">
@@ -29,7 +33,7 @@
             </intent-filter>
             <meta-data
                 android:name="com.symmetricalpalmtree.notesproutsn.extension.API_VERSION"
-                android:value="6" />
+                android:value="14" />
         </service>
 
         <!-- The NOTEBOOK_IMPORTER point (arc 16 / I1), served here too since arc 19 / M8: `.md` /

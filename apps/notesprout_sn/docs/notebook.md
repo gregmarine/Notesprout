@@ -870,7 +870,10 @@ selection can die (a tap-away, a page flip) before it answers. `HeadingConvert.r
    problem dialog and give-up (see `docs/extensions.md`);
 3. shows the **`RecognizingOverlay`** ("Recognizing…") box — `OpeningOverlay`'s smaller, dialog-free
    sibling, up for the width of the recognize call and down before anything else goes on screen;
-4. calls `recognizeInk` with the **selection's bounds**, not the page, as the writing area.
+4. calls `recognizeInk` with the **selection's bounds**, not the page, as the area — and the
+   extension then segments the selection into reading-order lines and recognizes each with its
+   own box, exactly as it does a page (since 2026-09-13; before that the selection box itself was
+   the writing area).
 
 That last point is the N2 eye-check root cause, worth stating exactly: SN's page pipeline
 recognizes per line using the line's own box, and Paper's H action passes the selection bounds for
@@ -1314,7 +1317,9 @@ Thresholds (Paper-v0 parity — the numbers are the feel):
 A swipe must be **horizontal-dominant** (`|dx| > |dy|`) and qualify on *velocity or* length;
 **direction comes from the sign of `dx`, never velocity**, because a decelerating finger can flip
 the velocity sign at the end of the drag. The vertical swipes (C1, K4) are the same rule rotated
-90° — vertical-dominant, the same three constants against the screen *height*, judged at the same
+90° — `SwipeMath.vertical`, vertical-dominant, the same three constants against the screen
+*height* (written once in `:sn-screen`, shared with `ListSwipe`'s optional vertical callbacks that
+the Bible reader's Contents rides), judged at the same
 `ACTION_UP` right after the flip evaluation (the two dominance tests are mutually exclusive) — and
 one sign-routed evaluation: `dy > 0` opens the Contents, `dy < 0` walks back the link trail (K4),
 so the two can never both fire. The one-finger **tap** (K4) is the inverse recogniser: sub-slop

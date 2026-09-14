@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The index's current book or chapter: filled black, paired with white bold text in code.
+     Copied from the calendar day picker's bg_month_selected — the same cell recipe, and an
+     extension owns its own resources. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/inkBlack" />
+    <corners android:radius="4dp" />
+</shape>

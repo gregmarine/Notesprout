@@ -111,6 +111,16 @@ class DocumentHostBinder(
          * Refused with `IllegalArgumentException` when the notebook is not a text document.
          */
         fun closeNotebook(mode: Int)
+
+        /**
+         * Arc 39 "Lookup": open the Bible reader over the editor on the reference [text] names
+         * — the editor's selection, prepared editor-side, non-blank and within
+         * [DocumentContract.MAX_REFERENCE_CHARS] (the binder checked). Blocking on the Binder
+         * thread for as long as the resolve and the reader's showing take; answers one of the
+         * three `REFERENCE_*` codes and never throws for an ordinary "no". The text is never
+         * logged.
+         */
+        fun openReference(text: String): Int
     }
 
     /**
@@ -259,6 +269,21 @@ class DocumentHostBinder(
         ) { "unknown close mode $mode" }
         hook { hooks.closeNotebook(mode) }
         Slog.d(TAG) { "closeNotebook: mode=$mode" }
+    }
+
+    // ── Arc 39 "Lookup": the one call that walks a door instead of moving text ──────
+
+    override fun openReference(text: String?): Int {
+        gate()
+        requireNotNull(text) { "text is null" }
+        require(text.isNotBlank()) { "text is blank" }
+        require(text.length <= DocumentContract.MAX_REFERENCE_CHARS) { "text over the cap" }
+        val t0 = SystemClock.elapsedRealtime()
+        val answer = hook { hooks.openReference(text) }
+        Slog.d(TAG) {
+            "openReference: ${text.length} chars → code $answer in ${SystemClock.elapsedRealtime() - t0} ms"
+        }
+        return answer
     }
 
     // ── The gate and the funnel ──────

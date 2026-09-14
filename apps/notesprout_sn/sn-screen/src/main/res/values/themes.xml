@@ -14,6 +14,14 @@
         <item name="android:alertDialogTheme">@style/Theme.Notesprout.AlertDialog</item>
     </style>
 
+    <!-- A see-through screen (arc 39): the host's Bible lookup trampoline shows only the "Opening…"
+         box over the editor it was started from, then leaves. -->
+    <style name="Theme.Notesprout.Translucent" parent="Theme.Notesprout">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+
     <style name="Theme.Notesprout.AlertDialog" parent="Theme.AppCompat.Light.Dialog.Alert">
         <item name="colorPrimary">@color/inkBlack</item>
         <item name="colorAccent">@color/inkBlack</item>

@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The extension's own strings. `ok` and `cancel` come from :sn-screen (Dialogs / ActionSheetDialog
+  reference them from inside the module) and are deliberately not repeated here.
+-->
+<resources>
+    <string name="ext_label">NSE · Bible</string>
+
+    <!-- Every icon button needs a long-press hint naming it, and the hint is its content description. -->
+    <string name="cd_bible_back">Back</string>
+    <string name="cd_bible_contents">Contents</string>
+    <string name="cd_bible_recents">Recents</string>
+    <!-- A text button, not a glyph: there is no icon for "the whole chapter this came from". -->
+    <string name="bible_full_chapter">Full chapter</string>
+    <string name="cd_bible_prev_page">Previous page</string>
+    <string name="cd_bible_next_page">Next page</string>
+
+    <!-- The Contents panel (arc 37 / B6, renamed from "Index" by B7): the notebook Contents' shape — book rows that open into a
+         chapter grid, paginated, with the library-shape pager below. -->
+    <string name="bible_contents_title">Contents</string>
+    <string name="cd_bible_expand">Show chapters</string>
+    <string name="cd_bible_collapse">Hide chapters</string>
+    <string name="cd_bible_contents_first">First page</string>
+    <string name="cd_bible_contents_prev">Previous page</string>
+    <string name="cd_bible_contents_next">Next page</string>
+    <string name="cd_bible_contents_last">Last page</string>
+
+    <!-- The Recents panel (arc 37 / B7, grown by arc 38 / R2): the notebook Recents' shape,
+         mirrored to the right — the chapters picked from the Contents AND the passages followed
+         from a notebook, newest first; its pager reuses the Contents' hints. The wording lost the
+         word "chapters" when references joined the list. -->
+    <string name="bible_recents_title">Recents</string>
+    <string name="bible_recents_empty">No recents</string>
+    <!-- "<medium date>, <time>" — when a chapter or a passage was opened. -->
+    <string name="bible_recents_when">%1$s, %2$s</string>
+
+    <!-- Search (arc 37 / B8): the field takes a reference or words; the panel reuses the
+         Contents' pager hints. -->
+    <string name="cd_bible_search">Search</string>
+    <!-- B9: the reader's Send to notebook (the calendar's wording) -->
+    <string name="cd_bible_send">Send to notebook</string>
+    <!-- Arc 40 "Verses": in passage mode Send asks which of the two should land. -->
+    <string name="bible_send_title">Send to notebook</string>
+    <string name="bible_send_reference">The reference</string>
+    <string name="bible_send_verses">The verses</string>
+    <string name="bible_search_hint">Reference or words</string>
+    <string name="bible_search_help_jump_title">Go to a passage</string>
+    <string name="bible_search_help_jump_examples">John 3:16 · Gen 1:5-10 · Psalm 23\nJohn 3:14-17, Acts 1:3 · 1 Cor 13</string>
+    <string name="bible_search_help_words_title">Search the text</string>
+    <string name="bible_search_help_words_examples">shepherd · love your enemies · living water</string>
+    <string name="bible_searching">Searching\u2026</string>
+    <!-- %1$s = what was typed -->
+    <string name="bible_search_none">No results for \u201C%1$s\u201D</string>
+    <!-- %1$d = the count, %2$s = what was typed -->
+    <plurals name="bible_search_count">
+        <item quantity="one">%1$d result for \u201C%2$s\u201D</item>
+        <item quantity="other">%1$d results for \u201C%2$s\u201D</item>
+    </plurals>
+    <!-- The list is capped; the count is not. %1$d = shown, %2$d = found, %3$s = what was typed -->
+    <string name="bible_search_capped">First %1$d of %2$d results for \u201C%3$s\u201D</string>
+
+    <string name="bible_title">Bible</string>
+    <string name="bible_page_indicator">%1$d / %2$d</string>
+    <!-- Book name + chapter number, the reader's top-bar title (e.g. "Genesis 1"). -->
+    <string name="bible_chapter_title">%1$s %2$d</string>
+    <string name="bible_loading">Loading\u2026</string>
+
+    <string name="bible_unavailable_title">Bible unavailable</string>
+    <string name="bible_unavailable_body">This chapter could not be opened. Close the Bible and open it again.</string>
+    <!-- The passage view's half of the same failure (arc 38 / R2). -->
+    <string name="bible_passage_unavailable_body">This passage could not be opened. Close the Bible and open it again.</string>
+</resources>

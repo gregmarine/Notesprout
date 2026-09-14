@@ -12,12 +12,13 @@ import org.junit.Test
 class SurfaceStackCodecTest {
 
     @Test
-    fun `a mixed stack of all four surfaces round-trips through encode and decode`() {
+    fun `a mixed stack of all five surfaces round-trips through encode and decode`() {
         val entries = listOf(
             SurfaceEntry("t1", Surface.NOTEBOOK, notebookId = "nb-1", viaLink = true),
             SurfaceEntry("t2", Surface.CALENDAR),
             SurfaceEntry("t3", Surface.SCRATCH_PAD),
             SurfaceEntry("t4", Surface.DOCUMENT_EDITOR),
+            SurfaceEntry("t5", Surface.BIBLE),
         )
         assertEquals(entries, SurfaceStackCodec.decode(SurfaceStackCodec.encode(entries)))
     }

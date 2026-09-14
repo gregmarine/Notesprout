@@ -13,9 +13,74 @@ are reading references — **no app code is copied from either**. Devices: **Nom
 The Manta identifies as a Nomad — target by serial.
 
 **Status: arcs 1–36 are all COMPLETE + FROZEN (2026-09-11) and `PARITY_BACKLOG.md` is closed.**
-The build effort ("ratta paper", 2026-08-20 → 2026-09-11) is over; what remains is maintenance.
-No NINTH extension point, no new arc, and no re-raising of any waived / declined review finding
-without a fresh user decision.
+The build effort ("ratta paper", 2026-08-20 → 2026-09-11) is over; what remains is maintenance,
+plus **arc 37 "Bible" — a fresh user decision granted 2026-09-13, COMPLETE + FROZEN 2026-09-13
+on branch `bible`, merged to `main` 2026-09-13 with arcs 38–40 and the branch review** (plan + ledger: `extensions/bible/BIBLE_PLAN.md`; reference
+`extensions/bible/docs/bible.md`; no code review — the user's call; frozen on the user's own Nomad
+walk; **post-freeze B6 2026-09-13 on the user's decision: the index became a Contents-shaped side
+panel with a one-finger swipe-down door — `SwipeMath.vertical` + `ListSwipe`'s optional vertical
+callbacks landed in `:sn-screen` for it; post-freeze B7 the same day: "Index" renamed "Contents"
+(strings and classes), and a Recents panel — the notebook's, mirrored right — of the chapters
+picked by name, behind a clock button and a two-finger swipe down; **post-freeze B8 the same
+day: a Search panel — reference or words, Biblesprout's shape, FTS4 in the slim build + a
+Kotlin BM25 — behind a search button left of the clock** (`ListSwipe`'s optional
+`onTwoFingerSwipeDown`, `:sn-screen`); the store grew to `BibleSchema.V2` with a `recent` table**).
+**Arc 38 "Reference" (2026-09-13, a fresh user decision, branch `bible`) grew the Bible point
+in place** — a lassoed or typed scripture reference becomes a linked passage object in the
+notebook, a tap opens NSE · Bible on just those verses with a Full chapter door back to ordinary
+reading: R1 the seam (`IBible.resolve`/`beginAt`, `ExtensionContract.API_VERSION` 11 → 12 as a
+method-floored tail, `MIN_API_VERSION_FOR_BIBLE_REFERENCE` = 12, the action floor 11 untouched),
+R2 the passage view + Full chapter + `BibleSchema.V3`'s `recent_ref` table, R3 the host object
+(`LinkPayload.KIND_BIBLE`, `BibleRefFlow`, the two gated doors), **R4 walked on the Nomad
+2026-09-13 (adb; the lasso and hand-feel left to the user)** — every path but the lasso conversion
+passed, one post-walk fix (the refusal dialog's Edit button), **R5 docs COMPLETE 2026-09-13**:
+plan + ledger `extensions/bible/REFERENCE_PLAN.md`; reference `extensions/bible/docs/bible.md`
+§ "Bible references". **FROZEN 2026-09-13 on the user's own hand walk on the Nomad** ("Looks and
+works good!" — the lasso conversion included; the eleven-button lasso bar fits). No code review —
+the user's call, the same waiver arc 37 took. Walk trap, not ours: the `.dev` host binds the
+RELEASE ML Kit first (`caller is not the host`), so
+`com.symmetricalpalmtree.notesproutsn.ext.mlkit` is `pm disable-user`'d on the Nomad beside the
+release pad and calendar. **B9 "Send to notebook" (2026-09-13, the user's decision after B8):**
+the reader's far-right Send button (only with a notebook behind it — `EXTRA_BIBLE_SEND_ENABLED`)
+parks the current chapter (whole) or passage, `RESULT_BIBLE_SEND`, the host takes it over the held
+bind (`IBible.takeOutgoingReference`, `API_VERSION` 12 → 13 as the method floor
+`MIN_API_VERSION_FOR_BIBLE_SEND`) and lands it as a selected Bible reference object at the page
+centre (`BibleRefFlow.insertResolved`); the reader closes — `docs/bible.md` § Send to notebook.
+**Arc 39 "Lookup" (2026-09-13, a fresh user decision, branch `bible`): the Bible from the
+document editor** — select a reference in Write or Preview, tap **Bible** in the system
+text-selection toolbar, the passage view opens over the editor, Back returns to the editor as it
+was. `IDocumentHost.openReference` (`API_VERSION` 13 → 14; `:ext-document`'s editor service
+redeclares 14, `DocumentContract.MIN_API_VERSION_FOR_DOCUMENT_LOOKUP`), one boolean on the
+editor's Intent (`EXTRA_DOCUMENT_BIBLE_AVAILABLE`, the host's discovery), the host resolves and
+parks (`LookupHandoff`), and the editor starts the host's exported `BibleLookupActivity`
+trampoline — **the stopped notebook must never launch the reader itself: it cannot see the
+result until the editor closes and the bind stays held** (measured; the first design failed
+exactly so). Alerts, never toasts, for "not a reference" and "unavailable" (the user's call).
+Walked over adb on the Nomad (Write, Preview, Back, a second lookup, the alert) and **FROZEN
+2026-09-13 on the user's own hand walk ("It works great!")**. Plan + ledger `extensions/bible/LOOKUP_PLAN.md`; reference
+`docs/document.md` § "Bible lookup", `docs/extensions.md` rows 58–59, `bible.md` § "Lookup from
+the document editor". No code review — the user's call.
+**Arc 40 "Verses" (2026-09-13, a fresh user decision, branch `bible`): the verses themselves on the
+page.** A lassoed/typed reference, the reader's Send, and the lasso's Verses on a placed reference
+can now land the passage's own words — a bold label line then plain-numbered verses, ten verses at
+most, whole chapters refused outright — as an ordinary text object wrapped in the same kind of link
+(`LinkPayload.KIND_BIBLE_TEXT` = 4), rather than only a citation of it. Seam: `IBible.passageText`
+(`API_VERSION` 14 → 15 as the method floor `MIN_API_VERSION_FOR_BIBLE_TEXT`; `MIN_API_VERSION_FOR_BIBLE`
+untouched at 11) is the first and only Bible-seam call to answer with scripture itself rather than a
+reference to it. `VersePlacement` puts the column at 10 % of the page width, wrapping at the page's
+right edge (the text model re-derives width from `x` on every load, so a centred column cannot
+survive a reload); a refusal — too long, or no clear room on the page — is an alert with OK, never a
+toast. Walked over adb on the Nomad (`.dev` builds), **COMPLETE + FROZEN 2026-09-13 on the user's own
+hand walk ("This looks and works good")**; one finding fixed mid-walk (a successor selection's transfer-paste latch was cleared too
+early and left it stranded under PEN) and one after (a page with no clear band no longer stacks the
+verses on what is already there — "No room on this page" instead). Plan + ledger
+`extensions/bible/VERSES_PLAN.md`; reference `extensions/bible/docs/bible.md` § "Verses on the
+page", `docs/extensions.md` § "Arc 40's tail: `passageText`" + audit row 60, `docs/objects.md` §
+"Text objects" + "Standing traps", `docs/links.md` § "The Bible kind". No code review — the user's
+call, the same waiver arcs 37–39 took.
+No TENTH extension point, no next Bible phase (bookmarks, cross references, footnotes, longer or
+multi-page passages) and no other new arc without a fresh user decision; no re-raising of any
+waived / declined review finding.
 
 **Maintenance protocol (replaces the per-arc phase protocol):**
 
@@ -111,7 +176,16 @@ built**, the sticky editor with its transfer singleton and EPD handoff chain, se
 undo kinds / clipboard arms / whole-object erase, PDF endnotes over `PageBundle` v2 +
 `bundleVersion`, the failure table, the design calls, the traps, the Nomad walks and the tests) ·
 `docs/sn-screen.md` (arc 11 / J1: the shared `:sn-screen` paper-screen library — what may live
-there, what may not depend on it, and the `nonTransitiveRClass` flag that holds it together).
+there, what may not depend on it, and the `nonTransitiveRClass` flag that holds it together) ·
+`extensions/bible/docs/bible.md` (arc 37 "Bible": **NSE · Bible** as a feature — the slim BSB
+SQLite build, the paginated print-look reader, single-finger swipe and chapter/book flow, the
+Contents side panel (book rows → chapter grid; swipe down opens it), the Recents side panel (the
+chapters picked by name; clock button + two-finger swipe down), the Search side panel (B8: a
+reference goes there, words are ranked hits — FTS4 + BM25), the stored position and the
+`recent` table, the `extensions/` monorepo-root pattern; grown by **arc 38 "Reference"**:
+notebook-linked Bible reference objects — the reference parser/codec, the passage view, Full
+chapter, and the Recents' `recent_ref` table of followed passages; grown by **arc 40 "Verses"**:
+the verses themselves as a linked text object on the page).
 
 ## Standing rules
 
@@ -128,7 +202,10 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   and does not want "fixing": pulling `:sn-screen` into an exporter for a log line would put a
   paper-screen library inside a module that draws no paper.
 
-- **Fourteen modules, own Gradle root**: `:app` (the
+- **Fifteen modules, own Gradle root — the fifteenth lives outside it.** Fourteen sit under this
+  app's own Gradle root; the fifteenth, `:ext-bible` (arc 37, **NSE · Bible**), lives at the
+  monorepo root (`extensions/bible/`) and is pulled in by `settings.gradle.kts`'s `projectDir`
+  include — the pattern recorded for every future extension. `:app` (the
   host) · `:markdown` (arc 19 / M1 — the shared markdown engine: parser, renderer, formatter,
   reflow, search, draft, paginator; stdlib only, depends on **nothing** in this project and
   nothing beyond the android SDK its spans use — `:app` and `:ext-document` consume it, one
@@ -224,7 +301,21 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   `ImageAssembly` (`requireOnePage` — a multi-page bundle is an `IllegalStateException`, never its
   first page; RGB_565 decode, dimension check against the declaration, PNG 100 through a counting
   stream + the `S_ISREG` fsync rule). It never sees a notebook, a `.soil`, or more than one page —
-  the host bakes once and splits (`BundleSplit`) and calls it once per page.)
+  the host bakes once and splits (`BundleSplit`) and calls it once per page.) ·
+  `:ext-bible` (**NSE · Bible**, arc 37 / B0, grown by arc 38 / R1–R2 — the fifteenth module, and
+  the only one at the monorepo root, `extensions/bible/`, included by `projectDir`):
+  `:extension-api` + `:sn-screen` only, **never** `:app`, no Room / SQLCipher / serialization.
+  Declares `API_VERSION` **15** since arc 40 "Verses" (12 at arc 38 / R1, 13 at B9, 15 at arc 40;
+  `MIN_API_VERSION_FOR_BIBLE` = 11 from its first
+  phase still gates the point's own existence; `MIN_API_VERSION_FOR_BIBLE_REFERENCE` = 12, a
+  method floor, gates `resolve`/`beginAt` and the notebook's two reference doors — an 11-only
+  reader still serves the plain door). Store `BibleSchema.V3` = `state` (B0) + `recent` (B7) +
+  `recent_ref` (arc 38 / R2, the passages followed from a notebook), `INSERT OR REPLACE` safe on
+  all three (no children). `ContentInstaller` copying its bundled
+  `assets/bible/bsb.bible` to its own `noBackupFilesDir` is **the one sanctioned "extension writes
+  to disk" exception** in the whole family — re-derivable APK content, never user data, ML Kit's
+  own model's class. Its door is a deliberate exception to "bottom bars are pager-only": `btnBible`
+  sits on both the library's and the notebook's bottom bars (arc 37 / B0, decision 3).
   `gradle.properties` sets `android.nonTransitiveRClass=false` — undoing it breaks every
   `:sn-screen` resource reference from `:app`.
 - **Arcs 26–35 are each COMPLETE + FROZEN.** Each has ONE reference doc and ONE standalone plan
@@ -331,13 +422,15 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   `:ext-tags`' `tag`, `:ext-calendar`'s `calendar`, `:ext-cloud`'s `cloud`). A package is found by
   its **label** in Settings → Apps; the glyph only says which family it belongs to. A new extension
   copies `ext-soil/src/main/res/drawable/ic_launcher_foreground.xml` and does not ask.
-- **SN has EIGHT extension points** — each added on its own explicit user decision, and
-  **no NINTH may be added without another** (arc 21's `ACTION_TAG_MANAGER` was the sixth's,
+- **SN has NINE extension points** — each added on its own explicit user decision, and
+  **no TENTH may be added without another** (arc 21's `ACTION_TAG_MANAGER` was the sixth's,
   granted 2026-08-31; the SEVENTH, `ACTION_CALENDAR`, was granted 2026-09-01 for arc 23 and
   landed at Y1 with the `:ext-ink` + `:ext-calendar` modules, `RATTA_PLAN.md` § "Phases —
   Arc 23"; **the EIGHTH, `CloudContract.ACTION_CLOUD_STORAGE`, was granted 2026-09-04 for arc 25
-  "Drive" and landed at V1** with `:ext-cloud` — its plan is the standalone `DRIVE_PLAN.md`). The
-  full seam — contracts, caps, trust, the
+  "Drive" and landed at V1** with `:ext-cloud` — its plan is the standalone `DRIVE_PLAN.md`; **the
+  NINTH, `ACTION_BIBLE`, was granted 2026-09-13 for arc 37 "Bible" and landed at B0** with
+  `:ext-bible` at the monorepo root — its plan is the standalone `extensions/bible/BIBLE_PLAN.md`).
+  The full seam — contracts, caps, trust, the
   boundary audit — is `docs/extensions.md`; the rules that bind every point:
   - `ACTION_HANDWRITING_RECOGNIZER` (headings + the markdown engine are core, the engine is
     swappable). **Only `prepare()` may start a model download** (host consent dialog first;
@@ -419,6 +512,24 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
     (nothing changed, try again). **No other extension is aware of the cloud** — exporters and
     importers only ever see fds, so a cloud destination changes only where the host's fd points.
     Consumers this arc: export destination, backup destination, import source; no restore.
+  - `ACTION_BIBLE` + `_SCREEN` (arc 37 / B0, granted 2026-09-13) — the fifth screen-owning point
+    and the second with **no paper** (the tag manager's shape): `IBible` is a held bind,
+    `begin(store)` / `end()` and nothing else, the store lent for the showing exactly as the tag
+    manager's is. Nothing rides the screen's Intent — no extras at all, the editor's and the cloud
+    connect screen's precedent. The store holds one `state` row (`position` →
+    `USFM:chapter:verse`); scripture text never crosses the seam and is never logged. Served by
+    **`NSE · Bible`** (`:ext-bible`), the ONE module living outside this app's own Gradle root
+    (`extensions/bible/`, included by `projectDir`), and the source of the family's one sanctioned
+    disk exception: `ContentInstaller` copies the bundled `.bible` file to its own
+    `noBackupFilesDir` — re-derivable APK content, never user data, ML Kit's own model's class.
+    **Grown by arc 38 "Reference" (R1, 2026-09-13, a fresh user decision) with two compatible
+    method tails after `end()`**: `resolve(text): ResolvedReference?` (bind-per-call, no store —
+    the notebook's reference dialog asks whether the user's words are a reference this Bible
+    knows) and `beginAt(store, reference)` (`begin`'s second opening, onto the passage view).
+    Both behind the **method** floor `MIN_API_VERSION_FOR_BIBLE_REFERENCE` = 12
+    (`ExtensionContract.API_VERSION` 11 → 12 to express it); the **action** floor
+    `MIN_API_VERSION_FOR_BIBLE` stays 11, so an 11-only reader still serves the plain door and
+    only loses the notebook's two reference doors. Not a tenth point.
 
   All of them get the **extension store** (`IExtensionStore` — per-package,
   encrypted under the global key at `Garden/<pkg>.db`, minted per bind, uid-bound, revoked with
@@ -445,8 +556,9 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   Action strings are
   SN-namespaced so Paper's extensions are never discovered; trust is same-signature both ways
   (discovery + bind-time re-check host-side, `HostCallerCheck` first thing in every stub method);
-  `ExtensionContract.API_VERSION` = **10** and the host accepts `minApiVersion(action)..10` — **the
-  floor is per action since arc 23 / Y1** (`minApiVersion` is a map, not a single set): 8 for
+  `ExtensionContract.API_VERSION` = **15** and the host accepts `minApiVersion(action)..15` — **the
+  floor is per action since arc 23 / Y1** (`minApiVersion` is a map, not a single set): 11 for
+  `ACTION_BIBLE` (`MIN_API_VERSION_FOR_BIBLE`, arc 37 / B0), 8 for
   `ACTION_CLOUD_STORAGE` (`CloudContract.MIN_API_VERSION_FOR_CLOUD`, arc 25 / V1), 7 for
   `ACTION_CALENDAR` (`MIN_API_VERSION_FOR_CALENDAR` — a point born at 7 has no older shape to
   accept), `MIN_API_VERSION_FOR_STORE` 6 for the three arc-22 store-taking points, 1 for every
@@ -479,7 +591,21 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   re-pinned to 8). Not a ninth point. · **10 = arc 35 / HA1, one compatible tail and NO floor
   moved**: `ICalendar.advanceOutgoing()` appended after `outgoingTarget` (method floor
   `MIN_API_VERSION_FOR_CALENDAR_DAY_SEND` 10 — a Day's whole-page Send parks both halves and the
-  host drains them in turn; only `:ext-calendar` redeclares).
+  host drains them in turn; only `:ext-calendar` redeclares) · **11 = arc 37 / B0, the BIBLE
+  point** — compatible addition floored at 11, no floor moved: `ACTION_BIBLE` is listed only at
+  `MIN_API_VERSION_FOR_BIBLE`, every other point's declared floor is unchanged; only `:ext-bible`
+  declares 11. · **12 = arc 38 / R1, two compatible tails and NO floor moved**: `IBible.resolve` +
+  `IBible.beginAt` appended after `end()`, gated by the **method** floor
+  `MIN_API_VERSION_FOR_BIBLE_REFERENCE` 12 — `MIN_API_VERSIONS` untouched,
+  `MIN_API_VERSION_FOR_BIBLE` still 11 and a reader declaring only 11 still binds for the plain
+  door. Not a tenth point; only `:ext-bible` declares 12. · **13 = B9 "Send"**:
+  `IBible.takeOutgoingReference`, method floor `MIN_API_VERSION_FOR_BIBLE_SEND` 13. · **14 = arc
+  39 "Lookup"**: `IDocumentHost.openReference`, method floor
+  `DocumentContract.MIN_API_VERSION_FOR_DOCUMENT_LOOKUP` 14 (`:ext-document` declares 14). ·
+  **15 = arc 40 "Verses"**: `IBible.passageText`, method floor `MIN_API_VERSION_FOR_BIBLE_TEXT`
+  15 (`:ext-bible` declares 15). No action floor moved at any of the three; the pin lives in
+  `ExtensionContractTest`, which **must be run** (`:extension-api:testDebugUnitTest`) at every
+  bump — it went red across three bumps unnoticed once.
   Meta-data is **per service**.
 - **The Scratch Pad is not ours to change from here** (arc 11, `docs/scratchpad.md`). It is the
   `:ext-scratchpad` APK: its own process, its own g-paper surface, its own undo stack, and it
@@ -573,6 +699,10 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
 - **Supernote swallows `adb shell input text`** — scripted device tests tap the on-screen
   keyboard or avoid text entry. EPD live ink is invisible to screencap; only committed
   strokes screenshot-verify.
+- **Bottom bars are pager-only, with one recorded exception** — the Bible button (arc 37 / B0,
+  decision 3), the first non-pager control ever placed on a bottom bar, on both the library's and
+  the notebook's. It is a deliberate, one-time exception, not a precedent: a future door still
+  goes on a top bar or a long-press sheet unless the user grants another one explicitly.
 
 ## Build & install
 

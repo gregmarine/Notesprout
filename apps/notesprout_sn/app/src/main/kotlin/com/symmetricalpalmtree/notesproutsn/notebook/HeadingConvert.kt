@@ -24,10 +24,10 @@ import java.lang.ref.WeakReference
  * taps a level; this takes the selected strokes out to the one trusted `HANDWRITING_RECOGNIZER`
  * extension and comes back with a **single-line** title — or with a reason, and nothing changed.
  *
- * It is `recognizeInk`, not `recognizePage`: a heading is one writing area, so there is nothing to
- * segment, and the empty `preContext` says the same thing. Recognition comes back with the
- * recognizer's own line breaks; a heading has exactly one line, so every run of whitespace collapses
- * to a single space and the result is trimmed. Blank after that is a *failure* the user must hear
+ * It is `recognizeInk`, not `recognizePage`: the selection is the ink, and the empty `preContext`
+ * says nothing came before it. The extension still segments what it is handed into reading-order
+ * lines (geometry, not writing order) and returns them with its own line breaks; a heading has
+ * exactly one line, so every run of whitespace collapses to a single space and the result is trimmed. Blank after that is a *failure* the user must hear
  * about — the lassoed ink is left exactly as it was and no heading is created.
  *
  * The flow is the debug menu's, minus the debug: one flow at a time (a [WeakReference] guard, so a
@@ -141,7 +141,7 @@ object HeadingConvert {
         RecognizingOverlay.show(activity)
         try {
             val t0 = System.currentTimeMillis()
-            // One writing area, no page context: the extension must not segment a heading into lines.
+            // No page context: the selection alone is the ink, read in reading order by the extension.
             val raw = client.recognizeInk(ink, areaWidth, areaHeight, "")
             val ms = System.currentTimeMillis() - t0
             val title = if (multiLine) TextLines.normalize(raw) else oneLine(raw)

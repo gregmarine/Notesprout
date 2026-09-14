@@ -69,6 +69,14 @@ class LinkFollowFlow(
     private val closeAndLaunch: (Intent) -> Unit,
     /** Open the picker prefilled with this link, from the dead-target dialog. */
     private val editLink: (PageLink) -> Unit,
+    /**
+     * Open the Bible reader on a passage (arc 38 / R3) — **true** when a trusted reader that
+     * understands references is installed and the showing was asked for, **false** when there is
+     * none (the dead-target dialog, with its own wording: the link is fine, the reader is missing
+     * or too old). The notebook is not left and no trail entry is pushed: the reader comes back by
+     * result, onto this very page.
+     */
+    private val openBible: (reference: String) -> Boolean = { false },
 ) {
 
     private var busy = false
@@ -117,6 +125,17 @@ class LinkFollowFlow(
                         Slog.d(TAG) { "follow: ${link.id} → page ${plan.pageId} (same notebook)" }
                     }
                     busy = false
+                }
+                // Arc 38 / R3: a passage, not a page. The reader owns its own screen and returns by
+                // result, so there is nothing to seal, nothing to push, and the door is free again
+                // the moment the showing has been asked for.
+                is LinkNav.Follow.Bible -> {
+                    busy = false
+                    if (openBible(plan.reference)) {
+                        Slog.d(TAG) { "follow: ${link.id} → the Bible reader" }
+                    } else {
+                        deadTarget(link, R.string.link_target_bible_body)
+                    }
                 }
                 is LinkNav.Follow.OtherNotebook -> followOut(link, plan)
             }

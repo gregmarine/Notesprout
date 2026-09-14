@@ -223,6 +223,20 @@ class LinkStore(
         Slog.d(TAG) { "updatePayload $id" }
     }
 
+    /**
+     * Rewrite a link's own box (arc 38 / R3) — the **only** mutation of a link's bounds that is not
+     * a move, and it exists for exactly one caller: a Bible link wraps one text object, and editing
+     * that reference re-measures the text, so the link's box (and with it the hit target and the
+     * underline band) has to be re-derived from [PageLink.unionBounds] and written down.
+     *
+     * The wrapped children are **not** touched: the text keeps the top-left it was authored at, and
+     * everything else about the link is where it was.
+     */
+    fun updateBounds(id: String, x: Float, y: Float, width: Float, height: Float) = writer.enqueue {
+        dao.setBox(id, x, y, width, height, System.currentTimeMillis())
+        Slog.d(TAG) { "updateBounds $id" }
+    }
+
     companion object {
         private const val TAG = "LinkStore"
 

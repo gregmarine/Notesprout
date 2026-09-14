@@ -146,4 +146,55 @@ object DocumentContract {
      * `requestMerge`, which mirrors `requestSeed`'s throw-not-null asymmetry.)
      */
     const val MERGE_CANCELLED: String = "MERGE_CANCELLED"
+
+    // ── Arc 39 "Lookup" (2026-09-13): the Bible from the editor's selection ──────
+
+    /**
+     * The **method** floor for `IDocumentHost.openReference` (transaction code 12), read on the
+     * *extension's* declaration: the host puts [EXTRA_DOCUMENT_BIBLE_AVAILABLE] on the editor's
+     * Intent only against an editor declaring at least this, and an editor declaring it never
+     * binds a host without the method (`ExtensionContract.accepts` — the arc-18 skew guard). Not
+     * an action floor: `MIN_API_VERSION_FOR_STORE` (6) stays the point's, an older editor keeps
+     * every door it had, and only `:ext-document` redeclares.
+     */
+    const val MIN_API_VERSION_FOR_DOCUMENT_LOOKUP: Int = 14
+
+    /**
+     * Boolean launch extra on the editor screen: a trusted Bible reader that understands
+     * references is installed, so the editor offers its selection-toolbar Bible item. Discovery is
+     * the host's — an extension never queries for another — and this is the ONE boolean the
+     * editor's Intent carries (it carried nothing from M3 to arc 38); still no content, no id, no
+     * path. The calendar's `EXTRA_CALENDAR_SCRATCH_PAD_AVAILABLE` shape.
+     */
+    const val EXTRA_DOCUMENT_BIBLE_AVAILABLE: String = "documentBibleAvailable"
+
+    /** `openReference`'s cap on the words it is handed — the Bible wire cap's twin; the editor
+     *  refuses longer selections before the call and the host binder refuses them on receipt. */
+    const val MAX_REFERENCE_CHARS: Int = 512
+
+    /**
+     * `openReference` answers: the words resolved and the host has parked the reference — the
+     * editor now starts the host's **lookup screen** ([ACTION_DOCUMENT_LOOKUP_SCREEN], for a
+     * result, with nothing on the Intent), which walks the reader's door and returns when the
+     * reader does. The notebook itself is stopped behind the editor and cannot see a child's result
+     * until the editor closes, which is why the launch is a second step and a live host screen.
+     */
+    const val REFERENCE_OPENED: Int = 0
+
+    /** `openReference` answers: the reader does not know the words as a scripture reference. */
+    const val REFERENCE_UNKNOWN: Int = 1
+
+    /** `openReference` answers: no reader, one too old to be asked, or the ask failed — the editor
+     *  says the Bible could not be opened, never that the words were wrong. */
+    const val REFERENCE_UNAVAILABLE: Int = 2
+
+    /** Intent action of the host's exported lookup screen: started **for a result** by the editor
+     *  (`setPackage(<the host>)`) right after `REFERENCE_OPENED`, with no extras — the host holds
+     *  the parked reference in-process and admits only the package it parked it for. */
+    const val ACTION_DOCUMENT_LOOKUP_SCREEN: String =
+        "com.symmetricalpalmtree.notesproutsn.extension.DOCUMENT_LOOKUP_SCREEN"
+
+    /** The lookup screen's result when the reader could not be opened (= `Activity.RESULT_FIRST_USER`)
+     *  — the editor explains; every other result means the reader was shown and has closed. */
+    const val RESULT_LOOKUP_FAILED: Int = 1
 }

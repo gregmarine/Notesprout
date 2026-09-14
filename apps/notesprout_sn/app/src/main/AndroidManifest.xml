@@ -4,8 +4,8 @@
     <!-- The readiness flow's offline pre-check (ML Kit's model download hangs silently offline). -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-    <!-- Package-visibility for SN's eight extension points (API 30+ filtering). Every
-         screen-owning point (scratch pad, document editor, tag manager, calendar, cloud) needs both
+    <!-- Package-visibility for SN's nine extension points (API 30+ filtering). Every
+         screen-owning point (scratch pad, document editor, tag manager, calendar, cloud, bible) needs both
          actions listed: the service to discover and bind, the screen to resolve and launch for a
          result — one missing reads as "0 provider(s) of 0 candidate(s)" (arc 21 / W1). -->
     <queries>
@@ -57,6 +57,13 @@
         </intent>
         <intent>
             <action android:name="com.symmetricalpalmtree.notesproutsn.extension.CLOUD_STORAGE_SCREEN" />
+        </intent>
+        <!-- The Bible point (arc 37 / B0): two actions, the same reason a sixth time. -->
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesproutsn.extension.BIBLE" />
+        </intent>
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesproutsn.extension.BIBLE_SCREEN" />
         </intent>
     </queries>
 
@@ -179,6 +186,26 @@
             android:name=".notebook.LinkPickerActivity"
             android:exported="false"
             android:screenOrientation="portrait" />
+
+        <!-- The Bible lookup screen (arc 39 "Lookup"): a translucent trampoline the document editor
+             starts for a result after the notebook answered REFERENCE_OPENED. Exported because the
+             editor is another package; gated in code on the index being open, on the calling
+             package being the editor the notebook parked the reference for, and on that park being
+             fresh — every refusal is a silent finish. Nothing rides its Intent. keyboard|keyboardHidden
+             for the notebook's reason: a recreate under the reader would drop the result it exists
+             to receive. excludeFromRecents: it is a moment, not a place. -->
+        <activity
+            android:name=".extension.BibleLookupActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Notesprout.Translucent"
+            android:configChanges="keyboard|keyboardHidden"
+            android:excludeFromRecents="true"
+            android:screenOrientation="portrait">
+            <intent-filter>
+                <action android:name="com.symmetricalpalmtree.notesproutsn.extension.DOCUMENT_LOOKUP_SCREEN" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
 
     </application>
 

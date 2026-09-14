@@ -55,6 +55,8 @@ class TextFlow(
 
         val paper: PaperView
 
+        val density: Float
+
         /** The named strokes off the visible page's mirror, in **writing order** — never the
          *  selection's Set, whose iteration order would scramble the recognizer's input. */
         fun strokesIn(ids: Set<String>): List<Stroke>
@@ -73,6 +75,11 @@ class TextFlow(
          *  command and leaves PEN armed, and a selection under PEN is a picture of one. The prior
          *  tool comes back at the selection's dismissal. Call BEFORE [selectAsText]. */
         fun armLassoForLanding()
+
+        /** Every box already on the displayed page — texts, shapes, stickies, headings, links and
+         *  the live ink — for [FreePlacement]: a drop lands at the nearest clear spot to the
+         *  centre, never on top of what is there. */
+        fun occupied(): List<Bounds>
 
         /** Arm the successor selection that rides the dismissal `removeStrokes` is about to
          *  perform; it must be injected inside `onSelectionDismissed` or the engine has already
@@ -110,7 +117,11 @@ class TextFlow(
         // Measured at x = 0 first: that is the widest column this page can offer, so the natural
         // width it comes back with is the one the centre is computed from.
         val (w0, h0) = host.objects.measure(source, 0f, page.width)
-        val (x, y) = TextPlacement.centred(page.width.toFloat(), page.height.toFloat(), w0, h0)
+        // The centre when it is clear, else the nearest clear spot (FreePlacement — the user's
+        // decision 2026-09-13: nothing drops onto what is already there).
+        val (x, y) = FreePlacement.nearCentre(
+            page.width.toFloat(), page.height.toFloat(), w0, h0, host.occupied(), host.density,
+        )
         // D1's cap is `pageWidth − x`, and a centred box always leaves at least its own width to
         // the right of x — so this re-measure cannot normally fire. It stands because the rule is
         // "measure at the final x", not "measure at the page width and hope".

@@ -3,6 +3,7 @@ package com.symmetricalpalmtree.notesproutsn.notebook
 import android.content.Intent
 import android.util.Log
 import com.symmetricalpalmtree.gpaper.core.PaperView
+import com.symmetricalpalmtree.gpaper.core.model.Bounds
 import com.symmetricalpalmtree.gpaper.core.model.Stroke
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.notebook.NotebookUndo.Action
@@ -58,6 +59,11 @@ class StickyFlow(private val host: Host) {
         /** Arm the lasso before a selection lands under another tool (the O2 ordering). */
         fun armLassoForLanding()
 
+        /** Every box already on the displayed page — texts, shapes, stickies, headings, links and
+         *  the live ink — for [FreePlacement]: a drop lands at the nearest clear spot to the
+         *  centre, never on top of what is there. */
+        fun occupied(): List<Bounds>
+
         /** A transform still running when the pipeline goes over would take its geometry with it. */
         fun endTransformIfRunning()
 
@@ -100,7 +106,14 @@ class StickyFlow(private val host: Host) {
             density = host.density,
             contentW = cw,
             contentH = ch,
-        )
+        ).let { built ->
+            // Sized by the defaults, placed by FreePlacement (the centre when clear).
+            val (x, y) = FreePlacement.nearCentre(
+                page.width.toFloat(), page.height.toFloat(), built.width, built.height,
+                host.occupied(), host.density,
+            )
+            built.copy(x = x, y = y)
+        }
         host.session.stickies.create(pageId, sticky)
         host.objects.put(stickies = listOf(sticky))
         host.record(Action.StickyInserted(pageId, sticky))

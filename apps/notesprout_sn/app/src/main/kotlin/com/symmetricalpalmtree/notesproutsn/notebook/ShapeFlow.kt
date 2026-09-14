@@ -1,6 +1,7 @@
 package com.symmetricalpalmtree.notesproutsn.notebook
 
 import com.symmetricalpalmtree.gpaper.core.PaperView
+import com.symmetricalpalmtree.gpaper.core.model.Bounds
 import com.symmetricalpalmtree.gpaper.core.model.OrientedBox
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.notebook.NotebookUndo.Action
@@ -67,6 +68,11 @@ class ShapeFlow(private val host: Host) {
          *  Call BEFORE `setSelection` and BEFORE `beginTransform` (the O2 ordering). */
         fun armLassoForLanding()
 
+        /** Every box already on the displayed page — texts, shapes, stickies, headings, links and
+         *  the live ink — for [FreePlacement]: a drop lands at the nearest clear spot to the
+         *  centre, never on top of what is there. */
+        fun occupied(): List<Bounds>
+
         /** Put back the tool the landing took away — [NotebookActivity]'s
          *  `restoreToolAfterTransferPaste`. */
         fun restoreToolAfterLanding()
@@ -120,7 +126,15 @@ class ShapeFlow(private val host: Host) {
             pageWidth = page.width.toFloat(),
             pageHeight = page.height.toFloat(),
             density = host.density,
-        )
+        ).let { built ->
+            // Sized by the defaults, placed by FreePlacement: the centre when clear, else the
+            // nearest clear spot. A fresh shape is unrotated, so its box is width × height.
+            val (x, y) = FreePlacement.nearCentre(
+                page.width.toFloat(), page.height.toFloat(), built.width, built.height,
+                host.occupied(), host.density,
+            )
+            built.copy(cx = x + built.width / 2f, cy = y + built.height / 2f)
+        }
         host.session.shapes.create(pageId, shape)
         host.objects.put(shapes = listOf(shape))
         host.record(Action.ShapeInserted(pageId, shape))

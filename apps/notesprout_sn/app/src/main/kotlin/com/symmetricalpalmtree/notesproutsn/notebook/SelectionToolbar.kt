@@ -61,7 +61,10 @@ enum class SelectionMode { STROKES, HEADING, TEXT, SHAPE, STICKY, LINK, MIXED, M
  * reason: `WireStroke` is the whole of what that contract carries too) · **Tag** (arc 21 /
  * W3 — beside them because it is the third button gated on an extension, and narrow for a reason of
  * its own: a lone heading or ink alone, never a mixed selection. [TagSelection] holds that rule and
- * the reasoning behind it) · **Delete**
+ * the reasoning behind it) · **Bible** (arc 38 / R3 — the fourth extension-gated button and the last
+ * before Delete, ink-only like the pad's and the calendar's and for a kindred reason: the act is
+ * "read this handwriting as a reference", and only handwriting can be read. Gated on a reader that
+ * understands references, not merely on one being installed) · **Delete**
  * (always, and last: the one destructive verb sits alone on the far edge, away from the buttons
  * reached for casually).
  * A lone **sticky** ([SelectionMode.STICKY], arc 28 / H5) adds nothing at all: it takes the base row
@@ -131,6 +134,19 @@ class SelectionToolbar(
     /** Whether a trusted tag manager is installed — re-read on every [show], same reason as the
      *  scratch pad's. */
     private val isTagAvailable: () -> Boolean = { false },
+    /** Read this ink selection as a Bible reference (arc 38 / R3) — the recognizer first, then the
+     *  reference dialog. Which selection that is is the screen's to resolve at tap time. */
+    private val onBible: () -> Unit = {},
+    /** Whether a trusted Bible reader **that understands references** is installed — re-read on
+     *  every [show], the pad's rule, and the method floor rather than the action floor: a reader
+     *  that only serves the plain door leaves this button absent. */
+    private val isBibleAvailable: () -> Boolean = { false },
+    /** Land the verses of the lone selected Bible reference beside it (arc 40 "Verses"). Which
+     *  link that is is the screen's to resolve at tap time. */
+    private val onVerses: () -> Unit = {},
+    /** Whether the lone selected link is a Bible *reference* (not already the verses) and the
+     *  reader declares the text floor — re-read on every [show], the pad's rule. */
+    private val isVersesAvailable: () -> Boolean = { false },
 ) {
 
     private val density = root.resources.displayMetrics.density
@@ -145,6 +161,8 @@ class SelectionToolbar(
     private val padButton: AppCompatImageButton
     private val calendarButton: AppCompatImageButton
     private val tagButton: AppCompatImageButton
+    private val bibleButton: AppCompatImageButton
+    private val versesButton: AppCompatImageButton
     /** Index 0 is H1 — `levelButtons[n - 1]` is level `n`. */
     private val levelButtons: List<AppCompatImageButton>
 
@@ -241,6 +259,24 @@ class SelectionToolbar(
         }
         bar.addView(tagButton)
 
+        // The fourth extension-gated button, ink-only like the pad's and the calendar's: the act is
+        // "read this handwriting", so there is nothing to read the moment the set holds anything
+        // that is already words or already a link. Gated on the *reference* floor, not merely on a
+        // reader existing — see isBibleAvailable.
+        bibleButton = button(R.drawable.ic_bible, ctx.getString(R.string.bible_reference_action)) {
+            releaseRender()
+            onBible()
+        }
+        bar.addView(bibleButton)
+        // Arc 40 "Verses": the one verb a placed Bible reference has beyond Edit/Unlink — put the
+        // passage's words on the page beside it. Lone-link only, and only a reference (a link
+        // that already holds the verses has nothing to expand).
+        versesButton = button(R.drawable.ic_quote, ctx.getString(R.string.bible_verses_action)) {
+            releaseRender()
+            onVerses()
+        }
+        bar.addView(versesButton)
+
         bar.addView(
             // Delete last, alone on the far edge — the one destructive verb, kept away from the
             // ones you reach for casually. Release before the row runs, for the same reason the R5
@@ -295,6 +331,10 @@ class SelectionToolbar(
             if (mode == SelectionMode.STROKES && isCalendarAvailable()) View.VISIBLE else View.GONE
         tagButton.visibility =
             if (TagSelection.offered(mode, isTagAvailable())) View.VISIBLE else View.GONE
+        bibleButton.visibility =
+            if (mode == SelectionMode.STROKES && isBibleAvailable()) View.VISIBLE else View.GONE
+        versesButton.visibility =
+            if (mode == SelectionMode.LINK && isVersesAvailable()) View.VISIBLE else View.GONE
 
         val rootLoc = IntArray(2).also { root.getLocationInWindow(it) }
         val paperLoc = IntArray(2).also { paperView.getLocationInWindow(it) }

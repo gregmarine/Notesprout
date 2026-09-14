@@ -181,6 +181,12 @@ class AutomationReceiver : BroadcastReceiver() {
 
         "get_title" -> peer.title()
 
+        // ── Arc 39's Bible lookup: the item's path on the payload, no selection needed. ──
+
+        "lookup" -> {
+            peer.lookup(payload(intent)); "OK"
+        }
+
         // ── M10's proofread. Its own peer: the flags live in the controller, not in the screen. ──
 
         "proofread_status" -> proofread()?.proofreadStatus() ?: NO_PROOFREAD

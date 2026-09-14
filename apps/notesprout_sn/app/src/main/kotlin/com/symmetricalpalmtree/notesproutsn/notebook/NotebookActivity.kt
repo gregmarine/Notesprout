@@ -60,6 +60,9 @@ import com.symmetricalpalmtree.notesproutsn.data.prefs.ChromePrefs
 import com.symmetricalpalmtree.notesproutsn.data.prefs.SnapPrefs
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityNotebookBinding
 import com.symmetricalpalmtree.notesproutsn.core.markdown.HeadingPrefix
+import com.symmetricalpalmtree.notesproutsn.extension.BibleEntry
+import com.symmetricalpalmtree.notesproutsn.extension.DocumentContract
+import com.symmetricalpalmtree.notesproutsn.extension.LookupHandoff
 import com.symmetricalpalmtree.notesproutsn.extension.CalendarEntry
 import com.symmetricalpalmtree.notesproutsn.extension.CalendarTarget
 import com.symmetricalpalmtree.notesproutsn.extension.DocumentEditorEntry
@@ -70,6 +73,8 @@ import com.symmetricalpalmtree.notesproutsn.export.ExportActivity
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionRegistry
 import com.symmetricalpalmtree.notesproutsn.extension.InkSend
 import com.symmetricalpalmtree.notesproutsn.extension.RecognizerClient
+import com.symmetricalpalmtree.notesproutsn.extension.PassageText
+import com.symmetricalpalmtree.notesproutsn.extension.ResolvedReference
 import com.symmetricalpalmtree.notesproutsn.extension.ScratchPadEntry
 import com.symmetricalpalmtree.notesproutsn.extension.TagManagerEntry
 import com.symmetricalpalmtree.notesproutsn.extension.TagShowing
@@ -152,6 +157,9 @@ class NotebookActivity : AppCompatActivity() {
     private lateinit var documentSeedFlow: DocumentSeedFlow
     /** The tag manager's entry (arc 21 / W2) — the sixth point's door, and the owner of `btnTags`. */
     private lateinit var tagEntry: TagManagerEntry
+    /** The Bible reader's entry (arc 37 / B0) — the ninth point's door, and the owner of the bottom
+     *  strip's `btnBible`. No paper behind it: no handoff, no chrome flag. */
+    private lateinit var bible: BibleEntry
     /** The three tag doors that button opens (arc 21 / W2). */
     private lateinit var tagsPopup: TagsPopup
     /** The Insert button's sub-bar (arc 28 / H1) — Sticky, Text and the six shapes. */
@@ -177,13 +185,52 @@ class NotebookActivity : AppCompatActivity() {
         override val pageId: String get() = displayedPageId
         override val objects: PageObjects get() = pageObjects
         override val paper: PaperView get() = this@NotebookActivity.paper
+        override val density: Float get() = resources.displayMetrics.density
         override fun strokesIn(ids: Set<String>) = liveStrokes.values.filter { it.id in ids }
         override fun dropLiveStrokes(ids: List<String>) { ids.forEach { liveStrokes.remove(it) } }
         override fun record(action: Action) = undo.record(action)
         override fun selectAsText(text: PageText) = this@NotebookActivity.selectAsText(text)
         override fun armLassoForLanding() = this@NotebookActivity.armLassoForLanding()
+        override fun occupied(): List<Bounds> = occupiedBounds()
         override fun armPendingSelection(select: () -> Unit) { pendingSelection = select }
         override fun drainPendingSelection() { pendingSelection?.let { pendingSelection = null; it() } }
+    })
+
+    /** Convert, insert and edit for **Bible references** (arc 38 / R3) — [TextFlow]'s neighbour and
+     *  its shape exactly, out of this file for the same reason. What it makes is an ordinary text
+     *  object wrapped in an ordinary link, so everything it needs of the screen is either a verb
+     *  [TextFlow.Host] already names or the wrap machinery `createLinkFromSelection` uses, reached
+     *  through [BibleRefFlow.Host.wrapTextAsLink]. It never touches the extension itself: the one
+     *  call out is `resolve`, which is [BibleEntry]'s (and answers null when there is no reader —
+     *  the doors are gated, but a package can be pulled between the tap and the Save). */
+    private val bibleRefFlow = BibleRefFlow(this, object : BibleRefFlow.Host {
+        override val alive: Boolean get() = opened && !closing
+        override val session: NotebookSession get() = this@NotebookActivity.session
+        override val pageId: String get() = displayedPageId
+        override val objects: PageObjects get() = pageObjects
+        override val paper: PaperView get() = this@NotebookActivity.paper
+        override val density: Float get() = resources.displayMetrics.density
+        override fun strokesIn(ids: Set<String>) = liveStrokes.values.filter { it.id in ids }
+        override fun record(action: Action) = undo.record(action)
+        override suspend fun resolve(text: String): ResolvedReference? =
+            if (::bible.isInitialized) bible.resolve(text) else null
+        // Read at the call, never captured — discovery re-runs on resume.
+        override val supportsReferences: Boolean get() = ::bible.isInitialized && bible.supportsReferences
+        // Arc 40 "Verses": both read at the call, never captured — discovery re-runs on resume.
+        override val supportsVerses: Boolean get() = ::bible.isInitialized && bible.supportsText
+        override suspend fun passageText(wire: String): PassageText? =
+            if (::bible.isInitialized) bible.passageText(wire) else null
+        override fun wrapTextAsLink(
+            pageId: String,
+            text: PageText,
+            payload: String,
+            consumedStrokeIds: List<String>,
+        ): PageLink? = this@NotebookActivity.wrapTextAsLink(pageId, text, payload, consumedStrokeIds)
+        override fun liveLink(id: String): PageLink? = liveLinks[id]
+        override fun relandEditedLink(link: PageLink) = this@NotebookActivity.relandEditedLink(link)
+        override fun armLassoForLanding() = this@NotebookActivity.armLassoForLanding()
+        override fun occupied(): List<Bounds> = occupiedBounds()
+        override fun toast(text: String) = this@NotebookActivity.toast(text)
     })
 
     /** Insert and transform for shapes (arc 28 / H4) — [TextFlow]'s neighbour, out of this file for
@@ -201,6 +248,7 @@ class NotebookActivity : AppCompatActivity() {
         override fun record(action: Action) = undo.record(action)
         override fun selectAsShape(shape: PageShape) = this@NotebookActivity.selectAsShape(shape)
         override fun armLassoForLanding() = this@NotebookActivity.armLassoForLanding()
+        override fun occupied(): List<Bounds> = occupiedBounds()
         override fun restoreToolAfterLanding() = restoreToolAfterTransferPaste()
         override fun dismissSelectionChrome() {
             selectionActive = false
@@ -236,6 +284,7 @@ class NotebookActivity : AppCompatActivity() {
         override fun runPageOp(block: suspend () -> Unit) = this@NotebookActivity.runPageOp(block)
         override fun selectAsSticky(sticky: PageSticky) = this@NotebookActivity.selectAsSticky(sticky)
         override fun armLassoForLanding() = this@NotebookActivity.armLassoForLanding()
+        override fun occupied(): List<Bounds> = occupiedBounds()
         override fun endTransformIfRunning() = this@NotebookActivity.endTransformIfRunning()
         override fun reclaimPipeline() { if (this@NotebookActivity::paper.isInitialized) this@NotebookActivity.paper.resumeDrawing() }
         override fun dismissFloatingChrome() {
@@ -631,6 +680,20 @@ class NotebookActivity : AppCompatActivity() {
             // every resume, so what the bar reads is what was true at the last resume, not at
             // startup.
             isTagAvailable = { ::tagEntry.isInitialized && tagEntry.isAvailable },
+            // Arc 38 / R3. Resolved at tap time like every other selection verb here.
+            onBible = { currentSelection?.let { bibleRefFlow.convert(it) } },
+            // The pad's rule again, and one step narrower: `BibleEntry` re-runs discovery on every
+            // resume, and what is read here is whether the reader it found understands *references*
+            // — an older one still serves the bottom bar's plain door and must not offer this.
+            isBibleAvailable = { ::bible.isInitialized && bible.supportsReferences },
+            // Arc 40 "Verses": a lone placed Bible *reference* (never one already holding the
+            // verses), against a reader declaring the text floor.
+            onVerses = { loneSelectedLink()?.let { bibleRefFlow.expand(it) } },
+            isVersesAvailable = {
+                val link = loneSelectedLink()
+                link != null && LinkPayload.referenceOf(link.payload) != null &&
+                    !LinkPayload.isBibleText(link.payload) && ::bible.isInitialized && bible.supportsText
+            },
         )
         // The transform mode's own floating bar (arc 28 / H4). It is not part of the selection
         // toolbar: the mode is not a selection, and the two are never up at the same time.
@@ -777,6 +840,8 @@ class NotebookActivity : AppCompatActivity() {
             // M8: the flag both editor-only hooks are gated on, and the flag every state carries.
             isTextDocument = { isTextDocument() },
             rename = { name -> renameTextDocument(name) },
+            // Arc 39 "Lookup": the editor's selection → the passage view over the editor.
+            lookupReference = { text -> lookupBibleReference(text) },
         )
         // Before the reconnect below, and before anything can ask for state: a host killed behind
         // the editor must come back pointing at the page — and, since M7, the scope — the editor
@@ -789,6 +854,10 @@ class NotebookActivity : AppCompatActivity() {
             activity = this,
             button = binding.btnDocument,
             hooks = documentHooks,
+            // Arc 39: the editor offers its Bible item only when the reader here understands
+            // references — the host's discovery answer, read at the open (the entry below is
+            // built a few lines down; nothing opens the editor before onResume).
+            bibleAvailable = { ::bible.isInitialized && bible.supportsReferences },
             // The showing is over — see [documentShowingEnded]. For an ordinary notebook that is the
             // catch-up (og's `navigateToPage(endedOn)`); since M8 a text document can also mean
             // "now show me the pages" or "seal and go".
@@ -824,6 +893,31 @@ class NotebookActivity : AppCompatActivity() {
         }
         TooltipCompat.setTooltipText(binding.btnTags, binding.btnTags.contentDescription)
 
+        // The Bible (arc 37 / B0) — the tag manager's shape: a launcher, so built here; a
+        // non-drawing screen, so no handoff. Its button is on the bottom strip (the user's call).
+        bible = BibleEntry(
+            activity = this,
+            button = binding.btnBible,
+            // Arc 38 / R3: the Insert bar's Bible button tracks the *reference* floor, not merely
+            // the reader's presence, and discovery re-runs on every resume — so the offer is made
+            // from the answer rather than once at startup. The bar is built a few lines below this
+            // one; nothing calls back before onResume.
+            onAvailabilityChanged = { supported ->
+                if (::insertBar.isInitialized) insertBar.offer(InsertBar.Kind.BIBLE, supported)
+            },
+            // B9: this door has a notebook behind it, so the reader gets its Send to notebook
+            // button; what it parks lands here as a Bible reference object, selected.
+            sendEnabled = true,
+            onSent = { reference -> bibleRefFlow.insertResolved(reference) },
+            // Arc 40 "Verses": the Send that chose the words — the reference and its Markdown.
+            onSentText = { reference, text -> bibleRefFlow.insertVersesSent(reference, text) },
+        )
+        binding.btnBible.setOnClickListener {
+            if (!opened || closing) return@setOnClickListener
+            bible.open()
+        }
+        TooltipCompat.setTooltipText(binding.btnBible, binding.btnBible.contentDescription)
+
         // Insert (arc 28 / H1, D4) — the sub-bar and the button that opens it. Every one of the
         // eight buttons is GONE until its own phase offers it (J4): a control that does nothing
         // does not exist. H2 gave one of them — Text — something to do in every build, which is
@@ -848,11 +942,14 @@ class NotebookActivity : AppCompatActivity() {
                     shape != null -> shapeFlow.insertAtCentre(shape)
                     kind == InsertBar.Kind.TEXT -> textFlow.insertAtCentre()
                     kind == InsertBar.Kind.STICKY -> stickyFlow.insertAtCentre()
+                    kind == InsertBar.Kind.BIBLE -> bibleRefFlow.insertAtCentre()
                 }
             },
         )
-        // All eight in every build since H5 — Text (H2), the six shapes (H4), Sticky (H5).
-        InsertBar.Kind.entries.forEach { insertBar.offer(it, true) }
+        // The arc-28 eight in every build since H5 — Text (H2), the six shapes (H4), Sticky (H5).
+        // Bible (arc 38 / R3) is the one that comes and goes: it is offered from `BibleEntry`'s own
+        // discovery (the `onAvailabilityChanged` above), which runs in onCreate and on every resume.
+        InsertBar.Kind.entries.forEach { insertBar.offer(it, it != InsertBar.Kind.BIBLE) }
         // The eraser's sub-bar (arc 29 / LE2, D3) — the Insert bar's recipe, hung under the eraser
         // button instead, and opened only by that button's own re-tap (there is no third top-bar
         // slot: a twelfth 62 dp button falls off the Nomad's edge). A pick arms the tool inside
@@ -922,6 +1019,9 @@ class NotebookActivity : AppCompatActivity() {
                     if (tagsPopup.isShowing) hideTagsPopup() else showTagsPopup(anchor)
                 },
                 CollapsedChrome.Entry.mirroring(R.drawable.ic_clock, binding.btnRecents),
+                // The Bible's bar button is on the bottom strip, but a door is a door: mirrored
+                // here before Calendar so the pad stays last (arc 37 / B0).
+                CollapsedChrome.Entry.mirroring(R.drawable.ic_bible, binding.btnBible),
                 CollapsedChrome.Entry.mirroring(R.drawable.ic_calendar, binding.btnCalendar),
                 CollapsedChrome.Entry.mirroring(R.drawable.ic_sketching, binding.btnScratchPad),
             ),
@@ -955,7 +1055,19 @@ class NotebookActivity : AppCompatActivity() {
             alive = { opened && !closing },
             navigateToPage = { pageId -> runPageOp { refreshToPage(pageId) } },
             closeAndLaunch = { target -> close { startActivity(target) } },
-            editLink = { link -> linkPickFlow.beginEdit(link) },
+            // The dead-target dialog's "Edit link" goes wherever this link's own Edit goes: a Bible
+            // link is retargeted in the reference dialog, never in the page picker.
+            editLink = { link -> editLinkTarget(link) },
+            // Arc 38 / R3: true when the showing was asked for, false when no reader that
+            // understands references is installed — which is the dead-target dialog's other body.
+            openBible = { reference ->
+                if (::bible.isInitialized && bible.supportsReferences) {
+                    bible.open(reference)
+                    true
+                } else {
+                    false
+                }
+            },
         )
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -1131,7 +1243,7 @@ class NotebookActivity : AppCompatActivity() {
         val page = if (idx >= 0 && idx != session.currentIndex) session.goTo(idx) else session.currentPage
         val strokes = session.store.loadPage(page.id)
         val headings = remeasureForDevice(session.headings.loadPage(page.id))
-        val links = withUnderlineBand(session.links.loadPage(page.id))
+        val links = correctedForDevice(session.links.loadPage(page.id), page.width)
         // Arc 28: the page's texts, shapes and sticky icons, read here with everything else — the
         // texts already re-measured for this device (the heading remeasure's rule, PageObjects).
         val objects = pageObjects.load(session, page.id, page.width)
@@ -1223,7 +1335,15 @@ class NotebookActivity : AppCompatActivity() {
                     }
                     if (standingForReplay()) scratchPad.open()
                 }
+                Surface.BIBLE -> {
+                    if (!bible.discovered()) {
+                        Slog.d(TAG) { "restore: the bible reader is not installed — dropped" }
+                        return@launch
+                    }
+                    if (standingForReplay()) bible.open()
+                }
                 Surface.DOCUMENT_EDITOR -> {
+                    bible.discovered() // the editor's Bible item is decided at the launch (arc 39)
                     if (!documentEntry.discovered()) {
                         Slog.d(TAG) { "restore: the document editor is not installed — dropped" }
                         return@launch
@@ -1257,6 +1377,31 @@ class NotebookActivity : AppCompatActivity() {
     /** Still worth raising a screen over: the same `opened && !closing` gate every extension button
      *  reads, plus the two Activity flags, re-asked after every suspension in [replayAbove]. */
     private fun standingForReplay(): Boolean = opened && !closing && !isFinishing && !isDestroyed
+
+    /**
+     * Arc 39 "Lookup" — the editor's selection, arriving on a **Binder thread** through
+     * [DocumentHostHooks]: ask the reader to resolve it (bind-per-call, off any screen) and park
+     * the answer for the host's lookup screen ([LookupHandoff] → `BibleLookupActivity`), which the
+     * editor starts next. **This screen launches nothing**: it is stopped behind the editor, and a
+     * child's result would not reach it until the editor closed — the stale-latch trap the lookup
+     * screen exists for. `runBlocking` here is the allowed case (a Binder thread, never the UI
+     * thread); the editor holds a wait dialog up for the call's life. Answers a [DocumentContract]
+     * `REFERENCE_*` code; the text is never logged.
+     *
+     * `resolve`'s null covers "not a reference" and "could not ask" alike (arc 38's one answer),
+     * so a reader that failed to answer reads as unknown here — the honest alternative would be a
+     * second call, and the failure is logged by the client either way.
+     */
+    private fun lookupBibleReference(text: String): Int = runBlocking {
+        if (!opened || closing || !::bible.isInitialized || !bible.supportsReferences) {
+            return@runBlocking DocumentContract.REFERENCE_UNAVAILABLE
+        }
+        val reader = bible.provider ?: return@runBlocking DocumentContract.REFERENCE_UNAVAILABLE
+        val editor = documentEntry.providerPackage ?: return@runBlocking DocumentContract.REFERENCE_UNAVAILABLE
+        val resolved = bible.resolve(text) ?: return@runBlocking DocumentContract.REFERENCE_UNKNOWN
+        LookupHandoff.park(reader, resolved.wire, editor)
+        DocumentContract.REFERENCE_OPENED
+    }
 
     /**
      * The text-document open (M8): the **lightweight** setup and the editor, with no stroke
@@ -1316,6 +1461,11 @@ class NotebookActivity : AppCompatActivity() {
         // pre-draw + post — the trap that overlay exists for). Both are the same layout and both
         // moves happen in this one Main message, so the swap costs no frame and shows no gap.
         binding.openingOverlay.root.visibility = View.GONE
+        // The editor's Bible item (arc 39) is decided at this launch from the reader's discovery,
+        // which onResume only fires and forgets — a cold launch straight into a text document
+        // would otherwise race it and open the editor without the item. A package query, cheap.
+        bible.discovered()
+        if (!opened || closing) return
         documentEntry.open()
         watchForAnEditorThatNeverOpens()
     }
@@ -1521,6 +1671,7 @@ class NotebookActivity : AppCompatActivity() {
                 // does the same in memory, so the composite (translation-invariant) is reused as-is.
                 session.links.move(linkIds, move.dx, move.dy)
                 for (id in linkIds) liveLinks[id]?.let { liveLinks[id] = it.translated(move.dx, move.dy) }
+                if (move.dx != 0f) remeasureMovedLinks(linkIds)
                 linkRenderer.update(liveLinks.values.toList())
             }
             // Arc 28: texts, shapes and stickies that rode the same drag. Each store's move is a
@@ -1695,9 +1846,16 @@ class NotebookActivity : AppCompatActivity() {
             // restore has already fired and the new heading sits selected under a PEN tool that
             // can neither drag nor tap it (eye-check #5 round-2 finding). The engine then owns the
             // PEN restore at this selection's own dismissal, exactly like any smart-lasso session.
-            pendingSelection?.let { select ->
-                pendingSelection = null
-                select()
+            val successor = pendingSelection
+            pendingSelection = null
+            if (successor != null) {
+                // Arc 40 walk finding: an insert-landed selection acted on by its own bar (Verses
+                // on a just-sent reference) is dismissed with a successor, and the transfer-paste
+                // latch would have put PEN back under it — the successor sat unselectable under a
+                // pen. The latch is *kept*, not cleared: the tool goes back when the successor is
+                // itself dismissed, which is what the insert promised in the first place.
+                successor()
+                return
             }
             restoreToolAfterTransferPaste()
         }
@@ -2023,7 +2181,7 @@ class NotebookActivity : AppCompatActivity() {
             page = session.goTo(index)
             strokes = session.store.loadPage(page.id)
             headings = remeasureForDevice(session.headings.loadPage(page.id))
-            links = withUnderlineBand(session.links.loadPage(page.id))
+            links = correctedForDevice(session.links.loadPage(page.id), page.width)
             objects = pageObjects.load(session, page.id, page.width)
             // Composites raster off Main here, inside the buffered-commit window — never in the
             // display block below, where a link-heavy page would stall the flip frame (K5 review).
@@ -2213,6 +2371,17 @@ class NotebookActivity : AppCompatActivity() {
                 session.store.drain(); refreshToPage(a.pageId)
             }
             is Action.TextEdited -> { session.texts.updateContent(a.before); session.store.drain(); refreshToPage(a.pageId) }
+            // Arc 38 / R3 — a Bible reference, reversed whole: unwrap (the text goes back to being
+            // page content), take the text away, and put the ink it replaced back IN PLACE (writing
+            // order is load-bearing). In that order: the unlink's re-parent must find the text row
+            // where it left it. An insert's strokeIds is empty, so the same arm covers both.
+            is Action.BibleRefCreated -> {
+                session.links.unlink(a.pageId, a.link)
+                session.texts.erase(listOf(a.text.id))
+                session.store.revive(a.strokeIds)
+                session.store.drain(); refreshToPage(a.pageId)
+            }
+            is Action.BibleRefEdited -> replayBibleRef(a.pageId, a.before)
             is Action.ShapeInserted -> { session.shapes.erase(listOf(a.shape.id)); session.store.drain(); refreshToPage(a.pageId) }
             is Action.ShapeTransformed -> { session.shapes.transform(a.before); session.store.drain(); refreshToPage(a.pageId) }
             // remove(), for the paste's reason: an insert's undo takes the note's children too —
@@ -2250,6 +2419,24 @@ class NotebookActivity : AppCompatActivity() {
             // No drain: a re-papering writes one page row and never touches the stroke writer.
             is Action.TemplateChanged -> { session.applyTemplate(a.pageId, a.from); refreshToPage(a.pageId) }
         }
+    }
+
+    /**
+     * One side of an [Action.BibleRefEdited] (arc 38 / R3), written the DB-is-truth way like every
+     * other replay: the three rows the edit touched — the wrapped text's content, the link's
+     * payload, the link's box — then a reload of the page.
+     *
+     * The composite cache is dropped first: a reload alone would not shift it, because the link's
+     * padded size is usually the same on both sides of a reference edit and that is exactly what
+     * [LinkRenderer.update] reuses on.
+     */
+    private suspend fun replayBibleRef(pageId: String, side: PageLink) {
+        side.texts.firstOrNull()?.let { session.texts.updateContent(it) }
+        session.links.updatePayload(side.id, side.payload)
+        session.links.updateBounds(side.id, side.x, side.y, side.width, side.height)
+        linkRenderer.invalidate(side.id)
+        session.store.drain()
+        refreshToPage(pageId)
     }
 
     private suspend fun reapply(a: Action) {
@@ -2315,6 +2502,15 @@ class NotebookActivity : AppCompatActivity() {
                 session.store.drain(); refreshToPage(a.pageId)
             }
             is Action.TextEdited -> { session.texts.updateContent(a.after); session.store.drain(); refreshToPage(a.pageId) }
+            // The undo run backwards: the text row first (relink re-parents it, so it has to be
+            // alive before the wrap goes back on), then the wrap, then the ink out again.
+            is Action.BibleRefCreated -> {
+                session.texts.restore(listOf(a.text.id))
+                session.links.relink(a.pageId, a.link)
+                session.store.remove(a.strokeIds)
+                session.store.drain(); refreshToPage(a.pageId)
+            }
+            is Action.BibleRefEdited -> replayBibleRef(a.pageId, a.after)
             is Action.ShapeInserted -> { session.shapes.restore(listOf(a.shape.id)); session.store.drain(); refreshToPage(a.pageId) }
             is Action.ShapeTransformed -> { session.shapes.transform(a.after); session.store.drain(); refreshToPage(a.pageId) }
             // restore(), not a create: the row is soft-deleted, not gone — and if the undo's delete
@@ -2448,6 +2644,41 @@ class NotebookActivity : AppCompatActivity() {
     private fun withUnderlineBand(links: List<PageLink>): List<PageLink> =
         if (links.isEmpty()) links
         else links.map { it.withUnderlineBand(resources.displayMetrics.density) }
+
+    /**
+     * Every in-memory correction a loaded link gets: its wrapped texts re-measured for THIS
+     * device at `pageWidth − x` ([PageLink.withTextsRemeasured] — the loose texts' rule, which a
+     * text under a link never had), then the underline band. Rows are corrected when next written.
+     */
+    private fun correctedForDevice(links: List<PageLink>, pageWidth: Int): List<PageLink> {
+        if (links.isEmpty()) return links
+        val density = resources.displayMetrics.density
+        return links.map { link ->
+            link.withTextsRemeasured({ t -> pageObjects.measure(t.text, t.x, pageWidth) }, density)
+                .withUnderlineBand(density)
+        }
+    }
+
+    /**
+     * A moved link whose wrapped texts now sit at another `x`: their wrap width changed with it
+     * (`pageWidth − x`), so re-measure, and when that moved the box, write the rows the store's
+     * delta move could not know about and drop the composite so it rasters at the new size.
+     * Nothing to do for a link wrapping no text — the common case, one map lookup.
+     */
+    private fun remeasureMovedLinks(ids: List<String>) {
+        val pageWidth = session.currentPage.width
+        val density = resources.displayMetrics.density
+        for (id in ids) {
+            val moved = liveLinks[id] ?: continue
+            if (moved.texts.isEmpty()) continue
+            val sized = moved.withTextsRemeasured({ t -> pageObjects.measure(t.text, t.x, pageWidth) }, density)
+            if (sized === moved) continue
+            liveLinks[id] = sized
+            for (t in sized.texts) if (t !in moved.texts) session.texts.updateContent(t)
+            session.links.updateBounds(id, sized.x, sized.y, sized.width, sized.height)
+            linkRenderer.invalidate(id)
+        }
+    }
 
     /**
      * The bar with the right mode: pure strokes → CONVERT's H + Link, one heading alone → CHANGE's H
@@ -2694,11 +2925,29 @@ class NotebookActivity : AppCompatActivity() {
         linkPickFlow.beginCreate(sel)
     }
 
-    /** Edit on a lone selected link: the flow captures the link and prefills the picker. */
+    /** Edit on a lone selected link: the flow captures the link and prefills the picker — or, for
+     *  a Bible link, the reference dialog ([editLinkTarget] decides, by reading the payload). */
     private fun beginLinkEdit() {
         if (!opened || closing) return
         val link = loneSelectedLink() ?: return
-        linkPickFlow.beginEdit(link)
+        editLinkTarget(link)
+    }
+
+    /**
+     * Retarget one link — **the payload decides which question that is** (arc 38 / R3). A
+     * [LinkPayload.KIND_BIBLE] link's target is a passage of scripture, and the page picker has
+     * nothing to say about one, so it opens the reference dialog instead; every other kind opens
+     * the picker as it always has. Both doors into an Edit — the lasso bar's button and the
+     * dead-target dialog's — come through here, so the two can never disagree.
+     */
+    private fun editLinkTarget(link: PageLink) {
+        if (!opened || closing) return
+        when {
+            // Arc 40: the verses on the page — the words are scripture, so Edit is the text dialog.
+            LinkPayload.isBibleText(link.payload) -> bibleRefFlow.editVerses(link)
+            LinkPayload.referenceOf(link.payload) != null -> bibleRefFlow.edit(link)
+            else -> linkPickFlow.beginEdit(link)
+        }
     }
 
     /**
@@ -2775,17 +3024,72 @@ class NotebookActivity : AppCompatActivity() {
             strokes = strokes, headings = headings,
             texts = texts, shapes = shapes, stickies = stickies,
         )
-        session.links.create(pageId, link)
+        landLink(pageId, link, strokes.map { it.id })
         undo.record(Action.LinkCreated(pageId, link))
+        Slog.d(TAG) {
+            "wrapped ${strokes.size} strokes + ${headings.size} headings + ${texts.size} texts + " +
+                "${shapes.size} shapes + ${stickies.size} stickies → link"
+        }
+    }
+
+    /**
+     * Wrap one freshly created text object in a link (arc 38 / R3 — [BibleRefFlow]'s door into the
+     * wrap machinery). The row for the text has already been written by the flow; what is left is
+     * exactly what a lasso wrap does, with a child set of one and no working copy to take the text
+     * out of (it was never put on the page — it belongs to the link from the moment it exists).
+     *
+     * [consumedStrokeIds] is the ink a conversion replaced; it is the list the paper is told to
+     * drop, standing where a wrap's own wrapped strokes stand — in both cases they are the strokes
+     * leaving the page's live set in this frame.
+     *
+     * Null when nothing can be wrapped: the bounds of one text object are never degenerate, so this
+     * only happens if the page turned under the dialog, which the flow has already checked.
+     */
+    private fun wrapTextAsLink(
+        pageId: String,
+        text: PageText,
+        payload: String,
+        consumedStrokeIds: List<String>,
+    ): PageLink? {
+        if (!opened || closing) return null
+        val bounds = PageLink.unionBounds(
+            emptyList(), emptyList(), resources.displayMetrics.density, listOf(text),
+        ) ?: return null
+        val link = PageLink(
+            id = java.util.UUID.randomUUID().toString(),
+            payload = payload, chrome = LinkPayload.chromeOf(payload),
+            x = bounds.left, y = bounds.top, width = bounds.width, height = bounds.height,
+            order = 0,   // the store lands it at MAX(order)+1 among the page's links
+            strokes = emptyList(), headings = emptyList(), texts = listOf(text),
+        )
+        landLink(pageId, link, consumedStrokeIds)
+        return link
+    }
+
+    /**
+     * The tail every wrap shares: the row, the working copies, the renderers, the successor
+     * selection and **one frame**. [droppedStrokeIds] are the strokes leaving the page's live set
+     * with this act — a wrap's own wrapped ink, or the ink a conversion consumed.
+     *
+     * The undo entry is deliberately **not** recorded here: a plain wrap is one
+     * [Action.LinkCreated], a Bible reference is one [Action.BibleRefCreated] covering three rows,
+     * and which of them this act is belongs to the caller.
+     */
+    private fun landLink(pageId: String, link: PageLink, droppedStrokeIds: List<String>) {
+        session.links.create(pageId, link)
         // A wrapped heading now *stays* in the outline (the gather hops link → page), so this
         // cannot flip availability any more — kept because parentage moved and the gate is cheap.
         contentsFlow.refresh()
-        val strokeIds = strokes.map { it.id }
-        strokeIds.forEach { liveStrokes.remove(it) }
-        headings.forEach { liveHeadings.remove(it.id) }
+        droppedStrokeIds.forEach { liveStrokes.remove(it) }
+        link.headings.forEach { liveHeadings.remove(it.id) }
         // The wrapped objects leave the page's own lists: they belong to the link now, and the
-        // link's composite is what draws them.
-        pageObjects.drop(objs)
+        // link's composite is what draws them. (A text the caller never put on the page is simply
+        // not there to remove — the drop is by id and a miss costs nothing.)
+        pageObjects.drop(
+            pageObjects.split(
+                link.texts.map { it.id } + link.shapes.map { it.id } + link.stickies.map { it.id },
+            )
+        )
         liveLinks[link.id] = link
         headingRenderer.headings = liveHeadings.values.toList()
         linkRenderer.update(liveLinks.values.toList())
@@ -2793,16 +3097,27 @@ class NotebookActivity : AppCompatActivity() {
         // `onSelectionDismissed`. Injecting it there keeps the smart-lasso session alive across the
         // wrap, so the engine restores PEN when the *link's* selection is dismissed, not mid-wrap.
         pendingSelection = { selectAsLink(link) }
-        if (strokeIds.isNotEmpty()) paper.removeStrokes(strokeIds) else paper.clearSelection()
+        if (droppedStrokeIds.isNotEmpty()) paper.removeStrokes(droppedStrokeIds) else paper.clearSelection()
         // No dismissal fired — select directly.
         pendingSelection?.let { pendingSelection = null; it() }
         // Unconditional, for the conversion's reason: removeStrokes only re-records when it dropped
         // something, and a heading-only wrap still has to paint. One Main block → one frame.
         paper.notifyContentChanged()
-        Slog.d(TAG) {
-            "wrapped ${strokeIds.size} strokes + ${headings.size} headings + ${texts.size} texts + " +
-                "${shapes.size} shapes + ${stickies.size} stickies → link"
-        }
+    }
+
+    /**
+     * A Bible reference's Edit landed (arc 38 / R3): the link's payload, box and one wrapped text
+     * have all changed together, so the composite must be **rebuilt** rather than reused — its
+     * padded size very often does not change when the words do ([LinkRenderer.invalidate]).
+     * Re-selecting re-anchors the bar under the resized box (the post-edit re-anchor, a recorded
+     * frame-silence exception).
+     */
+    private fun relandEditedLink(link: PageLink) {
+        if (!opened || closing) return
+        liveLinks[link.id] = link
+        linkRenderer.invalidate(link.id)
+        syncLinkRenderer()
+        selectAsLink(link)
     }
 
     /** Land the selection on a freshly wrapped [l] — the link is what the user now has in hand.
@@ -2950,7 +3265,7 @@ class NotebookActivity : AppCompatActivity() {
             // In-memory corrections a page load would make too: heading boxes re-measured for THIS
             // device, and any under-sized underline band grown. Rows are corrected when next written.
             val headings = remeasureForDevice(plan.headings)
-            val links = withUnderlineBand(plan.links)
+            val links = correctedForDevice(plan.links, page.width)
             // Arc 28: a pasted text is re-measured for THIS device too — same correction, same
             // reason (the row is corrected whenever the text is next written).
             val texts = pageObjects.remeasured(plan.texts, page.width)
@@ -3326,6 +3641,26 @@ class NotebookActivity : AppCompatActivity() {
      * It lands **selected with the lasso armed** and says so — [landTransferred], which the
      * received-page road (arc 31 / HV5) shares rather than copying.
      */
+
+    /**
+     * Every box on the displayed page, for [FreePlacement] (the user's decision 2026-09-13: a
+     * centre drop lands at the nearest clear spot, never on what is there): the working copies of
+     * texts, shapes (their padded AABB), stickies, headings and links, plus the **live ink** — a
+     * text dropped over handwriting is the same stacking. Read on Main at the drop, so what the
+     * user sees is what is avoided.
+     */
+    private fun occupiedBounds(): List<Bounds> {
+        val density = resources.displayMetrics.density
+        val out = ArrayList<Bounds>()
+        pageObjects.texts.values.mapTo(out) { Bounds(it.x, it.y, it.x + it.width, it.y + it.height) }
+        pageObjects.shapes.values.mapTo(out) { ShapeGeometry.aabb(it, density) }
+        pageObjects.stickies.values.mapTo(out) { Bounds(it.x, it.y, it.x + it.width, it.y + it.height) }
+        liveHeadings.values.mapTo(out) { it.bounds }
+        liveLinks.values.mapTo(out) { it.bounds }
+        liveStrokes.values.mapTo(out) { it.bounds }
+        return out
+    }
+
     private fun pasteTransferred(
         wire: List<WireStroke>,
         truncated: Boolean,
@@ -4228,6 +4563,7 @@ class NotebookActivity : AppCompatActivity() {
         }
         if (::documentEntry.isInitialized) documentEntry.refresh()
         if (::tagEntry.isInitialized) tagEntry.refresh()
+        if (::bible.isInitialized) bible.refresh()
         refreshExportAvailable()
     }
 
@@ -4372,6 +4708,8 @@ class NotebookActivity : AppCompatActivity() {
         // The tag screen's held bind, same rule. It reaches back into nothing of ours — the index
         // is the extension's own store value — so it needs no ordering against the seal below.
         if (::tagEntry.isInitialized) tagEntry.close()
+        // The Bible's held bind, same rule and the same reason as the tag screen's.
+        if (::bible.isInitialized) bible.close()
         // Same rule for the editor's held bind — and it matters more here, because its host binder
         // reaches back into this session: released before the seal below, never after. The close's
         // Job is what enforces "never after" (M11): the seal coroutine joins it, so the extension's

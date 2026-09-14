@@ -62,6 +62,21 @@ class LinkNavTest {
     }
 
     @Test
+    fun `a Bible reference plans a passage, not a place in the library`() {
+        val wire = "JHN:3:14-3:18,PRO:3:5-3:6"
+        val payload = LinkPayload.encode(LinkPayload.CHROME_UNDERLINE, LinkPayload.KIND_BIBLE, wire, null)
+        assertEquals(LinkNav.Follow.Bible(wire), LinkNav.planFollow(payload, here))
+        // And it does not depend on which notebook is open — a passage is nowhere in the library.
+        assertEquals(LinkNav.Follow.Bible(wire), LinkNav.planFollow(payload, there))
+    }
+
+    @Test
+    fun `a Bible payload the codec refuses is dead, not a passage`() {
+        assertEquals(LinkNav.Follow.Dead, LinkNav.planFollow("L1|1|3||", here))
+        assertEquals(LinkNav.Follow.Dead, LinkNav.planFollow("L1|1|3|JHN:3:16|pg-1", here))
+    }
+
+    @Test
     fun `a corrupt payload is dead`() {
         assertEquals(LinkNav.Follow.Dead, LinkNav.planFollow("not a payload", here))
     }

@@ -30,6 +30,12 @@ object SwipeMath {
     /** Rightward travel: back — the previous page. */
     const val BACK = -1
 
+    /** Downward travel: a swipe down — the Contents, the Recents, the Bible's Contents and Recents. */
+    const val DOWN = 1
+
+    /** Upward travel: a swipe up — the notebook's trail walk-back. */
+    const val UP = -1
+
     /**
      * [FORWARD], [BACK] or [NONE] for one completed drag.
      *
@@ -48,5 +54,25 @@ object SwipeMath {
         val long = absDx >= LONG_DISTANCE_FRAC * width
         if (!fast && !long) return NONE
         return if (dx < 0f) FORWARD else BACK
+    }
+
+    /**
+     * [flip] rotated 90°: [DOWN], [UP] or [NONE] for one completed drag, judged against the
+     * surface's **height**. Vertical-dominant, far enough, and either fast enough or simply long
+     * enough — the same three constants, so the hand learns one travel for both axes. The two
+     * dominance tests are mutually exclusive: at most one of [flip] and this fires for a drag.
+     *
+     * Written once here for the notebook's `PageGestures` (the Contents swipe-down and the trail
+     * swipe-up) and for [ListSwipe]'s optional vertical callbacks (the Bible's Contents and Recents panels).
+     */
+    fun vertical(dx: Float, dy: Float, vy: Float, height: Float, minVelocity: Float): Int {
+        if (height <= 0f) return NONE
+        val absDy = abs(dy)
+        if (absDy <= abs(dx)) return NONE
+        if (absDy < MIN_DISTANCE_FRAC * height) return NONE
+        val fast = abs(vy) >= minVelocity
+        val long = absDy >= LONG_DISTANCE_FRAC * height
+        if (!fast && !long) return NONE
+        return if (dy > 0f) DOWN else UP
     }
 }
