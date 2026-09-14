@@ -60,8 +60,27 @@ Walked over adb on the Nomad (Write, Preview, Back, a second lookup, the alert) 
 2026-09-13 on the user's own hand walk ("It works great!")**. Plan + ledger `extensions/bible/LOOKUP_PLAN.md`; reference
 `docs/document.md` § "Bible lookup", `docs/extensions.md` rows 58–59, `bible.md` § "Lookup from
 the document editor". No code review — the user's call.
-No TENTH extension point, no next Bible phase (bookmarks, cross references, footnotes) and no
-other new arc without a fresh user decision; no re-raising of any waived / declined review finding.
+**Arc 40 "Verses" (2026-09-13, a fresh user decision, branch `bible`): the verses themselves on the
+page.** A lassoed/typed reference, the reader's Send, and the lasso's Verses on a placed reference
+can now land the passage's own words — a bold label line then plain-numbered verses, ten verses at
+most, whole chapters refused outright — as an ordinary text object wrapped in the same kind of link
+(`LinkPayload.KIND_BIBLE_TEXT` = 4), rather than only a citation of it. Seam: `IBible.passageText`
+(`API_VERSION` 14 → 15 as the method floor `MIN_API_VERSION_FOR_BIBLE_TEXT`; `MIN_API_VERSION_FOR_BIBLE`
+untouched at 11) is the first and only Bible-seam call to answer with scripture itself rather than a
+reference to it. `VersePlacement` puts the column at 10 % of the page width, wrapping at the page's
+right edge (the text model re-derives width from `x` on every load, so a centred column cannot
+survive a reload); a refusal — too long, or no clear room on the page — is an alert with OK, never a
+toast. Walked over adb on the Nomad (`.dev` builds), **FROZEN 2026-09-13** on the user's own hand
+walk; one finding fixed mid-walk (a successor selection's transfer-paste latch was cleared too
+early and left it stranded under PEN) and one after (a page with no clear band no longer stacks the
+verses on what is already there — "No room on this page" instead). Plan + ledger
+`extensions/bible/VERSES_PLAN.md`; reference `extensions/bible/docs/bible.md` § "Verses on the
+page", `docs/extensions.md` § "Arc 40's tail: `passageText`" + audit row 60, `docs/objects.md` §
+"Text objects" + "Standing traps", `docs/links.md` § "The Bible kind". No code review — the user's
+call, the same waiver arcs 37–39 took.
+No TENTH extension point, no next Bible phase (bookmarks, cross references, footnotes, longer or
+multi-page passages) and no other new arc without a fresh user decision; no re-raising of any
+waived / declined review finding.
 
 **Maintenance protocol (replaces the per-arc phase protocol):**
 
@@ -165,7 +184,8 @@ chapters picked by name; clock button + two-finger swipe down), the Search side 
 reference goes there, words are ranked hits — FTS4 + BM25), the stored position and the
 `recent` table, the `extensions/` monorepo-root pattern; grown by **arc 38 "Reference"**:
 notebook-linked Bible reference objects — the reference parser/codec, the passage view, Full
-chapter, and the Recents' `recent_ref` table of followed passages).
+chapter, and the Recents' `recent_ref` table of followed passages; grown by **arc 40 "Verses"**:
+the verses themselves as a linked text object on the page).
 
 ## Standing rules
 

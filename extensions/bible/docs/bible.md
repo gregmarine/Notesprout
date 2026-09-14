@@ -661,6 +661,15 @@ the button too; its Send parks the reference in the same session and the passage
 `fullChapter` result callback echoes `RESULT_BIBLE_SEND` up and finishes — one Send, whichever
 instance it was tapped on.
 
+**Arc 40 "Verses" amendment (2026-09-13):** in passage mode Send is no longer a bare tap — an
+`ActionSheetDialog` asks "Send to notebook · The reference / The verses", because a passage can
+now land as its own words rather than a citation of them (chapter mode stays reference-only, the
+same cap that refuses a whole chapter as verses). **The reference** parks and returns
+`RESULT_BIBLE_SEND` exactly as before; **the verses** returns `RESULT_BIBLE_SEND_TEXT`, and the
+host takes the reference then reads its Markdown over the same held bind, before `end()`
+(`BibleEntry.onSentText`) — one extra call, the reader closing either way. See § [Verses on the
+page](#verses-on-the-page-arc-40-verses-2026-09-13).
+
 **Where it lands when the centre is taken** (the user's decision 2026-09-13, after the hand walk
 found a Send stacking on a sticky at the centre): the **nearest clear spot to the centre** —
 `FreePlacement.nearCentre`, the rule every centre drop in the notebook now obeys (Insert's Text,
@@ -1006,10 +1015,11 @@ hand, adb cannot drive it):
 
 ## Tests
 
-**111 JVM tests** across twelve files (`src/test/kotlin/.../ext/bible/`), counted directly from the
+**120 JVM tests** across thirteen files (`src/test/kotlin/.../ext/bible/`), counted directly from the
 source with `grep -c "@Test"` (46 at the arc-37 freeze; +1 the Psalm title, +5 B6's reshape after
 its rewrite, +13 B7 → 65; **+11 `ReferenceTest` and +9 `PassageAtomsTest` at arc 38 / R1–R2, +2 into
-`BibleSqlTest` and +6 into `RecentChaptersTest`'s rewrite for the union → 93; **+18 `SearchTest` at B8 → 111**):
+`BibleSqlTest` and +6 into `RecentChaptersTest`'s rewrite for the union → 93; **+18 `SearchTest` at
+B8 → 111; **+8 `PassageMarkdownTest` at arc 40 / V1 → 120**):
 
 | File | Tests | Pins |
 |---|---|---|
@@ -1024,6 +1034,7 @@ its rewrite, +13 B7 → 65; **+11 `ReferenceTest` and +9 `PassageAtomsTest` at a
 | `ContentsModelTest.kt` | 13 | Six-wide chapter rows with a padded last row, a one-chapter book as one cell and five spacers, the collapsed list as one row per book in canon order, an expanded book followed by its rows then the next book, case-insensitive keys, several books open at once, `indexOfBook` / `indexOfChapter` (only while open; Psalm 119 on the twentieth row), `pageOf` / `pageCount` / `clampPage` arithmetic, an empty source |
 | `ContentsLayoutTest.kt` | 4 | The 480 dp sidebar branch (Nomad and Manta both take it), the 60 % width rounding, a row's slot at both densities, `itemsPerPage` flooring to ≥ 1 |
 | `reader/ChapterPaginatorTest.kt` | 9 | Blocks becoming headings/numbers/words with a spliced footnote caller, minor heading kinds mapping to `MINOR`, a page never ending on a bare verse number, forced progress when nothing fits, `fitCount` returning zero when even one atom overflows, a page anchoring to the verse in effect at its first word, a verse-less opening page anchoring to verse 1, `pageContaining` picking the last page at or before a verse, and a real pagination round-tripping every page's anchor back to that same page |
+| `PassageMarkdownTest.kt` | 8 | Arc 40 / V1 — `withinCap` refusing a whole-chapter range, a cross-chapter range and more than ten verses as named (never as read back), accepting exactly ten; `build`'s bold label line, one paragraph per (book, chapter) run, a second bold label at a later crossing, plain verse numbers, an empty verse list building nothing |
 
 The host side of arc 38 (`LinkPayload`, `LinkNav`, `BibleRefFlow`'s pure edges) is tested in
 `:app`, not here — `docs/links.md` and `docs/objects.md` carry those counts.
@@ -1048,6 +1059,167 @@ the user's decisions and the ledger are `extensions/bible/LOOKUP_PLAN.md`.
 
 ---
 
+## Verses on the page (arc 40 "Verses", 2026-09-13)
+
+The user's decision (2026-09-13): "we currently have a way to insert a Bible reference from the
+extension directly into a notebook. Next, we'll add a way to insert the actual Bible text into the
+page as a text object. For now, we'll only support small references. Full chapters are too big for
+this idea for now. And text that is too long for a single page should not be allowed." Arc 38 put a
+**reference** on the page (the user's own words wrapped in a `KIND_BIBLE` link); B9 sent one from
+the reader. This arc puts the **verses** on the page — an ordinary text object holding the
+passage's words, still wrapped in the same Bible link. Scripture crosses the seam for the first
+time — until now every doc in this family has said "scripture text never crosses the seam"; this
+is the one exception, and it is one compatible tail, one method floor, nothing on an Intent.
+
+### The six locked decisions (2026-09-13 wizard) — do not re-raise
+
+1. **Three doors, all of them:** the reader's Send in passage mode offers *reference or verses*
+   (chapter mode stays reference-only); the notebook's reference dialog gains an **"Insert the
+   verses"** switch; and a lone selected Bible reference object gets a lasso-bar **Verses** action
+   that lands the passage text beside it.
+2. **What lands:** a text object holding the verses, wrapped in the `KIND_BIBLE` link — a finger
+   tap still opens the passage view.
+3. **Shape:** a bold label line (`**John 3:16–18**`), then the verses as one paragraph per chapter
+   run with plain verse numbers (`16 For God so loved…`).
+4. **Verse cap: 10 verses** total across the reference, enforced by the extension; whole chapters
+   are refused outright. The host adds a page-fit check on top (measured height must fit the
+   page). A refusal is an **alert with OK**, never a toast.
+5. **Column:** left edge at **10 % of the page width, wrapping at the page's right edge** — the
+   text model re-derives width from `x` on every load, so a centred 80 % column could not survive a
+   reload (the user chose this over a stored wrap column). The *expand* door lands the verses
+   directly below the reference, same left edge, when they fit there, else at the same 10 % rule
+   from the top of the free space.
+6. **Freeze = Nomad hand walk, no code review** — the arc 37–39 waiver, extended once more.
+
+### The seam tail: `passageText`
+
+`IBible` gained one method after `takeOutgoingReference` (transaction code 6, `ExtensionContract
+.API_VERSION` 14 → 15) behind a **method** floor, `MIN_API_VERSION_FOR_BIBLE_TEXT` = 15 — the
+calendar's `render` precedent once more, an addition rather than a break: `MIN_API_VERSION_FOR_BIBLE`
+stays 11, so a reader declaring only 11 loses none of its existing doors, and only loses the
+verses doors, which is all this tail is for.
+
+**`passageText(wire): PassageText?`** takes the same opaque wire every other Bible seam call reads,
+opens the source per call, and answers `PassageText(status, text)` — `STATUS_OK` carries the
+Markdown, `STATUS_TOO_LONG` (a whole chapter, or over the ten-verse cap) carries nothing, and a
+`null` reply is "could not read". `PassageText`'s constructor `require`s are the host's whole
+check (`MAX_TEXT_CHARS` = 4 000; ten verses of the BSB never approach it — a reply over the cap
+never unmarshals). `BibleService.passageText` is the first time scripture crosses the seam:
+status, a character count and a duration are logged, never a character of the text.
+
+### `PassageMarkdown` — the shape
+
+The pure half, JVM-tested over fake `VerseRow`s with no database: a bold label line — the
+canonical form the reference resolved to — then the verses as prose with plain numbers, one
+paragraph per chapter run, breaking exactly where `PassageAtoms` puts a heading, so a passage read
+across a chapter edge starts a fresh paragraph there and one across books gets a second bold label
+of its own. `withinCap(passages)` is what `passageText` asks before it ever reads a row: no
+whole-chapter range at all (`sv == 0 || ev == MAX_VERSE` refuses it), no cross-chapter range, and
+at most `MAX_VERSES` (10) verses **as named** by the endpoints — a hole in the source can only make
+a passage *shorter*, never longer, so the cap is checked against what was asked for, not what came
+back.
+
+### Three doors, one landing
+
+- **The reader's Send** — passage mode's chooser, § [Send to notebook](#send-to-notebook-b9)
+  above: "Verses" returns `RESULT_BIBLE_SEND_TEXT`, and the host reads `passageText(wire)` over
+  the still-held bind before `end()`.
+- **The reference dialog's "Insert the verses" pill** — on both creating doors (the lasso's Bible
+  and the Insert bar's), under the field, off by default and gone entirely against a reader that
+  does not serve `passageText`. On, the reference still resolves exactly as it always did and only
+  then are its verses read — the pill changes what lands, never what is asked for.
+- **The lasso bar's Verses** — on a lone selected Bible reference object, next to Edit: reads the
+  placed reference's own wire and lands the passage's words directly below it, the reference
+  itself untouched.
+
+All three end in the same landing (`BibleRefFlow.landVerses`): the Markdown measured in the verses
+column, refused with an alert when it does not fit, else placed, wrapped in a
+`LinkPayload.KIND_BIBLE_TEXT` link, selected under the lasso, one `Action.BibleRefCreated` undo
+step (the same triple as an ordinary reference — link + text + no ink), the "Placed …" toast.
+
+### `KIND_BIBLE_TEXT` — the same link, different words
+
+`LinkPayload.KIND_BIBLE_TEXT` (4) is `KIND_BIBLE`'s slot rules exactly — the wire rides the
+notebookId slot, no pageId, `LinkPayload.referenceOf` answers the wire for either kind, and a
+finger tap follows both the same way, into the same passage view. The one thing the kind changes
+is **Edit**: `LinkPayload.isBibleText` tells the two apart, and a verses link's Edit is the
+ordinary `TextEditDialog` on the wrapped Markdown (`BibleRefFlow.editVerses`) rather than the
+reference dialog — the words are scripture the user may want to trim or annotate, not a reference
+to re-resolve, and the payload is left untouched. A **blank Save is a Cancel** here too, the
+reference dialog's rule: a link must wrap its one text, and Delete is how the verses leave the
+page. Paper and og read kind 4 as unusable, exactly as they read kind 3 — the arc-38 acceptance
+extended to the new kind without anything new to build for that direction.
+
+### `VersePlacement` — the column, and why it has no right margin
+
+**The column** (decision 5): the left edge sits `LEFT_FRACTION` (10 %) of the way across the page
+and the text wraps at the page's right edge, because a text object's width is re-derived as
+`pageWidth − x` on every load — position is authored, size is derived, so a centred 80 % column
+could not survive a reload. The only free coordinate is therefore `y`, and `VersePlacement` chooses
+it: `nearY` scans outward from a preferred `y` in 16 dp steps with an 8 dp gap (`FreePlacement`'s
+own numbers), and `below` tries directly under a reference anchor first, falling back to `nearY`
+from there. **No clear spot is no spot** — unlike `FreePlacement`, which falls back to the page
+centre for a small object, a block of verses dropped on top of what is there is unreadable twice
+over (the walk found exactly this), so `nearY` answers `null` when nothing on the page is clear,
+and a box taller than the page never fits at all (`fits`). Both are the caller's "no room" alert,
+the page-fit rule the user asked for, never a stacked block.
+
+### The two alerts
+
+Never toasts, on the user's rule: **too long** (the reader's cap or a whole chapter) and **no
+room** (nothing fits, or nothing on the page is clear) each open a problem dialog naming the
+reference, OK only, and leave the page exactly as it was.
+
+### Privacy
+
+Never logged, on either side: `BibleService.passageText` logs a status, a character count and a
+duration; `BibleRefFlow.readVerses`/`landVerses` log a character count and a stroke count, never a
+word. The verses are scripture, the same "where, not what" rule the reference wire has always
+carried, now covering the words themselves too.
+
+### Judgment calls stated, not asked
+
+- **Edit on a verses object is the text dialog, not the reference dialog** — the words are
+  scripture, not a reference to resolve.
+- **The wire is what crosses**, never a chapter/verse tuple — `passageText(wire)` takes exactly
+  what `resolve`/`beginAt` already produce.
+- **One undo step** — a verses object is a Bible reference object with different words, not two
+  creations.
+- **A null read after the reader has already closed still reaches the notebook**, so it can alert,
+  rather than being dropped with the bind.
+
+### Walked over adb on the Nomad (V4, 2026-09-13)
+
+Passed: the reader's chooser and "The verses" (413 chars in 27 ms; landed selected, bold label,
+numbered verses, 10 % edge); Edit on the verses object opened the Text dialog on the Markdown; a
+finger tap followed to the passage view; the reference dialog's pill (renders under the field,
+caption tap toggles); "ps 23" with the pill on → **"Too long for a page"**; "ps 23:1-3" with the
+pill on → landed below the ink at the nearest clear band, survived a page flip unchanged; "The
+reference" Send still landed a plain reference, now with the Verses button in its bar; Verses on
+it → the passage placed.
+
+**Two findings, both fixed.** (1) A successor selection injected at an insert-landed selection's
+dismissal (Verses on a just-sent reference) was stranded under PEN, because the transfer-paste
+latch fired in `onSelectionDismissed` after the successor had already been selected — the latch is
+now **kept**, not cleared, when a successor is injected, and fires at the successor's own
+dismissal instead. (2) A page with no clear band **stacked** the verses on the earlier block
+(`FreePlacement`'s centre fallback) — `VersePlacement.nearY` now answers `null` when nothing is
+clear, and "No room on this page" is the answer.
+
+**Left to the user's hand:** the lasso convert with the pill, a Save from the verses' Edit,
+undo/redo, the move by pen, and the look of the column's right edge (the text runs to the page
+edge — a right margin needs a stored wrap column, declined).
+
+### Failure table (arc 40 additions)
+
+| Situation | What the user sees | Where |
+|---|---|---|
+| A reference over the ten-verse cap, or a whole chapter, asked for as verses | "Too long for a page" alert (OK) | `BibleRefFlow.tooLong`, `PassageMarkdown.withinCap`, `PassageText.STATUS_TOO_LONG` |
+| The measured verses do not fit the page, or no band of the page is clear | "No room on this page" alert (OK), nothing written | `BibleRefFlow.landVerses`, `VersePlacement.nearY`/`.fits` |
+| The reader could not read the verses at all (a store failure, or a reader too old for `passageText`) | "The verses could not be read" alert (OK) | `BibleRefFlow.readVerses`/`insertVersesSent`, `BibleEntry.passageText` returning null |
+
+---
+
 ## Not in this arc (recorded futures, each needing a user decision)
 
 - ~~**Send to notebook**~~ — DONE by B9 (§ [Send to notebook](#send-to-notebook-b9)).
@@ -1056,6 +1228,14 @@ the user's decisions and the ledger are `extensions/bible/LOOKUP_PLAN.md`.
 - **Bookmarks** beyond the single remembered reading position and the Recents' history of picked
   chapters and, since arc 38, followed passages (nothing is pinned, the list is the newest 30
   picks of the union).
+- ~~**Verses on the page**~~ — DONE by arc 40 (§ [Verses on the page](#verses-on-the-page-arc-40-verses-2026-09-13)).
+  Still not there: **longer passages / multi-page text** — the user's own explicit "for now," a
+  ten-verse cap and a page-fit refusal are this arc's whole answer, and a longer passage needs a
+  fresh decision about pagination or a multi-page landing before it can grow past that. **A stored
+  wrap column** — declined 2026-09-13, do not re-raise: the text model re-derives width from `x` on
+  every load, so a centred column cannot survive a reload without a schema change the user chose
+  not to make. **The right-margin look** — the verses run to the page's own right edge rather than
+  a typeset column with air on both sides; cosmetic, and the same stored-column question as above.
 - **Cross references** — the `xref` table is built and shipped but nothing reads it; the `r`
   (parallel-passage) lines and footnote callers render as plain, non-tappable text.
 - **Footnote popups** — footnote bodies (`footnote.text`) are stored and joined at chapter load but
@@ -1090,6 +1270,8 @@ the user's decisions and the ledger are `extensions/bible/LOOKUP_PLAN.md`.
   number and trap from.
 - `extensions/bible/REFERENCE_PLAN.md` — arc 38 "Reference"'s plan and ledger: the fourteen locked
   decisions, the judgment calls, and the R1–R5 phase records § "Bible references" draws from.
+- `extensions/bible/VERSES_PLAN.md` — arc 40 "Verses"'s plan and ledger: the six locked decisions,
+  the judgment calls, and the V1–V4 phase records § "Verses on the page" draws from.
 - `apps/notesprout_sn/CLAUDE.md` — the module-table entry, the ninth-point summary, and the
   "bottom bars are pager-only, with one recorded exception" rule.
 - `tools/bible/README.md` — the exact build command and result for `bsb.bible`.

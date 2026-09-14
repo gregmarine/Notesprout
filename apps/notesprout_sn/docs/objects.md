@@ -71,6 +71,7 @@ Star point count came up as an H4 phase-start question and was **fixed at 5** (`
 | `notebook/TextLines.kt` | Pure: `normalize` (recognized ink) vs `typed` (dialog text) — two deliberately different whitespace rules |
 | `notebook/TextPlacement.kt` | Pure: `centred` box placement for an inserted text — since 2026-09-13 the first candidate `FreePlacement` tries |
 | `notebook/FreePlacement.kt` | Pure (2026-09-13, the user's decision after B9's Send stacked on a sticky): **every centre drop** — Insert's Text, the six shapes, Sticky, Bible, and the Bible reader's Send — lands at the centre when it is clear, else at the **nearest clear spot**, searched outward in 16 dp rings with an 8 dp gap; occupied = `NotebookActivity.occupiedBounds()` (texts, shapes' padded AABB, stickies, headings, links **and the live ink**); a full page or an over-size box falls back to the centre, never a refusal. Each flow's `Host` gained `occupied()`; `ShapeDefaults.at` / `StickyDefaults.at` still size, no longer decide where |
+| `notebook/VersePlacement.kt` | Pure (arc 40 "Verses", 2026-09-13): `FreePlacement`'s sibling for the one column that is not centred — a fixed 10 % left edge, `nearY` scanning the same 16 dp rings for a clear `y`, `below` for the expand door. **Unlike `FreePlacement`, no room is no spot**: `nearY` answers `null` rather than falling back to a stacked centre, because a block of verses over what is already there is unreadable twice over (the arc's V4 walk found exactly this) |
 | `notebook/ShapeRows.kt` | `PageShape`, `ShapeType`, `ShapeFlags` (pack/unpack of aspect/pointCount/rotation) — pure, JVM-tested |
 | `notebook/ShapeStore.kt` | Shape row writes on the shared `SoilWriter` |
 | `notebook/ShapeGeometry.kt` | Pure: `outline`, `tightBounds`, `aabb`, the thin `pathFor` — one object for geometry and hit-bounds alike |
@@ -277,6 +278,16 @@ recognizer's line breaks are a guess (`normalize` — collapse, per-line trim, a
 blank line) while a typed line break is the author's decision (`typed` — per-line `trimEnd`, only
 outer blank lines trimmed). `TextPlacement.centred` is the pure box-placement helper both the
 Insert path and (via clamping) the paste path use.
+
+**A verses object** (arc 40 "Verses", 2026-09-13) is an ordinary text row like any other — nothing
+new in the data model — holding the words of a small Bible passage as Markdown, wrapped in a
+`LinkPayload.KIND_BIBLE_TEXT` link rather than the plain link a lassoed or typed reference gets. Its
+Edit is `TextEditDialog` (`BibleRefFlow.editVerses`), not the reference dialog: the words are
+scripture the user may want to trim or annotate, not a reference to re-resolve. Placement is
+`VersePlacement`'s, not `TextPlacement`'s or `FreePlacement`'s — a left edge fixed at 10 % of the
+page width, wrapping at the page's right edge, because a text object's width is re-derived from
+`pageWidth − x` on every load and a centred column could not survive a reload; see
+`extensions/bible/docs/bible.md` § "Verses on the page" for the reference doors it lands from.
 
 A stylus tap on a lone selected text object opens `TextEditDialog` (the same gesture that opens a
 heading, tried after the heading lookup misses). `SelectionMode.TEXT` (`SelectionModes.classify`)
@@ -675,6 +686,14 @@ the rows verbatim, encrypted or not as the notebook already is.
   trap, not a code trap, but it cost a round trip).
 - **A capped endnote page must build its `PageBundle.Link` from the post-clamp size** — building it
   from the plan side before the size clamp made a capped page refuse its own caption link (H6).
+- **A successor selection injected at a dismissal must keep the transfer-paste latch, not clear it**
+  (arc 40 "Verses" V4's Nomad finding). An insert-landed selection acted on by its own bar (Verses on
+  a just-sent reference) is dismissed with a *successor* selection queued (`pendingSelection`) —
+  clearing the latch in `onSelectionDismissed` before the successor is injected puts PEN back under
+  it, and a selection under PEN can be neither dragged nor tapped. The latch is kept and fires at
+  the successor's own dismissal instead (`NotebookActivity.onSelectionDismissed`); any new flow that
+  can queue a successor at a landing must check whether it, too, is reached from an already-selected
+  object.
 
 ## What the Nomad walks proved
 
