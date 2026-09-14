@@ -1837,9 +1837,16 @@ class NotebookActivity : AppCompatActivity() {
             // restore has already fired and the new heading sits selected under a PEN tool that
             // can neither drag nor tap it (eye-check #5 round-2 finding). The engine then owns the
             // PEN restore at this selection's own dismissal, exactly like any smart-lasso session.
-            pendingSelection?.let { select ->
-                pendingSelection = null
-                select()
+            val successor = pendingSelection
+            pendingSelection = null
+            if (successor != null) {
+                // Arc 40 walk finding: an insert-landed selection acted on by its own bar (Verses
+                // on a just-sent reference) is dismissed with a successor, and the transfer-paste
+                // latch would have put PEN back under it — the successor sat unselectable under a
+                // pen. The latch is *kept*, not cleared: the tool goes back when the successor is
+                // itself dismissed, which is what the insert promised in the first place.
+                successor()
+                return
             }
             restoreToolAfterTransferPaste()
         }

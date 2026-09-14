@@ -61,4 +61,44 @@ first time — one compatible tail, one method floor, nothing on an Intent.
 
 ## Ledger
 
-(filled as phases land)
+- **V1 seam + V2 reader door + V3 host doors — ✅ 2026-09-13 `99234f5f`.** `IBible.passageText`
+  (code 6), `PassageText(status, text)` Parcelable (`STATUS_OK` / `STATUS_TOO_LONG`,
+  `MAX_TEXT_CHARS` 4000), `API_VERSION` 14 → 15 as `MIN_API_VERSION_FOR_BIBLE_TEXT`, `:ext-bible`
+  declares 15, `RESULT_BIBLE_SEND_TEXT` = 2. Extension: `PassageMarkdown` (`withinCap` — no
+  whole-chapter range, no cross-chapter range, ≤ 10 verses as named; `build` — bold label line,
+  one paragraph per chapter run, a bold "Book chapter" line at every later crossing; 8 tests →
+  `:ext-bible` 120), `BibleService.passageText` (opens the source per call; status/count/duration
+  logged, never the text), the reader's Send in passage mode = an `ActionSheetDialog` "Send to
+  notebook · The reference / The verses" (`leaveWith(reference, code)`). Host: `BibleClient
+  .passageText` on the held bind + the bind-per-call twin (`TEXT_TIMEOUT_MS` = the resolve budget),
+  `BibleEntry.supportsText` / `passageText` / `onSentText` (drains take-then-text before `end()`;
+  a null read after the reader closed still reaches the notebook so it can alert),
+  `LinkPayload.KIND_BIBLE_TEXT` = 4 (`isBibleText`; `referenceOf` answers both kinds; `LinkNav`
+  follows both), `BibleRefDialog.show(activity, initial, offerVerses) { typed, verses -> }` with
+  the "Insert the verses" pill (`Widget.Notesprout.Toggle`'s items set in code), `BibleRefFlow`:
+  `readVerses` ("Reading verses…" `RecognizingOverlay`, the two alerts), `landVerses` (the one
+  landing: `VersePlacement`, `KIND_BIBLE_TEXT`, `armLassoForLanding`, `Action.BibleRefCreated`,
+  "Placed …" toast), `insertVersesSent`, `expand`, `editVerses` (`TextEditDialog`, blank Save =
+  Cancel, payload untouched, `applyWords` split out of `applyEdit`), `SelectionToolbar`'s
+  `versesButton` (`ic_quote`, `SelectionMode.LINK` + `isVersesAvailable`),
+  `NotebookActivity.editLinkTarget` routes kind 4 to `editVerses`. `VersePlacement` (pure, 7
+  tests → `:app` 1700): `leftEdge` = 10 %, `fits`, `nearY` (outward scan in 16 dp steps, 8 dp gap),
+  `below` (anchor bottom + 2 gaps, else `nearY`), `without` (a conversion's ink cleared from the
+  occupied set).
+- **V4 the Nomad walk (adb, `.dev` builds) — ✅ 2026-09-13.** Passed: the reader's chooser and
+  "The verses" (413 chars in 27 ms; landed selected, bold label, numbered verses, 10 % edge);
+  Edit on the verses object = the Text dialog on the Markdown; a finger tap follows to the
+  passage view; the reference dialog's pill (renders under the field, caption tap toggles);
+  "ps 23" with the pill on → **"Too long for a page"** alert; "ps 23:1-3" with the pill on →
+  landed below the ink at the nearest clear band, survived a page flip unchanged; "The
+  reference" Send still lands a plain reference, now with the **Verses** button in its bar;
+  Verses on it → the passage placed. **Two findings, both fixed:** (1) a successor selection
+  injected at an insert-landed selection's dismissal was stranded under PEN — the
+  transfer-paste latch fired in `onSelectionDismissed` after the successor was selected; now
+  the latch is *kept* (not cleared) when a successor is injected and fires at the successor's
+  own dismissal; (2) a page with no clear band **stacked** the verses on the earlier block
+  (FreePlacement's centre fallback) — `VersePlacement.nearY` now answers null when nothing is
+  clear, and the "No room on this page" alert is the answer (a block of verses over what is
+  there is unreadable twice over). Left to the user's hand: the lasso convert with the pill, a
+  Save from the verses' Edit, undo/redo, the move by pen, and the look of the column's right
+  edge (the text runs to the page edge — a right margin needs a stored wrap column, declined).

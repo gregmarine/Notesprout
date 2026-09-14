@@ -378,7 +378,8 @@ class BibleRefFlow(
     /**
      * The landing every verses door ends in: [markdown] measured in the column
      * ([VersePlacement.leftEdge], wrapping at the page's right edge), refused when taller than
-     * the page (the "no room" alert — nothing written), else placed at the nearest clear `y` to
+     * the page **or when no band of the page is clear** (the "no room" alert — nothing written;
+     * a block of verses over what is there is unreadable), else placed at the nearest clear `y` to
      * where the door pointed — under [anchor] for an expand, at [preferredTop] for a conversion
      * (whose [inkBounds] are cleared from the occupied set and whose [strokeIds] are erased), and
      * at the page's vertical centre otherwise — then wrapped in a [LinkPayload.KIND_BIBLE_TEXT]

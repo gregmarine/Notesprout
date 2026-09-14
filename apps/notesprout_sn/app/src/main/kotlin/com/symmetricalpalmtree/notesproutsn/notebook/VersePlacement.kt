@@ -11,9 +11,11 @@ import kotlin.math.max
  * re-derived as `pageWidth − x` on every load (position is authored, size is derived — a centred
  * 80 % column could not survive a reload). So the only free coordinate is `y`, and this object
  * chooses it: the first clear spot scanning outward from a preferred `y` in [STEP_DP] steps,
- * with [GAP_DP] of air ([FreePlacement]'s numbers), and the preferred `y` itself when nothing
- * on the page is clear. **A box taller than the page has no spot at all** — that is the
- * page-fit refusal the user asked for, and the caller explains it.
+ * with [GAP_DP] of air ([FreePlacement]'s numbers). **No clear spot is no spot** — unlike
+ * [FreePlacement], which falls back to the centre for a small object, a block of verses dropped
+ * on top of what is there is unreadable twice over (the Nomad walk stacked one on another), so a
+ * page with no room, like a box taller than the page, is the caller's "no room" refusal — the
+ * page-fit rule the user asked for.
  */
 object VersePlacement {
 
@@ -30,8 +32,8 @@ object VersePlacement {
 
     /**
      * The `y` for a [w] × [h] box at [x], as near [preferredY] as the page allows: [preferredY]
-     * clamped when it is clear of [occupied], else the nearest clear `y` above or below it, else
-     * the clamped [preferredY]. Null when the box does not [fits] the page.
+     * clamped when it is clear of [occupied], else the nearest clear `y` above or below it. Null
+     * when the box does not [fits] the page, or when no `y` on the page is clear.
      */
     fun nearY(
         x: Float,
@@ -55,7 +57,7 @@ object VersePlacement {
             val up = start - r * step
             val downIn = down <= maxY
             val upIn = up >= 0f
-            if (!downIn && !upIn) return start
+            if (!downIn && !upIn) return null
             if (downIn && clear(x, down, w, h, gap, occupied)) return down
             if (upIn && clear(x, up, w, h, gap, occupied)) return up
             r++

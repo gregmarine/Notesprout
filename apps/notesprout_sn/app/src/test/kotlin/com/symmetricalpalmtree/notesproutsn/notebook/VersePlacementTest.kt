@@ -42,9 +42,10 @@ class VersePlacementTest {
     }
 
     @Test
-    fun `a full page falls back to the preferred y`() {
+    fun `a full page has no spot`() {
         val wall = listOf(Bounds(0f, 0f, pageW, pageH))
-        assertEquals(500f, VersePlacement.nearY(100f, 500f, 900f, 200f, pageH, wall, 1f)!!, 0f)
+        assertNull(VersePlacement.nearY(100f, 500f, 900f, 200f, pageH, wall, 1f))
+        assertNull(VersePlacement.below(Bounds(0f, 0f, 10f, 10f), 100f, 900f, 200f, pageH, wall, 1f))
     }
 
     @Test
