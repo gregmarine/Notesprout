@@ -26,14 +26,12 @@ internal object MlKitEngine {
     private const val CALL_AWAIT_MS = 10_000L
 
     /**
-     * One writing area, no layout analysis. [deadlineMs] is an absolute `System.currentTimeMillis`
-     * bound shared by every call in the same host request. [dotLineHeight] is the height [Dots]
-     * scales its tiny-stroke threshold from — a **line** height, never a multi-line area's: the
-     * page path passes its per-line height (the default keeps that behaviour), and the direct
-     * host path derives one from the ink, because a selection spanning two written lines would
-     * double the threshold and swallow real punctuation into dot circles.
+     * One writing area — a single already-segmented line — with no layout analysis. [deadlineMs] is
+     * an absolute `System.currentTimeMillis` bound shared by every call in the same host request.
+     * [dotLineHeight] is the height [Dots] scales its tiny-stroke threshold from — a **line**
+     * height, never a multi-line area's (the default keeps the caller's area as that line).
      */
-    fun recognizeInk(
+    fun recognizeLine(
         recognizer: DigitalInkRecognizer,
         strokes: List<InkStroke>,
         areaWidth: Float,
@@ -43,7 +41,7 @@ internal object MlKitEngine {
         dotLineHeight: Float = areaHeight,
     ): String {
         val wait = PageText.waitFor(deadlineMs, System.currentTimeMillis(), CALL_AWAIT_MS)
-        if (wait <= 0L) throw TimeoutException("deadline passed before recognizeInk")
+        if (wait <= 0L) throw TimeoutException("deadline passed before recognizeLine")
 
         val builder = Ink.builder()
         for (s in Dots.round(PageText.widenDots(strokes), dotLineHeight)) {
@@ -65,12 +63,6 @@ internal object MlKitEngine {
      * A whole page: segment it into paragraphs and lines, recognize each line with the previous
      * line's tail as pre-context and the page's median line height as the writing-area height, then
      * join. [pageWidth] / [pageHeight] are part of the contract; the segmenter needs only the ink.
-     *
-     * **Per-line tolerance:** a line whose ML Kit call fails contributes nothing and the page carries
-     * on; only when *every* attempted line failed is the first failure rethrown, so a real engine
-     * failure is never served to the host as a blank page. The **deadline** is not tolerated that
-     * way — running out of time aborts the whole page with [TimeoutException], because the host has
-     * already given up and a warm retry (model loaded) is far faster.
      */
     fun recognizePage(
         recognizer: DigitalInkRecognizer,
@@ -78,10 +70,46 @@ internal object MlKitEngine {
         @Suppress("UNUSED_PARAMETER") pageWidth: Float,
         @Suppress("UNUSED_PARAMETER") pageHeight: Float,
         deadlineMs: Long,
+    ): String = recognizeLayout(recognizer, strokes, "", deadlineMs)
+
+    /**
+     * A selection: the **same** segment-then-recognize walk as a page, so the words come back in
+     * reading order (lines top → bottom by the coverage profile, strokes left → right within a
+     * line) whatever order they were written in — a word squeezed in later at the start of a line
+     * lands where it sits, not where it came in time. The host's [preContext] seeds the first line;
+     * every later line takes the previous line's tail, exactly as the page does. [areaWidth] /
+     * [areaHeight] are the host's selection box; the writing area used is the ink's own median
+     * line height, which is what makes a two-line selection read at the right scale.
+     */
+    fun recognizeInk(
+        recognizer: DigitalInkRecognizer,
+        strokes: List<InkStroke>,
+        @Suppress("UNUSED_PARAMETER") areaWidth: Float,
+        @Suppress("UNUSED_PARAMETER") areaHeight: Float,
+        preContext: String,
+        deadlineMs: Long,
+    ): String = recognizeLayout(recognizer, strokes, preContext, deadlineMs)
+
+    /**
+     * The shared walk: segment, recognize each line with the previous line's tail as pre-context
+     * ([preContext] seeds the first), fix a trailing baseline dot, join lines by `\n` and paragraphs
+     * by a blank line.
+     *
+     * **Per-line tolerance:** a line whose ML Kit call fails contributes nothing and the rest carries
+     * on; only when *every* attempted line failed is the first failure rethrown, so a real engine
+     * failure is never served to the host as blank text. The **deadline** is not tolerated that
+     * way — running out of time aborts the whole call with [TimeoutException], because the host has
+     * already given up and a warm retry (model loaded) is far faster.
+     */
+    private fun recognizeLayout(
+        recognizer: DigitalInkRecognizer,
+        strokes: List<InkStroke>,
+        preContext: String,
+        deadlineMs: Long,
     ): String {
         val layout = StrokeSegmenter.segment(PageText.widenDots(strokes))
         val paragraphs = ArrayList<List<String>>(layout.paragraphs.size)
-        var preContext = ""
+        var pre = preContext
         var attempted = 0
         var succeeded = 0
         var firstFailure: Exception? = null
@@ -92,13 +120,13 @@ internal object MlKitEngine {
                 val h = if (layout.medianLineHeight > 0f) layout.medianLineHeight else line.bounds.height
                 attempted++
                 val text = try {
-                    val raw = recognizeInk(recognizer, line.strokes, line.bounds.width, h, preContext, deadlineMs).trim()
+                    val raw = recognizeLine(recognizer, line.strokes, line.bounds.width, h, pre, deadlineMs).trim()
                     // A trailing baseline dot is a period whatever ML Kit made of it (see Dots).
                     val trailingDot = Dots.endsWithBaselineDot(line.strokes, line.bounds, h)
                     if (BuildConfig.DEBUG) Log.d(TAG, Dots.describeLine(line.strokes, line.bounds, h, raw, trailingDot))
                     if (raw.isNotEmpty() && trailingDot) Dots.fixTrailingPeriod(raw) else raw
                 } catch (e: TimeoutException) {
-                    throw e            // out of time for the page — never a silent partial result
+                    throw e            // out of time — never a silent partial result
                 } catch (e: InterruptedException) {
                     throw e
                 } catch (e: Exception) {
@@ -108,14 +136,14 @@ internal object MlKitEngine {
                 succeeded++
                 if (text.isNotEmpty()) {
                     lines += text
-                    preContext = text  // line N feeds line N+1
+                    pre = text  // line N feeds line N+1
                 }
             }
             paragraphs += lines
         }
 
         if (attempted > 0 && succeeded == 0) firstFailure?.let { throw it }
-        if (BuildConfig.DEBUG) Log.d(TAG, "page: $attempted line(s), $succeeded recognized")
+        if (BuildConfig.DEBUG) Log.d(TAG, "layout: $attempted line(s), $succeeded recognized")
         return PageText.join(paragraphs)
     }
 }

@@ -257,10 +257,15 @@ String recognizePage(in List<InkStroke> strokes, float pageWidth, float pageHeig
 `status()` never blocks on the engine — it is the fast, always-answerable read the host polls.
 `prepare()` is the **only** call that may start acquiring what the engine needs (a model
 download) and returns immediately; the recognize calls wait for an acquisition already in flight
-within the caller's timeout, but never start one themselves. `recognizeInk` is one writing area
-with no layout analysis — the caller has already decided what the ink is (a heading's lassoed
-selection); `recognizePage` hands the extension a whole page and lets it segment lines and
-paragraphs itself, chaining each line's recognized text as the next line's `preContext`.
+within the caller's timeout, but never start one themselves. Both recognize calls walk the ink the
+**same** way: the extension segments it into reading-order lines and paragraphs itself
+(`StrokeSegmenter`), recognizes each line with the previous line's tail as `preContext`, and joins
+lines by `\n` and paragraphs by a blank line. `recognizeInk` differs only in that the host's
+`preContext` seeds the first line and its `areaWidth`/`areaHeight` (the selection box) are part of
+the contract but not the writing area — each line's own box and the ink's median line height are,
+which is what reads a two-line selection at the right scale. Reading order comes from geometry, not
+from the order the strokes were written: a word squeezed in later at the start of a line lands where
+it sits.
 
 **`InkStroke`** (`extension-api/…/InkStroke.kt`, plain hand-written `Parcelable` — no AIDL
 `parcelable` codegen beyond the one-line `InkStroke.aidl` declaring it exists) carries bare
@@ -523,8 +528,10 @@ skip or misread a handwritten period as a comma — replacing tiny strokes with 
 circle before recognition, and fixing a line's trailing punctuation afterward from pure geometry
 (size, position in the line band) rather than reading the recognized text. Its tiny-stroke
 threshold scales from a **line** height, never a multi-line area's: `recognizePage` passes each
-line's height, and the direct `recognizeInk` stub derives one from the ink via the segmenter (N3 —
-a selection spanning two written lines would otherwise double the threshold and swallow real
+line's height — and since the selection path became the same segment-then-recognize walk
+(`MlKitEngine.recognizeLayout`, shared by `recognizeInk` and `recognizePage`; 2026-09-13), a
+lassoed selection gets the same per-line height (N3 had first derived one from the ink because a
+selection spanning two written lines would otherwise double the threshold and swallow real
 punctuation into dot circles). **`Box`** is the shared
 immutable rectangle both use, so the segmenter stays pure Kotlin end to end.
 

@@ -870,7 +870,10 @@ selection can die (a tap-away, a page flip) before it answers. `HeadingConvert.r
    problem dialog and give-up (see `docs/extensions.md`);
 3. shows the **`RecognizingOverlay`** ("Recognizing…") box — `OpeningOverlay`'s smaller, dialog-free
    sibling, up for the width of the recognize call and down before anything else goes on screen;
-4. calls `recognizeInk` with the **selection's bounds**, not the page, as the writing area.
+4. calls `recognizeInk` with the **selection's bounds**, not the page, as the area — and the
+   extension then segments the selection into reading-order lines and recognizes each with its
+   own box, exactly as it does a page (since 2026-09-13; before that the selection box itself was
+   the writing area).
 
 That last point is the N2 eye-check root cause, worth stating exactly: SN's page pipeline
 recognizes per line using the line's own box, and Paper's H action passes the selection bounds for
