@@ -112,6 +112,28 @@ ORDINAL = {usfm: ordinal for usfm, ordinal, _, _ in CANON}
 NAME = {usfm: name for usfm, _, name, _ in CANON}
 TESTAMENT = {usfm: t for usfm, _, _, t in CANON}
 
+# The display half of a `\\ref` names its book in words ("Song of Solomon 1:1–17");
+# this table resolves that name when the machine half carries no code. Longest
+# name first so "1 John" never matches "John". Only canon books are here: a
+# reference to Jasher, 1 Enoch or 1 Esdras is real text but not a link.
+_DISPLAY_BOOK_ALIASES = {"Song of Songs": "SNG", "Psalm": "PSA"}
+_DISPLAY_BOOKS = sorted(
+    [(name.lower(), usfm) for usfm, _, name, _ in CANON]
+    + [(alias.lower(), usfm) for alias, usfm in _DISPLAY_BOOK_ALIASES.items()],
+    key=lambda t: -len(t[0]))
+# Books of one chapter: the USFM cites their verses as bare numbers ("JUD 17-23").
+ONE_CHAPTER = {"OBA", "PHM", "2JN", "3JN", "JUD"}
+_ONE_CHAPTER_ORDINALS = {ORDINAL[u] for u in ONE_CHAPTER}
+
+
+def display_book(disp):
+    """The canon USFM code the display text of a `\\ref` opens with, or None."""
+    d = disp.strip().lower()
+    for name, usfm in _DISPLAY_BOOKS:
+        if d.startswith(name) and (len(d) == len(name) or not d[len(name)].isalpha()):
+            return usfm
+    return None
+
 BOOK_FACTOR = 1_000_000
 CHAPTER_FACTOR = 1_000
 MAX_VERSE = 999
@@ -439,7 +461,7 @@ class Builder:
                 disp, _, target = run[tok_end:end_m].partition("|")
                 disp = clean_ws(disp)
                 start = append_body(disp)
-                rng = self._resolve_target(target, ordinal)
+                rng = self._resolve_target(target, disp, ordinal)
                 if rng:
                     self.xrefs.append({
                         "source_kind": "block", "source_ref": block_idx,
@@ -542,7 +564,7 @@ class Builder:
                 disp, _, target = inner.partition("|")
                 disp = clean_ws(disp)
                 start = emit(disp)
-                rng = self._resolve_target(target, ordinal)
+                rng = self._resolve_target(target, disp, ordinal)
                 if rng:
                     self.xrefs.append({
                         "source_kind": "note", "source_ref": fn_index,
@@ -561,13 +583,22 @@ class Builder:
         })
 
     # ---- cross-reference target resolution ---------------------------------
-    def _resolve_target(self, target, cur_ordinal):
-        """Parse a USFM \\ref target ("JHN 1:1-5", "13:1-11", "1CH 15:29-16:3")
-        into an inclusive (start_key, end_key), or None if unparseable."""
+    def _resolve_target(self, target, disp, cur_ordinal):
+        """Parse a USFM \\ref target ("JHN 1:1-5", "1CH 15:29-16:3", "JUD 17-23")
+        into an inclusive (start_key, end_key), or None if it names nothing this
+        canon has.
+
+        The book comes from the target's USFM code; when the source omits the code
+        (the BSB does for Song of Solomon), from the DISPLAY text's book name —
+        never from the source book, which is how 1 Peter 3's "Song of Solomon
+        1:1–17" once pointed at 1 Peter 1. A display naming a book outside the
+        canon (Jasher, 1 Enoch, 1 Esdras) is not a link. On a one-chapter book a
+        bare "N-M" is verses of chapter 1 when the display says "1:N".
+        [cur_ordinal] is only consulted for the warning text.
+        """
         target = target.strip()
         if not target:
             return None
-        ordinal = cur_ordinal
         bm = re.match(r"([0-9][A-Z]{2}|[A-Z]{3})\s+", target)
         if bm:
             code = bm.group(1)
@@ -576,6 +607,13 @@ class Builder:
                 return None
             ordinal = ORDINAL[code]
             target = target[bm.end():]
+        else:
+            usfm = display_book(disp)
+            if usfm is None:
+                self.warnings.append(
+                    f"xref: non-canon target {disp!r} (in {NAME[CANON[cur_ordinal - 1][0]]})")
+                return None
+            ordinal = ORDINAL[usfm]
         # C:V , C:V-V , C:V-C:V , or whole chapter C.
         m = re.match(r"(\d+):(\d+)(?:-(?:(\d+):)?(\d+))?$", target)
         if m:
@@ -588,11 +626,14 @@ class Builder:
             else:
                 end = start
             return (start, end) if start <= end else (end, start)
-        cm = re.match(r"(\d+)(?:-(\d+))?$", target)  # whole chapter(s)
+        cm = re.match(r"(\d+)(?:-(\d+))?$", target)
         if cm:
-            c1 = int(cm.group(1))
-            c2 = int(cm.group(2)) if cm.group(2) else c1
-            return (encode(ordinal, c1, 0), encode(ordinal, c2, MAX_VERSE))
+            n1 = int(cm.group(1))
+            n2 = int(cm.group(2)) if cm.group(2) else n1
+            if ordinal in _ONE_CHAPTER_ORDINALS and ":" in disp:
+                # "JUD 17-23" shown as "Jude 1:17–23": verses of the one chapter.
+                return (encode(ordinal, 1, n1), encode(ordinal, 1, n2))
+            return (encode(ordinal, n1, 0), encode(ordinal, n2, MAX_VERSE))  # whole chapter(s)
         self.warnings.append(f"xref: unparseable target {target!r}")
         return None
 
@@ -793,6 +834,47 @@ class Builder:
             "INSERT INTO xref(source_kind, source_id, start, end, "
             "target_start_key, target_end_key) VALUES (?, ?, ?, ?, ?, ?)",
             xref_rows)
+        self._check_xrefs(db)
+
+    def _check_xrefs(self, db):
+        """Fail the build if any cross-reference points where nothing is.
+
+        Every target endpoint must be a verse the source has (a 0/999 sentinel
+        needs only its chapter), and the display text's book, when it parses,
+        must be the target's book — the check that would have caught 1 Peter 3's
+        Song of Solomon line pointing at 1 Peter 1. Loud, never silent.
+        """
+        bad = []
+        for kind, source_id, start, end, ts, te in db.execute(
+                "SELECT x.source_kind, x.source_id, x.start, x.end, "
+                "x.target_start_key, x.target_end_key FROM xref x"):
+            if kind == "block":
+                (text,) = db.execute("SELECT content FROM block WHERE id = ?", (source_id,)).fetchone()
+            else:
+                (text,) = db.execute("SELECT text FROM footnote WHERE id = ?", (source_id,)).fetchone()
+            disp = text[start:end]
+            problems = []
+            ordinal = ts // BOOK_FACTOR
+            if te // BOOK_FACTOR != ordinal:
+                problems.append("spans two books")
+            shown = display_book(disp)
+            if shown is not None and ORDINAL[shown] != ordinal:
+                problems.append(f"display names {shown}, target is {CANON[ordinal - 1][0]}")
+            for key in (ts, te):
+                verse = key % CHAPTER_FACTOR
+                if verse in (0, MAX_VERSE):
+                    chapter_start = key - verse
+                    hit = db.execute(
+                        "SELECT 1 FROM verse WHERE verse_key BETWEEN ? AND ? LIMIT 1",
+                        (chapter_start, chapter_start + MAX_VERSE)).fetchone()
+                else:
+                    hit = db.execute("SELECT 1 FROM verse WHERE verse_key = ?", (key,)).fetchone()
+                if hit is None:
+                    problems.append(f"no verse at key {key}")
+            if problems:
+                bad.append(f"  {kind} {source_id} {disp!r} -> {ts}..{te}: {'; '.join(problems)}")
+        if bad:
+            sys.exit("cross-reference check failed:\n" + "\n".join(bad))
 
     def _write_words(self, db):
         # Intern the two repetitive value groups, then reference them by id.
