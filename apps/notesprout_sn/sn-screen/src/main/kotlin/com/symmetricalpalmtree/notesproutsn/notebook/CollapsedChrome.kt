@@ -16,7 +16,7 @@ import com.symmetricalpalmtree.notesproutsn.screen.R
 /**
  * The collapsed chrome (arc 36) — what a paper screen shows while its bars are hidden: one
  * floating **corner button** at the top-right wearing the armed tool's glyph, and, hung under it
- * on a tap, a **mini toolbar** (the tools in [CollapsedTools.ORDER], the armed one bordered, then
+ * on a tap, a **mini toolbar** (the screen's [tools], [CollapsedTools.ORDER] by default, the armed one bordered, then
  * the screen's [commands], then `…`) with an **overflow row** under the `…` holding Back and the
  * screen's doors and actions — unless the overflow would hold only one or two buttons, which then
  * sit on the mini toolbar itself with no `…` (the sticky editor's Back, the pad's Back · Send).
@@ -82,6 +82,15 @@ class CollapsedChrome(
     private val onArmed: (Tool) -> Unit,
     /** Fires after every open / close — the screen re-pushes its exclusion rects. */
     private val onChanged: () -> Unit,
+    /**
+     * Which tool buttons the mini toolbar carries, in order (arc 43 / K2). The default is
+     * [CollapsedTools.ORDER] — the four every paper screen up to now has had — and it is the whole
+     * of the parameter's reason: a screen with **two** tools (the sketch surface's pencil and its
+     * rubbing eraser; there is no lasso on a raster page and nothing to select) would otherwise
+     * show two buttons that arm tools its surface does not have. Last in the list and defaulted, so
+     * every existing caller compiles unchanged.
+     */
+    tools: List<Tool> = CollapsedTools.ORDER,
 ) {
 
     /**
@@ -132,7 +141,7 @@ class CollapsedChrome(
             Tool.LASSO_ERASER to ctx.getString(R.string.eraser_lasso),
             Tool.LASSO to ctx.getString(R.string.tool_lasso),
         )
-        CollapsedTools.ORDER.forEach { tool ->
+        tools.forEach { tool ->
             toolButtons[tool] = mini.addButton(CollapsedTools.iconFor(tool), hints.getValue(tool)) { pick(tool) }
         }
         commands.forEach { add(mini, miniMirrored, it) }
@@ -227,6 +236,9 @@ class CollapsedChrome(
     fun sync() {
         val armed = paper.tool
         syncKnob(armed)
+        // [CollapsedTools.selectedFor] answers against the full order, so on a shortened bar it can
+        // name a tool that has no button here — the walk is over the buttons this bar actually
+        // built, so that reads as "nothing bordered", which is exactly right.
         val selected = CollapsedTools.selectedFor(armed)
         toolButtons.forEach { (tool, button) -> button.isSelected = tool == selected }
     }

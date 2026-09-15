@@ -65,6 +65,13 @@
         <intent>
             <action android:name="com.symmetricalpalmtree.notesproutsn.extension.BIBLE_SCREEN" />
         </intent>
+        <!-- The Sketch point (arc 43 / K2): two actions, the same reason a seventh time. -->
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesproutsn.extension.SKETCH" />
+        </intent>
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesproutsn.extension.SKETCH_SCREEN" />
+        </intent>
     </queries>
 
     <application

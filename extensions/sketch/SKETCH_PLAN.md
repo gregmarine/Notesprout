@@ -5,7 +5,7 @@ The plan **and the ledger** for the raster-sketch extension, in the shape of the
 the ledger at the bottom as they land; the reference doc once frozen is
 `extensions/sketch/docs/sketch.md` beside this file.
 
-**Status: Arc 43 — IN PROGRESS, K0 ✅ K1 ✅.** Phases are lettered **K** (arc 37 "Bible" used B, arc 38
+**Status: Arc 43 — IN PROGRESS, K0 ✅ K1 ✅ K2 ✅.** Phases are lettered **K** (arc 37 "Bible" used B, arc 38
 "Reference" used R, arc 39 "Lookup" used no letter of its own, arc 40 "Verses" used V, arc 41
 "Cross references" used no letter of its own, arc 42 "Notes" used N — arc 43 "Sketch" uses **K**).
 
@@ -108,7 +108,7 @@ paper white) is host-side and device-neutral and is ported, not reinvented.
 |---|---|---|---|
 | **K0 — Pin + scaffold** ✅ (`c3fc1847`, `29fc48dc`) | Sonnet | Branch `sketch` from `main`; `extensions/sketch/SKETCH_PLAN.md` (this plan + ledger); SN pin `sn-screen/build.gradle.kts` 0.1.28 → **0.1.31** (zero `gpaper-ratta` lines change; carries `RasterPatch`/`swapPageRaster`/`RasterRubbing`); g-paper `PLAN.md` Phase 16 🧪 → ✅ with the arc-29 Nomad record (Onyx half still untested); stale `docs/integration-guide.md`/`README.md` version lines; `apps/notesprout_sn/CLAUDE.md` pin sentence. | Build + all JVM tests green; Sonnet adb smoke of notebook/pad/calendar; user hand: ink, point eraser, lasso, lasso eraser, pad Send both ways; `gfxinfo` writing-minute baseline. |
 | **K1 — g-paper Phase 19 → 0.1.32 "Ratta and the raster page"** ✅ (g-paper `8bb2aa1`) | Opus (Fable reviews diff + numbers before publish) | Core: `protected open val rasterEraseRedrawIntervalMs` read by `throttledEraseRedraw` (const stays 16). Ratta: override (initial 100 ms; candidates 16/60/100/250/end-only via a demo-only system property); `RattaEmr.penSize(style, widthPx)` pure with `EMR_MIN_HAIRLINE` (start 120) for `PENCIL`, others keep 200; note at the "needs no override" comment naming `loadPageRaster`/`swapPageRaster` (the overlay is already released by `clearForContentSwap` under the swap law — verified, not a gap). **The g-paper demo gains a Raster toggle** (pencil + rubbing eraser) as the measurement vehicle. Tests `RattaEmrTest` ×4. Docs `api.md`/`CLAUDE.md`/`PLAN.md`. | Nomad (demo): M1 cadence per candidate (`gfxinfo` + the hand: lifts live? flicker?); M2 pencil preview width at EMR 120/150/200 vs the baked hairline (photo + screencap); M3 eraser-end pressure real (temporary log); M4 undo-swap flash (accept, record); M5 page-wide swap ms. Phase-start Qs: cadence candidates; whether to try `DARK_GRAY` preview. |
-| **K2 — The seam** ⬜ | Opus (Sonnet: `ExtensionContractTest` pin, docs rows) | `:extension-api`: `SketchContract`, `ISketch.aidl`, `ISketchHost.aidl`, `SketchPageState` (+`requireValid`), `ByteChunks`, `PngHeader` (pure, both sides), `API_VERSION` 17 + floor; host manifest `<queries>` both actions. `:sn-screen`: `UndoRedoStack` budget + `pushUndoBeneath`, `CollapsedChrome(tools)`, `PaperToolbar(btnLasso?)`. `:ext-ink`: `PaperScreenActivity` extraction + `PenIdle.awaitIdle`. Tests: `ExtensionContractTest`, `SketchContractTest`, `ByteChunksTest`, `PngHeaderTest`, `SketchPageStateTest`, `UndoRedoStackTest` (+6). | `:extension-api:testDebugUnitTest` green (the pin trap); all modules compile; Sonnet adb regression of pad + calendar (the base-class move); user hand: pad/calendar ink + handoff. |
+| **K2 — The seam** ✅ | Opus (Sonnet: `ExtensionContractTest` pin, docs rows) | `:extension-api`: `SketchContract`, `ISketch.aidl`, `ISketchHost.aidl`, `SketchPageState` (+`requireValid`), `ByteChunks`, `PngHeader` (pure, both sides), `API_VERSION` 17 + floor; host manifest `<queries>` both actions. `:sn-screen`: `UndoRedoStack` budget + `pushUndoBeneath`, `CollapsedChrome(tools)`, `PaperToolbar(btnLasso?)`. `:ext-ink`: `PaperScreenActivity` extraction + `PenIdle.awaitIdle`. Tests: `ExtensionContractTest`, `SketchContractTest`, `ByteChunksTest`, `PngHeaderTest`, `SketchPageStateTest`, `UndoRedoStackTest` (+6). | `:extension-api:testDebugUnitTest` green (the pin trap); all modules compile; Sonnet adb regression of pad + calendar (the base-class move); user hand: pad/calendar ink + handoff. |
 | **K3 — Host data, creation, routing** ⬜ | Opus (Sonnet: radio XML/strings) | `TYPE_SKETCH`/`SKETCH_ORDER`; `SketchDao` (`sketchDigest`, `sketchFor`, `pagesWithSketch`) + `sketchDao()`; `SketchRows` (port of `RasterRows`); `SketchRepository` (`has/get/save/clear`, guard, watch, cap, unchanged-bytes skip); `NotebookSession.kind/isSketch`, `writeSketch`, `readSketch`; `NotebookKind`; `NotebookFlags.SKETCH`, `NotebookMeta.sketch` + **every mirror site** (`NewNotebookActivity`, `TextDocumentCreate`, `IndexRepository.createNotebook/importNotebookRow`, `NotebookImport.refreshMeta`, `ImportFlow`, `ExportArtifact.stampExportedAt`, `NotebookSession.refreshMeta`); third radio + `KEY_KIND`; `FaceRouting` generic table + `TextDocRouting` facade (its tests untouched) + `SketchRouting`; `SoilDao.childrenOf` exclusion, `liveDescendantIds` + `'sketch'`, `liveErasableIds` for Erase page; `FakeSoilDao` mirrors. Tests: `SketchRowsTest`, `SketchRepositoryTest`, `NotebookKindTest`, `FaceRoutingTest`/`SketchRoutingTest`, `SoilDaoKindListsTest` (+3), `DocumentWhitelistTest` (+1), `PageClipTest` (+1), `SoilCompactorTest` (+2). | JVM green; Sonnet adb: create a Sketch notebook (radio), `.soil` meta shows `sketch:true`, index flag 8, `.soil` export/re-import keeps it. (No face yet — a Sketch notebook loads the canvas.) |
 | **K4 — Host entry, hooks, door, cover** ⬜ | Opus (Sonnet: `ic_brush` Tabler, strings, layout) | `ExtensionRegistry.sketch`; `SketchHostSession` (pure: read window, ink window, save accumulator); `SketchHostBinder` (gate first, funnel); `SketchClient` (hold, `begin(host)`, `end()` ≤ 15 s, revoke in `finally`); `SketchHostHooks` (`pages`, `loadPage`, `commit` → `writeSketch`, `requestInk` → drain + `TransferCaps` + `InkChunks`, bare strokes only); `SketchEntry` (= `DocumentEditorEntry` + `ExtensionScreenEntry`'s paper pieces: **drain → open → chrome extra → `dismissFloatingChrome` → `endTransformIfRunning` → `releaseForHandoff` → launch**; result: pop → chrome → `resumeDrawing` → finish job → `onClosed`); `NotebookActivity`: `openIntoSketch`, `sketchShowingEnded` (CATCH_UP / LOAD_CANVAS / SEAL_TO_LIBRARY), `replayAbove` `Surface.SKETCH`, reconnect keys, `close()` joins, watchdog; `btnSketch` on the bottom strip left of Bible + collapsed overflow mirror; `SketchCover` + `captureCover` branch + `saveLastOpened(lastFaceEndedOn)`. Tests: `SketchHostSessionTest` ×10, `ReplayPlanTest` (+1). | JVM green; button GONE for non-Sketch notebooks and with no extension (walk after K5). |
 | **K5 — NSE · Sketch, the screen** ⬜ | Opus (Sonnet: module scaffold, manifest, gradle, icon copy, layout, strings) | `extensions/sketch` module per the layout in the design notes: `SketchApplication` (`RattaEngine.register()`), `SketchService` (`begin/end`, `HostCallerCheck`, park re-push in `end()`), `SketchSession`, `SketchActivity` (lifecycle table, `swapTo`, listener ignoring `onStrokeCommitted`, `PageTurn` pure), `SketchSaver` + `SketchSaveGovernor` + `PendingPngPark`, `RasterTiles`/`RasterEditBuilder` (port), `SketchEdit`, `RasterImage`, `InkBake`, dialogs, a **debug-only "fill test pattern" door** so adb can produce a non-blank save. `settings.gradle.kts` include. Tests: `RasterTilesTest` (port), `SketchSaveGovernorTest`, `PendingPngParkTest`, `PageTurnTest`, `InkBakeTest`, `CollapsedToolsTest` (+1). | **First Nomad walk.** Sonnet adb: Sketch notebook opens into the face; `am start` refused; chrome/collapsed; page turns + bounds; Bring in ink (screencap shows strokes) / "No ink"; save log ≤ 1 s; Back → catch-up; Show pages → canvas; reopen pixel-identical; `am kill` host behind the face → reconnect + save lands; sleep/wake; `meminfo`. User hand checklist: pencil feel + preview, rubbing, undo/redo gestures incl. across a turn and the put-back case, bake then undo twice, Back mid-hover. Phase-start Qs: save-failed dialog wording; pencil glyph (`ic_pen` vs new `ic_pencil`). |
@@ -243,4 +243,56 @@ kept; INK pressure preview tried and dropped; **Ratta bakes PENCIL at a constant
 **Next.** K2 — the seam (`:extension-api` 17, `ISketch`/`ISketchHost`, `ByteChunks`, `PngHeader`,
 `UndoRedoStack` budget, `PaperScreenActivity`). K5's screen must set nothing in `RattaTuning`
 (the defaults are the measurements).
+
+### K2 — Outcome (2026-09-15)
+
+**Landed.** `:extension-api` **17**: `SketchContract` (both actions, `MIN_API_VERSION_FOR_SKETCH`
+17 as a birth floor in `MIN_API_VERSIONS`, `SKETCH_CHUNK_BYTES` 512 KiB, `MAX_BYTES` 6 MiB — the
+one written-down hard refusal — `WATCH_BYTES` 4 MB, `MAX_CHUNKS` 13, `RESULT_SKETCH_SHOW_PAGES` 1,
+`SKETCH_TOO_LARGE` / `SKETCH_BAD_PNG` typed refusals; page key and PAGE_PREV/NEXT alias
+`DocumentContract`'s), `ISketch` (`begin(host)` / `end()`, **no store**), `ISketchHost` (`current`,
+`requestPage`, `readSketchChunk`, `saveSketchChunk(pageKey, i, bytes, last)`, `requestInk` →
+chunk count with **0 = no bare ink, no exception**, `readInkChunk`), `SketchPageState` (7 fields —
+key, index, count, width, height, bytes, chunks — validated in `init`, so the plan's `requireValid`
+is unnecessary and dropped; `chunksFor` pins chunks to bytes), `ByteChunks` (`chunk` / `countFor` /
+`join`; empty → one empty chunk), `PngHeader` (pure big-endian IHDR parse, `size` / `matches`,
+no Android classes). Host manifest `<queries>` both actions. `:sn-screen`: `UndoRedoStack(cost,
+budgetBytes)` with `undoBytes`, Paintsprout's `evictForBudget` ported exactly (oldest costed entry,
+never the newest), `pushUndoBeneath(action, sinceGeneration)`; `CollapsedChrome(tools = ORDER)`
+last with a default; `PaperToolbar(btnLasso: ImageButton?)`. `:ext-ink`: `PaperScreenActivity`
+lifted out of `InkScreenActivity` (855 → 428 lines; chrome, collapsed bar, eraser sub-bar,
+touch dispatch, chrome-hidden state, lifecycle, `finishWithHandoff` moved down; store, strokes,
+undo, selection, send stayed up; hooks `extraFloatingRects` / `extraFloatingContains` /
+`onScreenPaused` / `onScreenDestroyed` / `collapsedTools`), **zero edits to the pad or calendar
+subclasses**; `PenIdleAwait.kt` (`suspend PaperView.awaitPenIdle()`; `:sn-screen` has no
+coroutines, so it lives in `:ext-ink` as planned). Opus wrote it on Fable's brief; Fable read
+every seam file and found one defect — a literal NUL byte in `SketchPageState`'s key check and
+its test instead of the `' '` escape — fixed before the commit.
+
+**Tests.** `:extension-api` 238 → **281** (+43: `SketchContractTest` 10, `ByteChunksTest` 10,
+`PngHeaderTest` 12, `SketchPageStateTest` 11, the pin), `:sn-screen` 101 → **109** (+8),
+`:ext-ink` 52; whole tree green, **1717 `:app` / 3225** in the SN root (K1's 3174 + 51) — 3380
+counting `extensions/bible`'s 155. `assembleDebug` all 11 APKs.
+
+**Measured** (Nomad, Sonnet's adb walk, all eleven `.dev` packages, no release packages present):
+notebook / Scratch Pad / Calendar / Document editor each open on `engine 'ratta'` and close on
+`firmware ink released for handoff … result=0`; pad chrome + eraser tap, calendar Next ×2 (adb
+`input swipe` does not page-turn on Ratta — known); every point discovered at API 17 (`1 provider(s)
+of 1 candidate(s)`), no refused / older-host / mismatch wording; logcat sweep zero `FATAL` /
+`SecurityException` / `IllegalStateException`; idle `gfxinfo` 0 frames / 30 s; PSS host 77.5 MB,
+pad 41.8 MB, calendar 50.2 MB. The kill-host-behind-the-pad step was not in K0's recipe and was
+skipped, not guessed.
+
+**Traps found.** (1) A stale incremental-dex snapshot still pointing at the pre-rename
+`apps/notesprout_ratta/…` path broke `:ext-calendar:mergeLibDexDebug` the first time a class was
+deleted from `:ext-ink`; `./gradlew :ext-ink:clean` clears it — expect it again on the next class
+deletion in a long-lived module. (2) A NUL inside a Kotlin char literal compiles and passes; only
+`cat -v` shows it — check new `require` lines against `DocumentPageState`'s escapes.
+
+**The hand.** Pad/calendar ink + handoff on the Nomad — pending the user's walk (recorded below when
+it lands).
+
+**Next.** K3 — host data, creation, routing (`TYPE_SKETCH`, `SketchDao` / `SketchRepository`,
+`NotebookFlags.SKETCH` + every meta mirror site, the third radio, `FaceRouting`, `childrenOf`
+exclusion + `liveDescendantIds` + `liveErasableIds`).
 

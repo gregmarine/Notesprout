@@ -9,7 +9,8 @@ import com.symmetricalpalmtree.gpaper.core.Tool
 import com.symmetricalpalmtree.notesproutsn.screen.R
 
 /**
- * Back plus the three tool buttons of a paper-hosting screen (arc 11 / J1), **binding-free**: it
+ * Back plus the tool buttons of a paper-hosting screen (arc 11 / J1) — three, or two where the
+ * screen has no lasso ([btnLasso] is nullable since arc 43 / K2) — **binding-free**: it
  * takes the views themselves rather than a generated binding, which is the whole reason the
  * notebook's own [NotebookToolbar] could not simply move here — that one is hard-bound to
  * `ActivityNotebookBinding` and carries the notebook's clipboard-loaded icon swap and lasso re-tap.
@@ -36,7 +37,10 @@ class PaperToolbar(
     private val btnBack: ImageButton,
     private val btnPen: ImageButton,
     private val btnEraser: ImageButton,
-    private val btnLasso: ImageButton,
+    /** The lasso button, or **null** on a screen that has none (arc 43 / K2 — the sketch surface's
+     *  bar is Pencil · Eraser: a raster page has nothing to select, so a lasso there would arm a
+     *  tool the surface does not answer). Every existing caller passes one and compiles unchanged. */
+    private val btnLasso: ImageButton?,
     private val paper: PaperView,
     private val onBack: () -> Unit,
     /** A tap on the **already-armed** eraser (arc 29 / LE2): the screen opens the eraser sub-bar
@@ -52,13 +56,13 @@ class PaperToolbar(
     private val onSynced: () -> Unit = {},
 ) {
     init {
-        listOf(btnBack, btnPen, btnEraser, btnLasso).forEach {
+        listOfNotNull(btnBack, btnPen, btnEraser, btnLasso).forEach {
             TooltipCompat.setTooltipText(it, it.contentDescription)
         }
         btnBack.setOnClickListener { releaseRenderIfIdle(); onBack() }
         btnPen.setOnClickListener { select(Tool.PEN) }
         btnEraser.setOnClickListener { select(Tool.ERASER) }
-        btnLasso.setOnClickListener { select(Tool.LASSO) }
+        btnLasso?.setOnClickListener { select(Tool.LASSO) }
         sync(paper.tool)
     }
 
@@ -121,7 +125,7 @@ class PaperToolbar(
             eraserShowsLasso = lassoKind
             btnEraser.setImageResource(if (lassoKind) R.drawable.ic_lasso_eraser else R.drawable.ic_eraser)
         }
-        btnLasso.isSelected = tool == Tool.LASSO
+        btnLasso?.isSelected = tool == Tool.LASSO
         onSynced()
     }
 
