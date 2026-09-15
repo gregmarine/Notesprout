@@ -4,8 +4,9 @@
 panel, a paginated print-look page, single-finger swipe that flows across chapter and book
 boundaries, — B7 — a **Recents** panel of the chapters picked by name, and — B8 — a **Search**
 panel: a reference goes there, words are found in the text (§ [Search](#search-b8)). No bookmarks
-beyond the one remembered position and that history, no cross-reference taps, no footnote popups.
-Berean Standard Bible only.
+beyond the one remembered position and that history. Berean Standard Bible only. **Arc 41 "Cross
+references"** (2026-09-14, § [Cross references](#cross-references-arc-41-2026-09-14)) made the
+parallel-passage lines and the footnote callers tappable.
 
 **Arc 38 "Reference"** (2026-09-13, a fresh user decision, § [Bible references](#bible-references-arc-38)
 below) grew a second door **in**, from the notebook: a lassoed or typed reference ("John 3:16-18,
@@ -229,8 +230,11 @@ not user data, and read-only means nothing here can ever write to it. Three meth
 - `footnotesForChapter(usfm, chapter)` — a chapter's footnotes, ordered by block then caller
   offset.
 
-Nothing else is read: no `xref`, no `redletter`, no `verse`, no `verse_fts` (absent from the slim
-build anyway).
+- `xrefsForChapter(usfm, chapter)` (arc 41) — the chapter's cross-references from both source kinds
+  in one `UNION ALL`: those on its `r` blocks and those inside its footnotes' bodies.
+
+`redletter` is never read. (`verse` and `verse_fts` are the passage view's and the Search's — arc
+38 / B8.)
 
 ---
 
@@ -271,7 +275,7 @@ The span table `build()` applies, per atom:
 
 | Atom | Spans |
 |---|---|
-| `HeadingAtom` | `AlignmentSpan.Standard(CENTER)`, `StyleSpan(BOLD)` for MAJOR / `StyleSpan(ITALIC)` for the other three, and `RelativeSizeSpan(0.8f)` **only** for REFERENCE |
+| `HeadingAtom` | `AlignmentSpan.Standard(CENTER)`, `StyleSpan(BOLD)` for MAJOR / `StyleSpan(ITALIC)` for the other three, and `RelativeSizeSpan(0.8f)` **only** for REFERENCE; since arc 41 an `UnderlineSpan` over each of its `links` (a `r` line's cross-references), clamped to the heading's own text |
 | `NumberAtom` | `RelativeSizeSpan(0.62f)` + `StyleSpan(BOLD)` + `SuperscriptSpan()` |
 | `FootnoteAtom` | `RelativeSizeSpan(0.7f)` + `StyleSpan(BOLD)` + `SuperscriptSpan()`, rendered as a literal `*`, attached with no leading space |
 | The whole buffer | one `LineHeightSpan.Standard(lineHeightPx)` over `[0, length)` |
@@ -1039,11 +1043,12 @@ hand, adb cannot drive it):
 
 ## Tests
 
-**120 JVM tests** across thirteen files (`src/test/kotlin/.../ext/bible/`), counted directly from the
+**133 JVM tests** across fifteen files (`src/test/kotlin/.../ext/bible/`), counted directly from the
 source with `grep -c "@Test"` (46 at the arc-37 freeze; +1 the Psalm title, +5 B6's reshape after
 its rewrite, +13 B7 → 65; **+11 `ReferenceTest` and +9 `PassageAtomsTest` at arc 38 / R1–R2, +2 into
 `BibleSqlTest` and +6 into `RecentChaptersTest`'s rewrite for the union → 93; **+18 `SearchTest` at
-B8 → 111; **+8 `PassageMarkdownTest` at arc 40 / V1 → 120**):
+B8 → 111; **+8 `PassageMarkdownTest` at arc 40 / V1 → 120; +5 to 125 at the 2026-09-13 review;
++3 `PageMarksTest`, +4 `XrefWireTest`, +1 into `ChapterPaginatorTest` at arc 41 → 133**):
 
 | File | Tests | Pins |
 |---|---|---|
@@ -1057,7 +1062,9 @@ B8 → 111; **+8 `PassageMarkdownTest` at arc 40 / V1 → 120**):
 | `ChapterCursorTest.kt` | 7 | Ordinary in-book stepping, book-to-book flow both directions, Genesis 1 having nothing before it, the last book's last chapter having nothing after it, a book the source omits being skipped in both directions, a zero count or unknown code walking nowhere |
 | `ContentsModelTest.kt` | 13 | Six-wide chapter rows with a padded last row, a one-chapter book as one cell and five spacers, the collapsed list as one row per book in canon order, an expanded book followed by its rows then the next book, case-insensitive keys, several books open at once, `indexOfBook` / `indexOfChapter` (only while open; Psalm 119 on the twentieth row), `pageOf` / `pageCount` / `clampPage` arithmetic, an empty source |
 | `ContentsLayoutTest.kt` | 4 | The 480 dp sidebar branch (Nomad and Manta both take it), the 60 % width rounding, a row's slot at both densities, `itemsPerPage` flooring to ≥ 1 |
-| `reader/ChapterPaginatorTest.kt` | 9 | Blocks becoming headings/numbers/words with a spliced footnote caller, minor heading kinds mapping to `MINOR`, a page never ending on a bare verse number, forced progress when nothing fits, `fitCount` returning zero when even one atom overflows, a page anchoring to the verse in effect at its first word, a verse-less opening page anchoring to verse 1, `pageContaining` picking the last page at or before a verse, and a real pagination round-tripping every page's anchor back to that same page |
+| `reader/PageMarksTest.kt` | 3 | Arc 41 — a reference mark hits on every char of `start until end` and not the one after; a one-glyph caller also hits on the boundary right after it (`start..end`); no marks, no hit |
+| `XrefWireTest.kt` | 4 | Arc 41 — a stored key range becomes one book range on the wire (`SNG:1:1-1:17`, 1 Peter 3's fixed line), a single verse, a whole-chapter target keeping the codec's `0`/`999` sentinels and labelling "Psalms 38", a cross-chapter target decoding back to the same keys |
+| `reader/ChapterPaginatorTest.kt` | 10 | Arc 41 — a `r` heading carrying its block-sourced xrefs as `XrefLink`s (offsets as stored, a note-sourced row ignored, an `s1` heading carrying none); blocks becoming headings/numbers/words with a spliced footnote caller, minor heading kinds mapping to `MINOR`, a page never ending on a bare verse number, forced progress when nothing fits, `fitCount` returning zero when even one atom overflows, a page anchoring to the verse in effect at its first word, a verse-less opening page anchoring to verse 1, `pageContaining` picking the last page at or before a verse, and a real pagination round-tripping every page's anchor back to that same page |
 | `PassageMarkdownTest.kt` | 8 | Arc 40 / V1 — `withinCap` refusing a whole-chapter range and more than ten verses as named (never as read back), accepting exactly ten, a chapter-crossing range counted by its last chapter plus one and then by its rows (review 2026-09-13); `build`'s bold label line, one paragraph per (book, chapter) run, a second bold label at a later crossing, plain verse numbers, an empty verse list building nothing |
 
 The host side of arc 38 (`LinkPayload`, `LinkNav`, `BibleRefFlow`'s pure edges) is tested in
@@ -1244,6 +1251,113 @@ edge — a right margin needs a stored wrap column, declined).
 
 ---
 
+## Cross references (arc 41, 2026-09-14)
+
+The user's decision (2026-09-14, branch `crossref`): "let's implement cross references … There was
+a bug in Biblesprout with one of the cross references … In 1 Peter 3, there is a cross reference to
+Song of Solomon. However, the link just goes to 1 Peter 1. In light of that, make sure all cross
+references link to the correct passages." Plan + ledger: `extensions/bible/CROSSREF_PLAN.md`.
+
+### The data, and the bug
+
+Every BSB cross reference is a `\ref Display|TARGET\ref*` pair — the USFM has **no `\x` notes**.
+2,028 sit in the italic parallel-passage `r` lines under section headings ("(Song of Solomon 1:1–17;
+Ephesians 5:22–33)"); 1,250 sit inside footnote bodies ("Cited in Matthew 19:4"). The slim build
+had shipped them in `xref` since B0, unread.
+
+**The Biblesprout bug was upstream data.** The publisher's USFM emits both Song of Solomon lines
+(1 Peter 3, Ephesians 5) with **no book code** in the target half — `\ref Song of Solomon
+1:1–17|1:1-17\ref*` — and the builder's `_resolve_target` treated a code-less target as "the source
+book", so the stored keys said 1 Peter 1:1–17 (`60001001–60001017`). Biblesprout's reader trusted
+the integers and went where they said. Auditing every row against the USFM found three defect
+classes, all fixed in `tools/bible/build_bible_db.py` (X1) and rebuilt into the asset:
+
+| Class | Rows | Now |
+|---|---|---|
+| Code-less target whose display names a canon book (Song of Solomon ×2) | 2 | The **display text's** book decides (`display_book`, longest canon name first, "Song of Songs"/"Psalm" aliases) — never the source book |
+| Code-less target naming a non-canon book (Jasher ×3, 1 Enoch ×2, 1 Esdras ×2, all in footnotes) | 7 | A warning and **no row** — the words stay in the note as plain text |
+| One-chapter books' bare numbers (`JUD 17-23`, `OBA 1-14`, `PHM 1-3`, `2JN 12-13`, `3JN 13-14`) read as chapters 17–23 | 15 | Verses of chapter 1 when the display carries a colon (`ONE_CHAPTER`); a bare "Jude 1" stays the chapter |
+
+`_check_xrefs` now **fails the build** if any target endpoint is not a verse the source has (a
+`0`/`999` sentinel needs only its chapter), a range spans two books, or a display whose book parses
+disagrees with the target's — the check that would have caught the 1 Peter line. Eleven stdlib
+`unittest`s (`tools/bible/test_build_bible_db.py`). The rebuilt `bsb.bible` carries **3,271** rows
+and is byte-for-byte the same length as before (15,265,792) — the install stamp's `lastUpdateTime`
+half is what makes the device notice. Biblesprout's own builder copy has the same defects; it was
+not touched from here.
+
+### The reader
+
+- **`Xref` row** (`Rows.kt`) and `BibleDatabase.xrefsForChapter` (Biblesprout's `UNION ALL` verbatim).
+- **`HeadingAtom.links: List<XrefLink>`** — a `r` block's xrefs ride its heading atom
+  (`ChapterPaginator.atomsForBlocks(blocks, footnotes, xrefs)`, `headingFor`); the heading's text is
+  the block's content verbatim, so the builder's char spans map one to one. Body kinds carry none —
+  verified: every block-sourced row is on a `r`. Note-sourced rows are grouped by footnote id into
+  `ChapterPages.noteLinks`, beside `footnotesById`, for the popup.
+- **`ReaderTypography.build(atoms, collectMarks)`** returns `Built(text, marks)`: an `UnderlineSpan`
+  over each link (the notebook's own link cue), and — only when `collectMarks` — a `PageMark.Reference`
+  per link and a `PageMark.Caller` per `*`. `bodyPage` (the drawn layout) collects; `measure` never
+  does, because it runs on every step of the paginator's binary search.
+- **`ReaderView.markAt(x, y)`** — the hit test asks the very layout that was drawn: the line under
+  the finger (`getLineForVertical`, below `bodyTop` — the heading stack on a first page), the char
+  nearest the finger's x on it (`getOffsetForHorizontal`), refused past a line's drawn ends by more
+  than 8 dp. `PageMarks.at` (pure) then decides: a reference hits on `start until end`, a one-glyph
+  caller on `start..end` inclusive — the boundary the layout answers for a finger on its right half.
+  `lineBounds(mark)` is the popup's anchor. A passage page has no marks (the plain verse layer).
+- **The tap is `ListSwipe`'s** (`:sn-screen`, optional `onTap(x, y)`): the UP of a one-finger,
+  **finger**, in-region sequence that never qualified as a swipe and never left the touch slop, in
+  the region's coordinates. One detector owns the sequence, so a turn and a tap can never both
+  fire; a stylus sequence is dropped as ever (the user's call: finger only). `BibleActivity.onPageTap`
+  ignores a tap while loading or in passage mode, and a tap on nothing is a **no-op** — tap-to-turn
+  stays declined.
+- **A reference tap → the passage, one screen further** (the user's call: Back returns to the
+  chapter). `openPassageOver(XrefWire.of(start, end))` launches a **second in-process
+  `BibleActivity`** in passage mode — Full chapter's road in reverse — with `EXTRA_PASSAGE_WIRE`
+  (in-process, no contract; decoded or ignored; it wins over `BibleSession.reference`, which belongs
+  to the instance the host opened). The child opens with `stamp = true`, so the passage lands in the
+  Recents like a followed link; both Send codes relay up through `passageOver`'s result callback
+  exactly as `fullChapter`'s do, so a Send from the child closes the whole chain onto the notebook.
+  Nesting (passage → Full chapter → reference → …) is unbounded; every Back pops one.
+- **A caller tap → `FootnotePopup`** (its own file): the note's address as heading — `"<book>
+  <label>"`, "1 Peter 3:8" (`bible_chapter_title_text`; the verse, then the chapter, when a note has
+  no label) — then the body at 20 sp Noto Serif, the note's own cross-references as black underlined
+  `ClickableSpan`s that dismiss and `openPassageOver`. The panels' dialog shape (`Theme_Notesprout`,
+  transparent, no dim, no elevation, no animation, `shape_dialog_bordered`); the whole window is the
+  dismissing scrim. Placed **under the caller's line** — over it when the page has no room — centred
+  on the line, clamped 16 dp inside the window, 340 dp wide or what the window leaves, and
+  `INVISIBLE` until placed (a box drawn once in the wrong place is a ghost on e-ink). One at a time;
+  `onDestroy` dismisses it.
+
+**Privacy:** a tap logs "cross-reference tap" or "footnote tap: N link(s)" and the passage its
+duration — never the text, the target, or the note.
+
+### Failure table (arc 41 additions)
+
+| Situation | What the user sees | Where |
+|---|---|---|
+| A finger tap on plain text, a heading without links, or the margins | Nothing | `BibleActivity.onPageTap` (`markAt` null) |
+| A stylus tap anywhere on the page | Nothing — the sequence is dropped before it is judged | `ListSwipe.isStylus` |
+| A tap while a chapter is loading, or in passage mode | Nothing | `BibleActivity.onPageTap` |
+| A tap on a caller whose footnote the chapter did not load (a hole in the source) | Nothing | `BibleActivity.showFootnote` (`footnotesById` miss) |
+| A reference whose target the source lacks | The passage problem dialog in the child instance; Back returns to the chapter | `BibleActivity.openPassage`'s `onFailure` |
+| `EXTRA_PASSAGE_WIRE` this build cannot decode | The child opens where the reader was left, as any unreadable extra does | `BibleActivity.onCreate` (`ReferenceCodec.decode` null → `BibleSession.reference` / the stored position) |
+| A second tap while the popup is up | The popup takes it (the window is the scrim) and dismisses; nothing underneath is hit | `FootnotePopup` root click |
+
+### Walked over adb on the Nomad (X4, 2026-09-14, `.dev` builds)
+
+John 3 page 1: the reference line underlined; a tap on "Romans 5:6–11" → the passage view (117 ms,
+title "Romans 5:6–11", Full chapter beside it), Back → John 3 page 1; a tap on verse 3's `*` → the
+popup under its line, "John 3:3 · Or born from above; also in verse 7."; a tap outside dismissed
+it. **1 Peter 3: a tap on "Song of Solomon 1:1–17" opened Song of Solomon 1** (3 pages; the bug),
+Back → 1 Peter 3 page 1; Recents listed "Song of Solomon 1:1–17" and "Romans 5:6–11" newest first;
+a tap on plain text did nothing; a swipe still turned the page. Genesis 1: the `*` after "light,"
+→ "Genesis 1:3 · Cited in 2 Corinthians 4:6" with the reference underlined; a tap on it → the
+passage "2 Corinthians 4:6"; Send → The reference → both instances closed, the notebook received
+"2 Corinthians 4:6" (17 chars, `BibleRefFlow`). **Left to the user's hand:** the tap-vs-swipe feel,
+a pen tap staying inert, the popup's placement and legibility, the underline at 0.8× italic.
+
+---
+
 ## Not in this arc (recorded futures, each needing a user decision)
 
 - ~~**Send to notebook**~~ — DONE by B9 (§ [Send to notebook](#send-to-notebook-b9)).
@@ -1260,10 +1374,8 @@ edge — a right margin needs a stored wrap column, declined).
   every load, so a centred column cannot survive a reload without a schema change the user chose
   not to make. **The right-margin look** — the verses run to the page's own right edge rather than
   a typeset column with air on both sides; cosmetic, and the same stored-column question as above.
-- **Cross references** — the `xref` table is built and shipped but nothing reads it; the `r`
-  (parallel-passage) lines and footnote callers render as plain, non-tappable text.
-- **Footnote popups** — footnote bodies (`footnote.text`) are stored and joined at chapter load but
-  never shown; the caller renders as an inert superscript `*`.
+- ~~**Cross references**~~ — DONE by arc 41 (§ [Cross references](#cross-references-arc-41-2026-09-14)).
+- ~~**Footnote popups**~~ — DONE by arc 41, the same section.
 - **Red letters** — `redletter` spans exist in the source and are copied by the slim build but are
   never read by the reader; words of Jesus render identically to surrounding text.
 - **The interlinear/word layer** — original-language words, Strong's numbers, morphology and
@@ -1271,7 +1383,8 @@ edge — a right margin needs a stored wrap column, declined).
   reader code; nothing here reads `morphology`/`form`/`word` even when present.
 - **A text-size preference** — decision 12 fixed 30sp × 1.5 line height for this arc only.
 - **Tap zones** — the reader turns pages by swipe only, on the user's explicit call; a tap-to-turn
-  zone was not built.
+  zone was not built. Arc 41's tap on a reference or a caller does not change this: a tap on
+  anything else is still nothing.
 - ~~**A "Psalm 23" title special case**~~ — **done at the freeze, the user's call**:
   `Canon.chapterTitleName(usfm)` answers "Psalm" for `PSA` and the book's name otherwise, so the
   page heading and the running head say "Psalm 23" while the Contents still lists the book as
@@ -1296,6 +1409,9 @@ edge — a right margin needs a stored wrap column, declined).
   decisions, the judgment calls, and the R1–R5 phase records § "Bible references" draws from.
 - `extensions/bible/VERSES_PLAN.md` — arc 40 "Verses"'s plan and ledger: the six locked decisions,
   the judgment calls, and the V1–V4 phase records § "Verses on the page" draws from.
+- `extensions/bible/CROSSREF_PLAN.md` — arc 41 "Cross references"'s plan and ledger: the bug's root
+  cause, the nine locked decisions, the judgment calls, and the X0–X5 records § "Cross references"
+  draws from.
 - `apps/notesprout_sn/CLAUDE.md` — the module-table entry, the ninth-point summary, and the
   "bottom bars are pager-only, with one recorded exception" rule.
 - `tools/bible/README.md` — the exact build command and result for `bsb.bible`.

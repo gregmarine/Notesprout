@@ -78,9 +78,24 @@ verses on what is already there — "No room on this page" instead). Plan + ledg
 page", `docs/extensions.md` § "Arc 40's tail: `passageText`" + audit row 60, `docs/objects.md` §
 "Text objects" + "Standing traps", `docs/links.md` § "The Bible kind". No code review — the user's
 call, the same waiver arcs 37–39 took.
-No TENTH extension point, no next Bible phase (bookmarks, cross references, footnotes, longer or
-multi-page passages) and no other new arc without a fresh user decision; no re-raising of any
-waived / declined review finding.
+**Arc 41 "Cross references" (2026-09-14, a fresh user decision, branch `crossref`): the BSB's
+cross references tappable.** Every `\r` parallel-passage line's references are underlined and a
+**finger** tap opens the cited passage **one screen further** (a second in-process `BibleActivity`
+in passage mode — Full chapter's road in reverse; Back returns to the chapter; Send relays up); a
+tap on a footnote caller `*` opens the note in a bordered popup under its line ("1 Peter 3:8" +
+text) with its own references tappable. The tap rides `ListSwipe.onTap` (`:sn-screen`, an
+optional callback: one finger, never past slop, never a swipe); a tap on anything else is nothing.
+**The Biblesprout bug it was asked to avoid was upstream data**: the publisher's USFM omits the
+book code on both Song of Solomon lines, and the builder fell back to the source book (1 Peter 3
+→ 1 Peter 1). `tools/bible/build_bible_db.py` now resolves a code-less target from the display
+text's book, refuses non-canon books (Jasher, Enoch, Esdras), reads one-chapter books' bare
+numbers as verses, and **fails the build** on any dangling or mis-booked target (`_check_xrefs`);
+asset rebuilt, 3,271 rows. No seam change — no `API_VERSION` bump. Walked over adb on the Nomad
+(`.dev`); the hand walk is the user's. Plan + ledger `extensions/bible/CROSSREF_PLAN.md`; reference
+`extensions/bible/docs/bible.md` § "Cross references". No code review — the user's call, the arc
+37–40 waiver.
+No TENTH extension point, no next Bible phase (bookmarks, longer or multi-page passages) and no
+other new arc without a fresh user decision; no re-raising of any waived / declined review finding.
 
 **Maintenance protocol (replaces the per-arc phase protocol):**
 

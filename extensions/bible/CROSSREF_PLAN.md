@@ -108,3 +108,17 @@ Biblesprout's own builder copy has the same defects — not touched from here.
   `openPassageOver`; placed under the caller's line (over it when there is no room), centred on
   the line, clamped 16 dp inside the window, 340 dp or what the window leaves, `INVISIBLE` until
   placed; the full transparent window dismisses; one at a time; `onDestroy` dismisses it.
+- **X4 walk (adb, `.dev` Bible on the Nomad; the host untouched) — ✅ 2026-09-14.** John 3: the
+  reference line underlined; "Romans 5:6–11" → passage (117 ms), Back → John 3 p1; verse 3's `*`
+  → popup "John 3:3 · Or born from above; also in verse 7." under its line; tap outside dismissed.
+  **1 Peter 3 → "Song of Solomon 1:1–17" → Song of Solomon 1 (3 pages) — the bug, fixed**; Back →
+  1 Peter 3 p1; Recents listed both passages newest first; plain-text tap = nothing; swipe still
+  turned. Genesis 1:3's `*` → "Genesis 1:3 · Cited in 2 Corinthians 4:6", the reference underlined
+  → passage "2 Corinthians 4:6" → Send → The reference → both instances closed, the notebook
+  received 17 chars. Trap for adb: the Send sheet's row bounds must be tapped at their centre
+  (735, 935 on the Nomad) — a stale dump right after the sheet opens misses. **Left to the user's
+  hand:** tap-vs-swipe feel, pen tap inert, popup placement/legibility, the underline at 0.8×.
+- **X5 docs — ✅ 2026-09-14.** `bible.md` § Cross references (+ data § amended, span table, tests
+  table → 133, futures struck, Related), `apps/notesprout_sn/CLAUDE.md` arc 41 entry, root
+  `CLAUDE.md` (module line + docs table), `tools/bible/README.md`, this ledger. **Awaiting the
+  user's hand walk on the Nomad for the freeze.**
