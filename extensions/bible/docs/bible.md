@@ -1362,8 +1362,10 @@ Back → 1 Peter 3 page 1; Recents listed "Song of Solomon 1:1–17" and "Romans
 a tap on plain text did nothing; a swipe still turned the page. Genesis 1: the `*` after "light,"
 → "Genesis 1:3 · Cited in 2 Corinthians 4:6" with the reference underlined; a tap on it → the
 passage "2 Corinthians 4:6"; Send → The reference → both instances closed, the notebook received
-"2 Corinthians 4:6" (17 chars, `BibleRefFlow`). **Left to the user's hand:** the tap-vs-swipe feel,
-a pen tap staying inert, the popup's placement and legibility, the underline at 0.8× italic.
+"2 Corinthians 4:6" (17 chars, `BibleRefFlow`). Then the user's hand, twice the same day: "The
+links work well. Going back works well too. The footnotes are working" (→ the swipe-up walk-back,
+then its widening to every link-opened reader), and **"This feels fantastic! My heart is happy!"
+— arc 41 COMPLETE + FROZEN 2026-09-14.** No code review (the user's call).
 
 ---
 

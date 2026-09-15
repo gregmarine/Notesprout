@@ -90,8 +90,12 @@ book code on both Song of Solomon lines, and the builder fell back to the source
 → 1 Peter 1). `tools/bible/build_bible_db.py` now resolves a code-less target from the display
 text's book, refuses non-canon books (Jasher, Enoch, Esdras), reads one-chapter books' bare
 numbers as verses, and **fails the build** on any dangling or mis-booked target (`_check_xrefs`);
-asset rebuilt, 3,271 rows. No seam change — no `API_VERSION` bump. Walked over adb on the Nomad
-(`.dev`); the hand walk is the user's. Plan + ledger `extensions/bible/CROSSREF_PLAN.md`; reference
+asset rebuilt, 3,271 rows. No seam change — no `API_VERSION` bump. A one-finger **swipe up**
+walks back from any reader a link led to (a cross-reference passage, a Full chapter from one, a
+notebook Bible link, the editor's Lookup); the plain Bible-button door is silent. Walked over adb
+on the Nomad (`.dev`), then **COMPLETE + FROZEN 2026-09-14 on the user's own hand walk ("This
+feels fantastic! My heart is happy!")**; branch `crossref` stays open for the related follow-ups
+the user named, merging `--no-ff` on their word. Plan + ledger `extensions/bible/CROSSREF_PLAN.md`; reference
 `extensions/bible/docs/bible.md` § "Cross references". No code review — the user's call, the arc
 37–40 waiver.
 No TENTH extension point, no next Bible phase (bookmarks, longer or multi-page passages) and no
