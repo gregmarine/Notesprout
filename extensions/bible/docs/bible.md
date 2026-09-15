@@ -1569,6 +1569,13 @@ passage-mode Notes with a rebuild reopen from a passage.
 
 ## Not in this arc (recorded futures, each needing a user decision)
 
+- **Notes from the editor's Lookup door** — the reader opened over the document editor
+  (`BibleLookupActivity`, arc 39) carries no Notes button: a row tap must open a notebook page,
+  and the notebook behind the editor is stopped and already open (a same-notebook row would need a
+  new hand-off — reader → trampoline → editor close → land on the page; a rebuild from there
+  could not read the open file). Noticed by the user 2026-09-15 and **left as-is for now** ("a
+  small gap … probably isn't important right now") — a future decision, not a bug.
+
 - ~~**Send to notebook**~~ — DONE by B9 (§ [Send to notebook](#send-to-notebook-b9)).
 - ~~**Search**~~ — DONE by B8 (§ [Search](#search-b8)). Still not there: typo tolerance (the
   match is prefix-AND, as Biblesprout's), an OR fallback when AND finds nothing, a search history.
