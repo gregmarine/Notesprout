@@ -2,6 +2,7 @@ package com.symmetricalpalmtree.notesproutsn.ext.bible
 
 import android.app.Activity
 import android.content.Intent
+import android.graphics.Rect
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
@@ -24,6 +25,7 @@ import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.core.TopGuard
 import com.symmetricalpalmtree.notesproutsn.ext.bible.databinding.ActivityBibleBinding
 import com.symmetricalpalmtree.notesproutsn.ext.bible.reader.ChapterPaginator
+import com.symmetricalpalmtree.notesproutsn.ext.bible.reader.PageMark
 import com.symmetricalpalmtree.notesproutsn.ext.bible.reader.ReaderView
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
 import com.symmetricalpalmtree.notesproutsn.extension.HostCallerCheck
@@ -156,6 +158,13 @@ class BibleActivity : AppCompatActivity() {
     /** The in-process Full chapter launch (arc 38 / R2). Registered in [onCreate]. */
     private lateinit var fullChapter: ActivityResultLauncher<Intent>
 
+    /** The in-process passage launch a cross-reference tap makes (arc 41) — Full chapter's road
+     *  in reverse: a SECOND instance in passage mode, so Back comes back to this chapter's page. */
+    private lateinit var passageOver: ActivityResultLauncher<Intent>
+
+    /** The footnote popup while it is up; null otherwise. One at a time, dismissed on the way out. */
+    private var footnotePopup: FootnotePopup? = null
+
     /** True while a chapter is being built. The latch that makes a fast flip drop, not queue. */
     private var loading = false
 
@@ -198,7 +207,13 @@ class BibleActivity : AppCompatActivity() {
         landing = landingFromIntent()
         // A landing is our own chapter launch and ignores the showing's reference; otherwise the
         // reference — read ONCE here — decides the mode for the life of this instance.
-        openingReference = if (landing != null) null else BibleSession.reference
+        // Our own passage launch (arc 41, a cross-reference tap) carries its wire as an extra and
+        // wins over the session's — the host's reference belongs to the instance it opened.
+        openingReference = when {
+            landing != null -> null
+            else -> intent?.getStringExtra(EXTRA_PASSAGE_WIRE)?.takeIf { ReferenceCodec.decode(it) != null }
+                ?: BibleSession.reference
+        }
         binding = ActivityBibleBinding.inflate(layoutInflater)
         setContentView(binding.root)
         TopGuard.applyInsetPadding(binding.root)
@@ -226,6 +241,17 @@ class BibleActivity : AppCompatActivity() {
             }
         }
 
+        passageOver = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            // The passage instance is one hop off this page; a Send from it (or from anything
+            // it opened in turn) carries its code up exactly as Full chapter's does.
+            if (result.resultCode == ExtensionContract.RESULT_BIBLE_SEND ||
+                result.resultCode == ExtensionContract.RESULT_BIBLE_SEND_TEXT
+            ) {
+                setResult(result.resultCode)
+                finish()
+            }
+        }
+
         readerView = ReaderView(this)
         binding.readerBand.addView(
             readerView,
@@ -243,6 +269,7 @@ class BibleActivity : AppCompatActivity() {
             onFlipPrevious = { turnTo(pageIndex - 1) },
             onSwipeDown = { openContents() },
             onTwoFingerSwipeDown = { openRecents() },
+            onTap = { x, y -> onPageTap(x, y) },
         )
 
         binding.title.setText(R.string.bible_title)
@@ -293,6 +320,7 @@ class BibleActivity : AppCompatActivity() {
         contentsPanel?.dismiss()
         recentsPanel?.dismiss()
         searchPanel?.dismiss()
+        footnotePopup?.dismiss()
         binding.root.removeCallbacks(showLoading)
         loader.close()
     }
@@ -703,6 +731,66 @@ class BibleActivity : AppCompatActivity() {
         }
     }
 
+    // --- cross references (arc 41) -------------------------------------------
+
+    /**
+     * A finger tap on the page ([ListSwipe.onTap], region coordinates). Only a **chapter** page
+     * has anything to hit — the `\\r` lines' references and the footnote callers; a passage flows
+     * the plain verse layer and carries no marks — and a tap on nothing is a no-op: tap-to-turn
+     * was declined at arc 37, and stays declined.
+     */
+    private fun onPageTap(x: Float, y: Float) {
+        if (loading || passage != null) return
+        when (val mark = readerView.markAt(x, y) ?: return) {
+            is PageMark.Reference -> {
+                Slog.d(TAG) { "cross-reference tap" }
+                openPassageOver(XrefWire.of(mark.targetStartKey, mark.targetEndKey))
+            }
+            is PageMark.Caller -> showFootnote(mark)
+        }
+    }
+
+    /**
+     * The referenced passage, **one screen further** — the user's call: Back returns to this
+     * chapter, on this page. A second instance of this Activity in passage mode (the Full chapter
+     * pattern in reverse), which stamps the passage as a pick the way a followed link is; the
+     * extras never cross a process and are no contract.
+     */
+    private fun openPassageOver(wire: String) {
+        passageOver.launch(
+            Intent(this, BibleActivity::class.java)
+                .putExtra(EXTRA_PASSAGE_WIRE, wire)
+                .putExtra(ExtensionContract.EXTRA_BIBLE_SEND_ENABLED, sendEnabled),
+        )
+    }
+
+    /** The footnote behind a tapped caller, in a [FootnotePopup] under its line. One at a time. */
+    private fun showFootnote(mark: PageMark.Caller) {
+        if (footnotePopup != null) return
+        val pages = chapter ?: return
+        val note = pages.footnotesById[mark.footnoteId] ?: return
+        val line = readerView.lineBounds(mark) ?: return
+        val at = IntArray(2)
+        readerView.getLocationOnScreen(at)
+        line.offset(at[0], at[1])
+        // "1 Peter 3:8" — the book the chapter wears, then the note's own origin label; a note
+        // without one names its verse, and without that its chapter.
+        val where = note.label
+            ?: note.verseKey?.let { "${VerseKey.chapterOf(it)}:${VerseKey.verseOf(it)}" }
+            ?: pages.chapter.toString()
+        val heading = getString(R.string.bible_chapter_title_text, Canon.chapterTitleName(pages.usfm), where)
+        Slog.d(TAG) { "footnote tap: ${pages.noteLinks[note.id].orEmpty().size} link(s)" }
+        footnotePopup = FootnotePopup(
+            activity = this,
+            anchor = Rect(line),
+            heading = heading,
+            text = note.text,
+            links = pages.noteLinks[note.id].orEmpty(),
+            onDismissed = { footnotePopup = null },
+            onNavigate = { startKey, endKey -> openPassageOver(XrefWire.of(startKey, endKey)) },
+        ).also { it.show() }
+    }
+
     // --- the passage's doors ------------------------------------------------
 
     /**
@@ -849,5 +937,9 @@ class BibleActivity : AppCompatActivity() {
         private const val EXTRA_USFM = "com.symmetricalpalmtree.notesproutsn.ext.bible.USFM"
         private const val EXTRA_CHAPTER = "com.symmetricalpalmtree.notesproutsn.ext.bible.CHAPTER"
         private const val EXTRA_VERSE = "com.symmetricalpalmtree.notesproutsn.ext.bible.VERSE"
+
+        /** A cross-reference tap's passage launch (arc 41): the wire to open on. In-process only,
+         *  like the three above. */
+        private const val EXTRA_PASSAGE_WIRE = "com.symmetricalpalmtree.notesproutsn.ext.bible.PASSAGE_WIRE"
     }
 }

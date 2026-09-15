@@ -98,3 +98,13 @@ Biblesprout's own builder copy has the same defects — not touched from here.
   region's coordinates. `XrefWire.of(startKey, endKey)`. Tests: `PageMarksTest` 3,
   `XrefWireTest` 4, one paginator link test → `:ext-bible` 133; `:sn-screen` 101 (ListSwipe
   itself is `MotionEvent`-bound and untested on the JVM, as before).
+- **X3 doors — ✅ 2026-09-14.** `BibleActivity.onPageTap` off `ListSwipe.onTap` (chapter mode
+  only; a tap on nothing is a no-op): a `PageMark.Reference` → `openPassageOver(XrefWire.of(…))`
+  — a **second in-process instance** launched with `EXTRA_PASSAGE_WIRE` (decoded or ignored; wins
+  over `BibleSession.reference`), opened via `openPassage(wire, stamp = true)`, both Send codes
+  relayed up as Full chapter's are; a `PageMark.Caller` → `FootnotePopup` (new file): heading
+  `"<book> <label>"` (`bible_chapter_title_text`; the verse, then the chapter, when a note has no
+  label), Noto Serif 20 sp, the note's own links as black underlined `ClickableSpan`s →
+  `openPassageOver`; placed under the caller's line (over it when there is no room), centred on
+  the line, clamped 16 dp inside the window, 340 dp or what the window leaves, `INVISIBLE` until
+  placed; the full transparent window dismisses; one at a time; `onDestroy` dismisses it.
