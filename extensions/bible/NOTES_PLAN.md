@@ -159,4 +159,4 @@ instance's Rebuild reopens the chapter · locked notebooks keep their rows on re
   `:ext-bible` module entry, the ledger line); root `CLAUDE.md` (the `extensions/bible` bullet,
   the docs-table row). **adb walk PASSED 2026-09-14** (`.dev` builds — Notes, Rebuild, follow, a
   live push and Send all verified, one finding fixed: a just-landed link's in-memory `createdAt`
-  is now dated now rather than 0); **the user's Nomad hand walk is pending.**
+  is now dated now rather than 0). **The user's Nomad hand walk PASSED 2026-09-15 ("All tests pass") — arc 42 COMPLETE + FROZEN.** Branch `crossref` stays open on the user's word.

@@ -1563,6 +1563,8 @@ instead (b5a53876).
 the editor Lookup's document row, the passphrase prompt on a locked notebook's follow, and
 passage-mode Notes with a rebuild reopen from a passage.
 
+**The user's own hand walk on the Nomad PASSED 2026-09-15 ("All tests pass") — arc 42 COMPLETE + FROZEN.** No code review (the user's call, the arc 37–41 waiver).
+
 ---
 
 ## Not in this arc (recorded futures, each needing a user decision)

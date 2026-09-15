@@ -120,8 +120,8 @@ notebooks (19 references, 2 locked skipped, 1 failed) in 8,550 ms and reopened t
 tap flipped the notebook to the page it named, and a Send re-pushed the page 750 ms later. One
 finding fixed mid-walk: a just-landed link's in-memory `createdAt` is 0 until its row is reloaded,
 so it is dated **now** rather than 1970. Plan + ledger `extensions/bible/NOTES_PLAN.md`; reference
-`extensions/bible/docs/bible.md` § "Notes — the personal commentary". Branch `crossref` still
-open; the user's Nomad hand walk pending.
+`extensions/bible/docs/bible.md` § "Notes — the personal commentary". **COMPLETE + FROZEN 2026-09-15 on the user's own Nomad hand walk ("All tests pass")**; branch
+`crossref` stays open until the user says to merge. No code review — the user's call.
 No TENTH extension point, no next Bible phase (bookmarks, longer or multi-page passages) and no
 other new arc without a fresh user decision; no re-raising of any waived / declined review finding.
 
