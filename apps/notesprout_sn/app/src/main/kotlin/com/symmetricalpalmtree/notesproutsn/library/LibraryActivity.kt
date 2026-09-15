@@ -45,6 +45,7 @@ import com.symmetricalpalmtree.notesproutsn.databinding.ActivityLibraryBinding
 import com.symmetricalpalmtree.notesproutsn.export.ExportActivity
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionRegistry
 import com.symmetricalpalmtree.notesproutsn.extension.BibleEntry
+import com.symmetricalpalmtree.notesproutsn.extension.BibleNoteIndex
 import com.symmetricalpalmtree.notesproutsn.extension.CalendarEntry
 import com.symmetricalpalmtree.notesproutsn.extension.CalendarTarget
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
@@ -55,6 +56,7 @@ import com.symmetricalpalmtree.notesproutsn.importing.ImportFlow
 import com.symmetricalpalmtree.notesproutsn.notebook.NotebookActivity
 import com.symmetricalpalmtree.notesproutsn.templates.TemplatesActivity
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -263,7 +265,16 @@ class LibraryActivity : AppCompatActivity() {
         binding.btnImport.setOnClickListener { importFlow.onTap() }
         TooltipCompat.setTooltipText(binding.btnImport, binding.btnImport.contentDescription)
         // The Bible (arc 37 / B0). A launcher, so built here; no paper behind it, so no handoff.
-        bible = BibleEntry(activity = this, button = binding.btnBible)
+        bible = BibleEntry(
+            activity = this,
+            button = binding.btnBible,
+            // Arc 42 "Notes": the library can open any notebook a note row names, so this door
+            // carries the reader's Notes panel and its Rebuild.
+            notesEnabled = true,
+            // TODO arc 42 N3/N4 — the follow and the rebuild.
+            onOpenNote = { Slog.d(TAG) { "open note: $it" } },
+            onRebuildNotes = { Slog.d(TAG) { "rebuild notes requested" } },
+        )
         binding.btnBible.setOnClickListener { bible.open() }
         TooltipCompat.setTooltipText(binding.btnBible, binding.btnBible.contentDescription)
         DebugMenu.install(this, binding.bottomRight)
@@ -1065,6 +1076,11 @@ class LibraryActivity : AppCompatActivity() {
                         return@launch
                     }
                     repo.rename(s.id, name)
+                    // Arc 42 "Notes": the reader's index lists a note under its notebook's name.
+                    // Fire-and-forget; a failure is a log line inside the push.
+                    if (s.type == ObjectType.NOTEBOOK) {
+                        lifecycleScope.launch { BibleNoteIndex.rename(applicationContext, s.id, name) }
+                    }
                     dismiss()
                     refresh()
                 } finally {
@@ -1085,6 +1101,7 @@ class LibraryActivity : AppCompatActivity() {
             repo.deleteNotebook(s.id)
             recentsPrefs.remove(s.id)
             withContext(Dispatchers.IO) { purgeNotebookFile(s.id) }
+            forgetNotes(listOf(s.id))   // arc 42
             refresh()
         }
     }
@@ -1098,6 +1115,7 @@ class LibraryActivity : AppCompatActivity() {
             val removed = repo.deleteFolderRecursive(s.id)
             removed.forEach { recentsPrefs.remove(it) }
             withContext(Dispatchers.IO) { removed.forEach { purgeNotebookFile(it) } }
+            forgetNotes(removed)   // arc 42: every notebook the folder took with it
             // Standing inside the folder that just went: step out to where it used to be.
             if (folderId == s.id) navigateTo(s.parentId) else refresh()
         }
@@ -1124,6 +1142,19 @@ class LibraryActivity : AppCompatActivity() {
         repo.deleteNotebook(id)
         recentsPrefs.remove(id)
         withContext(Dispatchers.IO) { purgeNotebookFile(id) }
+        forgetNotes(listOf(id))   // arc 42
+    }
+
+    /**
+     * Arc 42 "Notes": the notebooks in [ids] are gone, so the reader's index must stop offering
+     * their pages. Fire-and-forget on a **detached** scope — a delete finishes by leaving the
+     * screen (a folder delete navigates), and a push cancelled halfway would leave rows behind
+     * that only the Rebuild door could clear. Every failure is a log line inside the push.
+     */
+    private fun forgetNotes(ids: List<String>) {
+        if (ids.isEmpty()) return
+        val app = applicationContext
+        MainScope().launch { ids.forEach { BibleNoteIndex.delete(app, it) } }
     }
 
     /**

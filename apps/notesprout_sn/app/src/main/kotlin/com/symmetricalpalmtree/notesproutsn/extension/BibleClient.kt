@@ -59,7 +59,7 @@ class BibleClient(context: Context, val ref: ProviderRef) {
      * [ExtensionContract.MIN_API_VERSION_FOR_BIBLE_REFERENCE] or above ([BibleEntry] is the one
      * that does). The reference itself is never logged.
      */
-    suspend fun open(reference: String?, sendEnabled: Boolean = false): Intent? {
+    suspend fun open(reference: String?, sendEnabled: Boolean = false, notesEnabled: Boolean = false): Intent? {
         if (held != null) { Slog.d(TAG) { "open: already open" }; return null }
         val t0 = System.currentTimeMillis()
         val store = ExtensionStores.lease(appContext, ref.packageName, TAG) ?: return null
@@ -86,11 +86,35 @@ class BibleClient(context: Context, val ref: ProviderRef) {
             finish()
             return null
         }
-        Slog.d(TAG) { "open: ready in ${System.currentTimeMillis() - t0} ms (passage=${reference != null}, send=$sendEnabled)" }
+        Slog.d(TAG) { "open: ready in ${System.currentTimeMillis() - t0} ms (passage=${reference != null}, send=$sendEnabled, notes=$notesEnabled)" }
         return Intent(ExtensionContract.ACTION_BIBLE_SCREEN).setPackage(ref.packageName).apply {
             // B9: the one boolean the Bible Intent carries, and only when a notebook is behind the
             // reader — the library's door never sets it, so the reader shows no Send there.
             if (sendEnabled) putExtra(ExtensionContract.EXTRA_BIBLE_SEND_ENABLED, true)
+            // Arc 42: the second boolean — a host screen behind the reader can follow a note row
+            // out of it (the library's and the notebook's doors; never the editor's trampoline).
+            if (notesEnabled) putExtra(ExtensionContract.EXTRA_BIBLE_NOTES_ENABLED, true)
+        }
+    }
+
+    /**
+     * Arc 42 "Notes" — the note row the reader's Notes panel picked, over the bind this showing
+     * still holds: [takeOutgoingReference]'s twin, read right after the screen returned
+     * `RESULT_BIBLE_OPEN_NOTE` and before [finish]. Null when nothing was parked, the bind is
+     * gone, or the call failed (logged) — nothing opens.
+     */
+    suspend fun takeOutgoingNote(): BibleNoteTarget? {
+        val binding = held ?: return null
+        if (binding.isDead) return null
+        return try {
+            val taken = binding.call(CALL_TIMEOUT_MS) { it.takeOutgoingNote() }
+            Slog.d(TAG) { "takeOutgoingNote: ${taken?.toString() ?: "nothing"}" }
+            taken
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: ExtensionCallException) {
+            Slog.d(TAG) { "takeOutgoingNote failed: ${e.message}" }
+            null
         }
     }
 
@@ -175,6 +199,11 @@ class BibleClient(context: Context, val ref: ProviderRef) {
          *  `resolve` allows for (a fresh reader's first call copies the asset out of the APK). */
         const val TEXT_TIMEOUT_MS = RESOLVE_TIMEOUT_MS
 
+        /** A notes push's budget (arc 42): the store is leased outside it, so this covers one bind
+         *  and one small transaction — `TagClient.ASSIGN_TIMEOUT_MS`'s argument; a timeout undoes
+         *  nothing and the next push of the same page heals it. */
+        const val NOTES_TIMEOUT_MS = 4_000L
+
         /**
          * **Bind-per-call, no store** (the tag manager's second call shape): read [text] — the
          * user's own words — as one or more scripture references and answer the canonical form, or
@@ -205,6 +234,41 @@ class BibleClient(context: Context, val ref: ProviderRef) {
             } catch (e: ExtensionCallException) {
                 Slog.d(TAG) { "resolve failed: ${e.message}" }
                 null
+            }
+        }
+
+        /**
+         * Arc 42 "Notes" — a **store-taking, bind-per-call** push into the reader's notes index:
+         * the tag manager's `assign` shape. The store is leased on IO **first**, outside the call
+         * budget (the pre-open rule — a cold KDF is seconds on the Nomad), the bind is made for
+         * this one call, [block] runs against the interface with the store riding, and the store
+         * is revoked in `finally` on every path. Null when the store could not be leased, the
+         * bind was refused, or the call failed or timed out (logged) — the index is self-healing
+         * (the next push of the same page replaces it whole, and the Rebuild door covers the
+         * rest), so a lost push is a log line, never a dialog. **No notebook name and no wire is
+         * logged here**; a duration and the outcome's shape only.
+         */
+        suspend fun <T> withNotes(
+            context: Context, ref: ProviderRef, what: String, block: (IBible, ExtensionStoreBinder) -> T,
+        ): T? {
+            val appContext = context.applicationContext
+            val store = ExtensionStores.lease(appContext, ref.packageName, TAG) ?: return null
+            val t0 = System.currentTimeMillis()
+            return try {
+                val answer = ExtensionBinder.call(
+                    appContext, ref, ExtensionContract.ACTION_BIBLE, TAG,
+                    asInterface = { IBible.Stub.asInterface(it) },
+                    callTimeoutMs = NOTES_TIMEOUT_MS,
+                ) { iface -> block(iface, store) }
+                Slog.d(TAG) { "$what: ok in ${System.currentTimeMillis() - t0} ms" }
+                answer
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: ExtensionCallException) {
+                Slog.d(TAG) { "$what failed: ${e.message}" }
+                null
+            } finally {
+                store.revoke()
             }
         }
 

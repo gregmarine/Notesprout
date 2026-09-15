@@ -61,6 +61,7 @@ import com.symmetricalpalmtree.notesproutsn.data.prefs.SnapPrefs
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityNotebookBinding
 import com.symmetricalpalmtree.notesproutsn.core.markdown.HeadingPrefix
 import com.symmetricalpalmtree.notesproutsn.extension.BibleEntry
+import com.symmetricalpalmtree.notesproutsn.extension.BibleNoteIndex
 import com.symmetricalpalmtree.notesproutsn.extension.DocumentContract
 import com.symmetricalpalmtree.notesproutsn.extension.LookupHandoff
 import com.symmetricalpalmtree.notesproutsn.extension.CalendarEntry
@@ -477,6 +478,38 @@ class NotebookActivity : AppCompatActivity() {
 
     /** Serialises page/undo operations so two overlapping gestures can't tangle the page list. */
     private val pageOps = Mutex()
+
+    /**
+     * Arc 42 "Notes": the coalescer that keeps the Bible reader's index of where this notebook's
+     * references sit. Every act that touched the page's links ends in [markNotes], every act that
+     * moved the page list in `markStructural`, and the push itself runs debounced on [appScope] —
+     * so a Back taken right after the last mark still lands. Both reads it needs go through the
+     * open session, never a second connection, and answer empty before (or after) it is there.
+     */
+    private val noteSync = BibleNoteSync(
+        context = this,
+        scope = appScope,
+        notebookId = { notebookId },
+        notebookName = { notebookName },
+        linkRows = {
+            if (::session.isInitialized && session.isOpen) session.db.dao().liveLinkRows() else emptyList()
+        },
+        livePageIds = {
+            if (::session.isInitialized && session.isOpen) session.pages.map { it.id } else emptyList()
+        },
+    )
+
+    /** Arc 42: [pageId]'s 1-based number in the notebook, 0 when it is no longer one of its pages
+     *  (which is what tells the sync there is nothing to push). */
+    private fun ordinalOf(pageId: String): Int =
+        if (!::session.isInitialized) 0 else session.pages.indexOfFirst { it.id == pageId } + 1
+
+    /** Arc 42: the page's links **as the working copy now has them** — so every call site sits
+     *  after [liveLinks] has been brought in line with the rows, never before. */
+    private fun markNotes(pageId: String = displayedPageId) {
+        if (pageId.isEmpty()) return
+        noteSync.markPage(pageId, ordinalOf(pageId), liveLinks.values)
+    }
 
     /** The strokes on the visible page — the "you still have them" mirror an erase undo needs. */
     private var liveStrokes: MutableMap<String, Stroke> = mutableMapOf()
@@ -911,6 +944,12 @@ class NotebookActivity : AppCompatActivity() {
             onSent = { reference -> bibleRefFlow.insertResolved(reference) },
             // Arc 40 "Verses": the Send that chose the words — the reference and its Markdown.
             onSentText = { reference, text -> bibleRefFlow.insertVersesSent(reference, text) },
+            // Arc 42 "Notes": this door has a host screen behind it that can open a notebook page,
+            // so the reader gets its Notes panel and its Rebuild.
+            notesEnabled = true,
+            // TODO arc 42 N3/N4 — the follow and the rebuild.
+            onOpenNote = { Slog.d(TAG) { "open note: $it" } },
+            onRebuildNotes = { Slog.d(TAG) { "rebuild notes requested" } },
         )
         binding.btnBible.setOnClickListener {
             if (!opened || closing) return@setOnClickListener
@@ -1135,6 +1174,10 @@ class NotebookActivity : AppCompatActivity() {
                 NotebookSession.OpenResult.Ok -> Unit
             }
             if (isFinishing || closing) { sealAbandonedOpen(); return }
+            // Arc 42 "Notes": the open's one blob-free read — whether this notebook holds a Bible
+            // link at all, which is what keeps an ordinary notebook from ever binding the reader.
+            // Fire-and-forget, off Main, a failure swallowed (the Rebuild door is the answer).
+            lifecycleScope.launch { runCatching { withContext(Dispatchers.IO) { noteSync.prime() } } }
             // The follow's target page overrides the remembered one — once. A target that died in
             // the race falls back to refId silently (one arrival semantic; the pre-checks on the
             // tapping side carry the honesty).
@@ -1400,6 +1443,18 @@ class NotebookActivity : AppCompatActivity() {
         val editor = documentEntry.providerPackage ?: return@runBlocking DocumentContract.REFERENCE_UNAVAILABLE
         val resolved = bible.resolve(text) ?: return@runBlocking DocumentContract.REFERENCE_UNKNOWN
         LookupHandoff.park(reader, resolved.wire, editor)
+        // Arc 42 "Notes" (decision 3): a Lookup is the one thing that puts a *document* in the
+        // index — nothing scans document text. The editor's own target says which document it
+        // is; the notebook document and a text document have no page, and go in with no ordinal.
+        // Fire-and-forget on the application scope: never block this Binder thread on a push.
+        val onPage =
+            if (documentHooks.scopeIsNotebook || session.isTextDocument) ""
+            else documentHooks.targetPageId ?: displayedPageId
+        val ordinal = if (onPage.isEmpty()) 0 else ordinalOf(onPage)
+        val wire = resolved.wire
+        appScope.launch {
+            BibleNoteIndex.noteDocument(applicationContext, notebookId, notebookName, onPage, ordinal, wire)
+        }
         DocumentContract.REFERENCE_OPENED
     }
 
@@ -1523,7 +1578,14 @@ class NotebookActivity : AppCompatActivity() {
     private fun sealAbandonedOpen() {
         documentWritesClosed = true
         val s = session
-        appScope.launch { withContext(NonCancellable) { runCatching { s.seal() } } }
+        appScope.launch {
+            withContext(NonCancellable) {
+                // Arc 42: whatever was marked goes out before the connection does — a structural
+                // flush reads the rows through it.
+                runCatching { noteSync.flushBeforeSeal() }
+                runCatching { s.seal() }
+            }
+        }
     }
 
     /** A tap that opened nothing must be explained, not toasted (e-ink rule) — dialog, then leave. */
@@ -1612,6 +1674,9 @@ class NotebookActivity : AppCompatActivity() {
                 }
                 repo.rename(notebookId, name)
                 notebookName = name   // what the editor's own header asks for, from a Binder thread
+                // Arc 42: the index carries the name it lists this notebook under. Fire-and-forget
+                // on the application scope — this is a Binder thread and must not wait on it.
+                appScope.launch { BibleNoteIndex.rename(applicationContext, notebookId, name) }
                 // Posted, never awaited: this thread is inside a Binder transaction and must not
                 // wait on Main. No pen-idle gate either — the editor is on top of this screen, so
                 // there is no frame to present and nothing to interrupt.
@@ -1910,6 +1975,7 @@ class NotebookActivity : AppCompatActivity() {
             session.links.remove(links.filter { it.stickies.isEmpty() })
             links.forEach { liveLinks.remove(it.id) }
             linkRenderer.update(liveLinks.values.toList())
+            markNotes()   // arc 42: the page's links, as the erase left them
         }
         val stickies = pageObjects.stickiesIn(objs.stickyIds)
         if (!objs.isEmpty) {
@@ -2228,6 +2294,7 @@ class NotebookActivity : AppCompatActivity() {
     private suspend fun doInsert(after: Boolean) {
         val snap = session.insertBlank(after)
         undo.record(Action.Page(snap))
+        noteSync.markStructural()   // arc 42: every page's ordinal may have moved
         navigateTo(session.currentIndex)   // put the freshly-inserted blank page on the paper
     }
 
@@ -2244,6 +2311,7 @@ class NotebookActivity : AppCompatActivity() {
         if (ids.isEmpty()) return
         undo.record(Action.PageErased(pageId, ids))
         refreshToPage(pageId)
+        markNotes(pageId)   // arc 42: after the reload — liveLinks is the erased page's now
     }
 
     private suspend fun doDelete() {
@@ -2253,6 +2321,7 @@ class NotebookActivity : AppCompatActivity() {
         session.store.drain()
         val snap = session.deleteCurrent()
         undo.record(Action.Page(snap))
+        noteSync.markStructural()   // arc 42
         navigateTo(session.currentIndex)
     }
 
@@ -2269,6 +2338,7 @@ class NotebookActivity : AppCompatActivity() {
             undo.pushUndo(a)
             throw t
         }
+        markReplayed(a)
         // A pen-up landing mid-replay recorded a fresh edit, which cleared redo — honour the
         // record-clears-redo invariant rather than re-populating redo with the undone entry.
         if (undo.generation == g) undo.pushRedo(a)
@@ -2283,7 +2353,20 @@ class NotebookActivity : AppCompatActivity() {
             undo.pushRedo(a)
             throw t
         }
+        markReplayed(a)
         undo.pushUndo(a)
+    }
+
+    /**
+     * Arc 42 "Notes": what one replayed [a] owes the index — the page kinds push the whole
+     * notebook (every ordinal may have moved), the link-touching kinds push their own page, and
+     * everything else pushes nothing. Called **after** the replay, which ends in
+     * `refreshToPage` → `navigateTo` and therefore with [liveLinks] already reloaded from the
+     * rows; a replay onto a page that is no longer displayed is left to that page's next load.
+     */
+    private fun markReplayed(a: Action) {
+        if (BibleNoteIndex.isStructural(a)) noteSync.markStructural()
+        else if (BibleNoteIndex.mayTouchLinks(a) && a.pageId == displayedPageId) markNotes(a.pageId)
     }
 
     /**
@@ -2573,6 +2656,7 @@ class NotebookActivity : AppCompatActivity() {
             session.links.remove(links.filter { it.stickies.isEmpty() })
             links.forEach { liveLinks.remove(it.id) }
             linkRenderer.update(liveLinks.values.toList())
+            markNotes(pageId)   // arc 42
         }
         if (!objs.isEmpty) {
             // The sticky rows are deliberately not deleted here — [recordWithStickies] does that,
@@ -2982,6 +3066,7 @@ class NotebookActivity : AppCompatActivity() {
         liveLinks[linkId] = updated
         syncLinkRenderer()
         undo.record(Action.LinkEdited(displayedPageId, linkId, before, after))
+        markNotes()   // arc 42: the payload is what the index holds
         selectAsLink(updated)
         Slog.d(TAG) { "link $linkId payload edited" }
     }
@@ -3103,6 +3188,7 @@ class NotebookActivity : AppCompatActivity() {
         // Unconditional, for the conversion's reason: removeStrokes only re-records when it dropped
         // something, and a heading-only wrap still has to paint. One Main block → one frame.
         paper.notifyContentChanged()
+        markNotes(pageId)   // arc 42: every wrap ends here — the plain link's and the reference's
     }
 
     /**
@@ -3117,6 +3203,7 @@ class NotebookActivity : AppCompatActivity() {
         liveLinks[link.id] = link
         linkRenderer.invalidate(link.id)
         syncLinkRenderer()
+        markNotes()   // arc 42: a reference's Edit moved the passage the index names
         selectAsLink(link)
     }
 
@@ -3142,6 +3229,7 @@ class NotebookActivity : AppCompatActivity() {
             undo.record(Action.LinkUnlinked(pageId, link))
             session.store.drain()
             refreshToPage(pageId)
+            markNotes(pageId)   // arc 42: after the reload, which is this act's sync
         }
     }
 
@@ -3292,6 +3380,7 @@ class NotebookActivity : AppCompatActivity() {
                 )
             )
             if (headings.isNotEmpty() || links.any { it.headings.isNotEmpty() }) contentsFlow.refresh()
+            markNotes(pageId)   // arc 42: a pasted link is a reference the index has never seen
 
             // Land it selected, bar up — the pen drags it into place from here.
             var box: Bounds? = null
@@ -3616,6 +3705,7 @@ class NotebookActivity : AppCompatActivity() {
             // One undo step for what was one gesture: a lone page keeps HV5's kind, a pair takes
             // the arc-35 kind that replays both snapshots together.
             undo.record(if (snaps.size == 1) Action.PageReceived(snaps[0]) else Action.PagesReceived(snaps))
+            noteSync.markStructural()   // arc 42: pages landed, so every ordinal below them moved
             // The paste's road home: the page, its template and its strokes all come off the rows,
             // and it is synchronous within this page op — so the selection below lands on ink that
             // is already on the glass.
@@ -3689,6 +3779,7 @@ class NotebookActivity : AppCompatActivity() {
             // A transfer paste IS a strokes-only object paste: same rows created, same direction,
             // same replay — so it takes arc-8's entry rather than a fifteenth kind (J5 Q1).
             undo.record(Action.ObjectsPasted(pageId, strokes.map { it.id }, emptyList(), emptyList()))
+            markNotes(pageId)   // arc 42: the object paste's kind, so the object paste's mark
 
             landTransferred(strokes, truncated, wording, R.string.objects_pasted_toast)
             Slog.d(TAG) { "pasted ${strokes.size} strokes from $source onto $pageId" }
@@ -4269,6 +4360,7 @@ class NotebookActivity : AppCompatActivity() {
         if (cut) {
             val snap = session.deleteCurrent()
             undo.record(Action.Page(snap))
+            noteSync.markStructural()   // arc 42: the delete's mark, under the cut's name
             navigateTo(session.currentIndex)
         }
         toast(getString(if (cut) R.string.page_cut_toast else R.string.page_copied_toast))
@@ -4299,6 +4391,7 @@ class NotebookActivity : AppCompatActivity() {
         val anchor = PageMath.anchorNumberAfterPaste(session.currentIndex, before)
         val snap = session.pasteAt(env, before)
         undo.record(Action.PagePasted(snap))
+        noteSync.markStructural()   // arc 42: a whole page of links may have arrived
         navigateTo(session.currentIndex)
         toast(getString(if (before) R.string.pasted_before_toast else R.string.pasted_after_toast, anchor))
     }
@@ -4686,6 +4779,11 @@ class NotebookActivity : AppCompatActivity() {
                     try { captureCover(p, s, id) } catch (e: Exception) { Log.w(TAG, "cover failed", e) }
                     try { s.saveLastOpened() } catch (e: Exception) { Log.w(TAG, "saveLastOpened failed", e) }
                     try { s.refreshMeta(versionCode) } catch (e: Exception) { Log.w(TAG, "refreshMeta failed", e) }
+                    // Arc 42: only what is already pending, and only before the seal — a
+                    // structural flush reads the rows through this very connection. Nothing is
+                    // pushed *because* of a close: a cold store lease would pay the KDF at every
+                    // Back.
+                    try { noteSync.flushBeforeSeal() } catch (e: Exception) { Log.w(TAG, "notes flush failed", e) }
                     try { s.seal() } catch (e: Exception) { Log.w(TAG, "seal failed", e) }
                 }
             }

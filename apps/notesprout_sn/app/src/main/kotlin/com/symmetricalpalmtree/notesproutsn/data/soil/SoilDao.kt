@@ -169,6 +169,12 @@ interface SoilDao {
     @Query("SELECT id, parentId FROM notebook WHERE type = 'link' AND deletedAt IS NULL")
     suspend fun liveLinkPages(): List<LinkPage>
 
+    /** Every live link with its payload and stamp, blob-free — the Bible notes index's read
+     *  (arc 42): which of a notebook's links are Bible references, on which page, and since when.
+     *  `text` is the payload (`LinkPayload`); the caller decides what is a Bible link. */
+    @Query("SELECT id, parentId, text, createdAt FROM notebook WHERE type = 'link' AND deletedAt IS NULL")
+    suspend fun liveLinkRows(): List<LinkRow>
+
     /** Reposition an object (a heading drag) — geometry only, size untouched. */
     @Query("UPDATE notebook SET x = :x, y = :y, updatedAt = :at WHERE id = :id")
     suspend fun setPosition(id: String, x: Float, y: Float, at: Long)
@@ -237,6 +243,9 @@ object SoilSql {
 
 /** A live link's page — [SoilDao.liveLinkPages]. `parentId` is the page the link sits on. */
 data class LinkPage(val id: String, val parentId: String)
+
+/** A live link's payload and stamp — [SoilDao.liveLinkRows] (arc 42 "Notes"). */
+data class LinkRow(val id: String, val parentId: String, val text: String?, val createdAt: Long)
 
 /** A template row without its pixels — [SoilDao.templateDigests]. */
 data class TemplateDigest(

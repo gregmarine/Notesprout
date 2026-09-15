@@ -53,6 +53,7 @@ object LinkRows {
             x = x, y = y, width = w, height = h, order = row.order,
             strokes = strokes, headings = headings,
             texts = texts, shapes = shapes, stickies = stickies,
+            createdAt = row.createdAt,
         )
     }
 

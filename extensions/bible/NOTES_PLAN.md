@@ -84,7 +84,30 @@ instance's Rebuild reopens the chapter · locked notebooks keep their rows on re
   refuses is a log line, never a crash) and `leaveForRebuild` (`RESULT_BIBLE_REBUILD_NOTES`,
   parking the passage only) — with both in-process relays widened to the two new codes
   (`relayed`) and the flag forwarded on both own launches. `:ext-bible` 155 JVM tests green.
-- N2 — live push.
+- **N2 — live push (host call sites).** The notebook and the library now feed the index at the
+  moment of every act. `NotebookActivity`: the `noteSync` field (`BibleNoteSync` on the
+  companion's `appScope`, both reads through the open session — `dao().liveLinkRows()` /
+  `session.pages`), `ordinalOf` + `markNotes` (the page's links **after** `liveLinks` is in line
+  with the rows), `noteSync.prime()` fired off `openSession` once the `.soil` is open, and the
+  marks themselves — page marks from `removeContent` (the three erases), `deleteSelection`,
+  `applyLinkEdit` (the picker's Edit), `landLink` (every wrap: `LinkCreated` **and**
+  `BibleRefCreated`), `relandEditedLink` (`BibleRefEdited`), `unlinkSelection`, `doErase`, the
+  object paste (`doObjectPaste`'s `ObjectsPasted`) and `pasteTransferred`; structural marks from
+  `doInsert`, `doDelete`, the page **cut** half of `doCopy`, `doPaste` (`PagePasted`) and `receiveCalendarPages`
+  (`PageReceived`/`PagesReceived`); and `markReplayed(a)` at the tail of
+  both `doUndo` and `doRedo`, over `BibleNoteIndex.isStructural` / `mayTouchLinks` and gated on
+  the replayed page still being the displayed one (the replay ends in `refreshToPage` →
+  `navigateTo`, so `liveLinks` is already reloaded when it runs). `flushBeforeSeal()` before
+  `s.seal()` in both `close()` and `sealAbandonedOpen()`; `BibleNoteIndex.rename` from
+  `renameTextDocument` (the editor's tap-the-title rename, on `appScope` — never a wait on the
+  Binder thread) and `BibleNoteIndex.noteDocument` from `lookupBibleReference` after
+  `LookupHandoff.park` (decision 3 — the notebook document and a text document go in with no page
+  and no ordinal, read off `DocumentHostHooks.scopeIsNotebook` / `targetPageId`). `LibraryActivity`:
+  `BibleNoteIndex.rename` after `repo.rename` in `showRenameDialog` (notebooks only) and a
+  `forgetNotes` helper on a detached `MainScope` from `confirmDeleteNotebook`,
+  `confirmDeleteFolder` (every notebook the folder took) and `retireNotebook`. Both `BibleEntry`
+  constructions take `notesEnabled = true` with placeholder `onOpenNote` / `onRebuildNotes` log
+  lines (TODO arc 42 N3/N4). 1708 `:app` JVM tests green.
 - N3 — follow.
 - N4 — rebuild.
 - N5 — docs + freeze.

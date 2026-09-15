@@ -1,6 +1,7 @@
 package com.symmetricalpalmtree.notesproutsn.notebook
 
 import com.symmetricalpalmtree.notesproutsn.data.soil.LinkPage
+import com.symmetricalpalmtree.notesproutsn.data.soil.LinkRow
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilDao
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilObjectEntity
 import com.symmetricalpalmtree.notesproutsn.data.soil.TemplateDigest
@@ -105,6 +106,9 @@ class FakeSoilDao : SoilDao {
     override suspend fun liveLinkPages() =
         rows.values.filter { it.type == "link" && it.deletedAt == null }
             .map { LinkPage(it.id, it.parentId) }
+    override suspend fun liveLinkRows() =
+        rows.values.filter { it.type == "link" && it.deletedAt == null }
+            .map { LinkRow(it.id, it.parentId, it.text, it.createdAt) }
     override suspend fun setRefId(id: String, refId: String?, at: Long) {
         rows[id]?.let { rows[id] = it.copy(refId = refId, updatedAt = at) }
     }

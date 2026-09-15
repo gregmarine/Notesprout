@@ -76,6 +76,24 @@ class BibleEntry(
      * own alert rather than land nothing silently. Never called for the library.
      */
     private val onSentText: (ResolvedReference, PassageText?) -> Unit = { _, _ -> },
+    /**
+     * Arc 42 "Notes": whether this door has a host screen behind it that can open a notebook page
+     * — the library's and the notebook's doors; never the editor's Lookup trampoline. Only a true
+     * here, against a reader that [supportsNotes], puts the Notes button on the reader.
+     */
+    private val notesEnabled: Boolean = false,
+    /**
+     * Arc 42: the note row the reader's Notes panel picked, on Main, after the bind is finished
+     * (the reader has closed — the Send rule: what was asked for is what the person looks at).
+     * The host opens that notebook at that page, or its editor for a document row.
+     */
+    private val onOpenNote: (BibleNoteTarget) -> Unit = {},
+    /**
+     * Arc 42: the reader's Rebuild, on Main, after the bind is finished — with the passage it was
+     * showing (its wire) or null for chapter mode, so the host can reopen it where it was once
+     * the index is rebuilt.
+     */
+    private val onRebuildNotes: (parkedWire: String?) -> Unit = {},
 ) {
 
     private val launcher: ActivityResultLauncher<Intent> =
@@ -117,6 +135,12 @@ class BibleEntry(
     @Volatile var supportsText: Boolean = false
         private set
 
+    /** Arc 42 "Notes": the discovered reader keeps a notes index — a reader declaring
+     *  [ExtensionContract.MIN_API_VERSION_FOR_BIBLE_NOTES] or above. Every push and the Notes
+     *  button are gated on it. */
+    @Volatile var supportsNotes: Boolean = false
+        private set
+
     /** Whether a trusted reader is installed **right now**. Suspends — it is a package query. */
     suspend fun discovered(): Boolean {
         val found = ExtensionRegistry.bible(activity)
@@ -128,6 +152,8 @@ class BibleEntry(
             found != null && found.apiVersion >= ExtensionContract.MIN_API_VERSION_FOR_BIBLE_SEND
         supportsText =
             found != null && found.apiVersion >= ExtensionContract.MIN_API_VERSION_FOR_BIBLE_TEXT
+        supportsNotes =
+            found != null && found.apiVersion >= ExtensionContract.MIN_API_VERSION_FOR_BIBLE_NOTES
         button.visibility = if (found == null) View.GONE else View.VISIBLE
         onAvailabilityChanged(supportsReferences)
         return found != null
@@ -155,6 +181,11 @@ class BibleEntry(
      */
     fun open(reference: String) = show(reference)
 
+    /** Arc 42: reopen the reader after a rebuild — on the passage it was showing, or where it
+     *  was left (the stored position) when [wire] is null. [open]'s two shapes, chosen by the
+     *  parked value. */
+    fun reopen(wire: String?) = show(wire)
+
     /** Arc 39 "Lookup": the discovered reader, for the notebook to park a lookup against — read
      *  at the call, never captured (a package can be replaced under us). */
     val provider: ProviderRef? get() = ref
@@ -171,7 +202,11 @@ class BibleEntry(
             activity.lifecycleScope.launch {
                 val fresh = BibleClient(activity, provider)
                 client = fresh
-                val intent = fresh.open(reference, sendEnabled = sendEnabled && supportsSend)
+                val intent = fresh.open(
+                    reference,
+                    sendEnabled = sendEnabled && supportsSend,
+                    notesEnabled = notesEnabled && supportsNotes,
+                )
                 if (activity.isFinishing || activity.isDestroyed) {
                     client = null; opening = false; fresh.finish(); return@launch
                 }
@@ -249,7 +284,14 @@ class BibleEntry(
         val sent = result.resultCode == ExtensionContract.RESULT_BIBLE_SEND && sendEnabled
         // Arc 40 "Verses": the same take, followed by the verses over the same held bind.
         val sentText = result.resultCode == ExtensionContract.RESULT_BIBLE_SEND_TEXT && sendEnabled && supportsText
+        // Arc 42: the two notes roads — taken over the held bind, acted on AFTER the bind is
+        // finished (the reader has closed; what follows opens another screen or leases the same
+        // store for the rebuild, and neither may race a bind still holding it).
+        val openNote = result.resultCode == ExtensionContract.RESULT_BIBLE_OPEN_NOTE && notesEnabled && supportsNotes
+        val rebuild = result.resultCode == ExtensionContract.RESULT_BIBLE_REBUILD_NOTES && notesEnabled && supportsNotes
         MainScope().launch {
+            var noteTarget: BibleNoteTarget? = null
+            var rebuildWire: String? = null
             try {
                 if ((sent || sentText) && open != null) {
                     val reference = open.takeOutgoingReference()
@@ -262,6 +304,8 @@ class BibleEntry(
                         }
                     }
                 }
+                if (openNote && open != null) noteTarget = open.takeOutgoingNote()
+                if (rebuild && open != null) rebuildWire = open.takeOutgoingReference()?.wire
             } finally {
                 try {
                     open?.finish()
@@ -269,6 +313,9 @@ class BibleEntry(
                     opening = false
                 }
             }
+            if (activity.isFinishing || activity.isDestroyed) return@launch
+            noteTarget?.let(onOpenNote)
+            if (rebuild) onRebuildNotes(rebuildWire)
         }
     }
 
