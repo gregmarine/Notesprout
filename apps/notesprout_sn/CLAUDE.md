@@ -396,7 +396,8 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
     PDF endnotes over `PageBundle` v2; no line objects, no shape recognizer, no extension
     transfers. **Call `armLassoForLanding()` before `setSelection` from any non-lasso context.**
   - **Arc 29 "Loop"** (LE1–LE4, 2026-09-06/07; `docs/notebook.md`; `LOOP_PLAN.md`) — the lasso
-    eraser, item 4: `Tool.LASSO_ERASER` in g-paper **0.1.28** (the current pin), armed on all four
+    eraser, item 4: `Tool.LASSO_ERASER` in g-paper 0.1.28 (re-pinned to **0.1.31** since arc 43 /
+    K0, 2026-09-15 — see the pin note below), armed on all four
     paper surfaces from a second tap on the armed eraser → the Point · Lasso `EraserBar`
     (`:sn-screen`), **never a fourth bar button** (a twelfth 62 dp button falls off the Nomad's
     749 dp). The host never repaints from `onLassoErased`. Onyx's side of the engine change is
@@ -717,7 +718,11 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   never repaired by deletion.
 - **`IndexGuard.ready(this)` first thing in every index-touching `onCreate`**;
   `BootstrapActivity` is the only index opener and is `noHistory`.
-- **g-paper 0.1.28 (since arc 29 / LE1, 2026-09-06 — `Tool.LASSO_ERASER`; 0.1.27 = arc 28's transform mode, 0.1.23 before), `gpaper-core` + `gpaper-ratta` only** (mavenLocal). No `gpaper-onyx`,
+- **g-paper 0.1.31 (since arc 43 / K0, 2026-09-15 — re-pinned ahead of the Sketch engine work;
+  0.1.28 since arc 29 / LE1, 2026-09-06 — `Tool.LASSO_ERASER`; 0.1.27 = arc 28's transform mode,
+  0.1.23 before). 0.1.29 = a raster undo swap, 0.1.30 = the rubbing eraser, 0.1.31 = the alpha-3
+  fix — all three are Paintsprout Onyx raster work; **zero `gpaper-ratta` lines changed between
+  0.1.28 and 0.1.31**. `gpaper-core` + `gpaper-ratta` only** (mavenLocal). No `gpaper-onyx`,
   no BOOX repo, no jetifier, no jniLibs pickFirsts, no `tools:replace` label. Engine gaps
   are fixed in `~/git/g-paper` (bump version, `publishToMavenLocal`, re-pin) — never
   worked around in the host.
