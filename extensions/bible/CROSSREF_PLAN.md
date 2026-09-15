@@ -138,6 +138,6 @@ Biblesprout's own builder copy has the same defects — not touched from here.
   (`openingReference != null` → `leave()`); the plain door stays silent.
 - **FREEZE — ✅ 2026-09-14, the user's own hand walk on the Nomad ("This feels fantastic! My heart
   is happy!"). Arc 41 COMPLETE + FROZEN.** No code review (the user's call, the arc 37–40 waiver).
-  Branch `crossref` stays open for the related follow-ups the user named at the start; it merges to
-  `main` `--no-ff` on their word. No next Bible phase (bookmarks, red letters, text size, longer or
+  Branch `crossref` stayed open for arc 42 "Notes" (`NOTES_PLAN.md`) and **merged to `main`
+  2026-09-15 (`--no-ff`), then was deleted.** No next Bible phase (bookmarks, red letters, text size, longer or
   multi-page passages) without a fresh user decision.

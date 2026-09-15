@@ -15,7 +15,8 @@ devices first (BOOX), expanding to iPad, Android tablets, phones, and web.
   with notebook-linked scripture reference objects, by arc 40 "Verses" the same day (the verses
   themselves on the page as a linked text object), and by arc 41 "Cross references" 2026-09-14 on
   branch `crossref` (tappable parallel-passage references and footnote popups; the builder's
-  Song-of-Solomon target bug fixed), and by arc 42 "Notes" 2026-09-14 on the same branch (a
+  Song-of-Solomon target bug fixed), and by arc 42 "Notes" 2026-09-14 on the same branch — **`crossref`
+  merged to `main` 2026-09-15 (`--no-ff`) and deleted** (a
   personal-commentary side panel in the reader listing every notebook page or document that
   references the chapter being read, fed by a live host push plus a Rebuild door)): lives at the
   monorepo root and is included
@@ -177,6 +178,12 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   point: arc 37 (B0–B9), arc 38 "Reference", arc 39 "Lookup", arc 40 "Verses", all COMPLETE +
   FROZEN on the user's Nomad walks, plus the full-branch code review of 2026-09-13 (fixes in
   `extensions/bible/docs/bible.md` § Traps). The per-arc `*_PLAN.md` files there are history.
+- `crossref` — **merged to `main` 2026-09-15 (`--no-ff`) and deleted** (local + remote) — "on
+  crossref" means `main`. It carried arc 41 "Cross references" (tappable BSB cross references +
+  footnote popups; the builder's mis-booked-target bug fixed) and arc 42 "Notes" (the personal
+  commentary: a Notes side panel in the reader, the `note_ref` index in the Bible's store fed by a
+  live host push + a Rebuild door, `API_VERSION` 16), both COMPLETE + FROZEN on the user's Nomad
+  hand walks, no code review. `CROSSREF_PLAN.md` + `NOTES_PLAN.md` there are history.
 - `germination` — previous post-MVP feature branch (reference, not active)
 - The former feature branches (`seed`, `sprout`, `sapling`, `supernote`, `paper`) are merged and
   **deleted** (local + remote) — "on sprout/sapling/supernote/paper" means `main`; history lives under

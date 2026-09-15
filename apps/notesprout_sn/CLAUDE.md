@@ -94,8 +94,8 @@ asset rebuilt, 3,271 rows. No seam change — no `API_VERSION` bump. A one-finge
 walks back from any reader a link led to (a cross-reference passage, a Full chapter from one, a
 notebook Bible link, the editor's Lookup); the plain Bible-button door is silent. Walked over adb
 on the Nomad (`.dev`), then **COMPLETE + FROZEN 2026-09-14 on the user's own hand walk ("This
-feels fantastic! My heart is happy!")**; branch `crossref` stays open for the related follow-ups
-the user named, merging `--no-ff` on their word. Plan + ledger `extensions/bible/CROSSREF_PLAN.md`; reference
+feels fantastic! My heart is happy!")**; branch `crossref` **merged to `main` 2026-09-15
+(`--no-ff`) and deleted** after arc 42 froze on it. Plan + ledger `extensions/bible/CROSSREF_PLAN.md`; reference
 `extensions/bible/docs/bible.md` § "Cross references". No code review — the user's call, the arc
 37–40 waiver.
 **Arc 42 "Notes" (2026-09-14, a fresh user decision, branch `crossref`): a personal commentary.**
@@ -121,7 +121,9 @@ tap flipped the notebook to the page it named, and a Send re-pushed the page 750
 finding fixed mid-walk: a just-landed link's in-memory `createdAt` is 0 until its row is reloaded,
 so it is dated **now** rather than 1970. Plan + ledger `extensions/bible/NOTES_PLAN.md`; reference
 `extensions/bible/docs/bible.md` § "Notes — the personal commentary". **COMPLETE + FROZEN 2026-09-15 on the user's own Nomad hand walk ("All tests pass")**; branch
-`crossref` stays open until the user says to merge. No code review — the user's call.
+`crossref` merged to `main` 2026-09-15 (`--no-ff`) and deleted — "on crossref" means `main`. The
+one recorded gap, left as-is on the user's call: no Notes button on the reader opened from the
+editor's Lookup door (`bible.md` § Not in this arc). No code review — the user's call.
 No TENTH extension point, no next Bible phase (bookmarks, longer or multi-page passages) and no
 other new arc without a fresh user decision; no re-raising of any waived / declined review finding.
 
