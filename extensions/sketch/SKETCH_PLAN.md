@@ -289,8 +289,8 @@ deleted from `:ext-ink`; `./gradlew :ext-ink:clean` clears it — expect it agai
 deletion in a long-lived module. (2) A NUL inside a Kotlin char literal compiles and passes; only
 `cat -v` shows it — check new `require` lines against `DocumentPageState`'s escapes.
 
-**The hand.** Pad/calendar ink + handoff on the Nomad — pending the user's walk (recorded below when
-it lands).
+**The hand.** Nomad, the user, 2026-09-15: pad write + point-erase + Back, calendar write + finger
+week flip + Back, chrome hide + collapsed knob in both — **"all pass"**. K2 closed (`82ff9207`).
 
 **Next.** K3 — host data, creation, routing (`TYPE_SKETCH`, `SketchDao` / `SketchRepository`,
 `NotebookFlags.SKETCH` + every meta mirror site, the third radio, `FaceRouting`, `childrenOf`
