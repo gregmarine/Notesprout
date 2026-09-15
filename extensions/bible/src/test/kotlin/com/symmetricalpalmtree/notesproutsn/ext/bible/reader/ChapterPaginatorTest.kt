@@ -4,6 +4,7 @@ import com.symmetricalpalmtree.notesproutsn.ext.bible.Footnote
 import com.symmetricalpalmtree.notesproutsn.ext.bible.RenderBlock
 import com.symmetricalpalmtree.notesproutsn.ext.bible.VerseKey
 import com.symmetricalpalmtree.notesproutsn.ext.bible.VerseMark
+import com.symmetricalpalmtree.notesproutsn.ext.bible.Xref
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -14,6 +15,32 @@ import org.junit.Test
  * real measuring (a `StaticLayout`, which needs Android) out of these tests.
  */
 class ChapterPaginatorTest {
+
+    @Test
+    fun `a parallel-passage line carries its cross-references as links, other headings none`() {
+        val blocks = listOf(
+            RenderBlock(1, "s1", null, "Wives and Husbands", emptyList()),
+            RenderBlock(2, "r", null, "(Song of Solomon 1:1–17; Ephesians 5:22–33)", emptyList()),
+            RenderBlock(3, "p", null, "Wives, in the same way…", emptyList()),
+        )
+        val xrefs = listOf(
+            Xref("block", 2, 1, 23, 22001001, 22001017),
+            Xref("block", 2, 25, 42, 49005022, 49005033),
+            Xref("note", 9, 0, 8, 19034012, 19034016), // a footnote's — not the page's
+        )
+
+        val atoms = ChapterPaginator.atomsForBlocks(blocks, emptyList(), xrefs)
+
+        assertEquals(HeadingAtom("Wives and Husbands", HeadingKind.MAJOR), atoms[0])
+        assertEquals(
+            HeadingAtom(
+                "(Song of Solomon 1:1–17; Ephesians 5:22–33)",
+                HeadingKind.REFERENCE,
+                listOf(XrefLink(1, 23, 22001001, 22001017), XrefLink(25, 42, 49005022, 49005033)),
+            ),
+            atoms[1],
+        )
+    }
 
     // Psalm 23 is ordinal 19 — the shape these blocks imitate.
     private fun key(chapter: Int, verse: Int) = VerseKey.encode(19, chapter, verse)

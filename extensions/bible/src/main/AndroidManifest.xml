@@ -21,8 +21,10 @@
              B9 "Send"**: `takeOutgoingReference` behind `MIN_API_VERSION_FOR_BIBLE_SEND`; the
              host sets `EXTRA_BIBLE_SEND_ENABLED` only against a reader declaring it. **15 since
              arc 40 "Verses"**: `passageText` behind `MIN_API_VERSION_FOR_BIBLE_TEXT`; the host
-             offers the verses doors only to a reader declaring it. The
-             `android:value` below is the host-compat gate — it is the line that matters, and
+             offers the verses doors only to a reader declaring it. **16 since arc 42
+             "Notes"**: the seven notes tails behind `MIN_API_VERSION_FOR_BIBLE_NOTES`; the host
+             pushes reference rows, and sets `EXTRA_BIBLE_NOTES_ENABLED`, only against a reader
+             declaring it. The `android:value` below is the host-compat gate — it is the line that matters, and
              this comment must move with it. -->
         <service
             android:name=".BibleService"
@@ -32,7 +34,7 @@
             </intent-filter>
             <meta-data
                 android:name="com.symmetricalpalmtree.notesproutsn.extension.API_VERSION"
-                android:value="15" />
+                android:value="16" />
         </service>
 
         <!-- The extension-owned screen (tier 2): exported, custom action, NO launcher filter;

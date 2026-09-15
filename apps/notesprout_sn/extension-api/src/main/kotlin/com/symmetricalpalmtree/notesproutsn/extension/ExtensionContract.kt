@@ -124,8 +124,17 @@ object ExtensionContract {
      * a text object on the page — the first time scripture crosses the seam,
      * `extensions/bible/VERSES_PLAN.md`), behind the METHOD floor
      * [MIN_API_VERSION_FOR_BIBLE_TEXT]. `MIN_API_VERSIONS` untouched; only `:ext-bible` redeclares.
+     *
+     * **16 since arc 42 "Notes" (2026-09-14)** — seven compatible tails appended to `IBible` after
+     * `passageText` (the notes index: `replacePageNotes`, `replaceNotebookNotes`,
+     * `renameNotebookNotes`, `deleteNotebookNotes`, `pruneNotes`, `noteDocumentReference` —
+     * store-taking, bind-per-call, the tag manager's `assign` shape — and `takeOutgoingNote()` on
+     * the held bind; `extensions/bible/NOTES_PLAN.md`), behind the METHOD floor
+     * [MIN_API_VERSION_FOR_BIBLE_NOTES]. The host pushes where a Bible reference sits (notebook,
+     * page, the opaque wire) and the reader lists those pages while the chapter is read.
+     * `MIN_API_VERSIONS` untouched; only `:ext-bible` redeclares.
      */
-    const val API_VERSION: Int = 15
+    const val API_VERSION: Int = 16
 
     /**
      * The floor for a service on a **store-taking** point (arc 22 / X1): the host accepts such a
@@ -171,6 +180,33 @@ object ExtensionContract {
      * land transaction code 6 on nothing. Not an action floor: [MIN_API_VERSION_FOR_BIBLE] stays 11.
      */
     const val MIN_API_VERSION_FOR_BIBLE_TEXT: Int = 15
+
+    /**
+     * The **method** floor for the notes tails of `IBible` (arc 42 "Notes", 2026-09-14): the host
+     * pushes Bible-reference rows to the reader's index, and puts [EXTRA_BIBLE_NOTES_ENABLED] on
+     * the reader's Intent, only against a reader declaring at least this — an older reader would
+     * land transaction codes 7–13 on nothing. Not an action floor: [MIN_API_VERSION_FOR_BIBLE]
+     * stays 11.
+     */
+    const val MIN_API_VERSION_FOR_BIBLE_NOTES: Int = 16
+
+    /** A `BibleNote` / `BibleNoteTarget` kind (arc 42): a Bible link object on a notebook page —
+     *  the row is replaced whole with its page's links. */
+    const val BIBLE_NOTE_KIND_LINK: Int = 0
+
+    /** A `BibleNoteTarget` kind (arc 42): a reference looked up from a document (the editor's
+     *  Bible action) — never touched by a page's link replacement. */
+    const val BIBLE_NOTE_KIND_DOCUMENT: Int = 1
+
+    /** Most notes in one `replacePageNotes` / `replaceNotebookNotes` call — one page never holds
+     *  anywhere near it; a notebook's whole index rides one parcel well under the Binder budget. */
+    const val BIBLE_NOTES_PER_CALL: Int = 1_000
+
+    /** Most ids in one `replaceNotebookNotes` / `pruneNotes` list. */
+    const val BIBLE_NOTE_IDS_PER_CALL: Int = 10_000
+
+    /** Longest notebook name that rides a notes call — the document contract's title cap. */
+    const val BIBLE_NOTE_MAX_NAME_CHARS: Int = 200
 
     /**
      * The lowest API version the host accepts for a service on [action] — **per action** since arc
@@ -272,6 +308,24 @@ object ExtensionContract {
      *  shown a passage with [EXTRA_BIBLE_SEND_ENABLED] against
      *  [MIN_API_VERSION_FOR_BIBLE_TEXT] ever returns it. */
     const val RESULT_BIBLE_SEND_TEXT: Int = 2
+
+    /**
+     * Boolean launch extra on the Bible screen (arc 42 "Notes") — true when the host can follow a
+     * note row out of the reader (it shows its Notes button): the library's and the notebook's
+     * doors; never the editor's Lookup trampoline, which has no screen to open a notebook from.
+     * Set only against a reader declaring [MIN_API_VERSION_FOR_BIBLE_NOTES]. A boolean, no
+     * content — the target comes back over the held bind (`takeOutgoingNote`).
+     */
+    const val EXTRA_BIBLE_NOTES_ENABLED: String = "bibleNotesEnabled"
+
+    /** Activity result code (arc 42 "Notes"): the reader parked a note's target for
+     *  `takeOutgoingNote` — the host opens that notebook page (= `RESULT_FIRST_USER + 2`). */
+    const val RESULT_BIBLE_OPEN_NOTE: Int = 3
+
+    /** Activity result code (arc 42 "Notes"): the reader asks the host to rebuild the notes index
+     *  and reopen it where it was — a passage, if one was showing, is parked for
+     *  `takeOutgoingReference` (= `RESULT_FIRST_USER + 3`). */
+    const val RESULT_BIBLE_REBUILD_NOTES: Int = 4
 
     /** `<meta-data>` name (on the `<service>`) carrying the extension's API version. */
     const val META_API_VERSION: String =

@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Notes panel (arc 42 "Notes" / N1): dialog_recents.xml in a second subject — the same
+     right-hand panel, the same header-then-arrow order, the same paginated body and pager. Its
+     one addition is the **Rebuild** door in the header (decision 9): the index is a live push,
+     and the one place to ask for it to be rebuilt from scratch is where its answer is being
+     read. A text button, like Full chapter — there is no glyph for "walk every notebook again".
+     The owner branches in code on window width (full-screen below 480 dp, a 60 % sidebar at or
+     above) and sets the panel's width; the back arrow shows only in the full-screen form. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/notesRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/transparent">
+
+    <LinearLayout
+        android:id="@+id/notesPanel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_gravity="end"
+        android:orientation="vertical"
+        android:background="@drawable/shape_recents_sidebar"
+        android:clickable="true"
+        android:focusable="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/toolbar_bar_thickness"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp">
+
+            <TextView
+                android:id="@+id/notesTitle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/bible_notes_title"
+                android:textColor="@color/inkBlack"
+                android:textSize="20sp"
+                android:textStyle="bold"
+                android:singleLine="true"
+                android:ellipsize="end" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnNotesRebuild"
+                style="@style/Widget.Notesprout.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:contentDescription="@string/bible_notes_rebuild"
+                android:minHeight="@dimen/toolbar_button_size"
+                android:text="@string/bible_notes_rebuild" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnNotesBack"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="12dp"
+                android:src="@drawable/ic_arrow_left"
+                android:contentDescription="@string/cd_bible_back" />
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
+
+        <FrameLayout
+            android:id="@+id/notesBody"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <LinearLayout
+                android:id="@+id/notesRows"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp" />
+
+            <TextView
+                android:id="@+id/notesEmpty"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:textColor="@color/inkBlack"
+                android:textSize="15sp"
+                android:visibility="gone" />
+        </FrameLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
+
+        <LinearLayout
+            android:id="@+id/notesPager"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/toolbar_bar_thickness"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:visibility="invisible">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnNotesFirst"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_page_first"
+                android:contentDescription="@string/cd_bible_contents_first" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnNotesPrev"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_page_prev"
+                android:contentDescription="@string/cd_bible_contents_prev" />
+
+            <TextView
+                android:id="@+id/notesPageLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="56dp"
+                android:gravity="center"
+                android:textSize="14sp"
+                android:textColor="@color/inkBlack" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnNotesNext"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_page_next"
+                android:contentDescription="@string/cd_bible_contents_next" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnNotesLast"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_page_last"
+                android:contentDescription="@string/cd_bible_contents_last" />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

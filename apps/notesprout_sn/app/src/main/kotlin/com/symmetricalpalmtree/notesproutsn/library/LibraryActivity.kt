@@ -45,6 +45,8 @@ import com.symmetricalpalmtree.notesproutsn.databinding.ActivityLibraryBinding
 import com.symmetricalpalmtree.notesproutsn.export.ExportActivity
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionRegistry
 import com.symmetricalpalmtree.notesproutsn.extension.BibleEntry
+import com.symmetricalpalmtree.notesproutsn.extension.BibleNoteIndex
+import com.symmetricalpalmtree.notesproutsn.extension.BibleNoteRebuild
 import com.symmetricalpalmtree.notesproutsn.extension.CalendarEntry
 import com.symmetricalpalmtree.notesproutsn.extension.CalendarTarget
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
@@ -52,9 +54,11 @@ import com.symmetricalpalmtree.notesproutsn.extension.ScratchPadEntry
 import com.symmetricalpalmtree.notesproutsn.extension.TagManagerEntry
 import com.symmetricalpalmtree.notesproutsn.extension.TagShowing
 import com.symmetricalpalmtree.notesproutsn.importing.ImportFlow
+import com.symmetricalpalmtree.notesproutsn.notebook.BibleNoteFollow
 import com.symmetricalpalmtree.notesproutsn.notebook.NotebookActivity
 import com.symmetricalpalmtree.notesproutsn.templates.TemplatesActivity
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -263,7 +267,18 @@ class LibraryActivity : AppCompatActivity() {
         binding.btnImport.setOnClickListener { importFlow.onTap() }
         TooltipCompat.setTooltipText(binding.btnImport, binding.btnImport.contentDescription)
         // The Bible (arc 37 / B0). A launcher, so built here; no paper behind it, so no handoff.
-        bible = BibleEntry(activity = this, button = binding.btnBible)
+        bible = BibleEntry(
+            activity = this,
+            button = binding.btnBible,
+            // Arc 42 "Notes": the library can open any notebook a note row names, so this door
+            // carries the reader's Notes panel and its Rebuild.
+            notesEnabled = true,
+            // Arc 42 / N3: every row is a hop into some notebook from here — there is no current
+            // notebook, so the plan can only ever answer `Other`.
+            onOpenNote = { target -> noteFollow.follow(target) },
+            // Arc 42 / N4: the Rebuild door, with no open session to read through.
+            onRebuildNotes = { wire -> rebuildNotes(wire) },
+        )
         binding.btnBible.setOnClickListener { bible.open() }
         TooltipCompat.setTooltipText(binding.btnBible, binding.btnBible.contentDescription)
         DebugMenu.install(this, binding.bottomRight)
@@ -335,6 +350,52 @@ class LibraryActivity : AppCompatActivity() {
         // (arc 25 / V5) — both are this window's.
         if (::importFlow.isInitialized) importFlow.close()
         super.onDestroy()
+    }
+
+    /**
+     * Arc 42 "Notes" (N3): where a row of the reader's Notes panel goes, from a screen with **no
+     * notebook of its own**. That is the whole difference from the notebook's copy: nothing to
+     * flip to, no trail origin to push, and therefore no `SamePage` the plan can reach — the two
+     * in-notebook lambdas below are unreachable by construction and say so rather than pretending.
+     *
+     * The launch takes the library's one [launching] latch, exactly as [openNotebook] does: a
+     * note row and a card tap must not stack two notebook screens on one `.soil`.
+     */
+    private val noteFollow by lazy {
+        BibleNoteFollow(
+            activity = this,
+            currentNotebookId = { null },
+            navigateToPage = { Slog.d(TAG) { "note: a page hop with no notebook open — ignored" } },
+            openDocumentEditor = { Slog.d(TAG) { "note: an editor hop with no notebook open — ignored" } },
+            launch = { target ->
+                if (!launching) {
+                    launching = true
+                    OpeningOverlay.showThen(this) { startActivity(target) }
+                }
+            },
+        )
+    }
+
+    /** Arc 42 / N4: one rebuild at a time — a second would stack two progress dialogs. */
+    private var rebuildingNotes = false
+
+    /**
+     * Arc 42 / N4: the reader's Rebuild from the library — [BibleNoteRebuild] with no open
+     * session, because nothing here holds a `.soil` open. The reader comes back where it was once
+     * the done dialog is dismissed.
+     */
+    private fun rebuildNotes(parkedWire: String?) {
+        if (isFinishing || isDestroyed || rebuildingNotes) return
+        rebuildingNotes = true
+        lifecycleScope.launch {
+            try {
+                BibleNoteRebuild.run(this@LibraryActivity, openSession = null)
+            } finally {
+                rebuildingNotes = false
+            }
+            if (isFinishing || isDestroyed || launching) return@launch
+            bible.reopen(parkedWire)
+        }
     }
 
     /**
@@ -1065,6 +1126,11 @@ class LibraryActivity : AppCompatActivity() {
                         return@launch
                     }
                     repo.rename(s.id, name)
+                    // Arc 42 "Notes": the reader's index lists a note under its notebook's name.
+                    // Fire-and-forget; a failure is a log line inside the push.
+                    if (s.type == ObjectType.NOTEBOOK) {
+                        lifecycleScope.launch { BibleNoteIndex.rename(applicationContext, s.id, name) }
+                    }
                     dismiss()
                     refresh()
                 } finally {
@@ -1085,6 +1151,7 @@ class LibraryActivity : AppCompatActivity() {
             repo.deleteNotebook(s.id)
             recentsPrefs.remove(s.id)
             withContext(Dispatchers.IO) { purgeNotebookFile(s.id) }
+            forgetNotes(listOf(s.id))   // arc 42
             refresh()
         }
     }
@@ -1098,6 +1165,7 @@ class LibraryActivity : AppCompatActivity() {
             val removed = repo.deleteFolderRecursive(s.id)
             removed.forEach { recentsPrefs.remove(it) }
             withContext(Dispatchers.IO) { removed.forEach { purgeNotebookFile(it) } }
+            forgetNotes(removed)   // arc 42: every notebook the folder took with it
             // Standing inside the folder that just went: step out to where it used to be.
             if (folderId == s.id) navigateTo(s.parentId) else refresh()
         }
@@ -1124,6 +1192,19 @@ class LibraryActivity : AppCompatActivity() {
         repo.deleteNotebook(id)
         recentsPrefs.remove(id)
         withContext(Dispatchers.IO) { purgeNotebookFile(id) }
+        forgetNotes(listOf(id))   // arc 42
+    }
+
+    /**
+     * Arc 42 "Notes": the notebooks in [ids] are gone, so the reader's index must stop offering
+     * their pages. Fire-and-forget on a **detached** scope — a delete finishes by leaving the
+     * screen (a folder delete navigates), and a push cancelled halfway would leave rows behind
+     * that only the Rebuild door could clear. Every failure is a log line inside the push.
+     */
+    private fun forgetNotes(ids: List<String>) {
+        if (ids.isEmpty()) return
+        val app = applicationContext
+        MainScope().launch { ids.forEach { BibleNoteIndex.delete(app, it) } }
     }
 
     /**

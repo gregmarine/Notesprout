@@ -78,9 +78,54 @@ verses on what is already there — "No room on this page" instead). Plan + ledg
 page", `docs/extensions.md` § "Arc 40's tail: `passageText`" + audit row 60, `docs/objects.md` §
 "Text objects" + "Standing traps", `docs/links.md` § "The Bible kind". No code review — the user's
 call, the same waiver arcs 37–39 took.
-No TENTH extension point, no next Bible phase (bookmarks, cross references, footnotes, longer or
-multi-page passages) and no other new arc without a fresh user decision; no re-raising of any
-waived / declined review finding.
+**Arc 41 "Cross references" (2026-09-14, a fresh user decision, branch `crossref`): the BSB's
+cross references tappable.** Every `\r` parallel-passage line's references are underlined and a
+**finger** tap opens the cited passage **one screen further** (a second in-process `BibleActivity`
+in passage mode — Full chapter's road in reverse; Back returns to the chapter; Send relays up); a
+tap on a footnote caller `*` opens the note in a bordered popup under its line ("1 Peter 3:8" +
+text) with its own references tappable. The tap rides `ListSwipe.onTap` (`:sn-screen`, an
+optional callback: one finger, never past slop, never a swipe); a tap on anything else is nothing.
+**The Biblesprout bug it was asked to avoid was upstream data**: the publisher's USFM omits the
+book code on both Song of Solomon lines, and the builder fell back to the source book (1 Peter 3
+→ 1 Peter 1). `tools/bible/build_bible_db.py` now resolves a code-less target from the display
+text's book, refuses non-canon books (Jasher, Enoch, Esdras), reads one-chapter books' bare
+numbers as verses, and **fails the build** on any dangling or mis-booked target (`_check_xrefs`);
+asset rebuilt, 3,271 rows. No seam change — no `API_VERSION` bump. A one-finger **swipe up**
+walks back from any reader a link led to (a cross-reference passage, a Full chapter from one, a
+notebook Bible link, the editor's Lookup); the plain Bible-button door is silent. Walked over adb
+on the Nomad (`.dev`), then **COMPLETE + FROZEN 2026-09-14 on the user's own hand walk ("This
+feels fantastic! My heart is happy!")**; branch `crossref` **merged to `main` 2026-09-15
+(`--no-ff`) and deleted** after arc 42 froze on it. Plan + ledger `extensions/bible/CROSSREF_PLAN.md`; reference
+`extensions/bible/docs/bible.md` § "Cross references". No code review — the user's call, the arc
+37–40 waiver.
+**Arc 42 "Notes" (2026-09-14, a fresh user decision, branch `crossref`): a personal commentary.**
+A side panel in the reader ("Notes") lists every notebook page or document holding a Bible
+reference into the chapter being read — the user's own words: "everything the user writes about
+any given book, chapter, or reference will be available when they want to regardless of when they
+wrote the note." Eleven locked decisions, compressed: the reader's own store keeps the index
+(`note_ref`, `BibleSchema.V4`); the host pushes it live at every act that touches a link plus a
+Rebuild door that walks every openable notebook (locked ones skipped, not prompted); only a
+Lookup indexes a document, nothing scans text; scope is the chapter in view or a passage's own
+ranges; the panel is a right-hand side panel, no mark on the page; a row follows into that
+notebook at that page (or its editor), the reader closing first, locked notebooks prompting;
+Rebuild lives in the panel's own header; its door is a second granted exception to "bottom bars
+are pager-only" (`btnNotes`, `ic_notebook`). Seam: seven `IBible` tails after `passageText`
+(`API_VERSION` 15 → 16 as the method floor `MIN_API_VERSION_FOR_BIBLE_NOTES`;
+`MIN_API_VERSION_FOR_BIBLE` untouched at 11) — six store-taking, bind-per-call pushes
+(`replacePageNotes`/`replaceNotebookNotes`/`renameNotebookNotes`/`deleteNotebookNotes`/`pruneNotes`/
+`noteDocumentReference`, the tag manager's `assign` shape) and one held-bind read
+(`takeOutgoingNote`). No code review — the user's call, the arc 37–41 waiver. Walked over adb on
+the Nomad (`.dev`): Notes opened in 13 ms with "No notes for John 3", Rebuild walked 47 of 50
+notebooks (19 references, 2 locked skipped, 1 failed) in 8,550 ms and reopened the reader, a row
+tap flipped the notebook to the page it named, and a Send re-pushed the page 750 ms later. One
+finding fixed mid-walk: a just-landed link's in-memory `createdAt` is 0 until its row is reloaded,
+so it is dated **now** rather than 1970. Plan + ledger `extensions/bible/NOTES_PLAN.md`; reference
+`extensions/bible/docs/bible.md` § "Notes — the personal commentary". **COMPLETE + FROZEN 2026-09-15 on the user's own Nomad hand walk ("All tests pass")**; branch
+`crossref` merged to `main` 2026-09-15 (`--no-ff`) and deleted — "on crossref" means `main`. The
+one recorded gap, left as-is on the user's call: no Notes button on the reader opened from the
+editor's Lookup door (`bible.md` § Not in this arc). No code review — the user's call.
+No TENTH extension point, no next Bible phase (bookmarks, longer or multi-page passages) and no
+other new arc without a fresh user decision; no re-raising of any waived / declined review finding.
 
 **Maintenance protocol (replaces the per-arc phase protocol):**
 
@@ -302,20 +347,25 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   first page; RGB_565 decode, dimension check against the declaration, PNG 100 through a counting
   stream + the `S_ISREG` fsync rule). It never sees a notebook, a `.soil`, or more than one page —
   the host bakes once and splits (`BundleSplit`) and calls it once per page.) ·
-  `:ext-bible` (**NSE · Bible**, arc 37 / B0, grown by arc 38 / R1–R2 — the fifteenth module, and
-  the only one at the monorepo root, `extensions/bible/`, included by `projectDir`):
+  `:ext-bible` (**NSE · Bible**, arc 37 / B0, grown by arc 38 / R1–R2 and by arc 42 / N0–N1 — the
+  fifteenth module, and the only one at the monorepo root, `extensions/bible/`, included by
+  `projectDir`):
   `:extension-api` + `:sn-screen` only, **never** `:app`, no Room / SQLCipher / serialization.
-  Declares `API_VERSION` **15** since arc 40 "Verses" (12 at arc 38 / R1, 13 at B9, 15 at arc 40;
-  `MIN_API_VERSION_FOR_BIBLE` = 11 from its first
+  Declares `API_VERSION` **16** since arc 42 "Notes" (12 at arc 38 / R1, 13 at B9, 15 at arc 40,
+  16 at arc 42; `MIN_API_VERSION_FOR_BIBLE` = 11 from its first
   phase still gates the point's own existence; `MIN_API_VERSION_FOR_BIBLE_REFERENCE` = 12, a
-  method floor, gates `resolve`/`beginAt` and the notebook's two reference doors — an 11-only
-  reader still serves the plain door). Store `BibleSchema.V3` = `state` (B0) + `recent` (B7) +
-  `recent_ref` (arc 38 / R2, the passages followed from a notebook), `INSERT OR REPLACE` safe on
-  all three (no children). `ContentInstaller` copying its bundled
+  method floor, gates `resolve`/`beginAt` and the notebook's two reference doors —
+  `MIN_API_VERSION_FOR_BIBLE_NOTES` = 16 gates the seven notes tails and the Notes button; an
+  11-only reader still serves the plain door). Store `BibleSchema.V4` = `state` (B0) + `recent`
+  (B7) + `recent_ref` (arc 38 / R2, the passages followed from a notebook) + `note_ref` (arc 42,
+  the notes index, one row per verse range of a pushed reference, two indexes — the span and the
+  target), `INSERT OR REPLACE` safe on all four (no children). `ContentInstaller` copying its
+  bundled
   `assets/bible/bsb.bible` to its own `noBackupFilesDir` is **the one sanctioned "extension writes
   to disk" exception** in the whole family — re-derivable APK content, never user data, ML Kit's
   own model's class. Its door is a deliberate exception to "bottom bars are pager-only": `btnBible`
-  sits on both the library's and the notebook's bottom bars (arc 37 / B0, decision 3).
+  sits on both the library's and the notebook's bottom bars (arc 37 / B0, decision 3), and arc 42's
+  `btnNotes` is a second such exception, on the reader's own bottom bar.
   `gradle.properties` sets `android.nonTransitiveRClass=false` — undoing it breaks every
   `:sn-screen` resource reference from `:app`.
 - **Arcs 26–35 are each COMPLETE + FROZEN.** Each has ONE reference doc and ONE standalone plan
@@ -603,7 +653,10 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   39 "Lookup"**: `IDocumentHost.openReference`, method floor
   `DocumentContract.MIN_API_VERSION_FOR_DOCUMENT_LOOKUP` 14 (`:ext-document` declares 14). ·
   **15 = arc 40 "Verses"**: `IBible.passageText`, method floor `MIN_API_VERSION_FOR_BIBLE_TEXT`
-  15 (`:ext-bible` declares 15). No action floor moved at any of the three; the pin lives in
+  15 (`:ext-bible` declares 15). · **16 = arc 42 "Notes"**: seven `IBible` tails (six
+  store-taking/bind-per-call pushes into the reader's own notes index, one held-bind read), method
+  floor `MIN_API_VERSION_FOR_BIBLE_NOTES` 16 (`:ext-bible` declares 16). No action floor moved at
+  any of the four; the pin lives in
   `ExtensionContractTest`, which **must be run** (`:extension-api:testDebugUnitTest`) at every
   bump — it went red across three bumps unnoticed once.
   Meta-data is **per service**.

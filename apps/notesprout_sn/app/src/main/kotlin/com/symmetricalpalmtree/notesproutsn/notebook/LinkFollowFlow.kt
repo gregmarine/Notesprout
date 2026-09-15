@@ -9,7 +9,6 @@ import com.symmetricalpalmtree.notesproutsn.R
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
 import com.symmetricalpalmtree.notesproutsn.core.OpeningOverlay
 import com.symmetricalpalmtree.notesproutsn.core.Slog
-import com.symmetricalpalmtree.notesproutsn.crypto.KeyResolver
 import com.symmetricalpalmtree.notesproutsn.crypto.KeyScope
 import com.symmetricalpalmtree.notesproutsn.crypto.NotebookPassphrasePrompt
 import com.symmetricalpalmtree.notesproutsn.crypto.PassphraseCache
@@ -18,9 +17,6 @@ import com.symmetricalpalmtree.notesproutsn.data.index.ObjectType
 import com.symmetricalpalmtree.notesproutsn.data.prefs.LinkTrail
 import com.symmetricalpalmtree.notesproutsn.data.prefs.TrailCodec
 import com.symmetricalpalmtree.notesproutsn.data.prefs.TrailEntry
-import com.symmetricalpalmtree.notesproutsn.data.soil.SoilDao
-import com.symmetricalpalmtree.notesproutsn.data.soil.SoilDatabase
-import com.symmetricalpalmtree.notesproutsn.data.soil.SoilSchema
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -260,33 +256,15 @@ class LinkFollowFlow(
             ?.takeIf { it.type == ObjectType.NOTEBOOK }
 
     /**
-     * One-shot **read-only** pre-check of a page row in another notebook's `.soil`: live, still a
-     * page, and still parented to that notebook — through [SoilDatabase.readOnce], the single
-     * owner of the open → read → always-seal ritual. Any failure at all answers false: the follow
-     * then explains rather than guessing.
+     * One-shot **read-only** pre-check of a page row in another notebook's `.soil` — [ForeignPageCheck],
+     * shared since arc 42 / N3 with the notes follow ([BibleNoteFollow]) rather than copied.
      *
      * Only ever called for a genuinely foreign notebook — [LinkNav] routes every current-notebook
      * target to `SamePage`/`NoOp` — so this can never be a second connection to the live session's
      * own file.
-     *
-     * [typed] is the passphrase the follow just collected for a `NOTEBOOK`-scope target (arc 26 /
-     * U4): the read carries it rather than resolving, which would answer `NeedsPrompt` until the
-     * prompt's raw-key warm finishes and turn a live page into a dead one.
      */
-    private suspend fun foreignPageAlive(notebookId: String, pageId: String, typed: String?): Boolean {
-        val ctx = activity.applicationContext
-        val check: suspend (SoilDao) -> Boolean = { dao ->
-            val row = dao.byId(pageId)
-            row != null &&
-                row.deletedAt == null &&
-                row.type == SoilSchema.TYPE_PAGE &&
-                row.parentId == notebookId
-        }
-        val answer =
-            if (typed == null) SoilDatabase.readOnce(ctx, notebookId, check)
-            else SoilDatabase.readOnce(ctx, notebookId, KeyResolver.Resolved.Passphrases(typed), check)
-        return answer ?: false
-    }
+    private suspend fun foreignPageAlive(notebookId: String, pageId: String, typed: String?): Boolean =
+        ForeignPageCheck.alive(activity, notebookId, pageId, typed)
 
     // ── The dead-target dialog ───────────────────────────────────────────────
 

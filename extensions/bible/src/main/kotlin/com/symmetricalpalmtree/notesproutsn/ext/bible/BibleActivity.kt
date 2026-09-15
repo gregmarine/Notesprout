@@ -2,6 +2,7 @@ package com.symmetricalpalmtree.notesproutsn.ext.bible
 
 import android.app.Activity
 import android.content.Intent
+import android.graphics.Rect
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
@@ -24,7 +25,9 @@ import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.core.TopGuard
 import com.symmetricalpalmtree.notesproutsn.ext.bible.databinding.ActivityBibleBinding
 import com.symmetricalpalmtree.notesproutsn.ext.bible.reader.ChapterPaginator
+import com.symmetricalpalmtree.notesproutsn.ext.bible.reader.PageMark
 import com.symmetricalpalmtree.notesproutsn.ext.bible.reader.ReaderView
+import com.symmetricalpalmtree.notesproutsn.extension.BibleNoteTarget
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
 import com.symmetricalpalmtree.notesproutsn.extension.HostCallerCheck
 import com.symmetricalpalmtree.notesproutsn.extension.ResolvedReference
@@ -35,10 +38,11 @@ import kotlinx.coroutines.withContext
 
 /**
  * **Over the ~800-line rule, with reason:** this one screen is the reader's whole surface — the
- * chapter flow (B1–B2), the three side panels' doors (B3, B6–B8), the passage mode with its Full
- * chapter door (arc 38 / R2), Send (B9) and the verses chooser (arc 40) — and every door shares the
- * one `loading` latch, the one mode pair and the one position writer. Splitting the doors out
- * would spread that latch across files; the panels themselves already live in their own.
+ * chapter flow (B1–B2), the four side panels' doors (B3, B6–B8, arc 42), the passage mode with
+ * its Full chapter door (arc 38 / R2), Send (B9) and the verses chooser (arc 40) — **the doors
+ * live here, the models and the panels in their own files** — and every door shares the one
+ * `loading` latch, the one mode pair and the one position writer. Splitting the doors out would
+ * spread that latch across files; the panels themselves already live in their own.
  *
  * The Bible reader's screen (arc 37 / B1, grown by B2; UI-rule tier 2) — SN's **fifth**
  * screen-owning point and, like the tag manager, one whose screen carries **no paper**. There is
@@ -122,6 +126,17 @@ import kotlinx.coroutines.withContext
  * a Bible reference object, selected, so it can be moved. The reader closes (the calendar's
  * rule: what landed is what the person is looking at). Our own Full chapter launch forwards the
  * flag, and its Send is echoed up so the passage instance finishes with it too.
+ *
+ * Arc 42's addition ("Notes", the user's decision 2026-09-14): **the personal commentary** —
+ * `btnNotes` at the bottom bar's right end (the F2 rule's second granted exception, decision 10),
+ * shown only when the host opened the reader from a notebook (`EXTRA_BIBLE_NOTES_ENABLED`). It
+ * reads the index's rows overlapping what is on screen — the chapter's whole verse band, or the
+ * passage's own ranges ([NotesModel.scope]) — groups them per notebook page or document
+ * ([NotesModel.group]) and shows them in [NotesPanel]. A row **leaves**: its target is parked in
+ * [BibleSession.outgoingNote] and the reader finishes with `RESULT_BIBLE_OPEN_NOTE`, the host
+ * opening that page (the Send rule — the reader closes for what it hands over). The panel's
+ * Rebuild finishes with `RESULT_BIBLE_REBUILD_NOTES`, parking the passage on screen so the host
+ * can reopen the reader where it was; a chapter needs no parking, the bookmark already names it.
  */
 class BibleActivity : AppCompatActivity() {
 
@@ -149,12 +164,28 @@ class BibleActivity : AppCompatActivity() {
     /** The reference this showing opens on, read once from [BibleSession] in [onCreate]. */
     private var openingReference: String? = null
 
+    /** True when THIS process launched this instance — a Full chapter, or a cross-reference's
+     *  passage (arc 41): one screen further along a trail, which a swipe up walks back. The
+     *  host's own instance is the trail's origin, and a swipe up there is nothing. */
+    private var ownLaunch = false
+
     /** A notebook is behind this showing (B9): the host's `EXTRA_BIBLE_SEND_ENABLED`, forwarded
      *  to our own Full chapter launch. */
     private var sendEnabled = false
 
+    /** The host keeps a notes index and can follow a row (arc 42): `EXTRA_BIBLE_NOTES_ENABLED`,
+     *  forwarded to our own launches beside [sendEnabled]. */
+    private var notesEnabled = false
+
     /** The in-process Full chapter launch (arc 38 / R2). Registered in [onCreate]. */
     private lateinit var fullChapter: ActivityResultLauncher<Intent>
+
+    /** The in-process passage launch a cross-reference tap makes (arc 41) — Full chapter's road
+     *  in reverse: a SECOND instance in passage mode, so Back comes back to this chapter's page. */
+    private lateinit var passageOver: ActivityResultLauncher<Intent>
+
+    /** The footnote popup while it is up; null otherwise. One at a time, dismissed on the way out. */
+    private var footnotePopup: FootnotePopup? = null
 
     /** True while a chapter is being built. The latch that makes a fast flip drop, not queue. */
     private var loading = false
@@ -168,6 +199,10 @@ class BibleActivity : AppCompatActivity() {
     /** The Recents while it is up; null otherwise. [gatheringRecents] covers the read before it. */
     private var recentsPanel: RecentsPanel? = null
     private var gatheringRecents = false
+
+    /** The Notes while it is up; null otherwise. [gatheringNotes] covers the read before it. */
+    private var notesPanel: NotesPanel? = null
+    private var gatheringNotes = false
 
     /** The Search while it is up; null otherwise. [lastSearch] is what it re-opens on. */
     private var searchPanel: SearchPanel? = null
@@ -198,7 +233,14 @@ class BibleActivity : AppCompatActivity() {
         landing = landingFromIntent()
         // A landing is our own chapter launch and ignores the showing's reference; otherwise the
         // reference — read ONCE here — decides the mode for the life of this instance.
-        openingReference = if (landing != null) null else BibleSession.reference
+        // Our own passage launch (arc 41, a cross-reference tap) carries its wire as an extra and
+        // wins over the session's — the host's reference belongs to the instance it opened.
+        val passageOverWire = intent?.getStringExtra(EXTRA_PASSAGE_WIRE)?.takeIf { ReferenceCodec.decode(it) != null }
+        openingReference = when {
+            landing != null -> null
+            else -> passageOverWire ?: BibleSession.reference
+        }
+        ownLaunch = landing != null || passageOverWire != null
         binding = ActivityBibleBinding.inflate(layoutInflater)
         setContentView(binding.root)
         TopGuard.applyInsetPadding(binding.root)
@@ -209,6 +251,7 @@ class BibleActivity : AppCompatActivity() {
         loader = ChapterLoader(this)
         passages = PassageLoader(loader)
         sendEnabled = intent?.getBooleanExtra(ExtensionContract.EXTRA_BIBLE_SEND_ENABLED, false) ?: false
+        notesEnabled = intent?.getBooleanExtra(ExtensionContract.EXTRA_BIBLE_NOTES_ENABLED, false) ?: false
         fullChapter = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             // The chapter instance read and wrote its own position, and this one is exactly the
             // passage it was — nothing to do, unless it Sent (B9): the parked reference is
@@ -218,9 +261,18 @@ class BibleActivity : AppCompatActivity() {
             // Both Send codes (B9's reference, arc 40's verses): the chapter instance can be in
             // passage mode itself — a passage picked from its Recents or Search — and its
             // "The verses" answer carries the same parked reference under code 2.
-            if (result.resultCode == ExtensionContract.RESULT_BIBLE_SEND ||
-                result.resultCode == ExtensionContract.RESULT_BIBLE_SEND_TEXT
-            ) {
+            // Arc 42's two codes ride up the same way: the note target and the parked passage
+            // both live in the session, so this instance only carries the code.
+            if (relayed(result.resultCode)) {
+                setResult(result.resultCode)
+                finish()
+            }
+        }
+
+        passageOver = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            // The passage instance is one hop off this page; a Send from it (or from anything
+            // it opened in turn) carries its code up exactly as Full chapter's does.
+            if (relayed(result.resultCode)) {
                 setResult(result.resultCode)
                 finish()
             }
@@ -242,7 +294,9 @@ class BibleActivity : AppCompatActivity() {
             onFlipNext = { turnTo(pageIndex + 1) },
             onFlipPrevious = { turnTo(pageIndex - 1) },
             onSwipeDown = { openContents() },
+            onSwipeUp = { walkBack() },
             onTwoFingerSwipeDown = { openRecents() },
+            onTap = { x, y -> onPageTap(x, y) },
         )
 
         binding.title.setText(R.string.bible_title)
@@ -263,6 +317,9 @@ class BibleActivity : AppCompatActivity() {
         binding.btnSend.visibility = if (sendEnabled) View.VISIBLE else View.GONE
         binding.btnSend.setOnClickListener { sendToNotebook() }
         binding.btnSend.setOnLongClickListener { hint(R.string.cd_bible_send) }
+        binding.btnNotes.visibility = if (notesEnabled) View.VISIBLE else View.GONE
+        binding.btnNotes.setOnClickListener { openNotes() }
+        binding.btnNotes.setOnLongClickListener { hint(R.string.cd_bible_notes) }
         binding.btnPrevPage.setOnClickListener { turnTo(pageIndex - 1) }
         binding.btnPrevPage.setOnLongClickListener { hint(R.string.cd_bible_prev_page) }
         binding.btnNextPage.setOnClickListener { turnTo(pageIndex + 1) }
@@ -270,6 +327,7 @@ class BibleActivity : AppCompatActivity() {
         for (button in listOf<View>(
             binding.btnBack, binding.btnContents, binding.btnSearch, binding.btnRecents,
             binding.btnFullChapter, binding.btnSend, binding.btnPrevPage, binding.btnNextPage,
+            binding.btnNotes,
         )) {
             TooltipCompat.setTooltipText(button, button.contentDescription)
         }
@@ -292,7 +350,9 @@ class BibleActivity : AppCompatActivity() {
         // "don't keep activities" — destroys that bypass leave()).
         contentsPanel?.dismiss()
         recentsPanel?.dismiss()
+        notesPanel?.dismiss()
         searchPanel?.dismiss()
+        footnotePopup?.dismiss()
         binding.root.removeCallbacks(showLoading)
         loader.close()
     }
@@ -583,6 +643,85 @@ class BibleActivity : AppCompatActivity() {
         }
     }
 
+    // --- the Notes (arc 42) -------------------------------------------------
+
+    /**
+     * The Notes panel (arc 42 / N1): everything the user has written **about what is on screen**.
+     * The scope is the chapter's whole verse band, or — in passage mode — the passage's own
+     * ranges ([NotesModel.scope]); nothing open yet is an empty scope and a **silent no-op**,
+     * because a panel saying "not ready" would be noise for the half-second it is true.
+     *
+     * The rows are read from the index on IO — a store that will not answer, or none lent, is an
+     * empty list, never a dialog — and grouped per notebook page or document before anything is
+     * inflated. One showing at a time, and one gather at a time, the Recents' rule.
+     *
+     * **Counts and durations only**: the rows name notebooks the user named and places they have
+     * read.
+     */
+    private fun openNotes() {
+        if (notesPanel != null || gatheringNotes) return
+        val scope = NotesModel.scope(chapter?.ref, passage?.let { ReferenceCodec.decode(it.wire) })
+        if (scope.isEmpty()) return
+        gatheringNotes = true
+        lifecycleScope.launch {
+            val began = SystemClock.elapsedRealtime()
+            val store = bibleStore
+            val rows = withContext(Dispatchers.IO) {
+                runCatching { store?.readNotes(scope, NotesModel.NOTES_LIMIT) }.getOrNull().orEmpty()
+            }
+            gatheringNotes = false
+            if (notesPanel != null || isFinishing || isDestroyed) return@launch
+            val groups = NotesModel.group(rows)
+            Slog.d(TAG) {
+                "notes: ${groups.size} entr(ies) of ${rows.size} row(s) over ${scope.size} range(s) " +
+                    "in ${SystemClock.elapsedRealtime() - began} ms"
+            }
+            notesPanel = NotesPanel(
+                this@BibleActivity,
+                binding.title.text.toString(),
+                groups,
+                onDismissed = { notesPanel = null },
+                onPicked = ::leaveWithNote,
+                onRebuild = ::leaveForRebuild,
+            ).also { it.show() }
+        }
+    }
+
+    /**
+     * Follow a row (decision 7): park its target for the host's `takeOutgoingNote` and close with
+     * [ExtensionContract.RESULT_BIBLE_OPEN_NOTE] — the reader closes for what it hands over, as
+     * Send does. A row the target type refuses (an id the index cannot have held, a kind this
+     * build does not know) is a log line and nothing else: one malformed row must never crash the
+     * reader.
+     */
+    private fun leaveWithNote(group: NotesModel.NoteGroup) {
+        if (isFinishing) return
+        val target = runCatching { BibleNoteTarget(group.notebookId, group.pageId, group.kind) }
+            .getOrElse {
+                Slog.d(TAG) { "note row refused: kind=${group.kind}" }
+                return
+            }
+        synchronized(BibleSession) { BibleSession.outgoingNote = target }
+        Slog.d(TAG) { "open note: kind=${group.kind}" }
+        setResult(ExtensionContract.RESULT_BIBLE_OPEN_NOTE)
+        finish()
+    }
+
+    /**
+     * The panel's Rebuild (decision 9): close with
+     * [ExtensionContract.RESULT_BIBLE_REBUILD_NOTES] and let the host walk every notebook it can
+     * open, then reopen the reader where it was. **Only a passage is parked** — the bookmark
+     * already names the chapter being read, and a citation is not a place the bookmark knows.
+     */
+    private fun leaveForRebuild() {
+        if (isFinishing) return
+        val reference = if (passage != null) currentReference() else null
+        if (reference != null) synchronized(BibleSession) { BibleSession.outgoing = reference }
+        Slog.d(TAG) { "rebuild the notes index: ${if (reference != null) "passage" else "chapter"}" }
+        setResult(ExtensionContract.RESULT_BIBLE_REBUILD_NOTES)
+        finish()
+    }
+
     // --- the Search ---------------------------------------------------------
 
     /**
@@ -703,6 +842,86 @@ class BibleActivity : AppCompatActivity() {
         }
     }
 
+    // --- cross references (arc 41) -------------------------------------------
+
+    /**
+     * A finger tap on the page ([ListSwipe.onTap], region coordinates). Only a **chapter** page
+     * has anything to hit — the `\\r` lines' references and the footnote callers; a passage flows
+     * the plain verse layer and carries no marks — and a tap on nothing is a no-op: tap-to-turn
+     * was declined at arc 37, and stays declined.
+     */
+    private fun onPageTap(x: Float, y: Float) {
+        if (loading || passage != null) return
+        when (val mark = readerView.markAt(x, y) ?: return) {
+            is PageMark.Reference -> {
+                Slog.d(TAG) { "cross-reference tap" }
+                openPassageOver(XrefWire.of(mark.targetStartKey, mark.targetEndKey))
+            }
+            is PageMark.Caller -> showFootnote(mark)
+        }
+    }
+
+    /**
+     * The referenced passage, **one screen further** — the user's call: Back returns to this
+     * chapter, on this page. A second instance of this Activity in passage mode (the Full chapter
+     * pattern in reverse), which stamps the passage as a pick the way a followed link is; the
+     * extras never cross a process and are no contract.
+     */
+    private fun openPassageOver(wire: String) {
+        passageOver.launch(
+            Intent(this, BibleActivity::class.java)
+                .putExtra(EXTRA_PASSAGE_WIRE, wire)
+                .putExtra(ExtensionContract.EXTRA_BIBLE_SEND_ENABLED, sendEnabled)
+                .putExtra(ExtensionContract.EXTRA_BIBLE_NOTES_ENABLED, notesEnabled),
+        )
+    }
+
+    /**
+     * A one-finger swipe up on the page (arc 41, the user's call): the notebook's walk-back
+     * gesture, in the reader — "any link that lands us in the Bible, that swipe takes us back".
+     * Two kinds of hop it pops: an instance this process launched (a cross-reference's passage, a
+     * Full chapter opened from one) finishes back onto the screen it came from; the host's own
+     * instance, when a **link** opened it — a notebook's Bible link (arc 38) or the editor's Lookup
+     * (arc 39), i.e. it opened on a reference — leaves to the host exactly as Back does. The plain
+     * door (the Bible button on a bar) is not a link: nothing led here, so the swipe is silent —
+     * the notebook's own "exhausted trail" rule. Not while a load runs: the screen leaving
+     * mid-build is the latch's job to prevent.
+     */
+    private fun walkBack() {
+        if (loading) return
+        when {
+            ownLaunch -> { Slog.d(TAG) { "walk back" }; finish() }
+            openingReference != null -> { Slog.d(TAG) { "walk back to the host" }; leave() }
+        }
+    }
+
+    /** The footnote behind a tapped caller, in a [FootnotePopup] under its line. One at a time. */
+    private fun showFootnote(mark: PageMark.Caller) {
+        if (footnotePopup != null) return
+        val pages = chapter ?: return
+        val note = pages.footnotesById[mark.footnoteId] ?: return
+        val line = readerView.lineBounds(mark) ?: return
+        val at = IntArray(2)
+        readerView.getLocationOnScreen(at)
+        line.offset(at[0], at[1])
+        // "1 Peter 3:8" — the book the chapter wears, then the note's own origin label; a note
+        // without one names its verse, and without that its chapter.
+        val where = note.label
+            ?: note.verseKey?.let { "${VerseKey.chapterOf(it)}:${VerseKey.verseOf(it)}" }
+            ?: pages.chapter.toString()
+        val heading = getString(R.string.bible_chapter_title_text, Canon.chapterTitleName(pages.usfm), where)
+        Slog.d(TAG) { "footnote tap: ${pages.noteLinks[note.id].orEmpty().size} link(s)" }
+        footnotePopup = FootnotePopup(
+            activity = this,
+            anchor = Rect(line),
+            heading = heading,
+            text = note.text,
+            links = pages.noteLinks[note.id].orEmpty(),
+            onDismissed = { footnotePopup = null },
+            onNavigate = { startKey, endKey -> openPassageOver(XrefWire.of(startKey, endKey)) },
+        ).also { it.show() }
+    }
+
     // --- the passage's doors ------------------------------------------------
 
     /**
@@ -723,7 +942,8 @@ class BibleActivity : AppCompatActivity() {
                 .putExtra(EXTRA_USFM, pages.openAt.usfm)
                 .putExtra(EXTRA_CHAPTER, pages.openAt.chapter)
                 .putExtra(EXTRA_VERSE, pages.openVerse)
-                .putExtra(ExtensionContract.EXTRA_BIBLE_SEND_ENABLED, sendEnabled),
+                .putExtra(ExtensionContract.EXTRA_BIBLE_SEND_ENABLED, sendEnabled)
+                .putExtra(ExtensionContract.EXTRA_BIBLE_NOTES_ENABLED, notesEnabled),
         )
     }
 
@@ -824,6 +1044,15 @@ class BibleActivity : AppCompatActivity() {
         binding.title.post { binding.title.requestLayout() }
     }
 
+    /** The result codes an instance we launched hands up rather than swallows: both Sends
+     *  (B9, arc 40) and both notes codes (arc 42) — each one's payload is in the session, so an
+     *  instance in the middle of the trail only has to carry the number. */
+    private fun relayed(code: Int): Boolean =
+        code == ExtensionContract.RESULT_BIBLE_SEND ||
+            code == ExtensionContract.RESULT_BIBLE_SEND_TEXT ||
+            code == ExtensionContract.RESULT_BIBLE_OPEN_NOTE ||
+            code == ExtensionContract.RESULT_BIBLE_REBUILD_NOTES
+
     private fun leave() {
         setResult(Activity.RESULT_OK)
         finish()
@@ -849,5 +1078,9 @@ class BibleActivity : AppCompatActivity() {
         private const val EXTRA_USFM = "com.symmetricalpalmtree.notesproutsn.ext.bible.USFM"
         private const val EXTRA_CHAPTER = "com.symmetricalpalmtree.notesproutsn.ext.bible.CHAPTER"
         private const val EXTRA_VERSE = "com.symmetricalpalmtree.notesproutsn.ext.bible.VERSE"
+
+        /** A cross-reference tap's passage launch (arc 41): the wire to open on. In-process only,
+         *  like the three above. */
+        private const val EXTRA_PASSAGE_WIRE = "com.symmetricalpalmtree.notesproutsn.ext.bible.PASSAGE_WIRE"
     }
 }

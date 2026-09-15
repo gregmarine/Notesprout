@@ -44,6 +44,10 @@ data class PageLink(
     val texts: List<PageText> = emptyList(),
     val shapes: List<PageShape> = emptyList(),
     val stickies: List<PageSticky> = emptyList(),
+    /** Arc 42 "Notes": the row's `createdAt` — a Bible link's date in the reader's Notes panel,
+     *  so a rebuild of that index never re-dates a note "now". `0L` for a link built in memory
+     *  before its row exists; the row's stamp is what the index carries. */
+    val createdAt: Long = 0L,
 ) {
     val bounds: Bounds get() = Bounds(x, y, x + width, y + height)
 

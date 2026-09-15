@@ -6,11 +6,15 @@ import android.os.IBinder
 import android.os.SystemClock
 import android.util.Log
 import com.symmetricalpalmtree.notesproutsn.core.Slog
+import com.symmetricalpalmtree.notesproutsn.extension.BibleNote
+import com.symmetricalpalmtree.notesproutsn.extension.BibleNoteTarget
+import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
 import com.symmetricalpalmtree.notesproutsn.extension.HostCallerCheck
 import com.symmetricalpalmtree.notesproutsn.extension.IBible
 import com.symmetricalpalmtree.notesproutsn.extension.IExtensionStore
 import com.symmetricalpalmtree.notesproutsn.extension.PassageText
 import com.symmetricalpalmtree.notesproutsn.extension.ResolvedReference
+import com.symmetricalpalmtree.notesproutsn.extension.TagRules
 
 /**
  * The BIBLE point (arc 37 / B0) — SN's NINTH capability point and the fifth screen-owning one.
@@ -32,6 +36,12 @@ import com.symmetricalpalmtree.notesproutsn.extension.ResolvedReference
  * **B9 "Send"** appended a third behind the method floor 13: [takeOutgoingReference] — the
  * reference the screen's Send to notebook parked in [BibleSession], read once by the host on the
  * held bind after the screen returned `RESULT_BIBLE_SEND`.
+ *
+ * **Arc 42 "Notes"** appended seven behind the method floor 16: six store-taking, bind-per-call
+ * pushes into the notes index (`note_ref` — the tag manager's `assign` shape: the store rides
+ * the call, a [BibleStore] is built per call and the schema declared on that binder) and
+ * [takeOutgoingNote] on the held bind. A notebook name is user content and a wire is where the
+ * user has read: **neither is ever logged** — ids' counts, row counts and durations only.
  */
 class BibleService : Service() {
 
@@ -144,6 +154,119 @@ class BibleService : Service() {
             Slog.d(TAG) { "passageText: ${text.length} chars in ${SystemClock.elapsedRealtime() - began} ms" }
             return runCatching { PassageText(PassageText.STATUS_OK, text) }.getOrNull()
         }
+
+        // ── Arc 42 "Notes" ───────────────────────────────────────────────────────────────
+
+        override fun replacePageNotes(
+            store: IExtensionStore?, notebookId: String?, notebookName: String?,
+            pageId: String?, pageNumber: Int, notes: MutableList<BibleNote>?,
+        ) {
+            HostCallerCheck.enforce(this@BibleService, BuildConfig.HOST_PACKAGE)
+            val began = SystemClock.elapsedRealtime()
+            val nb = requireId(notebookId, "notebookId")
+            val page = requireId(pageId, "pageId")
+            val name = requireName(notebookName)
+            val list = requireNotes(notes)
+            require(list.all { it.pageId == page }) { "a note names another page" }
+            require(pageNumber >= 1) { "pageNumber is not an ordinal" }
+            val readable = withStore(store) { it.replacePageNotes(nb, name, page, pageNumber, list) }
+            Slog.d(TAG) { "replacePageNotes: ${list.size} note(s), $readable readable, in ${SystemClock.elapsedRealtime() - began} ms" }
+        }
+
+        override fun replaceNotebookNotes(
+            store: IExtensionStore?, notebookId: String?, notebookName: String?,
+            livePageIds: MutableList<String>?, notes: MutableList<BibleNote>?,
+        ) {
+            HostCallerCheck.enforce(this@BibleService, BuildConfig.HOST_PACKAGE)
+            val began = SystemClock.elapsedRealtime()
+            val nb = requireId(notebookId, "notebookId")
+            val name = requireName(notebookName)
+            val pages = requireIds(livePageIds)
+            val list = requireNotes(notes)
+            val readable = withStore(store) { it.replaceNotebookNotes(nb, name, pages, list) }
+            Slog.d(TAG) { "replaceNotebookNotes: ${pages.size} page(s), ${list.size} note(s), $readable readable, in ${SystemClock.elapsedRealtime() - began} ms" }
+        }
+
+        override fun renameNotebookNotes(store: IExtensionStore?, notebookId: String?, notebookName: String?) {
+            HostCallerCheck.enforce(this@BibleService, BuildConfig.HOST_PACKAGE)
+            val nb = requireId(notebookId, "notebookId")
+            val name = requireName(notebookName)
+            withStore(store) { it.renameNotes(nb, name) }
+            Slog.d(TAG) { "renameNotebookNotes" }
+        }
+
+        override fun deleteNotebookNotes(store: IExtensionStore?, notebookId: String?) {
+            HostCallerCheck.enforce(this@BibleService, BuildConfig.HOST_PACKAGE)
+            val nb = requireId(notebookId, "notebookId")
+            withStore(store) { it.deleteNotes(nb) }
+            Slog.d(TAG) { "deleteNotebookNotes" }
+        }
+
+        override fun pruneNotes(store: IExtensionStore?, aliveNotebookIds: MutableList<String>?) {
+            HostCallerCheck.enforce(this@BibleService, BuildConfig.HOST_PACKAGE)
+            val alive = requireIds(aliveNotebookIds).toSet()
+            val dropped = withStore(store) { it.pruneNotes(alive) }
+            Slog.d(TAG) { "pruneNotes: ${alive.size} alive, $dropped dropped" }
+        }
+
+        override fun noteDocumentReference(
+            store: IExtensionStore?, notebookId: String?, notebookName: String?,
+            pageId: String?, pageNumber: Int, wire: String?,
+        ) {
+            HostCallerCheck.enforce(this@BibleService, BuildConfig.HOST_PACKAGE)
+            val nb = requireId(notebookId, "notebookId")
+            val name = requireName(notebookName)
+            val page = pageId.orEmpty()
+            require(page.isEmpty() || TagRules.isId(page)) { "pageId is not an id" }
+            require(if (page.isEmpty()) pageNumber == 0 else pageNumber >= 1) { "pageNumber does not match the page" }
+            require(ResolvedReference.isWire(wire.orEmpty())) { "wire is not a reference" }
+            val written = withStore(store) {
+                it.noteDocument(nb, name, page, pageNumber, wire!!, System.currentTimeMillis())
+            }
+            Slog.d(TAG) { "noteDocumentReference: ${if (written) "written" else "unreadable wire"}" }
+        }
+
+        /** Once-only: the parked note target or null. */
+        override fun takeOutgoingNote(): BibleNoteTarget? {
+            HostCallerCheck.enforce(this@BibleService, BuildConfig.HOST_PACKAGE)
+            val taken = BibleSession.takeOutgoingNote()
+            Slog.d(TAG) { "takeOutgoingNote: ${if (taken == null) "nothing" else "a target"}" }
+            return taken
+        }
+
+        private fun requireId(id: String?, what: String): String {
+            require(id != null && TagRules.isId(id)) { "$what is not an id" }
+            return id
+        }
+
+        private fun requireName(name: String?): String {
+            require(name != null && name.length <= ExtensionContract.BIBLE_NOTE_MAX_NAME_CHARS) { "name is too long" }
+            return name
+        }
+
+        private fun requireIds(ids: List<String>?): List<String> {
+            val list = ids.orEmpty()
+            require(list.size <= ExtensionContract.BIBLE_NOTE_IDS_PER_CALL) { "too many ids" }
+            require(list.all { TagRules.isId(it) }) { "an id is not an id" }
+            return list
+        }
+
+        private fun requireNotes(notes: List<BibleNote>?): List<BibleNote> {
+            val list = notes.orEmpty()
+            require(list.size <= ExtensionContract.BIBLE_NOTES_PER_CALL) { "too many notes" }
+            return list
+        }
+
+        /** The tag manager's rule: any store failure is `IllegalStateException("store unavailable")`. */
+        private fun <T> withStore(store: IExtensionStore?, block: (BibleStore) -> T): T {
+            requireNotNull(store) { "store is null" }
+            return try {
+                block(BibleStore(store))
+            } catch (e: StoreUnavailable) {
+                Log.w(TAG, "notes: store unavailable", e)
+                throw IllegalStateException(STORE_UNAVAILABLE)
+            }
+        }
     }
 
     /** The source, opened on the first call that needs it and closed in [onDestroy]. */
@@ -170,5 +293,8 @@ class BibleService : Service() {
 
     private companion object {
         const val TAG = "BibleService"
+
+        /** Compared verbatim by the host, the tag manager's spelling. */
+        const val STORE_UNAVAILABLE = "store unavailable"
     }
 }

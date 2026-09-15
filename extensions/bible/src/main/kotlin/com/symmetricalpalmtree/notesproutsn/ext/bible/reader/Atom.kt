@@ -5,11 +5,12 @@ package com.symmetricalpalmtree.notesproutsn.ext.bible.reader
  * single word of body text. Pages are always cut on atom boundaries, so words
  * are never split and no fragile character-offset math is needed.
  *
- * Ported from Biblesprout (`reader/Atom.kt`). The link and word-layer fields came
- * out with the features that used them — this reader has no cross-reference
- * taps, no word popup and no highlights — and the heading's `minor` boolean grew
- * into [HeadingKind], because the four heading kinds now render differently
- * (decision 8: psalm superscriptions italic, parallel-passage lines small italic).
+ * Ported from Biblesprout (`reader/Atom.kt`). The word-layer fields came out with
+ * the features that used them — this reader has no word popup and no highlights —
+ * and the heading's `minor` boolean grew into [HeadingKind], because the four
+ * heading kinds render differently (decision 8: psalm superscriptions italic,
+ * parallel-passage lines small italic). The heading's cross-reference links came
+ * back at arc 41, when the parallel-passage lines became tappable.
  */
 sealed interface Atom
 
@@ -39,12 +40,23 @@ data class BreakAtom(val flow: Flow) : Atom
  */
 enum class HeadingKind { MAJOR, MINOR, REFERENCE, SUPERSCRIPTION }
 
-/** A centered heading rendered inline in the flow (e.g. "The Creation"). */
-data class HeadingAtom(val text: String, val kind: HeadingKind) : Atom
+/**
+ * A tappable cross-reference inside a heading's text (arc 41): chars `[start, end)` of
+ * [HeadingAtom.text] point at the inclusive verse-key range [targetStartKey]..[targetEndKey].
+ * Only `\r` parallel-passage lines carry any.
+ */
+data class XrefLink(val start: Int, val end: Int, val targetStartKey: Int, val targetEndKey: Int)
+
+/** A centered heading rendered inline in the flow (e.g. "The Creation"), with any
+ *  cross-reference [links] its text carries (a `\r` line's "(John 1:1–5; …)"). */
+data class HeadingAtom(
+    val text: String,
+    val kind: HeadingKind,
+    val links: List<XrefLink> = emptyList(),
+) : Atom
 
 /**
- * A footnote caller anchored between words. Rendered as a superscript `*` and
- * **not** tappable in this build (decision 8); [id] is kept so a future popup has
- * the footnote it belongs to.
+ * A footnote caller anchored between words. Rendered as a superscript `*`; a
+ * finger tap opens footnote [id] in a popup (arc 41).
  */
 data class FootnoteAtom(val id: Int) : Atom

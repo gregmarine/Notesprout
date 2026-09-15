@@ -314,3 +314,17 @@ object ReferenceResolver {
         return true
     }
 }
+
+/**
+ * A cross-reference's stored target — an inclusive verse-key range, one book by construction
+ * (a `\ref` target names one book; `_check_xrefs` refuses a range that spans two) — as the wire
+ * every other door already opens the passage view on (arc 41). A whole-chapter target carries
+ * the builder's `0`/`999` sentinels, which are exactly the codec's own.
+ */
+object XrefWire {
+    fun of(startKey: Int, endKey: Int): String {
+        require(startKey <= endKey) { "reversed range" }
+        val book = Canon.byOrdinal(VerseKey.ordinalOf(startKey))
+        return ReferenceCodec.encode(listOf(Passage(book, listOf(VerseRange(startKey, endKey)))))
+    }
+}

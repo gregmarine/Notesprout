@@ -241,4 +241,11 @@ class LinkRowsTest {
         assertEquals(-70.71f, b.left, 0.05f)
         assertEquals(70.71f, b.right, 0.05f)
     }
+
+    /** Arc 42 "Notes": the row's stamp rides into the link — the notes index dates a note by it. */
+    @Test
+    fun `toLink carries the row's createdAt`() {
+        val l = LinkRows.toLink(row(), emptyList(), emptyList())!!
+        assertEquals(1L, l.createdAt)
+    }
 }

@@ -5,8 +5,8 @@ package com.symmetricalpalmtree.notesproutsn.ext.bible
  * Android, no SQLite — so the paginator that consumes them is JVM-testable.
  *
  * Ported from Biblesprout (`data/BibleDatabase.kt`), trimmed to the reader's
- * four shapes: the word layer, cross-references, search hits and verse slices
- * are not in this build (the slim database carries no word layer at all).
+ * shapes: the word layer is not in this build (the slim database carries none);
+ * cross-references joined at arc 41.
  */
 
 /** One book of the source's `book` table, in canonical order. */
@@ -38,8 +38,8 @@ data class RenderBlock(
 /**
  * A footnote: its caller sits at [offset] chars into block [blockId]'s content;
  * [text] is the body, [label] the origin reference (e.g. "1:6"). The reader
- * renders the caller as a plain superscript `*` — it is not tappable in this
- * build, so nothing yet reads [text] (decision 8).
+ * renders the caller as a superscript `*`; since arc 41 a finger tap on it opens
+ * [text] in a popup, with the note's own cross-references tappable inside it.
  */
 data class Footnote(
     val id: Int,
@@ -49,6 +49,31 @@ data class Footnote(
     val label: String?,
     val text: String,
 )
+
+/**
+ * One cross-reference span (arc 41): `[start, end)` chars of its source's display text — a
+ * `\r` parallel-passage block's `content` when [sourceKind] is `block`, a footnote's `text`
+ * when it is `note` — pointing at the inclusive verse-key range [targetStartKey]..[targetEndKey].
+ * The builder resolved the target from the USFM code or, failing that, the display text's own
+ * book name, and refused anything outside the canon — so a row here always lands somewhere
+ * (`tools/bible/build_bible_db.py`, `_check_xrefs`).
+ */
+data class Xref(
+    val sourceKind: String,
+    val sourceId: Int,
+    val start: Int,
+    val end: Int,
+    val targetStartKey: Int,
+    val targetEndKey: Int,
+) {
+    val fromBlock: Boolean get() = sourceKind == KIND_BLOCK
+    val fromNote: Boolean get() = sourceKind == KIND_NOTE
+
+    companion object {
+        const val KIND_BLOCK = "block"
+        const val KIND_NOTE = "note"
+    }
+}
 
 /**
  * One verse of the source's `verse` table — the plain-text layer, clean of block structure

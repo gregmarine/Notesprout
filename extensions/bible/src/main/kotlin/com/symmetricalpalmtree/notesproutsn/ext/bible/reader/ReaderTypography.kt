@@ -13,6 +13,7 @@ import android.text.style.LineHeightSpan
 import android.text.style.RelativeSizeSpan
 import android.text.style.StyleSpan
 import android.text.style.SuperscriptSpan
+import android.text.style.UnderlineSpan
 import android.util.TypedValue
 import androidx.core.content.res.ResourcesCompat
 import com.symmetricalpalmtree.notesproutsn.ext.bible.R
@@ -33,10 +34,12 @@ import kotlin.math.roundToInt
  * Building a layout is not cheap: construct this and call it on `Dispatchers.IO`,
  * never on Main.
  *
- * Ported from Biblesprout (`reader/ReaderTypography.kt`). The char-mark
- * bookkeeping came out with everything that hit-tested against it — footnote and
- * cross-reference taps, the word popup, highlight underlines — none of which this
- * read-only reader has; the heading's boolean became [HeadingKind].
+ * Ported from Biblesprout (`reader/ReaderTypography.kt`). The word popup's and the
+ * highlights' char-mark bookkeeping came out with those features; the heading's
+ * boolean became [HeadingKind]. Arc 41 brought the tappable marks back in the
+ * reader's own shape — [PageMark]s, collected only for a layout that will be drawn
+ * ([bodyPage]), never on the measuring path ([measure] runs on every step of the
+ * paginator's binary search).
  */
 class ReaderTypography(context: Context) : BodyMeasurer {
 
@@ -77,13 +80,19 @@ class ReaderTypography(context: Context) : BodyMeasurer {
     private val indentUnit = dp(22f)
     private val paraIndent = dp(18f)
 
+    /** A built page body: the text, and — when asked for — the tappable spans in it. */
+    private class Built(val text: SpannableStringBuilder, val marks: List<PageMark>)
+
     /**
      * The single source of truth for how an atom stream lays out: builds the
      * rendered [SpannableStringBuilder]. [BreakAtom]s start new lines (poetry
      * indent / paragraph / stanza); [HeadingAtom]s render as centered lines.
+     * With [collectMarks] the char spans a finger can land on — a heading's
+     * cross-reference links, a footnote caller — are recorded as [PageMark]s.
      */
-    private fun build(atoms: List<Atom>): SpannableStringBuilder {
+    private fun build(atoms: List<Atom>, collectMarks: Boolean): Built {
         val sb = SpannableStringBuilder()
+        val marks = ArrayList<PageMark>()
         var atLineStart = true
         var lineStart = 0
         var lineFlow = Flow.PARAGRAPH
@@ -126,6 +135,18 @@ class ReaderTypography(context: Context) : BodyMeasurer {
                     if (atom.kind == HeadingKind.REFERENCE) {
                         sb.setSpan(RelativeSizeSpan(0.8f), start, sb.length, EXCL)
                     }
+                    // A cross-reference reads as a link — underlined, the notebook's own cue —
+                    // and its chars are what a tap is tested against (arc 41). Clamped to the
+                    // heading's own text: a builder span can never reach past it.
+                    for (link in atom.links) {
+                        val ls = (start + link.start).coerceIn(start, sb.length)
+                        val le = (start + link.end).coerceIn(ls, sb.length)
+                        if (le <= ls) continue
+                        sb.setSpan(UnderlineSpan(), ls, le, EXCL)
+                        if (collectMarks) {
+                            marks.add(PageMark.Reference(ls, le, link.targetStartKey, link.targetEndKey))
+                        }
+                    }
                     sb.append('\n') // end the heading line; next line starts a gap-free body line
                     lineStart = sb.length
                     lineFlow = Flow.PARAGRAPH
@@ -152,13 +173,14 @@ class ReaderTypography(context: Context) : BodyMeasurer {
                     sb.setSpan(RelativeSizeSpan(0.7f), start, sb.length, EXCL)
                     sb.setSpan(StyleSpan(Typeface.BOLD), start, sb.length, EXCL)
                     sb.setSpan(SuperscriptSpan(), start, sb.length, EXCL)
+                    if (collectMarks) marks.add(PageMark.Caller(start, sb.length, atom.id))
                     atLineStart = false
                 }
             }
         }
         closeLine()
         if (sb.isNotEmpty()) sb.setSpan(LineHeightSpan.Standard(lineHeightPx), 0, sb.length, INCL)
-        return sb
+        return Built(sb, marks)
     }
 
     /** Applies a line's leading margin (poetry indent / paragraph first-line indent). */
@@ -187,7 +209,16 @@ class ReaderTypography(context: Context) : BodyMeasurer {
             .build()
 
     fun bodyLayout(atoms: List<Atom>, width: Int): StaticLayout =
-        layout(build(atoms), body, width, Layout.Alignment.ALIGN_NORMAL)
+        layout(build(atoms, collectMarks = false).text, body, width, Layout.Alignment.ALIGN_NORMAL)
+
+    /**
+     * A page body to be **drawn** (arc 41): the layout and the [PageMark]s a tap on it is tested
+     * against — char offsets into this very layout's text.
+     */
+    fun bodyPage(atoms: List<Atom>, width: Int): Pair<StaticLayout, List<PageMark>> {
+        val built = build(atoms, collectMarks = true)
+        return layout(built.text, body, width, Layout.Alignment.ALIGN_NORMAL) to built.marks
+    }
 
     /** Rendered height of atoms [start, start+count), measured exactly as drawn. */
     override fun measure(atoms: List<Atom>, start: Int, count: Int, width: Int): Int =

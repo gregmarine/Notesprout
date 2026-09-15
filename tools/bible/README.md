@@ -31,7 +31,20 @@ python3 tools/bible/build_bible_db.py --slim \
 
 ## Result
 
-`extensions/bible/src/main/assets/bible/bsb.bible` — 15,257,600 bytes
+`extensions/bible/src/main/assets/bible/bsb.bible` — 15,265,792 bytes
 (~14.6 MB; 11.6 MB before the FTS4 index). 31,086 verses, 46,360 blocks,
-4,854 footnotes, 3,278 cross-references. `PRAGMA integrity_check` returns
+4,854 footnotes, 3,271 cross-references. `PRAGMA integrity_check` returns
 `ok`; `metadata.layers` = `display,fts4`.
+
+## Cross-reference targets (arc 41, 2026-09-14)
+
+Every BSB cross reference is a `\ref Display|TARGET\ref*` pair (there are no
+`\x` notes). The builder resolves the target's USFM code; when the source
+omits the code — it does for both Song of Solomon lines (1 Peter 3, Ephesians
+5) — the **display text's** book name decides, never the source book (the
+Biblesprout bug: those lines pointed at 1 Peter 1 / Ephesians 1). A display
+naming a book outside the canon (Jasher, 1 Enoch, 1 Esdras — seven footnotes)
+is plain text, not a link. On a one-chapter book (`JUD 17-23`) bare numbers
+are verses of chapter 1. `_check_xrefs` fails the build if any target
+endpoint is not a verse the source has, or a display's book disagrees with
+its target's. Tests: `python3 -m unittest tools/bible/test_build_bible_db.py`.

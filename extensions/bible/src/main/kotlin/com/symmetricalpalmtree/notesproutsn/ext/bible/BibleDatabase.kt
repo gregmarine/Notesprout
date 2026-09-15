@@ -12,10 +12,10 @@ import java.io.Closeable
  * All methods are blocking; call them off the main thread (`Dispatchers.IO`).
  *
  * Ported from Biblesprout (`data/BibleDatabase.kt`), trimmed to what the reader
- * needs — the SQL is copied exactly. Cross-references, the word layer,
- * concordance and verse slices are gone: the slim build carries no word layer.
- * Search (arc 37 / B8) is here, over the slim build's **FTS4** index — see
- * [search].
+ * needs — the SQL is copied exactly. The word layer and the concordance are
+ * gone: the slim build carries no word layer. Search (arc 37 / B8) is here, over
+ * the slim build's **FTS4** index — see [search]; cross-references (arc 41) in
+ * [xrefsForChapter].
  */
 class BibleDatabase private constructor(
     private val db: SQLiteDatabase,
@@ -111,6 +111,43 @@ class BibleDatabase private constructor(
                         verseKey = if (c.isNull(3)) null else c.getInt(3),
                         label = if (c.isNull(4)) null else c.getString(4),
                         text = c.getString(5),
+                    ),
+                )
+            }
+        }
+        return out
+    }
+
+    /**
+     * The chapter's cross-references (arc 41): those on its `\r` parallel-passage blocks and
+     * those inside its footnotes' bodies, in one read — Biblesprout's query verbatim. Each row
+     * is a char span of its source's display text plus the target verse-key range.
+     */
+    fun xrefsForChapter(usfm: String, chapter: Int): List<Xref> {
+        val out = ArrayList<Xref>()
+        db.rawQuery(
+            """
+            SELECT x.source_kind, x.source_id, x.start, x.end, x.target_start_key, x.target_end_key
+            FROM xref x JOIN block b ON b.id = x.source_id
+            WHERE x.source_kind = 'block' AND b.usfm = ? AND b.chapter = ?
+            UNION ALL
+            SELECT x.source_kind, x.source_id, x.start, x.end, x.target_start_key, x.target_end_key
+            FROM xref x
+              JOIN footnote f ON f.id = x.source_id
+              JOIN block b ON b.id = f.block_id
+            WHERE x.source_kind = 'note' AND b.usfm = ? AND b.chapter = ?
+            """.trimIndent(),
+            arrayOf(usfm, chapter.toString(), usfm, chapter.toString()),
+        ).use { c ->
+            while (c.moveToNext()) {
+                out.add(
+                    Xref(
+                        sourceKind = c.getString(0),
+                        sourceId = c.getInt(1),
+                        start = c.getInt(2),
+                        end = c.getInt(3),
+                        targetStartKey = c.getInt(4),
+                        targetEndKey = c.getInt(5),
                     ),
                 )
             }
