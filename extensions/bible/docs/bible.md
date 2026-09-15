@@ -1317,7 +1317,12 @@ not touched from here.
   to the instance the host opened). The child opens with `stamp = true`, so the passage lands in the
   Recents like a followed link; both Send codes relay up through `passageOver`'s result callback
   exactly as `fullChapter`'s do, so a Send from the child closes the whole chain onto the notebook.
-  Nesting (passage → Full chapter → reference → …) is unbounded; every Back pops one.
+  Nesting (passage → Full chapter → reference → …) is unbounded; every Back pops one — **and so
+  does a one-finger swipe up on the page** (the user's call after the first hand walk: the
+  notebook's walk-back gesture). `walkBack()` rides `ListSwipe.onSwipeUp` and finishes any instance
+  this process launched itself (`ownLaunch`: a reference's passage, or a Full chapter opened from
+  one); on the host's own instance — the trail's origin — the swipe is silent, the notebook's own
+  "exhausted trail" rule, and Back remains its door. Not while a load runs.
 - **A caller tap → `FootnotePopup`** (its own file): the note's address as heading — `"<book>
   <label>"`, "1 Peter 3:8" (`bible_chapter_title_text`; the verse, then the chapter, when a note has
   no label) — then the body at 20 sp Noto Serif, the note's own cross-references as black underlined
@@ -1342,6 +1347,7 @@ duration — never the text, the target, or the note.
 | A reference whose target the source lacks | The passage problem dialog in the child instance; Back returns to the chapter | `BibleActivity.openPassage`'s `onFailure` |
 | `EXTRA_PASSAGE_WIRE` this build cannot decode | The child opens where the reader was left, as any unreadable extra does | `BibleActivity.onCreate` (`ReferenceCodec.decode` null → `BibleSession.reference` / the stored position) |
 | A second tap while the popup is up | The popup takes it (the window is the scrim) and dismisses; nothing underneath is hit | `FootnotePopup` root click |
+| A one-finger swipe up on the host's own instance (nothing to walk back to), or while a load runs | Nothing | `BibleActivity.walkBack` (`ownLaunch` false / `loading`) |
 
 ### Walked over adb on the Nomad (X4, 2026-09-14, `.dev` builds)
 

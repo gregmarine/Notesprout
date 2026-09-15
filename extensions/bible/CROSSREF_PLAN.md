@@ -40,6 +40,10 @@ Biblesprout's own builder copy has the same defects — not touched from here.
 7. **Following a reference is a Recents pick** (stamped in `recent_ref`).
 8. **Branch `crossref`** from `main`, for this arc and the related follow-ups.
 9. **Freeze = Nomad hand walk, no code review** (the arc 37–40 waiver).
+10. **(Amendment after the first hand walk, 2026-09-14) A one-finger swipe up goes back** after
+    a cross-reference link — the notebook's walk-back gesture. Judgment call: it pops every
+    instance this process launched itself (a reference's passage, a Full chapter opened from one);
+    the host's own instance is the trail's origin and the swipe is silent there.
 
 ## Judgment calls (stated, not asked)
 
@@ -122,3 +126,8 @@ Biblesprout's own builder copy has the same defects — not touched from here.
   table → 133, futures struck, Related), `apps/notesprout_sn/CLAUDE.md` arc 41 entry, root
   `CLAUDE.md` (module line + docs table), `tools/bible/README.md`, this ledger. **Awaiting the
   user's hand walk on the Nomad for the freeze.**
+- **Hand walk 1 — 2026-09-14: "The links work well. Going back works well too. The footnotes are
+  working."** One ask: a single-finger swipe up to go back after a cross-reference link, as the
+  notebook does along its trail → decision 10; `BibleActivity.walkBack()` off `ListSwipe.onSwipeUp`
+  (`ownLaunch` = a Full-chapter landing or an `EXTRA_PASSAGE_WIRE` launch; silent on the root
+  instance and while loading).

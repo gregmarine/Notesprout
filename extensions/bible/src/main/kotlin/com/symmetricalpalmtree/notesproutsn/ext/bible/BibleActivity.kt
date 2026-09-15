@@ -151,6 +151,11 @@ class BibleActivity : AppCompatActivity() {
     /** The reference this showing opens on, read once from [BibleSession] in [onCreate]. */
     private var openingReference: String? = null
 
+    /** True when THIS process launched this instance — a Full chapter, or a cross-reference's
+     *  passage (arc 41): one screen further along a trail, which a swipe up walks back. The
+     *  host's own instance is the trail's origin, and a swipe up there is nothing. */
+    private var ownLaunch = false
+
     /** A notebook is behind this showing (B9): the host's `EXTRA_BIBLE_SEND_ENABLED`, forwarded
      *  to our own Full chapter launch. */
     private var sendEnabled = false
@@ -209,11 +214,12 @@ class BibleActivity : AppCompatActivity() {
         // reference — read ONCE here — decides the mode for the life of this instance.
         // Our own passage launch (arc 41, a cross-reference tap) carries its wire as an extra and
         // wins over the session's — the host's reference belongs to the instance it opened.
+        val passageOverWire = intent?.getStringExtra(EXTRA_PASSAGE_WIRE)?.takeIf { ReferenceCodec.decode(it) != null }
         openingReference = when {
             landing != null -> null
-            else -> intent?.getStringExtra(EXTRA_PASSAGE_WIRE)?.takeIf { ReferenceCodec.decode(it) != null }
-                ?: BibleSession.reference
+            else -> passageOverWire ?: BibleSession.reference
         }
+        ownLaunch = landing != null || passageOverWire != null
         binding = ActivityBibleBinding.inflate(layoutInflater)
         setContentView(binding.root)
         TopGuard.applyInsetPadding(binding.root)
@@ -268,6 +274,7 @@ class BibleActivity : AppCompatActivity() {
             onFlipNext = { turnTo(pageIndex + 1) },
             onFlipPrevious = { turnTo(pageIndex - 1) },
             onSwipeDown = { openContents() },
+            onSwipeUp = { walkBack() },
             onTwoFingerSwipeDown = { openRecents() },
             onTap = { x, y -> onPageTap(x, y) },
         )
@@ -762,6 +769,20 @@ class BibleActivity : AppCompatActivity() {
                 .putExtra(EXTRA_PASSAGE_WIRE, wire)
                 .putExtra(ExtensionContract.EXTRA_BIBLE_SEND_ENABLED, sendEnabled),
         )
+    }
+
+    /**
+     * A one-finger swipe up on the page (arc 41, the user's call): the notebook's walk-back
+     * gesture, in the reader. An instance this process launched — a cross-reference's passage, a
+     * Full chapter opened from one — is one hop along a trail, and the swipe pops it back onto the
+     * screen it came from (the same pop Back makes). The host's own instance is the trail's origin:
+     * nothing to go back to, so the swipe is silent there — the notebook's own "exhausted trail"
+     * rule. Not while a load runs: the screen leaving mid-build is the latch's job to prevent.
+     */
+    private fun walkBack() {
+        if (!ownLaunch || loading) return
+        Slog.d(TAG) { "walk back" }
+        finish()
     }
 
     /** The footnote behind a tapped caller, in a [FootnotePopup] under its line. One at a time. */
