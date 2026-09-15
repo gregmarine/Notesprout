@@ -73,4 +73,11 @@ class BibleNoteIndexTest {
         assertTrue(BibleNoteIndex.isStructural(structural))
         assertFalse(BibleNoteIndex.isStructural(Action.LinkCreated(page, l)))
     }
+
+    @Test
+    fun aLinkNotYetWrittenIsDatedNow() {
+        val a = "11111111-1111-4111-8111-111111111111"
+        val notes = BibleNoteIndex.linkNotes(listOf(link(a, bible, at = 0L)), page, 1, now = 99L)
+        assertEquals(99L, notes.single().at)
+    }
 }

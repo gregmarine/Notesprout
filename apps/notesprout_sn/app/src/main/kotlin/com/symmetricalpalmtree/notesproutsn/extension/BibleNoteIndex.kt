@@ -41,10 +41,15 @@ object BibleNoteIndex {
     /** The notes of one page: every link among [links] whose payload carries a Bible reference
      *  (both kinds), as the reader's parcel. A link whose row cannot become a parcel (a wire the
      *  host's own check refuses) is skipped, never thrown. */
-    fun linkNotes(links: Collection<PageLink>, pageId: String, pageNumber: Int): List<BibleNote> =
+    fun linkNotes(
+        links: Collection<PageLink>, pageId: String, pageNumber: Int, now: Long = System.currentTimeMillis(),
+    ): List<BibleNote> =
         links.mapNotNull { link ->
             val wire = LinkPayload.referenceOf(link.payload) ?: return@mapNotNull null
-            runCatching { BibleNote(link.id, pageId, pageNumber, wire, maxOf(0L, link.createdAt)) }.getOrNull()
+            // A link just landed is still the in-memory object built before its row (`createdAt`
+            // 0) — it was created now; the row's own stamp replaces it on the next full push.
+            val at = if (link.createdAt > 0L) link.createdAt else now
+            runCatching { BibleNote(link.id, pageId, pageNumber, wire, at) }.getOrNull()
         }
 
     /** The notes of a whole notebook from its raw link rows: a link on a page not in
