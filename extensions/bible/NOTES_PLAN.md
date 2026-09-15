@@ -70,7 +70,20 @@ instance's Rebuild reopens the chapter · locked notebooks keep their rows on re
   manifest 16; `BibleSchema.V4` (`NOTE_STEP`), `BibleSql`'s eleven statements (all through the
   host gate in `BibleSqlTest`), `NoteRows` (+ test), `BibleStore`'s seven methods,
   `BibleService`'s seven stubs, `BibleSession.outgoingNote`. `:ext-bible` 139 JVM tests green.
-- N1 — the panel.
+- **N1 — the panel.** DONE 2026-09-14. `NotesModel` (the scope — passage ranges win over the
+  chapter's band; `overlaps`, `SELECT_NOTES`' Kotlin twin over the range the wire and
+  `rangeIx` name; `group` — `(noteId, rangeIx)` de-duplicated across a passage's several
+  queries, then one entry per `(notebookId, pageId, kind)` labelling each note once, sorted
+  by where it points then newest first; the two row lines; the 60 % sidebar), `NotesPanel`
+  (`RecentsPanel`'s shape in a third subject — right sidebar / full screen below 480 dp,
+  `ListSwipe` flip, measured rows, pager `INVISIBLE` at one page, **Rebuild** in the header),
+  `dialog_notes.xml` + `item_note_entry.xml` + six strings, `btnNotes` at the bottom bar's
+  right end (decision 10's granted exception, `ic_notebook`, GONE without
+  `EXTRA_BIBLE_NOTES_ENABLED`), and `BibleActivity`'s three doors — `openNotes`,
+  `leaveWithNote` (`BibleNoteTarget` parked, `RESULT_BIBLE_OPEN_NOTE`; a row the type
+  refuses is a log line, never a crash) and `leaveForRebuild` (`RESULT_BIBLE_REBUILD_NOTES`,
+  parking the passage only) — with both in-process relays widened to the two new codes
+  (`relayed`) and the flag forwarded on both own launches. `:ext-bible` 155 JVM tests green.
 - N2 — live push.
 - N3 — follow.
 - N4 — rebuild.

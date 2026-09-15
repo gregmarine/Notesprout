@@ -43,6 +43,18 @@
     <string name="bible_send_title">Send to notebook</string>
     <string name="bible_send_reference">The reference</string>
     <string name="bible_send_verses">The verses</string>
+    <!-- The Notes panel (arc 42 "Notes" / N1): the personal commentary — every notebook page and
+         document holding a reference into what is on screen, grouped per place, with the Rebuild
+         door in its header. `%1$s` is what the reader is showing ("Genesis 1", "John 3:14-18").
+         Its pager reuses the Contents' hints. -->
+    <string name="cd_bible_notes">Notes</string>
+    <string name="bible_notes_title">Notes</string>
+    <string name="bible_notes_empty">No notes for %1$s</string>
+    <string name="bible_notes_rebuild">Rebuild</string>
+    <!-- A row's own words: "Study · Page 4", "Study · Document". -->
+    <string name="bible_notes_page_word">Page</string>
+    <string name="bible_notes_document_word">Document</string>
+
     <string name="bible_search_hint">Reference or words</string>
     <string name="bible_search_help_jump_title">Go to a passage</string>
     <string name="bible_search_help_jump_examples">John 3:16 · Gen 1:5-10 · Psalm 23\nJohn 3:14-17, Acts 1:3 · 1 Cor 13</string>
