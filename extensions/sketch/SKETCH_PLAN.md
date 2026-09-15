@@ -5,7 +5,7 @@ The plan **and the ledger** for the raster-sketch extension, in the shape of the
 the ledger at the bottom as they land; the reference doc once frozen is
 `extensions/sketch/docs/sketch.md` beside this file.
 
-**Status: Arc 43 — IN PROGRESS, K0 ✅.** Phases are lettered **K** (arc 37 "Bible" used B, arc 38
+**Status: Arc 43 — IN PROGRESS, K0 ✅ K1 ✅.** Phases are lettered **K** (arc 37 "Bible" used B, arc 38
 "Reference" used R, arc 39 "Lookup" used no letter of its own, arc 40 "Verses" used V, arc 41
 "Cross references" used no letter of its own, arc 42 "Notes" used N — arc 43 "Sketch" uses **K**).
 
@@ -107,7 +107,7 @@ paper white) is host-side and device-neutral and is ported, not reinvented.
 | Phase | Owner | What lands | Gate |
 |---|---|---|---|
 | **K0 — Pin + scaffold** ✅ (`c3fc1847`, `29fc48dc`) | Sonnet | Branch `sketch` from `main`; `extensions/sketch/SKETCH_PLAN.md` (this plan + ledger); SN pin `sn-screen/build.gradle.kts` 0.1.28 → **0.1.31** (zero `gpaper-ratta` lines change; carries `RasterPatch`/`swapPageRaster`/`RasterRubbing`); g-paper `PLAN.md` Phase 16 🧪 → ✅ with the arc-29 Nomad record (Onyx half still untested); stale `docs/integration-guide.md`/`README.md` version lines; `apps/notesprout_sn/CLAUDE.md` pin sentence. | Build + all JVM tests green; Sonnet adb smoke of notebook/pad/calendar; user hand: ink, point eraser, lasso, lasso eraser, pad Send both ways; `gfxinfo` writing-minute baseline. |
-| **K1 — g-paper Phase 19 → 0.1.32 "Ratta and the raster page"** ⬜ | Opus (Fable reviews diff + numbers before publish) | Core: `protected open val rasterEraseRedrawIntervalMs` read by `throttledEraseRedraw` (const stays 16). Ratta: override (initial 100 ms; candidates 16/60/100/250/end-only via a demo-only system property); `RattaEmr.penSize(style, widthPx)` pure with `EMR_MIN_HAIRLINE` (start 120) for `PENCIL`, others keep 200; note at the "needs no override" comment naming `loadPageRaster`/`swapPageRaster` (the overlay is already released by `clearForContentSwap` under the swap law — verified, not a gap). **The g-paper demo gains a Raster toggle** (pencil + rubbing eraser) as the measurement vehicle. Tests `RattaEmrTest` ×4. Docs `api.md`/`CLAUDE.md`/`PLAN.md`. | Nomad (demo): M1 cadence per candidate (`gfxinfo` + the hand: lifts live? flicker?); M2 pencil preview width at EMR 120/150/200 vs the baked hairline (photo + screencap); M3 eraser-end pressure real (temporary log); M4 undo-swap flash (accept, record); M5 page-wide swap ms. Phase-start Qs: cadence candidates; whether to try `DARK_GRAY` preview. |
+| **K1 — g-paper Phase 19 → 0.1.32 "Ratta and the raster page"** ✅ (g-paper `8bb2aa1`) | Opus (Fable reviews diff + numbers before publish) | Core: `protected open val rasterEraseRedrawIntervalMs` read by `throttledEraseRedraw` (const stays 16). Ratta: override (initial 100 ms; candidates 16/60/100/250/end-only via a demo-only system property); `RattaEmr.penSize(style, widthPx)` pure with `EMR_MIN_HAIRLINE` (start 120) for `PENCIL`, others keep 200; note at the "needs no override" comment naming `loadPageRaster`/`swapPageRaster` (the overlay is already released by `clearForContentSwap` under the swap law — verified, not a gap). **The g-paper demo gains a Raster toggle** (pencil + rubbing eraser) as the measurement vehicle. Tests `RattaEmrTest` ×4. Docs `api.md`/`CLAUDE.md`/`PLAN.md`. | Nomad (demo): M1 cadence per candidate (`gfxinfo` + the hand: lifts live? flicker?); M2 pencil preview width at EMR 120/150/200 vs the baked hairline (photo + screencap); M3 eraser-end pressure real (temporary log); M4 undo-swap flash (accept, record); M5 page-wide swap ms. Phase-start Qs: cadence candidates; whether to try `DARK_GRAY` preview. |
 | **K2 — The seam** ⬜ | Opus (Sonnet: `ExtensionContractTest` pin, docs rows) | `:extension-api`: `SketchContract`, `ISketch.aidl`, `ISketchHost.aidl`, `SketchPageState` (+`requireValid`), `ByteChunks`, `PngHeader` (pure, both sides), `API_VERSION` 17 + floor; host manifest `<queries>` both actions. `:sn-screen`: `UndoRedoStack` budget + `pushUndoBeneath`, `CollapsedChrome(tools)`, `PaperToolbar(btnLasso?)`. `:ext-ink`: `PaperScreenActivity` extraction + `PenIdle.awaitIdle`. Tests: `ExtensionContractTest`, `SketchContractTest`, `ByteChunksTest`, `PngHeaderTest`, `SketchPageStateTest`, `UndoRedoStackTest` (+6). | `:extension-api:testDebugUnitTest` green (the pin trap); all modules compile; Sonnet adb regression of pad + calendar (the base-class move); user hand: pad/calendar ink + handoff. |
 | **K3 — Host data, creation, routing** ⬜ | Opus (Sonnet: radio XML/strings) | `TYPE_SKETCH`/`SKETCH_ORDER`; `SketchDao` (`sketchDigest`, `sketchFor`, `pagesWithSketch`) + `sketchDao()`; `SketchRows` (port of `RasterRows`); `SketchRepository` (`has/get/save/clear`, guard, watch, cap, unchanged-bytes skip); `NotebookSession.kind/isSketch`, `writeSketch`, `readSketch`; `NotebookKind`; `NotebookFlags.SKETCH`, `NotebookMeta.sketch` + **every mirror site** (`NewNotebookActivity`, `TextDocumentCreate`, `IndexRepository.createNotebook/importNotebookRow`, `NotebookImport.refreshMeta`, `ImportFlow`, `ExportArtifact.stampExportedAt`, `NotebookSession.refreshMeta`); third radio + `KEY_KIND`; `FaceRouting` generic table + `TextDocRouting` facade (its tests untouched) + `SketchRouting`; `SoilDao.childrenOf` exclusion, `liveDescendantIds` + `'sketch'`, `liveErasableIds` for Erase page; `FakeSoilDao` mirrors. Tests: `SketchRowsTest`, `SketchRepositoryTest`, `NotebookKindTest`, `FaceRoutingTest`/`SketchRoutingTest`, `SoilDaoKindListsTest` (+3), `DocumentWhitelistTest` (+1), `PageClipTest` (+1), `SoilCompactorTest` (+2). | JVM green; Sonnet adb: create a Sketch notebook (radio), `.soil` meta shows `sketch:true`, index flag 8, `.soil` export/re-import keeps it. (No face yet — a Sketch notebook loads the canvas.) |
 | **K4 — Host entry, hooks, door, cover** ⬜ | Opus (Sonnet: `ic_brush` Tabler, strings, layout) | `ExtensionRegistry.sketch`; `SketchHostSession` (pure: read window, ink window, save accumulator); `SketchHostBinder` (gate first, funnel); `SketchClient` (hold, `begin(host)`, `end()` ≤ 15 s, revoke in `finally`); `SketchHostHooks` (`pages`, `loadPage`, `commit` → `writeSketch`, `requestInk` → drain + `TransferCaps` + `InkChunks`, bare strokes only); `SketchEntry` (= `DocumentEditorEntry` + `ExtensionScreenEntry`'s paper pieces: **drain → open → chrome extra → `dismissFloatingChrome` → `endTransformIfRunning` → `releaseForHandoff` → launch**; result: pop → chrome → `resumeDrawing` → finish job → `onClosed`); `NotebookActivity`: `openIntoSketch`, `sketchShowingEnded` (CATCH_UP / LOAD_CANVAS / SEAL_TO_LIBRARY), `replayAbove` `Surface.SKETCH`, reconnect keys, `close()` joins, watchdog; `btnSketch` on the bottom strip left of Bible + collapsed overflow mirror; `SketchCover` + `captureCover` branch + `saveLastOpened(lastFaceEndedOn)`. Tests: `SketchHostSessionTest` ×10, `ReplayPlanTest` (+1). | JVM green; button GONE for non-Sketch notebooks and with no extension (walk after K5). |
@@ -198,3 +198,49 @@ owed by K1's hand walk).
 and K1's walk needs the hand regardless.
 
 **Next.** K1 — g-paper Phase 19 → 0.1.32, Opus on a Fable brief, Fable reviews before publish.
+
+### K1 — Outcome (2026-09-15)
+
+**Landed** (g-paper `8bb2aa1`, Phase 19 → **0.1.32**, published to mavenLocal by the user; SN
+re-pinned in `sn-screen/build.gradle.kts` + the two `CLAUDE.md` pin sentences). Opus wrote the
+engine on Fable's brief, Fable reviewed every diff before the commit. Core: `rasterEraseRedrawIntervalMs`
+(`protected open val`, `RASTER_ERASE_REDRAW_END_ONLY` sentinel, `finalizeEraseRedraw` still presents
+once) and **`bakePressure(style, pressure)`** (`protected open`, applied only where a raster page is
+written — `compositeIntoRaster` — so stroke mode and every host's `Stroke` keep the measured
+pressure; identity default copies nothing). Ratta: `RattaEmr.penSize` (pure, `RattaEmrTest` ×5) with
+`EMR_MIN_HAIRLINE` 120 for `PENCIL`; the pencil **bakes at a constant pressure 0.5 under a
+`DARK_GRAY` needle preview**; cadence **16 ms**; `livePenCode` back to NEEDLE for PENCIL. `RattaTuning`
+(public, "a measurement door, not host API") holds the four measured values as its defaults until K8
+removes it. The "needs no override" comment now names `loadPageRaster`/`swapPageRaster` — and the
+reason for the swap is **not** the planning note's: an undo swap has no `clearForContentSwap` in
+front of it; `redrawCommitted`'s own `pendingBake` guard (record → `clearAll` → invalidate → ladder)
+is what covers it. Demo: Raster toggle (PENCIL 1.2 px `#505050`, rubber 12 px, Pen/Eraser only,
+gestures off), host-owned 64 px tile undo/redo, "Swap pg" door, four `debug.gpaper.*` props read via
+`getprop` at `onCreate`. Onyx untouched. g-paper 207 core / 12 ratta; **Paintsprout Onyx 203 green
+against 0.1.32** (temporary pin, reverted — its own move is its own decision); SN 1717 / 3174.
+
+**Measured** (Nomad, demo `.debug`, Sonnet-free — Fable drove adb, the user's hand judged):
+
+| M | Result |
+|---|---|
+| M1 cadence | 100 ms: 113 frames / 20 % janky / p50 13 p99 30 — "fine". 60 ms: 162 / 22 % / same — "even better". **16 ms: 756 / 82 % / p50 20 p90 28 p99 40, ~2800 batches — "I really like the 16 ms… this eraser works better on Ratta hardware than it does on Onyx."** 250 / end-only not walked. The frame count is far worse and the hand is right: an erase contact releases the overlay at `ACTION_DOWN`, so there is no accumulating masking cost — only the panel's own update, and the Nomad keeps up. |
+| M2 pencil width | EMR 120 renders and matches the baked hairline ("line widths seem good"). 150/200 not needed. |
+| Pencil tone | Black needle "way off" from the bake (a solid line vs pale grain). DARK_GRAY "an improvement". GRAY tried. INK pressure code "not really seeing a difference — a lightly drawn line is live rendered too dark". **The firmware paints one tone per pen, so no preview can track a soft touch; the user revised decision 3 for Ratta only: the bake ignores pressure** (constant 0.5). With DARK_GRAY: "spot on… really good", confirmed off-device in a Mac screencap at 3×. |
+| M3 eraser pressure | **Real**: 2852 batches, 0.06–0.49, median 0.24. |
+| M4 undo swap | 10–14 tiles, 14–20 ms; the bake-handoff flash noticed, accepted. |
+| M5 page swap | 1404×1685 page = 9.46 MB; whole-page swap 79–126 ms, read 1–53 ms; demo PSS 78 MB. |
+
+**Traps found.** (1) `monkey -p … LAUNCHER` does not bring the demo forward when SN's `.dev`
+notebook is resumed — use `am start -n …/.MainActivity`. (2) The Nomad's demo page is
+1404×1685, not the 1860×2480 the g-paper docs quote for 18 MB — budget arithmetic for K5/K6 should
+use 9.5 MB here (the Manta is the 19.7 MB case). (3) `publishToMavenLocal` is refused by the
+session's permission classifier — the user runs it by hand.
+
+**Decisions taken this phase (the user's, binding):** cadence ladder as planned; DARK_GRAY tried and
+kept; INK pressure preview tried and dropped; **Ratta bakes PENCIL at a constant pressure (0.5)**
+— decision 3's "pressure → darkness" stands on BOOX/Paintsprout only; cadence frozen at 16 ms.
+
+**Next.** K2 — the seam (`:extension-api` 17, `ISketch`/`ISketchHost`, `ByteChunks`, `PngHeader`,
+`UndoRedoStack` budget, `PaperScreenActivity`). K5's screen must set nothing in `RattaTuning`
+(the defaults are the measurements).
+
