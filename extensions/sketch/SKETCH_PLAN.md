@@ -5,7 +5,7 @@ The plan **and the ledger** for the raster-sketch extension, in the shape of the
 the ledger at the bottom as they land; the reference doc once frozen is
 `extensions/sketch/docs/sketch.md` beside this file.
 
-**Status: Arc 43 — IN PROGRESS, K0 🔄.** Phases are lettered **K** (arc 37 "Bible" used B, arc 38
+**Status: Arc 43 — IN PROGRESS, K0 ✅.** Phases are lettered **K** (arc 37 "Bible" used B, arc 38
 "Reference" used R, arc 39 "Lookup" used no letter of its own, arc 40 "Verses" used V, arc 41
 "Cross references" used no letter of its own, arc 42 "Notes" used N — arc 43 "Sketch" uses **K**).
 
@@ -178,3 +178,23 @@ Summarized from `apps/notesprout_sn/CLAUDE.md`'s maintenance protocol and this p
 
 Each phase appends an Outcome here when it closes: what landed, what was measured, what the hand
 said, and the commit.
+
+### K0 — Outcome (2026-09-15)
+
+**Landed** (`c3fc1847`; g-paper `5d14b6f`). Branch `sketch` from `main`; this file; `:sn-screen`'s
+g-paper pin 0.1.28 → **0.1.31** (raster undo swap, rubbing eraser, alpha-3 fix — zero `gpaper-ratta`
+lines changed between the two); g-paper `PLAN.md` Phase 16 🧪 → ✅ on arc 29's Nomad record, Phase 19
+pencilled in at 0.1.32 (Paintsprout's paper reservations of 0.1.32–0.1.34 noted free), stale 0.1.22
+coordinates in `README.md` / `docs/integration-guide.md` fixed. Build green; **1717 `:app` / 3174 JVM
+tests** (the plan's 1662 / 3097 predated arcs 41–42).
+
+**Measured.** Sonnet's adb walk on the Nomad (`.dev` host + all ten `.dev` extensions, no release
+packages present): 10/10 — engine line `Creating PaperView with engine 'ratta'`, eraser sub-bar / lasso
+/ pen toggling, finger page flip both ways, Scratch Pad / Calendar / Document open-and-back with no
+`SecurityException` and no `FATAL`; idle `gfxinfo` 0 frames / 60 s (the writing-minute baseline is
+owed by K1's hand walk).
+
+**The hand.** Waived on the user's call ("Please close K0") — the engine diff carries no Ratta line,
+and K1's walk needs the hand regardless.
+
+**Next.** K1 — g-paper Phase 19 → 0.1.32, Opus on a Fable brief, Fable reviews before publish.
