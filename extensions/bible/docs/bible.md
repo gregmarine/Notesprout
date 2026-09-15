@@ -1321,8 +1321,11 @@ not touched from here.
   does a one-finger swipe up on the page** (the user's call after the first hand walk: the
   notebook's walk-back gesture). `walkBack()` rides `ListSwipe.onSwipeUp` and finishes any instance
   this process launched itself (`ownLaunch`: a reference's passage, or a Full chapter opened from
-  one); on the host's own instance — the trail's origin — the swipe is silent, the notebook's own
-  "exhausted trail" rule, and Back remains its door. Not while a load runs.
+  one), and **leaves to the host** when a link opened the host's own instance — a notebook's Bible
+  link (arc 38) or the editor's Lookup (arc 39): "any link that lands us in the Bible, that swipe
+  takes us back" (the user's call). Only the plain bar-button door is silent — nothing led there,
+  the notebook's own "exhausted trail" rule — and Back remains every instance's door. Not while a
+  load runs.
 - **A caller tap → `FootnotePopup`** (its own file): the note's address as heading — `"<book>
   <label>"`, "1 Peter 3:8" (`bible_chapter_title_text`; the verse, then the chapter, when a note has
   no label) — then the body at 20 sp Noto Serif, the note's own cross-references as black underlined
@@ -1347,7 +1350,7 @@ duration — never the text, the target, or the note.
 | A reference whose target the source lacks | The passage problem dialog in the child instance; Back returns to the chapter | `BibleActivity.openPassage`'s `onFailure` |
 | `EXTRA_PASSAGE_WIRE` this build cannot decode | The child opens where the reader was left, as any unreadable extra does | `BibleActivity.onCreate` (`ReferenceCodec.decode` null → `BibleSession.reference` / the stored position) |
 | A second tap while the popup is up | The popup takes it (the window is the scrim) and dismisses; nothing underneath is hit | `FootnotePopup` root click |
-| A one-finger swipe up on the host's own instance (nothing to walk back to), or while a load runs | Nothing | `BibleActivity.walkBack` (`ownLaunch` false / `loading`) |
+| A one-finger swipe up on a reader opened from the Bible button (no link led there), or while a load runs | Nothing | `BibleActivity.walkBack` (`ownLaunch` false and `openingReference` null / `loading`) |
 
 ### Walked over adb on the Nomad (X4, 2026-09-14, `.dev` builds)
 

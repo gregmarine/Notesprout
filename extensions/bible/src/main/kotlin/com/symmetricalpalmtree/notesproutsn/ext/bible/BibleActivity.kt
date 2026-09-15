@@ -773,16 +773,21 @@ class BibleActivity : AppCompatActivity() {
 
     /**
      * A one-finger swipe up on the page (arc 41, the user's call): the notebook's walk-back
-     * gesture, in the reader. An instance this process launched — a cross-reference's passage, a
-     * Full chapter opened from one — is one hop along a trail, and the swipe pops it back onto the
-     * screen it came from (the same pop Back makes). The host's own instance is the trail's origin:
-     * nothing to go back to, so the swipe is silent there — the notebook's own "exhausted trail"
-     * rule. Not while a load runs: the screen leaving mid-build is the latch's job to prevent.
+     * gesture, in the reader — "any link that lands us in the Bible, that swipe takes us back".
+     * Two kinds of hop it pops: an instance this process launched (a cross-reference's passage, a
+     * Full chapter opened from one) finishes back onto the screen it came from; the host's own
+     * instance, when a **link** opened it — a notebook's Bible link (arc 38) or the editor's Lookup
+     * (arc 39), i.e. it opened on a reference — leaves to the host exactly as Back does. The plain
+     * door (the Bible button on a bar) is not a link: nothing led here, so the swipe is silent —
+     * the notebook's own "exhausted trail" rule. Not while a load runs: the screen leaving
+     * mid-build is the latch's job to prevent.
      */
     private fun walkBack() {
-        if (!ownLaunch || loading) return
-        Slog.d(TAG) { "walk back" }
-        finish()
+        if (loading) return
+        when {
+            ownLaunch -> { Slog.d(TAG) { "walk back" }; finish() }
+            openingReference != null -> { Slog.d(TAG) { "walk back to the host" }; leave() }
+        }
     }
 
     /** The footnote behind a tapped caller, in a [FootnotePopup] under its line. One at a time. */

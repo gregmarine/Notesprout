@@ -43,7 +43,10 @@ Biblesprout's own builder copy has the same defects — not touched from here.
 10. **(Amendment after the first hand walk, 2026-09-14) A one-finger swipe up goes back** after
     a cross-reference link — the notebook's walk-back gesture. Judgment call: it pops every
     instance this process launched itself (a reference's passage, a Full chapter opened from one);
-    the host's own instance is the trail's origin and the swipe is silent there.
+    the host's own instance is the trail's origin and the swipe is silent there. **Widened the
+    same day (the user's call): "any link that lands us in the Bible, that swipe takes us back"**
+    — the host's instance also leaves on a swipe up when a link opened it (a notebook Bible link,
+    the editor's Lookup); only the plain bar-button door stays silent.
 
 ## Judgment calls (stated, not asked)
 
@@ -131,3 +134,5 @@ Biblesprout's own builder copy has the same defects — not touched from here.
   notebook does along its trail → decision 10; `BibleActivity.walkBack()` off `ListSwipe.onSwipeUp`
   (`ownLaunch` = a Full-chapter landing or an `EXTRA_PASSAGE_WIRE` launch; silent on the root
   instance and while loading).
+- **Hand walk 1, second ask — 2026-09-14:** the swipe up also returns from a link-opened reader
+  (`openingReference != null` → `leave()`); the plain door stays silent.
