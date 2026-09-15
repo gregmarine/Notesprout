@@ -61,6 +61,44 @@ class BibleSqlTest {
         StoreSql.checkExec(BibleSql.TRIM_RECENTS)
         StoreSql.checkExec(BibleSql.UPSERT_RECENT_REF)
         StoreSql.checkExec(BibleSql.TRIM_RECENT_REFS)
+        StoreSql.checkQuery(BibleSql.SELECT_NOTES)
+        StoreSql.checkQuery(BibleSql.SELECT_NOTE_NOTEBOOKS)
+        StoreSql.checkExec(BibleSql.INSERT_NOTE)
+        StoreSql.checkExec(BibleSql.DELETE_PAGE_KIND_NOTES)
+        StoreSql.checkExec(BibleSql.DELETE_NOTEBOOK_KIND_NOTES)
+        StoreSql.checkExec(BibleSql.DELETE_NOTEBOOK_NOTES)
+        StoreSql.checkExec(BibleSql.RENAME_NOTES)
+        StoreSql.checkExec(BibleSql.RENUMBER_PAGE_NOTES)
+        StoreSql.checkExec(BibleSql.UNNUMBER_NOTES)
+        StoreSql.checkExec(BibleSql.DELETE_UNNUMBERED_NOTES)
+    }
+
+    /** Arc 42 "Notes": every statement of the index, verbatim. */
+    @Test
+    fun `note statements are pinned`() {
+        assertEquals(0L, BibleSql.KIND_LINK)
+        assertEquals(1L, BibleSql.KIND_DOCUMENT)
+        assertEquals(
+            "SELECT noteId, rangeIx, notebookId, pageId, kind, wire, notebookName, pageNumber, at " +
+                "FROM note_ref WHERE startKey <= ? AND endKey >= ? ORDER BY startKey, at DESC LIMIT ?",
+            BibleSql.SELECT_NOTES,
+        )
+        assertEquals(
+            "INSERT OR REPLACE INTO note_ref(noteId, rangeIx, notebookId, pageId, kind, wire, " +
+                "startKey, endKey, notebookName, pageNumber, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            BibleSql.INSERT_NOTE,
+        )
+        assertEquals("DELETE FROM note_ref WHERE notebookId = ? AND pageId = ? AND kind = ?", BibleSql.DELETE_PAGE_KIND_NOTES)
+        assertEquals("DELETE FROM note_ref WHERE notebookId = ? AND kind = ?", BibleSql.DELETE_NOTEBOOK_KIND_NOTES)
+        assertEquals("DELETE FROM note_ref WHERE notebookId = ?", BibleSql.DELETE_NOTEBOOK_NOTES)
+        assertEquals("UPDATE note_ref SET notebookName = ? WHERE notebookId = ?", BibleSql.RENAME_NOTES)
+        assertEquals("UPDATE note_ref SET pageNumber = ? WHERE notebookId = ? AND pageId = ?", BibleSql.RENUMBER_PAGE_NOTES)
+        assertEquals("UPDATE note_ref SET pageNumber = 0 WHERE notebookId = ? AND LENGTH(pageId) > 0", BibleSql.UNNUMBER_NOTES)
+        assertEquals(
+            "DELETE FROM note_ref WHERE notebookId = ? AND LENGTH(pageId) > 0 AND pageNumber = 0",
+            BibleSql.DELETE_UNNUMBERED_NOTES,
+        )
+        assertEquals("SELECT DISTINCT notebookId FROM note_ref", BibleSql.SELECT_NOTE_NOTEBOOKS)
     }
 
     /** V1 is exactly what B0 shipped — a landed step is never edited. */
@@ -103,6 +141,23 @@ class BibleSqlTest {
             "CREATE TABLE recent_ref (ref TEXT PRIMARY KEY, at INTEGER NOT NULL);",
             step[0],
         )
-        assertEquals(BibleSchema.V3, BibleSchema.CURRENT)
+    }
+
+    /** V4 is V3's three steps untouched plus the notes step — a landed step is never edited —
+     *  and it is what every call declares. */
+    @Test
+    fun v4IsV3PlusTheNoteStep() {
+        assertEquals(4, BibleSchema.V4.version)
+        assertEquals(4, BibleSchema.V4.steps.size)
+        for (i in 0 until 3) assertEquals(BibleSchema.V3.steps[i], BibleSchema.V4.steps[i])
+        val step = BibleSchema.V4.steps[3]
+        assertEquals(BibleSchema.NOTE_STEP, step)
+        assertEquals(3, step.size)
+        assertTrue(step[0].startsWith("CREATE TABLE note_ref"))
+        assertTrue("the pair is the key", "PRIMARY KEY (noteId, rangeIx)" in step[0])
+        assertTrue("the span", "startKey INTEGER NOT NULL, endKey INTEGER NOT NULL" in step[0])
+        assertEquals("CREATE INDEX note_ref_span ON note_ref (startKey, endKey);", step[1])
+        assertEquals("CREATE INDEX note_ref_target ON note_ref (notebookId, pageId);", step[2])
+        assertEquals(BibleSchema.V4, BibleSchema.CURRENT)
     }
 }

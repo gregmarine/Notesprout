@@ -31,7 +31,7 @@ class ExtensionContractTest {
         // 12 since arc 38 / R1 (two `IBible` tails behind a method floor; no action floor moved);
         // 13 since B9 "Send" (`takeOutgoingReference`); 14 since arc 39 / K1
         // (`IDocumentHost.openReference`); 15 since arc 40 "Verses" (`IBible.passageText`).
-        assertEquals(15, ExtensionContract.API_VERSION)
+        assertEquals(16, ExtensionContract.API_VERSION)
         assertEquals(9, ExporterContract.MIN_API_VERSION_FOR_DELIVERY)
         assertEquals(6, ExtensionContract.MIN_API_VERSION_FOR_STORE)
         assertEquals(7, ExtensionContract.MIN_API_VERSION_FOR_CALENDAR)
@@ -43,6 +43,7 @@ class ExtensionContractTest {
         assertEquals(12, ExtensionContract.MIN_API_VERSION_FOR_BIBLE_REFERENCE)
         assertEquals(13, ExtensionContract.MIN_API_VERSION_FOR_BIBLE_SEND)
         assertEquals(15, ExtensionContract.MIN_API_VERSION_FOR_BIBLE_TEXT)
+        assertEquals(16, ExtensionContract.MIN_API_VERSION_FOR_BIBLE_NOTES)
         assertEquals(14, DocumentContract.MIN_API_VERSION_FOR_DOCUMENT_LOOKUP)
         assertEquals(2_000, ExtensionContract.MAX_INK_STROKES)
         assertEquals(60_000, ExtensionContract.MAX_INK_POINTS)

@@ -1,5 +1,6 @@
 package com.symmetricalpalmtree.notesproutsn.ext.bible
 
+import com.symmetricalpalmtree.notesproutsn.extension.BibleNoteTarget
 import com.symmetricalpalmtree.notesproutsn.extension.IExtensionStore
 import com.symmetricalpalmtree.notesproutsn.extension.ResolvedReference
 
@@ -36,10 +37,23 @@ object BibleSession {
     @Synchronized
     fun takeOutgoing(): ResolvedReference? = outgoing.also { outgoing = null }
 
+    /**
+     * The note row the screen's Notes panel picked (arc 42) — read once by
+     * `BibleService.takeOutgoingNote` on the held bind after the screen returned
+     * `RESULT_BIBLE_OPEN_NOTE`. Cleared by that read and by `end()`.
+     */
+    @Volatile
+    var outgoingNote: BibleNoteTarget? = null
+
+    /** Once-only: the parked note target, cleared on the way out. */
+    @Synchronized
+    fun takeOutgoingNote(): BibleNoteTarget? = outgoingNote.also { outgoingNote = null }
+
     @Synchronized
     fun clear() {
         store = null
         reference = null
         outgoing = null
+        outgoingNote = null
     }
 }
