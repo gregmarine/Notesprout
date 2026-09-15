@@ -2,6 +2,7 @@ package com.symmetricalpalmtree.notesproutsn.ext.bible.reader
 
 import com.symmetricalpalmtree.notesproutsn.ext.bible.Footnote
 import com.symmetricalpalmtree.notesproutsn.ext.bible.RenderBlock
+import com.symmetricalpalmtree.notesproutsn.ext.bible.Xref
 
 /**
  * How tall a run of atoms renders. [ReaderTypography] is the real one — it
@@ -20,8 +21,8 @@ fun interface BodyMeasurer {
  *
  * Ported from Biblesprout (`reader/ChapterPaginator.kt`). The plain-verse
  * `atomsFor(chapter)` path came out (this reader only renders the rich block
- * layer), cross-references came out with the tappable headings, and the
- * `ReaderTypography` parameter became [BodyMeasurer].
+ * layer) and the `ReaderTypography` parameter became [BodyMeasurer]; the
+ * cross-reference links on `\r` headings came back at arc 41.
  */
 object ChapterPaginator {
 
@@ -30,12 +31,20 @@ object ChapterPaginator {
      * each block contributes a leading [BreakAtom] (poetry/paragraph/stanza) or a
      * [HeadingAtom], then its verse numbers and words. Verse-number spans in a
      * block's content are lifted out as [NumberAtom]s; the rest tokenizes to words.
+     * [xrefs] (arc 41): the chapter's cross-references — those sourced on a block ride its
+     * [HeadingAtom] as [XrefLink]s (only `\r` lines carry any); note-sourced ones are the
+     * footnote popup's, not the page's, and are ignored here.
      */
-    fun atomsForBlocks(blocks: List<RenderBlock>, footnotes: List<Footnote>): List<Atom> {
+    fun atomsForBlocks(
+        blocks: List<RenderBlock>,
+        footnotes: List<Footnote>,
+        xrefs: List<Xref> = emptyList(),
+    ): List<Atom> {
         val notesByBlock = footnotes.groupBy { it.blockId }
+        val linksByBlock = xrefs.filter { it.fromBlock }.groupBy { it.sourceId }
         val atoms = ArrayList<Atom>()
         for (block in blocks) {
-            val heading = headingFor(block)
+            val heading = headingFor(block, linksByBlock[block.id].orEmpty())
             if (heading != null) {
                 atoms.add(heading)
                 continue
@@ -120,10 +129,16 @@ object ChapterPaginator {
         else -> Flow.PARAGRAPH // p, pmo, pc, pm, mi, nb, …
     }
 
-    private fun headingFor(block: RenderBlock): HeadingAtom? = when (block.kind) {
+    private fun headingFor(block: RenderBlock, xrefs: List<Xref>): HeadingAtom? = when (block.kind) {
         "s1", "ms", "ms1" -> HeadingAtom(block.content, HeadingKind.MAJOR)
         "s2", "s3", "mr", "qa", "sr", "sp" -> HeadingAtom(block.content, HeadingKind.MINOR)
-        "r" -> HeadingAtom(block.content, HeadingKind.REFERENCE)
+        // The heading's text is the block's content verbatim, so the builder's char spans map
+        // onto it one to one.
+        "r" -> HeadingAtom(
+            block.content,
+            HeadingKind.REFERENCE,
+            xrefs.map { XrefLink(it.start, it.end, it.targetStartKey, it.targetEndKey) },
+        )
         // A psalm's superscription carries its `\v 1` marker inline ("1 A Psalm of David…"): the
         // digit is the builder's, not the heading's, and a heading has no number.
         "d" -> HeadingAtom(withoutMarkers(block), HeadingKind.SUPERSCRIPTION)

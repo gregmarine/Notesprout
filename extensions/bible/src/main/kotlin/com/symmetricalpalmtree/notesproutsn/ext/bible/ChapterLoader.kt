@@ -5,11 +5,15 @@ import com.symmetricalpalmtree.notesproutsn.ext.bible.reader.Atom
 import com.symmetricalpalmtree.notesproutsn.ext.bible.reader.ChapterPaginator
 import com.symmetricalpalmtree.notesproutsn.ext.bible.reader.ReaderPage
 import com.symmetricalpalmtree.notesproutsn.ext.bible.reader.ReaderTypography
+import com.symmetricalpalmtree.notesproutsn.ext.bible.reader.XrefLink
 
 /**
  * One paginated chapter, ready to page through: the atoms each page carries, the laid-out page
  * beside it, and the verse each page opens on ([ChapterPaginator.anchorVerses] — the position
  * anchor), all built together on IO. Page 0 wears the book title and the big chapter number.
+ * Since arc 41 it also carries what a tap needs: the chapter's footnotes by id, and the
+ * cross-references inside each footnote's body ([noteLinks], keyed by footnote id) — the popup's
+ * tappable spans; the page's own are on its [reader.HeadingAtom]s.
  */
 class ChapterPages(
     val ref: ChapterRef,
@@ -17,6 +21,8 @@ class ChapterPages(
     val pages: List<List<Atom>>,
     val rendered: List<ReaderPage>,
     val anchors: List<Int>,
+    val footnotesById: Map<Int, Footnote> = emptyMap(),
+    val noteLinks: Map<Int, List<XrefLink>> = emptyMap(),
 ) {
     val size: Int get() = pages.size
     val usfm: String get() = ref.usfm
@@ -145,8 +151,9 @@ class ChapterLoader(private val context: Context) {
         val typo = typography()
         val blocks = db.blocksForChapter(ref.usfm, ref.chapter)
         val footnotes = db.footnotesForChapter(ref.usfm, ref.chapter)
+        val xrefs = db.xrefsForChapter(ref.usfm, ref.chapter)
         check(blocks.isNotEmpty()) { "no blocks for ${ref.usfm} ${ref.chapter}" }
-        val atoms = ChapterPaginator.atomsForBlocks(blocks, footnotes)
+        val atoms = ChapterPaginator.atomsForBlocks(blocks, footnotes, xrefs)
         // Canon's names are the ones `build_bible_db.py` wrote into the `book` table — except that
         // a CHAPTER of Psalms is "Psalm 23", not "Psalms 23" (`Canon.chapterTitleName`); the index
         // still lists the book as "Psalms".
@@ -165,10 +172,16 @@ class ChapterLoader(private val context: Context) {
         check(pages.isNotEmpty()) { "no pages for ${ref.usfm} ${ref.chapter}" }
         // Lay every page out here, on IO: a page turn then costs one invalidate on Main.
         val rendered = pages.mapIndexed { index, page ->
-            val body = typo.bodyLayout(page, width)
-            if (index == 0) ReaderPage(body, heading.first, heading.second) else ReaderPage(body)
+            val (body, marks) = typo.bodyPage(page, width)
+            if (index == 0) ReaderPage(body, heading.first, heading.second, marks) else ReaderPage(body, marks = marks)
         }
-        return ChapterPages(ref, bookName, pages, rendered, ChapterPaginator.anchorVerses(pages))
+        val noteLinks = xrefs.filter { it.fromNote }
+            .groupBy({ it.sourceId }, { XrefLink(it.start, it.end, it.targetStartKey, it.targetEndKey) })
+        return ChapterPages(
+            ref, bookName, pages, rendered, ChapterPaginator.anchorVerses(pages),
+            footnotesById = footnotes.associateBy { it.id },
+            noteLinks = noteLinks,
+        )
     }
 
     /** The installed source, opened once for the life of the screen. Blocking — IO only. */

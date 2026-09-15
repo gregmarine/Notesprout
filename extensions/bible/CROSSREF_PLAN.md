@@ -84,3 +84,17 @@ Biblesprout's own builder copy has the same defects — not touched from here.
   Ephesians 5 → `22001001–22001017`, 14 one-chapter rows all on verses, zero dangling endpoints,
   `integrity_check` ok, 15,265,792 bytes (unchanged — the install stamp's `lastUpdateTime` half
   is what detects it).
+- **X2 reader model — ✅ 2026-09-14.** `Xref` row + `BibleDatabase.xrefsForChapter` (Biblesprout's
+  UNION ALL over both source kinds); `XrefLink` on `HeadingAtom.links` (default empty — the
+  existing atom equality tests untouched); `atomsForBlocks(blocks, footnotes, xrefs)` attaches a
+  block's links to its `r` heading and ignores note-sourced rows; `ReaderTypography.build(atoms,
+  collectMarks)` → `Built(text, marks)`, `UnderlineSpan` over every link, `PageMark.Reference` /
+  `.Caller` recorded only by `bodyPage` (the drawn layout) — `measure` never collects;
+  `PageMarks.at` (pure: a reference hits `start until end`, a one-glyph caller `start..end`);
+  `ReaderPage.marks`, `ReaderView.markAt(x, y)` (line under the finger, offset on it, an 8 dp
+  slop past a line's ends) + `lineBounds(mark)` for the popup anchor; `ChapterPages` carries
+  `footnotesById` + `noteLinks`. `ListSwipe.onTap` (`:sn-screen`): the UP of a one-finger,
+  finger, in-region sequence that never qualified and never left the touch slop, in the
+  region's coordinates. `XrefWire.of(startKey, endKey)`. Tests: `PageMarksTest` 3,
+  `XrefWireTest` 4, one paginator link test → `:ext-bible` 133; `:sn-screen` 101 (ListSwipe
+  itself is `MotionEvent`-bound and untested on the JVM, as before).

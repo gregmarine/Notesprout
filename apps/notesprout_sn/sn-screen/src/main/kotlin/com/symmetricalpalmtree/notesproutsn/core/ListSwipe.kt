@@ -44,6 +44,13 @@ import android.view.ViewConfiguration
  * second finger landing on an already-qualifying one-finger swipe is still the late arrival it
  * always was — the flip commits and the rest of the sequence is stood down. A host that leaves it
  * null keeps the one-finger detector exactly as it was.
+ *
+ * **Optionally a tap too** (arc 41, the Bible reader's cross-references). A host that gives
+ * [onTap] hears of a one-finger, finger, in-region sequence that ended without qualifying as
+ * anything and never moved past the touch slop — with the UP's position in the **region's own
+ * coordinates**. It rides the same sequence the swipe judges, so a drag that turns the page can
+ * never also be a tap, and a second finger kills it the way it kills the flip. A tap on nothing
+ * is the host's to ignore; this class decides only that a tap happened.
  */
 class ListSwipe(
     private val region: () -> View?,
@@ -52,6 +59,7 @@ class ListSwipe(
     private val onSwipeDown: (() -> Unit)? = null,
     private val onSwipeUp: (() -> Unit)? = null,
     private val onTwoFingerSwipeDown: (() -> Unit)? = null,
+    private val onTap: ((x: Float, y: Float) -> Unit)? = null,
     /** While true the detector refuses to arm and drops a sequence in flight — an overlay, a
      *  half-built screen, anything that owns the contact instead. Default: nothing stands it down. */
     private val standDown: () -> Boolean = { false },
@@ -64,6 +72,10 @@ class ListSwipe(
     private var regionHeight = 0f
     private var tracker: VelocityTracker? = null
     private var minFlingVelocity = 0f
+    private var touchSlop = 0f
+
+    /** Still a candidate tap: one finger, never moved past the slop. Dead once either fails. */
+    private var tapAlive = false
 
     private val bounds = IntArray(2)
 
@@ -81,10 +93,12 @@ class ListSwipe(
                 val view = region() ?: return
                 if (standDown() || isStylus(ev) || !inRegion(view, ev)) return
                 if (minFlingVelocity == 0f) {
-                    minFlingVelocity = ViewConfiguration.get(view.context)
-                        .scaledMinimumFlingVelocity * SwipeMath.MIN_VELOCITY_MULT
+                    val config = ViewConfiguration.get(view.context)
+                    minFlingVelocity = config.scaledMinimumFlingVelocity * SwipeMath.MIN_VELOCITY_MULT
+                    touchSlop = config.scaledTouchSlop.toFloat()
                 }
                 active = true
+                tapAlive = onTap != null
                 startX = ev.rawX; startY = ev.rawY
                 regionWidth = view.width.toFloat()
                 regionHeight = view.height.toFloat()
@@ -92,6 +106,9 @@ class ListSwipe(
             }
             MotionEvent.ACTION_MOVE -> {
                 if (active) tracker?.addMovement(ev)
+                if (tapAlive && (kotlin.math.abs(ev.rawX - startX) > touchSlop ||
+                        kotlin.math.abs(ev.rawY - startY) > touchSlop)
+                ) tapAlive = false
                 if (twoFingerActive && ev.pointerCount >= 2) twoFingerTracker?.addMovement(ev)
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
@@ -120,7 +137,8 @@ class ListSwipe(
                 }
             }
             MotionEvent.ACTION_UP -> {
-                commit(ev)
+                val committed = commit(ev)
+                if (!committed && tapAlive && active && !standDown()) tap(ev)
                 clear()
                 clearTwoFinger()
             }
@@ -194,8 +212,16 @@ class ListSwipe(
             y >= bounds[1] && y < bounds[1] + view.height
     }
 
+    /** The UP of an untravelled one-finger sequence, handed over in the region's coordinates. */
+    private fun tap(ev: MotionEvent) {
+        val view = region() ?: return
+        view.getLocationOnScreen(bounds)
+        onTap?.invoke(ev.rawX - bounds[0], ev.rawY - bounds[1])
+    }
+
     private fun clear() {
         active = false
+        tapAlive = false
         tracker?.recycle(); tracker = null
     }
 }
