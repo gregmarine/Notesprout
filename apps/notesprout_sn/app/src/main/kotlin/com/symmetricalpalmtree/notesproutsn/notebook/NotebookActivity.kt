@@ -62,6 +62,7 @@ import com.symmetricalpalmtree.notesproutsn.databinding.ActivityNotebookBinding
 import com.symmetricalpalmtree.notesproutsn.core.markdown.HeadingPrefix
 import com.symmetricalpalmtree.notesproutsn.extension.BibleEntry
 import com.symmetricalpalmtree.notesproutsn.extension.BibleNoteIndex
+import com.symmetricalpalmtree.notesproutsn.extension.BibleNoteRebuild
 import com.symmetricalpalmtree.notesproutsn.extension.DocumentContract
 import com.symmetricalpalmtree.notesproutsn.extension.LookupHandoff
 import com.symmetricalpalmtree.notesproutsn.extension.CalendarEntry
@@ -499,6 +500,26 @@ class NotebookActivity : AppCompatActivity() {
         },
     )
 
+    /**
+     * Arc 42 "Notes" (N3): where a row of the reader's Notes panel goes. Built at field-init like
+     * [noteSync] — it is handed to [BibleEntry] in `onCreate` and can only fire long after that.
+     * The editor is opened **through the page-op lock** so it lands on the page the hop just
+     * asked for: [navigateToPage] is fire-and-forget, and the seed flow reads the displayed page
+     * at the tap.
+     */
+    private val noteFollow = BibleNoteFollow(
+        activity = this,
+        currentNotebookId = { notebookId },
+        displayedPageId = { displayedPageId },
+        livePageIds = { if (::session.isInitialized) session.pages.map { it.id } else emptyList() },
+        navigateToPage = { pageId -> runPageOp { refreshToPage(pageId) } },
+        openDocumentEditor = { runPageOp { documentSeedFlow.start() } },
+        launch = { target -> OpeningOverlay.showThen(this) { close { startActivity(target) } } },
+        // The row named a page this notebook no longer has: the index is stale, and a structural
+        // push is exactly the repair (every ordinal below the gone page moved too).
+        onDeadPage = { noteSync.markStructural() },
+    )
+
     /** Arc 42: [pageId]'s 1-based number in the notebook, 0 when it is no longer one of its pages
      *  (which is what tells the sync there is nothing to push). */
     private fun ordinalOf(pageId: String): Int =
@@ -509,6 +530,42 @@ class NotebookActivity : AppCompatActivity() {
     private fun markNotes(pageId: String = displayedPageId) {
         if (pageId.isEmpty()) return
         noteSync.markPage(pageId, ordinalOf(pageId), liveLinks.values)
+    }
+
+    /** Arc 42 / N4: one rebuild at a time — the door is a dialog run, and a second one would
+     *  stack two progress dialogs over one screen. */
+    private var rebuildingNotes = false
+
+    /**
+     * Arc 42 / N4: the reader's Rebuild, taken here because the reader has already closed. The
+     * **open notebook is read through its own session** — `SoilDatabase.readOnce` may never be a
+     * second connection to a file this screen has open — and the reader is reopened where it was
+     * once the done dialog is gone ([parkedWire] is the passage it was showing, null for a
+     * chapter).
+     */
+    private fun rebuildNotes(parkedWire: String?) {
+        if (!opened || closing || isFinishing || isDestroyed || rebuildingNotes) return
+        rebuildingNotes = true
+        lifecycleScope.launch {
+            try {
+                BibleNoteRebuild.run(
+                    this@NotebookActivity,
+                    if (::session.isInitialized && session.isOpen) {
+                        BibleNoteRebuild.OpenSessionReads(
+                            notebookId,
+                            { session.db.dao().liveLinkRows() },
+                            { session.pages.map { it.id } },
+                        )
+                    } else {
+                        null
+                    },
+                )
+            } finally {
+                rebuildingNotes = false
+            }
+            if (!opened || closing || isFinishing || isDestroyed) return@launch
+            bible.reopen(parkedWire)
+        }
     }
 
     /** The strokes on the visible page — the "you still have them" mirror an erase undo needs. */
@@ -947,9 +1004,12 @@ class NotebookActivity : AppCompatActivity() {
             // Arc 42 "Notes": this door has a host screen behind it that can open a notebook page,
             // so the reader gets its Notes panel and its Rebuild.
             notesEnabled = true,
-            // TODO arc 42 N3/N4 — the follow and the rebuild.
-            onOpenNote = { Slog.d(TAG) { "open note: $it" } },
-            onRebuildNotes = { Slog.d(TAG) { "rebuild notes requested" } },
+            // Arc 42 / N3: the reader has closed; this screen takes the row where it points — a
+            // page of this very notebook is a flip, anything else is the link follow's ritual.
+            onOpenNote = { target -> noteFollow.follow(target) },
+            // Arc 42 / N4: the reader's Rebuild, with the passage it was showing. The index is
+            // walked with progress and the reader comes back on the dialog's dismissal.
+            onRebuildNotes = { wire -> rebuildNotes(wire) },
         )
         binding.btnBible.setOnClickListener {
             if (!opened || closing) return@setOnClickListener

@@ -831,6 +831,18 @@
     <string name="bible_verses_unavailable_body">The verses could not be read from the Bible. The extension may have been disabled, removed, or needs updating.</string>
     <string name="bible_verses_placed_toast">Placed %1$s</string>
 
+    <!-- Arc 42 "Notes" (N3 / N4): following a row of the reader's Notes panel, and the Rebuild
+         door inside it. The two "gone" dialogs also say what the host did about it — the index is
+         the host's own cache, so a dead row heals itself rather than merely explaining. -->
+    <string name="bible_note_page_gone_title">Page not found</string>
+    <string name="bible_note_page_gone_body">That page is no longer in the notebook. The notes index has been refreshed.</string>
+    <string name="bible_note_notebook_gone_title">Notebook not found</string>
+    <string name="bible_note_notebook_gone_body">That notebook is no longer in the library. Its notes have been removed from the index.</string>
+    <string name="bible_notes_rebuilding_title">Rebuilding notes</string>
+    <string name="bible_notes_rebuilding">%1$d / %2$d notebooks</string>
+    <string name="bible_notes_rebuilt_title">Notes rebuilt</string>
+    <string name="bible_notes_rebuilt_body">%1$d notebooks · %2$d references · %3$d locked notebooks skipped</string>
+
     <!-- The notebook's tag button and its secondary toolbar (arc 21 / W2). The three doors are
          icon-only and name themselves on a long press — the user's W2 call, and the recipe every
          floating bar in the notebook follows. -->

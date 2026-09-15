@@ -108,6 +108,45 @@ instance's Rebuild reopens the chapter · locked notebooks keep their rows on re
   `confirmDeleteFolder` (every notebook the folder took) and `retireNotebook`. Both `BibleEntry`
   constructions take `notesEnabled = true` with placeholder `onOpenNote` / `onRebuildNotes` log
   lines (TODO arc 42 N3/N4). 1708 `:app` JVM tests green.
-- N3 — follow.
-- N4 — rebuild.
+- **N3 — follow (host).** DONE 2026-09-14. A row of the reader's Notes panel now goes where it
+  points (decisions 7 + 8). `ForeignPageCheck` lifted out of `LinkFollowFlow` (arc 6's one-shot
+  read-only "is that page still there?", now shared rather than copied — the flow calls it);
+  `BibleNoteFollowRules.plan` + the four-hop `Plan` (`SamePage` · `SameNotebookDocument` ·
+  `Other(notebookId, pageId, openEditor)` · `DeadPage`), pure and JVM-tested
+  (`BibleNoteFollowPlanTest`, 8 cases — including the two the spec did not name: a **page-bound
+  row whose page is gone is `DeadPage` for either kind**, and a page-less document row on another
+  notebook is `Other` with `openEditor = false`); `BibleNoteFollow`, `followOut`'s ritual on a
+  `BibleNoteTarget` — index row alive (else `BibleNoteIndex.delete` + the notebook-gone dialog),
+  `NotebookPassphrasePrompt` for a `NOTEBOOK`-scope target (cancel = silence), `ForeignPageCheck`
+  for a page-bound one (else a whole-notebook re-push from its own rows, or a `delete` when it
+  cannot be read at all, + the page-gone dialog), `PassphraseCache.storeOnce`, the trail origin
+  **only where there is a current notebook**, then `NotebookActivity.intent` with
+  `resumeAbove = [DOCUMENT_EDITOR]` for a page-bound document row. **Both self-heals are
+  fire-and-forget on a detached scope** (a judgment call: a cold `.soil` open is seconds, and a
+  tap that says nothing for that long reads as broken on e-ink — the dialog's "has been
+  refreshed" is a promise kept a moment later). `NotebookActivity`: the `noteFollow` field beside
+  `noteSync`, `onDeadPage = { noteSync.markStructural() }`, and the editor opened through
+  `runPageOp { documentSeedFlow.start() }` so it lands on the page the flip just asked for (the
+  seed flow reads the displayed page at the tap, and `navigateToPage` is fire-and-forget).
+  `LibraryActivity`: the same follow with `currentNotebookId = { null }` — `SamePage` is
+  unreachable by construction, so its two in-notebook lambdas are log lines — and the launch
+  under the library's own `launching` latch. Four strings. **The one thing the host cannot do:
+  open *another* notebook's notebook document** — the editor's scope toggle lives inside the
+  editor and the replay can only raise it over a page, so a page-less document row on another
+  notebook opens that notebook and stops (which is already the whole answer for a text document,
+  whose own route opens its editor).
+- **N4 — rebuild (host).** DONE 2026-09-14. `BibleNoteRebuild.run(activity, openSession)`
+  (decision 9): `IndexRepository.allNotebooks()` → `BibleNoteIndex.prune` first, then per
+  notebook — the **open** one through the `OpenSessionReads` the notebook screen hands in (its
+  live session's `liveLinkRows` / `pages`; `readOnce` may never be a second connection to an open
+  file), everything else through `SoilDatabase.resolve` → `readOnce`, with `NeedsPrompt` / `NoKey`
+  counted as `lockedSkipped` and **its existing rows kept** — then `pushNotebook` of
+  `notebookNotes`. Progress is the backup screen's shape (a non-cancelable
+  `bible_notes_rebuilding` counter, updated per notebook on Main), the done dialog is
+  `Dialogs.confirm` (the counts *are* the result — the backup-report precedent) and `run`
+  **suspends until it is dismissed**, so the caller's reopen lands on a screen with nothing on
+  top of it. Counts and durations logged, never a name. Wired as `rebuildNotes(wire)` on both
+  screens — one-at-a-time latch, the notebook passing its open session, the library `null` —
+  each ending in `bible.reopen(parkedWire)` behind the same alive checks. Four strings.
+  `:app` 1716 JVM tests green (1708 + 8).
 - N5 — docs + freeze.

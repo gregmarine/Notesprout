@@ -46,6 +46,7 @@ import com.symmetricalpalmtree.notesproutsn.export.ExportActivity
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionRegistry
 import com.symmetricalpalmtree.notesproutsn.extension.BibleEntry
 import com.symmetricalpalmtree.notesproutsn.extension.BibleNoteIndex
+import com.symmetricalpalmtree.notesproutsn.extension.BibleNoteRebuild
 import com.symmetricalpalmtree.notesproutsn.extension.CalendarEntry
 import com.symmetricalpalmtree.notesproutsn.extension.CalendarTarget
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
@@ -53,6 +54,7 @@ import com.symmetricalpalmtree.notesproutsn.extension.ScratchPadEntry
 import com.symmetricalpalmtree.notesproutsn.extension.TagManagerEntry
 import com.symmetricalpalmtree.notesproutsn.extension.TagShowing
 import com.symmetricalpalmtree.notesproutsn.importing.ImportFlow
+import com.symmetricalpalmtree.notesproutsn.notebook.BibleNoteFollow
 import com.symmetricalpalmtree.notesproutsn.notebook.NotebookActivity
 import com.symmetricalpalmtree.notesproutsn.templates.TemplatesActivity
 import kotlinx.coroutines.Dispatchers
@@ -271,9 +273,11 @@ class LibraryActivity : AppCompatActivity() {
             // Arc 42 "Notes": the library can open any notebook a note row names, so this door
             // carries the reader's Notes panel and its Rebuild.
             notesEnabled = true,
-            // TODO arc 42 N3/N4 — the follow and the rebuild.
-            onOpenNote = { Slog.d(TAG) { "open note: $it" } },
-            onRebuildNotes = { Slog.d(TAG) { "rebuild notes requested" } },
+            // Arc 42 / N3: every row is a hop into some notebook from here — there is no current
+            // notebook, so the plan can only ever answer `Other`.
+            onOpenNote = { target -> noteFollow.follow(target) },
+            // Arc 42 / N4: the Rebuild door, with no open session to read through.
+            onRebuildNotes = { wire -> rebuildNotes(wire) },
         )
         binding.btnBible.setOnClickListener { bible.open() }
         TooltipCompat.setTooltipText(binding.btnBible, binding.btnBible.contentDescription)
@@ -346,6 +350,52 @@ class LibraryActivity : AppCompatActivity() {
         // (arc 25 / V5) — both are this window's.
         if (::importFlow.isInitialized) importFlow.close()
         super.onDestroy()
+    }
+
+    /**
+     * Arc 42 "Notes" (N3): where a row of the reader's Notes panel goes, from a screen with **no
+     * notebook of its own**. That is the whole difference from the notebook's copy: nothing to
+     * flip to, no trail origin to push, and therefore no `SamePage` the plan can reach — the two
+     * in-notebook lambdas below are unreachable by construction and say so rather than pretending.
+     *
+     * The launch takes the library's one [launching] latch, exactly as [openNotebook] does: a
+     * note row and a card tap must not stack two notebook screens on one `.soil`.
+     */
+    private val noteFollow by lazy {
+        BibleNoteFollow(
+            activity = this,
+            currentNotebookId = { null },
+            navigateToPage = { Slog.d(TAG) { "note: a page hop with no notebook open — ignored" } },
+            openDocumentEditor = { Slog.d(TAG) { "note: an editor hop with no notebook open — ignored" } },
+            launch = { target ->
+                if (!launching) {
+                    launching = true
+                    OpeningOverlay.showThen(this) { startActivity(target) }
+                }
+            },
+        )
+    }
+
+    /** Arc 42 / N4: one rebuild at a time — a second would stack two progress dialogs. */
+    private var rebuildingNotes = false
+
+    /**
+     * Arc 42 / N4: the reader's Rebuild from the library — [BibleNoteRebuild] with no open
+     * session, because nothing here holds a `.soil` open. The reader comes back where it was once
+     * the done dialog is dismissed.
+     */
+    private fun rebuildNotes(parkedWire: String?) {
+        if (isFinishing || isDestroyed || rebuildingNotes) return
+        rebuildingNotes = true
+        lifecycleScope.launch {
+            try {
+                BibleNoteRebuild.run(this@LibraryActivity, openSession = null)
+            } finally {
+                rebuildingNotes = false
+            }
+            if (isFinishing || isDestroyed || launching) return@launch
+            bible.reopen(parkedWire)
+        }
     }
 
     /**
