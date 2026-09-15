@@ -1850,6 +1850,42 @@ restore; this section covers only what happens once `openNotebook(…, resumeAbo
   also fires on a screen Android rebuilt after a process death whose `onCreate` bounced on
   `IndexGuard`.
 
+## The notes push (arc 42)
+
+The screen feeds the Bible reader's notes index (`extensions/bible/docs/bible.md` § "Notes — the
+personal commentary") at the moment of every act that could change it, through `noteSync`
+(`BibleNoteSync`, a field built beside the session): every act touching a page's links ends in
+`markPage(pageId, pageNumber, liveLinks.values)` (only **after** `liveLinks` is in line with the
+rows), every act touching the page list ends in `markStructural()`, and a flush runs on `appScope`
+after **750 ms** of quiet (`BibleNoteSync.DEBOUNCE_MS`) — long enough that a run of undo/redo taps
+coalesces into one push, short enough that a Back right after the last one still finds it landed
+or in flight. A structural mark supersedes any pending page marks (every page's ordinal may have
+moved) and reads the notebook's own rows to rebuild the whole push; a notebook with no Bible link
+never binds at all (`prime()`'s one open-time read decides), so an ordinary notebook opened and
+closed all day pays nothing for a feature it never uses.
+
+**Nothing is pushed at close** — a cold store lease pays the KDF, and a close is every Back.
+`flushBeforeSeal()` runs only what is already pending, on `NonCancellable`, before the session's
+own connection goes away in `close()`/`sealAbandonedOpen()` — a structural flush still reads the
+rows through that connection, never a second one.
+
+**Following a Notes row** is `noteFollow` (`BibleNoteFollow`), built beside `noteSync` for the same
+reason (it is handed to `BibleEntry` in `onCreate`, long before either can fire): a link row on the
+open notebook flips to its page (`navigateToPage` → `refreshToPage`, under the page-op lock); a
+document row on the open notebook raises the document editor **through** the page-op lock
+(`runPageOp { documentSeedFlow.start() }`) so it opens on the page the flip just landed on; another
+notebook goes through the same `ForeignPageCheck` / passphrase-prompt / trail-push ritual
+`LinkFollowFlow.followOut` uses for an ordinary link, with one difference — a dead target
+**self-heals** first (the index is the host's own cache, not the user's writing), and
+`onDeadPage` marks this notebook structural so a stale row against it repairs on the next flush.
+The library follows the same rows with no current notebook, so a same-page hop is unreachable by
+construction there.
+
+**Rebuild** (`rebuildNotes`, one at a time) hands the *open* notebook's own session reads in as
+`BibleNoteRebuild.OpenSessionReads`, so the rebuild's walk of the whole library never opens this
+screen's `.soil` a second time; once the counts dialog is dismissed the reader reopens where it
+was (`bible.reopen(parkedWire)`).
+
 ## Frame-silence rule
 
 No app frame is presented while `paper.isPenActive` — the strip text only changes through

@@ -149,4 +149,14 @@ instance's Rebuild reopens the chapter · locked notebooks keep their rows on re
   screens — one-at-a-time latch, the notebook passing its open session, the library `null` —
   each ending in `bible.reopen(parkedWire)` behind the same alive checks. Four strings.
   `:app` 1716 JVM tests green (1708 + 8).
-- N5 — docs + freeze.
+- **N5 — docs + freeze.** DONE 2026-09-14. `extensions/bible/docs/bible.md` § "Notes — the
+  personal commentary" (the eleven decisions, the seam, the store, `NotesModel`, `NotesPanel`,
+  `btnNotes`, the two result codes, judgment calls, privacy, failure table, the Nomad adb walk);
+  `apps/notesprout_sn/docs/extensions.md` § "Arc 42's tails: the notes index" + boundary-audit
+  rows 61–63 + the `API_VERSION` ledger's 16 entry; `apps/notesprout_sn/docs/links.md` § "The
+  Bible kind" (both kinds indexed, `PageLink.createdAt`); `apps/notesprout_sn/docs/notebook.md`
+  § "The notes push (arc 42)"; `apps/notesprout_sn/CLAUDE.md` (the status-block paragraph, the
+  `:ext-bible` module entry, the ledger line); root `CLAUDE.md` (the `extensions/bible` bullet,
+  the docs-table row). **adb walk PASSED 2026-09-14** (`.dev` builds — Notes, Rebuild, follow, a
+  live push and Send all verified, one finding fixed: a just-landed link's in-memory `createdAt`
+  is now dated now rather than 0); **the user's Nomad hand walk is pending.**

@@ -6,7 +6,10 @@ boundaries, — B7 — a **Recents** panel of the chapters picked by name, and �
 panel: a reference goes there, words are found in the text (§ [Search](#search-b8)). No bookmarks
 beyond the one remembered position and that history. Berean Standard Bible only. **Arc 41 "Cross
 references"** (2026-09-14, § [Cross references](#cross-references-arc-41-2026-09-14)) made the
-parallel-passage lines and the footnote callers tappable.
+parallel-passage lines and the footnote callers tappable. **Arc 42 "Notes"** (2026-09-14, §
+[Notes — the personal commentary](#notes--the-personal-commentary-arc-42-2026-09-14)) gave the
+reader a personal commentary: a side panel listing every notebook page or document holding a
+Bible reference into the chapter being read, fed by a live push from the host and a Rebuild door.
 
 **Arc 38 "Reference"** (2026-09-13, a fresh user decision, § [Bible references](#bible-references-arc-38)
 below) grew a second door **in**, from the notebook: a lassoed or typed reference ("John 3:16-18,
@@ -1043,16 +1046,17 @@ hand, adb cannot drive it):
 
 ## Tests
 
-**133 JVM tests** across fifteen files (`src/test/kotlin/.../ext/bible/`), counted directly from the
+**155 JVM tests** across seventeen files (`src/test/kotlin/.../ext/bible/`), counted directly from the
 source with `grep -c "@Test"` (46 at the arc-37 freeze; +1 the Psalm title, +5 B6's reshape after
 its rewrite, +13 B7 → 65; **+11 `ReferenceTest` and +9 `PassageAtomsTest` at arc 38 / R1–R2, +2 into
 `BibleSqlTest` and +6 into `RecentChaptersTest`'s rewrite for the union → 93; **+18 `SearchTest` at
 B8 → 111; **+8 `PassageMarkdownTest` at arc 40 / V1 → 120; +5 to 125 at the 2026-09-13 review;
-+3 `PageMarksTest`, +4 `XrefWireTest`, +1 into `ChapterPaginatorTest` at arc 41 → 133**):
++3 `PageMarksTest`, +4 `XrefWireTest`, +1 into `ChapterPaginatorTest` at arc 41 → 133; +4
+`NoteRowsTest`, +16 `NotesModelTest`, +2 into `BibleSqlTest` at arc 42 / N0–N1 → 155**):
 
 | File | Tests | Pins |
 |---|---|---|
-| `BibleSqlTest.kt` | 9 | Every SQL statement string verbatim (state, recents and, since R2, recent references), the `position` key literal, every statement passing the host's `StoreSql` query/exec gate, V1/V2/V3 each as the step before it untouched plus one new step, `CURRENT` = V3 |
+| `BibleSqlTest.kt` | 11 | Every SQL statement string verbatim (state, recents, recent references and, since arc 42, the eleven notes statements), the `position` key literal, every statement passing the host's `StoreSql` query/exec gate, V1/V2/V3/V4 each as the step before it untouched plus one new step, `CURRENT` = V4 |
 | `ReferenceTest.kt` | 11 | Arc 38 / R1 — `ReferenceParser.parse`/`.parseAll` (book/spec split, cross-chapter spans, carried-chapter verse lists, any one bad chunk emptying the whole result), `ReferenceCodec.encode`/`.decode` round-tripping including a whole chapter's `c:0-c:999` sentinel and adjacent-range folding, `decode` total over malformed wires, `ReferenceResolver.valid` over fake `chapterCount`/`verseExists` callbacks (a chapter past the book's end, a verse that does not exist, a whole chapter needing only its chapters to exist) |
 | `PassageAtomsTest.kt` | 9 | Arc 38 / R2 — a heading + paragraph break at every (book, chapter) crossing, no heading inside one run, verse numbers and words in order, words split on spaces, an empty verse list producing no atoms |
 | `RecentChaptersTest.kt` | 16 | Stored order kept against a canon-order and a stamp-order trap, the chapter being read dropped (case-insensitively), a sibling chapter kept, duplicates collapsing to the newest, nothing invented, the row label in the running head's form ("Psalm 23"), the lenient row decoder dropping an unknown code or chapter 0, the 50 % width under the Contents' 60 %, `itemsPerPage` whole rows ≥ 1 and safe on an unmeasured row, `KEEP` = 30, and — arc 38 / R2's rewrite — the two-table union sorted by stamp alone (never canon order), the current passage dropped by wire, a passage row's label via `ReferenceCodec.label`, ties keeping each table's own stored order |
@@ -1066,6 +1070,8 @@ B8 → 111; **+8 `PassageMarkdownTest` at arc 40 / V1 → 120; +5 to 125 at the 
 | `XrefWireTest.kt` | 4 | Arc 41 — a stored key range becomes one book range on the wire (`SNG:1:1-1:17`, 1 Peter 3's fixed line), a single verse, a whole-chapter target keeping the codec's `0`/`999` sentinels and labelling "Psalms 38", a cross-chapter target decoding back to the same keys |
 | `reader/ChapterPaginatorTest.kt` | 10 | Arc 41 — a `r` heading carrying its block-sourced xrefs as `XrefLink`s (offsets as stored, a note-sourced row ignored, an `s1` heading carrying none); blocks becoming headings/numbers/words with a spliced footnote caller, minor heading kinds mapping to `MINOR`, a page never ending on a bare verse number, forced progress when nothing fits, `fitCount` returning zero when even one atom overflows, a page anchoring to the verse in effect at its first word, a verse-less opening page anchoring to verse 1, `pageContaining` picking the last page at or before a verse, and a real pagination round-tripping every page's anchor back to that same page |
 | `PassageMarkdownTest.kt` | 8 | Arc 40 / V1 — `withinCap` refusing a whole-chapter range and more than ten verses as named (never as read back), accepting exactly ten, a chapter-crossing range counted by its last chapter plus one and then by its rows (review 2026-09-13); `build`'s bold label line, one paragraph per (book, chapter) run, a second bold label at a later crossing, plain verse numbers, an empty verse list building nothing |
+| `NoteRowsTest.kt` | 4 | Arc 42 / N0 — a two-book reference becomes two `INSERT_NOTE` rows with running `rangeIx`, a whole chapter keeping the codec's `0`/`999` sentinels, an unreadable wire yielding no statements at all, a document row's id keyed by its (document, reference) pair with the page-less fallback to the notebook id |
+| `NotesModelTest.kt` | 16 | Arc 42 / N1 — a chapter's scope is its whole verse band, a passage's scope is every range of every passage and wins over the chapter, nothing open is an empty scope; `overlaps`' twin of `SELECT_NOTES`' two-comparison test over a whole-chapter and a single-verse row, a row this build cannot place overlapping nothing; `group` collapsing the same row read by two ranges into one note, a multi-range link labelling itself once, one page's references reading as one entry in reading order, a page/another page/a document as three entries, groups sorting by where they point then newest first, a row with no derivable range dropped whole; `title`/`detail` naming a page's number vs. a notebook-level document, and only a page's own document row saying which half it is; the 60 % sidebar width |
 
 The host side of arc 38 (`LinkPayload`, `LinkNav`, `BibleRefFlow`'s pure edges) is tested in
 `:app`, not here — `docs/links.md` and `docs/objects.md` carry those counts.
@@ -1369,6 +1375,196 @@ then its widening to every link-opened reader), and **"This feels fantastic! My 
 
 ---
 
+## Notes — the personal commentary (arc 42, 2026-09-14)
+
+The user's decision (2026-09-14): "add a feature to the Bible extension where any notebooks with
+references to the Bible can easily be available while reading the Bible. Basically, like a
+personal commentary … everything the user writes about any given book, chapter, or reference will
+be available when they want to regardless of when they wrote the note." Plan + ledger:
+`extensions/bible/NOTES_PLAN.md`. Biblesprout's commentary keyed fixed entries by a verse range;
+here the entries are the user's own notebook pages, found through the Bible reference objects
+(arc 38 / 40) they hold and the document editor's Lookups (arc 39) — the reader never knew where
+its own references sat, so this arc builds an index of them, in the reader's own store, fed by the
+host at the moment of every act.
+
+### The eleven locked decisions (2026-09-14 wizard) — do not re-raise
+
+1. **Index owner = the Bible extension's store** (Tags' shape): `note_ref` in `BibleSchema.V4`;
+   the host pushes rows over new `IBible` tails; backed up with every store.
+2. **Sync = live push at every act + a Rebuild door** (walks every openable notebook; skips
+   locked ones silently).
+3. **Documents indexed at Lookup only** (the editor's Bible action); nothing scans document text.
+4. **One index row per link object** (both kinds), one row per verse range of it.
+5. **Scope = chapter in view, verse-sorted** (passage mode: the passage's own ranges). Overlap
+   test `startKey <= scopeEnd AND endKey >= scopeStart`.
+6. **Surface = a side panel in the Recents' shape**, right-hand, "Notes"; no mark on the page.
+7. **Follow = open over the reader**: the reader closes (the Send rule); the host opens that
+   notebook at that page, or the editor for a document row. Same notebook → just flip.
+8. **Locked notebooks are indexed; following prompts** for the passphrase.
+9. **Rebuild door lives inside the Notes panel** (header button); the reader returns a code, the
+   host rebuilds with progress + a done dialog with counts, then reopens the reader where it was.
+10. **Door = a button at the lower right of the reader's BOTTOM bar** — a second granted exception
+    to "bottom bars are pager-only" (the host's Bible button was the first). `ic_notebook`.
+11. Branch `crossref` (stays open); freeze = adb walk then the user's Nomad hand walk; **no code
+    review** (the arc 37–41 waiver).
+
+### The seam: seven tails, one method floor
+
+`IBible` gained seven methods after `passageText` (transaction codes 7–13),
+`ExtensionContract.API_VERSION` 15 → 16, all behind the **method** floor
+`MIN_API_VERSION_FOR_BIBLE_NOTES` = 16 — `MIN_API_VERSION_FOR_BIBLE` stays 11 untouched, so an
+older reader loses only these doors. Six are **store-taking, bind-per-call** (the tag manager's
+`assign` shape — the store rides the call, nothing is held): `replacePageNotes` /
+`replaceNotebookNotes` / `renameNotebookNotes` / `deleteNotebookNotes` / `pruneNotes` /
+`noteDocumentReference`. The seventh, `takeOutgoingNote()`, is the once-only read on the **held**
+bind, `takeOutgoingReference`'s twin. Two parcelables cross: `BibleNote(noteId, pageId,
+pageNumber, wire, at)` — one Bible link's whole worth, unmarshal-validated (every `require` is the
+host's whole check, so a note that could not be indexed never crosses) — and `BibleNoteTarget
+(notebookId, pageId, kind)`, the reply a tapped Notes row hands back. Notebook names are user
+content and a wire names where the user has read: **neither is logged**, on either side — counts
+and durations only.
+
+### The store — `note_ref` and its two indexes
+
+`BibleSchema.V4` adds one table to V3's three, `note_ref(noteId, rangeIx, notebookId, pageId,
+kind, wire, startKey, endKey, notebookName, pageNumber, at)`, `PRIMARY KEY (noteId, rangeIx)` —
+one row per verse range of one reference, so a two-passage reference is two rows sharing a
+`noteId` — plus `note_ref_span (startKey, endKey)` (the reader's read) and `note_ref_target
+(notebookId, pageId)` (the host's writes). `INSERT OR REPLACE` is safe throughout: no children.
+
+**`NoteRows` is the one place a pushed wire is ever read** — the host treats every wire as opaque
+and this decodes it (`ReferenceCodec`) into one `INSERT_NOTE` per verse range, `rangeIx` running
+from 0 across the reference's passages; a wire this build cannot read yields no statements at all,
+counted by the caller and never thrown, because one foreign row must not fail a whole page's push.
+A document row mints its own id (`NoteRows.documentNoteId` — `"doc:<page or notebook>:<wire>"`, so
+re-looking up the same reference on the same document re-stamps the row it already has).
+
+`BibleSql.SELECT_NOTES` is the overlap read — `startKey <= ? AND endKey >= ?` in reading order
+then newest first, at most `?` rows (`NotesModel.NOTES_LIMIT` = 500) — and the **renumber is a
+sentinel, never an id list**: `UNNUMBER_NOTES` zeroes every page-bound row of a notebook,
+`RENUMBER_PAGE_NOTES` re-stamps each live page in turn, and `DELETE_UNNUMBERED_NOTES` drops
+whatever is still 0 — a page no longer live — so a structural push never has to carry a list of
+page ids across the seam. `RENAME_NOTES`, the whole-notebook and whole-page kind deletes, and
+`SELECT_NOTE_NOTEBOOKS` (the prune's read; the diff is done in Kotlin) round out the eleven
+statements, every one pinned verbatim and gated through the host's `StoreSql` in `BibleSqlTest`.
+
+### `NotesModel` — scope, overlap and the group
+
+**Scope is the chapter in view, or the passage's own ranges, which win** (decision 5): a chapter
+is one range across its whole verse band, so a whole-chapter row and a single-verse row are found
+by the same query; a passage names several and the panel asks once per range, de-duplicating on
+`(noteId, rangeIx)`. `overlaps` is `SELECT_NOTES`'s `startKey <= scopeEnd AND endKey >= scopeStart`
+reproduced in Kotlin and pinned by a test, so the SQL and the arithmetic can never silently drift
+apart.
+
+**A page is one row, whatever it holds** — the judgment call recorded below: a page carrying
+three references reads as one entry naming all three, grouped on `(notebookId, pageId, kind)`,
+because what the user is looking for is the page, not the link object. Inside a group, a
+multi-range link labels itself once (`John 3:14–18`, never once per range); **the freshest row
+names the group** — its `notebookName` and `pageNumber`, because a rename or a page renumber
+re-stamps only the rows it touched and the newest push is the true one. Groups sort by where they
+point, then newest first. A row whose range cannot be derived (an unreadable wire, a `rangeIx` the
+wire no longer has) is dropped whole, never crashing the group it sits in.
+
+### `NotesPanel` — the Recents' shape, a third subject
+
+[`RecentsPanel`](#the-recents)'s shape over the notebooks instead of the reader's own history: a
+full-window `Dialog`, full-screen below 480 dp behind a back arrow, a **right sidebar at 60 %**
+above it (`NotesModel.SIDEBAR_WIDTH_FRACTION` — wider than the Recents' 50 %, because a row names
+a place *and* its references) over a transparent tap-dismiss scrim. Rows are two lines — where it
+was written ("Study · Page 4") and what it says with when ("John 3:14–17; John 3 · Sep 12") — both
+inkBlack, the smaller line for the secondary read, never grey. The list **paginates, never
+scrolls**: one row is inflated and measured at the panel's real width after the first layout, and
+a one-finger swipe over the body flips pages too. Empty is a real answer shown in the body —
+**"No notes for John 3"** — never a reason to hide the door.
+
+**Rebuild sits in the header**: the index is fed by a live push, and the one place to ask for it
+to be walked again is where its answer is being read; it dismisses the panel first and hands the
+job to the host, which reopens the reader once it is done. A row tap dismisses and hands its
+group up.
+
+### `btnNotes` — the bottom bar's right end
+
+Decision 10's exception, `ic_notebook`, `GONE` without `EXTRA_BIBLE_NOTES_ENABLED` on the launch
+Intent — the second boolean the Bible showing carries (after `EXTRA_BIBLE_SEND_ENABLED`), set only
+by a host door with a notebook page to open (the library's and the notebook's; never the editor's
+Lookup trampoline). A tap gathers the scope's rows off IO, groups them, and opens `NotesPanel`;
+nothing open yet is an empty scope and a **silent no-op** — a panel saying "not ready" for half a
+second would be noise.
+
+### Two result codes, and `BibleSession.outgoingNote`
+
+A tapped row parks its `BibleNoteTarget` in `BibleSession.outgoingNote` and the reader finishes
+with `RESULT_BIBLE_OPEN_NOTE` — the reader closes for what it hands over, the Send rule; the host
+reads `takeOutgoingNote()` over the bind it still holds, **after** the bind is finished (the
+reader has already closed by the time the host acts). Rebuild finishes with
+`RESULT_BIBLE_REBUILD_NOTES`, parking **only a passage** on screen (`BibleSession.outgoing`) —
+chapter mode has nothing to park, because the bookmark already names the chapter being read. A row
+the target type refuses (a malformed id, an unknown kind) is a log line in `leaveWithNote`, never
+a crash.
+
+### Judgment calls stated, not asked
+
+- **Rows group per notebook + page + kind** — one entry per place the user wrote, not per link
+  object.
+- **The freshest row names the group** — its notebook name and page number, because a rename or a
+  renumber only re-stamps the rows it touched.
+- **A row's second line is one line**: every reference the group holds, joined, then when the
+  newest of them was written — never a line per reference.
+- **Only a passage is parked for a rebuild reopen** — the bookmark already names a chapter, a
+  citation is not a place the bookmark knows; a Full-chapter instance's Rebuild reopens the
+  chapter it is showing.
+- No Notes door under the editor's Lookup trampoline — the stopped notebook cannot see anything a
+  tap there might ask for.
+- One link kind in the panel — `kind` only tells a link row from a document row, never colours a
+  row differently.
+- `at` is the link's own `createdAt`, not when it was pushed — a link just landed and not yet
+  reloaded (`createdAt` still 0 in memory) is dated **now**, fixed at the freeze (b5a53876) so it
+  is not misdated the first time it is indexed.
+- A dead target self-heals before its dialog (`BibleNoteFollow`'s `forgetNotebook`/`healPage`) —
+  the index is the host's own cache, never the user's writing, so it is safe to repair silently.
+- Locked notebooks keep their rows on a rebuild — a rebuild must never be a way to lose what was
+  indexed while a notebook was open.
+- 60 % sidebar width, wider than the Recents'.
+
+### Privacy
+
+Never logged, on either side: a notebook name is the user's own word and a wire names where the
+user has read. Every push, follow and rebuild logs counts, kinds and durations only —
+`BibleNoteIndex`, `BibleClient.withNotes`, `BibleNoteFollow`, `BibleNoteRebuild` all keep to the
+family's "where, not what" rule this doc has carried since arc 37.
+
+### Failure table (arc 42 additions)
+
+| Situation | What the user sees | Where |
+|---|---|---|
+| No store lent, or a store that will not answer, when Notes opens | The panel opens with "No notes for …" — a read failure and an empty scope are the same empty list | `BibleActivity.openNotes`, `BibleStore.readNotes` |
+| A row this build cannot read (an unreadable wire, a range the wire no longer has) | That row is dropped; the rest of the group still shows | `NoteRows.decode`, `NotesModel.group` |
+| A tapped row's target fails validation (a malformed id, an unknown kind) | Nothing opens; the tap is silently absorbed | `BibleActivity.leaveWithNote` (log line only) |
+| Rebuild with no trusted reader, or one too old for the notes tails | Nothing — the door only exists behind a reader that already declared it | `BibleEntry.supportsNotes`, `BibleNoteIndex.reader` |
+| A `NOTEBOOK`-scope notebook not yet unlocked this process, met during a Rebuild | Skipped, its existing rows kept — never prompted | `BibleNoteRebuild.run` (`lockedSkipped`) |
+| A note row's notebook or page is gone when followed | The host's "notebook gone" / "page gone" dialog, and the index self-heals first (deleted, or re-pushed whole) | `BibleNoteFollowRules.plan` (`DeadPage`), `BibleNoteFollow.followOut`/`.healPage`/`.forgetNotebook` |
+
+### What the walk proved on the Nomad (2026-09-14, `.dev`)
+
+Notes opened from the restored reader in **13 ms** with "No notes for John 3." Rebuild walked the
+library — **47 of 50 notebooks, 19 references, 2 locked skipped, 1 failed, in 8,550 ms** — and the
+reader reopened on John 3 (392 ms); Notes then listed three grouped rows in **33 ms** ("Objects ·
+Page 7" naming "John 3; John 3:14–17", "Page 11", and "Page 5" naming "John 3:16–18;
+Proverbs 3:5–6"). A row tap closed the reader and flipped the notebook to page 5, then to page 11.
+A Send of John 3 pushed the page **750 ms** later (`replacePageNotes: 2 note(s)` in 27 ms, 67 ms
+end to end) and the panel showed "John 3" added to Page 5. From the library's own door the reader
+showed Notes and no Send; a row tap there opened Objects at page 7, then page 11, above the
+library. **One finding, fixed**: a just-landed link's in-memory `createdAt` was 0 until its row
+was reloaded, dating it 1970 in the panel — `BibleNoteIndex.linkNotes` now dates it **now**
+instead (b5a53876).
+
+**Left to the user's hand:** lasso delete/undo of a Bible link and what that does to a note row,
+the editor Lookup's document row, the passphrase prompt on a locked notebook's follow, and
+passage-mode Notes with a rebuild reopen from a passage.
+
+---
+
 ## Not in this arc (recorded futures, each needing a user decision)
 
 - ~~**Send to notebook**~~ — DONE by B9 (§ [Send to notebook](#send-to-notebook-b9)).
@@ -1387,6 +1583,11 @@ then its widening to every link-opened reader), and **"This feels fantastic! My 
   a typeset column with air on both sides; cosmetic, and the same stored-column question as above.
 - ~~**Cross references**~~ — DONE by arc 41 (§ [Cross references](#cross-references-arc-41-2026-09-14)).
 - ~~**Footnote popups**~~ — DONE by arc 41, the same section.
+- ~~**A personal commentary / notes**~~ — DONE by arc 42 (§ [Notes — the personal
+  commentary](#notes--the-personal-commentary-arc-42-2026-09-14)). Still not there: a Notes door
+  under the editor's Lookup trampoline (the stopped notebook cannot see anything a tap there would
+  ask for), and passage-mode Notes together with a rebuild reopen from a passage — both left to
+  the user's hand at the freeze walk.
 - **Red letters** — `redletter` spans exist in the source and are copied by the slim build but are
   never read by the reader; words of Jesus render identically to surrounding text.
 - **The interlinear/word layer** — original-language words, Strong's numbers, morphology and
@@ -1423,6 +1624,11 @@ then its widening to every link-opened reader), and **"This feels fantastic! My 
 - `extensions/bible/CROSSREF_PLAN.md` — arc 41 "Cross references"'s plan and ledger: the bug's root
   cause, the nine locked decisions, the judgment calls, and the X0–X5 records § "Cross references"
   draws from.
+- `extensions/bible/NOTES_PLAN.md` — arc 42 "Notes"'s plan and ledger: the eleven locked
+  decisions, the judgment calls, and the N0–N5 records § "Notes — the personal commentary" draws
+  from.
+- [`apps/notesprout_sn/docs/notebook.md`](../../../apps/notesprout_sn/docs/notebook.md) § "The
+  notes push (arc 42)" — the host's per-page reconcile, the debounce, and the note follow doors.
 - `apps/notesprout_sn/CLAUDE.md` — the module-table entry, the ninth-point summary, and the
   "bottom bars are pager-only, with one recorded exception" rule.
 - `tools/bible/README.md` — the exact build command and result for `bsb.bible`.

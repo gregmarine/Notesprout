@@ -188,6 +188,16 @@ style (which is what makes an unchanged-payload Edit a clean no-op).
 `MIXED_WITH_LINK` hide the Link action — see below) and re-checked at use time in
 `createLinkFromSelection`.
 
+**Both Bible kinds are indexed for the reader's Notes panel (arc 42 "Notes")**: every act that
+lands, edits, unlinks or erases a `KIND_BIBLE` or `KIND_BIBLE_TEXT` link ends in
+`BibleNoteIndex.linkNotes` reading the page's live links back into rows the host pushes to the
+extension's own store (`extensions/bible/docs/bible.md` § "Notes — the personal commentary") — a
+link row itself is unchanged, and neither kind grew a column for it. `PageLink.createdAt` now
+rides from the row (`LinkRow.createdAt`, `SoilDao.liveLinkRows`) rather than defaulting to 0,
+because the notes index dates a note by when its link was created; a link just landed and not yet
+reloaded reads its in-memory `createdAt` as 0, which `BibleNoteIndex.linkNotes` dates **now**
+instead of 1970 for exactly that gap.
+
 ### Wrapping the new kinds (arc 28)
 
 A link may wrap any of arc 28's three additive kinds — text, shape and sticky rows — exactly as it
