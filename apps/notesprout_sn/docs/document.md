@@ -472,6 +472,18 @@ not distinguish. `canvasShown` is a **one-way latch** (saved as `KEY_CANVAS_SHOW
 document's pages have been shown in this incarnation, it behaves like an ordinary notebook for the
 rest of it.
 
+**Since arc 43 / K3, `TextDocRouting` is a facade over a generic `FaceRouting`**, pulled out once
+the sketch face needed the identical open/close shape for a second "primary surface that is not the
+canvas": the same four `openDecision` outcomes and three `closeDecision` outcomes, `opensIntoFace` +
+`showPagesMode` as the generic pair `TextDocRouting`'s methods used to be. `SketchRouting` is the
+sibling facade (`RESULT_SKETCH_SHOW_PAGES` → `LOAD_CANVAS`; Back / null with the canvas never shown
+→ `SEAL_TO_LIBRARY`, `extensions/sketch/docs/sketch.md`). Kotlin has no nested typealias, so each
+facade re-exposes `FaceRouting`'s nested `Open` / `Close` enums as its own nested objects to keep
+`TextDocRouting`'s existing test untouched — `NotebookActivity`'s `when`s over them name
+`FaceRouting.Open` / `FaceRouting.Close` directly rather than either facade's alias. Nothing about
+`TextDocRouting`'s own behaviour or test changed; a second primary-surface point now costs a new
+facade and a new `Activity`, not a second copy of the decision table.
+
 **`closeNotebook` is advisory, host-recorded state, consumed exactly once** via
 `takeCloseMode()` — read **before** `resetTarget()` clears it. **A null advisory means "to the
 library"** — the deliberate fail-safe direction: a notebook that reopens to the library when it

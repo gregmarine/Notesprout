@@ -29,10 +29,11 @@ import com.symmetricalpalmtree.notesproutsn.notebook.PenIdle
  *   screen before the listener attaches: a hatch is not a scribble and a closed shading loop is not
  *   a selection.
  *
- * **Nothing is set in `RattaTuning`.** The engine's defaults *are* the K1 measurements — the
+ * **No engine tuning is set here.** The engine's constants *are* the K1 measurements — the
  * pencil bakes at a constant pressure 0.5 under a DARK_GRAY needle preview, the erase redraw runs at
- * 16 ms, the EMR hairline floor is 120 — and a host that re-stated any of them would be a second
- * place for them to drift.
+ * 16 ms, the EMR hairline floor is 120 (g-paper 0.1.34 froze them; the `RattaTuning` door of
+ * 0.1.32–0.1.33 is gone) — and a host that re-stated any of them would be a second place for them
+ * to drift.
  *
  * **The arrows no-op at a bound, never disable.** A greyed control is invisible on e-ink (the
  * standing rule), so the buttons always look the same and a turn at either edge simply stays put —

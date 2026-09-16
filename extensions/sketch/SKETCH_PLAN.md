@@ -5,7 +5,7 @@ The plan **and the ledger** for the raster-sketch extension, in the shape of the
 the ledger at the bottom as they land; the reference doc once frozen is
 `extensions/sketch/docs/sketch.md` beside this file.
 
-**Status: Arc 43 — IN PROGRESS, K0 ✅ K1 ✅ K2 ✅ K3 ✅ K4 ✅ K5 ✅ K5b ✅ K6 ✅ K7 ✅ (next K8).** Phases are lettered **K** (arc 37 "Bible" used B, arc 38
+**Status: Arc 43 — COMPLETE + FROZEN 2026-09-16, K0 ✅ K1 ✅ K2 ✅ K3 ✅ K4 ✅ K5 ✅ K5b ✅ K6 ✅ K7 ✅ K8 ✅ — pending only the user's final Nomad hand walk and the `--no-ff` merge to `main`. This file is history from here; `extensions/sketch/docs/sketch.md` is the reference.** Phases are lettered **K** (arc 37 "Bible" used B, arc 38
 "Reference" used R, arc 39 "Lookup" used no letter of its own, arc 40 "Verses" used V, arc 41
 "Cross references" used no letter of its own, arc 42 "Notes" used N — arc 43 "Sketch" uses **K**).
 
@@ -115,7 +115,7 @@ paper white) is host-side and device-neutral and is ported, not reinvented.
 | **K5b — Page insert / delete from the face** ✅ | Opus (Sonnet: strings, adb walk) | **The user's 2026-09-15 decision, reversing decision 7's "no insert/delete from the sketch face" ("that was a mistake if I decided that").** The face inserts and deletes pages exactly as the notebook does: a single-finger swipe past the **last** page inserts a page after it; a **two-finger swipe** inserts a page in that direction (before / after the current one); delete behind the same door the notebook uses (the pager's long-press sheet), with a warning that names what else goes when the page carries content — *"This will also delete the page's handwriting and document"* only when the page has strokes / objects or a document; a page with nothing but the sketch gets the plain confirm. Seam: two `ISketchHost` tails after `readInkChunk` — `insertPage(direction): SketchPageState` (host inserts, moves the target, loads the window — the new page is the answer) and `deletePage(pageKey): SketchPageState` (host soft-deletes the page and its descendants the notebook's way — one undoable action on the notebook's stack, so the notebook's undo restores it — and answers the page now shown), plus `pageContent(pageKey): int` (bit 1 = bare strokes / objects, bit 2 = a document) for the warning; method floor `MIN_API_VERSION_FOR_SKETCH_PAGES` = **18** (`API_VERSION` 17 → 18, `:ext-sketch` declares 18, no action floor moved). The face's history drops entries for a deleted page; a delete on the notebook's last page answers a fresh blank page (the notebook's rule). **Grown the same day by the user's follow-up decision — the face's own undo / redo gestures must reverse a page insert or delete, so nobody has to go back to the notebook to undo a delete:** two further `ISketchHost` tails under the same floor 18 (`API_VERSION` stays 18), `undoPage(token)` / `redoPage(token)`, where a **token** is the host's opaque name for one structural edit and rides to the face as a compatible tail field on `SketchPageState` (`structuralToken`, empty for every answer that is not an insert or a delete). The host keeps the showing's snapshots in a small ledger (`undoable` / `redoable`, cleared with the showing) and each replay runs `NotebookActivity`'s own `is Action.Page ->` arm verbatim, then moves that very entry across the **notebook's** stack (`onStructuralUndone` / `onStructuralRedone`) — the two histories are one history and are kept provably in step. The face records a `SketchEdit.Structural` entry (`PageInserted` / `PageDeleted`) that holds **only the token** — zero bytes, so the byte budget can never evict one — and replays it through `applyStructural` (flush → pen-idle → generation re-check → the Binder call → re-index the history → load the page); an unknown token drops the entry, and structural entries are **never** dropped by key, or the two stacks would fall out of step. A delete now **flushes the doomed page first**, because what comes back on undo is what was last saved. Tests: `SketchContractTest` (+3), `SketchPageStateTest` (+2), `SketchEditTest` (+3), `PageTurnTest` (+5), `UndoRedoStackTest` (+5), `ExtensionContractTest` re-pin. | Sonnet adb: insert after via `input swipe` **cannot** page-turn on Ratta (K2 trap) — walk insert/delete via the sheet and the host log; the user's hand: swipe-past-last inserts, two-finger swipe both ways, delete with and without content (the warning wording), notebook undo restores a deleted page, Back → the notebook lands on the right page; and for the follow-up: delete → **two-finger undo on the face** puts the page back with its ink / document / sketch at its old position (`n / m` right) → three-finger redo takes it away again; insert → undo removes it → redo makes it again; draw on an inserted page then undo twice; Show pages → the notebook's own undo still reverses what is left; Back after an undo lands the notebook right. |
 | **K6 — g-paper Phase 20 → 0.1.33 "A mark says where it landed"** ✅ (g-paper Phase 20) | Opus (Fable reviews) | Core only: `RasterDirty.along(points, width, pageW, pageH, maxSpanPx = 256, maxRects = 64)` — per-segment will/changed rects for `commitCapturedStroke` and `addStrokes` in RASTER; `loadPageRaster` silent (drop the extension's `loadingRaster`, note Paintsprout's dead guard in its watch list); `PaperListener` KDoc. Tests `RasterDirtyTest` (+8). Paintsprout `./gradlew test` 203 green before publish; SN re-pin. | Nomad: corner-to-corner hairline — cells read / entry bytes / pen-up main-thread ms before vs after; undo still an involution (screencap diff zero). |
 | **K7 — Clipboard, erase, export** ✅ | Opus | `clip_too_large_sketch` wording in `doCopy`; Erase page via `liveErasableIds` (undo/redo replay by ids unchanged); `ExportRender`: `PageBake.hasSketch`, interleaved bundle, `bundlePositions`, endnote `fromPage`, `pageTitles` per bundle page (`ExportNaming` sketch stem), `SketchRaster.toWebp`, page-scope export carries its sketch; compaction KDoc. Tests: `ExportRenderPlanTest` (+5), `ExportRenderEndnotesTest`, `ExportNamingTest`, `ClipEnvelopeTest` (+1). | Sonnet adb: copy/paste page → face shows the sketch; Erase page leaves it; Delete → Undo; PDF page count = pages + sketches; page-scope export = 2 pages; PNG names carry the suffix; close after erase shrinks the file; library card shows the sketch. Phase-start Q: the sketch page's name suffix. |
-| **K8 — Docs + freeze** ⬜ | Sonnet (Fable reads) | `extensions/sketch/docs/sketch.md` (as-built: data model, seam, screen, saves, undo, failure table, frame-silence ledger, traps, Nomad numbers); `docs/extensions.md` (tenth point, API 17 ledger, boundary-audit rows 64–67, the store-less held bind); `docs/notebook.md` (the door, the second bottom-bar exception, `liveErasableIds`), `docs/clipboard.md`, `docs/export.md`, `docs/library.md` (third radio), `docs/sn-screen.md`, `docs/document.md` (FaceRouting note); both `CLAUDE.md` files (tenth point granted, module count 16, pin 0.1.33, bottom-bar exceptions, the 6 MiB refusal); g-paper `PLAN.md`/`CLAUDE.md`; `ONYX_PLAN.md` version-number note; memory file; `versionName` lockstep check; `SKETCH_PLAN.md` ledger closed. | User's final Nomad hand walk; merge `sketch` → `main` `--no-ff`, delete branch, push. |
+| **K8 — Docs + freeze** ✅ (2026-09-16; + g-paper Phase 21 → **0.1.34**, `RattaTuning` removed) | Sonnet + Opus (Fable reads) | `extensions/sketch/docs/sketch.md` (as-built: data model, seam, screen, saves, undo, failure table, frame-silence ledger, traps, Nomad numbers); `docs/extensions.md` (tenth point, API 17 ledger, boundary-audit rows 64–67, the store-less held bind); `docs/notebook.md` (the door, the second bottom-bar exception, `liveErasableIds`), `docs/clipboard.md`, `docs/export.md`, `docs/library.md` (third radio), `docs/sn-screen.md`, `docs/document.md` (FaceRouting note); both `CLAUDE.md` files (tenth point granted, module count 16, pin 0.1.33, bottom-bar exceptions, the 6 MiB refusal); g-paper `PLAN.md`/`CLAUDE.md`; `ONYX_PLAN.md` version-number note; memory file; `versionName` lockstep check; `SKETCH_PLAN.md` ledger closed. | User's final Nomad hand walk; merge `sketch` → `main` `--no-ff`, delete branch, push. |
 
 Order: K0 → K1 → K2 → K3 → K4 → K5 → K6 → K7 → K8. K2 may start against 0.1.31 while K1's walk is pending;
 K6 must land before any Manta walk (budget arithmetic at 19.7 MB pages), not before the first Nomad feel walk.
@@ -721,3 +721,48 @@ lays down `0 strokes` on Ratta — real ink is hand-only.
 **Next.** K8 — Docs + freeze (Sonnet, Fable reads): `extensions/sketch/docs/sketch.md`, the
 `docs/*.md` rows, both `CLAUDE.md` files, g-paper docs, memory, the ledger closed; then the user's
 final Nomad hand walk and the `--no-ff` merge to `main`.
+
+### K8 — Docs + freeze ✅ (2026-09-16)
+
+**Phase-start question (the user's, binding).** The row listed none, but g-paper's Phase 19
+ledger had promised that `RattaTuning` "is removed at the arc's close (K8)" — engine code, a
+publish, a re-pin. Asked as one question: remove it now, or freeze with the door in place. **The
+user: remove it now.**
+
+**Landed — engine (Opus on Fable's brief, Fable read every file, decision 13).** g-paper
+**Phase 21 "The door closes" → 0.1.34** (`84b6094`, pushed): `RattaTuning.kt` deleted; the four
+Nomad-measured values are constants where they are read — `RASTER_ERASE_REDRAW_MS` 16,
+`PENCIL_PREVIEW_GREY` DARK_GRAY, `PENCIL_BAKE_PRESSURE` 0.5 in `RattaPaperView`'s private
+companion, `RattaEmr.EMR_MIN_HAIRLINE` 120 read directly (`penSize` lost its `floor` parameter
+and the `coerceIn` that only absorbed a nonsense `setprop`); the demo drops the four
+`debug.gpaper.*` reads; `docs/api.md` § RattaTuning → "the door closed"; `CLAUDE.md` gains the
+standing rule "a measurement door is temporary by construction"; version pin 0.1.34 in
+`gradle.properties` / `README.md` / `docs/integration-guide.md`. **No behaviour change** — same
+numbers, same arming, same bake; 215 core / 12 ratta green, `:demo:assembleDebug` builds.
+SN re-pinned `sn-screen/build.gradle.kts` 0.1.33 → **0.1.34**; `SketchToolbar`'s KDoc no longer
+names the door. Paintsprout's `ONYX_PLAN.md` carries the one-line note that 0.1.34 is now this
+phase's number.
+
+**Landed — docs (Sonnet, Fable read every diff).** `extensions/sketch/docs/sketch.md` (new, the
+frozen reference: decisions, data, seam, screen, saves, undo, export/clipboard/erase/cover, the
+door, failure table, frame-silence ledger, traps, Nomad numbers); `apps/notesprout_sn/docs/`
+`extensions.md` (tenth point, API 17/18 ledger, § "The Sketch point", boundary-audit rows 64–67),
+`notebook.md` (the door, `liveErasableIds` — its Erase-page paragraph had still cited the pre-K3
+query), `clipboard.md`, `export.md` (its page-scope paragraph had predated K7's hand-found
+folder fix), `library.md` (third radio, § "Sketch notebooks"), `sn-screen.md` (`UndoRedoStack`
+budget, `PaperScreenActivity`, five screens), `document.md` (`FaceRouting` note); both
+`CLAUDE.md` files (tenth point granted, sixteen modules, `API_VERSION` line corrected from a
+stale 15 to 18, pin 0.1.34, three bottom-bar exceptions, the 6 MiB refusal, test counts, the
+ELEVENTH guard); root `CLAUDE.md` bullet + docs-table row + branch entry.
+
+**Fable's review of the drafts fixed:** `sketch.md`'s engine sentence (0.1.33 → 0.1.34), its
+`deletePage` bullet (claimed no pre-flush — `deletePageNow` flushes first, as K5b recorded), the
+bottom-bar exception count (second → third, in step with the SN `CLAUDE.md`), and **a literal
+NUL byte in the first draft** — the K2/K4 trap a third time, `file` said "data" and `grep` went
+quiet; stripped, and the trap paragraph now names all three occurrences.
+
+**Checks.** `versionName` lockstep: every SN module and both root extensions read `0.1.0-sn`.
+JVM + `assembleDebug` against 0.1.34 (the user published by hand): **1816 `:app` / 3549 SN root**, 0 failures, 12 APKs.
+
+**Next.** The user's final Nomad hand walk on this build, then `git merge --no-ff sketch` into `main`, delete the branch, push.
+

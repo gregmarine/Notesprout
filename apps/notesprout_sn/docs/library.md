@@ -712,12 +712,16 @@ sheet opens for **Save as template** ([`docs/notebook.md`](notebook.md);
 breadcrumbs, folders, shelves, import, both long-press sheets ([`templates.md`](templates.md)). The
 four radios are gone (arc 13 / G3); a tap ticks a card and the screen waits for Create.
 
-**A second, two-way radio — Handwritten / Text (arc 19)** — sits under the name bar: *Handwritten*
-is the default, *Text* flags the notebook as a [text document](#text-documents-arc-19), a notebook
-that opens straight into the document editor instead of onto paper. It is one bit, not a second
-screen, because the rest of the screen is identical either way: the template browser stays live for
-a text document too — its pages underneath are still pages, just ones nothing writes on until
-**Show pages** is asked for.
+**A radio under the name bar — Handwritten / Text (arc 19) / Sketch (arc 43)** — a third, exclusive
+option (`typeSketch`) joined the original two-way radio at arc 43 decision 1: *Handwritten* is the
+default, *Text* flags the notebook as a [text document](#text-documents-arc-19) that opens straight
+into the document editor instead of onto paper, *Sketch* flags it as a [sketch
+notebook](#sketch-notebooks-arc-43) that opens straight into the raster face beside its ink. The
+choice is never Text **and** Sketch — the radio is exclusive by construction, so the only way to see
+both bits set is a foreign imported row, and `NotebookKind` says **TEXT wins** when that happens
+(logged, never both faces at once). It is bits, not a second screen, because the rest of the screen
+is identical for all three: the template browser stays live regardless — a Sketch notebook's pages
+underneath are still ordinary pages, and each may carry one sketch beside its own ink.
 
 The screen is **`adjustNothing`**, not `adjustResize`: it has a page on it, and resizing for the
 keyboard would squash the grid it measured itself against. The name field sits in the top row where
@@ -741,7 +745,9 @@ The order is the format contract:
 7. `db.seal(file)` — WAL checkpoint back into the file, close;
 8. **then** `IndexRepository.createNotebook(...)` (pageCount 1, `templateKind` =
    `TemplatePicks.birthKind` — the kind's name, or `IMAGE` for an imported template, plus
-   `textDocument = true` when the Text radio was armed — see [Text documents](#text-documents-arc-19)).
+   `textDocument = true` when the Text radio was armed — see [Text documents](#text-documents-arc-19)
+   — or, since arc 43, `NotebookFlags.SKETCH` set when the Sketch radio was armed — see [Sketch
+   notebooks](#sketch-notebooks-arc-43)).
 
 The index row is last on purpose: the index is the library's truth, so a crash anywhere earlier
 leaves an orphan file in `Garden/` — never a card pointing at nothing. A failure mid-way still
@@ -802,6 +808,42 @@ same `NameRules` charset and the same sibling-uniqueness check (`IndexRepository
 other rename in this file answers to. A refusal comes back as the exact sentence the library itself
 would show, and (the `NameDialog` pattern — positive button wired after `show()`) the dialog stays
 up with the typed text intact rather than dismissing on a rejected name.
+
+---
+
+## Sketch notebooks (arc 43)
+
+A **Sketch notebook** is an ordinary notebook the library flagged at birth (or at import) with one
+more bit — same `.soil`, same pages, same folder tree — that says every page may carry **one raster
+sketch beside its ink**. The feature itself — the pencil, the rubbing eraser, the screen, saves,
+undo, page insert/delete from the face — lives in `extensions/sketch/docs/sketch.md` and
+[`docs/extensions.md`](extensions.md) § "The Sketch point"; this is only the library's own half.
+
+**The flag rides two places, in step, the text-document precedent exactly**: index row `flags` bit 3
+(`NotebookFlags.SKETCH = 8`) and `notebook_meta.sketch` (additive, codec-defaulting-`false`, no
+`.soil` schema change). Every site that refreshes `notebook_meta` sources `sketch` from the index
+bit, never from the previous meta — the same wipe-trap rule `textDocument` already follows, applied
+at every one of the same mirror sites (`NewNotebookActivity`, `IndexRepository.createNotebook` /
+`importNotebookRow`, `NotebookImport.refreshMeta`, `ImportFlow`, `ExportArtifact.stampExportedAt`,
+`NotebookSession.refreshMeta`). `NotebookKind` reads both bits together: **TEXT wins** when a
+foreign row somehow carries both (logged as a conflict, never both faces).
+
+**The cover is `SketchCover`, not `CoverSnapshot`, and not `TextCover`.** A Sketch notebook still
+has an ordinary paper surface underneath, so its card is the **ink bake of the last-shown page**
+composited with that page's sketch over paper white when one exists — the sketch of the last-shown
+page over paper white, decision 6 — falling back to the plain ink bake alone when that page carries
+no sketch. `SketchCover.render` reads the row **after** the showing's `end()` has saved it, so the
+card never races a save still in flight.
+
+**Routing.** Opening a Sketch notebook from any entry point goes straight into the sketch face
+(`SketchEntry`/`openIntoSketch`) — the canvas underneath loads only when the face's own **Show
+pages** button is tapped (`RESULT_SKETCH_SHOW_PAGES`) or when no trusted `NSE · Sketch` is
+installed, in which case the notebook silently loads the ordinary canvas instead (`GONE` door, no
+dialog — the same quiet fallback every extension-backed door uses). Back from the face with the
+canvas never shown seals straight to the library, exactly as a text document's back arrow does.
+Unlike a text document, a Sketch notebook is never rename-from-the-face — its name still comes from
+the notebook's own long-press sheet, because the face is a second view of the same page, not a
+second kind of primary surface.
 
 ---
 

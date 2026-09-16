@@ -486,10 +486,18 @@ applies to the heading, **before** the suffix: the suffix is the app's word and 
 make a filename lie about what is in it.
 
 **Page scope carries its sketch too**: `ExportScope.Page` filters the page rows before the plan, so
-one page with a sketch is a two-page bundle and nothing else changes — a per-page exporter at page
-scope still delivers one file per bundle page, and the single-file export (a PDF holding both) is
-named for the **page**, the ink page's stem. The document source is untouched (decision 5): a
-document export is the authored text, and there is no page under it to have a sketch.
+one page with a sketch is a two-page bundle. A single-file exporter (PDF) still writes one file
+holding both, named for the **page** — the ink page's stem. **A per-page exporter at page scope is
+where a sketched page changes shape**: the plan's naive read was "a Page is one file," so a
+two-page bundle handed to a per-page exporter (`NSE · Image`) was refused outright
+(`bundle carries 2 pages; one expected`, nothing written, found by the user's hand the day after K7
+first landed). The fix, `ExportDelivery.perPage(delivery, scope, pageHasSketch)`: a **sketched**
+page at page scope is counted as a **folder**, the calendar's Day shape, never assumed a Whole the
+way an unsketched page still is; `SoilDao.hasLiveSketch(pageId)` (blob-free, `length(blob) > 0`) is
+read once in the Export screen's own open into `PageFacts.hasSketch`, and every one of the three
+doors that decide "is this a folder" now goes through the one `perPage(c)` call rather than each
+guessing separately. The document source is untouched (decision 5): a document export is the
+authored text, and there is no page under it to have a sketch.
 
 ---
 
