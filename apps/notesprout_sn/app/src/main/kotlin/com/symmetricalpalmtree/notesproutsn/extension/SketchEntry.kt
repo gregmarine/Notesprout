@@ -65,7 +65,7 @@ class SketchEntry(
     private val activity: AppCompatActivity,
     private val button: View,
     /** The open notebook's read and write half, handed to the [SketchHostBinder] minted per
-     *  showing. Its four methods run on Binder threads — see [SketchHostBinder.Hooks]. */
+     *  showing. Its methods all run on Binder threads — see [SketchHostBinder.Hooks]. */
     private val hooks: SketchHostBinder.Hooks,
     /** Whether this notebook is a Sketch notebook — read at every discovery, because the session
      *  answers honestly (false) until it has read the index bit. */

@@ -28,6 +28,42 @@ class SketchContractTest {
     }
 
     @Test
+    fun `the page method floor is its own birth number, above the point's`() {
+        // K5b: insertPage / deletePage / pageContent are a METHOD floor, not an action floor. The
+        // point's own floor must not have moved with it — a screen declaring 17 still binds and
+        // still draws, it simply never makes a page.
+        assertEquals(18, SketchContract.MIN_API_VERSION_FOR_SKETCH_PAGES)
+        assertEquals(17, SketchContract.MIN_API_VERSION_FOR_SKETCH)
+        assertTrue(SketchContract.MIN_API_VERSION_FOR_SKETCH_PAGES > SketchContract.MIN_API_VERSION_FOR_SKETCH)
+        // A floor can never ask for a host that does not exist yet.
+        assertTrue(SketchContract.MIN_API_VERSION_FOR_SKETCH_PAGES <= ExtensionContract.API_VERSION)
+    }
+
+    @Test
+    fun `the structural token is bounded well above what the host mints`() {
+        // The host's tokens are "s1", "s2", … — the bound is a guard on an unmarshalled string, not
+        // a budget, and it must never be so tight that a long showing runs into it.
+        assertEquals(64, SketchContract.MAX_STRUCTURAL_TOKEN_CHARS)
+        assertTrue("s${Int.MAX_VALUE}".length < SketchContract.MAX_STRUCTURAL_TOKEN_CHARS)
+    }
+
+    @Test
+    fun `the page-content bits are disjoint single bits`() {
+        // They are OR-ed into one int and read back with `and`, so each must be exactly one bit and
+        // no two may be the same one. Zero is the meaningful answer "nothing else is on this page".
+        assertEquals(1, SketchContract.PAGE_HAS_INK)
+        assertEquals(2, SketchContract.PAGE_HAS_DOCUMENT)
+        assertEquals(0, SketchContract.PAGE_HAS_INK and SketchContract.PAGE_HAS_DOCUMENT)
+        for (bit in listOf(SketchContract.PAGE_HAS_INK, SketchContract.PAGE_HAS_DOCUMENT)) {
+            assertEquals("a bit must be a single bit", 0, bit and (bit - 1))
+        }
+        // Both together still read back as both — the "handwriting and document" wording's case.
+        val both = SketchContract.PAGE_HAS_INK or SketchContract.PAGE_HAS_DOCUMENT
+        assertTrue(both and SketchContract.PAGE_HAS_INK != 0)
+        assertTrue(both and SketchContract.PAGE_HAS_DOCUMENT != 0)
+    }
+
+    @Test
     fun theChunkSizeStaysUnderTheBinderBudget() {
         assertEquals(512 * 1024, SketchContract.SKETCH_CHUNK_BYTES)
         assertTrue(SketchContract.SKETCH_CHUNK_BYTES < 1024 * 1024)

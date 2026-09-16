@@ -144,6 +144,39 @@ class UndoRedoStack<A : Any>(
         undoBytes += cost(action)
     }
 
+    /**
+     * Rewrite every entry on **both** sides through [transform], dropping the ones it answers null
+     * for (arc 43 / K5b).
+     *
+     * It exists for the one thing a history of *pixels* cannot shrug off: a page inserted or deleted
+     * underneath it. Every entry on a raster screen carries the **index** of the page it was made on
+     * — the key is an opaque token that says nothing about where the page sits — and the replay uses
+     * that index to decide which way to turn and how far. An insert or a delete moves every later
+     * page along by one, so every later entry's index is a page out unless it is rewritten; and the
+     * entries belonging to a page that no longer exists are pixels for a row that has been
+     * soft-deleted, so they are dropped rather than replayed onto whatever took its place.
+     *
+     * Order is preserved on both sides, [undoBytes] is recounted from what survived (entries left,
+     * so the running total cannot simply be adjusted), and [generation] is **bumped**: a replay that
+     * snapshotted a generation and then found the pages moved under it must not apply its swap as
+     * though nothing had happened. Redo is deliberately **not** cleared — the entries that survived
+     * are still true, they merely sit at new indexes.
+     *
+     * The transform must be pure: it is called once per entry per side.
+     */
+    fun remap(transform: (A) -> A?) {
+        remapSide(undo, transform)
+        remapSide(redo, transform)
+        undoBytes = undo.sumOf { cost(it) }
+        generation++
+    }
+
+    private fun remapSide(side: ArrayDeque<A>, transform: (A) -> A?) {
+        val mapped = side.mapNotNull(transform)
+        side.clear()
+        side.addAll(mapped)
+    }
+
     fun clear() {
         undo.clear()
         redo.clear()

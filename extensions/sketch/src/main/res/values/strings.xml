@@ -27,6 +27,19 @@
     <string name="sketch_no_ink_body">There is no handwriting on this page to bring in.</string>
     <string name="sketch_bring_ink_failed_title">Ink not brought in</string>
     <string name="sketch_bring_ink_failed_body">Notesprout SN could not read this page\'s handwriting. Try again.</string>
+    <!-- Page insert / delete from the face (K5b). `delete_page_title` / `delete_confirm` are the
+         notebook's and the pad's own wording, repeated here because each module owns its strings;
+         `cancel` comes from :sn-screen. The body names ONLY what the page is actually carrying — a
+         page with nothing on it but the sketch gets no body at all, because there is nothing to
+         warn about (the sketch itself is on the glass in front of the person deleting it). -->
+    <string name="delete_page_title">Delete this page?</string>
+    <string name="delete_confirm">Delete</string>
+    <string name="delete_page_body_ink">Its handwriting will be deleted too.</string>
+    <string name="delete_page_body_document">Its document will be deleted too.</string>
+    <string name="delete_page_body_both">Its handwriting and document will be deleted too.</string>
+    <string name="sketch_page_failed_title">Page not changed</string>
+    <string name="sketch_page_failed_body">Notesprout SN could not change the notebook\'s pages. Try again.</string>
+
     <string name="sketch_host_gone_title">Sketch unavailable</string>
     <string name="sketch_host_gone_body">The notebook is no longer reachable. Go back and open the sketch again.</string>
 </resources>

@@ -32,8 +32,11 @@ class ExtensionContractTest {
         // 13 since B9 "Send" (`takeOutgoingReference`); 14 since arc 39 / K1
         // (`IDocumentHost.openReference`); 15 since arc 40 "Verses" (`IBible.passageText`);
         // 16 since arc 42 "Notes" (seven `IBible` tails); 17 since arc 43 / K2 (the SKETCH point —
-        // SN's TENTH, a compatible addition on the Bible's pattern, floored at 17).
-        assertEquals(17, ExtensionContract.API_VERSION)
+        // SN's TENTH, a compatible addition on the Bible's pattern, floored at 17); 18 since arc 43
+        // / K5b (three `ISketchHost` tails — insertPage / deletePage / pageContent — behind the
+        // METHOD floor MIN_API_VERSION_FOR_SKETCH_PAGES; no action floor moved, only :ext-sketch
+        // redeclares).
+        assertEquals(18, ExtensionContract.API_VERSION)
         assertEquals(9, ExporterContract.MIN_API_VERSION_FOR_DELIVERY)
         assertEquals(6, ExtensionContract.MIN_API_VERSION_FOR_STORE)
         assertEquals(7, ExtensionContract.MIN_API_VERSION_FOR_CALENDAR)
@@ -47,6 +50,7 @@ class ExtensionContractTest {
         assertEquals(15, ExtensionContract.MIN_API_VERSION_FOR_BIBLE_TEXT)
         assertEquals(16, ExtensionContract.MIN_API_VERSION_FOR_BIBLE_NOTES)
         assertEquals(17, SketchContract.MIN_API_VERSION_FOR_SKETCH)
+        assertEquals(18, SketchContract.MIN_API_VERSION_FOR_SKETCH_PAGES)
         assertEquals(14, DocumentContract.MIN_API_VERSION_FOR_DOCUMENT_LOOKUP)
         assertEquals(2_000, ExtensionContract.MAX_INK_STROKES)
         assertEquals(60_000, ExtensionContract.MAX_INK_POINTS)

@@ -33,9 +33,21 @@ import kotlinx.coroutines.withContext
  * face's first call is already on a Binder thread, and refusing there would throw away the save the
  * reconnect exists to land.
  *
- * **The target is the host's memory of where the face is** (decision 7). The sketch screen turns
- * its own pages; the notebook underneath stays exactly where it was and catches up when the showing
- * ends. A [requestPage] moves [target] and nothing else does. It survives the host's death through
+ * **The two undo histories are one history.** A page the face inserts or deletes is recorded on the
+ * **notebook's** stack ([onStructural]) and never on the face's, because a page is the notebook's
+ * object and undoing one after Show pages must work. But the person holding the pen is looking at
+ * the face, and the user's follow-up decision (2026-09-15) is that the face's own undo gesture has
+ * to reverse a delete too — so this class keeps a small **ledger** of the showing's structural
+ * edits, names each one with a token the face carries in its history, and lets the face ask for that
+ * edit back ([undoPage] / [redoPage]). Each replay runs the notebook's own reconcile arm and then
+ * moves the matching entry across the notebook's stack ([onStructuralUndone] /
+ * [onStructuralRedone]), so the two stacks are provably in step rather than merely likely to be.
+ * The ledger dies with the showing ([resetTarget]): from then on the notebook's own undo owns it.
+ *
+ * **The target is the host's memory of where the face is** (decision 7, as K5b amended it). The
+ * sketch screen turns — and, since K5b, inserts and deletes — its own pages; the notebook underneath
+ * stays exactly where it was and catches up when the showing ends. [requestPage], [insertPage] and
+ * [deletePage] move [target] and nothing else does. It survives the host's death through
  * the screen's saved state ([restoreTarget]), and a target naming a page that is no longer in the
  * notebook falls back to the displayed one ([DocumentTargetRules.resolveTarget] — the same rule,
  * reused rather than re-written).
@@ -57,6 +69,32 @@ class SketchHostHooks(
     /** Whether the session lateinit is constructed and open — [alive] says the screen still takes
      *  writes; this says the `.soil` is there to take them. */
     private val sessionOpen: () -> Boolean,
+    /**
+     * K5b: a page was inserted or deleted from the face — record it on the **notebook's own** undo
+     * stack ([NotebookUndo.Action.Page]) and mark the notes index structural, exactly as
+     * `NotebookActivity.doInsert` / `doDelete` do for a page the notebook itself changed.
+     *
+     * Called from the **Binder thread** the structural hook is running on; the implementation posts
+     * to Main, because the undo stack and the notes sync belong to the screen. It is deliberately
+     * fire-and-forget: the extension's insert has already happened in the `.soil` by the time this
+     * runs, and making a Binder transaction wait on the host's main thread would be the ANR this
+     * whole class is built to avoid.
+     */
+    private val onStructural: (NotebookSession.Structural) -> Unit,
+    /**
+     * K5b: the face's undo gesture took one of those back — take the matching
+     * [NotebookUndo.Action.Page] off the **notebook's** undo stack and put it on its redo stack, so
+     * the notebook's own history says what the file says.
+     *
+     * Called from the Binder thread, posted to Main like [onStructural], and for the same reason.
+     * The implementation checks that the entry it pops really is this snapshot before moving it: the
+     * canvas is stopped behind the face so nothing else can be on top, and a check that can only
+     * fail if that stops being true is exactly the check worth having.
+     */
+    private val onStructuralUndone: (NotebookSession.Structural) -> Unit,
+    /** K5b: [onStructuralUndone]'s mirror — the entry comes off the notebook's redo stack and goes
+     *  back onto its undo stack. */
+    private val onStructuralRedone: (NotebookSession.Structural) -> Unit,
 ) : SketchHostBinder.Hooks {
 
     /**
@@ -77,9 +115,88 @@ class SketchHostHooks(
         target = pageId
     }
 
-    /** The showing is over: the next one starts from the displayed page again. */
+    /** The showing is over: the next one starts from the displayed page again, the page list is
+     *  whatever the face left it as, and the structural ledger goes — a showing's page history dies
+     *  with the showing, and from here the notebook's own undo stack owns every one of those edits
+     *  (which is where they have been all along). */
     fun resetTarget() {
         target = null
+        structuralChanged = false
+        synchronized(ledger) {
+            undoable.clear()
+            redoable.clear()
+        }
+    }
+
+    /**
+     * K5b: whether the face inserted or deleted a page during this showing — read by
+     * `NotebookActivity.sketchShowingEnded`, which must then reload the canvas **even when the face
+     * ended on the page the canvas is already showing**: the page list under it has changed (count,
+     * ordinals, possibly the displayed page itself is gone), and the ordinary catch-up's
+     * same-page shortcut would leave a stale pager and a stale Contents behind.
+     *
+     * `@Volatile`: set on a Binder thread, read on Main.
+     */
+    @Volatile
+    var structuralChanged: Boolean = false
+        private set
+
+    // ── The structural ledger (K5b) ────────────────────────────────────────
+
+    /**
+     * The showing's page edits, newest last, by the token the face carries: [undoable] holds the
+     * ones that can be taken back, [redoable] the ones that have been. An edit is in exactly one of
+     * them, or in neither once the showing ends.
+     *
+     * **Snapshots, not ids** — [NotebookSession.Structural] is the notebook's own undo record and is
+     * exactly what the reconcile arms take, so the face's undo runs the notebook's undo rather than
+     * something that resembles it.
+     *
+     * Guarded by [ledger] rather than left to chance: every touch happens on whichever pooled Binder
+     * thread the face's call arrived on, and two calls in a showing are not guaranteed to be the
+     * same thread even though the face serialises them.
+     */
+    private val ledger = Any()
+    private val undoable = LinkedHashMap<String, NotebookSession.Structural>()
+    private val redoable = LinkedHashMap<String, NotebookSession.Structural>()
+    private var seq = 0
+
+    /**
+     * Name a fresh structural edit and file it as undoable.
+     *
+     * **Recording a new edit clears the redo side**, exactly as `UndoRedoStack.record` does: an
+     * insert made after an undo forks the history, and the branch that was abandoned must not still
+     * be reachable. The face's own stack does the same thing to its own entries in the same moment.
+     *
+     * The one place the two sides can differ, written down rather than chased: a **pixel** edit
+     * clears the face's redo side and this stack knows nothing about it, so a page insert the face
+     * has undone and then walked away from can still be redone from the notebook afterwards. That is
+     * loose, not wrong — a redo of an insert brings the page back with everything it held — and the
+     * alternative is a Binder call on every mark, which is the one thing that must never be in the
+     * path of the pen. The next structural edit clears it either way.
+     */
+    private fun mint(snap: NotebookSession.Structural): String = synchronized(ledger) {
+        val token = "s${++seq}"
+        redoable.clear()
+        undoable[token] = snap
+        while (undoable.size > MAX_LEDGER) undoable.remove(undoable.keys.first())
+        token
+    }
+
+    /** Take [token] off [from], or refuse — an edit can be taken back exactly once, and a token this
+     *  showing never minted (or has already moved) is the caller's mistake, not a failure. */
+    private fun claim(from: LinkedHashMap<String, NotebookSession.Structural>, token: String) =
+        synchronized(ledger) { from.remove(token) } ?: throw IllegalArgumentException("Unknown edit")
+
+    /** File a claimed edit on the other side, **after** its reconcile landed: a ledger that said an
+     *  edit was reversible while the file disagreed would be worse than one that lost it. */
+    private fun file(
+        to: LinkedHashMap<String, NotebookSession.Structural>,
+        token: String,
+        snap: NotebookSession.Structural,
+    ) = synchronized(ledger) {
+        to[token] = snap
+        while (to.size > MAX_LEDGER) to.remove(to.keys.first())
     }
 
     /**
@@ -192,13 +309,174 @@ class SketchHostHooks(
         return out
     }
 
+    // ── Page structure (K5b) ───────────────────────────────────────────────
+
     /**
-     * The one place a [SketchPageState] is built, so the two window-loading hooks cannot drift on
+     * Insert a blank page next to **the face's target** and land the target on it (K5b).
+     *
+     * Next to the *target*, not next to the notebook's displayed page: the face turns its own pages
+     * and the notebook has not followed. [NotebookSession.insertBlank] works relative to the
+     * session's current index, so the session is walked to the target first ([NotebookSession.goTo]
+     * — a pure move, no structure) and the insert happens there.
+     *
+     * **The notebook's own undo stack owns it.** [onStructural] records the snapshot as
+     * `NotebookUndo.Action.Page` exactly as `doInsert` does, so after Show pages the notebook's undo
+     * reverses a page the face made — the whole reason this is a host call rather than something the
+     * extension could do for itself. What is deliberately **not** reproduced from `doInsert` is the
+     * `navigateTo`: there is no canvas to repaint (it is released behind the face), and the catch-up
+     * at the end of the showing is what puts the paper back.
+     */
+    override fun insertPage(session: SketchHostSession, direction: Int): SketchPageState = runBlocking {
+        withContext(Dispatchers.IO) {
+            val nb = openSession()
+            nb.goTo(targetIndex(nb))
+            val snap = nb.insertBlank(after = direction == SketchContract.PAGE_NEXT)
+            val token = mint(snap)
+            structuralChanged = true
+            onStructural(snap)
+            target = nb.currentPage.id
+            Slog.d(TAG) { "insertPage($token): ${nb.pages.size} pages, target at ${nb.currentIndex}" }
+            state(session, nb, nb.currentIndex, token)
+        }
+    }
+
+    /**
+     * Soft-delete the face's target page and answer the page the notebook lands on (K5b).
+     *
+     * [pageKey] **must be the target** — an `IllegalArgumentException` otherwise. The face is showing
+     * one page and the confirm it just ran named that page; a delete of anything else would be a
+     * page destroyed at a distance, which is exactly the class of bug the save path's key check
+     * exists to prevent.
+     *
+     * **The writer is drained first**, `doDelete`'s reason verbatim: a stroke commit still queued
+     * would land *after* the delete's descendant snapshot and transaction, leaving a live orphan row
+     * under a soft-deleted page that neither the snapshot nor redo's reconcile knows about.
+     *
+     * Deleting the only page of a notebook puts a **fresh blank page** in its place
+     * ([NotebookSession.deleteCurrent]'s own rule) — the face simply loads whatever comes back.
+     */
+    override fun deletePage(session: SketchHostSession, pageKey: String): SketchPageState = runBlocking {
+        withContext(Dispatchers.IO) {
+            val nb = openSession()
+            val index = targetIndex(nb)
+            require(nb.pages[index].id == pageKey) { "not the target page" }
+            nb.goTo(index)
+            nb.store.drain()
+            val snap = nb.deleteCurrent()
+            val token = mint(snap)
+            structuralChanged = true
+            onStructural(snap)
+            target = nb.currentPage.id
+            Slog.d(TAG) { "deletePage($token): ${nb.pages.size} pages, target at ${nb.currentIndex}" }
+            state(session, nb, nb.currentIndex, token)
+        }
+    }
+
+    /**
+     * What else the live page [pageKey] names is carrying (K5b) — the two bits the delete confirm
+     * words itself from, and nothing more.
+     *
+     * `SoilDao.liveErasableIds` is the ink bit's source deliberately: it is already "every live
+     * descendant of the page **except** its sketch", which is exactly the question here — the face
+     * is showing the sketch, so warning that it will go would be telling someone their drawing is
+     * about to be deleted while they are looking at it.
+     *
+     * `documentFor` carries `deletedAt IS NULL` in its own SQL, so a non-null row is a live one.
+     * The writer is drained first for [requestInk]'s reason: content committed a moment ago is a
+     * queued row, and a confirm that said "nothing else here" about a page that has ink would be
+     * wrong in the one direction that costs something.
+     */
+    override fun pageContent(pageKey: String): Int = runBlocking {
+        withContext(Dispatchers.IO) {
+            val nb = openSession()
+            require(nb.pages.any { it.id == pageKey }) { "Unknown page" }
+            nb.store.drain()
+            var bits = 0
+            if (nb.db.dao().liveErasableIds(pageKey).isNotEmpty()) bits = bits or SketchContract.PAGE_HAS_INK
+            if (nb.db.documentDao().documentFor(pageKey) != null) bits = bits or SketchContract.PAGE_HAS_DOCUMENT
+            bits
+        }
+    }
+
+    /**
+     * Take back the page insert or delete [token] names (K5b) — **the notebook's own undo, run from
+     * the face**, so the user never has to leave for the notebook to put back a page they deleted.
+     *
+     * The body is `NotebookActivity`'s `is Action.Page ->` revert arm verbatim:
+     * `reconcile(before, objectIds, emptyList(), beforeCurrentId)` — the page list goes back to what
+     * it was, the rows the delete soft-deleted (its strokes, its objects, its document **and** its
+     * sketch) come back with it, and the notebook lands where it was standing. One arm, one
+     * behaviour, whichever screen asked.
+     *
+     * **The writer is drained first**, `deletePage`'s reason in the other direction: a stroke commit
+     * still queued would land after the reconcile's transaction and sit on a page the reconcile has
+     * just soft-deleted.
+     *
+     * The ledger is moved **after** the reconcile lands, and the notebook's own stack after that
+     * ([onStructuralUndone]) — a failure anywhere leaves both saying what the file says.
+     */
+    override fun undoPage(session: SketchHostSession, token: String): SketchPageState = runBlocking {
+        withContext(Dispatchers.IO) {
+            val nb = openSession()
+            val snap = claim(undoable, token)
+            nb.store.drain()
+            nb.reconcile(snap.before, snap.objectIds, emptyList(), snap.beforeCurrentId)
+            file(redoable, token, snap)
+            structuralChanged = true
+            onStructuralUndone(snap)
+            target = nb.currentPage.id
+            Slog.d(TAG) { "undoPage($token): ${nb.pages.size} pages, target at ${nb.currentIndex}" }
+            state(session, nb, nb.currentIndex)
+        }
+    }
+
+    /**
+     * Put back the page insert or delete [token] names (K5b) — [undoPage]'s mirror, and
+     * `NotebookActivity`'s `is Action.Page ->` **reapply** arm verbatim:
+     * `reconcile(after, emptyList(), objectIds, afterCurrentId)`. The two directions are the same
+     * call with the snapshot's sides swapped, which is what [NotebookSession.reconcile] exists for.
+     */
+    override fun redoPage(session: SketchHostSession, token: String): SketchPageState = runBlocking {
+        withContext(Dispatchers.IO) {
+            val nb = openSession()
+            val snap = claim(redoable, token)
+            nb.store.drain()
+            nb.reconcile(snap.after, emptyList(), snap.objectIds, snap.afterCurrentId)
+            file(undoable, token, snap)
+            structuralChanged = true
+            onStructuralRedone(snap)
+            target = nb.currentPage.id
+            Slog.d(TAG) { "redoPage($token): ${nb.pages.size} pages, target at ${nb.currentIndex}" }
+            state(session, nb, nb.currentIndex)
+        }
+    }
+
+    /** Where the face is, as an index into [NotebookSession.pages] — the same resolve the two
+     *  window-loading hooks run, so a target that has vanished falls back to the displayed page
+     *  rather than throwing at a structural door. */
+    private fun targetIndex(nb: NotebookSession): Int {
+        val pageIds = nb.pages.map { it.id }
+        val pageId = DocumentTargetRules.resolveTarget(target, pageIds, displayedPageId())
+        val index = pageIds.indexOf(pageId)
+        check(index >= 0) { "page is not in the notebook" }
+        return index
+    }
+
+    /**
+     * The one place a [SketchPageState] is built, so the hooks that answer with one cannot drift on
      * the page facts. [SketchHostSession.setWindow] runs here and its answer is the state's
      * `sketchChunks` — the window and the state that describes it are loaded together, which is the
      * contract's atomicity.
+     *
+     * [structuralToken] is empty for every answer but the two that **make** a structural edit
+     * (K5b): a turn names no edit, and neither does a replay of one.
      */
-    private suspend fun state(session: SketchHostSession, nb: NotebookSession, index: Int): SketchPageState {
+    private suspend fun state(
+        session: SketchHostSession,
+        nb: NotebookSession,
+        index: Int,
+        structuralToken: String = "",
+    ): SketchPageState {
         val page = nb.pages[index]
         // Null for a page with no sketch AND for a stored row the header guard refused (which it
         // soft-deletes on the way past) — the screen starts from blank paper either way.
@@ -212,6 +490,7 @@ class SketchHostHooks(
             height = page.height,
             sketchBytes = png.size,
             sketchChunks = chunks,
+            structuralToken = structuralToken,
         )
     }
 
@@ -242,5 +521,14 @@ class SketchHostHooks(
 
         /** One poll step. */
         const val OPEN_POLL_MS = 200L
+
+        /**
+         * Most structural edits either side of the ledger holds (K5b). It mirrors `UndoRedoStack`'s
+         * own 100-entry bound: neither the face's history nor the notebook's stack can hold more
+         * than that, so an edit beyond it is one no gesture can still reach. The eldest goes, which
+         * is the end nothing is reaching for — and an edit that has fallen off is simply "Unknown
+         * edit", which the face already knows how to take.
+         */
+        const val MAX_LEDGER = 100
     }
 }

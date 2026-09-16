@@ -276,4 +276,70 @@ class UndoRedoStackTest {
         assertFalse(s.canRedo())                  // record-clears-redo holds
         assertTrue(s.canUndo())                   // the fresh edit is still undoable
     }
+
+    // ── remap ── the raster screen's re-index after a page insert or delete (arc 43 / K5b) ──────
+
+    @Test
+    fun `remap rewrites both sides and keeps each side's order`() {
+        val s = UndoRedoStack<Act>()
+        s.record(drew("a", page = "p1"))
+        s.record(drew("b", page = "p2"))
+        val undone = s.popUndo()!!
+        s.pushRedo(undone)                       // "b" now sits on the redo side
+        s.remap { (it as Act.Drew).copy(pageId = it.pageId + "!") }
+        assertEquals(Act.Drew("p1!", "a"), s.popUndo())
+        assertEquals(Act.Drew("p2!", "b"), s.popRedo())
+    }
+
+    @Test
+    fun `remap drops the entries it answers null for, on both sides`() {
+        val s = UndoRedoStack<Act>()
+        s.record(drew("keep", page = "p1"))
+        s.record(drew("gone", page = "dead"))
+        val undone = s.popUndo()!!
+        s.pushRedo(undone)
+        s.record(drew("alsoGone", page = "dead"))
+        // The raster screen's rule: the entries made on the page that went go with it, by page.
+        s.remap { if (it.pageId == "dead") null else it }
+        assertEquals(drew("keep", page = "p1"), s.popUndo())
+        assertNull(s.popUndo())
+        assertFalse(s.canRedo())
+    }
+
+    @Test
+    fun `remap recounts the undo bytes from what survived`() {
+        // The total cannot simply be adjusted: entries left, so it is counted again from the side.
+        val s = costed(budget = 10_000)
+        s.record(Heavy("a", 100))
+        s.record(Heavy("b", 30))
+        assertEquals(130L, s.undoBytes)
+        s.remap { if ((it as Heavy).id == "a") null else it }
+        assertEquals(30L, s.undoBytes)
+        s.remap { null }
+        assertEquals(0L, s.undoBytes)
+        assertFalse(s.canUndo())
+    }
+
+    @Test
+    fun `remap bumps the generation so a replay in flight cannot land blind`() {
+        // A replay snapshots the generation before it waits. Pages moving under it is exactly the
+        // kind of change it must notice, even though nothing was recorded.
+        val s = UndoRedoStack<Act>()
+        s.record(drew("a"))
+        val g = s.generation
+        s.remap { it }
+        assertTrue(s.generation > g)
+    }
+
+    @Test
+    fun `remap leaves the redo side reachable — the surviving entries are still true`() {
+        // Unlike `record`, a remap is not a fresh edit: nothing forward became unreachable, the
+        // entries merely sit at new indexes.
+        val s = UndoRedoStack<Act>()
+        s.record(drew("a"))
+        val undone = s.popUndo()!!
+        s.pushRedo(undone)
+        s.remap { it }
+        assertTrue(s.canRedo())
+    }
 }

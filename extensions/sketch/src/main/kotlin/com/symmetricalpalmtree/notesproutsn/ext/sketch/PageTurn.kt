@@ -6,7 +6,8 @@ import com.symmetricalpalmtree.notesproutsn.extension.SketchContract
  * The page-turn arithmetic of the sketch screen (arc 43 / K5), kept apart from the Activity so the
  * one rule that is easy to get subtly wrong can be proved on a laptop.
  *
- * **The screen turns its own pages** (decision 7): it asks the host to move
+ * **The screen turns — and, since K5b, inserts and deletes — its own pages** (decision 7 as the
+ * user amended it on 2026-09-15): it asks the host to move
  * ([com.symmetricalpalmtree.notesproutsn.extension.ISketchHost.requestPage]) and the host answers
  * with a state. **At either edge the host answers the SAME page**, unchanged — a turn is never an
  * exception and never a null the screen has to word — so the screen compares `pageKey` and stays
@@ -57,11 +58,35 @@ object PageTurn {
     /**
      * How many turns the replay may take before it gives up and drops the entry.
      *
-     * The index recorded with an edit is where the page sat **then**; pages cannot be inserted or
-     * deleted from this screen, but the notebook behind it is a live file and an index can be stale
-     * in principle. So the walk is bounded rather than trusted: the recorded distance plus one step
-     * of slack, and an edge (the same key twice) stops it early in any case.
+     * The index recorded with an edit is where the page sat **then**. Since K5b pages *can* be
+     * inserted and deleted from this screen — which is exactly why the history is re-indexed when
+     * one is ([reindexAfterInsert] / [reindexAfterDelete]) — and the notebook behind it is a live
+     * file besides, so an index can still be stale in principle. The walk is therefore bounded
+     * rather than trusted: the recorded distance plus one step of slack, and an edge (the same key
+     * twice) stops it early in any case.
      */
     fun maxSteps(currentIndex: Int, editIndex: Int): Int =
         kotlin.math.abs(editIndex - currentIndex) + 1
+
+    // ── Re-indexing the history when a page arrives or goes (K5b) ──────
+
+    /**
+     * Where a history entry made on page [index] now sits, after a page was inserted **at** [at].
+     *
+     * A page inserted at position `p` pushes `p` and everything after it one along; anything before
+     * `p` has not moved. Pure arithmetic, and deliberately total: a history entry is never dropped
+     * by an insert, because an insert takes nothing away.
+     */
+    fun reindexAfterInsert(index: Int, at: Int): Int = if (index >= at) index + 1 else index
+
+    /**
+     * Where a history entry made on page [index] now sits, after the page **at** [at] was deleted.
+     *
+     * Everything after `at` moves one back; everything before it stays. An entry made on the deleted
+     * page itself is **not** handled here — it is dropped by **key** at the call site, because the
+     * key is the only thing that certainly identifies the page that went, while a recorded index can
+     * be stale. Keeping this function total means a stale index can never quietly drop an entry that
+     * belongs to a page still on the paper.
+     */
+    fun reindexAfterDelete(index: Int, at: Int): Int = if (index > at) index - 1 else index
 }

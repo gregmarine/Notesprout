@@ -25,7 +25,10 @@ class SketchPageStateTest {
         height: Int = 1685,
         sketchBytes: Int = 0,
         sketchChunks: Int = 1,
-    ) = SketchPageState(pageKey, pageIndex, pageCount, width, height, sketchBytes, sketchChunks)
+        structuralToken: String = "",
+    ) = SketchPageState(
+        pageKey, pageIndex, pageCount, width, height, sketchBytes, sketchChunks, structuralToken,
+    )
 
     private fun assertRefused(build: () -> SketchPageState) {
         try {
@@ -119,6 +122,29 @@ class SketchPageStateTest {
         state(sketchBytes = cap + 1, sketchChunks = 2)
         assertRefused { state(sketchBytes = cap + 1, sketchChunks = 1) }
         assertRefused { state(sketchBytes = cap, sketchChunks = 2) }
+    }
+
+    // ── The structural token, K5b's compatible tail ──────
+
+    @Test
+    fun theStructuralTokenDefaultsToEmpty() {
+        // The default is what makes the tail compatible in Kotlin as well as on the wire: every K5
+        // call site constructs a state without it and means exactly what it meant — "this answer is
+        // not a page insert or delete". The same value `read()` builds from an exhausted parcel,
+        // where `readString()` answers null.
+        assertEquals("", state().structuralToken)
+        assertEquals("s7", state(structuralToken = "s7").structuralToken)
+    }
+
+    @Test
+    fun theStructuralTokenIsBoundedAndOneWord() {
+        assertRefused { state(structuralToken = "k".repeat(SketchContract.MAX_STRUCTURAL_TOKEN_CHARS + 1)) }
+        state(structuralToken = "k".repeat(SketchContract.MAX_STRUCTURAL_TOKEN_CHARS))
+        // A SPACE, not NUL — a token is one word in a log line. The distinction is the point of the
+        // check, so both are pinned: the space is refused, and nothing else here pretends to be it.
+        assertRefused { state(structuralToken = "s 7") }
+        assertRefused { state(structuralToken = " ") }
+        state(structuralToken = "s-7_a.b")
     }
 
     @Test

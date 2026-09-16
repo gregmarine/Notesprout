@@ -144,8 +144,19 @@ object ExtensionContract {
      * pixels live in the host's `.soil`, the bookmark is the notebook's page, and the undo history
      * is the sitting — and the second to be served by a host-side stub (`ISketchHost`, after
      * `IDocumentHost`). Only `:ext-sketch` declares 17.
+     *
+     * **18 = arc 43 / K5b (2026-09-15)** — five compatible tails appended to `ISketchHost` after
+     * `readInkChunk` (`insertPage`, `deletePage`, `pageContent`: the sketch face inserts and deletes
+     * pages exactly as the notebook does, the user's amendment to decision 7; then `undoPage` and
+     * `redoPage`, his follow-up the same day: the face's own undo/redo gestures reverse one, so
+     * nobody has to leave for the notebook to take back a delete), behind the METHOD
+     * floor [SketchContract.MIN_API_VERSION_FOR_SKETCH_PAGES]. The arc-39 shape — a **host-side**
+     * stub's tail, where the number an extension declares is what it requires of the host — so a
+     * screen that calls transaction codes 7–11 declares 18 and never binds a 17 host.
+     * `MIN_API_VERSIONS` is untouched, [SketchContract.MIN_API_VERSION_FOR_SKETCH] stays 17, no
+     * door vanishes, and only `:ext-sketch` redeclares. Not an eleventh point.
      */
-    const val API_VERSION: Int = 17
+    const val API_VERSION: Int = 18
 
     /**
      * The floor for a service on a **store-taking** point (arc 22 / X1): the host accepts such a

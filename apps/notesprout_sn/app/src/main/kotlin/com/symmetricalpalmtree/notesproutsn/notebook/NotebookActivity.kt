@@ -1058,6 +1058,26 @@ class NotebookActivity : AppCompatActivity() {
             // The document editor's gate, shared — see the field's doc.
             alive = { !documentWritesClosed },
             sessionOpen = { ::session.isInitialized && session.isOpen },
+            // K5b: a page the FACE inserted or deleted is the notebook's own structural edit — it
+            // goes on the notebook's undo stack, so the notebook's undo reverses it after Show
+            // pages exactly as if `doInsert` / `doDelete` had made it. Arrives on a Binder thread
+            // and is posted, never awaited: the `.soil` write has already happened and a Binder
+            // transaction must not wait on this screen's main thread.
+            onStructural = { snap ->
+                // runOnUiThread, not `binding.root.post`: a posted Runnable on a detached view can
+                // be dropped, and this screen's view IS detached for the life of the face.
+                runOnUiThread {
+                    if (isFinishing || isDestroyed || !opened || closing) return@runOnUiThread
+                    undo.record(Action.Page(snap))
+                    noteSync.markStructural()   // arc 42: every page's ordinal may have moved
+                }
+            },
+            // K5b, the user's follow-up the same day: the face's own undo gesture reverses one of
+            // those, so nobody has to come back here to take back a delete. The `.soil` has already
+            // been reconciled by the hook; what is left is to keep THIS stack saying the same thing,
+            // by moving the very entry `onStructural` recorded across to the redo side.
+            onStructuralUndone = { snap -> moveStructural(snap, undone = true) },
+            onStructuralRedone = { snap -> moveStructural(snap, undone = false) },
         )
         // Before the reconnect below, and before anything can ask for state: a host killed behind
         // the face must come back pointing at the page the face is showing.
@@ -1900,6 +1920,9 @@ class NotebookActivity : AppCompatActivity() {
     private fun sketchShowingEnded(resultCode: Int) {
         val endedOn = sketchHooks.targetPageId
         if (endedOn != null) lastFaceEndedOn = endedOn
+        // K5b: a face that inserted or deleted a page changed the list under the canvas — count,
+        // ordinals, and possibly the displayed page itself. Read BEFORE `resetTarget` clears it.
+        val structuralEdit = sketchHooks.structuralChanged
         sketchHooks.resetTarget()
         if (SketchRouting.parkClose(opened)) {
             // Nothing to act on yet — see [FaceRouting.parkClose]. openSession re-decides it.
@@ -1909,7 +1932,12 @@ class NotebookActivity : AppCompatActivity() {
         when (SketchRouting.closeDecision(isSketchNotebook(), canvasShown, resultCode)) {
             // Decision 7: the notebook follows the face to the page it ended on.
             FaceRouting.Close.CATCH_UP ->
-                if (endedOn != null && endedOn != displayedPageId) runPageOp { refreshToPage(endedOn) }
+                // The same-page shortcut is deliberately skipped after a structural edit: the paper
+                // may be showing the right page and still be showing it wrongly (a stale pager, a
+                // stale Contents) — or be showing a page that is no longer there at all.
+                if (endedOn != null && (structuralEdit || endedOn != displayedPageId)) {
+                    runPageOp { catchUpTo(endedOn) }
+                }
             FaceRouting.Close.LOAD_CANVAS -> {
                 // The box goes back up for a load the user asked for and cannot see the cost of.
                 binding.openingOverlay.root.visibility = View.VISIBLE
@@ -1917,6 +1945,54 @@ class NotebookActivity : AppCompatActivity() {
             }
             FaceRouting.Close.SEAL_TO_LIBRARY -> close()
         }
+    }
+
+    /**
+     * The face replayed a page insert or delete: move the entry that recorded it across this
+     * screen's stack, so the notebook's own undo history says exactly what the file now says (K5b).
+     *
+     * **The entry must be on top.** The canvas is released for the whole life of the face and this
+     * screen records nothing while it is up, so the only entries reaching this stack during a
+     * showing are the face's own structural ones — in order, and the face replays them newest-first
+     * like any history. The post that recorded it and the post that moves it are both
+     * `runOnUiThread`, and posts to Main run in order, so the record has always landed by the time
+     * this runs.
+     *
+     * If it is somehow **not** on top, the honest thing is to put back what was popped and say so:
+     * the `.soil` is already reconciled and this stack is a step behind, which a log line can be
+     * read against later — where silently moving the wrong entry would make the next undo undo
+     * something the person never asked about.
+     */
+    private fun moveStructural(snapshot: NotebookSession.Structural, undone: Boolean) {
+        runOnUiThread {
+            if (isFinishing || isDestroyed || !opened || closing) return@runOnUiThread
+            val top = if (undone) undo.popUndo() else undo.popRedo()
+            when {
+                top is Action.Page && top.snapshot == snapshot ->
+                    if (undone) undo.pushRedo(top) else undo.pushUndo(top)
+                top != null -> {
+                    if (undone) undo.pushUndo(top) else undo.pushRedo(top)
+                    Log.w(TAG, "the sketch face replayed a page edit that is not on top of this stack")
+                }
+                else -> Log.w(TAG, "the sketch face replayed a page edit this stack no longer holds")
+            }
+            noteSync.markStructural()   // arc 42: every page's ordinal may have moved back
+        }
+    }
+
+    /**
+     * The page the notebook catches up to when the sketch face closes (K5b).
+     *
+     * Since the face can delete pages, the page it ended on may not be in the notebook any more —
+     * and [refreshToPage] on an id that is not in the list does **nothing**, which would leave the
+     * paper sitting on a soft-deleted page. The session has already landed on the page a delete
+     * lands on, so that is the honest fallback and it is made explicit here rather than left to a
+     * silent no-op.
+     */
+    private suspend fun catchUpTo(pageId: String) {
+        val land = if (session.pages.any { it.id == pageId }) pageId else session.currentPage.id
+        if (land != pageId) Slog.d(TAG) { "the face's last page is gone — catching up to the notebook's own" }
+        refreshToPage(land)
     }
 
     /** Whether the open notebook is a sketch notebook (arc 43 / K4) — [isTextDocument]'s sibling,

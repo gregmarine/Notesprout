@@ -48,6 +48,21 @@ object SketchContract {
      */
     const val MIN_API_VERSION_FOR_SKETCH: Int = 17
 
+    /**
+     * The **method** floor for [ISketchHost.insertPage] / [ISketchHost.deletePage] /
+     * [ISketchHost.pageContent] / [ISketchHost.undoPage] / [ISketchHost.redoPage] (K5b,
+     * 2026-09-15 — the user's amendment to decision 7: the face inserts and deletes pages exactly
+     * as the notebook does, **and its own undo/redo gestures reverse one**). The number an
+     * extension declares is what it **requires of the host**, so a sketch screen that calls those
+     * five transaction codes declares 18 and is never discovered by a 17 host that would land them
+     * on nothing — the arc-39 `openReference` precedent, this seam's other host-side stub.
+     *
+     * **Not an action floor:** [MIN_API_VERSION_FOR_SKETCH] stays 17 and `MIN_API_VERSIONS` is
+     * untouched, so a screen declaring 17 still binds and still draws; it simply never turns a page
+     * into a new one. Only `:ext-sketch` redeclares.
+     */
+    const val MIN_API_VERSION_FOR_SKETCH_PAGES: Int = 18
+
     // ── The PNG on the wire ──────
 
     /** Most bytes in one chunk — 512 KiB, the store's inline carrier, comfortably under the ~1 MB
@@ -90,6 +105,26 @@ object SketchContract {
      */
     const val MAX_PAGE_KEY_CHARS: Int = DocumentContract.MAX_PAGE_KEY_CHARS
 
+    // ── The structural edit's name (K5b) ──────
+
+    /**
+     * Longest [SketchPageState.structuralToken] (chars) — the host's opaque name for **one page
+     * insert or delete**, minted by the host and carried in the face's history so its own undo /
+     * redo gestures can ask for that edit back ([ISketchHost.undoPage] / [ISketchHost.redoPage]).
+     *
+     * A token is a name, never a payload: **the snapshot never crosses.** What a page insert or a
+     * delete has to remember — the live page ids either side, the rows it soft-deleted, the page
+     * the notebook was on — is the notebook's own undo record and belongs on the notebook's own
+     * stack; the face only has to be able to say *which* edit it means. So the wire carries a short
+     * word and the host looks it up, which is also what keeps the two stacks provably in step.
+     *
+     * 64 is generous by an order of magnitude (the host mints `s1`, `s2`, …) and is here for the
+     * same reason [MAX_PAGE_KEY_CHARS] is: a bound on an unmarshalled string, checked before it can
+     * be held. Displayed nowhere, parsed by nobody, and **space-free** so a token is always one word
+     * in a log line.
+     */
+    const val MAX_STRUCTURAL_TOKEN_CHARS: Int = 64
+
     // ── requestPage arguments ──────
 
     /** [ISketchHost.requestPage] direction: the previous / next page. The document editor's values,
@@ -105,6 +140,19 @@ object SketchContract {
      *  A bitmap at the upper bound is 256 MB, which is the point: past here the number is wrong. */
     const val MIN_PAGE_PX: Int = 1
     const val MAX_PAGE_PX: Int = 8192
+
+    // ── What else a page is carrying (K5b) ──────
+
+    /**
+     * [ISketchHost.pageContent] bit: the page has **live bare content** — strokes, headings, links,
+     * text, shapes, sticky notes; everything the host's `liveErasableIds` counts, which is every
+     * descendant of the page **except** its sketch (the face is showing that one).
+     */
+    const val PAGE_HAS_INK: Int = 1
+
+    /** [ISketchHost.pageContent] bit: the page has a live `document` row — its authored Markdown,
+     *  which a page delete takes with it like everything else the page owns. */
+    const val PAGE_HAS_DOCUMENT: Int = 2
 
     // ── The screen's result ──────
 

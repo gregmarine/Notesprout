@@ -16,9 +16,11 @@ import android.os.Parcelable
  * untrusted-inward side here exactly as the host is for a descriptor.
  *
  * Wire form: `String pageKey · int pageIndex · int pageCount · int width · int height ·
- * int sketchBytes · int sketchChunks`. A future field is a compatible tail — the state is the
- * reply's whole payload, so a reader stops after the fields it knows and an old-shape parcel simply
- * runs out ([DocumentPageState.seeded]'s rule).
+ * int sketchBytes · int sketchChunks · String structuralToken (the K5b tail)`. A future field is a
+ * compatible tail — the state is the reply's whole payload, so a reader stops after the fields it
+ * knows and an old-shape parcel simply runs out ([DocumentPageState.seeded]'s rule, and exactly how
+ * [structuralToken] reads: an exhausted parcel answers `readString()` **null**, which becomes the
+ * empty token — precisely what a K5-shape answer meant).
  *
  * **[sketchChunks] is derivable from [sketchBytes] and both are carried anyway.** The count is what
  * the extension loops on and the byte total is what it budgets against, so each is read directly
@@ -41,6 +43,17 @@ class SketchPageState(
     val sketchBytes: Int,
     /** How many [ISketchHost.readSketchChunk] calls serve it — always ≥ 1 ([ByteChunks]' rule). */
     val sketchChunks: Int,
+    /**
+     * K5b's compatible tail: the host's opaque name for the page insert or delete that produced
+     * this answer, or **""** when the answer is not one ([ISketchHost.current],
+     * [ISketchHost.requestPage], and the two replays themselves, which name an edit rather than
+     * make one).
+     *
+     * The face keeps it in its history and hands it back at [ISketchHost.undoPage] /
+     * [ISketchHost.redoPage] — see [SketchContract.MAX_STRUCTURAL_TOKEN_CHARS] for why a *name*
+     * crosses and the snapshot never does.
+     */
+    val structuralToken: String = "",
 ) : Parcelable {
 
     init {
@@ -66,6 +79,12 @@ class SketchPageState(
         require(sketchChunks == chunksFor(sketchBytes)) {
             "sketchChunks $sketchChunks does not match $sketchBytes bytes"
         }
+        require(structuralToken.length <= SketchContract.MAX_STRUCTURAL_TOKEN_CHARS) {
+            "structuralToken length ${structuralToken.length} > ${SketchContract.MAX_STRUCTURAL_TOKEN_CHARS}"
+        }
+        // A SPACE — the literal ' ', not NUL. A token is one word in a log line and nothing else;
+        // it is never a path and never displayed, so this is the whole of what it must not carry.
+        require(' ' !in structuralToken) { "structuralToken carries a space" }
     }
 
     /** Whether the page carries a sketch at all — the screen's "start from blank paper" test. */
@@ -79,6 +98,7 @@ class SketchPageState(
         dest.writeInt(height)
         dest.writeInt(sketchBytes)
         dest.writeInt(sketchChunks)
+        dest.writeString(structuralToken)   // LAST — the tail, so an older reader simply stops here
     }
 
     override fun describeContents(): Int = 0
@@ -96,6 +116,9 @@ class SketchPageState(
             height = parcel.readInt(),
             sketchBytes = parcel.readInt(),
             sketchChunks = parcel.readInt(),
+            // An exhausted parcel answers null here (a K5-shape reply has no tail) — the empty
+            // token, which is what "this answer is not a structural edit" has always meant.
+            structuralToken = parcel.readString() ?: "",
         )
 
         @JvmField

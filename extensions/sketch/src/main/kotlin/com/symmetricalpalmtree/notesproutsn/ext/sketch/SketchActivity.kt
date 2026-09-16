@@ -66,15 +66,25 @@ import kotlinx.coroutines.withContext
  *   composites each mark into one page-sized image at pen-up and drops the stroke, so
  *   `onStrokeCommitted` still fires and is **deliberately ignored** — storing that stroke would be
  *   storing a row for something that is already pixels.
- * - **Undo is pixels.** The before-image of everything one contact changed is read on a 64 px grid
- *   ([RasterTiles]) between `onRasterWillChange` and `onPenLifted`, and taken back with
- *   `swapPageRaster`, which leaves the arrays holding the other side — so one entry is its own redo.
- *   The history is bounded by **bytes** as well as by count ([SketchEdit.UNDO_BUDGET_BYTES]).
+ * - **Undo is pixels — and, since K5b, one page.** The before-image of everything one contact
+ *   changed is read on a 64 px grid ([RasterTiles]) between `onRasterWillChange` and `onPenLifted`,
+ *   and taken back with `swapPageRaster`, which leaves the arrays holding the other side — so one
+ *   entry is its own redo. The history is bounded by **bytes** as well as by count
+ *   ([SketchEdit.UNDO_BUDGET_BYTES]). The one entry that holds no pixels is a page insert or delete
+ *   ([SketchEdit.Structural]): it holds the host's *name* for that edit, and replaying it is a
+ *   Binder call that runs the notebook's own undo arm ([applyStructural]).
  * - **Undo and redo are gestures only** (decision 12): the two- and three-finger stationary
  *   double-taps every SN paper screen has. No arrows — an arrow that cannot be redrawn when its
  *   state changes (which is every moment the pen is armed on this panel) is an arrow that lies.
- * - **The screen turns its own pages** (decision 7) and the notebook catches up when it closes. At
- *   either edge the host answers the same page and the screen stays put, silently ([PageTurn]).
+ * - **The screen turns, inserts and deletes its own pages** (decision 7, as the user amended it on
+ *   2026-09-15 — K5b) and the notebook catches up when it closes. At either edge of a *turn* the
+ *   host answers the same page and the screen stays put, silently ([PageTurn]); a swipe past the
+ *   **last** page makes one instead, and a two-finger swipe makes one either side, exactly as the
+ *   notebook and the Scratch Pad do. An insert or a delete is **the notebook's** structural edit —
+ *   the snapshot that makes it reversible goes on the notebook's undo stack, never on this one —
+ *   while this screen's *pixel* history is re-indexed around it ([UndoRedoStack.remap]) and keeps a
+ *   name for it, so **this screen's own undo gesture reverses a page too** (the user's follow-up
+ *   decision, 2026-09-15: nobody should have to go back to the notebook to take back a delete).
  * - **Plain white paper, always** (decision 10): no template ever crosses the seam.
  *
  * ## Frame silence
@@ -322,20 +332,185 @@ class SketchActivity : PaperScreenActivity() {
      * **At the edge the host answers the same page** and the screen stays put: no dialog, no toast,
      * and the arrows never disable.
      */
-    private fun turnPage(direction: Int) = runPageOp {
-        val from = currentPage ?: return@runPageOp
+    private fun turnPage(direction: Int) = runPageOp { turnPageNow(direction) }
+
+    /** [turnPage]'s body, already inside the page-op lock — so the swipe-past-the-last-page gesture
+     *  can decide between a turn and an insert without taking the lock twice. */
+    private suspend fun turnPageNow(direction: Int) {
+        val from = currentPage ?: return
         if (!saver.flushAndAwait()) Log.w(TAG, "the page could not be saved before the turn; its pixels are parked")
         val to = callHost { it.requestPage(direction) }.getOrElse {
             Log.w(TAG, "the host would not turn the page: ${it.javaClass.simpleName}")
             hostGone()
-            return@runPageOp
+            return
         }
         if (PageTurn.isEdge(from.pageKey, to.pageKey)) {
             Slog.d(TAG) { "page turn refused at the edge (page ${from.pageIndex + 1}/${from.pageCount})" }
-            return@runPageOp
+            return
         }
         loadPage(to, firstLoad = false)
         Slog.d(TAG) { "turned to page ${to.pageIndex + 1}/${to.pageCount} (${to.sketchBytes} B)" }
+    }
+
+    // ── Page insert and delete (K5b) ────────────────────────────────────
+
+    /**
+     * Ask the host to make a page on the side [direction] names, and land on it.
+     *
+     * **This page's pixels go first**, exactly as a turn flushes them and for the same reason: the
+     * host's read window is about to move, and a save left in flight would land on the page being
+     * left.
+     *
+     * The insert is the **notebook's** structural edit — the host records the snapshot that makes it
+     * reversible on the notebook's own undo stack — but this screen's history gains a *name* for it
+     * ([rememberStructural]), so the undo gesture here reverses it too.
+     *
+     * The history also needs the **arithmetic**: a page inserted at position `p` pushes every later
+     * page one along, and every entry recorded against one of those pages is now a page out of step
+     * with the replay's walk ([PageTurn.reindexAfterInsert]).
+     */
+    private suspend fun insertPageNow(direction: Int) {
+        if (currentPage == null) return
+        if (!saver.flushAndAwait()) Log.w(TAG, "the page could not be saved before the insert; its pixels are parked")
+        val to = callHost { it.insertPage(direction) }.getOrElse {
+            Log.w(TAG, "the host would not insert a page: ${it.javaClass.simpleName}")
+            showProblem(R.string.sketch_page_failed_title, R.string.sketch_page_failed_body)
+            return
+        }
+        val at = to.pageIndex
+        undo.remap { it.withIndex(PageTurn.reindexAfterInsert(it.pageIndex, at)) }
+        // Recorded AFTER the re-index, so the entry is never shifted by its own insert — and
+        // through `record`, which clears the redo side: a new edit forks the history here exactly
+        // as it does on the host's ledger, and the two must fork together.
+        rememberStructural(SketchEdit.PageInserted(to.structuralToken, to.pageKey, at), to)
+        loadPage(to, firstLoad = false)
+        Slog.d(TAG) { "inserted page ${to.pageIndex + 1}/${to.pageCount}" }
+    }
+
+    /**
+     * Ask the host to delete the page on the glass, and land on whatever it answers with.
+     *
+     * **The doomed page IS flushed first** — which K5b's first half did not do, and the second half
+     * changes deliberately. While a delete could only be taken back from the notebook, encoding a
+     * page image for a row about to be soft-deleted was work for nothing. Now the same gesture that
+     * deletes the page can put it back, and what comes back is whatever was last **saved**: the save
+     * is debounced by seconds, so a mark made shortly before the long-press would otherwise be the
+     * one thing the undo could not return. A few hundred milliseconds on a path the person has just
+     * spent a dialog on is the cheaper side of that trade. A flush that fails parks its bytes and the
+     * delete goes ahead, exactly as a turn's does.
+     *
+     * After the flush the timers come down and the page is marked clean, so no debounced save can
+     * fire into the gap. A push already in the air when the row goes cannot be prevented from
+     * here: it arrives at a host that no longer has the page and is refused with
+     * `IllegalArgumentException("Unknown page")`, which [SketchSaver] parks. `end()` re-pushes the
+     * park once, is refused again, and drops it with a line — which is correct: those pixels were
+     * for a page the person deleted. The park is cleared here for the ordinary case, where something
+     * was already sitting in it.
+     *
+     * Deleting the notebook's **only** page answers a fresh blank page (the session's own rule) and
+     * this simply loads whatever comes back.
+     */
+    private suspend fun deletePageNow() {
+        val here = currentPage ?: return
+        val gone = here.pageKey
+        val at = here.pageIndex
+        if (!saver.flushAndAwait()) Log.w(TAG, "the page could not be saved before the delete; its pixels are parked")
+        saver.cancelTimers()
+        saver.markClean()
+        val to = callHost { it.deletePage(gone) }.getOrElse {
+            Log.w(TAG, "the host would not delete the page: ${it.javaClass.simpleName}")
+            showProblem(R.string.sketch_page_failed_title, R.string.sketch_page_failed_body)
+            return
+        }
+        // Whatever was owed for the page that has gone is owed no longer.
+        SketchSession.pending.clear(gone)
+        undo.remap(dropPixelsOf(gone, at))
+        // The page can be asked back for from here (K5b's second half) — its entry names the host's
+        // record of the delete, and the host still holds it.
+        rememberStructural(SketchEdit.PageDeleted(to.structuralToken, gone, at), to)
+        loadPage(to, firstLoad = false)
+        Slog.d(TAG) { "deleted a page; now page ${to.pageIndex + 1}/${to.pageCount} (${to.sketchBytes} B)" }
+    }
+
+    /**
+     * Put a structural edit into this screen's history so its own undo gesture can reach it (K5b).
+     *
+     * The entry is only a **name** for the edit the host made and recorded on the notebook's own
+     * stack ([SketchEdit.Structural]); a host that minted no name for it is one this screen cannot
+     * ask to replay it, so nothing is recorded and the notebook's own undo is the only way back —
+     * which is where it was before this half of K5b, and is said out loud rather than left as an
+     * entry that would silently fail at the gesture.
+     */
+    private fun rememberStructural(edit: SketchEdit.Structural, landedOn: SketchPageState) {
+        if (edit.token.isEmpty()) {
+            Log.w(TAG, "the host named no page edit; it can only be undone from the notebook")
+            return
+        }
+        undo.record(edit)
+        Slog.d(TAG) { "page history: ${edit.javaClass.simpleName} at ${landedOn.pageIndex + 1}/${landedOn.pageCount}" }
+    }
+
+    /**
+     * The history's re-index for a page that has **gone** — deleted, or an insert taken back (K5b).
+     *
+     * Two rules in one pass, and the difference between them is the whole care here:
+     *
+     * - **Pixel entries for that page are dropped, by KEY.** Their before-images belong to a row
+     *   that is no longer on the paper, and the key is the only thing that certainly names the page
+     *   that went (a recorded index can be a step stale). Their page may come back — but its pixels
+     *   come back with it, out of the `.soil`, which is the copy that matters.
+     * - **Structural entries are never dropped, not even the ones naming that same page.** They
+     *   mirror the notebook's own stack one for one, and dropping one out of the middle would leave
+     *   the two histories out of step — so "insert a page, then delete it" keeps both entries, and
+     *   undoing twice does exactly what it says: the page comes back, then it goes again.
+     */
+    private fun dropPixelsOf(gone: String, at: Int): (SketchEdit) -> SketchEdit? = { edit ->
+        if (edit is SketchEdit.RasterChanged && edit.pageKey == gone) null
+        else edit.withIndex(PageTurn.reindexAfterDelete(edit.pageIndex, at))
+    }
+
+    /**
+     * The delete door — a one-finger long-press on the paper, the Scratch Pad's shape exactly: **one
+     * question rather than a one-row sheet**, because this screen has a single page action and a
+     * sheet whose only row leads to a confirm would be two taps for one decision.
+     *
+     * The body is **content-aware**: the host is asked what else the page is carrying
+     * ([ISketchHost.pageContent]) and the dialog names only that. A page with nothing on it but the
+     * sketch gets no body at all — the user's call, and the right one: the sketch is on the glass in
+     * front of the person about to delete it, so warning them about it would be explaining the
+     * obvious while the real warning (handwriting they cannot see from here, a document they cannot
+     * see at all) is the thing worth saying.
+     */
+    private fun confirmDeletePage() {
+        if (!opened || closing) return
+        // Ungated releaseRender() is safe here only because the long-press fired through
+        // PageGestures' own gate: it never arms while the pen is active and re-checks at fire.
+        paper.releaseRender()
+        runPageOp { askAboutDelete() }
+    }
+
+    private suspend fun askAboutDelete() {
+        val here = currentPage ?: return
+        val bits = callHost { it.pageContent(here.pageKey) }.getOrElse {
+            Log.w(TAG, "the page's content could not be read: ${it.javaClass.simpleName}")
+            hostGone()
+            return
+        }
+        if (isFinishing || isDestroyed || closing) return
+        val ink = bits and SketchContract.PAGE_HAS_INK != 0
+        val document = bits and SketchContract.PAGE_HAS_DOCUMENT != 0
+        val body = when {
+            ink && document -> R.string.delete_page_body_both
+            ink -> R.string.delete_page_body_ink
+            document -> R.string.delete_page_body_document
+            else -> 0
+        }
+        val builder = AlertDialog.Builder(this)
+            .setTitle(R.string.delete_page_title)
+            .setPositiveButton(R.string.delete_confirm) { _, _ -> runPageOp { deletePageNow() } }
+            .setNegativeButton(R.string.cancel, null)
+        if (body != 0) builder.setMessage(body)
+        Dialogs.style(builder.create()).show()
     }
 
     // ── g-paper → the page ───────────────────────────────────────────────────
@@ -412,15 +587,28 @@ class SketchActivity : PaperScreenActivity() {
     // ── Gestures ─────────────────────────────────────────────────────────────
 
     private val gestureListener = object : PageGestures.Listener {
-        override fun onFlipNext() = turnPage(SketchContract.PAGE_NEXT)
+        override fun onFlipNext() = runPageOp {
+            // Swiping past the last page makes one — the notebook grows where you draw (K5b, the
+            // notebook's and the pad's own rule). The count comes from the host's last answer, and
+            // the host is asked either way, so a stale count costs one extra Binder call at worst.
+            val here = currentPage ?: return@runPageOp
+            if (here.pageIndex < here.pageCount - 1) turnPageNow(SketchContract.PAGE_NEXT)
+            else insertPageNow(SketchContract.PAGE_NEXT)
+        }
         override fun onFlipPrevious() = turnPage(SketchContract.PAGE_PREV)
+        // K5b: a two-finger swipe makes a page on the side it went — the notebook's gesture, on the
+        // notebook's pages, recorded on the notebook's undo stack.
+        override fun onInsertAfter() = runPageOp { insertPageNow(SketchContract.PAGE_NEXT) }
+        override fun onInsertBefore() = runPageOp { insertPageNow(SketchContract.PAGE_PREV) }
         override fun onUndo() = runPageOp { doReplay(undoing = true) }
         override fun onRedo() = runPageOp { doReplay(undoing = false) }
+        // K5b: the long-press asks; it never acts — the pad's shape (one question, not a one-row
+        // sheet), with a body that names what else goes with the page.
+        override fun onPageSheetRequested() = confirmDeletePage()
         // Arc 33: a finger double-tap hides / shows the chrome. Nothing on this surface answers a
         // single tap, so there is no collision rule here.
         override fun onFingerDoubleTap(x: Float, y: Float) = toggleChrome()
-        // Everything else stays the no-op default: there is no page insert or delete from this face
-        // (decision 7), no Contents, no trail, no selection.
+        // Everything else stays the no-op default: no Contents, no trail, no selection.
     }
 
     // ── Undo and redo ────────────────────────────────────────────────────────
@@ -451,11 +639,18 @@ class SketchActivity : PaperScreenActivity() {
         val edit = (if (undoing) undo.popUndo() else undo.popRedo()) ?: return
         val generation = undo.generation
         val applied = try {
-            applyEdit(edit as SketchEdit.RasterChanged, generation, undoing)
+            when (edit) {
+                // Pixels: swapped here, on this screen, with nothing crossing the seam.
+                is SketchEdit.RasterChanged -> applyEdit(edit, generation, undoing)
+                // A page: the host's edit and the host's replay — this screen only names it (K5b).
+                is SketchEdit.Structural -> applyStructural(edit, generation, undoing)
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
             // Failed mid-replay: put the entry back so the history never silently loses a step.
+            // **The one put-back path**, for both kinds — a replay that cannot land throws rather
+            // than restoring the entry itself, so there is exactly one line that decides this.
             if (undoing) undo.pushUndo(edit) else undo.pushRedo(edit)
             throw t
         }
@@ -487,6 +682,80 @@ class SketchActivity : PaperScreenActivity() {
         saver.markDirty()
         saver.schedule()
         Slog.d(TAG) { "${if (undoing) "undo" else "redo"}: ${edit.tiles.size} tiles swapped" }
+        return true
+    }
+
+    /**
+     * Take back — or put back — one **page** insert or delete (K5b, the user's follow-up decision of
+     * 2026-09-15: his own undo gesture on this screen has to reverse a page delete, so he never has
+     * to go back to the notebook to undo one).
+     *
+     * Nothing is swapped here. The entry is a name for an edit the **host** made and recorded on the
+     * notebook's own undo stack, so the replay is a Binder call that runs the notebook's own undo
+     * arm — the page comes back with its handwriting, its document and its sketch, at the position
+     * it had — and the host moves its own stack in step. One history, seen from two screens.
+     *
+     * The order at the top is an ordinary turn's, because that is what this is about to be:
+     *
+     * - **This page's pixels go first.** The window is about to move to another page, and a save
+     *   left in flight would land on the page being left. A flush that fails parks its bytes and the
+     *   replay goes ahead rather than trapping the hand.
+     * - **The pen-idle gate is waited on**, and a mark that landed while it waited makes the replay
+     *   something the person did not ask for — so the entry goes back **beneath** what landed
+     *   ([UndoRedoStack.pushUndoBeneath]) and the gesture simply has to be repeated. [applyEdit]'s
+     *   rule exactly, for the same reason and in the same words.
+     *
+     * A token the host no longer knows (the showing was rebuilt underneath us, or the ledger's bound
+     * let the oldest edit go) is an `IllegalArgumentException` and **drops the entry**: this screen
+     * cannot name that edit any more, and the notebook's own undo still can. Anything else is a real
+     * failure — it is said in a dialog and thrown, so [doReplay]'s one catch puts the entry back.
+     */
+    private suspend fun applyStructural(edit: SketchEdit.Structural, generation: Int, undoing: Boolean): Boolean {
+        if (currentPage == null) return false
+        if (!saver.flushAndAwait()) Log.w(TAG, "the page could not be saved before the page replay; its pixels are parked")
+        paper.awaitPenIdle()
+        if (isFinishing || isDestroyed || closing) return false
+        if (undo.generation != generation) {
+            undo.pushUndoBeneath(edit, generation)
+            Slog.d(TAG) { "a mark landed while the page replay waited for the pen; the entry was put back beneath it" }
+            return false
+        }
+        val to = callHost { if (undoing) it.undoPage(edit.token) else it.redoPage(edit.token) }.getOrElse { t ->
+            if (t is IllegalArgumentException) {
+                Log.w(TAG, "the host no longer knows that page edit; the entry was dropped")
+                return false
+            }
+            showProblem(R.string.sketch_page_failed_title, R.string.sketch_page_failed_body)
+            throw t
+        }
+        // Whether the page this entry is about is on the paper afterwards decides the arithmetic:
+        // undoing a delete and redoing an insert bring it back, the other two take it away.
+        //
+        // **The entry's own index is the position, in both directions** — deliberately, rather than
+        // the host's answer in the one direction that offers one. The two are the same number when
+        // nothing has drifted, and taking it from one place is what makes an undo and the redo after
+        // it exact inverses ([PageTurn.reindexAfterInsert] then `reindexAfterDelete` at the same
+        // position is the identity): an entry re-indexed by two different numbers would leave the
+        // history a page out after a round trip. The entry being replayed is already off the stack,
+        // so it is never shifted by its own position.
+        //
+        // **A replay never drops pixel entries — only a fresh delete does** ([dropPixelsOf] is the
+        // delete door's). Undoing an insert takes the page away, but every mark made on it since is
+        // sitting on the REDO side, one step above this entry, waiting for the redo that brings the
+        // page back — dropping them here is what lost the drawing in "insert, draw, undo, undo,
+        // redo, redo" (the user's Nomad walk, 2026-09-15). And redoing a delete has nothing left to
+        // drop: the delete itself dropped them, and a mark made after its undo clears the redo side
+        // the delete entry was on. An entry for a page that is not on the paper cannot be replayed
+        // in any case — its walk fails and drops it then, with a line.
+        val at = edit.pageIndex
+        val back = if (undoing) edit is SketchEdit.PageDeleted else edit is SketchEdit.PageInserted
+        if (back) undo.remap { it.withIndex(PageTurn.reindexAfterInsert(it.pageIndex, at)) }
+        else undo.remap { it.withIndex(PageTurn.reindexAfterDelete(it.pageIndex, at)) }
+        loadPage(to, firstLoad = false)
+        Slog.d(TAG) {
+            "${if (undoing) "undo" else "redo"} of ${edit.javaClass.simpleName}: " +
+                "now page ${to.pageIndex + 1}/${to.pageCount} (${to.sketchBytes} B)"
+        }
         return true
     }
 

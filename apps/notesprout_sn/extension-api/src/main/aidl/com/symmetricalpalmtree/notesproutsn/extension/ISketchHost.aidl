@@ -70,4 +70,88 @@ interface ISketchHost {
 
     /** One chunk of the ink window, 0-based; outside 0..the count requestInk answered is refused. */
     List<WireStroke> readInkChunk(int chunkIndex);
+
+    /**
+     * K5b (2026-09-15) -- a compatible tail (the seventh method, transaction code 7) behind the
+     * extension-side declaration floor SketchContract.MIN_API_VERSION_FOR_SKETCH_PAGES (18):
+     * insert a blank page next to THE FACE'S TARGET -- not the notebook's displayed page -- on the
+     * side SketchContract.PAGE_PREV / PAGE_NEXT names, and land the target on it.
+     *
+     * The host inserts it exactly as its own notebook does: the new page inherits the target page's
+     * template and authored size, the insert is ONE entry on the NOTEBOOK'S OWN undo stack (so the
+     * notebook's undo takes it back after Show pages, as if the notebook had made it), and the read
+     * window is loaded with the new page -- empty, because a page that did not exist a moment ago
+     * has no pixels. The answer is the new page's state, and its structuralToken is the host's name
+     * for this edit -- the face keeps it and hands it back at undoPage().
+     *
+     * It is safe for an extension to call this: the number an extension declares is what it
+     * REQUIRES OF THE HOST, so an extension declaring 18 is only ever discovered by a host at
+     * >= 18 (the arc-39 openReference precedent, the first host-side-stub tail).
+     */
+    SketchPageState insertPage(int direction);
+
+    /**
+     * K5b -- a compatible tail (the eighth method, transaction code 8) behind the same floor:
+     * soft-delete the page [pageKey] names, which MUST be the face's current target
+     * (IllegalArgumentException otherwise -- pixels and pages can never be acted on at a distance).
+     *
+     * The host deletes it the notebook's way: the page and every live descendant it owns -- its
+     * strokes, its objects, its document AND its sketch -- go together, as ONE entry on the
+     * NOTEBOOK'S OWN undo stack. Deleting the only page of a notebook answers a FRESH BLANK page
+     * instead of an empty notebook (the session's own rule); otherwise the target lands on the page
+     * the notebook lands on. The read window is loaded with whatever that page is, and its state is
+     * the answer -- carrying the structuralToken that names this delete, so the face's own undo
+     * gesture can ask for the page back without the person having to leave for the notebook.
+     *
+     * The extension does NOT flush the doomed page first: its pixels are being deleted, and a save
+     * pushed into the gap would write a row that is soft-deleted a moment later. A push already in
+     * flight when the row goes is refused with IllegalArgumentException("Unknown page"), which is
+     * the same refusal any dead key gets.
+     */
+    SketchPageState deletePage(String pageKey);
+
+    /**
+     * K5b -- a compatible tail (the ninth method, transaction code 9) behind the same floor: what
+     * else the page [pageKey] names is carrying, as a bit set of SketchContract.PAGE_HAS_INK (bare
+     * strokes or objects) and SketchContract.PAGE_HAS_DOCUMENT (a live document row). ZERO means a
+     * page with nothing on it but its sketch.
+     *
+     * It exists so the delete confirm can NAME what goes with the page rather than warn about
+     * content that is not there. Any LIVE page of the open notebook may be asked (not only the
+     * target); a key naming a page the notebook no longer has is an IllegalArgumentException.
+     * The sketch itself is deliberately not a bit: the face is showing it.
+     */
+    int pageContent(String pageKey);
+
+    /**
+     * K5b (the user's follow-up decision, 2026-09-15) -- a compatible tail (the tenth method,
+     * transaction code 10) behind the same floor: TAKE BACK the page insert or delete [token]
+     * names, so the face's own undo gesture reverses one and nobody has to go back to the notebook
+     * to undo a delete.
+     *
+     * [token] is the structuralToken an insertPage() / deletePage() answer carried. The host looks
+     * up the snapshot it kept for that edit and replays it through exactly the arm the notebook's
+     * own undo runs -- the same reconcile, so a page comes back with its handwriting, its document
+     * and its sketch, at the position it had. It then takes that same edit off the NOTEBOOK'S undo
+     * stack and puts it on the notebook's redo stack, because the two histories are one history
+     * seen from two screens and they must stay in step.
+     *
+     * A token this host does not know (the edit was already undone, or the host died and came back)
+     * is an IllegalArgumentException: the face drops that entry and carries on. The answer is the
+     * state of the page the notebook lands on, with an EMPTY structuralToken -- a replay names an
+     * edit, it does not make one.
+     */
+    SketchPageState undoPage(String token);
+
+    /**
+     * K5b -- a compatible tail (the eleventh method, transaction code 11) behind the same floor:
+     * the mirror of undoPage(). PUT BACK the page insert or delete [token] names, through the arm
+     * the notebook's own redo runs, and move that edit back from the notebook's redo stack to its
+     * undo stack.
+     *
+     * Only a token undoPage() has taken back can be put back; anything else is an
+     * IllegalArgumentException, as it is there. The answer is the page the notebook lands on, with
+     * an empty structuralToken.
+     */
+    SketchPageState redoPage(String token);
 }
