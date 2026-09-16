@@ -569,8 +569,10 @@ class LibraryActivity : AppCompatActivity() {
                     if (standingForReplay()) bible.open()
                 }
                 // Not a shape this screen can produce — the editor only ever stands over a
-                // notebook — so it is dropped rather than guessed at.
+                // notebook — so it is dropped rather than guessed at. The sketch face is the same
+                // (arc 43 / K4): its door exists only inside a Sketch notebook.
                 Surface.DOCUMENT_EDITOR -> Slog.d(TAG) { "restore: library-level DOCUMENT_EDITOR dropped" }
+                Surface.SKETCH -> Slog.d(TAG) { "restore: library-level SKETCH dropped" }
                 Surface.NOTEBOOK -> Unit   // ReplayPlan never answers LibraryLevel(NOTEBOOK).
             }
         }

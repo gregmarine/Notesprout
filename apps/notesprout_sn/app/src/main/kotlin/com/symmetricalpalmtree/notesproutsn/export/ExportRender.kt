@@ -15,6 +15,8 @@ import com.symmetricalpalmtree.notesproutsn.crypto.KeyResolver
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilDao
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilDatabase
+import com.symmetricalpalmtree.notesproutsn.data.soil.SketchDao
+import com.symmetricalpalmtree.notesproutsn.data.soil.SketchRows
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilObjectEntity
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilSchema
 import com.symmetricalpalmtree.notesproutsn.data.template.BuiltInTemplates
@@ -23,6 +25,7 @@ import com.symmetricalpalmtree.notesproutsn.notebook.PageLabels
 import com.symmetricalpalmtree.notesproutsn.notebook.PagePreview
 import com.symmetricalpalmtree.notesproutsn.notebook.PageRaster
 import com.symmetricalpalmtree.notesproutsn.notebook.PageReads
+import com.symmetricalpalmtree.notesproutsn.notebook.SketchRaster
 import com.symmetricalpalmtree.notesproutsn.notebook.StickyRows
 import com.symmetricalpalmtree.notesproutsn.notebook.StrokeRows
 import kotlinx.coroutines.CancellationException
@@ -71,6 +74,15 @@ import java.io.IOException
  * [PageRaster]'s since arc 31 / HV2 — page-to-template wants the same picture, and one recipe with
  * two readers is the only way it stays the same picture. What stays here is the *bake*: the scope,
  * the plan, the endnotes, the one-page-at-a-time loop and the template held across pages.
+ *
+ * **Sketch pages (arc 43 / K7, decision 5).** A page that carries a raster sketch exports as
+ * **two** pages: the ink page as above, then the sketch on plain white paper immediately after it
+ * ([SketchRaster]). It is a second page rather than a layer because that is what the sketch is —
+ * a drawing *beside* the writing, on its own sheet, which the person can read, print or hand on
+ * without the notes over it — and because there is no honest way to flatten two pictures a person
+ * deliberately kept apart. Everything downstream counts **bundle** pages from there: the endnotes
+ * land after the last sketch, the progress line counts them, [PageBundle.MAX_PAGES] is measured
+ * against them, and the per-page delivery names them ([ExportNaming.PageName]).
  *
  * **Endnotes (arc 28 / D7).** For an exporter that reads the version-2 bundle, every sticky note
  * with content becomes one more page after the notebook's: its strokes on white at the note's
@@ -123,17 +135,19 @@ object ExportRender {
          *  else — a page bundle's size is deliberately **not** what the destination ends up
          *  holding (see [ExportVerification]).
          *
-         *  [pageTitles] is one entry per baked **notebook** page, in bundle order: the page's
-         *  topmost heading by the Contents rule ([PageLabels.titleOf]), or null when it has none
-         *  (arc 31 / HV1). It exists for the per-page delivery, which names every file after its
-         *  own page — read here because the bake already holds each page's content, and reading it
-         *  a second time would be a second full open. The endnote pages get **no entry**: a note is
-         *  not a page anyone named, and a per-page exporter never sees one (it declares bundle
-         *  version 1, so no endnote is planned at all). */
+         *  [pageNames] is one entry per baked **bundle** page, in bundle order: the page's number
+         *  in the notebook, its topmost heading by the Contents rule ([PageLabels.titleOf]) or null
+         *  when it has none (arc 31 / HV1), and whether it is that page's sketch (arc 43 / K7). It
+         *  exists for the per-page delivery, which names every file after its own page — read here
+         *  because the bake already holds each page's content, and reading it a second time would
+         *  be a second full open. It carries the page's *number* rather than leaning on its index
+         *  because a sketch page makes the two different things. The endnote pages get **no
+         *  entry**: a note is not a page anyone named, and a per-page exporter never sees one (it
+         *  declares bundle version 1, so no endnote is planned at all). */
         class Ready(
             val file: File,
             val bytes: Long,
-            val pageTitles: List<String?> = emptyList(),
+            val pageNames: List<ExportNaming.PageName> = emptyList(),
         ) : Outcome()
         class Failed(val problem: Problem) : Outcome()
     }
@@ -198,15 +212,23 @@ object ExportRender {
         ExportOpen.Guard.UNREADABLE -> Problem.UNREADABLE
     }
 
-    /** One page as the bake takes it: identity, its **own** pixel size, the paper under it, and
+    /** One page as the bake takes it: identity, its **own** pixel size, the paper under it,
      *  [number] — what the **notebook** calls this page (arc 34 / L15), which is its place in the
-     *  bundle only when the whole notebook is in scope. */
+     *  bundle only when the whole notebook is in scope and nothing is interleaved — and
+     *  [hasSketch], which says this page exports as two ([bundlePages], decision 5).
+     *
+     *  [hasSketch] is **planned, not discovered**: it comes from one blob-free query of the pages
+     *  that carry a sketch ([com.symmetricalpalmtree.notesproutsn.data.soil.SketchDao.pagesWithSketch]),
+     *  asked once per notebook before the first page is drawn, because the bundle has to declare
+     *  its page count in its header and a count that found out as it went would already have
+     *  written the wrong one. */
     class PageBake(
         val id: String,
         val widthPx: Int,
         val heightPx: Int,
         val templateId: String,
         val number: Int,
+        val hasSketch: Boolean = false,
     )
 
     /**
@@ -220,13 +242,55 @@ object ExportRender {
      * Null when any row carries no usable size: a page that cannot be drawn at its own size would
      * have to be guessed at or dropped, and a document silently missing a page is worse than one
      * that refuses out loud.
+     *
+     * [sketched] is the set of page ids carrying a live sketch (arc 43 / K7) — empty for every
+     * caller that has none to hand, which is why the whole interleaving can be reasoned about here
+     * without a DAO in sight.
      */
-    fun plan(scoped: List<ExportScope.ScopedPage>): List<PageBake>? = scoped.map { page ->
+    fun plan(
+        scoped: List<ExportScope.ScopedPage>,
+        sketched: Set<String> = emptySet(),
+    ): List<PageBake>? = scoped.map { page ->
         val row = page.row
         val width = (row.width ?: 0f).toInt()
         val height = (row.height ?: 0f).toInt()
         if (width < 1 || height < 1) return null
-        PageBake(row.id, width, height, row.refId.orEmpty(), page.number)
+        PageBake(row.id, width, height, row.refId.orEmpty(), page.number, row.id in sketched)
+    }
+
+    /** One page of the **bundle**: which of [plan]'s pages it comes from, and whether it is that
+     *  page's sketch rather than its ink. */
+    class BundlePage(val index: Int, val sketch: Boolean)
+
+    /**
+     * The bundle's pages for [pages] (arc 43 / K7, decision 5): each page's ink, then its sketch
+     * when it has one — page 1 ink, page 1 sketch, page 2 ink, … — and the endnotes after all of
+     * them. Pure, because every count downstream is derived from it: the header's declared page
+     * count, the cap check, the progress line's denominator and the endnotes' first page.
+     */
+    fun bundlePages(pages: List<PageBake>): List<BundlePage> {
+        val bundle = ArrayList<BundlePage>(pages.size)
+        pages.forEachIndexed { index, page ->
+            bundle += BundlePage(index, sketch = false)
+            if (page.hasSketch) bundle += BundlePage(index, sketch = true)
+        }
+        return bundle
+    }
+
+    /**
+     * Where each of [pages] lands in the bundle: the 1-based position of its **ink** page, which is
+     * its own number shifted by every sketch page before it. This is what a link addresses — the
+     * container numbers its own pages, and a sticky note's icon sits on the ink page, never on the
+     * sketch beside it.
+     */
+    fun bundlePositions(pages: List<PageBake>): List<Int> {
+        var at = 0
+        return pages.map { page ->
+            at += 1
+            val position = at
+            if (page.hasSketch) at += 1
+            position
+        }
     }
 
     /**
@@ -248,18 +312,25 @@ object ExportRender {
         val dao = db.dao()
         val scoped = ExportScope.pagesInScope(dao.childrenOfType(notebookId, SoilSchema.TYPE_PAGE), pageIds)
         if (scoped.isEmpty()) return Outcome.Failed(Problem.EMPTY)
+        // Which pages carry a sketch, asked once for the whole notebook and blob-free (arc 43 /
+        // K7): the ids only, never the megabytes, because this question is about the shape of the
+        // bundle and not yet about any pixels. A notebook with no sketches pays one indexed query.
+        val sketched = db.sketchDao().pagesWithSketch(notebookId).toHashSet()
         // Each refusal keeps its own Problem — routing either through the generic render catch
         // would blame memory or space for a data problem (the D3 review).
-        val pages = plan(scoped) ?: return Outcome.Failed(Problem.DAMAGED)
-        if (pages.size > PageBundle.MAX_PAGES) return Outcome.Failed(Problem.TOO_LONG)
+        val pages = plan(scoped, sketched) ?: return Outcome.Failed(Problem.DAMAGED)
+        // Every count from here is the BUNDLE's, not the notebook's: a sketch page is a page of
+        // the document like any other, and the container's cap is about what it holds.
+        val bundlePages = bundlePages(pages)
+        if (bundlePages.size > PageBundle.MAX_PAGES) return Outcome.Failed(Problem.TOO_LONG)
         // The endnotes are planned before the first page is drawn: the bundle declares its page
         // count and its links up front, and both include the notes (D7).
         val endnotes = if (bundleVersion >= PageBundle.VERSION) {
-            Endnotes.plan(endnoteSources(dao, pages), pages.size)
+            Endnotes.plan(endnoteSources(dao, pages), bundlePages.size)
         } else {
             Endnotes.Plan(emptyList(), emptyList())
         }
-        val total = pages.size + endnotes.notes.size
+        val total = bundlePages.size + endnotes.notes.size
         if (total > PageBundle.MAX_PAGES) return Outcome.Failed(Problem.TOO_LONG)
 
         val bundle = File(ExportArtifact.freshDir(context), "$notebookId.pages")
@@ -288,13 +359,24 @@ object ExportRender {
             runCatching { out.close() }
             throw e
         }
-        // One entry per notebook page, in bundle order — the per-page delivery's filenames (arc
-        // 31 / HV1). Filled from the content this bake already reads; never from a second open.
-        val pageTitles = ArrayList<String?>(pages.size)
+        // One entry per BUNDLE page, in its order — the per-page delivery's filenames (arc 31 /
+        // HV1, grown arc 43 / K7). Filled from the content this bake already reads; never from a
+        // second open.
+        val pageNames = ArrayList<ExportNaming.PageName>(bundlePages.size)
+        val sketches = db.sketchDao()
         try {
             bundleWriter.use { writer ->
-                pages.forEachIndexed { index, page ->
-                    progress(index + 1, total)
+                // The ink page's own heading, held for the sketch page that follows it: the two
+                // pages are one page of the notebook and are named after the same thing.
+                var title: String? = null
+                bundlePages.forEachIndexed { at, entry ->
+                    val page = pages[entry.index]
+                    progress(at + 1, total)
+                    if (entry.sketch) {
+                        writer.writePage(page.widthPx, page.heightPx, sketchImage(sketches, page))
+                        pageNames += ExportNaming.PageName(page.number, title, sketch = true)
+                        return@forEachIndexed
+                    }
                     // White ground is the *absence* of the decode, not a decoded bitmap thrown
                     // away: a template the page will not carry must not cost the page's worth of
                     // memory on the way past (the one-page-at-a-time rule cuts both ways).
@@ -305,7 +387,8 @@ object ExportRender {
                         template = PageRaster.decodeTemplate(dao, page.templateId)
                     }
                     val content = PageReads.content(dao, page.id)
-                    pageTitles += PageLabels.titleOf(content)
+                    title = PageLabels.titleOf(content)
+                    pageNames += ExportNaming.PageName(page.number, title)
                     val image = PageRaster.toWebp(
                         page.widthPx, page.heightPx, template, content, metrics.density, paints,
                     )
@@ -326,8 +409,41 @@ object ExportRender {
             template?.recycle()
         }
         val bytes = bundle.length()
-        Slog.d(TAG) { "rendered ${pages.size} page(s) + ${endnotes.notes.size} endnote(s) into $bytes bytes" }
-        return Outcome.Ready(bundle, bytes, pageTitles)
+        Slog.d(TAG) {
+            "rendered ${pages.size} page(s) + ${bundlePages.size - pages.size} sketch(es) + " +
+                "${endnotes.notes.size} endnote(s) into $bytes bytes"
+        }
+        return Outcome.Ready(bundle, bytes, pageNames)
+    }
+
+    /**
+     * [page]'s sketch, drawn — or a blank sheet of its size when the row is not there to draw.
+     *
+     * The blank is the honest answer, not a fallback dressed up as one: the bundle's header
+     * declared its page count before the first page was written, so a sketch that has gone missing
+     * between the plan and this line (the header guard refused the stored PNG, the row was cleared
+     * by another process, a page was resized) leaves a page that **must** be filled — a writer that
+     * simply skipped it would close short and the whole export would be refused as truncated. The
+     * alternative, reading every sketch's bytes up front to make the count exact, costs the whole
+     * notebook's pixels in memory at once, which is the one thing this render will not do.
+     *
+     * **The row is read here rather than through
+     * [com.symmetricalpalmtree.notesproutsn.data.soil.SketchRepository.get]**, which applies the
+     * same header guard but **soft-deletes** a row that fails it: a render must not mutate what it
+     * renders (rule 1 of this file), and an export is the last place a page's drawing should be
+     * dated out from. The guard itself is the shared one ([SketchRows]) — a PNG that is not exactly
+     * this page's size cannot be composited onto it, so it is refused here too, and left alone for
+     * the notebook screen to meet and deal with.
+     */
+    private suspend fun sketchImage(sketches: SketchDao, page: PageBake): ByteArray {
+        val png = sketches.sketchFor(page.id)?.let { SketchRows.pngBytes(it) }
+        if (png == null || !SketchRows.fitsPage(png, page.widthPx, page.heightPx)) {
+            // Ids and sizes, never pixels. Log.w rather than Slog.d: a declared page that came out
+            // blank is the sort of thing a person reports about a release build.
+            Log.w(TAG, "the sketch of ${page.id} is gone or does not fit — exporting a blank page")
+            return SketchRaster.blank(page.widthPx, page.heightPx)
+        }
+        return SketchRaster.toWebp(page.widthPx, page.heightPx, png)
     }
 
     /**
@@ -339,6 +455,10 @@ object ExportRender {
     internal suspend fun endnoteSources(dao: SoilDao, pages: List<PageBake>): List<Endnotes.Source> {
         val withContent = dao.stickyIdsWithContent().toHashSet()
         if (withContent.isEmpty()) return emptyList()
+        // Where each page's ink actually lands in the bundle — its index plus every sketch page
+        // before it (arc 43 / K7). A link that addressed the notebook's numbering would point one
+        // page short for every sketch above it.
+        val positions = bundlePositions(pages)
         val sources = ArrayList<Endnotes.Source>()
         pages.forEachIndexed { index, page ->
             val rows = ArrayList<SoilObjectEntity>(dao.stickiesOf(page.id))
@@ -350,7 +470,7 @@ object ExportRender {
                     stickyId = sticky.id,
                     // Bundle-relative for the link (the container addresses its own pages);
                     // notebook-relative for what the caption says (arc 34 / L15).
-                    fromPage = index + 1,
+                    fromPage = positions[index],
                     fromPageLabel = page.number,
                     iconL = sticky.x, iconT = sticky.y,
                     iconR = sticky.x + sticky.width, iconB = sticky.y + sticky.height,

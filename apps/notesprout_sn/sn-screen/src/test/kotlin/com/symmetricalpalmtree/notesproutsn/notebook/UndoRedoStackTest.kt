@@ -143,6 +143,127 @@ class UndoRedoStackTest {
         assertEquals(g1, s.generation)
     }
 
+    // ── The byte budget and the put-back-beneath rule (arc 43 / K2) ──────
+
+    /** A costed action set: [Act.Drew] is free (ids), [Heavy] holds pixels. */
+    private data class Heavy(val id: String, val bytes: Long) : Act {
+        override val pageId: String get() = "p"
+    }
+
+    private fun costed(budget: Long) =
+        UndoRedoStack<Act>(cost = { (it as? Heavy)?.bytes ?: 0L }, budgetBytes = budget)
+
+    @Test
+    fun `the default stack counts nothing and never evicts`() {
+        // Every screen that records ids is exactly what it was: no cost, no budget, no eviction.
+        val s = UndoRedoStack<Act>()
+        repeat(5) { s.record(drew("s$it")) }
+        assertEquals(0L, s.undoBytes)
+    }
+
+    @Test
+    fun `bytes are counted on record, pop, push and clear`() {
+        val s = costed(budget = 1_000)
+        s.record(Heavy("a", 100))
+        s.record(drew("free"))
+        s.record(Heavy("b", 250))
+        assertEquals(350L, s.undoBytes)
+        // A pop hands the entry to the caller and stops holding its bytes...
+        val b = s.popUndo()!!
+        assertEquals(100L, s.undoBytes)
+        // ...and a push back counts them again — a total that did not move would drift.
+        s.pushUndo(b)
+        assertEquals(350L, s.undoBytes)
+        s.clear()
+        assertEquals(0L, s.undoBytes)
+    }
+
+    @Test
+    fun `eviction drops the oldest costed entry and skips the free ones`() {
+        val s = costed(budget = 250)
+        s.record(Heavy("old", 100))
+        s.record(drew("free"))
+        s.record(Heavy("mid", 100))
+        assertEquals(200L, s.undoBytes)
+        // This one takes it over budget: the OLDEST costed entry goes, not the free one in between.
+        s.record(Heavy("new", 100))
+        assertEquals(200L, s.undoBytes)
+        val left = generateSequence { s.popUndo() }.toList()
+        assertEquals(listOf("new", "mid", "free"), left.map { (it as? Heavy)?.id ?: (it as Act.Drew).id })
+    }
+
+    @Test
+    fun `the newest entry is never evicted even alone over budget`() {
+        // A single entry over budget is the case where everything older has gone already. Dropping
+        // it would leave an undo that does nothing for the mark just made, which reads as broken.
+        val s = costed(budget = 10)
+        s.record(Heavy("only", 5_000))
+        assertTrue(s.canUndo())
+        assertEquals(5_000L, s.undoBytes)
+        s.record(Heavy("next", 5_000))
+        // The older one went; the newest stayed, over budget and on purpose.
+        assertEquals(5_000L, s.undoBytes)
+        assertEquals("next", (s.popUndo() as Heavy).id)
+        assertFalse(s.canUndo())
+    }
+
+    @Test
+    fun `pushUndoBeneath with nothing recorded since is a plain push on top`() {
+        val s = costed(budget = 10_000)
+        s.record(Heavy("a", 10))
+        val popped = s.popUndo()!!
+        val g = s.generation
+        // Nothing landed while the replay was in flight — the entry goes back where it came from.
+        s.pushUndoBeneath(popped, g)
+        assertEquals(10L, s.undoBytes)
+        assertSame(popped, s.popUndo())
+    }
+
+    @Test
+    fun `pushUndoBeneath puts the entry under what landed while the replay waited`() {
+        val s = costed(budget = 10_000)
+        val a = Heavy("a", 10)
+        s.record(a)
+        val popped = s.popUndo()!!
+        val g = s.generation
+        val fresh = Heavy("fresh", 20)
+        s.record(fresh)                    // a mark landed mid-replay
+        s.pushUndoBeneath(popped, g)
+        assertEquals(30L, s.undoBytes)
+        // The fresh mark is still the newest: the entry that never landed went underneath it.
+        assertSame(fresh, s.popUndo())
+        assertSame(popped, s.popUndo())
+    }
+
+    @Test
+    fun `pushUndoBeneath goes under two marks when two landed`() {
+        val s = costed(budget = 10_000)
+        s.record(Heavy("a", 10))
+        val popped = s.popUndo()!!
+        val g = s.generation
+        val first = Heavy("first", 1)
+        val second = Heavy("second", 2)
+        s.record(first)
+        s.record(second)
+        s.pushUndoBeneath(popped, g)
+        assertSame(second, s.popUndo())
+        assertSame(first, s.popUndo())
+        assertSame(popped, s.popUndo())
+    }
+
+    @Test
+    fun `pushUndoBeneath moves neither the generation nor the redo side`() {
+        // Nothing new happened (the entry never landed), so nothing forward became unreachable.
+        val s = costed(budget = 10_000)
+        s.record(Heavy("a", 10))
+        val popped = s.popUndo()!!
+        s.pushRedo(drew("kept"))
+        val g = s.generation
+        s.pushUndoBeneath(popped, g)
+        assertEquals(g, s.generation)
+        assertTrue(s.canRedo())
+    }
+
     @Test
     fun `the mid-replay protocol drops redo when an edit interleaves`() {
         // The activity's doUndo: pop, snapshot generation, replay, pushRedo only if unchanged.
@@ -154,5 +275,71 @@ class UndoRedoStackTest {
         if (s.generation == g) s.pushRedo(a)      // must NOT run
         assertFalse(s.canRedo())                  // record-clears-redo holds
         assertTrue(s.canUndo())                   // the fresh edit is still undoable
+    }
+
+    // ── remap ── the raster screen's re-index after a page insert or delete (arc 43 / K5b) ──────
+
+    @Test
+    fun `remap rewrites both sides and keeps each side's order`() {
+        val s = UndoRedoStack<Act>()
+        s.record(drew("a", page = "p1"))
+        s.record(drew("b", page = "p2"))
+        val undone = s.popUndo()!!
+        s.pushRedo(undone)                       // "b" now sits on the redo side
+        s.remap { (it as Act.Drew).copy(pageId = it.pageId + "!") }
+        assertEquals(Act.Drew("p1!", "a"), s.popUndo())
+        assertEquals(Act.Drew("p2!", "b"), s.popRedo())
+    }
+
+    @Test
+    fun `remap drops the entries it answers null for, on both sides`() {
+        val s = UndoRedoStack<Act>()
+        s.record(drew("keep", page = "p1"))
+        s.record(drew("gone", page = "dead"))
+        val undone = s.popUndo()!!
+        s.pushRedo(undone)
+        s.record(drew("alsoGone", page = "dead"))
+        // The raster screen's rule: the entries made on the page that went go with it, by page.
+        s.remap { if (it.pageId == "dead") null else it }
+        assertEquals(drew("keep", page = "p1"), s.popUndo())
+        assertNull(s.popUndo())
+        assertFalse(s.canRedo())
+    }
+
+    @Test
+    fun `remap recounts the undo bytes from what survived`() {
+        // The total cannot simply be adjusted: entries left, so it is counted again from the side.
+        val s = costed(budget = 10_000)
+        s.record(Heavy("a", 100))
+        s.record(Heavy("b", 30))
+        assertEquals(130L, s.undoBytes)
+        s.remap { if ((it as Heavy).id == "a") null else it }
+        assertEquals(30L, s.undoBytes)
+        s.remap { null }
+        assertEquals(0L, s.undoBytes)
+        assertFalse(s.canUndo())
+    }
+
+    @Test
+    fun `remap bumps the generation so a replay in flight cannot land blind`() {
+        // A replay snapshots the generation before it waits. Pages moving under it is exactly the
+        // kind of change it must notice, even though nothing was recorded.
+        val s = UndoRedoStack<Act>()
+        s.record(drew("a"))
+        val g = s.generation
+        s.remap { it }
+        assertTrue(s.generation > g)
+    }
+
+    @Test
+    fun `remap leaves the redo side reachable — the surviving entries are still true`() {
+        // Unlike `record`, a remap is not a fresh edit: nothing forward became unreachable, the
+        // entries merely sit at new indexes.
+        val s = UndoRedoStack<Act>()
+        s.record(drew("a"))
+        val undone = s.popUndo()!!
+        s.pushRedo(undone)
+        s.remap { it }
+        assertTrue(s.canRedo())
     }
 }

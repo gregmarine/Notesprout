@@ -11,13 +11,14 @@ import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.crypto.KeyResolver
 import com.symmetricalpalmtree.notesproutsn.data.clip.ClipEnvelope
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
-import com.symmetricalpalmtree.notesproutsn.data.index.NotebookFlags
+import com.symmetricalpalmtree.notesproutsn.data.index.NotebookKind
 import com.symmetricalpalmtree.notesproutsn.data.soil.DocumentRepository
 import com.symmetricalpalmtree.notesproutsn.data.soil.KEY_SCOPE_GLOBAL
 import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookMeta
 import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookMetaStore
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilCompactor
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilDatabase
+import com.symmetricalpalmtree.notesproutsn.data.soil.SketchRepository
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilObjectEntity
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilSchema
 import com.symmetricalpalmtree.notesproutsn.data.template.BuiltInTemplates
@@ -82,6 +83,16 @@ class NotebookSession(
     lateinit var documents: DocumentRepository
         private set
 
+    /**
+     * The `sketch` rows' reader and writer (arc 43 / K3). [documents]' shape exactly, and for the
+     * same reasons: a sketch is not page content with an in-memory working copy on this screen —
+     * the extension's screen holds the live pixels and the host writes what it pushes back. Reads
+     * go straight through it; **writes go through [writeSketch]**, which is what puts them on the
+     * session's one serial queue with everything else.
+     */
+    lateinit var sketches: SketchRepository
+        private set
+
     // @Volatile: the Contents gather reads this on an IO thread outside the page-op mutex — the
     // list itself is immutable and swapped whole, but without the fence its publication to that
     // reader is a JMM data race (unsafe publication, not just staleness).
@@ -100,14 +111,23 @@ class NotebookSession(
     val isOpen: Boolean get() = ::db.isInitialized && db.isOpen
 
     /**
-     * Whether this notebook is a **text document** (arc 19 / M8) — the index bit, read once at
-     * [open] and never again: the flag is set when the notebook is created or imported and nothing
-     * flips it afterwards, while the screen asks about it on every route it takes (the open's
-     * routing, the seal's cover, the editor's rename and close hooks). False before [open], which
+     * What this notebook **opens as** (arc 19 / M8, three-way since arc 43 / K3) — the index bits
+     * through [NotebookKind], read once at [open] and never again: the kind is set when the
+     * notebook is created or imported and nothing flips it afterwards, while the screen asks about
+     * it on every route it takes (the open's routing, the seal's cover, the editor's rename and
+     * close hooks, the sketch door's visibility). [NotebookKind.HANDWRITTEN] before [open], which
      * is the honest answer for a session that has not read the index yet.
      */
-    var isTextDocument: Boolean = false
+    var kind: NotebookKind = NotebookKind.HANDWRITTEN
         private set
+
+    /** Whether this notebook is a **text document** — [kind]'s reading, kept as its own name
+     *  because every caller of it since arc 19 asks exactly this question. */
+    val isTextDocument: Boolean get() = kind == NotebookKind.TEXT
+
+    /** Whether this notebook is a **sketch notebook** (arc 43 / K3) — [isTextDocument]'s sibling,
+     *  and what the notebook screen's sketch door hangs its visibility on. */
+    val isSketch: Boolean get() = kind == NotebookKind.SKETCH
 
     sealed class OpenResult {
         object Ok : OpenResult()
@@ -147,10 +167,17 @@ class NotebookSession(
         shapes = ShapeStore(db.dao(), writer)
         stickies = StickyStore(db.dao(), writer) { block -> db.withTransaction { block() } }
         documents = DocumentRepository(db.documentDao(), db.dao())
+        sketches = SketchRepository(db.sketchDao(), db.dao())
         try {
-            // The index bit, once (M8): blob-free, and before anything can ask — the screen's very
-            // first decision after this call is which route the open takes.
-            isTextDocument = textDocumentBit(repo.summary(notebookId)?.flags)
+            // The index bits, once (M8; arc 43 / K3 made it three-way): blob-free, and before
+            // anything can ask — the screen's very first decision after this call is which route
+            // the open takes. `NotebookKind` is pure and cannot log, so the one reading site that
+            // can meet a foreign row says the conflict out loud here.
+            val flags = repo.summary(notebookId)?.flags
+            if (NotebookKind.conflicting(flags)) {
+                Log.w(TAG, "$notebookId claims both text document and sketch — opening it as text")
+            }
+            kind = NotebookKind.of(flags)
             val dao = db.dao()
             val root = dao.notebookRow()
             val pageRows = dao.childrenOfType(notebookId, SoilSchema.TYPE_PAGE)
@@ -536,17 +563,23 @@ class NotebookSession(
     /**
      * **Erase page** (arc 30 / PE1): soft-delete every live object on the current page in one
      * transaction and keep the page itself — its row, `"order"`, size and template are untouched,
-     * and [currentIndex] does not move. The read is [deleteCurrent]'s own
-     * [SoilDao.liveDescendantIds] (strokes, headings, links + their wrapped children, the page's
-     * `document`, texts, shapes, stickies + their content), so the erase is type-agnostic the way
-     * the delete is. Returns the ids it dated out — the undo entry's whole payload
+     * and [currentIndex] does not move. The read is
+     * [com.symmetricalpalmtree.notesproutsn.data.soil.SoilDao.liveErasableIds] (strokes, headings,
+     * links + their wrapped children, the page's `document`, texts, shapes, stickies + their
+     * content), so the erase is type-agnostic the way the delete is — **with the one exception the
+     * separate query exists for: a page's sketch is never erased** (arc 43, decision 11). Erase
+     * page is an ink door on an ink surface; the pixels are the sketch face's, and clearing them
+     * there is the sketch face's own act. [deleteCurrent] and [capturePage] stay on
+     * [com.symmetricalpalmtree.notesproutsn.data.soil.SoilDao.liveDescendantIds], which does carry
+     * it: a deleted or copied page takes its drawing with it. Returns the ids it dated out — the
+     * undo entry's whole payload
      * ([NotebookUndo.Action.PageErased]) — or an empty list when the page had nothing, in which
      * case **nothing is written** (no transaction, no `updatedAt` churn). The caller drains the
      * writer first (the delete's rule: a queued stroke commit must land before the id snapshot).
      */
     suspend fun eraseCurrent(): List<String> = withContext(Dispatchers.IO) {
         val page = currentPage
-        val ids = db.dao().liveDescendantIds(page.id)
+        val ids = db.dao().liveErasableIds(page.id)
         if (ids.isEmpty()) return@withContext emptyList()
         val now = System.currentTimeMillis()
         db.withTransaction { db.dao().softDelete(ids, now) }
@@ -667,11 +700,11 @@ class NotebookSession(
 
     /** Refresh `notebook_meta` from the index (name, folder path) — the file stays self-describing.
      *
-     *  `textDocument` is read from the **index bit** and never from [existing] (arc 19 / M2): the
-     *  index is the authority and the meta field only mirrors it, so a refresh that carried the
-     *  previous meta forward would wipe the flag the first time the file was written by anything
-     *  that had not seen it (og's meta-refresh-wipe trap). Every meta writer in this app sources it
-     *  the same way.
+     *  `textDocument` and `sketch` are read from the **index bits** and never from [existing]
+     *  (arc 19 / M2, grown arc 43 / K3): the index is the authority and the meta fields only mirror
+     *  it, so a refresh that carried the previous meta forward would wipe a flag the first time the
+     *  file was written by anything that had not seen it (og's meta-refresh-wipe trap). Every meta
+     *  writer in this app sources them the same way.
      *
      *  `keyScope` follows exactly the same rule (arc 26 / U4): straight off the index row, never
      *  from [existing] and never from the data class's `GLOBAL` default — a NOTEBOOK-scope file
@@ -682,6 +715,9 @@ class NotebookSession(
     suspend fun refreshMeta(appVersionCode: Int) = withContext(Dispatchers.IO) {
         if (!isOpen) return@withContext
         val row = repo.get(notebookId) ?: return@withContext
+        // One reading of the bits, so the file's two mirrored fields can never disagree with each
+        // other or with [kind].
+        val rowKind = NotebookKind.of(row.flags)
         val existing = NotebookMetaStore.read(db.raw())
         NotebookMetaStore.write(db.raw(), NotebookMeta(
             notebookId = notebookId, name = row.name,
@@ -689,14 +725,10 @@ class NotebookSession(
             keyScope = row.keyScope ?: KEY_SCOPE_GLOBAL,
             cover = null,
             folderPath = repo.ancestry(row.parentId), appVersionCode = appVersionCode,
-            textDocument = textDocumentBit(row.flags),
+            textDocument = rowKind == NotebookKind.TEXT,
+            sketch = rowKind == NotebookKind.SKETCH,
         ))
     }
-
-    /** The one reading of [NotebookFlags.TEXT_DOCUMENT] (M8) — [open]'s and [refreshMeta]'s, so the
-     *  session's own answer and the one written into the file can never drift apart. */
-    private fun textDocumentBit(flags: Int?): Boolean =
-        ((flags ?: 0) and NotebookFlags.TEXT_DOCUMENT) != 0
 
     /**
      * Persist a document (arc 19 / M3) — the editor's save, arriving from the extension over the
@@ -735,6 +767,70 @@ class NotebookSession(
         // A closed writer never runs the job — awaiting its deferred would hang the Binder thread.
         check(queued) { "notebook closed" }
         done.await()
+    }
+
+    /**
+     * Persist a page's sketch (arc 43 / K3) — the sketch screen's save, arriving from the extension
+     * over the host callback binder once its last chunk has landed. [writeDocument]'s exact shape,
+     * and for its exact reasons.
+     *
+     * **Through the writer, then awaited — exceptionally if the write threw.** The enqueue orders
+     * these pixels against the strokes and headings the same page may still be committing (one
+     * serial queue, the session's rule). The await after it is the seam's half: the extension's
+     * `saveSketchChunk` is a blocking Binder call and its return is the screen's only "it landed",
+     * so a fire-and-forget enqueue would let the screen mark itself clean — and the host seal — over
+     * a write still sitting in the queue. And because that return IS the contract, a failed write
+     * must **throw** here rather than be swallowed by [SoilWriter]'s drain loop the way an ink
+     * write's failure is: a refused or disk-full save reported as success would drop a drawing that
+     * has **no other copy at all**. The two typed refusals
+     * ([com.symmetricalpalmtree.notesproutsn.extension.SketchContract.SKETCH_TOO_LARGE] and
+     * `SKETCH_BAD_PNG`) come back out of here the same way, which is how the screen can keep its
+     * pixels and say what happened.
+     *
+     * The page size is this notebook's own [PageRef], never anything the extension said: a sketch
+     * is only meaningful at exactly its page's size, and taking the dimensions from the sender
+     * would make the guard agree with whatever produced the bytes. [pageId] must name a **live**
+     * page of this notebook — a save for one that has since been deleted is an
+     * [IllegalArgumentException], which K4's binder turns into the seam's refusal.
+     *
+     * Empty [png] is the wire form for "clear this page" ([SketchRepository.save]'s
+     * blank-means-absent rule, not a special case here).
+     */
+    suspend fun writeSketch(pageId: String, png: ByteArray) {
+        check(isOpen) { "notebook closed" }
+        val page = pages.firstOrNull { it.id == pageId }
+            ?: throw IllegalArgumentException("Unknown page")
+        val done = CompletableDeferred<Unit>()
+        val queued = writer.enqueue {
+            try {
+                sketches.save(pageId, png, page.width, page.height)
+                done.complete(Unit)
+            } catch (e: Exception) {
+                done.completeExceptionally(e)
+            }
+        }
+        // A closed writer never runs the job — awaiting its deferred would hang the Binder thread.
+        check(queued) { "notebook closed" }
+        done.await()
+    }
+
+    /**
+     * [pageId]'s stored sketch, or null when it has none (arc 43 / K3) — the read half of
+     * [writeSketch], and the only place the host pulls a page-sized PNG out of the file.
+     *
+     * The page size is this notebook's own, for [writeSketch]'s reason: it is what the header guard
+     * is checked against, and a row that fails it is soft-deleted and answered null
+     * ([SketchRepository.get]). Null for a page that is not live, which is the same answer a page
+     * with no sketch gets — the caller is showing a page either way.
+     *
+     * Not on the writer: it writes nothing (the guard's soft-delete aside, which is the repository's
+     * own repair and ordered against nothing), and a read that queued behind a page of ink would
+     * make every page turn wait for it.
+     */
+    suspend fun readSketch(pageId: String): ByteArray? = withContext(Dispatchers.IO) {
+        if (!isOpen) return@withContext null
+        val page = pages.firstOrNull { it.id == pageId } ?: return@withContext null
+        sketches.get(pageId, page.width, page.height)
     }
 
     /** Wait for queued writes (both stores), then purge + checkpoint + close. Idempotent; never throws. */

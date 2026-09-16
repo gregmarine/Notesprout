@@ -28,8 +28,11 @@ class FakeSoilDao : SoilDao {
     override suspend fun childrenOfType(parentId: String, type: String) =
         rows.values.filter { it.parentId == parentId && it.type == type && it.deletedAt == null }
             .sortedBy { it.order }
+    /** Mirrors `SoilDao.childrenOf`' `type != 'sketch'` exclusion (arc 43 / K3) — a page-sized PNG
+     *  never rides an untyped, blob-inclusive page read. */
     override suspend fun childrenOf(parentId: String) =
-        rows.values.filter { it.parentId == parentId && it.deletedAt == null }.sortedBy { it.order }
+        rows.values.filter { it.parentId == parentId && it.type != "sketch" && it.deletedAt == null }
+            .sortedBy { it.order }
     override suspend fun notebookRow() = rows.values.firstOrNull { it.type == "notebook" }
     override suspend fun templateDigests(notebookId: String) = rows.values
         .filter { it.type == "template" && it.parentId == notebookId && it.deletedAt == null }
@@ -59,7 +62,13 @@ class FakeSoilDao : SoilDao {
         for (id in ids) rows[id]?.let { rows[id] = it.copy(parentId = newParentId, updatedAt = at) }
         events += "reparent:${ids.joinToString(",")}->$newParentId"
     }
-    override suspend fun liveDescendantIds(pageId: String): List<String> {
+    override suspend fun liveDescendantIds(pageId: String) = descendantIds(pageId, withSketch = true)
+
+    /** Mirrors `SoilDao.liveErasableIds` (arc 43 / K3): [liveDescendantIds] minus the page's
+     *  sketch — Erase page is ink only (decision 11). */
+    override suspend fun liveErasableIds(pageId: String) = descendantIds(pageId, withSketch = false)
+
+    private fun descendantIds(pageId: String, withSketch: Boolean): List<String> {
         val linkIds = rows.values
             .filter { it.parentId == pageId && it.type == "link" && it.deletedAt == null }
             .map { it.id }
@@ -68,9 +77,10 @@ class FakeSoilDao : SoilDao {
             .filter { it.type == "sticky_note" && it.deletedAt == null && (it.parentId == pageId || it.parentId in linkIds) }
             .map { it.id }
             .toSet()
+        val pageLevel = LOOSE_CONTENT + setOf("link", "document") + if (withSketch) setOf("sketch") else emptySet()
         return rows.values.filter {
             it.deletedAt == null && (
-                (it.parentId == pageId && (it.type in LOOSE_CONTENT || it.type == "link" || it.type == "document")) ||
+                (it.parentId == pageId && it.type in pageLevel) ||
                     it.parentId in linkIds ||
                     it.parentId in stickyIds
                 )
@@ -99,6 +109,8 @@ class FakeSoilDao : SoilDao {
         }
     override suspend fun hasLiveDocument() =
         rows.values.any { it.type == "document" && it.deletedAt == null && !it.text.isNullOrBlank() }
+    override suspend fun hasLiveSketch(pageId: String) =
+        rows.values.any { it.parentId == pageId && it.type == "sketch" && it.deletedAt == null && (it.blob?.size ?: 0) > 0 }
     override suspend fun stickyIdsWithContent(): List<String> =
         rows.values.filter { it.type == "sticky_note" && it.deletedAt == null }
             .filter { s -> rows.values.any { it.parentId == s.id && it.type == "stroke" && it.deletedAt == null } }

@@ -22,8 +22,12 @@ import com.symmetricalpalmtree.notesproutsn.extension.ExporterInfo
  *    tail can never disagree about what the host will do — the D3 skew-guard recipe, read from the
  *    host's side.
  *  - [perPage] — per-page delivery **at more than one page**. At [ExportScope.Page] there is
- *    exactly one page, so a per-page exporter is a single file through the ordinary picker and
- *    nothing about the flow changes. At [ExportScope.Whole] it is the folder case, deliberately
+ *    exactly one page — unless it carries a **sketch** (arc 43 / K7, decision 5), which exports as
+ *    a second page after it and so makes the page two files and a folder; otherwise a per-page
+ *    exporter is a single file through the ordinary picker and nothing about the flow changes.
+ *    Like the calendar's Day below, that is counted, not assumed: "a sketched page is two files"
+ *    is a fact about the page, not a rule the person has to hold. At [ExportScope.Whole] it is
+ *    the folder case, deliberately
  *    including a one-page notebook: *Whole notebook = a folder* is a rule the person can hold, and
  *    a scope that sometimes made a folder and sometimes a file would not be.
  *
@@ -43,11 +47,12 @@ object ExportDelivery {
         else ExporterContract.DELIVERY_ONE_FILE
 
     /** Whether this export writes one file per page: a per-page exporter at [ExportScope.Whole],
-     *  or at a [ExportScope.Calendar] target that draws more than one page. */
-    fun perPage(delivery: Int, scope: ExportScope): Boolean =
+     *  at an [ExportScope.Page] whose page carries a sketch ([pageHasSketch] — the bundle is two
+     *  pages, arc 43 / K7), or at a [ExportScope.Calendar] target that draws more than one page. */
+    fun perPage(delivery: Int, scope: ExportScope, pageHasSketch: Boolean = false): Boolean =
         delivery == ExporterContract.DELIVERY_PER_PAGE && when (scope) {
             ExportScope.Whole -> true
-            is ExportScope.Page -> false
+            is ExportScope.Page -> pageHasSketch
             is ExportScope.Calendar -> CalendarRenderPlan.pages(scope.target) > 1
         }
 }

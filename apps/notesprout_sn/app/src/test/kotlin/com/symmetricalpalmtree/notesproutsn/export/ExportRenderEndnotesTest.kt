@@ -53,6 +53,25 @@ class ExportRenderEndnotesTest {
     }
 
     @Test
+    fun aSketchBeforeAPageShiftsWhatItsNotesLinkTo() = runBlocking {
+        // Arc 43 / K7: page 1's sketch is the bundle's second page, so page 2's note points at
+        // page 3 — while the caption still says page 2, which is what the NOTEBOOK calls it.
+        row("p1", "nb", SoilSchema.TYPE_PAGE, 0, w = 1404f, h = 1872f)
+        row("p2", "nb", SoilSchema.TYPE_PAGE, 1, w = 1404f, h = 1872f)
+        sticky("one", "p1", 0)
+        sticky("two", "p2", 0)
+
+        val pages = listOf(
+            ExportRender.PageBake("p1", 1404, 1872, "", number = 1, hasSketch = true),
+            ExportRender.PageBake("p2", 1404, 1872, "", number = 2),
+        )
+        val sources = ExportRender.endnoteSources(dao, pages)
+        assertEquals(listOf("one", "two"), sources.map { it.stickyId })
+        assertEquals(listOf(1, 3), sources.map { it.fromPage })
+        assertEquals(listOf(1, 2), sources.map { it.fromPageLabel })
+    }
+
+    @Test
     fun noNotesWithContentIsNoWalkAtAll() = runBlocking {
         row("p1", "nb", SoilSchema.TYPE_PAGE, 0, w = 1404f, h = 1872f)
         sticky("empty", "p1", 0, withStroke = false)

@@ -91,6 +91,21 @@ class DocumentWhitelistTest {
             assertEquals(200L, f.docs.notebookMaxContentUpdatedAt(rootId))
         }
 
+    /**
+     * Arc 43 / K3: a `sketch` is a *picture of* the page, not content on it — the `document` rule
+     * applied to pixels. A drawing made after a draft was written must not make the draft read
+     * "the page has changed since", because the page's words did not change: nothing in a sketch
+     * ever reaches the recognized text a document is seeded from.
+     */
+    @Test
+    fun `a newer sketch row raises neither watermark`() = runBlocking {
+        val f = Fixture()
+        f.notebook()
+        f.put("sk-a", pageA, SoilSchema.TYPE_SKETCH, 9_000L)
+        assertEquals(100L, f.docs.maxContentUpdatedAt(pageA))
+        assertEquals(100L, f.docs.notebookMaxContentUpdatedAt(rootId))
+    }
+
     @Test
     fun `a newer stroke inside a sticky wrapped in a link still does not count`() = runBlocking {
         val f = Fixture()

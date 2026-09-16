@@ -54,7 +54,8 @@ sealed class ReplayPlan {
          * The chain above a notebook, cut down to what SN can actually reopen (arc 32 / RS2).
          * Exactly one extension screen is showing at a time, so the only legal shapes are nothing,
          * one screen, or `CALENDAR, SCRATCH_PAD` — the calendar's own pad door, the one place two
-         * of them are stacked (a `BIBLE` is one screen like any other, and never latches). Anything else is a stack this build did not write (or wrote across
+         * of them are stacked (a `BIBLE` is one screen like any other, and never latches; so is a
+         * `SKETCH`, arc 43 / K4 — the sketch face has no door to another extension). Anything else is a stack this build did not write (or wrote across
          * a surface it has since dropped), and is truncated to its **longest legal prefix** rather
          * than refused: what is below the first illegal entry was really open, and the entries
          * above a dropped one can never stand.

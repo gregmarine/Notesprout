@@ -119,6 +119,52 @@ class ExportNamingTest {
     }
 
     @Test
+    fun aSketchPageIsItsInkPagesNamePlusTheWord() {
+        // Arc 43 / K7, the user's phase-start call: the two files of one page sort together and
+        // say which is which.
+        assertEquals("Field notes - Standup sketch", ExportNaming.pageStem("Field notes", id, 3, "Standup", sketch = true))
+        assertEquals("Field notes - page 3 sketch", ExportNaming.pageStem("Field notes", id, 3, null, sketch = true))
+        // No heading and no place: the notebook alone, still saying which of the two it is.
+        assertEquals("Field notes sketch", ExportNaming.pageStem("Field notes", id, 0, null, sketch = true))
+        // The default is the ink page — every caller that never heard of sketches is unchanged.
+        assertEquals(
+            ExportNaming.pageStem("Field notes", id, 3, "Standup"),
+            ExportNaming.pageStem("Field notes", id, 3, "Standup", sketch = false),
+        )
+    }
+
+    @Test
+    fun theTitleCapIsAppliedBeforeTheSketchSuffix() {
+        // The cap is about the user's heading; the suffix is the app's own word and is never
+        // truncated — a file called "…xxx sketc" would lie about what is in it.
+        val long = "x".repeat(200)
+        assertEquals(
+            "N - " + "x".repeat(ExportNaming.MAX_TITLE_CHARS) + " sketch",
+            ExportNaming.pageStem("N", id, 1, long, sketch = true),
+        )
+    }
+
+    @Test
+    fun aSketchPagesNameIsBuiltFromItsOwnPagesNumber() {
+        // The bundle interleaves, so the position in the file list is NOT the page number: page 2
+        // of the notebook is the third and fourth files when page 1 carries a sketch.
+        val names = listOf(
+            ExportNaming.PageName(1, "Plan"),
+            ExportNaming.PageName(1, "Plan", sketch = true),
+            ExportNaming.PageName(2, null),
+            ExportNaming.PageName(2, null, sketch = true),
+        )
+        assertEquals(
+            listOf("NB - Plan.png", "NB - Plan sketch.png", "NB - page 2.png", "NB - page 2 sketch.png"),
+            names.map {
+                ExportNaming.fileName(
+                    ExportNaming.pageStem("NB", id, it.number, it.title, it.sketch), "png",
+                )
+            },
+        )
+    }
+
+    @Test
     fun everyPageOfAPerPageExportIsNamedFromItsOwnPage() {
         // Arc 31 / HV1: one file per page, each named by the Contents rule or by its number.
         val titles = listOf("Plan", null, "Plan")

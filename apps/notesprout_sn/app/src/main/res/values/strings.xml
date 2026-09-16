@@ -74,6 +74,7 @@
     <string name="new_notebook_type_label">Type</string>
     <string name="new_notebook_type_handwritten">Handwritten</string>
     <string name="new_notebook_type_text">Text</string>
+    <string name="new_notebook_type_sketch">Sketch</string>
     <string name="template_blank">Blank</string>
     <string name="template_lined">Lined</string>
     <string name="template_dotted">Dotted</string>
@@ -665,6 +666,10 @@
     <string name="clip_failed_title">Clipboard</string>
     <string name="clip_capture_failed">This page couldn\'t be read. Nothing was copied.</string>
     <string name="clip_too_large">There is too much on this page to copy. The clipboard was left unchanged.</string>
+    <!-- Arc 43 / K3: the same refusal, when the page carries a sketch — which is almost always the
+         reason a page does not fit, and a page of ink that "is too much to copy" would read as a
+         puzzle rather than an explanation. -->
+    <string name="clip_too_large_sketch">This page\'s sketch makes the copy too large to hold on the clipboard. The clipboard was left unchanged.</string>
     <string name="clip_paste_failed">The clipboard is empty or its contents couldn\'t be read. Copy a page again.</string>
     <string name="clip_write_failed">The page couldn\'t be put on the clipboard. The clipboard was left unchanged.</string>
 
@@ -800,6 +805,13 @@
     <string name="cd_bible">Bible</string>
     <string name="bible_failed_title">Bible unavailable</string>
     <string name="bible_failed_body">The Bible could not be opened. The extension may have been disabled or removed.</string>
+
+    <!-- The Sketch face (arc 43 / K4) — the bottom-bar door on the notebook, left of Bible. GONE
+         unless the notebook is a Sketch notebook and a trusted NSE · Sketch is installed;
+         SketchEntry owns it. -->
+    <string name="cd_sketch">Sketch</string>
+    <string name="sketch_failed_title">Sketch unavailable</string>
+    <string name="sketch_failed_body">The sketch could not be opened. NSE · Sketch may have been disabled or removed.</string>
 
     <!-- Bible references in the notebook (arc 38 / R3) — the lasso bar's Bible button, the Insert
          bar's, and the Edit of a lone Bible link. The words on the page stay the user's own; the

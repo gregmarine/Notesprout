@@ -124,8 +124,38 @@ so it is dated **now** rather than 1970. Plan + ledger `extensions/bible/NOTES_P
 `crossref` merged to `main` 2026-09-15 (`--no-ff`) and deleted — "on crossref" means `main`. The
 one recorded gap, left as-is on the user's call: no Notes button on the reader opened from the
 editor's Lookup door (`bible.md` § Not in this arc). No code review — the user's call.
-No TENTH extension point, no next Bible phase (bookmarks, longer or multi-page passages) and no
-other new arc without a fresh user decision; no re-raising of any waived / declined review finding.
+**Arc 43 "Sketch" (branch `sketch`, from 2026-09-15, a fresh user decision granted the same day):
+a raster sketch beside each page's ink.** Notesprout SN's tenth extension point, `ACTION_SKETCH` +
+`ACTION_SKETCH_SCREEN`, served by **`NSE · Sketch`** (`:ext-sketch`) at `extensions/sketch/`, the
+Bible `projectDir` pattern repeated (the sixteenth module, the second living outside this app's own
+Gradle root). Fourteen locked decisions, compressed: a third notebook-creation radio (Handwritten /
+Text / Sketch, TEXT winning any foreign conflict); the Paintsprout pencil as-is (`StrokeStyle.PENCIL`,
+1.2 px, `#505050`) but baked at a **constant pressure 0.5 on Ratta** under a `DARK_GRAY` preview — the
+firmware paints one tone per pen, so no live preview can track a soft touch, the user's on-device
+revision of decision 3 for Ratta only; the rubbing eraser (12 px); the sketch as its own bundle page
+after the ink page on export, plain white paper always, never a template; the cover is the last-shown
+page's sketch over the ink bake; `btnSketch` on the notebook's bottom strip, left of Bible — a
+further granted exception to "bottom bars are pager-only"; Erase page is ink-only, never the sketch;
+and, after the first Nomad walk found it missing, page insert/delete **and their own undo/redo
+gestures** from the sketch face itself (K5b, the user's same-day follow-up decision), mirrored onto
+the **notebook's own** undo stack so the two histories stay one history. Seam: `ISketch.begin(host)`
+takes **no store** — the seam's held bind runs backwards, the host minting `ISketchHost` for the
+extension rather than lending a store — `API_VERSION` 16 → **17** as a birth floor
+(`SketchContract.MIN_API_VERSION_FOR_SKETCH`), then → **18** at K5b for five more `ISketchHost`
+tails behind the method floor `MIN_API_VERSION_FOR_SKETCH_PAGES`. `SoilSchema.TYPE_SKETCH` is a
+plain PNG-blob row, one per page, minted on first save; **`MAX_BYTES` = 6 MiB is the one written-down
+hard refusal in the whole family** (the SQLCipher cursor window — a PNG above it could never be read
+back). The engine work landed in `~/git/g-paper` first, on Fable's brief, Opus writing it and Fable
+reviewing every diff before publish: Phase 19 → 0.1.32 (the Ratta cadence and hairline measurements),
+Phase 20 → 0.1.33 (per-segment dirty rects, a silent `loadPageRaster`), Phase 21 → 0.1.34 at K8
+(`RattaTuning` removed, its four measured values now plain constants). K0 through K7 are all
+**COMPLETE ✅** on the user's Nomad hand walks (2026-09-15/16) — K8 "Docs + freeze" is the last phase:
+`extensions/sketch/docs/sketch.md` is the reference once frozen, `extensions/sketch/SKETCH_PLAN.md`
+the plan + ledger (history after freeze, per the maintenance protocol below), and the merge to `main`
+(`--no-ff`) is pending the user's final Nomad walk.
+No ELEVENTH extension point, no next Bible phase (bookmarks, longer or multi-page passages), no next
+Sketch phase and no other new arc without a fresh user decision; no re-raising of any waived /
+declined review finding.
 
 **Maintenance protocol (replaces the per-arc phase protocol):**
 
@@ -230,7 +260,14 @@ reference goes there, words are ranked hits — FTS4 + BM25), the stored positio
 `recent` table, the `extensions/` monorepo-root pattern; grown by **arc 38 "Reference"**:
 notebook-linked Bible reference objects — the reference parser/codec, the passage view, Full
 chapter, and the Recents' `recent_ref` table of followed passages; grown by **arc 40 "Verses"**:
-the verses themselves as a linked text object on the page).
+the verses themselves as a linked text object on the page) ·
+`extensions/sketch/docs/sketch.md` (arc 43 "Sketch": **NSE · Sketch** as a feature — the raster
+pencil and rubbing eraser, the store-less seam (`ISketch`/`ISketchHost`), the data model
+(`SoilSchema.TYPE_SKETCH`, `NotebookFlags.SKETCH`, `NotebookKind`), the screen (`SketchActivity :
+PaperScreenActivity`), pen-idle-debounced saves and the parked-save recovery, the 64 px raster-undo
+tiles, page insert/delete and their own undo/redo from the face (K5b), export as the ink page's own
+bundle-page follower, the failure table and the Nomad numbers; `extensions/sketch/SKETCH_PLAN.md`
+is history once frozen, this doc is the reference).
 
 ## Standing rules
 
@@ -247,10 +284,11 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   and does not want "fixing": pulling `:sn-screen` into an exporter for a log line would put a
   paper-screen library inside a module that draws no paper.
 
-- **Fifteen modules, own Gradle root — the fifteenth lives outside it.** Fourteen sit under this
-  app's own Gradle root; the fifteenth, `:ext-bible` (arc 37, **NSE · Bible**), lives at the
-  monorepo root (`extensions/bible/`) and is pulled in by `settings.gradle.kts`'s `projectDir`
-  include — the pattern recorded for every future extension. `:app` (the
+- **Sixteen modules, own Gradle root — two live outside it.** Fourteen sit under this
+  app's own Gradle root; the fifteenth, `:ext-bible` (arc 37, **NSE · Bible**), and the sixteenth,
+  `:ext-sketch` (arc 43, **NSE · Sketch**), live at the monorepo root (`extensions/bible/` and
+  `extensions/sketch/`) and are pulled in by `settings.gradle.kts`'s `projectDir` include — the
+  pattern recorded for every future extension. `:app` (the
   host) · `:markdown` (arc 19 / M1 — the shared markdown engine: parser, renderer, formatter,
   reflow, search, draft, paginator; stdlib only, depends on **nothing** in this project and
   nothing beyond the android SDK its spans use — `:app` and `:ext-document` consume it, one
@@ -348,7 +386,7 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   stream + the `S_ISREG` fsync rule). It never sees a notebook, a `.soil`, or more than one page —
   the host bakes once and splits (`BundleSplit`) and calls it once per page.) ·
   `:ext-bible` (**NSE · Bible**, arc 37 / B0, grown by arc 38 / R1–R2 and by arc 42 / N0–N1 — the
-  fifteenth module, and the only one at the monorepo root, `extensions/bible/`, included by
+  fifteenth module, and the first living at the monorepo root, `extensions/bible/`, included by
   `projectDir`):
   `:extension-api` + `:sn-screen` only, **never** `:app`, no Room / SQLCipher / serialization.
   Declares `API_VERSION` **16** since arc 42 "Notes" (12 at arc 38 / R1, 13 at B9, 15 at arc 40,
@@ -367,7 +405,33 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   sits on both the library's and the notebook's bottom bars (arc 37 / B0, decision 3), and arc 42's
   `btnNotes` is a second such exception, on the reader's own bottom bar.
   `gradle.properties` sets `android.nonTransitiveRClass=false` — undoing it breaks every
-  `:sn-screen` resource reference from `:app`.
+  `:sn-screen` resource reference from `:app`. ·
+  `:ext-sketch` (**NSE · Sketch**, arc 43 / K5, grown by K5b — the sixteenth module, and the
+  second at the monorepo root, `extensions/sketch/`, included by `projectDir`):
+  `:extension-api` + `:sn-screen` + `:ext-ink`, **never** `:app`. Declares `API_VERSION` **18**
+  since K5b (17 at K2, the point's birth floor; `SketchContract.MIN_API_VERSION_FOR_SKETCH` = 17
+  still gates the point's own existence; `MIN_API_VERSION_FOR_SKETCH_PAGES` = 18, a method floor,
+  gates the five page-structure tails — `insertPage`/`deletePage`/`pageContent`/`undoPage`/
+  `redoPage` — added after `readInkChunk`; a 17-only sketch extension still serves the plain
+  view-only face). **No store** (`ISketch.begin(host)` takes none — the seam's held bind runs
+  backwards, an `ISketchHost` the host mints and lends, `IDocumentHost`'s host-side-stub recipe a
+  third time). One `SoilSchema.TYPE_SKETCH` row per page (order −1, PNG blob), minted on first
+  save, `NotebookFlags.SKETCH = 8` + `notebook_meta.sketch` mirrored at every meta site,
+  `NotebookKind` (TEXT wins over SKETCH on a foreign conflict), `SoilDao.childrenOf` excluding it,
+  `liveDescendantIds` carrying it (deleted with the page), `liveErasableIds` = descendants minus
+  the sketch (Erase page is ink-only, decision 11). **`SketchContract.MAX_BYTES` = 6 MiB is the
+  one written-down hard refusal in the whole family** — the SQLCipher cursor window means a PNG
+  above it could never be read back, so a save above the line is refused before a byte is written
+  rather than the family's usual "never refuse." `SketchApplication` (`RattaEngine.register()`),
+  `SketchService`/`SketchSession` (the `ISketch` stub), `SketchActivity : PaperScreenActivity`
+  (`:ext-ink`'s new store-agnostic chrome/handoff base, K2 — pencil + rubbing eraser only, no
+  lasso, no smart lasso, no scribble erase), `SketchSaver`/`SketchSaveGovernor`/`PendingPngPark`
+  (pen-idle-debounced PNG push and the parked-save recovery), `RasterTiles`/`RasterEditBuilder`/
+  `SketchEdit` (the Paintsprout Onyx raster-undo port, 64 px tiles, a 48 MB `UndoRedoStack`
+  budget), `InkBake` ("Bring in ink" — bare strokes only, link-wrapped and sticky ink excluded).
+  Its door is a further granted exception to "bottom bars are pager-only": `btnSketch` sits on the
+  notebook's bottom strip, left of Bible (decision 9) — the third such exception after `btnBible`
+  and `btnNotes`.
 - **Arcs 26–35 are each COMPLETE + FROZEN.** Each has ONE reference doc and ONE standalone plan
   file whose ledger holds every phase record and judgment call — **read that plan file, not
   `RATTA_PLAN.md`, for any work on the arc.** None added a point, changed the `.soil` schema, or
@@ -396,7 +460,8 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
     PDF endnotes over `PageBundle` v2; no line objects, no shape recognizer, no extension
     transfers. **Call `armLassoForLanding()` before `setSelection` from any non-lasso context.**
   - **Arc 29 "Loop"** (LE1–LE4, 2026-09-06/07; `docs/notebook.md`; `LOOP_PLAN.md`) — the lasso
-    eraser, item 4: `Tool.LASSO_ERASER` in g-paper **0.1.28** (the current pin), armed on all four
+    eraser, item 4: `Tool.LASSO_ERASER` in g-paper 0.1.28 (re-pinned to **0.1.33** since arc 43 /
+    K6, 2026-09-15 — see the pin note below), armed on all four
     paper surfaces from a second tap on the armed eraser → the Point · Lasso `EraserBar`
     (`:sn-screen`), **never a fourth bar button** (a twelfth 62 dp button falls off the Nomad's
     749 dp). The host never repaints from `onLassoErased`. Onyx's side of the engine change is
@@ -472,14 +537,16 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   `:ext-tags`' `tag`, `:ext-calendar`'s `calendar`, `:ext-cloud`'s `cloud`). A package is found by
   its **label** in Settings → Apps; the glyph only says which family it belongs to. A new extension
   copies `ext-soil/src/main/res/drawable/ic_launcher_foreground.xml` and does not ask.
-- **SN has NINE extension points** — each added on its own explicit user decision, and
-  **no TENTH may be added without another** (arc 21's `ACTION_TAG_MANAGER` was the sixth's,
+- **SN has TEN extension points** — each added on its own explicit user decision, and
+  **no ELEVENTH may be added without another** (arc 21's `ACTION_TAG_MANAGER` was the sixth's,
   granted 2026-08-31; the SEVENTH, `ACTION_CALENDAR`, was granted 2026-09-01 for arc 23 and
   landed at Y1 with the `:ext-ink` + `:ext-calendar` modules, `RATTA_PLAN.md` § "Phases —
   Arc 23"; **the EIGHTH, `CloudContract.ACTION_CLOUD_STORAGE`, was granted 2026-09-04 for arc 25
   "Drive" and landed at V1** with `:ext-cloud` — its plan is the standalone `DRIVE_PLAN.md`; **the
   NINTH, `ACTION_BIBLE`, was granted 2026-09-13 for arc 37 "Bible" and landed at B0** with
-  `:ext-bible` at the monorepo root — its plan is the standalone `extensions/bible/BIBLE_PLAN.md`).
+  `:ext-bible` at the monorepo root — its plan is the standalone `extensions/bible/BIBLE_PLAN.md`;
+  **the TENTH, `ACTION_SKETCH`, was granted 2026-09-15 for arc 43 "Sketch" and landed at K2** with
+  `:ext-sketch` at the monorepo root — its plan is the standalone `extensions/sketch/SKETCH_PLAN.md`).
   The full seam — contracts, caps, trust, the
   boundary audit — is `docs/extensions.md`; the rules that bind every point:
   - `ACTION_HANDWRITING_RECOGNIZER` (headings + the markdown engine are core, the engine is
@@ -580,6 +647,23 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
     (`ExtensionContract.API_VERSION` 11 → 12 to express it); the **action** floor
     `MIN_API_VERSION_FOR_BIBLE` stays 11, so an 11-only reader still serves the plain door and
     only loses the notebook's two reference doors. Not a tenth point.
+  - `ACTION_SKETCH` + `_SCREEN` (arc 43 / K2, granted 2026-09-15) — the sixth screen-owning point,
+    and the second **with paper** after the pad and the calendar (an extension writes nothing to
+    disk itself; the host owns every `.soil` read and write). **The held bind runs backwards**:
+    `ISketch` is `begin(host)` / `end()` and nothing else — the extension takes no store at all
+    (there is nothing of its own to persist), so the one argument on `begin` is an `ISketchHost`
+    binder the **host** mints and lends, `IDocumentHost`'s host-side-stub recipe a third time.
+    Six `ISketchHost` methods at K2 move a page's PNG and its bare-ink strokes chunked both ways
+    (`current`/`requestPage`/`readSketchChunk`/`saveSketchChunk`/`requestInk`/`readInkChunk`);
+    five more at K5b (`insertPage`/`deletePage`/`pageContent`/`undoPage`/`redoPage`) let the face
+    insert and delete pages and undo/redo one such edit itself, mirrored onto the **notebook's**
+    own undo stack so the two histories stay one. Nothing rides the screen's Intent but
+    `EXTRA_CHROME_HIDDEN`. Served by **`NSE · Sketch`** (`:ext-sketch`) at the monorepo root
+    (`extensions/sketch/`, the Bible `projectDir` pattern repeated); its plan is the standalone
+    `extensions/sketch/SKETCH_PLAN.md`, its reference `extensions/sketch/docs/sketch.md`.
+    `SketchContract.MAX_BYTES` = 6 MiB is **the one written-down hard refusal in the whole
+    family** — the SQLCipher cursor window means a PNG above it could never be read back, so a
+    save above the line is refused before a byte is written. Not an eleventh point.
 
   All of them get the **extension store** (`IExtensionStore` — per-package,
   encrypted under the global key at `Garden/<pkg>.db`, minted per bind, uid-bound, revoked with
@@ -606,8 +690,9 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   Action strings are
   SN-namespaced so Paper's extensions are never discovered; trust is same-signature both ways
   (discovery + bind-time re-check host-side, `HostCallerCheck` first thing in every stub method);
-  `ExtensionContract.API_VERSION` = **15** and the host accepts `minApiVersion(action)..15` — **the
-  floor is per action since arc 23 / Y1** (`minApiVersion` is a map, not a single set): 11 for
+  `ExtensionContract.API_VERSION` = **18** and the host accepts `minApiVersion(action)..18` — **the
+  floor is per action since arc 23 / Y1** (`minApiVersion` is a map, not a single set): 17 for
+  `ACTION_SKETCH` (`SketchContract.MIN_API_VERSION_FOR_SKETCH`, arc 43 / K2), 11 for
   `ACTION_BIBLE` (`MIN_API_VERSION_FOR_BIBLE`, arc 37 / B0), 8 for
   `ACTION_CLOUD_STORAGE` (`CloudContract.MIN_API_VERSION_FOR_CLOUD`, arc 25 / V1), 7 for
   `ACTION_CALENDAR` (`MIN_API_VERSION_FOR_CALENDAR` — a point born at 7 has no older shape to
@@ -655,8 +740,16 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   **15 = arc 40 "Verses"**: `IBible.passageText`, method floor `MIN_API_VERSION_FOR_BIBLE_TEXT`
   15 (`:ext-bible` declares 15). · **16 = arc 42 "Notes"**: seven `IBible` tails (six
   store-taking/bind-per-call pushes into the reader's own notes index, one held-bind read), method
-  floor `MIN_API_VERSION_FOR_BIBLE_NOTES` 16 (`:ext-bible` declares 16). No action floor moved at
-  any of the four; the pin lives in
+  floor `MIN_API_VERSION_FOR_BIBLE_NOTES` 16 (`:ext-bible` declares 16). · **17 = arc 43 / K2
+  (2026-09-15), the SKETCH point** — the calendar's/Bible's shape: a compatible addition floored at
+  17 (`SketchContract.MIN_API_VERSION_FOR_SKETCH`, a birth floor), no existing floor moved, only
+  `:ext-sketch` declares 17. This is the **tenth** point, not an eleventh. · **18 = arc 43 / K5b
+  (2026-09-15), five `ISketchHost` tails** — `insertPage`/`deletePage`/`pageContent`/`undoPage`/
+  `redoPage` appended after `readInkChunk` on the **host-side** stub, gated by the method floor
+  `MIN_API_VERSION_FOR_SKETCH_PAGES` 18; `MIN_API_VERSION_FOR_SKETCH` stays 17 untouched, so a
+  17-only sketch extension still gets the plain view-only face. Not an eleventh point; only
+  `:ext-sketch` declares 18. No action floor moved at any of the six bumps from 12 on; the pin
+  lives in
   `ExtensionContractTest`, which **must be run** (`:extension-api:testDebugUnitTest`) at every
   bump — it went red across three bumps unnoticed once.
   Meta-data is **per service**.
@@ -717,7 +810,21 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   never repaired by deletion.
 - **`IndexGuard.ready(this)` first thing in every index-touching `onCreate`**;
   `BootstrapActivity` is the only index opener and is `noHistory`.
-- **g-paper 0.1.28 (since arc 29 / LE1, 2026-09-06 — `Tool.LASSO_ERASER`; 0.1.27 = arc 28's transform mode, 0.1.23 before), `gpaper-core` + `gpaper-ratta` only** (mavenLocal). No `gpaper-onyx`,
+- **g-paper 0.1.34 (since arc 43 / K8, 2026-09-16 — Phase 21 "The door closes":** `RattaTuning`
+  removed; the four Nomad-measured values it held as a "measurement door, not host API" — cadence
+  16 ms, the PENCIL EMR hairline floor 120, the pencil baked at a constant pressure 0.5 under a
+  DARK_GRAY needle preview — are now plain constants in `gpaper-ratta`, Ratta-only, no behaviour
+  change. **0.1.33 since K6, 2026-09-15 — Phase 20 "A mark says where it landed":**
+  a composited raster mark announces itself as runs of ≤ 256 px span (`RasterDirty.along`), not
+  one bounding box, and `loadPageRaster` is silent like `swapPageRaster` — the sketch face's
+  `loadingRaster` guard went with it. **0.1.32 since K1 the same day — Phase 19 "Ratta and the
+  raster page":** the raster-erase cadence seam, `RattaEmr` with the PENCIL hairline EMR floor 120,
+  the pencil baked at a constant pressure 0.5 under a DARK_GRAY needle preview, cadence 16 ms, all
+  measured on the Nomad. 0.1.31 since K0 the same
+  day; 0.1.28 since arc 29 / LE1, 2026-09-06 — `Tool.LASSO_ERASER`; 0.1.27 = arc 28's transform
+  mode, 0.1.23 before). 0.1.29 = a raster undo swap, 0.1.30 = the rubbing eraser, 0.1.31 = the
+  alpha-3 fix — all three are Paintsprout Onyx raster work; **zero `gpaper-ratta` lines changed
+  between 0.1.28 and 0.1.31**. `gpaper-core` + `gpaper-ratta` only** (mavenLocal). No `gpaper-onyx`,
   no BOOX repo, no jetifier, no jniLibs pickFirsts, no `tools:replace` label. Engine gaps
   are fixed in `~/git/g-paper` (bump version, `publishToMavenLocal`, re-pin) — never
   worked around in the host.
@@ -752,15 +859,18 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
 - **Supernote swallows `adb shell input text`** — scripted device tests tap the on-screen
   keyboard or avoid text entry. EPD live ink is invisible to screencap; only committed
   strokes screenshot-verify.
-- **Bottom bars are pager-only, with one recorded exception** — the Bible button (arc 37 / B0,
-  decision 3), the first non-pager control ever placed on a bottom bar, on both the library's and
-  the notebook's. It is a deliberate, one-time exception, not a precedent: a future door still
-  goes on a top bar or a long-press sheet unless the user grants another one explicitly.
+- **Bottom bars are pager-only, with three recorded exceptions, each its own grant** — `btnBible`
+  (arc 37 / B0, decision 3), the first non-pager control ever placed on a bottom bar, on both the
+  library's and the notebook's; `btnNotes` (arc 42), a second such exception on the Bible reader's
+  own bottom bar; and `btnSketch` (arc 43, decision 9), a third, on the notebook's bottom strip left
+  of Bible. Each is a deliberate, one-time grant, not a precedent: a future door still goes on a top
+  bar or a long-press sheet unless the user grants another one explicitly.
 
 ## Build & install
 
 See `RATTA_PLAN.md` appendix and the root `device-build-install` skill. From `apps/notesprout_sn/`:
 debug `./gradlew assembleDebug` → `adb -s SN078D10012852 install -r` (host + every `ext-*` APK).
 Release is unsigned + hand-signed with the debug keystore; the release ext packages are re-enabled
-on the Nomad. JVM tests: `./gradlew test` (1662 in `:app`, 3097 across the modules at the freeze).
+on the Nomad. JVM tests: `./gradlew test` (1816 in `:app`, 3549 across the modules — including
+`extensions/bible`'s 155 and `extensions/sketch`'s 60 — at arc 43's K7).
 Java 17 comes from `org.gradle.java.home` (Temurin-17).

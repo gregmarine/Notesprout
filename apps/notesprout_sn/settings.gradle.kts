@@ -36,3 +36,6 @@ include(":ext-image")
 // second Gradle root, nothing to drift.
 include(":ext-bible")
 project(":ext-bible").projectDir = file("../../extensions/bible")
+// arc 43 / K5 — NSE · Sketch, the tenth point, the second monorepo-root extension.
+include(":ext-sketch")
+project(":ext-sketch").projectDir = file("../../extensions/sketch")

@@ -3,6 +3,7 @@ package com.symmetricalpalmtree.notesproutsn.importing
 import android.content.Context
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
+import com.symmetricalpalmtree.notesproutsn.data.index.NotebookKind
 import com.symmetricalpalmtree.notesproutsn.data.soil.DocumentRepository
 import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookMeta
 import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookMetaStore
@@ -125,7 +126,7 @@ object TextDocumentCreate {
             parentId = parentFolderId,
             templateKind = TemplatePicks.birthKind(TemplatePick.Blank),
             pageCount = 1,
-            textDocument = true,
+            kind = NotebookKind.TEXT,
             now = now,
         )
         Slog.d(TAG) { "created text document $notebookId (${text.length} chars)" }

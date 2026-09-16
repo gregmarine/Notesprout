@@ -27,8 +27,15 @@ interface SoilDao {
     /** Every live child of [parentId] in `order`, whatever its type (arc 34 / L16) — for a reader
      *  that wants most of the kinds anyway and would otherwise ask the same index once per type.
      *  Filtering the answer in Kotlin keeps each kind's own order: one `ORDER BY` over the whole
-     *  set, and a filter never reorders what it keeps. */
-    @Query("SELECT * FROM notebook WHERE parentId = :parentId AND deletedAt IS NULL ORDER BY `order`")
+     *  set, and a filter never reorders what it keeps.
+     *
+     *  **Except a `sketch`** (arc 43 / K3). This read is untyped *and* blob-inclusive, and it is
+     *  what `PageReads` is built on — the export bake, page previews, link-picker labels, every
+     *  page flip. A page-sized PNG riding all of those would be megabytes pulled out of the file
+     *  per page, for readers that have no use for a picture of the page and would drop it again.
+     *  Nothing wanting a sketch asks an untyped question: [SketchDao] is the door, and it has a
+     *  blob-free one for the callers that only want to know whether there is one. */
+    @Query("SELECT * FROM notebook WHERE parentId = :parentId AND type != 'sketch' AND deletedAt IS NULL ORDER BY `order`")
     suspend fun childrenOf(parentId: String): List<SoilObjectEntity>
 
     @Query("SELECT * FROM notebook WHERE type = 'notebook' AND parentId = '' LIMIT 1")
@@ -98,7 +105,38 @@ interface SoilDao {
      *  A `document` is a *product* of the page, not content on it (it is excluded from every
      *  staleness whitelist — [DocumentDao.maxContentUpdatedAt]), but it is still the user's writing
      *  and it belongs to that page: a delete, its undo, and a page copy must all carry it. Only the
-     *  page level gains it — a link never wraps a document. */
+     *  page level gains it — a link never wraps a document.
+     *
+     *  A `sketch` (arc 43 / K3) joins it at the page level for exactly the same reasons and with
+     *  exactly the same limit: a drawing is the user's, it belongs to that page, and a delete, its
+     *  undo and a page copy must all carry it — while a link never wraps one (a sketch is the whole
+     *  page, so there is nothing for a lasso to have caught). **Erase page is the one caller that
+     *  must not have it** and has [liveErasableIds] instead (decision 11). */
+    @Query(
+        """SELECT id FROM notebook WHERE deletedAt IS NULL AND (
+             (parentId = :pageId AND type IN ('stroke', 'heading', 'link', 'document', 'text', 'shape', 'sticky_note', 'sketch'))
+             OR parentId IN (SELECT id FROM notebook WHERE parentId = :pageId AND type = 'link' AND deletedAt IS NULL)
+             OR parentId IN (SELECT s.id FROM notebook s WHERE s.type = 'sticky_note' AND s.deletedAt IS NULL AND (
+                   s.parentId = :pageId
+                   OR s.parentId IN (SELECT l.id FROM notebook l WHERE l.parentId = :pageId AND l.type = 'link' AND l.deletedAt IS NULL))))""",
+    )
+    suspend fun liveDescendantIds(pageId: String): List<String>
+
+    /**
+     * [liveDescendantIds] **minus the page's `sketch`** — what **Erase page** clears (arc 43 / K3,
+     * decision 11), and the only difference between the two lists.
+     *
+     * A second query rather than a filter over the first because the difference is a rule, not a
+     * convenience: Erase page is an ink door on an ink surface, and the sketch beside the ink is
+     * the sketch face's to clear. A person who erases a page of writing has said nothing at all
+     * about the drawing on it, and an Erase page that silently took both would be the one act in
+     * this app that destroys something the user never pointed at. (Undo would put it back — but
+     * "undo would fix it" is not a reason to do it.)
+     *
+     * Every other level is [liveDescendantIds]'s, verbatim: a link's wrapped children, a sticky's
+     * content, both reachable through a link. Nothing below the page level can be a sketch, so the
+     * exclusion sits only where one can be.
+     */
     @Query(
         """SELECT id FROM notebook WHERE deletedAt IS NULL AND (
              (parentId = :pageId AND type IN ('stroke', 'heading', 'link', 'document', 'text', 'shape', 'sticky_note'))
@@ -107,7 +145,7 @@ interface SoilDao {
                    s.parentId = :pageId
                    OR s.parentId IN (SELECT l.id FROM notebook l WHERE l.parentId = :pageId AND l.type = 'link' AND l.deletedAt IS NULL))))""",
     )
-    suspend fun liveDescendantIds(pageId: String): List<String>
+    suspend fun liveErasableIds(pageId: String): List<String>
 
     /** Shift live rows by a delta — a link drag's row + heading children (stroke geometry lives in
      *  the blob, so strokes go through their codec instead; see `LinkStore.move`). */
@@ -149,6 +187,16 @@ interface SoilDao {
             "AND TRIM(COALESCE(text, ''), " + SoilSql.BLANK_CHARS + ") != '')",
     )
     suspend fun hasLiveDocument(): Boolean
+
+    /** Does [pageId] carry a live sketch? (arc 43 / K7) — blob-free, `SketchRepository.has`'s
+     *  rule read from the one-open side: the Export screen asks it of the page-sheet door's page
+     *  to know whether that page is one file or two ([com.symmetricalpalmtree.notesproutsn.export.ExportDelivery.perPage]).
+     *  An empty blob is no sketch. */
+    @Query(
+        "SELECT EXISTS(SELECT 1 FROM notebook WHERE parentId = :pageId AND type = 'sketch' " +
+            "AND deletedAt IS NULL AND length(blob) > 0)",
+    )
+    suspend fun hasLiveSketch(pageId: String): Boolean
 
     /** Ids of every live sticky note that holds at least one live stroke — the notes the PDF
      *  endnotes (arc 28 / D7) render; an empty note has nothing to show and gets no page. Asked

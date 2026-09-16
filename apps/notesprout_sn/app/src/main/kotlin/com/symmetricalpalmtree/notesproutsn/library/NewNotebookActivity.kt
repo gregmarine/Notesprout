@@ -20,6 +20,7 @@ import com.symmetricalpalmtree.notesproutsn.crypto.PassphraseCache
 import com.symmetricalpalmtree.notesproutsn.crypto.ScopeChange
 import com.symmetricalpalmtree.notesproutsn.crypto.SetPassphraseDialog
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
+import com.symmetricalpalmtree.notesproutsn.data.index.NotebookKind
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectType
 import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookMeta
 import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookMetaStore
@@ -47,10 +48,12 @@ import java.util.UUID
 /**
  * Name the notebook, pick its kind and its paper, create it.
  *
- * **The kind is a two-way radio** (arc 19 / M8): *Handwritten*, the default, and *Text* — a notebook
- * that opens straight into the document editor. It is a radio and not a second screen because the
- * choice is one bit and the rest of the screen is identical for both: the paper browser stays live
- * either way, since a text document's pages underneath are still pages.
+ * **The kind is a three-way radio** (arc 19 / M8, grown by arc 43 / K3): *Handwritten*, the default,
+ * *Text* — a notebook that opens straight into the document editor — and *Sketch*, whose pages may
+ * each carry one raster sketch beside their ink. It is a radio and not a second screen because the
+ * choice is one [NotebookKind] and the rest of the screen is identical for all three: the paper
+ * browser stays live whichever is picked, since a text document's and a sketchbook's pages
+ * underneath are still pages.
  *
  * **The key is a two-way radio too** (arc 26 / U5, D4): *This device's key*, the default, and *Its
  * own passphrase* — which asks for one before anything is written, creates the `.soil` under it and
@@ -91,16 +94,17 @@ class NewNotebookActivity : AppCompatActivity() {
      *  against. */
     private var pick: TemplatePick = TemplatePick.Blank
 
-    /** The kind the user has chosen (arc 19 / M8). **Handwritten is the default** — this is a
-     *  handwriting-first app, and a text document is the deliberate exception. It changes only what
-     *  the create writes: the paper below is picked, and written, exactly the same way either way. */
-    private var textDocument = false
+    /** The kind the user has chosen (arc 19 / M8, three-way since arc 43 / K3). **Handwritten is
+     *  the default** — this is a handwriting-first app, and the other two are deliberate
+     *  exceptions. It changes only what the create writes: the paper below is picked, and written,
+     *  exactly the same way for all three. */
+    private var kind = NotebookKind.HANDWRITTEN
 
     /** The key the user has chosen (arc 26 / U5, D4). **This device's key is the default** — a
      *  notebook with its own passphrase asks for it on every open, which is a thing to opt into,
-     *  never to be given by a screen the user was not reading. Like [textDocument] it changes only
-     *  what the create writes: the key the file is made under, the scope in both records, and
-     *  whether a cover is painted at all. */
+     *  never to be given by a screen the user was not reading. Like [kind] it changes only what the
+     *  create writes: the key the file is made under, the scope in both records, and whether a
+     *  cover is painted at all. */
     private var ownPassphrase = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -159,12 +163,27 @@ class NewNotebookActivity : AppCompatActivity() {
 
         // The type survives the same death, and for the same reason: coming back from SAF with the
         // radio silently reset to Handwritten would make a handwritten notebook out of a text
-        // document the user had already asked for. Restore first, check the group, and only THEN
-        // listen — `check()` fires the listener, and wiring it first would just re-set what we set.
-        textDocument = savedInstanceState?.getBoolean(KEY_TEXT_DOCUMENT, false) ?: false
-        binding.typeGroup.check(if (textDocument) R.id.typeText else R.id.typeHandwritten)
+        // document (or a sketchbook) the user had already asked for. Saved by NAME and not by
+        // ordinal — an enum's ordinals are a wire format nobody declared, and a kind added in the
+        // middle of the list one day would turn a parked answer into a different one. Restore
+        // first, check the group, and only THEN listen — `check()` fires the listener, and wiring
+        // it first would just re-set what we set.
+        kind = savedInstanceState?.getString(KEY_KIND)
+            ?.let { name -> NotebookKind.entries.firstOrNull { it.name == name } }
+            ?: NotebookKind.HANDWRITTEN
+        binding.typeGroup.check(
+            when (kind) {
+                NotebookKind.TEXT -> R.id.typeText
+                NotebookKind.SKETCH -> R.id.typeSketch
+                NotebookKind.HANDWRITTEN -> R.id.typeHandwritten
+            }
+        )
         binding.typeGroup.setOnCheckedChangeListener { _, checkedId ->
-            textDocument = checkedId == R.id.typeText
+            kind = when (checkedId) {
+                R.id.typeText -> NotebookKind.TEXT
+                R.id.typeSketch -> NotebookKind.SKETCH
+                else -> NotebookKind.HANDWRITTEN
+            }
         }
 
         // The key choice survives the same death as the type, for the same reason, and is restored
@@ -179,7 +198,7 @@ class NewNotebookActivity : AppCompatActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putString(KEY_PICK, pick.encode())
-        outState.putBoolean(KEY_TEXT_DOCUMENT, textDocument)
+        outState.putString(KEY_KIND, kind.name)
         outState.putBoolean(KEY_OWN_PASSPHRASE, ownPassphrase)
         if (::browser.isInitialized) browser.saveState(outState)
     }
@@ -211,7 +230,7 @@ class NewNotebookActivity : AppCompatActivity() {
         val chosen = pick
         // Read once, here, alongside the paper: everything after this point is the create, and it
         // must be the create the user was looking at when they tapped.
-        val asText = textDocument
+        val chosenKind = kind
         val ownKey = ownPassphrase
         setCreating(true)
 
@@ -252,7 +271,7 @@ class NewNotebookActivity : AppCompatActivity() {
                 )
                 return@launch
             }
-            val result = runCatching { withContext(Dispatchers.IO) { createNotebook(name, chosen, paper, asText, typed) } }
+            val result = runCatching { withContext(Dispatchers.IO) { createNotebook(name, chosen, paper, chosenKind, typed) } }
             result.onSuccess { id ->
                 // Baking page 1 is an apply, and an apply is the only thing that makes paper
                 // recent (arc 13 / G5). After the create, never before: a notebook that failed to
@@ -290,17 +309,18 @@ class NewNotebookActivity : AppCompatActivity() {
      * which is this contract's Blank-template case plus a `document` row and the text-document
      * flag — the two must be changed together.
      *
-     * [asText] is the type radio (arc 19 / M8) and touches exactly two of the eight steps: step 6's
-     * `notebook_meta.textDocument` and step 8's `NotebookFlags.TEXT_DOCUMENT` bit. Nothing else
-     * changes — **the paper is written the same way for both kinds**, because a text document's
-     * pages underneath are still pages. It writes no `document` row either: a brand-new text
-     * document has no text, and blank text is an absent row in this format.
+     * [kind] is the type radio (arc 19 / M8, three-way since arc 43 / K3) and touches exactly two
+     * of the eight steps: step 6's `notebook_meta.textDocument` / `.sketch` and step 8's flag bit.
+     * Nothing else changes — **the paper is written the same way for all three kinds**, because a
+     * text document's and a sketchbook's pages underneath are still pages. It writes no `document`
+     * row either (a brand-new text document has no text, and blank text is an absent row in this
+     * format) and no `sketch` row (a sketch is minted on the first save, never at create).
      */
     private suspend fun createNotebook(
         name: String,
         pick: TemplatePick,
         paper: PaperSource,
-        asText: Boolean,
+        kind: NotebookKind,
         typed: String?,
     ): String {
         val notebookId = UUID.randomUUID().toString()
@@ -361,8 +381,9 @@ class NewNotebookActivity : AppCompatActivity() {
                 notebookId = notebookId, name = name, createdAt = now, updatedAt = now,
                 folderPath = repo.ancestry(parentFolderId),
                 appVersionCode = packageManager.getPackageInfo(packageName, 0).longVersionCode.toInt(),
-                // The mirror of the index bit, so the file stays self-describing on import.
-                textDocument = asText,
+                // The mirror of the index bits, so the file stays self-describing on import.
+                textDocument = kind == NotebookKind.TEXT,
+                sketch = kind == NotebookKind.SKETCH,
                 // The mirror of the index column, so a notebook carries its own key model on import.
                 keyScope = scope.column,
             ))
@@ -376,7 +397,7 @@ class NewNotebookActivity : AppCompatActivity() {
 
         repo.createNotebook(
             notebookId, name, parentFolderId, TemplatePicks.birthKind(pick), pageCount = 1,
-            textDocument = asText, keyScope = scope.column, now = now,
+            kind = kind, keyScope = scope.column, now = now,
         )
 
         // A text document's cover is its text, so an empty one's cover is an empty page — rendered
@@ -386,7 +407,10 @@ class NewNotebookActivity : AppCompatActivity() {
         //
         // A NOTEBOOK-scope notebook has no cover anywhere (decision 11): the card is a lock, and
         // painting one here would put the only picture of its content in the unencrypted index.
-        if (asText && scope == KeyScope.GLOBAL) TextCover.render(repo, notebookId, "")
+        //
+        // A Sketch notebook gets nothing here: its cover is the sketch of the page it was last on
+        // (arc 43, decision 6), and at create there is no sketch — the first close paints it.
+        if (kind == NotebookKind.TEXT && scope == KeyScope.GLOBAL) TextCover.render(repo, notebookId, "")
 
         // The hand-off for the open that is about to follow (decision 12) — parked after the index
         // row, taken only by the notebook screen's own open, gone in 60 s either way. Nobody is
@@ -398,7 +422,7 @@ class NewNotebookActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "NewNotebook"
         private const val KEY_PICK = "templatePick"
-        private const val KEY_TEXT_DOCUMENT = "textDocument"
+        private const val KEY_KIND = "notebookKind"
         private const val KEY_OWN_PASSPHRASE = "ownPassphrase"
         const val EXTRA_PARENT_FOLDER_ID = "parentFolderId"
         const val EXTRA_NOTEBOOK_ID = "notebookId"

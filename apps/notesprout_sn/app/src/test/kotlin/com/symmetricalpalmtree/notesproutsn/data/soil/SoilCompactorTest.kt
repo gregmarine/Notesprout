@@ -156,6 +156,36 @@ class SoilCompactorTest {
         assertEquals(setOf("txt-1", "shp-1", "stk-1", "note-ink"), SoilCompactor.purgeIds(rows))
     }
 
+    /**
+     * Arc 43 / K3: the sketch needs no code in the purge either — it is a soft-deleted row like any
+     * other, and a purged page's cascade is type-agnostic. These two are what say so, and they fail
+     * if the purge is ever taught to enumerate types or to exempt a second kind beside `template`.
+     * The stakes are the opposite of a template's: a sketch left behind after its page is gone pays
+     * **megabytes** of rent in an encrypted file forever.
+     */
+    @Test
+    fun aSoftDeletedSketchPurges() {
+        val rows = listOf(
+            root(), page("p1"), stroke("s1", "p1"),
+            Row("sk-1", "p1", SoilSchema.TYPE_SKETCH, deleted = true),   // cleared, or erased-and-closed
+            Row("sk-2", "p2", SoilSchema.TYPE_SKETCH, deleted = false),
+            page("p2"),
+        )
+        assertEquals(setOf("sk-1"), SoilCompactor.purgeIds(rows))
+    }
+
+    @Test
+    fun aPurgedPageTakesItsSketchWithIt() {
+        val rows = listOf(
+            root(), template("t1"),
+            page("p1", deleted = true),
+            Row("sk-1", "p1", SoilSchema.TYPE_SKETCH, deleted = false),
+            stroke("s1", "p1"),
+            page("p2"), Row("sk-2", "p2", SoilSchema.TYPE_SKETCH, deleted = false),
+        )
+        assertEquals(setOf("p1", "sk-1", "s1"), SoilCompactor.purgeIds(rows))
+    }
+
     @Test
     fun emptyInputIsEmptyOutput() {
         assertTrue(SoilCompactor.purgeIds(emptyList()).isEmpty())

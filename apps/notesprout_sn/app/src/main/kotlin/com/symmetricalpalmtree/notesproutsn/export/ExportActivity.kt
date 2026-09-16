@@ -215,9 +215,10 @@ class ExportActivity : AppCompatActivity(), ExportPresetRow.Host {
     private var scope: ExportScope = ExportScope.Whole
 
     /** What the one open answered about the door's page (arc 30 / PE2): its 1-based position, its
-     *  topmost heading (the Contents rule), whether it has its own document. Null when the page is
-     *  not among the notebook's live pages any more. */
-    private class PageFacts(val number: Int, val title: String?, val hasDocument: Boolean)
+     *  topmost heading (the Contents rule), whether it has its own document, and whether it carries
+     *  a sketch (arc 43 / K7 — a per-page exporter then writes two files, [ExportDelivery.perPage]).
+     *  Null when the page is not among the notebook's live pages any more. */
+    private class PageFacts(val number: Int, val title: String?, val hasDocument: Boolean, val hasSketch: Boolean)
 
     /**
      * Everything the **one** `.soil` open answers, together (arc 34 / L14 — they had been three
@@ -634,7 +635,7 @@ class ExportActivity : AppCompatActivity(), ExportPresetRow.Host {
                     // The page's own document row (a child of the page); blank means absent — the
                     // repository's read rule, kept by hand as ExportText keeps it.
                     val pageDoc = dao.childrenOfType(id, SoilSchema.TYPE_DOCUMENT).any { !it.text.isNullOrBlank() }
-                    PageFacts(index + 1, title, pageDoc)
+                    PageFacts(index + 1, title, pageDoc, dao.hasLiveSketch(id))
                 }
                 NotebookAnswers(dao.hasLiveDocument(), dao.stickyIdsWithContent().isNotEmpty(), facts)
             }
@@ -1085,14 +1086,25 @@ class ExportActivity : AppCompatActivity(), ExportPresetRow.Host {
     }
 
     /**
-     * The stem of file [index] of a per-page export (arc 31 / HV1, grown HV4). For the notebook it
-     * is the page's own name; for a calendar it is the plan's stem, used **verbatim** — a calendar
-     * page has no heading to fall back on and no notebook to be prefixed with, and the ` AM` /
-     * ` PM` that tells a Day's two files apart is already in it.
+     * The stem of file [index] of a per-page export (arc 31 / HV1, grown HV4 and arc 43 / K7). For
+     * the notebook it is the page's own name — built from what the bake read for **that bundle
+     * page**, which since sketches are interleaved is no longer the same thing as its position in
+     * the list; for a calendar it is the plan's stem, used **verbatim** — a calendar page has no
+     * heading to fall back on and no notebook to be prefixed with, and the ` AM` / ` PM` that tells
+     * a Day's two files apart is already in it.
      */
-    private fun stemFor(index: Int, pageTitles: List<String?>): String =
-        if (scope is ExportScope.Calendar) pageTitles.getOrNull(index) ?: stem()
-        else ExportNaming.pageStem(notebookName, notebookId, index + 1, pageTitles.getOrNull(index))
+    /** [ExportDelivery.perPage] for [c] at this screen's scope, with the door page's sketch fact
+     *  (arc 43 / K7) — the one place the three doors to a folder ask it. */
+    private fun perPage(c: Candidate): Boolean =
+        ExportDelivery.perPage(c.delivery, scope, answers?.page?.hasSketch == true)
+
+    private fun stemFor(index: Int, pageNames: List<ExportNaming.PageName>): String {
+        val name = pageNames.getOrNull(index)
+        if (scope is ExportScope.Calendar) return name?.title ?: stem()
+        return ExportNaming.pageStem(
+            notebookName, notebookId, name?.number ?: (index + 1), name?.title, name?.sketch == true,
+        )
+    }
 
     private fun onExportTap() {
         if (busy) { Slog.d(TAG) { "export tap ignored: already running" }; return }
@@ -1146,7 +1158,7 @@ class ExportActivity : AppCompatActivity(), ExportPresetRow.Host {
             // A per-page export cannot name its files before the bake, so it asks about the folder
             // once, up front (arc 31 / HV1) instead of about one name.
             else browse { pick ->
-                if (ExportDelivery.perPage(c.delivery, scope)) confirmFolderThenExport(pick.path)
+                if (perPage(c)) confirmFolderThenExport(pick.path)
                 else confirmThenUpload(c, pick.path, pick.listing)
             }
             return
@@ -1154,7 +1166,7 @@ class ExportActivity : AppCompatActivity(), ExportPresetRow.Host {
         // The per-page fork (arc 31 / HV1). A folder, not a file: the host names one file per page
         // and there is nothing to type over, so the door is SAF's tree pick rather than a document
         // creation. Everything above is shared — it is about what is in the files, not how many.
-        if (ExportDelivery.perPage(c.delivery, scope)) {
+        if (perPage(c)) {
             busy = true
             try {
                 treeLauncher.launch(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE))
@@ -1313,7 +1325,7 @@ class ExportActivity : AppCompatActivity(), ExportPresetRow.Host {
             }
             hideProgress()
             if (isFinishing || isDestroyed) { cancelledAtThePicker(); return@launch }
-            if (ExportDelivery.perPage(c.delivery, scope)) confirmFolderThenExport(path)
+            if (perPage(c)) confirmFolderThenExport(path)
             else confirmThenUpload(c, path, listing)
         }
     }
@@ -1498,7 +1510,7 @@ class ExportActivity : AppCompatActivity(), ExportPresetRow.Host {
                 if (perPage) {
                     exportPerPage(
                         c, destination, streamFile,
-                        (prepared as? StreamSource.Ready)?.pageTitles.orEmpty(),
+                        (prepared as? StreamSource.Ready)?.pageNames.orEmpty(),
                         specValues,
                         if (wantsSecret) typedExportSecret else null,
                     )
@@ -1630,10 +1642,11 @@ class ExportActivity : AppCompatActivity(), ExportPresetRow.Host {
      *  two source kinds answer with the same two shapes, which is what lets the flow stop caring
      *  which one it asked at the line after this. */
     private sealed class StreamSource {
-        /** [pageTitles] is the per-page delivery's naming answer (arc 31 / HV1) — one entry per
-         *  page of the bundle, in its order, empty for every source kind that has no pages of the
-         *  notebook to name (the `.soil`, the assembled text, the document laid out on paper). */
-        class Ready(val file: File, val pageTitles: List<String?> = emptyList()) : StreamSource()
+        /** [pageNames] is the per-page delivery's naming answer (arc 31 / HV1, grown arc 43 /
+         *  K7) — one entry per page of the bundle, in its order, empty for every source kind that
+         *  has no pages of the notebook to name (the `.soil`, the assembled text, the document
+         *  laid out on paper). */
+        class Ready(val file: File, val pageNames: List<ExportNaming.PageName> = emptyList()) : StreamSource()
         class Failed(val message: String) : StreamSource()
     }
 
@@ -1700,7 +1713,7 @@ class ExportActivity : AppCompatActivity(), ExportPresetRow.Host {
             scope.pageIds,
         )
         return when (outcome) {
-            is ExportRender.Outcome.Ready -> StreamSource.Ready(outcome.file, outcome.pageTitles)
+            is ExportRender.Outcome.Ready -> StreamSource.Ready(outcome.file, outcome.pageNames)
             is ExportRender.Outcome.Failed -> StreamSource.Failed(getString(ExportMessages.of(outcome.problem)))
         }
     }
@@ -1749,7 +1762,7 @@ class ExportActivity : AppCompatActivity(), ExportPresetRow.Host {
             maxOf(metrics.widthPixels, metrics.heightPixels),
         )
         return when (outcome) {
-            is CalendarRender.Outcome.Ready -> StreamSource.Ready(outcome.file, outcome.pageTitles)
+            is CalendarRender.Outcome.Ready -> StreamSource.Ready(outcome.file, outcome.pageNames)
             is CalendarRender.Outcome.Failed -> StreamSource.Failed(outcome.message)
         }
     }
@@ -1934,7 +1947,7 @@ class ExportActivity : AppCompatActivity(), ExportPresetRow.Host {
         c: Candidate,
         destination: Destination,
         bundle: File,
-        pageTitles: List<String?>,
+        pageNames: List<ExportNaming.PageName>,
         specValues: Map<String, String>,
         secret: String?,
     ) {
@@ -1981,7 +1994,7 @@ class ExportActivity : AppCompatActivity(), ExportPresetRow.Host {
             return
         }
         try {
-            exportPerPageHeld(exporter, c, destination, parts, pageTitles, specValues, secret, extension, mime, treeRoot)
+            exportPerPageHeld(exporter, c, destination, parts, pageNames, specValues, secret, extension, mime, treeRoot)
         } finally {
             exporter.close()
         }
@@ -1993,7 +2006,7 @@ class ExportActivity : AppCompatActivity(), ExportPresetRow.Host {
         c: Candidate,
         destination: Destination,
         parts: List<File>,
-        pageTitles: List<String?>,
+        pageNames: List<ExportNaming.PageName>,
         specValues: Map<String, String>,
         secret: String?,
         extension: String,
@@ -2005,7 +2018,7 @@ class ExportActivity : AppCompatActivity(), ExportPresetRow.Host {
         var written = 0
         for (index in parts.indices) {
             val part = parts[index]
-            val stem = stemFor(index, pageTitles)
+            val stem = stemFor(index, pageNames)
             val name = ExportNaming.fileName(stem, extension)
             stage(getString(R.string.export_exporting_image, index + 1, total))
             val spec = try {

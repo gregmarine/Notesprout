@@ -30,8 +30,13 @@ class ExtensionContractTest {
         // contract event.
         // 12 since arc 38 / R1 (two `IBible` tails behind a method floor; no action floor moved);
         // 13 since B9 "Send" (`takeOutgoingReference`); 14 since arc 39 / K1
-        // (`IDocumentHost.openReference`); 15 since arc 40 "Verses" (`IBible.passageText`).
-        assertEquals(16, ExtensionContract.API_VERSION)
+        // (`IDocumentHost.openReference`); 15 since arc 40 "Verses" (`IBible.passageText`);
+        // 16 since arc 42 "Notes" (seven `IBible` tails); 17 since arc 43 / K2 (the SKETCH point —
+        // SN's TENTH, a compatible addition on the Bible's pattern, floored at 17); 18 since arc 43
+        // / K5b (three `ISketchHost` tails — insertPage / deletePage / pageContent — behind the
+        // METHOD floor MIN_API_VERSION_FOR_SKETCH_PAGES; no action floor moved, only :ext-sketch
+        // redeclares).
+        assertEquals(18, ExtensionContract.API_VERSION)
         assertEquals(9, ExporterContract.MIN_API_VERSION_FOR_DELIVERY)
         assertEquals(6, ExtensionContract.MIN_API_VERSION_FOR_STORE)
         assertEquals(7, ExtensionContract.MIN_API_VERSION_FOR_CALENDAR)
@@ -44,6 +49,8 @@ class ExtensionContractTest {
         assertEquals(13, ExtensionContract.MIN_API_VERSION_FOR_BIBLE_SEND)
         assertEquals(15, ExtensionContract.MIN_API_VERSION_FOR_BIBLE_TEXT)
         assertEquals(16, ExtensionContract.MIN_API_VERSION_FOR_BIBLE_NOTES)
+        assertEquals(17, SketchContract.MIN_API_VERSION_FOR_SKETCH)
+        assertEquals(18, SketchContract.MIN_API_VERSION_FOR_SKETCH_PAGES)
         assertEquals(14, DocumentContract.MIN_API_VERSION_FOR_DOCUMENT_LOOKUP)
         assertEquals(2_000, ExtensionContract.MAX_INK_STROKES)
         assertEquals(60_000, ExtensionContract.MAX_INK_POINTS)
@@ -103,6 +110,14 @@ class ExtensionContractTest {
         assertEquals(
             "com.symmetricalpalmtree.notesproutsn.extension.CLOUD_STORAGE_SCREEN",
             CloudContract.ACTION_CLOUD_STORAGE_SCREEN,
+        )
+        assertEquals(
+            "com.symmetricalpalmtree.notesproutsn.extension.SKETCH",
+            SketchContract.ACTION_SKETCH,
+        )
+        assertEquals(
+            "com.symmetricalpalmtree.notesproutsn.extension.SKETCH_SCREEN",
+            SketchContract.ACTION_SKETCH_SCREEN,
         )
     }
 
@@ -222,7 +237,16 @@ class ExtensionContractTest {
         assertTrue(!ExtensionContract.accepts(bible, 10))
         assertTrue(ExtensionContract.accepts(bible, 11))
         assertTrue(!ExtensionContract.accepts(bible, ExtensionContract.API_VERSION + 1))
+        // The Sketch point (arc 43 / K2): born at 17, listed only there. No other door moved —
+        // every floor above still answers its own birth number.
+        val sketch = SketchContract.ACTION_SKETCH
+        assertEquals(17, ExtensionContract.minApiVersion(sketch))
+        assertEquals(SketchContract.MIN_API_VERSION_FOR_SKETCH, ExtensionContract.minApiVersion(sketch))
+        assertTrue(!ExtensionContract.accepts(sketch, 16))
+        assertTrue(ExtensionContract.accepts(sketch, 17))
+        assertTrue(!ExtensionContract.accepts(sketch, ExtensionContract.API_VERSION + 1))
         // The screen action is not a service action — it carries no floor of its own.
+        assertEquals(1, ExtensionContract.minApiVersion(SketchContract.ACTION_SKETCH_SCREEN))
         assertEquals(1, ExtensionContract.minApiVersion(ExtensionContract.ACTION_BIBLE_SCREEN))
         assertEquals(1, ExtensionContract.minApiVersion(ExtensionContract.ACTION_CALENDAR_SCREEN))
         assertEquals(1, ExtensionContract.minApiVersion(CloudContract.ACTION_CLOUD_STORAGE_SCREEN))

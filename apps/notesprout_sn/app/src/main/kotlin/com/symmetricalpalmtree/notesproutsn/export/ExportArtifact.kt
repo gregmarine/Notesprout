@@ -189,10 +189,15 @@ object ExportArtifact {
                     folderPath = repo.ancestry(row.parentId),
                     exportedAt = System.currentTimeMillis(),
                     appVersionCode = appVersionCode,
-                    // From the index bit, never from `existing` (arc 19 / M2): the index is the
-                    // authority and the meta field mirrors it, so carrying the previous meta
-                    // forward is how the flag gets silently wiped (og's meta-refresh-wipe trap).
+                    // From the index bits, never from `existing` (arc 19 / M2, grown arc 43 / K3):
+                    // the index is the authority and the meta fields mirror it, so carrying the
+                    // previous meta forward is how a flag gets silently wiped (og's
+                    // meta-refresh-wipe trap). Read as two independent bits rather than through
+                    // `NotebookKind`, because this is a mirror of what the row says and not a
+                    // decision about what to open: an exported file describes itself exactly as
+                    // the index does, conflict and all, and the reading side resolves it.
                     textDocument = ((row.flags ?: 0) and NotebookFlags.TEXT_DOCUMENT) != 0,
+                    sketch = ((row.flags ?: 0) and NotebookFlags.SKETCH) != 0,
                 ),
             )
         } catch (e: Exception) {

@@ -1,0 +1,244 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Sketch screen (arc 43 / K5) — a raster page beside the ink, spartan: full-bleed paper with
+  two thin chrome bars overlaid. The PaperView is added into paperContainer programmatically. Paper
+  is plain white always (decision 10) — no template, no ink layer underneath.
+
+  Tools are pencil and eraser only — no lasso, no selection toolbar: a sketch page has no objects to
+  select, only pixels. Top bar: Back · Pencil · Eraser … Bring in ink · Show pages. Bottom bar is the
+  pager only.
+
+  Both bars go to paper.setExclusionRects (via PaperChrome) after layout, so ink never lands under
+  chrome. Chrome sits flush at the top edge — the top guard is 0 on Ratta.
+
+  openingOverlay is the LAST child (topmost) and starts VISIBLE: the screen covers its own first
+  frame the way the notebook does, so the launch reads as one continuous "Opening…".
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/paperWhite">
+
+    <FrameLayout
+        android:id="@+id/paperContainer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <LinearLayout
+        android:id="@+id/topBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:background="@color/paperWhite"
+        android:orientation="vertical">
+
+        <!-- A FrameLayout, not a row: the title is centred on the SCREEN, so it stays put
+             whatever flanks it. -->
+        <FrameLayout
+            android:id="@+id/topBarRow"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/toolbar_bar_thickness"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp">
+
+            <TextView
+                android:id="@+id/title"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:ellipsize="end"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:singleLine="true"
+                android:text="@string/sketch_title"
+                android:textColor="@color/inkBlack"
+                android:textSize="16sp" />
+
+            <!-- Back, then the tools: pencil and eraser only, no lasso. -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:layout_gravity="start"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnBack"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:contentDescription="@string/cd_sketch_back"
+                    android:src="@drawable/ic_arrow_left" />
+
+                <!-- ic_pen IS Tabler's pencil glyph (the user's call, K5): the sketch's one tool
+                     wears it, and so does the collapsed corner button. -->
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnPencil"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:contentDescription="@string/cd_tool_pencil"
+                    android:src="@drawable/ic_pen" />
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnEraser"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:contentDescription="@string/cd_tool_eraser"
+                    android:src="@drawable/ic_eraser" />
+            </LinearLayout>
+
+            <!-- Bring in ink (the door back to the notebook's own ink layer), then Show pages. -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:layout_gravity="end"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnBringInk"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:contentDescription="@string/cd_sketch_bring_ink"
+                    android:src="@drawable/ic_pencil_down" />
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnShowPages"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:contentDescription="@string/cd_sketch_show_pages"
+                    android:src="@drawable/ic_page" />
+            </LinearLayout>
+
+        </FrameLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/bottomBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:background="@color/paperWhite"
+        android:orientation="vertical">
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
+
+        <!-- Pages only, centred on the SCREEN — the tools live in the top bar. -->
+        <FrameLayout
+            android:id="@+id/bottomBarRow"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/toolbar_bar_thickness"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:layout_gravity="center"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnPrevPage"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:contentDescription="@string/cd_prev_page"
+                    android:src="@drawable/ic_page_prev" />
+
+                <TextView
+                    android:id="@+id/pageIndicator"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:minWidth="56dp"
+                    android:singleLine="true"
+                    android:textColor="@color/inkBlack"
+                    android:textSize="14sp" />
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnNextPage"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:contentDescription="@string/cd_next_page"
+                    android:src="@drawable/ic_page_next" />
+            </LinearLayout>
+
+        </FrameLayout>
+
+    </LinearLayout>
+
+    <!-- The collapsed chrome — what shows while both bars are hidden: the corner tool button at
+         top-right wearing the armed tool's glyph, and, hung under it on a tap, the mini toolbar and
+         its overflow row (buttons built in code — CollapsedChrome, :sn-screen). The button is GONE
+         while the bars show; ChromeToggle flips it with them. All three sit after every bar they may
+         overlap and BEFORE openingOverlay, which stays topmost while the screen opens — a corner
+         button laid over it would take the taps the overlay is there to swallow. -->
+    <androidx.appcompat.widget.AppCompatImageButton
+        android:id="@+id/collapsedKnob"
+        style="@style/Widget.Notesprout.ToolbarButton"
+        android:layout_gravity="top|end"
+        android:layout_margin="8dp"
+        android:background="@drawable/shape_dialog_bordered"
+        android:src="@drawable/ic_pen"
+        android:visibility="gone"
+        android:contentDescription="@string/collapsed_tools" />
+
+    <LinearLayout
+        android:id="@+id/collapsedBar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:background="@drawable/shape_dialog_bordered"
+        android:orientation="horizontal"
+        android:padding="4dp"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/collapsedOverflow"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:background="@drawable/shape_dialog_bordered"
+        android:orientation="horizontal"
+        android:padding="4dp"
+        android:visibility="gone" />
+
+    <!-- "Opening…" — the screen's own box (the host's core/OpeningOverlay is :app's and never
+         crosses). Full-screen but transparent and clickable: it swallows the second tap a slow
+         e-ink refresh invites while the page is still being read. -->
+    <FrameLayout
+        android:id="@+id/openingOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/transparent"
+        android:clickable="true"
+        android:focusable="true">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:background="@drawable/shape_dialog_bordered"
+            android:orientation="vertical"
+            android:padding="24dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/sketch_opening"
+                android:textColor="@color/inkBlack"
+                android:textSize="16sp" />
+
+        </LinearLayout>
+
+    </FrameLayout>
+
+    <!-- There is deliberately NO eraser sub-bar here, and no lasso button above. Every other paper
+         screen's eraser has two kinds — Point and Lasso — reached by a second tap on the armed
+         eraser. A raster page has no strokes to lasso and no objects to select, so both would arm
+         tools this surface does not answer. PaperScreenActivity's `eraserBar` is simply never
+         initialised, and every call site there is `isInitialized`-guarded. -->
+
+</FrameLayout>

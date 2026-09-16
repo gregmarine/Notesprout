@@ -25,6 +25,8 @@ class FamilyConstantsTest {
         assertEquals(1, NotebookFlags.ENCRYPTED)
         assertEquals(2, NotebookFlags.EXCLUDE_FROM_BACKUP)
         assertEquals(4, NotebookFlags.TEXT_DOCUMENT)
+        // Arc 43 / K3 — the next free bit. Paper ignores unknown bits, so this is additive.
+        assertEquals(8, NotebookFlags.SKETCH)
         assertEquals("__notesprout_index__", KeyMaterial.INDEX_FILE_ID)
     }
 
@@ -45,6 +47,10 @@ class FamilyConstantsTest {
         assertEquals("text", SoilSchema.TYPE_TEXT)
         assertEquals("shape", SoilSchema.TYPE_SHAPE)
         assertEquals("sticky_note", SoilSchema.TYPE_STICKY)
+        // Arc 43 / K3: og has no sketch row, so this name is SN's own — pinned here anyway,
+        // because a `.soil` this app wrote must keep reading as the same file after any rename.
+        assertEquals("sketch", SoilSchema.TYPE_SKETCH)
+        assertEquals(-1, SoilSchema.SKETCH_ORDER)
         assertEquals("", SoilSchema.ROOT_PARENT)
         assertEquals("BLANK", SoilSchema.TEMPLATE_BLANK)
         assertEquals("GLOBAL", KEY_SCOPE_GLOBAL)

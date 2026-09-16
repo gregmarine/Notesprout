@@ -12,8 +12,9 @@ package com.symmetricalpalmtree.notesproutsn.extension
  * other family's host.
  *
  * Since then: arc 15's exporters, arc 16's importers, arc 19's document editor, arc 21's tag
- * manager, arc 23's calendar, arc 25's cloud storage ([CloudContract]) and arc 37's Bible reader
- * ([ACTION_BIBLE]) — each on its own explicit user decision, nine points in all.
+ * manager, arc 23's calendar, arc 25's cloud storage ([CloudContract]), arc 37's Bible reader
+ * ([ACTION_BIBLE]) and arc 43's sketch surface ([SketchContract.ACTION_SKETCH]) — each on its own
+ * explicit user decision, ten points in all.
  *
  * `IExtensionStore` (arc 11 / J2, rebuilt arc 22 / X1) is not a capability point but the
  * **service** the host offers an extension it has bound: a per-package encrypted SQLite store the
@@ -133,8 +134,29 @@ object ExtensionContract {
      * [MIN_API_VERSION_FOR_BIBLE_NOTES]. The host pushes where a Bible reference sits (notebook,
      * page, the opaque wire) and the reader lists those pages while the chapter is read.
      * `MIN_API_VERSIONS` untouched; only `:ext-bible` redeclares.
+     *
+     * **17 since arc 43 / K2** — the SKETCH point ([SketchContract.ACTION_SKETCH], SN's TENTH
+     * capability point, granted by the user 2026-09-15 — `extensions/sketch/SKETCH_PLAN.md`). The
+     * Bible's and the calendar's shape once more: a compatible *addition*, screen-owning behind a
+     * held bind (`begin(host)` / `end()`), listed only at [SketchContract.MIN_API_VERSION_FOR_SKETCH]
+     * because it was never reachable below it; nothing existing changes, every existing extension
+     * keeps its declaration, no door vanishes. It is the first point to take **no store** — the
+     * pixels live in the host's `.soil`, the bookmark is the notebook's page, and the undo history
+     * is the sitting — and the second to be served by a host-side stub (`ISketchHost`, after
+     * `IDocumentHost`). Only `:ext-sketch` declares 17.
+     *
+     * **18 = arc 43 / K5b (2026-09-15)** — five compatible tails appended to `ISketchHost` after
+     * `readInkChunk` (`insertPage`, `deletePage`, `pageContent`: the sketch face inserts and deletes
+     * pages exactly as the notebook does, the user's amendment to decision 7; then `undoPage` and
+     * `redoPage`, his follow-up the same day: the face's own undo/redo gestures reverse one, so
+     * nobody has to leave for the notebook to take back a delete), behind the METHOD
+     * floor [SketchContract.MIN_API_VERSION_FOR_SKETCH_PAGES]. The arc-39 shape — a **host-side**
+     * stub's tail, where the number an extension declares is what it requires of the host — so a
+     * screen that calls transaction codes 7–11 declares 18 and never binds a 17 host.
+     * `MIN_API_VERSIONS` is untouched, [SketchContract.MIN_API_VERSION_FOR_SKETCH] stays 17, no
+     * door vanishes, and only `:ext-sketch` redeclares. Not an eleventh point.
      */
-    const val API_VERSION: Int = 16
+    const val API_VERSION: Int = 18
 
     /**
      * The floor for a service on a **store-taking** point (arc 22 / X1): the host accepts such a
@@ -214,7 +236,8 @@ object ExtensionContract {
      * ([ACTION_SCRATCH_PAD], [DocumentContract.ACTION_DOCUMENT_EDITOR], [ACTION_TAG_MANAGER]),
      * [MIN_API_VERSION_FOR_CALENDAR] for [ACTION_CALENDAR], [CloudContract.MIN_API_VERSION_FOR_CLOUD]
      * for [CloudContract.ACTION_CLOUD_STORAGE] (arc 25 / V1), [MIN_API_VERSION_FOR_BIBLE] for
-     * [ACTION_BIBLE] (arc 37 / B0), 1 for every other. The range rule at
+     * [ACTION_BIBLE] (arc 37 / B0), [SketchContract.MIN_API_VERSION_FOR_SKETCH] for
+     * [SketchContract.ACTION_SKETCH] (arc 43 / K2), 1 for every other. The range rule at
      * [API_VERSION] applies above it. A point that is not in the map has the floor of 1 — a new
      * point that needs one adds its row here, and the test that pins the map fails until it does.
      */
@@ -233,6 +256,7 @@ object ExtensionContract {
             ACTION_CALENDAR to MIN_API_VERSION_FOR_CALENDAR,
             CloudContract.ACTION_CLOUD_STORAGE to CloudContract.MIN_API_VERSION_FOR_CLOUD,
             ACTION_BIBLE to MIN_API_VERSION_FOR_BIBLE,
+            SketchContract.ACTION_SKETCH to SketchContract.MIN_API_VERSION_FOR_SKETCH,
         )
     }
 
@@ -276,7 +300,8 @@ object ExtensionContract {
         "com.symmetricalpalmtree.notesproutsn.extension.CALENDAR_SCREEN"
 
     /** Intent action a Bible-reader `<service>` declares in its intent-filter (arc 37 / B0 — SN's
-     *  NINTH capability point, granted by the user 2026-09-13; no TENTH without another). The
+     *  NINTH capability point, granted by the user 2026-09-13; the TENTH was granted 2026-09-15 for
+     *  arc 43's sketch surface, [SketchContract.ACTION_SKETCH], and no ELEVENTH without another). The
      *  fifth screen-owning point and the second with **no paper** (the tag manager's shape): a
      *  held bind for the showing, the store lent at `begin`, nothing else on the interface and
      *  nothing on the Intent. Served by `:ext-bible` at `extensions/bible/`. */
