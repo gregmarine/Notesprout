@@ -219,13 +219,23 @@
             <!-- The right half of the row: the same weight as the name's half, so the pager stays
                  centred — and, since arc 37 / B0, the Bible's door at its far end on the user's
                  call: the first non-pager control on this strip. GONE unless a trusted reader is
-                 installed; BibleEntry owns it. -->
+                 installed; BibleEntry owns it. Arc 43 / K4, decision 9 adds the Sketch door
+                 (`btnSketch`) immediately to Bible's left — GONE unless the notebook is a Sketch
+                 notebook and a trusted NSE · Sketch is installed; SketchEntry owns it. The second
+                 granted exception to "bottom bars are pager-only". -->
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:orientation="horizontal"
                 android:gravity="end|center_vertical">
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnSketch"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:src="@drawable/ic_brush"
+                    android:visibility="gone"
+                    android:contentDescription="@string/cd_sketch"/>
 
                 <androidx.appcompat.widget.AppCompatImageButton
                     android:id="@+id/btnBible"

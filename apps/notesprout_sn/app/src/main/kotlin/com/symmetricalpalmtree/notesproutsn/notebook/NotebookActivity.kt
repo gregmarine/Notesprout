@@ -78,6 +78,7 @@ import com.symmetricalpalmtree.notesproutsn.extension.RecognizerClient
 import com.symmetricalpalmtree.notesproutsn.extension.PassageText
 import com.symmetricalpalmtree.notesproutsn.extension.ResolvedReference
 import com.symmetricalpalmtree.notesproutsn.extension.ScratchPadEntry
+import com.symmetricalpalmtree.notesproutsn.extension.SketchEntry
 import com.symmetricalpalmtree.notesproutsn.extension.TagManagerEntry
 import com.symmetricalpalmtree.notesproutsn.extension.TagShowing
 import com.symmetricalpalmtree.notesproutsn.extension.TransferCaps
@@ -162,6 +163,13 @@ class NotebookActivity : AppCompatActivity() {
     /** The Bible reader's entry (arc 37 / B0) — the ninth point's door, and the owner of the bottom
      *  strip's `btnBible`. No paper behind it: no handoff, no chrome flag. */
     private lateinit var bible: BibleEntry
+    /** The sketch face's entry (arc 43 / K4) — the tenth point's door, and the owner of the bottom
+     *  strip's `btnSketch` (decision 9, the second granted exception to "bottom bars are
+     *  pager-only"). Paper behind it, unlike the Bible's: the handoff and the chrome flag both. */
+    private lateinit var sketchEntry: SketchEntry
+    /** The `.soil` half of that door: the four hooks the sketch screen's callback binder reaches
+     *  back through, and the host's memory of which page the face is on. */
+    private lateinit var sketchHooks: SketchHostHooks
     /** The three tag doors that button opens (arc 21 / W2). */
     private lateinit var tagsPopup: TagsPopup
     /** The Insert button's sub-bar (arc 28 / H1) — Sticky, Text and the six shapes. */
@@ -386,6 +394,10 @@ class NotebookActivity : AppCompatActivity() {
      * teardown flush must still land while the screen is closing (flush-before-seal, the M4
      * invariant), and the reconnect wait must run while the session is still opening (`opened`
      * false). `@Volatile`: written on the seal coroutine, read on Binder threads.
+     *
+     * **[SketchHostHooks] reads the same flag** (arc 43 / K4): it is one screen with one session,
+     * and "this screen still takes extension writes" is one fact about it. The name is the document
+     * editor's because it got here first; a second flag would be a second answer to one question.
      */
     @Volatile
     private var documentWritesClosed = false
@@ -401,6 +413,17 @@ class NotebookActivity : AppCompatActivity() {
     /** M8 — saved state said the editor was showing, so [DocumentEditorEntry.reconnect] has already
      *  run in `onCreate` and the open must not launch a second showing over the same one. */
     private var documentShowingRestored = false
+
+    /** Arc 43 / K4 — [documentShowingRestored]'s sibling for the sketch face. */
+    private var sketchShowingRestored = false
+
+    /**
+     * Arc 43 / K4, decision 6/7: the page the sketch face ended on, kept after
+     * [SketchHostHooks.resetTarget] has cleared the hooks' copy. Two things read it — the seal's
+     * cover (the sketch of the last-shown page) and the last-open pointer — and both run long after
+     * the showing is over, on a screen whose canvas may never have been loaded at all.
+     */
+    private var lastFaceEndedOn: String? = null
 
     /** A showing that ended while [openSession] was still on IO — see [TextDocRouting.parkClose].
      *  A class rather than a bare `Int?` so that "no result yet" and "a result whose editor never
@@ -1017,6 +1040,56 @@ class NotebookActivity : AppCompatActivity() {
         }
         TooltipCompat.setTooltipText(binding.btnBible, binding.btnBible.contentDescription)
 
+        // The sketch face (arc 43 / K4) — the tenth point. Built here for the pad's two reasons: it
+        // registers an ActivityResult launcher, and it is a second paper surface in a second
+        // process, so the EPD pipeline goes over the instant before it launches. The notebook is
+        // NOT sealed behind it — the screen opens no `.soil` at all; every pixel it reads and
+        // writes comes back here through the callback binder [SketchHostHooks] serves, which is the
+        // document editor's invariant applied to a drawing surface.
+        //
+        // Its door is on the bottom strip, left of Bible (decision 9) and GONE unless this notebook
+        // is a Sketch notebook AND a trusted extension is installed — both conditions inside
+        // `SketchEntry.discovered`, so there is one answer and one place visibility is decided.
+        sketchHooks = SketchHostHooks(
+            notebook = { session },
+            // displayedPageId, never session.currentIndex — the R6 torn-read rule, and since the
+            // face turns its own pages this is the fallback for its target, not the answer.
+            displayedPageId = { displayedPageId },
+            // The document editor's gate, shared — see the field's doc.
+            alive = { !documentWritesClosed },
+            sessionOpen = { ::session.isInitialized && session.isOpen },
+        )
+        // Before the reconnect below, and before anything can ask for state: a host killed behind
+        // the face must come back pointing at the page the face is showing.
+        sketchHooks.restoreTarget(savedInstanceState?.getString(KEY_SKETCH_TARGET))
+        sketchEntry = SketchEntry(
+            activity = this,
+            button = binding.btnSketch,
+            hooks = sketchHooks,
+            // Read at every discovery: the session answers false until it has read the index bit.
+            offered = { ::session.isInitialized && session.isSketch },
+            // The queued rows first, so the face's first `current()` — and any Bring in ink right
+            // after it — sees the ink that was just drawn.
+            drainWrites = { if (::session.isInitialized && session.isOpen) session.store.drain() },
+            // The order of the last three acts before the launch (K4): the floating chrome comes
+            // down, a running transform is persisted through `onTransformEnded` (releaseForHandoff
+            // is a silent release and would take its geometry with it — H4), and only then does the
+            // pipeline go over.
+            beforeLaunch = {
+                hideLassoPopup(); hideTagsPopup(); hideInsertBar(); hideEraserBar(); dismissCollapsed()
+                endTransformIfRunning()
+                paper.releaseForHandoff()
+            },
+            // A launch the system refused after the hand-over (arc 34 / M8): this screen never
+            // paused, so its onResume will not re-arm the pipeline — this does.
+            afterLaunchFailed = { paper.resumeDrawing() },
+            // The way home, before `onResume` would get to it (the pad's rule).
+            reclaimPipeline = { if (::paper.isInitialized) paper.resumeDrawing() },
+            onClosed = { resultCode -> sketchShowingEnded(resultCode) },
+        )
+        binding.btnSketch.setOnClickListener { if (opened && !closing) sketchEntry.open() }
+        TooltipCompat.setTooltipText(binding.btnSketch, binding.btnSketch.contentDescription)
+
         // Insert (arc 28 / H1, D4) — the sub-bar and the button that opens it. Every one of the
         // eight buttons is GONE until its own phase offers it (J4): a control that does nothing
         // does not exist. H2 gave one of them — Text — something to do in every build, which is
@@ -1074,6 +1147,10 @@ class NotebookActivity : AppCompatActivity() {
         // onResume, and the entry joins the reconnect from there rather than racing it.
         documentShowingRestored = savedInstanceState?.getBoolean(KEY_DOCUMENT_SHOWING) == true
         if (documentShowingRestored) documentEntry.reconnect()
+        // Arc 43 / K4: the same, for the sketch face — and it matters more there, because what the
+        // extension is holding is a page of pixels with no other copy anywhere.
+        sketchShowingRestored = savedInstanceState?.getBoolean(KEY_SKETCH_SHOWING) == true
+        if (sketchShowingRestored) sketchEntry.reconnect()
         // M8: and whether the pages were already on the glass when we died — a text document that
         // has shown its canvas comes back an ordinary notebook (see [TextDocRouting]). Read here,
         // before openSession is launched at the end of this method, because it is the first thing
@@ -1118,6 +1195,10 @@ class NotebookActivity : AppCompatActivity() {
                     if (tagsPopup.isShowing) hideTagsPopup() else showTagsPopup(anchor)
                 },
                 CollapsedChrome.Entry.mirroring(R.drawable.ic_clock, binding.btnRecents),
+                // The sketch face's bar button is on the bottom strip too (arc 43 / K4), and left of
+                // Bible there — so it is mirrored left of Bible here. GONE on the bar (not a Sketch
+                // notebook, or no extension) is GONE here: the entry mirrors visibility.
+                CollapsedChrome.Entry.mirroring(R.drawable.ic_brush, binding.btnSketch),
                 // The Bible's bar button is on the bottom strip, but a door is a door: mirrored
                 // here before Calendar so the pad stays last (arc 37 / B0).
                 CollapsedChrome.Entry.mirroring(R.drawable.ic_bible, binding.btnBible),
@@ -1259,16 +1340,31 @@ class NotebookActivity : AppCompatActivity() {
             // text document opens into its editor and leaves the paper alone.
             val parkedBox = pendingCloseAfterOpen
             pendingCloseAfterOpen = null
+            // Arc 43 / K3 made the kind three-way and the kinds are exclusive, so exactly one face
+            // answers: the sketch notebook's face reads the Activity result code as its advisory
+            // ([SketchRouting]), the text document's reads the editor's own ([TextDocRouting]).
+            // Both are [FaceRouting]'s one table.
+            val sketchFace = session.isSketch
             val parked = parkedBox?.let {
-                TextDocRouting.closeDecision(session.isTextDocument, canvasShown, it.mode)
+                if (sketchFace) SketchRouting.closeDecision(true, canvasShown, it.mode)
+                else TextDocRouting.closeDecision(session.isTextDocument, canvasShown, it.mode)
             }
             when (
-                val route = TextDocRouting.openDecision(
-                    isTextDocument = session.isTextDocument,
-                    canvasShown = canvasShown,
-                    reconnectPending = documentShowingRestored,
-                    parkedClose = parked,
-                )
+                val route = if (sketchFace) {
+                    SketchRouting.openDecision(
+                        isSketch = true,
+                        canvasShown = canvasShown,
+                        reconnectPending = sketchShowingRestored,
+                        parkedClose = parked,
+                    )
+                } else {
+                    TextDocRouting.openDecision(
+                        isTextDocument = session.isTextDocument,
+                        canvasShown = canvasShown,
+                        reconnectPending = documentShowingRestored,
+                        parkedClose = parked,
+                    )
+                }
             ) {
                 FaceRouting.Open.CANVAS -> {
                     // A parked close replays onto the page the editor ended on — the catch-up (or
@@ -1276,13 +1372,14 @@ class NotebookActivity : AppCompatActivity() {
                     loadCanvas(parkedBox?.endedOn ?: session.currentPage.id)
                 }
                 FaceRouting.Open.SEAL_AND_LEAVE -> {
-                    // The editor left toward the library while we were still opening: seal what we
+                    // The face left toward the library while we were still opening: seal what we
                     // opened and go, without ever putting a page on the paper.
-                    Slog.d(TAG) { "text document: the showing ended before the open did — sealing" }
+                    Slog.d(TAG) { "faced notebook: the showing ended before the open did — sealing" }
                     close()
                 }
                 FaceRouting.Open.EDITOR_LAUNCH, FaceRouting.Open.EDITOR_RECONNECT -> {
-                    openIntoEditor(launch = route == FaceRouting.Open.EDITOR_LAUNCH)
+                    val launch = route == FaceRouting.Open.EDITOR_LAUNCH
+                    if (sketchFace) openIntoSketch(launch) else openIntoEditor(launch)
                 }
             }
         } catch (t: Throwable) {
@@ -1445,6 +1542,16 @@ class NotebookActivity : AppCompatActivity() {
                     }
                     if (standingForReplay()) bible.open()
                 }
+                Surface.SKETCH -> {
+                    // `discovered()` answers false for a notebook that is not a Sketch notebook as
+                    // well as for a missing extension — both are "no door", and a chain naming a
+                    // door this notebook does not have is dropped exactly like a missing package.
+                    if (!sketchEntry.discovered()) {
+                        Slog.d(TAG) { "restore: the sketch face is not available here — dropped" }
+                        return@launch
+                    }
+                    if (standingForReplay()) sketchEntry.open()
+                }
                 Surface.DOCUMENT_EDITOR -> {
                     bible.discovered() // the editor's Bible item is decided at the launch (arc 39)
                     if (!documentEntry.discovered()) {
@@ -1560,7 +1667,7 @@ class NotebookActivity : AppCompatActivity() {
             // The editor is *believed* to be on screen — but the belief is saved state, and the
             // system may have dropped the editor task-mate along with us. If this screen is still
             // the thing on the glass at the deadline, the belief was wrong (M11 review find).
-            watchForAnEditorThatNeverOpens(reconnect = true)
+            watchForAFaceThatNeverOpens(reconnect = true, isShowing = { documentEntry.isShowing }, face = "text document")
             return
         }
         if (!documentEntry.isAvailable) {
@@ -1582,30 +1689,97 @@ class NotebookActivity : AppCompatActivity() {
         bible.discovered()
         if (!opened || closing) return
         documentEntry.open()
-        watchForAnEditorThatNeverOpens()
+        watchForAFaceThatNeverOpens(isShowing = { documentEntry.isShowing }, face = "text document")
     }
 
     /**
-     * The one thing the text route may not leave to chance: an editor that never appears. A bind or
-     * a `begin` can fail (a package replaced under us, a document over the cap) and the entry
-     * answers that with its own problem dialog — which would leave this screen sitting on chrome
-     * over a paper surface that was never loaded. So: one bounded look, and if no showing is up and
-     * we are still the thing on the glass, the pages come up instead.
+     * Arc 43 / K4 — [openIntoEditor]'s sibling for the sketch face, and deliberately shorter: there
+     * is no seed, no recognition and no scope, so all the lightweight open establishes is the page
+     * the hooks fall back to and the `opened` flag their `alive` gate reads. The face's `begin`
+     * asks for state before the launch, so both have to be true by then.
+     *
+     * The target is set **only on a fresh open**: a restored one (or a live showing being
+     * reconnected to) is the face's own memory of where it is, and overwriting it would answer a
+     * reconnecting screen's `current()` about the wrong page.
+     *
+     * [launch] false is the reconnect: the screen is already up and [SketchEntry.reconnect] has
+     * re-minted its binder, so launching would bind twice over one showing. The "Opening…" box
+     * stays up behind it — nothing else will take it down, and this screen is not what the user is
+     * looking at.
+     *
+     * **The extension missing or untrusted is not a failure**: the canvas loads normally and the
+     * door simply stays GONE. A Sketch notebook is an ordinary notebook underneath, and a screen of
+     * chrome over an unloaded surface is not a screen. The alert
+     * ([R.string.sketch_failed_title]/`_body`, raised by [SketchEntry] itself) belongs to a
+     * *deliberate tap* that failed — never to this route.
+     */
+    private suspend fun openIntoSketch(launch: Boolean) {
+        displayedPageId = session.currentPage.id
+        if (launch) {
+            // A Sketch notebook opens *into* the face by itself, so a restored SKETCH entry is
+            // consumed silently here — reopening it would be a second launch over the one this
+            // route is already making. Anything else above it has no page to stand on (arc 32 /
+            // RS2). The reconnect arm leaves the list alone: a recreate never carried one.
+            val above = resumeAbove
+            resumeAbove = emptyList()
+            if (above.isNotEmpty() && above != listOf(Surface.SKETCH)) {
+                Slog.d(TAG) { "restore: $above above a sketch notebook dropped — it reopens into its face" }
+            }
+        }
+        if (launch && !sketchShowingRestored && sketchHooks.targetPageId == null) {
+            sketchHooks.restoreTarget(session.currentPage.id)
+        }
+        opened = true
+        pushExclusions()
+        if (!launch) {
+            Slog.d(TAG) { "sketch notebook: reconnected to the showing already on screen" }
+            watchForAFaceThatNeverOpens(reconnect = true, isShowing = { sketchEntry.isShowing }, face = "sketch")
+            return
+        }
+        // Awaited, never `isAvailable`: the onResume refresh and this route are two coroutines
+        // whose finishing order is a race, and a Sketch notebook must not fall back to its canvas
+        // merely because discovery had not answered yet (arc 32 / RS2's lesson).
+        if (!sketchEntry.discovered()) {
+            Slog.d(TAG) { "sketch notebook: no sketch extension — showing the pages" }
+            loadCanvas(session.currentPage.id)
+            return
+        }
+        if (!opened || closing || isFinishing || isDestroyed) return
+        // Hand the box over rather than stack a second one: the entry raises its own
+        // [OpeningOverlay] and runs the launch strictly after that frame is on the glass.
+        binding.openingOverlay.root.visibility = View.GONE
+        sketchEntry.open()
+        watchForAFaceThatNeverOpens(isShowing = { sketchEntry.isShowing }, face = "sketch")
+    }
+
+    /**
+     * The one thing a face route may not leave to chance: a face that never appears. A bind or a
+     * `begin` can fail (a package replaced under us, a document over the cap) and the entry answers
+     * that with its own problem dialog — which would leave this screen sitting on chrome over a
+     * paper surface that was never loaded. So: one bounded look, and if no showing is up and we are
+     * still the thing on the glass, the pages come up instead.
      *
      * A launch that DID happen leaves this screen stopped, and a showing that has already ended has
      * either loaded the canvas or started closing — three checks that each cost nothing.
+     *
+     * One function for both faces (arc 43 / K4): the rule is about the *screen underneath*, not
+     * about what is over it, and a second hand-written copy of it is the sibling-copy trap.
      */
-    private fun watchForAnEditorThatNeverOpens(reconnect: Boolean = false) {
+    private fun watchForAFaceThatNeverOpens(
+        reconnect: Boolean = false,
+        isShowing: () -> Boolean,
+        face: String,
+    ) {
         lifecycleScope.launch {
             delay(EDITOR_LAUNCH_WATCHDOG_MS)
             if (closing || isFinishing || isDestroyed || canvasShown) return@launch
-            // On the reconnect route [DocumentEntry.isShowing] is true by construction (the binder
+            // On the reconnect route the entry's `isShowing` is true by construction (the binder
             // was re-minted), so it proves nothing there — RESUMED is the check that can: a live
-            // editor on top means this screen is STOPPED, and a screen still RESUMED at the
-            // deadline is a screen with no editor over it, whatever the saved state believed.
-            if (!reconnect && documentEntry.isShowing) return@launch
+            // face on top means this screen is STOPPED, and a screen still RESUMED at the deadline
+            // is a screen with nothing over it, whatever the saved state believed.
+            if (!reconnect && isShowing()) return@launch
             if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@launch
-            Slog.d(TAG) { "text document: the editor never opened — showing the pages" }
+            Slog.d(TAG) { "$face: the face never opened — showing the pages" }
             runPageOp { loadCanvas(displayedPageId) }
         }
     }
@@ -1705,6 +1879,49 @@ class NotebookActivity : AppCompatActivity() {
             FaceRouting.Close.SEAL_TO_LIBRARY -> close()
         }
     }
+
+    // ── The sketch face's showing (arc 43 / K4) ──────────────────────────────
+
+    /**
+     * The sketch showing ended. [documentShowingEnded]'s twin — the same three routes over the same
+     * [FaceRouting] table — with one difference the plan is explicit about: **the advisory is the
+     * Activity result code**, and there is no silence in one. `RESULT_CANCELED` is the screen
+     * saying "I am done and I did not ask for the pages", which is a to-library answer rather than
+     * an unanswered question; [SketchContract.RESULT_SKETCH_SHOW_PAGES] is Show pages.
+     * [SketchRouting] holds that reading.
+     *
+     * Runs on Main from the entry's result callback, which is **before** `onResume` and can
+     * therefore be before the open has even finished — hence the park.
+     *
+     * [lastFaceEndedOn] is set here and deliberately **not** cleared: the seal's cover and the
+     * last-open pointer both read it long after this, on a screen whose canvas may never load
+     * (decision 6/7).
+     */
+    private fun sketchShowingEnded(resultCode: Int) {
+        val endedOn = sketchHooks.targetPageId
+        if (endedOn != null) lastFaceEndedOn = endedOn
+        sketchHooks.resetTarget()
+        if (SketchRouting.parkClose(opened)) {
+            // Nothing to act on yet — see [FaceRouting.parkClose]. openSession re-decides it.
+            pendingCloseAfterOpen = ParkedClose(resultCode, endedOn)
+            return
+        }
+        when (SketchRouting.closeDecision(isSketchNotebook(), canvasShown, resultCode)) {
+            // Decision 7: the notebook follows the face to the page it ended on.
+            FaceRouting.Close.CATCH_UP ->
+                if (endedOn != null && endedOn != displayedPageId) runPageOp { refreshToPage(endedOn) }
+            FaceRouting.Close.LOAD_CANVAS -> {
+                // The box goes back up for a load the user asked for and cannot see the cost of.
+                binding.openingOverlay.root.visibility = View.VISIBLE
+                runPageOp { loadCanvas(endedOn ?: session.currentPage.id) }
+            }
+            FaceRouting.Close.SEAL_TO_LIBRARY -> close()
+        }
+    }
+
+    /** Whether the open notebook is a sketch notebook (arc 43 / K4) — [isTextDocument]'s sibling,
+     *  false until the session has read the index bit, which is the honest answer before then. */
+    private fun isSketchNotebook(): Boolean = ::session.isInitialized && session.isSketch
 
     /**
      * The editor's tap-the-title rename (M8), text documents only — [DocumentHostHooks] has already
@@ -4727,6 +4944,9 @@ class NotebookActivity : AppCompatActivity() {
         if (::documentEntry.isInitialized) documentEntry.refresh()
         if (::tagEntry.isInitialized) tagEntry.refresh()
         if (::bible.isInitialized) bible.refresh()
+        // Arc 43 / K4: two conditions, both re-asked here — a package can be disabled under us, and
+        // the session may only just have read the index bit that says this notebook has the door.
+        if (::sketchEntry.isInitialized) sketchEntry.refresh()
         refreshExportAvailable()
     }
 
@@ -4755,6 +4975,16 @@ class NotebookActivity : AppCompatActivity() {
             KEY_DOCUMENT_SCOPE,
             ::documentHooks.isInitialized && documentHooks.scopeIsNotebook,
         )
+        // Arc 43 / K4: the same two for the sketch face — whether it was showing, and the page it
+        // was on. The face's own memory of where it is lives only in the other process.
+        outState.putBoolean(
+            KEY_SKETCH_SHOWING,
+            ::sketchEntry.isInitialized && sketchEntry.isShowing,
+        )
+        outState.putString(
+            KEY_SKETCH_TARGET,
+            if (::sketchHooks.isInitialized) sketchHooks.targetPageId else null,
+        )
         // M8: and whether this incarnation ever put the pages on the glass — a recreated text
         // document that had must come back as an ordinary notebook, not into the editor again.
         outState.putBoolean(KEY_CANVAS_SHOWN, canvasShown)
@@ -4775,9 +5005,43 @@ class NotebookActivity : AppCompatActivity() {
         // no picture of its contents — not a page snapshot, not the opening lines of its document.
         // The scope was read once at open (`keyScope`), so this costs nothing per stop.
         if (keyScope == KeyScope.NOTEBOOK) return
-        if (s.isTextDocument) TextCover.render(repo, id, s.documents.get(id)?.text.orEmpty())
-        else if (opened) CoverSnapshot.capture(p, id, repo)
+        when {
+            s.isTextDocument -> TextCover.render(repo, id, s.documents.get(id)?.text.orEmpty())
+            // Arc 43 / K4, decision 6: the sketch of the page the face ended on, over paper white
+            // — read from the stored row, which is honest only because the caller has already
+            // joined the showing's `end()` flush. The ink bake is the fallback, and only when the
+            // canvas is actually loaded: a snapshot of an unloaded surface is a blank card.
+            s.isSketch -> {
+                val pageId = coverPageId(s)
+                val png = if (pageId.isEmpty()) null else runCatching { s.readSketch(pageId) }.getOrNull()
+                val drawn = png != null && SketchCover.render(repo, id, png)
+                // `canvasShown`, NOT `opened`: a sketch notebook is "opened" the moment the
+                // lightweight route sets the flag for the hooks, with nothing on the paper at all —
+                // and a snapshot of an unloaded surface is a blank card where a drawing used to be
+                // (TextCover's lesson, and the reason decision 6 words the fallback this way).
+                if (!drawn && canvasShown) CoverSnapshot.capture(p, id, repo)
+            }
+            opened -> CoverSnapshot.capture(p, id, repo)
+        }
     }
+
+    /** The page a sketch notebook's cover and last-open pointer name (arc 43 / K4): the page the
+     *  face ended on, else the page it is still on, else the displayed one — and never a page this
+     *  notebook no longer has. */
+    private fun coverPageId(s: NotebookSession): String {
+        val live = s.pages.map { it.id }
+        val wanted = lastFaceEndedOn ?: (if (::sketchHooks.isInitialized) sketchHooks.targetPageId else null)
+        return wanted?.takeIf { it in live } ?: displayedPageId
+    }
+
+    /**
+     * Where the notebook reopens (arc 43 / K4). For every ordinary notebook that is the session's
+     * own current page, exactly as before. For a **sketch notebook the face left without ever
+     * showing its canvas** it is the page the face ended on: the session is still sitting on the
+     * page it opened at, and reopening there would put the person somewhere they did not leave.
+     */
+    private fun lastOpenedPageId(s: NotebookSession): String =
+        if (s.isSketch) coverPageId(s) else s.currentPage.id
 
     override fun onStop() {
         super.onStop()
@@ -4796,7 +5060,7 @@ class NotebookActivity : AppCompatActivity() {
                     // The editor launching over us is one of the ways we get here — and it is
                     // exactly when a text document's cover should be re-rendered.
                     if (!closing) captureCover(p, s, id)
-                    if (!closing && s.isOpen) s.saveLastOpened()
+                    if (!closing && s.isOpen) s.saveLastOpened(lastOpenedPageId(s))
                 }
             } catch (e: Exception) { Log.w(TAG, "onStop persist failed", e) }
         }
@@ -4838,6 +5102,10 @@ class NotebookActivity : AppCompatActivity() {
                 // it — flush-before-seal, across the process boundary. A finished (or absent) job
                 // joins instantly; `documentWritesClosed` is what refuses anything after this line.
                 if (::documentEntry.isInitialized) documentEntry.finishJob?.join()
+                // Arc 43 / K4: the same, and for the same reason — a sketch showing that just ended
+                // has an `end()` re-push in flight, and the seal below must not start under it.
+                // Pixels have no other copy, so this join is the one that can lose a drawing.
+                if (::sketchEntry.isInitialized) sketchEntry.finishJob?.join()
                 documentWritesClosed = true
                 // The page-op mutex first: an insert/delete that passed the `closing` check before
                 // it flipped may still be inside its transaction — sealing under it would fail the
@@ -4847,7 +5115,7 @@ class NotebookActivity : AppCompatActivity() {
                     // Before the seal, always — and for a text document before the paper has
                     // necessarily ever been loaded (captureCover is what knows the difference).
                     try { captureCover(p, s, id) } catch (e: Exception) { Log.w(TAG, "cover failed", e) }
-                    try { s.saveLastOpened() } catch (e: Exception) { Log.w(TAG, "saveLastOpened failed", e) }
+                    try { s.saveLastOpened(lastOpenedPageId(s)) } catch (e: Exception) { Log.w(TAG, "saveLastOpened failed", e) }
                     try { s.refreshMeta(versionCode) } catch (e: Exception) { Log.w(TAG, "refreshMeta failed", e) }
                     // Arc 42: only what is already pending, and only before the seal — a
                     // structural flush reads the rows through this very connection. Nothing is
@@ -4883,6 +5151,9 @@ class NotebookActivity : AppCompatActivity() {
         // Job is what enforces "never after" (M11): the seal coroutine joins it, so the extension's
         // `end()` flush lands on a session that is still open.
         val documentClose = if (::documentEntry.isInitialized) documentEntry.close() else null
+        // Arc 43 / K4: the sketch face's held bind, the editor's rule exactly — its host binder
+        // reaches back into this session, so it is released before the seal below, never after.
+        val sketchClose = if (::sketchEntry.isInitialized) sketchEntry.close() else null
         if (::paper.isInitialized) paper.release()
         // A destroy that isn't a normal close (e.g. finish() out of failOpen) still seals.
         if (::session.isInitialized && session.isOpen && !closing) {
@@ -4893,6 +5164,7 @@ class NotebookActivity : AppCompatActivity() {
             appScope.launch {
                 withContext(NonCancellable) {
                     documentClose?.join()
+                    sketchClose?.join()
                     documentWritesClosed = true
                     pageOps.withLock { try { s.seal() } catch (e: Exception) { Log.w(TAG, "seal failed", e) } }
                 }
@@ -4918,6 +5190,13 @@ class NotebookActivity : AppCompatActivity() {
         /** Saved state (M8): this incarnation has put the pages on the paper, so a text document
          *  comes back an ordinary notebook — [TextDocRouting]'s one-way latch. */
         private const val KEY_CANVAS_SHOWN = "notebook.canvasShown"
+
+        /** Saved state (arc 43 / K4): the sketch face was showing when this instance went down. */
+        private const val KEY_SKETCH_SHOWING = "notebook.sketchShowing"
+
+        /** Saved state (arc 43 / K4): the page that showing had turned to — the host's target,
+         *  which the notebook underneath does not follow until the showing ends (decision 7). */
+        private const val KEY_SKETCH_TARGET = "notebook.sketchTarget"
 
         /** How long a text document waits for the editor it launched before deciding it is not
          *  coming and showing the pages instead. Comfortably past a cold bind's KDF (≈3 s on the

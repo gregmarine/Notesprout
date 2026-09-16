@@ -128,6 +128,17 @@ class ReplayPlanTest {
         assertEquals(listOf(Surface.BIBLE), ReplayPlan.decodeAbove(listOf("BIBLE")))
     }
 
+    /** Arc 43 / K4: the sketch face is one screen like the Bible's — it has no door to another
+     *  extension, so it is only ever the last surface and never latches anything behind it. */
+    @Test
+    fun `the sketch face is a one-screen chain above a notebook`() {
+        val stack = listOf(entry(Surface.NOTEBOOK, notebookId = "nb-1"), entry(Surface.SKETCH))
+        assertEquals(ReplayPlan.Notebook("nb-1", false, listOf(Surface.SKETCH)), ReplayPlan.of(stack))
+        assertEquals(listOf(Surface.SKETCH), ReplayPlan.legalAbove(listOf(Surface.SKETCH)))
+        assertEquals(listOf(Surface.SKETCH), ReplayPlan.legalAbove(listOf(Surface.SKETCH, Surface.CALENDAR)))
+        assertEquals(listOf(Surface.SKETCH), ReplayPlan.decodeAbove(listOf("SKETCH")))
+    }
+
     @Test
     fun `a notebook on top of a library-level entry is not a shape and answers Nothing`() {
         val stack = listOf(entry(Surface.CALENDAR), entry(Surface.NOTEBOOK, notebookId = "nb-1"))

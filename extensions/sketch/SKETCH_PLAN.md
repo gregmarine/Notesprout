@@ -5,7 +5,7 @@ The plan **and the ledger** for the raster-sketch extension, in the shape of the
 the ledger at the bottom as they land; the reference doc once frozen is
 `extensions/sketch/docs/sketch.md` beside this file.
 
-**Status: Arc 43 — IN PROGRESS, K0 ✅ K1 ✅ K2 ✅ K3 ✅.** Phases are lettered **K** (arc 37 "Bible" used B, arc 38
+**Status: Arc 43 — IN PROGRESS, K0 ✅ K1 ✅ K2 ✅ K3 ✅ K4 ✅.** Phases are lettered **K** (arc 37 "Bible" used B, arc 38
 "Reference" used R, arc 39 "Lookup" used no letter of its own, arc 40 "Verses" used V, arc 41
 "Cross references" used no letter of its own, arc 42 "Notes" used N — arc 43 "Sketch" uses **K**).
 
@@ -110,7 +110,7 @@ paper white) is host-side and device-neutral and is ported, not reinvented.
 | **K1 — g-paper Phase 19 → 0.1.32 "Ratta and the raster page"** ✅ (g-paper `8bb2aa1`) | Opus (Fable reviews diff + numbers before publish) | Core: `protected open val rasterEraseRedrawIntervalMs` read by `throttledEraseRedraw` (const stays 16). Ratta: override (initial 100 ms; candidates 16/60/100/250/end-only via a demo-only system property); `RattaEmr.penSize(style, widthPx)` pure with `EMR_MIN_HAIRLINE` (start 120) for `PENCIL`, others keep 200; note at the "needs no override" comment naming `loadPageRaster`/`swapPageRaster` (the overlay is already released by `clearForContentSwap` under the swap law — verified, not a gap). **The g-paper demo gains a Raster toggle** (pencil + rubbing eraser) as the measurement vehicle. Tests `RattaEmrTest` ×4. Docs `api.md`/`CLAUDE.md`/`PLAN.md`. | Nomad (demo): M1 cadence per candidate (`gfxinfo` + the hand: lifts live? flicker?); M2 pencil preview width at EMR 120/150/200 vs the baked hairline (photo + screencap); M3 eraser-end pressure real (temporary log); M4 undo-swap flash (accept, record); M5 page-wide swap ms. Phase-start Qs: cadence candidates; whether to try `DARK_GRAY` preview. |
 | **K2 — The seam** ✅ | Opus (Sonnet: `ExtensionContractTest` pin, docs rows) | `:extension-api`: `SketchContract`, `ISketch.aidl`, `ISketchHost.aidl`, `SketchPageState` (+`requireValid`), `ByteChunks`, `PngHeader` (pure, both sides), `API_VERSION` 17 + floor; host manifest `<queries>` both actions. `:sn-screen`: `UndoRedoStack` budget + `pushUndoBeneath`, `CollapsedChrome(tools)`, `PaperToolbar(btnLasso?)`. `:ext-ink`: `PaperScreenActivity` extraction + `PenIdle.awaitIdle`. Tests: `ExtensionContractTest`, `SketchContractTest`, `ByteChunksTest`, `PngHeaderTest`, `SketchPageStateTest`, `UndoRedoStackTest` (+6). | `:extension-api:testDebugUnitTest` green (the pin trap); all modules compile; Sonnet adb regression of pad + calendar (the base-class move); user hand: pad/calendar ink + handoff. |
 | **K3 — Host data, creation, routing** ✅ | Opus (Sonnet: radio XML/strings) | `TYPE_SKETCH`/`SKETCH_ORDER`; `SketchDao` (`sketchDigest`, `sketchFor`, `pagesWithSketch`) + `sketchDao()`; `SketchRows` (port of `RasterRows`); `SketchRepository` (`has/get/save/clear`, guard, watch, cap, unchanged-bytes skip); `NotebookSession.kind/isSketch`, `writeSketch`, `readSketch`; `NotebookKind`; `NotebookFlags.SKETCH`, `NotebookMeta.sketch` + **every mirror site** (`NewNotebookActivity`, `TextDocumentCreate`, `IndexRepository.createNotebook/importNotebookRow`, `NotebookImport.refreshMeta`, `ImportFlow`, `ExportArtifact.stampExportedAt`, `NotebookSession.refreshMeta`); third radio + `KEY_KIND`; `FaceRouting` generic table + `TextDocRouting` facade (its tests untouched) + `SketchRouting`; `SoilDao.childrenOf` exclusion, `liveDescendantIds` + `'sketch'`, `liveErasableIds` for Erase page; `FakeSoilDao` mirrors. Tests: `SketchRowsTest`, `SketchRepositoryTest`, `NotebookKindTest`, `FaceRoutingTest`/`SketchRoutingTest`, `SoilDaoKindListsTest` (+3), `DocumentWhitelistTest` (+1), `PageClipTest` (+1), `SoilCompactorTest` (+2). | JVM green; Sonnet adb: create a Sketch notebook (radio), `.soil` meta shows `sketch:true`, index flag 8, `.soil` export/re-import keeps it. (No face yet — a Sketch notebook loads the canvas.) |
-| **K4 — Host entry, hooks, door, cover** ⬜ | Opus (Sonnet: `ic_brush` Tabler, strings, layout) | `ExtensionRegistry.sketch`; `SketchHostSession` (pure: read window, ink window, save accumulator); `SketchHostBinder` (gate first, funnel); `SketchClient` (hold, `begin(host)`, `end()` ≤ 15 s, revoke in `finally`); `SketchHostHooks` (`pages`, `loadPage`, `commit` → `writeSketch`, `requestInk` → drain + `TransferCaps` + `InkChunks`, bare strokes only); `SketchEntry` (= `DocumentEditorEntry` + `ExtensionScreenEntry`'s paper pieces: **drain → open → chrome extra → `dismissFloatingChrome` → `endTransformIfRunning` → `releaseForHandoff` → launch**; result: pop → chrome → `resumeDrawing` → finish job → `onClosed`); `NotebookActivity`: `openIntoSketch`, `sketchShowingEnded` (CATCH_UP / LOAD_CANVAS / SEAL_TO_LIBRARY), `replayAbove` `Surface.SKETCH`, reconnect keys, `close()` joins, watchdog; `btnSketch` on the bottom strip left of Bible + collapsed overflow mirror; `SketchCover` + `captureCover` branch + `saveLastOpened(lastFaceEndedOn)`. Tests: `SketchHostSessionTest` ×10, `ReplayPlanTest` (+1). | JVM green; button GONE for non-Sketch notebooks and with no extension (walk after K5). |
+| **K4 — Host entry, hooks, door, cover** ✅ | Opus (Sonnet: `ic_brush` Tabler, strings, layout) | `ExtensionRegistry.sketch`; `SketchHostSession` (pure: read window, ink window, save accumulator); `SketchHostBinder` (gate first, funnel); `SketchClient` (hold, `begin(host)`, `end()` ≤ 15 s, revoke in `finally`); `SketchHostHooks` (`pages`, `loadPage`, `commit` → `writeSketch`, `requestInk` → drain + `TransferCaps` + `InkChunks`, bare strokes only); `SketchEntry` (= `DocumentEditorEntry` + `ExtensionScreenEntry`'s paper pieces: **drain → open → chrome extra → `dismissFloatingChrome` → `endTransformIfRunning` → `releaseForHandoff` → launch**; result: pop → chrome → `resumeDrawing` → finish job → `onClosed`); `NotebookActivity`: `openIntoSketch`, `sketchShowingEnded` (CATCH_UP / LOAD_CANVAS / SEAL_TO_LIBRARY), `replayAbove` `Surface.SKETCH`, reconnect keys, `close()` joins, watchdog; `btnSketch` on the bottom strip left of Bible + collapsed overflow mirror; `SketchCover` + `captureCover` branch + `saveLastOpened(lastFaceEndedOn)`. Tests: `SketchHostSessionTest` ×10, `ReplayPlanTest` (+1). | JVM green; button GONE for non-Sketch notebooks and with no extension (walk after K5). |
 | **K5 — NSE · Sketch, the screen** ⬜ | Opus (Sonnet: module scaffold, manifest, gradle, icon copy, layout, strings) | `extensions/sketch` module per the layout in the design notes: `SketchApplication` (`RattaEngine.register()`), `SketchService` (`begin/end`, `HostCallerCheck`, park re-push in `end()`), `SketchSession`, `SketchActivity` (lifecycle table, `swapTo`, listener ignoring `onStrokeCommitted`, `PageTurn` pure), `SketchSaver` + `SketchSaveGovernor` + `PendingPngPark`, `RasterTiles`/`RasterEditBuilder` (port), `SketchEdit`, `RasterImage`, `InkBake`, dialogs, a **debug-only "fill test pattern" door** so adb can produce a non-blank save. `settings.gradle.kts` include. Tests: `RasterTilesTest` (port), `SketchSaveGovernorTest`, `PendingPngParkTest`, `PageTurnTest`, `InkBakeTest`, `CollapsedToolsTest` (+1). | **First Nomad walk.** Sonnet adb: Sketch notebook opens into the face; `am start` refused; chrome/collapsed; page turns + bounds; Bring in ink (screencap shows strokes) / "No ink"; save log ≤ 1 s; Back → catch-up; Show pages → canvas; reopen pixel-identical; `am kill` host behind the face → reconnect + save lands; sleep/wake; `meminfo`. User hand checklist: pencil feel + preview, rubbing, undo/redo gestures incl. across a turn and the put-back case, bake then undo twice, Back mid-hover. Phase-start Qs: save-failed dialog wording; pencil glyph (`ic_pen` vs new `ic_pencil`). |
 | **K6 — g-paper Phase 20 → 0.1.33 "A mark says where it landed"** ⬜ | Opus (Fable reviews) | Core only: `RasterDirty.along(points, width, pageW, pageH, maxSpanPx = 256, maxRects = 64)` — per-segment will/changed rects for `commitCapturedStroke` and `addStrokes` in RASTER; `loadPageRaster` silent (drop the extension's `loadingRaster`, note Paintsprout's dead guard in its watch list); `PaperListener` KDoc. Tests `RasterDirtyTest` (+8). Paintsprout `./gradlew test` 203 green before publish; SN re-pin. | Nomad: corner-to-corner hairline — cells read / entry bytes / pen-up main-thread ms before vs after; undo still an involution (screencap diff zero). |
 | **K7 — Clipboard, erase, export** ⬜ | Opus | `clip_too_large_sketch` wording in `doCopy`; Erase page via `liveErasableIds` (undo/redo replay by ids unchanged); `ExportRender`: `PageBake.hasSketch`, interleaved bundle, `bundlePositions`, endnote `fromPage`, `pageTitles` per bundle page (`ExportNaming` sketch stem), `SketchRaster.toWebp`, page-scope export carries its sketch; compaction KDoc. Tests: `ExportRenderPlanTest` (+5), `ExportRenderEndnotesTest`, `ExportNamingTest`, `ClipEnvelopeTest` (+1). | Sonnet adb: copy/paste page → face shows the sketch; Erase page leaves it; Delete → Undo; PDF page count = pages + sketches; page-scope export = 2 pages; PNG names carry the suffix; close after erase shrinks the file; library card shows the sketch. Phase-start Q: the sketch page's name suffix. |
@@ -267,7 +267,7 @@ undo, selection, send stayed up; hooks `extraFloatingRects` / `extraFloatingCont
 subclasses**; `PenIdleAwait.kt` (`suspend PaperView.awaitPenIdle()`; `:sn-screen` has no
 coroutines, so it lives in `:ext-ink` as planned). Opus wrote it on Fable's brief; Fable read
 every seam file and found one defect — a literal NUL byte in `SketchPageState`'s key check and
-its test instead of the `' '` escape — fixed before the commit.
+its test instead of the `'\u0000'` escape — fixed before the commit.
 
 **Tests.** `:extension-api` 238 → **281** (+43: `SketchContractTest` 10, `ByteChunksTest` 10,
 `PngHeaderTest` 12, `SketchPageStateTest` 11, the pin), `:sn-screen` 101 → **109** (+8),
@@ -368,3 +368,80 @@ back out of by hand — `am force-stop com.android.documentsui` returned the lib
 `SketchHostBinder` / `SketchClient` / `SketchHostHooks` / `SketchEntry`, `NotebookActivity`'s
 `openIntoSketch` + `sketchShowingEnded` over `SketchRouting`, `btnSketch` on the bottom strip left
 of Bible, `SketchCover`).
+
+
+### K4 — Outcome (2026-09-15)
+
+**Landed.** `ExtensionRegistry.sketch()` (trust + the API-17 floor through the existing
+`accepts` / `minApiVersion`; "nine → ten points"); `SketchHostSession` (pure: the read window
+PNG → `ByteChunks`, the ink window of staged `WireStroke` chunks with **0 legal**, the save
+accumulator — key taken from chunk 0 and every later chunk must repeat it, in order, per-chunk
+and running-total caps, `SKETCH_TOO_LARGE` verbatim as an `IllegalStateException`, empty join =
+clear; **a window swap mid-save leaves the accumulation where it was**, so a flush a moment after
+a page turn still lands on the page it was drawn on); `SketchHostBinder` (`ISketchHost.Stub`,
+uid `gate()` the first statement of all six methods, the marshalable-only `hook {}` funnel,
+`revoke()` clears the session); `SketchClient` (`DocumentEditorClient` minus the store: mint
+binder → `hold` → `begin(host)` ≤ 2 s → the package-pinned screen Intent; `finish()` = `end()`
+≤ 15 s then unbind + revoke in `finally`); `SketchEntry` (`DocumentEditorEntry` +
+`ExtensionScreenEntry`'s paper pieces — open: drain → bind+begin → `EXTRA_CHROME_HIDDEN` →
+`beforeLaunch` (floating chrome down, transform ended, `releaseForHandoff`) → `ScreenLaunch.attempt`
+→ stack attach; result: pop → chrome flag → `reclaimPipeline` → lazy finish job → `onClosed(code)`;
+`reconnect()`, `close(): Job?`, `finishJob`; the `sketch_failed_*` alert only on a deliberate
+tap); `SketchHostHooks` (`loadCurrent` / `requestPage` — **an edge answers the same page** /
+`commit` → `NotebookSession.writeSketch` / `requestInk` — writer drained, then `store.loadPage`
+→ `TransferCaps` + `InkChunks`; `BoundedWait` `openSession()` at the document hooks' 8 s / 200 ms;
+the face's target is `@Volatile`, restored from saved state before a reconnect's `begin`);
+`SketchCover` (sampled decode behind the `PngHeader` guard, drawn over white into `RGB_565`,
+`CoverSnapshot.encode`; pure `sampleFor`). `Surface.SKETCH` appended (`SurfaceStack`,
+`LibraryActivity` drops it like `DOCUMENT_EDITOR`, `ReplayPlan` doc). `NotebookActivity`:
+`sketchHooks` / `sketchEntry` wiring, `btnSketch` click + tooltip, the collapsed-overflow mirror
+(`ic_brush`, left of Bible), the open route forking on `session.isSketch` into `SketchRouting`,
+`openIntoSketch(launch)` (a missing / untrusted extension loads the canvas silently),
+`sketchShowingEnded(resultCode)` (CATCH_UP → `refreshToPage`; LOAD_CANVAS on Show pages;
+SEAL_TO_LIBRARY on Back with the canvas never shown), `replayAbove` `Surface.SKETCH`,
+`KEY_SKETCH_SHOWING` / `KEY_SKETCH_TARGET` reconnect keys, `captureCover`'s sketch branch +
+`coverPageId` / `lastOpenedPageId` → `saveLastOpened(…)` (the notebook reopens on the page the
+face ended on), `close()` / `onDestroy` join and close the sketch bind. Sonnet: `ic_brush`
+(Tabler, in `:sn-screen` beside `ic_bible`), `cd_sketch` / `sketch_failed_title` /
+`sketch_failed_body`, the `btnSketch` slot before `btnBible` on the bottom strip (decision 9).
+Opus wrote it on Fable's brief; Fable read the session, binder, hooks, client and the
+`NotebookActivity` diff before the gate.
+
+**Deviations from the row (Opus's, each read and kept).** (1) `watchForAnEditorThatNeverOpens`
+generalized into `watchForAFaceThatNeverOpens(reconnect, isShowing, face)` for both faces — a
+second hand copy is the sibling-copy trap. (2) **The ink window's cap cuts rather than refuses**:
+a page past `MAX_TRANSFER_STROKES` (10 000) / `MAX_TRANSFER_POINTS` (400 000) crosses as the
+prefix that fits, in writing order, logged — the pad's Send refuses because a selection can be
+made smaller; here the alternative to a partial bake is no bake, and the seam has no typed
+refusal for it. (3) The PNG header guard is not in the session — the page size lives in the
+`.soil`, so `SketchRepository` throws `SKETCH_BAD_PNG` with nothing written. (4) The sketch
+hooks reuse `documentWritesClosed` as their `alive` gate — one screen, one session, one fact.
+(5) `captureCover`'s ink-bake fallback is gated on `canvasShown`, not `opened` — a Sketch
+notebook is `opened` with nothing on the paper (TextCover's lesson). (6) `SketchEntry.discovered()`
+carries both conditions (Sketch notebook AND a trusted extension) and `openIntoSketch` **awaits**
+it — reading `isAvailable` would lose the RS2 race about half the time.
+
+**Tests.** `:app` 1783 → **1805** (+22: `SketchHostSessionTest` 15, `SketchCoverTest` 5,
+`ReplayPlanTest` +1, and one more pin); **3313 in the SN root** (K3's 3291 + 22), 3468 with
+`extensions/bible`'s 155. `assembleDebug` green. Fable re-ran the whole root's `test` +
+`:app:assembleDebug` after the review — zero failures.
+
+**Measured.** Nothing on the device this phase — the row's gate is "JVM green; button GONE for
+non-Sketch notebooks and with no extension (walk after K5)": with no `NSE · Sketch` installed a
+Sketch notebook loads its canvas and the door stays GONE, which K5's walk covers together with
+the face itself.
+
+**For K5 (the screen).** `requestPage` never returns null and never throws at an edge — compare
+`pageKey`. `requestInk` answers **0** for a page with no bare ink, never a refusal; "bare" is
+structural (link ink is re-parented to the link row, sticky ink lives in the sticky), and a dense
+page may arrive **cut** at the transfer caps. A save is accepted for any live page; a key naming a
+deleted page comes back as `IllegalArgumentException("Unknown page")`. `end()` has the 15 s host
+budget and is where a parked re-push must land; `begin()` has 2 s — do no work in it. The host
+sets `EXTRA_CHROME_HIDDEN` on the launch Intent and reads it back off the result (`ChromeResult`)
+— echo it. `RESULT_SKETCH_SHOW_PAGES` (1) is the only non-to-library result; `RESULT_CANCELED`
+seals to the library when the canvas was never shown.
+
+**Next.** K5 — `extensions/sketch`, the screen (`SketchApplication`, `SketchService`,
+`SketchActivity : PaperScreenActivity`, saver / governor / park, tiles + edit builder, `InkBake`,
+the debug-only fill door), the first Nomad walk. Phase-start Qs: the save-failed dialog wording;
+the pencil glyph (`ic_pen` vs a new `ic_pencil`).

@@ -806,6 +806,13 @@
     <string name="bible_failed_title">Bible unavailable</string>
     <string name="bible_failed_body">The Bible could not be opened. The extension may have been disabled or removed.</string>
 
+    <!-- The Sketch face (arc 43 / K4) — the bottom-bar door on the notebook, left of Bible. GONE
+         unless the notebook is a Sketch notebook and a trusted NSE · Sketch is installed;
+         SketchEntry owns it. -->
+    <string name="cd_sketch">Sketch</string>
+    <string name="sketch_failed_title">Sketch unavailable</string>
+    <string name="sketch_failed_body">The sketch could not be opened. NSE · Sketch may have been disabled or removed.</string>
+
     <!-- Bible references in the notebook (arc 38 / R3) — the lasso bar's Bible button, the Insert
          bar's, and the Edit of a lone Bible link. The words on the page stay the user's own; the
          toast names the passage they matched, once. -->
