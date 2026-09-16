@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The extension's own strings. `ok` and `cancel` come from :sn-screen (Dialogs / ActionSheetDialog
+  reference them from inside the module) and are deliberately not repeated here.
+-->
+<resources>
+    <string name="ext_label">NSE · Sketch</string>
+    <string name="sketch_title">Sketch</string>
+    <string name="sketch_opening">Opening…</string>
+
+    <!-- Chrome. Every icon button needs a hint naming it: long-press tooltip and content description. -->
+    <string name="cd_sketch_back">Back</string>
+    <string name="cd_tool_pencil">Pencil</string>
+    <string name="cd_tool_eraser">Eraser</string>
+    <string name="cd_sketch_bring_ink">Bring in ink</string>
+    <string name="cd_sketch_show_pages">Show pages</string>
+    <string name="cd_prev_page">Previous page</string>
+    <string name="cd_next_page">Next page</string>
+    <string name="sketch_page_indicator">%1$d / %2$d</string>
+
+    <!-- Problem dialogs — a tap that did nothing is never a toast on e-ink. -->
+    <string name="sketch_not_saved_title">Sketch not saved</string>
+    <string name="sketch_not_saved_body">Notesprout SN could not save this page\'s sketch.</string>
+    <string name="sketch_try_again">Try again</string>
+    <string name="sketch_leave_anyway">Leave anyway</string>
+    <string name="sketch_no_ink_title">No ink on this page</string>
+    <string name="sketch_no_ink_body">There is no handwriting on this page to bring in.</string>
+    <string name="sketch_bring_ink_failed_title">Ink not brought in</string>
+    <string name="sketch_bring_ink_failed_body">Notesprout SN could not read this page\'s handwriting. Try again.</string>
+    <string name="sketch_host_gone_title">Sketch unavailable</string>
+    <string name="sketch_host_gone_body">The notebook is no longer reachable. Go back and open the sketch again.</string>
+</resources>
