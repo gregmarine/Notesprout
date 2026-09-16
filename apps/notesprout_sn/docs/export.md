@@ -443,8 +443,53 @@ carries links, so it is always a version-1 bundle by construction.
 
 Failure-table and traps additions, below, are this phase's; tests: `PageBundleTest` (11, in
 `extension-api`), `PdfLinksTest` (`:ext-pdf`), `EndnotesTest` (9 — arc 34 / L15 added the
-notebook-relative-caption-vs-bundle-relative-link case), `ExportRenderEndnotesTest` (2,
-over the fake DAO — order, skip-empty, wrapped, size fallback), `ExportDocumentRulesTest` (+1).
+notebook-relative-caption-vs-bundle-relative-link case), `ExportRenderEndnotesTest` (3,
+over the fake DAO — order, skip-empty, wrapped, size fallback, and the sketch-shifted link),
+`ExportDocumentRulesTest` (+1).
+
+### Sketch pages (arc 43 / K7)
+
+**A page that carries a raster sketch exports as two pages: its ink, then its sketch, immediately
+after it** (arc 43, decision 5). A drawing the person deliberately kept beside the writing stays
+beside it — never flattened under it — and the sketch page is **plain white paper**, never the
+page's template (decision 10), because white is what the sketch face draws on.
+
+`ExportRender` plans it before the first page is drawn: one blob-free query
+(`SketchDao.pagesWithSketch`, ids only) marks each `PageBake.hasSketch`, and two pure functions do
+the rest — `bundlePages(pages)` is the interleaved list the bundle actually holds (`(pageIndex,
+sketch)` entries) and `bundlePositions(pages)` is where each page's **ink** lands, 1-based. Every
+count downstream is the bundle's: the header's declared page count, both `PageBundle.MAX_PAGES`
+refusals, the progress line, and the endnotes — whose `fromPage` link is `bundlePositions[index]`
+so a note on page 3 addresses the right page when page 1 has a sketch above it (`fromPageLabel`,
+what the caption *says*, is still the notebook's own number). `SketchRaster.toWebp` draws the
+page: the stored PNG decoded ARGB_8888, composited over an opaque white `RGB_565` bitmap at the
+page's own size, WEBP q100, both bitmaps recycled before the next page starts. **The row is read
+through `SketchDao.sketchFor` + `SketchRows.fitsPage`, not `SketchRepository.get`** — the
+repository's read soft-deletes a row that fails the header guard, and a render must not mutate what
+it renders (rule 1 of the bake); the guard is applied all the same, it simply refuses instead of
+dating the row out.
+
+**A sketch that has gone missing between the plan and the bake writes a blank page of the page's
+size** (`SketchRaster.blank`, one `Log.w` naming the page id — never pixels). The bundle declared
+its page count in its header before the first page was written, so skipping the page would close
+short and the whole export would be refused as truncated; reading every sketch's bytes up front to
+make the count exact would cost the notebook's pixels in memory at once, which the render will not
+do.
+
+**Naming.** The per-page delivery's answer is `ExportRender.Outcome.Ready.pageNames` — one
+`ExportNaming.PageName(number, title, sketch)` per **bundle** page (never per notebook page: with a
+sketch interleaved the two are different things), the endnote pages still getting none.
+`ExportNaming.pageStem(…, sketch = true)` is the ink page's own stem with **` sketch`** appended —
+`Meeting notes - Agenda` / `Meeting notes - Agenda sketch`, `Meeting notes - page 3 sketch`, and
+`Meeting notes sketch` for a page with neither a heading nor a place. The `MAX_TITLE_CHARS` cap
+applies to the heading, **before** the suffix: the suffix is the app's word and truncating it would
+make a filename lie about what is in it.
+
+**Page scope carries its sketch too**: `ExportScope.Page` filters the page rows before the plan, so
+one page with a sketch is a two-page bundle and nothing else changes — a per-page exporter at page
+scope still delivers one file per bundle page, and the single-file export (a PDF holding both) is
+named for the **page**, the ink page's stem. The document source is untouched (decision 5): a
+document export is the authored text, and there is no page under it to have a sketch.
 
 ---
 
@@ -776,10 +821,11 @@ bundle back a page at a time, writing each as its own **version-1, one-page** bu
 its contract says it may: a bundle of one page. Any version in, version 1 out (a v2 bundle's link
 trailer is dropped — links jump between pages of one document, and a one-page file has nowhere to
 jump to); one page alive in memory at a time on both sides; the pixels themselves are never
-re-encoded, only re-framed into a new container. `ExportRender.Outcome.Ready.pageTitles`
+re-encoded, only re-framed into a new container. `ExportRender.Outcome.Ready.pageNames`
 (`PageLabels.titleOf`, read beside the page's content in the same bake, not a second `readOnce`)
-carries a title per page — a heading if the page has one, else null, which per-page naming falls
-back from.
+carries one `ExportNaming.PageName` per bundle page — the page's notebook number, its heading if it
+has one (else null, which per-page naming falls back from), and since arc 43 / K7 whether the page
+is that page's sketch.
 
 **On the screen.** `Destination` grows two cases beside the SAF document: `SafTree(uri)` (a second
 `treeLauncher` over `ACTION_OPEN_DOCUMENT_TREE`, **no persistable grant** — the tree is used once,

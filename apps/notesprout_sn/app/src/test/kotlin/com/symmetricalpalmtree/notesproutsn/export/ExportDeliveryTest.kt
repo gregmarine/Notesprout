@@ -71,6 +71,19 @@ class ExportDeliveryTest {
     }
 
     @Test
+    fun aSketchedPageIsTwoPagesAndSoGoesToAFolder() {
+        // Arc 43 / K7: the page's sketch is a second bundle page, so a per-page exporter writes
+        // two files — counted like the calendar's Day, not assumed like the Whole.
+        assertTrue(
+            ExportDelivery.perPage(ExporterContract.DELIVERY_PER_PAGE, ExportScope.Page("p1"), pageHasSketch = true),
+        )
+        // The fact only matters at page scope: a one-file exporter still writes one file of it.
+        assertFalse(
+            ExportDelivery.perPage(ExporterContract.DELIVERY_ONE_FILE, ExportScope.Page("p1"), pageHasSketch = true),
+        )
+    }
+
+    @Test
     fun aOneFileExporterIsNeverPerPage() {
         assertFalse(ExportDelivery.perPage(ExporterContract.DELIVERY_ONE_FILE, ExportScope.Whole))
         assertFalse(ExportDelivery.perPage(ExporterContract.DELIVERY_ONE_FILE, ExportScope.Page("p1")))

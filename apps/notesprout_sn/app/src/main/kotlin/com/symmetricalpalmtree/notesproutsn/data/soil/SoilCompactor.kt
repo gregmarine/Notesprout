@@ -27,6 +27,12 @@ import java.io.File
  *  - **`updatedAt` is untouched everywhere** (og's rule): rows are deleted, never rewritten — a
  *    bump would re-flag the notebook as needing backup forever.
  *
+ * **A `sketch` row needs nothing of its own here** (arc 43 / K7): a cleared or refused sketch is a
+ * soft-deleted row and purges at the next close like any other, and a purged page takes its sketch
+ * with it down the cascade — which is the whole reason the sketch is a child row of the page rather
+ * than a column on it. It is the one row type where that matters in megabytes rather than bytes, so
+ * it is written down: erasing a page's drawing and closing the notebook gives the file space back.
+ *
  * `VACUUM`, not `incremental_vacuum`, and only when something was deleted (og's measured finding:
  * freed-value fragmentation is not returned by incremental, and an imported/re-keyed file may not
  * have `auto_vacuum` set at all, so the full form is the only one that works fleet-wide; it

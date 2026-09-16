@@ -188,6 +188,16 @@ interface SoilDao {
     )
     suspend fun hasLiveDocument(): Boolean
 
+    /** Does [pageId] carry a live sketch? (arc 43 / K7) — blob-free, `SketchRepository.has`'s
+     *  rule read from the one-open side: the Export screen asks it of the page-sheet door's page
+     *  to know whether that page is one file or two ([com.symmetricalpalmtree.notesproutsn.export.ExportDelivery.perPage]).
+     *  An empty blob is no sketch. */
+    @Query(
+        "SELECT EXISTS(SELECT 1 FROM notebook WHERE parentId = :pageId AND type = 'sketch' " +
+            "AND deletedAt IS NULL AND length(blob) > 0)",
+    )
+    suspend fun hasLiveSketch(pageId: String): Boolean
+
     /** Ids of every live sticky note that holds at least one live stroke — the notes the PDF
      *  endnotes (arc 28 / D7) render; an empty note has nothing to show and gets no page. Asked
      *  once per bake, notebook-wide, so the page walk never opens a note's blobs to find out. */

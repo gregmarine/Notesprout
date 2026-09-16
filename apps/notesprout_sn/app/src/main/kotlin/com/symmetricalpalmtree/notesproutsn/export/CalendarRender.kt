@@ -43,9 +43,11 @@ object CalendarRender {
     /** The bundle, or the sentence saying why there is none — [ExportRender]'s two shapes, so the
      *  screen's `when` reads the same for every producer. */
     sealed class Outcome {
-        /** [pageTitles] is the plan's own stems: one per page, in order, which is what a per-page
-         *  delivery names its files after (a calendar page has no heading to fall back on). */
-        class Ready(val file: File, val bytes: Long, val pageTitles: List<String?>) : Outcome()
+        /** [pageNames] is the plan's own stems: one per page, in order, which is what a per-page
+         *  delivery names its files after (a calendar page has no heading to fall back on, and no
+         *  notebook to be prefixed with — so each name carries the finished stem in its `title`
+         *  and is used **verbatim**; see `ExportActivity.stemFor`). */
+        class Ready(val file: File, val bytes: Long, val pageNames: List<ExportNaming.PageName>) : Outcome()
 
         class Failed(val message: String) : Outcome()
     }
@@ -91,11 +93,13 @@ object CalendarRender {
         }
         if (bytes <= 0L) return Outcome.Failed(context.getString(R.string.export_calendar_failed_body))
         Slog.d(TAG) { "rendered ${plan.targets.size} calendar page(s), $bytes bytes" }
-        return Outcome.Ready(file, bytes, plan.pageTitles())
+        return Outcome.Ready(file, bytes, plan.pageNames())
     }
 
-    /** The plan's stems as the bundle's page titles — one per page, in the bundle's own order. */
-    private fun CalendarRenderPlan.pageTitles(): List<String?> = stems.toList()
+    /** The plan's stems as the bundle's page names — one per page, in the bundle's own order, each
+     *  a finished stem rather than a heading to build one from. */
+    private fun CalendarRenderPlan.pageNames(): List<ExportNaming.PageName> =
+        stems.map { ExportNaming.PageName(title = it) }
 
     /**
      * Read the whole bundle back. The [PageBundle.Reader] *is* the header verification — it checks

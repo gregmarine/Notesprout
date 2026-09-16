@@ -55,16 +55,56 @@ object ExportNaming {
      * `page N` with the page's 1-based position. A plain ASCII hyphen because the sanitize would
      * strip a dash of any other kind. [pageNumber] below 1 (the page could not be placed) names
      * the notebook alone: a filename must never say "page 0".
+     *
+     * [sketch] names the **sketch page** that follows its ink page in a bundle (arc 43 / K7,
+     * decision 5 + the user's phase-start call): the ink page's own stem with ` sketch` appended,
+     * so `Meeting notes - Agenda` and `Meeting notes - Agenda sketch` sort together in a folder and
+     * say which is which without a second word for the page. The cap applies to the **title**, not
+     * to the stem: the suffix is the app's word, not the user's, and truncating it would produce a
+     * filename that lies about what is in it.
      */
-    fun pageStem(displayName: String, notebookId: String, pageNumber: Int, pageTitle: String?): String {
+    fun pageStem(
+        displayName: String,
+        notebookId: String,
+        pageNumber: Int,
+        pageTitle: String?,
+        sketch: Boolean = false,
+    ): String {
         val stem = base(displayName, notebookId)
         val title = pageTitle?.let { ILLEGAL.replace(it, "").trim() }?.take(MAX_TITLE_CHARS)?.trim()
-        return when {
+        val page = when {
             !title.isNullOrEmpty() && title != "." && title != ".." -> "$stem - $title"
             pageNumber >= 1 -> "$stem - page $pageNumber"
             else -> stem
         }
+        return if (sketch) page + SKETCH_SUFFIX else page
     }
+
+    /** What a sketch page's stem ends with — a word, with its own space, never a separator the
+     *  sanitize would strip. */
+    private const val SKETCH_SUFFIX = " sketch"
+
+    /**
+     * One **bundle** page's name, as the bake read it (arc 43 / K7) — what the per-page delivery
+     * turns into a filename, one entry per page of the bundle in its order.
+     *
+     * It replaced a bare `List<String?>` of titles the moment a bundle page stopped being the same
+     * thing as a notebook page: with a sketch interleaved after its ink ([ExportRender]), the
+     * file's place in the bundle is no longer its page's number, so the number has to travel beside
+     * the title rather than be counted back out of the list's index.
+     *
+     * [title] carries two meanings by producer, as the list it replaced already did: for a notebook
+     * it is the page's heading (null when it has none) and [pageStem] builds the filename around
+     * it; for a **calendar** it is the plan's finished stem, used verbatim — a calendar page has no
+     * heading to fall back on and no notebook to be prefixed with (see `ExportActivity.stemFor`).
+     */
+    data class PageName(
+        /** The page's 1-based place in the **notebook**, or 0 when it has none. */
+        val number: Int = 0,
+        val title: String? = null,
+        /** True for the sketch page that follows its ink page — the ` sketch` suffix. */
+        val sketch: Boolean = false,
+    )
 
     /**
      * The stem of a **calendar** export (arc 31 / HV4): `Calendar - September 2026` for a month,

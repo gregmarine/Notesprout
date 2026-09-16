@@ -1,5 +1,6 @@
 package com.symmetricalpalmtree.notesproutsn.data.clip
 
+import com.symmetricalpalmtree.notesproutsn.R
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -23,6 +24,20 @@ class ClipEnvelopeTest {
         copiedAt = 1_700_000_000_000L,
         rows = rows,
     )
+
+    @Test
+    fun `an over-cap page carrying a sketch says so`() {
+        // Arc 43 / K7: the cap does not move, but the sentence does. A page's sketch is measured
+        // in megabytes where everything else on it is measured in kilobytes, so it is almost
+        // always the reason a copy was refused — and the dialog says which reason it was.
+        val page = ClipRow(id = "page-1", parentId = "nb-1", type = "page", width = 1404f, height = 1872f)
+        val stroke = ClipRow(id = "s-1", parentId = "page-1", type = "stroke", blob = ClipRow.encodeBlob(strokeBytes()))
+        val sketch = ClipRow(id = "k-1", parentId = "page-1", type = "sketch", order = -1, blob = ClipRow.encodeBlob(strokeBytes()))
+        assertEquals(R.string.clip_too_large, ClipMessages.tooLarge(listOf(page, stroke)))
+        assertEquals(R.string.clip_too_large_sketch, ClipMessages.tooLarge(listOf(page, stroke, sketch)))
+        // An empty payload is still the ordinary sentence, never the sketch one.
+        assertEquals(R.string.clip_too_large, ClipMessages.tooLarge(emptyList()))
+    }
 
     @Test
     fun `round-trips a page with a binary stroke blob`() {

@@ -5,7 +5,7 @@ The plan **and the ledger** for the raster-sketch extension, in the shape of the
 the ledger at the bottom as they land; the reference doc once frozen is
 `extensions/sketch/docs/sketch.md` beside this file.
 
-**Status: Arc 43 — IN PROGRESS, K0 ✅ K1 ✅ K2 ✅ K3 ✅ K4 ✅ K5 ✅ K5b ✅ K6 ✅ (next K7).** Phases are lettered **K** (arc 37 "Bible" used B, arc 38
+**Status: Arc 43 — IN PROGRESS, K0 ✅ K1 ✅ K2 ✅ K3 ✅ K4 ✅ K5 ✅ K5b ✅ K6 ✅ K7 ✅ (next K8).** Phases are lettered **K** (arc 37 "Bible" used B, arc 38
 "Reference" used R, arc 39 "Lookup" used no letter of its own, arc 40 "Verses" used V, arc 41
 "Cross references" used no letter of its own, arc 42 "Notes" used N — arc 43 "Sketch" uses **K**).
 
@@ -114,7 +114,7 @@ paper white) is host-side and device-neutral and is ported, not reinvented.
 | **K5 — NSE · Sketch, the screen** ✅ | Opus (Sonnet: module scaffold, manifest, gradle, icon copy, layout, strings) | `extensions/sketch` module per the layout in the design notes: `SketchApplication` (`RattaEngine.register()`), `SketchService` (`begin/end`, `HostCallerCheck`, park re-push in `end()`), `SketchSession`, `SketchActivity` (lifecycle table, `swapTo`, listener ignoring `onStrokeCommitted`, `PageTurn` pure), `SketchSaver` + `SketchSaveGovernor` + `PendingPngPark`, `RasterTiles`/`RasterEditBuilder` (port), `SketchEdit`, `RasterImage`, `InkBake`, dialogs, a **debug-only "fill test pattern" door** so adb can produce a non-blank save. `settings.gradle.kts` include. Tests: `RasterTilesTest` (port), `SketchSaveGovernorTest`, `PendingPngParkTest`, `PageTurnTest`, `InkBakeTest`, `CollapsedToolsTest` (+1). | **First Nomad walk.** Sonnet adb: Sketch notebook opens into the face; `am start` refused; chrome/collapsed; page turns + bounds; Bring in ink (screencap shows strokes) / "No ink"; save log ≤ 1 s; Back → catch-up; Show pages → canvas; reopen pixel-identical; `am kill` host behind the face → reconnect + save lands; sleep/wake; `meminfo`. User hand checklist: pencil feel + preview, rubbing, undo/redo gestures incl. across a turn and the put-back case, bake then undo twice, Back mid-hover. Phase-start Qs: save-failed dialog wording; pencil glyph (`ic_pen` vs new `ic_pencil`). |
 | **K5b — Page insert / delete from the face** ✅ | Opus (Sonnet: strings, adb walk) | **The user's 2026-09-15 decision, reversing decision 7's "no insert/delete from the sketch face" ("that was a mistake if I decided that").** The face inserts and deletes pages exactly as the notebook does: a single-finger swipe past the **last** page inserts a page after it; a **two-finger swipe** inserts a page in that direction (before / after the current one); delete behind the same door the notebook uses (the pager's long-press sheet), with a warning that names what else goes when the page carries content — *"This will also delete the page's handwriting and document"* only when the page has strokes / objects or a document; a page with nothing but the sketch gets the plain confirm. Seam: two `ISketchHost` tails after `readInkChunk` — `insertPage(direction): SketchPageState` (host inserts, moves the target, loads the window — the new page is the answer) and `deletePage(pageKey): SketchPageState` (host soft-deletes the page and its descendants the notebook's way — one undoable action on the notebook's stack, so the notebook's undo restores it — and answers the page now shown), plus `pageContent(pageKey): int` (bit 1 = bare strokes / objects, bit 2 = a document) for the warning; method floor `MIN_API_VERSION_FOR_SKETCH_PAGES` = **18** (`API_VERSION` 17 → 18, `:ext-sketch` declares 18, no action floor moved). The face's history drops entries for a deleted page; a delete on the notebook's last page answers a fresh blank page (the notebook's rule). **Grown the same day by the user's follow-up decision — the face's own undo / redo gestures must reverse a page insert or delete, so nobody has to go back to the notebook to undo a delete:** two further `ISketchHost` tails under the same floor 18 (`API_VERSION` stays 18), `undoPage(token)` / `redoPage(token)`, where a **token** is the host's opaque name for one structural edit and rides to the face as a compatible tail field on `SketchPageState` (`structuralToken`, empty for every answer that is not an insert or a delete). The host keeps the showing's snapshots in a small ledger (`undoable` / `redoable`, cleared with the showing) and each replay runs `NotebookActivity`'s own `is Action.Page ->` arm verbatim, then moves that very entry across the **notebook's** stack (`onStructuralUndone` / `onStructuralRedone`) — the two histories are one history and are kept provably in step. The face records a `SketchEdit.Structural` entry (`PageInserted` / `PageDeleted`) that holds **only the token** — zero bytes, so the byte budget can never evict one — and replays it through `applyStructural` (flush → pen-idle → generation re-check → the Binder call → re-index the history → load the page); an unknown token drops the entry, and structural entries are **never** dropped by key, or the two stacks would fall out of step. A delete now **flushes the doomed page first**, because what comes back on undo is what was last saved. Tests: `SketchContractTest` (+3), `SketchPageStateTest` (+2), `SketchEditTest` (+3), `PageTurnTest` (+5), `UndoRedoStackTest` (+5), `ExtensionContractTest` re-pin. | Sonnet adb: insert after via `input swipe` **cannot** page-turn on Ratta (K2 trap) — walk insert/delete via the sheet and the host log; the user's hand: swipe-past-last inserts, two-finger swipe both ways, delete with and without content (the warning wording), notebook undo restores a deleted page, Back → the notebook lands on the right page; and for the follow-up: delete → **two-finger undo on the face** puts the page back with its ink / document / sketch at its old position (`n / m` right) → three-finger redo takes it away again; insert → undo removes it → redo makes it again; draw on an inserted page then undo twice; Show pages → the notebook's own undo still reverses what is left; Back after an undo lands the notebook right. |
 | **K6 — g-paper Phase 20 → 0.1.33 "A mark says where it landed"** ✅ (g-paper Phase 20) | Opus (Fable reviews) | Core only: `RasterDirty.along(points, width, pageW, pageH, maxSpanPx = 256, maxRects = 64)` — per-segment will/changed rects for `commitCapturedStroke` and `addStrokes` in RASTER; `loadPageRaster` silent (drop the extension's `loadingRaster`, note Paintsprout's dead guard in its watch list); `PaperListener` KDoc. Tests `RasterDirtyTest` (+8). Paintsprout `./gradlew test` 203 green before publish; SN re-pin. | Nomad: corner-to-corner hairline — cells read / entry bytes / pen-up main-thread ms before vs after; undo still an involution (screencap diff zero). |
-| **K7 — Clipboard, erase, export** ⬜ | Opus | `clip_too_large_sketch` wording in `doCopy`; Erase page via `liveErasableIds` (undo/redo replay by ids unchanged); `ExportRender`: `PageBake.hasSketch`, interleaved bundle, `bundlePositions`, endnote `fromPage`, `pageTitles` per bundle page (`ExportNaming` sketch stem), `SketchRaster.toWebp`, page-scope export carries its sketch; compaction KDoc. Tests: `ExportRenderPlanTest` (+5), `ExportRenderEndnotesTest`, `ExportNamingTest`, `ClipEnvelopeTest` (+1). | Sonnet adb: copy/paste page → face shows the sketch; Erase page leaves it; Delete → Undo; PDF page count = pages + sketches; page-scope export = 2 pages; PNG names carry the suffix; close after erase shrinks the file; library card shows the sketch. Phase-start Q: the sketch page's name suffix. |
+| **K7 — Clipboard, erase, export** ✅ | Opus | `clip_too_large_sketch` wording in `doCopy`; Erase page via `liveErasableIds` (undo/redo replay by ids unchanged); `ExportRender`: `PageBake.hasSketch`, interleaved bundle, `bundlePositions`, endnote `fromPage`, `pageTitles` per bundle page (`ExportNaming` sketch stem), `SketchRaster.toWebp`, page-scope export carries its sketch; compaction KDoc. Tests: `ExportRenderPlanTest` (+5), `ExportRenderEndnotesTest`, `ExportNamingTest`, `ClipEnvelopeTest` (+1). | Sonnet adb: copy/paste page → face shows the sketch; Erase page leaves it; Delete → Undo; PDF page count = pages + sketches; page-scope export = 2 pages; PNG names carry the suffix; close after erase shrinks the file; library card shows the sketch. Phase-start Q: the sketch page's name suffix. |
 | **K8 — Docs + freeze** ⬜ | Sonnet (Fable reads) | `extensions/sketch/docs/sketch.md` (as-built: data model, seam, screen, saves, undo, failure table, frame-silence ledger, traps, Nomad numbers); `docs/extensions.md` (tenth point, API 17 ledger, boundary-audit rows 64–67, the store-less held bind); `docs/notebook.md` (the door, the second bottom-bar exception, `liveErasableIds`), `docs/clipboard.md`, `docs/export.md`, `docs/library.md` (third radio), `docs/sn-screen.md`, `docs/document.md` (FaceRouting note); both `CLAUDE.md` files (tenth point granted, module count 16, pin 0.1.33, bottom-bar exceptions, the 6 MiB refusal); g-paper `PLAN.md`/`CLAUDE.md`; `ONYX_PLAN.md` version-number note; memory file; `versionName` lockstep check; `SKETCH_PLAN.md` ledger closed. | User's final Nomad hand walk; merge `sketch` → `main` `--no-ff`, delete branch, push. |
 
 Order: K0 → K1 → K2 → K3 → K4 → K5 → K6 → K7 → K8. K2 may start against 0.1.31 while K1's walk is pending;
@@ -647,3 +647,77 @@ zipflinger inflation, not a dependency change.
 
 **Next.** K7 — Clipboard, erase, export (Opus). The Manta walk is now unblocked (the plan's
 "K6 must land before any Manta walk") but stays a future needing the user's word.
+
+### K7 — Clipboard, erase, export ✅ (2026-09-15 → 16)
+
+**Phase-start answer (the user's, binding).** The sketch page's file name is the ink page's stem
+with **` sketch`** appended — `K7 - Heading.png` beside `K7 - Heading sketch.png`, `K7 - page 3
+sketch.png` without a heading (option A of three; a second hyphen and a heading-less `sketch N`
+were the others). The cap applies to the title, never to the suffix.
+
+**Already there from K3, verified not redone:** the `clip_too_large_sketch` branch in `doCopy`
+(the *choice* extracted to a pure `data/clip/ClipMessages.tooLarge(rows)` so it is tested) and
+Erase page over `liveErasableIds` (undo/redo replay by ids untouched).
+
+**Landed (Opus on Fable's brief; Fable read every file).** `ExportRender`: `PageBake.hasSketch`
+planned from **one blob-free** `SketchDao.pagesWithSketch` query before the first page is drawn
+(the bundle declares its count in its header); pure `BundlePage` / `bundlePages` / `bundlePositions`
+— page 1 ink, page 1 sketch, page 2 ink, …, endnotes after the last sketch; both `MAX_PAGES`
+checks, the progress line and `Endnotes.plan` count **bundle** pages; `endnoteSources` sets
+`fromPage` = the ink page's bundle position (`fromPageLabel` stays the notebook's number); the
+sketch row is read through `SketchDao.sketchFor` + `SketchRows.pngBytes`/`fitsPage` — **never
+`SketchRepository.get`**, which soft-deletes a refused row, and a render must not write; a row gone
+or refused between plan and bake writes a **white page of the page's size** (`SketchRaster.blank`,
+one `Log.w`) rather than closing the bundle short. New `notebook/SketchRaster.toWebp(w, h, png)`:
+ARGB decode over an opaque white `RGB_565` ground at the page's own size, `BuiltInTemplates.toWebp`,
+both bitmaps recycled in `finally`, `IOException` on a refused allocation, **plain white never the
+template** (decision 10). `ExportNaming.pageStem(…, sketch)` + `ExportNaming.PageName(number, title,
+sketch)` replacing the bare `List<String?>` of titles on `ExportRender.Outcome.Ready`,
+`CalendarRender.Outcome.Ready` (its stems ride in `title`, used verbatim) and
+`ExportActivity.StreamSource.Ready` — `stemFor` builds from the page's **number**, not its bundle
+index, which the interleave had made two different things. `SoilCompactor` KDoc (a sketch row
+purges like any row; a purged page cascades). `docs/export.md` "Sketch pages" subsection.
+
+**The hand found one bug (2026-09-16, "Exports aren't saving no matter where I try to put
+them").** Page-scope export to the image exporter: `ExportDelivery.perPage` held "a Page is one
+file", so the two-page bundle went to `NSE · Image` as one file and it refused — `export call
+failed: IllegalStateException: bundle carries 2 pages; one expected` — with nothing written and
+the failure sentence on screen. Fix: `perPage(delivery, scope, pageHasSketch)` — a sketched page at
+page scope is a **folder**, counted like the calendar's Day, not assumed like the Whole;
+`SoilDao.hasLiveSketch(pageId)` (blob-free, `length(blob) > 0`) answered in the Export screen's one
+open into `PageFacts.hasSketch`; the three doors to a folder go through one `perPage(c)`;
+`FakeSoilDao` mirrors; `ExportDeliveryTest` +1. Re-walked by the user: `Documents/Notesprout-Dev/
+sketches/` holds `K7 - Heading.png` (33 254 B, the ink) and `K7 - Heading sketch.png` (50 581 B,
+the pencil alone on white) — Fable pulled and looked at both.
+
+**Tests.** `:app` 1805 → **1816** (`ExportRenderPlanTest` +5, `ExportRenderEndnotesTest` +1,
+`ExportNamingTest` +3, `ClipEnvelopeTest` +1, `ExportDeliveryTest` +1); every other module
+unchanged; **3549 in the SN root** with `extensions/bible`'s 155 and `extensions/sketch`'s 60.
+`:app:assembleDebug` green.
+
+**Measured (Nomad, Sonnet's adb walk, `.dev` host; notebook "K7" `2814d828-…`, page 1 sketched
+via the debug fill door, page 2 blank):** copy/paste page → the pasted page's sketch is
+**byte-identical** (`current: page 2/2, 133362 B`, screencap lattice pixel-equal); Erase page →
+the sketch unchanged; Delete page → `deleted … + 1 objects`; whole-notebook PDF `rendered 2 page(s)
++ 1 sketch(es) + 0 endnote(s)`, pulled file `/Count 3`; page-scope PDF `K7 - page 1.pdf`, `/Count
+2`; whole-notebook PNG "3 images were exported": `K7 - page 1.png` 11 964 B · `K7 - page 1
+sketch.png` 109 995 B · `K7 - page 2.png` 11 964 B; `.soil` 159 744 B → delete the sketched page →
+close → `SoilCompactor: purged 2 row(s)` → **24 576 B**; the library card shows the lattice; crash
+buffer empty, no `ExportRender` warning. Not driveable by adb (K5 traps): real pen ink, the
+gesture undo.
+
+**The hand.** Nomad, the user, 2026-09-16: after the fix, the page export with a heading landed
+both files; real ink then Erase page keeps the sketch; delete then two-finger undo brings the page
+back with its sketch — **"The other tests pass too."** K7 closed.
+
+**Traps found.** (1) No release SN packages were on the Nomad, so the "disable the release
+packages" step was a no-op — check before assuming. (2) The debug fill door's long-press must land
+on the `pageIndicator` TextView's own bounds; a swipe a few px below silently does nothing.
+(3) `input keyevent KEYCODE_DEL` is swallowed like `input text` — clear a field with on-screen
+backspace taps. (4) The SAF tree picker refuses the bare `Download` root ("Can't use this folder")
+until a subfolder is created — the documented DocumentsUI trick, again. (5) A finger `input swipe`
+lays down `0 strokes` on Ratta — real ink is hand-only.
+
+**Next.** K8 — Docs + freeze (Sonnet, Fable reads): `extensions/sketch/docs/sketch.md`, the
+`docs/*.md` rows, both `CLAUDE.md` files, g-paper docs, memory, the ledger closed; then the user's
+final Nomad hand walk and the `--no-ff` merge to `main`.

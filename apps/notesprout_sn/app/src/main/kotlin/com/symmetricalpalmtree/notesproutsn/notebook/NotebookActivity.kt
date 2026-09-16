@@ -43,6 +43,7 @@ import com.symmetricalpalmtree.notesproutsn.crypto.KeyScope
 import com.symmetricalpalmtree.notesproutsn.crypto.NotebookPassphrasePrompt
 import com.symmetricalpalmtree.notesproutsn.core.Bitmaps
 import com.symmetricalpalmtree.notesproutsn.data.clip.ClipEnvelope
+import com.symmetricalpalmtree.notesproutsn.data.clip.ClipMessages
 import com.symmetricalpalmtree.notesproutsn.data.clip.ClipStore
 import com.symmetricalpalmtree.notesproutsn.data.template.PaperSource
 import com.symmetricalpalmtree.notesproutsn.data.template.TemplateFit
@@ -4700,18 +4701,11 @@ class NotebookActivity : AppCompatActivity() {
         val header = write.getOrNull()
         if (header == null) {
             // Over the payload cap, or the write threw. Either way nothing landed, so whatever was
-            // on the clipboard still stands — and the message says which of the two it was. A
-            // refused envelope carrying a sketch (arc 43 / K3) names it: a page's PNG is measured
-            // in megabytes where everything else on a page is measured in kilobytes, so it is
-            // almost always the reason, and "there is too much on this page" over a page of
-            // ordinary ink and one drawing reads as a puzzle rather than an explanation. The cap
-            // itself does not move — `ClipEnvelope.MAX_BYTES` is the cursor window, not a
-            // preference.
-            val message = when {
-                !write.isSuccess -> R.string.clip_write_failed
-                env.rows.any { it.type == SoilSchema.TYPE_SKETCH } -> R.string.clip_too_large_sketch
-                else -> R.string.clip_too_large
-            }
+            // on the clipboard still stands — and the message says which of the two it was. Which
+            // over-cap sentence it is (a sketch names itself, arc 43 / K3) is `ClipMessages`', so
+            // the choice is pure and tested.
+            val message =
+                if (!write.isSuccess) R.string.clip_write_failed else ClipMessages.tooLarge(env.rows)
             Dialogs.problem(this, R.string.clip_failed_title, message)
             return
         }
