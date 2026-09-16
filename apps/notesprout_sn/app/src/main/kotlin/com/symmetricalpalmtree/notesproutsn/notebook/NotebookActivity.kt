@@ -1270,19 +1270,19 @@ class NotebookActivity : AppCompatActivity() {
                     parkedClose = parked,
                 )
             ) {
-                TextDocRouting.Open.CANVAS -> {
+                FaceRouting.Open.CANVAS -> {
                     // A parked close replays onto the page the editor ended on — the catch-up (or
                     // the ✓-Done canvas) it would have been, had the open finished in time.
                     loadCanvas(parkedBox?.endedOn ?: session.currentPage.id)
                 }
-                TextDocRouting.Open.SEAL_AND_LEAVE -> {
+                FaceRouting.Open.SEAL_AND_LEAVE -> {
                     // The editor left toward the library while we were still opening: seal what we
                     // opened and go, without ever putting a page on the paper.
                     Slog.d(TAG) { "text document: the showing ended before the open did — sealing" }
                     close()
                 }
-                TextDocRouting.Open.EDITOR_LAUNCH, TextDocRouting.Open.EDITOR_RECONNECT -> {
-                    openIntoEditor(launch = route == TextDocRouting.Open.EDITOR_LAUNCH)
+                FaceRouting.Open.EDITOR_LAUNCH, FaceRouting.Open.EDITOR_RECONNECT -> {
+                    openIntoEditor(launch = route == FaceRouting.Open.EDITOR_LAUNCH)
                 }
             }
         } catch (t: Throwable) {
@@ -1692,9 +1692,9 @@ class NotebookActivity : AppCompatActivity() {
             return
         }
         when (TextDocRouting.closeDecision(isTextDocument(), canvasShown, mode)) {
-            TextDocRouting.Close.CATCH_UP ->
+            FaceRouting.Close.CATCH_UP ->
                 if (endedOn != null && endedOn != displayedPageId) runPageOp { refreshToPage(endedOn) }
-            TextDocRouting.Close.LOAD_CANVAS -> {
+            FaceRouting.Close.LOAD_CANVAS -> {
                 // The box goes back up for a load the user asked for and cannot see the cost of:
                 // the page comes off the `.soil` and the surface is set up from nothing. No
                 // [OpeningOverlay.showThen] wait is owed here — nothing pauses this screen, so the
@@ -1702,7 +1702,7 @@ class NotebookActivity : AppCompatActivity() {
                 binding.openingOverlay.root.visibility = View.VISIBLE
                 runPageOp { loadCanvas(endedOn ?: session.currentPage.id) }
             }
-            TextDocRouting.Close.SEAL_TO_LIBRARY -> close()
+            FaceRouting.Close.SEAL_TO_LIBRARY -> close()
         }
     }
 
@@ -4407,8 +4407,18 @@ class NotebookActivity : AppCompatActivity() {
         val header = write.getOrNull()
         if (header == null) {
             // Over the payload cap, or the write threw. Either way nothing landed, so whatever was
-            // on the clipboard still stands — and the message says which of the two it was.
-            val message = if (write.isSuccess) R.string.clip_too_large else R.string.clip_write_failed
+            // on the clipboard still stands — and the message says which of the two it was. A
+            // refused envelope carrying a sketch (arc 43 / K3) names it: a page's PNG is measured
+            // in megabytes where everything else on a page is measured in kilobytes, so it is
+            // almost always the reason, and "there is too much on this page" over a page of
+            // ordinary ink and one drawing reads as a puzzle rather than an explanation. The cap
+            // itself does not move — `ClipEnvelope.MAX_BYTES` is the cursor window, not a
+            // preference.
+            val message = when {
+                !write.isSuccess -> R.string.clip_write_failed
+                env.rows.any { it.type == SoilSchema.TYPE_SKETCH } -> R.string.clip_too_large_sketch
+                else -> R.string.clip_too_large
+            }
             Dialogs.problem(this, R.string.clip_failed_title, message)
             return
         }

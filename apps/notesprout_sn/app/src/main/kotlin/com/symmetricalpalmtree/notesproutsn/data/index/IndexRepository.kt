@@ -113,21 +113,23 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
     }
 
     /** Insert the index row for a notebook whose `.soil` already exists (the caller minted [id]).
-     *  [textDocument] sets [NotebookFlags.TEXT_DOCUMENT] (arc 19 / M8) — the index bit is the
-     *  authority; the caller mirrors it into `notebook_meta` at create.
+     *  [kind] is the create screen's type radio (arc 19 / M8, grown to three by arc 43 / K3) and
+     *  sets its bit through [NotebookKind.flagBits] — the index bit is the authority; the caller
+     *  mirrors it into `notebook_meta` at create. One parameter and not two booleans, because the
+     *  kinds are exclusive and an enum is the shape in which "both" cannot be passed.
      *
      *  [keyScope] is which key the `.soil` the caller just wrote is actually under (arc 26 / U5) —
      *  the New Notebook screen's *Its own passphrase* radio passes `KEY_SCOPE_NOTEBOOK`. It
      *  defaults to the device's global key, which is what every other create still is. */
     suspend fun createNotebook(
         id: String, name: String, parentId: String?, templateKind: String, pageCount: Int = 1,
-        textDocument: Boolean = false, keyScope: String = KEY_SCOPE_GLOBAL,
+        kind: NotebookKind = NotebookKind.HANDWRITTEN, keyScope: String = KEY_SCOPE_GLOBAL,
         now: Long = System.currentTimeMillis(),
     ): ObjectEntity {
         val row = ObjectEntity(
             id = id, type = ObjectType.NOTEBOOK, name = name, parentId = parentId,
             createdAt = now, updatedAt = now, pageCount = pageCount,
-            flags = NotebookFlags.ENCRYPTED or (if (textDocument) NotebookFlags.TEXT_DOCUMENT else 0),
+            flags = NotebookFlags.ENCRYPTED or NotebookKind.flagBits(kind),
             keyScope = keyScope, templateKind = templateKind,
         )
         dao.upsert(row)
@@ -181,11 +183,11 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
         createdAt: Long,
         updatedAt: Long,
         templateKind: String?,
-        /** Whether the imported file describes itself as a text document (arc 19 / M2) — its
-         *  `notebook_meta.textDocument`. It is the arriving file's nature, so it comes from the
-         *  manifest and **replaces** whatever the replaced row said, exactly as [templateKind]
-         *  does. */
-        textDocument: Boolean = false,
+        /** What the imported file describes itself as (arc 19 / M2, grown arc 43 / K3) — its
+         *  `notebook_meta.textDocument` / `.sketch`, read through [NotebookKind.fromMeta]. It is
+         *  the arriving file's nature, so it comes from the manifest and **replaces** whatever the
+         *  replaced row said, exactly as [templateKind] does. */
+        kind: NotebookKind = NotebookKind.HANDWRITTEN,
     ): ObjectEntity {
         val existing = dao.byId(id)
         val row = ObjectEntity(
@@ -196,7 +198,7 @@ class IndexRepository(private val dao: ObjectDao = SnIndex.dao()) {
             // backup" — a wholesale flags rewrite would silently drop that policy (K3 review).
             flags = NotebookFlags.ENCRYPTED or
                 ((existing?.flags ?: 0) and NotebookFlags.EXCLUDE_FROM_BACKUP) or
-                (if (textDocument) NotebookFlags.TEXT_DOCUMENT else 0),
+                NotebookKind.flagBits(kind),
             keyScope = KEY_SCOPE_GLOBAL,
             templateKind = templateKind, blob = null,
         )

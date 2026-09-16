@@ -27,6 +27,7 @@ import com.symmetricalpalmtree.notesproutsn.crypto.SoilCrypto
 import com.symmetricalpalmtree.notesproutsn.crypto.SoilFileKind
 import com.symmetricalpalmtree.notesproutsn.data.backup.BackupStore
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
+import com.symmetricalpalmtree.notesproutsn.data.index.NotebookKind
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectSummary
 import com.symmetricalpalmtree.notesproutsn.data.index.ObjectType
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilOpenFiles
@@ -653,11 +654,19 @@ class ImportFlow(
             }
         }
         val now = System.currentTimeMillis()
-        // The arriving file's own nature (arc 19 / M2), read once and used for both writes — the
-        // index row (the authority) and the meta refresh (its mirror). Untrusted like the rest of
-        // the manifest, and harmless if wrong: the worst it costs is a notebook that opens on the
-        // wrong one of its two surfaces.
-        val textDocument = manifest.meta?.textDocument == true
+        // The arriving file's own nature (arc 19 / M2, three-way since arc 43 / K3), read once and
+        // used for both writes — the index row (the authority) and the meta refresh (its mirror).
+        // Untrusted like the rest of the manifest, and harmless if wrong: the worst it costs is a
+        // notebook that opens on the wrong one of its three surfaces. A file claiming to be both a
+        // text document and a sketchbook is neither thing this app can write, so it is read as a
+        // text document (the recoverable answer — `NotebookKind`) and said out loud here, because
+        // `NotebookKind` is pure and cannot log.
+        val metaText = manifest.meta?.textDocument == true
+        val metaSketch = manifest.meta?.sketch == true
+        if (NotebookKind.metaConflicting(metaText, metaSketch)) {
+            Log.w(TAG, "imported meta claims both text document and sketch — reading it as text")
+        }
+        val kind = NotebookKind.fromMeta(metaText, metaSketch)
         repo.importNotebookRow(
             id = identity.notebookId,
             name = naming.name,
@@ -666,7 +675,7 @@ class ImportFlow(
             createdAt = manifest.meta?.createdAt ?: now,
             updatedAt = manifest.meta?.updatedAt ?: now,
             templateKind = manifest.templateKind,
-            textDocument = textDocument,
+            kind = kind,
         )
         // The replaced notebook goes only now — cancelling anywhere above left it untouched.
         naming.retireId?.let { retireNotebook(it) }
@@ -695,7 +704,7 @@ class ImportFlow(
                 folderPath = repo.ancestry(parentId),
                 passphrase = outcome.passphrase,
                 appVersionCode = versionCode(),
-                textDocument = textDocument,
+                kind = kind,
             )
         }.onFailure { Log.w(TAG, "meta refresh skipped: ${it.javaClass.simpleName}") }
 

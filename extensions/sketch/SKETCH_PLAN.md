@@ -5,7 +5,7 @@ The plan **and the ledger** for the raster-sketch extension, in the shape of the
 the ledger at the bottom as they land; the reference doc once frozen is
 `extensions/sketch/docs/sketch.md` beside this file.
 
-**Status: Arc 43 — IN PROGRESS, K0 ✅ K1 ✅ K2 ✅.** Phases are lettered **K** (arc 37 "Bible" used B, arc 38
+**Status: Arc 43 — IN PROGRESS, K0 ✅ K1 ✅ K2 ✅ K3 ✅.** Phases are lettered **K** (arc 37 "Bible" used B, arc 38
 "Reference" used R, arc 39 "Lookup" used no letter of its own, arc 40 "Verses" used V, arc 41
 "Cross references" used no letter of its own, arc 42 "Notes" used N — arc 43 "Sketch" uses **K**).
 
@@ -109,7 +109,7 @@ paper white) is host-side and device-neutral and is ported, not reinvented.
 | **K0 — Pin + scaffold** ✅ (`c3fc1847`, `29fc48dc`) | Sonnet | Branch `sketch` from `main`; `extensions/sketch/SKETCH_PLAN.md` (this plan + ledger); SN pin `sn-screen/build.gradle.kts` 0.1.28 → **0.1.31** (zero `gpaper-ratta` lines change; carries `RasterPatch`/`swapPageRaster`/`RasterRubbing`); g-paper `PLAN.md` Phase 16 🧪 → ✅ with the arc-29 Nomad record (Onyx half still untested); stale `docs/integration-guide.md`/`README.md` version lines; `apps/notesprout_sn/CLAUDE.md` pin sentence. | Build + all JVM tests green; Sonnet adb smoke of notebook/pad/calendar; user hand: ink, point eraser, lasso, lasso eraser, pad Send both ways; `gfxinfo` writing-minute baseline. |
 | **K1 — g-paper Phase 19 → 0.1.32 "Ratta and the raster page"** ✅ (g-paper `8bb2aa1`) | Opus (Fable reviews diff + numbers before publish) | Core: `protected open val rasterEraseRedrawIntervalMs` read by `throttledEraseRedraw` (const stays 16). Ratta: override (initial 100 ms; candidates 16/60/100/250/end-only via a demo-only system property); `RattaEmr.penSize(style, widthPx)` pure with `EMR_MIN_HAIRLINE` (start 120) for `PENCIL`, others keep 200; note at the "needs no override" comment naming `loadPageRaster`/`swapPageRaster` (the overlay is already released by `clearForContentSwap` under the swap law — verified, not a gap). **The g-paper demo gains a Raster toggle** (pencil + rubbing eraser) as the measurement vehicle. Tests `RattaEmrTest` ×4. Docs `api.md`/`CLAUDE.md`/`PLAN.md`. | Nomad (demo): M1 cadence per candidate (`gfxinfo` + the hand: lifts live? flicker?); M2 pencil preview width at EMR 120/150/200 vs the baked hairline (photo + screencap); M3 eraser-end pressure real (temporary log); M4 undo-swap flash (accept, record); M5 page-wide swap ms. Phase-start Qs: cadence candidates; whether to try `DARK_GRAY` preview. |
 | **K2 — The seam** ✅ | Opus (Sonnet: `ExtensionContractTest` pin, docs rows) | `:extension-api`: `SketchContract`, `ISketch.aidl`, `ISketchHost.aidl`, `SketchPageState` (+`requireValid`), `ByteChunks`, `PngHeader` (pure, both sides), `API_VERSION` 17 + floor; host manifest `<queries>` both actions. `:sn-screen`: `UndoRedoStack` budget + `pushUndoBeneath`, `CollapsedChrome(tools)`, `PaperToolbar(btnLasso?)`. `:ext-ink`: `PaperScreenActivity` extraction + `PenIdle.awaitIdle`. Tests: `ExtensionContractTest`, `SketchContractTest`, `ByteChunksTest`, `PngHeaderTest`, `SketchPageStateTest`, `UndoRedoStackTest` (+6). | `:extension-api:testDebugUnitTest` green (the pin trap); all modules compile; Sonnet adb regression of pad + calendar (the base-class move); user hand: pad/calendar ink + handoff. |
-| **K3 — Host data, creation, routing** ⬜ | Opus (Sonnet: radio XML/strings) | `TYPE_SKETCH`/`SKETCH_ORDER`; `SketchDao` (`sketchDigest`, `sketchFor`, `pagesWithSketch`) + `sketchDao()`; `SketchRows` (port of `RasterRows`); `SketchRepository` (`has/get/save/clear`, guard, watch, cap, unchanged-bytes skip); `NotebookSession.kind/isSketch`, `writeSketch`, `readSketch`; `NotebookKind`; `NotebookFlags.SKETCH`, `NotebookMeta.sketch` + **every mirror site** (`NewNotebookActivity`, `TextDocumentCreate`, `IndexRepository.createNotebook/importNotebookRow`, `NotebookImport.refreshMeta`, `ImportFlow`, `ExportArtifact.stampExportedAt`, `NotebookSession.refreshMeta`); third radio + `KEY_KIND`; `FaceRouting` generic table + `TextDocRouting` facade (its tests untouched) + `SketchRouting`; `SoilDao.childrenOf` exclusion, `liveDescendantIds` + `'sketch'`, `liveErasableIds` for Erase page; `FakeSoilDao` mirrors. Tests: `SketchRowsTest`, `SketchRepositoryTest`, `NotebookKindTest`, `FaceRoutingTest`/`SketchRoutingTest`, `SoilDaoKindListsTest` (+3), `DocumentWhitelistTest` (+1), `PageClipTest` (+1), `SoilCompactorTest` (+2). | JVM green; Sonnet adb: create a Sketch notebook (radio), `.soil` meta shows `sketch:true`, index flag 8, `.soil` export/re-import keeps it. (No face yet — a Sketch notebook loads the canvas.) |
+| **K3 — Host data, creation, routing** ✅ | Opus (Sonnet: radio XML/strings) | `TYPE_SKETCH`/`SKETCH_ORDER`; `SketchDao` (`sketchDigest`, `sketchFor`, `pagesWithSketch`) + `sketchDao()`; `SketchRows` (port of `RasterRows`); `SketchRepository` (`has/get/save/clear`, guard, watch, cap, unchanged-bytes skip); `NotebookSession.kind/isSketch`, `writeSketch`, `readSketch`; `NotebookKind`; `NotebookFlags.SKETCH`, `NotebookMeta.sketch` + **every mirror site** (`NewNotebookActivity`, `TextDocumentCreate`, `IndexRepository.createNotebook/importNotebookRow`, `NotebookImport.refreshMeta`, `ImportFlow`, `ExportArtifact.stampExportedAt`, `NotebookSession.refreshMeta`); third radio + `KEY_KIND`; `FaceRouting` generic table + `TextDocRouting` facade (its tests untouched) + `SketchRouting`; `SoilDao.childrenOf` exclusion, `liveDescendantIds` + `'sketch'`, `liveErasableIds` for Erase page; `FakeSoilDao` mirrors. Tests: `SketchRowsTest`, `SketchRepositoryTest`, `NotebookKindTest`, `FaceRoutingTest`/`SketchRoutingTest`, `SoilDaoKindListsTest` (+3), `DocumentWhitelistTest` (+1), `PageClipTest` (+1), `SoilCompactorTest` (+2). | JVM green; Sonnet adb: create a Sketch notebook (radio), `.soil` meta shows `sketch:true`, index flag 8, `.soil` export/re-import keeps it. (No face yet — a Sketch notebook loads the canvas.) |
 | **K4 — Host entry, hooks, door, cover** ⬜ | Opus (Sonnet: `ic_brush` Tabler, strings, layout) | `ExtensionRegistry.sketch`; `SketchHostSession` (pure: read window, ink window, save accumulator); `SketchHostBinder` (gate first, funnel); `SketchClient` (hold, `begin(host)`, `end()` ≤ 15 s, revoke in `finally`); `SketchHostHooks` (`pages`, `loadPage`, `commit` → `writeSketch`, `requestInk` → drain + `TransferCaps` + `InkChunks`, bare strokes only); `SketchEntry` (= `DocumentEditorEntry` + `ExtensionScreenEntry`'s paper pieces: **drain → open → chrome extra → `dismissFloatingChrome` → `endTransformIfRunning` → `releaseForHandoff` → launch**; result: pop → chrome → `resumeDrawing` → finish job → `onClosed`); `NotebookActivity`: `openIntoSketch`, `sketchShowingEnded` (CATCH_UP / LOAD_CANVAS / SEAL_TO_LIBRARY), `replayAbove` `Surface.SKETCH`, reconnect keys, `close()` joins, watchdog; `btnSketch` on the bottom strip left of Bible + collapsed overflow mirror; `SketchCover` + `captureCover` branch + `saveLastOpened(lastFaceEndedOn)`. Tests: `SketchHostSessionTest` ×10, `ReplayPlanTest` (+1). | JVM green; button GONE for non-Sketch notebooks and with no extension (walk after K5). |
 | **K5 — NSE · Sketch, the screen** ⬜ | Opus (Sonnet: module scaffold, manifest, gradle, icon copy, layout, strings) | `extensions/sketch` module per the layout in the design notes: `SketchApplication` (`RattaEngine.register()`), `SketchService` (`begin/end`, `HostCallerCheck`, park re-push in `end()`), `SketchSession`, `SketchActivity` (lifecycle table, `swapTo`, listener ignoring `onStrokeCommitted`, `PageTurn` pure), `SketchSaver` + `SketchSaveGovernor` + `PendingPngPark`, `RasterTiles`/`RasterEditBuilder` (port), `SketchEdit`, `RasterImage`, `InkBake`, dialogs, a **debug-only "fill test pattern" door** so adb can produce a non-blank save. `settings.gradle.kts` include. Tests: `RasterTilesTest` (port), `SketchSaveGovernorTest`, `PendingPngParkTest`, `PageTurnTest`, `InkBakeTest`, `CollapsedToolsTest` (+1). | **First Nomad walk.** Sonnet adb: Sketch notebook opens into the face; `am start` refused; chrome/collapsed; page turns + bounds; Bring in ink (screencap shows strokes) / "No ink"; save log ≤ 1 s; Back → catch-up; Show pages → canvas; reopen pixel-identical; `am kill` host behind the face → reconnect + save lands; sleep/wake; `meminfo`. User hand checklist: pencil feel + preview, rubbing, undo/redo gestures incl. across a turn and the put-back case, bake then undo twice, Back mid-hover. Phase-start Qs: save-failed dialog wording; pencil glyph (`ic_pen` vs new `ic_pencil`). |
 | **K6 — g-paper Phase 20 → 0.1.33 "A mark says where it landed"** ⬜ | Opus (Fable reviews) | Core only: `RasterDirty.along(points, width, pageW, pageH, maxSpanPx = 256, maxRects = 64)` — per-segment will/changed rects for `commitCapturedStroke` and `addStrokes` in RASTER; `loadPageRaster` silent (drop the extension's `loadingRaster`, note Paintsprout's dead guard in its watch list); `PaperListener` KDoc. Tests `RasterDirtyTest` (+8). Paintsprout `./gradlew test` 203 green before publish; SN re-pin. | Nomad: corner-to-corner hairline — cells read / entry bytes / pen-up main-thread ms before vs after; undo still an involution (screencap diff zero). |
@@ -296,3 +296,75 @@ week flip + Back, chrome hide + collapsed knob in both — **"all pass"**. K2 cl
 `NotebookFlags.SKETCH` + every meta mirror site, the third radio, `FaceRouting`, `childrenOf`
 exclusion + `liveDescendantIds` + `liveErasableIds`).
 
+
+### K3 — Outcome (2026-09-15)
+
+**Landed.** `SoilSchema.TYPE_SKETCH` (`"sketch"`, the seventh additive row type) + `SKETCH_ORDER`
+−1; `SketchDao` (`sketchDigest` blob-free, `sketchFor`, `pagesWithSketch`) + `sketchDao()`;
+`SketchRows` (the `RasterRows` port — `toRow` / `pngBytes` / `fitsPage` over K2's `PngHeader`;
+`pngSize` / `isRaster` / `flagsFor` deliberately not ported); `SketchRepository` (`has` / `get` /
+`save` / `clear`: IHDR guard both ways, a refused **stored** row soft-deleted never overwritten,
+`SKETCH_TOO_LARGE` / `SKETCH_BAD_PNG` thrown with the contract's exact strings and nothing
+written, `WATCH_BYTES` logged, digest-first unchanged-bytes skip, pixels never logged);
+`NotebookFlags.SKETCH = 8` + `NotebookKind { HANDWRITTEN, TEXT, SKETCH }` (`of` — **TEXT wins
+when both bits are set**, `conflicting`, `flagBits`, `fromMeta`, `metaConflicting`; pure, so the
+two reading sites that can meet a foreign row — `NotebookSession.open` and `ImportFlow` — log
+the conflict); `notebook_meta.sketch` (last, after `textDocument`) sourced from the index bit at
+**every** mirror site (`NewNotebookActivity`, `TextDocumentCreate`, `IndexRepository.createNotebook`
+/ `importNotebookRow` — both now take a `kind`, `NotebookImport.refreshMeta`, `ImportFlow`,
+`ExportArtifact.stampExportedAt`, `NotebookSession.refreshMeta`); the third radio `typeSketch`
+(exclusive, `KEY_KIND` saved by name); `NotebookSession.kind` / derived `isTextDocument` +
+`isSketch`, `sketches`, `writeSketch` (writer-queued, awaited, throws; page size from `pages`)
+and `readSketch`; `FaceRouting` (the generic table, `opensIntoFace` + `showPagesMode`) with
+`TextDocRouting` a facade over it (its test untouched) and `SketchRouting` (Show pages =
+`RESULT_SKETCH_SHOW_PAGES` → LOAD_CANVAS; Back / null → SEAL_TO_LIBRARY when the canvas was
+never shown); `SoilDao.childrenOf` excludes `'sketch'`, `liveDescendantIds` carries it at the
+page level, new `liveErasableIds` = descendants minus `'sketch'` and `eraseCurrent` uses it
+(decision 11); `clip_too_large_sketch` wording when a refused envelope carries a sketch row (cap
+unchanged). `NotebookActivity` is otherwise untouched — a Sketch notebook loads the canvas, as
+this phase's gate requires. Opus wrote it on Fable's brief, Sonnet the radio XML + string; Fable
+read the repository, kind, routing, DAO SQL, fake-DAO mirrors and session diff before the build.
+
+**Tests.** `:app` 1717 → **1783** (+66: `SketchRowsTest`, `SketchRepositoryTest` over a
+`FakeSketchDao` + hand-built `TestPng` headers, `NotebookKindTest`, `FaceRoutingTest`,
+`SketchRoutingTest`; `SoilDaoKindListsTest` +3, `DocumentWhitelistTest` +1 — a newer sketch row
+raises neither staleness sweep, `PageClipTest` +1, `SoilCompactorTest` +2, `NotebookMetaTest`
+re-pinned with `"sketch":false`, `FamilyConstantsTest` bit 8 / type / order). **3291 in the SN
+root** (K2's 3225 + 66), 3446 with `extensions/bible`'s 155; `:extension-api` 281 unchanged.
+`assembleDebug` green.
+
+**Measured** (Nomad, Sonnet's adb walk, the `.dev` host with K3): three radios present by id and
+by eye; a Sketch notebook created from the radio opened on the ordinary canvas (`Creating
+PaperView with engine 'ratta'`, no `FATAL` / `SecurityException` / `IllegalStateException` /
+`IllegalArgumentException` in the host's log, `logcat -b crash` empty); the pulled index row reads
+`flags = 9` (ENCRYPTED | **SKETCH**, TEXT_DOCUMENT clear) and the pulled `.soil`'s
+`notebook_meta.json` ends `"textDocument":false,"sketch":true`; the `.soil` **export** landed on
+the device and its meta reads the same with `exportedAt` stamped (Fable pulled it and read it
+with the sqlcipher CLI). Regression: a Handwritten notebook opened and closed, a Text notebook
+opened straight into the editor. **Re-import: NOT WALKED by adb** — the Supernote DocumentsUI
+*file* picker (`ACTION_OPEN_DOCUMENT`) ignores synthetic taps on rows exactly as the folder
+picker does (a new instance of the recorded trap); walked by the user's hand instead — see
+"The hand".
+
+**Traps found.** (1) `TextDocRouting`'s nested `Open` / `Close` enums had to survive for its test
+to stay untouched, and Kotlin has no nested typealias — the enums live in `FaceRouting` and each
+facade re-exposes them as nested objects of `val`s, which costs `when`-exhaustiveness, so
+`NotebookActivity`'s two `when`s name `FaceRouting.Open` / `.Close` directly (six label edits).
+(2) `PageClipTest`'s counts are load-bearing: adding the sketch row to the shared fixture moved
+three unrelated assertions. (3) The DocumentsUI file picker is as adb-proof as the folder picker.
+(4) `NotebookSession.kt` is 1014 lines (was 918, already over the ~800 guidance) — flagged, not
+split, in this phase.
+
+**The hand.** Nomad, the user, 2026-09-15: the exported Sketch `.soil` imported from the library's
+Import door (the adb-driven export had landed it in a folder named with one space — moved to
+`Download/` first). Log: `placed 24576 bytes in the Garden`; the imported row
+`20260915_195418 Copy` reads `flags = 9` and its `notebook_meta.json` ends
+`"textDocument":false,"sketch":true` (Fable pulled both and read them with sqlcipher). **Trap:**
+the user's second tap on Import reopened the DocumentsUI picker, which Supernote gives no way to
+back out of by hand — `am force-stop com.android.documentsui` returned the library cleanly
+(`RESULT_CANCELED`, nothing imported twice). K3 closed.
+
+**Next.** K4 — host entry, hooks, door, cover (`ExtensionRegistry.sketch`, `SketchHostSession` /
+`SketchHostBinder` / `SketchClient` / `SketchHostHooks` / `SketchEntry`, `NotebookActivity`'s
+`openIntoSketch` + `sketchShowingEnded` over `SketchRouting`, `btnSketch` on the bottom strip left
+of Bible, `SketchCover`).

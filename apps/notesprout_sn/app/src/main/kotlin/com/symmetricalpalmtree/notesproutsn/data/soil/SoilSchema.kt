@@ -6,7 +6,8 @@ package com.symmetricalpalmtree.notesproutsn.data.soil
  * columns in the same order, same index name, same `user_version` — Room's identity hash must
  * match or a Paper-created file fails validation on open (and vice versa). SN writes only the
  * row types notebook/page/template/stroke plus its own additive object types (heading, link,
- * document, and arc 28's text / shape / sticky_note); Paper's `object` rows are ignored.
+ * document, arc 28's text / shape / sticky_note, and arc 43's sketch); Paper's `object` rows are
+ * ignored.
  *
  * Room owns the `notebook` table (generated from [SoilObjectEntity]); the DDL below is the
  * *contract* those entity annotations must produce. `notebook_meta` is created by raw SQL in the
@@ -105,6 +106,37 @@ object SoilSchema {
      * Sticky content never draws on the page. No version bump, no migration. `OBJECTS_PLAN.md` D2.
      */
     const val TYPE_STICKY = "sticky_note"
+
+    /**
+     * Sketch (arc 43 / K3) — the seventh additive row type, and the first whose payload is a
+     * **picture of the page rather than a mark on it**: `parentId` = page id · `blob` = the PNG
+     * (ARGB_8888, transparent where empty, **exactly** the page's `width` × `height`) ·
+     * `"order"` = [SKETCH_ORDER] · everything else null. No version bump, no migration; Paper
+     * ignores the rows (the proven-safe additive pattern, the seventh time). `SKETCH_PLAN.md`
+     * § Derived / Storage.
+     *
+     * **One live row per page**, and it is **minted on the first save, never on open**: a page
+     * nobody has drawn on has no row at all, so a Sketch notebook costs what its sketches cost.
+     * Later saves rewrite the same row in place ([SoilDao.setBlob], `createdAt` kept) — a row per
+     * save would make a notebook's size a function of how long the person worked rather than of
+     * how much they drew.
+     *
+     * **Blank means absent** (the `document` row's rule, applied to pixels): an all-transparent
+     * sketch is not stored, and the wire form for "clear this page" is an empty byte array, which
+     * soft-deletes the live row. A sketch is soft-deleted with its page and rides copy / cut /
+     * paste / delete / undo like any other child ([SoilDao.liveDescendantIds]) — but **not** Erase
+     * page ([SoilDao.liveErasableIds], decision 11: Erase page is ink only), and it is invisible
+     * to [SoilDao.childrenOf] (a page-sized blob must never ride an untyped page read).
+     */
+    const val TYPE_SKETCH = "sketch"
+
+    /**
+     * A sketch row's `"order"` — **-1, outside every z-order space in the file**. Every other
+     * `"order"` in this format is a position among siblings of the same type, dense from 0; the
+     * sketch is not one of the marks on the page, it is what all of them came to, so it is given a
+     * number no ordering ever reaches rather than a place in one.
+     */
+    const val SKETCH_ORDER = -1
 
     /** The notebook meta row's `parentId` (it is the root). */
     const val ROOT_PARENT = ""

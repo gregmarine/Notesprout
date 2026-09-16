@@ -4,6 +4,7 @@ import com.symmetricalpalmtree.notesproutsn.data.soil.FolderRef
 import com.symmetricalpalmtree.notesproutsn.data.soil.KEY_SCOPE_GLOBAL
 import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookMeta
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -22,12 +23,12 @@ class NotebookMetaTest {
             appVersionCode = 12,
         )
         assertEquals(
-            """{"formatVersion":1,"notebookId":"3d6b8f2a-1111-2222-3333-444455556666","name":"Compat Notebook","createdAt":1755600000000,"updatedAt":1755600000001,"encrypted":true,"keyScope":"GLOBAL","folderPath":[{"id":"f1","name":"Folder One"},{"id":"f2","name":"Two","parentId":"f1"}],"appVersionCode":12,"textDocument":false}""",
+            """{"formatVersion":1,"notebookId":"3d6b8f2a-1111-2222-3333-444455556666","name":"Compat Notebook","createdAt":1755600000000,"updatedAt":1755600000001,"encrypted":true,"keyScope":"GLOBAL","folderPath":[{"id":"f1","name":"Folder One"},{"id":"f2","name":"Two","parentId":"f1"}],"appVersionCode":12,"textDocument":false,"sketch":false}""",
             full.toJson(),
         )
         val minimal = NotebookMeta(notebookId = "nb", name = "N", createdAt = 1L, updatedAt = 2L)
         assertEquals(
-            """{"formatVersion":1,"notebookId":"nb","name":"N","createdAt":1,"updatedAt":2,"encrypted":true,"keyScope":"GLOBAL","folderPath":[],"textDocument":false}""",
+            """{"formatVersion":1,"notebookId":"nb","name":"N","createdAt":1,"updatedAt":2,"encrypted":true,"keyScope":"GLOBAL","folderPath":[],"textDocument":false,"sketch":false}""",
             minimal.toJson(),
         )
     }
@@ -52,6 +53,22 @@ class NotebookMetaTest {
             folderPath = listOf(FolderRef("f", "Folder", null)), appVersionCode = 1,
         )
         assertEquals(m, NotebookMeta.fromJson(m.toJson()))
+    }
+
+    /** Arc 43 / K3: `sketch` is additive and last, so a file written by any build before it simply
+     *  has no key — and must decode to false rather than refusing to parse. The fixture above is
+     *  exactly such a file. */
+    @Test
+    fun aMetaWithNoSketchKeyDecodesAsNotASketch() {
+        val m = NotebookMeta.fromJson(
+            """{"formatVersion":1,"notebookId":"nb","name":"N","createdAt":1,"updatedAt":2,"encrypted":true,"keyScope":"GLOBAL","folderPath":[],"textDocument":false}"""
+        )
+        assertFalse(m.sketch)
+        assertFalse(m.textDocument)
+        val sketchy = NotebookMeta.fromJson(
+            """{"notebookId":"nb","name":"N","createdAt":1,"updatedAt":2,"sketch":true}"""
+        )
+        assertTrue(sketchy.sketch)
     }
 
     @Test

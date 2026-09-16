@@ -107,6 +107,18 @@ object NotebookFlags {
      *  the file stays self-describing — every meta refresh sources the field from **this bit**,
      *  never from the previous meta row (the og meta-refresh-wipe trap). */
     const val TEXT_DOCUMENT = 4
+
+    /** Arc 43 / K3 — a **sketch notebook**: a notebook whose pages may each carry one raster
+     *  sketch beside their ink, and which opens into the sketch face rather than onto paper.
+     *  Format-safe like [EXCLUDE_FROM_BACKUP] and [TEXT_DOCUMENT]: Paper ignores unknown bits. The
+     *  bit is the index's authority; `notebook_meta.sketch` mirrors it so the file stays
+     *  self-describing — every meta refresh sources the field from **this bit**, never from the
+     *  previous meta row (the og meta-refresh-wipe trap), exactly as [TEXT_DOCUMENT] does.
+     *
+     *  It is exclusive with [TEXT_DOCUMENT] by construction (the create screen's radio, decision 1)
+     *  and never both here; a foreign file carrying both is read as a text document and logged —
+     *  see [NotebookKind.of]. */
+    const val SKETCH = 8
 }
 
 /**

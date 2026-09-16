@@ -74,6 +74,7 @@
     <string name="new_notebook_type_label">Type</string>
     <string name="new_notebook_type_handwritten">Handwritten</string>
     <string name="new_notebook_type_text">Text</string>
+    <string name="new_notebook_type_sketch">Sketch</string>
     <string name="template_blank">Blank</string>
     <string name="template_lined">Lined</string>
     <string name="template_dotted">Dotted</string>
@@ -665,6 +666,10 @@
     <string name="clip_failed_title">Clipboard</string>
     <string name="clip_capture_failed">This page couldn\'t be read. Nothing was copied.</string>
     <string name="clip_too_large">There is too much on this page to copy. The clipboard was left unchanged.</string>
+    <!-- Arc 43 / K3: the same refusal, when the page carries a sketch — which is almost always the
+         reason a page does not fit, and a page of ink that "is too much to copy" would read as a
+         puzzle rather than an explanation. -->
+    <string name="clip_too_large_sketch">This page\'s sketch makes the copy too large to hold on the clipboard. The clipboard was left unchanged.</string>
     <string name="clip_paste_failed">The clipboard is empty or its contents couldn\'t be read. Copy a page again.</string>
     <string name="clip_write_failed">The page couldn\'t be put on the clipboard. The clipboard was left unchanged.</string>
 

@@ -37,6 +37,14 @@ data class NotebookMeta(
     val exportedAt: Long? = null,
     val appVersionCode: Int? = null,
     val textDocument: Boolean = false,
+    /** Arc 43 / K3 — the mirror of `NotebookFlags.SKETCH`, so a sketch notebook stays a sketch
+     *  notebook when its `.soil` is exported and imported somewhere else. **Last**, and additive
+     *  like `textDocument` before it: a file written by an older build simply has no key, which
+     *  decodes to false. The index bit is the authority; every meta writer sources this from the
+     *  bit and never from the previous meta row (the og meta-refresh-wipe trap). Exclusive with
+     *  [textDocument] by construction — see
+     *  [com.symmetricalpalmtree.notesproutsn.data.index.NotebookKind]. */
+    val sketch: Boolean = false,
 ) {
     fun toJson(): String = codec.encodeToString(serializer(), this)
 

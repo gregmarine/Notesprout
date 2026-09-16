@@ -6,6 +6,7 @@ import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.crypto.KeyMaterial
 import com.symmetricalpalmtree.notesproutsn.crypto.SoilCrypto
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
+import com.symmetricalpalmtree.notesproutsn.data.index.NotebookKind
 import com.symmetricalpalmtree.notesproutsn.data.sidecarsOf
 import com.symmetricalpalmtree.notesproutsn.data.soil.FolderRef
 import com.symmetricalpalmtree.notesproutsn.data.soil.KEY_SCOPE_GLOBAL
@@ -375,11 +376,11 @@ object NotebookImport {
         passphrase: String,
         appVersionCode: Int,
         /** What the index row this import just wrote says — a parameter rather than a read of the
-         *  previous meta (arc 19 / M2): the index bit is the authority, the meta field mirrors it,
-         *  and the caller is the one side that knows what was written (og's meta-refresh-wipe
-         *  trap). It comes from the imported file's own manifest, so a text document imported from
-         *  another device stays one. */
-        textDocument: Boolean,
+         *  previous meta (arc 19 / M2, grown arc 43 / K3): the index bits are the authority, the
+         *  meta fields mirror them, and the caller is the one side that knows what was written
+         *  (og's meta-refresh-wipe trap). It comes from the imported file's own manifest, so a
+         *  text document — or a sketch notebook — imported from another device stays one. */
+        kind: NotebookKind,
         now: Long = System.currentTimeMillis(),
     ) = withContext(Dispatchers.IO) {
         val file = soilFile(context, notebookId)
@@ -412,7 +413,8 @@ object NotebookImport {
                     keyScope = IndexRepository().get(notebookId)?.keyScope ?: KEY_SCOPE_GLOBAL,
                     folderPath = folderPath,
                     appVersionCode = appVersionCode,
-                    textDocument = textDocument,
+                    textDocument = kind == NotebookKind.TEXT,
+                    sketch = kind == NotebookKind.SKETCH,
                 ),
             )
         } catch (e: Exception) {
