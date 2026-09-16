@@ -116,16 +116,15 @@ class SketchActivity : PaperScreenActivity() {
     /** The page on the glass, as the host last described it. Null before the first load. */
     private var currentPage: SketchPageState? = null
 
-    /**
-     * True while a `loadPageRaster` of ours is running. The load reports a whole-page change the
-     * moment it lands, and that change is **the file talking, not the hand**: without this guard
-     * every page turn would dirty the page it arrived on and record a page-sized "undo" of the
-     * previous one. (g-paper Phase 20 / K6 makes the load silent and this goes away.)
-     */
-    private var loadingRaster = false
-
     /** The open contact's before-image, from its first change to the pen lifting. */
     private var openEdit: RasterEditBuilder? = null
+
+    /**
+     * Main-thread nanoseconds spent reading the open contact's before-image — the cost of every
+     * `onRasterWillChange` it received, summed. Reported with the entry (K6's measurement: what a
+     * corner-to-corner hairline costs at pen-up before and after g-paper reports per run).
+     */
+    private var openEditReadNanos = 0L
 
     // ── What the skeleton asks for ───────────────────────────────────────────
 
@@ -292,12 +291,9 @@ class SketchActivity : PaperScreenActivity() {
         if (!firstLoad) paper.clearForContentSwap()
         paper.setPageSize(state.width, state.height)
         paper.setTemplate(null)   // plain white always (decision 10) — no template ever crosses
-        loadingRaster = true
-        try {
-            paper.loadPageRaster(bitmap)
-        } finally {
-            loadingRaster = false
-        }
+        // Silent since g-paper 0.1.33 (K6): a page we loaded ourselves is our own news, so no
+        // will-change/changed pair arrives and nothing here has to swallow one.
+        paper.loadPageRaster(bitmap)
         bitmap?.recycle()
         currentPage = state
         saver.pageKey = state.pageKey
@@ -536,15 +532,20 @@ class SketchActivity : PaperScreenActivity() {
          * one once ([RasterTiles]).
          */
         override fun onRasterWillChange(rect: Rect) {
-            if (loadingRaster || !opened || closing) return
+            if (!opened || closing) return
             val state = currentPage ?: return
             val builder = openEdit
-                ?: RasterEditBuilder(state.pageKey, state.pageIndex, state.width, state.height).also { openEdit = it }
+                ?: RasterEditBuilder(state.pageKey, state.pageIndex, state.width, state.height).also {
+                    openEdit = it
+                    openEditReadNanos = 0L
+                }
+            val t0 = System.nanoTime()
             builder.touch(rect.left, rect.top, rect.right, rect.bottom) { cell ->
                 // The engine's array, straight into the tile — no copy. It goes back to the engine
                 // as it stands, and the swap leaves it holding the other side of the edit.
                 paper.readPageRaster(Rect(cell.left, cell.top, cell.left + cell.width, cell.top + cell.height))?.pixels
             }
+            openEditReadNanos += System.nanoTime() - t0
         }
 
         /**
@@ -553,7 +554,7 @@ class SketchActivity : PaperScreenActivity() {
          * is not read: one image is written whole.
          */
         override fun onRasterChanged(rect: Rect) {
-            if (loadingRaster || !opened || closing) return
+            if (!opened || closing) return
             saver.markDirty()
             saver.schedule()
         }
@@ -581,7 +582,8 @@ class SketchActivity : PaperScreenActivity() {
         }
         val edit = builder.build() ?: return
         undo.record(edit)
-        Slog.d(TAG) { "undo entry: ${edit.tiles.size} tiles, ${edit.bytes} B (${undo.undoBytes} B held)" }
+        val readMs = openEditReadNanos / 1_000_000
+        Slog.d(TAG) { "undo entry: ${edit.tiles.size} tiles, ${edit.bytes} B, read $readMs ms on the main thread (${undo.undoBytes} B held)" }
     }
 
     // ── Gestures ─────────────────────────────────────────────────────────────

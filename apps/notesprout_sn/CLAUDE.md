@@ -396,8 +396,8 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
     PDF endnotes over `PageBundle` v2; no line objects, no shape recognizer, no extension
     transfers. **Call `armLassoForLanding()` before `setSelection` from any non-lasso context.**
   - **Arc 29 "Loop"** (LE1–LE4, 2026-09-06/07; `docs/notebook.md`; `LOOP_PLAN.md`) — the lasso
-    eraser, item 4: `Tool.LASSO_ERASER` in g-paper 0.1.28 (re-pinned to **0.1.32** since arc 43 /
-    K1, 2026-09-15 — see the pin note below), armed on all four
+    eraser, item 4: `Tool.LASSO_ERASER` in g-paper 0.1.28 (re-pinned to **0.1.33** since arc 43 /
+    K6, 2026-09-15 — see the pin note below), armed on all four
     paper surfaces from a second tap on the armed eraser → the Point · Lasso `EraserBar`
     (`:sn-screen`), **never a fourth bar button** (a twelfth 62 dp button falls off the Nomad's
     749 dp). The host never repaints from `onLassoErased`. Onyx's side of the engine change is
@@ -718,7 +718,10 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   never repaired by deletion.
 - **`IndexGuard.ready(this)` first thing in every index-touching `onCreate`**;
   `BootstrapActivity` is the only index opener and is `noHistory`.
-- **g-paper 0.1.32 (since arc 43 / K1, 2026-09-15 — Phase 19 "Ratta and the raster page":
+- **g-paper 0.1.33 (since arc 43 / K6, 2026-09-15 — Phase 20 "A mark says where it landed":
+  a composited raster mark announces itself as runs of ≤ 256 px span (`RasterDirty.along`), not
+  one bounding box, and `loadPageRaster` is silent like `swapPageRaster` — the sketch face's
+  `loadingRaster` guard is gone. 0.1.32 since K1 the same day — Phase 19 "Ratta and the raster page":
   the raster-erase cadence seam, `RattaEmr` with the PENCIL hairline EMR floor 120, the pencil
   baked at a constant pressure 0.5 under a DARK_GRAY needle preview, cadence 16 ms, all
   measured on the Nomad; `RattaTuning` holds the four values until K8. 0.1.31 since K0 the same
