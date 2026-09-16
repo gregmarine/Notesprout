@@ -151,8 +151,8 @@ Phase 20 → 0.1.33 (per-segment dirty rects, a silent `loadPageRaster`), Phase 
 (`RattaTuning` removed, its four measured values now plain constants). K0 through K7 are all
 **COMPLETE ✅** on the user's Nomad hand walks (2026-09-15/16) — K8 "Docs + freeze" is the last phase:
 `extensions/sketch/docs/sketch.md` is the reference once frozen, `extensions/sketch/SKETCH_PLAN.md`
-the plan + ledger (history after freeze, per the maintenance protocol below), and the merge to `main`
-(`--no-ff`) is pending the user's final Nomad walk.
+the plan + ledger (history after freeze, per the maintenance protocol below), and the branch was merged to `main`
+(`--no-ff`) and deleted 2026-09-16 after the user's final Nomad walk — "on sketch" means `main`.
 No ELEVENTH extension point, no next Bible phase (bookmarks, longer or multi-page passages), no next
 Sketch phase and no other new arc without a fresh user decision; no re-raising of any waived /
 declined review finding.
