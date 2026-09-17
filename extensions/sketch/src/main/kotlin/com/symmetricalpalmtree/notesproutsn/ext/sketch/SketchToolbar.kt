@@ -31,7 +31,8 @@ import com.symmetricalpalmtree.notesproutsn.notebook.PenIdle
  *
  * **No engine tuning is set here.** The engine's constants *are* the K1 measurements — the
  * pencil bakes at a constant pressure 0.5 under a DARK_GRAY needle preview, the erase redraw runs at
- * 16 ms, the EMR hairline floor is 120 (g-paper 0.1.34 froze them; the `RattaTuning` door of
+ * 16 ms, the EMR hairline floor is 120, the bake is upright whatever the pen's lean (g-paper
+ * 0.1.34 froze the first four, 0.1.35 added the last; the `RattaTuning` door of
  * 0.1.32–0.1.33 is gone) — and a host that re-stated any of them would be a second place for them
  * to drift.
  *
