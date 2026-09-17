@@ -810,7 +810,11 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   never repaired by deletion.
 - **`IndexGuard.ready(this)` first thing in every index-touching `onCreate`**;
   `BootstrapActivity` is the only index opener and is `noHistory`.
-- **g-paper 0.1.34 (since arc 43 / K8, 2026-09-16 — Phase 21 "The door closes":** `RattaTuning`
+- **g-paper 0.1.35 (since the Manta sketch walk, 2026-09-17 — Phase 22 "The pencil bakes upright
+  on Ratta":** a leaned `PENCIL` baked 10–15× wider than the firmware's live line, which cannot
+  widen with tilt; the `bakeTilt` seam bakes it at tilt 0 on Ratta. Walked on Manta + Nomad; see
+  `extensions/sketch/docs/sketch.md` § Traps.) Before it, **0.1.34 (arc 43 / K8, 2026-09-16 —
+  Phase 21 "The door closes":** `RattaTuning`
   removed; the four Nomad-measured values it held as a "measurement door, not host API" — cadence
   16 ms, the PENCIL EMR hairline floor 120, the pencil baked at a constant pressure 0.5 under a
   DARK_GRAY needle preview — are now plain constants in `gpaper-ratta`, Ratta-only, no behaviour

@@ -169,7 +169,6 @@ class SketchActivity : PaperScreenActivity() {
         Immersive.apply(window, binding.root)
         TopGuard.applyRootPadding(binding.root)   // 0 on Ratta — chrome sits flush at the top edge
 
-        if (BuildConfig.DEBUG) MantaTuningProps.apply()
         paper = GPaper.create(this).also {
             binding.paperContainer.addView(
                 it.asView(),

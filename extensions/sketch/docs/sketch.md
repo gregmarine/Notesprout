@@ -18,7 +18,7 @@ documented once, in
 [`apps/notesprout_sn/docs/extensions.md`](../../../apps/notesprout_sn/docs/extensions.md) § "The
 Sketch point (arc 43)"; this doc is the feature side and links there rather than repeating it.
 
-**Engine.** g-paper is pinned at **0.1.34** (Phase 21, "The door closes") as of K8, over 0.1.33 (Phase 20, "A mark says where it landed", K6) and 0.1.32 (Phase 19, "Ratta and the raster page", K1). The
+**Engine.** g-paper is pinned at **0.1.35** (Phase 22, "The pencil bakes upright on Ratta", the 2026-09-17 Manta walk — see Traps), over 0.1.34 (Phase 21, "The door closes", K8), 0.1.33 (Phase 20, "A mark says where it landed", K6) and 0.1.32 (Phase 19, "Ratta and the raster page", K1). The
 four values K1 measured on the Nomad — cadence **16 ms**, `PENCIL`'s EMR floor **120**, a
 `DARK_GRAY` preview needle, and a **constant bake pressure of 0.5** for `PENCIL` on Ratta — are
 plain constants in `gpaper-ratta` and `gpaper-core`; the measurement door (`RattaTuning`, "a
@@ -540,6 +540,15 @@ notebook screen first).
 
 ## Traps
 
+- **The pencil bakes upright on Ratta (g-paper 0.1.35, 2026-09-17, branch `sketch-manta`).** The
+  stable build went onto the Manta unwalked, and there the baked hairline landed **10–15× wider**
+  than the firmware's live line. Not a panel difference and not the EMR size (suspected first —
+  a `setprop` door was re-opened for it and closed again unused): g-paper's graphite widens a
+  leaned lead up to ~11×, and the Supernote live line is one width whatever the tilt. Both
+  devices deliver `AXIS_TILT`; the Nomad walks had simply been at an upright grip. g-paper's
+  `bakeTilt` seam (beside `bakePressure`) bakes Ratta's `PENCIL` at tilt 0 — decision 3's "no
+  tilt", now true in the pixels. Walked by hand on both the Manta and the Nomad. **The size of a
+  mismatch names its cause: an EMR error is tens of percent, a lean error an order of magnitude.**
 - **`RattaNotebookView`-style sibling-copy risk was avoided on purpose.** `FaceRouting` is one
   generic open/close table; `TextDocRouting` and `SketchRouting` are thin facades naming its
   answers under each face's own words. A fix to the shared table helps both faces at once — do not
