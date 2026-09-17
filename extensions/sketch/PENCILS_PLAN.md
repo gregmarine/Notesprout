@@ -1,0 +1,143 @@
+# PENCILS_PLAN.md — arc 44 "Pencils": pencil shades, pencil sizes and a gel pen (branch `pencils`)
+
+The plan **and the ledger** for the second arc of `NSE · Sketch`, in the shape of
+`SKETCH_PLAN.md` beside this file. Phases are appended to the ledger at the bottom as they land;
+the reference doc stays `extensions/sketch/docs/sketch.md`, grown at T5.
+
+**Status: Arc 44 — IN PROGRESS, T0 ✅ T1 ⬜ T2 ⬜ T3 ⬜ T4 ⬜ T5 ⬜.** Phases are lettered **T**
+("Tools" — arc 37 "Bible" used B, arc 38 "Reference" R, arc 40 "Verses" V, arc 42 "Notes" N,
+arc 43 "Sketch" K; T was checked unused across every `*_PLAN.md` at T0). The g-paper half is
+g-paper's own **Phase 23 → 0.1.36** on its branch `pencil-tones`.
+
+## Context
+
+The sketch face has one tool: a 1.2 px `#505050` pencil (arc 43, decision 3: "no tilt, no width
+choice, no colour"). Tilt is firmware-gated on Supernote — the bake is upright since g-paper
+0.1.35 — so a sketch cannot be shaded. The user's decision of 2026-09-17 opens this arc: **fifteen
+greyscale pencil shades, five pencil sizes, and one fixed gel pen**, remembered on the device.
+
+It is a fresh user decision in the two places the standing rules require one: it **amends arc 43's
+decision 3** ("no width choice, no colour"), and it grants the **first tool-options bar on an SN
+paper screen** since P1 removed the tool panels ("no next Sketch phase … without a fresh user
+decision" — this is that decision). Neither is a precedent for the notebook's own toolbar.
+
+What the exploration found (2026-09-17), which shapes every phase:
+
+- **The gel pen and the sizes need no engine change.** A gel pen is `StrokeStyle.PEN`, black, 3 px
+  in `PageMode.RASTER` (3 px = `NotebookToolbar.PEN_WIDTH_PX`; Ratta arms `NEEDLE`, above
+  `RattaEmr.EMR_MIN` = 200). `penWidth` already runs through `GraphiteGrain.of` on the bake and
+  `RattaEmr.penSize` on the preview (PENCIL hairline floor 120, ceiling 1200 = 12 px).
+- **Shades bake correctly from `penColor` today**, but `RattaPaperView.firmwarePenColor()` forces
+  `PENCIL_PREVIEW_GREY` (DARK_GRAY) for every pencil, and the firmware has four colour codes of
+  which three are usable. That is the one g-paper change.
+- **Nothing is remembered today**, the seam carries no tool state, and an extension may not write
+  to disk itself.
+
+## Decisions (the user's, 2026-09-17 — binding; phase-start questions may not reopen them)
+
+| # | Question | Decision |
+|---|---|---|
+| 1 | Ratta live preview across shades | **Map the pencil shade to the nearest usable firmware tone** (a g-paper change); thresholds are settled by the user's hand. The bake is always the true shade. |
+| 2 | Which shades | **Fifteen**: `#000000 … #EEEEEE` in `0x11` steps, the e-paper ladder without white. Default `#555555` (level 5), replacing `#505050`. |
+| 3 | Which sizes | **Five: 1.2 / 2 / 4 / 7 / 12 px** — starting values the hand may adjust. Default 1.2. |
+| 4 | Gel pen | `StrokeStyle.PEN`, black, **3 px** (the notebook pen's width), one size, no options. "We may adjust after some testing of that." |
+| 5 | Chrome | A third top-bar tool button — Pencil · **Pen** · Eraser. **Re-tapping the armed Pencil** opens one `AnchoredBar` under it: shade swatches (8 + 7) over a size row. The collapsed mini-toolbar gains Pen. |
+| 6 | Memory | **Remembered on the device**: two `ISketchHost` tails, `API_VERSION` 18 → 19; the host keeps it in device-local prefs — one setting for all notebooks, not in the `.soil`, not in backups. |
+| 7 | Pen glyph | Tabler **`ballpen`** → `ic_ballpen` in `:sn-screen`'s shared drawables; hint "Pen". `ic_pen` (Tabler's pencil) stays on the Pencil. |
+| 8 | Naming | Arc 44 "Pencils" · Notesprout branch `pencils` · g-paper branch `pencil-tones` · letter T · this file. |
+| 9 | Models | **Fable orchestrates**, writes the briefs and the AIDL seam, reviews every g-paper diff and every doc draft; **Opus codes**; **Sonnet** does scaffolding (XML / strings / drawable / doc drafts), JVM test runs and Nomad adb walks; **no Haiku**; no code review (arc 43 decision 14 carried). |
+
+### Derived (reconciled from the exploration — not re-asked)
+
+- **Carried unchanged from arc 43:** the rubbing eraser at 12 px; undo by gestures only, no
+  arrows; no lasso on the face, ever; Erase page = ink only; "Bring in ink" composites black;
+  `MAX_BYTES` 6 MiB; plain white paper; **no engine constant re-stated in the host**
+  (`SketchToolbar`'s KDoc) — bake pressure 0.5, bake tilt 0, both EMR floors and the 16 ms cadence
+  do not move in this arc.
+- **Stored as indices, not values.** `SketchToolSettings` = tool (pencil / pen) + shade level
+  0–14 + size index 0–4, so retuning a size at T4 never strands a stored value; anything out of
+  range reads as the default.
+- **The preview map is its own function.** `RattaInkMap.firmwareColorFor`'s thresholds are "do not
+  revisit" and stay untouched; the pencil gets `pencilPreviewFor(argb)` with its own ladder,
+  because a pencil bakes at pressure 0.5 through grain and reads lighter than its nominal colour.
+  It must answer DARK_GRAY for `#555555` (K1's "spot on") and never LIGHT_GRAY (near-invisible).
+- **`PaperToolbar` is changed in `:sn-screen`, never forked** — a second PEN-kind button and a
+  pen re-tap hook, with `sync()` still the one truth. `PencilBar` itself lives in `:ext-sketch`
+  (one consumer); `ic_ballpen` lives in `:sn-screen` (the shared vocabulary).
+- **An older host (API 18) simply does not remember** — the two tails sit under a method floor,
+  action floors untouched.
+- **Bring in ink re-states pen colour / width / style for its bake** (`SketchActivity` ~L889);
+  the armed settings must be restored after it.
+- **Colour rule:** greys are ink, and appear in chrome only as the swatches being chosen (and, if
+  T3's phase-start answer says so, the Pencil button reporting the armed shade).
+
+## Phases (letter T; one per session; ⬜ 🔄 🧪 ✅; each ends commit + push; ledger below)
+
+| Phase | Owner | What lands | Gate |
+|---|---|---|---|
+| **T0 — Plan lands** ✅ | Fable | Branches `pencils` (Notesprout) and `pencil-tones` (g-paper); this file; g-paper `PLAN.md` Phase 23 ⬜; memory `project_pencils_arc.md`. | Both branches pushed; `file` says this is text (the NUL trap). |
+| **T1 — g-paper Phase 23 → 0.1.36: pencil preview tones** ⬜ | Opus on Fable's brief; Fable reviews the diff; Sonnet runs tests + installs the demo | Pure `RattaInkMap.pencilPreviewFor(argb)`, own thresholds — start: levels 0–2 → BLACK, 3–9 → DARK_GRAY, 10–14 → GRAY. `firmwarePenColor()` routes PENCIL through it; the `PENCIL_PREVIEW_GREY` constant goes. `RattaInkMapTest` pins the ladder. The demo's raster toggle gains shade + size cyclers (the walk surface) and renders each of the five lead sizes to a PNG before a panel sees it (g-paper `CLAUDE.md`'s rule) — Sonnet pulls them, Fable looks. A temporary measurement door only if the first thresholds miss, removed before the phase closes. `docs/api.md` + `CLAUDE.md` in the same commit. | g-paper `./gradlew test` green (215 core / 12+ ratta); Paintsprout Onyx 203 green on its pin; **the user's hand on the Nomad** settles the thresholds; 0.1.36 published to mavenLocal (by the user's hand if the classifier refuses). |
+| **T2 — Seam + host memory (API 19)** ⬜ | **Fable: the seam**; Opus: host side; Sonnet: test runs | `SketchToolSettings` parcelable in `:extension-api`; `ISketchHost.toolSettings()` / `putToolSettings(…)` appended after the existing tails under `SketchContract.MIN_API_VERSION_FOR_SKETCH_TOOLS = 19`; `API_VERSION` 18 → 19, action floors untouched. Host: `SketchHostBinder` + a small prefs store, `SharedPreferences("sn_sketch_tools")` — **not** `sn_tool`, which `SnApplication` deletes at start. | `:extension-api:testDebugUnitTest` (**the pin test — must be run**) + `:app:test` green. |
+| **T3 — The face** ⬜ | Opus; Sonnet: layout XML, strings, `ic_ballpen`, the adb walk | Re-pin g-paper 0.1.36 (`sn-screen/build.gradle.kts` + the pin sentences). Pure `SketchPalette` (15 shades, 5 sizes, defaults; names "Black" / 1–14) + pure `SketchToolState`, both JVM-tested. `PaperToolbar` learns the second PEN-kind button + `onPenReTap`; `CollapsedTools` takes the third tool. `PencilBar` over `AnchoredBar` (the `EraserBar` pattern: armed entry `isSelected`; swatch = black ring + ink fill, a white gap ring when selected; rects unioned into `floatingRects()` / `floatingContains()`; `PenIdle.releaseRenderIfIdle` before assigning; never a frame while `paper.isPenActive`). `SketchToolbar` applies state → `penStyle` / `penWidth` / `penColor`; Bring in ink restores it. Settings loaded at `begin`, pushed on every pick. **Phase-start question:** how the Pencil button reports the armed shade (a light tint is invisible on e-ink — a floored tint vs. none). | `:ext-sketch:test` + `:sn-screen:test` + root `./gradlew test` green; Sonnet's Nomad adb walk (bar opens / closes, picks survive a reopen and a process death, screenshots, save bytes of a heavy 12 px black scribble against 4 MB watch / 6 MiB); then **the hand**: shades, sizes, gel pen feel, preview ↔ bake width agreement at every size. |
+| **T4 — Walk adjustments** ⬜ | Opus (small); Fable if engine | Whatever the hand found: size values, gel pen width, thresholds (engine → another g-paper patch + Fable's review). Skipped if T3's walk is clean. | The user's word. |
+| **T5 — Docs + freeze** ⬜ | Sonnet drafts; Fable reviews every draft | `docs/sketch.md` (tools, seam tails, traps, numbers), SN `CLAUDE.md` (API 19, pin, counts, arc row), root `CLAUDE.md`, SN `docs/notebook.md` frame-silence ledger if touched, g-paper `PLAN.md` close, memory. **Phase-start question:** a `versionName` bump. Merge `--no-ff` in both repos **only on the user's word**; the Manta only if asked. | `file` on every touched doc = text; the final hand walk. |
+
+**Order:** T0 → T1 → T2 → T3 → (T4) → T5. T2 does not depend on T1 and may go first if the Nomad
+is not at hand.
+
+## Critical files
+
+- **g-paper:** `gpaper-ratta/…/RattaPaperView.kt` (`firmwarePenColor` ~L281, `PENCIL_PREVIEW_GREY`
+  ~L124), `RattaInkMap.kt`, `RattaInkMapTest.kt`, `demo/…/MainActivity.kt` (`toggleRaster` ~L557),
+  `gradle.properties` (`GPAPER_VERSION`), `docs/api.md`, `CLAUDE.md`, `PLAN.md`.
+- **Seam:** `apps/notesprout_sn/extension-api/…/SketchContract.kt`, `ISketchHost.aidl`,
+  `ExtensionContract.kt`, `ExtensionContractTest`; host `SketchHostBinder` / `SketchHostSession`.
+- **Shared screen:** `apps/notesprout_sn/sn-screen/…/notebook/PaperToolbar.kt`,
+  `CollapsedTools.kt`, `AnchoredBar.kt`, `EraserBar.kt` (the pattern), `res/drawable/ic_ballpen.xml`
+  (new), `sn-screen/build.gradle.kts` (the pin).
+- **Face:** `extensions/sketch/…/SketchToolbar.kt`, `SketchActivity.kt`,
+  `res/layout/activity_sketch.xml`; new `SketchPalette.kt`, `SketchToolState.kt`, `PencilBar.kt`
+  + tests.
+- **Reference only:** `apps/notesprout_android/…/PenPalette.kt`, `PenColorPanelController.kt`.
+
+## Verification
+
+- **JVM:** g-paper `./gradlew test`; SN root `./gradlew test` from `apps/notesprout_sn` (baseline
+  1816 `:app` / 3549 root — the `test-results` XML counts every test twice, halve it);
+  `:extension-api:testDebugUnitTest` at the bump.
+- **Device:** the Nomad `SN078D10012852` only; release extension packages `pm disable-user`'d for
+  a `.dev` walk. adb cannot draw ink or double-tap — every feel judgment is the user's hand, given
+  as a short numbered checklist.
+- **Measured at T3:** PNG save size and undo tile bytes under heavy 12 px black coverage, against
+  the K6 table in `docs/sketch.md`.
+
+## Open items parked as futures (each needs a fresh decision — not this arc)
+
+Gel pen sizes or colours · eraser sizes · a white / highlight pencil · per-notebook tool memory ·
+generic-engine dirty-rect padding for a leaned wide pencil (`RasterDirty.of` pads by the nominal
+width; harmless on Ratta and Onyx, which bake upright / report no tilt).
+
+## Working protocol
+
+1. One phase per session; the user clears context between phases.
+2. Every phase starts by reading this file, `docs/sketch.md`, and the SN `CLAUDE.md` (T1: g-paper's
+   `CLAUDE.md` + `PLAN.md` too).
+3. Phase-start questions are wizard-style, one at a time, the explanation first.
+4. Fable reviews every g-paper diff before publish and every Sonnet doc draft before commit.
+5. Sub-agents never run git.
+6. Walks on the Nomad only; the Manta only on the user's word.
+7. Commit + push only on a green gate; one ledger entry per phase (Phase-start answers · Landed ·
+   Deviations · Tests · Measured · Traps found · The hand · Next).
+
+## Ledger
+
+### T0 — Outcome (2026-09-17)
+
+**Landed.** Branch `pencils` here and `pencil-tones` in `~/git/g-paper`, both from a clean `main`;
+this file; g-paper `PLAN.md` Phase 23 ⬜. The nine decisions above were taken wizard-style in the
+planning session, after three read-only explorations (the face, the engine, SN's rules).
+
+**Traps found.** None yet. Letter T verified unused (K, N, B, Z, X are the letters in use across
+the plan files).
+
+**Next.** T1 — g-paper Phase 23. Needs the Nomad and the user's hand for the thresholds.
