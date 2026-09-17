@@ -35,8 +35,10 @@ class ExtensionContractTest {
         // SN's TENTH, a compatible addition on the Bible's pattern, floored at 17); 18 since arc 43
         // / K5b (three `ISketchHost` tails — insertPage / deletePage / pageContent — behind the
         // METHOD floor MIN_API_VERSION_FOR_SKETCH_PAGES; no action floor moved, only :ext-sketch
-        // redeclares).
-        assertEquals(18, ExtensionContract.API_VERSION)
+        // redeclares); 19 since arc 44 "Pencils" / T2 (two more `ISketchHost` tails —
+        // toolSettings / putToolSettings — behind the METHOD floor
+        // MIN_API_VERSION_FOR_SKETCH_TOOLS; no action floor moved, only :ext-sketch redeclares).
+        assertEquals(19, ExtensionContract.API_VERSION)
         assertEquals(9, ExporterContract.MIN_API_VERSION_FOR_DELIVERY)
         assertEquals(6, ExtensionContract.MIN_API_VERSION_FOR_STORE)
         assertEquals(7, ExtensionContract.MIN_API_VERSION_FOR_CALENDAR)
@@ -51,6 +53,7 @@ class ExtensionContractTest {
         assertEquals(16, ExtensionContract.MIN_API_VERSION_FOR_BIBLE_NOTES)
         assertEquals(17, SketchContract.MIN_API_VERSION_FOR_SKETCH)
         assertEquals(18, SketchContract.MIN_API_VERSION_FOR_SKETCH_PAGES)
+        assertEquals(19, SketchContract.MIN_API_VERSION_FOR_SKETCH_TOOLS)
         assertEquals(14, DocumentContract.MIN_API_VERSION_FOR_DOCUMENT_LOOKUP)
         assertEquals(2_000, ExtensionContract.MAX_INK_STROKES)
         assertEquals(60_000, ExtensionContract.MAX_INK_POINTS)

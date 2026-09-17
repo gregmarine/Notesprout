@@ -4,7 +4,7 @@ The plan **and the ledger** for the second arc of `NSE · Sketch`, in the shape 
 `SKETCH_PLAN.md` beside this file. Phases are appended to the ledger at the bottom as they land;
 the reference doc stays `extensions/sketch/docs/sketch.md`, grown at T5.
 
-**Status: Arc 44 — IN PROGRESS, T0 ✅ T1 ✅ T2 ⬜ T3 ⬜ T4 ⬜ T5 ⬜.** Phases are lettered **T**
+**Status: Arc 44 — IN PROGRESS, T0 ✅ T1 ✅ T2 ✅ T3 ⬜ T4 ⬜ T5 ⬜.** Phases are lettered **T**
 ("Tools" — arc 37 "Bible" used B, arc 38 "Reference" R, arc 40 "Verses" V, arc 42 "Notes" N,
 arc 43 "Sketch" K; T was checked unused across every `*_PLAN.md` at T0). The g-paper half is
 g-paper's own **Phase 23 → 0.1.36** on its branch `pencil-tones`.
@@ -77,7 +77,7 @@ What the exploration found (2026-09-17), which shapes every phase:
 |---|---|---|---|
 | **T0 — Plan lands** ✅ | Fable | Branches `pencils` (Notesprout) and `pencil-tones` (g-paper); this file; g-paper `PLAN.md` Phase 23 ⬜; memory `project_pencils_arc.md`. | Both branches pushed; `file` says this is text (the NUL trap). |
 | **T1 — g-paper Phase 23 → 0.1.36: pencil preview tones** ✅ | Opus on Fable's brief; Fable reviews the diff; Sonnet runs tests + installs the demo | Pure `RattaInkMap.pencilPreviewFor(argb)`, own thresholds — start: levels 0–2 → BLACK, 3–9 → DARK_GRAY, 10–14 → GRAY. `firmwarePenColor()` routes PENCIL through it; the `PENCIL_PREVIEW_GREY` constant goes. `RattaInkMapTest` pins the ladder. The demo's raster toggle gains shade + size cyclers (the walk surface) and renders each of the five lead sizes to a PNG before a panel sees it (g-paper `CLAUDE.md`'s rule) — Sonnet pulls them, Fable looks. A temporary measurement door only if the first thresholds miss, removed before the phase closes. `docs/api.md` + `CLAUDE.md` in the same commit. | g-paper `./gradlew test` green (215 core / 12+ ratta); Paintsprout Onyx 203 green on its pin; **the user's hand on the Nomad** settles the thresholds; 0.1.36 published to mavenLocal (by the user's hand if the classifier refuses). |
-| **T2 — Seam + host memory (API 19)** ⬜ | **Fable: the seam**; Opus: host side; Sonnet: test runs | `SketchToolSettings` parcelable in `:extension-api`; `ISketchHost.toolSettings()` / `putToolSettings(…)` appended after the existing tails under `SketchContract.MIN_API_VERSION_FOR_SKETCH_TOOLS = 19`; `API_VERSION` 18 → 19, action floors untouched. Host: `SketchHostBinder` + a small prefs store, `SharedPreferences("sn_sketch_tools")` — **not** `sn_tool`, which `SnApplication` deletes at start. | `:extension-api:testDebugUnitTest` (**the pin test — must be run**) + `:app:test` green. |
+| **T2 — Seam + host memory (API 19)** ✅ | **Fable: the seam**; Opus: host side; Sonnet: test runs | `SketchToolSettings` parcelable in `:extension-api`; `ISketchHost.toolSettings()` / `putToolSettings(…)` appended after the existing tails under `SketchContract.MIN_API_VERSION_FOR_SKETCH_TOOLS = 19`; `API_VERSION` 18 → 19, action floors untouched. Host: `SketchHostBinder` + a small prefs store, `SharedPreferences("sn_sketch_tools")` — **not** `sn_tool`, which `SnApplication` deletes at start. | `:extension-api:testDebugUnitTest` (**the pin test — must be run**) + `:app:test` green. |
 | **T3 — The face** ⬜ | Opus; Sonnet: layout XML, strings, `ic_ballpen`, the adb walk | Re-pin g-paper 0.1.36 (`sn-screen/build.gradle.kts` + the pin sentences). Pure `SketchPalette` (15 shades, 5 sizes, defaults; names "Black" / 1–14) + pure `SketchToolState`, both JVM-tested. `PaperToolbar` learns the second PEN-kind button + `onPenReTap`; `CollapsedTools` takes the third tool. `PencilBar` over `AnchoredBar` (the `EraserBar` pattern: armed entry `isSelected`; swatch = black ring + ink fill, a white gap ring when selected; rects unioned into `floatingRects()` / `floatingContains()`; `PenIdle.releaseRenderIfIdle` before assigning; never a frame while `paper.isPenActive`). `SketchToolbar` applies state → `penStyle` / `penWidth` / `penColor`; Bring in ink restores it. Settings loaded at `begin`, pushed on every pick. **Phase-start question:** how the Pencil button reports the armed shade (a light tint is invisible on e-ink — a floored tint vs. none). | `:ext-sketch:test` + `:sn-screen:test` + root `./gradlew test` green; Sonnet's Nomad adb walk (bar opens / closes, picks survive a reopen and a process death, screenshots, save bytes of a heavy 12 px black scribble against 4 MB watch / 6 MiB); then **the hand**: shades, sizes, gel pen feel, preview ↔ bake width agreement at every size. |
 | **T4 — Walk adjustments** ⬜ | Opus (small); Fable if engine | Whatever the hand found: size values, gel pen width, thresholds (engine → another g-paper patch + Fable's review). Skipped if T3's walk is clean. | The user's word. |
 | **T5 — Docs + freeze** ⬜ | Sonnet drafts; Fable reviews every draft | `docs/sketch.md` (tools, seam tails, traps, numbers), SN `CLAUDE.md` (API 19, pin, counts, arc row), root `CLAUDE.md`, SN `docs/notebook.md` frame-silence ledger if touched, g-paper `PLAN.md` close, memory. **Phase-start question:** a `versionName` bump. Merge `--no-ff` in both repos **only on the user's word**; the Manta only if asked. | `file` on every touched doc = text; the final hand walk. |
@@ -176,3 +176,38 @@ fifteen; `SketchPalette` and `PencilBar`'s 8 + 7 rows must make a shorter list a
 Stored shade indices already read out-of-range as the default.
 
 **Next.** T2 — seam + host memory (API 19). No device needed.
+
+### T2 — Outcome (2026-09-17)
+
+**Phase-start answers.** None asked.
+
+**Landed.** `ExtensionContract.API_VERSION` 18 → **19**. The seam (Fable): the
+`SketchToolSettings` parcelable (`int tool · int shade · int size`, value semantics), two
+`ISketchHost` tails after `redoPage` — `toolSettings()` (transaction code 12, **null = nothing
+remembered**) and `putToolSettings(in …)` (13) — behind the method floor
+`SketchContract.MIN_API_VERSION_FOR_SKETCH_TOOLS` = 19; `TOOL_PENCIL` 0 / `TOOL_PEN` 1;
+`MAX_TOOL_SETTING_INDEX` 255. No action floor moved. The host (Opus): `data/prefs/SketchToolPrefs`
+(`sn_sketch_tools`, three int keys, one `edit()` per put) over the pure `SketchToolCodec.decode`,
+two new `SketchHostBinder.Hooks` members gated and funnelled like the rest, `SketchHostHooks`
+delegating to a `SketchToolPrefs` built in `NotebookActivity` with the application context.
+
+**Judgment calls (the seam).** The parcelable's bound is a **sanity bound (0–255), not the
+palette's**: the host never learns how many shades or sizes exist and never clamps, so dropping
+levels 13–14 at T3 is a face-only change and a stored 14 is a legal parcel the face reads as its
+default. The defaults live in the face only — hence the null answer rather than a host-made
+default. The eraser is never a remembered tool. Three small integers are not content and may be
+logged.
+
+**Deviations.** None. `:ext-sketch` still declares 18 — it redeclares 19 at T3, when it first
+calls the tails.
+
+**Tests.** `:extension-api:testDebugUnitTest` (the pin test, run) 292 green; `:app` **1822**
+(+6, `SketchToolCodecTest`); root **3561** (+12: the codec's 6, `SketchToolSettingsTest` 4,
+`SketchContractTest` +2). Sonnet ran the root.
+
+**Traps found.** No test implements `SketchHostBinder.Hooks` — the binder shell has no JVM
+coverage (`Binder.getCallingUid`), so the two overrides are proven only by T3's device walk
+(picks survive a reopen and a process death).
+
+**Next.** T3 — the face. Needs the Nomad; starts with the phase-start question on how the Pencil
+button reports the armed shade.

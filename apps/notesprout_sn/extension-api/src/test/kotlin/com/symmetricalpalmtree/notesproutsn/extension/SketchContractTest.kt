@@ -40,6 +40,30 @@ class SketchContractTest {
     }
 
     @Test
+    fun `the tools method floor is its own birth number, above the pages'`() {
+        // Arc 44 / T2: toolSettings / putToolSettings are a METHOD floor. Neither earlier floor
+        // moved — a screen declaring 18 still binds, draws and turns pages; it just forgets its
+        // tools between showings.
+        assertEquals(19, SketchContract.MIN_API_VERSION_FOR_SKETCH_TOOLS)
+        assertEquals(18, SketchContract.MIN_API_VERSION_FOR_SKETCH_PAGES)
+        assertEquals(17, SketchContract.MIN_API_VERSION_FOR_SKETCH)
+        assertTrue(SketchContract.MIN_API_VERSION_FOR_SKETCH_TOOLS <= ExtensionContract.API_VERSION)
+        // The point is still listed at its birth floor and nowhere else.
+        assertEquals(17, ExtensionContract.minApiVersion(SketchContract.ACTION_SKETCH))
+        assertTrue(ExtensionContract.accepts(SketchContract.ACTION_SKETCH, 18))
+    }
+
+    @Test
+    fun `the tool numbers are pinned and distinct`() {
+        // Stored in the host's prefs across app updates — a renumbering would re-arm the wrong tool.
+        assertEquals(0, SketchContract.TOOL_PENCIL)
+        assertEquals(1, SketchContract.TOOL_PEN)
+        // A sanity bound on an unmarshalled int, not the palette's size (that is :ext-sketch's).
+        assertEquals(255, SketchContract.MAX_TOOL_SETTING_INDEX)
+        assertTrue(SketchContract.TOOL_PEN <= SketchContract.MAX_TOOL_SETTING_INDEX)
+    }
+
+    @Test
     fun `the structural token is bounded well above what the host mints`() {
         // The host's tokens are "s1", "s2", … — the bound is a guard on an unmarshalled string, not
         // a budget, and it must never be so tight that a long showing runs into it.

@@ -63,6 +63,19 @@ object SketchContract {
      */
     const val MIN_API_VERSION_FOR_SKETCH_PAGES: Int = 18
 
+    /**
+     * The **method** floor for [ISketchHost.toolSettings] / [ISketchHost.putToolSettings] (arc 44
+     * "Pencils" / T2, 2026-09-17 — the user's decision 6: the face's tool, pencil shade and pencil
+     * size are **remembered on the device**). [MIN_API_VERSION_FOR_SKETCH_PAGES]'s shape exactly: a
+     * sketch screen that calls transaction codes 12–13 declares 19 and is never discovered by an
+     * 18 host that would land them on nothing.
+     *
+     * **Not an action floor:** [MIN_API_VERSION_FOR_SKETCH] stays 17 and `MIN_API_VERSIONS` is
+     * untouched. A screen declaring 18 still binds, draws and turns pages; it simply does not
+     * remember its tools. Only `:ext-sketch` redeclares.
+     */
+    const val MIN_API_VERSION_FOR_SKETCH_TOOLS: Int = 19
+
     // ── The PNG on the wire ──────
 
     /** Most bytes in one chunk — 512 KiB, the store's inline carrier, comfortably under the ~1 MB
@@ -153,6 +166,24 @@ object SketchContract {
     /** [ISketchHost.pageContent] bit: the page has a live `document` row — its authored Markdown,
      *  which a page delete takes with it like everything else the page owns. */
     const val PAGE_HAS_DOCUMENT: Int = 2
+
+    // ── The remembered tools (arc 44 / T2) ──────
+
+    /** [SketchToolSettings.tool]: the graphite pencil — the face's default, and what an unknown
+     *  tool number reads as. */
+    const val TOOL_PENCIL: Int = 0
+
+    /** [SketchToolSettings.tool]: the gel pen (`StrokeStyle.PEN`, black, one size — decision 4). */
+    const val TOOL_PEN: Int = 1
+
+    /**
+     * Largest value any [SketchToolSettings] field may carry — a **sanity bound on an unmarshalled
+     * integer, not the palette's size** ([MAX_PAGE_PX]'s kind of number). How many shades and sizes
+     * there are is `:ext-sketch`'s to know and to change; the face reads an index past the end of
+     * its own list as its default. 255 is past anything a bar of swatches could ever hold, which
+     * is the point: beyond it the number is not an index.
+     */
+    const val MAX_TOOL_SETTING_INDEX: Int = 255
 
     // ── The screen's result ──────
 
