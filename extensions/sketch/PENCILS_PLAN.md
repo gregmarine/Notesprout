@@ -4,7 +4,7 @@ The plan **and the ledger** for the second arc of `NSE · Sketch`, in the shape 
 `SKETCH_PLAN.md` beside this file. Phases are appended to the ledger at the bottom as they land;
 the reference doc stays `extensions/sketch/docs/sketch.md`, grown at T5.
 
-**Status: Arc 44 — IN PROGRESS, T0 ✅ T1 ⬜ T2 ⬜ T3 ⬜ T4 ⬜ T5 ⬜.** Phases are lettered **T**
+**Status: Arc 44 — IN PROGRESS, T0 ✅ T1 ✅ T2 ⬜ T3 ⬜ T4 ⬜ T5 ⬜.** Phases are lettered **T**
 ("Tools" — arc 37 "Bible" used B, arc 38 "Reference" R, arc 40 "Verses" V, arc 42 "Notes" N,
 arc 43 "Sketch" K; T was checked unused across every `*_PLAN.md` at T0). The g-paper half is
 g-paper's own **Phase 23 → 0.1.36** on its branch `pencil-tones`.
@@ -76,7 +76,7 @@ What the exploration found (2026-09-17), which shapes every phase:
 | Phase | Owner | What lands | Gate |
 |---|---|---|---|
 | **T0 — Plan lands** ✅ | Fable | Branches `pencils` (Notesprout) and `pencil-tones` (g-paper); this file; g-paper `PLAN.md` Phase 23 ⬜; memory `project_pencils_arc.md`. | Both branches pushed; `file` says this is text (the NUL trap). |
-| **T1 — g-paper Phase 23 → 0.1.36: pencil preview tones** ⬜ | Opus on Fable's brief; Fable reviews the diff; Sonnet runs tests + installs the demo | Pure `RattaInkMap.pencilPreviewFor(argb)`, own thresholds — start: levels 0–2 → BLACK, 3–9 → DARK_GRAY, 10–14 → GRAY. `firmwarePenColor()` routes PENCIL through it; the `PENCIL_PREVIEW_GREY` constant goes. `RattaInkMapTest` pins the ladder. The demo's raster toggle gains shade + size cyclers (the walk surface) and renders each of the five lead sizes to a PNG before a panel sees it (g-paper `CLAUDE.md`'s rule) — Sonnet pulls them, Fable looks. A temporary measurement door only if the first thresholds miss, removed before the phase closes. `docs/api.md` + `CLAUDE.md` in the same commit. | g-paper `./gradlew test` green (215 core / 12+ ratta); Paintsprout Onyx 203 green on its pin; **the user's hand on the Nomad** settles the thresholds; 0.1.36 published to mavenLocal (by the user's hand if the classifier refuses). |
+| **T1 — g-paper Phase 23 → 0.1.36: pencil preview tones** ✅ | Opus on Fable's brief; Fable reviews the diff; Sonnet runs tests + installs the demo | Pure `RattaInkMap.pencilPreviewFor(argb)`, own thresholds — start: levels 0–2 → BLACK, 3–9 → DARK_GRAY, 10–14 → GRAY. `firmwarePenColor()` routes PENCIL through it; the `PENCIL_PREVIEW_GREY` constant goes. `RattaInkMapTest` pins the ladder. The demo's raster toggle gains shade + size cyclers (the walk surface) and renders each of the five lead sizes to a PNG before a panel sees it (g-paper `CLAUDE.md`'s rule) — Sonnet pulls them, Fable looks. A temporary measurement door only if the first thresholds miss, removed before the phase closes. `docs/api.md` + `CLAUDE.md` in the same commit. | g-paper `./gradlew test` green (215 core / 12+ ratta); Paintsprout Onyx 203 green on its pin; **the user's hand on the Nomad** settles the thresholds; 0.1.36 published to mavenLocal (by the user's hand if the classifier refuses). |
 | **T2 — Seam + host memory (API 19)** ⬜ | **Fable: the seam**; Opus: host side; Sonnet: test runs | `SketchToolSettings` parcelable in `:extension-api`; `ISketchHost.toolSettings()` / `putToolSettings(…)` appended after the existing tails under `SketchContract.MIN_API_VERSION_FOR_SKETCH_TOOLS = 19`; `API_VERSION` 18 → 19, action floors untouched. Host: `SketchHostBinder` + a small prefs store, `SharedPreferences("sn_sketch_tools")` — **not** `sn_tool`, which `SnApplication` deletes at start. | `:extension-api:testDebugUnitTest` (**the pin test — must be run**) + `:app:test` green. |
 | **T3 — The face** ⬜ | Opus; Sonnet: layout XML, strings, `ic_ballpen`, the adb walk | Re-pin g-paper 0.1.36 (`sn-screen/build.gradle.kts` + the pin sentences). Pure `SketchPalette` (15 shades, 5 sizes, defaults; names "Black" / 1–14) + pure `SketchToolState`, both JVM-tested. `PaperToolbar` learns the second PEN-kind button + `onPenReTap`; `CollapsedTools` takes the third tool. `PencilBar` over `AnchoredBar` (the `EraserBar` pattern: armed entry `isSelected`; swatch = black ring + ink fill, a white gap ring when selected; rects unioned into `floatingRects()` / `floatingContains()`; `PenIdle.releaseRenderIfIdle` before assigning; never a frame while `paper.isPenActive`). `SketchToolbar` applies state → `penStyle` / `penWidth` / `penColor`; Bring in ink restores it. Settings loaded at `begin`, pushed on every pick. **Phase-start question:** how the Pencil button reports the armed shade (a light tint is invisible on e-ink — a floored tint vs. none). | `:ext-sketch:test` + `:sn-screen:test` + root `./gradlew test` green; Sonnet's Nomad adb walk (bar opens / closes, picks survive a reopen and a process death, screenshots, save bytes of a heavy 12 px black scribble against 4 MB watch / 6 MiB); then **the hand**: shades, sizes, gel pen feel, preview ↔ bake width agreement at every size. |
 | **T4 — Walk adjustments** ⬜ | Opus (small); Fable if engine | Whatever the hand found: size values, gel pen width, thresholds (engine → another g-paper patch + Fable's review). Skipped if T3's walk is clean. | The user's word. |
@@ -141,3 +141,38 @@ planning session, after three read-only explorations (the face, the engine, SN's
 the plan files).
 
 **Next.** T1 — g-paper Phase 23. Needs the Nomad and the user's hand for the thresholds.
+
+### T1 — Outcome (2026-09-17)
+
+**Phase-start answers.** None asked.
+
+**Landed.** g-paper Phase 23, **0.1.36** published to mavenLocal, `pencil-tones` `564d387` pushed.
+`RattaInkMap.pencilPreviewFor(argb)` — `PENCIL`'s own ladder beside the untouched
+`firmwareColorFor`; `firmwarePenColor()` routes `PENCIL` through it; `PENCIL_PREVIEW_GREY` gone.
+`penColor`'s setter already re-arms the firmware pen, so a shade pick shows on the next mark. The
+demo's raster page gained Shade + Lead cyclers (the walk surface). `PencilRenderHarness` (a JVM
+test) renders the five leads × three shades to PNGs — geometry evidence only, it hand-mirrors
+`drawPencil`'s fleck loop because the real bake is `android.graphics`.
+
+**Deviations.** Fable made the install and the threshold edits directly (one-line changes inside
+a live walk) instead of routing them through Sonnet / Opus.
+
+**Tests.** g-paper 216 core / 17 ratta green; `:demo:assembleDebug`; Paintsprout Onyx 203 green on
+its pin.
+
+**Measured (the hand, Nomad).** The starting ladder put 3–9 on DARK_GRAY; **7–9 previewed darker
+than they baked**, so the DARK_GRAY ceiling moved 161.5 → 110.5. **Final: 0–2 BLACK · 3–6
+DARK_GRAY · 7–14 GRAY.** 12–14 also preview darker as GRAY than they bake; **LIGHT_GRAY was
+trialled for them and rejected** ("that doesn't work") — GRAY stays the palest rung. All five
+lead sizes pass: preview ↔ bake width agree at 1.2 / 2 / 4 / 7 / 12; no EMR change.
+
+**Traps found.** The demo's Shade / Lead buttons are raster-only and the bar scrolls sideways —
+say so in any walk checklist. `adb shell monkey` exits 251 on the Nomad with the app launched or
+not; don't chain on it.
+
+**Open, carried to T3's walk (the user's word, 2026-09-17).** The user may drop **levels 13 and
+14** from the real palette — "keep the full list and I'll decide once it's in T3". T3 builds all
+fifteen; `SketchPalette` and `PencilBar`'s 8 + 7 rows must make a shorter list a one-line change.
+Stored shade indices already read out-of-range as the default.
+
+**Next.** T2 — seam + host memory (API 19). No device needed.
