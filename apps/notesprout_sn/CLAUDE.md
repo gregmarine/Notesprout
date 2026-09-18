@@ -499,8 +499,8 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
     PDF endnotes over `PageBundle` v2; no line objects, no shape recognizer, no extension
     transfers. **Call `armLassoForLanding()` before `setSelection` from any non-lasso context.**
   - **Arc 29 "Loop"** (LE1–LE4, 2026-09-06/07; `docs/notebook.md`; `LOOP_PLAN.md`) — the lasso
-    eraser, item 4: `Tool.LASSO_ERASER` in g-paper 0.1.28 (re-pinned to **0.1.37** since arc 44 /
-    T3, 2026-09-17 — see the pin note below), armed on all four
+    eraser, item 4: `Tool.LASSO_ERASER` in g-paper 0.1.28 (re-pinned to **0.1.38** since 2026-09-17
+    — see the pin note below), armed on all four
     paper surfaces from a second tap on the armed eraser → the Point · Lasso `EraserBar`
     (`:sn-screen`), **never a fourth bar button** (a twelfth 62 dp button falls off the Nomad's
     749 dp). The host never repaints from `onLassoErased`. Onyx's side of the engine change is
@@ -854,7 +854,11 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   never repaired by deletion.
 - **`IndexGuard.ready(this)` first thing in every index-touching `onCreate`**;
   `BootstrapActivity` is the only index opener and is `noHistory`.
-- **g-paper 0.1.37 (since arc 44 / T3, 2026-09-17 — Phase 24 "The lead goes wide on Ratta":**
+- **g-paper 0.1.38 (since 2026-09-17, post-arc-44 maintenance — Phase 25 "Graphite on paper":**
+  the 96 px pencil lead baked as a comb of bars across the mark (the travel direction's wobble
+  times a 48 px lever arm); `GraphiteGrain` loosens rim flecks along the stroke, streaks the skate
+  along it, and mottles by a page-space tooth field. `gpaper-core` only, no API change, walked on
+  the Manta. **0.1.37 since arc 44 / T3 the same day — Phase 24 "The lead goes wide on Ratta":**
   `RattaEmr.EMR_MAX` 1200 → 9600, so a lead up to 96 px previews at the width it bakes; the old
   ceiling had never been reached by anything and its "the daemon lags" was never a measurement.
   **0.1.36 since T1 the same day — Phase 23 "The pencil previews its tone on Ratta":**

@@ -22,8 +22,15 @@ Arc 44 "Pencils" (2026-09-17, branch `pencils`, `PENCILS_PLAN.md` the plan + led
 T0–T5) grew the one pencil into **six shades, twelve leads and a gel pen**, all of it remembered
 on the device.
 
-**Engine.** g-paper is pinned at **0.1.37** (Phase 24, "The lead goes wide on Ratta", the T3 hand
-walk of 2026-09-17 — `RattaEmr.EMR_MAX` lifted from 1200 to **9600**, 96 px, so every lead the
+**Engine.** g-paper is pinned at **0.1.38** (Phase 25, "Graphite on paper", 2026-09-17, post-freeze
+maintenance on the user's Manta screencap — the 96 px lead baked as "a series of tiny lines": each
+cross-section is a rigid comb turned to the smoothed travel direction, and ~2° of wobble × a 48 px
+lever arm piles the rim's combs up every ~4 px. `GraphiteGrain` now loosens flecks along the
+stroke in proportion to their distance from the centre line, streaks the skate *along* the stroke
+instead of banding it across, and mottles by a **page-space** tooth field the sheet shares under
+every stroke; total ink within 1 %, so the shade ladder below did not move. `gpaper-core` only, no
+API change; walked by the user's hand on the Manta: "Sooooo much better"), over 0.1.37 (Phase 24,
+"The lead goes wide on Ratta", the T3 hand walk of 2026-09-17 — `RattaEmr.EMR_MAX` lifted from 1200 to **9600**, 96 px, so every lead the
 sketch face now offers previews at the width it bakes), over 0.1.36 (Phase 23, "Pencil preview
 tones", T1 — `RattaInkMap.pencilPreviewFor`, arc 44's own preview ladder beside the untouched
 `firmwareColorFor`), 0.1.35 (Phase 22, "The pencil bakes upright on Ratta", the 2026-09-17 Manta

@@ -39,7 +39,8 @@ devices first (BOOX), expanding to iPad, Android tablets, phones, and web.
   Gradle root by `projectDir` — the Bible pattern repeated; its own `SKETCH_PLAN.md` +
   `docs/sketch.md`; read the SN `CLAUDE.md` before any work there; grown by **arc 44 "Pencils"**
   2026-09-17 on branch `pencils` (six greyscale pencil shades, twelve lead sizes to 96 px, a 5 px
-  black gel pen, all remembered on the device via API 19 — g-paper 0.1.36 + 0.1.37; its own
+  black gel pen, all remembered on the device via API 19 — g-paper 0.1.36 + 0.1.37; then g-paper
+  0.1.38 "Graphite on paper" 2026-09-17, the wide lead's grain fixed on the Manta; its own
   `PENCILS_PLAN.md`)
 
 ---
