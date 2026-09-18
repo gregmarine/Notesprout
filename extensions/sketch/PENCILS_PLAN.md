@@ -4,7 +4,9 @@ The plan **and the ledger** for the second arc of `NSE · Sketch`, in the shape 
 `SKETCH_PLAN.md` beside this file. Phases are appended to the ledger at the bottom as they land;
 the reference doc stays `extensions/sketch/docs/sketch.md`, grown at T5.
 
-**Status: Arc 44 — IN PROGRESS, T0 ✅ T1 ✅ T2 ✅ T3 ✅ T4 ✅ (folded into T3's walk) T5 ⬜.** Phases are lettered **T**
+**Status: Arc 44 — COMPLETE + FROZEN 2026-09-17, T0 ✅ T1 ✅ T2 ✅ T3 ✅ T4 ✅ (folded into T3's
+walk) T5 ✅.** This file is history from here — plan + ledger, read for *why*, never resumed;
+`docs/sketch.md` § "Tools (arc 44)" is the reference. Phases are lettered **T**
 ("Tools" — arc 37 "Bible" used B, arc 38 "Reference" R, arc 40 "Verses" V, arc 42 "Notes" N,
 arc 43 "Sketch" K; T was checked unused across every `*_PLAN.md` at T0). The g-paper half is
 g-paper's own **Phase 23 → 0.1.36** on its branch `pencil-tones`.
@@ -80,7 +82,7 @@ What the exploration found (2026-09-17), which shapes every phase:
 | **T2 — Seam + host memory (API 19)** ✅ | **Fable: the seam**; Opus: host side; Sonnet: test runs | `SketchToolSettings` parcelable in `:extension-api`; `ISketchHost.toolSettings()` / `putToolSettings(…)` appended after the existing tails under `SketchContract.MIN_API_VERSION_FOR_SKETCH_TOOLS = 19`; `API_VERSION` 18 → 19, action floors untouched. Host: `SketchHostBinder` + a small prefs store, `SharedPreferences("sn_sketch_tools")` — **not** `sn_tool`, which `SnApplication` deletes at start. | `:extension-api:testDebugUnitTest` (**the pin test — must be run**) + `:app:test` green. |
 | **T3 — The face** ✅ | Opus; Sonnet: layout XML, strings, `ic_ballpen`, the adb walk | Re-pin g-paper 0.1.36 (`sn-screen/build.gradle.kts` + the pin sentences). Pure `SketchPalette` (15 shades, 5 sizes, defaults; names "Black" / 1–14) + pure `SketchToolState`, both JVM-tested. `PaperToolbar` learns the second PEN-kind button + `onPenReTap`; `CollapsedTools` takes the third tool. `PencilBar` over `AnchoredBar` (the `EraserBar` pattern: armed entry `isSelected`; swatch = black ring + ink fill, a white gap ring when selected; rects unioned into `floatingRects()` / `floatingContains()`; `PenIdle.releaseRenderIfIdle` before assigning; never a frame while `paper.isPenActive`). `SketchToolbar` applies state → `penStyle` / `penWidth` / `penColor`; Bring in ink restores it. Settings loaded at `begin`, pushed on every pick. **Phase-start question:** how the Pencil button reports the armed shade (a light tint is invisible on e-ink — a floored tint vs. none). | `:ext-sketch:test` + `:sn-screen:test` + root `./gradlew test` green; Sonnet's Nomad adb walk (bar opens / closes, picks survive a reopen and a process death, screenshots, save bytes of a heavy 12 px black scribble against 4 MB watch / 6 MiB); then **the hand**: shades, sizes, gel pen feel, preview ↔ bake width agreement at every size. |
 | **T4 — Walk adjustments** ✅ (inside T3) | Opus (small); Fable if engine | Whatever the hand found: size values, gel pen width, thresholds (engine → another g-paper patch + Fable's review). Skipped if T3's walk is clean. | The user's word. |
-| **T5 — Docs + freeze** ⬜ | Sonnet drafts; Fable reviews every draft | `docs/sketch.md` (tools, seam tails, traps, numbers), SN `CLAUDE.md` (API 19, pin, counts, arc row), root `CLAUDE.md`, SN `docs/notebook.md` frame-silence ledger if touched, g-paper `PLAN.md` close, memory. **Phase-start question:** a `versionName` bump. Merge `--no-ff` in both repos **only on the user's word**; the Manta only if asked. | `file` on every touched doc = text; the final hand walk. |
+| **T5 — Docs + freeze** ✅ | Sonnet drafts; Fable reviews every draft | `docs/sketch.md` (tools, seam tails, traps, numbers), SN `CLAUDE.md` (API 19, pin, counts, arc row), root `CLAUDE.md`, SN `docs/notebook.md` frame-silence ledger if touched, g-paper `PLAN.md` close, memory. **Phase-start question:** a `versionName` bump. Merge `--no-ff` in both repos **only on the user's word**; the Manta only if asked. | `file` on every touched doc = text; the final hand walk. |
 
 **Order:** T0 → T1 → T2 → T3 → (T4) → T5. T2 does not depend on T1 and may go first if the Nomad
 is not at hand.
@@ -289,3 +291,39 @@ ceiling experiment by hand; Opus wrote the Phase 24 patch and every larger face 
 decisions 2 / 3 / 4), SN `CLAUDE.md` (API 19, pin 0.1.37, counts, the arc row), root `CLAUDE.md`,
 g-paper `PLAN.md` close, memory; the `versionName` phase-start question; merge `--no-ff` in both
 repos only on the user's word.
+
+### T5 — Outcome (2026-09-17) — docs + freeze
+
+**Phase-start answers.** *A `versionName` bump:* **no** — every SN APK stays `0.1.0-sn` /
+`versionCode` 1, as every arc since the SN tag has; the version moves at a release, not an arc.
+
+**Landed.** `docs/sketch.md` (title "arcs 43–44"; the engine chain to 0.1.37 with the four K1
+values re-stated as unmoved; decision 3 marked amended; § "Arc 44's decisions" with 2 / 3 / 4
+original → final; the seam's two T2 tails in the code block + § "T2's two tails"; § "Tools
+(arc 44)" — `SketchPalette` / `SketchToolState` / `PencilBar` / `PencilIcon` / `ic_ballpen` and the
+`:sn-screen` growth / restore + Bring in ink / the Ratta preview; three failure-table rows; seven
+traps; a T1–T3 numbers table; the counts). SN `docs/extensions.md` (`API_VERSION` row 19 + the
+ledger entry, § "T2's two tails" under the Sketch point, boundary-audit row 68). SN
+`docs/sn-screen.md` (the four grown rows, the two drawables, `CollapsedToolsTest` 10 → 14, module
+118). SN `CLAUDE.md` (the arc 44 paragraph, protocol item 2, the docs table, the `:ext-sketch`
+bullet at API 19, the pin sentences at 0.1.37 → 0.1.36 → 0.1.35, the seam ledger's 19, the
+counts). Root `CLAUDE.md` (the `extensions/sketch` bullet, the docs table row, a `pencils` branch
+row). g-paper `PLAN.md` Phases 23 + 24 closed with the freeze. Memory `project_pencils_arc.md`.
+This file: status COMPLETE + FROZEN; history from here.
+
+**Deviations.** Fable's review of the two Sonnet drafts changed three things: an invented
+rationale for decision 3's amendment (rewritten to the plain fact), a "one lead per firmware band"
+claim (it is 1 / 2 / 3 across the three bands — replaced by "every other rung from 1 to 11"), and
+two `sn-screen.md` rows whose arc 44 sentence had been prepended ahead of the row's own history
+(moved to the end). Sonnet corrected one premise in the brief: `PencilBar`'s open **is** the
+floating-bar exception (a frame at a deliberate tap with the pen hovering); only the render release
+is pen-gated.
+
+**Tests.** SN root `./gradlew test` green at freeze: **3592** (`:app` 1822 · `:extension-api` 292 ·
+`:sn-screen` 118 · `:ext-sketch` 87 · `extensions/bible` 155). `file` on every touched doc: text.
+
+**Traps found.** None new.
+
+**Next.** Nothing — arc 44 is frozen. Merge `--no-ff` in both repos (`pencils` → Notesprout
+`main`, `pencil-tones` → g-paper `main`) only on the user's word; the Manta only if asked. No
+eleventh extension point, no next Sketch phase and no new arc without a fresh user decision.

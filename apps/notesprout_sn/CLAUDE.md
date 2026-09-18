@@ -153,9 +153,38 @@ Phase 20 → 0.1.33 (per-segment dirty rects, a silent `loadPageRaster`), Phase 
 `extensions/sketch/docs/sketch.md` is the reference once frozen, `extensions/sketch/SKETCH_PLAN.md`
 the plan + ledger (history after freeze, per the maintenance protocol below), and the branch was merged to `main`
 (`--no-ff`) and deleted 2026-09-16 after the user's final Nomad walk — "on sketch" means `main`.
-No ELEVENTH extension point, no next Bible phase (bookmarks, longer or multi-page passages), no next
-Sketch phase and no other new arc without a fresh user decision; no re-raising of any waived /
-declined review finding.
+No next Bible phase (bookmarks, longer or multi-page passages) without a fresh user decision.
+**Arc 44 "Pencils" (branch `pencils`, from 2026-09-17, a fresh user decision granted the same day):
+the one pencil becomes six greyscale shades, twelve lead sizes, and a fixed gel pen, all remembered
+on the device.** Nine locked decisions, compressed: **six ladder shades** — the hand's own amendment
+to the fifteen first built, every other rung from 1 to 11, since only 0 / 5 / 9 preview exactly as
+they bake on the firmware's three tones — levels **1 · 3 · 5 · 7 · 9 · 11**
+(`#111111` … `#BBBBBB`, no pure black on the pencil, the gel pen owning black), default level 5;
+**twelve sizes** — the hand's own amendment to the five first built, once the wide-lead walk found
+no lag — **1.2 / 2 / 4 / 7 / 12 / 16 / 20 / 24 / 32 / 48 / 64 / 96 px** in two rows of six, default
+1.2; a fixed **gel pen** (`StrokeStyle.PEN`, black, **5 px** — the hand's own amendment from a
+starting 3, by way of 7); a third top-bar tool button, Pencil · Pen · Eraser, re-tapping the armed
+Pencil opening `PencilBar` over `AnchoredBar`; the Pencil glyph filled with the armed shade
+(`PencilIcon`, `ic_pen_fill`), the fill kept while Pen or Eraser is armed. This is the arc's fresh
+decision in the two places the standing rules require one: it **amends arc 43's decision 3** ("no
+tilt, no width choice, no colour") and it grants the family's **first tool-options bar on an SN
+paper screen** since P1 removed the tool panels — neither is a precedent for the notebook's own
+toolbar. Seam: `ExtensionContract.API_VERSION` 18 → **19**, two `ISketchHost` tails after
+`redoPage` — `toolSettings()` (null = nothing remembered) / `putToolSettings(in …)` (transaction
+codes 12–13) — behind the method floor `SketchContract.MIN_API_VERSION_FOR_SKETCH_TOOLS` = 19;
+`MIN_API_VERSION_FOR_SKETCH` stays 17 and `_PAGES` 18, no action floor moved, only `:ext-sketch`
+redeclares 19; the settings live in host prefs (`SharedPreferences("sn_sketch_tools")`, not
+`sn_tool`), one setting for all notebooks, never in the `.soil` and never backed up. Engine: the
+Ratta pencil's live preview maps each shade to the nearest usable firmware tone
+(`RattaInkMap.pencilPreviewFor`, g-paper Phase 23 → **0.1.36**), and the EMR ceiling lifted so a
+96 px lead previews at the width it bakes (`RattaEmr.EMR_MAX` 1200 → 9600, g-paper Phase 24 →
+**0.1.37**) — both landed in `~/git/g-paper` first on Fable's brief, Opus writing, Fable reviewing
+every diff. Plan + ledger `extensions/sketch/PENCILS_PLAN.md`; reference
+`extensions/sketch/docs/sketch.md` § "Tools (arc 44)". **COMPLETE + FROZEN 2026-09-17 on the
+user's Nomad hand walks; merge to `main` (`--no-ff`) pending the user's word.** No ELEVENTH
+extension point, no next Sketch phase (gel pen sizes or colours, eraser sizes, a white/highlight
+pencil, per-notebook tool memory) and no other new arc without a fresh user decision; no
+re-raising of any waived / declined review finding.
 
 **Maintenance protocol (replaces the per-arc phase protocol):**
 
@@ -163,8 +192,10 @@ declined review finding.
    reference for its feature, including its failure table and traps.
 2. **The plan files are history, not instructions.** `RATTA_PLAN.md` (arcs 1–24 ledger + the
    still-binding decisions of the whole effort, § "Standing traps" and the model recipe) and the
-   standalone `<ARC>_PLAN.md` files (arcs 25–36) hold every phase record and judgment call. Consult
-   them to learn *why* something is the way it is; never "resume" a phase from them.
+   standalone `<ARC>_PLAN.md` files (arcs 25–36), and each of arcs 37–44's own plan files
+   (`extensions/bible/*_PLAN.md`, `extensions/sketch/SKETCH_PLAN.md` + `PENCILS_PLAN.md`), hold
+   every phase record and judgment call. Consult them to learn *why* something is the way it is;
+   never "resume" a phase from them.
 3. **Fixes to shared screen logic go in `:sn-screen`, engine gaps in `~/git/g-paper`** — never
    worked around in a consumer or the host (see Standing rules).
 4. Model recipe still applies: Fable plans and writes the seams / crypto / engine-facing code,
@@ -261,13 +292,15 @@ reference goes there, words are ranked hits — FTS4 + BM25), the stored positio
 notebook-linked Bible reference objects — the reference parser/codec, the passage view, Full
 chapter, and the Recents' `recent_ref` table of followed passages; grown by **arc 40 "Verses"**:
 the verses themselves as a linked text object on the page) ·
-`extensions/sketch/docs/sketch.md` (arc 43 "Sketch": **NSE · Sketch** as a feature — the raster
+`extensions/sketch/docs/sketch.md` (arcs 43–44: **NSE · Sketch** as a feature — the raster
 pencil and rubbing eraser, the store-less seam (`ISketch`/`ISketchHost`), the data model
 (`SoilSchema.TYPE_SKETCH`, `NotebookFlags.SKETCH`, `NotebookKind`), the screen (`SketchActivity :
 PaperScreenActivity`), pen-idle-debounced saves and the parked-save recovery, the 64 px raster-undo
 tiles, page insert/delete and their own undo/redo from the face (K5b), export as the ink page's own
 bundle-page follower, the failure table and the Nomad numbers; `extensions/sketch/SKETCH_PLAN.md`
-is history once frozen, this doc is the reference).
+is history once frozen, this doc is the reference; grown by **arc 44 "Pencils"**: six pencil
+shades, twelve sizes, a 5 px gel pen, the `PencilBar`, the filled Pencil glyph, and the two API-19
+tool-memory tails (`extensions/sketch/PENCILS_PLAN.md` is history once frozen)).
 
 ## Standing rules
 
@@ -406,13 +439,16 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   `btnNotes` is a second such exception, on the reader's own bottom bar.
   `gradle.properties` sets `android.nonTransitiveRClass=false` — undoing it breaks every
   `:sn-screen` resource reference from `:app`. ·
-  `:ext-sketch` (**NSE · Sketch**, arc 43 / K5, grown by K5b — the sixteenth module, and the
+  `:ext-sketch` (**NSE · Sketch**, arc 43 / K5, grown by K5b and by arc 44 / T3 — the sixteenth
+  module, and the
   second at the monorepo root, `extensions/sketch/`, included by `projectDir`):
-  `:extension-api` + `:sn-screen` + `:ext-ink`, **never** `:app`. Declares `API_VERSION` **18**
-  since K5b (17 at K2, the point's birth floor; `SketchContract.MIN_API_VERSION_FOR_SKETCH` = 17
+  `:extension-api` + `:sn-screen` + `:ext-ink`, **never** `:app`. Declares `API_VERSION` **19**
+  since arc 44 / T2–T3 (18 at K5b, 17 at K2, the point's birth floor; `SketchContract.MIN_API_VERSION_FOR_SKETCH` = 17
   still gates the point's own existence; `MIN_API_VERSION_FOR_SKETCH_PAGES` = 18, a method floor,
   gates the five page-structure tails — `insertPage`/`deletePage`/`pageContent`/`undoPage`/
-  `redoPage` — added after `readInkChunk`; a 17-only sketch extension still serves the plain
+  `redoPage` — added after `readInkChunk`; `MIN_API_VERSION_FOR_SKETCH_TOOLS` = 19, a method
+  floor, gates the two tool-memory tails — `toolSettings`/`putToolSettings` — added after
+  `redoPage`; a 17-only sketch extension still serves the plain
   view-only face). **No store** (`ISketch.begin(host)` takes none — the seam's held bind runs
   backwards, an `ISketchHost` the host mints and lends, `IDocumentHost`'s host-side-stub recipe a
   third time). One `SoilSchema.TYPE_SKETCH` row per page (order −1, PNG blob), minted on first
@@ -424,8 +460,11 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   above it could never be read back, so a save above the line is refused before a byte is written
   rather than the family's usual "never refuse." `SketchApplication` (`RattaEngine.register()`),
   `SketchService`/`SketchSession` (the `ISketch` stub), `SketchActivity : PaperScreenActivity`
-  (`:ext-ink`'s new store-agnostic chrome/handoff base, K2 — pencil + rubbing eraser only, no
-  lasso, no smart lasso, no scribble erase), `SketchSaver`/`SketchSaveGovernor`/`PendingPngPark`
+  (`:ext-ink`'s new store-agnostic chrome/handoff base, K2 — pencil (six shades, twelve leads) + a
+  5 px black gel pen (arc 44 / T3) + the rubbing eraser; no lasso, no smart lasso, no scribble
+  erase), `SketchPalette`/`SketchToolState`/`PencilBar`/`PencilIcon` (arc 44 / T3 — the pure
+  fifteen-built/six-shipped shade + size lists, the tool state derived style/width/colour, the
+  `AnchoredBar` over the re-tapped Pencil, the filled-glyph icon), `SketchSaver`/`SketchSaveGovernor`/`PendingPngPark`
   (pen-idle-debounced PNG push and the parked-save recovery), `RasterTiles`/`RasterEditBuilder`/
   `SketchEdit` (the Paintsprout Onyx raster-undo port, 64 px tiles, a 48 MB `UndoRedoStack`
   budget), `InkBake` ("Bring in ink" — bare strokes only, link-wrapped and sticky ink excluded).
@@ -460,8 +499,8 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
     PDF endnotes over `PageBundle` v2; no line objects, no shape recognizer, no extension
     transfers. **Call `armLassoForLanding()` before `setSelection` from any non-lasso context.**
   - **Arc 29 "Loop"** (LE1–LE4, 2026-09-06/07; `docs/notebook.md`; `LOOP_PLAN.md`) — the lasso
-    eraser, item 4: `Tool.LASSO_ERASER` in g-paper 0.1.28 (re-pinned to **0.1.33** since arc 43 /
-    K6, 2026-09-15 — see the pin note below), armed on all four
+    eraser, item 4: `Tool.LASSO_ERASER` in g-paper 0.1.28 (re-pinned to **0.1.37** since arc 44 /
+    T3, 2026-09-17 — see the pin note below), armed on all four
     paper surfaces from a second tap on the armed eraser → the Point · Lasso `EraserBar`
     (`:sn-screen`), **never a fourth bar button** (a twelfth 62 dp button falls off the Nomad's
     749 dp). The host never repaints from `onLassoErased`. Onyx's side of the engine change is
@@ -690,7 +729,7 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   Action strings are
   SN-namespaced so Paper's extensions are never discovered; trust is same-signature both ways
   (discovery + bind-time re-check host-side, `HostCallerCheck` first thing in every stub method);
-  `ExtensionContract.API_VERSION` = **18** and the host accepts `minApiVersion(action)..18` — **the
+  `ExtensionContract.API_VERSION` = **19** and the host accepts `minApiVersion(action)..19` — **the
   floor is per action since arc 23 / Y1** (`minApiVersion` is a map, not a single set): 17 for
   `ACTION_SKETCH` (`SketchContract.MIN_API_VERSION_FOR_SKETCH`, arc 43 / K2), 11 for
   `ACTION_BIBLE` (`MIN_API_VERSION_FOR_BIBLE`, arc 37 / B0), 8 for
@@ -748,7 +787,12 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   `redoPage` appended after `readInkChunk` on the **host-side** stub, gated by the method floor
   `MIN_API_VERSION_FOR_SKETCH_PAGES` 18; `MIN_API_VERSION_FOR_SKETCH` stays 17 untouched, so a
   17-only sketch extension still gets the plain view-only face. Not an eleventh point; only
-  `:ext-sketch` declares 18. No action floor moved at any of the six bumps from 12 on; the pin
+  `:ext-sketch` declares 18. · **19 = arc 44 / T2 (2026-09-17), two `ISketchHost` tails** —
+  `toolSettings()`/`putToolSettings(in SketchToolSettings)` appended after `redoPage` (codes
+  12–13) on the host-side stub, behind the method floor `MIN_API_VERSION_FOR_SKETCH_TOOLS` 19;
+  `MIN_API_VERSION_FOR_SKETCH` 17 and `MIN_API_VERSION_FOR_SKETCH_PAGES` 18 untouched. Not an
+  eleventh point; only `:ext-sketch` declares 19. No action floor moved at any of the seven bumps
+  from 12 on; the pin
   lives in
   `ExtensionContractTest`, which **must be run** (`:extension-api:testDebugUnitTest`) at every
   bump — it went red across three bumps unnoticed once.
@@ -810,7 +854,13 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   never repaired by deletion.
 - **`IndexGuard.ready(this)` first thing in every index-touching `onCreate`**;
   `BootstrapActivity` is the only index opener and is `noHistory`.
-- **g-paper 0.1.35 (since the Manta sketch walk, 2026-09-17 — Phase 22 "The pencil bakes upright
+- **g-paper 0.1.37 (since arc 44 / T3, 2026-09-17 — Phase 24 "The lead goes wide on Ratta":**
+  `RattaEmr.EMR_MAX` 1200 → 9600, so a lead up to 96 px previews at the width it bakes; the old
+  ceiling had never been reached by anything and its "the daemon lags" was never a measurement.
+  **0.1.36 since T1 the same day — Phase 23 "The pencil previews its tone on Ratta":**
+  `RattaInkMap.pencilPreviewFor`, the pencil's own ladder — 0–2 BLACK / 3–6 DARK_GRAY / 7–14 GRAY,
+  thresholds settled by the hand, never LIGHT_GRAY; `PENCIL_PREVIEW_GREY` gone. Before them,
+  **0.1.35 (since the Manta sketch walk, 2026-09-17 — Phase 22 "The pencil bakes upright
   on Ratta":** a leaned `PENCIL` baked 10–15× wider than the firmware's live line, which cannot
   widen with tilt; the `bakeTilt` seam bakes it at tilt 0 on Ratta. Walked on Manta + Nomad; see
   `extensions/sketch/docs/sketch.md` § Traps.) Before it, **0.1.34 (arc 43 / K8, 2026-09-16 —
@@ -875,6 +925,6 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
 See `RATTA_PLAN.md` appendix and the root `device-build-install` skill. From `apps/notesprout_sn/`:
 debug `./gradlew assembleDebug` → `adb -s SN078D10012852 install -r` (host + every `ext-*` APK).
 Release is unsigned + hand-signed with the debug keystore; the release ext packages are re-enabled
-on the Nomad. JVM tests: `./gradlew test` (1816 in `:app`, 3549 across the modules — including
-`extensions/bible`'s 155 and `extensions/sketch`'s 60 — at arc 43's K7).
+on the Nomad. JVM tests: `./gradlew test` (1822 in `:app`, 3592 across the modules —
+including `extensions/bible`'s 155 and `extensions/sketch`'s 87 — at arc 44's T5).
 Java 17 comes from `org.gradle.java.home` (Temurin-17).
