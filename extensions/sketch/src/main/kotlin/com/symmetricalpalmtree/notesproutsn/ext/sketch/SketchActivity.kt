@@ -4,6 +4,7 @@ import android.app.Activity
 import android.graphics.Rect
 import android.os.Bundle
 import android.util.Log
+import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.ImageButton
@@ -18,7 +19,6 @@ import com.symmetricalpalmtree.gpaper.core.Tool
 import com.symmetricalpalmtree.gpaper.core.engine.GPaper
 import com.symmetricalpalmtree.gpaper.core.model.Stroke
 import com.symmetricalpalmtree.gpaper.core.model.StrokePoint
-import com.symmetricalpalmtree.gpaper.core.model.StrokeStyle
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
 import com.symmetricalpalmtree.notesproutsn.core.Immersive
 import com.symmetricalpalmtree.notesproutsn.core.Slog
@@ -36,6 +36,7 @@ import com.symmetricalpalmtree.notesproutsn.ink.awaitPenIdle
 import com.symmetricalpalmtree.notesproutsn.notebook.CollapsedChrome
 import com.symmetricalpalmtree.notesproutsn.notebook.PageGestures
 import com.symmetricalpalmtree.notesproutsn.notebook.PaperChrome
+import com.symmetricalpalmtree.notesproutsn.notebook.PaperToolbar
 import com.symmetricalpalmtree.notesproutsn.notebook.UndoRedoStack
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -86,6 +87,14 @@ import kotlinx.coroutines.withContext
  *   name for it, so **this screen's own undo gesture reverses a page too** (the user's follow-up
  *   decision, 2026-09-15: nobody should have to go back to the notebook to take back a delete).
  * - **Plain white paper, always** (decision 10): no template ever crosses the seam.
+ * - **The tools are chosen and remembered** (arc 44 / T3, the user's decision of 2026-09-17): a
+ *   graphite pencil of six shades and twelve leads, a fixed gel pen, and the rubber. Both pens
+ *   are `Tool.PEN` to the engine, so which one is armed lives in [SketchToolState] and the bar
+ *   paints from it; the pencil's shade and lead are picked in the [PencilBar] hung under its own
+ *   button on a re-tap, and **the Pencil button reports the armed shade** by carrying it as a fill
+ *   inside its glyph ([PencilIcon]) — on the top bar, on the mini toolbar and on the corner button. The choice is **device state, not page state** — it is kept in the host's
+ *   prefs over two seam tails (`toolSettings` / `putToolSettings`), one setting for every notebook,
+ *   never in the `.soil` and never in a backup, because an extension writes nothing to disk itself.
  *
  * ## Frame silence
  *
@@ -101,6 +110,10 @@ class SketchActivity : PaperScreenActivity() {
     private lateinit var toolbar: SketchToolbar
     private lateinit var saver: SketchSaver
 
+    /** The pencil's options bar (arc 44 / T3) — shades over sizes, hung under whichever Pencil
+     *  button was re-tapped. Null until `onCreate` builds it, which a refused caller never reaches. */
+    private var pencilBar: PencilBar? = null
+
     /**
      * This sitting's history — pixels, so it is bounded by bytes as well as by count. It survives a
      * page turn (each entry carries the page it happened on) and dies with the screen.
@@ -112,6 +125,10 @@ class SketchActivity : PaperScreenActivity() {
 
     /** Serialises every page / undo / bake / flush operation. */
     private val pageOps = Mutex()
+
+    /** Keeps the tool pushes in pick order (arc 44 / T3): each one is its own IO hop, and two quick
+     *  picks racing there could leave the device remembering the first. The mutex is fair. */
+    private val toolPushes = Mutex()
 
     /** The page on the glass, as the host last described it. Null before the first load. */
     private var currentPage: SketchPageState? = null
@@ -142,9 +159,52 @@ class SketchActivity : PaperScreenActivity() {
     override fun armTool(tool: Tool) = toolbar.arm(tool)
 
     /** **Two** tools on the mini toolbar, not the usual four (arc 43 / K2 grew the parameter for
-     *  exactly this): the pencil and the rubber are all this surface answers. The pencil wears
-     *  `ic_pen` — Tabler's pencil glyph, and the user's call. */
+     *  exactly this): the pen and the rubber are all this surface answers. The pen slot is two
+     *  *kinds* since arc 44 ([collapsedPenKinds]), so the row reads Pencil · Pen · Eraser — the top
+     *  bar's own order. The pencil wears `ic_pen` — Tabler's pencil glyph, and the user's call. */
     override fun collapsedTools(): List<Tool> = listOf(Tool.PEN, Tool.ERASER)
+
+    /**
+     * The pen's two kinds on the mini toolbar (arc 44 / T3): the graphite pencil and the gel pen,
+     * both `Tool.PEN`. A pick of the already-armed pencil opens the [PencilBar] **under that row's
+     * own button** and leaves the row up beneath it — the notebook Insert bar's shape, and the
+     * reason the entry is handed its anchor: the top bar's Pencil button is `GONE` while the chrome
+     * is collapsed and keeps stale edges, so a bar hung under it would land under nothing.
+     *
+     * **The row and the corner button report the armed shade too** — the same filled pencil the top
+     * bar's own button wears ([PencilIcon]), so collapsing the chrome never costs the person the
+     * one place the tone is shown. The row's pencil carries it always; the corner button only while
+     * the pencil is the armed tool, since under the gel pen or the rubber it is wearing their
+     * glyphs. The ARGB is the token `CollapsedChrome` compares, so nothing repaints for a pick that
+     * lands on the shade already showing.
+     */
+    override fun collapsedPenKinds(): CollapsedChrome.PenKinds = CollapsedChrome.PenKinds(
+        primaryHint = getString(R.string.cd_tool_pencil),
+        altIconRes = R.drawable.ic_ballpen,
+        altHint = getString(R.string.cd_tool_pen),
+        altArmed = { toolbar.state.isPen },
+        onPick = { alt -> armPen(alt) },
+        onPrimaryReTap = { anchor -> togglePencilBar(anchor) },
+        primaryIcon = {
+            val ink = toolbar.state.reportedShade
+            CollapsedChrome.PenIcon(ink) { PencilIcon.filled(this, ink) }
+        },
+    )
+
+    /** The pencil bar is this screen's own floating chrome: the pen refuses under it and a finger
+     *  landing on it is not a page gesture. */
+    override fun extraFloatingRects(): List<Rect> = pencilBar?.rects() ?: emptyList()
+
+    override fun extraFloatingContains(x: Int, y: Int): Boolean = pencilBar?.contains(x, y) == true
+
+    /** The mini toolbar's rows are coming down — the bar hung under one of them goes with them.
+     *  No exclusion push here: [CollapsedChrome]'s own `onChanged` follows. */
+    override fun onCollapsedClosing() {
+        takeDownPencilBar()
+    }
+
+    /** …and a contact **inside** that bar must not take the rows down under it. */
+    override fun keepCollapsedUnder(x: Int, y: Int): Boolean = pencilBar?.contains(x, y) == true
 
     /** Back · Bring in ink · Show pages — the top bar's three doors, **mirrored**, so the row shows
      *  exactly what the bar shows and a tap performs the bar button's own click. Three is past
@@ -195,6 +255,7 @@ class SketchActivity : PaperScreenActivity() {
             topBar = binding.topBar,
             btnBack = binding.btnBack,
             btnPencil = binding.btnPencil,
+            btnPen = binding.btnPen,
             btnEraser = binding.btnEraser,
             btnBringInk = binding.btnBringInk,
             btnShowPages = binding.btnShowPages,
@@ -206,10 +267,23 @@ class SketchActivity : PaperScreenActivity() {
             onShowPages = { exit(SketchContract.RESULT_SKETCH_SHOW_PAGES) },
             onPrevPage = { turnPage(SketchContract.PAGE_PREV) },
             onNextPage = { turnPage(SketchContract.PAGE_NEXT) },
-            onToolTapped = { dismissCollapsed() },
+            // An actual tool change — including a pencil↔gel-pen switch, which never moves
+            // `paper.tool`: the pencil's own bar belongs to the kind that is leaving.
+            onToolTapped = { dismissCollapsed(); hidePencilBar() },
+            onPencilReTap = { togglePencilBar() },
+            onPenKindPicked = { alt -> pickTools(toolbar.state.withTool(penKind(alt))) },
             onSynced = { syncCollapsed() },   // arc 36: the corner button repaints with the bar
             // Release builds never attach it: the door is compiled out with the branch.
             onIndicatorLongPress = if (BuildConfig.DEBUG) ({ fillTestPattern() }) else null,
+        )
+        pencilBar = PencilBar(
+            root = binding.root,
+            bar = binding.pencilBar,
+            anchor = binding.btnPencil,
+            bandBottom = { chromeBand()?.last },
+            paper = paper,
+            armed = { toolbar.state },
+            onPicked = { picked -> pickTools(picked) },
         )
         chrome = PaperChrome(
             paper = paper,
@@ -257,6 +331,10 @@ class SketchActivity : PaperScreenActivity() {
         }
         if (isFinishing || isDestroyed || closing) return
         loadPage(state, firstLoad = true)
+        // Before `opened`, which is what the block-all rect waits on: the tools are in place before
+        // the first mark is possible, so nothing is ever drawn with a pencil the person did not
+        // choose. It costs one more Binder call on the open path — a prefs read, no window moves.
+        restoreTools()
         opened = true
         pushExclusions()   // swap the block-all rect for the real chrome rects
         // The page is on the paper — take the box down. Deliberately NOT pen-idle-gated:
@@ -288,6 +366,7 @@ class SketchActivity : PaperScreenActivity() {
         // that cannot be taken back now; the honest loss.
         openEdit = null
         dismissCollapsed()   // a floating row never survives a content swap
+        hidePencilBar()      // nor a bar hung under one — arc 44 / T3
         if (!firstLoad) paper.clearForContentSwap()
         paper.setPageSize(state.width, state.height)
         paper.setTemplate(null)   // plain white always (decision 10) — no template ever crosses
@@ -313,6 +392,130 @@ class SketchActivity : PaperScreenActivity() {
             Log.w(TAG, "the page's sketch could not be read: ${it.javaClass.simpleName}")
             ByteArray(0)
         }
+    }
+
+    // ── The tools (arc 44 / T3) ──────────────────────────────────────────────
+
+    /**
+     * Put this device's remembered tools on the pen, or the face's defaults.
+     *
+     * **Null is the answer, not a failure**: the seam's word for "nothing has been remembered here
+     * yet" — a first showing, cleared app data — and the defaults live in [SketchToolState] rather
+     * than in the host precisely so that answer can be given honestly.
+     *
+     * **There is no host-version test here, and there does not need to be one.** The two tails sit
+     * behind `SketchContract.MIN_API_VERSION_FOR_SKETCH_TOOLS`, and the number this extension
+     * declares in its manifest (19) is what it *requires of the host*: a host below 19 never
+     * discovers this package at all, so the call cannot land on a transaction code that is not
+     * there. The declaration **is** the guard — the K5b page tails' arrangement exactly. A refusal
+     * that arrives anyway is a log line and the defaults, like every other call here.
+     */
+    private suspend fun restoreTools() {
+        val remembered = callHost { it.toolSettings() }.getOrElse {
+            Log.w(TAG, "the host would not answer toolSettings(): ${it.javaClass.simpleName}")
+            null
+        }
+        if (isFinishing || isDestroyed || closing) return
+        val state = SketchToolState.fromSettings(remembered)
+        toolbar.apply(state)
+        Slog.d(TAG) { "tools restored: ${if (remembered == null) "defaults" else "remembered"} — $state" }
+    }
+
+    /**
+     * A tool choice the person made: on the engine, and on the device.
+     *
+     * The push is **fire and forget** — the pen is already armed by the time it goes, and a failure
+     * means only that this pick will not survive the session, which is a log line and never a
+     * dialog interrupting a hand that is drawing. Three small integers are not content (the seam
+     * says so), so they may be logged.
+     */
+    private fun pickTools(state: SketchToolState) {
+        toolbar.apply(state)
+        lifecycleScope.launch {
+            toolPushes.withLock {
+                callHost { it.putToolSettings(state.toSettings()) }.onFailure {
+                    Log.w(TAG, "the tools could not be remembered: ${it.javaClass.simpleName}")
+                }
+            }
+        }
+        Slog.d(TAG) { "tools picked: $state" }
+    }
+
+    /** Which kind the two pen buttons stand for — the alt one is the gel pen. */
+    private fun penKind(alt: Boolean): Int =
+        if (alt) SketchContract.TOOL_PEN else SketchContract.TOOL_PENCIL
+
+    /**
+     * Arm a pen **kind** from the mini toolbar: the kind first, then the tool through the toolbar's
+     * own `arm` — which does the one pen-gated render release and the syncs, and is a no-op on the
+     * surface when `Tool.PEN` is already what is armed. The top bar's own buttons take the other
+     * road ([PaperToolbar] arms the tool itself and calls back for the kind), and both end at
+     * [pickTools].
+     */
+    private fun armPen(alt: Boolean) {
+        pickTools(toolbar.state.withTool(penKind(alt)))
+        toolbar.arm(Tool.PEN)
+    }
+
+    /** Open the pencil's bar under [anchor], or close it — the Pencil button's re-tap toggle, from
+     *  the top bar (its own button) or from the mini toolbar (that row's button). */
+    private fun togglePencilBar(anchor: View? = null) {
+        val bar = pencilBar ?: return
+        if (bar.isShowing) {
+            hidePencilBar()
+            return
+        }
+        if (!opened || closing) return
+        val shown = if (anchor == null) bar.show() else bar.show(anchor)
+        if (shown) pushExclusions()
+    }
+
+    /** Idempotent; answers whether it was showing, so a caller inside [CollapsedChrome]'s close can
+     *  leave the one exclusion push to it. */
+    private fun takeDownPencilBar(): Boolean {
+        val bar = pencilBar ?: return false
+        if (!bar.isShowing) return false
+        bar.hide()
+        return true
+    }
+
+    /** Idempotent — every dismiss path but the collapsed chrome's calls this one. */
+    private fun hidePencilBar() {
+        if (takeDownPencilBar()) pushExclusions()
+    }
+
+    /**
+     * The outside-contact dismissal — the eraser sub-bar's rule on every other paper screen: any
+     * pointer landing anywhere but the bar itself, the Pencil button whose own re-tap toggles it, or
+     * the collapsed rows it may be hanging under, takes it down. That covers a bare pen tap, a
+     * stroke, a finger gesture and every other button on either bar without any of them having to
+     * know this bar exists.
+     *
+     * Excluding the two toggling buttons is load-bearing: a contact that both dismissed the bar and
+     * then re-opened it would make the toggle re-open what it meant to close, every time — the lasso
+     * popup's original trap.
+     */
+    private fun dismissPencilBarOnContact(ev: MotionEvent, index: Int) {
+        val bar = pencilBar ?: return
+        if (!bar.isShowing) return
+        val x = ev.getX(index).toInt()
+        val y = ev.getY(index).toInt()
+        // `floatingContains` is this screen's own bar (through `extraFloatingContains`) **and** the
+        // collapsed rows it may be hanging under — window coordinates, which on a full-bleed
+        // immersive screen are the root's.
+        if (floatingContains(x, y)) return
+        if (PaperToolbar.rectOf(binding.btnPencil)?.contains(x, y) == true) return
+        hidePencilBar()
+    }
+
+    /** Every pointer going down, not just the first — with a hand resting on the glass the pen
+     *  arrives as `ACTION_POINTER_DOWN` (the notebook's O2 finding, the base class's rule). */
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        val action = ev.actionMasked
+        if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) {
+            dismissPencilBarOnContact(ev, ev.actionIndex)
+        }
+        return super.dispatchTouchEvent(ev)
     }
 
     // ── Page turns ───────────────────────────────────────────────────────────
@@ -609,7 +812,12 @@ class SketchActivity : PaperScreenActivity() {
         override fun onPageSheetRequested() = confirmDeletePage()
         // Arc 33: a finger double-tap hides / shows the chrome. Nothing on this surface answers a
         // single tap, so there is no collision rule here.
-        override fun onFingerDoubleTap(x: Float, y: Float) = toggleChrome()
+        override fun onFingerDoubleTap(x: Float, y: Float) {
+            // The pencil's bar belongs to the chrome that is flipping: it is hung off a button that
+            // is about to be `GONE`, or off rows that are about to be.
+            hidePencilBar()
+            toggleChrome()
+        }
         // Everything else stays the no-op default: no Contents, no trail, no selection.
     }
 
@@ -835,6 +1043,11 @@ class SketchActivity : PaperScreenActivity() {
      * Composite [strokes] onto the page as **one** history entry — the bake door's body, and the
      * debug fill door's. Any contact still gathering is closed first: its tiles are its own movement
      * of the hand, not this one's.
+     *
+     * The armed pen is put back afterwards ([SketchToolbar.restorePen]): a raster bake takes each
+     * stroke's own colour, width and style rather than the armed pen's, so nothing is disturbed
+     * today — and that one line is what keeps it true if the engine's bake ever starts reading the
+     * pen instead.
      */
     private fun composite(state: SketchPageState, strokes: List<Stroke>) {
         closeOpenEdit()
@@ -843,6 +1056,7 @@ class SketchActivity : PaperScreenActivity() {
             paper.addStrokes(strokes)
         } finally {
             closeOpenEdit()
+            toolbar.restorePen()
         }
         saver.markDirty()
         saver.schedule()
@@ -869,6 +1083,10 @@ class SketchActivity : PaperScreenActivity() {
 
     private fun fillTestPatternNow() {
         val state = currentPage ?: return
+        // The ARMED tools, not a fixed pencil (arc 44 / T3): the door's whole job is to put
+        // something on a raster page that adb can prove, and a walk that wants to prove a shade or
+        // a lead bakes as it previews needs the pattern drawn with the one that is chosen.
+        val tools = toolbar.state
         val w = state.width.toFloat()
         val h = state.height.toFloat()
         val strokes = ArrayList<Stroke>(TEST_PATTERN_LINES)
@@ -886,9 +1104,9 @@ class SketchActivity : PaperScreenActivity() {
             strokes += Stroke(
                 id = "test-$i-${System.nanoTime()}",
                 points = points,
-                color = SketchToolbar.PENCIL_COLOR,
-                width = SketchToolbar.PENCIL_WIDTH_PX,
-                style = StrokeStyle.PENCIL,
+                color = tools.penColor,
+                width = tools.penWidth,
+                style = tools.penStyle,
             )
         }
         composite(state, strokes)
@@ -998,6 +1216,7 @@ class SketchActivity : PaperScreenActivity() {
         if (closing) return
         closing = true
         dismissCollapsed()
+        hidePencilBar()
         saver.cancelTimers()
         leaveWhenFlushed(resultCode)
     }

@@ -3,11 +3,14 @@ package com.symmetricalpalmtree.notesproutsn.notebook
 import com.symmetricalpalmtree.gpaper.core.model.Stroke
 import com.symmetricalpalmtree.notesproutsn.core.BoundedWait
 import com.symmetricalpalmtree.notesproutsn.core.Slog
+import com.symmetricalpalmtree.notesproutsn.data.prefs.SketchToolCodec
+import com.symmetricalpalmtree.notesproutsn.data.prefs.SketchToolPrefs
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
 import com.symmetricalpalmtree.notesproutsn.extension.SketchContract
 import com.symmetricalpalmtree.notesproutsn.extension.SketchHostBinder
 import com.symmetricalpalmtree.notesproutsn.extension.SketchHostSession
 import com.symmetricalpalmtree.notesproutsn.extension.SketchPageState
+import com.symmetricalpalmtree.notesproutsn.extension.SketchToolSettings
 import com.symmetricalpalmtree.notesproutsn.extension.TransferCaps
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -95,6 +98,16 @@ class SketchHostHooks(
     /** K5b: [onStructuralUndone]'s mirror — the entry comes off the notebook's redo stack and goes
      *  back onto its undo stack. */
     private val onStructuralRedone: (NotebookSession.Structural) -> Unit,
+    /**
+     * Arc 44 / T2: where the face's drawing tools are remembered — device-local prefs, one setting
+     * for every notebook (decision 6). Held rather than derived from a Context because this class
+     * has none and wants none; the screen builds it with the application context.
+     *
+     * It is the one piece of state here that is **not the notebook's**: the tools survive the
+     * notebook being closed, which is why they are not in the `.soil` and why these two hooks touch
+     * no session and no window.
+     */
+    private val toolPrefs: SketchToolPrefs,
 ) : SketchHostBinder.Hooks {
 
     /**
@@ -450,6 +463,22 @@ class SketchHostHooks(
             state(session, nb, nb.currentIndex)
         }
     }
+
+    // ── The drawing tools (arc 44 / T2) ────────────────────────────────────
+
+    /**
+     * What the tools were last set to, or null for nothing remembered — a prefs read, no session, no
+     * window, no `runBlocking`: this hook is the only one here that never touches the `.soil`, so a
+     * sealed or unopened notebook is no reason to refuse it.
+     *
+     * The decode never throws ([SketchToolCodec]); a value this build cannot read is "nothing
+     * remembered", and the face falls back to its own defaults, which the host has never seen.
+     */
+    override fun toolSettings(): SketchToolSettings? = toolPrefs.get()
+
+    /** Remember the face's pick. Fire-and-forget by nature — `apply()` is asynchronous — and pushed
+     *  at every pick, so the value that survives a process death is the last one chosen. */
+    override fun putToolSettings(settings: SketchToolSettings) = toolPrefs.put(settings)
 
     /** Where the face is, as an index into [NotebookSession.pages] — the same resolve the two
      *  window-loading hooks run, so a target that has vanished falls back to the displayed page

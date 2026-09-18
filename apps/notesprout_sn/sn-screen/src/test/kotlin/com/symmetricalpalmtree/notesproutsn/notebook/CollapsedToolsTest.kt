@@ -33,6 +33,51 @@ class CollapsedToolsTest {
         assertEquals(R.drawable.ic_eraser, CollapsedTools.iconFor(Tool.ERASER, clipboardLoaded = true))
     }
 
+    @Test fun `the alt pen wears the ballpen - and only under PEN`() {
+        // Arc 44 / T3: the sketch face's gel pen and its pencil are both Tool.PEN, so the glyph is
+        // the only thing that says which one is armed — on the corner button and in the row.
+        assertEquals(R.drawable.ic_ballpen, CollapsedTools.iconFor(Tool.PEN, altPen = true))
+        assertEquals(R.drawable.ic_pen, CollapsedTools.iconFor(Tool.PEN, altPen = false))
+        // A stale flag under another tool changes nothing: the eraser is the eraser.
+        assertEquals(R.drawable.ic_eraser, CollapsedTools.iconFor(Tool.ERASER, altPen = true))
+        assertEquals(R.drawable.ic_pen, CollapsedTools.iconFor(Tool.NONE, altPen = true))
+    }
+
+    @Test fun `exactly one of the two pen buttons reads as armed, and only under PEN`() {
+        assertTrue(CollapsedTools.penButtonSelected(Tool.PEN, altPenArmed = false, isAltButton = false))
+        assertFalse(CollapsedTools.penButtonSelected(Tool.PEN, altPenArmed = false, isAltButton = true))
+        assertTrue(CollapsedTools.penButtonSelected(Tool.PEN, altPenArmed = true, isAltButton = true))
+        assertFalse(CollapsedTools.penButtonSelected(Tool.PEN, altPenArmed = true, isAltButton = false))
+        listOf(Tool.ERASER, Tool.LASSO_ERASER, Tool.LASSO, Tool.NONE).forEach { tool ->
+            assertFalse(CollapsedTools.penButtonSelected(tool, altPenArmed = false, isAltButton = false))
+            assertFalse(CollapsedTools.penButtonSelected(tool, altPenArmed = true, isAltButton = true))
+        }
+    }
+
+    @Test fun `the corner button's painted report follows the primary pen button`() {
+        // Arc 44 / T3: a screen may paint the primary kind's glyph itself (the sketch face's pencil
+        // filled with the armed shade), and the corner button wears it exactly when the PRIMARY pen
+        // button reads as armed — this rule, not a second spelling of "is the pencil on the paper?".
+        assertTrue(CollapsedTools.penButtonSelected(Tool.PEN, altPenArmed = false, isAltButton = false))
+        // The alt kind and every other tool wear their own glyphs, untouched by the report.
+        assertFalse(CollapsedTools.penButtonSelected(Tool.PEN, altPenArmed = true, isAltButton = false))
+        assertFalse(CollapsedTools.penButtonSelected(Tool.ERASER, altPenArmed = false, isAltButton = false))
+        // The trap: NONE wears `ic_pen` as "what a tap will bring back", but nothing is on the
+        // paper, so it keeps the plain glyph rather than reporting a shade.
+        assertFalse(CollapsedTools.penButtonSelected(Tool.NONE, altPenArmed = false, isAltButton = false))
+        assertEquals(R.drawable.ic_pen, CollapsedTools.iconFor(Tool.NONE))
+    }
+
+    @Test fun `a screen with one pen gets the rule it always had`() {
+        // The defaults every existing caller passes: "is the pen armed?", and nothing else.
+        CollapsedTools.ORDER.forEach { tool ->
+            assertEquals(
+                tool == Tool.PEN,
+                CollapsedTools.penButtonSelected(tool, altPenArmed = false, isAltButton = false),
+            )
+        }
+    }
+
     @Test fun `NONE wears the pen and arms no button`() {
         assertEquals(R.drawable.ic_pen, CollapsedTools.iconFor(Tool.NONE))
         assertNull(CollapsedTools.selectedFor(Tool.NONE))

@@ -20,9 +20,12 @@
              listed only at `SketchContract.MIN_API_VERSION_FOR_SKETCH`, because the point was
              never reachable at any lower number. **API version 18 since K5b** — the screen calls
              `ISketchHost.insertPage` / `deletePage` / `pageContent`, which is what
-             `SketchContract.MIN_API_VERSION_FOR_SKETCH_PAGES` requires of the host; the point's own
-             action floor stays 17. The `android:value` below is the host-compat gate — it is the
-             line that matters, and this comment must move with it. -->
+             `SketchContract.MIN_API_VERSION_FOR_SKETCH_PAGES` requires of the host. **API version
+             19 since arc 44 / T3** — the screen calls `ISketchHost.toolSettings` /
+             `putToolSettings`, which is what `SketchContract.MIN_API_VERSION_FOR_SKETCH_TOOLS`
+             requires of the host; an API-18 host simply does not remember the tools. The point's
+             own action floor stays 17. The `android:value` below is the host-compat gate — it is
+             the line that matters, and this comment must move with it. -->
         <service
             android:name=".SketchService"
             android:exported="true">
@@ -31,7 +34,7 @@
             </intent-filter>
             <meta-data
                 android:name="com.symmetricalpalmtree.notesproutsn.extension.API_VERSION"
-                android:value="18" />
+                android:value="19" />
         </service>
 
         <!-- The extension-owned screen (tier 2): exported, custom action, NO launcher filter;

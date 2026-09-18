@@ -155,8 +155,17 @@ object ExtensionContract {
      * screen that calls transaction codes 7–11 declares 18 and never binds a 17 host.
      * `MIN_API_VERSIONS` is untouched, [SketchContract.MIN_API_VERSION_FOR_SKETCH] stays 17, no
      * door vanishes, and only `:ext-sketch` redeclares. Not an eleventh point.
+     *
+     * **19 = arc 44 "Pencils" / T2 (2026-09-17)** — two more compatible tails on `ISketchHost`
+     * after `redoPage` (`toolSettings` / `putToolSettings`: the face's armed tool, pencil shade and
+     * pencil size are remembered on the device, in the host's prefs — an extension writes nothing
+     * to disk itself), behind the METHOD floor [SketchContract.MIN_API_VERSION_FOR_SKETCH_TOOLS],
+     * with one new parcelable, [SketchToolSettings]. K5b's shape again: a screen that calls
+     * transaction codes 12–13 declares 19 and never binds an 18 host. `MIN_API_VERSIONS` is
+     * untouched, both earlier sketch floors stay where they were born, no door vanishes, and only
+     * `:ext-sketch` redeclares. Not an eleventh point.
      */
-    const val API_VERSION: Int = 18
+    const val API_VERSION: Int = 19
 
     /**
      * The floor for a service on a **store-taking** point (arc 22 / X1): the host accepts such a

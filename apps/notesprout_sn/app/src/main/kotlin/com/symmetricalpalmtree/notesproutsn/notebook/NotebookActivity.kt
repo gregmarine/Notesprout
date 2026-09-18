@@ -58,6 +58,7 @@ import com.symmetricalpalmtree.notesproutsn.data.prefs.SurfaceStack
 import com.symmetricalpalmtree.notesproutsn.data.prefs.LinkTrail
 import com.symmetricalpalmtree.notesproutsn.data.prefs.RecentsPrefs
 import com.symmetricalpalmtree.notesproutsn.data.prefs.ChromePrefs
+import com.symmetricalpalmtree.notesproutsn.data.prefs.SketchToolPrefs
 import com.symmetricalpalmtree.notesproutsn.data.prefs.SnapPrefs
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityNotebookBinding
 import com.symmetricalpalmtree.notesproutsn.core.markdown.HeadingPrefix
@@ -1079,6 +1080,10 @@ class NotebookActivity : AppCompatActivity() {
             // by moving the very entry `onStructural` recorded across to the redo side.
             onStructuralUndone = { snap -> moveStructural(snap, undone = true) },
             onStructuralRedone = { snap -> moveStructural(snap, undone = false) },
+            // Arc 44 / T2: the face's tools are remembered here, in device-local prefs, because an
+            // extension writes nothing to disk itself. The application context on purpose — the
+            // hooks outlive this screen's own window for as long as the showing does.
+            toolPrefs = SketchToolPrefs(applicationContext),
         )
         // Before the reconnect below, and before anything can ask for state: a host killed behind
         // the face must come back pointing at the page the face is showing.

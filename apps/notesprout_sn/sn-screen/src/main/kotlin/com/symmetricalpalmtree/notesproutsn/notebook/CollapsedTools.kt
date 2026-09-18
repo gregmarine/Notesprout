@@ -23,13 +23,36 @@ object CollapsedTools {
      * bar's button does while [clipboardLoaded] (arc 8's one standing hint that a pen tap on bare
      * paper will paste). [Tool.NONE] — a surface that captures nothing — wears the pen: the
      * button names what a tap will bring back, and the pen is what every screen arms first.
+     *
+     * [altPen] is arc 44 / T3's second **kind** of [Tool.PEN] — the sketch face's gel pen, which is
+     * `Tool.PEN` to the engine exactly as its pencil is and differs only in what the pen is armed
+     * with. So the glyph, not the tool, is what says which one is on the paper. Defaulted false,
+     * so every screen with one pen reads exactly as it did.
      */
-    fun iconFor(tool: Tool, clipboardLoaded: Boolean = false): Int = when (tool) {
-        Tool.PEN, Tool.NONE -> R.drawable.ic_pen
+    fun iconFor(tool: Tool, clipboardLoaded: Boolean = false, altPen: Boolean = false): Int = when (tool) {
+        Tool.PEN -> if (altPen) R.drawable.ic_ballpen else R.drawable.ic_pen
+        Tool.NONE -> R.drawable.ic_pen
         Tool.ERASER -> R.drawable.ic_eraser
         Tool.LASSO_ERASER -> R.drawable.ic_lasso_eraser
         Tool.LASSO -> if (clipboardLoaded) R.drawable.ic_lasso_clipboard else R.drawable.ic_lasso
     }
+
+    /**
+     * Which of the PEN slot's **two kind buttons** reads as armed (arc 44 / T3) — the pencil's and
+     * the gel pen's on the sketch face, on the top bar ([PaperToolbar.sync]) and on the mini
+     * toolbar ([CollapsedChrome.sync]) alike.
+     *
+     * It lives here, as one rule, because both bars ask it and two spellings of "is this the armed
+     * pen?" would be two things to keep in step — the module's standing answer to the
+     * `RattaNotebookView` sibling-copy trap, in miniature. Both buttons are only ever lit under
+     * [Tool.PEN], and then exactly one of them: [altPenArmed] says which kind the screen has armed,
+     * [isAltButton] which kind this button offers, and they must agree.
+     *
+     * A screen with **one** pen passes the defaults (`altPenArmed = false`, `isAltButton = false`)
+     * and gets `tool == PEN` back, which is the rule it has always had.
+     */
+    fun penButtonSelected(tool: Tool, altPenArmed: Boolean, isAltButton: Boolean): Boolean =
+        tool == Tool.PEN && altPenArmed == isAltButton
 
     /**
      * A small overflow is not an overflow (the user's calls on the sticky editor and the pad,

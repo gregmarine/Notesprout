@@ -42,8 +42,12 @@ dependencies {
     // `:extension-api`: keeping the contract out of here is what makes the host's `TransferCaps`
     // and the extension's own ink mapping deliberate twins rather than one shared class.
     // g-paper is `api` because both consumers write against PaperView / Stroke.
-    api("com.symmetricalpalmtree.gpaper:gpaper-core:0.1.35")
-    api("com.symmetricalpalmtree.gpaper:gpaper-ratta:0.1.35")
+    // 0.1.36 is Phase 23 "pencil preview tones" — RattaInkMap.pencilPreviewFor: a PENCIL previews
+    // in the nearest usable firmware tone rather than always DARK_GRAY (arc 44 / T1). 0.1.37 is
+    // Phase 24 "the lead goes wide" — RattaEmr.EMR_MAX 1200 → 9600, so a lead up to 96 px previews
+    // at the width it bakes (arc 44 / T3, the hand's walk).
+    api("com.symmetricalpalmtree.gpaper:gpaper-core:0.1.37")
+    api("com.symmetricalpalmtree.gpaper:gpaper-ratta:0.1.37")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
 

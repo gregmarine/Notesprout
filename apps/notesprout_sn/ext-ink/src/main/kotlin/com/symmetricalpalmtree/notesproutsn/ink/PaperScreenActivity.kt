@@ -135,6 +135,30 @@ abstract class PaperScreenActivity : AppCompatActivity() {
     protected open fun collapsedTools(): List<Tool> = CollapsedTools.ORDER
 
     /**
+     * The PEN slot's **two kinds** on the mini toolbar (arc 44 / T3), or null — every screen but
+     * the sketch face, whose pencil and gel pen are both `Tool.PEN` and so cannot be two entries of
+     * [collapsedTools]. Read once, at [initChrome], like [collapsedOverflow]: which buttons exist
+     * is the screen's shape, and only what they *show* is read at every open.
+     */
+    protected open fun collapsedPenKinds(): CollapsedChrome.PenKinds? = null
+
+    /**
+     * The rows are about to come down, by any path (arc 44 / T3) — the screen takes down the
+     * sub-bars it hung off them, **without** pushing exclusions: [CollapsedChrome]'s own
+     * `onChanged` follows and a close stays one binder call. The eraser sub-bar is not one of
+     * these: it belongs to the top bar's eraser button and goes down when the rows come *up*.
+     */
+    protected open fun onCollapsedClosing() {}
+
+    /**
+     * Whether a contact at this point (root view-local) lands inside a sub-bar this screen has hung
+     * off the rows, and so must **not** take them down (arc 44 / T3) — [CollapsedChrome]'s `keep`
+     * predicate, the notebook's rule for its Insert bar. Nothing by default: a screen with no
+     * sub-bar of its own has nothing to keep alive.
+     */
+    protected open fun keepCollapsedUnder(x: Int, y: Int): Boolean = false
+
+    /**
      * Back as a mirrored entry, or null before the bar exists. The hint is the button's own content
      * description — the screens name Back differently ("Back to the notebook", "Back to the
      * calendar") and the row should say what the bar's long press says.
@@ -187,11 +211,14 @@ abstract class PaperScreenActivity : AppCompatActivity() {
         if (::collapsed.isInitialized) collapsed.dismiss()
     }
 
-    /** The outside-contact dismissal — the rule lives in [CollapsedChrome], and these screens
-     *  hang no sub-bar off the rows, so there is nothing to keep alive under a contact. */
+    /** The outside-contact dismissal — the rule lives in [CollapsedChrome]; a screen that hangs a
+     *  sub-bar off the rows (arc 44 / T3, the sketch face's `PencilBar`) keeps it alive under a
+     *  contact of its own through [keepCollapsedUnder], and every other screen answers false. */
     private fun dismissCollapsedOnContact(ev: MotionEvent, index: Int) {
         if (!::collapsed.isInitialized) return
-        collapsed.dismissOnContact(ev.getX(index).toInt(), ev.getY(index).toInt())
+        collapsed.dismissOnContact(ev.getX(index).toInt(), ev.getY(index).toInt()) { x, y ->
+            keepCollapsedUnder(x, y)
+        }
     }
 
     // ── The eraser sub-bar (arc 29 / LE3) ────────────────────────────────────
@@ -310,9 +337,13 @@ abstract class PaperScreenActivity : AppCompatActivity() {
             // The eraser's own sub-bar is the one other thing that could be up: it belongs to the
             // bar's eraser button, which is not on the glass while the rows are.
             onOpen = { hideEraserBar() },
+            // Arc 44 / T3: a sub-bar the screen hung off the rows goes down with them, before the
+            // one exclusion push — a close stays one binder call.
+            onClose = { onCollapsedClosing() },
             onArmed = { armTool(it) },
             onChanged = { pushExclusions() },
             tools = collapsedTools(),
+            penKinds = collapsedPenKinds(),
         )
     }
 

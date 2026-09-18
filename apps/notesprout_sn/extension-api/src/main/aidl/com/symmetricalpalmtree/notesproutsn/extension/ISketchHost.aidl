@@ -2,6 +2,7 @@ package com.symmetricalpalmtree.notesproutsn.extension;
 
 // A .aidl that takes a parcelable needs an explicit import for it.
 import com.symmetricalpalmtree.notesproutsn.extension.SketchPageState;
+import com.symmetricalpalmtree.notesproutsn.extension.SketchToolSettings;
 import com.symmetricalpalmtree.notesproutsn.extension.WireStroke;
 
 /**
@@ -154,4 +155,31 @@ interface ISketchHost {
      * an empty structuralToken.
      */
     SketchPageState redoPage(String token);
+
+    /**
+     * Arc 44 / T2 (2026-09-17) -- a compatible tail (the twelfth method, transaction code 12)
+     * behind the extension-side declaration floor SketchContract.MIN_API_VERSION_FOR_SKETCH_TOOLS
+     * (19): what the face's drawing tools were last set to ON THIS DEVICE -- the armed tool, the
+     * pencil's shade level and its size index -- or NULL when nothing has been remembered yet (a
+     * first showing, cleared app data, or a stored value that no longer reads as one). Null is a
+     * legal answer to a legal question, never an exception: the face's defaults live in the face,
+     * and the host never learns them.
+     *
+     * One setting for every notebook (the user's decision 6): it is kept in the host's
+     * device-local prefs, not in the .soil, not in a backup, and it touches no window -- it is not
+     * about a page at all. The face asks once, at begin.
+     */
+    SketchToolSettings toolSettings();
+
+    /**
+     * Arc 44 / T2 -- a compatible tail (the thirteenth method, transaction code 13) behind the
+     * same floor: remember [settings] as this device's sketch tools, replacing whatever was kept.
+     * The face pushes at every pick, so the value that survives a process death is the last one
+     * the person chose. A null is an IllegalArgumentException; an out-of-bounds field never
+     * arrives (SketchToolSettings' constructor refuses it at unmarshal).
+     *
+     * Indices, never values: the host stores three small integers and knows nothing of the greys
+     * or the widths they name.
+     */
+    void putToolSettings(in SketchToolSettings settings);
 }

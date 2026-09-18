@@ -45,8 +45,10 @@ class SketchHostBinder(
     /**
      * The things this binder cannot do itself: read the open notebook's current page, move that
      * page, write a page's pixels, stage a page's bare ink, and — since K5b — insert a page, delete
-     * one, say what else a page is carrying, and take one of those two back or put it back. All of
-     * them are **blocking** and all of them run on a Binder thread (see the class doc).
+     * one, say what else a page is carrying, and take one of those two back or put it back; since
+     * arc 44 / T2, also remember and hand back the face's drawing tools, the only pair here that
+     * names no page. All of them are **blocking** and all of them run on a Binder thread (see the
+     * class doc).
      */
     interface Hooks {
         /**
@@ -112,6 +114,25 @@ class SketchHostBinder(
         /** K5b: [undoPage]'s mirror — the notebook's own redo arm, and the edit goes back onto the
          *  notebook's undo stack. */
         fun redoPage(session: SketchHostSession, token: String): SketchPageState
+
+        /**
+         * Arc 44 / T2: what the face's drawing tools were last set to **on this device**, or null
+         * when nothing has been remembered yet (a first showing, cleared app data, a stored value
+         * that no longer reads as one). Null is a legal answer, never an exception — the face's
+         * defaults live in the face and the host never learns them.
+         *
+         * **Touches no window**: it is not about a page at all, which is what makes it the one thing
+         * this seam carries that no `pageKey` names. Blocking on a Binder thread like every hook
+         * here, though this one reads prefs rather than the `.soil`.
+         */
+        fun toolSettings(): SketchToolSettings?
+
+        /**
+         * Arc 44 / T2: remember [settings] as this device's sketch tools, replacing whatever was
+         * kept. **Indices, never values** — three small integers, the greys and widths they name
+         * being `:ext-sketch`'s alone — so nothing here clamps to a palette it does not know.
+         */
+        fun putToolSettings(settings: SketchToolSettings)
     }
 
     /**
@@ -256,6 +277,26 @@ class SketchHostBinder(
                 "in ${SystemClock.elapsedRealtime() - t0} ms"
         }
         return state
+    }
+
+    // ── The drawing tools (arc 44 / T2) ──────
+
+    // Three small integers are not content — they say nothing of what a person drew — so unlike
+    // every other value on this binder they may be logged whole. No duration either: neither call
+    // opens the `.soil`, and a prefs read that needed timing would be a different bug.
+
+    override fun toolSettings(): SketchToolSettings? {
+        gate()
+        val settings = hook { hooks.toolSettings() }
+        Slog.d(TAG) { "toolSettings: ${settings ?: "nothing remembered"}" }
+        return settings
+    }
+
+    override fun putToolSettings(settings: SketchToolSettings?) {
+        gate()
+        requireNotNull(settings) { "settings is null" }
+        hook { hooks.putToolSettings(settings) }
+        Slog.d(TAG) { "putToolSettings: $settings" }
     }
 
     // ── The gate and the funnel ──────
