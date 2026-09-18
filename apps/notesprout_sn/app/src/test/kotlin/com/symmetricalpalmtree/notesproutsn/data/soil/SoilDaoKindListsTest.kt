@@ -8,11 +8,13 @@ import org.junit.Test
 /**
  * [SoilDao.liveContentIds] and [SoilDao.liveDescendantIds] — the two kind lists widened for arc 28
  * (H1): both now know text, shape and sticky rows, and a sticky's content strokes are reached only
- * by the deeper list, never the shallow one. Grown by arc 43 / K3 with the `sketch` row and the
+ * by the deeper list, never the shallow one. Grown by arc 43 / K3 with the sketch row and the
  * third list it needed: [SoilDao.liveErasableIds], which is [SoilDao.liveDescendantIds] minus the
  * sketch (Erase page is ink only, decision 11), and [SoilDao.childrenOf], which must never see one
- * at all. Runs against [FakeSoilDao], which mirrors the `@Query` strings by hand — the point of the
- * suite is to keep the fake and the SQL from drifting apart.
+ * at all — and by arc 45 / G2, where the one sketch row became **two** (`sketch_graphite` and
+ * `sketch_ink`) beside the **dead** arc-43 name `sketch`, which `childrenOf` still excludes and
+ * nothing else carries. Runs against [FakeSoilDao], which mirrors the `@Query` strings by hand —
+ * the point of the suite is to keep the fake and the SQL from drifting apart.
  */
 class SoilDaoKindListsTest {
 
@@ -104,21 +106,43 @@ class SoilDaoKindListsTest {
             assertEquals(setOf("l1", "sn1", "c1"), dao.liveDescendantIds(pageId).toSet())
         }
 
-    // ── The sketch (arc 43 / K3) ────────────────────────────────────────────
+    // ── The two sketch rasters (arc 43 / K3, split at arc 45 / G2) ───────────
+
+    /** The names themselves, pinned here as well as in `FamilyConstantsTest`: these three strings
+     *  are what every list below is about, and a typo in one of them is a row that quietly stops
+     *  travelling. */
+    @Test
+    fun `the row names are the two live rasters and the dead arc-43 one`() {
+        assertEquals("sketch_graphite", SoilSchema.TYPE_SKETCH_GRAPHITE)
+        assertEquals("sketch_ink", SoilSchema.TYPE_SKETCH_INK)
+        assertEquals("sketch", SoilSchema.TYPE_SKETCH_DEAD)
+    }
 
     @Test
-    fun `liveDescendantIds carries the page's sketch — a copy and a delete take the drawing`() =
+    fun `liveDescendantIds carries both rasters — a copy and a delete take the drawing`() =
         runBlocking {
             val dao = FakeSoilDao()
             dao.put("s1", pageId, SoilSchema.TYPE_STROKE)
-            dao.put("sk1", pageId, SoilSchema.TYPE_SKETCH)
-            assertEquals(setOf("s1", "sk1"), dao.liveDescendantIds(pageId).toSet())
+            dao.put("skg", pageId, SoilSchema.TYPE_SKETCH_GRAPHITE)
+            dao.put("ski", pageId, SoilSchema.TYPE_SKETCH_INK)
+            assertEquals(setOf("s1", "skg", "ski"), dao.liveDescendantIds(pageId).toSet())
         }
 
-    /** Decision 11: Erase page is ink only. The two lists differ in exactly one row, and in nothing
-     *  else — a link's wrapped children and a note's content ride both. */
+    /** A row nothing can read is a row nothing should copy (decision 4): the dead arc-43 name
+     *  travels with nothing, so a page copy never carries a PNG no reader will open. */
     @Test
-    fun `liveErasableIds is liveDescendantIds minus the sketch, and nothing else`() = runBlocking {
+    fun `liveDescendantIds does not carry the dead arc-43 row`() = runBlocking {
+        val dao = FakeSoilDao()
+        dao.put("s1", pageId, SoilSchema.TYPE_STROKE)
+        dao.put("skOld", pageId, SoilSchema.TYPE_SKETCH_DEAD)
+        assertEquals(setOf("s1"), dao.liveDescendantIds(pageId).toSet())
+    }
+
+    /** Decision 11: Erase page is ink only. The two lists differ in exactly the two raster rows,
+     *  and in nothing else — a link's wrapped children and a note's content ride both. G2's ink
+     *  raster is the *sketch's* ink, not the page's, and is excluded with the graphite. */
+    @Test
+    fun `liveErasableIds is liveDescendantIds minus both rasters, and nothing else`() = runBlocking {
         val dao = FakeSoilDao()
         dao.put("s1", pageId, SoilSchema.TYPE_STROKE)
         dao.put("h1", pageId, SoilSchema.TYPE_HEADING)
@@ -127,24 +151,47 @@ class SoilDaoKindListsTest {
         dao.put("ls1", "l1", SoilSchema.TYPE_STROKE)
         dao.put("sn1", pageId, SoilSchema.TYPE_STICKY)
         dao.put("c1", "sn1", SoilSchema.TYPE_STROKE)
-        dao.put("sk1", pageId, SoilSchema.TYPE_SKETCH)
+        dao.put("skg", pageId, SoilSchema.TYPE_SKETCH_GRAPHITE)
+        dao.put("ski", pageId, SoilSchema.TYPE_SKETCH_INK)
 
         val deep = dao.liveDescendantIds(pageId).toSet()
         val erasable = dao.liveErasableIds(pageId).toSet()
-        assertEquals(setOf("sk1"), deep - erasable)
+        assertEquals(setOf("skg", "ski"), deep - erasable)
         assertEquals(emptySet<String>(), erasable - deep)
         assertEquals(setOf("s1", "h1", "d1", "l1", "ls1", "sn1", "c1"), erasable)
     }
 
     /** [SoilDao.childrenOf] is untyped **and** blob-inclusive — it feeds every page read there is,
-     *  and a page-sized PNG riding those would be megabytes per flip. */
+     *  and a page-sized image riding those would be megabytes per flip. All three names are
+     *  excluded, the dead one included: a leftover arc-43 row must never surface as a child. */
     @Test
-    fun `childrenOf never sees a sketch`() = runBlocking {
+    fun `childrenOf never sees a sketch row of any of the three names`() = runBlocking {
         val dao = FakeSoilDao()
         dao.put("s1", pageId, SoilSchema.TYPE_STROKE)
         dao.put("t1", pageId, SoilSchema.TYPE_TEXT)
-        dao.put("sk1", pageId, SoilSchema.TYPE_SKETCH)
+        dao.put("skg", pageId, SoilSchema.TYPE_SKETCH_GRAPHITE)
+        dao.put("ski", pageId, SoilSchema.TYPE_SKETCH_INK)
+        dao.put("skOld", pageId, SoilSchema.TYPE_SKETCH_DEAD)
         assertEquals(setOf("s1", "t1"), dao.childrenOf(pageId).map { it.id }.toSet())
+    }
+
+    /** `hasLiveSketch` is "either raster, with pixels in it" — and never the dead name. */
+    @Test
+    fun `hasLiveSketch answers for either raster and ignores the dead one`() = runBlocking {
+        val dao = FakeSoilDao()
+        suspend fun raster(id: String, type: String, blob: ByteArray?) = dao.upsert(
+            SoilObjectEntity(
+                id = id, parentId = pageId, type = type, order = SoilSchema.SKETCH_ORDER,
+                createdAt = 1L, updatedAt = 1L, blob = blob,
+            )
+        )
+        assertEquals(false, dao.hasLiveSketch(pageId))
+        raster("skOld", SoilSchema.TYPE_SKETCH_DEAD, ByteArray(9))
+        assertEquals(false, dao.hasLiveSketch(pageId))
+        raster("ski", SoilSchema.TYPE_SKETCH_INK, ByteArray(0))
+        assertEquals("an empty blob is no raster", false, dao.hasLiveSketch(pageId))
+        raster("skg", SoilSchema.TYPE_SKETCH_GRAPHITE, ByteArray(9))
+        assertEquals(true, dao.hasLiveSketch(pageId))
     }
 
     @Test

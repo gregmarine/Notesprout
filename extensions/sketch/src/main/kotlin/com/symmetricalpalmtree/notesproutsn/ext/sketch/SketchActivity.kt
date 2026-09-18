@@ -27,7 +27,7 @@ import com.symmetricalpalmtree.notesproutsn.ext.sketch.databinding.ActivitySketc
 import com.symmetricalpalmtree.notesproutsn.extension.ByteChunks
 import com.symmetricalpalmtree.notesproutsn.extension.HostCallerCheck
 import com.symmetricalpalmtree.notesproutsn.extension.ISketchHost
-import com.symmetricalpalmtree.notesproutsn.extension.PngHeader
+import com.symmetricalpalmtree.notesproutsn.extension.ImageHeader
 import com.symmetricalpalmtree.notesproutsn.extension.SketchContract
 import com.symmetricalpalmtree.notesproutsn.extension.SketchPageState
 import com.symmetricalpalmtree.notesproutsn.extension.WireStroke
@@ -341,7 +341,7 @@ class SketchActivity : PaperScreenActivity() {
         // `isPenActive` counts hover, and the pen is already over the glass on the way to drawing,
         // which would hold the box up over the page the user asked for.
         binding.openingOverlay.visibility = View.GONE
-        Slog.d(TAG) { "page ${state.pageIndex + 1}/${state.pageCount} open (${state.sketchBytes} B)" }
+        Slog.d(TAG) { "page ${state.pageIndex + 1}/${state.pageCount} open (${state.graphiteBytes} B)" }
     }
 
     /**
@@ -350,7 +350,7 @@ class SketchActivity : PaperScreenActivity() {
      * `loadStrokes` would be (`clearForContentSwap` → `setPageSize` → the content call, one EPD
      * refresh, no blank flash).
      *
-     * **The header guard runs before the decode** ([PngHeader]) and a mismatch starts the page blank
+     * **The header guard runs before the decode** ([ImageHeader]) and a mismatch starts the page blank
      * with a line in the log rather than handing a foreign blob's idea of its own size to the
      * allocator. The engine copies the bitmap in, so the decode is let go of the instant it returns:
      * a page-sized bitmap held one turn longer than it is needed is ~9.5 MB on a device that kills
@@ -383,10 +383,11 @@ class SketchActivity : PaperScreenActivity() {
     /** The read window, chunk by chunk — an empty answer is a page with no sketch, which is the
      *  window's shape for it (one empty chunk) and not a failure. */
     private suspend fun readSketch(state: SketchPageState): ByteArray {
-        if (!state.hasSketch) return ByteArray(0)
+        // G3: graphite only until the face loads both rasters (G2's compile shim).
+        if (!state.hasLayer(SketchContract.LAYER_GRAPHITE)) return ByteArray(0)
         return callHost { host ->
-            val chunks = ArrayList<ByteArray>(state.sketchChunks)
-            for (i in 0 until state.sketchChunks) chunks += host.readSketchChunk(i)
+            val chunks = ArrayList<ByteArray>(state.graphiteChunks)
+            for (i in 0 until state.graphiteChunks) chunks += host.readSketchChunk(SketchContract.LAYER_GRAPHITE, i)
             ByteChunks.join(chunks)
         }.getOrElse {
             Log.w(TAG, "the page's sketch could not be read: ${it.javaClass.simpleName}")
@@ -548,7 +549,7 @@ class SketchActivity : PaperScreenActivity() {
             return
         }
         loadPage(to, firstLoad = false)
-        Slog.d(TAG) { "turned to page ${to.pageIndex + 1}/${to.pageCount} (${to.sketchBytes} B)" }
+        Slog.d(TAG) { "turned to page ${to.pageIndex + 1}/${to.pageCount} (${to.graphiteBytes} B)" }
     }
 
     // ── Page insert and delete (K5b) ────────────────────────────────────
@@ -628,7 +629,7 @@ class SketchActivity : PaperScreenActivity() {
         // record of the delete, and the host still holds it.
         rememberStructural(SketchEdit.PageDeleted(to.structuralToken, gone, at), to)
         loadPage(to, firstLoad = false)
-        Slog.d(TAG) { "deleted a page; now page ${to.pageIndex + 1}/${to.pageCount} (${to.sketchBytes} B)" }
+        Slog.d(TAG) { "deleted a page; now page ${to.pageIndex + 1}/${to.pageCount} (${to.graphiteBytes} B)" }
     }
 
     /**
@@ -964,7 +965,7 @@ class SketchActivity : PaperScreenActivity() {
         loadPage(to, firstLoad = false)
         Slog.d(TAG) {
             "${if (undoing) "undo" else "redo"} of ${edit.javaClass.simpleName}: " +
-                "now page ${to.pageIndex + 1}/${to.pageCount} (${to.sketchBytes} B)"
+                "now page ${to.pageIndex + 1}/${to.pageCount} (${to.graphiteBytes} B)"
         }
         return true
     }

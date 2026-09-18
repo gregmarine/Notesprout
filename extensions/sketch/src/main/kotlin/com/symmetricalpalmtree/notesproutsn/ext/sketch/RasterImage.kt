@@ -3,14 +3,14 @@ package com.symmetricalpalmtree.notesproutsn.ext.sketch
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Log
-import com.symmetricalpalmtree.notesproutsn.extension.PngHeader
+import com.symmetricalpalmtree.notesproutsn.extension.ImageHeader
 import com.symmetricalpalmtree.notesproutsn.extension.SketchContract
 import java.io.ByteArrayOutputStream
 
 /**
  * A page's pixels turned into bytes, and back (arc 43 / K5, ported from Paintsprout Onyx's
  * `sketchbook/RasterImage.kt`) — the half of the raster border that needs Android. The half that
- * does not is [PngHeader], in `:extension-api`, shared with the host.
+ * does not is [ImageHeader], in `:extension-api`, shared with the host.
  *
  * **PNG, because the drawing has to come back exactly.** It is lossless, so a page saved and
  * reopened is the page that was drawn rather than a very good likeness of it; a raster page has no
@@ -52,7 +52,7 @@ object RasterImage {
      * The bytes as a page image, or null when they are not this page's.
      *
      * **The guard runs before the decoder, always, and that order is the whole of this function.**
-     * [PngHeader.matches] answers from the PNG's own thirty-three-byte header; only once it has said
+     * [ImageHeader.matches] answers from the PNG's own thirty-three-byte header; only once it has said
      * yes does anything ask `BitmapFactory` for memory. The other order — decode and then check the
      * dimensions — hands a damaged or foreign blob's idea of how big it is straight to the
      * allocator, on a device where the honest page is already ~9.5 MB, which is a way to take the
@@ -65,8 +65,8 @@ object RasterImage {
      */
     fun decode(bytes: ByteArray, pageWidth: Int, pageHeight: Int): Bitmap? {
         if (bytes.isEmpty()) return null
-        if (!PngHeader.matches(bytes, pageWidth, pageHeight)) {
-            Log.w(TAG, "a stored sketch is ${PngHeader.size(bytes)} and the page is ${pageWidth}x$pageHeight — refused before decoding")
+        if (!ImageHeader.matches(bytes, pageWidth, pageHeight)) {
+            Log.w(TAG, "a stored sketch is ${ImageHeader.size(bytes)} and the page is ${pageWidth}x$pageHeight — refused before decoding")
             return null
         }
         val options = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 }

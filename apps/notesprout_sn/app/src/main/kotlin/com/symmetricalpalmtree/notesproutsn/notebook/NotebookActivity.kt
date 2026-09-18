@@ -80,6 +80,7 @@ import com.symmetricalpalmtree.notesproutsn.extension.RecognizerClient
 import com.symmetricalpalmtree.notesproutsn.extension.PassageText
 import com.symmetricalpalmtree.notesproutsn.extension.ResolvedReference
 import com.symmetricalpalmtree.notesproutsn.extension.ScratchPadEntry
+import com.symmetricalpalmtree.notesproutsn.extension.SketchContract
 import com.symmetricalpalmtree.notesproutsn.extension.SketchEntry
 import com.symmetricalpalmtree.notesproutsn.extension.TagManagerEntry
 import com.symmetricalpalmtree.notesproutsn.extension.TagShowing
@@ -5083,13 +5084,16 @@ class NotebookActivity : AppCompatActivity() {
         when {
             s.isTextDocument -> TextCover.render(repo, id, s.documents.get(id)?.text.orEmpty())
             // Arc 43 / K4, decision 6: the sketch of the page the face ended on, over paper white
-            // — read from the stored row, which is honest only because the caller has already
-            // joined the showing's `end()` flush. The ink bake is the fallback, and only when the
-            // canvas is actually loaded: a snapshot of an unloaded surface is a blank card.
+            // — read from the stored rows (both rasters since arc 45 / G2, flattened by the cover
+            // exactly as the export flattens them), which is honest only because the caller has
+            // already joined the showing's `end()` flush. The ink bake is the fallback, and only
+            // when the canvas is actually loaded: a snapshot of an unloaded surface is a blank card.
             s.isSketch -> {
                 val pageId = coverPageId(s)
-                val png = if (pageId.isEmpty()) null else runCatching { s.readSketch(pageId) }.getOrNull()
-                val drawn = png != null && SketchCover.render(repo, id, png)
+                val graphite = readSketchLayer(s, pageId, SketchContract.LAYER_GRAPHITE)
+                val ink = readSketchLayer(s, pageId, SketchContract.LAYER_INK)
+                val drawn = (graphite != null || ink != null) &&
+                    SketchCover.render(repo, id, graphite, ink)
                 // `canvasShown`, NOT `opened`: a sketch notebook is "opened" the moment the
                 // lightweight route sets the flag for the hooks, with nothing on the paper at all —
                 // and a snapshot of an unloaded surface is a blank card where a drawing used to be
@@ -5099,6 +5103,12 @@ class NotebookActivity : AppCompatActivity() {
             opened -> CoverSnapshot.capture(p, id, repo)
         }
     }
+
+    /** One of the cover page's two rasters (arc 45 / G2), or null — a missing page id, a layer with
+     *  no row and a read that threw all read the same here, because a cover is a nicety and any of
+     *  the three just means there is less to draw. */
+    private suspend fun readSketchLayer(s: NotebookSession, pageId: String, layer: Int): ByteArray? =
+        if (pageId.isEmpty()) null else runCatching { s.readSketch(pageId, layer) }.getOrNull()
 
     /** The page a sketch notebook's cover and last-open pointer name (arc 43 / K4): the page the
      *  face ended on, else the page it is still on, else the displayed one — and never a page this

@@ -1,6 +1,8 @@
 package com.symmetricalpalmtree.notesproutsn.notebook
 
+import com.symmetricalpalmtree.notesproutsn.R
 import com.symmetricalpalmtree.notesproutsn.data.clip.ClipEnvelope
+import com.symmetricalpalmtree.notesproutsn.data.clip.ClipMessages
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilObjectEntity
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilSchema
 import org.junit.Assert.assertArrayEquals
@@ -39,13 +41,15 @@ class PageClipTest {
     /** A watermark past `Int.MAX_VALUE` — epoch millis, the value the arc-19 retype exists for. */
     private val watermark = 1_756_500_000_000L
 
-    /** The page's sketch, pixels and all (arc 43 / K3) — a made-up PNG-ish blob, since what a page
-     *  copy owes it is that the bytes arrive verbatim, not that they decode. */
-    private val sketchPng = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x11, 0x22, 0x33)
+    /** The page's sketch, pixels and all (arc 43 / K3; two rasters since arc 45 / G2) — made-up
+     *  WebP-ish blobs, and **different from each other**, since what a page copy owes them is that
+     *  each layer's bytes arrive verbatim on its own row, not that either decodes. */
+    private val graphiteBytes = byteArrayOf(0x52, 0x49, 0x46, 0x46, 0x11, 0x22, 0x33)
+    private val inkBytes = byteArrayOf(0x52, 0x49, 0x46, 0x46, 0x44, 0x55)
 
     /** A page with loose ink, a heading, a link wrapping a stroke of its own (two levels), the
-     *  page's document and its sketch — `SoilDao.liveDescendantIds` carries all six, so a copy
-     *  captures all six. */
+     *  page's document and **both** its sketch rasters — `SoilDao.liveDescendantIds` carries all
+     *  seven, so a copy captures all seven. */
     private fun content() = listOf(
         row("s-loose", pageId, SoilSchema.TYPE_STROKE, order = 0, blob = byteArrayOf(9, 8, 7)),
         row("h-1", pageId, SoilSchema.TYPE_HEADING, order = 1, text = "## Title", flags = 2L),
@@ -53,7 +57,8 @@ class PageClipTest {
             text = LinkPayload.encode(LinkPayload.CHROME_UNDERLINE, LinkPayload.KIND_PAGE, null, "page-9")),
         row("s-wrapped", "lnk-1", SoilSchema.TYPE_STROKE, order = 5, blob = byteArrayOf(4, 5)),
         row("doc-1", pageId, SoilSchema.TYPE_DOCUMENT, order = 0, text = "# Draft", flags = watermark),
-        row("sk-1", pageId, SoilSchema.TYPE_SKETCH, order = SoilSchema.SKETCH_ORDER, blob = sketchPng),
+        row("sk-g", pageId, SoilSchema.TYPE_SKETCH_GRAPHITE, order = SoilSchema.SKETCH_ORDER, blob = graphiteBytes),
+        row("sk-i", pageId, SoilSchema.TYPE_SKETCH_INK, order = SoilSchema.SKETCH_ORDER, blob = inkBytes),
     )
 
     private fun envelope() = PageClip.capture(pageRow, templateRow, content(), notebookId, now)
@@ -74,7 +79,7 @@ class PageClipTest {
         assertEquals(notebookId, env.sourceNotebookId)
         assertEquals(now, env.copiedAt)
         assertEquals(
-            listOf(templateId, pageId, "s-loose", "h-1", "lnk-1", "s-wrapped", "doc-1", "sk-1"),
+            listOf(templateId, pageId, "s-loose", "h-1", "lnk-1", "s-wrapped", "doc-1", "sk-g", "sk-i"),
             env.rows.map { it.id },
         )
         assertArrayEquals(byteArrayOf(1, 2, 3, 4), env.rows.first { it.type == "template" }.blobBytes())
@@ -105,10 +110,10 @@ class PageClipTest {
     fun `every row gets a fresh id and nothing keeps a source id`() {
         val env = envelope()
         val plan = PageClip.plan(env, "nb-dest", 4, PageClip.Template.Reuse(templateId), now, ids())!!
-        val sourceIds = setOf(pageId, "s-loose", "h-1", "lnk-1", "s-wrapped", "doc-1", "sk-1")
+        val sourceIds = setOf(pageId, "s-loose", "h-1", "lnk-1", "s-wrapped", "doc-1", "sk-g", "sk-i")
         for (r in plan.rows) assertTrue("$r kept a source id", r.id !in sourceIds)
         assertNotEquals(pageId, plan.pageId)
-        assertEquals(6, plan.contentIds.size)
+        assertEquals(7, plan.contentIds.size)
     }
 
     @Test
@@ -133,10 +138,11 @@ class PageClipTest {
         val env = envelope()
         val plan = PageClip.plan(env, "nb-dest", 7, PageClip.Template.Reuse(templateId), now, ids())!!
         assertEquals(7, plan.rows.first { it.type == SoilSchema.TYPE_PAGE }.order)
-        // Loose stroke 0, heading 1, link 0, wrapped stroke 5, document 0, sketch -1 — verbatim,
-        // capture order. The sketch's -1 is out of every z-order space and travels as it is.
+        // Loose stroke 0, heading 1, link 0, wrapped stroke 5, document 0, graphite -1, ink -1 —
+        // verbatim, capture order. The rasters' -1 is out of every z-order space and travels as it
+        // is, and it is the SAME number for both: neither is above the other.
         assertEquals(
-            listOf(0, 1, 0, 5, 0, SoilSchema.SKETCH_ORDER),
+            listOf(0, 1, 0, 5, 0, SoilSchema.SKETCH_ORDER, SoilSchema.SKETCH_ORDER),
             plan.rows
                 .filter { it.type != SoilSchema.TYPE_PAGE && it.type != SoilSchema.TYPE_TEMPLATE }
                 .map { it.order },
@@ -192,20 +198,43 @@ class PageClipTest {
      * which, for a page that has just been rebuilt row by row, it has.
      */
     /**
-     * The page's sketch rides its page (arc 43 / K3): a fresh id, re-parented onto the copied page,
-     * the PNG carried **verbatim** through the envelope's Base64, and `"order"` still
-     * [SoilSchema.SKETCH_ORDER]. A page copy that lost the drawing would be the one paste in the
-     * app that silently dropped something the user can see.
+     * The page's sketch rides its page (arc 43 / K3; **both rasters** since arc 45 / G2): a fresh id
+     * each, re-parented onto the copied page, each layer's bytes carried **verbatim** through the
+     * envelope's Base64 and onto its own row, and `"order"` still [SoilSchema.SKETCH_ORDER]. A page
+     * copy that lost the drawing — or that landed the ink on the graphite row — would be the one
+     * paste in the app that silently dropped or scrambled something the user can see.
      */
     @Test
-    fun `the page sketch travels with the page, pixels and all`() {
+    fun `both sketch rasters travel with the page, pixels and all`() {
         val plan = PageClip.plan(envelope(), "nb-dest", 0, PageClip.Template.Reuse(templateId), now, ids())!!
-        val sketch = plan.rows.single { it.type == SoilSchema.TYPE_SKETCH }
-        assertNotEquals("sk-1", sketch.id)
-        assertEquals(plan.pageId, sketch.parentId)
-        assertEquals(SoilSchema.SKETCH_ORDER, sketch.order)
-        assertArrayEquals(sketchPng, sketch.blob)
-        assertTrue(sketch.id in plan.contentIds)
+        val graphite = plan.rows.single { it.type == SoilSchema.TYPE_SKETCH_GRAPHITE }
+        val ink = plan.rows.single { it.type == SoilSchema.TYPE_SKETCH_INK }
+        for (r in listOf(graphite, ink)) {
+            assertTrue("$r kept a source id", r.id !in setOf("sk-g", "sk-i"))
+            assertEquals(plan.pageId, r.parentId)
+            assertEquals(SoilSchema.SKETCH_ORDER, r.order)
+            assertTrue(r.id in plan.contentIds)
+        }
+        assertNotEquals(graphite.id, ink.id)
+        // Each layer's own bytes on its own row — the one thing a swap here would look like.
+        assertArrayEquals(graphiteBytes, graphite.blob)
+        assertArrayEquals(inkBytes, ink.blob)
+    }
+
+    /** A page drawn only with the gel pen carries one raster, and a refused copy of it still says
+     *  the sketch is why (arc 45 / G2) — read off a real capture, so the row type the envelope
+     *  writes and the type the sentence looks for cannot drift apart. */
+    @Test
+    fun `an over-cap page carrying only the ink raster still names the sketch`() {
+        val inkOnly = content().filter { it.type != SoilSchema.TYPE_SKETCH_GRAPHITE }
+        val env = PageClip.capture(pageRow, templateRow, inkOnly, notebookId, now)
+        assertEquals(R.string.clip_too_large_sketch, ClipMessages.tooLarge(env.rows))
+
+        val noSketch = content().filter {
+            it.type != SoilSchema.TYPE_SKETCH_GRAPHITE && it.type != SoilSchema.TYPE_SKETCH_INK
+        }
+        val plain = PageClip.capture(pageRow, templateRow, noSketch, notebookId, now)
+        assertEquals(R.string.clip_too_large, ClipMessages.tooLarge(plain.rows))
     }
 
     @Test
@@ -289,9 +318,9 @@ class PageClipTest {
         assertArrayEquals(byteArrayOf(3, 3), ink.blob)
         assertEquals(7L, newNote.flags)                      // the packed content size travels
         assertEquals("an **object**", plan.rows.single { it.type == SoilSchema.TYPE_TEXT }.text)
-        // Ten descendants now: the arc-6 five plus arc 43's sketch, plus text, shape, sticky and
-        // the note's ink.
-        assertEquals(10, plan.contentIds.size)
+        // Eleven descendants now: the arc-6 five plus arc 43's sketch (two rasters since arc 45),
+        // plus text, shape, sticky and the note's ink.
+        assertEquals(11, plan.contentIds.size)
         assertTrue(ink.id in plan.contentIds)
     }
 
@@ -313,9 +342,9 @@ class PageClipTest {
         val orphan = row("s-orphan", "lnk-gone", SoilSchema.TYPE_STROKE, blob = byteArrayOf(1))
         val env = PageClip.capture(pageRow, null, content() + orphan, notebookId, now)
         val plan = PageClip.plan(env, "nb-dest", 0, PageClip.Template.None, now, ids())!!
-        // Six descendants travelled (ink, heading, link, wrapped ink, document, sketch); the
-        // orphan did not.
-        assertEquals(6, plan.contentIds.size)
+        // Seven descendants travelled (ink, heading, link, wrapped ink, document, and the two
+        // sketch rasters); the orphan did not.
+        assertEquals(7, plan.contentIds.size)
         assertEquals(3, plan.rows.count { it.type == SoilSchema.TYPE_STROKE || it.type == SoilSchema.TYPE_HEADING })
     }
 

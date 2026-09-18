@@ -455,26 +455,30 @@ beside it — never flattened under it — and the sketch page is **plain white 
 page's template (decision 10), because white is what the sketch face draws on.
 
 `ExportRender` plans it before the first page is drawn: one blob-free query
-(`SketchDao.pagesWithSketch`, ids only) marks each `PageBake.hasSketch`, and two pure functions do
-the rest — `bundlePages(pages)` is the interleaved list the bundle actually holds (`(pageIndex,
-sketch)` entries) and `bundlePositions(pages)` is where each page's **ink** lands, 1-based. Every
-count downstream is the bundle's: the header's declared page count, both `PageBundle.MAX_PAGES`
-refusals, the progress line, and the endnotes — whose `fromPage` link is `bundlePositions[index]`
-so a note on page 3 addresses the right page when page 1 has a sketch above it (`fromPageLabel`,
-what the caption *says*, is still the notebook's own number). `SketchRaster.toWebp` draws the
-page: the stored PNG decoded ARGB_8888, composited over an opaque white `RGB_565` bitmap at the
-page's own size, WEBP q100, both bitmaps recycled before the next page starts. **The row is read
-through `SketchDao.sketchFor` + `SketchRows.fitsPage`, not `SketchRepository.get`** — the
-repository's read soft-deletes a row that fails the header guard, and a render must not mutate what
-it renders (rule 1 of the bake); the guard is applied all the same, it simply refuses instead of
-dating the row out.
+(`SketchDao.pagesWithSketch`, ids only — **either raster** live marks the page) marks each
+`PageBake.hasSketch`, and two pure functions do the rest — `bundlePages(pages)` is the interleaved
+list the bundle actually holds (`(pageIndex, sketch)` entries) and `bundlePositions(pages)` is
+where each page's **ink** lands, 1-based. Every count downstream is the bundle's: the header's
+declared page count, both `PageBundle.MAX_PAGES` refusals, the progress line, and the endnotes —
+whose `fromPage` link is `bundlePositions[index]` so a note on page 3 addresses the right page when
+page 1 has a sketch above it (`fromPageLabel`, what the caption *says*, is still the notebook's own
+number). Since arc 45 "Ink" / G2 a sketch is **two rasters, one picture**: `SketchRaster.toWebp`
+reads both the graphite (`SketchContract.LAYER_GRAPHITE`) and ink (`LAYER_INK`) rows, decodes
+whichever are present ARGB_8888, and draws the page — graphite plain, then ink over it with
+`PorterDuff.Mode.DARKEN` (order-independent: the darker of the two per channel) — onto an opaque
+white `RGB_565` ground at the page's own size, WEBP q100, one decoded raster alive at a time so the
+peak stays two bitmaps whatever either row's size. **Each row is read through `SketchDao.sketchFor`
++ `SketchRows.fitsPage`, not `SketchRepository.get`** — the repository's read soft-deletes a row
+that fails the header guard, and a render must not mutate what it renders (rule 1 of the bake); the
+guard is applied all the same, it simply refuses instead of dating the row out.
 
-**A sketch that has gone missing between the plan and the bake writes a blank page of the page's
-size** (`SketchRaster.blank`, one `Log.w` naming the page id — never pixels). The bundle declared
-its page count in its header before the first page was written, so skipping the page would close
-short and the whole export would be refused as truncated; reading every sketch's bytes up front to
-make the count exact would cost the notebook's pixels in memory at once, which the render will not
-do.
+**A sketch that has gone entirely missing between the plan and the bake writes a blank page of the
+page's size** (`SketchRaster.blank`, one `Log.w` naming the page id — never pixels) — only when
+**neither** raster survives the guard; a page with, say, ink alone but a graphite row that failed
+the header check still exports its ink. The bundle declared its page count in its header before the
+first page was written, so skipping the page would close short and the whole export would be
+refused as truncated; reading every sketch's bytes up front to make the count exact would cost the
+notebook's pixels in memory at once, which the render will not do.
 
 **Naming.** The per-page delivery's answer is `ExportRender.Outcome.Ready.pageNames` — one
 `ExportNaming.PageName(number, title, sketch)` per **bundle** page (never per notebook page: with a
@@ -493,10 +497,11 @@ two-page bundle handed to a per-page exporter (`NSE · Image`) was refused outri
 (`bundle carries 2 pages; one expected`, nothing written, found by the user's hand the day after K7
 first landed). The fix, `ExportDelivery.perPage(delivery, scope, pageHasSketch)`: a **sketched**
 page at page scope is counted as a **folder**, the calendar's Day shape, never assumed a Whole the
-way an unsketched page still is; `SoilDao.hasLiveSketch(pageId)` (blob-free, `length(blob) > 0`) is
-read once in the Export screen's own open into `PageFacts.hasSketch`, and every one of the three
-doors that decide "is this a folder" now goes through the one `perPage(c)` call rather than each
-guessing separately. The document source is untouched (decision 5): a document export is the
+way an unsketched page still is; `SoilDao.hasLiveSketch(pageId)` (blob-free, `length(blob) > 0` on
+**either** raster row since arc 45 / G2 — `sketch_graphite` or `sketch_ink`, never the dead arc-43
+`sketch` name) is read once in the Export screen's own open into `PageFacts.hasSketch`, and every
+one of the three doors that decide "is this a folder" now goes through the one `perPage(c)` call
+rather than each guessing separately. The document source is untouched (decision 5): a document export is the
 authored text, and there is no page under it to have a sketch.
 
 ---

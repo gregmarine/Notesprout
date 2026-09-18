@@ -4,7 +4,7 @@ The plan **and the ledger** for the third arc of `NSE · Sketch`, in the shape o
 beside this file. Phases are appended to the ledger at the bottom as they land; the reference doc
 stays `extensions/sketch/docs/sketch.md`, grown at G5.
 
-**Status: Arc 45 — IN PROGRESS, G0 ✅ G1 ✅ (2026-09-17).** Phases are lettered **G** ("Graphite" — the
+**Status: Arc 45 — IN PROGRESS, G0 ✅ G1 ✅ G2 ✅ (2026-09-17).** Phases are lettered **G** ("Graphite" — the
 letters B C D F H K L M N P R T U V W X Z are in use across every `*_PLAN.md`; I was declined for
 its I/l ambiguity in a terminal). The g-paper half is g-paper's own **Phase 26 → 0.1.39** on its
 branch `two-rasters`.
@@ -122,7 +122,7 @@ What the exploration found (2026-09-17), which shapes every phase:
 |---|---|---|---|
 | **G0 — Plan lands** ✅ | Fable | Branches `ink` (Notesprout) and `two-rasters` (g-paper); this file; g-paper `PLAN.md` Phase 26 ⬜; memory `project_ink_arc.md`. | Both branches pushed; `file` says this is text (the NUL trap). |
 | **G1 — g-paper Phase 26 → 0.1.39: two rasters** ✅ | Opus on Fable's brief; Fable reviews the diff; Sonnet runs tests + installs the demo | `RasterLayer`; `CanvasPaperView` holds `graphiteRaster` + `inkRaster` (both lazy); `compositeIntoRaster` routes by style; the committed-layer draw flattens with `DARKEN`; `eraseRasterAlong` rubs graphite only; layer-qualified `get/load/copy/swapPageRaster` + layered listener callbacks, un-layered forms = graphite; `RasterDirty` unchanged; `clear()` drops both. Demo: the raster toggle draws pencil + pen + rubs, and a "flatten to PNG" render before a panel sees it (g-paper `CLAUDE.md`'s rule). `docs/api.md` + `CLAUDE.md` in the same commit. | g-paper `./gradlew test` green (core + ratta + onyx); **Paintsprout Onyx green on its pin**; Nomad demo: pen over pencil then rub — graphite lifts, ink stays; redraw ms with the flatten vs. 0.1.38; demo PSS; 0.1.39 published to mavenLocal (by the user's hand if the classifier refuses). |
-| **G2 — Seam + host data (API 20)** ⬜ | **Fable: the seam**; Opus: host side; Sonnet: test runs + doc rows | `ImageHeader` (WebP) replaces `PngHeader`; `SketchPageState` two streams; layered `readSketchChunk` / `saveSketchChunk`; `API_VERSION` 19 → 20, `MIN_API_VERSION_FOR_SKETCH` 17 → 20. Host: `TYPE_SKETCH_GRAPHITE` / `TYPE_SKETCH_INK` (+ the dead `sketch` in every exclusion), `SketchDao` / `SketchRepository` / `SketchRows` per layer, `SoilDao` lists, `SketchHostSession` two windows + two accumulators, `SketchHostBinder`, `SketchRaster` + `SketchCover` flatten, clip message. SN `docs/objects.md` (or wherever the row is specified) + root `docs/soil-file-format.md` if it names the row. | `:extension-api:testDebugUnitTest` (**the pin test — must be run**) + `:app:test` green; `PageClipTest` fixtures grown for the second row type. |
+| **G2 — Seam + host data (API 20)** ✅ | **Fable: the seam**; Opus: host side; Sonnet: test runs + doc rows | `ImageHeader` (WebP) replaces `PngHeader`; `SketchPageState` two streams; layered `readSketchChunk` / `saveSketchChunk`; `API_VERSION` 19 → 20, `MIN_API_VERSION_FOR_SKETCH` 17 → 20. Host: `TYPE_SKETCH_GRAPHITE` / `TYPE_SKETCH_INK` (+ the dead `sketch` in every exclusion), `SketchDao` / `SketchRepository` / `SketchRows` per layer, `SoilDao` lists, `SketchHostSession` two windows + two accumulators, `SketchHostBinder`, `SketchRaster` + `SketchCover` flatten, clip message. SN `docs/objects.md` (or wherever the row is specified) + root `docs/soil-file-format.md` if it names the row. | `:extension-api:testDebugUnitTest` (**the pin test — must be run**) + `:app:test` green; `PageClipTest` fixtures grown for the second row type. |
 | **G3 — The face** ⬜ | Opus; Sonnet: the adb walk (**clear the dev library's sketches first**, then a blank page) | Re-pin g-paper 0.1.39 (`sn-screen/build.gradle.kts` + the pin sentences). `:ext-sketch` declares API 20. `RasterImage` encodes WebP lossless (effort constant from the measurement), decodes via `BitmapFactory`; `SketchSaveGovernor` / `SketchSaver` / the park per layer; `RasterEditBuilder` + `SketchEdit.RasterChanged` carry a layer; `openPage` loads both rasters; Bring in ink → ink raster; the delete/undo/redo replay paths re-index both. **Phase-start question:** the WebP effort value, after Sonnet's on-device encode table. | `:ext-sketch:test` + root `./gradlew test` green; Sonnet's Nomad adb walk (two rows in the `.soil`, bytes per row vs. the old PNG, encode ms, reopen 0-pixel diff of the flatten, PSS, `logcat -b crash` empty); then **the hand**: pencil over pen, pen over pencil, rub each way, undo/redo across both, Bring in ink then rub, page turns, export PDF/PNG, cover, copy/paste page. |
 | **G4 — Walk adjustments** ⬜ | Opus (small); Fable if engine | Whatever the hand found (engine → another g-paper patch + Fable's review). Skipped if G3's walk is clean. | The user's word. |
 | **G5 — Docs + freeze** ⬜ | Sonnet drafts; Fable reviews every draft | `docs/sketch.md` (the two rasters, the format, the seam, traps, numbers), SN `docs/extensions.md` (API 20, the floor move), SN `CLAUDE.md` (API 20, pin 0.1.39, counts, arc row), root `CLAUDE.md`, g-paper `PLAN.md` close, memory. **Phase-start question:** a `versionName` bump (T5's answer was no — the version moves at a release). Merge `--no-ff` in both repos **only on the user's word**; the Manta only if asked. | `file` on every touched doc = text; the final hand walk. |
@@ -247,3 +247,84 @@ again, undo/redo of a mark, a pen line and a rub — *"Nothing feels off."* The 
 where the two cross.
 
 **Next.** G2 — the seam + host data (API 20). Fable writes the seam; the Nomad is not needed.
+
+### G2 — Outcome (2026-09-17)
+
+**Phase-start answers.** None asked — § Derived held. One call taken without asking, recorded
+under Deviations: `SKETCH_BAD_PNG` renamed `SKETCH_BAD_IMAGE` with the format.
+
+**Landed — the seam (Fable).** `ImageHeader` replaces `PngHeader` (file renamed; `RIFF`/`WEBP` +
+`VP8L` — signature `0x2F`, 14-bit `w−1`/`h−1`, version bits 0 — or `VP8X` — 24-bit `w−1`/`h−1`;
+`parse`/`size`/`matches`, little-endian by hand, 25 / 30 bytes are enough; a PNG fails it, no
+sniffing). `SketchContract`: `LAYER_GRAPHITE` = 0, `LAYER_INK` = 1, `LAYERS`, `isLayer`;
+`MIN_API_VERSION_FOR_SKETCH` **17 → 20** (the point's own codes 3–4 changed shape in place, so
+the action floor moved — the first single-point floor move after birth; `_PAGES` 18 and `_TOOLS`
+19 kept as history, inert below it); `SKETCH_BAD_IMAGE`; `MAX_BYTES`/`WATCH_BYTES` documented per
+row. `SketchPageState` wire form `pageKey · pageIndex · pageCount · width · height ·
+graphiteBytes · graphiteChunks · inkBytes · inkChunks · structuralToken` (the token stays last, the
+next tail's slot); `hasSketch` = either, `hasLayer`/`bytesFor`/`chunksOf`. `ISketchHost`:
+`readSketchChunk(layer, i)` / `saveSketchChunk(pageKey, layer, i, chunk, last)` replace the
+un-layered pair; the K5b and T2 tails untouched. `ExtensionContract.API_VERSION` 19 → **20**, the
+ledger entry written. Tests: `ImageHeaderTest` (both chunk forms, every truncation boundary, the
+PNG refusal, version bits, declared-length short/negative), `SketchPageStateTest` per stream
+(each pinned to its own total, both at the cap legal), `SketchContractTest` (layers pinned; the
+two method floors asserted *below* the action floor), `ExtensionContractTest` (20; 16–19 refused,
+20 accepted).
+
+**Landed — the host (Opus on Fable's brief, reviewed).** `SoilSchema.TYPE_SKETCH_GRAPHITE` /
+`TYPE_SKETCH_INK` + `TYPE_SKETCH_DEAD = "sketch"` (exclusion only); `SketchRows.typeFor(layer)`,
+`toRow(pageId, layer, …)`, `imageBytes` (both live types, the dead name refused);
+`SketchDao.sketchDigest/sketchFor(pageId, type)`, `pagesWithSketch` = either; `SketchRepository`
+`has` (either) / `get`/`save`/`clear(pageId, layer, …)` with every rule per row;
+`SoilDao.childrenOf` excludes all three names, `liveDescendantIds` carries the two,
+`liveErasableIds` excludes the two, `hasLiveSketch` = either; `ClipMessages` either;
+`NotebookSession.writeSketch/readSketch(pageId, layer, …)`. `SketchHostSession`: two read windows
++ two accumulators under one monitor, `setWindows(pageKey, graphite, ink): Windows` (atomic with
+the state), `readChunk(layer, i)`, `acceptChunk(pageKey, layer, …): Commit(pageKey, layer, bytes)`
+— independent accumulations (a refusal on one leaves the other), unknown layer refused before
+anything else. `SketchHostBinder` layered codes 3–4, log lines name the layer. `SketchHostHooks.state`
+reads both rows, parks both windows. **The flatten:** `SketchRaster.toWebp(w, h, graphite?, ink?)`
+and `SketchCover.render(repo, id, graphite?, ink?)` — white, graphite plain, ink with
+`PorterDuff.Mode.DARKEN`; export decodes one raster at a time (peak still two bitmaps); the cover
+samples both at one `sampleFor` size from the page's own size so they register; `ExportRender`
+reads both rows (never `SketchRepository.get`), blank page only when both are gone;
+`NotebookActivity`'s cover path reads both. `TestPng` → `TestWebp` (hand-built `VP8L`); every
+sketch test run per layer; `PageClipTest` fixtures carry both rows with different bytes.
+SN `docs/extensions.md` (the `API_VERSION` row's 20 entry, § The Sketch point + a "§ Arc 45 / G2:
+two rasters", audit rows 65/66 rewritten + row 69 added), `docs/export.md`, `docs/clipboard.md`,
+`docs/notebook.md`, `docs/library.md` (Sonnet drafts, Fable-reviewed; one claim corrected — X1
+moved three floors at once, so G2 is the first *single-point* floor move, not the first).
+
+**Deviations.**
+- `SKETCH_BAD_PNG` → **`SKETCH_BAD_IMAGE`**: a typed string compared verbatim on both sides,
+  renamed with the format since both sides are rebuilt and there is no legacy (decision 4).
+- **`:ext-sketch` carries a three-line compile shim** (`// G3:` in `SketchPush`, `SketchActivity`,
+  `RasterImage`): graphite layer only, `ImageHeader` in place of `PngHeader`. Not in the phase
+  table — added so the root build and `./gradlew test` stay green between G2 and G3 rather than
+  leaving a module uncompilable on the branch. The manifest still declares 19 (G3's item); a G2
+  build on a device would therefore show no sketch door, by design — G2 is not installed.
+- `SketchCover` allocates its ground from the page's own sampled size (ceiling division) before
+  either decode, rather than from the first decoded bitmap — needed so two decodes register.
+- Root `docs/soil-file-format.md` names no sketch row (checked) — nothing to update there; the
+  row's spec lives in SN's docs and `docs/sketch.md` (G5).
+
+**Tests.** `:extension-api` 292 → **299**; `:app` 1822 → **1844**; root **3621** (from 3592), 0
+failures; `:app:assembleDebug` + `:ext-sketch:assembleDebug` green (the AIDL regenerated, the shim
+compiles).
+
+**Measured.** Nothing on-device — the Nomad was not needed (the plan's own note). The seam's JVM
+byte arithmetic: a `VP8L` header parses from 25 bytes, `VP8X` from 30.
+
+**Traps found.**
+- "First floor move after birth" is false as first written: arc 22 / X1 moved three points' floors
+  (1 → 6) when floors were introduced. G2 is the first move of a *single* point's action floor.
+- With `MIN_API_VERSION_FOR_SKETCH` above `_PAGES`/`_TOOLS`, any test asserting a method floor is
+  *above* the action floor inverts — `SketchContractTest` now asserts the opposite and says why.
+
+**The hand.** Not needed this phase.
+
+**Next.** G3 — the face: re-pin g-paper 0.1.39, `:ext-sketch` declares 20, `RasterImage` encodes
+WebP lossless (effort from Sonnet's Nomad encode table — the phase-start question), the governor /
+saver / park per layer, `RasterEditBuilder` + `SketchEdit.RasterChanged` carry a layer, `openPage`
+loads both rasters, Bring in ink → ink; the three `// G3:` shim lines go. **Clear the Nomad's dev
+sketches before the walk** (decision 4).

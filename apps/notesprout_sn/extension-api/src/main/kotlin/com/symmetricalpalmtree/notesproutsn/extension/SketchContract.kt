@@ -7,22 +7,30 @@ package com.symmetricalpalmtree.notesproutsn.extension
  * and a rubbing eraser over a page-sized bitmap — and **the host owns every `.soil` write**, the
  * document editor's invariant enforced by the same process boundary.
  *
- * A notebook page may carry **one sketch** beside its ink, the way it carries a document. The
- * pixels are a PNG (ARGB_8888, transparent where empty, exactly the page's `width`×`height`) and
- * they cross **chunked in both directions** at [SKETCH_CHUNK_BYTES] ([ByteChunks], the [TextChunks]
- * recipe applied to bytes): the Binder transaction budget is ~1 MB and a page's PNG is measured in
- * megabytes. Reads pull from the host's read window ([ISketchHost.readSketchChunk]); writes push
- * into the host's save accumulator ([ISketchHost.saveSketchChunk]), and the last chunk commits.
+ * A notebook page may carry **one sketch** beside its ink, the way it carries a document. Since
+ * arc 45 "Ink" (G2, 2026-09-17 — `extensions/sketch/INK_PLAN.md`) a sketch is **two rasters, one
+ * picture**: a **graphite** raster the pencil bakes into and the rubber rubs, and an **ink** raster
+ * the gel pen and "Bring in ink" bake into and **nothing ever erases** (the user's decision 1 —
+ * "in the real world, ink is more permanent than pencil"). Every place the sketch is seen flattens
+ * the two with a *darken* composite, which is order-independent, so there is no top and bottom to
+ * explain; tools route by raster, never by colour. Each raster is a page-sized **lossless WebP with
+ * alpha** (RGBA, transparent where empty, exactly the page's `width`×`height` — [ImageHeader] is
+ * the guard), named on the wire by [LAYER_GRAPHITE] / [LAYER_INK], and crosses **chunked in both
+ * directions** at [SKETCH_CHUNK_BYTES] ([ByteChunks], the [TextChunks] recipe applied to bytes):
+ * the Binder transaction budget is ~1 MB and a page's raster is measured in megabytes. Reads pull
+ * from the host's per-layer read window ([ISketchHost.readSketchChunk]); writes push into the
+ * host's per-layer save accumulator ([ISketchHost.saveSketchChunk]), and the last chunk commits.
  *
  * **Pixels are never logged on either side** — counts, byte totals and durations only (the N-arc
  * privacy rule: what a person drew is content exactly as what they wrote is).
  *
  * **[MAX_BYTES] is the one deliberate deviation from "never refuse".** Everywhere else in this app
- * a size problem is absorbed rather than reported; here it cannot be. The row lives in the `.soil`
- * and comes back through a SQLCipher cursor window, so a PNG written above that window **can never
- * be read back** — accepting it would trade a refusal the person can see for pixels that quietly
- * stop existing. So the host refuses the save, says so, and leaves the stored row exactly as it
- * was. [WATCH_BYTES] is the earlier, silent line: logged, never refused.
+ * a size problem is absorbed rather than reported; here it cannot be. Each raster's row lives in
+ * the `.soil` and comes back through a SQLCipher cursor window, so an image written above that
+ * window **can never be read back** — accepting it would trade a refusal the person can see for
+ * pixels that quietly stop existing. So the host refuses the save, says so, and leaves the stored
+ * row exactly as it was. The cap is **per raster** (decision 3). [WATCH_BYTES] is the earlier,
+ * silent line: logged, never refused.
  *
  * Nothing rides the screen's launch Intent but [ExtensionContract.EXTRA_CHROME_HIDDEN] — the
  * editor's and the reader's precedent. Show-pages is a **result code**
@@ -41,12 +49,20 @@ object SketchContract {
         "com.symmetricalpalmtree.notesproutsn.extension.SKETCH_SCREEN"
 
     /**
-     * The point's **birth floor**: `ACTION_SKETCH` is listed in `MIN_API_VERSIONS` only at 17,
-     * because it was never reachable below it — the Bible's 11 and the calendar's 7 exactly. Pinned
-     * forever: a floor pins to its birth number, never to [ExtensionContract.API_VERSION] (the
-     * arc-31 / HV1 lesson, which is what made `CloudContractTest` re-pin the cloud's to 8).
+     * The point's **action floor** — **20 since arc 45 "Ink" / G2 (2026-09-17)**, moved from its
+     * birth number 17 (arc 43 / K2). A floor pins to the number at which the point's *shape* was
+     * last settled, never to [ExtensionContract.API_VERSION] (the arc-31 / HV1 lesson, which is what
+     * made `CloudContractTest` re-pin the cloud's to 8); until G2 that was its birth. G2 changed the
+     * point's own calls **in place** rather than appending tails — [ISketchHost.readSketchChunk] and
+     * [ISketchHost.saveSketchChunk] take a raster layer at transaction codes 3 and 4, and
+     * [SketchPageState]'s wire form carries two byte totals — so a 17–19 sketch screen against a 20
+     * host would land the old shapes on the new codes, and a 20 screen against a 19 host the
+     * reverse. `MIN_API_VERSIONS` lists `ACTION_SKETCH` at 20 and a host or screen below it never
+     * binds the point at all. This is the third non-tail break in the seam's history (after arc 21 /
+     * W4's `TagShowing` and arc 22 / X1's store) and the first the sketch point has taken, granted
+     * by the user's decision 4: **no legacy** — no shipped library depends on the old shape.
      */
-    const val MIN_API_VERSION_FOR_SKETCH: Int = 17
+    const val MIN_API_VERSION_FOR_SKETCH: Int = 20
 
     /**
      * The **method** floor for [ISketchHost.insertPage] / [ISketchHost.deletePage] /
@@ -54,12 +70,12 @@ object SketchContract {
      * 2026-09-15 — the user's amendment to decision 7: the face inserts and deletes pages exactly
      * as the notebook does, **and its own undo/redo gestures reverse one**). The number an
      * extension declares is what it **requires of the host**, so a sketch screen that calls those
-     * five transaction codes declares 18 and is never discovered by a 17 host that would land them
+     * five transaction codes declared 18 and was never discovered by a 17 host that would land them
      * on nothing — the arc-39 `openReference` precedent, this seam's other host-side stub.
      *
-     * **Not an action floor:** [MIN_API_VERSION_FOR_SKETCH] stays 17 and `MIN_API_VERSIONS` is
-     * untouched, so a screen declaring 17 still binds and still draws; it simply never turns a page
-     * into a new one. Only `:ext-sketch` redeclares.
+     * **History since G2:** the action floor [MIN_API_VERSION_FOR_SKETCH] moved to 20, above this
+     * number, so every screen the host can bind at all already clears it — the constant is kept
+     * as the ledger of when those five methods arrived, and is inert as a gate.
      */
     const val MIN_API_VERSION_FOR_SKETCH_PAGES: Int = 18
 
@@ -67,36 +83,62 @@ object SketchContract {
      * The **method** floor for [ISketchHost.toolSettings] / [ISketchHost.putToolSettings] (arc 44
      * "Pencils" / T2, 2026-09-17 — the user's decision 6: the face's tool, pencil shade and pencil
      * size are **remembered on the device**). [MIN_API_VERSION_FOR_SKETCH_PAGES]'s shape exactly: a
-     * sketch screen that calls transaction codes 12–13 declares 19 and is never discovered by an
+     * sketch screen that calls transaction codes 12–13 declared 19 and was never discovered by an
      * 18 host that would land them on nothing.
      *
-     * **Not an action floor:** [MIN_API_VERSION_FOR_SKETCH] stays 17 and `MIN_API_VERSIONS` is
-     * untouched. A screen declaring 18 still binds, draws and turns pages; it simply does not
-     * remember its tools. Only `:ext-sketch` redeclares.
+     * **History since G2**, like [MIN_API_VERSION_FOR_SKETCH_PAGES]: below the action floor, kept
+     * as the ledger of when the two tool tails arrived, inert as a gate.
      */
     const val MIN_API_VERSION_FOR_SKETCH_TOOLS: Int = 19
 
-    // ── The PNG on the wire ──────
+    // ── The two rasters (arc 45 / G2) ──────
+
+    /**
+     * The **graphite** raster — what the pencil bakes into and the rubbing eraser rubs. The wire's
+     * name for it on [ISketchHost.readSketchChunk] / [ISketchHost.saveSketchChunk], and the
+     * un-layered meaning every g-paper call kept (`RasterLayer.GRAPHITE`, 0.1.39).
+     */
+    const val LAYER_GRAPHITE: Int = 0
+
+    /**
+     * The **ink** raster — what the gel pen and "Bring in ink" bake into. **Never erased** (decision
+     * 1): the eraser rubs graphite only and never reads this raster. A future "resists" would be a
+     * fresh decision, not a value here.
+     */
+    const val LAYER_INK: Int = 1
+
+    /** Every layer the wire knows, in the order the host announces and flattens them (graphite
+     *  first, then ink darkened over it). A layer outside this list on a call is
+     *  `IllegalArgumentException`. */
+    val LAYERS: List<Int> = listOf(LAYER_GRAPHITE, LAYER_INK)
+
+    /** Whether [layer] names a raster this seam carries — the host's first check on either
+     *  chunk call, and what [SketchPageState] reads its per-layer fields by. */
+    fun isLayer(layer: Int): Boolean = layer == LAYER_GRAPHITE || layer == LAYER_INK
+
+    // ── The rasters on the wire ──────
 
     /** Most bytes in one chunk — 512 KiB, the store's inline carrier, comfortably under the ~1 MB
      *  Binder transaction budget with the ink transfers' headroom. [ByteChunks] holds the rule. */
     const val SKETCH_CHUNK_BYTES: Int = 512 * 1024
 
     /**
-     * The hard refusal: most bytes one page's PNG may be — **6 MiB, the SQLCipher cursor window**.
-     * A blob larger than the window cannot be read back out of the `.soil` at all, so a PNG written
-     * above this is pixels the person can never see again. The host's accumulator re-checks the
-     * running total on every chunk and refuses with [SKETCH_TOO_LARGE]; nothing is written and the
-     * stored row stays exactly as it was. See the class note on why this one refuses.
+     * The hard refusal: most bytes **one raster's** image may be — **6 MiB, the SQLCipher cursor
+     * window**, applied per row (each raster is its own row in the `.soil`). A blob larger than the
+     * window cannot be read back out of the `.soil` at all, so an image written above this is
+     * pixels the person can never see again. The host's accumulator re-checks the running total on
+     * every chunk and refuses with [SKETCH_TOO_LARGE]; nothing is written and the stored row stays
+     * exactly as it was. See the class note on why this one refuses.
      */
     const val MAX_BYTES: Int = 6 * 1024 * 1024
 
     /** The quiet line: a save over this is **logged** (bytes only, never pixels) and accepted. It
-     *  is how a page on its way to [MAX_BYTES] shows up in a walk's log before it is a problem. */
+     *  is how a raster on its way to [MAX_BYTES] shows up in a walk's log before it is a problem.
+     *  Per raster, like the refusal. */
     const val WATCH_BYTES: Int = 4_000_000
 
     /**
-     * Most chunks one page's PNG can produce — **computed** from the other two (the arc-11 / J6
+     * Most chunks one raster's image can produce — **computed** from the other two (the arc-11 / J6
      * lesson: derive the bound from the rules that produce it, never hand-write it). [ByteChunks]
      * fills every chunk but the last, so `MAX / CHUNK` is exact when the cap divides evenly and
      * short by one when it does not; `+ 1` covers both, and an empty image's one empty chunk is
@@ -210,13 +252,14 @@ object SketchContract {
     const val SKETCH_TOO_LARGE: String = "SKETCH_TOO_LARGE"
 
     /**
-     * The committed bytes are not a PNG the host will store: no signature, a truncated header, a
-     * first chunk that is not `IHDR`, or an `IHDR` whose width/height are not the page's
-     * ([PngHeader.matches], checked on the **last** chunk, before any decode). Nothing was written.
-     * A mis-sized image is the one thing a later read cannot recover from, so it is refused at the
-     * door rather than stored and discovered.
+     * The committed bytes are not a WebP the host will store: not `RIFF`/`WEBP`, a truncated
+     * header, a first chunk that is neither `VP8L` nor `VP8X`, or a header whose width/height are
+     * not the page's ([ImageHeader.matches], checked on the **last** chunk, before any decode).
+     * Nothing was written. A mis-sized image is the one thing a later read cannot recover from, so
+     * it is refused at the door rather than stored and discovered. (`SKETCH_BAD_PNG` until G2 —
+     * renamed with the format, both sides rebuilt, no legacy.)
      */
-    const val SKETCH_BAD_PNG: String = "SKETCH_BAD_PNG"
+    const val SKETCH_BAD_IMAGE: String = "SKETCH_BAD_IMAGE"
 
     // There is deliberately NO "no ink" refusal. `requestInk` on a page with no bare strokes answers
     // **0 chunks**, which is a legal answer to a legal question — the pad's zero-chunk park (arc 31 /

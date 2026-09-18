@@ -2,6 +2,7 @@ package com.symmetricalpalmtree.notesproutsn.ext.sketch
 
 import com.symmetricalpalmtree.notesproutsn.extension.ByteChunks
 import com.symmetricalpalmtree.notesproutsn.extension.ISketchHost
+import com.symmetricalpalmtree.notesproutsn.extension.SketchContract
 
 /**
  * The one chunk stream a sketch save crosses on (arc 43 / K5) — written once because it has **two**
@@ -14,7 +15,7 @@ import com.symmetricalpalmtree.notesproutsn.extension.ISketchHost
  * every other save. Blocking Binder calls, so **never from the main thread**.
  *
  * Any refusal ([com.symmetricalpalmtree.notesproutsn.extension.SketchContract.SKETCH_TOO_LARGE],
- * [com.symmetricalpalmtree.notesproutsn.extension.SketchContract.SKETCH_BAD_PNG], a dead binder)
+ * [com.symmetricalpalmtree.notesproutsn.extension.SketchContract.SKETCH_BAD_IMAGE], a dead binder)
  * comes back out of here as it crossed; the caller parks the pixels rather than losing them.
  */
 object SketchPush {
@@ -22,6 +23,7 @@ object SketchPush {
     /** Push [png] to the host as the sketch of [pageKey]. Throws on any refusal. */
     fun push(host: ISketchHost, pageKey: String, png: ByteArray) {
         val chunks = ByteChunks.chunk(png)
-        for (i in chunks.indices) host.saveSketchChunk(pageKey, i, chunks[i], i == chunks.lastIndex)
+        // G3: the layer is graphite-only here until the face carries two rasters (G2's compile shim).
+        for (i in chunks.indices) host.saveSketchChunk(pageKey, SketchContract.LAYER_GRAPHITE, i, chunks[i], i == chunks.lastIndex)
     }
 }

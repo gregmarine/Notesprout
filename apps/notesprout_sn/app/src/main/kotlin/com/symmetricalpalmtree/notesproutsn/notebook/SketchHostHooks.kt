@@ -23,6 +23,11 @@ import kotlinx.coroutines.withContext
  * sketch is read and written here, in the host, which is og's invariant 3 with a process boundary
  * enforcing it.
  *
+ * **A sketch is two rasters since arc 45 / G2** — graphite and ink — so every state-answering hook
+ * reads both rows and parks both windows in one [SketchHostSession.setWindows], and a commit writes
+ * the one layer it names. Nothing else about this class moved: the target, the ledger, the sealed
+ * refusal and the bounded open wait are all indifferent to how many pictures a page carries.
+ *
  * **Threading.** Every method runs on the arbitrary pooled **Binder thread** the extension's call
  * arrived on — never Main — so the `runBlocking` each one opens over the suspending DAO work is
  * exactly the allowed case of it. A Binder transaction cannot be cancelled; the extension's own
@@ -213,10 +218,10 @@ class SketchHostHooks(
     }
 
     /**
-     * The current target page's state, with its stored PNG parked in the read window.
+     * The current target page's state, with **both** its stored rasters parked in the read windows.
      *
-     * `setWindow` is the last thing done and its answer is the state's `sketchChunks`: window and
-     * state are loaded together, which is the contract's atomicity.
+     * `setWindows` is the last thing done and its answer is the state's two chunk counts: windows
+     * and state are loaded together, which is the contract's atomicity.
      */
     override fun loadCurrent(session: SketchHostSession): SketchPageState = runBlocking {
         withContext(Dispatchers.IO) {
@@ -232,12 +237,12 @@ class SketchHostHooks(
     }
 
     /**
-     * Turn the target one page in [direction] and load the window with that page's pixels.
+     * Turn the target one page in [direction] and load both windows with that page's pixels.
      *
      * **At either edge the same page is answered, unchanged** — the contract's rule, and the reason
      * this hook has no null: a turn is never an exception and never a null the screen has to word.
      * Anything that fails on the way is a genuine failure and crosses as one; there is nothing to
-     * "stay put" on the way to, because the window is only touched once the page has been found.
+     * "stay put" on the way to, because the windows are only touched once the page has been found.
      */
     override fun requestPage(session: SketchHostSession, direction: Int): SketchPageState = runBlocking {
         withContext(Dispatchers.IO) {
@@ -256,13 +261,17 @@ class SketchHostHooks(
     }
 
     /**
-     * A completed save, straight into the `.soil` through the session's one serial writer
-     * ([NotebookSession.writeSketch] — see its KDoc for why the write is drained **and awaited
-     * exceptionally**: the extension's `saveSketchChunk` returning is the screen's only "it
+     * A completed save of **one raster**, straight into the `.soil` through the session's one serial
+     * writer ([NotebookSession.writeSketch] — see its KDoc for why the write is drained **and
+     * awaited exceptionally**: the extension's `saveSketchChunk` returning is the screen's only "it
      * landed", so a failure reported as success would drop a drawing that has no other copy).
      *
+     * The commit names its layer, and only that layer's row is written or cleared — a graphite push
+     * and an ink push are two saves of one picture, which is what lets the face re-encode only what
+     * it changed.
+     *
      * The page size is the notebook's own, never anything the extension said, and the two typed
-     * refusals ([SketchContract.SKETCH_TOO_LARGE] / [SketchContract.SKETCH_BAD_PNG]) come back out
+     * refusals ([SketchContract.SKETCH_TOO_LARGE] / [SketchContract.SKETCH_BAD_IMAGE]) come back out
      * of the repository with nothing written. A key naming a page this notebook no longer has is
      * an `IllegalArgumentException` from `writeSketch` — which is the structural half of "a save is
      * accepted for any **live** page".
@@ -270,7 +279,7 @@ class SketchHostHooks(
     override fun commit(commit: SketchHostSession.Commit) = runBlocking {
         withContext(Dispatchers.IO) {
             val nb = openSession()
-            nb.writeSketch(commit.pageKey, commit.png)
+            nb.writeSketch(commit.pageKey, commit.layer, commit.bytes)
         }
     }
 
@@ -493,9 +502,14 @@ class SketchHostHooks(
 
     /**
      * The one place a [SketchPageState] is built, so the hooks that answer with one cannot drift on
-     * the page facts. [SketchHostSession.setWindow] runs here and its answer is the state's
-     * `sketchChunks` — the window and the state that describes it are loaded together, which is the
-     * contract's atomicity.
+     * the page facts. [SketchHostSession.setWindows] runs here and its answer is the state's two
+     * chunk counts — the windows and the state that describes them are loaded together, which is
+     * the contract's atomicity, and the reason both rasters are read before either window moves.
+     *
+     * **Two blob reads, and they are still the only page-sized images the host pulls out of the
+     * file.** A layer with no row answers null, which becomes an empty array — the wire form for
+     * "this page has no graphite" / "no ink" — so a page drawn in pencil alone costs exactly one
+     * read's worth of pixels and an untouched page costs none.
      *
      * [structuralToken] is empty for every answer but the two that **make** a structural edit
      * (K5b): a turn names no edit, and neither does a replay of one.
@@ -507,18 +521,21 @@ class SketchHostHooks(
         structuralToken: String = "",
     ): SketchPageState {
         val page = nb.pages[index]
-        // Null for a page with no sketch AND for a stored row the header guard refused (which it
+        // Null for a layer with no row AND for a stored row the header guard refused (which it
         // soft-deletes on the way past) — the screen starts from blank paper either way.
-        val png = nb.readSketch(page.id) ?: ByteArray(0)
-        val chunks = session.setWindow(page.id, png)
+        val graphite = nb.readSketch(page.id, SketchContract.LAYER_GRAPHITE) ?: ByteArray(0)
+        val ink = nb.readSketch(page.id, SketchContract.LAYER_INK) ?: ByteArray(0)
+        val windows = session.setWindows(page.id, graphite, ink)
         return SketchPageState(
             pageKey = page.id,
             pageIndex = index,
             pageCount = nb.pages.size,
             width = page.width,
             height = page.height,
-            sketchBytes = png.size,
-            sketchChunks = chunks,
+            graphiteBytes = graphite.size,
+            graphiteChunks = windows.graphiteChunks,
+            inkBytes = ink.size,
+            inkChunks = windows.inkChunks,
             structuralToken = structuralToken,
         )
     }

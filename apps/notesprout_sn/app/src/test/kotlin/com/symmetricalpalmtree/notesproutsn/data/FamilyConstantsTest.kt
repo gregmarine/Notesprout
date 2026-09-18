@@ -47,9 +47,15 @@ class FamilyConstantsTest {
         assertEquals("text", SoilSchema.TYPE_TEXT)
         assertEquals("shape", SoilSchema.TYPE_SHAPE)
         assertEquals("sticky_note", SoilSchema.TYPE_STICKY)
-        // Arc 43 / K3: og has no sketch row, so this name is SN's own — pinned here anyway,
-        // because a `.soil` this app wrote must keep reading as the same file after any rename.
-        assertEquals("sketch", SoilSchema.TYPE_SKETCH)
+        // Arc 43 / K3, split in two at arc 45 / G2: og has no sketch row, so these names are SN's
+        // own — pinned here anyway, because a `.soil` this app wrote must keep reading as the same
+        // file after any rename. The dead arc-43 name is pinned with them: it is excluded from
+        // `childrenOf` by that exact string (decision 4, no legacy), and a typo there would let a
+        // leftover megabyte-blob row surface on every page read.
+        assertEquals("sketch_graphite", SoilSchema.TYPE_SKETCH_GRAPHITE)
+        assertEquals("sketch_ink", SoilSchema.TYPE_SKETCH_INK)
+        assertEquals("sketch", SoilSchema.TYPE_SKETCH_DEAD)
+        // One `"order"` for both rasters: neither is above the other.
         assertEquals(-1, SoilSchema.SKETCH_ORDER)
         assertEquals("", SoilSchema.ROOT_PARENT)
         assertEquals("BLANK", SoilSchema.TEMPLATE_BLANK)

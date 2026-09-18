@@ -118,9 +118,14 @@ object ExtensionRegistry {
      * question this arc asks. Re-run on every resume of a screen that shows the sketch door — and
      * that door is **GONE** whenever this answers null, never disabled.
      *
-     * The floor is [SketchContract.MIN_API_VERSION_FOR_SKETCH] (17), carried by
-     * [ExtensionContract.minApiVersion] like every other point's — a point born at 17 was never
-     * reachable below it, so nothing existing moved with the bump.
+     * The floor is [SketchContract.MIN_API_VERSION_FOR_SKETCH] — **20 since arc 45 "Ink" / G2**,
+     * moved from the point's birth number 17 — carried by [ExtensionContract.minApiVersion] like
+     * every other point's. G2 changed the point's own calls *in place* (a raster layer on the two
+     * chunk methods, a second byte/chunk pair on the state), so the floor moved with the shape: a
+     * 17–19 sketch screen would land its old calls on the new transaction codes. Granted by the
+     * user's decision 4 — no legacy — and the consequence is the one X1 had, deliberately: a sketch
+     * extension below 20 is simply never discovered, and the notebook's door is GONE until it is
+     * rebuilt.
      */
     suspend fun sketch(context: Context): ProviderRef? = withContext(Dispatchers.IO) {
         val all = discover(context.applicationContext, SketchContract.ACTION_SKETCH)

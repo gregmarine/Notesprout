@@ -6,8 +6,8 @@ package com.symmetricalpalmtree.notesproutsn.data.soil
  * columns in the same order, same index name, same `user_version` — Room's identity hash must
  * match or a Paper-created file fails validation on open (and vice versa). SN writes only the
  * row types notebook/page/template/stroke plus its own additive object types (heading, link,
- * document, arc 28's text / shape / sticky_note, and arc 43's sketch); Paper's `object` rows are
- * ignored.
+ * document, arc 28's text / shape / sticky_note, and arc 43's sketch — two rows since arc 45 / G2,
+ * [TYPE_SKETCH_GRAPHITE] and [TYPE_SKETCH_INK]); Paper's `object` rows are ignored.
  *
  * Room owns the `notebook` table (generated from [SoilObjectEntity]); the DDL below is the
  * *contract* those entity annotations must produce. `notebook_meta` is created by raw SQL in the
@@ -108,33 +108,65 @@ object SoilSchema {
     const val TYPE_STICKY = "sticky_note"
 
     /**
-     * Sketch (arc 43 / K3) — the seventh additive row type, and the first whose payload is a
-     * **picture of the page rather than a mark on it**: `parentId` = page id · `blob` = the PNG
-     * (ARGB_8888, transparent where empty, **exactly** the page's `width` × `height`) ·
-     * `"order"` = [SKETCH_ORDER] · everything else null. No version bump, no migration; Paper
-     * ignores the rows (the proven-safe additive pattern, the seventh time). `SKETCH_PLAN.md`
-     * § Derived / Storage.
+     * Sketch, the **graphite** raster (arc 43 / K3, split in two at arc 45 / G2) — the seventh
+     * additive row *kind*, and the first whose payload is a **picture of the page rather than a
+     * mark on it**: `parentId` = page id · `blob` = a page-sized **lossless WebP with alpha** (RGBA,
+     * transparent where empty, **exactly** the page's `width` × `height`) · `"order"` =
+     * [SKETCH_ORDER] · everything else null. No version bump, no migration; Paper ignores the rows
+     * (the proven-safe additive pattern). `INK_PLAN.md` § Decisions / Derived.
      *
-     * **One live row per page**, and it is **minted on the first save, never on open**: a page
-     * nobody has drawn on has no row at all, so a Sketch notebook costs what its sketches cost.
-     * Later saves rewrite the same row in place ([SoilDao.setBlob], `createdAt` kept) — a row per
-     * save would make a notebook's size a function of how long the person worked rather than of
-     * how much they drew.
+     * **A sketch is two rows since G2** — this one, which the pencil bakes into and the rubbing
+     * eraser rubs, and [TYPE_SKETCH_INK], which the gel pen and "Bring in ink" bake into and
+     * nothing ever erases (the user's decision 1). Every place the sketch is *seen* flattens the
+     * two with a darken composite, which is order-independent, so the file has no top and bottom to
+     * record: the row name is the whole of the layering. The seventh additive row type became two,
+     * and the format's version did not move, because both are additive exactly as the one was.
      *
-     * **Blank means absent** (the `document` row's rule, applied to pixels): an all-transparent
-     * sketch is not stored, and the wire form for "clear this page" is an empty byte array, which
-     * soft-deletes the live row. A sketch is soft-deleted with its page and rides copy / cut /
-     * paste / delete / undo like any other child ([SoilDao.liveDescendantIds]) — but **not** Erase
-     * page ([SoilDao.liveErasableIds], decision 11: Erase page is ink only), and it is invisible
-     * to [SoilDao.childrenOf] (a page-sized blob must never ride an untyped page read).
+     * **One live row per page per layer**, each **minted on its own first save, never on open**: a
+     * page nobody has drawn on has no row at all, and a page with only ink has no graphite row.
+     * Later saves rewrite that row in place ([SoilDao.setBlob], `createdAt` kept) — a row per save
+     * would make a notebook's size a function of how long the person worked rather than of how
+     * much they drew.
+     *
+     * **Blank means absent, per row** (the `document` row's rule, applied to pixels): an
+     * all-transparent raster is not stored, and the wire form for "clear this layer" is an empty
+     * byte array, which soft-deletes that layer's live row and leaves the other alone. Both rows
+     * are soft-deleted with their page and ride copy / cut / paste / delete / undo like any other
+     * child ([SoilDao.liveDescendantIds]) — but **not** Erase page ([SoilDao.liveErasableIds],
+     * decision 11 of arc 43: Erase page is ink only), and both are invisible to [SoilDao.childrenOf]
+     * (a page-sized blob must never ride an untyped page read).
      */
-    const val TYPE_SKETCH = "sketch"
+    const val TYPE_SKETCH_GRAPHITE = "sketch_graphite"
 
     /**
-     * A sketch row's `"order"` — **-1, outside every z-order space in the file**. Every other
-     * `"order"` in this format is a position among siblings of the same type, dense from 0; the
-     * sketch is not one of the marks on the page, it is what all of them came to, so it is given a
-     * number no ordering ever reaches rather than a place in one.
+     * Sketch, the **ink** raster (arc 45 / G2) — [TYPE_SKETCH_GRAPHITE]'s twin in every respect but
+     * what writes it: the gel pen and "Bring in ink" bake here, and **nothing ever erases it**
+     * (decision 1 — "in the real world, ink is more permanent than pencil"). Same columns, same
+     * `"order"`, same blank-means-absent rule, same lossless WebP at exactly the page's size.
+     */
+    const val TYPE_SKETCH_INK = "sketch_ink"
+
+    /**
+     * The **dead** sketch row name — arcs 43–44's single un-layered PNG row, replaced by the two
+     * above at arc 45 / G2 under the user's decision 4: **no legacy.** There is no migration, no
+     * PNG sniffing and no warning; this name exists so that a leftover row on a device that ran an
+     * older build is **excluded from [SoilDao.childrenOf]** and therefore never surfaces as a child
+     * of its page (an untyped page read would hand a megabyte of unreadable pixels to a caller that
+     * has no idea what they are).
+     *
+     * Beyond that one exclusion it is ignored entirely: never read, never written, never migrated,
+     * never counted, and not carried by [SoilDao.liveDescendantIds] — a row nothing can read is a
+     * row nothing should copy. The close purge takes it with its page like any other soft-deleted
+     * row; a live one simply sits there, costing the bytes it already cost.
+     */
+    const val TYPE_SKETCH_DEAD = "sketch"
+
+    /**
+     * A sketch row's `"order"` — **-1, outside every z-order space in the file**, and the same
+     * number for both rasters. Every other `"order"` in this format is a position among siblings of
+     * the same type, dense from 0; a sketch raster is not one of the marks on the page, it is what
+     * all of them came to, so it is given a number no ordering ever reaches rather than a place in
+     * one. The two rows sharing it says the same thing the flatten does: neither is above the other.
      */
     const val SKETCH_ORDER = -1
 

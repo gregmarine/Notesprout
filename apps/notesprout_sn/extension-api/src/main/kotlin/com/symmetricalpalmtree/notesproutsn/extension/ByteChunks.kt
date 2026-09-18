@@ -1,7 +1,8 @@
 package com.symmetricalpalmtree.notesproutsn.extension
 
 /**
- * The contract's chunking rule for a sketch's PNG (arc 43 / K2), written once for both sides — the
+ * The contract's chunking rule for a sketch raster's image (arc 43 / K2; a lossless WebP per
+ * raster since arc 45 / G2), written once for both sides — the
  * [TextChunks] recipe applied to **bytes**, and simpler than it: bytes have no surrogate pairs, so
  * every chunk but the last is exactly [SketchContract.SKETCH_CHUNK_BYTES] and [join] is plain
  * concatenation.

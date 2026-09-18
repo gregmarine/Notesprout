@@ -92,16 +92,19 @@ class DocumentWhitelistTest {
         }
 
     /**
-     * Arc 43 / K3: a `sketch` is a *picture of* the page, not content on it — the `document` rule
-     * applied to pixels. A drawing made after a draft was written must not make the draft read
-     * "the page has changed since", because the page's words did not change: nothing in a sketch
-     * ever reaches the recognized text a document is seeded from.
+     * Arc 43 / K3, two rows since arc 45 / G2: a sketch raster is a *picture of* the page, not
+     * content on it — the `document` rule applied to pixels. A drawing made after a draft was
+     * written must not make the draft read "the page has changed since", because the page's words
+     * did not change: nothing in a sketch ever reaches the recognized text a document is seeded
+     * from. Neither raster does, and neither does a leftover arc-43 row.
      */
     @Test
-    fun `a newer sketch row raises neither watermark`() = runBlocking {
+    fun `a newer sketch raster raises neither watermark`() = runBlocking {
         val f = Fixture()
         f.notebook()
-        f.put("sk-a", pageA, SoilSchema.TYPE_SKETCH, 9_000L)
+        f.put("sk-g", pageA, SoilSchema.TYPE_SKETCH_GRAPHITE, 9_000L)
+        f.put("sk-i", pageA, SoilSchema.TYPE_SKETCH_INK, 9_001L)
+        f.put("sk-old", pageA, SoilSchema.TYPE_SKETCH_DEAD, 9_002L)
         assertEquals(100L, f.docs.maxContentUpdatedAt(pageA))
         assertEquals(100L, f.docs.notebookMaxContentUpdatedAt(rootId))
     }

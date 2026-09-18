@@ -157,33 +157,39 @@ class SoilCompactorTest {
     }
 
     /**
-     * Arc 43 / K3: the sketch needs no code in the purge either — it is a soft-deleted row like any
-     * other, and a purged page's cascade is type-agnostic. These two are what say so, and they fail
-     * if the purge is ever taught to enumerate types or to exempt a second kind beside `template`.
-     * The stakes are the opposite of a template's: a sketch left behind after its page is gone pays
-     * **megabytes** of rent in an encrypted file forever.
+     * Arc 43 / K3, two rows since arc 45 / G2: a sketch raster needs no code in the purge either —
+     * it is a soft-deleted row like any other, and a purged page's cascade is type-agnostic. These
+     * two are what say so, and they fail if the purge is ever taught to enumerate types or to exempt
+     * a second kind beside `template`. The stakes are the opposite of a template's: a raster left
+     * behind after its page is gone pays **megabytes** of rent in an encrypted file forever — and
+     * that now includes the **dead** arc-43 row, which nothing else in the app reads but the purge
+     * still carries away with its page, exactly because it does not enumerate types.
      */
     @Test
-    fun aSoftDeletedSketchPurges() {
+    fun aSoftDeletedSketchRasterPurges() {
         val rows = listOf(
             root(), page("p1"), stroke("s1", "p1"),
-            Row("sk-1", "p1", SoilSchema.TYPE_SKETCH, deleted = true),   // cleared, or erased-and-closed
-            Row("sk-2", "p2", SoilSchema.TYPE_SKETCH, deleted = false),
+            // cleared, or erased-and-closed — one raster of a page whose other raster is live
+            Row("sk-g1", "p1", SoilSchema.TYPE_SKETCH_GRAPHITE, deleted = true),
+            Row("sk-i1", "p1", SoilSchema.TYPE_SKETCH_INK, deleted = false),
+            Row("sk-g2", "p2", SoilSchema.TYPE_SKETCH_GRAPHITE, deleted = false),
             page("p2"),
         )
-        assertEquals(setOf("sk-1"), SoilCompactor.purgeIds(rows))
+        assertEquals(setOf("sk-g1"), SoilCompactor.purgeIds(rows))
     }
 
     @Test
-    fun aPurgedPageTakesItsSketchWithIt() {
+    fun aPurgedPageTakesBothItsRastersAndAnyDeadOneWithIt() {
         val rows = listOf(
             root(), template("t1"),
             page("p1", deleted = true),
-            Row("sk-1", "p1", SoilSchema.TYPE_SKETCH, deleted = false),
+            Row("sk-g1", "p1", SoilSchema.TYPE_SKETCH_GRAPHITE, deleted = false),
+            Row("sk-i1", "p1", SoilSchema.TYPE_SKETCH_INK, deleted = false),
+            Row("sk-old", "p1", SoilSchema.TYPE_SKETCH_DEAD, deleted = false),
             stroke("s1", "p1"),
-            page("p2"), Row("sk-2", "p2", SoilSchema.TYPE_SKETCH, deleted = false),
+            page("p2"), Row("sk-g2", "p2", SoilSchema.TYPE_SKETCH_GRAPHITE, deleted = false),
         )
-        assertEquals(setOf("p1", "sk-1", "s1"), SoilCompactor.purgeIds(rows))
+        assertEquals(setOf("p1", "sk-g1", "sk-i1", "sk-old", "s1"), SoilCompactor.purgeIds(rows))
     }
 
     @Test
