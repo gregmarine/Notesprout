@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The pencil's BODY as a fill (arc 44 / T3) — `ic_pen`'s first path, closed with `z`, with no
+    stroke at all and the same 24 viewport. Layered UNDER `ic_pen` it lands exactly inside that
+    glyph: the outline's 2 px stroke is centred on this very path, so it covers the fill's own edge
+    on both sides and the outline stays solid black at every shade. The ferrule line (`ic_pen`'s
+    second path) is not part of the body and so is not here.
+
+    It is tinted at runtime with the armed shade (`PencilIcon`, `:ext-sketch`) and is never drawn on
+    its own; the black declared here is what an untinted instance reads as — the black pencil, which
+    is level 0 of the ladder and an honest default rather than a placeholder.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="@color/inkBlack"
+        android:pathData="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4z"/>
+</vector>

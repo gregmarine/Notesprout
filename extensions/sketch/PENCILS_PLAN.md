@@ -4,7 +4,7 @@ The plan **and the ledger** for the second arc of `NSE · Sketch`, in the shape 
 `SKETCH_PLAN.md` beside this file. Phases are appended to the ledger at the bottom as they land;
 the reference doc stays `extensions/sketch/docs/sketch.md`, grown at T5.
 
-**Status: Arc 44 — IN PROGRESS, T0 ✅ T1 ✅ T2 ✅ T3 ⬜ T4 ⬜ T5 ⬜.** Phases are lettered **T**
+**Status: Arc 44 — IN PROGRESS, T0 ✅ T1 ✅ T2 ✅ T3 ✅ T4 ✅ (folded into T3's walk) T5 ⬜.** Phases are lettered **T**
 ("Tools" — arc 37 "Bible" used B, arc 38 "Reference" R, arc 40 "Verses" V, arc 42 "Notes" N,
 arc 43 "Sketch" K; T was checked unused across every `*_PLAN.md` at T0). The g-paper half is
 g-paper's own **Phase 23 → 0.1.36** on its branch `pencil-tones`.
@@ -78,8 +78,8 @@ What the exploration found (2026-09-17), which shapes every phase:
 | **T0 — Plan lands** ✅ | Fable | Branches `pencils` (Notesprout) and `pencil-tones` (g-paper); this file; g-paper `PLAN.md` Phase 23 ⬜; memory `project_pencils_arc.md`. | Both branches pushed; `file` says this is text (the NUL trap). |
 | **T1 — g-paper Phase 23 → 0.1.36: pencil preview tones** ✅ | Opus on Fable's brief; Fable reviews the diff; Sonnet runs tests + installs the demo | Pure `RattaInkMap.pencilPreviewFor(argb)`, own thresholds — start: levels 0–2 → BLACK, 3–9 → DARK_GRAY, 10–14 → GRAY. `firmwarePenColor()` routes PENCIL through it; the `PENCIL_PREVIEW_GREY` constant goes. `RattaInkMapTest` pins the ladder. The demo's raster toggle gains shade + size cyclers (the walk surface) and renders each of the five lead sizes to a PNG before a panel sees it (g-paper `CLAUDE.md`'s rule) — Sonnet pulls them, Fable looks. A temporary measurement door only if the first thresholds miss, removed before the phase closes. `docs/api.md` + `CLAUDE.md` in the same commit. | g-paper `./gradlew test` green (215 core / 12+ ratta); Paintsprout Onyx 203 green on its pin; **the user's hand on the Nomad** settles the thresholds; 0.1.36 published to mavenLocal (by the user's hand if the classifier refuses). |
 | **T2 — Seam + host memory (API 19)** ✅ | **Fable: the seam**; Opus: host side; Sonnet: test runs | `SketchToolSettings` parcelable in `:extension-api`; `ISketchHost.toolSettings()` / `putToolSettings(…)` appended after the existing tails under `SketchContract.MIN_API_VERSION_FOR_SKETCH_TOOLS = 19`; `API_VERSION` 18 → 19, action floors untouched. Host: `SketchHostBinder` + a small prefs store, `SharedPreferences("sn_sketch_tools")` — **not** `sn_tool`, which `SnApplication` deletes at start. | `:extension-api:testDebugUnitTest` (**the pin test — must be run**) + `:app:test` green. |
-| **T3 — The face** ⬜ | Opus; Sonnet: layout XML, strings, `ic_ballpen`, the adb walk | Re-pin g-paper 0.1.36 (`sn-screen/build.gradle.kts` + the pin sentences). Pure `SketchPalette` (15 shades, 5 sizes, defaults; names "Black" / 1–14) + pure `SketchToolState`, both JVM-tested. `PaperToolbar` learns the second PEN-kind button + `onPenReTap`; `CollapsedTools` takes the third tool. `PencilBar` over `AnchoredBar` (the `EraserBar` pattern: armed entry `isSelected`; swatch = black ring + ink fill, a white gap ring when selected; rects unioned into `floatingRects()` / `floatingContains()`; `PenIdle.releaseRenderIfIdle` before assigning; never a frame while `paper.isPenActive`). `SketchToolbar` applies state → `penStyle` / `penWidth` / `penColor`; Bring in ink restores it. Settings loaded at `begin`, pushed on every pick. **Phase-start question:** how the Pencil button reports the armed shade (a light tint is invisible on e-ink — a floored tint vs. none). | `:ext-sketch:test` + `:sn-screen:test` + root `./gradlew test` green; Sonnet's Nomad adb walk (bar opens / closes, picks survive a reopen and a process death, screenshots, save bytes of a heavy 12 px black scribble against 4 MB watch / 6 MiB); then **the hand**: shades, sizes, gel pen feel, preview ↔ bake width agreement at every size. |
-| **T4 — Walk adjustments** ⬜ | Opus (small); Fable if engine | Whatever the hand found: size values, gel pen width, thresholds (engine → another g-paper patch + Fable's review). Skipped if T3's walk is clean. | The user's word. |
+| **T3 — The face** ✅ | Opus; Sonnet: layout XML, strings, `ic_ballpen`, the adb walk | Re-pin g-paper 0.1.36 (`sn-screen/build.gradle.kts` + the pin sentences). Pure `SketchPalette` (15 shades, 5 sizes, defaults; names "Black" / 1–14) + pure `SketchToolState`, both JVM-tested. `PaperToolbar` learns the second PEN-kind button + `onPenReTap`; `CollapsedTools` takes the third tool. `PencilBar` over `AnchoredBar` (the `EraserBar` pattern: armed entry `isSelected`; swatch = black ring + ink fill, a white gap ring when selected; rects unioned into `floatingRects()` / `floatingContains()`; `PenIdle.releaseRenderIfIdle` before assigning; never a frame while `paper.isPenActive`). `SketchToolbar` applies state → `penStyle` / `penWidth` / `penColor`; Bring in ink restores it. Settings loaded at `begin`, pushed on every pick. **Phase-start question:** how the Pencil button reports the armed shade (a light tint is invisible on e-ink — a floored tint vs. none). | `:ext-sketch:test` + `:sn-screen:test` + root `./gradlew test` green; Sonnet's Nomad adb walk (bar opens / closes, picks survive a reopen and a process death, screenshots, save bytes of a heavy 12 px black scribble against 4 MB watch / 6 MiB); then **the hand**: shades, sizes, gel pen feel, preview ↔ bake width agreement at every size. |
+| **T4 — Walk adjustments** ✅ (inside T3) | Opus (small); Fable if engine | Whatever the hand found: size values, gel pen width, thresholds (engine → another g-paper patch + Fable's review). Skipped if T3's walk is clean. | The user's word. |
 | **T5 — Docs + freeze** ⬜ | Sonnet drafts; Fable reviews every draft | `docs/sketch.md` (tools, seam tails, traps, numbers), SN `CLAUDE.md` (API 19, pin, counts, arc row), root `CLAUDE.md`, SN `docs/notebook.md` frame-silence ledger if touched, g-paper `PLAN.md` close, memory. **Phase-start question:** a `versionName` bump. Merge `--no-ff` in both repos **only on the user's word**; the Manta only if asked. | `file` on every touched doc = text; the final hand walk. |
 
 **Order:** T0 → T1 → T2 → T3 → (T4) → T5. T2 does not depend on T1 and may go first if the Nomad
@@ -211,3 +211,81 @@ coverage (`Binder.getCallingUid`), so the two overrides are proven only by T3's 
 
 **Next.** T3 — the face. Needs the Nomad; starts with the phase-start question on how the Pencil
 button reports the armed shade.
+
+### T3 — Outcome (2026-09-17) — with T4 folded in
+
+**Phase-start answers.** *How the Pencil button reports the armed shade:* **the pencil glyph is
+filled with the armed shade, its outline solid black** (the user's own shape, over the three
+offered — a corner swatch dot, a floored tint, none); the gel pen's button never changes; the
+collapsed corner knob and the mini row's pencil wear the same fill.
+
+**Landed.** g-paper re-pinned **0.1.36 → 0.1.37** (`:sn-screen`). `:ext-sketch` declares API
+**19** and calls the two T2 tails. Pure `SketchPalette` (an explicit list of ladder **levels**, a
+list of px sizes, defaults, row breaks) and `SketchToolState` (tool · shade level · size index,
+`fromSettings` reading anything unoffered as the default, `toSettings`, derived
+style/width/colour, `reportedShade`). `:sn-screen` `PaperToolbar` grew a defaulted second
+PEN-kind button (`btnAltPen` · `altPenArmed` · `onPenKindPicked` · `onPenReTap`), the armed test
+against the *kind* not the tool; `CollapsedTools.penButtonSelected` + `iconFor(altPen)`;
+`CollapsedChrome.PenKinds` (the alt button built right after `Tool.PEN`, a primary re-tap hook
+that hangs a bar under the mini row's own button — the Insert precedent — and `PenIcon` tokens so
+a filled glyph swaps only on a change); `AnchoredBar.addRow`; three defaulted hooks on
+`PaperScreenActivity` (`collapsedPenKinds` · `onCollapsedClosing` · `keepCollapsedUnder`).
+`PencilBar` in `:ext-sketch` over `AnchoredBar`: swatch = black ring + ink fill, a white gap ring
+when selected (a black border is invisible on a dark swatch); size dots a legible dp ladder, never
+literal px; **stays open after a pick**, closes on the Pencil re-tap, any tool change, a page
+swap, a finger gesture, a chrome flip, an outside contact (a `dispatchTouchEvent` override), the
+exit. `PencilIcon` (a `LayerDrawable`: tinted fill under the untouched outline). `SketchToolbar`
+owns the state and applies it; `SketchActivity` restores it from `toolSettings()` inside
+`openPage` before `opened = true` (a host below 19 never binds this extension — the manifest
+declaration is the guard, K5b's arrangement), pushes `putToolSettings` on every pick and pen-kind
+switch, fire-and-forget on IO **under a fair mutex** (Fable's one review fix: two quick picks
+raced on separate IO hops), and `restorePen()` after every bake (defence only — `addStrokes` in
+RASTER bakes from each stroke's own style and never touches the armed pen). `ic_ballpen` in
+`:sn-screen` (Tabler upstream verified — its body path carries no trailing `z`); `ic_pen_fill`.
+
+**The walk (the user's hand, Nomad, 2026-09-17) — T4 happened inside it, in five installs:**
+- Sizes 1.2 / 2 / 4 / 7 / 12: preview ↔ bake agree. Gel pen **3 → 7 → 5 px** ("5 is perfect").
+- Shades: of the fifteen, **only 0, 5 and 9 previewed as they bake** (the firmware's three
+  tones). The list went 15 → 3 (0 · 5 · 9) → 6 (+2, 6, 11) → (6 → 7) → (0, 2 → 1, 3) → **1 · 3 ·
+  5 · 7 · 9 · 11**, every other rung from 1 to 11, two leads per firmware band, no pure black on
+  the pencil (the gel pen is black). Default stays 5. Decision 2 is **amended** to this.
+- Wide leads: the g-paper demo with the EMR ceiling lifted walked **16 / 20 / 24 / 32 / 48 / 64 /
+  96 px** — "all of those wide-lead sizes work", no lag. **g-paper Phase 24 → 0.1.37**
+  (`pencil-tones` `fccfacd`): `RattaEmr.EMR_MAX` 1200 → **9600**; the old ceiling had never been
+  reached by anything and its "the daemon lags" was never a measurement (g-paper `CLAUDE.md`'s
+  new standing bullet). The sketch now offers **twelve sizes** — 1.2 · 2 · 4 · 7 · 12 · 16 · 20 ·
+  24 · 32 · 48 · 64 · 96 — in two rows of six under the one row of shades. Decision 3 is
+  **amended** to this.
+- The filled pencil icon, the shade fill kept while Pen / Eraser are armed, the collapsed knob
+  and mini row, the bar's dismissals, Bring in ink restoring the pen, undo/redo: all pass.
+
+**Measured (Sonnet's adb walk, Nomad, `.dev`).** Bar at x 8–940 of 1404 (the 8 + 7 layout, before
+the cut), fully on-screen; picks survive a reopen **and a process death** (`tools restored:
+remembered — tool=1, shade=0, size=4` after `am force-stop`; the T2 binder overrides are now
+proven). Heaviest save, black at 12 px, four fill-door passes: **607 519 → 591 880 → 559 914 →
+524 533 B** — under the 4 MB watch by an order of magnitude; the 96 px lead was not measured for
+save bytes (a later walk's number if it matters). `logcat -b crash` empty.
+
+**Deviations.** T4 did not get its own session — every adjustment was a one-line change made and
+installed inside T3's walk, five times over, so the phase is marked done here. Fable made the
+gel-pen, shade-list and re-pin edits directly (T1's precedent) and did the g-paper demo's
+ceiling experiment by hand; Opus wrote the Phase 24 patch and every larger face change.
+
+**Tests.** `:ext-sketch` 60 → **87**; `:sn-screen` 114 → **118**; `:app` 1822 (unchanged);
+`:extension-api` unchanged; SN root `./gradlew test` green. g-paper 216 core / **18** ratta.
+
+**Traps found.**
+- **The fill door draws on whatever page is showing.** The adb walk composited its twelve black
+  test lines, four times, over the user's own tree sketch on the dev library's K7 page 2, and the
+  process-death step took the undo history with it. **Every walk brief says "turn to a blank page
+  first"** from now on.
+- Two `PEN`-kind tools are one `Tool.PEN` to g-paper — the screen owns which kind is armed, and
+  every "is the pen armed?" test in shared chrome has to ask the screen (`altPenArmed`), never the
+  tool alone.
+- `ROW_BREAK` (8) is inert at six shades; kept as the rule `shadeRows()` derives from.
+- `SketchActivity` is ~1230 lines, past the ~800 guide; what remains is screen wiring.
+
+**Next.** T5 — docs + freeze: `docs/sketch.md` (tools, the seam tails, the numbers, the amended
+decisions 2 / 3 / 4), SN `CLAUDE.md` (API 19, pin 0.1.37, counts, the arc row), root `CLAUDE.md`,
+g-paper `PLAN.md` close, memory; the `versionName` phase-start question; merge `--no-ff` in both
+repos only on the user's word.

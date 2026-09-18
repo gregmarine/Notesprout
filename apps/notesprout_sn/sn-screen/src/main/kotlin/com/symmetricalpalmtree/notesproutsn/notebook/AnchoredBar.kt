@@ -23,7 +23,9 @@ import com.symmetricalpalmtree.notesproutsn.screen.R
  * the buttons and when the bar is allowed to open.
  *
  * Buttons are **icon-only with long-press hints**, the recipe every chrome button in SN follows,
- * at [R.dimen.toolbar_button_size] so they grow with the tablet tier.
+ * at [R.dimen.toolbar_button_size] so they grow with the tablet tier. [bar]'s own orientation is
+ * the caller's layout: a horizontal one takes buttons ([addButton]), and a **vertical** one takes
+ * rows the caller builds ([addRow], arc 44 / T3 — the sketch face's [PencilBar]).
  *
  * What the caller still owns: *when* it opens and closes (a tool switch, a page swap, a finger
  * gesture, an outside tap), and unioning [rects] into the exclusion rects and the `overChrome`
@@ -53,6 +55,22 @@ class AnchoredBar(
      */
     fun addButton(iconRes: Int, hint: String, onClick: () -> Unit): AppCompatImageButton =
         button(iconRes, hint, onClick).also { bar.addView(it) }
+
+    /**
+     * Add a whole child of the caller's own making, in call order (arc 44 / T3) — what a bar whose
+     * [bar] is **vertical** needs, because its children are rows rather than buttons: the sketch
+     * face's [PencilBar] is two rows of shade swatches over a row of sizes, and a swatch is not an
+     * icon button at all (it is a ring and a fill, and the fill is ink).
+     *
+     * Everything else stays exactly as it is for every other bar: the placement, the
+     * measure-before-place rule, the rects and the hit test know nothing about what is inside. What
+     * the caller gives up by coming through this door rather than [addButton] is the shared button
+     * recipe — so a caller that builds its own children owns the dimen-driven size, the hint and
+     * the tooltip itself ([button] is public and static for exactly that).
+     */
+    fun addRow(row: View) {
+        bar.addView(row)
+    }
 
     /**
      * Open the bar under [anchor] — the constructor's button unless a caller names another: the

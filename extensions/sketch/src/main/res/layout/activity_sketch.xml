@@ -4,9 +4,9 @@
   two thin chrome bars overlaid. The PaperView is added into paperContainer programmatically. Paper
   is plain white always (decision 10) — no template, no ink layer underneath.
 
-  Tools are pencil and eraser only — no lasso, no selection toolbar: a sketch page has no objects to
-  select, only pixels. Top bar: Back · Pencil · Eraser … Bring in ink · Show pages. Bottom bar is the
-  pager only.
+  Tools are pencil, pen and eraser only — no lasso, no selection toolbar: a sketch page has no
+  objects to select, only pixels. Top bar: Back · Pencil · Pen · Eraser … Bring in ink · Show pages.
+  Bottom bar is the pager only.
 
   Both bars go to paper.setExclusionRects (via PaperChrome) after layout, so ink never lands under
   chrome. Chrome sits flush at the top edge — the top guard is 0 on Ratta.
@@ -55,7 +55,7 @@
                 android:textColor="@color/inkBlack"
                 android:textSize="16sp" />
 
-            <!-- Back, then the tools: pencil and eraser only, no lasso. -->
+            <!-- Back, then the tools: pencil, pen and eraser only, no lasso. -->
             <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="match_parent"
@@ -76,6 +76,14 @@
                     style="@style/Widget.Notesprout.ToolbarButton"
                     android:contentDescription="@string/cd_tool_pencil"
                     android:src="@drawable/ic_pen" />
+
+                <!-- The gel pen (arc 44 / T3) — Tabler's ballpen glyph, a fixed 3 px black line,
+                     no PencilBar of its own. -->
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnPen"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:contentDescription="@string/cd_tool_pen"
+                    android:src="@drawable/ic_ballpen" />
 
                 <androidx.appcompat.widget.AppCompatImageButton
                     android:id="@+id/btnEraser"
@@ -168,6 +176,19 @@
         </FrameLayout>
 
     </LinearLayout>
+
+    <!-- The pencil's own options bar (arc 44 / T3) — shade swatches (8 + 7) over a size row, hung
+         under the armed Pencil button on a re-tap. Empty here: its rows and buttons are built in
+         code by PencilBar. -->
+    <LinearLayout
+        android:id="@+id/pencilBar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:background="@drawable/shape_dialog_bordered"
+        android:orientation="vertical"
+        android:padding="4dp"
+        android:visibility="gone" />
 
     <!-- The collapsed chrome — what shows while both bars are hidden: the corner tool button at
          top-right wearing the armed tool's glyph, and, hung under it on a tap, the mini toolbar and
