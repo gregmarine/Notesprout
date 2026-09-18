@@ -1,5 +1,6 @@
 package com.symmetricalpalmtree.notesproutsn.ext.sketch
 
+import com.symmetricalpalmtree.gpaper.core.RasterLayer
 import com.symmetricalpalmtree.notesproutsn.extension.ISketchHost
 
 /**
@@ -16,12 +17,13 @@ import com.symmetricalpalmtree.notesproutsn.extension.ISketchHost
  *
  * What it does hold:
  *
- * - [host] — the `ISketchHost` callback binder every byte of PNG crosses, in both directions. The
+ * - [host] — the `ISketchHost` callback binder every byte of image crosses, in both directions. The
  *   host revokes it alongside the unbind, so a reference kept past `end()` would not be a leak of
  *   anything usable — it would be a binder that throws `SecurityException` on every call. Clearing
  *   it is still the honest thing: it makes "there is no showing" a state the screen can test rather
  *   than infer from a refusal.
- * - [pending] — a page whose push failed, parked with the key it was for ([PendingPngPark]). It
+ * - [pending] — a raster whose push failed, parked with the page key and the layer it was for
+ *   ([PendingImagePark], one slot per raster since arc 45 / G3). It
  *   survives the screen: a recreated or dead Activity does not take unwritten pixels with it.
  * - [flushHook] — how the service, on a Binder thread at `end()`, gets unsaved pixels out of a
  *   screen that is still standing, through that screen's own push lock.
@@ -38,8 +40,9 @@ object SketchSession {
 
     private var hostBinder: ISketchHost? = null
 
-    /** Pixels a push could not deliver, waiting for a host that can take them. */
-    val pending: PendingPngPark = PendingPngPark()
+    /** Pixels a push could not deliver, waiting for a host that can take them — one slot per
+     *  raster, because a page has two rows and each is owed separately. */
+    val pending: PendingImagePark = PendingImagePark()
 
     /** The screen's ear for a host reconnect. Registered in `onCreate`, cleared in `onDestroy`;
      *  null means no screen is alive to ask. Invoked on a **Binder thread**. */
@@ -80,12 +83,13 @@ object SketchSession {
      *  ride the saver's push lock instead of interleaving with a save already in the air on the
      *  host's one accumulator (the document editor's M11 lesson). */
     interface FlushHook {
-        /** Push anything the screen holds unsaved, blocking the calling Binder thread. Never
-         *  throws: a failure has already parked its pixels. */
+        /** Push anything the screen holds unsaved — both rasters, if both are owed — blocking the
+         *  calling Binder thread. Never throws: a failure has already parked its pixels. */
         fun flushBlocking()
 
-        /** Push exactly these bytes for this page, through the saver's push lock, blocking the
-         *  calling Binder thread; throws on failure (the caller decides what to do about it). */
-        fun pushBlocking(pageKey: String, png: ByteArray)
+        /** Push exactly these bytes for this page's [layer] raster, through the saver's push lock,
+         *  blocking the calling Binder thread; throws on failure (the caller decides what to do
+         *  about it). */
+        fun pushBlocking(pageKey: String, layer: RasterLayer, bytes: ByteArray)
     }
 }

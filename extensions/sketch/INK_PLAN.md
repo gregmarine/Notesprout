@@ -4,7 +4,7 @@ The plan **and the ledger** for the third arc of `NSE · Sketch`, in the shape o
 beside this file. Phases are appended to the ledger at the bottom as they land; the reference doc
 stays `extensions/sketch/docs/sketch.md`, grown at G5.
 
-**Status: Arc 45 — IN PROGRESS, G0 ✅ G1 ✅ G2 ✅ (2026-09-17).** Phases are lettered **G** ("Graphite" — the
+**Status: Arc 45 — IN PROGRESS, G0 ✅ G1 ✅ G2 ✅ (2026-09-17), G3 🧪 (2026-09-18, adb walk green, the hand next).** Phases are lettered **G** ("Graphite" — the
 letters B C D F H K L M N P R T U V W X Z are in use across every `*_PLAN.md`; I was declined for
 its I/l ambiguity in a terminal). The g-paper half is g-paper's own **Phase 26 → 0.1.39** on its
 branch `two-rasters`.
@@ -123,7 +123,7 @@ What the exploration found (2026-09-17), which shapes every phase:
 | **G0 — Plan lands** ✅ | Fable | Branches `ink` (Notesprout) and `two-rasters` (g-paper); this file; g-paper `PLAN.md` Phase 26 ⬜; memory `project_ink_arc.md`. | Both branches pushed; `file` says this is text (the NUL trap). |
 | **G1 — g-paper Phase 26 → 0.1.39: two rasters** ✅ | Opus on Fable's brief; Fable reviews the diff; Sonnet runs tests + installs the demo | `RasterLayer`; `CanvasPaperView` holds `graphiteRaster` + `inkRaster` (both lazy); `compositeIntoRaster` routes by style; the committed-layer draw flattens with `DARKEN`; `eraseRasterAlong` rubs graphite only; layer-qualified `get/load/copy/swapPageRaster` + layered listener callbacks, un-layered forms = graphite; `RasterDirty` unchanged; `clear()` drops both. Demo: the raster toggle draws pencil + pen + rubs, and a "flatten to PNG" render before a panel sees it (g-paper `CLAUDE.md`'s rule). `docs/api.md` + `CLAUDE.md` in the same commit. | g-paper `./gradlew test` green (core + ratta + onyx); **Paintsprout Onyx green on its pin**; Nomad demo: pen over pencil then rub — graphite lifts, ink stays; redraw ms with the flatten vs. 0.1.38; demo PSS; 0.1.39 published to mavenLocal (by the user's hand if the classifier refuses). |
 | **G2 — Seam + host data (API 20)** ✅ | **Fable: the seam**; Opus: host side; Sonnet: test runs + doc rows | `ImageHeader` (WebP) replaces `PngHeader`; `SketchPageState` two streams; layered `readSketchChunk` / `saveSketchChunk`; `API_VERSION` 19 → 20, `MIN_API_VERSION_FOR_SKETCH` 17 → 20. Host: `TYPE_SKETCH_GRAPHITE` / `TYPE_SKETCH_INK` (+ the dead `sketch` in every exclusion), `SketchDao` / `SketchRepository` / `SketchRows` per layer, `SoilDao` lists, `SketchHostSession` two windows + two accumulators, `SketchHostBinder`, `SketchRaster` + `SketchCover` flatten, clip message. SN `docs/objects.md` (or wherever the row is specified) + root `docs/soil-file-format.md` if it names the row. | `:extension-api:testDebugUnitTest` (**the pin test — must be run**) + `:app:test` green; `PageClipTest` fixtures grown for the second row type. |
-| **G3 — The face** ⬜ | Opus; Sonnet: the adb walk (**clear the dev library's sketches first**, then a blank page) | Re-pin g-paper 0.1.39 (`sn-screen/build.gradle.kts` + the pin sentences). `:ext-sketch` declares API 20. `RasterImage` encodes WebP lossless (effort constant from the measurement), decodes via `BitmapFactory`; `SketchSaveGovernor` / `SketchSaver` / the park per layer; `RasterEditBuilder` + `SketchEdit.RasterChanged` carry a layer; `openPage` loads both rasters; Bring in ink → ink raster; the delete/undo/redo replay paths re-index both. **Phase-start question:** the WebP effort value, after Sonnet's on-device encode table. | `:ext-sketch:test` + root `./gradlew test` green; Sonnet's Nomad adb walk (two rows in the `.soil`, bytes per row vs. the old PNG, encode ms, reopen 0-pixel diff of the flatten, PSS, `logcat -b crash` empty); then **the hand**: pencil over pen, pen over pencil, rub each way, undo/redo across both, Bring in ink then rub, page turns, export PDF/PNG, cover, copy/paste page. |
+| **G3 — The face** 🧪 | Opus; Sonnet: the adb walk (**clear the dev library's sketches first**, then a blank page) | Re-pin g-paper 0.1.39 (`sn-screen/build.gradle.kts` + the pin sentences). `:ext-sketch` declares API 20. `RasterImage` encodes WebP lossless (effort constant from the measurement), decodes via `BitmapFactory`; `SketchSaveGovernor` / `SketchSaver` / the park per layer; `RasterEditBuilder` + `SketchEdit.RasterChanged` carry a layer; `openPage` loads both rasters; Bring in ink → ink raster; the delete/undo/redo replay paths re-index both. **Phase-start question:** the WebP effort value, after Sonnet's on-device encode table. | `:ext-sketch:test` + root `./gradlew test` green; Sonnet's Nomad adb walk (two rows in the `.soil`, bytes per row vs. the old PNG, encode ms, reopen 0-pixel diff of the flatten, PSS, `logcat -b crash` empty); then **the hand**: pencil over pen, pen over pencil, rub each way, undo/redo across both, Bring in ink then rub, page turns, export PDF/PNG, cover, copy/paste page. |
 | **G4 — Walk adjustments** ⬜ | Opus (small); Fable if engine | Whatever the hand found (engine → another g-paper patch + Fable's review). Skipped if G3's walk is clean. | The user's word. |
 | **G5 — Docs + freeze** ⬜ | Sonnet drafts; Fable reviews every draft | `docs/sketch.md` (the two rasters, the format, the seam, traps, numbers), SN `docs/extensions.md` (API 20, the floor move), SN `CLAUDE.md` (API 20, pin 0.1.39, counts, arc row), root `CLAUDE.md`, g-paper `PLAN.md` close, memory. **Phase-start question:** a `versionName` bump (T5's answer was no — the version moves at a release). Merge `--no-ff` in both repos **only on the user's word**; the Manta only if asked. | `file` on every touched doc = text; the final hand walk. |
 
@@ -328,3 +328,89 @@ WebP lossless (effort from Sonnet's Nomad encode table — the phase-start quest
 saver / park per layer, `RasterEditBuilder` + `SketchEdit.RasterChanged` carry a layer, `openPage`
 loads both rasters, Bring in ink → ink; the three `// G3:` shim lines go. **Clear the Nomad's dev
 sketches before the walk** (decision 4).
+
+### G3 — Outcome (2026-09-18) — the face 🧪 (adb walk green; the hand next)
+
+**Phase-start answers.** *The WebP effort:* **100** — asked after Sonnet's Nomad table (below), as
+the plan ordered it; the top of the dial is the smallest on both rasters and still no slower than
+the PNG it replaced, on an IO thread three seconds behind the last mark. Recorded beside the
+constant in `RasterImage.WEBP_EFFORT`.
+
+**Landed (Opus on Fable's brief, reviewed).** g-paper re-pinned **0.1.39** (`sn-screen`, one pin
+sentence). `:ext-sketch` manifest declares **API 20** (the comment now says the number is what the
+extension requires of the host, and why 20 is the action floor). New `SketchLayers` (`wireOf` /
+`of` / `all` — the one translation between `SketchContract.LAYER_*` and `RasterLayer`, pinned to
+both by test). `RasterImage`: `WEBP_LOSSLESS` on 30+, `WEBP` q100 on 29, behind one
+`compressLossless`; `WEBP_EFFORT`; a debug-only `encodeTable` (efforts 0/25/50/75/100 + PNG, bytes
+and ms) logged from the fill door. `SketchEdit.RasterChanged` and `RasterEditBuilder` carry a
+`layer`; the activity overrides the **layered** `onRasterWillChange` / `onRasterChanged` (the
+un-layered pair deleted — silent for ink by design), reads `readPageRaster(layer, …)`, swaps
+`swapPageRaster(edit.layer, …)`, with a belt that closes an open entry if a second layer ever
+arrives inside one contact. `SketchSaver`: one `SketchSaveGovernor` **per raster** (the class
+unchanged), `markDirty(layer)`, `saveNow` / `flushAndAwait` walk `SketchLayers.all`, **one** push
+lock (FIFO — two rasters of a page go over the wire one after the other), per-layer completion
+bookkeeping, one retry beat for the page. `PendingPngPark` → **`PendingImagePark`**: one slot per
+raster, displacement per slot, `clear(pageKey, layer)`, `take()` graphite-first; every caller
+**drains** (`retryParked`, the service's `flushBeforeRevoke` and `pushPendingInBackground`, both
+proved terminating). `SketchSession.FlushHook.pushBlocking(pageKey, layer, bytes)`. `loadPage`
+loads **both** layers always, null for an absent one, sequentially with one decoded bitmap alive;
+`readSketch(state, layer)` answers an absent layer without a Binder call. `deletePageNow` clears
+the park on both layers. `composite()` no longer pre-opens a builder (the layer is the engine's
+answer per stroke — the listener opens it on the layer the engine names) and marks dirty each
+distinct `RasterLayer.of(style)`. `InkBake`'s KDoc says the bake lands in ink and why. Every log
+line names its raster, counts only. The three `// G3:` shim lines are gone.
+
+**Deviations.** `composite()`'s builder is opened by the listener, not the door (above). `loadPage`
+reads inside the per-layer loop rather than both arrays first (peak one array + one bitmap).
+`SketchPageLoad` **not** split out — it would need `callHost` and the lifecycle checks handed in as
+lambdas for ~45 lines; `SketchActivity` is now ~1330 lines (the size is already recorded).
+`docs/sketch.md` still says PNG / one raster — G5's by the plan. G2's own ledger prose in
+`:extension-api` still names `PngHeader` / `SKETCH_BAD_PNG` as history — left.
+
+**Tests.** `:ext-sketch` 87 → **97** (`SketchLayersTest` 4, `PendingImageParkTest` 13 from 8,
+`SketchEditTest` +2, `RasterTilesTest` +1); root **3631** (from 3621), 0 failures;
+`:ext-sketch:assembleDebug` + `:app:assembleDebug` green; every touched file `file` = text.
+
+**Measured (Sonnet's adb walk, Nomad, fresh `.dev`, notebook "G3", 1404×1872).**
+
+| | graphite (pencil lattice) | ink (gel-pen lattice) |
+|---|---|---|
+| WebP effort 0 | 217 924 B / 426 ms | 116 542 B / 393 ms |
+| effort 25 | 217 776 / 400 | 116 542 / 341 |
+| effort 50 | 216 084 / 405 | 105 236 / 341 |
+| effort 75 | 284 888 / 431 | 98 412 / 352 |
+| **effort 100** | **146 498 / 619** | **88 642 / 346** |
+| PNG | 222 066 / 656 | 53 065 / 602 |
+
+- Saves: `save (graphite): 146498 B encoded in 674 ms, pushed in 25 ms`, host committed 21 ms,
+  1 chunk; `save (ink): 88642 B … 365 ms / 21 ms`; **no second graphite save after the ink one**.
+- `.soil` (`sqlcipher`): exactly `sketch_graphite|146498` + `sketch_ink|88642`, both
+  `RIFF…WEBP…VP8X`.
+- Reopen: `page 1/1 open (g 146498 B, ink 88642 B)`; screencap diff **2 445 px at max delta
+  1/255** (0.09 %) — see Traps. Turn back: byte-exact; swipe past the last page inserted page 2;
+  copy/paste page → `page 3/3 open` with the same two counts; PNG export `3 page(s) + 2 sketch(es)`,
+  the sketch file shows both lattices with the pen solid through the graphite.
+- Undo entries: graphite 368 tiles / 6 029 312 B read 27 ms; ink 368 tiles / 6 029 312 B read
+  11 ms (the same lattice on each raster — a pen entry costs what a pencil entry does).
+- PSS: extension **67.7 MB**, host **67.4 MB** (K5: 64.2 / 65.8 — the priced second bitmap).
+- `logcat -b crash` empty; no `E/` from any sketch tag.
+
+**Traps found.**
+- **The reopen is not a literal 0-pixel screencap diff any more**: 0.09 % of pixels at ±1/255,
+  along the graphite grain's antialiased edges — premultiplied-alpha rounding on the
+  encode/decode round trip of semi-transparent pixels, not codec loss (WebP lossless is exact on
+  the unpremultiplied bytes). Invisible on a 16-grey panel; K5's "0-pixel" line is now "≤ 1/255".
+- **The WebP effort dial is not monotonic** — 75 encoded *larger* than 50 on graphite (libwebp
+  changes heuristics up the dial); measure, never interpolate.
+- **PNG beats lossless WebP on a pure-black lattice** (ink: 53 KB vs 89 KB); real ink is sparser.
+- **A device-wide `sn_chrome.xml` `hidden=true` left by an earlier walk hides every paper bar**,
+  including the sketch face's — an adb walk that cannot find the fill door checks that prefs file
+  first (Sonnet reset it via `run-as` + `cp`).
+- **`dumpsys package` does not surface a `<service>`'s `<meta-data>`** — the declared API is
+  read from the built manifest, not the device.
+- adb long-presses are `input swipe x y x y 800`; a true double-tap is still out of reach, so the
+  finger double-tap chrome toggle was **not** driven this walk — the hand's.
+
+**The hand.** Pending — the checklist is in the session; the phase closes on the user's word.
+
+**Next.** The hand walk; then G4 if it finds anything, else G5 (docs + freeze).

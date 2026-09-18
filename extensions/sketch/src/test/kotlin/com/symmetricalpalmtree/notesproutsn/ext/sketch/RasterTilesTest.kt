@@ -1,5 +1,6 @@
 package com.symmetricalpalmtree.notesproutsn.ext.sketch
 
+import com.symmetricalpalmtree.gpaper.core.RasterLayer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -95,8 +96,11 @@ class RasterTilesTest {
         }
     }
 
-    private fun builder(capBytes: Long = SketchEdit.UNDO_BUDGET_BYTES, index: Int = 0) =
-        RasterEditBuilder("p1", index, page, page, capBytes)
+    private fun builder(
+        capBytes: Long = SketchEdit.UNDO_BUDGET_BYTES,
+        index: Int = 0,
+        layer: RasterLayer = RasterLayer.GRAPHITE,
+    ) = RasterEditBuilder("p1", index, layer, page, page, capBytes)
 
     @Test
     fun `a cell is read once however many times the sweep crosses it`() {
@@ -197,10 +201,26 @@ class RasterTilesTest {
 
     @Test
     fun `an entry remembers the page the contact began on, and where that page was`() {
-        val b = RasterEditBuilder("p7", 4, page, page)
+        val b = RasterEditBuilder("p7", 4, RasterLayer.INK, page, page)
         b.touch(0, 0, 10, 10) { IntArray(it.width * it.height) }
         val edit = b.build()!!
         assertEquals("p7", edit.pageKey)
         assertEquals("the replay has to know which way to walk back", 4, edit.pageIndex)
+    }
+
+    @Test
+    fun `the builder stamps its own raster on the entry`() {
+        // Arc 45 / G3. The layer is fixed at construction because one contact touches one image,
+        // and it has to reach the entry: a `RasterPatch` carries no layer of its own, so the entry
+        // is the only thing that can tell the replay which image these pixels came off.
+        val ink = RasterEditBuilder("p1", 0, RasterLayer.INK, page, page)
+        ink.touch(0, 0, 10, 10) { IntArray(it.width * it.height) }
+        assertEquals(RasterLayer.INK, ink.layer)
+        assertEquals(RasterLayer.INK, ink.build()!!.layer)
+
+        val graphite = builder()
+        graphite.touch(0, 0, 10, 10) { IntArray(it.width * it.height) }
+        assertEquals(RasterLayer.GRAPHITE, graphite.layer)
+        assertEquals(RasterLayer.GRAPHITE, graphite.build()!!.layer)
     }
 }

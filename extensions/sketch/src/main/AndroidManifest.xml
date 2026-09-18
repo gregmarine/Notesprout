@@ -15,17 +15,21 @@
              2026-09-15), the sixth screen-owning one and the third with paper: a raster pencil
              sketch surface over g-paper, beside the ink rather than mixed into it. `ISketch.begin
              (host)` lends the host for the whole showing, `end()` drops it — there is NO store:
-             the pixels live in the host's own `.soil` and cross the seam as chunked PNG, so this
-             point never touches Room / SQLCipher / serialization. API version 17 — born here,
-             listed only at `SketchContract.MIN_API_VERSION_FOR_SKETCH`, because the point was
-             never reachable at any lower number. **API version 18 since K5b** — the screen calls
-             `ISketchHost.insertPage` / `deletePage` / `pageContent`, which is what
-             `SketchContract.MIN_API_VERSION_FOR_SKETCH_PAGES` requires of the host. **API version
-             19 since arc 44 / T3** — the screen calls `ISketchHost.toolSettings` /
-             `putToolSettings`, which is what `SketchContract.MIN_API_VERSION_FOR_SKETCH_TOOLS`
-             requires of the host; an API-18 host simply does not remember the tools. The point's
-             own action floor stays 17. The `android:value` below is the host-compat gate — it is
-             the line that matters, and this comment must move with it. -->
+             the pixels live in the host's own `.soil` and cross the seam as chunked lossless WebP
+             — two rasters a page since arc 45 "Ink" — so this point never touches Room / SQLCipher
+             / serialization. **API version 20 since arc 45 / G2–G3.** The number is what this
+             extension REQUIRES OF THE HOST, and 20 is `SketchContract.MIN_API_VERSION_FOR_SKETCH`
+             after G2 moved the point's own ACTION floor 17 → 20: the point's own calls changed
+             shape in place — `ISketchHost.readSketchChunk` / `saveSketchChunk` (codes 3–4) took a
+             raster layer, and `SketchPageState`'s wire form grew a second byte/chunk pair — so
+             neither side can read the other's, and a host below 20 never discovers this package at
+             all. That discovery gate is the whole guard; there is no runtime version test
+             anywhere in this extension. The two method floors beneath it are history and inert:
+             `MIN_API_VERSION_FOR_SKETCH_PAGES` 18 (K5b's five page tails) and
+             `MIN_API_VERSION_FOR_SKETCH_TOOLS` 19 (arc 44 / T2's two tool tails) are both below
+             the action floor now, so every host that can bind at all already clears them. The
+             `android:value` below is the host-compat gate — it is the line that matters, and this
+             comment must move with it. -->
         <service
             android:name=".SketchService"
             android:exported="true">
@@ -34,7 +38,7 @@
             </intent-filter>
             <meta-data
                 android:name="com.symmetricalpalmtree.notesproutsn.extension.API_VERSION"
-                android:value="19" />
+                android:value="20" />
         </service>
 
         <!-- The extension-owned screen (tier 2): exported, custom action, NO launcher filter;

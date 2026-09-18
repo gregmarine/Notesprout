@@ -1,5 +1,7 @@
 package com.symmetricalpalmtree.notesproutsn.ext.sketch
 
+import com.symmetricalpalmtree.gpaper.core.RasterLayer
+
 /**
  * One thing the hand did to a sketch page that can be taken back (arc 43 / K5).
  *
@@ -8,8 +10,9 @@ package com.symmetricalpalmtree.notesproutsn.ext.sketch
  * ours, and on a raster page it is **pixels**, not ids.
  *
  * Every other SN screen records *references*: a stroke id, a page id, a row that is still in the
- * `.soil` and merely stamped. A raster page has no rows to un-stamp — the graphite went into one
- * page image at pen-up and the rubber took pixels off it — so the only record of what was there a
+ * `.soil` and merely stamped. A raster page has no rows to un-stamp — the graphite went into the
+ * page's graphite image at pen-up, the gel pen into its ink image, and the rubber took pixels off
+ * the graphite one — so the only record of what was there a
  * moment ago is the pixels that were there. [RasterChanged] carries them, and [bytes] is what lets
  * [com.symmetricalpalmtree.notesproutsn.notebook.UndoRedoStack] bound a history that is no longer
  * free to hold.
@@ -56,19 +59,28 @@ sealed class SketchEdit {
     abstract fun withIndex(index: Int): SketchEdit
 
     /**
-     * The page image as it was, over the patch of page one contact changed — a mark composited at
-     * pen-up, a whole eraser sweep from the moment the rubber touched down to the moment it lifted,
-     * or one "Bring in ink" bake.
+     * One of the page's two rasters as it was, over the patch of page one contact changed — a
+     * pencil mark composited at pen-up, a gel-pen mark, a whole rubbing sweep from the moment the
+     * rubber touched down to the moment it lifted, or one "Bring in ink" bake.
      *
      * **One contact is one entry, because it was one movement of the hand.** The engine reports an
      * erase once per batch and there are dozens of batches in a second of scrubbing; an entry each
      * would make taking back a rub a matter of tapping until it stopped.
      *
-     * **It is its own inverse.** The tiles go onto the page and come back holding what the page was
-     * holding (`swapPageRaster`), so the entry that undid a change is the entry that redoes it, with
-     * no second copy of the pixels and no second shape of call. That is the whole reason this is a
-     * swap in the engine rather than a load: a page-wide erase's before-image is the page, and a
-     * second one of those is ~9.5 MB the device does not have to spare.
+     * **One contact also touches exactly one raster, and that is why [layer] is a field rather than
+     * a property of each tile** (arc 45 / G3). A pencil stroke announces graphite, a gel-pen stroke
+     * and the ink bake announce ink, and a rub announces graphite and never so much as reads the
+     * ink — g-paper's own rule, stated in `PaperListener.onRasterWillChange`. So the entry reads
+     * its tiles from that one raster and **per-contact undo bytes do not double** when the page
+     * gains a second image: a mark on a two-raster page costs exactly what the same mark cost on a
+     * one-raster page.
+     *
+     * **It is still its own inverse, on that layer.** The tiles go onto that raster and come back
+     * holding what it was holding (`swapPageRaster(layer, patches)`), so the entry that undid a
+     * change is the entry that redoes it, with no second copy of the pixels and no second shape of
+     * call. That is the whole reason this is a swap in the engine rather than a load: a page-wide
+     * erase's before-image is the page, and a second one of those is ~9.5 MB the device does not
+     * have to spare.
      *
      * [tiles] are disjoint — see [RasterTiles] — so they can be swapped in any order, which spares
      * the replayer from having to remember which order they were read in.
@@ -76,19 +88,22 @@ sealed class SketchEdit {
     class RasterChanged(
         override val pageKey: String,
         override val pageIndex: Int,
+        /** Which of the page's two rasters these tiles were read from, and the only one they may be
+         *  swapped back into — a patch carries no layer of its own. */
+        val layer: RasterLayer,
         val tiles: List<RasterTile>,
     ) : SketchEdit() {
         override val bytes: Long get() = tiles.sumOf { it.bytes }
 
         /**
-         * **The tiles are shared, not copied.** They are the whole cost of an entry (megabytes on a
-         * page-wide rub) and nothing about them changes when a *different* page is inserted or
-         * removed: the pixels still belong to the same page, which has merely moved. Copying them to
-         * change one integer would double the history's footprint at the exact moment the device is
-         * least able to afford it.
+         * **The tiles are shared, not copied**, and so is the layer. They are the whole cost of an
+         * entry (megabytes on a page-wide rub) and nothing about them changes when a *different*
+         * page is inserted or removed: the pixels still belong to the same raster of the same page,
+         * which has merely moved. Copying them to change one integer would double the history's
+         * footprint at the exact moment the device is least able to afford it.
          */
         override fun withIndex(index: Int): RasterChanged =
-            if (index == pageIndex) this else RasterChanged(pageKey, index, tiles)
+            if (index == pageIndex) this else RasterChanged(pageKey, index, layer, tiles)
     }
 
     /**

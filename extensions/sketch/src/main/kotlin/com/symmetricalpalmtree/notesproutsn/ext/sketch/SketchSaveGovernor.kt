@@ -5,33 +5,39 @@ package com.symmetricalpalmtree.notesproutsn.ext.sketch
  * the document editor's `AutosaveGovernor` recipe applied to pixels), so every rule that decides
  * whether a drawing is written can be pinned by a plain JUnit test instead of by a device walk.
  *
+ * **One of these governs one raster.** A page is a graphite image and an ink image since arc 45
+ * "Ink" (G3), each its own row and its own push, so [SketchSaver] holds one governor per raster and
+ * asks each of them separately — which is what makes "a pencil scribble never re-encodes the ink"
+ * true rather than aspirational. Nothing in this class knows that; it simply answers about the one
+ * image it was given.
+ *
  * The sketch's saves cross a process boundary (`ISketchHost.saveSketchChunk`), which makes three
  * things true at once and is exactly why the decision lives apart from the plumbing:
  *
  * - **A save can fail** — the host may have died, its binder may be revoked, its accumulator may
- *   refuse a chunk. A failure must leave the page *dirty*, never quietly "saved", and its pixels
- *   parked ([PendingPngPark]): they have no other copy.
- * - **A save takes time.** A page's PNG is encoded off the main thread and pushed in 512 KiB chunks,
- *   and the hand goes on drawing underneath it. The newest page wins, and it wins **after** the one
+ *   refuse a chunk. A failure must leave the raster *dirty*, never quietly "saved", and its pixels
+ *   parked ([PendingImagePark]): they have no other copy.
+ * - **A save takes time.** A raster is encoded off the main thread and pushed in 512 KiB chunks,
+ *   and the hand goes on drawing underneath it. The newest image wins, and it wins **after** the one
  *   in flight finishes — two overlapping chunk streams would interleave on the host's one
  *   accumulator and commit an image that was never drawn.
  * - **Most triggers have nothing to do.** A page turn, `onPause`, Back and Show pages all ask for a
- *   save; most of those are of a page that is already on disk, and re-encoding ~9.5 MB to write the
- *   same bytes again is the most expensive way to do nothing.
+ *   save; most of those are of an image that is already on disk, and re-encoding ~9.5 MB to write
+ *   the same bytes again is the most expensive way to do nothing.
  *
  * **Dirty is a flag, not a comparison.** The editor's governor can ask "is this text what the host
  * holds"; a page of pixels cannot be compared without re-encoding it, which is the work the question
- * was meant to avoid. So the engine's own `onRasterChanged` is the truth ([markDirty]), and the flag
- * is cleared **when the copy is taken** rather than when the write lands — a mark arriving during
- * the encode re-dirties the page and a second save follows it, where the other order would drop it
- * into the hole between a copy that predates it and a flag cleared after it.
+ * was meant to avoid. So the engine's own `onRasterChanged(layer, …)` is the truth ([markDirty]),
+ * and the flag is cleared **when the copy is taken** rather than when the write lands — a mark arriving during
+ * the encode re-dirties the raster and a second save follows it, where the other order would drop
+ * it into the hole between a copy that predates it and a flag cleared after it.
  *
  * The governor never times anything. The debounce, the pen-idle gate and the retry delay are
  * [SketchSaver]'s, because they are Android and this is not.
  */
 class SketchSaveGovernor {
 
-    /** Whether the page on the glass holds something the host has not been given. */
+    /** Whether this raster on the glass holds something the host has not been given. */
     var dirty: Boolean = false
         private set
 
@@ -39,7 +45,7 @@ class SketchSaveGovernor {
     var inFlight: Boolean = false
         private set
 
-    /** The engine reported a change to the page image (a mark, a rub batch, an undo swap, a bake). */
+    /** The engine reported a change to this raster (a mark, a rub batch, an undo swap, a bake). */
     fun markDirty() {
         dirty = true
     }
@@ -83,7 +89,7 @@ class SketchSaveGovernor {
     }
 
     /** The copy could not be taken (a page-sized allocation on a device short of exactly that). The
-     *  page stays dirty and the caller re-arms its retry; nothing was pushed. */
+     *  raster stays dirty and the caller re-arms its retry; nothing was pushed. */
     fun onCopyFailed() {
         inFlight = false
         dirty = true
@@ -98,8 +104,8 @@ class SketchSaveGovernor {
         return request()
     }
 
-    /** The push failed. The page is dirty again (its pixels are parked) and the caller re-arms the
-     *  retry beat. */
+    /** The push failed. The raster is dirty again (its pixels are parked) and the caller re-arms
+     *  the retry beat. */
     fun onFailed(): SaveAction {
         inFlight = false
         dirty = true
@@ -111,13 +117,13 @@ class SketchSaveGovernor {
         /** Nothing to write. */
         data object Idle : SaveAction
 
-        /** Take the page copy now and push it. */
+        /** Take this raster's copy now and push it. */
         data object Save : SaveAction
 
         /** A push is in flight; this trigger is answered by that push's own completion. */
         data object Wait : SaveAction
 
-        /** The push failed: the page stays dirty, its pixels are parked, re-arm the retry. */
+        /** The push failed: the raster stays dirty, its pixels are parked, re-arm the retry. */
         data object Retry : SaveAction
     }
 }

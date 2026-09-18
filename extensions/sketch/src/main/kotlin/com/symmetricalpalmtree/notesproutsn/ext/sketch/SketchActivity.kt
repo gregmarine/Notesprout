@@ -14,6 +14,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.lifecycle.lifecycleScope
 import com.symmetricalpalmtree.gpaper.core.PageMode
 import com.symmetricalpalmtree.gpaper.core.PaperListener
+import com.symmetricalpalmtree.gpaper.core.RasterLayer
 import com.symmetricalpalmtree.gpaper.core.RasterPatch
 import com.symmetricalpalmtree.gpaper.core.Tool
 import com.symmetricalpalmtree.gpaper.core.engine.GPaper
@@ -62,18 +63,28 @@ import kotlinx.coroutines.withContext
  * ## What is different from every other paper screen
  *
  * - **There is no store and there are no rows.** The pixels live in the host's `.soil` and cross the
- *   seam as chunked PNG ([SketchSaver] out, [loadPage] in). Nothing here writes to disk, ever.
+ *   seam as chunked lossless WebP ([SketchSaver] out, [loadPage] in). Nothing here writes to disk,
+ *   ever.
+ * - **A page is two rasters, one picture** (arc 45 "Ink", the user's decision of 2026-09-17): a
+ *   **graphite** image the pencil bakes into and the rubber rubs, and an **ink** image the gel pen
+ *   and "Bring in ink" bake into and **nothing ever erases** — *"in the real world, ink is more
+ *   permanent than pencil."* Neither is a user-facing layer: there is no z-order to choose and
+ *   nothing to toggle, because what the artist sees is the two flattened with a darken composite,
+ *   which is order-independent and therefore has no top and no bottom. Routing is g-paper's, by
+ *   stroke style, at the one site `RasterLayer.of`; this screen only ever *follows* the layer the
+ *   engine names — in its undo entries, its dirty flags, its two rows and its two parks.
  * - **A mark is not an object.** `pageMode = RASTER` is set once, before any content: the engine
- *   composites each mark into one page-sized image at pen-up and drops the stroke, so
+ *   composites each mark into its style's page-sized image at pen-up and drops the stroke, so
  *   `onStrokeCommitted` still fires and is **deliberately ignored** — storing that stroke would be
  *   storing a row for something that is already pixels.
  * - **Undo is pixels — and, since K5b, one page.** The before-image of everything one contact
  *   changed is read on a 64 px grid ([RasterTiles]) between `onRasterWillChange` and `onPenLifted`,
- *   and taken back with `swapPageRaster`, which leaves the arrays holding the other side — so one
- *   entry is its own redo. The history is bounded by **bytes** as well as by count
- *   ([SketchEdit.UNDO_BUDGET_BYTES]). The one entry that holds no pixels is a page insert or delete
- *   ([SketchEdit.Structural]): it holds the host's *name* for that edit, and replaying it is a
- *   Binder call that runs the notebook's own undo arm ([applyStructural]).
+ *   and taken back with `swapPageRaster(layer, …)`, which leaves the arrays holding the other side — so one
+ *   entry is its own redo. **An entry names its raster** and reads only that one, so a page with two
+ *   images costs an undo exactly what a page with one did. The history is bounded by **bytes** as
+ *   well as by count ([SketchEdit.UNDO_BUDGET_BYTES]). The one entry that holds no pixels is a page
+ *   insert or delete ([SketchEdit.Structural]): it holds the host's *name* for that edit, and
+ *   replaying it is a Binder call that runs the notebook's own undo arm ([applyStructural]).
  * - **Undo and redo are gestures only** (decision 12): the two- and three-finger stationary
  *   double-taps every SN paper screen has. No arrows — an arrow that cannot be redrawn when its
  *   state changes (which is every moment the pen is armed on this panel) is an arrow that lies.
@@ -246,7 +257,7 @@ class SketchActivity : PaperScreenActivity() {
         Slog.d(TAG) { "engine=${paper.engineId}" }
 
         saver = SketchSaver(
-            copyPage = { paper.getPageRaster() },
+            copyPage = { layer -> paper.getPageRaster(layer) },
             awaitPenIdle = { paper.awaitPenIdle() },
         )
 
@@ -341,25 +352,30 @@ class SketchActivity : PaperScreenActivity() {
         // `isPenActive` counts hover, and the pen is already over the glass on the way to drawing,
         // which would hold the box up over the page the user asked for.
         binding.openingOverlay.visibility = View.GONE
-        Slog.d(TAG) { "page ${state.pageIndex + 1}/${state.pageCount} open (${state.graphiteBytes} B)" }
+        Slog.d(TAG) { "page ${state.pageIndex + 1}/${state.pageCount} open ${state.rasterSizes()}" }
     }
 
     /**
-     * Put the page [state] describes on the paper: pull its PNG out of the host's read window, decode
-     * it, and load it — the host-responsibilities page-swap order with `loadPageRaster` where
-     * `loadStrokes` would be (`clearForContentSwap` → `setPageSize` → the content call, one EPD
-     * refresh, no blank flash).
+     * Put the page [state] describes on the paper — **both of its rasters** (arc 45 / G3): pull each
+     * one's WebP out of the host's own read window, decode it, and load it onto that layer — the
+     * host-responsibilities page-swap order with `loadPageRaster` where `loadStrokes` would be
+     * (`clearForContentSwap` → `setPageSize` → the content calls, one EPD refresh, no blank flash).
      *
-     * **The header guard runs before the decode** ([ImageHeader]) and a mismatch starts the page blank
-     * with a line in the log rather than handing a foreign blob's idea of its own size to the
-     * allocator. The engine copies the bitmap in, so the decode is let go of the instant it returns:
-     * a page-sized bitmap held one turn longer than it is needed is ~9.5 MB on a device that kills
-     * processes for less.
+     * **Both layers are always loaded, null for an absent one.** `loadPageRaster(layer, null)` drops
+     * that layer in the engine; after `clearForContentSwap` it is a no-op, on the first load it is a
+     * no-op, and it costs nothing — so the face never has to reason about which rasters the
+     * *previous* page happened to have. A page with ink and no graphite following one with graphite
+     * and no ink is simply two loads, as every other page is.
+     *
+     * **One raster at a time, from the read through the recycle.** The engine copies the bitmap in,
+     * so each decode is let go of the instant it returns and the peak is one page-sized bitmap, not
+     * two: ~9.5 MB on the Nomad, ~18.4 MB on the Manta, on devices that kill processes for less.
+     *
+     * **The header guard runs before each decode** ([ImageHeader]) and a mismatch starts that layer
+     * blank with a line in the log rather than handing a foreign blob's idea of its own size to the
+     * allocator.
      */
     private suspend fun loadPage(state: SketchPageState, firstLoad: Boolean) {
-        val png = readSketch(state)
-        val bitmap = withContext(Dispatchers.IO) { RasterImage.decode(png, state.width, state.height) }
-        if (isFinishing || isDestroyed) { bitmap?.recycle(); return }
         // A contact that never got its pen-up (the panel slept mid-sweep) leaves a half-gathered
         // entry tagged with the page being left. Carried across the turn it would go on collecting
         // the next page's cells under the old page's key. That gathering is one movement of the hand
@@ -370,27 +386,34 @@ class SketchActivity : PaperScreenActivity() {
         if (!firstLoad) paper.clearForContentSwap()
         paper.setPageSize(state.width, state.height)
         paper.setTemplate(null)   // plain white always (decision 10) — no template ever crosses
-        // Silent since g-paper 0.1.33 (K6): a page we loaded ourselves is our own news, so no
-        // will-change/changed pair arrives and nothing here has to swallow one.
-        paper.loadPageRaster(bitmap)
-        bitmap?.recycle()
+        for (layer in SketchLayers.all) {
+            val bytes = readSketch(state, layer)
+            val bitmap = withContext(Dispatchers.IO) { RasterImage.decode(bytes, state.width, state.height) }
+            if (isFinishing || isDestroyed) { bitmap?.recycle(); return }
+            // Silent since g-paper 0.1.33 (K6): a page we loaded ourselves is our own news, so no
+            // will-change/changed pair arrives and nothing here has to swallow one.
+            paper.loadPageRaster(layer, bitmap)
+            bitmap?.recycle()
+        }
         currentPage = state
         saver.pageKey = state.pageKey
         saver.markClean()
         toolbar.setPage(state.pageIndex + 1, state.pageCount)
     }
 
-    /** The read window, chunk by chunk — an empty answer is a page with no sketch, which is the
-     *  window's shape for it (one empty chunk) and not a failure. */
-    private suspend fun readSketch(state: SketchPageState): ByteArray {
-        // G3: graphite only until the face loads both rasters (G2's compile shim).
-        if (!state.hasLayer(SketchContract.LAYER_GRAPHITE)) return ByteArray(0)
+    /** One raster's read window, chunk by chunk — an empty answer is a page with no such raster,
+     *  which is the window's shape for it (one empty chunk) and not a failure. A layer the state
+     *  says is absent is answered without a Binder call at all. */
+    private suspend fun readSketch(state: SketchPageState, layer: RasterLayer): ByteArray {
+        val wire = SketchLayers.wireOf(layer)
+        if (!state.hasLayer(wire)) return ByteArray(0)
+        val count = state.chunksOf(wire)
         return callHost { host ->
-            val chunks = ArrayList<ByteArray>(state.graphiteChunks)
-            for (i in 0 until state.graphiteChunks) chunks += host.readSketchChunk(SketchContract.LAYER_GRAPHITE, i)
+            val chunks = ArrayList<ByteArray>(count)
+            for (i in 0 until count) chunks += host.readSketchChunk(wire, i)
             ByteChunks.join(chunks)
         }.getOrElse {
-            Log.w(TAG, "the page's sketch could not be read: ${it.javaClass.simpleName}")
+            Log.w(TAG, "the page's $layer raster could not be read: ${it.javaClass.simpleName}")
             ByteArray(0)
         }
     }
@@ -549,7 +572,7 @@ class SketchActivity : PaperScreenActivity() {
             return
         }
         loadPage(to, firstLoad = false)
-        Slog.d(TAG) { "turned to page ${to.pageIndex + 1}/${to.pageCount} (${to.graphiteBytes} B)" }
+        Slog.d(TAG) { "turned to page ${to.pageIndex + 1}/${to.pageCount} ${to.rasterSizes()}" }
     }
 
     // ── Page insert and delete (K5b) ────────────────────────────────────
@@ -592,7 +615,7 @@ class SketchActivity : PaperScreenActivity() {
      *
      * **The doomed page IS flushed first** — which K5b's first half did not do, and the second half
      * changes deliberately. While a delete could only be taken back from the notebook, encoding a
-     * page image for a row about to be soft-deleted was work for nothing. Now the same gesture that
+     * page's rasters for rows about to be soft-deleted was work for nothing. Now the same gesture that
      * deletes the page can put it back, and what comes back is whatever was last **saved**: the save
      * is debounced by seconds, so a mark made shortly before the long-press would otherwise be the
      * one thing the undo could not return. A few hundred milliseconds on a path the person has just
@@ -622,14 +645,15 @@ class SketchActivity : PaperScreenActivity() {
             showProblem(R.string.sketch_page_failed_title, R.string.sketch_page_failed_body)
             return
         }
-        // Whatever was owed for the page that has gone is owed no longer.
-        SketchSession.pending.clear(gone)
+        // Whatever was owed for the page that has gone is owed no longer — on **both** rasters:
+        // each is its own slot and its own row, and the page they belonged to is not there any more.
+        for (layer in SketchLayers.all) SketchSession.pending.clear(gone, layer)
         undo.remap(dropPixelsOf(gone, at))
         // The page can be asked back for from here (K5b's second half) — its entry names the host's
         // record of the delete, and the host still holds it.
         rememberStructural(SketchEdit.PageDeleted(to.structuralToken, gone, at), to)
         loadPage(to, firstLoad = false)
-        Slog.d(TAG) { "deleted a page; now page ${to.pageIndex + 1}/${to.pageCount} (${to.graphiteBytes} B)" }
+        Slog.d(TAG) { "deleted a page; now page ${to.pageIndex + 1}/${to.pageCount} ${to.rasterSizes()}" }
     }
 
     /**
@@ -719,7 +743,7 @@ class SketchActivity : PaperScreenActivity() {
 
         /**
          * **Deliberately ignored.** On a raster page the engine has already composited the mark into
-         * the page image and dropped the object by the time this fires; it reports the stroke only so
+         * its style's page image and dropped the object by the time this fires; it reports the stroke only so
          * that timestamps and counts come from one place. Storing it would be storing a row for
          * something that is pixels, and this screen has no rows at all. The undo entry for the same
          * mark is made from the pixels that were there **before** it — see [onRasterWillChange] and
@@ -728,18 +752,35 @@ class SketchActivity : PaperScreenActivity() {
         override fun onStrokeCommitted(stroke: Stroke) = Unit
 
         /**
-         * The page image is **about to** change — the one moment the pixels that are there can still
-         * be read, and so the one moment an undo entry can be made of them.
+         * One of the page's two rasters is **about to** change — the one moment the pixels that are
+         * there can still be read, and so the one moment an undo entry can be made of them.
+         *
+         * **The layered form is the one the engine calls** (g-paper 0.1.39). The un-layered pair is
+         * deliberately *not* overridden here: it is silent for ink by the engine's own design, so a
+         * face that kept it would take a graphite before-image for a gel-pen mark — a corrupted undo
+         * rather than a missing one.
          *
          * The rect is fed to the open contact's builder, which decides how much of it actually needs
          * reading: a rubbing sweep crosses the same cells dozens of times and the grid keeps each
-         * one once ([RasterTiles]).
+         * one once ([RasterTiles]). The read is of **that layer** — a tile can only be swapped back
+         * into the raster it came from.
+         *
+         * **One contact is one raster, and the layer change below is a belt on that rule.** A mark's
+         * runs are all its style's layer and a sweep is all graphite, so a second layer inside one
+         * open contact would be the engine breaking its own contract; if it ever happens the entry
+         * gathered so far is closed on its own layer and a fresh one opens, which is honest in both
+         * directions and never mixes two images' pixels into one patch list.
          */
-        override fun onRasterWillChange(rect: Rect) {
+        override fun onRasterWillChange(layer: RasterLayer, rect: Rect) {
             if (!opened || closing) return
             val state = currentPage ?: return
+            val open = openEdit
+            if (open != null && open.layer != layer) {
+                Slog.d(TAG) { "one contact reported ${open.layer} then $layer; the first entry was closed" }
+                closeOpenEdit()
+            }
             val builder = openEdit
-                ?: RasterEditBuilder(state.pageKey, state.pageIndex, state.width, state.height).also {
+                ?: RasterEditBuilder(state.pageKey, state.pageIndex, layer, state.width, state.height).also {
                     openEdit = it
                     openEditReadNanos = 0L
                 }
@@ -747,19 +788,23 @@ class SketchActivity : PaperScreenActivity() {
             builder.touch(rect.left, rect.top, rect.right, rect.bottom) { cell ->
                 // The engine's array, straight into the tile — no copy. It goes back to the engine
                 // as it stands, and the swap leaves it holding the other side of the edit.
-                paper.readPageRaster(Rect(cell.left, cell.top, cell.left + cell.width, cell.top + cell.height))?.pixels
+                paper.readPageRaster(
+                    layer,
+                    Rect(cell.left, cell.top, cell.left + cell.width, cell.top + cell.height),
+                )?.pixels
             }
             openEditReadNanos += System.nanoTime() - t0
         }
 
         /**
-         * The page image changed — a mark composited at pen-up, or one batch of a rubbing sweep.
-         * This is a raster page's news that anything happened, so it is what arms the save. The rect
-         * is not read: one image is written whole.
+         * One of the page's rasters changed — a mark composited at pen-up, or one batch of a rubbing
+         * sweep. This is a raster page's news that anything happened, so it is what arms the save,
+         * **for that raster alone**: a pencil scribble leaves the ink raster clean and the next save
+         * does not re-encode it. The rect is not read: an image is written whole.
          */
-        override fun onRasterChanged(rect: Rect) {
+        override fun onRasterChanged(layer: RasterLayer, rect: Rect) {
             if (!opened || closing) return
-            saver.markDirty()
+            saver.markDirty(layer)
             saver.schedule()
         }
 
@@ -787,7 +832,10 @@ class SketchActivity : PaperScreenActivity() {
         val edit = builder.build() ?: return
         undo.record(edit)
         val readMs = openEditReadNanos / 1_000_000
-        Slog.d(TAG) { "undo entry: ${edit.tiles.size} tiles, ${edit.bytes} B, read $readMs ms on the main thread (${undo.undoBytes} B held)" }
+        Slog.d(TAG) {
+            "undo entry: ${layerName(edit.layer)}, ${edit.tiles.size} tiles, ${edit.bytes} B, " +
+                "read $readMs ms on the main thread (${undo.undoBytes} B held)"
+        }
     }
 
     // ── Gestures ─────────────────────────────────────────────────────────────
@@ -887,12 +935,16 @@ class SketchActivity : PaperScreenActivity() {
         // rule for overlapping patches is "reverse read order to undo, read order to redo", and
         // saying it here costs nothing and keeps the call honest against a future that overlaps.
         val tiles = if (undoing) edit.tiles.asReversed() else edit.tiles
+        // **The entry's own layer**, because a `RasterPatch` carries none: a tile read from graphite
+        // swapped into ink would paint the wrong image with the wrong pixels, and the engine could
+        // not tell.
         paper.swapPageRaster(
+            edit.layer,
             tiles.map { RasterPatch(Rect(it.left, it.top, it.left + it.width, it.top + it.height), it.pixels) },
         )
-        saver.markDirty()
+        saver.markDirty(edit.layer)
         saver.schedule()
-        Slog.d(TAG) { "${if (undoing) "undo" else "redo"}: ${edit.tiles.size} tiles swapped" }
+        Slog.d(TAG) { "${if (undoing) "undo" else "redo"}: ${edit.tiles.size} ${layerName(edit.layer)} tiles swapped" }
         return true
     }
 
@@ -965,7 +1017,7 @@ class SketchActivity : PaperScreenActivity() {
         loadPage(to, firstLoad = false)
         Slog.d(TAG) {
             "${if (undoing) "undo" else "redo"} of ${edit.javaClass.simpleName}: " +
-                "now page ${to.pageIndex + 1}/${to.pageCount} (${to.graphiteBytes} B)"
+                "now page ${to.pageIndex + 1}/${to.pageCount} ${to.rasterSizes()}"
         }
         return true
     }
@@ -998,12 +1050,15 @@ class SketchActivity : PaperScreenActivity() {
 
     /**
      * The page's own handwriting, composited onto the sketch — **as drawn, in black pen**, one undo
-     * entry, and one way only: pixels never become strokes again.
+     * entry, and one way only: pixels never become strokes again. It lands in the **ink** raster,
+     * where the rubber can never reach it: the bake is a black `PEN` and g-paper routes every style
+     * but `PENCIL` to ink ([InkBake]'s own note says why that is the right home for it).
      *
-     * The door opens and closes **its own** [RasterEditBuilder] around the `addStrokes`, because a
-     * composited bake produces no pen-up and `onPenLifted` is what closes an ordinary contact's. The
-     * engine reports the bake's change like any other, so the builder fills itself through
-     * [onRasterWillChange] while the call runs.
+     * The door **closes** any [RasterEditBuilder] still gathering before the `addStrokes` and again
+     * after it, because a composited bake produces no pen-up and `onPenLifted` is what closes an
+     * ordinary contact's. Opening one is the listener's, not the door's — a builder carries the
+     * raster it is reading and only the engine knows which one a bake touches — so the builder fills
+     * itself through [onRasterWillChange] while the call runs, on the layer the engine names.
      *
      * A page with no bare ink answers **0 chunks** — a legal answer, not a refusal — and gets an
      * alert that says so. A page dense past the transfer caps arrives cut; what arrived is baked.
@@ -1035,7 +1090,7 @@ class SketchActivity : PaperScreenActivity() {
                 showProblem(R.string.sketch_no_ink_title, R.string.sketch_no_ink_body)
                 return@runPageOp
             }
-            composite(state, strokes)
+            composite(strokes)
             Slog.d(TAG) { "brought in ${strokes.size} stroke(s) over $count chunk(s)" }
         }
     }
@@ -1049,17 +1104,28 @@ class SketchActivity : PaperScreenActivity() {
      * stroke's own colour, width and style rather than the armed pen's, so nothing is disturbed
      * today — and that one line is what keeps it true if the engine's bake ever starts reading the
      * pen instead.
+     *
+     * **The builder is no longer opened here** (arc 45 / G3). It carries a raster now, and which
+     * raster a bake lands on is the engine's answer — `RasterLayer.of(style)` per stroke — not this
+     * door's to guess. So the door only *closes* any contact still gathering, and the listener opens
+     * the builder on the layer the engine names at the bake's first will-change. A bake whose
+     * strokes are all one style (which both doors' are — "Bring in ink" is all `PEN`, the debug fill
+     * door all the armed tool's) is still exactly one entry; a mixed one would record one entry per
+     * raster, which is the honest shape for something that changed two images. (Which is also why
+     * the page is no longer a parameter: the builder the listener opens reads [currentPage], the
+     * one page a bake can possibly land on.)
      */
-    private fun composite(state: SketchPageState, strokes: List<Stroke>) {
+    private fun composite(strokes: List<Stroke>) {
         closeOpenEdit()
-        openEdit = RasterEditBuilder(state.pageKey, state.pageIndex, state.width, state.height)
         try {
             paper.addStrokes(strokes)
         } finally {
             closeOpenEdit()
             toolbar.restorePen()
         }
-        saver.markDirty()
+        // A belt on the engine's own `onRasterChanged(layer, …)`, which has already marked each of
+        // these: one entry per raster the bake actually touched, never both by default.
+        for (layer in strokes.mapTo(LinkedHashSet()) { RasterLayer.of(it.style) }) saver.markDirty(layer)
         saver.schedule()
     }
 
@@ -1110,8 +1176,34 @@ class SketchActivity : PaperScreenActivity() {
                 style = tools.penStyle,
             )
         }
-        composite(state, strokes)
+        composite(strokes)
         Log.w(TAG, "debug fill door: ${strokes.size} test strokes composited")
+        logEncodeTable(RasterLayer.of(tools.penStyle))
+    }
+
+    /**
+     * **Debug only — G3's measurement instrument, and the whole answer to the phase's open
+     * question** ([RasterImage.WEBP_EFFORT]): what a lossless WebP of a real, freshly filled page
+     * costs in bytes and in milliseconds at each effort, with PNG beside it for the number this arc
+     * is trading against.
+     *
+     * The copy is taken on Main like every other page copy (the engine only touches its images
+     * there), the encoding happens on IO because it is six page encodes in a row, and every row
+     * lands in `logcat` at `Log.w` so a walk can read the table off a device with nothing else to
+     * build. **Bytes and milliseconds only — never a pixel.**
+     */
+    private fun logEncodeTable(layer: RasterLayer) {
+        if (!BuildConfig.DEBUG) return
+        val copy = paper.getPageRaster(layer) ?: return
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                for (row in RasterImage.encodeTable(copy).lineSequence()) {
+                    if (row.isNotEmpty()) Log.w(TAG, "encode table (${layerName(layer)}): $row")
+                }
+            } finally {
+                copy.recycle()
+            }
+        }
     }
 
     // ── Page operations ──────────────────────────────────────────────────────
@@ -1185,7 +1277,8 @@ class SketchActivity : PaperScreenActivity() {
 
     private val flushHook = object : SketchSession.FlushHook {
         override fun flushBlocking() = saver.flushBlocking()
-        override fun pushBlocking(pageKey: String, png: ByteArray) = saver.pushBlocking(pageKey, png)
+        override fun pushBlocking(pageKey: String, layer: RasterLayer, bytes: ByteArray) =
+            saver.pushBlocking(pageKey, layer, bytes)
     }
 
     /**
@@ -1273,3 +1366,14 @@ class SketchActivity : PaperScreenActivity() {
         const val TEST_PATTERN_POINTS = 24
     }
 }
+
+/** A raster's name for a log line — a word, never a pixel (arc 45 / G3). */
+private fun layerName(layer: RasterLayer): String = if (layer == RasterLayer.INK) "ink" else "graphite"
+
+/**
+ * What a page is carrying, for a log line: both rasters' byte totals, graphite first
+ * ([SketchLayers.all]'s order), in the shape `(g 133482 B, ink 21000 B)`.
+ *
+ * **Counts, never content** — a byte total says how much was drawn and nothing about what.
+ */
+private fun SketchPageState.rasterSizes(): String = "(g $graphiteBytes B, ink $inkBytes B)"

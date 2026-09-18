@@ -1,5 +1,6 @@
 package com.symmetricalpalmtree.notesproutsn.ext.sketch
 
+import com.symmetricalpalmtree.gpaper.core.RasterLayer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -17,13 +18,13 @@ class SketchEditTest {
 
     @Test
     fun `an entry costs four bytes a pixel, summed over its tiles`() {
-        val edit = SketchEdit.RasterChanged("p1", 0, listOf(tile(64, 64), tile(64, 64), tile(10, 4)))
+        val edit = SketchEdit.RasterChanged("p1", 0, RasterLayer.GRAPHITE, listOf(tile(64, 64), tile(64, 64), tile(10, 4)))
         assertEquals((64 * 64 + 64 * 64 + 10 * 4) * 4L, edit.bytes)
     }
 
     @Test
     fun `an entry with no tiles costs nothing`() {
-        assertEquals(0L, SketchEdit.RasterChanged("p1", 0, emptyList()).bytes)
+        assertEquals(0L, SketchEdit.RasterChanged("p1", 0, RasterLayer.GRAPHITE, emptyList()).bytes)
     }
 
     @Test
@@ -41,20 +42,36 @@ class SketchEditTest {
     }
 
     @Test
-    fun `an entry re-indexed keeps its key, its pixels and its cost`() {
+    fun `an entry re-indexed keeps its key, its raster, its pixels and its cost`() {
         // K5b: a page inserted or deleted beneath the history moves an entry's page WITHOUT touching
         // what the entry holds. The tiles are shared rather than copied on purpose — they are the
-        // whole cost of an entry, and nothing about them changed.
+        // whole cost of an entry, and nothing about them changed. Arc 45 / G3 — the RASTER is part
+        // of "what the entry holds" — a tile read from ink can only ever be swapped back into ink,
+        // so an entry that lost its layer in a re-index would paint the wrong image at the next
+        // undo, and the engine could not tell.
         val tiles = listOf(tile(64, 64), tile(8, 8))
-        val edit = SketchEdit.RasterChanged("p1", 3, tiles)
+        val edit = SketchEdit.RasterChanged("p1", 3, RasterLayer.INK, tiles)
         val moved = edit.withIndex(4)
         assertEquals(4, moved.pageIndex)
         assertEquals("p1", moved.pageKey)
+        assertEquals(RasterLayer.INK, moved.layer)
         assertEquals(edit.bytes, moved.bytes)
         assertSame(tiles, moved.tiles)
         // Re-indexing to where it already is hands back the very same entry — no allocation at all
         // for the pages an insert did not move, which is most of them.
         assertSame(edit, edit.withIndex(3))
+    }
+
+    @Test
+    fun `an entry on one raster costs what the same entry on the other does`() {
+        // The arc's memory line: a page gaining a second image must not double what one contact
+        // costs the history. It does not, because one contact touches one raster — the entry reads
+        // its tiles from that one and holds nothing of the other.
+        val tiles = listOf(tile(64, 64), tile(64, 64))
+        assertEquals(
+            SketchEdit.RasterChanged("p1", 0, RasterLayer.GRAPHITE, tiles).bytes,
+            SketchEdit.RasterChanged("p1", 0, RasterLayer.INK, tiles).bytes,
+        )
     }
 
     // ── The structural entries (K5b's second half) ──────
