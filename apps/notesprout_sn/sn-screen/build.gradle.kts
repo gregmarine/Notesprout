@@ -45,9 +45,13 @@ dependencies {
     // 0.1.36 is Phase 23 "pencil preview tones" — RattaInkMap.pencilPreviewFor: a PENCIL previews
     // in the nearest usable firmware tone rather than always DARK_GRAY (arc 44 / T1). 0.1.37 is
     // Phase 24 "the lead goes wide" — RattaEmr.EMR_MAX 1200 → 9600, so a lead up to 96 px previews
-    // at the width it bakes (arc 44 / T3, the hand's walk).
-    api("com.symmetricalpalmtree.gpaper:gpaper-core:0.1.37")
-    api("com.symmetricalpalmtree.gpaper:gpaper-ratta:0.1.37")
+    // at the width it bakes (arc 44 / T3, the hand's walk). 0.1.38 is Phase 25 "graphite on
+    // paper" — the 96 px lead baked as a comb of bars across the mark (the travel direction's
+    // wobble times a 48 px lever arm); GraphiteGrain now loosens the rim flecks along the
+    // stroke, streaks the skate along it, and mottles by a page-space tooth field. Core only,
+    // no API change.
+    api("com.symmetricalpalmtree.gpaper:gpaper-core:0.1.38")
+    api("com.symmetricalpalmtree.gpaper:gpaper-ratta:0.1.38")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
 
