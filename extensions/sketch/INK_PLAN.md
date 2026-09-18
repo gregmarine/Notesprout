@@ -4,7 +4,7 @@ The plan **and the ledger** for the third arc of `NSE · Sketch`, in the shape o
 beside this file. Phases are appended to the ledger at the bottom as they land; the reference doc
 stays `extensions/sketch/docs/sketch.md`, grown at G5.
 
-**Status: Arc 45 — IN PROGRESS, G0 ✅ (2026-09-17).** Phases are lettered **G** ("Graphite" — the
+**Status: Arc 45 — IN PROGRESS, G0 ✅ G1 ✅ (2026-09-17).** Phases are lettered **G** ("Graphite" — the
 letters B C D F H K L M N P R T U V W X Z are in use across every `*_PLAN.md`; I was declined for
 its I/l ambiguity in a terminal). The g-paper half is g-paper's own **Phase 26 → 0.1.39** on its
 branch `two-rasters`.
@@ -121,7 +121,7 @@ What the exploration found (2026-09-17), which shapes every phase:
 | Phase | Owner | What lands | Gate |
 |---|---|---|---|
 | **G0 — Plan lands** ✅ | Fable | Branches `ink` (Notesprout) and `two-rasters` (g-paper); this file; g-paper `PLAN.md` Phase 26 ⬜; memory `project_ink_arc.md`. | Both branches pushed; `file` says this is text (the NUL trap). |
-| **G1 — g-paper Phase 26 → 0.1.39: two rasters** ⬜ | Opus on Fable's brief; Fable reviews the diff; Sonnet runs tests + installs the demo | `RasterLayer`; `CanvasPaperView` holds `graphiteRaster` + `inkRaster` (both lazy); `compositeIntoRaster` routes by style; the committed-layer draw flattens with `DARKEN`; `eraseRasterAlong` rubs graphite only; layer-qualified `get/load/copy/swapPageRaster` + layered listener callbacks, un-layered forms = graphite; `RasterDirty` unchanged; `clear()` drops both. Demo: the raster toggle draws pencil + pen + rubs, and a "flatten to PNG" render before a panel sees it (g-paper `CLAUDE.md`'s rule). `docs/api.md` + `CLAUDE.md` in the same commit. | g-paper `./gradlew test` green (core + ratta + onyx); **Paintsprout Onyx green on its pin**; Nomad demo: pen over pencil then rub — graphite lifts, ink stays; redraw ms with the flatten vs. 0.1.38; demo PSS; 0.1.39 published to mavenLocal (by the user's hand if the classifier refuses). |
+| **G1 — g-paper Phase 26 → 0.1.39: two rasters** ✅ | Opus on Fable's brief; Fable reviews the diff; Sonnet runs tests + installs the demo | `RasterLayer`; `CanvasPaperView` holds `graphiteRaster` + `inkRaster` (both lazy); `compositeIntoRaster` routes by style; the committed-layer draw flattens with `DARKEN`; `eraseRasterAlong` rubs graphite only; layer-qualified `get/load/copy/swapPageRaster` + layered listener callbacks, un-layered forms = graphite; `RasterDirty` unchanged; `clear()` drops both. Demo: the raster toggle draws pencil + pen + rubs, and a "flatten to PNG" render before a panel sees it (g-paper `CLAUDE.md`'s rule). `docs/api.md` + `CLAUDE.md` in the same commit. | g-paper `./gradlew test` green (core + ratta + onyx); **Paintsprout Onyx green on its pin**; Nomad demo: pen over pencil then rub — graphite lifts, ink stays; redraw ms with the flatten vs. 0.1.38; demo PSS; 0.1.39 published to mavenLocal (by the user's hand if the classifier refuses). |
 | **G2 — Seam + host data (API 20)** ⬜ | **Fable: the seam**; Opus: host side; Sonnet: test runs + doc rows | `ImageHeader` (WebP) replaces `PngHeader`; `SketchPageState` two streams; layered `readSketchChunk` / `saveSketchChunk`; `API_VERSION` 19 → 20, `MIN_API_VERSION_FOR_SKETCH` 17 → 20. Host: `TYPE_SKETCH_GRAPHITE` / `TYPE_SKETCH_INK` (+ the dead `sketch` in every exclusion), `SketchDao` / `SketchRepository` / `SketchRows` per layer, `SoilDao` lists, `SketchHostSession` two windows + two accumulators, `SketchHostBinder`, `SketchRaster` + `SketchCover` flatten, clip message. SN `docs/objects.md` (or wherever the row is specified) + root `docs/soil-file-format.md` if it names the row. | `:extension-api:testDebugUnitTest` (**the pin test — must be run**) + `:app:test` green; `PageClipTest` fixtures grown for the second row type. |
 | **G3 — The face** ⬜ | Opus; Sonnet: the adb walk (**clear the dev library's sketches first**, then a blank page) | Re-pin g-paper 0.1.39 (`sn-screen/build.gradle.kts` + the pin sentences). `:ext-sketch` declares API 20. `RasterImage` encodes WebP lossless (effort constant from the measurement), decodes via `BitmapFactory`; `SketchSaveGovernor` / `SketchSaver` / the park per layer; `RasterEditBuilder` + `SketchEdit.RasterChanged` carry a layer; `openPage` loads both rasters; Bring in ink → ink raster; the delete/undo/redo replay paths re-index both. **Phase-start question:** the WebP effort value, after Sonnet's on-device encode table. | `:ext-sketch:test` + root `./gradlew test` green; Sonnet's Nomad adb walk (two rows in the `.soil`, bytes per row vs. the old PNG, encode ms, reopen 0-pixel diff of the flatten, PSS, `logcat -b crash` empty); then **the hand**: pencil over pen, pen over pencil, rub each way, undo/redo across both, Bring in ink then rub, page turns, export PDF/PNG, cover, copy/paste page. |
 | **G4 — Walk adjustments** ⬜ | Opus (small); Fable if engine | Whatever the hand found (engine → another g-paper patch + Fable's review). Skipped if G3's walk is clean. | The user's word. |
@@ -200,3 +200,50 @@ chosen (§ Context).
 
 **Next.** G1 — g-paper Phase 26. Needs the Nomad and the user's hand for the gate; G2 may go first
 if it is not at hand.
+
+### G1 — Outcome (2026-09-17)
+
+**Phase-start answers.** None asked — the brief was derived from the plan's § Derived and the
+engine exploration; nothing in it proved wrong.
+
+**Landed.** g-paper Phase 26 on `two-rasters`, commit `8d58bd1`, **0.1.39 published to
+mavenLocal**. `RasterLayer { GRAPHITE, INK }` + `RasterLayer.of(style)` (the one routing site);
+`CanvasPaperView` holds `graphiteRaster` + `inkRaster`, each lazy on its own first mark, every
+drop site drops both; `compositeIntoRaster` routes per stroke with one `Canvas` per layer
+touched; the flatten is one `DARKEN` blit of the ink image in `drawCommittedContent` (so
+`renderToBitmap()` is the flatten); `eraseRasterAlong` names `graphiteRaster` — ink is never
+read, allocated or announced by an erase; layered `load/get/copy/read/swapPageRaster` and
+layered `onRasterWillChange/onRasterChanged`, the un-layered forms interface defaults meaning
+`GRAPHITE` (a legacy listener is **silent for ink**, deliberately — its `readPageRaster(rect)`
+reads graphite, so forwarding would hand it the wrong before-image). Load/clear announce both
+layers, graphite first, whole page, even when one is empty. Onyx's two overrides moved to the
+layered forms; Ratta needs none. Demo: `Pen (ink)` toggle, `(layer, tile)`-keyed undo swapped per
+layer, `Swap pg` over both rasters, `Dump` (wall-clocked flatten → PNG). `docs/api.md`,
+`docs/host-responsibilities.md` (its save recipe would have gone silent for ink), `CLAUDE.md`,
+README + integration guide at 0.1.39.
+
+**Deviations.** `docs/host-responsibilities.md` was in the brief's spirit, not its list —
+updated. `docs/api.md`'s "as of" header had been stale at 0.1.22 for sixteen releases; now
+0.1.39. The "flatten redraw ms **vs. 0.1.38**" line cannot be honoured literally: `Dump` is a
+new instrument and 0.1.38 had no equivalent; the number is recorded as a baseline.
+
+**Tests.** g-paper 220 core (+3: `RasterLayerTest` over every `StrokeStyle`, and
+`LegacyRasterHostTest`, a 0.1.38 host whose *compiling* is the guard) / 18 ratta green;
+Paintsprout Onyx `:app:compileDebugKotlin` green against a throwaway 0.1.39 re-pin, no source
+change, pin reverted.
+
+**Measured (Nomad demo, `ratta` engine).** `renderToBitmap()` of the 1404×1711 flatten **37 ms**;
+demo PSS **48.8 MB at launch → 70.9 MB** after the walk with both rasters live (~9.6 MB each on
+the Nomad — the "one more page-sized bitmap" the plan priced); undo swaps 7–20 ms for 6–9
+graphite tiles; a pen line's undo entry 33 tiles / 540 KB on ink alone, every rub entry on
+graphite alone (a rub never reads ink — the entry proves it).
+
+**Traps found.** None. `DARKEN` on a hardware `RenderNode` recording with no `saveLayer` is
+correct (the mode reads dst only) and looked right on the panel.
+
+**The hand.** Pencil shading, gel pen across it, rubbed both ways, pencil over ink and rubbed
+again, undo/redo of a mark, a pen line and a rub — *"Nothing feels off."* The dumped flatten at
+1× and 3×: ink solid through the rubbed graphite, rub corridors only in the graphite, no fringe
+where the two cross.
+
+**Next.** G2 — the seam + host data (API 20). Fable writes the seam; the Nomad is not needed.
