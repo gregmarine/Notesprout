@@ -1,11 +1,12 @@
-# Sketch (arcs 43–44)
+# Sketch (arcs 43–45)
 
-**NSE · Sketch** gives a notebook page a second surface beside its ink: one raster picture, a
-graphite pencil and a rubbing eraser, over a page-sized bitmap. A notebook created from the third
-radio (Handwritten / Text / **Sketch**) opens straight into this face; any page of it may carry one
-sketch, the way any page may carry one document. The host owns every `.soil` read and write, as it
-does for the document editor; the extension owns nothing but the pixels on the glass while the
-showing lasts.
+**NSE · Sketch** gives a notebook page a second surface beside its ink: **two raster pictures,
+one flattened**, a graphite pencil and a rubbing eraser over a graphite bitmap, a gel pen (and
+"Bring in ink") over an ink bitmap that the rubber never touches — over a page-sized surface. A
+notebook created from the third radio (Handwritten / Text / **Sketch**) opens straight into this
+face; any page of it may carry a sketch, the way any page may carry one document. The host owns
+every `.soil` read and write, as it does for the document editor; the extension owns nothing but
+the pixels on the glass while the showing lasts.
 
 This is the user's 2026-09-15 decision, landing SN's **tenth** extension point (`ACTION_SKETCH` /
 `ACTION_SKETCH_SCREEN`) and its **sixteenth** module — the second, after **NSE · Bible**, living
@@ -16,13 +17,37 @@ that every number and trap below comes from. Built on branch `sketch`; frozen at
 itself — `ISketch`, `ISketchHost`, the two host-side-stub tails, the boundary-audit rows — is
 documented once, in
 [`apps/notesprout_sn/docs/extensions.md`](../../../apps/notesprout_sn/docs/extensions.md) § "The
-Sketch point (arc 43)"; this doc is the feature side and links there rather than repeating it.
+Sketch point (arc 43)" and its § "Arc 45: two rasters"; this doc is the feature side and links
+there rather than repeating it.
 
 Arc 44 "Pencils" (2026-09-17, branch `pencils`, `PENCILS_PLAN.md` the plan + ledger, phases
 T0–T5) grew the one pencil into **six shades, twelve leads and a gel pen**, all of it remembered
 on the device.
 
-**Engine.** g-paper is pinned at **0.1.38** (Phase 25, "Graphite on paper", 2026-09-17, post-freeze
+Arc 45 "Ink" (2026-09-17/18, branch `ink`, `INK_PLAN.md` the plan + ledger, phases G0–G5, **G4
+skipped**) is the user's decision that ink is more permanent than pencil: the one raster became
+**two**, graphite and ink, the rubber confined to graphite, and the two flattened wherever the
+sketch is seen. Complete on the user's Nomad hand walk of 2026-09-18 ("Clean!").
+
+**Engine.** g-paper is pinned at **0.1.39** (Phase 26, "Two rasters: graphite and ink",
+2026-09-17): `CanvasPaperView` holds two lazily-allocated rasters, `graphiteRaster` and
+`inkRaster`, each first allocated on its own first mark; `RasterLayer { GRAPHITE, INK }` names
+them and `RasterLayer.of(style)` is the **one** routing site — `StrokeStyle.PENCIL` bakes into
+graphite, every other style (the gel pen's `PEN`, "Bring in ink") bakes into ink.
+`compositeIntoRaster` routes each stroke to its raster with one `Canvas` per layer actually
+touched. Flatten is a single blit: `drawCommittedContent` draws graphite, then draws ink over it
+with `PorterDuff.Mode.DARKEN` (each output pixel is the darker of the two — order-independent, so
+`renderToBitmap()` **is** the flatten, with no "which is on top" to explain and no fringe where a
+pencil stroke crosses a pen stroke). `eraseRasterAlong` names `graphiteRaster` only — the ink
+raster is never read, allocated, or announced by an erase, so a page with ink and no graphite
+rubs nothing (decision 1). The engine's whole raster API is now layer-qualified —
+`load`/`get`/`copy`/`read`/`swapPageRaster` each take a `RasterLayer`, and
+`PaperListener.onRasterWillChange`/`onRasterChanged` carry one — with the un-layered forms kept
+as interface defaults meaning `GRAPHITE`, so a 0.1.38 host still compiles against the re-pin; the
+un-layered listener is **silent for ink, deliberately** (its `readPageRaster(rect)` reads
+graphite, so forwarding an ink change through it would hand the listener the wrong before-image).
+Load and clear announce both layers, graphite first, whole page, even when one is empty. Over
+0.1.38 (Phase 25, "Graphite on paper", 2026-09-17, post-freeze
 maintenance on the user's Manta screencap — the 96 px lead baked as "a series of tiny lines": each
 cross-section is a rigid comb turned to the smoothed travel direction, and ~2° of wobble × a 48 px
 lever arm piles the rim's combs up every ~4 px. `GraphiteGrain` now loosens flecks along the
@@ -43,6 +68,9 @@ measurement door, not host API") closed at K8 (g-paper Phase 21 → 0.1.34) and 
 to pick a cadence any more. **Arc 44 moved none of the four**: the EMR floor **120**, the bake
 pressure **0.5**, the bake tilt **0** (0.1.35's own fix) and the **16 ms** cadence all stand exactly
 as K1/K8 froze them — only the EMR *ceiling* moved, and only for the pencil's widest leads.
+**Arc 45 moved none of the four either** — the two-raster split is an engine-side routing and
+flatten change, not a tuning one; cadence, EMR floor, bake pressure and bake tilt are exactly
+what K1/K8/0.1.35 left them.
 
 ---
 
@@ -125,46 +153,101 @@ value are given.
    doc draft; Opus codes; Sonnet scaffolds (XML / strings / drawables / doc drafts), runs JVM
    tests and walks the Nomad; no Haiku; no code review (arc 43's waiver carried).
 
+### Arc 45's decisions (2026-09-17)
+
+The user's, locked in `INK_PLAN.md`; phase-start questions could not reopen them:
+
+1. **How the rubber treats ink** — **never erases.** The eraser rubs the graphite raster only;
+   the ink raster is never read, never rubbed, never in an eraser's undo tiles. (A future
+   "resists" would be an `inkLift` fraction on `RasterRubbing` — a fresh decision, not this arc.)
+2. **Naming** — Arc 45 **"Ink"** · Notesprout branch **`ink`** · g-paper branch **`two-rasters`**
+   (Phase 26 → 0.1.39) · letter **G** · `INK_PLAN.md`.
+3. **Storage** — **two rows per page, `sketch_graphite` + `sketch_ink`**, symmetric names
+   (`TYPE_SKETCH` renamed, every site with it); **each a page-sized lossless WebP with alpha**
+   (RGBA — colour-ready for other platforms; grey+alpha PNG was declined for that reason). The
+   6 MiB cursor-window refusal applies **per row**.
+4. **Legacy** — **none.** No migration, no PNG sniffing, no warning. Existing `sketch` PNG rows
+   on the Nomad dev library and the Manta release library are lost — "nothing there worth
+   keeping." The Nomad's dev sketches were removed before G3's walk.
+5. **Models** — unchanged from arcs 43–44: Fable orchestrates, writes the AIDL seam and the
+   g-paper briefs, reviews every g-paper diff and every doc draft; Opus codes; Sonnet scaffolds,
+   runs JVM tests and walks the Nomad; no Haiku; no code review.
+
+**Derived** (reconciled from the G0 exploration, not re-asked): flatten = darken, everywhere the
+two rasters become one picture; routing by style, at the one `RasterLayer.of(style)` site; the
+rubber never allocates the ink raster; one contact touches one raster, so per-contact undo bytes
+never double; two dirty flags / two saves / two parks (one push lock, FIFO, still stands); the
+seam's chunk calls take a layer, replacing the un-layered pair outright (no legacy to keep them
+for); the image guard becomes a WebP guard (`ImageHeader`); encoding is
+`Bitmap.CompressFormat.WEBP_LOSSLESS` on API 30+, `WEBP` at quality 100 on 29 (`minSdk` 29); blank
+means absent, per row; reads that must not see the rows exclude both new names **and** the dead
+name `sketch`; export stays one sketch page per sketched page, the flatten happening inside
+`SketchRaster`; the cover flattens both rows of the last-shown page; one more page-sized bitmap
+alive in the extension (9.5 MB Nomad / 18.4 MB Manta, allocated lazily like `pageRaster` always
+was).
+
+Three shapes were weighed in the planning session and declined, so as not to be re-proposed: **a
+colour key** ("pure black means ink", one bitmap, an `inkLift` fraction on the rubber, `DARKEN`
+for pencil flecks over ink) — cheaper, but rests on the pencil never baking `#000000`, breaks the
+day the pen gets a second colour, and scuffs the antialias fringe where ink crosses graphite;
+**user-facing layers** (a layer UI, z-order, visibility) — the app never grows a layer panel; and
+**one blob container** holding both rasters (declined: not a picture — a row a reader can decode
+on its own is) and **a grey+alpha PNG** per raster (declined: colour is coming on other platforms,
+so RGBA).
+
 ---
 
 ## The data
 
-### The row
+### The rows
 
-`type='sketch'` (`SoilSchema.TYPE_SKETCH`) is the seventh additive row type, ordered outside every
-mark's stacking space at `SoilSchema.SKETCH_ORDER = -1`. One live row per page, parented to the
-page; `blob` is a PNG, ARGB_8888, transparent where empty, **exactly** the page's `width`×`height`
-— nothing else about the row is used (`SketchRows.toRow`).
+A sketch is now **two** rows, one per raster: `type='sketch_graphite'`
+(`SoilSchema.TYPE_SKETCH_GRAPHITE`) and `type='sketch_ink'` (`SoilSchema.TYPE_SKETCH_INK`), arc
+45 / G2's rename of the single `TYPE_SKETCH` (now `SoilSchema.TYPE_SKETCH_DEAD = "sketch"`, kept
+only as an **exclusion** name — decision 4 waived legacy outright, so a leftover PNG row from
+before the rename is never read, never surfaced, never migrated, just excluded everywhere the
+live names are). Both are additive row types, ordered outside every mark's stacking space at the
+unchanged `SoilSchema.SKETCH_ORDER = -1`. Up to one live row of each kind per page, parented to
+the page; `blob` is a **lossless WebP with alpha (RGBA)**, transparent where empty, **exactly**
+the page's `width`×`height` — nothing else about either row is used. `SketchRows.typeFor(layer)`
+answers the row name for a `RasterLayer`; `SketchRows.toRow(pageId, layer, …)` builds either row
+the same way; `SketchRows.imageBytes` reads either row's blob back — the dead name is refused by
+both.
 
-**Minted on the first save, never on open.** `SketchRepository.get` only reads; a page nobody has
-drawn on has no row at all, so a Sketch notebook costs what its sketches cost. The first save
-`upsert`s a whole row with a fresh id; every save after it rewrites the same row's pixels in place
-(`SoilDao.setBlob`, `createdAt` kept) — a row per save would make a notebook's size a function of
-how long the person worked rather than how much they drew.
+**Minted on the first save per row, never on open.** `SketchRepository.get` only reads; a page
+nobody has drawn on either raster has no rows at all, so a Sketch notebook costs what its sketches
+cost. The first save to a raster `upsert`s a whole row with a fresh id; every save after it
+rewrites that row's pixels in place (`SoilDao.setBlob`, `createdAt` kept) — a row per save would
+make a notebook's size a function of how long the person worked rather than how much they drew. A
+page inked on only one raster carries only that row: **blank means absent, per row** — an empty
+byte array for a layer clears that layer's row and that layer's row alone, the other untouched.
 
-**Blank means absent.** The wire form for "clear this page" is an empty byte array; `save` routes
-it to `clear`, which soft-deletes the live row (if any) and writes nothing else — a page with no
-sketch has no row.
+**The `ImageHeader` guard stands in front of every decode, both ways**, replacing the PNG-era
+`PngHeader`/IHDR check (arc 45 / G2): pure, hand-parsed, little-endian, checked on a save before
+anything is written and on a read before anything is composited. It looks for `RIFF` + `WEBP`,
+then either a `VP8L` chunk (signature `0x2F`, 14-bit width−1/height−1) or a `VP8X` chunk (24-bit
+width−1/height−1) — libwebp writes one or the other for lossless-with-alpha; 25 bytes are enough
+to parse a `VP8L` header, 30 for `VP8X`. A save whose committed bytes are not exactly the page's
+declared size, in either chunk form, throws `SKETCH_BAD_IMAGE` (renamed from `SKETCH_BAD_PNG` at
+G2 — both sides rebuilt, no legacy to keep the old name for) and writes nothing. A PNG is simply
+not a WebP and fails the guard outright — there is no sniffing. **A row already stored that fails
+the guard on read is soft-deleted, never overwritten** (`SketchRepository.get`) — the pixels are
+unreadable either way, and leaving them would hand the same refusal to every future reader.
 
-**The IHDR guard stands in front of every decode, both ways.** `PngHeader.matches` (pure, no
-Android classes, hand-parsed big-endian off the first 33 bytes) is checked on a save before
-anything is written and on a read before anything is composited. A save whose PNG is not exactly
-the page's declared size throws `SKETCH_BAD_PNG` and writes nothing. **A row already stored that
-fails the guard on read is soft-deleted, never overwritten** (`SketchRepository.get`) — the pixels
-are unreadable either way, and leaving them would hand the same refusal to every future reader.
+**Size caps are per row.** `SketchContract.WATCH_BYTES` = 4 MB is a silent log line, asked of
+each raster independently — a page on its way to the real limit on *either* raster shows up in a
+walk's log before it is a problem. `SketchContract.MAX_BYTES` = **6 MiB is a hard refusal, per
+row**, thrown as `SKETCH_TOO_LARGE` for that layer alone, nothing written for it, the other
+layer's row untouched. This is the sketch seam's one deliberate deviation from "never refuse" in
+the whole app: a row crosses back out through a SQLCipher cursor window, and an image written
+above that window can never be *read back* — accepting it would trade a refusal the person can
+see today for pixels that quietly stop existing later.
 
-**Size caps.** `SketchContract.WATCH_BYTES` = 4 MB is a silent log line — a page on its way to the
-real limit shows up in a walk's log before it is a problem. `SketchContract.MAX_BYTES` = **6 MiB is
-a hard refusal**, thrown as `SKETCH_TOO_LARGE`, nothing written, the stored row untouched. This is
-the sketch seam's one deliberate deviation from "never refuse" in the whole app: the row crosses
-back out through a SQLCipher cursor window, and a PNG written above that window can never be *read
-back* — accepting it would trade a refusal the person can see today for pixels that quietly stop
-existing later.
-
-**`updatedAt` is sacred.** `SketchDao.sketchDigest` (blob-free, `length(blob)`) is asked first, so
-an unequal length settles most saves without reading a megabyte of pixels back out of the file; a
-save whose bytes are already stored writes nothing at all, so opening and closing a sketch untouched
-never re-flags the notebook for backup.
+**`updatedAt` is sacred, per row.** `sketchDigest(pageId, type)` (blob-free, `length(blob)`) is
+asked first for whichever row is being saved, so an unequal length settles most saves without
+reading a megabyte of pixels back out of the file; a save whose bytes are already stored writes
+nothing at all for that row, so opening and closing a sketch untouched on both rasters never
+re-flags the notebook for backup.
 
 ### Index and meta
 
@@ -182,32 +265,39 @@ both, so a row that does is foreign or damaged, and the two mistakes are not the
 document opened as a sketchbook shows a blank page where its words are, while a sketchbook opened as
 a text document shows an empty editor with **Show pages** one tap away. The recoverable answer wins.
 
-### Reads that must not see the sketch row
+### Reads that must not see the rows
 
 - `SoilDao.childrenOf` (untyped, blob-inclusive; feeds export bake, previews, labels, the link
-  picker) excludes `type != 'sketch'`.
-- `SoilDao.liveDescendantIds` (page copy/cut/paste/delete/undo) **carries** the sketch row — a page
-  copy or delete must take its sketch with it.
-- `SoilDao.liveErasableIds` = `liveDescendantIds` **minus** the sketch row — what **Erase page**
-  actually clears (decision 11). Erase page's undo/redo replay is unchanged: it still replays by id.
+  picker) excludes **all three names** — `sketch_graphite`, `sketch_ink`, and the dead `sketch` —
+  so a leftover pre-rename PNG row on a device can never surface as a child either.
+- `SoilDao.liveDescendantIds` (page copy/cut/paste/delete/undo) **carries both** live rows — a page
+  copy or delete must take its sketches with it.
+- `SoilDao.liveErasableIds` = `liveDescendantIds` **minus both** rows — what **Erase page**
+  actually clears (decision 11, unchanged: ink stays out of Erase page's reach the same way
+  graphite does). Erase page's undo/redo replay is unchanged: it still replays by id.
 - Not in `liveContentIds`, not in any document-staleness whitelist, not in `ORDERED_TYPES` (never
   reachable from an objects paste).
+- `SoilDao.hasLiveSketch` / `SketchDao.pagesWithSketch` answer **"either row live"** — a page inked
+  on only one raster still counts as a sketched page.
 
-`SketchDao` (separate from `SoilDao`, `DocumentDao`'s shape) holds three reads and no write:
-`sketchDigest` (blob-free existence + length), `sketchFor` (the whole row, pixels included — the
-one read in the app that pulls a page-sized PNG), and `pagesWithSketch` (which of a notebook's live
-pages carry a live sketch, asked once per notebook, ids only — K4's cover and K7's export bundle
-both use it instead of a digest per page). `SketchRepository` is the **only writer** — `has` / `get`
-/ `save` / `clear` — layered over `SketchDao` + `SoilDao`, pure `suspend`, no Android classes, so
-every rule above is provable off-device.
+`SketchDao` (separate from `SoilDao`, `DocumentDao`'s shape) reads **per type**:
+`sketchDigest(pageId, type)` (blob-free existence + length) and `sketchFor(pageId, type)` (the
+whole row, pixels included — the one read in the app that pulls a page-sized image), each asked
+once per raster; `pagesWithSketch` (which of a notebook's live pages carry a live sketch on
+*either* raster, asked once per notebook, ids only — K4's cover and K7's export bundle both use it
+instead of a digest per page). `SketchRepository` is the **only writer** — `has` (either row
+live) / `get` / `save` / `clear(pageId, layer, …)`, every one of the last three taking a
+`RasterLayer` and applying every rule above **per row** — layered over `SketchDao` + `SoilDao`,
+pure `suspend`, no Android classes, so every rule above is provable off-device.
 
 ### Clipboard
 
-`ClipEnvelope.MAX_BYTES` (6 MB) is unchanged; a refused envelope that happens to be carrying a
-sketch row names it (`ClipMessages.tooLarge`, `clip_too_large_sketch`: *"This page's sketch makes
-the copy too large to hold on the clipboard. The clipboard was left unchanged."*) rather than
-giving the generic size message. A cross-notebook paste into a non-Sketch notebook carries the row
-along and never shows it — the destination simply has a page with a sketch nobody can see.
+`ClipEnvelope.MAX_BYTES` (6 MB) is unchanged; a refused envelope that happens to be carrying
+either sketch row names it (`ClipMessages.tooLarge`, `clip_too_large_sketch`: *"This page's sketch
+makes the copy too large to hold on the clipboard. The clipboard was left unchanged."*) rather than
+giving the generic size message — the message names the page's sketch, not which raster. A
+cross-notebook paste into a non-Sketch notebook carries **both** rows along and never shows either
+— the destination simply has a page with a sketch nobody can see.
 
 ---
 
@@ -215,10 +305,20 @@ along and never shows it — the destination simply has a page with a sketch nob
 
 `ExtensionContract.API_VERSION` moved 16 → **17** for the birth of `ACTION_SKETCH` /
 `ACTION_SKETCH_SCREEN` (`SketchContract.MIN_API_VERSION_FOR_SKETCH = 17`, a birth floor in
-`MIN_API_VERSIONS` — no existing floor moved), and → **18** at K5b for a compatible **method** tail
-(`SketchContract.MIN_API_VERSION_FOR_SKETCH_PAGES = 18`, gating five later `ISketchHost` methods;
-only `:ext-sketch` redeclares it, and `MIN_API_VERSION_FOR_SKETCH` itself stays 17 — a screen
-declaring 17 still binds and draws, it simply never turns a page into a new one).
+`MIN_API_VERSIONS` — no existing floor moved), → **18** at K5b for a compatible **method** tail
+(`SketchContract.MIN_API_VERSION_FOR_SKETCH_PAGES = 18`, gating five later `ISketchHost` methods),
+→ **19** at T2 for another compatible method tail (`MIN_API_VERSION_FOR_SKETCH_TOOLS = 19`) —
+and, at **arc 45 / G2**, → **20**, where the birth floor itself finally moves:
+`MIN_API_VERSION_FOR_SKETCH` **17 → 20**. This one is not a tail — the point's own chunk-transfer
+codes 3–4 (`readSketchChunk`/`saveSketchChunk`) **changed shape in place** to take a layer rather
+than growing a new pair beside them, so a host or screen on either side of the break simply never
+binds the other at all: a screen declaring below 20 never sees `ACTION_SKETCH` offered, and a host
+below 20 is refused by `:ext-sketch`'s own manifest declaration before any call is attempted.
+`MIN_API_VERSION_FOR_SKETCH_PAGES` (18) and `MIN_API_VERSION_FOR_SKETCH_TOOLS` (19) stay in the
+source as history — both are now ≤ 20 and therefore inert, since nothing binds below the action
+floor to begin with. This is the family's first move of a *single point's* action floor (arc 22 /
+X1 moved three points' floors at once, when floors were introduced — G2's own ledger corrects an
+earlier "first ever" claim to that).
 
 `ISketch` carries **no store** — the sixth screen-owning point and the second with none (the tag
 manager's shape): nothing here has anything of its own to remember. The bookmark is the notebook's
@@ -243,31 +343,44 @@ recipe: minted per showing, uid-gated in every method, revoked with the unbind.
 interface ISketchHost {
     SketchPageState current();
     SketchPageState requestPage(int direction);            // PAGE_PREV/PAGE_NEXT; same page = edge
-    byte[] readSketchChunk(int chunkIndex);
-    void   saveSketchChunk(String pageKey, int chunkIndex, byte[] chunk, boolean last);
+    byte[] readSketchChunk(int layer, int chunkIndex);
+    void   saveSketchChunk(String pageKey, int layer, int chunkIndex, byte[] chunk, boolean last);
     int    requestInk(String pageKey);                      // chunk count; 0 = no bare ink, no exception
     List<WireStroke> readInkChunk(int chunkIndex);
-    // K5b — method floor 18:
+    // K5b — method floor 18 (history; inert below the action floor of 20):
     SketchPageState insertPage(int direction);
     SketchPageState deletePage(String pageKey);
     int    pageContent(String pageKey);                     // bit 1 ink/objects, bit 2 document
     SketchPageState undoPage(String token);
     SketchPageState redoPage(String token);
-    // T2 — method floor 19:
+    // T2 — method floor 19 (history; inert below the action floor of 20):
     SketchToolSettings toolSettings();
     void   putToolSettings(SketchToolSettings settings);
 }
 ```
 
-**PNG crosses chunked both ways**, at `SketchContract.SKETCH_CHUNK_BYTES` = 512 KiB (`ByteChunks`,
-the `TextChunks` recipe applied to bytes — no surrogate pairs, so `join` is plain concatenation).
-**An empty image is one empty chunk**, never zero chunks: clearing a page's sketch rides the same
-shape as every other save, and the host's accumulator has one path rather than two. Reads are a
-pull — every state-answering call parks its PNG atomically in the host's **read window** alongside
-the `SketchPageState` it returns, and `readSketchChunk` serves that window; writes are a push —
-`saveSketchChunk` accumulates in order from chunk 0, the last chunk commits, and the accumulator
-re-checks the running total against `MAX_BYTES` on every chunk (over it: `SKETCH_TOO_LARGE`, the
-accumulation reset, nothing written).
+The pair `readSketchChunk`/`saveSketchChunk` **replaced** their un-layered predecessors in place
+at arc 45 / G2 rather than growing a third pair beside them — there was no legacy to keep the old
+shape for (decision 4) — which is exactly why the point's action floor had to move instead of a
+method floor growing another tail.
+
+`SketchContract.LAYER_GRAPHITE` = 0, `LAYER_INK` = 1, `LAYERS` (`[LAYER_GRAPHITE, LAYER_INK]`, the
+order the host announces and flattens them in — graphite first, ink darkened over it), and
+`isLayer(Int)` name the two rasters on the wire; a layer outside `LAYERS` on either chunk call is
+`IllegalArgumentException`, checked **before** anything else about the call is read (an unknown
+layer on `saveSketchChunk` never touches the accumulator).
+
+**The WebP of the named layer crosses chunked, each layer independent**, at
+`SketchContract.SKETCH_CHUNK_BYTES` = 512 KiB (`ByteChunks`, the `TextChunks` recipe applied to
+bytes — no surrogate pairs, so `join` is plain concatenation). **An empty image is one empty
+chunk**, never zero chunks: clearing a page's sketch on either raster rides the same shape as
+every other save, and the host's per-layer accumulator has one path rather than two. Reads are a
+pull — every state-answering call parks **both** images atomically in the host's per-layer **read
+windows** alongside the `SketchPageState` it returns, and `readSketchChunk(layer, i)` serves the
+window named; writes are a push — `saveSketchChunk` accumulates in order from chunk 0 **per
+layer**, the last chunk commits that layer, and the accumulator re-checks the running total
+against `MAX_BYTES` on every chunk (over it: `SKETCH_TOO_LARGE` for that layer alone, that layer's
+accumulation reset, nothing written for it — the other layer's accumulation is untouched).
 
 **A save is accepted for any live page of the open notebook**, named by `pageKey` — unlike the
 document editor's mode-routed target, there is no routing guard here: the screen turns its own
@@ -275,23 +388,26 @@ pages, and a save flushed a moment after a turn still belongs to the page it was
 key still guarantees is that pixels can never land on a page nobody drew them on; a key naming a
 deleted page is `IllegalArgumentException("Unknown page")`.
 
-`SketchPageState` (7 fields plus K5b's tail, every one validated in `init` — unmarshal *is*
-validation): `pageKey`, `pageIndex`, `pageCount`, `width`, `height`, `sketchBytes`, `sketchChunks`
-(pinned to `ByteChunks.countFor(sketchBytes)` so a hand-built state can never disagree with the
-chunker that will serve it), and `structuralToken` (K5b's compatible tail, empty on every answer
-that is not a page insert or delete — an exhausted parcel reads `readString()` null, which becomes
-the empty token, exactly what a pre-K5b answer meant).
+`SketchPageState`'s wire form is `pageKey · pageIndex · pageCount · width · height ·
+graphiteBytes · graphiteChunks · inkBytes · inkChunks · structuralToken` — the single
+`sketchBytes`/`sketchChunks` pair grew into two pairs at arc 45 / G2, one per raster, each chunk
+count pinned to `ByteChunks.countFor(...Bytes)` so a hand-built state can never disagree with the
+chunker that will serve it; `structuralToken` (K5b's compatible tail) stays last, the next tail's
+slot, empty on every answer that is not a page insert or delete. `hasSketch` answers "**either**
+raster live"; `hasLayer(layer)` / `bytesFor(layer)` / `chunksOf(layer)` answer the same questions
+for one named raster.
 
 **Only `SecurityException` / `IllegalArgumentException` / `IllegalStateException` may cross.** The
-two typed `IllegalStateException` strings — `SKETCH_TOO_LARGE`, `SKETCH_BAD_PNG` — are compared
-`==`, never `contains`. **There is deliberately no "no ink" refusal**: `requestInk` on a bare page
-answers **0**, a legal count for a legal question (the pad's zero-chunk park precedent) — the
-screen words its own "No ink on this page" from the number, rather than handling an exception where
-a count would do.
+two typed `IllegalStateException` strings — `SKETCH_TOO_LARGE`, `SKETCH_BAD_IMAGE` (renamed from
+`SKETCH_BAD_PNG` at G2, the format in the name) — are compared `==`, never `contains`. **There is
+deliberately no "no ink" refusal**: `requestInk` on a bare page answers **0**, a legal count for a
+legal question (the pad's zero-chunk park precedent) — the screen words its own "No ink on this
+page" from the number, rather than handling an exception where a count would do.
 
 ### K5b's five tails
 
-Added the same day as decisions 7's second amendment, all behind the method floor 18:
+Added the same day as decisions 7's second amendment, all behind the method floor 18 — history
+since arc 45 / G2 moved the action floor itself to 20, above it:
 
 - **`insertPage(direction)`** — a blank page next to **the face's target**, not the notebook's
   displayed page, on the `PAGE_PREV`/`PAGE_NEXT` side named. The host inserts it exactly as its own
@@ -323,8 +439,9 @@ never displayed, never parsed).
 ### T2's two tails
 
 Added arc 44 / T2 (2026-09-17), behind the method floor `SketchContract.MIN_API_VERSION_FOR_SKETCH_TOOLS`
-= 19 (`API_VERSION` 18 → 19, no action floor moved — `MIN_API_VERSION_FOR_SKETCH` stays 17,
-`MIN_API_VERSION_FOR_SKETCH_PAGES` stays 18 untouched):
+= 19 (`API_VERSION` 18 → 19; at the time no action floor moved — `MIN_API_VERSION_FOR_SKETCH`
+stayed 17, `MIN_API_VERSION_FOR_SKETCH_PAGES` stayed 18 untouched. History since arc 45 / G2 moved
+the action floor to 20, above this one too):
 
 - **`toolSettings(): SketchToolSettings?` / `putToolSettings(settings)`** — what this device last
   remembered the face's tools to be, and how the face pushes a new pick. **What crosses is
@@ -357,13 +474,21 @@ Added arc 44 / T2 (2026-09-17), behind the method floor `SketchContract.MIN_API_
 
 ### `SketchHostSession` and `SketchHostBinder`
 
-`SketchHostSession` (pure) holds the read window (a PNG staged as `ByteChunks`), the ink window
-(staged `WireStroke` chunks, 0 legal), and the save accumulator: a key is taken from the save's
-chunk 0 and every later chunk must repeat it, in order; per-chunk and running-total caps enforce
-`MAX_BYTES`; an empty join is a clear. **A window swap mid-save leaves the accumulation exactly
-where it was** — a flush a moment after a page turn still lands on the page it was drawn on.
-`SketchHostBinder` is the `ISketchHost.Stub`: `gate()` is the first statement of all thirteen methods,
-a `hook {}` funnel keeps only marshalable exceptions crossing, and `revoke()` clears the session.
+`SketchHostSession` (pure) holds **two** read windows and **two** save accumulators, one per
+raster, under one monitor — `setWindows(pageKey, graphite, ink): Windows` sets both atomically
+with the state they belong to, `readChunk(layer, i)` serves the named window, and
+`acceptChunk(pageKey, layer, …): Commit(pageKey, layer, bytes)` accumulates that layer alone (a
+key is taken from the save's chunk 0 and every later chunk for that layer must repeat it, in
+order; per-chunk and running-total caps enforce `MAX_BYTES`; an empty join is a clear) — plus the
+ink window (staged `WireStroke` chunks, 0 legal), unchanged. **The two accumulations are
+independent**: a refusal on one layer (`SKETCH_TOO_LARGE`, a bad key) leaves the other's
+accumulation exactly where it was, and an unknown layer is refused **before** anything else about
+the call is read. **A window swap mid-save leaves the accumulation exactly where it was** — a
+flush a moment after a page turn still lands on the page it was drawn on. `SketchHostBinder` is
+the `ISketchHost.Stub`: `gate()` is still the first statement of all **thirteen** methods (the
+un-layered pair was **replaced** by the layered pair in place, not added to — the count did not
+grow), a `hook {}` funnel keeps only marshalable exceptions crossing, log lines name the layer,
+and `revoke()` clears the session.
 
 ### `SketchClient` and `SketchEntry`
 
@@ -462,6 +587,12 @@ stroke erasers, and a raster page has neither.
   three tones (BLACK / DARK_GRAY / GRAY, `RattaInkMap.pencilPreviewFor`). Every other offered level
   previews in its band's tone (0–2 → BLACK, 3–6 → DARK_GRAY, 7–14 → GRAY) while baking its own
   grey — the live line is an approximation, the bake is always the true shade.
+- **`SketchLayers`** (`:ext-sketch`, arc 45 / G3, pure Kotlin) is the **one** translation between
+  `SketchContract.LAYER_*` (the wire) and `RasterLayer` (the engine): `wireOf(RasterLayer)`,
+  `of(Int)`, and `all` (`[GRAPHITE, INK]`, the same order as `SketchContract.LAYERS`) — pinned to
+  both by test, so the two enumerations can never drift silently apart. Every layered call in the
+  face (`readPageRaster`, `swapPageRaster`, a save's `markDirty`) goes through it rather than
+  hand-mapping an `Int`.
 
 **Page turns, inserts, deletes** all go through `runPageOp`, which serializes page ops on the
 lifecycle scope and turns any thrown exception into a `Log.w` rather than a crash. A turn
@@ -486,14 +617,18 @@ two-finger swipe inserts in the direction swiped (before or after the current pa
 **Bring in ink** (`bringInInk`): stages the page's bare strokes over `requestInk` (0 = "No ink on
 this page" alert, never an exception), reads them chunk by chunk (`readInkChunk`), turns them into
 strokes via `InkBake.toBakedStrokes` — `InkWire.toStrokes` plus one colour override, opaque black,
-width and style kept as drawn — and composites them as one undo entry (`composite`). A page dense
-past the pad's own transfer caps (`MAX_TRANSFER_STROKES` 10 000 / `MAX_TRANSFER_POINTS` 400 000)
-arrives **cut**: the prefix that fits, in writing order, logged host-side — a partial bake, never no
-bake at all.
+width and style kept as drawn — and composites them as one undo entry (`composite`). **The bake
+lands in the ink raster** (`InkBake`'s own KDoc says so, arc 45 / G3 — the strokes it produces are
+`StrokeStyle.PEN`, so `RasterLayer.of(style)` routes them there the same as the gel pen). A page
+dense past the pad's own transfer caps (`MAX_TRANSFER_STROKES` 10 000 / `MAX_TRANSFER_POINTS`
+400 000) arrives **cut**: the prefix that fits, in writing order, logged host-side — a partial
+bake, never no bake at all.
 
 **The debug fill door** (`BuildConfig.DEBUG` only): a long-press on the page indicator composites
-`TEST_PATTERN_LINES` = 12 diagonal `PENCIL` strokes as one undo entry, so adb (which cannot draw)
-can still produce a non-blank save to walk against.
+`TEST_PATTERN_LINES` = 12 diagonal `PENCIL` strokes as one undo entry — **landing in graphite**, by
+the same routing — so adb (which cannot draw) can still produce a non-blank save to walk against;
+arc 45 / G3 also logs a debug-only `encodeTable` (WebP effort 0/25/50/75/100 + PNG, bytes and ms)
+from this same door, the source of the G3 measurement table below.
 
 **Saves and reconnect.** `SketchSession.FlushHook` (`flushBlocking`/`pushBlocking`) and
 `BeginListener` are the screen's static hand-off to `SketchService`: a host restart while the
@@ -538,37 +673,70 @@ back whole), and the alternative is a Binder call per mark.
 
 ## Saves
 
-`SketchSaveGovernor` (pure Kotlin, no Android types) is the whole decision of whether a drawing gets
-written; `SketchSaver` is the plumbing (timers, threads, the binder call) that carries out what the
-governor says.
+`SketchSaveGovernor` (pure Kotlin, no Android types; unchanged class) is the whole decision of
+whether a drawing gets written — arc 45 / G3 runs **one instance per raster**, so a pencil
+scribble never re-encodes the ink row and a pen stroke never re-encodes graphite. `SketchSaver` is
+the plumbing (timers, threads, the binder call) that carries out what the governor says,
+`markDirty(layer)` its per-raster hook.
 
-**Dirty is a flag, not a comparison** — a page of pixels cannot be compared without re-encoding it,
-which is the work the question exists to avoid. `markDirty()` follows the engine's own
-`onRasterChanged`; the flag is cleared **when the copy is taken**, not when the write lands, so a
-mark arriving mid-encode re-dirties the page and a second save follows rather than being lost in the
-gap between an old copy and a flag cleared too late.
+**Dirty is a flag, not a comparison, per raster** — a page of pixels cannot be compared without
+re-encoding it, which is the work the question exists to avoid. `markDirty(layer)` follows the
+engine's own layered `onRasterChanged`; the flag is cleared **when the copy is taken**, not when
+the write lands, so a mark arriving mid-encode re-dirties that raster's page and a second save
+follows rather than being lost in the gap between an old copy and a flag cleared too late.
 
-**States**: `request()` (an ordinary trigger — the debounce tick, a turn, `onPause`, a retry) answers
-`Idle` / `Save` (take the copy now) / `Wait` (a push is already in flight; its own completion
-re-asks) — **newest wins, and wins after**, never beside, the one already running (two overlapping
-chunk streams would interleave on the host's one accumulator). `flushRequest()` (a **leave**
-trigger: Back, Show pages, `end()`) ignores `inFlight` on purpose — the real exclusion is the push
-lock around the chunk stream, and a leave flush queued behind an in-flight push still lands, in
-order, rather than leaving with the newest pixels unwritten.
+**States**: `request()` (an ordinary trigger — the debounce tick, a turn, `onPause`, a retry)
+answers `Idle` / `Save` (take the copy now) / `Wait` (a push is already in flight; its own
+completion re-asks) — **newest wins, and wins after**, never beside, the one already running (two
+overlapping chunk streams would interleave on the host's accumulator). `flushRequest()` /
+`saveNow()` / `flushAndAwait()` **walk `SketchLayers.all`**, one raster after the other, so both
+dirty rasters of a page are pushed by one call. `flushRequest()` (a **leave** trigger: Back, Show
+pages, `end()`) ignores `inFlight` on purpose — the real exclusion is **one push lock, FIFO**: the
+two rasters of a page cross the wire one after the other under the same lock, never
+interleaved, and a leave flush queued behind an in-flight push still lands, in order, rather than
+leaving with the newest pixels unwritten. Completion bookkeeping and the retry beat are kept
+**per layer**, but the retry itself is **one beat for the whole page** — a page with both rasters
+dirty gets one retry tick, not two racing ones.
 
 **Cadence**: 3 s pen-idle-gated debounce; a failed push retries after 2 s; flush points are a page
 turn/insert/delete, `onPause`, Back, and Show pages. Each save is a **Main-thread bitmap copy** →
-PNG encode on IO → chunked push under one `Mutex` (one push in flight at a time, ever). A failed
-copy (an allocation the device refuses) leaves the page dirty and re-arms the retry with nothing
-pushed; a failed push leaves the page dirty, parks the pixels, and re-arms the retry.
+WebP encode on IO → chunked push under the one push lock (one push in flight at a time, ever, for
+the whole page). Encoding is `RasterImage.compressLossless`: `Bitmap.CompressFormat.WEBP_LOSSLESS`
+on API 30+, `WEBP` at quality 100 on 29 (documented lossless there; `minSdk` is 29). The `quality`
+argument doubles as an **effort** dial on the lossless path; `RasterImage.WEBP_EFFORT` = **100**,
+the G3 phase-start answer after Sonnet's Nomad encode table (below): the top of the dial is the
+smallest encode on **both** rasters and still no slower than the PNG it replaces, running on an IO
+thread three seconds behind the last mark. **The dial is not monotonic — measure, never
+interpolate** (see Traps): 75 encoded *larger* than 50 on the graphite lattice at G3. A
+debug-only `encodeTable` (efforts 0/25/50/75/100 plus PNG, bytes and ms each) is logged from the
+fill door for exactly this reason. A failed copy (an allocation the device refuses) leaves that
+raster's page dirty and re-arms the retry with nothing pushed; a failed push leaves that raster
+dirty, parks its pixels, and re-arms the retry.
 
-**`PendingPngPark`** is the one place a page's pixels live when a push could not be delivered — the
-host process died, its binder was revoked, a chunk was refused. **One slot, keyed by page**: a
-second failure on a *different* page displaces the first (the newer pixels, the ones the hand is
-closest to, win; the caller logs the displacement). `ISketch.end()` re-pushes whatever is parked
-while the host binder is still valid — the last moment it is. Unlike the document editor's park, a
-sketch save is accepted for any live page, so a park never has to match what the host is currently
-showing to be worth writing back.
+**`PendingImagePark`** (renamed from `PendingPngPark` at G3, the format in the name) is the one
+place a page's pixels live, **per raster**, when a push could not be delivered — the host process
+died, its binder was revoked, a chunk was refused. **One slot per raster, keyed by page and
+layer**: a second failure on a *different* page (on the same raster) displaces the first slot for
+that raster (the newer pixels, the ones the hand is closest to, win; the caller logs the
+displacement) — a graphite failure and an ink failure on the same page occupy their own slots and
+never displace each other. `clear(pageKey, layer)` drops one slot; `take()` answers
+**graphite-first** when both are parked. Every caller that can find a parked slot **drains** it:
+`retryParked`, the service's `flushBeforeRevoke`, and `pushPendingInBackground` all walk both
+layers (each proved terminating). `ISketch.end()` re-pushes whatever is parked, on either raster,
+while the host binder is still valid — the last moment it is — via
+`SketchSession.FlushHook.pushBlocking(pageKey, layer, bytes)`, now layer-taking. Unlike the
+document editor's park, a sketch save is accepted for any live page, so a park never has to match
+what the host is currently showing to be worth writing back.
+
+**Loading a page** (`loadPage`) loads **both** layers always, sequentially, one decoded bitmap
+alive at a time (peak memory: one array plus one bitmap, not two of each) — a null layer is
+absent, dropped rather than swapped in as a blank raster. `readSketch(state, layer)` answers an
+absent layer's own bytes without a Binder call at all, straight from the parked `SketchPageState`.
+`deletePageNow` clears the park **on both layers** before the delete crosses. `composite()` (the
+ink bake, the fill door) no longer pre-opens a raster-edit builder on a fixed layer — the listener
+opens it on whichever layer the engine actually names for the stroke it is baking (there is no way
+to know in advance which raster a mixed batch will touch), and marks dirty each distinct
+`RasterLayer.of(style)` the batch produced.
 
 ---
 
@@ -583,13 +751,21 @@ tens of megabytes of near-duplicate pixels inside a single entry. Sixty-four is 
 hairline stroke costs 16–64 KB and large enough that a page-wide sweep is not tens of thousands of
 tiny reads.
 
-**One contact is one entry, and it is its own inverse** (`SketchEdit.RasterChanged(pageKey,
-pageIndex, tiles)`): the tiles go onto the page via g-paper's `swapPageRaster` and come back holding
-what the page was holding, so the entry that undid a change is the entry that redoes it, with no
-second copy and no second shape of call. **Undo bytes bound the whole entry to the page itself** — a
-9.5 MB Nomad page or an 18.4 MB Manta page is the absolute ceiling for one contact, well under the
-48 MB budget (`SketchEdit.UNDO_BUDGET_BYTES`), which `UndoRedoStack`'s `evictForBudget` enforces by
-dropping the **oldest costed entry**, never the newest.
+**One contact is one entry on one raster, and it is its own inverse**
+(`SketchEdit.RasterChanged(pageKey, pageIndex, layer, tiles)`, `layer` added at arc 45 / G3): the
+tiles go onto the named raster via g-paper's layered `swapPageRaster(edit.layer, …)` and come back
+holding what that raster was holding, so the entry that undid a change is the entry that redoes
+it, with no second copy and no second shape of call. **One contact touches one raster** (a pencil
+stroke, a pen stroke, an eraser sweep, or the ink bake), so per-contact undo bytes **do not
+double** now that there are two rasters — `SketchActivity` overrides only the **layered**
+`onRasterWillChange`/`onRasterChanged` callbacks (the un-layered pair, silent for ink by g-paper's
+own design, was deleted rather than kept), and reads via `readPageRaster(layer, …)`. A belt
+closes an open entry if a second layer's `onRasterWillChange` ever arrives inside what the builder
+thought was one contact — a defence against a mixed batch, not something the engine is known to
+do. **Undo bytes still bound the whole entry to one page's raster** — a 9.5 MB Nomad page or an
+18.4 MB Manta page is the absolute ceiling for one contact on one raster, well under the 48 MB
+budget (`SketchEdit.UNDO_BUDGET_BYTES`, unchanged), which `UndoRedoStack`'s `evictForBudget`
+enforces by dropping the **oldest costed entry**, never the newest.
 
 **`SketchEdit.Structural` is the one zero-byte kind** (K5b): a `PageInserted`/`PageDeleted` entry
 carries only its host `token`, no pixels at all, so the byte budget can **never** evict one to make
@@ -617,34 +793,45 @@ drops.
 **Export** (`ExportRender`, K7): a bundle interleaves each page's ink then, if it has one, its
 sketch — page 1 ink, page 1 sketch, page 2 ink, … — with endnotes after the last sketch. Which
 pages carry one is **planned, not discovered**: one blob-free `SketchDao.pagesWithSketch` query
-before the first page is drawn, so the bundle can declare its header page count up front.
-`bundlePositions` shifts every endnote's `fromPage` by the sketch pages ahead of it (`fromPageLabel`
-keeps the notebook's own page number). The sketch image is read through `SketchDao.sketchFor` +
-`SketchRows.pngBytes`/`fitsPage` — **never `SketchRepository.get`**, which would soft-delete a row
-the render must not touch — and a row that is gone or refused between the plan and the bake writes
-a **plain white page of the page's own size** (`SketchRaster.blank`, logged) rather than closing the
-bundle short by one page. `SketchRaster.toWebp` composites the guarded PNG over opaque white into
-`RGB_565`, one page bitmap alive at a time, plain white never the template (decision 10).
-`ExportNaming.pageStem(sketch = true)` appends **` sketch`** to the ink page's own stem
-(`K7 - Heading.png` / `K7 - Heading sketch.png`) — the phase-start answer, so the two files sort
-together and the suffix never eats into the title's own cap.
+before the first page is drawn (arc 45's own answer: **either row live**), so the bundle can
+declare its header page count up front. `bundlePositions` shifts every endnote's `fromPage` by the
+sketch pages ahead of it (`fromPageLabel` keeps the notebook's own page number). The **two** row
+images are read through `SketchDao.sketchFor(pageId, type)` (once per row that exists) +
+`SketchRows.imageBytes`/`fitsPage` — **never `SketchRepository.get`**, which would soft-delete a
+row the render must not touch — and a page whose rows are both gone or refused between the plan
+and the bake writes a **plain white page of the page's own size** (`SketchRaster.blank`, logged)
+rather than closing the bundle short by one page. `SketchRaster.toWebp(w, h, graphite?, ink?)`
+(arc 45 / G2: grew from one guarded blob to two optional ones) decodes **one raster at a time**
+(peak still two bitmaps alive together, one per raster, not more) and composites white, then
+graphite plain, then ink with `PorterDuff.Mode.DARKEN`, into `RGB_565`, plain white never the
+template (decision 10). `ExportNaming.pageStem(sketch = true)` appends **` sketch`** to the ink
+page's own stem (`K7 - Heading.png` / `K7 - Heading sketch.png`) — the phase-start answer, so the
+two files sort together and the suffix never eats into the title's own cap; the exported file is
+still one flattened image regardless of how many of the two rasters it drew from.
 
 **Page-scope export of a sketched page is a folder, not a single file** (`ExportDelivery.perPage`,
 the K7 hand-found bug): a two-page bundle handed to a single-file image exporter as "one page" threw
 `bundle carries 2 pages; one expected` with nothing written. Fixed by counting a sketched page at
 page scope like the calendar's Day — `perPage(delivery, scope, pageHasSketch)` — with
-`SoilDao.hasLiveSketch(pageId)` (blob-free) answering the Export screen's one open.
+`SoilDao.hasLiveSketch(pageId)` (blob-free, either row) answering the Export screen's one open.
 
-**Clipboard/erase**: see § The data above — `clip_too_large_sketch`, `liveErasableIds`.
+**Clipboard/erase**: see § The data above — `clip_too_large_sketch`, `liveErasableIds` (both now
+excluding both rows).
 
-**Cover** (`SketchCover`, decision 6): rendered from the **stored row**, never the extension's live
-surface — the pixels are in another process, and the only honest picture is the one that landed,
-which is why the caller reads the row *after* `end()`'s save has been joined. Composited over
-opaque white (a transparent card would show the library's own background through the strokes),
-decoded **sampled** (`sampleFor`, pure, the largest power-of-two `inSampleSize` that keeps the long
-edge at or above `CoverSnapshot.LONG_EDGE_PX`) so the decoder never allocates a full page for a
-512 px card. Falls back to the ordinary ink bake when the page carries no sketch, and only once the
-canvas has actually loaded (an unloaded surface's "bake" would be a blank card).
+**Cover** (`SketchCover`, decision 6): `render(repo, pageId, graphite?, ink?)` — rendered from the
+**stored rows**, never the extension's live surface — the pixels are in another process, and the
+only honest picture is the one that landed, which is why the caller reads the rows *after*
+`end()`'s save has been joined. Both rasters are decoded at **one `sampleFor` size derived from
+the page's own size**, not from whichever decodes first — the ground bitmap is allocated from that
+sampled size (ceiling division) **before either decode**, an arc 45 / G2 deviation from the K4
+recipe needed so two separate decodes both register onto the same card rather than the second
+silently sizing itself off the first. `sampleFor` is still the largest power-of-two `inSampleSize`
+that keeps the long edge at or above `CoverSnapshot.LONG_EDGE_PX`, so the decoder never allocates a
+full page for a 512 px card. Composited over opaque white (a transparent card would show the
+library's own background through the strokes) — graphite plain, ink `PorterDuff.Mode.DARKEN` over
+it, the same flatten as everywhere else. Falls back to the ordinary ink bake when the page carries
+neither row, and only once the canvas has actually loaded (an unloaded surface's "bake" would be a
+blank card).
 
 **Compaction**: unchanged. A soft-deleted sketch row purges like any row at close; a purged page
 cascades and takes its sketch with it.
@@ -666,15 +853,16 @@ notebook screen first).
 
 | Situation | What happens |
 |---|---|
-| A save's running total passes `MAX_BYTES` (6 MiB) | `SKETCH_TOO_LARGE` thrown at the accumulator; nothing written; stored row unchanged; the screen keeps the pixels on the glass (they have no other copy) |
-| Committed save bytes are not a PNG of exactly the page's size | `SKETCH_BAD_PNG`; nothing written |
-| A stored row fails the header guard on read | Soft-deleted on the way past, never overwritten; `get` answers null |
-| The host dies mid-save (Binder revoked, `DeadObjectException`) | The pixels are parked (`PendingPngPark`) by page key; the governor keeps the page dirty and retries |
-| Final flush before Back/Show pages fails | "Sketch not saved" dialog — Try again / Leave anyway; "leave anyway" still leaves the pixels parked for `end()`'s own retry |
+| A save's running total on one raster passes `MAX_BYTES` (6 MiB) | `SKETCH_TOO_LARGE` for that layer alone thrown at the accumulator; nothing written for it; stored row unchanged; the **other layer's row and accumulation are untouched**; the screen keeps the pixels on the glass (they have no other copy) |
+| Committed save bytes on a layer are not a WebP of exactly the page's size | `SKETCH_BAD_IMAGE` (renamed from `SKETCH_BAD_PNG`) for that layer; nothing written for it |
+| A stored row fails the header guard on read | Soft-deleted on the way past, never overwritten; `get` answers null for that row |
+| The host dies mid-save (Binder revoked, `DeadObjectException`) | The pixels are parked (`PendingImagePark`) by page key **and layer**; the governor keeps that raster's page dirty and retries |
+| Final flush before Back/Show pages fails | "Sketch not saved" dialog — Try again / Leave anyway; "leave anyway" still leaves the pixels parked, on whichever layer(s) failed, for `end()`'s own retry |
 | A page turn/insert/delete lands at the notebook's boundary | The host answers the **same page unchanged**; the screen compares `pageKey` and does nothing — no dialog, no toast |
 | `deletePage` is asked for a page that is not the face's current target | `IllegalArgumentException` |
 | `undoPage`/`redoPage` is asked for an unknown token | `IllegalArgumentException`; the face drops that history entry |
 | A `readInkChunk`/`readSketchChunk` index is out of range | Refused (contract-typed exception) |
+| An unknown layer is named on `readSketchChunk`/`saveSketchChunk` | `IllegalArgumentException`, checked **before** the chunk index or any accumulator state is read |
 | A page has no bare ink for "Bring in ink" | `requestInk` answers **0** (not an exception); the screen shows "No ink on this page" |
 | A page is denser than the transfer caps | Ink arrives cut to the prefix that fits, in writing order; a partial bake, never none |
 | `am start` targets the exported screen directly | `HostCallerCheck` refuses before anything is inflated; `onScreenDestroyed` still runs and must not crash the process (see Traps) |
@@ -683,18 +871,23 @@ notebook screen first).
 | A structural replay lands mid-mark | Put back **beneath** the newer mark (generation re-check), never applied out of order |
 | The host answers **null** for `toolSettings()` | Read as "nothing remembered yet," never a failure — the face arms its own defaults (pencil, level 5, the finest lead) |
 | A remembered index (shade level or size position) this build does not offer | That field alone falls to its own default (`SketchToolState.of`) — the other two remembered fields are unaffected |
-| A host below API 19 | `:ext-sketch` never binds it at all — the manifest declaration is the guard, K5b's arrangement repeated; there is no runtime version test in `restoreTools()` |
+| A host below API 20 | `:ext-sketch` never binds it at all — the manifest declaration is the guard (arc 45 / G2 moved the action floor from 17 to 20, K5b's arrangement repeated at the new number); there is no runtime version test in `restoreTools()` |
 
 ---
 
 ## Frame-silence ledger
 
-- `loadPageRaster` — **silent**, as `swapPageRaster` always was, since g-paper 0.1.33 (K6): a page
-  the host replaced is the host's own news, not the engine's. The screen's earlier `loadingRaster`
-  guard against a spurious dirty flag on load is gone with it — there is nothing left to guard
-  against.
-- `swapPageRaster` (an undo/redo swap) — silent, unchanged from every earlier pin.
-- `addStrokes` in RASTER (the ink bake) and `clear()` — **report**, as ordinary raster changes.
+- `loadPageRaster` — **still silent, layered**, as `swapPageRaster` always was, since g-paper 0.1.33
+  (K6): a page the host replaced is the host's own news, not the engine's, on either raster. The
+  screen's earlier `loadingRaster` guard against a spurious dirty flag on load is gone with it —
+  there is nothing left to guard against.
+- `swapPageRaster` (an undo/redo swap) — silent, unchanged from every earlier pin, now layered.
+- `addStrokes` in RASTER (the ink bake) — **reports**, as an ordinary raster change, on the one
+  layer the baked style routes to.
+- `loadStrokes` (a strokes bake at load) and `clear()` — **report**, and since arc 45 / G1
+  **announce both layers, graphite first, whole page, even when one is empty**: these are changes
+  to the rasters' own content, not a page swap underneath them, so the silence rule above does not
+  apply. (`loadPageRaster` — the host handing a raster in — is the silent one, above.)
 - `commitCapturedStroke` / the eraser's batches — report per-segment dirty rects (0.1.33's
   `RasterDirty.along`), not one page-wide rect — the K6 change that took the worst-case undo entry
   from 550 cells / 8.98 MB to 134 cells / 2.19 MB on a corner-to-corner Nomad hairline.
@@ -773,9 +966,42 @@ notebook screen first).
   never the tool alone.
 - **`SketchPalette.ROW_BREAK` (8) is inert at six offered shades (T3)** — kept anyway, as the rule
   `shadeRows()` derives from, rather than deleted for a list that may grow again.
-- **`SketchActivity` is ~1230 lines (T3)**, past the ~800-line guide — what remains past that point
-  is screen wiring (the tools, the pencil bar's toggle/dismiss paths), not a candidate for a quick
-  split.
+- **`SketchActivity` is ~1330 lines (G3, up from ~1230 at T3)**, past the ~800-line guide — the
+  growth is the layered raster-load/save wiring; `SketchPageLoad` was **not** split out at G3 (it
+  would need `callHost` and the lifecycle checks handed in as lambdas for roughly 45 lines saved —
+  not worth the indirection yet), so what remains past the guide is screen wiring, not a candidate
+  for a quick split.
+- **With the action floor above `_PAGES`/`_TOOLS`, a test asserting a method floor is *above* the
+  action floor inverts (G2).** Before arc 45, `MIN_API_VERSION_FOR_SKETCH_PAGES` (18) and
+  `MIN_API_VERSION_FOR_SKETCH_TOOLS` (19) were each above the birth floor (17), so a contract test
+  naturally asserted "the method floor is ≥ the action floor." Once the action floor itself moved
+  to 20, both are now *below* it, and `SketchContractTest` had to flip the assertion and say why —
+  any future contract test written from the old pattern will silently invert.
+- **"First floor move after birth" needed a correction (G2).** Arc 22 / X1 had already moved three
+  points' floors at once when floors were introduced; arc 45 / G2 is the first move of a *single*
+  point's own action floor, not the first floor move ever. Don't repeat the broader claim.
+- **A reopen is no longer a literal 0-pixel screencap diff (G3)** — K5's "0-pixel" line is now
+  "**≤ 1/255**": the flattened round trip differs by up to 0.09 % of pixels at one delta unit,
+  along the graphite grain's antialiased edges. This is **premultiplied-alpha rounding on the
+  encode/decode round trip of semi-transparent pixels, not codec loss** — WebP lossless is exact on
+  the unpremultiplied bytes it is handed — and it is invisible on a 16-grey e-ink panel. Don't
+  chase it as a regression; measure against ≤ 1/255, not 0.
+- **The WebP effort dial is not monotonic (G3)** — effort 75 encoded *larger* than effort 50 on the
+  graphite test lattice (libwebp changes heuristics as the dial moves, not a smooth cost curve).
+  Measure every effort you care about; never interpolate between two measured points.
+- **Plain PNG can still beat lossless WebP on a synthetic pure-black lattice (G3)** — the fill
+  door's test ink lattice encoded smaller as PNG (53 065 B) than as lossless WebP at any effort
+  (88 642 B at effort 100). Real handwritten ink is far sparser than a filled test lattice, so this
+  is a property of the *test pattern*, not evidence to revisit the WebP choice.
+- **A stale device-wide `sn_chrome.xml` with `hidden=true`, left by an earlier walk, hides every
+  paper bar (G3)** — including the sketch face's own toolbar. An adb walk that cannot find the fill
+  door should check that prefs file before suspecting the build; it was reset via `run-as` + `cp`.
+- **`dumpsys package` does not surface a `<service>`'s declared `<meta-data>` (G3)** — the API
+  version a service actually requires has to be read from the built manifest, not asked of the
+  running device.
+- **A true double-tap is still out of adb's reach (G3)** — `input swipe x y x y 800` stands in for
+  a long-press, but the finger double-tap chrome toggle has no adb equivalent and stayed a
+  hand-only walk item this arc too.
 
 ---
 
@@ -825,11 +1051,11 @@ entry and no dirty flag.
 - `.soil` 159 744 B → delete the sketched page → close → `SoilCompactor: purged 2 row(s)` →
   **24 576 B**
 
-**Across every phase (`assembleDebug`, JVM):** `:extension-api` 281 → 286 (K5b) → **292** (arc 44 /
-T2); `:sn-screen` 101 → 109 → 114 → **118** (arc 44 / T3); `:ext-sketch` 0 → 52 → 60 → **87** (arc
-44 / T3); `:app` 1717 → 1816 → **1822** (arc 44 / T2). **3592 tests in the SN root** at
-arc 44's freeze, counting `extensions/bible`'s 155 and `extensions/sketch`'s 87 (3549 at K7,
-counting `extensions/sketch`'s 60).
+**Across every phase (`assembleDebug`, JVM):** `:extension-api` 281 → 286 (K5b) → 292 (arc 44 / T2)
+→ **299** (arc 45 / G2); `:sn-screen` 101 → 109 → 114 → **118** (arc 44 / T3, unchanged through
+arc 45); `:ext-sketch` 0 → 52 → 60 → 87 (arc 44 / T3) → **97** (arc 45 / G3); `:app` 1717 → 1816 →
+1822 (arc 44 / T2) → **1844** (arc 45 / G2). **3631 tests in the SN root** at arc 45's freeze (3621
+at G2, 3592 at arc 44's), 0 failures at every gate.
 
 **T1–T3 (arc 44):**
 
@@ -847,3 +1073,47 @@ counting `extensions/sketch`'s 60).
 | T3 heaviest save, 12 px black, four fill-door passes | 607 519 → 591 880 → 559 914 → **524 533 B** — an order of magnitude under the 4 MB watch |
 
 The 96 px lead was not measured for save bytes at T3 (a later walk's number if it matters).
+
+**G1 (g-paper demo, 0.1.39, Nomad, `ratta` engine):**
+
+| Measurement | Result |
+|---|---|
+| `renderToBitmap()` of the flatten, 1404×1711 | **37 ms** |
+| Demo PSS | 48.8 MB at launch → **70.9 MB** after the walk with both rasters live (~9.6 MB each — the "one more page-sized bitmap" the plan priced) |
+| Undo swap | 7–20 ms for 6–9 graphite tiles |
+| A pen line's undo entry | 33 tiles / 540 KB, on ink alone |
+| Every rub entry | on graphite alone — a rub never reads ink, and the entry proves it |
+
+The "flatten redraw ms **vs. 0.1.38**" line in the phase table could not be honoured literally:
+`Dump` (the demo's wall-clocked flatten → PNG instrument) is new at G1, and 0.1.38 has no
+equivalent measurement to compare against — the 37 ms is recorded as this arc's own baseline.
+
+**G3 (the face, Nomad, fresh `.dev`, notebook "G3", 1404×1872):**
+
+| WebP effort | graphite (pencil lattice) | ink (gel-pen lattice) |
+|---|---|---|
+| 0 | 217 924 B / 426 ms | 116 542 B / 393 ms |
+| 25 | 217 776 B / 400 ms | 116 542 B / 341 ms |
+| 50 | 216 084 B / 405 ms | 105 236 B / 341 ms |
+| 75 | 284 888 B / 431 ms | 98 412 B / 352 ms |
+| **100** | **146 498 B / 619 ms** | **88 642 B / 346 ms** |
+| PNG (for comparison) | 222 066 B / 656 ms | 53 065 B / 602 ms |
+
+- Saves: `save (graphite): 146498 B encoded in 674 ms, pushed in 25 ms`, host committed 21 ms, 1
+  chunk; `save (ink): 88642 B … 365 ms / 21 ms`; **no second graphite save after the ink one** —
+  confirming the per-layer dirty flag holds independently.
+- `.soil` (`sqlcipher`): exactly `sketch_graphite|146498` + `sketch_ink|88642`, both
+  `RIFF…WEBP…VP8X`.
+- Reopen: `page 1/1 open (g 146498 B, ink 88642 B)`; screencap diff **2 445 px at max delta 1/255**
+  (0.09 %, see Traps). Turn back: byte-exact. Swipe past the last page inserted page 2. Copy/paste
+  page → `page 3/3 open` with the same two byte counts. PNG export: `3 page(s) + 2 sketch(es)`, the
+  sketch file shows both lattices with the pen solid through the graphite.
+- Undo entries: graphite 368 tiles / 6 029 312 B read 27 ms; ink 368 tiles / 6 029 312 B read
+  11 ms — the same lattice on each raster, so a pen entry costs exactly what a pencil entry does.
+- PSS: extension **67.7 MB**, host **67.4 MB** (K5's PNG-era numbers: 64.2 MB / 65.8 MB — the
+  priced second bitmap).
+- `logcat -b crash` empty; no `E/` from any sketch tag.
+
+**The hand (2026-09-18).** Pencil over pen and rubbed, pen over pencil and rubbed, a rub over ink
+alone, undo/redo across both rasters, Bring in ink then rub then undo, turn and back, Back and
+reopen, the finger double-tap chrome toggle, PDF export and the cover — *"Clean!"*

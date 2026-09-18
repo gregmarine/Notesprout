@@ -4,7 +4,11 @@ The plan **and the ledger** for the third arc of `NSE · Sketch`, in the shape o
 beside this file. Phases are appended to the ledger at the bottom as they land; the reference doc
 stays `extensions/sketch/docs/sketch.md`, grown at G5.
 
-**Status: Arc 45 — IN PROGRESS, G0 ✅ G1 ✅ G2 ✅ (2026-09-17), G3 ✅ (2026-09-18, the user's Nomad hand walk clean).** Phases are lettered **G** ("Graphite" — the
+**Status: Arc 45 — COMPLETE + FROZEN 2026-09-18.** G0 ✅ G1 ✅ G2 ✅ (2026-09-17), G3 ✅ (2026-09-18,
+the user's Nomad hand walk clean), G4 skipped (nothing found), G5 ✅ (docs + freeze, 2026-09-18).
+This file is history from here — plan + ledger, read for *why*, never resumed;
+`extensions/sketch/docs/sketch.md` is the reference. Merge `--no-ff` in both repos only on the
+user's word. Phases are lettered **G** ("Graphite" — the
 letters B C D F H K L M N P R T U V W X Z are in use across every `*_PLAN.md`; I was declined for
 its I/l ambiguity in a terminal). The g-paper half is g-paper's own **Phase 26 → 0.1.39** on its
 branch `two-rasters`.
@@ -124,8 +128,8 @@ What the exploration found (2026-09-17), which shapes every phase:
 | **G1 — g-paper Phase 26 → 0.1.39: two rasters** ✅ | Opus on Fable's brief; Fable reviews the diff; Sonnet runs tests + installs the demo | `RasterLayer`; `CanvasPaperView` holds `graphiteRaster` + `inkRaster` (both lazy); `compositeIntoRaster` routes by style; the committed-layer draw flattens with `DARKEN`; `eraseRasterAlong` rubs graphite only; layer-qualified `get/load/copy/swapPageRaster` + layered listener callbacks, un-layered forms = graphite; `RasterDirty` unchanged; `clear()` drops both. Demo: the raster toggle draws pencil + pen + rubs, and a "flatten to PNG" render before a panel sees it (g-paper `CLAUDE.md`'s rule). `docs/api.md` + `CLAUDE.md` in the same commit. | g-paper `./gradlew test` green (core + ratta + onyx); **Paintsprout Onyx green on its pin**; Nomad demo: pen over pencil then rub — graphite lifts, ink stays; redraw ms with the flatten vs. 0.1.38; demo PSS; 0.1.39 published to mavenLocal (by the user's hand if the classifier refuses). |
 | **G2 — Seam + host data (API 20)** ✅ | **Fable: the seam**; Opus: host side; Sonnet: test runs + doc rows | `ImageHeader` (WebP) replaces `PngHeader`; `SketchPageState` two streams; layered `readSketchChunk` / `saveSketchChunk`; `API_VERSION` 19 → 20, `MIN_API_VERSION_FOR_SKETCH` 17 → 20. Host: `TYPE_SKETCH_GRAPHITE` / `TYPE_SKETCH_INK` (+ the dead `sketch` in every exclusion), `SketchDao` / `SketchRepository` / `SketchRows` per layer, `SoilDao` lists, `SketchHostSession` two windows + two accumulators, `SketchHostBinder`, `SketchRaster` + `SketchCover` flatten, clip message. SN `docs/objects.md` (or wherever the row is specified) + root `docs/soil-file-format.md` if it names the row. | `:extension-api:testDebugUnitTest` (**the pin test — must be run**) + `:app:test` green; `PageClipTest` fixtures grown for the second row type. |
 | **G3 — The face** ✅ | Opus; Sonnet: the adb walk (**clear the dev library's sketches first**, then a blank page) | Re-pin g-paper 0.1.39 (`sn-screen/build.gradle.kts` + the pin sentences). `:ext-sketch` declares API 20. `RasterImage` encodes WebP lossless (effort constant from the measurement), decodes via `BitmapFactory`; `SketchSaveGovernor` / `SketchSaver` / the park per layer; `RasterEditBuilder` + `SketchEdit.RasterChanged` carry a layer; `openPage` loads both rasters; Bring in ink → ink raster; the delete/undo/redo replay paths re-index both. **Phase-start question:** the WebP effort value, after Sonnet's on-device encode table. | `:ext-sketch:test` + root `./gradlew test` green; Sonnet's Nomad adb walk (two rows in the `.soil`, bytes per row vs. the old PNG, encode ms, reopen 0-pixel diff of the flatten, PSS, `logcat -b crash` empty); then **the hand**: pencil over pen, pen over pencil, rub each way, undo/redo across both, Bring in ink then rub, page turns, export PDF/PNG, cover, copy/paste page. |
-| **G4 — Walk adjustments** ⬜ | Opus (small); Fable if engine | Whatever the hand found (engine → another g-paper patch + Fable's review). Skipped if G3's walk is clean. | The user's word. |
-| **G5 — Docs + freeze** ⬜ | Sonnet drafts; Fable reviews every draft | `docs/sketch.md` (the two rasters, the format, the seam, traps, numbers), SN `docs/extensions.md` (API 20, the floor move), SN `CLAUDE.md` (API 20, pin 0.1.39, counts, arc row), root `CLAUDE.md`, g-paper `PLAN.md` close, memory. **Phase-start question:** a `versionName` bump (T5's answer was no — the version moves at a release). Merge `--no-ff` in both repos **only on the user's word**; the Manta only if asked. | `file` on every touched doc = text; the final hand walk. |
+| **G4 — Walk adjustments** — skipped | Opus (small); Fable if engine | Whatever the hand found (engine → another g-paper patch + Fable's review). Skipped if G3's walk is clean. | The user's word. |
+| **G5 — Docs + freeze** ✅ | Sonnet drafts; Fable reviews every draft | `docs/sketch.md` (the two rasters, the format, the seam, traps, numbers), SN `docs/extensions.md` (API 20, the floor move), SN `CLAUDE.md` (API 20, pin 0.1.39, counts, arc row), root `CLAUDE.md`, g-paper `PLAN.md` close, memory. **Phase-start question:** a `versionName` bump (T5's answer was no — the version moves at a release). Merge `--no-ff` in both repos **only on the user's word**; the Manta only if asked. | `file` on every touched doc = text; the final hand walk. |
 
 **Order:** G0 → G1 → G2 → G3 → (G4) → G5. G2 does not depend on G1 and may go first if the Nomad
 is not at hand; G3 needs both.
@@ -419,3 +423,33 @@ reopen, the finger double-tap chrome toggle, PDF export and the cover, feel — 
 WebP rows, the seam, traps, numbers), SN `docs/extensions.md`, SN `CLAUDE.md` (API 20, pin 0.1.39,
 counts, arc row), root `CLAUDE.md`, g-paper `PLAN.md` close, memory; the `versionName`
 phase-start question; merge `--no-ff` in both repos only on the user's word.
+
+### G5 — Outcome (2026-09-18) — docs + freeze ✅
+
+**Phase-start answers.** *A `versionName` bump:* **no** — the version moves at a release, T5's
+answer repeated; `0.1.0-sn` stands.
+
+**Landed (Sonnet drafts, Fable-reviewed, every claim checked against this ledger).**
+`extensions/sketch/docs/sketch.md` grown to arcs 43–45: the two rasters, the two WebP rows and the
+`ImageHeader` guard, the layered seam at API 20 and the action-floor move, per-raster saves under
+one push lock, `PendingImagePark`, layered undo entries, the `DARKEN` flatten in export and cover,
+§ "Arc 45's decisions" (the five, the derived list, the declined shapes), the G2/G3 traps and the
+G1/G3 Nomad numbers. SN `docs/extensions.md`: the `API_VERSION` 20 entry says the manifest
+declares 20 (G3), § "Arc 45: two rasters" closed. SN `CLAUDE.md`: the arc 45 paragraph, API 20,
+pin 0.1.39, `:ext-sketch` bullet, counts (`:app` 1844 · `:extension-api` 299 · `:ext-sketch` 97 ·
+root **3631**), the maintenance list. Root `CLAUDE.md`: the `extensions/sketch` bullet, the docs
+table row, the `ink` branch row. g-paper `PLAN.md` Phase 26 closed on the consumer side. Memory
+`project_ink_arc.md` rewritten as frozen.
+
+**Deviations.** None in scope. **Not merged** — `ink` and g-paper `two-rasters` stay branches
+until the user's word; the Manta untouched.
+
+**Tests.** No code touched this phase; root 3631 stands from G3. `file` = text on every touched
+doc.
+
+**Traps found.** None new.
+
+**The hand.** The final walk is the user's, after the merge if one is granted.
+
+**Next.** Nothing — arc 45 is frozen. Every future here (`inkLift`, a coloured gel pen, ladder
+quantization) needs a fresh user decision.
