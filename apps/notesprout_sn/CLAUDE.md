@@ -181,7 +181,7 @@ Ratta pencil's live preview maps each shade to the nearest usable firmware tone
 **0.1.37**) — both landed in `~/git/g-paper` first on Fable's brief, Opus writing, Fable reviewing
 every diff. Plan + ledger `extensions/sketch/PENCILS_PLAN.md`; reference
 `extensions/sketch/docs/sketch.md` § "Tools (arc 44)". **COMPLETE + FROZEN 2026-09-17 on the
-user's Nomad hand walks; merge to `main` (`--no-ff`) pending the user's word.** No ELEVENTH
+user's Nomad hand walks; branch `pencils` merged to `main` 2026-09-17 (`--no-ff`) and deleted — "on pencils" means `main`.** No ELEVENTH
 extension point, no next Sketch phase (gel pen sizes or colours, eraser sizes, a white/highlight
 pencil, per-notebook tool memory) and no other new arc without a fresh user decision; no
 re-raising of any waived / declined review finding.

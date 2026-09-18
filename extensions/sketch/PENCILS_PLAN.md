@@ -324,6 +324,7 @@ is pen-gated.
 
 **Traps found.** None new.
 
-**Next.** Nothing — arc 44 is frozen. Merge `--no-ff` in both repos (`pencils` → Notesprout
-`main`, `pencil-tones` → g-paper `main`) only on the user's word; the Manta only if asked. No
+**Next.** Nothing — arc 44 is frozen. Merged `--no-ff` in both repos on the user's word
+(2026-09-17): `pencils` → Notesprout `main`, `pencil-tones` → g-paper `main`, both branches
+deleted; stable builds installed on the Manta the same day. No
 eleventh extension point, no next Sketch phase and no new arc without a fresh user decision.

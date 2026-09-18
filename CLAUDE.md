@@ -210,7 +210,7 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   `~/git/g-paper` first (0.1.32 → 0.1.34) and `RattaTuning` removed at the freeze. `SKETCH_PLAN.md`
   there is history (plan + ledger — read for *why*, never resumed).
 - `pencils` — arc 44 "Pencils" COMPLETE + FROZEN 2026-09-17 on the user's Nomad hand walks;
-  **merge to `main` (`--no-ff`) pending the user's word**. It carries the growth of
+  **merged to `main` 2026-09-17 (`--no-ff`) and deleted** (local + remote) — "on pencils" means `main`. It carried the growth of
   `extensions/sketch` (**NSE · Sketch**) into shades, sizes and a gel pen, with the engine work in
   `~/git/g-paper` on branch `pencil-tones` (0.1.36 → 0.1.37). `PENCILS_PLAN.md` there is history
   (plan + ledger — read for *why*, never resumed). **No ELEVENTH extension point and no new arc
