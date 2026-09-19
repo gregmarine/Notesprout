@@ -76,6 +76,16 @@ palette was a firmware-needle constraint that no longer applies on the direct pa
   questions**: the pen-up re-present (dithered white dots pass through black on the way to
   grey), an anti-aliased ink edge over dithered graphite, whether a grey pen's pen-up feels late.
 
+- **Third walk (2026-09-19) — "not at pen-up":** "That looks okayish … instead of on pen up,
+  perhaps when the tool is changed, or when flipping pages, or anything other than drawing."
+  g-paper **Phase 32 → 0.1.46** (`ink-true`): the baked pen mark stays on the glass as its
+  dither; its runs wait in `pendingInk`, and `settleInkTone()` re-renders them in tone at every
+  non-drawing event the engine sees — the tool / penColor / penWidth / penStyle setters (a tool
+  pick, a shade pick), and every raster change that is not the ink bake's own announce (a rub, an
+  undo, a page load). 343 green; published; SN re-pinned 0.1.46; installed on the Nomad. Not
+  settled by anything the engine cannot see (a chrome flip alone) — a host door would be a fresh
+  decision.
+
 ## Traps to record at Q4
 
 - A **white gel pen draws nothing** under `DARKEN` yet still lands opaque white pixels in the ink
