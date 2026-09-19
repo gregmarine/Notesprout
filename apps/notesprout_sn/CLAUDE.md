@@ -231,7 +231,9 @@ dotted ring; solid ring on the selected); **both pen glyphs wear their own shade
 `PaperToolbar.onPenReTap(alt)` in `:sn-screen`); and **ink flattened over graphite** — "a white
 gel pen can write over anything" — g-paper **Phase 30 → 0.1.44** (`SRC_OVER`, ink on top, in the
 engine, `SketchRaster` and `SketchCover`; pencil over an ink line is hidden; amends arc 45's "no
-top and no bottom"). Seam:
+top and no bottom"), then **baked ink shown in its true tone on the panel** — g-paper **Phase 31
+→ 0.1.45** (`DitherFlatten.coverage`: graphite and a live pen stroke dither, baked ink is its
+grey, the pen-up re-presents in tone). Seam:
 `SketchToolSettings` grows a fourth int `penShade` — **a parcel tail, not a method** —
 `API_VERSION` 20 → **21** named by `SketchContract.MIN_API_VERSION_FOR_SKETCH_PEN_SHADE`; the
 action floor stays 20; `size` is a dead wire slot written 0. Reference

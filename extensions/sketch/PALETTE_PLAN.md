@@ -64,6 +64,18 @@ palette was a firmware-needle constraint that no longer applies on the direct pa
 - **Q4** — docs (`docs/sketch.md`, SN `CLAUDE.md`, root `CLAUDE.md`), freeze on the user's Nomad
   hand walk. No `versionName` bump (version moves at a release).
 
+- **Second walk (2026-09-19) — "the pen in its true tone":** the user saw the panel holds sixteen
+  greys (Atelier's pen is solid) and asked, for the pen only, that the stroke re-present in its
+  true tone after the live dither that keeps it under the nib. g-paper **Phase 31 → 0.1.45** on
+  branch `ink-true`: `DitherFlatten.coverage` is the one display rule — a pixel the ink image
+  covers with no live ink shows `255 − luma`; bare graphite and live ink dither; the pen-up bake
+  re-posts each run through it, so the line lands solid; the window's `ALPHA_8` display byte is
+  now a coverage (the band kernel writes tones for ink pixels; `landDitherRect` uses the byte as
+  alpha; `presentPageViaPanel` maps through `LEVEL_OF_COVERAGE`); graphite is never shown in tone.
+  core+ratta 342 green; published; SN re-pinned 0.1.45; installed on the Nomad. **Device
+  questions**: the pen-up re-present (dithered white dots pass through black on the way to
+  grey), an anti-aliased ink edge over dithered graphite, whether a grey pen's pen-up feels late.
+
 ## Traps to record at Q4
 
 - A **white gel pen draws nothing** under `DARKEN` yet still lands opaque white pixels in the ink

@@ -42,9 +42,13 @@ anything"; g-paper Phase 30 → **0.1.44**, amending arc 45's "no top and no bot
 grew one parcel tail (`SketchToolSettings.penShade`, API 20 → 21). See "Arc 46's decisions"
 below.
 
-**Engine.** g-paper is pinned at **0.1.44** (Phase 30, "Ink over graphite", 2026-09-19 — the
-flatten is ink `SRC_OVER` graphite, see arc 46's decision 9; the paragraph below is 0.1.39's
-account of the two rasters and stands but for the operator), over **0.1.39** (Phase 26, "Two rasters: graphite and ink",
+**Engine.** g-paper is pinned at **0.1.45** (Phase 31, "Baked ink shows its true tone",
+2026-09-19 — on the Supernote panel and in the window a pixel the ink image covers is shown at
+its true grey while the pencil's graphite and a **live** pen stroke stay a blue-noise dither, and
+the pen-up re-presents the stroke's runs in tone; `DitherFlatten.coverage` is the one rule), over
+**0.1.44** (Phase 30, "Ink over graphite", 2026-09-19 — the flatten is ink `SRC_OVER` graphite,
+see arc 46's decision 9; the paragraph below is 0.1.39's account of the two rasters and stands but
+for the operator), over **0.1.39** (Phase 26, "Two rasters: graphite and ink",
 2026-09-17): `CanvasPaperView` holds two lazily-allocated rasters, `graphiteRaster` and
 `inkRaster`, each first allocated on its own first mark; `RasterLayer { GRAPHITE, INK }` names
 them and `RasterLayer.of(style)` is the **one** routing site — `StrokeStyle.PENCIL` bakes into
@@ -254,6 +258,13 @@ the final one are given.
 7. **Naming** — Arc 46 "Palette" · branch **`tools`** (expected to carry further tool arcs) ·
    letter **Q** · `PALETTE_PLAN.md`. No `versionName` bump (version moves at a release).
 8. **Recipe** unchanged from arcs 43–45; no code review (the standing waiver).
+10. **The pen shows its true tone** (the second walk: "the panel is capable of showing the true
+   tone without dithering … if the dithering is just so the stroke keeps with the nib, can we
+   have it rebake with the true tone of the pen? I'm only asking about the pen tool, not
+   pencil") — g-paper **Phase 31 → 0.1.45**: baked ink is displayed at its grey, on the panel and
+   in the window; a live pen stroke still dithers so it lands under the nib, and the pen-up
+   re-presents its runs in tone; graphite stays a dither throughout. Covers and exports were
+   never dithered and are unchanged.
 9. **Ink over graphite** (the first walk: "the white pen should be able to write over the pencil.
    It correctly writes over the darker pen. In the real world, a white gel pen can write over
    anything"; asked plainly and decided) — the flatten is **`SRC_OVER`, ink on top, everywhere**
