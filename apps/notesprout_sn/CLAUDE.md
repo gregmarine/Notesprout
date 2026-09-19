@@ -159,7 +159,10 @@ the one pencil becomes six greyscale shades, twelve lead sizes, and a fixed gel 
 on the device.** Nine locked decisions, compressed: **six ladder shades** — the hand's own amendment
 to the fifteen first built, every other rung from 1 to 11, since only 0 / 5 / 9 preview exactly as
 they bake on the firmware's three tones — levels **1 · 3 · 5 · 7 · 9 · 11**
-(`#111111` … `#BBBBBB`, no pure black on the pencil, the gel pen owning black), default level 5;
+(`#111111` … `#BBBBBB`, no pure black on the pencil, the gel pen owning black), default level 5
+— **narrowed again 2026-09-18 (arc 45's decision 6) to the firmware's four tones, levels 0 · 5 ·
+9 · 15 — black, grey, light grey, white — the white lead a lightener over graphite, previewing
+LIGHT_GRAY on g-paper 0.1.40**;
 **twelve sizes** — the hand's own amendment to the five first built, once the wide-lead walk found
 no lag — **1.2 / 2 / 4 / 7 / 12 / 16 / 20 / 24 / 32 / 48 / 64 / 96 px** in two rows of six, default
 1.2; a fixed **gel pen** (`StrokeStyle.PEN`, black, **5 px** — the hand's own amendment from a
@@ -205,11 +208,15 @@ move a single point's own action floor after its birth** (X1 moved three points'
 to 6, when floors were introduced in the first place). The engine work — `RasterLayer`, the lazy
 two rasters, the `DARKEN` flatten, the graphite-only rubber, the layered API with the un-layered
 forms kept meaning graphite — landed in `~/git/g-paper` first, on Fable's brief, Opus writing it
-and Fable reviewing every diff before publish: Phase 26 → **0.1.39**. Plan + ledger
+and Fable reviewing every diff before publish: Phase 26 → **0.1.39**, then Phase 27 → **0.1.40**
+(a white lead previews LIGHT_GRAY) for the user's pre-merge decision 6 of 2026-09-18: **the pencil
+offers the firmware's four tones — black, grey, light grey, white (levels 0 · 5 · 9 · 15)**, the
+white lead paling graphite under it (flecks go down `SRC_OVER` on the raster; nothing on bare
+paper under `DARKEN`) — the "white/highlight pencil" future, decided. Plan + ledger
 `extensions/sketch/INK_PLAN.md`; reference `extensions/sketch/docs/sketch.md` § "Arc 45's
 decisions". **COMPLETE + FROZEN 2026-09-18 on the user's Nomad hand walk; merge to `main` pending
 the user's word** (branch `ink` not yet merged). No ELEVENTH extension point, no next Sketch phase
-(gel pen sizes or colours, eraser sizes, a white/highlight pencil, per-notebook tool memory, an
+(gel pen sizes or colours, eraser sizes, per-notebook tool memory, an
 `inkLift` fraction, a coloured or grey gel pen, quantizing graphite alpha to the 16-grey ladder)
 and no other new arc without a fresh user decision; no re-raising of any waived / declined review
 finding.
@@ -912,7 +919,8 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   never repaired by deletion.
 - **`IndexGuard.ready(this)` first thing in every index-touching `onCreate`**;
   `BootstrapActivity` is the only index opener and is `noHistory`.
-- **g-paper 0.1.39 (since arc 45 / G1, 2026-09-17, re-pinned into `:ext-sketch` at G3,
+- **g-paper 0.1.40 (the pin since 2026-09-18 — Phase 27, the white lead's LIGHT_GRAY preview,
+  ratta only; 0.1.39 since arc 45 / G1, 2026-09-17, re-pinned into `:ext-sketch` at G3,
   2026-09-18 — Phase 26 "Two rasters: graphite and ink":** `RasterLayer { GRAPHITE, INK }`;
   `CanvasPaperView` holds both, each allocated lazily on its own first mark; the committed-layer
   draw flattens them with one `PorterDuff.Mode.DARKEN` blit (`renderToBitmap()` is the flatten);
@@ -933,7 +941,8 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   ceiling had never been reached by anything and its "the daemon lags" was never a measurement.
   **0.1.36 since T1 the same day — Phase 23 "The pencil previews its tone on Ratta":**
   `RattaInkMap.pencilPreviewFor`, the pencil's own ladder — 0–2 BLACK / 3–6 DARK_GRAY / 7–14 GRAY,
-  thresholds settled by the hand, never LIGHT_GRAY; `PENCIL_PREVIEW_GREY` gone. Before them,
+  thresholds settled by the hand, never LIGHT_GRAY for a grey (**0.1.40 / Phase 27, 2026-09-18:
+  a white lead alone reaches LIGHT_GRAY**, luma > 246.5); `PENCIL_PREVIEW_GREY` gone. Before them,
   **0.1.35 (since the Manta sketch walk, 2026-09-17 — Phase 22 "The pencil bakes upright
   on Ratta":** a leaned `PENCIL` baked 10–15× wider than the firmware's live line, which cannot
   widen with tilt; the `bakeTilt` seam bakes it at tilt 0 on Ratta. Walked on Manta + Nomad; see

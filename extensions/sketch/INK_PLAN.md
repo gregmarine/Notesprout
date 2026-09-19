@@ -453,3 +453,23 @@ doc.
 
 **Next.** Nothing — arc 45 is frozen. Every future here (`inkLift`, a coloured gel pen, ladder
 quantization) needs a fresh user decision.
+
+### Post-freeze, pre-merge — the four-tone palette (2026-09-18) ✅
+
+The user's decision 6, given before the merge: *"Instead of the 6 colors we have now, let's just
+have the 4 that we know we can support. Black, grey, light grey, and white"* — the four tones the
+firmware has; the white one *"to allow drawing a light pencil stroke over dark graphite for
+precision lightening… something the eraser doesn't provide."*
+
+**Done.** `SketchPalette.SHADE_LEVELS` = `0, 5, 9, 15` (+ `WHITE_SHADE` for the hint string
+`cd_pencil_shade_white`); the armed swatch draws a 1 dp black hairline at its fill's edge (the
+white gap ring is invisible against a white fill); g-paper **Phase 27 → 0.1.40** on `two-rasters`
+(`22fa570`): `PENCIL_GRAY_MAX_LUMA` 246.5 so a white lead alone previews LIGHT_GRAY — every grey
+still tops out at GRAY, the hand's 2026-09-17 measurement standing; `sn-screen` re-pinned. No API
+change, no seam change: the stored shade was always the ladder level, so a device remembering one
+of the dropped six reads as the default (level 5), which is the fallback the tests already proved.
+
+**Tests.** `:ext-sketch` 97 green (palette + tool-state tests rewritten to the four); g-paper
+core + ratta green. **The hand.** The white lead on the Nomad is the user's to walk — over dark
+graphite it should pale, on bare paper leave nothing, and the trail under the pen should be the
+faint LIGHT_GRAY.

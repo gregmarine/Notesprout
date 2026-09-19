@@ -27,7 +27,10 @@ on the device.
 Arc 45 "Ink" (2026-09-17/18, branch `ink`, `INK_PLAN.md` the plan + ledger, phases G0–G5, **G4
 skipped**) is the user's decision that ink is more permanent than pencil: the one raster became
 **two**, graphite and ink, the rubber confined to graphite, and the two flattened wherever the
-sketch is seen. Complete on the user's Nomad hand walk of 2026-09-18 ("Clean!").
+sketch is seen. Complete on the user's Nomad hand walk of 2026-09-18 ("Clean!"). Before the merge,
+the same day, the user narrowed the pencil's shades to **the four tones the firmware has** —
+black, grey, light grey, white (levels 0 · 5 · 9 · 15) — the white lead being a lightener over
+graphite; g-paper 0.1.40 lets it preview LIGHT_GRAY (see "Arc 45's decisions", 6).
 
 **Engine.** g-paper is pinned at **0.1.39** (Phase 26, "Two rasters: graphite and ink",
 2026-09-17): `CanvasPaperView` holds two lazily-allocated rasters, `graphiteRaster` and
@@ -130,7 +133,8 @@ value are given.
    (level 5). **Amended at T3's walk**: only levels 0, 5 and 9 preview *exactly* as they bake (the
    firmware's three tones), so the list settled at **six** — levels **1, 3, 5, 7, 9, 11** — every
    other rung from 1 to 11, no pure black on the pencil (the gel pen is black). Default stays
-   level 5.
+   level 5. **Amended again 2026-09-18 (arc 45's decision 6)**: **four** — levels **0, 5, 9, 15**,
+   the firmware's four tones; see below.
 3. **Which sizes** — original: five, 1.2 / 2 / 4 / 7 / 12 px. **Amended at T3's walk**: the hand
    walked every lead above 12 px against a lifted EMR ceiling and found none of them laggy, so the
    list widened to **twelve** — 1.2 · 2 · 4 · 7 · 12 · 16 · 20 · 24 · 32 · 48 · 64 · 96 px — in two
@@ -172,6 +176,20 @@ The user's, locked in `INK_PLAN.md`; phase-start questions could not reopen them
 5. **Models** — unchanged from arcs 43–44: Fable orchestrates, writes the AIDL seam and the
    g-paper briefs, reviews every g-paper diff and every doc draft; Opus codes; Sonnet scaffolds,
    runs JVM tests and walks the Nomad; no Haiku; no code review.
+6. **The palette is the firmware's four tones** (2026-09-18, before the merge; amends arc 44's
+   decision 2 a second time) — **black, grey, light grey, white**: ladder levels **0 · 5 · 9 ·
+   15**. 0, 5 and 9 are the three the hand found previewing exactly as they bake (BLACK /
+   DARK_GRAY / GRAY); the six of 2026-09-17 kept three more that previewed a shade off, and a lead
+   the hand aims wrong with is not worth its swatch. **White (level 15) is a different kind of
+   lead**: the pencil's flecks go down `SRC_OVER` on the graphite raster, so a white one **pales
+   the graphite under it** — precision lightening the rubber does not give — and lays nothing on
+   bare paper under the `DARKEN` flatten. It previews **LIGHT_GRAY** on Ratta (g-paper Phase 27 →
+   **0.1.40**: one rung on `pencilPreviewFor` above luma 246.5, so only white reaches it; every
+   grey still tops out at GRAY, the hand's 2026-09-17 measurement standing). Default stays level 5.
+   The gel pen is unchanged. `SketchPalette.SHADE_LEVELS` was the one line, plus a `WHITE_SHADE`
+   name for the hint, and the armed swatch gained a black hairline at its fill's edge because the
+   white gap ring says nothing against a white fill. This is arc 44's "white/highlight pencil"
+   future, decided.
 
 **Derived** (reconciled from the G0 exploration, not re-asked): flatten = darken, everywhere the
 two rasters become one picture; routing by style, at the one `RasterLayer.of(style)` site; the
@@ -535,11 +553,13 @@ stroke erasers, and a raster page has neither.
 ### Tools (arc 44)
 
 - **`SketchPalette`** (`:ext-sketch`, pure Kotlin) is the one place the greys and the widths are
-  written down. A stored shade is **a level of the e-paper ladder (0–14), never a position in
-  `SHADE_LEVELS`** — the list of levels this build offers, `listOf(1, 3, 5, 7, 9, 11)` today — so
-  the level means the same thing whichever subset a build happens to offer, and `SHADE_LEVELS` is
-  the one line to change to offer a different set. `ROW_BREAK` (8, decision 5's "8 over 7" when
-  there were fifteen shades) is inert at six offered levels — the row simply never reaches it — and
+  written down. A stored shade is **a level of the e-paper ladder (0–15), never a position in
+  `SHADE_LEVELS`** — the list of levels this build offers, `listOf(0, 5, 9, 15)` since 2026-09-18
+  (black, grey, light grey, white — the six of arc 44 before that) — so the level means the same
+  thing whichever subset a build happens to offer, and `SHADE_LEVELS` is the one line to change to
+  offer a different set; a device remembering one of the dropped six reads as the default.
+  `WHITE_SHADE` (15) names the lightener for its hint. `ROW_BREAK` (8, decision 5's "8 over 7"
+  when there were fifteen shades) is inert at four offered levels — the row simply never reaches it — and
   is kept as the rule `shadeRows()` derives from rather than deleted. `SIZE_ROW_BREAK` = 6 is where
   the twelve lead widths wrap onto their second row. `PEN_WIDTH_PX` = 5 (px) is the gel pen's one
   width, settled at T3's walk.
@@ -555,8 +575,9 @@ stroke erasers, and a raster page has neither.
   the `EraserBar` pattern applied to three rows instead of one. A shade swatch is not an icon
   button: it is a black ring with the grey itself as the fill, painted in `onDraw` rather than a
   drawable, because the fill has to read at every level offered — the selected swatch alone gains a
-  **white gap ring** between the ring and the fill, the one mark that works as well on `#000000` as
-  on the palest lead offered. A size dot is a **legible dp ladder, never the literal px** — 1.2 px
+  **white gap ring** between the ring and the fill, the mark that works on `#000000` and every
+  grey, plus (2026-09-18) a **black hairline at the fill's edge**, the mark that works on the
+  white lead — against which the gap ring is nothing at all. A size dot is a **legible dp ladder, never the literal px** — 1.2 px
   would be a single dark pixel and 96 px would not fit a cell, so the twelve widths are drawn on a
   ladder linear in the index, clamped to the cell so it holds at both button tiers. Re-tapping the
   armed Pencil opens the bar under it; it **stays open after a pick** — a visit is usually "this

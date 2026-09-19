@@ -46,13 +46,13 @@ class SketchToolStateTest {
     }
 
     @Test fun `the pencil draws the shade and the lead that were picked`() {
-        val state = SketchToolState.DEFAULT.withShade(1).withSize(4)
+        val state = SketchToolState.DEFAULT.withShade(0).withSize(4)
         assertEquals(StrokeStyle.PENCIL, state.penStyle)
-        assertEquals(0xFF111111.toInt(), state.penColor)
+        assertEquals(0xFF000000.toInt(), state.penColor)
         assertEquals(12f, state.penWidth, 0f)
-        // Both ends of the widened list, and one of the shades the walk kept to try.
-        val heaviest = SketchToolState.DEFAULT.withShade(9).withSize(11)
-        assertEquals(0xFF999999.toInt(), heaviest.penColor)
+        // Both ends of the widened list, and the white lead — the lightener.
+        val heaviest = SketchToolState.DEFAULT.withShade(15).withSize(11)
+        assertEquals(0xFFFFFFFF.toInt(), heaviest.penColor)
         assertEquals(96f, heaviest.penWidth, 0f)
     }
 
@@ -68,7 +68,8 @@ class SketchToolStateTest {
     }
 
     @Test fun `the darkest lead reports its own tone, and so does every other offered level`() {
-        assertEquals(0xFF111111.toInt(), SketchToolState.DEFAULT.withShade(1).reportedShade)
+        assertEquals(0xFF000000.toInt(), SketchToolState.DEFAULT.withShade(0).reportedShade)
+        assertEquals(0xFFFFFFFF.toInt(), SketchToolState.DEFAULT.withShade(15).reportedShade)
         // Distinct levels are distinct fills — the ARGB is the token both bars compare, so two
         // levels sharing one would leave a pick showing the tone before it.
         val tones = SketchPalette.SHADE_LEVELS.map { SketchToolState.DEFAULT.withShade(it).reportedShade }
@@ -76,9 +77,9 @@ class SketchToolStateTest {
     }
 
     @Test fun `a shade this build does not offer reports the default's tone, never a stray one`() {
-        // A level of the ladder this build simply does not offer (0), and one off the ladder
-        // entirely (15) — the stored number is the LEVEL, so both arrive the same way.
-        listOf(0, 15).forEach { level ->
+        // A level of the ladder this build simply does not offer (7), and one off the ladder
+        // entirely (16) — the stored number is the LEVEL, so both arrive the same way.
+        listOf(7, 16).forEach { level ->
             val past = SketchToolState.of(SketchContract.TOOL_PENCIL, level, 0)
             assertEquals(SketchToolState.DEFAULT.reportedShade, past.reportedShade)
             // The fill and the ink agree: the button can never report a tone the pencil would not
@@ -109,7 +110,7 @@ class SketchToolStateTest {
 
     @Test fun `a dropped level reads as the default - and keeps the rest`() {
         // A ladder level this build does not offer: exactly what a device remembering one of the
-        // nine the walk left out hands back, and what any stale level is.
+        // twelve this palette leaves out hands back, and what any stale level is.
         val dropped = 12
         val state = SketchToolState.fromSettings(SketchToolSettings(SketchContract.TOOL_PEN, dropped, 3))
         assertEquals(SketchPalette.DEFAULT_SHADE, state.shadeLevel)

@@ -23,6 +23,7 @@
          on a re-tap: 15 grey shade swatches (black is its own row, the other 14 numbered) over a
          row of 5 sizes. -->
     <string name="cd_pencil_shade_black">Black</string>
+    <string name="cd_pencil_shade_white">White</string>
     <string name="cd_pencil_shade">Shade %1$d</string>
     <string name="cd_pencil_size">Size %1$d</string>
 
