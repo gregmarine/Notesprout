@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The gel pen's BODY as a fill (arc 46 "Palette") — `ic_ballpen`'s barrel path, which is already
+    a closed shape, with no stroke and the same 24 viewport: `ic_pen_fill`'s recipe applied to the
+    ballpen. Layered UNDER `ic_ballpen` it lands exactly inside that glyph: the outline's 2 px stroke
+    is centred on this very path, so it covers the fill's edge on both sides and the outline stays
+    solid black at every shade. The nib line and the tail stroke are not part of the barrel and so
+    are not here.
+
+    It is tinted at runtime with the pen's shade (`ShadeIcon`, `:ext-sketch`) and is never drawn on
+    its own; the black declared here is what an untinted instance reads as — the black pen, level 0
+    of the ladder and the pen's own default.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="@color/inkBlack"
+        android:pathData="M5.828 18.172a2.828 2.828 0 0 0 4 0l10.586 -10.586a2 2 0 0 0 0 -2.829l-1.171 -1.171a2 2 0 0 0 -2.829 0l-10.586 10.586a2.828 2.828 0 0 0 0 4z"/>
+</vector>

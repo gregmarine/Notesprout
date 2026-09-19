@@ -80,3 +80,15 @@ palette was a firmware-needle constraint that no longer applies on the direct pa
   = 21, `API_VERSION` 20 → 21, `:ext-sketch` manifest 21, `SketchToolPrefs`/`SketchToolCodec`
   fourth key `pen_shade` (missing → 0). Pin tests: `:extension-api` SketchContract 16 /
   SketchToolSettings 4 / ExtensionContract 10, `:app` SketchToolCodec 7 — all green.
+- **Q2 ✅ 2026-09-19** — `SketchPalette` (sixteen levels, two rows of eight, `PENCIL_WIDTH_PX` 4,
+  sizes gone, `DEFAULT_PEN_SHADE` 0, `shade(level, fallback)`), `SketchToolState`
+  (`tool · pencilShade · penShade`, `armedShade`, `pencilReport` / `penReport`, `withShade` on the
+  armed kind, `toSettings` writes `size` 0). Tests rewritten: `:ext-sketch` 96.
+- **Q3 ✅ 2026-09-19** — the chrome: `ic_palette` + `ic_ballpen_fill` and `CollapsedChrome.PenKinds.altIcon`
+  + `syncAltPen` (corner knob wears the armed kind's painted glyph) in `:sn-screen`; `ShadeIcon`
+  (was `PencilIcon`), `PaletteBar` (was `PencilBar` — dotted ring on every swatch, solid on the
+  armed, hairline on every fill), `btnPalette` after the eraser, `paletteBar` in the layout,
+  strings `cd_tool_palette` "Shades" / `cd_shade*`; `SketchToolbar` takes `btnPalette` +
+  `onPalette`, drops the pencil re-tap, re-inks both glyphs; `SketchActivity` rewired (Shades
+  entry in the collapsed overflow anchors the panel on its own row). `:sn-screen` 118 green;
+  both debug APKs build; the built ext manifest declares 21.

@@ -13,19 +13,18 @@
     <string name="cd_tool_pencil">Pencil</string>
     <string name="cd_tool_pen">Pen</string>
     <string name="cd_tool_eraser">Eraser</string>
+    <string name="cd_tool_palette">Shades</string>
     <string name="cd_sketch_bring_ink">Bring in ink</string>
     <string name="cd_sketch_show_pages">Show pages</string>
     <string name="cd_prev_page">Previous page</string>
     <string name="cd_next_page">Next page</string>
     <string name="sketch_page_indicator">%1$d / %2$d</string>
 
-    <!-- PencilBar (arc 44 / T3) — the pencil's own options bar, hung under the armed Pencil button
-         on a re-tap: 15 grey shade swatches (black is its own row, the other 14 numbered) over a
-         row of 5 sizes. -->
-    <string name="cd_pencil_shade_black">Black</string>
-    <string name="cd_pencil_shade_white">White</string>
-    <string name="cd_pencil_shade">Shade %1$d</string>
-    <string name="cd_pencil_size">Size %1$d</string>
+    <!-- PaletteBar (arc 46 "Palette"; arc 44 / T3's PencilBar remade) — the shade panel under the
+         Palette button: the sixteen ladder levels, black and white named, the rest numbered. -->
+    <string name="cd_shade_black">Black</string>
+    <string name="cd_shade_white">White</string>
+    <string name="cd_shade">Shade %1$d</string>
 
     <!-- Problem dialogs — a tap that did nothing is never a toast on e-ink. -->
     <string name="sketch_not_saved_title">Sketch not saved</string>

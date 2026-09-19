@@ -11,26 +11,29 @@ import com.symmetricalpalmtree.notesproutsn.notebook.PaperToolbar
 import com.symmetricalpalmtree.notesproutsn.notebook.PenIdle
 
 /**
- * The sketch screen's chrome (arc 43 / K5, grown by arc 44 / T3): Back, the pencil, the gel pen and
- * the rubber, "Bring in ink" and "Show pages" on the top bar; the pager alone on the bottom one. The
+ * The sketch screen's chrome (arc 43 / K5, grown by arc 44 / T3 and arc 46 "Palette"): Back, the
+ * pencil, the gel pen, the rubber and the shade panel's door, "Bring in ink" and "Show pages" on
+ * the top bar; the pager alone on the bottom one. The
  * tool half is `:sn-screen`'s [PaperToolbar] — with **no lasso button**, which is what `btnLasso`'s
  * nullability is for: a raster page has no objects to select, so a lasso there would arm a tool the
  * surface does not answer.
  *
- * ## The tools (decisions 3 and 4, as arc 44 amended them)
+ * ## The tools (decisions 3 and 4, as arcs 44 and 46 amended them)
  *
- * - **A graphite pencil with six shades and twelve leads** ([SketchPalette] — six levels of the
- *   grey ladder, three of them previewing exactly as they bake, and leads from 1.2 to 96 px). Arc
- *   43's decision 3
- *   was "no tilt, no width choice, no colour", and the first two thirds of that stood on measurement
- *   rather than taste: the Supernote bakes upright whatever the grip (g-paper 0.1.35), so a sketch
- *   could not be shaded by leaning even in principle. The user's decision of 2026-09-17 opens the
- *   other route — choose the tone and the lead instead of leaning for them. **Its button wears the
- *   armed shade**, as a fill inside a glyph whose outline stays solid black ([reportShade]).
- * - **One gel pen**: `StrokeStyle.PEN`, black, 5 px — the width the hand settled on. One size, one
- *   tone, nothing to choose. It and the pencil are **both [Tool.PEN]** to the engine; what differs
- *   is only what the engine is armed with, which is what [SketchToolState] holds and this class
- *   assigns.
+ * - **A graphite pencil of one width and sixteen shades** ([SketchPalette] — the whole grey
+ *   ladder, every level previewing as it bakes on the direct panel path, at 4 px). Arc 43's
+ *   decision 3 was "no tilt, no width choice, no colour", and the first two thirds of that stood
+ *   on measurement rather than taste: the Supernote bakes upright whatever the grip (g-paper
+ *   0.1.35), so a sketch could not be shaded by leaning even in principle. Arc 44 opened the other
+ *   route — choose the tone instead of leaning for it — and arc 46 closed the width choice again
+ *   at a real pencil's size. **Its button wears its shade**, as a fill inside a glyph whose
+ *   outline stays solid black ([reportShades]).
+ * - **One gel pen**: `StrokeStyle.PEN`, 5 px — the width the hand settled on — in **any of the
+ *   same sixteen shades** (arc 46, decision 3); its button wears its own shade the same way. It
+ *   and the pencil are **both [Tool.PEN]** to the engine; what differs is only what the engine is
+ *   armed with, which is what [SketchToolState] holds and this class assigns.
+ * - **The Palette button** opens the shade panel ([PaletteBar]) under itself, editing the armed
+ *   kind's shade; a second tap closes it.
  * - The **rubbing** eraser at [ERASER_RADIUS_PX] px on g-paper's [RasterRubbing] defaults: within
  *   the radius the alpha is lifted a fraction per pass, so a light pass softens a line and a few
  *   firm passes take it out. It is not a stroke eraser and there is no sub-bar — there are no
@@ -46,11 +49,9 @@ import com.symmetricalpalmtree.notesproutsn.notebook.PenIdle
  * added the upright bake; the `RattaTuning` door of 0.1.32–0.1.33 is gone) — and a host that
  * re-stated any of them would be a second place for them to drift. **What the host does set is the
  * pen itself**: style, width and colour, which are the person's choices and were never the engine's.
- * g-paper 0.1.36 is what makes the shades honest on Ratta — the firmware paints one tone per pen,
- * so the live line cannot be the true grey, and `RattaInkMap.pencilPreviewFor` maps each shade to
- * the nearest of the three usable firmware tones while the bake stays the shade that was chosen.
- * The heaviest leads want one thing more: g-paper **0.1.37** lifts `RattaEmr.EMR_MAX` from 12 px
- * to 96, the top of [SketchPalette.SIZES_PX], so every lead previews at the width it bakes.
+ * g-paper 0.1.41–0.1.43 is what makes the shades honest on Ratta: the pencil and the pen go direct
+ * to the panel and the glass shows a blue-noise dither of the true grey, so every level previews as
+ * it bakes; `RattaInkMap.pencilPreviewFor`'s four-tone ladder is the needle fallback only.
  *
  * **The arrows no-op at a bound, never disable.** A greyed control is invisible on e-ink (the
  * standing rule), so the buttons always look the same and a turn at either edge simply stays put —
@@ -67,6 +68,8 @@ class SketchToolbar(
     /** The gel pen (arc 44 / T3) — [Tool.PEN]'s second **kind**, beside the pencil's. */
     btnPen: ImageButton,
     btnEraser: ImageButton,
+    /** The shade panel's door (arc 46 "Palette"). */
+    private val btnPalette: ImageButton,
     private val btnBringInk: ImageButton,
     private val btnShowPages: ImageButton,
     private val btnPrevPage: ImageButton,
@@ -80,9 +83,8 @@ class SketchToolbar(
     /** Any actual tool change — the screen takes down anything that belonged to the old tool. A
      *  pencil↔gel-pen switch is one of these, even though `paper.tool` never moves for it. */
     onToolTapped: () -> Unit,
-    /** A tap on the **already-armed** pencil (arc 44 / T3) — the screen toggles its [PencilBar]
-     *  under it. A re-tap on the armed gel pen is nothing: it has no options. */
-    onPencilReTap: () -> Unit = {},
+    /** A tap on the Palette button (arc 46) — the screen toggles its [PaletteBar] under it. */
+    onPalette: () -> Unit = {},
     /** A pen **kind** was tapped (arc 44 / T3): the screen applies the new state ([apply]) and
      *  remembers it on the device. It fires before the tool is armed — the firmware pen is re-armed
      *  from the colour and width, so the kind has to be in place first. */
@@ -110,17 +112,20 @@ class SketchToolbar(
     private val tools: PaperToolbar
 
     /**
-     * The Pencil button's glyph: the outline over a body that carries the armed shade
-     * ([PencilIcon]). Built here rather than left to the layout's `android:src` because it is a
-     * two-layer drawable whose fill this class re-inks — the layout's own `ic_pen` is what the
-     * button wears for the instant before this line runs.
+     * The two pen buttons' glyphs: each an outline over a body that carries that kind's shade
+     * ([ShadeIcon]). Built here rather than left to the layout's `android:src` because they are
+     * two-layer drawables whose fill this class re-inks — the layout's own `ic_pen` / `ic_ballpen`
+     * is what each button wears for the instant before these lines run.
      */
-    private val pencilIcon = PencilIcon.filled(btnPencil.context, SketchToolState.DEFAULT.reportedShade)
+    private val pencilIcon = ShadeIcon.pencil(btnPencil.context, SketchToolState.DEFAULT.pencilReport)
         .also { btnPencil.setImageDrawable(it) }
+    private val penIcon = ShadeIcon.pen(btnPen.context, SketchToolState.DEFAULT.penReport)
+        .also { btnPen.setImageDrawable(it) }
 
-    /** The shade the button is actually wearing — an ARGB, so the compare is the fill itself and
-     *  two levels that render the same could never both repaint. Null until the first report. */
-    private var reportedShade: Int? = null
+    /** The shades the two buttons are actually wearing — ARGBs, so the compare is the fill itself
+     *  and two levels that render the same could never both repaint. Null until the first report. */
+    private var reportedPencil: Int? = null
+    private var reportedPen: Int? = null
 
     init {
         paper.tool = Tool.PEN
@@ -150,12 +155,13 @@ class SketchToolbar(
             btnAltPen = btnPen,
             altPenArmed = { toolState.isPen },
             onPenKindPicked = onPenKindPicked,
-            onPenReTap = onPencilReTap,
+            // Arc 46: a re-tap on the armed pencil is nothing now — the shade panel has its own door.
         )
 
-        listOf(btnBringInk, btnShowPages, btnPrevPage, btnNextPage).forEach {
+        listOf(btnPalette, btnBringInk, btnShowPages, btnPrevPage, btnNextPage).forEach {
             TooltipCompat.setTooltipText(it, it.contentDescription)
         }
+        btnPalette.setOnClickListener { releaseRenderIfIdle(); onPalette() }
         btnBringInk.setOnClickListener { releaseRenderIfIdle(); onBringInk() }
         btnShowPages.setOnClickListener { releaseRenderIfIdle(); onShowPages() }
         btnPrevPage.setOnClickListener { releaseRenderIfIdle(); onPrevPage() }
@@ -168,7 +174,7 @@ class SketchToolbar(
 
     /**
      * Arm [state] — the one door every tool choice comes through: the restore at open, a kind tap,
-     * a shade or a lead from the [PencilBar].
+     * a shade from the [PaletteBar].
      *
      * It **syncs the bar** as well as the engine, because which of the two pen buttons reads as
      * armed follows the *kind* and the tool may not have moved at all (a pencil↔pen switch under an
@@ -197,34 +203,41 @@ class SketchToolbar(
         paper.penStyle = state.penStyle
         paper.penWidth = state.penWidth
         paper.penColor = state.penColor
-        reportShade(state.reportedShade)
+        reportShades(state)
     }
 
     /**
-     * How the Pencil button itself **reports the armed shade** — arc 44 / T3's phase-start
-     * question, answered by the user on 2026-09-17: **the pencil's body is filled with the shade,
-     * and its outline stays solid black.** Black armed is a completely black pencil; every other
-     * level is a black outline with that grey inside it ([PencilIcon] draws it and says why a fill
-     * rather than a tint of the whole glyph).
+     * How the two pen buttons **report their shades** — arc 44 / T3's phase-start question,
+     * answered by the user on 2026-09-17 for the Pencil and extended to the gel pen by arc 46's
+     * decision 6: **each glyph's body is filled with that kind's shade, and its outline stays solid
+     * black.** Black is a completely black glyph; every other level is a black outline with that
+     * grey inside it ([ShadeIcon] draws it and says why a fill rather than a tint of the whole
+     * glyph).
      *
-     * **Greys are ink**, and this is the one place outside [PencilBar]'s swatches where the armed
-     * ink is *reported* rather than chosen — the root `CLAUDE.md`'s standing exception, "the pen
-     * button's icon tinted with the armed ink", in its fill form. The gel pen's button never
-     * changes: it has one tone and nothing to report.
+     * **Greys are ink**, and this is the one place outside [PaletteBar]'s swatches where an ink is
+     * *reported* rather than chosen — the root `CLAUDE.md`'s standing exception, "the pen button's
+     * icon tinted with the armed ink", in its fill form, twice.
      *
-     * **The shade is the pencil's, not the armed kind's** ([SketchToolState.reportedShade]), so
-     * while the gel pen or the rubber is armed the button still shows what a tap on it will bring
-     * back.
+     * **Each shade is its kind's, not the armed kind's** ([SketchToolState.pencilReport] /
+     * [SketchToolState.penReport]), so while the other kind or the rubber is armed a button still
+     * shows what a tap on it will bring back.
      *
      * It is called from [assign] alone — every state change already passes through there, the
      * restore at open included, so no path can be left out — and it is never inside a stroke: the
      * calls are a deliberate tap, or the restore before the screen is even open. Unchanged is
-     * silent, which is the frame-silence rule for a button nobody asked to repaint.
+     * silent, per button, which is the frame-silence rule for a button nobody asked to repaint.
      */
-    private fun reportShade(ink: Int) {
-        if (ink == reportedShade) return
-        reportedShade = ink
-        PencilIcon.tint(pencilIcon, ink)
+    private fun reportShades(state: SketchToolState) {
+        val pencil = state.pencilReport
+        if (pencil != reportedPencil) {
+            reportedPencil = pencil
+            ShadeIcon.tint(pencilIcon, pencil)
+        }
+        val pen = state.penReport
+        if (pen != reportedPen) {
+            reportedPen = pen
+            ShadeIcon.tint(penIcon, pen)
+        }
     }
 
     /** Make the tool buttons honest — driven from `PaperListener.onToolChanged`, never from a tap. */
@@ -249,7 +262,7 @@ class SketchToolbar(
 
         /** The rubber's radius, in px — g-paper 0.1.30's rubbing eraser at its default lift. The
          *  eraser has no options and is not remembered, so this is the one number left here; the
-         *  pencil's and the pen's live in [SketchPalette]. */
+         *  pencil's and the pen's widths live in [SketchPalette]. */
         const val ERASER_RADIUS_PX = 12f
     }
 }

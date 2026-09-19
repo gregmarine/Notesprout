@@ -159,6 +159,13 @@ class CollapsedChrome(
          * screen owns the armed shade and a copy of it here is a copy that can be stale.
          */
         val primaryIcon: (() -> PenIcon)? = null,
+        /**
+         * The **alt** kind's glyph, painted by the screen (arc 46 "Palette"), or null to wear
+         * [altIconRes] as every screen did before. [primaryIcon]'s rule and reason exactly: the
+         * sketch face's gel pen reports its own shade as a fill under a solid outline, on the row's
+         * own button always and on the corner button while the alt kind is the armed one.
+         */
+        val altIcon: (() -> PenIcon)? = null,
     )
 
     /**
@@ -214,6 +221,7 @@ class CollapsedChrome(
      *  one, which is every screen but the sketch face and every tool but the primary pen. */
     private var knobToken: Int? = null
     private var primaryPenToken: Int? = null
+    private var altPenToken: Int? = null
     private var clipboardLoaded = false
 
     val isShowing: Boolean get() = mini.isShowing
@@ -365,6 +373,7 @@ class CollapsedChrome(
         val armed = paper.tool
         syncKnob(armed)
         syncPrimaryPen()
+        syncAltPen()
         // [CollapsedTools.selectedFor] answers against the full order, so on a shortened bar it can
         // name a tool that has no button here — the walk is over the buttons this bar actually
         // built, so that reads as "nothing bordered", which is exactly right.
@@ -400,11 +409,15 @@ class CollapsedChrome(
         val alt = kinds?.altArmed() == true
         // The screen's own painted glyph (arc 44 / T3) wears the corner button exactly when the
         // PRIMARY pen button reads as armed — [CollapsedTools.penButtonSelected]'s rule again
-        // rather than a second spelling of "is the pencil what is on the paper?". Under the alt
-        // kind or any other tool the button wears that tool's glyph, untouched.
+        // rather than a second spelling of "is the pencil what is on the paper?" — and (arc 46)
+        // the alt kind's painted glyph when the ALT button reads as armed. Under any other tool
+        // the button wears that tool's glyph, untouched.
         val reported = kinds?.primaryIcon
             ?.takeIf { CollapsedTools.penButtonSelected(armed, alt, isAltButton = false) }
             ?.invoke()
+            ?: kinds?.altIcon
+                ?.takeIf { CollapsedTools.penButtonSelected(armed, alt, isAltButton = true) }
+                ?.invoke()
         if (reported != null) {
             // `knobIcon` 0 is "wearing a painted glyph" — no resource id is ever 0, so the pair
             // (0, token) cannot be confused with any resource the button could be showing.
@@ -433,6 +446,16 @@ class CollapsedChrome(
         val button = toolButtons[Tool.PEN] ?: return
         if (icon.token == primaryPenToken) return
         primaryPenToken = icon.token
+        button.setImageDrawable(icon.newDrawable())
+    }
+
+    /** The row's alt-pen button wears the screen's painted glyph always (arc 46 "Palette") —
+     *  [syncPrimaryPen]'s rule for the second kind. Null on every screen but the sketch face. */
+    private fun syncAltPen() {
+        val icon = penKinds?.altIcon?.invoke() ?: return
+        val button = altPenButton ?: return
+        if (icon.token == altPenToken) return
+        altPenToken = icon.token
         button.setImageDrawable(icon.newDrawable())
     }
 
