@@ -1,5 +1,7 @@
 package com.symmetricalpalmtree.notesproutsn.ext.sketch
 
+import com.symmetricalpalmtree.gpaper.core.RasterLayer
+
 /**
  * A square of a raster page's before-image, and where on the page it belongs (arc 43 / K5 — ported
  * from Paintsprout Onyx's `sketchbook/RasterTiles.kt`, which is where the design was proved).
@@ -10,10 +12,11 @@ package com.symmetricalpalmtree.notesproutsn.ext.sketch
  * `android.graphics.Rect` so that everything about an undo entry except the swap itself can be
  * proved on a laptop with no tablet in the room.
  *
- * The array is **not** a snapshot the engine may keep: `swapPageRaster` writes the page's old
- * pixels back into it, which is the whole trick that lets one entry serve undo and redo. So nothing
- * else may hold a second reference to it and read it later expecting the before-image to still be
- * there.
+ * The array is **not** a snapshot the engine may keep: `swapPageRaster(layer, …)` writes that
+ * raster's old pixels back into it, which is the whole trick that lets one entry serve undo and
+ * redo. So nothing else may hold a second reference to it and read it later expecting the
+ * before-image to still be there. A tile carries no layer of its own, which is why the entry does:
+ * pixels read off one raster can only ever be swapped back into that one.
  */
 class RasterTile(
     val left: Int,
@@ -122,13 +125,21 @@ object RasterTiles {
 }
 
 /**
- * One contact's before-image, gathered as it happens: opened at the first change the pen makes and
- * closed when the pen lifts — or, for the "Bring in ink" bake, opened and closed by the door itself,
- * because a composited bake never produces a pen-up.
+ * One contact's before-image, gathered as it happens: opened at the first change the engine
+ * announces and closed when the pen lifts — or, for the "Bring in ink" bake and the debug fill door,
+ * closed by the door itself, because a composited bake never produces a pen-up.
  *
  * The screen feeds it every rect g-paper reports and hands it a way to read pixels; it decides which
  * of those actually need reading (see [RasterTiles] — a cell is read once and never again) and hands
  * back a single [SketchEdit.RasterChanged] at the end, or nothing when there is nothing to take back.
+ *
+ * **A builder belongs to one raster** (arc 45 / G3). [layer] is fixed at construction and stamped
+ * on the entry, because a contact only ever changes one of the page's two images — g-paper's own
+ * rule — and the tiles it reads are that image's, swapped back into that image and no other. The
+ * screen opens a builder on the layer the engine names at the contact's first will-change; a
+ * second layer arriving inside one contact would be the engine breaking its own rule, and the
+ * screen closes the entry and opens a fresh one rather than mixing two images' pixels into a patch
+ * list that carries no layer of its own.
  *
  * **The cap is a belt, and it is kept anyway.** With cells aligned to the page a single contact
  * cannot hold more than the page itself, which is well under the budget — so [tooBig] should never
@@ -139,6 +150,8 @@ object RasterTiles {
 class RasterEditBuilder(
     private val pageKey: String,
     private val pageIndex: Int,
+    /** Which of the page's two rasters this contact is changing — read from, and swapped back into. */
+    val layer: RasterLayer,
     private val pageWidth: Int,
     private val pageHeight: Int,
     private val capBytes: Long = SketchEdit.UNDO_BUDGET_BYTES,
@@ -195,6 +208,6 @@ class RasterEditBuilder(
      */
     fun build(): SketchEdit.RasterChanged? {
         if (tooBig || held.isEmpty()) return null
-        return SketchEdit.RasterChanged(pageKey, pageIndex, held.values.toList())
+        return SketchEdit.RasterChanged(pageKey, pageIndex, layer, held.values.toList())
     }
 }

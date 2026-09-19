@@ -232,7 +232,8 @@ class SketchEntry(
      * pixels) survived while the host binder it was holding died with us.
      *
      * The recovery is host-driven because only the host can tell that this happened: the extension
-     * sees a dead binder and can only park its PNG and retry. A fresh `begin` reaching it **is**
+     * sees a dead binder and can only park its rasters and retry. A fresh `begin` reaching it
+     * **is**
      * the retry answering — its handler re-pushes the parked save through the new host binder.
      *
      * So: no launch (the screen is already up), no [OpeningOverlay] (it would paint under the

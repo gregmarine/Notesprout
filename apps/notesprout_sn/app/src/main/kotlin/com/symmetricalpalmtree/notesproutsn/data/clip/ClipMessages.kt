@@ -16,16 +16,22 @@ import com.symmetricalpalmtree.notesproutsn.data.soil.SoilSchema
 object ClipMessages {
 
     /**
-     * The over-cap copy's sentence for a payload made of [rows] (arc 43 / K3).
+     * The over-cap copy's sentence for a payload made of [rows] (arc 43 / K3; two raster types
+     * since arc 45 / G2).
      *
-     * A refused envelope carrying a **sketch** row names it. A page's sketch is a PNG measured in
-     * megabytes where everything else on a page is measured in kilobytes, so it is almost always
-     * the reason [ClipEnvelope.MAX_BYTES] was passed, and "there is too much on this page" over a
-     * page of ordinary ink and one drawing reads as a puzzle rather than an explanation. The cap
-     * itself does not move — it is the cursor window, not a preference.
+     * A refused envelope carrying **either sketch raster** names the sketch — one sentence for
+     * both, because the person did not draw a graphite raster and an ink raster, they drew a
+     * picture. A page's sketch is measured in megabytes where everything else on a page is measured
+     * in kilobytes, so it is almost always the reason [ClipEnvelope.MAX_BYTES] was passed, and
+     * "there is too much on this page" over a page of ordinary ink and one drawing reads as a puzzle
+     * rather than an explanation. The cap itself does not move — it is the cursor window, not a
+     * preference.
      */
     @StringRes
     fun tooLarge(rows: List<ClipRow>): Int =
-        if (rows.any { it.type == SoilSchema.TYPE_SKETCH }) R.string.clip_too_large_sketch
-        else R.string.clip_too_large
+        if (rows.any { it.type == SoilSchema.TYPE_SKETCH_GRAPHITE || it.type == SoilSchema.TYPE_SKETCH_INK }) {
+            R.string.clip_too_large_sketch
+        } else {
+            R.string.clip_too_large
+        }
 }

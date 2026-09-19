@@ -832,8 +832,11 @@ foreign row somehow carries both (logged as a conflict, never both faces).
 has an ordinary paper surface underneath, so its card is the **ink bake of the last-shown page**
 composited with that page's sketch over paper white when one exists — the sketch of the last-shown
 page over paper white, decision 6 — falling back to the plain ink bake alone when that page carries
-no sketch. `SketchCover.render` reads the row **after** the showing's `end()` has saved it, so the
-card never races a save still in flight.
+no sketch. Since arc 45 / G2 the sketch is **two rasters, flattened**: `SketchCover.render` reads
+both rows **after** the showing's `end()` has saved them, draws graphite plain then ink over it with
+`PorterDuff.Mode.DARKEN` (`SketchRaster`'s flatten, sampled), and falls back to whichever raster
+survives the header guard when the other's header does not read — so the card never races a save
+still in flight and never shows one drawing sliding over the other.
 
 **Routing.** Opening a Sketch notebook from any entry point goes straight into the sketch face
 (`SketchEntry`/`openIntoSketch`) — the canvas underneath loads only when the face's own **Show

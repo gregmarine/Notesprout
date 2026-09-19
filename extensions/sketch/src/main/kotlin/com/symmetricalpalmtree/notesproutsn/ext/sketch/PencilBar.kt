@@ -29,16 +29,16 @@ import com.symmetricalpalmtree.notesproutsn.notebook.PenIdle
  *
  * - **It is three rows, not one.** `activity_sketch.xml`'s `pencilBar` is a *vertical*
  *   [LinearLayout] and each row is a horizontal one built here ([AnchoredBar.addRow] exists for
- *   exactly this). The rows are [SketchPalette.shadeRows]' — one row of six shades today — and then
+ *   exactly this). The rows are [SketchPalette.shadeRows]' — one row of four shades today — and then
  *   [SketchPalette.sizeRows]', two rows of six leads. **Six is the widest a row gets** on purpose:
  *   six 62 dp cells plus the bar's padding is ≈ 380 dp, well inside the Nomad's 749 dp, so neither
  *   button tier can push an entry off the edge.
  * - **A swatch is not an icon button.** It is a black ring with the ink itself as the fill, drawn
  *   here rather than being a drawable, because the fill is a grey off the ladder and the selection
  *   has to read at **every** level offered: a black swatch bordered in black says nothing. So the
- *   selected swatch gains a **white gap ring** between the ring and the fill — the one mark that
- *   works as well on `#000000` as on the palest lead. Painted rather than left to the bar's white
- *   background, so it stays true whatever is behind it.
+ *   selected swatch gains a **white gap ring** between the ring and the fill, and a black hairline
+ *   at the fill's edge — between them, one mark that works on `#000000` and one on white. Painted
+ *   rather than left to the bar's white background, so it stays true whatever is behind it.
  * - **Greys are ink.** They appear here and nowhere else in any chrome — the colour rule's one
  *   opening is a swatch showing the tone being chosen. The size dots and every border are black.
  * - **The bar stays open after a pick.** A visit here is usually "this grey, that lead", and a bar
@@ -88,8 +88,11 @@ class PencilBar(
         SketchPalette.shadeRows().forEach { levels ->
             val row = newRow(ctx)
             levels.forEach { level ->
-                val hint = if (level == 0) ctx.getString(R.string.cd_pencil_shade_black)
-                else ctx.getString(R.string.cd_pencil_shade, level)
+                val hint = when (level) {
+                    0 -> ctx.getString(R.string.cd_pencil_shade_black)
+                    SketchPalette.WHITE_SHADE -> ctx.getString(R.string.cd_pencil_shade_white)
+                    else -> ctx.getString(R.string.cd_pencil_shade, level)
+                }
                 val swatch = Swatch(ctx, SketchPalette.shade(level)).apply {
                     layoutParams = LinearLayout.LayoutParams(cell, cell)
                     contentDescription = hint
@@ -171,12 +174,15 @@ class PencilBar(
 
     /**
      * One shade: a black ring with the grey itself inside it, and — when it is the armed one — a
-     * white ring in the gap between them.
+     * white ring in the gap between them, then a hairline of black around the fill.
      *
      * The selection **cannot** be a border here. `bg_toolbar_button`'s black `state_selected` frame
      * is invisible against level 0, and a swatch the person cannot tell is armed is a swatch that
-     * reads as broken. The gap ring reads at every level because it
-     * is white between two darker things — the only contrast an e-paper panel always has.
+     * reads as broken. The gap ring reads at every dark level because it is white between two
+     * darker things — the only contrast an e-paper panel always has. It is nothing at all against
+     * the **white** lead (2026-09-18), whose fill is the gap's own colour, so the armed swatch
+     * also draws a hairline black ring at the fill's edge: invisible on black (black on black,
+     * the gap still says it), the mark that says it on white.
      */
     private class Swatch(ctx: Context, private val ink: Int) : View(ctx) {
 
@@ -202,8 +208,14 @@ class PencilBar(
                 val gap = GAP_DP * density
                 paint.color = white
                 canvas.drawCircle(cx, cy, outer - ring, paint)
+                val fill = maxOf(0f, outer - ring - gap)
                 paint.color = ink
-                canvas.drawCircle(cx, cy, maxOf(0f, outer - ring - gap), paint)
+                canvas.drawCircle(cx, cy, fill, paint)
+                val hair = HAIR_DP * density
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = hair
+                paint.color = black
+                canvas.drawCircle(cx, cy, maxOf(0f, fill - hair / 2f), paint)
             } else {
                 paint.color = ink
                 canvas.drawCircle(cx, cy, outer - ring, paint)
@@ -237,6 +249,9 @@ class PencilBar(
         const val RING_DP = 2f
         const val PAD_DP = 6f
         const val GAP_DP = 3f
+
+        /** The hairline around the armed fill — what makes the white lead's selection visible. */
+        const val HAIR_DP = 1f
 
         /** The size ladder's ends in dp: the finest lead and the heaviest, with the rest spaced
          *  evenly between them however many there are. The wide end grew with the list (arc 44,

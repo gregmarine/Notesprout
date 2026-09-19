@@ -17,7 +17,8 @@ import com.symmetricalpalmtree.notesproutsn.extension.ISketchHost;
  *
  * The seam's piece rides begin(): [host] is a HOST-side binder (IDocumentHost's recipe -- minted
  * per showing, uid-gated in every method, revoked with the unbind) through which every byte of
- * PNG crosses, in both directions, chunked (ByteChunks). Nothing rides the screen's Intent but
+ * raster image (two per page since arc 45 — graphite and ink, each a lossless WebP) crosses, in
+ * both directions, chunked (ByteChunks). Nothing rides the screen's Intent but
  * ExtensionContract.EXTRA_CHROME_HIDDEN. Every method here: HostCallerCheck.enforce first.
  * Timeouts are the host's.
  */

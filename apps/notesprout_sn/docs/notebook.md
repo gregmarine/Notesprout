@@ -1267,7 +1267,7 @@ its row work inside one `db.withTransaction` and then mirrors the result into th
 | Operation | What happens |
 |---|---|
 | `insertBlank(after)` | new `page` row (fresh UUID, parent = notebook, `order` = `PageMath.insertPosition`), inheriting the **current page's template and authored size**, then a renumber; lands on the new page |
-| `deleteCurrent()` | soft-delete the page **and its live content** (`liveDescendantIds`, type-agnostic — strokes, headings, links and their wrapped children, the page's `document` row, texts, shapes, sticky notes and their children, and — arc 43 — the page's `sketch` row, carried like everything else a page owns), renumber the remainder, land on `PageMath.indexAfterDelete` (the previous page, or the new first) |
+| `deleteCurrent()` | soft-delete the page **and its live content** (`liveDescendantIds`, type-agnostic — strokes, headings, links and their wrapped children, the page's `document` row, texts, shapes, sticky notes and their children, and — arc 43, **both rasters since arc 45 / G2** — the page's `sketch_graphite` and `sketch_ink` rows, carried like everything else a page owns), renumber the remainder, land on `PageMath.indexAfterDelete` (the previous page, or the new first) |
 | `deleteCurrent()` on the **only** page | the page and its content are soft-deleted and a **fresh blank replacement** is created in the same transaction, same template and size — a notebook always has ≥ 1 page, and an empty one would have nothing to open |
 | `pasteAt(env, before)` (B1) | write the clipboard payload's rows — a fresh page row, its content, and the template unless `resolveTemplate` finds this file already has it (by id, or B2, by content) — at `PageMath.insertPosition`, renumber, land on the pasted page. Across notebooks the page's own-notebook links are rewritten to name the source ([`docs/clipboard.md`](clipboard.md)) |
 | `capturePage()` (B1) | snapshot the current page, its template row and its live descendants into a clipboard payload; the caller drains the writer first |
@@ -1605,9 +1605,10 @@ the id snapshot and survive as a live orphan), then `NotebookSession.eraseCurren
 rule: the host repaints once after the transaction, never per object.
 
 `eraseCurrent()` is `deleteCurrent()`'s content half **minus the sketch**: `dao().liveErasableIds(page.id)`
-(arc 43 / K3, decision 11) — `liveDescendantIds`' own query with the page's `sketch` row excluded,
-so Erase page clears every stroke, heading, link (and its wrapped children), the page's `document`
-row, texts, shapes and sticky notes (and their children), but **never** the page's raster sketch —
+(arc 43 / K3, decision 11) — `liveDescendantIds`' own query with the page's **both** sketch rows
+excluded (`sketch_graphite` and `sketch_ink`, since arc 45 / G2), so Erase page clears every
+stroke, heading, link (and its wrapped children), the page's `document` row, texts, shapes and
+sticky notes (and their children), but **never** the page's raster sketch —
 and one `withTransaction { softDelete(ids, now) }`. The page row, its `order`, its size, its template
 and `currentIndex` are untouched; the page count does not change. **An empty page's Erase is
 silent** — the dialog is still shown (the row is always present while the page exists), but the

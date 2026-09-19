@@ -164,8 +164,19 @@ object ExtensionContract {
      * transaction codes 12–13 declares 19 and never binds an 18 host. `MIN_API_VERSIONS` is
      * untouched, both earlier sketch floors stay where they were born, no door vanishes, and only
      * `:ext-sketch` redeclares. Not an eleventh point.
+     *
+     * **20 = arc 45 "Ink" / G2 (2026-09-17) — the THIRD non-tail break, and the first to
+     * move one point's action floor after its birth (X1 moved three at once).** A sketch is two rasters now (graphite + ink, `INK_PLAN.md`), so
+     * `ISketchHost.readSketchChunk` / `saveSketchChunk` (transaction codes 3–4) take a raster layer
+     * **in place**, [SketchPageState]'s wire form carries two byte/chunk pairs, and the image guard
+     * is WebP (`ImageHeader`, `PngHeader` gone). Neither side can read the other's parcels, so
+     * `MIN_API_VERSIONS` lists `ACTION_SKETCH` at [SketchContract.MIN_API_VERSION_FOR_SKETCH] =
+     * **20** (from its birth 17): a 17–19 screen is not discovered by a 20 host, and a 20 screen
+     * never binds a 19 host. Granted by the user's decision 4 — no legacy, no shipped library on
+     * the old shape. Every other point's floor is untouched; the two sketch method floors (18, 19)
+     * sit below the action floor and are inert. Not an eleventh point; only `:ext-sketch` declares.
      */
-    const val API_VERSION: Int = 19
+    const val API_VERSION: Int = 20
 
     /**
      * The floor for a service on a **store-taking** point (arc 22 / X1): the host accepts such a
@@ -246,7 +257,8 @@ object ExtensionContract {
      * [MIN_API_VERSION_FOR_CALENDAR] for [ACTION_CALENDAR], [CloudContract.MIN_API_VERSION_FOR_CLOUD]
      * for [CloudContract.ACTION_CLOUD_STORAGE] (arc 25 / V1), [MIN_API_VERSION_FOR_BIBLE] for
      * [ACTION_BIBLE] (arc 37 / B0), [SketchContract.MIN_API_VERSION_FOR_SKETCH] for
-     * [SketchContract.ACTION_SKETCH] (arc 43 / K2), 1 for every other. The range rule at
+     * [SketchContract.ACTION_SKETCH] (arc 43 / K2 at 17; **20 since arc 45 / G2** — the first
+     * floor to move after birth since X1's store floor), 1 for every other. The range rule at
      * [API_VERSION] applies above it. A point that is not in the map has the floor of 1 — a new
      * point that needs one adds its row here, and the test that pins the map fails until it does.
      */

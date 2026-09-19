@@ -17,6 +17,19 @@ import java.util.UUID
  * ARGB int from another process is untrusted, and a raster page has exactly one ink — there is no
  * colour on this surface to honour a coloured stroke with.
  *
+ * **Which raster it lands in is the engine's answer, not this object's** (arc 45 "Ink" / G3).
+ * g-paper routes every composited stroke by its style at one site, `RasterLayer.of`: a `PEN` stroke
+ * — which is what [InkWire.styleOf] answers for the notebook's own ink, and what an unknown style
+ * name falls back to — bakes into the **ink** raster, where the rubber can never reach it. That is
+ * the right home for brought-in handwriting: it is a tracing to build the drawing *around*, and a
+ * rub of the graphite over it should not take it away.
+ *
+ * A notebook stroke written with `StrokeStyle.PENCIL` would bake into the **graphite** raster and
+ * be rubbable, and that is also correct rather than a gap — routing by style is the whole rule, and
+ * a pencil line brought in from the page is a pencil line. (No SN notebook tool writes `PENCIL`
+ * today; [InkWire.styleOf] simply reads whatever style name the wire carries, so nothing here has
+ * to be kept in step if one ever does.)
+ *
  * Everything else about the wire is [InkWire]'s and is not repeated: fresh ids, `timeMillis` 0, an
  * unknown style name reading as PEN, the width clamped. **Nothing from the wire is trusted beyond
  * its geometry.**

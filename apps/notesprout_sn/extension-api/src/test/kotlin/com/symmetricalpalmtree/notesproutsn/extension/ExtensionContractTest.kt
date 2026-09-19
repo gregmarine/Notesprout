@@ -37,8 +37,12 @@ class ExtensionContractTest {
         // METHOD floor MIN_API_VERSION_FOR_SKETCH_PAGES; no action floor moved, only :ext-sketch
         // redeclares); 19 since arc 44 "Pencils" / T2 (two more `ISketchHost` tails —
         // toolSettings / putToolSettings — behind the METHOD floor
-        // MIN_API_VERSION_FOR_SKETCH_TOOLS; no action floor moved, only :ext-sketch redeclares).
-        assertEquals(19, ExtensionContract.API_VERSION)
+        // MIN_API_VERSION_FOR_SKETCH_TOOLS; no action floor moved, only :ext-sketch redeclares);
+        // 20 since arc 45 "Ink" / G2 (two rasters — readSketchChunk / saveSketchChunk take a layer
+        // IN PLACE at codes 3–4, SketchPageState carries two byte/chunk pairs, the guard is WebP:
+        // the THIRD non-tail break, and the sketch ACTION floor moved 17 → 20 with it — no legacy,
+        // the user's decision 4; only :ext-sketch redeclares).
+        assertEquals(20, ExtensionContract.API_VERSION)
         assertEquals(9, ExporterContract.MIN_API_VERSION_FOR_DELIVERY)
         assertEquals(6, ExtensionContract.MIN_API_VERSION_FOR_STORE)
         assertEquals(7, ExtensionContract.MIN_API_VERSION_FOR_CALENDAR)
@@ -51,7 +55,9 @@ class ExtensionContractTest {
         assertEquals(13, ExtensionContract.MIN_API_VERSION_FOR_BIBLE_SEND)
         assertEquals(15, ExtensionContract.MIN_API_VERSION_FOR_BIBLE_TEXT)
         assertEquals(16, ExtensionContract.MIN_API_VERSION_FOR_BIBLE_NOTES)
-        assertEquals(17, SketchContract.MIN_API_VERSION_FOR_SKETCH)
+        // G2: the sketch action floor is the one floor that moved after birth — 17 → 20. The two
+        // method floors keep their birth numbers as history and sit below it, inert.
+        assertEquals(20, SketchContract.MIN_API_VERSION_FOR_SKETCH)
         assertEquals(18, SketchContract.MIN_API_VERSION_FOR_SKETCH_PAGES)
         assertEquals(19, SketchContract.MIN_API_VERSION_FOR_SKETCH_TOOLS)
         assertEquals(14, DocumentContract.MIN_API_VERSION_FOR_DOCUMENT_LOOKUP)
@@ -240,13 +246,14 @@ class ExtensionContractTest {
         assertTrue(!ExtensionContract.accepts(bible, 10))
         assertTrue(ExtensionContract.accepts(bible, 11))
         assertTrue(!ExtensionContract.accepts(bible, ExtensionContract.API_VERSION + 1))
-        // The Sketch point (arc 43 / K2): born at 17, listed only there. No other door moved —
-        // every floor above still answers its own birth number.
+        // The Sketch point (arc 43 / K2): born at 17; listed at 20 since arc 45 / G2, when its own
+        // chunk calls changed shape in place — a 17–19 screen is not discovered, by design (no
+        // legacy). No other door moved — every floor above still answers its own birth number.
         val sketch = SketchContract.ACTION_SKETCH
-        assertEquals(17, ExtensionContract.minApiVersion(sketch))
+        assertEquals(20, ExtensionContract.minApiVersion(sketch))
         assertEquals(SketchContract.MIN_API_VERSION_FOR_SKETCH, ExtensionContract.minApiVersion(sketch))
-        assertTrue(!ExtensionContract.accepts(sketch, 16))
-        assertTrue(ExtensionContract.accepts(sketch, 17))
+        for (old in 16..19) assertTrue("a $old sketch screen must not bind", !ExtensionContract.accepts(sketch, old))
+        assertTrue(ExtensionContract.accepts(sketch, 20))
         assertTrue(!ExtensionContract.accepts(sketch, ExtensionContract.API_VERSION + 1))
         // The screen action is not a service action — it carries no floor of its own.
         assertEquals(1, ExtensionContract.minApiVersion(SketchContract.ACTION_SKETCH_SCREEN))

@@ -13,51 +13,70 @@ import com.symmetricalpalmtree.notesproutsn.extension.WireStroke;
  * SecurityException, the extension-side HostCallerCheck's mirror.
  *
  * Pixels cross ONLY here, chunked by the shared ByteChunks rule, and are never logged on either
- * side -- counts, byte totals and durations only. The read direction is a pull: every
- * state-answering call parks its PNG in the host's read window atomically with the
- * SketchPageState it returns, and readSketchChunk() serves that window. The write direction is a
- * push: saveSketchChunk() accumulates and the last chunk commits.
+ * side -- counts, byte totals and durations only. Since arc 45 "Ink" / G2 (2026-09-17) a page's
+ * sketch is TWO RASTERS -- graphite (SketchContract.LAYER_GRAPHITE: the pencil's, the rubber's)
+ * and ink (SketchContract.LAYER_INK: the gel pen's and "Bring in ink"'s, NEVER erased -- the
+ * user's decision 1) -- each its own lossless WebP, its own row, its own window and its own
+ * accumulator. The read direction is a pull: every state-answering call parks BOTH images in the
+ * host's per-layer read windows atomically with the SketchPageState it returns, and
+ * readSketchChunk(layer, i) serves the window the layer names. The write direction is a push:
+ * saveSketchChunk(pageKey, layer, ...) accumulates per layer and the last chunk commits that
+ * layer's row alone -- a pencil scribble never re-sends the ink.
  *
  * Unlike the editor's, a save is accepted for ANY LIVE PAGE of the open notebook, named by
  * [pageKey] -- the sketch screen turns its own pages and a save flushed a moment after a turn
  * still belongs to the page it was drawn on. What the key still guarantees is that pixels can
  * never land on a page nobody drew them on.
  *
+ * G2 CHANGED transaction codes 3 and 4 IN PLACE (a layer argument, and the state's wire form grew
+ * a second byte/chunk pair) rather than appending tails: with no shipped library on the old shape
+ * (decision 4, no legacy) the point's action floor moved to
+ * SketchContract.MIN_API_VERSION_FOR_SKETCH = 20, and a host or screen below it never binds this
+ * point at all. The five K5b tails (codes 7-11) and the two T2 tails (12-13) are unchanged.
+ *
  * Only SecurityException / IllegalArgumentException / IllegalStateException may cross. The two
  * typed IllegalStateException messages -- SketchContract.SKETCH_TOO_LARGE and
- * SketchContract.SKETCH_BAD_PNG -- are compared verbatim by the extension (==, never contains).
+ * SketchContract.SKETCH_BAD_IMAGE -- are compared verbatim by the extension (==, never contains).
+ * A layer that is not LAYER_GRAPHITE / LAYER_INK is an IllegalArgumentException on either call.
  */
 interface ISketchHost {
-    /** The current page's state; parks its sketch PNG in the read window. */
+    /** The current page's state; parks both of its raster images in the read windows. */
     SketchPageState current();
 
     /**
-     * Flip to the page SketchContract.PAGE_PREV / PAGE_NEXT of the current one: the host moves its
-     * read window atomically with the state it answers. At either edge the host answers the SAME
-     * page unchanged -- the extension compares pageKey and stays where it is -- so a page turn is
-     * never an exception and never a null the caller has to word. The extension pushes its own
-     * pixels FIRST: the host's window is what it will read back, and a save left in flight would
+     * Flip to the page SketchContract.PAGE_PREV / PAGE_NEXT of the current one: the host moves
+     * both read windows atomically with the state it answers. At either edge the host answers the
+     * SAME page unchanged -- the extension compares pageKey and stays where it is -- so a page turn
+     * is never an exception and never a null the caller has to word. The extension pushes its own
+     * pixels FIRST: the host's windows are what it will read back, and a save left in flight would
      * land on the page it just left.
      */
     SketchPageState requestPage(int direction);
 
-    /** One chunk of the read window's PNG, 0-based; outside 0..sketchChunks-1 is refused. The
-     *  window is the page current() / requestPage() last answered with. */
-    byte[] readSketchChunk(int chunkIndex);
+    /**
+     * One chunk of the read window the raster [layer] names, 0-based; outside
+     * 0..(that layer's chunk count)-1 is refused, as is an unknown layer. The windows are the page
+     * current() / requestPage() last answered with. An absent raster is one empty chunk.
+     */
+    byte[] readSketchChunk(int layer, int chunkIndex);
 
     /**
-     * One chunk of a save for the page [pageKey] names -- any live page of the open notebook.
-     * Chunks arrive in order from 0; the host re-checks the running total against
-     * SketchContract.MAX_BYTES on receipt (over it: IllegalStateException carrying exactly
-     * SketchContract.SKETCH_TOO_LARGE, the accumulation reset, nothing written); [last] commits,
-     * and the committed bytes are checked against the page's size before any decode (a mismatch or
-     * a malformed header: IllegalStateException carrying exactly SketchContract.SKETCH_BAD_PNG).
+     * One chunk of a save of the raster [layer] names, for the page [pageKey] names -- any live
+     * page of the open notebook. Chunks arrive in order from 0 per layer; the host re-checks that
+     * layer's running total against SketchContract.MAX_BYTES on receipt (over it:
+     * IllegalStateException carrying exactly SketchContract.SKETCH_TOO_LARGE, that layer's
+     * accumulation reset, nothing written); [last] commits, and the committed bytes are checked
+     * against the page's size before any decode (a mismatch or a malformed header:
+     * IllegalStateException carrying exactly SketchContract.SKETCH_BAD_IMAGE).
      *
-     * ONE EMPTY CHUNK with last = true is the wire form of "this page has no sketch": the host
-     * soft-deletes the row rather than storing a blank page of pixels. A refused chunk resets the
-     * whole accumulation; the extension restarts from chunk 0.
+     * ONE EMPTY CHUNK with last = true is the wire form of "this page has no <layer> raster": the
+     * host soft-deletes that layer's row rather than storing a blank page of pixels; the other
+     * layer's row is untouched. A refused chunk resets that layer's accumulation; the extension
+     * restarts it from chunk 0. The two layers' accumulations are independent (a graphite stream
+     * and an ink stream may cross chunk-for-chunk without harm); two streams on the SAME layer may
+     * not, which the extension's one push lock already guarantees (SketchSaver's rule).
      */
-    void saveSketchChunk(String pageKey, int chunkIndex, in byte[] chunk, boolean last);
+    void saveSketchChunk(String pageKey, int layer, int chunkIndex, in byte[] chunk, boolean last);
 
     /**
      * "Bring in ink" (decision 8): stage the page [pageKey] names' BARE strokes -- link-wrapped

@@ -23,12 +23,12 @@ import com.symmetricalpalmtree.notesproutsn.extension.ISketchHost
  * holds; with no screen alive, a parked page is pushed here on a background thread.
  *
  * **`end` is the last moment the host binder is valid**, and on this seam that matters more than on
- * any other: a sketch is one image that exists nowhere until a save lands — there are no rows in the
- * `.soil` the way a page of ink has rows. So `end` flushes the live screen's page through that
- * screen's own push lock, then re-pushes whatever is parked, under its own key (a sketch save is
- * accepted for **any live page**, so the park needs no match to be worth writing). A park whose push
- * fails a second time is dropped with a line — the binder is about to be revoked and there is
- * nowhere left to put it.
+ * any other: a sketch raster is an image that exists nowhere until a save lands — there are no rows
+ * in the `.soil` the way a page of ink has rows. So `end` flushes the live screen's page through
+ * that screen's own push lock, then re-pushes everything parked, each under its own key **and its
+ * own raster** (a sketch save is accepted for **any live page**, so the park needs no match to be
+ * worth writing). A park whose push fails a second time is dropped with a line — the binder is
+ * about to be revoked and there is nowhere left to put it.
  *
  * `end` runs on a Binder thread, where blocking is allowed and correct: the host's `end()` call
  * returning is what tells it the flush is done, and the host gives it fifteen seconds for exactly
@@ -78,15 +78,18 @@ class SketchService : Service() {
      * The teardown backstop, in the order the two owed things have to go:
      *
      * 1. **The live screen's page first**, through [SketchSession.FlushHook.flushBlocking] — the
-     *    newest pixels there are. It never throws; a failure inside it has already parked them.
-     * 2. **Then whatever is parked**, which after step 1 is either an older failure for another page
-     *    or the very bytes step 1 just failed to deliver. Either way it is pushed through the
-     *    screen's push lock when there is a screen (so it cannot interleave with a save still in the
-     *    air on the host's one accumulator) and straight down the chunk stream when there is not.
+     *    newest pixels there are, both rasters of it. It never throws; a failure inside it has
+     *    already parked them.
+     * 2. **Then everything that is parked**, which after step 1 is either an older failure for
+     *    another page or the very bytes step 1 just failed to deliver. The park is **drained** —
+     *    a page can owe both of its rasters, and each is its own row — and each item is pushed
+     *    through the screen's push lock when there is a screen (so it cannot interleave with a save
+     *    still in the air on the host's one accumulator) and straight down the chunk stream when
+     *    there is not.
      *
      * A second failure is the end of the road: the binder is revoked the moment this returns, so the
      * bytes are dropped with a line rather than held in a process that has nothing left to do with
-     * them.
+     * them. Nothing is re-parked here, so the drain always terminates.
      */
     private fun flushBeforeRevoke(host: ISketchHost) {
         val hook = SketchSession.flushHook
@@ -96,17 +99,26 @@ class SketchService : Service() {
         } catch (e: Exception) {
             Log.w(TAG, "teardown flush hook failed: ${e.javaClass.simpleName}")
         }
-        val parked = SketchSession.pending.take()
-        if (parked == null) {
-            Slog.d(TAG) { "teardown: nothing parked (${SystemClock.elapsedRealtime() - t0} ms)" }
-            return
+        var drained = 0
+        while (true) {
+            val parked = SketchSession.pending.take() ?: break
+            drained++
+            try {
+                if (hook != null) hook.pushBlocking(parked.pageKey, parked.layer, parked.bytes)
+                else SketchPush.push(host, parked.pageKey, parked.layer, parked.bytes)
+                Slog.d(TAG) {
+                    "teardown: parked ${parked.bytes.size} B (${parked.layer}) re-pushed in " +
+                        "${SystemClock.elapsedRealtime() - t0} ms"
+                }
+            } catch (e: Exception) {
+                Log.w(
+                    TAG,
+                    "a parked ${parked.layer} raster (${parked.bytes.size} B) could not be re-pushed " +
+                        "at end(); dropped: ${e.javaClass.simpleName}",
+                )
+            }
         }
-        try {
-            if (hook != null) hook.pushBlocking(parked.pageKey, parked.png) else SketchPush.push(host, parked.pageKey, parked.png)
-            Slog.d(TAG) { "teardown: parked ${parked.png.size} B re-pushed in ${SystemClock.elapsedRealtime() - t0} ms" }
-        } catch (e: Exception) {
-            Log.w(TAG, "a parked sketch (${parked.png.size} B) could not be re-pushed at end(); dropped: ${e.javaClass.simpleName}")
-        }
+        if (drained == 0) Slog.d(TAG) { "teardown: nothing parked (${SystemClock.elapsedRealtime() - t0} ms)" }
     }
 
     /**
@@ -117,20 +129,28 @@ class SketchService : Service() {
      * the ladder gives it a few seconds and then gives up, which is the honest end of a save nobody
      * is waiting for any more. The park is only taken once a push is about to be attempted, so a
      * `begin` that races this one does not find an empty park and conclude there was nothing owed.
+     *
+     * **Each attempt drains what is there** — a page can owe both of its rasters (arc 45 / G3) —
+     * and the first failure re-parks that one item and ends the attempt, so the drain can never
+     * chase its own re-park round the loop.
      */
     private fun pushPendingInBackground() {
         Thread {
             for (attempt in 1..PENDING_ATTEMPTS) {
                 val host = SketchSession.host ?: return@Thread
-                val parked = SketchSession.pending.take() ?: return@Thread
-                try {
-                    SketchPush.push(host, parked.pageKey, parked.png)
-                    Slog.d(TAG) { "pending: ${parked.png.size} B pushed on attempt $attempt" }
-                    return@Thread
-                } catch (e: Exception) {
-                    SketchSession.pending.park(parked.pageKey, parked.png)
-                    Slog.d(TAG) { "pending attempt $attempt failed: ${e.javaClass.simpleName}" }
+                var failed = false
+                while (!failed) {
+                    val parked = SketchSession.pending.take() ?: break
+                    try {
+                        SketchPush.push(host, parked.pageKey, parked.layer, parked.bytes)
+                        Slog.d(TAG) { "pending: ${parked.bytes.size} B (${parked.layer}) pushed on attempt $attempt" }
+                    } catch (e: Exception) {
+                        SketchSession.pending.park(parked.pageKey, parked.layer, parked.bytes)
+                        Slog.d(TAG) { "pending attempt $attempt failed on ${parked.layer}: ${e.javaClass.simpleName}" }
+                        failed = true
+                    }
                 }
+                if (!failed) return@Thread
                 Thread.sleep(PENDING_RETRY_MS)
             }
             Slog.d(TAG) { "pending gave up after $PENDING_ATTEMPTS attempts" }

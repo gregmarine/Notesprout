@@ -23,11 +23,14 @@ class SketchPageStateTest {
         pageCount: Int = 3,
         width: Int = 1404,
         height: Int = 1685,
-        sketchBytes: Int = 0,
-        sketchChunks: Int = 1,
+        graphiteBytes: Int = 0,
+        graphiteChunks: Int = 1,
+        inkBytes: Int = 0,
+        inkChunks: Int = 1,
         structuralToken: String = "",
     ) = SketchPageState(
-        pageKey, pageIndex, pageCount, width, height, sketchBytes, sketchChunks, structuralToken,
+        pageKey, pageIndex, pageCount, width, height,
+        graphiteBytes, graphiteChunks, inkBytes, inkChunks, structuralToken,
     )
 
     private fun assertRefused(build: () -> SketchPageState) {
@@ -40,20 +43,50 @@ class SketchPageStateTest {
 
     @Test
     fun aPlainStateHolds() {
-        val s = state(sketchBytes = 4_000, sketchChunks = 1)
+        val s = state(graphiteBytes = 4_000, graphiteChunks = 1, inkBytes = 900, inkChunks = 1)
         assertEquals("page-1", s.pageKey)
         assertEquals(1404, s.width)
         assertEquals(1685, s.height)
-        assertEquals(1, s.sketchChunks)
+        assertEquals(4_000, s.graphiteBytes)
+        assertEquals(1, s.graphiteChunks)
+        assertEquals(900, s.inkBytes)
+        assertEquals(1, s.inkChunks)
     }
 
     @Test
-    fun anAbsentSketchIsZeroBytesInOneChunk() {
+    fun anAbsentRasterIsZeroBytesInOneChunk() {
         val s = state()
         assertFalse(s.hasSketch)
-        assertEquals(0, s.sketchBytes)
-        assertEquals(1, s.sketchChunks)
-        assertTrue(state(sketchBytes = 1, sketchChunks = 1).hasSketch)
+        assertEquals(0, s.graphiteBytes)
+        assertEquals(1, s.graphiteChunks)
+        assertEquals(0, s.inkBytes)
+        assertEquals(1, s.inkChunks)
+    }
+
+    @Test
+    fun hasSketchIsEitherRasterLive() {
+        // Blank means absent, per raster (G2): a page with only ink has no graphite row and is
+        // still a sketched page — "start from blank paper" is false for it.
+        assertTrue(state(graphiteBytes = 1).hasSketch)
+        assertTrue(state(inkBytes = 1).hasSketch)
+        assertTrue(state(graphiteBytes = 1, inkBytes = 1).hasSketch)
+        assertFalse(state().hasSketch)
+    }
+
+    @Test
+    fun thePerLayerReadsAnswerByLayerAndRefuseTheRest() {
+        val s = state(graphiteBytes = 4_000, inkBytes = SketchContract.SKETCH_CHUNK_BYTES + 1, inkChunks = 2)
+        assertEquals(4_000, s.bytesFor(SketchContract.LAYER_GRAPHITE))
+        assertEquals(1, s.chunksOf(SketchContract.LAYER_GRAPHITE))
+        assertEquals(SketchContract.SKETCH_CHUNK_BYTES + 1, s.bytesFor(SketchContract.LAYER_INK))
+        assertEquals(2, s.chunksOf(SketchContract.LAYER_INK))
+        assertTrue(s.hasLayer(SketchContract.LAYER_GRAPHITE))
+        assertTrue(s.hasLayer(SketchContract.LAYER_INK))
+        assertFalse(state(inkBytes = 1).hasLayer(SketchContract.LAYER_GRAPHITE))
+        for (bad in listOf(-1, 2)) {
+            try { s.bytesFor(bad); fail("bytesFor($bad)") } catch (expected: IllegalArgumentException) {}
+            try { s.chunksOf(bad); fail("chunksOf($bad)") } catch (expected: IllegalArgumentException) {}
+        }
     }
 
     @Test
@@ -92,46 +125,66 @@ class SketchPageStateTest {
     }
 
     @Test
-    fun theByteTotalIsBoundedByTheHardRefusal() {
+    fun eachByteTotalIsBoundedByTheHardRefusal() {
+        // The refusal is per raster (decision 3): each stream may reach the cap on its own, and
+        // two rasters at the cap together are a legal state.
         val max = SketchContract.MAX_BYTES
-        state(sketchBytes = max, sketchChunks = ByteChunks.countFor(max))
-        assertRefused { state(sketchBytes = max + 1, sketchChunks = SketchContract.MAX_CHUNKS) }
-        assertRefused { state(sketchBytes = -1) }
+        val chunks = ByteChunks.countFor(max)
+        state(graphiteBytes = max, graphiteChunks = chunks)
+        state(inkBytes = max, inkChunks = chunks)
+        state(graphiteBytes = max, graphiteChunks = chunks, inkBytes = max, inkChunks = chunks)
+        assertRefused { state(graphiteBytes = max + 1, graphiteChunks = SketchContract.MAX_CHUNKS) }
+        assertRefused { state(inkBytes = max + 1, inkChunks = SketchContract.MAX_CHUNKS) }
+        assertRefused { state(graphiteBytes = -1) }
+        assertRefused { state(inkBytes = -1) }
     }
 
     @Test
-    fun theChunkCountIsBounded() {
-        assertRefused { state(sketchBytes = 0, sketchChunks = 0) }
+    fun eachChunkCountIsBounded() {
+        assertRefused { state(graphiteBytes = 0, graphiteChunks = 0) }
+        assertRefused { state(inkBytes = 0, inkChunks = 0) }
         assertRefused {
-            state(sketchBytes = SketchContract.MAX_BYTES, sketchChunks = SketchContract.MAX_CHUNKS + 1)
+            state(graphiteBytes = SketchContract.MAX_BYTES, graphiteChunks = SketchContract.MAX_CHUNKS + 1)
+        }
+        assertRefused {
+            state(inkBytes = SketchContract.MAX_BYTES, inkChunks = SketchContract.MAX_CHUNKS + 1)
         }
     }
 
     @Test
-    fun anEmptySketchIsExactlyOneChunk() {
-        assertRefused { state(sketchBytes = 0, sketchChunks = 2) }
-        state(sketchBytes = 0, sketchChunks = 1)
+    fun anEmptyRasterIsExactlyOneChunk() {
+        assertRefused { state(graphiteBytes = 0, graphiteChunks = 2) }
+        assertRefused { state(inkBytes = 0, inkChunks = 2) }
+        state(graphiteBytes = 0, graphiteChunks = 1, inkBytes = 0, inkChunks = 1)
     }
 
     @Test
-    fun theChunkCountMustMatchTheByteTotal() {
+    fun eachChunkCountMustMatchItsByteTotal() {
         // The relation is pinned rather than recomputed at every call site: a hand-built state can
-        // never disagree with the chunker that will actually serve it.
+        // never disagree with the chunker that will actually serve it — and each stream is pinned
+        // to its OWN total, never the other's.
         val cap = SketchContract.SKETCH_CHUNK_BYTES
-        state(sketchBytes = cap, sketchChunks = 1)
-        state(sketchBytes = cap + 1, sketchChunks = 2)
-        assertRefused { state(sketchBytes = cap + 1, sketchChunks = 1) }
-        assertRefused { state(sketchBytes = cap, sketchChunks = 2) }
+        state(graphiteBytes = cap, graphiteChunks = 1)
+        state(graphiteBytes = cap + 1, graphiteChunks = 2)
+        state(inkBytes = cap, inkChunks = 1)
+        state(inkBytes = cap + 1, inkChunks = 2)
+        assertRefused { state(graphiteBytes = cap + 1, graphiteChunks = 1) }
+        assertRefused { state(graphiteBytes = cap, graphiteChunks = 2) }
+        assertRefused { state(inkBytes = cap + 1, inkChunks = 1) }
+        assertRefused { state(inkBytes = cap, inkChunks = 2) }
+        // Crossed: a graphite count that would fit the ink total is still wrong.
+        assertRefused { state(graphiteBytes = cap, graphiteChunks = 2, inkBytes = cap + 1, inkChunks = 2) }
     }
 
     // ── The structural token, K5b's compatible tail ──────
 
     @Test
     fun theStructuralTokenDefaultsToEmpty() {
-        // The default is what makes the tail compatible in Kotlin as well as on the wire: every K5
-        // call site constructs a state without it and means exactly what it meant — "this answer is
-        // not a page insert or delete". The same value `read()` builds from an exhausted parcel,
-        // where `readString()` answers null.
+        // The default is what makes the tail compatible in Kotlin as well as on the wire: a call
+        // site constructing a state without it means exactly "this answer is not a page insert or
+        // delete". The same value `read()` builds from an exhausted parcel, where `readString()`
+        // answers null. (G2 reshaped the fields BEFORE it and moved the action floor for that; the
+        // token stays the last field so the next tail is compatible again.)
         assertEquals("", state().structuralToken)
         assertEquals("s7", state(structuralToken = "s7").structuralToken)
     }

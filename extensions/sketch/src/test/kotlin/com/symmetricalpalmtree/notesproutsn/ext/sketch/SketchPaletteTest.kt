@@ -11,31 +11,28 @@ import org.junit.Test
  * safe across a palette that has changed.
  *
  * Everything here is written against [SketchPalette.SHADE_LEVELS] rather than against a count, on
- * purpose: the offered levels are a subset of the fifteen-level ladder (1, 3, 5, 7, 9 and 11 today
- * — the three rungs the Ratta preview hits exactly, plus the three the hand kept to try), and these
- * tests are what prove the promise that changing the subset is one line and strands nothing.
+ * purpose: the offered levels are a subset of the sixteen-level ladder (0, 5, 9 and 15 today — the
+ * three rungs the Ratta preview hits exactly, plus white, the lightener), and these tests are what
+ * prove the promise that changing the subset is one line and strands nothing.
  */
 class SketchPaletteTest {
 
-    @Test fun `the offered shades are the user's six, and none of them is pure black`() {
-        assertEquals(listOf(1, 3, 5, 7, 9, 11), SketchPalette.SHADE_LEVELS)
-        // The two the firmware previews exactly: DARK_GRAY, GRAY.
+    @Test fun `the offered shades are the firmware's four tones - black, grey, light grey, white`() {
+        assertEquals(listOf(0, 5, 9, 15), SketchPalette.SHADE_LEVELS)
+        // The three the firmware previews exactly: BLACK, DARK_GRAY, GRAY.
+        assertEquals(0xFF000000.toInt(), SketchPalette.shade(0))
         assertEquals(0xFF555555.toInt(), SketchPalette.shade(5))
         assertEquals(0xFF999999.toInt(), SketchPalette.shade(9))
-        // …and the four that preview in their band's tone while baking their own.
-        assertEquals(0xFF111111.toInt(), SketchPalette.shade(1))
-        assertEquals(0xFF333333.toInt(), SketchPalette.shade(3))
-        assertEquals(0xFF777777.toInt(), SketchPalette.shade(7))
-        assertEquals(0xFFBBBBBB.toInt(), SketchPalette.shade(11))
-        // Black is the gel pen's; the pencil's darkest lead is level 1.
-        assertFalse(SketchPalette.isShade(0))
+        // …and white, the lead that lightens graphite rather than laying any.
+        assertEquals(0xFFFFFFFF.toInt(), SketchPalette.shade(15))
+        assertEquals(15, SketchPalette.WHITE_SHADE)
+        assertTrue(SketchPalette.isShade(SketchPalette.WHITE_SHADE))
     }
 
-    @Test fun `every offered level is its ladder grey - level times 0x11, opaque, never white`() {
+    @Test fun `every offered level is its ladder grey - level times 0x11, opaque`() {
         SketchPalette.SHADE_LEVELS.forEach { level ->
             val v = level * 0x11
             assertEquals((0xFF shl 24) or (v shl 16) or (v shl 8) or v, SketchPalette.shade(level))
-            assertTrue("the ladder must stop short of white", v < 0xFF)
         }
     }
 
@@ -48,16 +45,16 @@ class SketchPaletteTest {
     @Test fun `every level this build offers is a shade, and nothing else is`() {
         SketchPalette.SHADE_LEVELS.forEach { assertTrue(SketchPalette.isShade(it)) }
         assertFalse(SketchPalette.isShade(-1))
-        assertFalse(SketchPalette.isShade(15))
+        assertFalse(SketchPalette.isShade(16))
         assertFalse(SketchPalette.isShade(255))
     }
 
     @Test fun `a level on the ladder but not offered is not a shade and reads as the default`() {
-        // Levels 0 and 2 are perfectly good rungs of the fifteen-level coordinate system — they
-        // are simply not ones this build offers (both were, earlier on the same walk). The stored
-        // number is the LEVEL, so this is exactly what a device remembering 0 or 2 from an
-        // earlier build hands the face.
-        listOf(0, 2).forEach { level ->
+        // Levels 1, 3, 7 and 11 are perfectly good rungs of the sixteen-level coordinate system —
+        // they are simply not ones this build offers (all four were, in the six of 2026-09-17).
+        // The stored number is the LEVEL, so this is exactly what a device remembering one of
+        // them from that build hands the face.
+        listOf(1, 3, 7, 11).forEach { level ->
             assertFalse(SketchPalette.isShade(level))
             assertEquals(SketchPalette.shade(SketchPalette.DEFAULT_SHADE), SketchPalette.shade(level))
         }
@@ -66,7 +63,7 @@ class SketchPaletteTest {
     @Test fun `a level this build does not have reads as the default, never as an exception`() {
         val default = SketchPalette.shade(SketchPalette.DEFAULT_SHADE)
         assertEquals(default, SketchPalette.shade(14))
-        assertEquals(default, SketchPalette.shade(15))
+        assertEquals(default, SketchPalette.shade(16))
         assertEquals(default, SketchPalette.shade(-1))
         // The seam's own sanity bound, which the face must survive reading.
         assertEquals(default, SketchPalette.shade(255))
@@ -79,8 +76,8 @@ class SketchPaletteTest {
         assertTrue(rows.last().size in 1..SketchPalette.ROW_BREAK)
     }
 
-    @Test fun `at six offered shades the bar is one row of six`() {
-        assertEquals(listOf(listOf(1, 3, 5, 7, 9, 11)), SketchPalette.shadeRows())
+    @Test fun `at four offered shades the bar is one row of four`() {
+        assertEquals(listOf(listOf(0, 5, 9, 15)), SketchPalette.shadeRows())
     }
 
     @Test fun `the twelve leads are the walked ones, finest first`() {

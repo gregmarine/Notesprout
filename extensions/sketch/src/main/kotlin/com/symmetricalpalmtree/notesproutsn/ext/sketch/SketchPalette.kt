@@ -6,21 +6,22 @@ package com.symmetricalpalmtree.notesproutsn.ext.sketch
  * (`SketchToolSettings`): the host stores three small integers and never learns what they name, so
  * retuning a width or changing which shades are offered here strands nothing.
  *
- * **The coordinate system is the e-paper ladder without white** (decision 2): fifteen levels
- * `#000000` … `#EEEEEE` in `0x11` steps, level *n* being the grey `n * 0x11` repeated across all
- * three channels, always opaque. A stored `shade` is **a level of that ladder, not a position in
+ * **The coordinate system is the sixteen-level e-paper ladder** (decision 2): `#000000` …
+ * `#FFFFFF` in `0x11` steps, level *n* being the grey `n * 0x11` repeated across all three
+ * channels, always opaque. A stored `shade` is **a level of that ladder, not a position in
  * [SHADE_LEVELS]** — which is what makes the level mean the same thing in every build, whichever
  * subset a build happens to offer.
  *
- * **Six of the fifteen are offered** ([SHADE_LEVELS] — the user's decision on the Nomad walk of
- * 2026-09-17, amending decision 2's "fifteen"): levels **1, 3, 5, 7, 9 and 11**. The hand walked
- * all fifteen and found only 0, 5 and 9 (`#000000`, `#555555`, `#999999`) previewing *exactly* as
- * they bake — the rungs `RattaInkMap.pencilPreviewFor` names, BLACK / DARK_GRAY / GRAY; the
- * firmware paints one tone per arming and cannot be talked out of it. The list then moved twice on
- * the same walk, settling on **every other rung from 1 to 11** — pure black off the pencil
- * altogether (the gel pen is black), two leads in each firmware band. Every offered level
- * previews in its band's tone (0–2 → BLACK, 3–6 → DARK_GRAY, 7–14 → GRAY) while baking its own
- * grey. Level 5 stays the default, exactly as it was. One row of six ([shadeRows]).
+ * **Four of the sixteen are offered** ([SHADE_LEVELS] — the user's decision of 2026-09-18, before
+ * arc 45 merged, amending the six of the 2026-09-17 walk): **the four tones the firmware has**.
+ * Levels **0, 5 and 9** (`#000000`, `#555555`, `#999999`) are the three the hand found previewing
+ * *exactly* as they bake — the rungs `RattaInkMap.pencilPreviewFor` names, BLACK / DARK_GRAY /
+ * GRAY; the firmware paints one tone per arming and cannot be talked out of it, and a lead that
+ * previews a shade off is a lead the hand aims wrong with. **Level 15 is white**, the fourth tone
+ * (LIGHT_GRAY under the hand, g-paper 0.1.40) and a different kind of lead: it lays nothing on
+ * bare paper under the `DARKEN` flatten and **pales the graphite under it** — the pencil's flecks
+ * go down over the raster — so it is the precision lightener the rubber does not give. Level 5
+ * stays the default, exactly as it was. One row of four ([shadeRows]).
  *
  * **Changing which shades are offered is [SHADE_LEVELS] and nothing else.** The rows ([shadeRows]),
  * the bar built from them and every range check derive from that one list, and a level this build
@@ -46,19 +47,21 @@ object SketchPalette {
      * exist**. Every row, every bound and every "is that a shade?" test below is derived from this
      * list, and nothing outside this file decides for itself what a shade is.
      *
-     * The user's six, from the walk of 2026-09-17: **1, 3, 5, 7, 9, 11**. 5 and 9 are rungs the
-     * Ratta preview hits exactly (DARK_GRAY / GRAY); the rest preview in their band's tone (0–2
-     * BLACK, 3–6 DARK_GRAY, 7–14 GRAY) while baking their own grey. No pure black: that is the
-     * gel pen's.
+     * The user's four (2026-09-18): **0, 5, 9, 15** — black, grey, light grey, white; the four
+     * tones the firmware has. 0, 5 and 9 are the rungs the Ratta preview hits exactly (BLACK /
+     * DARK_GRAY / GRAY); 15 previews LIGHT_GRAY and is the lightener.
      */
-    val SHADE_LEVELS: List<Int> = listOf(1, 3, 5, 7, 9, 11)
+    val SHADE_LEVELS: List<Int> = listOf(0, 5, 9, 15)
 
-    /** The step between levels: `0x11`, so level *n* is the grey `n * 0x11` and level 15 would be
-     *  white — which is why the ladder stops one short of it. */
+    /** The step between levels: `0x11`, so level *n* is the grey `n * 0x11` and level 15 is
+     *  white. */
     private const val SHADE_STEP: Int = 0x11
 
+    /** Level 15 — the white lead, the one that lightens rather than darkens. */
+    const val WHITE_SHADE: Int = 15
+
     /** Where the swatches wrap onto a second row (decision 5: 8 over 7, when there were fifteen).
-     *  At six offered levels this leaves a single row of six. */
+     *  At four offered levels this leaves a single row of four. */
     const val ROW_BREAK: Int = 8
 
     /** The default shade: level 5, `#555555` — arc 43's one graphite tone rounded onto the ladder,
@@ -107,7 +110,7 @@ object SketchPalette {
     /**
      * The opaque ARGB grey [level] names — **or the default's**, for anything this build does not
      * offer. That fallback is the whole reason a stored ladder level is safe across a changed
-     * palette: a remembered 12 against this six-shade build is an ordinary miss, never a crash
+     * palette: a remembered 7 against this four-shade build is an ordinary miss, never a crash
      * and never a black page.
      */
     fun shade(level: Int): Int = greyOf(if (isShade(level)) level else DEFAULT_SHADE)
@@ -120,8 +123,8 @@ object SketchPalette {
 
     /**
      * The swatch rows, in order, as the bar lays them out: [ROW_BREAK] levels then the rest. Derived
-     * rather than written down, so [SHADE_LEVELS] is genuinely the only line to change — at six
-     * offered levels this is a single row of six.
+     * rather than written down, so [SHADE_LEVELS] is genuinely the only line to change — at four
+     * offered levels this is a single row of four.
      */
     fun shadeRows(): List<List<Int>> = SHADE_LEVELS.chunked(ROW_BREAK)
 

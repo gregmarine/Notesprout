@@ -82,7 +82,7 @@ class ByteChunksTest {
 
     @Test
     fun theWholeCapStaysInsideTheChunkBound() {
-        // A PNG at MAX_BYTES must be servable — the state's `sketchChunks` range depends on it.
+        // A raster image at MAX_BYTES must be servable — the state's per-layer chunk ranges depend on it.
         val chunks = ByteChunks.chunk(bytes(SketchContract.MAX_BYTES))
         assertTrue(chunks.size <= SketchContract.MAX_CHUNKS)
         for (c in chunks) assertTrue(c.size <= cap)

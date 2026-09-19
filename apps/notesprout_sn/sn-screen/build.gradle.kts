@@ -49,9 +49,17 @@ dependencies {
     // paper" — the 96 px lead baked as a comb of bars across the mark (the travel direction's
     // wobble times a 48 px lever arm); GraphiteGrain now loosens the rim flecks along the
     // stroke, streaks the skate along it, and mottles by a page-space tooth field. Core only,
-    // no API change.
-    api("com.symmetricalpalmtree.gpaper:gpaper-core:0.1.38")
-    api("com.symmetricalpalmtree.gpaper:gpaper-ratta:0.1.38")
+    // no API change. 0.1.39 is Phase 26 "two rasters" — a raster page holds TWO images,
+    // `RasterLayer { GRAPHITE, INK }`, routed by style at the one site `RasterLayer.of` (PENCIL →
+    // graphite, every other style → ink); the rubber rubs graphite only and never reads, allocates
+    // or announces ink; the committed layer is a `DARKEN` flatten of the two, which is
+    // order-independent and therefore has no top and no bottom; `load/get/copy/read/swapPageRaster`
+    // and both `onRaster*` callbacks gained layered forms, with the un-layered ones meaning
+    // GRAPHITE so a pencil-only host compiles and behaves unchanged (arc 45 "Ink" / G1). 0.1.40
+    // is Phase 27 — a WHITE pencil lead previews LIGHT_GRAY on Ratta (every grey still tops out
+    // at GRAY), for the four-tone palette of 2026-09-18; ratta only, no API change.
+    api("com.symmetricalpalmtree.gpaper:gpaper-core:0.1.40")
+    api("com.symmetricalpalmtree.gpaper:gpaper-ratta:0.1.40")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
 

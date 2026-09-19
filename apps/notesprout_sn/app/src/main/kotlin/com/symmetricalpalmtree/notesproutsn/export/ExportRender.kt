@@ -21,6 +21,7 @@ import com.symmetricalpalmtree.notesproutsn.data.soil.SoilObjectEntity
 import com.symmetricalpalmtree.notesproutsn.data.soil.SoilSchema
 import com.symmetricalpalmtree.notesproutsn.data.template.BuiltInTemplates
 import com.symmetricalpalmtree.notesproutsn.extension.PageBundle
+import com.symmetricalpalmtree.notesproutsn.extension.SketchContract
 import com.symmetricalpalmtree.notesproutsn.notebook.PageLabels
 import com.symmetricalpalmtree.notesproutsn.notebook.PagePreview
 import com.symmetricalpalmtree.notesproutsn.notebook.PageRaster
@@ -417,33 +418,46 @@ object ExportRender {
     }
 
     /**
-     * [page]'s sketch, drawn — or a blank sheet of its size when the row is not there to draw.
+     * [page]'s sketch, drawn — **both rasters flattened** (arc 45 / G2) — or a blank sheet of its
+     * size when neither row is there to draw.
      *
      * The blank is the honest answer, not a fallback dressed up as one: the bundle's header
      * declared its page count before the first page was written, so a sketch that has gone missing
-     * between the plan and this line (the header guard refused the stored PNG, the row was cleared
+     * between the plan and this line (the header guard refused the stored bytes, the row was cleared
      * by another process, a page was resized) leaves a page that **must** be filled — a writer that
      * simply skipped it would close short and the whole export would be refused as truncated. The
      * alternative, reading every sketch's bytes up front to make the count exact, costs the whole
-     * notebook's pixels in memory at once, which is the one thing this render will not do.
+     * notebook's pixels in memory at once, which is the one thing this render will not do. **One
+     * raster surviving is not a blank page**: the flatten draws what is there, which is exactly what
+     * a page drawn in pencil alone or in the gel pen alone looks like anyway.
      *
-     * **The row is read here rather than through
+     * **The rows are read here rather than through
      * [com.symmetricalpalmtree.notesproutsn.data.soil.SketchRepository.get]**, which applies the
      * same header guard but **soft-deletes** a row that fails it: a render must not mutate what it
      * renders (rule 1 of this file), and an export is the last place a page's drawing should be
-     * dated out from. The guard itself is the shared one ([SketchRows]) — a PNG that is not exactly
-     * this page's size cannot be composited onto it, so it is refused here too, and left alone for
-     * the notebook screen to meet and deal with.
+     * dated out from. The guard itself is the shared one ([SketchRows]) — an image that is not
+     * exactly this page's size cannot be composited onto it, so it is refused here too, per raster,
+     * and left alone for the notebook screen to meet and deal with.
      */
     private suspend fun sketchImage(sketches: SketchDao, page: PageBake): ByteArray {
-        val png = sketches.sketchFor(page.id)?.let { SketchRows.pngBytes(it) }
-        if (png == null || !SketchRows.fitsPage(png, page.widthPx, page.heightPx)) {
+        val graphite = guarded(sketches, page, SketchContract.LAYER_GRAPHITE)
+        val ink = guarded(sketches, page, SketchContract.LAYER_INK)
+        if (graphite == null && ink == null) {
             // Ids and sizes, never pixels. Log.w rather than Slog.d: a declared page that came out
             // blank is the sort of thing a person reports about a release build.
             Log.w(TAG, "the sketch of ${page.id} is gone or does not fit — exporting a blank page")
             return SketchRaster.blank(page.widthPx, page.heightPx)
         }
-        return SketchRaster.toWebp(page.widthPx, page.heightPx, png)
+        return SketchRaster.toWebp(page.widthPx, page.heightPx, graphite, ink)
+    }
+
+    /** One raster of [page], past the shared header guard, or null — read without the repository's
+     *  soft-delete, for [sketchImage]'s reason. */
+    private suspend fun guarded(sketches: SketchDao, page: PageBake, layer: Int): ByteArray? {
+        val bytes = sketches.sketchFor(page.id, SketchRows.typeFor(layer))
+            ?.let { SketchRows.imageBytes(it) }
+            ?: return null
+        return if (SketchRows.fitsPage(bytes, page.widthPx, page.heightPx)) bytes else null
     }
 
     /**

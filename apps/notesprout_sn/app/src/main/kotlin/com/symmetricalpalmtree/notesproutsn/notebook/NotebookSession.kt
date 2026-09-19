@@ -770,9 +770,15 @@ class NotebookSession(
     }
 
     /**
-     * Persist a page's sketch (arc 43 / K3) — the sketch screen's save, arriving from the extension
-     * over the host callback binder once its last chunk has landed. [writeDocument]'s exact shape,
-     * and for its exact reasons.
+     * Persist one raster of a page's sketch (arc 43 / K3; per-layer since arc 45 / G2) — the sketch
+     * screen's save, arriving from the extension over the host callback binder once that layer's
+     * last chunk has landed. [writeDocument]'s exact shape, and for its exact reasons.
+     *
+     * [layer] is the seam's
+     * ([com.symmetricalpalmtree.notesproutsn.extension.SketchContract.LAYER_GRAPHITE] /
+     * `LAYER_INK`) and decides the row: a graphite push never touches the ink row and a page may be
+     * saved one layer at a time, which is the point of two rows (a pencil scribble never re-encodes
+     * the ink).
      *
      * **Through the writer, then awaited — exceptionally if the write threw.** The enqueue orders
      * these pixels against the strokes and headings the same page may still be committing (one
@@ -784,26 +790,26 @@ class NotebookSession(
      * write's failure is: a refused or disk-full save reported as success would drop a drawing that
      * has **no other copy at all**. The two typed refusals
      * ([com.symmetricalpalmtree.notesproutsn.extension.SketchContract.SKETCH_TOO_LARGE] and
-     * `SKETCH_BAD_PNG`) come back out of here the same way, which is how the screen can keep its
+     * `SKETCH_BAD_IMAGE`) come back out of here the same way, which is how the screen can keep its
      * pixels and say what happened.
      *
-     * The page size is this notebook's own [PageRef], never anything the extension said: a sketch
+     * The page size is this notebook's own [PageRef], never anything the extension said: a raster
      * is only meaningful at exactly its page's size, and taking the dimensions from the sender
      * would make the guard agree with whatever produced the bytes. [pageId] must name a **live**
      * page of this notebook — a save for one that has since been deleted is an
      * [IllegalArgumentException], which K4's binder turns into the seam's refusal.
      *
-     * Empty [png] is the wire form for "clear this page" ([SketchRepository.save]'s
-     * blank-means-absent rule, not a special case here).
+     * Empty [bytes] is the wire form for "clear this layer" ([SketchRepository.save]'s
+     * blank-means-absent rule, not a special case here) and leaves the other raster alone.
      */
-    suspend fun writeSketch(pageId: String, png: ByteArray) {
+    suspend fun writeSketch(pageId: String, layer: Int, bytes: ByteArray) {
         check(isOpen) { "notebook closed" }
         val page = pages.firstOrNull { it.id == pageId }
             ?: throw IllegalArgumentException("Unknown page")
         val done = CompletableDeferred<Unit>()
         val queued = writer.enqueue {
             try {
-                sketches.save(pageId, png, page.width, page.height)
+                sketches.save(pageId, layer, bytes, page.width, page.height)
                 done.complete(Unit)
             } catch (e: Exception) {
                 done.completeExceptionally(e)
@@ -815,22 +821,24 @@ class NotebookSession(
     }
 
     /**
-     * [pageId]'s stored sketch, or null when it has none (arc 43 / K3) — the read half of
-     * [writeSketch], and the only place the host pulls a page-sized PNG out of the file.
+     * [pageId]'s stored raster for [layer], or null when it has none (arc 43 / K3; per-layer since
+     * arc 45 / G2) — the read half of [writeSketch], and the only place the host pulls a page-sized
+     * image out of the file. A page showing both rasters is read twice, once per layer: two
+     * pictures, two reads, and each caller decides which it needs.
      *
      * The page size is this notebook's own, for [writeSketch]'s reason: it is what the header guard
      * is checked against, and a row that fails it is soft-deleted and answered null
      * ([SketchRepository.get]). Null for a page that is not live, which is the same answer a page
-     * with no sketch gets — the caller is showing a page either way.
+     * with no raster gets — the caller is showing a page either way.
      *
      * Not on the writer: it writes nothing (the guard's soft-delete aside, which is the repository's
      * own repair and ordered against nothing), and a read that queued behind a page of ink would
      * make every page turn wait for it.
      */
-    suspend fun readSketch(pageId: String): ByteArray? = withContext(Dispatchers.IO) {
+    suspend fun readSketch(pageId: String, layer: Int): ByteArray? = withContext(Dispatchers.IO) {
         if (!isOpen) return@withContext null
         val page = pages.firstOrNull { it.id == pageId } ?: return@withContext null
-        sketches.get(pageId, page.width, page.height)
+        sketches.get(pageId, layer, page.width, page.height)
     }
 
     /** Wait for queued writes (both stores), then purge + checkpoint + close. Idempotent; never throws. */

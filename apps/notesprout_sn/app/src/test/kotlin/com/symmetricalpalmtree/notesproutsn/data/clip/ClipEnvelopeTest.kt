@@ -26,15 +26,25 @@ class ClipEnvelopeTest {
     )
 
     @Test
-    fun `an over-cap page carrying a sketch says so`() {
+    fun `an over-cap page carrying either sketch raster says so`() {
         // Arc 43 / K7: the cap does not move, but the sentence does. A page's sketch is measured
         // in megabytes where everything else on it is measured in kilobytes, so it is almost
         // always the reason a copy was refused — and the dialog says which reason it was.
+        // Arc 45 / G2: either raster names it, with one sentence for both — the person did not draw
+        // a graphite raster and an ink raster, they drew a picture.
         val page = ClipRow(id = "page-1", parentId = "nb-1", type = "page", width = 1404f, height = 1872f)
         val stroke = ClipRow(id = "s-1", parentId = "page-1", type = "stroke", blob = ClipRow.encodeBlob(strokeBytes()))
-        val sketch = ClipRow(id = "k-1", parentId = "page-1", type = "sketch", order = -1, blob = ClipRow.encodeBlob(strokeBytes()))
+        fun raster(id: String, type: String) =
+            ClipRow(id = id, parentId = "page-1", type = type, order = -1, blob = ClipRow.encodeBlob(strokeBytes()))
+        val graphite = raster("k-g", "sketch_graphite")
+        val ink = raster("k-i", "sketch_ink")
         assertEquals(R.string.clip_too_large, ClipMessages.tooLarge(listOf(page, stroke)))
-        assertEquals(R.string.clip_too_large_sketch, ClipMessages.tooLarge(listOf(page, stroke, sketch)))
+        assertEquals(R.string.clip_too_large_sketch, ClipMessages.tooLarge(listOf(page, stroke, graphite)))
+        // Ink alone — a page drawn only with the gel pen — still names the sketch.
+        assertEquals(R.string.clip_too_large_sketch, ClipMessages.tooLarge(listOf(page, stroke, ink)))
+        assertEquals(R.string.clip_too_large_sketch, ClipMessages.tooLarge(listOf(page, graphite, ink)))
+        // The dead arc-43 row never travels, so it is not a sentence this can produce.
+        assertEquals(R.string.clip_too_large, ClipMessages.tooLarge(listOf(page, raster("k-old", "sketch"))))
         // An empty payload is still the ordinary sentence, never the sketch one.
         assertEquals(R.string.clip_too_large, ClipMessages.tooLarge(emptyList()))
     }

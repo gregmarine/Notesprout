@@ -29,13 +29,23 @@ interface SoilDao {
      *  Filtering the answer in Kotlin keeps each kind's own order: one `ORDER BY` over the whole
      *  set, and a filter never reorders what it keeps.
      *
-     *  **Except a `sketch`** (arc 43 / K3). This read is untyped *and* blob-inclusive, and it is
-     *  what `PageReads` is built on — the export bake, page previews, link-picker labels, every
-     *  page flip. A page-sized PNG riding all of those would be megabytes pulled out of the file
-     *  per page, for readers that have no use for a picture of the page and would drop it again.
-     *  Nothing wanting a sketch asks an untyped question: [SketchDao] is the door, and it has a
-     *  blob-free one for the callers that only want to know whether there is one. */
-    @Query("SELECT * FROM notebook WHERE parentId = :parentId AND type != 'sketch' AND deletedAt IS NULL ORDER BY `order`")
+     *  **Except a sketch raster** (arc 43 / K3; two of them since arc 45 / G2). This read is untyped
+     *  *and* blob-inclusive, and it is what `PageReads` is built on — the export bake, page
+     *  previews, link-picker labels, every page flip. A page-sized image riding all of those would
+     *  be megabytes pulled out of the file per page, for readers that have no use for a picture of
+     *  the page and would drop it again. Nothing wanting a sketch asks an untyped question:
+     *  [SketchDao] is the door, and it has a blob-free one for the callers that only want to know
+     *  whether there is one.
+     *
+     *  **All three names are excluded**, the two live ones and the dead arc-43 `sketch`
+     *  ([SoilSchema.TYPE_SKETCH_DEAD]): there is no migration and no sniffing (decision 4), so a
+     *  leftover PNG row on a device that ran an older build must simply never surface as a child of
+     *  its page. It is the one place in the app that names the dead type at all. */
+    @Query(
+        """SELECT * FROM notebook WHERE parentId = :parentId
+           AND type NOT IN ('sketch', 'sketch_graphite', 'sketch_ink')
+           AND deletedAt IS NULL ORDER BY `order`"""
+    )
     suspend fun childrenOf(parentId: String): List<SoilObjectEntity>
 
     @Query("SELECT * FROM notebook WHERE type = 'notebook' AND parentId = '' LIMIT 1")
@@ -107,14 +117,16 @@ interface SoilDao {
      *  and it belongs to that page: a delete, its undo, and a page copy must all carry it. Only the
      *  page level gains it — a link never wraps a document.
      *
-     *  A `sketch` (arc 43 / K3) joins it at the page level for exactly the same reasons and with
-     *  exactly the same limit: a drawing is the user's, it belongs to that page, and a delete, its
-     *  undo and a page copy must all carry it — while a link never wraps one (a sketch is the whole
-     *  page, so there is nothing for a lasso to have caught). **Erase page is the one caller that
-     *  must not have it** and has [liveErasableIds] instead (decision 11). */
+     *  A page's **two sketch rasters** (arc 43 / K3, `sketch_graphite` + `sketch_ink` since arc 45 /
+     *  G2) join it at the page level for exactly the same reasons and with exactly the same limit: a
+     *  drawing is the user's, it belongs to that page, and a delete, its undo and a page copy must
+     *  carry **both** — while a link never wraps one (a sketch is the whole page, so there is
+     *  nothing for a lasso to have caught). The dead arc-43 `sketch` name is deliberately *not*
+     *  here: a row nothing can read is a row nothing should copy (decision 4). **Erase page is the
+     *  one caller that must not have them** and has [liveErasableIds] instead (decision 11). */
     @Query(
         """SELECT id FROM notebook WHERE deletedAt IS NULL AND (
-             (parentId = :pageId AND type IN ('stroke', 'heading', 'link', 'document', 'text', 'shape', 'sticky_note', 'sketch'))
+             (parentId = :pageId AND type IN ('stroke', 'heading', 'link', 'document', 'text', 'shape', 'sticky_note', 'sketch_graphite', 'sketch_ink'))
              OR parentId IN (SELECT id FROM notebook WHERE parentId = :pageId AND type = 'link' AND deletedAt IS NULL)
              OR parentId IN (SELECT s.id FROM notebook s WHERE s.type = 'sticky_note' AND s.deletedAt IS NULL AND (
                    s.parentId = :pageId
@@ -123,19 +135,21 @@ interface SoilDao {
     suspend fun liveDescendantIds(pageId: String): List<String>
 
     /**
-     * [liveDescendantIds] **minus the page's `sketch`** — what **Erase page** clears (arc 43 / K3,
-     * decision 11), and the only difference between the two lists.
+     * [liveDescendantIds] **minus the page's two sketch rasters** — what **Erase page** clears
+     * (arc 43 / K3, decision 11; both rasters since arc 45 / G2), and the only difference between
+     * the two lists.
      *
      * A second query rather than a filter over the first because the difference is a rule, not a
      * convenience: Erase page is an ink door on an ink surface, and the sketch beside the ink is
      * the sketch face's to clear. A person who erases a page of writing has said nothing at all
      * about the drawing on it, and an Erase page that silently took both would be the one act in
      * this app that destroys something the user never pointed at. (Undo would put it back — but
-     * "undo would fix it" is not a reason to do it.)
+     * "undo would fix it" is not a reason to do it.) G2's ink raster is the *sketch's* ink, not the
+     * page's, and is excluded for exactly the same reason the graphite is.
      *
      * Every other level is [liveDescendantIds]'s, verbatim: a link's wrapped children, a sticky's
-     * content, both reachable through a link. Nothing below the page level can be a sketch, so the
-     * exclusion sits only where one can be.
+     * content, both reachable through a link. Nothing below the page level can be a sketch raster,
+     * so the exclusion sits only where one can be.
      */
     @Query(
         """SELECT id FROM notebook WHERE deletedAt IS NULL AND (
@@ -188,12 +202,14 @@ interface SoilDao {
     )
     suspend fun hasLiveDocument(): Boolean
 
-    /** Does [pageId] carry a live sketch? (arc 43 / K7) — blob-free, `SketchRepository.has`'s
-     *  rule read from the one-open side: the Export screen asks it of the page-sheet door's page
-     *  to know whether that page is one file or two ([com.symmetricalpalmtree.notesproutsn.export.ExportDelivery.perPage]).
-     *  An empty blob is no sketch. */
+    /** Does [pageId] carry a live sketch? (arc 43 / K7) — **either raster** (arc 45 / G2),
+     *  blob-free, `SketchRepository.has`'s rule read from the one-open side: the Export screen asks
+     *  it of the page-sheet door's page to know whether that page is one file or two
+     *  ([com.symmetricalpalmtree.notesproutsn.export.ExportDelivery.perPage]). An empty blob is no
+     *  raster, and the dead arc-43 name is not asked about at all (decision 4). */
     @Query(
-        "SELECT EXISTS(SELECT 1 FROM notebook WHERE parentId = :pageId AND type = 'sketch' " +
+        "SELECT EXISTS(SELECT 1 FROM notebook WHERE parentId = :pageId " +
+            "AND type IN ('sketch_graphite', 'sketch_ink') " +
             "AND deletedAt IS NULL AND length(blob) > 0)",
     )
     suspend fun hasLiveSketch(pageId: String): Boolean

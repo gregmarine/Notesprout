@@ -93,8 +93,8 @@ class SketchClient(context: Context, val ref: ProviderRef) {
      * **Why `end()` gets its own, longer clock** (the editor's M4 reasoning, and it bites harder
      * here). `end()` is not a question — it is the screen's last chance to push pixels it has not
      * saved yet, and a parked save is re-pushed inside its handler, synchronously, through this
-     * host binder. So the wait has to cover a whole page's PNG in 512 KiB chunks *plus* the host's
-     * own write of it, which on the reconnect path includes [SketchHostHooks]' bounded wait for a
+     * host binder. So the wait has to cover a whole page's rasters in 512 KiB chunks *plus* the
+     * host's own write of them, which on the reconnect path includes [SketchHostHooks]' bounded wait for a
      * `.soil` that is still opening. A Binder call cannot be cancelled in any case — the timeout
      * only bounds how long we *wait* for it, so the cost of being generous is nothing and the cost
      * of being short is a drawing that has **no other copy at all**.

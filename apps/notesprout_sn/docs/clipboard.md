@@ -89,10 +89,12 @@ global key, every `.soil` under it, and the index itself encrypted at rest. Reco
   tap that does nothing. The cap sits under the window with room for the row around it, pinned by a
   JVM guard test against `ClipEnvelope.CURSOR_WINDOW_BYTES`. `readEnvelope` also guards the read
   itself, so a row a laxer build wrote reads as unusable rather than throwing.
-- **Arc 43: a refused envelope that carries a sketch row says so.** `MAX_BYTES` is unchanged (a
-  page's PNG is already capped at `SketchContract.MAX_BYTES` = 6 MiB before it can be a live row at
-  all), but `doCopy`'s over-cap dialog picks `clip_too_large_sketch` wording instead of the plain
-  over-cap string whenever the envelope that failed to fit held a sketch — the choice is a pure
+- **Arc 43: a refused envelope that carries a sketch row says so — either raster, since arc 45 /
+  G2.** `MAX_BYTES` is unchanged (each raster is already capped at `SketchContract.MAX_BYTES` = 6
+  MiB, per row, before it can be a live row at all), but `doCopy`'s over-cap dialog picks
+  `clip_too_large_sketch` wording instead of the plain over-cap string whenever the envelope that
+  failed to fit held a `sketch_graphite` or a `sketch_ink` row — one sentence for either, because
+  the person drew a picture, not "a graphite raster and an ink raster." The choice is a pure
   function, `ClipMessages.tooLarge(rows)`, so it is JVM-tested rather than read off the dialog by
   hand.
 
@@ -116,14 +118,15 @@ process life.
 
 `session.capturePage()` reads the page row, its template row, and `liveDescendantIds` — **two levels
 deep since arc 6**, so a link's wrapped children ride along — and hands them to `PageClip.capture`.
-Since arc 43, the same query also carries a page's `sketch` row (a plain row like any other; the
-copy is verbatim PNG bytes, no re-encode) — a page-copy or cross-notebook page-paste lands with its
-sketch byte-identical (K7, measured on the Nomad: `current: page 2/2, 133362 B`, a pixel-equal
-screencap). Pasting a sketched page into a notebook that is **not** flagged Sketch carries the row
-across exactly as it always has — the row travels, but with no `btnSketch` on that notebook there is
-nowhere to show it, so it sits unseen until the page is copied onward into a Sketch notebook (the
-same "the row travels and is never shown" rule the object clipboard already has for a Bible-linked
-row pasted where the extension is absent).
+Since arc 43, the same query also carries a page's sketch rows — **both `sketch_graphite` and
+`sketch_ink`, since arc 45 / G2** (each a plain row like any other; the copy is verbatim WebP
+bytes, no re-encode, no flatten) — a page-copy or cross-notebook page-paste lands with its sketch
+byte-identical, raster for raster (K7, measured on the Nomad against the PNG-era row:
+`current: page 2/2, 133362 B`, a pixel-equal screencap). Pasting a sketched page into a notebook
+that is **not** flagged Sketch carries both rows across exactly as it always has — they travel, but
+with no `btnSketch` on that notebook there is nowhere to show them, so they sit unseen until the
+page is copied onward into a Sketch notebook (the same "the row travels and is never shown" rule
+the object clipboard already has for a Bible-linked row pasted where the extension is absent).
 
 **Drain the writer first.** A stroke commit still queued on the shared `SoilWriter` would land after
 the capture's row read and be silently missing from the copy. `doCopy` calls `store.drain()` before
