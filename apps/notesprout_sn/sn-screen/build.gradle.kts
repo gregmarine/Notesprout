@@ -58,8 +58,8 @@ dependencies {
     // GRAPHITE so a pencil-only host compiles and behaves unchanged (arc 45 "Ink" / G1). 0.1.40
     // is Phase 27 — a WHITE pencil lead previews LIGHT_GRAY on Ratta (every grey still tops out
     // at GRAY), for the four-tone palette of 2026-09-18; ratta only, no API change.
-    api("com.symmetricalpalmtree.gpaper:gpaper-core:0.1.42")
-    api("com.symmetricalpalmtree.gpaper:gpaper-ratta:0.1.42")
+    api("com.symmetricalpalmtree.gpaper:gpaper-core:0.1.43")
+    api("com.symmetricalpalmtree.gpaper:gpaper-ratta:0.1.43")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
 

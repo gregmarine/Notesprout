@@ -23,6 +23,7 @@ import com.symmetricalpalmtree.gpaper.core.engine.GPaper
 import com.symmetricalpalmtree.gpaper.core.model.Stroke
 import com.symmetricalpalmtree.gpaper.core.model.StrokePoint
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
+import com.symmetricalpalmtree.notesproutsn.core.EinkRefresh
 import com.symmetricalpalmtree.notesproutsn.core.Immersive
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.core.TopGuard
@@ -428,6 +429,33 @@ class SketchActivity : PaperScreenActivity() {
         saver.pageKey = state.pageKey
         saver.markClean()
         toolbar.setPage(state.pageIndex + 1, state.pageCount)
+        if (!firstLoad) refreshPanelAfterTurn()
+    }
+
+    /**
+     * End a page change with a **full panel refresh** (2026-09-19, the user's finding and decision
+     * on the Nomad: "the sketch face could use a full refresh at page turn").
+     *
+     * Since the Supernote pencil went direct on the panel and the page on the glass became a dither
+     * (g-paper 0.1.42), a page of high-contrast dots is exactly the frame the compositor's partial
+     * update ghosts worst — and a sketch face turns pages between them all day. [EinkRefresh] asks
+     * the firmware's own e-ink service to clear and repaint; on anything that does not answer it is
+     * one log line, once, and nothing thereafter.
+     *
+     * **Posted, never called inline.** [loadPage] has just handed the engine both rasters and the
+     * engine rebuilds and presents them; a refresh asked before that present would clear the panel
+     * and let the new page land on it partially — the ghosting it exists to remove, put back. The
+     * post runs after this load's own frame.
+     *
+     * **A page change, and only a page change.** Every call site of [loadPage] with
+     * `firstLoad = false` is one — a turn, an insert, a delete, a structural replay's landing, the
+     * replay walk's last step. The first open of the face is not (the activity transition refreshes
+     * the panel by itself), and neither is a raster undo/redo, which swaps tiles in place and never
+     * comes through here.
+     */
+    private fun refreshPanelAfterTurn() {
+        if (!REFRESH_ON_TURN) return
+        paper.asView().post { if (!isFinishing && !isDestroyed) EinkRefresh.fullRefresh(this) }
     }
 
     /**
@@ -1444,6 +1472,16 @@ class SketchActivity : PaperScreenActivity() {
 
         /** Outlives the Activity so a flush in flight always completes. */
         val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+        /**
+         * Whether a page change ends with a full panel refresh ([refreshPanelAfterTurn]).
+         *
+         * **The user's walk decides whether this stays** — and, if it does, whether
+         * [EinkRefresh.MODE] should be something other than the 0 the probe used. It is a constant
+         * rather than a setting because there is nothing for a person to choose here: either the
+         * panel is better for it on every turn or it is better for it on none.
+         */
+        const val REFRESH_ON_TURN = false
 
         /** The debug fill door's lattice — enough to be unmistakable in a `screencap`, few enough to
          *  composite in one call. */

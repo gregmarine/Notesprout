@@ -677,6 +677,38 @@ not saved" dialog (see Failure table) rather than a log line — pixels have no 
 pages answers `SketchContract.RESULT_SKETCH_SHOW_PAGES` (1); Back answers `RESULT_CANCELED`.
 Nothing else rides the result Intent but `EXTRA_CHROME_HIDDEN`.
 
+**A page turn ends with a full refresh (2026-09-19).** Since the Supernote pencil went direct on
+the panel and the page on the glass became a dither (g-paper 0.1.42), e-ink ghosting accumulates at
+**page flips** — the compositor's partial update over a page of high-contrast dots is the worst
+frame it could be handed, and a sketch face turns pages between such frames all day. The user's
+finding and decision on the Nomad: *"the sketch face could use a full refresh at page turn. We
+should try that."* So `loadPage` ends, whenever `firstLoad` is false, with
+`refreshPanelAfterTurn()` — a **posted** `EinkRefresh.fullRefresh(this)`, one per page change.
+
+- **`EinkRefresh` lives in `:sn-screen`** (`core/EinkRefresh.kt`), beside `TopGuard`, because a
+  panel refresh is a property of the **screen**, not of the paper — there is no g-paper call for it,
+  and any of the four paper surfaces could want it next. It is all reflection: a probe found that an
+  ordinary app may reach the firmware's own service — `ServiceManager.getService("eink")` →
+  `android.os.IEinkManager$Stub.asInterface(binder)` → `screenRefresh(false, 0)`, which returns
+  without throwing and needs no permission. None of those three names is in the public SDK, so the
+  object's whole contract is *it either refreshes or it does nothing*: Ratta-only (its own
+  `isRattaDevice()`, g-paper's being `internal` to its Ratta module), the proxy and method resolved
+  once and cached, **every failure of any kind one `Log.w` and a remembered refusal** — never a
+  crash, and never a second attempt for the life of the process. The successful call logs the ms it
+  took, one line per refresh, so a walk can read the cost straight off the log.
+- **Posted, never inline.** The load has just handed the engine both rasters and the engine rebuilds
+  and presents them; a refresh asked before that present would clear the panel and let the new page
+  land on it partially — the ghosting it exists to remove, put back.
+- **A page change, and only a page change.** Every `loadPage(firstLoad = false)` is one — a turn, an
+  insert, a delete, a structural replay's landing, the replay walk's last step. The first open of
+  the face is not (the activity transition refreshes the panel by itself), and neither is a raster
+  undo/redo, which swaps tiles in place and never comes through here.
+- **`SketchActivity.REFRESH_ON_TURN` = `true`** is the one switch. Its KDoc says what is still open:
+  **the user's walk decides whether the refresh stays at all**, and whether `EinkRefresh.MODE` — the
+  second, undocumented `int` of `screenRefresh` — should be something other than the `0` the probe
+  used. It is a constant rather than a setting because there is nothing for a person to choose:
+  either the panel is better for it on every turn or on none.
+
 ### The host side (`NotebookActivity`, `SketchHostHooks`)
 
 `NotebookActivity` holds `sketchEntry` (the door — `btnSketch`, left of `btnBible`, mirrored in the
@@ -1073,6 +1105,16 @@ notebook screen first).
   `SketchPageState` describes read windows the host loaded at the time it answered. Today
   `loadPage` is the only such read; a future one — a thumbnail, a second face — that skips either
   half will silently show the page as it was before the last strokes.
+- **The panel-refresh door is unpublished, and its refusal is logged exactly once (2026-09-19).**
+  `"eink"`, `android.os.IEinkManager$Stub` and `screenRefresh(boolean, int)` appear in no SDK and
+  could be gone after any firmware update; the `int` argument's meaning is unknown and the probe's
+  `0` is a guess (`EinkRefresh.MODE`). `EinkRefresh` remembers its first failure for the life of the
+  process, so a walk grepping the log after a dozen turns finds **one** `EinkRefresh` warning, not
+  one per turn — absence of further lines is the design, not evidence the door opened. The proof it
+  did is the `full panel refresh in N ms` line, one per page change, on a debug build.
+- **`PaperView` is an interface, not a `View`** — `paper.post { … }` does not compile; the handle to
+  post on is `paper.asView()`. Trivial, and caught by the compiler, but it is the second time a
+  helper written against "the paper" reached for a `View` method that is not there.
 - **A true double-tap is still out of adb's reach (G3)** — `input swipe x y x y 800` stands in for
   a long-press, but the finger double-tap chrome toggle has no adb equivalent and stayed a
   hand-only walk item this arc too.
