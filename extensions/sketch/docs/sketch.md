@@ -73,12 +73,16 @@ pressure **0.5**, the bake tilt **0** (0.1.35's own fix) and the **16 ms** caden
 as K1/K8 froze them — only the EMR *ceiling* moved, and only for the pencil's widest leads.
 **Arc 45 moved none of the four either** — the two-raster split is an engine-side routing and
 flatten change, not a tuning one; cadence, EMR floor, bake pressure and bake tilt are exactly
-what K1/K8/0.1.35 left them. **Over 0.1.41 / 0.1.42 (g-paper Phase 28 + maintenance, re-pinned
+what K1/K8/0.1.35 left them. **Over 0.1.41 / 0.1.42 / 0.1.43 (g-paper Phase 28 + maintenance + Phase 29, re-pinned
 2026-09-19 as SN maintenance, not an arc):** the pencil previews direct on the panel and the
 display is dithered (see "The Ratta preview" under Tools); on that path the bake pressure is the
 hand's (0.5 only on the needle fallback), the tilt stays 0, the cadence and EMR floor are
 untouched. The face decodes both rasters before loading either (one dither rebuild per page open,
 ~100–200 ms on the Nomad) and a page turn awaits the pixel copy, not the encode (§ Saves).
+**0.1.43 (Phase 29):** the rubber and the gel pen go through the panel too — the daemon is off for
+the whole sketch page, no overlay, no clear ladder there — and the pen-up bake is the live layer
+composited (no second grain pass; a dense scribble's pen-up no longer costs ~1 s). One trade: a
+lasso outline on a sketch page has no live dashed trail (nothing that ships lassoes one).
 
 ---
 
@@ -677,13 +681,16 @@ not saved" dialog (see Failure table) rather than a log line — pixels have no 
 pages answers `SketchContract.RESULT_SKETCH_SHOW_PAGES` (1); Back answers `RESULT_CANCELED`.
 Nothing else rides the result Intent but `EXTRA_CHROME_HIDDEN`.
 
-**A page turn ends with a full refresh (2026-09-19).** Since the Supernote pencil went direct on
-the panel and the page on the glass became a dither (g-paper 0.1.42), e-ink ghosting accumulates at
-**page flips** — the compositor's partial update over a page of high-contrast dots is the worst
-frame it could be handed, and a sketch face turns pages between such frames all day. The user's
-finding and decision on the Nomad: *"the sketch face could use a full refresh at page turn. We
-should try that."* So `loadPage` ends, whenever `firstLoad` is false, with
-`refreshPanelAfterTurn()` — a **posted** `EinkRefresh.fullRefresh(this)`, one per page change.
+**A page turn's full refresh — built, walked, and turned OFF (2026-09-19).** `EinkRefresh`
+(`:sn-screen`) can ask the framework's eink service for a full refresh by reflection
+(`IEinkManager.screenRefresh(hide, 1)` — the second argument is the refresh kind, **1 = full
+regardless of what the compositor thinks changed**; 0/2/3 do nothing once the panel has been drawn
+on directly; `hide` makes no difference — measured on the Nomad by cycling every variant through
+g-paper's probe). `SketchActivity.REFRESH_ON_TURN` is **false** by the user's decision ("a bit much;
+I can always manually refresh"): the door stays for a later choice. The flip ghosting it cleared is
+the dithered dot field itself — dense pencil scribbles ghost worst, solid gel-pen strokes not at
+all; presenting a loaded page through the panel first (g-paper `PRESENT_LOADED_PAGE_VIA_PANEL`,
+off) made no difference. Accepted as is; a coarser dither is the one future thread.
 
 - **`EinkRefresh` lives in `:sn-screen`** (`core/EinkRefresh.kt`), beside `TopGuard`, because a
   panel refresh is a property of the **screen**, not of the paper — there is no g-paper call for it,
