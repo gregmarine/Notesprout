@@ -216,11 +216,24 @@ paper under `DARKEN`) — the "white/highlight pencil" future, decided. Plan + l
 `extensions/sketch/INK_PLAN.md`; reference `extensions/sketch/docs/sketch.md` § "Arc 45's
 decisions". **COMPLETE + FROZEN 2026-09-18 on the user's Nomad hand walk (the white lead walked
 too — "works good enough for now"); `ink` merged to `main` 2026-09-18 (`--no-ff`) and deleted,
-g-paper `two-rasters` likewise** — "on ink" means `main`. No ELEVENTH extension point, no next Sketch phase
-(gel pen sizes or colours, eraser sizes, per-notebook tool memory, an
-`inkLift` fraction, a coloured or grey gel pen, quantizing graphite alpha to the 16-grey ladder)
-and no other new arc without a fresh user decision; no re-raising of any waived / declined review
-finding.
+g-paper `two-rasters` likewise** — "on ink" means `main`.
+
+**Arc 46 "Palette" (2026-09-19, branch `tools`, letter Q, `extensions/sketch/PALETTE_PLAN.md`)**
+— the user's decision that, with the pencil and the pen going direct to the panel under a dither
+(g-paper 0.1.41–0.1.43), the four-tone limit no longer applies: **all sixteen greys for the
+pencil and the gel pen alike** (white included on the pen, by the user's word — it draws nothing
+under `DARKEN`); **one pencil width, 4 px** (arc 44's twelve leads withdrawn); the shade picker on
+its **own Palette button** (Tabler `palette`, after the eraser) with Atelier's swatches (fill ·
+gap · dotted ring; solid ring on the selected); **both pen glyphs wear their own shade**
+(`ShadeIcon`, `ic_ballpen_fill`; `CollapsedChrome.PenKinds.altIcon` in `:sn-screen`). Seam:
+`SketchToolSettings` grows a fourth int `penShade` — **a parcel tail, not a method** —
+`API_VERSION` 20 → **21** named by `SketchContract.MIN_API_VERSION_FOR_SKETCH_PEN_SHADE`; the
+action floor stays 20; `size` is a dead wire slot written 0. No g-paper change. Reference
+`extensions/sketch/docs/sketch.md` § "Arc 46's decisions" + § "Tools (arcs 44–46)". Branch `tools`
+is expected to carry further tool arcs, each a fresh user decision. No ELEVENTH extension point,
+no next Sketch phase (eraser sizes, per-notebook tool memory, an `inkLift` fraction, quantizing
+graphite alpha to the 16-grey ladder, a pencil library of Atelier's grades) and no other new arc
+without a fresh user decision; no re-raising of any waived / declined review finding.
 
 **Maintenance protocol (replaces the per-arc phase protocol):**
 
@@ -481,8 +494,10 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   the sixteenth
   module, and the
   second at the monorepo root, `extensions/sketch/`, included by `projectDir`):
-  `:extension-api` + `:sn-screen` + `:ext-ink`, **never** `:app`. Declares `API_VERSION` **20**
-  since arc 45 / G3 (19 at arc 44 / T2–T3, 18 at K5b, 17 at K2, the point's birth floor).
+  `:extension-api` + `:sn-screen` + `:ext-ink`, **never** `:app`. Declares `API_VERSION` **21**
+  since arc 46 / Q1 (20 at arc 45 / G3, 19 at arc 44 / T2–T3, 18 at K5b, 17 at K2, the point's
+  birth floor) — 21 = `SketchContract.MIN_API_VERSION_FOR_SKETCH_PEN_SHADE`, the parcel tail
+  carrying the gel pen's remembered shade.
   `SketchContract.MIN_API_VERSION_FOR_SKETCH` **moved from its birth 17 to 20 at arc 45 / G2** —
   the point's own chunk calls changed shape in place, so a pre-20 sketch extension or host never
   binds a 20 one on the other side; `MIN_API_VERSION_FOR_SKETCH_PAGES` = 18 and
@@ -856,8 +871,12 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   (no legacy, no shipped library on the old shape); `MIN_API_VERSION_FOR_SKETCH_PAGES` 18 and
   `MIN_API_VERSION_FOR_SKETCH_TOOLS` 19 stay where they were minted, both now inert below the
   action floor. `:ext-sketch` redeclares 20 as of arc 45 / G3 (2026-09-18) — its manifest still
-  said 19 between G2 and G3, a build not installed. Not an eleventh point. No action floor moved
-  at any of the other seven bumps
+  said 19 between G2 and G3, a build not installed. Not an eleventh point. · **21 = arc 46
+  "Palette" / Q1 (2026-09-19)**: a compatible tail on a **parcel**, not a method —
+  `SketchToolSettings` grows a fourth `int`, `penShade` (the gel pen's own remembered shade), read
+  with the exhausted-parcel rule; `SketchContract.MIN_API_VERSION_FOR_SKETCH_PEN_SHADE` 21 names
+  it, `MIN_API_VERSIONS` untouched, the action floor still 20, only `:ext-sketch` redeclares. No
+  action floor moved at any of the other eight bumps
   from 12 on; the pin
   lives in
   `ExtensionContractTest`, which **must be run** (`:extension-api:testDebugUnitTest`) at every

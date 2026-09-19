@@ -92,3 +92,8 @@ palette was a firmware-needle constraint that no longer applies on the direct pa
   `onPalette`, drops the pencil re-tap, re-inks both glyphs; `SketchActivity` rewired (Shades
   entry in the collapsed overflow anchors the panel on its own row). `:sn-screen` 118 green;
   both debug APKs build; the built ext manifest declares 21.
+- **Q4 (docs) 2026-09-19** — `docs/sketch.md` (title arcs 43–46, the arc 46 decisions section,
+  § "Q1's tail", § "Tools (arcs 44–46)", failure-table rows, traps, counts), SN `CLAUDE.md`
+  (the arc 46 entry, `:ext-sketch` declares 21, the API ledger's 21), root `CLAUDE.md` (sketch
+  bullet + table row, branch `tools`). Root suite **3632**, 0 failures. Debug host + ext-sketch
+  installed on the Nomad for the user's hand walk. **Freeze awaits the walk.**
