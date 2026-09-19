@@ -11,17 +11,23 @@ import org.junit.Test
  * that makes a remembered **ladder level** safe across a palette that has changed.
  *
  * Everything here is written against [SketchPalette.SHADE_LEVELS] rather than against a count, on
- * purpose: the offered levels are a subset of the sixteen-level ladder (the whole ladder since arc
- * 46), and these tests are what prove the promise that changing the subset is one line and strands
+ * purpose: the offered levels are a subset of Atelier's sixteen tones (all of them since arc 46),
+ * and these tests are what prove the promise that changing the subset is one line and strands
  * nothing.
  */
 class SketchPaletteTest {
 
-    @Test fun `all sixteen ladder levels are offered, black to white`() {
+    @Test fun `all sixteen of Atelier's tones are offered, black to white`() {
         assertEquals((0..15).toList(), SketchPalette.SHADE_LEVELS)
+        // The user's list of 2026-09-19, verbatim, darkest first.
+        val atelier = listOf(
+            "000000", "505050", "606060", "686868", "707070", "808080", "888888", "909090",
+            "a0a0a0", "aaaaaa", "b6b6b6", "c0c0c0", "c8c8c8", "d0d0d0", "dddddd", "ffffff",
+        )
+        assertEquals(atelier, SketchPalette.TONES.map { "%06x".format(it and 0xFFFFFF) })
         assertEquals(0xFF000000.toInt(), SketchPalette.shade(0))
-        assertEquals(0xFF555555.toInt(), SketchPalette.shade(5))
-        assertEquals(0xFF999999.toInt(), SketchPalette.shade(9))
+        assertEquals(0xFF505050.toInt(), SketchPalette.shade(1))
+        assertEquals(0xFF808080.toInt(), SketchPalette.shade(5))
         assertEquals(0xFFFFFFFF.toInt(), SketchPalette.shade(15))
         assertEquals(0, SketchPalette.BLACK_SHADE)
         assertEquals(15, SketchPalette.WHITE_SHADE)
@@ -29,17 +35,22 @@ class SketchPaletteTest {
         assertTrue(SketchPalette.isShade(SketchPalette.WHITE_SHADE))
     }
 
-    @Test fun `every offered level is its ladder grey - level times 0x11, opaque`() {
+    @Test fun `every offered level is its tone - opaque, a neutral grey, strictly lighter up the list`() {
         SketchPalette.SHADE_LEVELS.forEach { level ->
-            val v = level * 0x11
-            assertEquals((0xFF shl 24) or (v shl 16) or (v shl 8) or v, SketchPalette.shade(level))
+            val tone = SketchPalette.shade(level)
+            assertEquals(0xFF, tone ushr 24)
+            val r = tone ushr 16 and 0xFF
+            assertEquals(r, tone ushr 8 and 0xFF)
+            assertEquals(r, tone and 0xFF)
+            if (level > 0) assertTrue(r > (SketchPalette.shade(level - 1) and 0xFF))
         }
         assertEquals(16, SketchPalette.SHADE_LEVELS.distinct().size)
         assertEquals(SketchPalette.SHADE_LEVELS.sorted(), SketchPalette.SHADE_LEVELS)
     }
 
-    @Test fun `the defaults are level 5 for the pencil and black for the pen`() {
-        assertEquals(5, SketchPalette.DEFAULT_SHADE)
+    @Test fun `the defaults are 505050 for the pencil and black for the pen`() {
+        assertEquals(1, SketchPalette.DEFAULT_SHADE)
+        assertEquals(0xFF505050.toInt(), SketchPalette.shade(SketchPalette.DEFAULT_SHADE))
         assertEquals(0, SketchPalette.DEFAULT_PEN_SHADE)
         assertTrue(SketchPalette.isShade(SketchPalette.DEFAULT_SHADE))
         assertTrue(SketchPalette.isShade(SketchPalette.DEFAULT_PEN_SHADE))
@@ -57,15 +68,16 @@ class SketchPaletteTest {
         assertEquals(SketchPalette.shade(SketchPalette.DEFAULT_SHADE), SketchPalette.shade(255))
         assertEquals(0xFF000000.toInt(), SketchPalette.shade(255, fallback = SketchPalette.DEFAULT_PEN_SHADE))
         // An offered level ignores the fallback entirely.
-        assertEquals(0xFF999999.toInt(), SketchPalette.shade(9, fallback = 0))
+        assertEquals(0xFFAAAAAA.toInt(), SketchPalette.shade(9, fallback = 0))
     }
 
-    @Test fun `the rows wrap at ROW_BREAK and cover every level once`() {
-        assertEquals(8, SketchPalette.ROW_BREAK)
+    @Test fun `the rows are four by four, white first, and cover every level once`() {
+        assertEquals(4, SketchPalette.ROW_BREAK)
         val rows = SketchPalette.shadeRows()
-        assertEquals(listOf((0..7).toList(), (8..15).toList()), rows)
+        assertEquals(listOf(listOf(15, 14, 13, 12), listOf(11, 10, 9, 8), listOf(7, 6, 5, 4), listOf(3, 2, 1, 0)), rows)
         rows.forEach { assertTrue(it.size <= SketchPalette.ROW_BREAK) }
-        assertEquals(SketchPalette.SHADE_LEVELS, rows.flatten())
+        assertEquals(SketchPalette.SHADE_LEVELS.toSet(), rows.flatten().toSet())
+        assertEquals(16, rows.flatten().size)
     }
 
     @Test fun `there is one pencil width and one pen width`() {

@@ -13,7 +13,6 @@
     <string name="cd_tool_pencil">Pencil</string>
     <string name="cd_tool_pen">Pen</string>
     <string name="cd_tool_eraser">Eraser</string>
-    <string name="cd_tool_palette">Shades</string>
     <string name="cd_sketch_bring_ink">Bring in ink</string>
     <string name="cd_sketch_show_pages">Show pages</string>
     <string name="cd_prev_page">Previous page</string>
@@ -21,7 +20,7 @@
     <string name="sketch_page_indicator">%1$d / %2$d</string>
 
     <!-- PaletteBar (arc 46 "Palette"; arc 44 / T3's PencilBar remade) — the shade panel under the
-         Palette button: the sixteen ladder levels, black and white named, the rest numbered. -->
+         armed pen button: Atelier's sixteen tones, black and white named, the rest numbered. -->
     <string name="cd_shade_black">Black</string>
     <string name="cd_shade_white">White</string>
     <string name="cd_shade">Shade %1$d</string>

@@ -97,3 +97,25 @@ palette was a firmware-needle constraint that no longer applies on the direct pa
   (the arc 46 entry, `:ext-sketch` declares 21, the API ledger's 21), root `CLAUDE.md` (sketch
   bullet + table row, branch `tools`). Root suite **3632**, 0 failures. Debug host + ext-sketch
   installed on the Nomad for the user's hand walk. **Freeze awaits the walk.**
+- **First walk (2026-09-19) — the user's amendments, all built the same day:**
+  1. **Ink over graphite** — "the white pen should be able to write over the pencil … in the real
+     world, a white gel pen can write over anything." Asked plainly and decided: the flatten is
+     `SRC_OVER`, ink on top, everywhere (pencil over an ink line is hidden by the ink). g-paper
+     **Phase 30 → 0.1.44** on branch `ink-over` (`CanvasPaperView.drawRasterLayers` null paint,
+     `DitherFlatten.luma` + `band` blend ink over the graphite result, `DitherFlattenTest`'s darken
+     test becomes the over test; core+ratta 341 green; published to mavenLocal). SN re-pinned;
+     `SketchRaster` + `SketchCover` flip the same operator. **Amends arc 45's "no top and no
+     bottom".**
+  2. **Atelier's sixteen tones**, verbatim (`ffffff dddddd d0d0d0 c8c8c8 c0c0c0 b6b6b6 aaaaaa
+     a0a0a0 909090 888888 808080 707070 686868 606060 505050 000000`), replace the `0x11` ladder:
+     `SketchPalette.TONES` darkest first (0 black, 15 white — the two names every earlier build
+     stored), a stored shade is a position in it; `DEFAULT_SHADE` 5 → **1** (`#505050`, arc 43's
+     exact tone).
+  3. **4 × 4**, white first, Atelier's order (`ROW_BREAK` 4, `shadeRows()` reversed).
+  4. **The panel goes back onto the tool**: a re-tap on the armed Pencil opens it for the pencil's
+     shade, on the armed Pen for the pen's — "since pencil and pen have independent shade
+     selections, it makes better sense to attach the selection to the tool." `btnPalette`,
+     `ic_palette`, `cd_tool_palette` and the Shades overflow entry are gone; `PaperToolbar.onPenReTap`
+     and `CollapsedChrome.PenKinds.onReTap` take the kind (`:sn-screen`, defaulted, no other
+     caller moves); the mini row's alt button is its own anchor. Root 3632 green; installed on
+     the Nomad.

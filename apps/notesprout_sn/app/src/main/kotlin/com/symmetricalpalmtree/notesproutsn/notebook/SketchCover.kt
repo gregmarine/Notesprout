@@ -5,8 +5,6 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffXfermode
 import android.util.Log
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
@@ -27,10 +25,9 @@ import kotlinx.coroutines.withContext
  * bake, and only when the canvas has actually been loaded (a snapshot of an unloaded surface is a
  * blank card where a drawing used to be).
  *
- * **The flatten is [SketchRaster]'s, sampled** — graphite plain, then ink with
- * [PorterDuff.Mode.DARKEN] over it, each channel the darker of the two. Order-independent, so the
- * card shows the same picture the export does and the face does, with no layer order to keep in
- * step. Both decodes take the **same** sample size, computed from the page's own size rather than
+ * **The flatten is [SketchRaster]'s, sampled** — graphite plain, then ink drawn **over** it
+ * (plain `SRC_OVER`, arc 46 / g-paper 0.1.44; `DARKEN` before that). The card shows the same
+ * picture the export does and the face does — ink on top, the media's own order. Both decodes take the **same** sample size, computed from the page's own size rather than
  * from each image, so the two register pixel-for-pixel: a card whose ink was sampled one step
  * differently from its graphite would be two drawings sliding over each other.
  *
@@ -129,7 +126,7 @@ object SketchCover {
             val canvas = Canvas(cover)
             canvas.drawColor(Color.WHITE)
             var drew = blit(canvas, graphite, sample, null)
-            drew = blit(canvas, ink, sample, darkenPaint()) || drew
+            drew = blit(canvas, ink, sample, null) || drew
             keep = drew
             if (drew) cover else null
         } finally {
@@ -155,11 +152,6 @@ object SketchCover {
             raster.recycle()
         }
     }
-
-    /** [SketchRaster]'s composite, said the same way here — the darker of the two per channel, and
-     *  a fresh `Paint` per call for the same reason it is fresh there. */
-    private fun darkenPaint(): Paint =
-        Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DARKEN) }
 
     /**
      * `inSampleSize` for a [width] × [height] image wanted at about [edge] px on its long side: the

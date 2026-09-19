@@ -6,23 +6,24 @@ package com.symmetricalpalmtree.notesproutsn.ext.sketch
  * (`SketchToolSettings`): the host stores small integers and never learns what they name, so
  * retuning a width or changing which shades are offered here strands nothing.
  *
- * **The coordinate system is the sixteen-level e-paper ladder**: `#000000` … `#FFFFFF` in `0x11`
- * steps, level *n* being the grey `n * 0x11` repeated across all three channels, always opaque. A
- * stored shade is **a level of that ladder, not a position in [SHADE_LEVELS]** — which is what makes
- * the level mean the same thing in every build, whichever subset a build happens to offer.
+ * **The coordinate system is Atelier's sixteen tones** ([TONES] — the user's list of 2026-09-19,
+ * arc 46's decision 2 as amended on the first walk: "the shades seem off from what Atelier has"),
+ * kept **darkest first** so that level 0 is black and level 15 is white, the two names every
+ * earlier build already stored. A stored shade is **a level — a position in [TONES]**, and
+ * [SHADE_LEVELS] is the subset a build offers (all sixteen). Until arc 46 the ladder was the
+ * e-paper's own `0x11` steps; Atelier's tones sit closer together in the dark half (`#505050` …
+ * `#707070`) and spread out in the light, which is where a pencil's shading actually lives.
  *
- * **All sixteen are offered, to both kinds** ([SHADE_LEVELS] — the user's decision of 2026-09-19,
- * arc 46's decisions 2 and 3). Arc 44 offered six, then arc 45's decision 6 cut them to the
- * firmware's four tones, because the Ratta *needle* previewed one tone per arming and a lead that
- * previews a shade off is a lead the hand aims wrong with. Since g-paper 0.1.41 the Supernote
- * pencil — and since 0.1.43 the gel pen — go direct to the panel and the glass shows a blue-noise
- * dither of the true grey, so every level previews as it bakes and the four-tone limit no longer
- * applies. **Level 15 is white**: on the pencil it is a different kind of lead — it lays nothing on
- * bare paper under the `DARKEN` flatten and **pales the graphite under it** (the flecks go down
- * over the raster), the precision lightener the rubber does not give; on the gel pen it draws
- * nothing at all (white ink is invisible under `DARKEN`) yet still lands pixels in the ink raster —
- * offered by the user's word, documented in `docs/sketch.md` § Traps. Two rows of eight
- * ([shadeRows]).
+ * **All sixteen are offered, to both kinds** (arc 46's decisions 2 and 3). Arc 44 offered six,
+ * then arc 45's decision 6 cut them to the firmware's four tones, because the Ratta *needle*
+ * previewed one tone per arming. Since g-paper 0.1.41 the Supernote pencil — and since 0.1.43 the
+ * gel pen — go direct to the panel and the glass shows a blue-noise dither of the true grey, so
+ * every tone previews as it bakes. **Level 15 is white**: on the pencil a different kind of lead
+ * — it lays nothing on bare paper and **pales the graphite under it** (the flecks go down over the
+ * raster), the precision lightener the rubber does not give; on the gel pen, since g-paper 0.1.44
+ * flattens ink **over** graphite, it covers pencil and darker ink alike — "a white gel pen can
+ * write over anything" — and shows nothing only over bare paper. Four rows of four
+ * ([shadeRows]), white first as Atelier lays them out.
  *
  * **Changing which shades are offered is [SHADE_LEVELS] and nothing else.** The rows ([shadeRows]),
  * the bar built from them and every range check derive from that one list, and a level this build
@@ -40,18 +41,22 @@ object SketchPalette {
     // ── The greys ──────
 
     /**
-     * The ladder levels this build offers, in order — **the one line that changes which shades
-     * exist**. Every row, every bound and every "is that a shade?" test below is derived from this
-     * list, and nothing outside this file decides for itself what a shade is.
-     *
-     * The user's sixteen (2026-09-19): the whole ladder, black to white, for the pencil and the
-     * gel pen alike.
+     * Atelier's sixteen tones as opaque ARGB, **darkest first** — level *n* is `TONES[n]`. The
+     * user's list, verbatim, reversed so that 0 is black and 15 is white.
      */
-    val SHADE_LEVELS: List<Int> = (0..15).toList()
+    val TONES: List<Int> = listOf(
+        0x000000, 0x505050, 0x606060, 0x686868, 0x707070, 0x808080, 0x888888, 0x909090,
+        0xA0A0A0, 0xAAAAAA, 0xB6B6B6, 0xC0C0C0, 0xC8C8C8, 0xD0D0D0, 0xDDDDDD, 0xFFFFFF,
+    ).map { (0xFF shl 24) or it }
 
-    /** The step between levels: `0x11`, so level *n* is the grey `n * 0x11` and level 15 is
-     *  white. */
-    private const val SHADE_STEP: Int = 0x11
+    /**
+     * The levels this build offers, in order — **the one line that changes which shades exist**.
+     * Every row, every bound and every "is that a shade?" test below is derived from this list,
+     * and nothing outside this file decides for itself what a shade is.
+     *
+     * The user's sixteen (2026-09-19): every tone, for the pencil and the gel pen alike.
+     */
+    val SHADE_LEVELS: List<Int> = TONES.indices.toList()
 
     /** Level 0 — black, the gel pen's default and its hint's name. */
     const val BLACK_SHADE: Int = 0
@@ -59,13 +64,13 @@ object SketchPalette {
     /** Level 15 — white: the pencil's lightener lead; on the pen, a stroke that shows nothing. */
     const val WHITE_SHADE: Int = 15
 
-    /** Where the swatches wrap onto a second row: eight over eight. Eight 62 dp cells plus the
-     *  bar's padding is ≈ 500 dp, inside the Nomad's 749 dp, and the 44 dp tier is narrower still. */
-    const val ROW_BREAK: Int = 8
+    /** Where the swatches wrap: four rows of four, Atelier's grid (the user's word on the first
+     *  arc 46 walk, over the two rows of eight it opened with). */
+    const val ROW_BREAK: Int = 4
 
-    /** The pencil's default shade: level 5, `#555555` — arc 43's one graphite tone rounded onto
-     *  the ladder, which the hand called "spot on" at K1. */
-    const val DEFAULT_SHADE: Int = 5
+    /** The pencil's default shade: level 1, `#505050` — arc 43's one graphite tone (`#505050`
+     *  exactly), which the hand called "spot on" at K1. */
+    const val DEFAULT_SHADE: Int = 1
 
     /** The gel pen's default shade: black — what the pen always was before arc 46. */
     const val DEFAULT_PEN_SHADE: Int = BLACK_SHADE
@@ -102,15 +107,13 @@ object SketchPalette {
         greyOf(if (isShade(level)) level else fallback)
 
     /**
-     * The swatch rows, in order, as the bar lays them out: [ROW_BREAK] levels then the rest. Derived
-     * rather than written down, so [SHADE_LEVELS] is genuinely the only line to change — at sixteen
-     * offered levels this is two rows of eight.
+     * The swatch rows, in order, as the bar lays them out — **white first**, Atelier's own order
+     * (its list runs `ffffff` … `000000`), [ROW_BREAK] to a row. Derived rather than written down,
+     * so [SHADE_LEVELS] is genuinely the only line to change — at sixteen offered levels this is
+     * four rows of four, white at the top left and black at the bottom right.
      */
-    fun shadeRows(): List<List<Int>> = SHADE_LEVELS.chunked(ROW_BREAK)
+    fun shadeRows(): List<List<Int>> = SHADE_LEVELS.asReversed().chunked(ROW_BREAK)
 
-    /** Level *n* as an opaque grey: `n * 0x11` on all three channels. */
-    private fun greyOf(level: Int): Int {
-        val v = level * SHADE_STEP
-        return (0xFF shl 24) or (v shl 16) or (v shl 8) or v
-    }
+    /** Level *n* as its opaque tone. */
+    private fun greyOf(level: Int): Int = TONES[level]
 }

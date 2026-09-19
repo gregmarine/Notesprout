@@ -22,16 +22,16 @@ class SketchToolStateTest {
     private val pen = SketchContract.TOOL_PEN
     private val pencil = SketchContract.TOOL_PENCIL
 
-    @Test fun `the default is the pencil at level 5 with a black pen waiting`() {
+    @Test fun `the default is the pencil at 505050 with a black pen waiting`() {
         val state = SketchToolState.DEFAULT
         assertFalse(state.isPen)
         assertEquals(pencil, state.tool)
         assertEquals(SketchPalette.DEFAULT_SHADE, state.pencilShade)
         assertEquals(SketchPalette.DEFAULT_PEN_SHADE, state.penShade)
         assertEquals(StrokeStyle.PENCIL, state.penStyle)
-        assertEquals(0xFF555555.toInt(), state.penColor)
+        assertEquals(0xFF505050.toInt(), state.penColor)
         assertEquals(SketchPalette.PENCIL_WIDTH_PX, state.penWidth, 0f)
-        assertEquals(5, state.armedShade)
+        assertEquals(1, state.armedShade)
     }
 
     @Test fun `the gel pen draws PEN at its own width and its own shade`() {
@@ -42,7 +42,7 @@ class SketchToolStateTest {
         assertEquals(0xFF000000.toInt(), state.penColor)
         assertEquals(0, state.armedShade)
         val grey = state.withShade(9)
-        assertEquals(0xFF999999.toInt(), grey.penColor)
+        assertEquals(0xFFAAAAAA.toInt(), grey.penColor)
         assertEquals(9, grey.armedShade)
     }
 
@@ -56,7 +56,7 @@ class SketchToolStateTest {
         // And back: the pencil is exactly as it was left.
         val back = penPicked.withTool(pencil)
         assertEquals(12, back.armedShade)
-        assertEquals(0xFFCCCCCC.toInt(), back.penColor)
+        assertEquals(0xFFC8C8C8.toInt(), back.penColor)
         assertEquals(3, back.penShade)
     }
 
@@ -69,12 +69,12 @@ class SketchToolStateTest {
 
     @Test fun `each button reports its own kind's shade whatever is armed`() {
         val s = SketchToolState.DEFAULT.withShade(7).withTool(pen).withShade(14)
-        assertEquals(0xFF777777.toInt(), s.pencilReport)
-        assertEquals(0xFFEEEEEE.toInt(), s.penReport)
+        assertEquals(0xFF909090.toInt(), s.pencilReport)
+        assertEquals(0xFFDDDDDD.toInt(), s.penReport)
         assertEquals(s.penReport, s.penColor)
         val t = s.withTool(pencil)
-        assertEquals(0xFF777777.toInt(), t.pencilReport)
-        assertEquals(0xFFEEEEEE.toInt(), t.penReport)
+        assertEquals(0xFF909090.toInt(), t.pencilReport)
+        assertEquals(0xFFDDDDDD.toInt(), t.penReport)
         assertEquals(t.pencilReport, t.penColor)
     }
 

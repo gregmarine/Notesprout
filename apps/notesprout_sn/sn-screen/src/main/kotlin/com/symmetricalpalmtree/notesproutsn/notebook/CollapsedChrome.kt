@@ -136,14 +136,15 @@ class CollapsedChrome(
          *  (`toolbar.arm`), which does the one pen-gated render release and the syncs. */
         val onPick: (alt: Boolean) -> Unit,
         /**
-         * A pick of the **already-armed primary** kind, handed this row's own button as an anchor —
-         * [Entry.onTap]'s contract, and the notebook Insert bar's precedent: the caller hangs its
-         * sub-bar under the button the person actually tapped and **the rows stay up beneath it**,
-         * which also means the caller owns that bar's dismissal (`onClose` brings it down with the
-         * rows, and the screen's outside-contact rule keeps it alive under a contact of its own).
-         * Absent, a re-pick simply arms again and closes the rows like any other tool tap.
+         * A pick of the **already-armed** kind (either one since arc 46), handed which kind and
+         * this row's own button as an anchor — [Entry.onTap]'s contract, and the notebook Insert
+         * bar's precedent: the caller hangs its sub-bar under the button the person actually tapped
+         * and **the rows stay up beneath it**, which also means the caller owns that bar's
+         * dismissal (`onClose` brings it down with the rows, and the screen's outside-contact rule
+         * keeps it alive under a contact of its own). Absent, a re-pick simply arms again and
+         * closes the rows like any other tool tap.
          */
-        val onPrimaryReTap: ((anchor: View) -> Unit)? = null,
+        val onReTap: ((alt: Boolean, anchor: View) -> Unit)? = null,
         /**
          * The **primary** kind's glyph, painted by the screen (arc 44 / T3), or null to wear the
          * plain resource one ([CollapsedTools.iconFor]) as every screen did before.
@@ -252,7 +253,9 @@ class CollapsedChrome(
             toolButtons[tool] = button
             // Immediately after the primary one — the sketch face's row reads Pencil · Pen · Eraser.
             if (kinds != null) {
-                altPenButton = mini.addButton(kinds.altIconRes, kinds.altHint) { pickPen(alt = true, anchor = null) }
+                // Its own click's anchor too (arc 46): a re-pick of the armed alt kind hangs the
+                // screen's shade panel under this button.
+                altPenButton = mini.addButton(kinds.altIconRes, kinds.altHint) { pickPen(alt = true, anchor = altPenButton) }
             }
         }
         commands.forEach { add(mini, miniMirrored, it) }
@@ -344,7 +347,7 @@ class CollapsedChrome(
      * the tool is the same either way, and [PaperToolbar.selectPen]'s rule said once more for this
      * row.
      *
-     * A pick of the already-armed **primary** kind is the row's own re-tap: the screen is handed
+     * A pick of the already-armed kind is the row's own re-tap: the screen is handed the kind and
      * this button as an anchor and **the rows stay up**, so its bar hangs under the button that was
      * tapped rather than under a bar button that is `GONE` behind hidden chrome. Everything else —
      * the other kind, a first arming, a re-pick with no re-tap handler — arms and closes the rows,
@@ -353,9 +356,9 @@ class CollapsedChrome(
     private fun pickPen(alt: Boolean, anchor: AppCompatImageButton?) {
         val kinds = penKinds ?: return
         if (paper.tool == Tool.PEN && kinds.altArmed() == alt) {
-            val reTap = kinds.onPrimaryReTap
-            if (!alt && reTap != null && anchor != null) {
-                reTap(anchor)
+            val reTap = kinds.onReTap
+            if (reTap != null && anchor != null) {
+                reTap(alt, anchor)
                 return
             }
         }

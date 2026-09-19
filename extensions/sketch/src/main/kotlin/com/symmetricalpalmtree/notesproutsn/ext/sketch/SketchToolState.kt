@@ -85,7 +85,7 @@ data class SketchToolState(
 
     companion object {
 
-        /** The face with nothing remembered: the pencil at level 5, the pen at black. */
+        /** The face with nothing remembered: the pencil at `#505050` (level 1), the pen at black. */
         val DEFAULT: SketchToolState = SketchToolState(
             tool = SketchContract.TOOL_PENCIL,
             pencilShade = SketchPalette.DEFAULT_SHADE,

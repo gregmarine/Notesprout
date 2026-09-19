@@ -16,8 +16,10 @@ import com.symmetricalpalmtree.notesproutsn.notebook.AnchoredBar
 import com.symmetricalpalmtree.notesproutsn.notebook.PenIdle
 
 /**
- * The **shade panel** (arc 46 "Palette", the user's decisions 4 and 5; arc 44 / T3's `PencilBar`
- * remade) — sixteen swatches in two rows of eight, hung under the Palette button. `EraserBar`'s
+ * The **shade panel** (arc 46 "Palette", the user's decisions 4 and 5 as amended on the first
+ * walk; arc 44 / T3's `PencilBar` remade) — Atelier's sixteen tones in four rows of four, hung
+ * under the armed pen button on its re-tap: the Pencil's for the pencil's shade, the Pen's for
+ * the pen's. `EraserBar`'s
  * shape in every particular that matters: [AnchoredBar] places it, measures it and owns its rects;
  * the screen owns *when* it opens and closes, and unions [rects] into the exclusion rects and the
  * `overChrome` test, because a pen landing on a floating bar must never ink.
@@ -29,9 +31,10 @@ import com.symmetricalpalmtree.notesproutsn.notebook.PenIdle
  * ## What it edits
  *
  * **The armed kind's shade** ([SketchToolState.withShade]): the pencil's while the pencil is armed,
- * the gel pen's while the pen is. With the rubber armed it edits the kind that was last armed —
- * exactly what `SketchToolState.tool` holds, since the eraser is never a pen kind. It does not
- * re-arm anything: the button's fill ([ShadeIcon]) says what changed.
+ * the gel pen's while the pen is — and the only way in is a re-tap on the armed kind's own button,
+ * so the panel always belongs to the kind whose button it hangs under (the user's amendment:
+ * "since pencil and pen have independent shade selections, it makes better sense to attach the
+ * selection to the tool"). The button's fill ([ShadeIcon]) says what changed.
  *
  * ## The swatch (decision 4 — Atelier's shape)
  *
@@ -47,8 +50,8 @@ import com.symmetricalpalmtree.notesproutsn.notebook.PenIdle
  * colour rule's one opening is a swatch showing the tone being chosen. Every ring is black.
  *
  * **The bar stays open after a pick.** A visit is often "this grey — no, that one", and a bar that
- * closed on the first pick would cost a re-tap for the second. It closes on the Palette button's
- * own re-tap (the toggle), any tool change, a page swap, a finger gesture, a contact outside it,
+ * closed on the first pick would cost a re-tap for the second. It closes on the armed button's
+ * next re-tap (the toggle), any tool change, a page swap, a finger gesture, a contact outside it,
  * a chrome flip and the exit — the screen's list, not this class's.
  *
  * **Frame silence**: opening this bar and repainting it after a pick are one chrome frame each at a
@@ -61,8 +64,8 @@ import com.symmetricalpalmtree.notesproutsn.notebook.PenIdle
 class PaletteBar(
     root: ViewGroup,
     bar: LinearLayout,
-    /** The Palette button on the top bar — the bar's default anchor. [show] may name another (the
-     *  collapsed overflow's own entry, while the chrome is collapsed). */
+    /** The top bar's Pencil button — the bar's default anchor. [show] names another for the pen's
+     *  own button, and for the mini toolbar's buttons while the chrome is collapsed. */
     private val anchor: View,
     /** The free band's bottom edge in root coordinates (the bottom strip's top); null before layout. */
     bandBottom: () -> Int?,

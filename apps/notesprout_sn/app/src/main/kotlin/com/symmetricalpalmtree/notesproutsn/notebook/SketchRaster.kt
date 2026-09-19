@@ -5,8 +5,6 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffXfermode
 import com.symmetricalpalmtree.notesproutsn.data.template.BuiltInTemplates
 import java.io.IOException
 
@@ -23,14 +21,14 @@ import java.io.IOException
  * own size at scale 1, and one page bitmap alive at a time — and those are kept here by repetition,
  * which is cheaper than a shared abstraction over two unlike drawings.
  *
- * **The flatten is a darken** (arc 45, § Derived). Graphite is drawn plain and ink is drawn over it
- * with [PorterDuff.Mode.DARKEN] — each channel the darker of the two. That is what makes "two
- * rasters, one picture" literally true rather than a story about layers: darken is
- * **order-independent** (min is commutative), so there is no top and no bottom to record in the
- * file, to explain to a person, or to get wrong in a reader. It is also right for a coloured gel
- * pen later — min per channel, not per pixel-luminance — which is why the rasters are RGBA rather
- * than the grey the panel actually shows. Neither raster covers the other: where one is transparent
- * the other stands, because transparent-white is the identity of a darken over an opaque ground.
+ * **The flatten is ink over graphite** (arc 46, the user's decision of 2026-09-19 — "a white gel
+ * pen can write over anything"; g-paper 0.1.44's own flatten, said the same way here). Graphite is
+ * drawn plain and ink is drawn **over** it, plain `SRC_OVER`. Arc 45 flattened with
+ * [PorterDuff.Mode.DARKEN] — the darker per channel, order-independent — which could never show a
+ * white or pale ink over darker graphite. The order is the media's, not a layer to record in the
+ * file or explain: gel ink sits on the sheet over graphite, and graphite over dry ink mostly
+ * slides off, so pencil over an ink line is hidden by it. Where a raster is transparent the other
+ * stands; with a black pen the two operators are pixel-identical.
  *
  * **Plain white, never the template** (decision 10). The paper under a sketch in the sketch face is
  * white — no template crosses that seam — so an exported sketch page that ruled a grid under the
@@ -75,8 +73,8 @@ object SketchRaster {
             // Graphite plain: the first thing over the white ground, so there is nothing yet for a
             // composite to be about.
             blit(canvas, graphite, widthPx, heightPx, null)
-            // Ink darkened: the darker of the two per channel, wherever they meet.
-            blit(canvas, ink, widthPx, heightPx, darkenPaint())
+            // Ink over it: plain SRC_OVER — ink on top wherever they meet (arc 46, g-paper 0.1.44).
+            blit(canvas, ink, widthPx, heightPx, null)
         }
 
     /**
@@ -108,12 +106,6 @@ object SketchRaster {
             raster.recycle()
         }
     }
-
-    /** A fresh `Paint` per call rather than one held here: this object is used from the export
-     *  bake's coroutine and nothing guarantees it is the only caller, and a `Paint` carrying an
-     *  xfermode is exactly the kind of shared mutable state that draws the wrong page once a year. */
-    private fun darkenPaint(): Paint =
-        Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DARKEN) }
 
     /** The white ground at the page's size, drawn on and encoded, recycled whatever happens. */
     private fun draw(widthPx: Int, heightPx: Int, onto: (Canvas) -> Unit): ByteArray {

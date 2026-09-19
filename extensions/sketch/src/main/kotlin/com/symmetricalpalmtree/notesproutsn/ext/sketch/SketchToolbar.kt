@@ -12,16 +12,16 @@ import com.symmetricalpalmtree.notesproutsn.notebook.PenIdle
 
 /**
  * The sketch screen's chrome (arc 43 / K5, grown by arc 44 / T3 and arc 46 "Palette"): Back, the
- * pencil, the gel pen, the rubber and the shade panel's door, "Bring in ink" and "Show pages" on
- * the top bar; the pager alone on the bottom one. The
+ * pencil, the gel pen and the rubber, "Bring in ink" and "Show pages" on the top bar; the pager
+ * alone on the bottom one. The
  * tool half is `:sn-screen`'s [PaperToolbar] — with **no lasso button**, which is what `btnLasso`'s
  * nullability is for: a raster page has no objects to select, so a lasso there would arm a tool the
  * surface does not answer.
  *
  * ## The tools (decisions 3 and 4, as arcs 44 and 46 amended them)
  *
- * - **A graphite pencil of one width and sixteen shades** ([SketchPalette] — the whole grey
- *   ladder, every level previewing as it bakes on the direct panel path, at 4 px). Arc 43's
+ * - **A graphite pencil of one width and sixteen shades** ([SketchPalette] — Atelier's sixteen
+ *   tones, every one previewing as it bakes on the direct panel path, at 4 px). Arc 43's
  *   decision 3 was "no tilt, no width choice, no colour", and the first two thirds of that stood
  *   on measurement rather than taste: the Supernote bakes upright whatever the grip (g-paper
  *   0.1.35), so a sketch could not be shaded by leaning even in principle. Arc 44 opened the other
@@ -32,8 +32,8 @@ import com.symmetricalpalmtree.notesproutsn.notebook.PenIdle
  *   same sixteen shades** (arc 46, decision 3); its button wears its own shade the same way. It
  *   and the pencil are **both [Tool.PEN]** to the engine; what differs is only what the engine is
  *   armed with, which is what [SketchToolState] holds and this class assigns.
- * - **The Palette button** opens the shade panel ([PaletteBar]) under itself, editing the armed
- *   kind's shade; a second tap closes it.
+ * - **A re-tap on the armed pen button of either kind** opens the shade panel ([PaletteBar])
+ *   under that button, for that kind; a second re-tap closes it.
  * - The **rubbing** eraser at [ERASER_RADIUS_PX] px on g-paper's [RasterRubbing] defaults: within
  *   the radius the alpha is lifted a fraction per pass, so a light pass softens a line and a few
  *   firm passes take it out. It is not a stroke eraser and there is no sub-bar — there are no
@@ -68,8 +68,6 @@ class SketchToolbar(
     /** The gel pen (arc 44 / T3) — [Tool.PEN]'s second **kind**, beside the pencil's. */
     btnPen: ImageButton,
     btnEraser: ImageButton,
-    /** The shade panel's door (arc 46 "Palette"). */
-    private val btnPalette: ImageButton,
     private val btnBringInk: ImageButton,
     private val btnShowPages: ImageButton,
     private val btnPrevPage: ImageButton,
@@ -83,8 +81,9 @@ class SketchToolbar(
     /** Any actual tool change — the screen takes down anything that belonged to the old tool. A
      *  pencil↔gel-pen switch is one of these, even though `paper.tool` never moves for it. */
     onToolTapped: () -> Unit,
-    /** A tap on the Palette button (arc 46) — the screen toggles its [PaletteBar] under it. */
-    onPalette: () -> Unit = {},
+    /** A tap on the **already-armed** pen of either kind (arc 44 / T3, both kinds since arc 46) —
+     *  the screen toggles its [PaletteBar] under that button, for that kind. */
+    onPenReTap: (alt: Boolean) -> Unit = {},
     /** A pen **kind** was tapped (arc 44 / T3): the screen applies the new state ([apply]) and
      *  remembers it on the device. It fires before the tool is armed — the firmware pen is re-armed
      *  from the colour and width, so the kind has to be in place first. */
@@ -155,13 +154,12 @@ class SketchToolbar(
             btnAltPen = btnPen,
             altPenArmed = { toolState.isPen },
             onPenKindPicked = onPenKindPicked,
-            // Arc 46: a re-tap on the armed pencil is nothing now — the shade panel has its own door.
+            onPenReTap = onPenReTap,
         )
 
-        listOf(btnPalette, btnBringInk, btnShowPages, btnPrevPage, btnNextPage).forEach {
+        listOf(btnBringInk, btnShowPages, btnPrevPage, btnNextPage).forEach {
             TooltipCompat.setTooltipText(it, it.contentDescription)
         }
-        btnPalette.setOnClickListener { releaseRenderIfIdle(); onPalette() }
         btnBringInk.setOnClickListener { releaseRenderIfIdle(); onBringInk() }
         btnShowPages.setOnClickListener { releaseRenderIfIdle(); onShowPages() }
         btnPrevPage.setOnClickListener { releaseRenderIfIdle(); onPrevPage() }

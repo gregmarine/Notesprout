@@ -104,8 +104,8 @@ import kotlinx.coroutines.withContext
  * - **The tools are chosen and remembered** (arc 44 / T3, remade by arc 46 "Palette"): a graphite
  *   pencil of one width and sixteen shades, a gel pen of one width and the same sixteen shades,
  *   and the rubber. Both pens are `Tool.PEN` to the engine, so which one is armed lives in
- *   [SketchToolState] and the bar paints from it; the armed kind's shade is picked in the
- *   [PaletteBar] hung under the Palette button, and **each pen button reports its own shade** by
+ *   [SketchToolState] and the bar paints from it; a kind's shade is picked in the [PaletteBar]
+ *   hung under its own button on a re-tap, and **each pen button reports its own shade** by
  *   carrying it as a fill inside its glyph ([ShadeIcon]) — on the top bar, on the mini toolbar
  *   and on the corner button. The choice is **device state, not page state** — it is kept in the
  *   host's prefs over two seam tails (`toolSettings` / `putToolSettings`), one setting for every
@@ -126,9 +126,9 @@ class SketchActivity : PaperScreenActivity() {
     private lateinit var toolbar: SketchToolbar
     private lateinit var saver: SketchSaver
 
-    /** The shade panel (arc 46 "Palette") — sixteen swatches, hung under the Palette button or the
-     *  collapsed overflow's own entry. Null until `onCreate` builds it, which a refused caller never
-     *  reaches. */
+    /** The shade panel (arc 46 "Palette") — Atelier's sixteen tones, hung under whichever pen
+     *  button was re-tapped (top bar or mini row). Null until `onCreate` builds it, which a refused
+     *  caller never reaches. */
     private var paletteBar: PaletteBar? = null
 
     /**
@@ -183,8 +183,11 @@ class SketchActivity : PaperScreenActivity() {
 
     /**
      * The pen's two kinds on the mini toolbar (arc 44 / T3): the graphite pencil and the gel pen,
-     * both `Tool.PEN`. A pick of the already-armed kind simply arms it again and closes the rows
-     * (arc 46 took the re-tap door away — the shade panel has its own entry, below).
+     * both `Tool.PEN`. A pick of the already-armed kind opens the [PaletteBar] **under that row's
+     * own button** for that kind and leaves the row up beneath it — the notebook Insert bar's
+     * shape, and the reason the entry is handed its anchor: the top bar's pen buttons are `GONE`
+     * while the chrome is collapsed and keep stale edges, so a bar hung under one would land under
+     * nothing.
      *
      * **The row and the corner button report the shades too** — the same filled glyphs the top
      * bar's own buttons wear ([ShadeIcon]), so collapsing the chrome never costs the person the one
@@ -199,6 +202,7 @@ class SketchActivity : PaperScreenActivity() {
         altHint = getString(R.string.cd_tool_pen),
         altArmed = { toolbar.state.isPen },
         onPick = { alt -> armPen(alt) },
+        onReTap = { _, anchor -> togglePaletteBar(anchor) },
         primaryIcon = {
             val ink = toolbar.state.pencilReport
             CollapsedChrome.PenIcon(ink) { ShadeIcon.pencil(this, ink) }
@@ -224,19 +228,11 @@ class SketchActivity : PaperScreenActivity() {
     /** …and a contact **inside** that panel must not take the rows down under it. */
     override fun keepCollapsedUnder(x: Int, y: Int): Boolean = paletteBar?.contains(x, y) == true
 
-    /**
-     * Back · Shades · Bring in ink · Show pages — the top bar's doors, **mirrored**, so the row
-     * shows exactly what the bar shows and a tap performs the bar button's own click. Four is past
-     * `CollapsedTools.INLINE_MAX`, so they sit behind `…`.
-     *
-     * **Shades** (arc 46) is the one with its own `onTap`: the top bar's Palette button is `GONE`
-     * while the chrome is collapsed and keeps stale edges, so its panel is hung under **this row's
-     * own entry** instead and the rows stay up beneath it — the notebook Insert bar's shape, and
-     * the reason an entry is handed its anchor.
-     */
+    /** Back · Bring in ink · Show pages — the top bar's three doors, **mirrored**, so the row shows
+     *  exactly what the bar shows and a tap performs the bar button's own click. Three is past
+     *  `CollapsedTools.INLINE_MAX`, so they sit behind `…`. */
     override fun collapsedOverflow(): List<CollapsedChrome.Entry> = listOfNotNull(
         backEntry(),
-        CollapsedChrome.Entry.mirroring(R.drawable.ic_palette, binding.btnPalette) { anchor -> togglePaletteBar(anchor) },
         CollapsedChrome.Entry.mirroring(R.drawable.ic_pencil_down, binding.btnBringInk),
         CollapsedChrome.Entry.mirroring(R.drawable.ic_page, binding.btnShowPages),
     )
@@ -283,7 +279,6 @@ class SketchActivity : PaperScreenActivity() {
             btnPencil = binding.btnPencil,
             btnPen = binding.btnPen,
             btnEraser = binding.btnEraser,
-            btnPalette = binding.btnPalette,
             btnBringInk = binding.btnBringInk,
             btnShowPages = binding.btnShowPages,
             btnPrevPage = binding.btnPrevPage,
@@ -297,7 +292,8 @@ class SketchActivity : PaperScreenActivity() {
             // An actual tool change — including a pencil↔gel-pen switch, which never moves
             // `paper.tool`: the shade panel shows the kind that is leaving.
             onToolTapped = { dismissCollapsed(); hidePaletteBar() },
-            onPalette = { togglePaletteBar() },
+            // The armed kind's own button: the pencil's or the pen's (arc 46).
+            onPenReTap = { alt -> togglePaletteBar(if (alt) binding.btnPen else binding.btnPencil) },
             onPenKindPicked = { alt -> pickTools(toolbar.state.withTool(penKind(alt))) },
             onSynced = { syncCollapsed() },   // arc 36: the corner button repaints with the bar
             // Release builds never attach it: the door is compiled out with the branch.
@@ -306,7 +302,7 @@ class SketchActivity : PaperScreenActivity() {
         paletteBar = PaletteBar(
             root = binding.root,
             bar = binding.paletteBar,
-            anchor = binding.btnPalette,
+            anchor = binding.btnPencil,
             bandBottom = { chromeBand()?.last },
             paper = paper,
             armed = { toolbar.state },
@@ -596,8 +592,8 @@ class SketchActivity : PaperScreenActivity() {
         toolbar.arm(Tool.PEN)
     }
 
-    /** Open the shade panel under [anchor], or close it — the Palette button's toggle, from the
-     *  top bar (its own button) or from the collapsed overflow (that row's entry). */
+    /** Open the shade panel under [anchor], or close it — the armed pen button's re-tap toggle,
+     *  from the top bar (the pencil's or the pen's button) or from the mini toolbar (that row's). */
     private fun togglePaletteBar(anchor: View? = null) {
         val bar = paletteBar ?: return
         if (bar.isShowing) {
@@ -625,8 +621,8 @@ class SketchActivity : PaperScreenActivity() {
 
     /**
      * The outside-contact dismissal — the eraser sub-bar's rule on every other paper screen: any
-     * pointer landing anywhere but the panel itself, the Palette button whose own tap toggles it, or
-     * the collapsed rows it may be hanging under, takes it down. That covers a bare pen tap, a
+     * pointer landing anywhere but the panel itself, the armed pen button whose own re-tap toggles
+     * it, or the collapsed rows it may be hanging under, takes it down. That covers a bare pen tap, a
      * stroke, a finger gesture and every other button on either bar without any of them having to
      * know this bar exists.
      *
@@ -643,7 +639,8 @@ class SketchActivity : PaperScreenActivity() {
         // collapsed rows it may be hanging under — window coordinates, which on a full-bleed
         // immersive screen are the root's.
         if (floatingContains(x, y)) return
-        if (PaperToolbar.rectOf(binding.btnPalette)?.contains(x, y) == true) return
+        val toggler = if (toolbar.state.isPen) binding.btnPen else binding.btnPencil
+        if (PaperToolbar.rectOf(toggler)?.contains(x, y) == true) return
         hidePaletteBar()
     }
 

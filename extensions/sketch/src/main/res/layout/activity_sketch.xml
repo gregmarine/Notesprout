@@ -90,14 +90,6 @@
                     style="@style/Widget.Notesprout.ToolbarButton"
                     android:contentDescription="@string/cd_tool_eraser"
                     android:src="@drawable/ic_eraser" />
-
-                <!-- The shade panel's door (arc 46 "Palette") — Tabler's palette glyph; a tap
-                     toggles the PaletteBar under it, editing the armed pen kind's shade. -->
-                <androidx.appcompat.widget.AppCompatImageButton
-                    android:id="@+id/btnPalette"
-                    style="@style/Widget.Notesprout.ToolbarButton"
-                    android:contentDescription="@string/cd_tool_palette"
-                    android:src="@drawable/ic_palette" />
             </LinearLayout>
 
             <!-- Bring in ink (the door back to the notebook's own ink layer), then Show pages. -->
@@ -185,9 +177,9 @@
 
     </LinearLayout>
 
-    <!-- The shade panel (arc 46 "Palette"; arc 44 / T3's PencilBar remade) — sixteen swatches in
-         two rows of eight, hung under the Palette button. Empty here: its rows and swatches are
-         built in code by PaletteBar. -->
+    <!-- The shade panel (arc 46 "Palette"; arc 44 / T3's PencilBar remade) — Atelier's sixteen
+         tones in four rows of four, hung under the armed pen button on its re-tap. Empty here: its
+         rows and swatches are built in code by PaletteBar. -->
     <LinearLayout
         android:id="@+id/paletteBar"
         android:layout_width="wrap_content"
