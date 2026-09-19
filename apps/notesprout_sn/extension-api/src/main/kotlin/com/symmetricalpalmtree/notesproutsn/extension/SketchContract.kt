@@ -91,6 +91,18 @@ object SketchContract {
      */
     const val MIN_API_VERSION_FOR_SKETCH_TOOLS: Int = 19
 
+    /**
+     * The floor for [SketchToolSettings.penShade] (arc 46 "Palette" / Q1, 2026-09-19 — the user's
+     * decision 3: the gel pen takes the same sixteen-shade choice as the pencil, so its shade is
+     * remembered beside the pencil's). Not a method: the two tool tails are unchanged, and what
+     * grew is the **parcel** — a fourth `int` after `size`, read with the exhausted-parcel rule, so
+     * a 20 host and a 21 screen still read each other (the pen reads as black on the old side).
+     * Named the way the method floors are so the ledger says when the field arrived; like them it
+     * is a number an extension declares to say what it requires of the host, and `:ext-sketch`
+     * declares it. [MIN_API_VERSION_FOR_SKETCH] stays 20 — nothing changed shape in place.
+     */
+    const val MIN_API_VERSION_FOR_SKETCH_PEN_SHADE: Int = 21
+
     // ── The two rasters (arc 45 / G2) ──────
 
     /**
@@ -215,13 +227,14 @@ object SketchContract {
      *  tool number reads as. */
     const val TOOL_PENCIL: Int = 0
 
-    /** [SketchToolSettings.tool]: the gel pen (`StrokeStyle.PEN`, black, one size — decision 4). */
+    /** [SketchToolSettings.tool]: the gel pen (`StrokeStyle.PEN`, one size — arc 44's decision 4;
+     *  its shade is [SketchToolSettings.penShade] since arc 46). */
     const val TOOL_PEN: Int = 1
 
     /**
      * Largest value any [SketchToolSettings] field may carry — a **sanity bound on an unmarshalled
-     * integer, not the palette's size** ([MAX_PAGE_PX]'s kind of number). How many shades and sizes
-     * there are is `:ext-sketch`'s to know and to change; the face reads an index past the end of
+     * integer, not the palette's size** ([MAX_PAGE_PX]'s kind of number). How many shades there
+     * are is `:ext-sketch`'s to know and to change; the face reads an index past the end of
      * its own list as its default. 255 is past anything a bar of swatches could ever hold, which
      * is the point: beyond it the number is not an index.
      */

@@ -75,3 +75,8 @@ palette was a firmware-needle constraint that no longer applies on the direct pa
 ## Ledger
 
 - **Q0 ✅ 2026-09-19** — branch `tools` from `main` (94da6447); this plan.
+- **Q1 ✅ 2026-09-19** — the seam: `SketchToolSettings.penShade` (fourth int, exhausted-parcel
+  read → 0, `size` a dead slot kept on the wire), `SketchContract.MIN_API_VERSION_FOR_SKETCH_PEN_SHADE`
+  = 21, `API_VERSION` 20 → 21, `:ext-sketch` manifest 21, `SketchToolPrefs`/`SketchToolCodec`
+  fourth key `pen_shade` (missing → 0). Pin tests: `:extension-api` SketchContract 16 /
+  SketchToolSettings 4 / ExtensionContract 10, `:app` SketchToolCodec 7 — all green.

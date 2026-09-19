@@ -175,8 +175,16 @@ object ExtensionContract {
      * never binds a 19 host. Granted by the user's decision 4 — no legacy, no shipped library on
      * the old shape. Every other point's floor is untouched; the two sketch method floors (18, 19)
      * sit below the action floor and are inert. Not an eleventh point; only `:ext-sketch` declares.
+     *
+     * **21 = arc 46 "Palette" / Q1 (2026-09-19)** — one compatible tail on a **parcel**, not a
+     * method: [SketchToolSettings] grows a fourth `int`, `penShade` (the gel pen takes the same
+     * sixteen-shade choice as the pencil — the user's decision 3), read with the exhausted-parcel
+     * rule, named by [SketchContract.MIN_API_VERSION_FOR_SKETCH_PEN_SHADE]. The `size` slot before
+     * it is dead (one pencil width now) and stays on the wire so nothing changes shape in place.
+     * `MIN_API_VERSIONS` is untouched, [SketchContract.MIN_API_VERSION_FOR_SKETCH] stays 20, no
+     * door vanishes, and only `:ext-sketch` redeclares. Not an eleventh point.
      */
-    const val API_VERSION: Int = 20
+    const val API_VERSION: Int = 21
 
     /**
      * The floor for a service on a **store-taking** point (arc 22 / X1): the host accepts such a

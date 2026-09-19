@@ -46,6 +46,19 @@ class SketchContractTest {
     }
 
     @Test
+    fun `the pen-shade tail sits above the action floor and closes no door`() {
+        // Arc 46 / Q1: a PARCEL tail (SketchToolSettings.penShade), named at 21 the way the method
+        // floors are. Unlike the two history floors it is ABOVE the action floor — the correct
+        // sense for a live tail, the reverse of G2's inversion — and it moves no floor: a 20
+        // screen still binds, and a 21 one does too.
+        assertEquals(21, SketchContract.MIN_API_VERSION_FOR_SKETCH_PEN_SHADE)
+        assertTrue(SketchContract.MIN_API_VERSION_FOR_SKETCH_PEN_SHADE > SketchContract.MIN_API_VERSION_FOR_SKETCH)
+        assertTrue(SketchContract.MIN_API_VERSION_FOR_SKETCH_PEN_SHADE <= ExtensionContract.API_VERSION)
+        assertEquals(20, ExtensionContract.minApiVersion(SketchContract.ACTION_SKETCH))
+        assertTrue(ExtensionContract.accepts(SketchContract.ACTION_SKETCH, 21))
+    }
+
+    @Test
     fun `the two rasters are pinned, distinct and the whole list`() {
         // Arc 45 / G2: the wire names a raster by a small int. Stored nowhere (a layer is a row
         // TYPE on the host's side, not a number), but compared on every chunk call, so pinned.

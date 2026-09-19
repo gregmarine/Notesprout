@@ -27,6 +27,9 @@ class SketchToolSettingsTest {
         assertEquals(SketchContract.TOOL_PEN, s.tool)
         assertEquals(5, s.shade)
         assertEquals(2, s.size)
+        // Q1: the fourth field defaults to black — a three-int caller means what it always did.
+        assertEquals(0, s.penShade)
+        assertEquals(9, SketchToolSettings(SketchContract.TOOL_PEN, 5, 2, penShade = 9).penShade)
     }
 
     @Test
@@ -34,8 +37,8 @@ class SketchToolSettingsTest {
         // A stored index past the end of a (possibly shortened) palette is a LEGAL parcel — the
         // face reads it as its default. Only a number that cannot be an index at all is refused.
         val max = SketchContract.MAX_TOOL_SETTING_INDEX
-        SketchToolSettings(max, max, max)
-        SketchToolSettings(0, 0, 0)
+        SketchToolSettings(max, max, max, max)
+        SketchToolSettings(0, 0, 0, 0)
         SketchToolSettings(SketchContract.TOOL_PENCIL, shade = 14, size = 4)
     }
 
@@ -48,6 +51,8 @@ class SketchToolSettingsTest {
         assertRefused { SketchToolSettings(over, 0, 0) }
         assertRefused { SketchToolSettings(0, over, 0) }
         assertRefused { SketchToolSettings(0, 0, over) }
+        assertRefused { SketchToolSettings(0, 0, 0, -1) }
+        assertRefused { SketchToolSettings(0, 0, 0, over) }
         assertRefused { SketchToolSettings(Int.MIN_VALUE, Int.MAX_VALUE, 0) }
     }
 
@@ -59,6 +64,7 @@ class SketchToolSettingsTest {
         assertNotEquals(a, SketchToolSettings(1, 5, 0))
         assertNotEquals(a, SketchToolSettings(0, 6, 0))
         assertNotEquals(a, SketchToolSettings(0, 5, 1))
-        assertEquals("SketchToolSettings(tool=0, shade=5, size=0)", a.toString())
+        assertNotEquals(a, SketchToolSettings(0, 5, 0, 1))
+        assertEquals("SketchToolSettings(tool=0, shade=5, size=0, penShade=0)", a.toString())
     }
 }

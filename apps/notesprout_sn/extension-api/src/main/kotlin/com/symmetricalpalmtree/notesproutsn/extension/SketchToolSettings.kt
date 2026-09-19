@@ -4,9 +4,9 @@ import android.os.Parcel
 import android.os.Parcelable
 
 /**
- * What the sketch face's drawing tools were last set to (arc 44 / T2) — the one thing the sketch
- * seam carries that is **not about a page**: which tool was armed, which pencil shade, which pencil
- * size. The face pushes it at every pick ([ISketchHost.putToolSettings]) and asks for it back at
+ * What the sketch face's drawing tools were last set to (arc 44 / T2, grown by arc 46 / Q1) — the
+ * one thing the sketch seam carries that is **not about a page**: which tool was armed, which
+ * pencil shade, and — since arc 46 "Palette" — which gel-pen shade. The face pushes it at every pick ([ISketchHost.putToolSettings]) and asks for it back at
  * `begin` ([ISketchHost.toolSettings]); the host keeps it in device-local prefs — one setting for
  * every notebook, never in the `.soil`, never in a backup (decision 6). An extension writes nothing
  * to disk itself, which is the whole reason this crosses at all.
@@ -24,10 +24,16 @@ import android.os.Parcelable
  * The constructor `require`s are the validation — unmarshal is validation (the family rule). This
  * parcel crosses in **both** directions, so both sides are the untrusted-inward side once.
  *
- * Wire form: `int tool · int shade · int size`. A future field is a compatible tail, read with the
- * exhausted-parcel rule ([SketchPageState.structuralToken]'s).
+ * Wire form: `int tool · int shade · int size · int penShade`. [penShade] is arc 46 / Q1's
+ * **compatible tail**, read with the exhausted-parcel rule ([SketchPageState.structuralToken]'s):
+ * a three-int parcel from an arc-44/45 host reads as pen shade 0, and a four-int parcel handed to
+ * such a host leaves one int unread. [size] is a **dead slot since arc 46** — the face offers one
+ * pencil width and writes 0 here, never reading it back — kept on the wire because dropping it
+ * would be an in-place shape change and move the point's action floor for nothing
+ * ([SketchContract.MIN_API_VERSION_FOR_SKETCH_PEN_SHADE] names the tail instead). A future field
+ * is another tail after it.
  *
- * Nothing here is content: three small integers say nothing of what a person drew, so they may be
+ * Nothing here is content: four small integers say nothing of what a person drew, so they may be
  * logged.
  */
 class SketchToolSettings(
@@ -36,8 +42,12 @@ class SketchToolSettings(
     val tool: Int,
     /** The pencil's shade, as a level on the face's own ladder (0 = black). */
     val shade: Int,
-    /** The pencil's size, as a position in the face's own list (0 = the finest). */
+    /** Arc 44's pencil size, as a position in the face's then list. **Dead since arc 46 / Q1**: the
+     *  face writes 0 and never reads it; the slot stays on the wire (class doc). */
     val size: Int,
+    /** The gel pen's shade, as a level on the face's own ladder (0 = black) — arc 46 / Q1's tail.
+     *  Defaulted so a three-int caller still compiles and means what it always did. */
+    val penShade: Int = 0,
 ) : Parcelable {
 
     init {
@@ -50,28 +60,37 @@ class SketchToolSettings(
         require(size in 0..SketchContract.MAX_TOOL_SETTING_INDEX) {
             "size $size outside 0..${SketchContract.MAX_TOOL_SETTING_INDEX}"
         }
+        require(penShade in 0..SketchContract.MAX_TOOL_SETTING_INDEX) {
+            "penShade $penShade outside 0..${SketchContract.MAX_TOOL_SETTING_INDEX}"
+        }
     }
 
     override fun writeToParcel(dest: Parcel, flags: Int) {
         dest.writeInt(tool)
         dest.writeInt(shade)
         dest.writeInt(size)
+        dest.writeInt(penShade)
     }
 
     override fun describeContents(): Int = 0
 
     override fun equals(other: Any?): Boolean =
-        other is SketchToolSettings && other.tool == tool && other.shade == shade && other.size == size
+        other is SketchToolSettings && other.tool == tool && other.shade == shade &&
+            other.size == size && other.penShade == penShade
 
-    override fun hashCode(): Int = (tool * 31 + shade) * 31 + size
+    override fun hashCode(): Int = ((tool * 31 + shade) * 31 + size) * 31 + penShade
 
-    override fun toString(): String = "SketchToolSettings(tool=$tool, shade=$shade, size=$size)"
+    override fun toString(): String =
+        "SketchToolSettings(tool=$tool, shade=$shade, size=$size, penShade=$penShade)"
 
     companion object {
         private fun read(parcel: Parcel): SketchToolSettings = SketchToolSettings(
             tool = parcel.readInt(),
             shade = parcel.readInt(),
             size = parcel.readInt(),
+            // The exhausted-parcel rule: an arc-44/45 host writes three ints, and the pen it never
+            // knew about reads as black.
+            penShade = if (parcel.dataAvail() > 0) parcel.readInt() else 0,
         )
 
         @JvmField

@@ -17,9 +17,12 @@
              (host)` lends the host for the whole showing, `end()` drops it — there is NO store:
              the pixels live in the host's own `.soil` and cross the seam as chunked lossless WebP
              — two rasters a page since arc 45 "Ink" — so this point never touches Room / SQLCipher
-             / serialization. **API version 20 since arc 45 / G2–G3.** The number is what this
-             extension REQUIRES OF THE HOST, and 20 is `SketchContract.MIN_API_VERSION_FOR_SKETCH`
-             after G2 moved the point's own ACTION floor 17 → 20: the point's own calls changed
+             / serialization. **API version 21 since arc 46 "Palette" / Q1** — the number is what
+             this extension REQUIRES OF THE HOST: 21 is
+             `SketchContract.MIN_API_VERSION_FOR_SKETCH_PEN_SHADE`, the parcel tail that carries the
+             gel pen's remembered shade (`SketchToolSettings.penShade`, a fourth int a 20 host
+             would read as absent). The ACTION floor `MIN_API_VERSION_FOR_SKETCH` is still 20, where
+             G2 moved it from 17: the point's own calls changed
              shape in place — `ISketchHost.readSketchChunk` / `saveSketchChunk` (codes 3–4) took a
              raster layer, and `SketchPageState`'s wire form grew a second byte/chunk pair — so
              neither side can read the other's, and a host below 20 never discovers this package at
@@ -38,7 +41,7 @@
             </intent-filter>
             <meta-data
                 android:name="com.symmetricalpalmtree.notesproutsn.extension.API_VERSION"
-                android:value="20" />
+                android:value="21" />
         </service>
 
         <!-- The extension-owned screen (tier 2): exported, custom action, NO launcher filter;
