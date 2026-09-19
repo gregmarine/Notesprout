@@ -921,7 +921,7 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
 - **`IndexGuard.ready(this)` first thing in every index-touching `onCreate`**;
   `BootstrapActivity` is the only index opener and is `noHistory`.
 - **g-paper 0.1.40 (the pin since 2026-09-18 — Phase 27, the white lead's LIGHT_GRAY preview,
-  ratta only; 0.1.39 since arc 45 / G1, 2026-09-17, re-pinned into `:ext-sketch` at G3,
+  ratta only; **0.1.42 since 2026-09-19 (Phase 28 "Graphite on the panel" + maintenance — the Supernote pencil previews direct on `/dev/ebc`, the on-screen page dithered; SN maintenance re-pin, not an arc)**; 0.1.39 since arc 45 / G1, 2026-09-17, re-pinned into `:ext-sketch` at G3,
   2026-09-18 — Phase 26 "Two rasters: graphite and ink":** `RasterLayer { GRAPHITE, INK }`;
   `CanvasPaperView` holds both, each allocated lazily on its own first mark; the committed-layer
   draw flattens them with one `PorterDuff.Mode.DARKEN` blit (`renderToBitmap()` is the flatten);

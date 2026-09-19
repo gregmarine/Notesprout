@@ -37,6 +37,13 @@ import kotlinx.coroutines.withContext
  *   main-thread copy of one of the engine's page images, and the engine only ever touches those
  *   images on Main (the composite at pen-up, each batch of a rub, a load) — so a copy can never
  *   catch a half-written composite. Everything after that point works on an immutable bitmap.
+ * - **A page turn awaits the copy and nothing else** ([flushForTurn], 2026-09-19). The encode is
+ *   the expensive half — 0.5–3.5 s for a real pencil page on the Nomad at `WEBP_EFFORT` 100 — and
+ *   a turn that awaited it made a flip straight after drawing take seconds while a flip after a
+ *   pause was instant. The copy freezes the pixels; nothing the hand does afterwards can change
+ *   what will be written, so the encode and the push go on in the background while the next page
+ *   loads. The **leave** flushes ([flushForExit], [flushBlocking]) still await the push itself:
+ *   the host reads the row the moment they return.
  * - **The encode and the push run on IO, one at a time** — *one* [Mutex] for both rasters, not one
  *   each. `saveSketchChunk` is a blocking Binder call and the host accumulates chunks per save;
  *   the lock is FIFO, so the two rasters of one page go over the wire **one after the other**,
@@ -47,6 +54,8 @@ import kotlinx.coroutines.withContext
  *   their page *and their layer*, the retry is re-armed, and that raster stays dirty — the other
  *   one is unaffected. Only counts, durations and exception class names are logged — never a
  *   pixel, on any path.
+ * - **A push is recorded under the page key its copy was taken on** ([PushTracker]), so a later
+ *   *read* of that page can wait for it. A read of any other page never waits — see [awaitPushes].
  *
  * **The debounce goes through the pen-idle gate.** Three seconds after the last change, and then
  * only once the pen is off the glass: the copy is a page-sized `memcpy` on the main thread and the
@@ -77,12 +86,20 @@ class SketchSaver(
     private val governors: Map<RasterLayer, SketchSaveGovernor> =
         SketchLayers.all.associateWith { SketchSaveGovernor() }
 
+    /** Which pages still have a push in the air, keyed by the page the copy was taken on — what
+     *  lets a read of a page wait for its own write and for no other (2026-09-19). */
+    private val pushes = PushTracker()
+
     /** The page every save goes to, set at each load. Null before the first one — and a save with
      *  no page is not a save that goes to the wrong place, it is no save at all. */
     @Volatile
     var pageKey: String? = null
 
-    /** Set once the screen is leaving: the timers stay down and no new debounce may arm. */
+    /** Set once the screen is leaving: the timers stay down, no new debounce may arm, and no
+     *  completing push may start another one (which is what makes [PushTracker.awaitAll]
+     *  terminate). `@Volatile` because [flushForExit] can be entered from the **Binder thread**
+     *  `end()` arrives on while the completions that read it run on Main. */
+    @Volatile
     private var leaving = false
 
     private var debounce: Job? = null
@@ -142,19 +159,49 @@ class SketchSaver(
      */
     private fun startPush(key: String, layer: RasterLayer) {
         val copy = takeCopy(layer) ?: run { armRetry(); return }
-        scope.launch {
-            val error = pushCopy(key, layer, copy.bitmap)
-            withContext(Dispatchers.Main) {
-                if (error == null) {
-                    if (governor(layer).onSaved() is SketchSaveGovernor.SaveAction.Save) {
-                        pageKey?.let { startPush(it, layer) }
-                    }
-                } else {
-                    governor(layer).onFailed()
-                    armRetry()
-                }
-            }
+        launchPush(key, layer, copy)
+    }
+
+    /**
+     * **Main thread.** Send [copy] on its way as [layer]'s image of the page [key] names, and record
+     * the job under **that** key so a later read of that page can wait for it ([awaitPushes]) — the
+     * key the copy was taken under is the key it is pushed under, whatever page the screen has moved
+     * to by the time it lands.
+     */
+    private fun launchPush(key: String, layer: RasterLayer, copy: Snapshot) {
+        val job = scope.launch {
+            val error = pushCopy(key, layer, copy.bitmap, copy.copyMs)
+            withContext(Dispatchers.Main) { finishPush(key, layer, error) }
         }
+        pushes.track(key, job)
+    }
+
+    /**
+     * **Main thread.** One push's bookkeeping, shared by the debounced save and the turn flush's
+     * background push.
+     *
+     * The governors are about **the glass**, not about a page: by the time a background push lands
+     * the screen may be on the next page, and that is exactly right — a mark that arrived during the
+     * encode belongs to whatever page is showing now, so the follow-up save goes to [pageKey] and
+     * not to [key]. Two consequences worth saying out loud:
+     *
+     * - **While leaving, a follow-up is not started but is not dropped either.** The governor's flag
+     *   is put straight back (`onCopyFailed` is "still owed, nothing in flight"), so the leave
+     *   flush's own `flushRequest` still finds it. Starting one here would be a push appearing
+     *   *after* [PushTracker.awaitAll] had drained the last one.
+     * - **A background push that fails after a turn marks the page now showing dirty.** It costs one
+     *   redundant save of bytes the host already has, and it is the conservative side of the trade:
+     *   the alternative is a governor that has to know which page each push was for.
+     */
+    private fun finishPush(key: String, layer: RasterLayer, error: Throwable?) {
+        if (error != null) {
+            governor(layer).onFailed()
+            armRetry()
+            return
+        }
+        if (governor(layer).onSaved() !is SketchSaveGovernor.SaveAction.Save) return
+        val next = pageKey
+        if (leaving || next == null) governor(layer).onCopyFailed() else startPush(next, layer)
     }
 
     /**
@@ -167,14 +214,23 @@ class SketchSaver(
      */
     suspend fun flushForExit(): Boolean {
         leaving = true
+        // Everything a turn left running, whatever page it was for: the binder is revoked the
+        // moment we hand the pipeline back, and a push still encoding would arrive at a dead one.
+        // `leaving` is already true, so nothing can start another and this drain terminates.
+        pushes.awaitAll()
         return flushAndAwait()
     }
 
     /**
-     * The same flush **without** declaring the screen gone — what a page turn and an undo replay's
-     * walk take before they leave a page behind. The host's read windows are about to move, so this
-     * page's pixels have to be on disk first; but the screen is staying, so the debounce may arm
-     * again on the page that arrives.
+     * The same flush **without** declaring the screen gone — what a page insert, a page delete and a
+     * structural replay take before they leave a page behind, and what every leave flush ends with.
+     * The host's read windows are about to move, so this page's pixels have to be on disk first;
+     * but the screen is staying, so the debounce may arm again on the page that arrives.
+     *
+     * **A page turn takes [flushForTurn] instead** (2026-09-19): a turn is the one flush point where
+     * nothing reads a row immediately afterwards, so it need not pay the encode. The three that stay
+     * here each have a reason to: an insert and a delete are about to change the notebook's own page
+     * set, and a delete in particular must have written whatever its undo will bring back.
      *
      * Walks the rasters in [SketchLayers.all]'s order and pushes each one that is owed, in turn —
      * sequentially, because the push lock would serialise them anyway and because a flush answers
@@ -183,6 +239,9 @@ class SketchSaver(
     suspend fun flushAndAwait(): Boolean {
         cancelTimers()
         val key = pageKey ?: return true
+        // A turn may have left this page's own push in the air. Waiting here is what keeps "when
+        // this returns, this page is on disk" true; it is a no-op on every other path.
+        pushes.await(key)
         var clean = true
         for (layer in SketchLayers.all) {
             // `owed` is what tells a raster with nothing to write apart from one whose copy could
@@ -196,7 +255,8 @@ class SketchSaver(
                 if (owed) clean = false
                 continue
             }
-            val error = withContext(NonCancellable) { pushCopy(key, layer, copy.bitmap) }   // pushCopy hops to IO itself
+            // pushCopy hops to IO itself
+            val error = withContext(NonCancellable) { pushCopy(key, layer, copy.bitmap, copy.copyMs) }
             withContext(Dispatchers.Main + NonCancellable) {
                 if (error == null) governor(layer).onSaved() else governor(layer).onFailed()
             }
@@ -204,6 +264,64 @@ class SketchSaver(
         }
         return clean
     }
+
+    /**
+     * **The page turn's flush** (2026-09-19, the user's decision after his own Nomad finding: a flip
+     * straight after drawing took "a few seconds", a flip after a pause was instant).
+     *
+     * It awaits **only the Main-thread pixel copy** of each owed raster — `flushRequest()` and
+     * `getPageRaster` — and then lets the encode and the push run on IO, under the same one push
+     * lock, while the next page loads. The measured halves on the Nomad say why: the copy is a
+     * page-sized `memcpy` of a few milliseconds, the WebP encode at `WEBP_EFFORT` 100 is 0.5–3.5 s
+     * on a real pencil page (2 792 / 3 543 / 3 310 ms on three ~1 MB pages), and the push is tens
+     * of milliseconds. The copy is the half that has to happen before the paper changes; the encode
+     * only has to happen before the row is read.
+     *
+     * **What makes that safe is [awaitPushes].** The copy freezes the pixels, so what will be
+     * written is already decided; the one thing still untrue is that the page's *row* holds them. So
+     * every read of a page's raster — which on this screen means `loadPage`, the only place the face
+     * reads a raster back through the host — waits for that page's own pushes first, and for no
+     * other page's. Everything else is unchanged: the copy is taken under [pageKey] and pushed under
+     * the same key, a failure parks and re-arms exactly as before, and the leave flushes still await
+     * the push itself.
+     *
+     * Returns **true** when nothing was owed that could not be *copied*. A false here is narrower
+     * than [flushAndAwait]'s: the copy was refused (a page-sized allocation on a device short of
+     * exactly that), the raster stays dirty and the retry is armed. A push that fails later parks
+     * its pixels as always and the screen hears about it at the next flush or at `end()`.
+     */
+    suspend fun flushForTurn(): Boolean {
+        cancelTimers()
+        val key = pageKey ?: return true
+        var copied = true
+        withContext(Dispatchers.Main + NonCancellable) {
+            for (layer in SketchLayers.all) {
+                if (governor(layer).flushRequest() !is SketchSaveGovernor.SaveAction.Save) continue
+                val copy = takeCopy(layer)
+                if (copy == null) {
+                    copied = false
+                    armRetry()
+                    continue
+                }
+                launchPush(key, layer, copy)
+            }
+        }
+        return copied
+    }
+
+    /**
+     * Suspend until every background push taken for the page [key] names has finished — landed, or
+     * failed and parked. **A page with nothing in the air returns at once, and a different page's
+     * push is never waited for**: that is the whole shape of [flushForTurn]'s safety, and the reason
+     * turning away from a page just drawn on is free while turning *back* to it is not.
+     *
+     * Called by the screen before it reads that page's rasters back through the host.
+     */
+    suspend fun awaitPushes(key: String) = pushes.await(key)
+
+    /** Whether the page [key] names still has a push in the air — the cheap question a page load
+     *  asks before deciding whether it must wait and re-ask the host for its state. */
+    fun isPushPending(key: String): Boolean = pushes.isPending(key)
 
     /**
      * Re-offer **everything** that is parked, each under its own page key and its own raster — a
@@ -254,14 +372,17 @@ class SketchSaver(
 
     // ── The push ──────────────────────────────────────────────────────────────
 
-    /** The copy, taken on Main. A null bitmap is a blank raster, which is a save like any other. */
-    private class Snapshot(val bitmap: Bitmap?)
+    /** The copy, taken on Main, and how long taking it cost. A null bitmap is a blank raster, which
+     *  is a save like any other; [copyMs] rides along only so the save's log line can name the half
+     *  a page turn now awaits beside the halves it no longer does. */
+    private class Snapshot(val bitmap: Bitmap?, val copyMs: Long)
 
     /** **Main thread.** One raster's copy, or null when it could not be taken (a page-sized
      *  allocation on a device short of exactly that — that raster stays dirty and the caller
      *  retries). */
     private fun takeCopy(layer: RasterLayer): Snapshot? = try {
-        Snapshot(copyPage(layer))
+        val t0 = SystemClock.elapsedRealtime()
+        Snapshot(copyPage(layer), SystemClock.elapsedRealtime() - t0)
     } catch (t: Throwable) {
         governor(layer).onCopyFailed()
         Log.e(TAG, "the ${name(layer)} raster could not be copied for saving; it stays dirty and will be tried again", t)
@@ -277,7 +398,12 @@ class SketchSaver(
      * own Main-dispatched page-op lock — and a page encode plus a chunked Binder push on the main
      * thread is the ANR this whole class exists to avoid.
      */
-    private suspend fun pushCopy(key: String, layer: RasterLayer, copy: Bitmap?): Throwable? = withContext(Dispatchers.IO) {
+    private suspend fun pushCopy(
+        key: String,
+        layer: RasterLayer,
+        copy: Bitmap?,
+        copyMs: Long,
+    ): Throwable? = withContext(Dispatchers.IO) {
         val t0 = SystemClock.elapsedRealtime()
         val bytes = try {
             RasterImage.encode(copy)
@@ -291,8 +417,10 @@ class SketchSaver(
         }
         val encoded = SystemClock.elapsedRealtime() - t0
         val error = pushBytes(key, layer, bytes)
+        // The three halves named apart (2026-09-19): a page turn awaits the copy and nothing else,
+        // so a walk can read straight off this line which part of a save it is still paying for.
         Slog.d(TAG) {
-            "save (${name(layer)}): ${bytes.size} B encoded in $encoded ms, pushed in " +
+            "save (${name(layer)}): ${bytes.size} B — copy $copyMs ms, encode $encoded ms, push " +
                 "${SystemClock.elapsedRealtime() - t0 - encoded} ms${if (error == null) "" else " — FAILED"}"
         }
         error

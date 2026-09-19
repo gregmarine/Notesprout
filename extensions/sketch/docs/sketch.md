@@ -73,7 +73,12 @@ pressure **0.5**, the bake tilt **0** (0.1.35's own fix) and the **16 ms** caden
 as K1/K8 froze them — only the EMR *ceiling* moved, and only for the pencil's widest leads.
 **Arc 45 moved none of the four either** — the two-raster split is an engine-side routing and
 flatten change, not a tuning one; cadence, EMR floor, bake pressure and bake tilt are exactly
-what K1/K8/0.1.35 left them.
+what K1/K8/0.1.35 left them. **Over 0.1.41 / 0.1.42 (g-paper Phase 28 + maintenance, re-pinned
+2026-09-19 as SN maintenance, not an arc):** the pencil previews direct on the panel and the
+display is dithered (see "The Ratta preview" under Tools); on that path the bake pressure is the
+hand's (0.5 only on the needle fallback), the tilt stays 0, the cadence and EMR floor are
+untouched. The face decodes both rasters before loading either (one dither rebuild per page open,
+~100–200 ms on the Nomad) and a page turn awaits the pixel copy, not the encode (§ Saves).
 
 ---
 
@@ -604,10 +609,19 @@ stroke erasers, and a raster page has neither.
   the armed pen back on the engine after "Bring in ink" or the debug fill door composite: those two
   bake **strokes**, which carry their own colour/width/style in `PageMode.RASTER` rather than the
   armed pen's, so nothing is disturbed today — the call is defence against that ever changing.
-- **The Ratta preview.** Only levels 0, 5 and 9 preview *exactly* as they bake — the firmware's
-  three tones (BLACK / DARK_GRAY / GRAY, `RattaInkMap.pencilPreviewFor`). Every other offered level
-  previews in its band's tone (0–2 → BLACK, 3–6 → DARK_GRAY, 7–14 → GRAY) while baking its own
-  grey — the live line is an approximation, the bake is always the true shade.
+- **The Ratta preview — direct on the panel since g-paper 0.1.41 (Phase 28 "Graphite on the
+  panel", re-pinned 2026-09-19, 0.1.42).** The pencil no longer previews through the firmware
+  needle at all: the engine opens `/dev/ebc` itself (the vendor policy lets any app), lays the
+  stroke's own grain live into the panel's frame, and shows the page — live and after pen-up —
+  as a **blue-noise dither** of the true-grey page image, black or white per pixel, so every
+  shade lands under the nib on the panel's first frame and nothing changes at pen-up. The page
+  image, the WebP rows, covers and exports stay true grey; only what the glass shows is dithered.
+  Pressure is back on the Supernote pencil (the constant-0.5 bake was a compensation for the
+  needle); the pencil stays upright (no tilt widening — the user's decision). The daemon is
+  full-screen-disabled while the pencil is armed; the gel pen and the rubber still use it. The
+  firmware-needle path (`pencilPreviewFor`, the four-tone ladder, the 0.5 / 0 bake constants) is
+  now the **fallback** when the panel refuses to open. Reference: g-paper `PLAN.md` § Phase 28 and
+  `probe-ebc/README.md` (the measurements, incl. Atelier's shade ladder).
 - **`SketchLayers`** (`:ext-sketch`, arc 45 / G3, pure Kotlin) is the **one** translation between
   `SketchContract.LAYER_*` (the wire) and `RasterLayer` (the engine): `wireOf(RasterLayer)`,
   `of(Int)`, and `all` (`[GRAPHITE, INK]`, the same order as `SketchContract.LAYERS`) — pinned to
@@ -749,6 +763,36 @@ while the host binder is still valid — the last moment it is — via
 document editor's park, a sketch save is accepted for any live page, so a park never has to match
 what the host is currently showing to be worth writing back.
 
+**The page turn awaits the copy, not the encode** (2026-09-19, the user's finding and decision on
+the Nomad: a flip straight after drawing took "a few seconds", a flip after a pause was instant).
+The log said why — the graphite WebP encode at `WEBP_EFFORT` 100 costs 0.5–3.5 s on a real page
+(2 792 / 3 543 / 3 310 ms on three ~1 MB pencil pages) — and a page turn's flush was awaiting it.
+A turn now takes `flushForTurn`, which awaits only the **Main-thread pixel copy** of each owed
+raster (`governor.flushRequest()` + `getPageRaster`, a few ms) and lets the encode and the push run
+on IO, under the same one push lock, while the next page loads. The copy is what has to happen
+before the paper changes — it freezes what will be written — and the encode only has to happen
+before the row is **read**. So the one rule the change adds is about reads: **a page whose push is
+still in the air is not read until that push has landed.** `SketchSaver` records every push under
+the page key its copy was taken on (`PushTracker` — pure Kotlin, keyed), and `loadPage`, the only
+place the face reads a raster back through the host, asks `isPushPending(pageKey)` first; if it is,
+it awaits that page's pushes, takes one more `flushForTurn` of whatever the *outgoing* page gained
+while it waited (that page is still on the glass, and the load's `markClean()` would otherwise throw
+a late mark away), **and then re-asks the host for the state** (`current()`), because the
+`SketchPageState` it was handed carries the byte and chunk counts of read windows the host loaded
+*before* the push landed. **A different page's load never waits and costs no extra Binder call** —
+which is the whole point of keying it: turning *away* from a page just drawn on is free, and only
+turning straight *back* to it pays anything. The other flush points are unchanged and deliberately
+so: Back, Show pages, `end()` and the Binder-thread `flushBlocking` are **leave** flushes and the
+host reads the row the moment they return (`flushForExit` now also drains every background push,
+whatever page it was for, before it flushes the current one); a page insert, a page delete and a
+structural replay keep the awaiting flush because they are about to change the notebook's own page
+set, and a delete in particular must have written whatever its undo will bring back. The save log
+line names all three halves — `copy N ms, encode N ms, push N ms` — so a walk can read straight off
+it which part of a save a turn is still paying for. The undo ledger's replay path needs no rule of
+its own: `applyEdit` swaps tiles in the engine (`swapPageRaster`) and `RasterEditBuilder` reads
+them with `readPageRaster`, both in-process, and the only host read it makes is through the
+`loadPage` at the end of `walkTo` / `applyStructural`, which rule (1) already covers.
+
 **Loading a page** (`loadPage`) loads **both** layers always, sequentially, one decoded bitmap
 alive at a time (peak memory: one array plus one bitmap, not two of each) — a null layer is
 absent, dropped rather than swapped in as a blank raster. `readSketch(state, layer)` answers an
@@ -877,6 +921,8 @@ notebook screen first).
 | A save's running total on one raster passes `MAX_BYTES` (6 MiB) | `SKETCH_TOO_LARGE` for that layer alone thrown at the accumulator; nothing written for it; stored row unchanged; the **other layer's row and accumulation are untouched**; the screen keeps the pixels on the glass (they have no other copy) |
 | Committed save bytes on a layer are not a WebP of exactly the page's size | `SKETCH_BAD_IMAGE` (renamed from `SKETCH_BAD_PNG`) for that layer; nothing written for it |
 | A stored row fails the header guard on read | Soft-deleted on the way past, never overwritten; `get` answers null for that row |
+| A page is turned away from and straight back to before its background push has landed | The load waits for that page's own pushes and re-asks the host for its state; the wait is the remainder of the encode, and no other page's load waits at all |
+| A **background** push (one a page turn left running) fails | Its pixels are parked and the raster is marked dirty exactly as any failure is — but the page now showing is the one marked, so it costs one redundant save of bytes the host already has; the parked bytes are still re-pushed at a host reconnect and at `end()` |
 | The host dies mid-save (Binder revoked, `DeadObjectException`) | The pixels are parked (`PendingImagePark`) by page key **and layer**; the governor keeps that raster's page dirty and retries |
 | Final flush before Back/Show pages fails | "Sketch not saved" dialog — Try again / Leave anyway; "leave anyway" still leaves the pixels parked, on whichever layer(s) failed, for `end()`'s own retry |
 | A page turn/insert/delete lands at the notebook's boundary | The host answers the **same page unchanged**; the screen compares `pageKey` and does nothing — no dialog, no toast |
@@ -987,7 +1033,7 @@ notebook screen first).
   never the tool alone.
 - **`SketchPalette.ROW_BREAK` (8) is inert at six offered shades (T3)** — kept anyway, as the rule
   `shadeRows()` derives from, rather than deleted for a list that may grow again.
-- **`SketchActivity` is ~1330 lines (G3, up from ~1230 at T3)**, past the ~800-line guide — the
+- **`SketchActivity` is ~1465 lines (2026-09-19, up from ~1330 at G3 and ~1230 at T3)**, past the ~800-line guide — the
   growth is the layered raster-load/save wiring; `SketchPageLoad` was **not** split out at G3 (it
   would need `callHost` and the lifecycle checks handed in as lambdas for roughly 45 lines saved —
   not worth the indirection yet), so what remains past the guide is screen wiring, not a candidate
@@ -1020,6 +1066,13 @@ notebook screen first).
 - **`dumpsys package` does not surface a `<service>`'s declared `<meta-data>` (G3)** — the API
   version a service actually requires has to be read from the built manifest, not asked of the
   running device.
+- **A page turn's flush no longer means the row is written (2026-09-19).** `flushForTurn` awaits
+  the copy only, so between a turn and a few seconds later the `.soil` row is one save behind what
+  the glass held. Anything that reads a page's raster back through the host has to await that
+  page's pushes first (`SketchSaver.awaitPushes`) **and re-ask for the state**, because a
+  `SketchPageState` describes read windows the host loaded at the time it answered. Today
+  `loadPage` is the only such read; a future one — a thumbnail, a second face — that skips either
+  half will silently show the page as it was before the last strokes.
 - **A true double-tap is still out of adb's reach (G3)** — `input swipe x y x y 800` stands in for
   a long-press, but the finger double-tap chrome toggle has no adb equivalent and stayed a
   hand-only walk item this arc too.

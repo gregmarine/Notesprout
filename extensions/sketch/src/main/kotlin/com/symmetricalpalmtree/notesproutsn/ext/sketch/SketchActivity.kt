@@ -1,8 +1,10 @@
 package com.symmetricalpalmtree.notesproutsn.ext.sketch
 
 import android.app.Activity
+import android.graphics.Bitmap
 import android.graphics.Rect
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
@@ -367,15 +369,38 @@ class SketchActivity : PaperScreenActivity() {
      * *previous* page happened to have. A page with ink and no graphite following one with graphite
      * and no ink is simply two loads, as every other page is.
      *
-     * **One raster at a time, from the read through the recycle.** The engine copies the bitmap in,
-     * so each decode is let go of the instant it returns and the peak is one page-sized bitmap, not
-     * two: ~9.5 MB on the Nomad, ~18.4 MB on the Manta, on devices that kill processes for less.
+     * **Both decoded first, then both loaded back-to-back** (0.1.42 re-pin, 2026-09-19). The
+     * engine copies each bitmap in, and on Supernote it rebuilds its dithered display of the
+     * whole page at every load — so loading graphite, decoding ink, then loading ink showed the
+     * pencil first and the ink a moment later (two ~100 ms rebuilds with a decode between them).
+     * With the decodes done first the two loads land together, the engine folds them into one
+     * rebuild and one present, and the page appears whole. The peak is the same three page-sized
+     * bitmaps it always was (the second decode, the engine's first copy, the engine's second
+     * copy — ~9.5 MB each on the Nomad, ~18.4 MB on the Manta), because the first decode is
+     * recycled the instant its load returns.
+     *
+     * **A page with a save still in the air waits for it, and then asks again** (2026-09-19). Since
+     * a page turn stopped awaiting the encode ([SketchSaver.flushForTurn]), the rows of the page
+     * just left are written some seconds after the turn — so a turn straight *back* to that page
+     * would otherwise read the row as it was before the last strokes, and the drawing would seem to
+     * lose them. This is the one place on the face that reads a page's rasters back through the
+     * host, so this is the one place the rule has to hold. Two halves to it:
+     *
+     * - **Wait for that page's own pushes and for nobody else's** ([SketchSaver.awaitPushes]). A
+     *   page nothing is owed for — every ordinary turn — returns at once and waits for nothing.
+     * - **Then re-ask the host for its state.** The [SketchPageState] handed in carries the byte
+     *   and chunk counts of the read windows the host loaded *before* the push landed, so waiting
+     *   alone would only have waited to read stale numbers. `current()` reloads both windows for
+     *   the host's target page — which at every call site here is the page being loaded — and
+     *   answers the counts that go with them. It costs one Binder call, and only in the case that
+     *   needed one.
      *
      * **The header guard runs before each decode** ([ImageHeader]) and a mismatch starts that layer
      * blank with a line in the log rather than handing a foreign blob's idea of its own size to the
      * allocator.
      */
-    private suspend fun loadPage(state: SketchPageState, firstLoad: Boolean) {
+    private suspend fun loadPage(requested: SketchPageState, firstLoad: Boolean) {
+        val state = awaitOwnSave(requested)
         // A contact that never got its pen-up (the panel slept mid-sweep) leaves a half-gathered
         // entry tagged with the page being left. Carried across the turn it would go on collecting
         // the next page's cells under the old page's key. That gathering is one movement of the hand
@@ -386,10 +411,14 @@ class SketchActivity : PaperScreenActivity() {
         if (!firstLoad) paper.clearForContentSwap()
         paper.setPageSize(state.width, state.height)
         paper.setTemplate(null)   // plain white always (decision 10) — no template ever crosses
+        val decoded = ArrayList<Pair<RasterLayer, Bitmap?>>(SketchLayers.all.size)
         for (layer in SketchLayers.all) {
             val bytes = readSketch(state, layer)
             val bitmap = withContext(Dispatchers.IO) { RasterImage.decode(bytes, state.width, state.height) }
-            if (isFinishing || isDestroyed) { bitmap?.recycle(); return }
+            if (isFinishing || isDestroyed) { bitmap?.recycle(); decoded.forEach { it.second?.recycle() }; return }
+            decoded += layer to bitmap
+        }
+        for ((layer, bitmap) in decoded) {
             // Silent since g-paper 0.1.33 (K6): a page we loaded ourselves is our own news, so no
             // will-change/changed pair arrives and nothing here has to swallow one.
             paper.loadPageRaster(layer, bitmap)
@@ -399,6 +428,51 @@ class SketchActivity : PaperScreenActivity() {
         saver.pageKey = state.pageKey
         saver.markClean()
         toolbar.setPage(state.pageIndex + 1, state.pageCount)
+    }
+
+    /**
+     * [loadPage]'s first half (2026-09-19): if this page has a background save still in the air,
+     * wait for it and re-ask the host for the state, so what is about to be read is the row the
+     * push wrote and not the row it is replacing.
+     *
+     * **The cheap question first.** `isPushPending` is a map lookup; on every ordinary turn it is
+     * false and this costs nothing at all — no wait, no extra Binder call. Only a turn straight back
+     * to a page drawn on seconds ago takes the slow side.
+     *
+     * The re-ask is `current()`, which loads both read windows for **the host's target page**. Every
+     * call site of [loadPage] is a state the host has just made its target — `current()` itself, a
+     * turn, an insert, a delete, a structural replay, the walk's last step — so "the target" and
+     * "the page being loaded" are the same page by construction; a `current()` that answered a
+     * different key would mean the two had drifted, and the state that comes back is the one to
+     * believe in any case. A host that refuses the call leaves the page as it was asked for, with a
+     * line: the read that follows is then the same read it would have been before this change.
+     *
+     * **A second copy of the page still on the glass closes the window this wait opens.** The paper
+     * still holds the *outgoing* page while this waits, and [SketchSaver.pageKey] still names it —
+     * a mark landing here would be composited into that raster and then thrown away by the
+     * `markClean()` at the end of the load. The turn's own flush ran before the host was asked to
+     * move, so this second one is `Idle` unless something landed in between; when something did, it
+     * is copied and pushed under the page it was drawn on, like every other save. It leaves only the
+     * `current()` call's own width of window, which is what every load has always had. The second
+     * `awaitPushes` after it is for the one case where the glass **is** the page being reloaded (a
+     * structural replay landing where it started): the late flush is then that page's own push too,
+     * and reading before it landed would be the very thing this method exists to prevent.
+     */
+    private suspend fun awaitOwnSave(requested: SketchPageState): SketchPageState {
+        if (!saver.isPushPending(requested.pageKey)) return requested
+        val t0 = SystemClock.elapsedRealtime()
+        saver.awaitPushes(requested.pageKey)
+        if (!saver.flushForTurn()) Log.w(TAG, "a late mark could not be copied before the load; the raster stays dirty")
+        saver.awaitPushes(requested.pageKey)
+        val fresh = callHost { it.current() }.getOrElse {
+            Log.w(TAG, "the page's state could not be re-read after its save: ${it.javaClass.simpleName}")
+            return requested
+        }
+        Slog.d(TAG) {
+            "waited ${SystemClock.elapsedRealtime() - t0} ms for this page's own save before loading it " +
+                "${fresh.rasterSizes()}"
+        }
+        return fresh
     }
 
     /** One raster's read window, chunk by chunk — an empty answer is a page with no such raster,
@@ -547,13 +621,22 @@ class SketchActivity : PaperScreenActivity() {
     /**
      * Ask the host to move one page, and follow it.
      *
-     * **This page's pixels go first.** The host's read window is what the screen is about to read
-     * back, and a save left in flight would land on the page it just left — the contract says so and
-     * this is the line that obeys it. A flush that fails parks its bytes (they are re-pushed at
-     * `end()`); the turn goes ahead rather than trapping the hand on one page.
+     * **This page's pixels are frozen first, not written first** ([SketchSaver.flushForTurn],
+     * 2026-09-19). The copy is taken before anything moves — so what will be written is decided and
+     * nothing the next page's hand does can change it — and the WebP encode and the push go on in
+     * the background while this turn lands. The user's own finding is the reason: the encode is
+     * 0.5–3.5 s on a real pencil page, and awaiting it made a flip straight after drawing take
+     * seconds while a flip after a pause was instant. A copy that could not be taken leaves that
+     * raster dirty and re-arms the retry; the turn goes ahead rather than trapping the hand on one
+     * page, exactly as a failed flush always did.
+     *
+     * What keeps that honest is [loadPage], which waits for a page's own pushes before it reads that
+     * page's rasters back — so a turn *away* from a page just drawn on is free, and only a turn
+     * straight *back* to it pays anything.
      *
      * **At the edge the host answers the same page** and the screen stays put: no dialog, no toast,
-     * and the arrows never disable.
+     * and the arrows never disable. Nothing is read there either, so the in-flight push is no
+     * hazard — the state the host answers with is compared by key and dropped.
      */
     private fun turnPage(direction: Int) = runPageOp { turnPageNow(direction) }
 
@@ -561,7 +644,7 @@ class SketchActivity : PaperScreenActivity() {
      *  can decide between a turn and an insert without taking the lock twice. */
     private suspend fun turnPageNow(direction: Int) {
         val from = currentPage ?: return
-        if (!saver.flushAndAwait()) Log.w(TAG, "the page could not be saved before the turn; its pixels are parked")
+        if (!saver.flushForTurn()) Log.w(TAG, "the page's pixels could not be copied before the turn; the raster stays dirty")
         val to = callHost { it.requestPage(direction) }.getOrElse {
             Log.w(TAG, "the host would not turn the page: ${it.javaClass.simpleName}")
             hostGone()
@@ -1025,12 +1108,14 @@ class SketchActivity : PaperScreenActivity() {
     /**
      * Walk back to the page [edit] was made on, one `requestPage` at a time, bounded by the distance
      * it recorded ([PageTurn.maxSteps]) and stopped early by an edge. The page being left is flushed
-     * first, exactly as an ordinary turn flushes it.
+     * first, exactly as an ordinary turn flushes it — and since 2026-09-19 in exactly the same way:
+     * the copy is awaited, the encode is not, and the [loadPage] at the end waits for that page's
+     * own pushes if the walk happens to have come back to one.
      */
     private suspend fun walkTo(edit: SketchEdit.RasterChanged): Boolean {
         var here = currentPage ?: return false
         val direction = PageTurn.directionTowards(here.pageIndex, edit.pageIndex) ?: return false
-        if (!saver.flushAndAwait()) Log.w(TAG, "the page could not be saved before the replay's turn; its pixels are parked")
+        if (!saver.flushForTurn()) Log.w(TAG, "the page's pixels could not be copied before the replay's turn; the raster stays dirty")
         var steps = PageTurn.maxSteps(here.pageIndex, edit.pageIndex)
         var moved = false
         while (steps-- > 0 && here.pageKey != edit.pageKey) {
