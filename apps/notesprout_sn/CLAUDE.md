@@ -221,14 +221,20 @@ g-paper `two-rasters` likewise** — "on ink" means `main`.
 **Arc 46 "Palette" (2026-09-19, branch `tools`, letter Q, `extensions/sketch/PALETTE_PLAN.md`)**
 — the user's decision that, with the pencil and the pen going direct to the panel under a dither
 (g-paper 0.1.41–0.1.43), the four-tone limit no longer applies: **all sixteen greys for the
-pencil and the gel pen alike** (white included on the pen, by the user's word — it draws nothing
-under `DARKEN`); **one pencil width, 4 px** (arc 44's twelve leads withdrawn); the shade picker on
-its **own Palette button** (Tabler `palette`, after the eraser) with Atelier's swatches (fill ·
-gap · dotted ring; solid ring on the selected); **both pen glyphs wear their own shade**
-(`ShadeIcon`, `ic_ballpen_fill`; `CollapsedChrome.PenKinds.altIcon` in `:sn-screen`). Seam:
+pencil and the gel pen alike** — **Atelier's own sixteen tones** (`SketchPalette.TONES`, darkest
+first, 0 black / 15 white; the pencil's default `#505050`), white included on the pen; **one
+pencil width, 4 px** (arc 44's twelve leads withdrawn); the shade panel **on each pen button's
+re-tap** (the Pencil's for the pencil's shade, the Pen's for the pen's — a Palette button was
+opened and withdrawn on the first walk) with Atelier's swatches in a **4 × 4** (fill · gap ·
+dotted ring; solid ring on the selected); **both pen glyphs wear their own shade** (`ShadeIcon`,
+`ic_ballpen_fill`; `CollapsedChrome.PenKinds.altIcon` + `onReTap(alt, anchor)`,
+`PaperToolbar.onPenReTap(alt)` in `:sn-screen`); and **ink flattened over graphite** — "a white
+gel pen can write over anything" — g-paper **Phase 30 → 0.1.44** (`SRC_OVER`, ink on top, in the
+engine, `SketchRaster` and `SketchCover`; pencil over an ink line is hidden; amends arc 45's "no
+top and no bottom"). Seam:
 `SketchToolSettings` grows a fourth int `penShade` — **a parcel tail, not a method** —
 `API_VERSION` 20 → **21** named by `SketchContract.MIN_API_VERSION_FOR_SKETCH_PEN_SHADE`; the
-action floor stays 20; `size` is a dead wire slot written 0. No g-paper change. Reference
+action floor stays 20; `size` is a dead wire slot written 0. Reference
 `extensions/sketch/docs/sketch.md` § "Arc 46's decisions" + § "Tools (arcs 44–46)". Branch `tools`
 is expected to carry further tool arcs, each a fresh user decision. No ELEVENTH extension point,
 no next Sketch phase (eraser sizes, per-notebook tool memory, an `inkLift` fraction, quantizing
