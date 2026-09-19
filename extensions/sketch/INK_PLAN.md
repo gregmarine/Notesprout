@@ -470,6 +470,6 @@ change, no seam change: the stored shade was always the ladder level, so a devic
 of the dropped six reads as the default (level 5), which is the fallback the tests already proved.
 
 **Tests.** `:ext-sketch` 97 green (palette + tool-state tests rewritten to the four); g-paper
-core + ratta green. **The hand.** The white lead on the Nomad is the user's to walk — over dark
-graphite it should pale, on bare paper leave nothing, and the trail under the pen should be the
-faint LIGHT_GRAY.
+core + ratta green. **The hand (2026-09-18, Nomad dev install):** *"This works good enough for
+now."* **Merged** — `ink` → Notesprout `main` and `two-rasters` → g-paper `main`, both `--no-ff`,
+both branches deleted local + remote. Arc 45 closed.

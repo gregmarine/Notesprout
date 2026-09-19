@@ -214,8 +214,9 @@ offers the firmware's four tones — black, grey, light grey, white (levels 0 ·
 white lead paling graphite under it (flecks go down `SRC_OVER` on the raster; nothing on bare
 paper under `DARKEN`) — the "white/highlight pencil" future, decided. Plan + ledger
 `extensions/sketch/INK_PLAN.md`; reference `extensions/sketch/docs/sketch.md` § "Arc 45's
-decisions". **COMPLETE + FROZEN 2026-09-18 on the user's Nomad hand walk; merge to `main` pending
-the user's word** (branch `ink` not yet merged). No ELEVENTH extension point, no next Sketch phase
+decisions". **COMPLETE + FROZEN 2026-09-18 on the user's Nomad hand walk (the white lead walked
+too — "works good enough for now"); `ink` merged to `main` 2026-09-18 (`--no-ff`) and deleted,
+g-paper `two-rasters` likewise** — "on ink" means `main`. No ELEVENTH extension point, no next Sketch phase
 (gel pen sizes or colours, eraser sizes, per-notebook tool memory, an
 `inkLift` fraction, a coloured or grey gel pen, quantizing graphite alpha to the 16-grey ladder)
 and no other new arc without a fresh user decision; no re-raising of any waived / declined review
