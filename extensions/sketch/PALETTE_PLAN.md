@@ -1,7 +1,9 @@
 # Arc 46 "Palette" — the sketch face's tool settings (branch `tools`)
 
-**Status:** 🔄 IN PROGRESS (2026-09-19). Letter **Q**. Phases Q0–Q4 below; the ledger is appended
-as each closes. `docs/sketch.md` is the reference once frozen; this file is then history.
+**Status:** ✅ COMPLETE + FROZEN 2026-09-19 on the user's Nomad hand walks — "This looks amazing …
+That's excellent! Let's freeze this." Letter **Q**. Phases Q0–Q4 plus the five walk amendments
+below; g-paper Phases 30–35 (0.1.44 → 0.1.50, branches `ink-over` + `ink-true`) landed on Fable's
+hand for it. `docs/sketch.md` is the reference; this file is history.
 
 ## Why
 
@@ -117,6 +119,12 @@ palette was a firmware-needle constraint that no longer applies on the direct pa
   out an active pen (hover counts) in 500 ms steps; it settles through window and panel. Page flips
   were already covered — a load clears the waiting runs and rebuilds the page settled, so a page
   turned to is in tone from its first frame. SN re-pinned 0.1.50; on the Nomad.
+
+**Outcome (2026-09-19).** Frozen on the user's word after the fifth walk. What shipped beyond the plan:
+Atelier's tones, a 4 × 4 on each pen's re-tap, ink over graphite, and the settle model — a mark
+dithers only while live or waiting, and settles into its true tone (the pen solid, the pencil's
+grain in grey) at a tool or shade pick, a rub, an undo, a page load, a chrome open
+(`settleDisplay`), or a 2.5 s pause. Root suite green at every step; every build walked by hand.
 
 ## Traps to record at Q4
 
