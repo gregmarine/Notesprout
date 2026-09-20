@@ -42,12 +42,12 @@ anything"; g-paper Phase 30 → **0.1.44**, amending arc 45's "no top and no bot
 grew one parcel tail (`SketchToolSettings.penShade`, API 20 → 21). See "Arc 46's decisions"
 below.
 
-**Engine.** g-paper is pinned at **0.1.46** (Phase 32, "Ink settles, not at pen-up", 2026-09-19
-— a baked pen mark stays dithered until the next thing that is not a mark: a tool or shade pick,
-a rub, an undo, a page load; then it settles solid, over Phase 31, "Baked ink shows its true
-tone" — on the Supernote panel and in the window settled ink is shown at its true grey while the
-pencil's graphite and a **live** pen stroke stay a blue-noise dither; `DitherFlatten.coverage` is
-the one rule, `toneInk` the settle flag), over
+**Engine.** g-paper is pinned at **0.1.48** (Phases 31–34, 2026-09-19: on the Supernote panel
+and in the window a mark is a blue-noise dither only while it is **live** or **waiting** — it
+settles into its true tone, the pen's line solid and the pencil's flecks each at their own alpha
+in the lead's tone, at the next thing that is not a mark: a tool or shade pick, a rub, an undo, a
+page load, or the host's `settleDisplay()` before chrome opens; `DitherFlatten.coverage` is the
+one rule, `settled` the flag; a loaded page is shown settled), over
 **0.1.44** (Phase 30, "Ink over graphite", 2026-09-19 — the flatten is ink `SRC_OVER` graphite,
 see arc 46's decision 9; the paragraph below is 0.1.39's account of the two rasters and stands but
 for the operator), over **0.1.39** (Phase 26, "Two rasters: graphite and ink",
@@ -268,8 +268,13 @@ the final one are given.
    dither throughout. Covers and exports were never dithered and are unchanged. **Amended on the
    third walk** ("instead of on pen up … anything other than drawing will rebake with the correct
    tone"): the mark stays dithered at pen-up and **settles** in tone at the next non-drawing
-   event — a tool or shade pick, a rub, an undo, a page load (g-paper Phase 32 → **0.1.46**). A
-   chrome flip alone does not settle it: the engine never sees one.
+   event — a tool or shade pick, a rub, an undo, a page load (g-paper Phase 32 → **0.1.46**), or
+   the face's own `paper.settleDisplay()` before the shade panel, a chrome flip or the collapsed
+   rows open (Phase 33 → **0.1.47**; setter-triggered settles reach the panel through the window
+   only, so a pick can never paint over the panel). **And the pencil the same way** (the fourth
+   walk: "perhaps it will look more natural with real tones with the grain?" — Phase 34 →
+   **0.1.48**): a settled fleck shows at its own alpha in the lead's tone, grain in grey; the
+   dither is the live picture only.
 9. **Ink over graphite** (the first walk: "the white pen should be able to write over the pencil.
    It correctly writes over the darker pen. In the real world, a white gel pen can write over
    anything"; asked plainly and decided) — the flatten is **`SRC_OVER`, ink on top, everywhere**

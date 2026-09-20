@@ -95,6 +95,15 @@ palette was a firmware-needle constraint that no longer applies on the direct pa
   (shared, `:ext-ink` / `:sn-screen`); setter-triggered settles are now window-only (the
   compositor carries them to the panel a beat later). SN re-pinned 0.1.47; on the Nomad.
 
+- **Fourth walk (2026-09-19) — "the pencil too":** "That works. … The grain looks good. But if
+  it is just black being dithered, perhaps it will look more natural with real tones with the
+  grain?" g-paper **Phase 34 → 0.1.48**: `toneInk` becomes `settled`; a settled pixel either
+  raster covers shows `255 − luma` — a fleck at its own alpha in the lead's tone, grain in grey;
+  the graphite bake's runs wait in the same `pendingRuns` and settle at the same events; a loaded
+  page is shown settled. The dither is now the **live** picture only (amends g-paper Phase 28's
+  decision 7). SN re-pinned 0.1.48; on the Nomad. Walk question: a pale lead's low-alpha grain
+  through the compositor's 16-level table.
+
 ## Traps to record at Q4
 
 - A **white gel pen draws nothing** under `DARKEN` yet still lands opaque white pixels in the ink

@@ -55,7 +55,8 @@ devices first (BOOX), expanding to iPad, Android tablets, phones, and web.
   4 × 4, both pen glyphs filled with their own shade, `SketchToolSettings.penShade` as a parcel
   tail — API 20 → 21, no floor moved — ink flattened **over** graphite, g-paper Phase 30 →
   0.1.44, and baked ink shown in its true tone on the Supernote panel — settling at the next
-  non-drawing event, not at pen-up — Phases 31–32 → 0.1.46; its own `PALETTE_PLAN.md`)
+  non-drawing event, not at pen-up, the pencil's grain in grey the same way — Phases 31–34 →
+  0.1.48; its own `PALETTE_PLAN.md`)
 
 ---
 
@@ -239,8 +240,8 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
 - `tools` — **ACTIVE** (2026-09-19): arc 46 "Palette" — Atelier's sixteen tones for the sketch
   face's pencil and gel pen, one 4 px pencil lead, the shade panel on each pen's re-tap (4 × 4),
   both pen glyphs wearing their shade, ink flattened over graphite (g-paper 0.1.44, branch
-  `ink-over`) and baked ink shown in true tone once settled by a non-drawing event (0.1.45–0.1.46,
-  branch `ink-true`, on top of it; both unmerged), `API_VERSION` 20 → 21 as a parcel tail. Expected to carry further tool arcs
+  `ink-over`) and baked ink shown in true tone once settled by a non-drawing event, pencil grain in grey
+  the same way (0.1.45–0.1.48, branch `ink-true`, on top of it; both unmerged), `API_VERSION` 20 → 21 as a parcel tail. Expected to carry further tool arcs
   after this one, each a fresh user decision. `extensions/sketch/PALETTE_PLAN.md` is the plan +
   ledger. **No ELEVENTH extension point and no new arc without a user decision.**
 - `germination` — previous post-MVP feature branch (reference, not active)
