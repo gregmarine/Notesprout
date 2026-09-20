@@ -92,3 +92,10 @@ SN `:sn-screen` re-pinned; `docs/sketch.md` § "Arc 47's decisions"; PLAN + CLAU
 - 2026-09-19 · decisions 1–6 taken; g-paper `side-lead` branched; R0 probe commissioned.
 - 2026-09-19 · R0 walked on the Nomad and the Manta (probe-tilt `c6dd29c`); decisions 2 and 4
   resolved; threshold fitted; the Manta units bug found. R1 briefed to Opus (Phase 36).
+- 2026-09-19 · R1 built: g-paper Phase 36 `70fa080` (0.1.51) reviewed + committed; SN re-pinned
+  `d064f44b`; dev host + ext-sketch on Nomad + Manta. Walk 1: writing grip unchanged, band lands,
+  but **the flank is clumpy** (tooth-field cells decide whole sites at the flank's mid coverage).
+  Fix `8acaf60`: `FLANK_TOOTH_WEIGHT` 0.20 on the spread, tone held. Walk 2: **still clumpy** on the
+  Manta — the synthetic harness stroke (press 0.65, straight) was unrepresentative; the real
+  shading hand is ≈0.22 pressure with jitter. Next: render from the real probe strokes, fix the
+  cause, republish, reinstall; the user walks again 2026-09-20.
