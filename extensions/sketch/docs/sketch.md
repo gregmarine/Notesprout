@@ -42,7 +42,7 @@ anything"; g-paper Phase 30 → **0.1.44**, amending arc 45's "no top and no bot
 grew one parcel tail (`SketchToolSettings.penShade`, API 20 → 21). See "Arc 46's decisions"
 below.
 
-**Engine.** g-paper is pinned at **0.1.48** (Phases 31–34, 2026-09-19: on the Supernote panel
+**Engine.** g-paper is pinned at **0.1.49** (Phases 31–34 + the rubber settling before it posts, 2026-09-19: on the Supernote panel
 and in the window a mark is a blue-noise dither only while it is **live** or **waiting** — it
 settles into its true tone, the pen's line solid and the pencil's flecks each at their own alpha
 in the lead's tone, at the next thing that is not a mark: a tool or shade pick, a rub, an undo, a

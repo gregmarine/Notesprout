@@ -104,6 +104,12 @@ palette was a firmware-needle constraint that no longer applies on the direct pa
   decision 7). SN re-pinned 0.1.48; on the Nomad. Walk question: a pale lead's low-alpha grain
   through the compositor's 16-level table.
 
+- **Eraser check (2026-09-19):** "Does the eraser work with this too … I just want to be sure it
+  isn't dithering if it doesn't need to." The rub read the page in tone, but its first corridor
+  across a still-waiting stroke posted dithered (the post ran before the announce settled it).
+  g-paper **0.1.49**: `onRasterErasedBatch` settles (window only) before it posts. SN re-pinned;
+  on the Nomad.
+
 ## Traps to record at Q4
 
 - A **white gel pen draws nothing** under `DARKEN` yet still lands opaque white pixels in the ink
