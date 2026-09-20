@@ -1,7 +1,9 @@
 # Arc 47 "Side" — the pencil's flank (branch `tools`)
 
-**Status:** 🔄 IN PROGRESS 2026-09-19. Letter **R**. g-paper branch `side-lead` (off `ink-true`).
-`docs/sketch.md` becomes the reference at the freeze; this file is the plan + ledger.
+**Status:** ✅ COMPLETE + FROZEN 2026-09-20 on the user's Nomad + Manta walks ("This feels good.
+Let's freeze the arc."). Letter **R**. g-paper Phase 36 → 0.1.51 on branch `side-lead` (merged to
+g-paper `main` at the freeze, branch deleted). `docs/sketch.md` § "Arc 47's decisions" is the
+reference; this file is history (plan + ledger).
 
 ## Why
 
@@ -117,3 +119,5 @@ SN `:sn-screen` re-pinned; `docs/sketch.md` § "Arc 47's decisions"; PLAN + CLAU
 4. Light vs hard while leaned (range is narrower now, both ends toward "grey however hard").
 5. A dab laid over → a short streak of grit. A drag along the lean → thin.
 6. Speed: a fast turning sweep — any lag on the live line (the fan costs 2.8× stations on turns).
+- 2026-09-20 · Walk 3 (Nomad + Manta): even grit, band toward the hand on both devices, light/hard,
+  the roll — "This feels good. Let's freeze the arc." **FROZEN.** `tools` stays open for later tool arcs.

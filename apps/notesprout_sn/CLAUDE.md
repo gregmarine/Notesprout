@@ -241,7 +241,7 @@ grey) and **settling at the next non-drawing event rather than at pen-up** — P
 before chrome opens (Phase 33 → 0.1.47, called from `PaperScreenActivity.toggleChrome`,
 `CollapsedChrome.open` and the sketch face's shade panel), and **the pencil settling in tone
 too** — grain in grey, the dither the live picture only (Phase 34 → **0.1.48**; 0.1.49: the rubber settles before it posts; Phase 35 → **0.1.50**: a 2.5 s pause settles on
-its own; a page turned to is shown settled from its first frame). Seam:
+its own; a page turned to is shown settled from its first frame). **Arc 47 "Side" (2026-09-19/20, same branch): the pencil's flank — g-paper Phase 36 → 0.1.51, no seam change; see `extensions/sketch/docs/sketch.md` § "Arc 47's decisions".** Seam:
 `SketchToolSettings` grows a fourth int `penShade` — **a parcel tail, not a method** —
 `API_VERSION` 20 → **21** named by `SketchContract.MIN_API_VERSION_FOR_SKETCH_PEN_SHADE`; the
 action floor stays 20; `size` is a dead wire slot written 0. Reference

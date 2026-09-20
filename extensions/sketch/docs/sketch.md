@@ -42,7 +42,7 @@ anything"; g-paper Phase 30 → **0.1.44**, amending arc 45's "no top and no bot
 grew one parcel tail (`SketchToolSettings.penShade`, API 20 → 21). See "Arc 46's decisions"
 below.
 
-**Engine.** g-paper is pinned at **0.1.50** (Phases 31–35: the 2.5 s pause settle, the rubber settling before it posts, 2026-09-19: on the Supernote panel
+**Engine.** g-paper is pinned at **0.1.51** (Phase 36 "The flank", arc 47 — see "Arc 47's decisions" below; Phases 31–35: the 2.5 s pause settle, the rubber settling before it posts, 2026-09-19: on the Supernote panel
 and in the window a mark is a blue-noise dither only while it is **live** or **waiting** — it
 settles into its true tone, the pen's line solid and the pencil's flecks each at their own alpha
 in the lead's tone, at the next thing that is not a mark: a tool or shade pick, a rub, an undo, a
@@ -316,6 +316,46 @@ so RGBA).
 ---
 
 ## The data
+
+### Arc 47's decisions (2026-09-19/20)
+
+The user's, locked in `SIDE_PLAN.md`; phase-start questions could not reopen them:
+
+1. **Calibration first.** `probe-tilt` (a dependency-free g-paper app) walked on the Nomad and
+   the Manta before any curve: the Ratta HAL puts signed **tilt-X in degrees** in `AXIS_TILT`
+   and signed **tilt-Y in degrees** in `AXIS_ORIENTATION` (panel space, both live). The polar lean
+   is `hypot(x, y)`; the azimuth `atan2(y, x)` turned panel→screen (`EbcGeometry.screenAzimuth`;
+   the Nomad's 137° raw ≡ the Manta's 42°). The 2026-09-17 Manta bloom was this units bug, so
+   g-paper Phase 28 decision 5 ("the Supernote pencil stays upright") is **amended**: upright
+   for every ordinary grip, flank past a side threshold.
+2. **Threshold from the hand:** tip only ≤ **45°**, smoothstep bloom 45° → **54°**, full flank
+   past it. Writing never crossed 43° on either device; shading never dropped under 50°.
+3. **Flank extent 20× the lead** — 80 px on the 4 px lead (`FLANK_EXTENT`, the knob).
+4. **The flank pales as it widens** (`FLANK_LIGHTEN`, fitted to the user's own recorded
+   shading strokes, not a synthetic sweep).
+5. **Asymmetric**, because both Supernotes report a live lean direction: a one-sided capsule
+   from the tip along the azimuth toward the barrel, densest at the tip, trailing off
+   (`FLANK_TAIL_BARE`); a stroke dragged along its own lean stays thin. The user is
+   right-handed, which fixed the sign from the Manta data; both devices confirmed on walks.
+6. Arc 47 "Side", branch `tools`, letter R, `SIDE_PLAN.md`; g-paper Phase 36 → **0.1.51** on
+   branch `side-lead` (merged to g-paper `main` at the freeze). Same recipe; no code review.
+
+**As built (g-paper, no seam change).** `StrokePoint.azimuth` (a defaulted tail);
+`CanvasPaperView.sampleTilt`/`sampleAzimuth` capture seams (core defaults unchanged; Ratta
+decodes); `GraphiteGrain.Lead { ROUND, FLANK }` opt-in on `of`/`begin` — ROUND and every
+sub-threshold flank mark are bit-identical to before; `rasterDirtyWidth` seam so an 80 px band
+is not clipped from its own bake; `bakeTilt` passes the lean on the direct panel path, 0 on the
+needle fallback. Pressure was already live (Phase 28) and keeps its role.
+
+**Two walk findings that shaped it.** (1) The flank was clumpy on the device while the offline
+synthetic stroke was even: the cause was the **fan** of cross-sections on a turning path
+(stations 0.8 px apart; a hand's 0.24° median / 4.6° p95 turn per station slips the 80 px rim
+up to 6 px, so combs crowd then part — worms). Found only by rendering the user's real probe
+strokes (`FlankRenderHarness` + `GPAPER_PROBE_CSV`); fixed by depositing per unit of paper
+swept and splitting stations where the fan opens (`FAN_SPLIT_MAX`). (2) The sheet's tooth
+entered `catches` as an offset, which clamped light shading to nothing; the flank now takes it
+as a multiplicative depth (`FLANK_TOOTH_DEPTH`). Lesson kept: **test the grain on the hand's
+own recorded strokes, never a synthetic straight sweep.**
 
 ### The rows
 
