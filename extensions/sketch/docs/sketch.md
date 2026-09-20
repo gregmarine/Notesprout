@@ -856,7 +856,13 @@ extra rule needed (`SketchRouting`'s own KDoc).
 
 `SketchHostHooks.target` (`@Volatile`) is the host's memory of **where the face is** — moved only by
 `requestPage`/`insertPage`/`deletePage`, restored from saved state on a reconnect, falling back to
-the displayed page if the face's target no longer exists. **The two undo histories are one
+the displayed page if the face's target no longer exists. **Every move also writes the notebook's
+last-opened pointer** (`rememberLastOpened` → `NotebookSession.saveLastOpened`, 2026-09-19, the
+user's finding): the notebook screen's own pointer writes run at its `onStop` and `close()`, and
+that screen is stopped for the whole life of the face — so a notebook killed by the system while
+the face was up used to reopen at the page the face *opened* at. A failed write is a log line and
+never fails the move. Verified on the Nomad: page 2 → two turns → both processes force-stopped →
+relaunch opened on page 4. **The two undo histories are one
 history**: a page insert or delete is recorded on the **notebook's own** undo stack
 (`NotebookUndo.Action.Page`, via `onStructural`, posted to Main since the hook runs on a pooled
 Binder thread) so the notebook's own undo still restores it after Show pages — but a small

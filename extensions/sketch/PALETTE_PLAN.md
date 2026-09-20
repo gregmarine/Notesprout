@@ -126,6 +126,11 @@ dithers only while live or waiting, and settles into its true tone (the pen soli
 grain in grey) at a tool or shade pick, a rub, an undo, a page load, a chrome open
 (`settleDisplay`), or a 2.5 s pause. Root suite green at every step; every build walked by hand.
 
+**Post-freeze maintenance (2026-09-19, same day):** the face's page was not remembered across a
+process death — `SketchHostHooks` now writes the notebook's last-opened pointer on every
+`requestPage`/`insertPage`/`deletePage`/`undoPage`/`redoPage` (`rememberLastOpened`). Verified by
+adb on the Nomad (page 2 → 4, force-stop both, relaunch on 4). `:app` 1845 green.
+
 ## Traps to record at Q4
 
 - A **white gel pen draws nothing** under `DARKEN` yet still lands opaque white pixels in the ink

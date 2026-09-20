@@ -2,6 +2,7 @@ package com.symmetricalpalmtree.notesproutsn.notebook
 
 import com.symmetricalpalmtree.gpaper.core.model.Stroke
 import com.symmetricalpalmtree.notesproutsn.core.BoundedWait
+import android.util.Log
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.data.prefs.SketchToolCodec
 import com.symmetricalpalmtree.notesproutsn.data.prefs.SketchToolPrefs
@@ -121,6 +122,25 @@ class SketchHostHooks(
      */
     @Volatile
     private var target: String? = null
+
+    /**
+     * Persist [target] as the notebook's last-opened page **now**, on every move the face makes
+     * (2026-09-19, the user's finding: a notebook killed by the system while the face was up
+     * reopened at the page the face *opened* at, not the one it was on). The host's own pointer
+     * writes run at the notebook screen's `onStop` and `close()` — and the screen is stopped for
+     * the whole life of the face, so a turn, an insert, a delete, an undo or a redo in the face
+     * moved [target] and nothing wrote it down until the face closed cleanly. Same row, same
+     * writer ([NotebookSession.saveLastOpened]); a failure here is a log line and never fails the
+     * move it follows.
+     */
+    private suspend fun rememberLastOpened(nb: NotebookSession) {
+        val id = target ?: return
+        try {
+            nb.saveLastOpened(id)
+        } catch (e: Exception) {
+            Log.w(TAG, "last-opened page not remembered: ${e.javaClass.simpleName}")
+        }
+    }
 
     /** The page the face is on — the screen's saved state, its catch-up on close, and the page the
      *  seal's cover is drawn from (decision 6). */
@@ -256,6 +276,7 @@ class SketchHostHooks(
             val newIndex = DocumentTargetRules.flipIndex(index, direction, pages.size) ?: index
             val state = state(session, nb, newIndex)
             target = pages[newIndex].id
+            rememberLastOpened(nb)
             state
         }
     }
@@ -357,6 +378,7 @@ class SketchHostHooks(
             structuralChanged = true
             onStructural(snap)
             target = nb.currentPage.id
+            rememberLastOpened(nb)
             Slog.d(TAG) { "insertPage($token): ${nb.pages.size} pages, target at ${nb.currentIndex}" }
             state(session, nb, nb.currentIndex, token)
         }
@@ -389,6 +411,7 @@ class SketchHostHooks(
             structuralChanged = true
             onStructural(snap)
             target = nb.currentPage.id
+            rememberLastOpened(nb)
             Slog.d(TAG) { "deletePage($token): ${nb.pages.size} pages, target at ${nb.currentIndex}" }
             state(session, nb, nb.currentIndex, token)
         }
@@ -447,6 +470,7 @@ class SketchHostHooks(
             structuralChanged = true
             onStructuralUndone(snap)
             target = nb.currentPage.id
+            rememberLastOpened(nb)
             Slog.d(TAG) { "undoPage($token): ${nb.pages.size} pages, target at ${nb.currentIndex}" }
             state(session, nb, nb.currentIndex)
         }
@@ -468,6 +492,7 @@ class SketchHostHooks(
             structuralChanged = true
             onStructuralRedone(snap)
             target = nb.currentPage.id
+            rememberLastOpened(nb)
             Slog.d(TAG) { "redoPage($token): ${nb.pages.size} pages, target at ${nb.currentIndex}" }
             state(session, nb, nb.currentIndex)
         }
