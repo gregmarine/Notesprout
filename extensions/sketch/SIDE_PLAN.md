@@ -99,3 +99,21 @@ SN `:sn-screen` re-pinned; `docs/sketch.md` § "Arc 47's decisions"; PLAN + CLAU
   Manta — the synthetic harness stroke (press 0.65, straight) was unrepresentative; the real
   shading hand is ≈0.22 pressure with jitter. Next: render from the real probe strokes, fix the
   cause, republish, reinstall; the user walks again 2026-09-20.
+- 2026-09-20 · **The clumps' cause found and fixed** (g-paper `598da3c`, 0.1.51 republished): not
+  the grain, the pressure or the sheet — the **fan** of cross-sections on a turning path. Stations
+  sit 0.8 px apart along the path; a hand's 0.24° median / 4.6° p95 turn per station slips the
+  80 px rim 0.34 / 6.4 px, so combs crowd three deep then leave 6 px bare — the worms. Rendered
+  from the user's real Manta shading strokes (`FlankRenderHarness`, `GPAPER_PROBE_CSV`): a single
+  pass 1.83 → 1.07 clump. Fix: deposit per unit of paper swept + split stations where the fan
+  opens (`FAN_SPLIT_MAX`, ≤8/row); and the sheet now *scales* the catch odds (`FLANK_TOOTH_DEPTH`
+  0.5) instead of offsetting them (the old form clamped light shading to nothing). `FLANK_LIGHTEN`
+  0.84, fitted to the hand's strokes. ROUND + straight cells bit-identical. Dev host + ext-sketch
+  reinstalled on Nomad + Manta. **Walk 3 pending** — the user.
+
+### Walk 3 list (2026-09-20)
+1. Writing grip: unchanged from before the arc.
+2. Shading sweeps, the scribbled patch you actually shade with: even fine grit, no worms.
+3. Which side the band lands: toward the hand (say if not, per device).
+4. Light vs hard while leaned (range is narrower now, both ends toward "grey however hard").
+5. A dab laid over → a short streak of grit. A drag along the lean → thin.
+6. Speed: a fast turning sweep — any lag on the live line (the fan costs 2.8× stations on turns).
