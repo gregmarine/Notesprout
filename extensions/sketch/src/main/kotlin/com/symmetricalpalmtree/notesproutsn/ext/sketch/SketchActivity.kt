@@ -601,6 +601,10 @@ class SketchActivity : PaperScreenActivity() {
             return
         }
         if (!opened || closing) return
+        // The panel is about to hang over the page: a pen mark still on the glass as its
+        // dither settles into its tone FIRST (g-paper 0.1.47), or the settle would paint
+        // over the panel — the user's third-walk finding.
+        paper.settleDisplay()
         val shown = if (anchor == null) bar.show() else bar.show(anchor)
         if (shown) pushExclusions()
     }

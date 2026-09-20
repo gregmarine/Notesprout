@@ -86,6 +86,15 @@ palette was a firmware-needle constraint that no longer applies on the direct pa
   settled by anything the engine cannot see (a chrome flip alone) — a host door would be a fresh
   decision.
 
+- **Third walk, second finding (2026-09-19):** a re-tap on the armed pen changed no engine
+  property, so nothing settled until a shade was picked — and that settle posted straight to the
+  panel under the open panel, painting the stroke and its rect over the bar. g-paper **Phase 33
+  → 0.1.47**: `PaperView.settleDisplay()` (a defaulted no-op; Ratta settles through window and
+  panel), called by the host **before** chrome opens — the sketch face before the shade panel
+  shows (`togglePaletteBar`), `PaperScreenActivity.toggleChrome` and `CollapsedChrome.open`
+  (shared, `:ext-ink` / `:sn-screen`); setter-triggered settles are now window-only (the
+  compositor carries them to the panel a beat later). SN re-pinned 0.1.47; on the Nomad.
+
 ## Traps to record at Q4
 
 - A **white gel pen draws nothing** under `DARKEN` yet still lands opaque white pixels in the ink

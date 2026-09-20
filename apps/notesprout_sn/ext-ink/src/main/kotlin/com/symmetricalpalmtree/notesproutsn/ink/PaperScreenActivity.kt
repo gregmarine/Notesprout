@@ -363,6 +363,10 @@ abstract class PaperScreenActivity : AppCompatActivity() {
      */
     protected fun toggleChrome() {
         if (!opened || closing || !::chromeToggle.isInitialized) return
+        // Chrome is about to move over the page: anything the engine shows provisionally
+        // (a pen mark still dithered on Supernote's direct path) settles first, so the
+        // settle can never paint over a bar that has just appeared (g-paper 0.1.47).
+        paper.settleDisplay()
         chromeToggle.toggle()
     }
 
