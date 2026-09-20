@@ -110,6 +110,14 @@ palette was a firmware-needle constraint that no longer applies on the direct pa
   g-paper **0.1.49**: `onRasterErasedBatch` settles (window only) before it posts. SN re-pinned;
   on the Nomad.
 
+- **Fifth walk (2026-09-19) — the pause settle:** "a pause in drawing for like 2–3 seconds … while
+  active drawing, nothing gets rebaked, but a pause can give the screen an opportunity to show the
+  real raster without the tool change. Also, let's make sure this works on page flips." g-paper
+  **Phase 35 → 0.1.50**: every direct bake arms a 2.5 s settle; any new contact disarms it; it waits
+  out an active pen (hover counts) in 500 ms steps; it settles through window and panel. Page flips
+  were already covered — a load clears the waiting runs and rebuilds the page settled, so a page
+  turned to is in tone from its first frame. SN re-pinned 0.1.50; on the Nomad.
+
 ## Traps to record at Q4
 
 - A **white gel pen draws nothing** under `DARKEN` yet still lands opaque white pixels in the ink

@@ -237,7 +237,8 @@ grey) and **settling at the next non-drawing event rather than at pen-up** — P
 **0.1.46** (a tool or shade pick, a rub, an undo, a page load), the host's `settleDisplay()`
 before chrome opens (Phase 33 → 0.1.47, called from `PaperScreenActivity.toggleChrome`,
 `CollapsedChrome.open` and the sketch face's shade panel), and **the pencil settling in tone
-too** — grain in grey, the dither the live picture only (Phase 34 → **0.1.48**; 0.1.49: the rubber settles before it posts). Seam:
+too** — grain in grey, the dither the live picture only (Phase 34 → **0.1.48**; 0.1.49: the rubber settles before it posts; Phase 35 → **0.1.50**: a 2.5 s pause settles on
+its own; a page turned to is shown settled from its first frame). Seam:
 `SketchToolSettings` grows a fourth int `penShade` — **a parcel tail, not a method** —
 `API_VERSION` 20 → **21** named by `SketchContract.MIN_API_VERSION_FOR_SKETCH_PEN_SHADE`; the
 action floor stays 20; `size` is a dead wire slot written 0. Reference

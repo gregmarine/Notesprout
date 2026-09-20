@@ -42,7 +42,7 @@ anything"; g-paper Phase 30 → **0.1.44**, amending arc 45's "no top and no bot
 grew one parcel tail (`SketchToolSettings.penShade`, API 20 → 21). See "Arc 46's decisions"
 below.
 
-**Engine.** g-paper is pinned at **0.1.49** (Phases 31–34 + the rubber settling before it posts, 2026-09-19: on the Supernote panel
+**Engine.** g-paper is pinned at **0.1.50** (Phases 31–35: the 2.5 s pause settle, the rubber settling before it posts, 2026-09-19: on the Supernote panel
 and in the window a mark is a blue-noise dither only while it is **live** or **waiting** — it
 settles into its true tone, the pen's line solid and the pencil's flecks each at their own alpha
 in the lead's tone, at the next thing that is not a mark: a tool or shade pick, a rub, an undo, a
@@ -268,7 +268,8 @@ the final one are given.
    dither throughout. Covers and exports were never dithered and are unchanged. **Amended on the
    third walk** ("instead of on pen up … anything other than drawing will rebake with the correct
    tone"): the mark stays dithered at pen-up and **settles** in tone at the next non-drawing
-   event — a tool or shade pick, a rub, an undo, a page load (g-paper Phase 32 → **0.1.46**), or
+   event — a tool or shade pick, a rub, an undo, a page load (g-paper Phase 32 → **0.1.46**), a
+   2.5 s pause with no new contact (Phase 35 → **0.1.50**), or
    the face's own `paper.settleDisplay()` before the shade panel, a chrome flip or the collapsed
    rows open (Phase 33 → **0.1.47**; setter-triggered settles reach the panel through the window
    only, so a pick can never paint over the panel). **And the pencil the same way** (the fourth
