@@ -237,7 +237,9 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   0.1.39, Phase 27 → 0.1.40; merged to g-paper `main` the same day, branch deleted), plus the
   pre-merge palette narrowing (four firmware tones incl. a white lightener lead). `INK_PLAN.md`
   there is history (plan + ledger — read for *why*, never resumed).
-- `tools` — **ACTIVE** (2026-09-19): arc 46 "Palette" — Atelier's sixteen tones for the sketch
+- `tools` — arc 46 "Palette" **COMPLETE + FROZEN 2026-09-19** on the user's Nomad and Manta walks
+  (not merged — the branch stays open for further tool arcs, each a fresh user decision; g-paper's
+  `ink-over` + `ink-true` likewise frozen and unmerged, merge on the user's word): Atelier's sixteen tones for the sketch
   face's pencil and gel pen, one 4 px pencil lead, the shade panel on each pen's re-tap (4 × 4),
   both pen glyphs wearing their shade, ink flattened over graphite (g-paper 0.1.44, branch
   `ink-over`) and baked ink shown in true tone once settled by a non-drawing event, pencil grain in grey

@@ -218,7 +218,10 @@ decisions". **COMPLETE + FROZEN 2026-09-18 on the user's Nomad hand walk (the wh
 too — "works good enough for now"); `ink` merged to `main` 2026-09-18 (`--no-ff`) and deleted,
 g-paper `two-rasters` likewise** — "on ink" means `main`.
 
-**Arc 46 "Palette" (2026-09-19, branch `tools`, letter Q, `extensions/sketch/PALETTE_PLAN.md`)**
+**Arc 46 "Palette" (2026-09-19, branch `tools`, letter Q, `extensions/sketch/PALETTE_PLAN.md` —
+COMPLETE + FROZEN 2026-09-19 on the user's Nomad and Manta walks; `tools` and g-paper's
+`ink-over`/`ink-true` unmerged, merge on the user's word; post-freeze the same day: the face's page
+is remembered on every move, `SketchHostHooks.rememberLastOpened`)**
 — the user's decision that, with the pencil and the pen going direct to the panel under a dither
 (g-paper 0.1.41–0.1.43), the four-tone limit no longer applies: **all sixteen greys for the
 pencil and the gel pen alike** — **Atelier's own sixteen tones** (`SketchPalette.TONES`, darkest
