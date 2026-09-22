@@ -75,9 +75,17 @@ and the e-ink repaints the whole library.
 
 ---
 
-## NSE · Sketch — the flank's grain (deferred 2026-09-21)
+## NSE · Sketch — the flank (side-of-the-lead shading), OFF since 2026-09-21
 
-> The user, after living with arc 47's side-of-the-lead shading: *"it still feels like it is
+> **Arc 47's flank is switched off** (g-paper Phase 39 → 0.1.53): the Supernote pencil bakes
+> upright regardless of tilt and draws with the round lead — the user's word: *"remove the side
+> pencil shading completely. Just normal pencil regardless of tilt."* The model stays in
+> `GraphiteGrain` (`Lead.FLANK`, `StrokePoint.azimuth`, the tilt capture seams, `FlankRenderHarness`,
+> `probe-tilt`) as an opt-in no engine uses; two lines in `RattaPaperView` (`bakeTilt`, `pencilLead`)
+> turn it back on. If it comes back, it comes back **with** the grain fix below, and the grain fix
+> needs the live path made affordable first.
+
+> The grain, as it stood when the user set it aside — after living with arc 47's side-of-the-lead shading: *"it still feels like it is
 > clumping. It should be the same sort of grain as a normal pencil stroke, only wider. Right now,
 > it looks like charcoal instead of pencil."* Then, after two walks of the fix: *"Let's drop this
 > feature and make a note to come back to it later. It isn't working well and it's holding me back."*

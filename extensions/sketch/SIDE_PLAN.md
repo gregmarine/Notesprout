@@ -79,8 +79,16 @@ six-fold flecks tipped it into coalesced events with huge boxes; `FLANK_STATION_
 live batches halved it on the JVM. **Withdrawn 2026-09-21 on the user's word** ("Let's drop this
 feature and make a note to come back to it later … it's holding me back"): g-paper reverted to
 0.1.52, SN re-pinned, both devices reinstalled. The grain was right; the cost is the problem. Deferred
-in root `BACKLOG.md` § "NSE · Sketch — the flank's grain"; the code is in g-paper history
-(0c2d1fe · 342bdce · 744ef2f) and g-paper `PLAN.md` Phase 38 holds the levers.
+in root `BACKLOG.md`; the code is in g-paper history (0c2d1fe · 342bdce · 744ef2f) and g-paper
+`PLAN.md` Phase 38 holds the levers.
+
+### THE FLANK IS OFF (2026-09-21, g-paper Phase 39 → 0.1.53)
+The user's clarification: "What I meant was that I want to remove the side pencil shading
+completely. Just normal pencil regardless of tilt." `RattaPaperView.bakeTilt` returns 0 for the
+pencil always and `pencilLead` is the round lead — a leaned pen lays the upright mark, with no
+flank and no tilt bloom. Nothing removed from `GraphiteGrain`: `Lead.FLANK`, `StrokePoint.azimuth`,
+the capture seams and the harness stay as an opt-in no engine uses; arc 47 can be turned back on
+with two lines. Arc 47 remains history (plan + ledger); SN re-pinned 0.1.53; both devices reinstalled.
 
 ### R0 — Results (2026-09-19, Nomad `tilt-20260919-220438.csv` + Manta `tilt-20260919-221419.csv`)
 The Ratta HAL breaks Android's axis contract: `AXIS_TILT` = signed **tilt-X in degrees**,
