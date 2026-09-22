@@ -3,8 +3,9 @@
 **Status:** ✅ COMPLETE + FROZEN 2026-09-22 on the user's Nomad hand walks ("It is looking so good
 right now. Let's freeze this arc … This arc is a wrap!"). Letter **S**. g-paper Phase 40 →
 **0.1.54** on branch `smudge` (off `settle-gesture`) and Phase 41 → **0.1.55** on branch
-`always-dither` (off `smudge`) — SN pinned at 0.1.55; both g-paper branches and SN `tools`
-UNMERGED by design (merge on the user's word; `tools` stays for later tool arcs). Undo memory:
+`always-dither` (off `smudge`) — SN pinned at 0.1.55; the g-paper branches **merged to g-paper `main` 2026-09-22 (`--no-ff`)
+and deleted** (with `settle-gesture`, `ink-over`, `ink-true`); SN `tools` stays open as the
+working branch by the user's word. Undo memory:
 the user chose to leave the 48 MB before-image cap as it is (compressed tiles or session-merged
 rubs are the levers if it ever matters). `docs/sketch.md` § "The smudge" is the reference; this
 file is history (plan + ledger).
