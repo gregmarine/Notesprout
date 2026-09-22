@@ -741,8 +741,10 @@ clumps**: under the finger every graphite pixel is pulled toward the mean of its
 (g-paper Phase 40 → **0.1.54**, `RasterSmudge`: a box of `spread` px on premultiplied channels, so
 bare paper lends emptiness and never colour; `strength × coverage` per batch over the rubber's own
 feathered corridor; `loss` pales it a little after the blend, as a real smudge does; the graphite the
-blur pushes past the corridor's edge is the other honest paling). No pass mask — a dwelling,
-wiggling finger keeps blending. `RasterSmudging(strength 0.45, spread 6, feather 0.5, loss 0.04)`
+blur pushes past the corridor's edge is the other honest paling). **Once per pixel per pass**, again on
+each reversal of travel — the rubber's pass mask, so a dense digitizer or a slow hand blends no
+more than a quick one (the first Nomad probe compounded per batch: 240 batches for eight strokes
+of the arm left 1 % of the tone). `RasterSmudging(strength 0.45, spread 6, feather 0.5, loss 0.04)`
 and `smudgeRadius` 32 px (a fingertip at 300 ppi) are the knobs, set on the engine's defaults.
 
 The recogniser is the face's (`SmudgeRub`, pure Kotlin): a sequence that began on one finger, on

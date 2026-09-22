@@ -26,7 +26,8 @@ into a tone. The rubber (arc 43) lifts; nothing on the face *moves* graphite.
 - **Engine (g-paper Phase 40, 0.1.54).** `RasterSmudge` (pure, `geometry/`): under the finger
   every pixel is pulled toward the mean of its neighbourhood — a separable box of `spread` px on
   premultiplied channels — by `strength × coverage` per batch; coverage is the rubber's feathered
-  corridor; `loss` scales the alpha after the blend. No pass mask: every batch pulls. The read is
+  corridor, **once per pixel per pass** on a pass mask like the rubber's (a reversal starts the
+  next); `loss` scales the alpha per pass the same way. The read is
   padded by `spread`; the write and every announce are the corridor's rect. `RasterSmudging
   (strength 0.45, spread 6, feather 0.5, loss 0.04)` + `smudgeRadius` 32 px on `PaperView`;
   `beginSmudge()` / `smudgeAlong(points)` / `endSmudge()` are **host-driven** (the engine's own
@@ -65,4 +66,17 @@ into a tone. The rubber (arc 43) lifts; nothing on the face *moves* graphite.
 
 ## Walk ledger
 
-- (pending)
+- **Probe 1 (2026-09-22, agent-driven):** `adb shell input` cannot rub (a second per event —
+  the long-press fired first) and the touch node is not shell-writable, so a **debug-only
+  broadcast** in `SketchActivity` (`<pkg>.SMUDGE_PROBE --ei x --ei y --ei half --ei passes`)
+  synthesises a finger back-and-forth through `dispatchTouchEvent`. Armed after 17 samples,
+  stood the page gestures down, ran as batches to the panel, closed as one graphite undo
+  entry (10 tiles), no crash. **Too pale**: the pull and the loss compounded per batch — 240
+  batches for eight strokes left ~1 % of the tone. Reworked the same day to **per pass** on a
+  pass mask (g-paper 0.1.54 republished): pull once per pixel per stroke of the arm, reset on
+  a reversal.
+- **Probe 2 (2026-09-22, agent-driven, per-pass build):** the same 180 px × 8 rub across a fresh
+  strip of the hatch. The band went from separate lines to an even tone (screencap greyscale
+  spread 47 → 12) at the same mean darkness as the untouched hatch above and below it (band
+  210 between 227 and 197) — blended, redistributed, nothing lost beyond the 4 % loss. Armed at
+  17 samples, one graphite undo entry (10 tiles), no crash. **The user's hand walk is next.**

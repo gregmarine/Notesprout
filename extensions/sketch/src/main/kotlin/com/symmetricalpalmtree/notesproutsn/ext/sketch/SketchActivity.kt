@@ -1338,6 +1338,60 @@ class SketchActivity : PaperScreenActivity() {
      * copy. The branch is `if (BuildConfig.DEBUG)` at the one call site, so release never compiles
      * the listener in.
      */
+    /**
+     * **Debug only — the smudge probe (arc 48).** `adb shell input` cannot rub: each of its
+     * invocations takes about a second, so the long-press fires before the first move, and the
+     * touch node is not writable from the shell. This broadcast synthesises a finger back-and-forth
+     * through the activity's own [dispatchTouchEvent] — real `MotionEvent`s, `TOOL_TYPE_FINGER`,
+     * one contact — so an agent-driven walk can prove the whole path lands on the panel and in the
+     * raster. Registered only in debug builds, only while resumed; release never compiles it in.
+     *
+     * `am broadcast -a <pkg>.SMUDGE_PROBE --ei x 480 --ei y 700 --ei half 80 --ei passes 6`
+     * (window coordinates; a horizontal rub of `2 × half` px, `passes` times there and back).
+     */
+    private val smudgeProbe = if (!BuildConfig.DEBUG) null else object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+            val cx = intent.getIntExtra("x", 480).toFloat()
+            val cy = intent.getIntExtra("y", 700).toFloat()
+            val half = intent.getIntExtra("half", 80).toFloat()
+            val passes = intent.getIntExtra("passes", 6)
+            val down = SystemClock.uptimeMillis()
+            var t = down
+            fun send(action: Int, x: Float, y: Float) {
+                val props = arrayOf(MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_FINGER })
+                val coords = arrayOf(MotionEvent.PointerCoords().apply { this.x = x; this.y = y; pressure = 1f; size = 0.1f })
+                val ev = MotionEvent.obtain(down, t, action, 1, props, coords, 0, 0, 1f, 1f, 0, 0, android.view.InputDevice.SOURCE_TOUCHSCREEN, 0)
+                dispatchTouchEvent(ev)
+                ev.recycle()
+                t += 8
+            }
+            send(MotionEvent.ACTION_DOWN, cx - half, cy)
+            val step = 12f
+            repeat(passes) {
+                var x = cx - half
+                while (x < cx + half) { x += step; send(MotionEvent.ACTION_MOVE, x, cy) }
+                while (x > cx - half) { x -= step; send(MotionEvent.ACTION_MOVE, x, cy) }
+            }
+            send(MotionEvent.ACTION_UP, cx - half, cy)
+            Slog.d(TAG) { "smudge probe: rubbed ${2 * half} px × $passes at ($cx, $cy)" }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        smudgeProbe?.let {
+            androidx.core.content.ContextCompat.registerReceiver(
+                this, it, android.content.IntentFilter("$packageName.SMUDGE_PROBE"),
+                androidx.core.content.ContextCompat.RECEIVER_EXPORTED,
+            )
+        }
+    }
+
+    override fun onPause() {
+        smudgeProbe?.let { unregisterReceiver(it) }
+        super.onPause()
+    }
+
     private fun fillTestPattern() {
         if (!BuildConfig.DEBUG) return
         // Through the page-op lock like every other thing that touches the paper: a walk taps this
