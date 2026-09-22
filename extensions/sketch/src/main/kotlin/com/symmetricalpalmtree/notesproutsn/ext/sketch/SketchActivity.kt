@@ -601,10 +601,6 @@ class SketchActivity : PaperScreenActivity() {
             return
         }
         if (!opened || closing) return
-        // The panel is about to hang over the page: a pen mark still on the glass as its
-        // dither settles into its tone FIRST (g-paper 0.1.47), or the settle would paint
-        // over the panel — the user's third-walk finding.
-        paper.settleDisplay()
         val shown = if (anchor == null) bar.show() else bar.show(anchor)
         if (shown) pushExclusions()
     }
@@ -994,9 +990,11 @@ class SketchActivity : PaperScreenActivity() {
         }
         // 2026-09-21: the one-finger swipe down — the notebook's Contents gesture, unassigned on
         // this surface — asks for the settle by hand: every mark still on the glass as the dither
-        // it was drawn under goes to its true tone (g-paper 0.1.47's door). It replaces the 2.5 s
-        // pause settle (g-paper 0.1.50 → withdrawn in 0.1.52), which landed where the hand was
-        // about to draw. A finger, never the pen, so the settle may post straight to the panel;
+        // it was drawn under goes to its true tone (g-paper 0.1.47's door). Since g-paper 0.1.52
+        // (Phase 37) this and a page load are the ONLY settles: the 2.5 s pause, the tool and
+        // shade picks, the rub, the undo and the chrome opens all used to settle, and each landed
+        // a settle the hand had not asked for ("only … the swipe gesture, page flip, or closing
+        // the sketch"). A finger, never the pen, so the settle may post straight to the panel;
         // pen-gated by the detector like every finger gesture here. Nothing waiting: a no-op.
         override fun onSwipeDown() {
             Slog.d(TAG) { "swipe down: settle the display" }

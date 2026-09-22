@@ -308,9 +308,6 @@ class CollapsedChrome(
     private fun open() {
         if (!canOpen()) return
         onOpen()
-        // Rows are about to hang over the page: settle what the engine shows provisionally
-        // before they do (g-paper 0.1.47's `settleDisplay`, a no-op on every other engine).
-        paper.settleDisplay()
         paper.releaseRender()
         refresh(miniMirrored)
         sync()

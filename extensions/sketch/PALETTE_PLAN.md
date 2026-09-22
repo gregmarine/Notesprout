@@ -122,7 +122,9 @@ palette was a firmware-needle constraint that no longer applies on the direct pa
   **Withdrawn 2026-09-21** (post-freeze, g-paper Phase 37 → **0.1.52**): "that has caused some
   undesired side effects. What might be better is a gesture to explicitly achieve the true tone
   bake" — the timer goes; a **one-finger swipe down** on the sketch face (`PageGestures.onSwipeDown`,
-  unassigned there) calls `paper.settleDisplay()` instead. SN re-pinned 0.1.52; on the Nomad, walk pending.
+  unassigned there) calls `paper.settleDisplay()` instead. First walk: "it still does it on tool change
+  too. Let's make this only happen with the swipe gesture, page flip, or closing the sketch" — the
+  setter, rub, undo and chrome-open settles withdrawn too; 0.1.52 republished. On the Nomad, walk pending.
 
 **Outcome (2026-09-19).** Frozen on the user's word after the fifth walk. What shipped beyond the plan:
 Atelier's tones, a 4 × 4 on each pen's re-tap, ink over graphite, and the settle model — a mark
