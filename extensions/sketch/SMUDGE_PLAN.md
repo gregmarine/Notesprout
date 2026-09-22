@@ -98,5 +98,16 @@ into a tone. The rubber (arc 43) lifts; nothing on the face *moves* graphite.
   samples):** 5.3 s of main-thread time in all (~1.5 ms a sample, a real finger sends one every
   ~8 ms), one batch logged over 30 ms (the first, 119 ms — warm-up + arming). The band is an even
   tone (greyscale spread 8) **darker** than the untouched hatch beside it (215 vs 228), feathered
-  at the ends, no clumps. **Walk 2 (the user's hand) is next.** If the tone is too dark, `gamma`
-  (1.5 sits between); too light, `loss` → 0 or `gamma` → 2.5.
+  at the ends, no clumps.
+- **Walk 2 (2026-09-22, the user's hand, before / after / after-settled screencaps in Preview):**
+  no ANR, three rubs each one undo entry, the scribble one even cloud. Two asks: **"too light …
+  closer to the original"** → `gamma` 2 → **3**; and **"it should be able to smudge out past the
+  boundary … fade … just enough to dirty the paper under it"** → **the finger's load** (g-paper
+  2eacf8c → ee99029): the darkest local tone under the finger's core is picked up, decays by
+  `e^(−travel / carry)` (carry **40 px**), is topped up wherever the finger crosses something
+  darker, and under the finger a pixel is pulled at least to `deposit` (**0.5**) of it, in the
+  load's colour where the pixel has none; `carry` 0 lays nothing. First cut (corridor average,
+  0.35, 30 px) laid a trail too faint to see (251–254 past the edge) — the average was watered
+  down by the paper beside the mark. Probe 4 (200 px rub from inside the patch out): the trail
+  now runs ~120 px past the edge, 232 → 252 fading to paper. **Walk 3 (the user's hand) next.**
+  Knobs: `deposit` (how dark the trail starts), `carry` (how far it runs), `gamma` (the tone).

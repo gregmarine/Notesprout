@@ -744,7 +744,7 @@ feathered corridor; `loss` pales it a little after the blend, as a real smudge d
 blur pushes past the corridor's edge is the other honest paling). **Once per pixel per pass**, again on
 each reversal of travel — the rubber's pass mask, so a dense digitizer or a slow hand blends no
 more than a quick one (the first Nomad probe compounded per batch: 240 batches for eight strokes
-of the arm left 1 % of the tone). `RasterSmudging(strength 0.45, spread 6, feather 0.5, loss 0.02, gamma 2)`
+of the arm left 1 % of the tone). `RasterSmudging(strength 0.45, spread 6, feather 0.5, loss 0.02, gamma 3, carry 40, deposit 0.5)`
 and `smudgeRadius` 32 px (a fingertip at 300 ppi) are the knobs, set on the engine's defaults.
 **`gamma` is the tone it converges to** (the user's first walk: "it looks like it is removing it"):
 the pencil lays sparse dark flecks and the eye reads a hatch by them, so their plain mean spread
@@ -754,6 +754,13 @@ mean, the way crushed graphite reads, and an even corridor is its own fixed poin
 swept area** (g-paper's per-segment coverage field, samples thinned under 2 px, batches chunked
 at 16, a warn line over 30 ms): the first build tested every pixel against every segment and the
 user's real finger hung the Nomad 12 s on one event — an ANR that closed the face, not a crash.
+**The finger carries graphite** (the second walk: "it should be able to smudge out past the
+boundary … a gradient depletion … just enough to dirty the paper under it"): the darkest local
+tone under the finger's core is its load; it decays by `e^(−travel / carry)` px of travel, is
+topped up wherever the finger crosses something darker, and under the finger a pixel is pulled at
+least to `deposit` of it, in the load's colour where the pixel has none of its own — so a rub out
+of a mark leaves a fading trail about three carries long. `gamma` went 2 → 3 the same walk ("too
+light … closer to the original").
 
 The recogniser is the face's (`SmudgeRub`, pure Kotlin): a sequence that began on one finger, on
 the page, with the pen gate open arms on the first **reversal of travel** — hops of
