@@ -132,6 +132,31 @@ class SketchActivity : PaperScreenActivity() {
     private var paletteBar: PaletteBar? = null
 
     /**
+     * The finger rub that smudges graphite (arc 48): a one-finger back-and-forth on the page,
+     * recognised by [SmudgeRub] and driven straight into the engine's smudge sweep. Fed from
+     * [dispatchTouchEvent] before the base feeds [gestures], so the page gestures see it standing
+     * down on the same event that armed it. Coordinates are converted to the paper's at the down.
+     */
+    private val smudge = SmudgeRub(
+        hopPx = SMUDGE_HOP_PX,
+        armWithinPx = SMUDGE_ARM_WITHIN_PX,
+        gate = { !paper.isPenActive && opened && !closing },
+        listener = object : SmudgeRub.Listener {
+            override fun onArmed(points: List<StrokePoint>) {
+                Slog.d(TAG) { "smudge armed: ${points.size} samples so far" }
+                paper.beginSmudge()
+                paper.smudgeAlong(points)
+            }
+            override fun onRub(points: List<StrokePoint>) = paper.smudgeAlong(points)
+            override fun onEnded() {
+                Slog.d(TAG) { "smudge ended" }
+                paper.endSmudge()
+            }
+        },
+    )
+    private val smudgeOrigin = IntArray(2)
+
+    /**
      * This sitting's history — pixels, so it is bounded by bytes as well as by count. It survives a
      * page turn (each entry carries the page it happened on) and dies with the screen.
      */
@@ -321,7 +346,7 @@ class SketchActivity : PaperScreenActivity() {
         gestures = PageGestures(
             host = paper.asView(),
             isPenActive = { paper.isPenActive },
-            standDown = { false },   // nothing on this surface claims finger input
+            standDown = { smudge.active },   // an armed smudge rub owns the finger (arc 48)
             overChrome = { chrome.overChrome(it) },
             listener = gestureListener,
         )
@@ -648,10 +673,47 @@ class SketchActivity : PaperScreenActivity() {
      *  arrives as `ACTION_POINTER_DOWN` (the notebook's O2 finding, the base class's rule). */
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         val action = ev.actionMasked
+        feedSmudge(ev, action)
         if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) {
             dismissPaletteBarOnContact(ev, ev.actionIndex)
         }
         return super.dispatchTouchEvent(ev)
+    }
+
+    /**
+     * The smudge rub's feed (arc 48). A sequence qualifies at the down only: one finger (never a
+     * stylus — the pen has its own tools), on the page (not on chrome), with the pen gate open and
+     * the page truly on the glass. The recogniser does the rest; every sample of a move — the
+     * event's history and its own point — goes in, in the paper's coordinates.
+     */
+    private fun feedSmudge(ev: MotionEvent, action: Int) {
+        when (action) {
+            MotionEvent.ACTION_DOWN -> {
+                val finger = ev.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER
+                val allowed = finger && opened && !closing && !paper.isPenActive &&
+                    !chrome.overChrome(ev)
+                if (allowed) paper.asView().getLocationInWindow(smudgeOrigin)
+                smudge.down(ev.x - smudgeOrigin[0], ev.y - smudgeOrigin[1], ev.eventTime, allowed)
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> smudge.secondFinger()
+            MotionEvent.ACTION_MOVE -> if (smudge.tracking) {
+                val n = ev.historySize
+                val points = ArrayList<StrokePoint>(n + 1)
+                for (i in 0 until n) {
+                    points.add(StrokePoint(
+                        ev.getHistoricalX(0, i) - smudgeOrigin[0], ev.getHistoricalY(0, i) - smudgeOrigin[1],
+                        pressure = SmudgeRub.PRESSURE, timeMillis = ev.getHistoricalEventTime(i),
+                    ))
+                }
+                points.add(StrokePoint(
+                    ev.getX(0) - smudgeOrigin[0], ev.getY(0) - smudgeOrigin[1],
+                    pressure = SmudgeRub.PRESSURE, timeMillis = ev.eventTime,
+                ))
+                smudge.move(points)
+            }
+            MotionEvent.ACTION_UP -> smudge.up()
+            MotionEvent.ACTION_CANCEL -> smudge.cancel()
+        }
     }
 
     // ── Page turns ───────────────────────────────────────────────────────────
@@ -1491,6 +1553,16 @@ class SketchActivity : PaperScreenActivity() {
 
     private companion object {
         const val TAG = "SketchActivity"
+
+        /** A hop of the smudge rub — the travel that fixes a direction (arc 48). About 1 mm at 300 ppi. */
+        const val SMUDGE_HOP_PX = 10f
+
+        /**
+         * How far from its landing a finger may be at its first turn-back and still be rubbing
+         * rather than bouncing off a swipe: 2.4 cm at 300 ppi, well inside the swipe's own floor
+         * (30 % of the shorter screen axis — 421 px on the Nomad).
+         */
+        const val SMUDGE_ARM_WITHIN_PX = 280f
 
         /** Outlives the Activity so a flush in flight always completes. */
         val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)

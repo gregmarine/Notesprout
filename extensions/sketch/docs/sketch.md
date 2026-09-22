@@ -42,7 +42,7 @@ anything"; g-paper Phase 30 → **0.1.44**, amending arc 45's "no top and no bot
 grew one parcel tail (`SketchToolSettings.penShade`, API 20 → 21). See "Arc 46's decisions"
 below.
 
-**Engine.** g-paper is pinned at **0.1.53** (**Phase 39, 2026-09-21: the side-of-the-lead shading of arc 47 is OFF — "just normal pencil regardless of tilt"**: the Supernote pencil bakes upright always and draws with the round lead; the flank stays in `GraphiteGrain` as an opt-in no engine uses, and Phase 38 — its grain as the point's, in grey — was built, walked twice and withdrawn the same day because the live path could not afford it; both deferred in root `BACKLOG.md` § "NSE · Sketch — the flank"; Phase 37, 2026-09-21: a mark settles into tone **only** on the sketch face's **one-finger swipe down** or a page load — Phase 35's 2.5 s pause and Phase 32's tool / shade / rub / undo settles all **withdrawn**; see "The settle gesture" below; Phase 36 "The flank", arc 47 — see "Arc 47's decisions" below; Phases 31–34: the rubber settling before it posts, 2026-09-19: on the Supernote panel
+**Engine.** g-paper is pinned at **0.1.54** (**Phase 40, 2026-09-22: the finger smudge, arc 48 — see "The smudge" below**; **Phase 39, 2026-09-21: the side-of-the-lead shading of arc 47 is OFF — "just normal pencil regardless of tilt"**: the Supernote pencil bakes upright always and draws with the round lead; the flank stays in `GraphiteGrain` as an opt-in no engine uses, and Phase 38 — its grain as the point's, in grey — was built, walked twice and withdrawn the same day because the live path could not afford it; both deferred in root `BACKLOG.md` § "NSE · Sketch — the flank"; Phase 37, 2026-09-21: a mark settles into tone **only** on the sketch face's **one-finger swipe down** or a page load — Phase 35's 2.5 s pause and Phase 32's tool / shade / rub / undo settles all **withdrawn**; see "The settle gesture" below; Phase 36 "The flank", arc 47 — see "Arc 47's decisions" below; Phases 31–34: the rubber settling before it posts, 2026-09-19: on the Supernote panel
 and in the window a mark is a blue-noise dither only while it is **live** or **waiting** — it
 settles into its true tone, the pen's line solid and the pencil's flecks each at their own alpha
 in the lead's tone, at the next thing that is not a mark: a tool or shade pick, a rub, an undo, a
@@ -730,6 +730,41 @@ an undo and the chrome opens no longer settle — g-paper's setter and raster-ch
 gone, and the face's, `PaperScreenActivity.toggleChrome`'s and `CollapsedChrome.open`'s calls to
 `settleDisplay()` with them (their reason, a setter settle painting over a freshly opened panel,
 no longer exists). Closing the sketch needs nothing: the notebook shows the flattened rasters.
+
+**The smudge (arc 48, 2026-09-22).** A **one-finger back-and-forth** on the page rubs the
+graphite under it the way a finger blends pencil on paper: separate lines run together into a
+tone. It is not a tool and never the stylus — the user's word: "a single-finger gesture of a
+natural rub feel … rapid and in short distances, so it doesn't trigger the swipe gesture" — and it
+touches the **pencil only**: the ink raster is never read, never allocated, never announced (the
+rubber's rule, held by the same construction). It **blends and redistributes, never lifts and never
+clumps**: under the finger every graphite pixel is pulled toward the mean of its neighbourhood
+(g-paper Phase 40 → **0.1.54**, `RasterSmudge`: a box of `spread` px on premultiplied channels, so
+bare paper lends emptiness and never colour; `strength × coverage` per batch over the rubber's own
+feathered corridor; `loss` pales it a little after the blend, as a real smudge does; the graphite the
+blur pushes past the corridor's edge is the other honest paling). No pass mask — a dwelling,
+wiggling finger keeps blending. `RasterSmudging(strength 0.45, spread 6, feather 0.5, loss 0.04)`
+and `smudgeRadius` 32 px (a fingertip at 300 ppi) are the knobs, set on the engine's defaults.
+
+The recogniser is the face's (`SmudgeRub`, pure Kotlin): a sequence that began on one finger, on
+the page, with the pen gate open arms on the first **reversal of travel** — hops of
+`SMUDGE_HOP_PX` 10 px, a turn past 120° — while the finger is still within `SMUDGE_ARM_WITHIN_PX`
+280 px of where it landed. A swipe goes one way and never arms; a swipe that bounced turns back far
+from home and never arms; the swipe's own floor is 30 % of the axis (421 px on the Nomad), so the
+two cannot meet. The samples before arming are delivered as the first batch, so the rub's first
+stroke smudges too. It is fed from `SketchActivity.dispatchTouchEvent` **before** the base feeds
+`PageGestures`, and `standDown = { smudge.active }` stands every page gesture down on the event
+that armed it (the detector cancels all and ignores the rest of the sequence). The gate
+(`!paper.isPenActive`) is re-asked at the turn and on every batch — a pen arriving mid-rub ends the
+smudge; a second finger ends an armed rub and kills an unarmed one; a lift ends it.
+
+On the engine side the sweep is the rubber's with the arithmetic swapped: `beginSmudge()` →
+`smudgeAlong(points)` per batch (the previous batch's last sample chained on) → `endSmudge()`. Each
+batch announces `onRasterWillChange(GRAPHITE, rect)` → blend → `onRasterChanged(GRAPHITE, rect)`,
+so the face's per-contact undo entry ([Undo](#undo)) and the save governor need nothing new;
+`endSmudge()` fires `onPenLifted`, which closes the entry. On the Nomad the blended corridor goes
+straight into the panel per batch (`onRasterSmudgedBatch` → `toneAndPost`, the rubber's posting);
+a smudge settles nothing that is waiting (Phase 37's rule — the swipe down still does that).
+`extensions/sketch/SMUDGE_PLAN.md` is the plan + ledger.
 
 ### Tools (arcs 44–46)
 
