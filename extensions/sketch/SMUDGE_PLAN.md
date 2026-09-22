@@ -117,3 +117,11 @@ into a tone. The rubber (arc 43) lifts; nothing on the face *moves* graphite.
   the face's swipe-down settle removed) — "the dither looks great on the device, and the true
   tone looks great on the Mac." SN re-pinned 0.1.55. Next: the user's drawing test, then an
   export pulled to the Mac for Preview.
+- **Walk 4 (2026-09-22, page 24):** "it seems I lost the sketch for a moment … a series of
+  undo/redo … eventually the sketch I was working on magically came back." The log: every turn
+  to page 24 (457 KB graphite) answered `the page's GRAPHITE raster could not be read:
+  DeadObjectException` while page 23 (156 KB) read fine — the 512 KiB chunk reply overran
+  Binder's shared 1 MB buffer beside the save push in flight; the pixels were never lost.
+  `SKETCH_CHUNK_BYTES` 512 → **128 KiB** (`MAX_CHUNKS` 49), the pin tests moved, host + ext
+  rebuilt. Not a smudge bug; a `docs/sketch.md` trap. Glass vs export of page 24 put side by side
+  in Preview through the new `SKETCH_DUMP` door (the dither on the glass, the tone in the file).

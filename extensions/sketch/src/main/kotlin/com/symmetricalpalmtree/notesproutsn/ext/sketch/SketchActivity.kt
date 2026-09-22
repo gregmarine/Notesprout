@@ -1347,6 +1347,7 @@ class SketchActivity : PaperScreenActivity() {
      */
     private val smudgeProbe = if (!BuildConfig.DEBUG) null else object : android.content.BroadcastReceiver() {
         override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+            if (intent.action == "$packageName.SKETCH_DUMP") { dumpPage(); return }
             val cx = intent.getIntExtra("x", 480).toFloat()
             val cy = intent.getIntExtra("y", 700).toFloat()
             val half = intent.getIntExtra("half", 80).toFloat()
@@ -1391,11 +1392,23 @@ class SketchActivity : PaperScreenActivity() {
     override fun onResume() {
         super.onResume()
         smudgeProbe?.let {
-            androidx.core.content.ContextCompat.registerReceiver(
-                this, it, android.content.IntentFilter("$packageName.SMUDGE_PROBE"),
-                androidx.core.content.ContextCompat.RECEIVER_EXPORTED,
-            )
+            val filter = android.content.IntentFilter("$packageName.SMUDGE_PROBE").apply { addAction("$packageName.SKETCH_DUMP") }
+            androidx.core.content.ContextCompat.registerReceiver(this, it, filter, androidx.core.content.ContextCompat.RECEIVER_EXPORTED)
         }
+    }
+
+    /**
+     * **Debug only.** `<pkg>.SKETCH_DUMP` writes the page as the export would see it — g-paper's
+     * `renderToBitmap`, both rasters flattened in true grey over white, never the panel's dither —
+     * to `files/dump/page.png` in this app's external files dir, for `adb pull`. It is how the glass
+     * (a screencap) and the export are put side by side on the Mac without walking the export screen.
+     */
+    private fun dumpPage() {
+        val bmp = paper.renderToBitmap() ?: run { Log.w(TAG, "dump: nothing to render"); return }
+        val dir = java.io.File(getExternalFilesDir(null), "dump").apply { mkdirs() }
+        val f = java.io.File(dir, "page.png")
+        f.outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        Log.i(TAG, "dump: ${bmp.width}×${bmp.height} → ${f.absolutePath}")
     }
 
     override fun onPause() {

@@ -793,7 +793,9 @@ straight into the panel per batch (`onRasterSmudgedBatch` → `toneAndPost`, the
 a smudge settles nothing that is waiting (Phase 37's rule — the swipe down still does that).
 `extensions/sketch/SMUDGE_PLAN.md` is the plan + ledger. **Debug builds carry a probe**: the
 broadcast `<ext pkg>.SMUDGE_PROBE --ei x --ei y --ei half --ei passes --ei step --ei hist`
-synthesises a finger back-and-forth through `dispatchTouchEvent` (window coordinates), because
+synthesises a finger back-and-forth through `dispatchTouchEvent` (window coordinates), and
+`<ext pkg>.SKETCH_DUMP` writes the page as the export sees it (`renderToBitmap`, true grey) to
+`files/dump/page.png` in the extension's external files dir for `adb pull`, because
 `adb shell input` takes about a second per event — the long-press fires first — and the touch
 node is not shell-writable. Release never compiles it in.
 
@@ -1268,6 +1270,18 @@ notebook screen first).
 ---
 
 ## Traps
+
+**A 512 KiB chunk reply can fail beside a save in flight (fixed 2026-09-22).** Binder's ~1 MB
+transaction buffer is per process and shared by everything in flight, and the face saves the page
+it is leaving while it asks for the next; a 457 KB `readSketchChunk` reply landed beside a 430 KB
+push and failed as a `DeadObjectException`, so the page came up **blank on the glass** while its
+pixels sat safe in the `.soil` — the user: "I lost the sketch for a moment … eventually the sketch
+I was working on magically came back" (a later turn read it fine). A 156 KB page never failed.
+`SketchContract.SKETCH_CHUNK_BYTES` is 128 KiB now (`MAX_CHUNKS` 13 → 49); the count travels in
+`SketchPageState`, so host and extension need not agree on the number to agree on a page. The
+symptom to recognise: `the page's GRAPHITE raster could not be read: DeadObjectException` in the
+face's log on a page turn, with the host's `requestPage` line just above it reporting the bytes.
+
 
 - **Ink is on top since arc 46 / g-paper 0.1.44 — pencil over an ink line is hidden by it.**
   Under 0.1.39–0.1.43's `DARKEN` a white gel pen drew nothing over graphite and a grey one could

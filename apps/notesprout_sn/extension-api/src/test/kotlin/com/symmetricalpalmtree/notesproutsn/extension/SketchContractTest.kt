@@ -109,7 +109,8 @@ class SketchContractTest {
 
     @Test
     fun theChunkSizeStaysUnderTheBinderBudget() {
-        assertEquals(512 * 1024, SketchContract.SKETCH_CHUNK_BYTES)
+        // 512 KiB until 2026-09-22: a reply that size beside a save in flight overran Binder's shared buffer.
+        assertEquals(128 * 1024, SketchContract.SKETCH_CHUNK_BYTES)
         assertTrue(SketchContract.SKETCH_CHUNK_BYTES < 1024 * 1024)
     }
 
@@ -133,7 +134,7 @@ class SketchContractTest {
             SketchContract.MAX_BYTES / SketchContract.SKETCH_CHUNK_BYTES + 1,
             SketchContract.MAX_CHUNKS,
         )
-        assertEquals(13, SketchContract.MAX_CHUNKS)
+        assertEquals(49, SketchContract.MAX_CHUNKS)   // 13 at 512 KiB chunks; 49 at 128 KiB (2026-09-22)
         // And it really does bound what the chunker produces, at the cap and one under it.
         assertTrue(ByteChunks.countFor(SketchContract.MAX_BYTES) <= SketchContract.MAX_CHUNKS)
         assertTrue(ByteChunks.countFor(SketchContract.MAX_BYTES - 1) <= SketchContract.MAX_CHUNKS)

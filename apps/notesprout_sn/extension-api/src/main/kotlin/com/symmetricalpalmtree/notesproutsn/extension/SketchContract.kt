@@ -130,9 +130,18 @@ object SketchContract {
 
     // ── The rasters on the wire ──────
 
-    /** Most bytes in one chunk — 512 KiB, the store's inline carrier, comfortably under the ~1 MB
-     *  Binder transaction budget with the ink transfers' headroom. [ByteChunks] holds the rule. */
-    const val SKETCH_CHUNK_BYTES: Int = 512 * 1024
+    /**
+     * Most bytes in one chunk — **128 KiB** since 2026-09-22 (512 KiB from arc 43 to then).
+     * Binder's ~1 MB transaction buffer is **per process and shared by every transaction in
+     * flight**, and a raster read is never alone in it: the face saves the page it is leaving
+     * while it asks for the next, so a 457 KB reply landed beside a 430 KB push and the reply
+     * failed as a `DeadObjectException` — the page came up blank on the glass while its pixels sat
+     * safe in the `.soil` (the user: "I lost the sketch for a moment … eventually the sketch I was
+     * working on magically came back"). A 156 KB page never failed. The count travels in
+     * [SketchPageState], so the two sides never have to agree on this number to agree on a page.
+     * [ByteChunks] holds the rule.
+     */
+    const val SKETCH_CHUNK_BYTES: Int = 128 * 1024
 
     /**
      * The hard refusal: most bytes **one raster's** image may be — **6 MiB, the SQLCipher cursor
