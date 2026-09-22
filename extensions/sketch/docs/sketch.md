@@ -744,8 +744,16 @@ feathered corridor; `loss` pales it a little after the blend, as a real smudge d
 blur pushes past the corridor's edge is the other honest paling). **Once per pixel per pass**, again on
 each reversal of travel — the rubber's pass mask, so a dense digitizer or a slow hand blends no
 more than a quick one (the first Nomad probe compounded per batch: 240 batches for eight strokes
-of the arm left 1 % of the tone). `RasterSmudging(strength 0.45, spread 6, feather 0.5, loss 0.04)`
+of the arm left 1 % of the tone). `RasterSmudging(strength 0.45, spread 6, feather 0.5, loss 0.02, gamma 2)`
 and `smudgeRadius` 32 px (a fingertip at 300 ppi) are the knobs, set on the engine's defaults.
+**`gamma` is the tone it converges to** (the user's first walk: "it looks like it is removing it"):
+the pencil lays sparse dark flecks and the eye reads a hatch by them, so their plain mean spread
+evenly across the corridor is a pale wash; the target is the mean of darkness raised to `gamma`
+and brought back by the root — at 2 the root mean square, so a hatch settles denser than its
+mean, the way crushed graphite reads, and an even corridor is its own fixed point. **Cost is the
+swept area** (g-paper's per-segment coverage field, samples thinned under 2 px, batches chunked
+at 16, a warn line over 30 ms): the first build tested every pixel against every segment and the
+user's real finger hung the Nomad 12 s on one event — an ANR that closed the face, not a crash.
 
 The recogniser is the face's (`SmudgeRub`, pure Kotlin): a sequence that began on one finger, on
 the page, with the pen gate open arms on the first **reversal of travel** — hops of
@@ -766,7 +774,11 @@ so the face's per-contact undo entry ([Undo](#undo)) and the save governor need 
 `endSmudge()` fires `onPenLifted`, which closes the entry. On the Nomad the blended corridor goes
 straight into the panel per batch (`onRasterSmudgedBatch` → `toneAndPost`, the rubber's posting);
 a smudge settles nothing that is waiting (Phase 37's rule — the swipe down still does that).
-`extensions/sketch/SMUDGE_PLAN.md` is the plan + ledger.
+`extensions/sketch/SMUDGE_PLAN.md` is the plan + ledger. **Debug builds carry a probe**: the
+broadcast `<ext pkg>.SMUDGE_PROBE --ei x --ei y --ei half --ei passes --ei step --ei hist`
+synthesises a finger back-and-forth through `dispatchTouchEvent` (window coordinates), because
+`adb shell input` takes about a second per event — the long-press fires first — and the touch
+node is not shell-writable. Release never compiles it in.
 
 ### Tools (arcs 44–46)
 

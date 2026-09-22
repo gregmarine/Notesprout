@@ -40,6 +40,7 @@ import com.symmetricalpalmtree.notesproutsn.ink.awaitPenIdle
 import com.symmetricalpalmtree.notesproutsn.notebook.CollapsedChrome
 import com.symmetricalpalmtree.notesproutsn.notebook.PageGestures
 import com.symmetricalpalmtree.notesproutsn.notebook.PaperChrome
+import kotlin.math.min
 import com.symmetricalpalmtree.notesproutsn.notebook.PaperToolbar
 import com.symmetricalpalmtree.notesproutsn.notebook.UndoRedoStack
 import kotlinx.coroutines.CancellationException
@@ -1355,25 +1356,40 @@ class SketchActivity : PaperScreenActivity() {
             val cy = intent.getIntExtra("y", 700).toFloat()
             val half = intent.getIntExtra("half", 80).toFloat()
             val passes = intent.getIntExtra("passes", 6)
+            val step = intent.getIntExtra("step", 12).toFloat()      // px between samples
+            val hist = intent.getIntExtra("hist", 1).coerceAtLeast(1) // samples per MOVE event
             val down = SystemClock.uptimeMillis()
             var t = down
+            fun props() = arrayOf(MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_FINGER })
+            fun coords(x: Float, y: Float) = arrayOf(MotionEvent.PointerCoords().apply { this.x = x; this.y = y; pressure = 1f; size = 0.1f })
             fun send(action: Int, x: Float, y: Float) {
-                val props = arrayOf(MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_FINGER })
-                val coords = arrayOf(MotionEvent.PointerCoords().apply { this.x = x; this.y = y; pressure = 1f; size = 0.1f })
-                val ev = MotionEvent.obtain(down, t, action, 1, props, coords, 0, 0, 1f, 1f, 0, 0, android.view.InputDevice.SOURCE_TOUCHSCREEN, 0)
+                val ev = MotionEvent.obtain(down, t, action, 1, props(), coords(x, y), 0, 0, 1f, 1f, 0, 0, android.view.InputDevice.SOURCE_TOUCHSCREEN, 0)
                 dispatchTouchEvent(ev)
                 ev.recycle()
                 t += 8
             }
+            val t0 = SystemClock.uptimeMillis()
             send(MotionEvent.ACTION_DOWN, cx - half, cy)
-            val step = 12f
+            val xs = ArrayList<Float>()
             repeat(passes) {
                 var x = cx - half
-                while (x < cx + half) { x += step; send(MotionEvent.ACTION_MOVE, x, cy) }
-                while (x > cx - half) { x -= step; send(MotionEvent.ACTION_MOVE, x, cy) }
+                while (x < cx + half) { x += step; xs.add(x) }
+                while (x > cx - half) { x -= step; xs.add(x) }
+            }
+            // Real events carry their history: `hist` samples per MOVE, the last as the event's own.
+            var i = 0
+            while (i < xs.size) {
+                val n = min(hist, xs.size - i)
+                val ev = MotionEvent.obtain(down, t, MotionEvent.ACTION_MOVE, 1, props(), coords(xs[i], cy), 0, 0, 1f, 1f, 0, 0, android.view.InputDevice.SOURCE_TOUCHSCREEN, 0)
+                for (k in 1 until n) { t += 8; ev.addBatch(t, coords(xs[i + k], cy), 0) }
+                dispatchTouchEvent(ev)
+                ev.recycle()
+                t += 8
+                i += n
             }
             send(MotionEvent.ACTION_UP, cx - half, cy)
-            Slog.d(TAG) { "smudge probe: rubbed ${2 * half} px × $passes at ($cx, $cy)" }
+            val ms = SystemClock.uptimeMillis() - t0
+            Log.i(TAG, "smudge probe: rubbed ${2 * half} px × $passes at ($cx, $cy), step $step, $hist/event, ${xs.size} samples in $ms ms")
         }
     }
 

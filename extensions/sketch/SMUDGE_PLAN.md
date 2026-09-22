@@ -79,4 +79,24 @@ into a tone. The rubber (arc 43) lifts; nothing on the face *moves* graphite.
   strip of the hatch. The band went from separate lines to an even tone (screencap greyscale
   spread 47 → 12) at the same mean darkness as the untouched hatch above and below it (band
   210 between 227 and 197) — blended, redistributed, nothing lost beyond the 4 % loss. Armed at
-  17 samples, one graphite undo entry (10 tiles), no crash. **The user's hand walk is next.**
+  17 samples, one graphite undo entry (10 tiles), no crash.
+- **Walk 1 (2026-09-22, the user's hand): "It doesn't quite work as expected … it may have caused
+  a crash … it just closed the sketchbook. The smudging seems to be more like an eraser … it
+  looks like it is removing it. When I smudge, I would be making several passes of the spot."**
+  Two findings. (1) **ANR, not a crash**: the dropbox trace put the main thread in
+  `RasterRub.coverage` inside `smudgeBatch` — every pixel of the batch's rect against every
+  segment; a real finger's event carries dozens of samples, the queue coalesced behind the
+  first slow batch, 12 s on one event, "Input dispatching timed out", the face force-finished.
+  Fixed in g-paper (0.1.54 republished, cc2827f): a per-segment **coverage field** (cost = the
+  swept area), samples thinned under 2 px, batches chunked at 16, a `GPaperCore` warn line for
+  any batch over 30 ms. (2) **The eraser look was the plain mean**: the pencil lays sparse dark
+  flecks and the eye reads the hatch by them; their mean alpha spread evenly across a 64 px
+  corridor is a pale wash. Now the target is the **power mean of darkness** (`gamma` 2 = RMS):
+  a hatch settles to a tone denser than its mean — the way crushed graphite reads — and an even
+  corridor is its own fixed point, so passes converge. `loss` 0.04 → 0.02.
+- **Probe 3 (2026-09-22, finger-dense: step 2 px, 8 samples an event, 20 passes, 3 600
+  samples):** 5.3 s of main-thread time in all (~1.5 ms a sample, a real finger sends one every
+  ~8 ms), one batch logged over 30 ms (the first, 119 ms — warm-up + arming). The band is an even
+  tone (greyscale spread 8) **darker** than the untouched hatch beside it (215 vs 228), feathered
+  at the ends, no clumps. **Walk 2 (the user's hand) is next.** If the tone is too dark, `gamma`
+  (1.5 sits between); too light, `loss` → 0 or `gamma` → 2.5.
