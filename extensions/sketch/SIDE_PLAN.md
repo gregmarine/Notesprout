@@ -71,7 +71,16 @@ sparseness. Asked "paler flecks at the point's density, or black flecks and a de
 `Grain.pale` (a byte per fleck), sites filled at the point's density for the pressure, lightening
 carried as alpha, the barrel-end fall kept in the sites so the far edge still feathers,
 `FLANK_LIGHTEN` 0.84 → 0.70 (rendered both ways from the Manta probe CSV), `MAX_FLECKS` 400k → 1M
-(a filled 9 000 px pass truncated at 400k). SN re-pinned; dev builds on Nomad + Manta; walk pending.
+(a filled 9 000 px pass truncated at 400k). SN re-pinned; dev builds on Nomad + Manta.
+**Walk 1:** a huge lag and a Manta ANR — the fleck drawer scanned the batch once per (darkness,
+paleness) pair; made one counting sort. **Walk 2:** still laggy — the device log showed the sparse
+flank was already at ~85 % of a core live (~3 µs a tooth *site*, 125 sites/px regardless of fill) and
+six-fold flecks tipped it into coalesced events with huge boxes; `FLANK_STATION_STRIDE` 2 + chunked
+live batches halved it on the JVM. **Withdrawn 2026-09-21 on the user's word** ("Let's drop this
+feature and make a note to come back to it later … it's holding me back"): g-paper reverted to
+0.1.52, SN re-pinned, both devices reinstalled. The grain was right; the cost is the problem. Deferred
+in root `BACKLOG.md` § "NSE · Sketch — the flank's grain"; the code is in g-paper history
+(0c2d1fe · 342bdce · 744ef2f) and g-paper `PLAN.md` Phase 38 holds the levers.
 
 ### R0 — Results (2026-09-19, Nomad `tilt-20260919-220438.csv` + Manta `tilt-20260919-221419.csv`)
 The Ratta HAL breaks Android's axis contract: `AXIS_TILT` = signed **tilt-X in degrees**,

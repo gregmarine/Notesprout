@@ -75,6 +75,39 @@ and the e-ink repaints the whole library.
 
 ---
 
+## NSE · Sketch — the flank's grain (deferred 2026-09-21)
+
+> The user, after living with arc 47's side-of-the-lead shading: *"it still feels like it is
+> clumping. It should be the same sort of grain as a normal pencil stroke, only wider. Right now,
+> it looks like charcoal instead of pencil."* Then, after two walks of the fix: *"Let's drop this
+> feature and make a note to come back to it later. It isn't working well and it's holding me back."*
+
+- **The diagnosis stands.** The flank makes its grey by leaving four tooth sites in five bare with
+  full-black flecks; a sparse random field clumps by chance — that is charcoal — and none of arc
+  47's knobs (tooth weight, depth, the fan, lighten) reach it, because each shaped the sparse field
+  rather than its sparseness.
+- **The fix that was right on paper** (g-paper Phase 38, built + reverted the same day; code in
+  g-paper history 0c2d1fe · 342bdce · 744ef2f, write-up in g-paper `PLAN.md` § Phase 38): the user
+  chose *paler flecks at the point's density* over *black flecks and a darker band*. `Grain.pale`
+  (a byte per fleck, `null` on full-ink grains so the round lead stays bit-identical), sites at
+  the point's own odds for the pressure, the lightening as alpha (`FLANK_LIGHTEN` 0.70), the
+  barrel-end fall kept in the sites so the far edge feathers, `MAX_FLECKS` 1M. Rendered against
+  the user's recorded Manta strokes (`FlankRenderHarness`, the probe CSV on the Manta at
+  `Android/data/com.symmetricalpalmtree.gpaper.probetilt/files/`): an even fine speckle, no clumps.
+- **Why it was pulled: the live path could not afford it.** The `live graphite:` log lines
+  showed the *sparse* flank already at ~85 % of a core on the main thread (~3 µs a tooth site on
+  the RK3566; 125 sites per px of travel whether one in five or one in two catch). Six-fold flecks
+  tipped it: input coalesced into ~24 events per stroke, each box mostly empty paper flattened and
+  dithered whole — 237 ms/event on the Manta, a 15 s ANR that lost the stroke, 787 ms/event on the
+  Nomad. A counting-sort fleck drawer, `FLANK_STATION_STRIDE` 2 and chunked live batches halved it
+  on the JVM; never confirmed on the glass.
+- **To come back to it — the cost is the site cost, not the fleck cost:** (1) the per-site price
+  (two octaves of value noise per site; sample the tooth once per cell and reuse, or a precomputed
+  tile); (2) the sweep on a worker thread, the main thread only compositing and posting;
+  (3) fewer sites per px on the flank than the point's lattice, the look re-checked on the probe
+  renders first. Then re-apply the Phase 38 commits on top and walk. Do the grain work on the
+  hand's own recorded strokes, never a synthetic sweep (arc 47's lesson).
+
 ## Supernote (Ratta) — deferred items
 
 > From the retired `SUPERNOTE_SUPPORT_PLAN.md` (all 10 phases shipped on the `supernote` branch,
