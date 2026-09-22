@@ -42,7 +42,7 @@ anything"; g-paper Phase 30 → **0.1.44**, amending arc 45's "no top and no bot
 grew one parcel tail (`SketchToolSettings.penShade`, API 20 → 21). See "Arc 46's decisions"
 below.
 
-**Engine.** g-paper is pinned at **0.1.54** (**Phase 40, 2026-09-22: the finger smudge, arc 48 — see "The smudge" below**; **Phase 39, 2026-09-21: the side-of-the-lead shading of arc 47 is OFF — "just normal pencil regardless of tilt"**: the Supernote pencil bakes upright always and draws with the round lead; the flank stays in `GraphiteGrain` as an opt-in no engine uses, and Phase 38 — its grain as the point's, in grey — was built, walked twice and withdrawn the same day because the live path could not afford it; both deferred in root `BACKLOG.md` § "NSE · Sketch — the flank"; Phase 37, 2026-09-21: a mark settles into tone **only** on the sketch face's **one-finger swipe down** or a page load — Phase 35's 2.5 s pause and Phase 32's tool / shade / rub / undo settles all **withdrawn**; see "The settle gesture" below; Phase 36 "The flank", arc 47 — see "Arc 47's decisions" below; Phases 31–34: the rubber settling before it posts, 2026-09-19: on the Supernote panel
+**Engine.** g-paper is pinned at **0.1.55** (**Phase 41, 2026-09-22: the panel is always dithered, nothing settles — see "Always dithered" below**; **Phase 40, 2026-09-22: the finger smudge, arc 48 — see "The smudge" below**; **Phase 39, 2026-09-21: the side-of-the-lead shading of arc 47 is OFF — "just normal pencil regardless of tilt"**: the Supernote pencil bakes upright always and draws with the round lead; the flank stays in `GraphiteGrain` as an opt-in no engine uses, and Phase 38 — its grain as the point's, in grey — was built, walked twice and withdrawn the same day because the live path could not afford it; both deferred in root `BACKLOG.md` § "NSE · Sketch — the flank"; Phase 37, 2026-09-21: a mark settles into tone **only** on the sketch face's **one-finger swipe down** or a page load — Phase 35's 2.5 s pause and Phase 32's tool / shade / rub / undo settles all **withdrawn**; see "The settle gesture" below; Phase 36 "The flank", arc 47 — see "Arc 47's decisions" below; Phases 31–34: the rubber settling before it posts, 2026-09-19: on the Supernote panel
 and in the window a mark is a blue-noise dither only while it is **live** or **waiting** — it
 settles into its true tone, the pen's line solid and the pencil's flecks each at their own alpha
 in the lead's tone, at the next thing that is not a mark: a tool or shade pick, a rub, an undo, a
@@ -716,7 +716,17 @@ three — because the PEN slot itself carries **both** kinds via `collapsedPenKi
 own order, with no change to how many tools the base class thinks this screen has. Overflow behind
 `…` is unchanged: Back · Bring in ink · Show pages. There is no `EraserBar` — Point and Lasso are stroke erasers, and a raster page has neither.
 
-**The settle gesture (2026-09-21).** A **one-finger swipe down** on the page calls
+**Always dithered (2026-09-22, g-paper Phase 41 → 0.1.55).** The Supernote panel shows the
+dither always — pencil and pen, a loaded page included — and nothing settles: `RattaPaperView.
+DISPLAY_SETTLES` is false, `settleDisplay()` is a no-op there, and the face's swipe-down binding
+below is gone (the gesture is unassigned on this surface again). The page images, the covers and
+every export keep the true greys, so **the glass is the dither and the export is the tone** — the
+user's word with both pictures side by side: "the dither looks great on the device, and the true
+tone looks great on the Mac. But the dither looks awful on Mac and the true tone doesn't quite
+look right on the device." Existing sketches show dithered from their next load; their stored
+pixels are untouched. The paragraph below is history.
+
+**The settle gesture (2026-09-21, withdrawn 2026-09-22).** A **one-finger swipe down** on the page called
 `paper.settleDisplay()`: every mark still on the glass as the dither it was drawn under goes to
 its true tone — the pen's line solid, the pencil's grain in grey. It is `PageGestures.onSwipeDown`,
 the notebook's Contents gesture, which this surface never used (a sketch has no Contents); the

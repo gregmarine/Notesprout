@@ -1051,18 +1051,13 @@ class SketchActivity : PaperScreenActivity() {
             hidePaletteBar()
             toggleChrome()
         }
-        // 2026-09-21: the one-finger swipe down — the notebook's Contents gesture, unassigned on
-        // this surface — asks for the settle by hand: every mark still on the glass as the dither
-        // it was drawn under goes to its true tone (g-paper 0.1.47's door). Since g-paper 0.1.52
-        // (Phase 37) this and a page load are the ONLY settles: the 2.5 s pause, the tool and
-        // shade picks, the rub, the undo and the chrome opens all used to settle, and each landed
-        // a settle the hand had not asked for ("only … the swipe gesture, page flip, or closing
-        // the sketch"). A finger, never the pen, so the settle may post straight to the panel;
-        // pen-gated by the detector like every finger gesture here. Nothing waiting: a no-op.
-        override fun onSwipeDown() {
-            Slog.d(TAG) { "swipe down: settle the display" }
-            paper.settleDisplay()
-        }
+        // The one-finger swipe down is unassigned here again (2026-09-22). From 2026-09-21 it
+        // asked g-paper for the settle — every mark on the glass as the dither it was drawn under
+        // going to its true tone — and since g-paper 0.1.55 (Phase 41) nothing on the Supernote
+        // panel settles: the glass shows the dither always, pencil and pen alike, and the true
+        // tone belongs to the export (the user, with both side by side: "the dither looks great
+        // on the device, and the true tone looks great on the Mac"). `settleDisplay()` is a no-op
+        // on that engine now, so the binding went with it rather than pretending.
         // Everything else stays the no-op default: no trail, no selection.
     }
 

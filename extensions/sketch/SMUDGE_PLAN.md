@@ -111,3 +111,9 @@ into a tone. The rubber (arc 43) lifts; nothing on the face *moves* graphite.
   down by the paper beside the mark. Probe 4 (200 px rub from inside the patch out): the trail
   now runs ~120 px past the edge, 232 → 252 fading to paper. **Walk 3 (the user's hand) next.**
   Knobs: `deposit` (how dark the trail starts), `carry` (how far it runs), `gamma` (the tone).
+- **Walk 3 (2026-09-22):** page 22 smudged darker with a fading trail off the edge — no complaint
+  on the smudge itself. Side decision, not this arc's but landed on it: **the panel is always
+  dithered, the export always true tone** (g-paper Phase 41 → 0.1.55, `DISPLAY_SETTLES` false;
+  the face's swipe-down settle removed) — "the dither looks great on the device, and the true
+  tone looks great on the Mac." SN re-pinned 0.1.55. Next: the user's drawing test, then an
+  export pulled to the Mac for Preview.
