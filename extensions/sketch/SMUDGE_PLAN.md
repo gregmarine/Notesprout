@@ -1,8 +1,13 @@
 # Arc 48 "Smudge" — the finger rub that blends graphite (branch `tools`)
 
-**Status:** 🔧 BUILT 2026-09-22, dev build on the Nomad, **WALK PENDING**. Letter **S**. g-paper
-Phase 40 → **0.1.54** on branch `smudge` (off `settle-gesture`; unmerged, mavenLocal).
-`docs/sketch.md` § "The smudge" is the reference; this file is the plan + ledger.
+**Status:** ✅ COMPLETE + FROZEN 2026-09-22 on the user's Nomad hand walks ("It is looking so good
+right now. Let's freeze this arc … This arc is a wrap!"). Letter **S**. g-paper Phase 40 →
+**0.1.54** on branch `smudge` (off `settle-gesture`) and Phase 41 → **0.1.55** on branch
+`always-dither` (off `smudge`) — SN pinned at 0.1.55; both g-paper branches and SN `tools`
+UNMERGED by design (merge on the user's word; `tools` stays for later tool arcs). Undo memory:
+the user chose to leave the 48 MB before-image cap as it is (compressed tiles or session-merged
+rubs are the levers if it ever matters). `docs/sketch.md` § "The smudge" is the reference; this
+file is history (plan + ledger).
 
 ## Why
 
@@ -57,7 +62,7 @@ into a tone. The rubber (arc 43) lifts; nothing on the face *moves* graphite.
   2026-09-22 (ext-sketch 104, sn-screen 214 green).
 - **S2** — docs (this file, `docs/sketch.md` § "The smudge", SN `CLAUDE.md`, root `CLAUDE.md`);
   dev host + ext-sketch on the Nomad. ✅ 2026-09-22.
-- **S3** — the user's Nomad walk: the scribble on page 20/20 rubbed with one finger. Knobs if it
+- **S3** ✅ — four Nomad hand walks 2026-09-22 (the ledger below), frozen after the fourth. Knobs if it
   is wrong: `RasterSmudging.strength` (how fast it blends), `spread` (how far a line reaches —
   the hatch's gap is ~8–15 px, so 6 each side is two passes to close it), `loss` (how much
   pales), `smudgeRadius` (the fingertip); on the face `SMUDGE_HOP_PX` / `SMUDGE_ARM_WITHIN_PX`

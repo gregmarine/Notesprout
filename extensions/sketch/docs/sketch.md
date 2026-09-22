@@ -1,4 +1,4 @@
-# Sketch (arcs 43–46)
+# Sketch (arcs 43–48)
 
 **NSE · Sketch** gives a notebook page a second surface beside its ink: **two raster pictures,
 one flattened**, a graphite pencil and a rubbing eraser over a graphite bitmap, a gel pen (and
@@ -741,7 +741,7 @@ gone, and the face's, `PaperScreenActivity.toggleChrome`'s and `CollapsedChrome.
 `settleDisplay()` with them (their reason, a setter settle painting over a freshly opened panel,
 no longer exists). Closing the sketch needs nothing: the notebook shows the flattened rasters.
 
-**The smudge (arc 48, 2026-09-22).** A **one-finger back-and-forth** on the page rubs the
+**The smudge (arc 48, 2026-09-22 — COMPLETE + FROZEN the same day on four Nomad hand walks).** A **one-finger back-and-forth** on the page rubs the
 graphite under it the way a finger blends pencil on paper: separate lines run together into a
 tone. It is not a tool and never the stylus — the user's word: "a single-finger gesture of a
 natural rub feel … rapid and in short distances, so it doesn't trigger the swipe gesture" — and it
