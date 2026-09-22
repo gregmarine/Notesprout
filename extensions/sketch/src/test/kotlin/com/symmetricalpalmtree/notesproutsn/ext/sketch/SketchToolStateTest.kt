@@ -64,7 +64,7 @@ class SketchToolStateTest {
         val white = SketchToolState.DEFAULT.withShade(SketchPalette.WHITE_SHADE)
         assertEquals(0xFFFFFFFF.toInt(), white.penColor)
         assertEquals(StrokeStyle.PENCIL, white.penStyle)
-        assertEquals(4f, white.penWidth, 0f)
+        assertEquals(SketchPalette.PENCIL_WIDTH_PX, white.penWidth, 0f)
     }
 
     @Test fun `each button reports its own kind's shade whatever is armed`() {
