@@ -35,7 +35,7 @@ graphite; g-paper 0.1.40 lets it preview LIGHT_GRAY (see "Arc 45's decisions", 6
 Arc 46 "Palette" (2026-09-19, branch `tools`, `PALETTE_PLAN.md` the plan + ledger, phases Q0–Q4)
 is the user's decision that, with the pencil and the pen going direct to the panel under a dither
 (g-paper 0.1.41–0.1.43), the four-tone limit no longer applies: **Atelier's sixteen tones, for the
-pencil and the gel pen alike; one pencil width (4 px, a real pencil's); the shade panel on each
+pencil and the gel pen alike; one pencil width (4 px, a real pencil's — **2 px since 2026-09-21**, the user's trial after the flank came off); the shade panel on each
 pen button's re-tap, Atelier's swatches in a 4 × 4; both pen glyphs wearing their own shade** —
 and, from the first walk, **ink flattened over graphite** ("a white gel pen can write over
 anything"; g-paper Phase 30 → **0.1.44**, amending arc 45's "no top and no bottom"). The seam
@@ -229,7 +229,7 @@ The first Nomad walk (the same day) amended 2, 4 and 5 and added 9 — both the 
 the final one are given.
 
 1. **No size choice.** One pencil width, "the size of a real pencil, whatever Atelier uses":
-   **4 px** (`SketchPalette.PENCIL_WIDTH_PX`, arc 44's third lead). Atelier's nib was never
+   **4 px** (`SketchPalette.PENCIL_WIDTH_PX`, arc 44's third lead; **2 px since 2026-09-21** — "let's try a smaller stroke size", walk pending). Atelier's nib was never
    measured — its black HB reads back ~2.7 black px per px of stroke length on the Nomad
    (g-paper `probe-ebc/README.md`) — so 4 px is walked against Atelier by hand, and the one
    constant is the knob if it reads heavy. Withdraws arc 44's decision 3 (the twelve leads).
