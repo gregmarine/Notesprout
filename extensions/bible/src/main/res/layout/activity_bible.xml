@@ -110,7 +110,7 @@
                 android:id="@+id/btnSend"
                 style="@style/Widget.Notesprout.ToolbarButton"
                 android:contentDescription="@string/cd_bible_send"
-                android:src="@drawable/ic_pencil_down"
+                android:src="@drawable/ic_pen_down"
                 android:visibility="gone" />
         </LinearLayout>
 

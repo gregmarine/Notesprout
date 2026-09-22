@@ -3842,7 +3842,7 @@ class NotebookActivity : AppCompatActivity() {
             .addAction(R.drawable.ic_plus, getString(R.string.scratch_placement_new_page)) {
                 openPadWith(strokes, page, ExtensionContract.PLACEMENT_NEW_PAGE)
             }
-            .addAction(R.drawable.ic_pencil_down, getString(R.string.scratch_placement_current_page)) {
+            .addAction(R.drawable.ic_pen_down, getString(R.string.scratch_placement_current_page)) {
                 openPadWith(strokes, page, ExtensionContract.PLACEMENT_CURRENT_PAGE)
             }
             .show()

@@ -30,7 +30,7 @@ import androidx.core.graphics.drawable.DrawableCompat
  * Tinting the outline itself would take it with the shade, and a `#DDDDDD` pencil on white paper
  * is a button that has gone missing on an e-paper panel. Keeping the outline black and colouring
  * only the body means the button is always fully legible and the shade is a thing *inside* it. Each
- * fill path (`ic_pen_fill`, `ic_ballpen_fill`) is its outline's own body path closed, and the
+ * fill path (`ic_pencil_fill`, `ic_pen_fill`) is its outline's own body path closed, and the
  * outline's 2 px stroke is centred on it — so the outline covers the fill's edge and no shade can
  * bleed past the glyph.
  *
@@ -47,11 +47,11 @@ object ShadeIcon {
 
     /** The Pencil glyph with its body in [ink]. */
     fun pencil(ctx: Context, ink: Int): LayerDrawable =
-        filled(ctx, outlineRes = R.drawable.ic_pen, fillRes = R.drawable.ic_pen_fill, ink = ink)
+        filled(ctx, outlineRes = R.drawable.ic_pencil, fillRes = R.drawable.ic_pencil_fill, ink = ink)
 
     /** The gel pen glyph with its barrel in [ink] (arc 46). */
     fun pen(ctx: Context, ink: Int): LayerDrawable =
-        filled(ctx, outlineRes = R.drawable.ic_ballpen, fillRes = R.drawable.ic_ballpen_fill, ink = ink)
+        filled(ctx, outlineRes = R.drawable.ic_pen, fillRes = R.drawable.ic_pen_fill, ink = ink)
 
     /**
      * A fresh glyph with its body in [ink]. **Fresh per call on purpose**: a `Drawable` in two views

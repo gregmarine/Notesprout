@@ -986,7 +986,7 @@ page are both this device's screen, so a cross-size page clips the ink exactly l
 
 1. The top bar's Send (`sendPage`) is the whole current page in writing order; the selection bar's
    Send (`sendSelection`) is the lasso's strokes, read at the tap because a selection can die between
-   the show and the tap. Both are icon `ic_pencil_down`, both absent without a notebook behind the
+   the show and the tap. Both are icon `ic_pen_down`, both absent without a notebook behind the
    calendar (`sendEnabled`). An empty pick raises "Nothing to send," never silence.
 2. The page is flushed under the page-op lock first (**the calendar keeps its ink** — this is a
    copy), the wire chunks (`InkWire.toWireStrokes` → `InkChunks.chunk`) are parked in
@@ -1132,7 +1132,7 @@ already exist, by growing `ICalendar` one call rather than building a fifth exte
 `EXTRA_CALENDAR_EXPORT_ENABLED` — the Intent's fourth boolean, set by the host's `CalendarEntry`
 only when the discovered calendar declares `API_VERSION` ≥ 9 **and** an exporter is installed (the
 arc-30 door's own rule: the screen, not the extension, decides "nothing takes pages") — and picks
-the button's face from `sendEnabled`/`exportEnabled`: Send alone (`ic_pencil_down`), Export alone
+the button's face from `sendEnabled`/`exportEnabled`: Send alone (`ic_pen_down`), Export alone
 (`ic_download`), or both behind one button whose tap raises an `ActionSheetDialog` — **Send page**
 / **Export…**. Why one button rather than a fourth: the notebook door's bar already carries eleven
 — a twelfth 62 dp button is 11 × 62 + margins = 726 of the Nomad's 749 dp, and the icon alone

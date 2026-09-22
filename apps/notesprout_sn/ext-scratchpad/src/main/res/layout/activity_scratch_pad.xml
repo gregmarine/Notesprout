@@ -93,7 +93,7 @@
                 style="@style/Widget.Notesprout.ToolbarButton"
                 android:layout_gravity="end|center_vertical"
                 android:contentDescription="@string/cd_scratch_send_page"
-                android:src="@drawable/ic_pencil_down"
+                android:src="@drawable/ic_pen_down"
                 android:visibility="gone" />
 
         </FrameLayout>

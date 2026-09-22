@@ -121,7 +121,7 @@ class ScratchPadActivity : InkScreenActivity<ScratchAction>() {
      */
     override fun collapsedOverflow(): List<CollapsedChrome.Entry> = listOfNotNull(
         backEntry(),
-        CollapsedChrome.Entry.mirroring(R.drawable.ic_pencil_down, binding.btnSend),
+        CollapsedChrome.Entry.mirroring(R.drawable.ic_pen_down, binding.btnSend),
     )
 
     override fun showPage() = showPage(firstLoad = false)

@@ -45,7 +45,7 @@ class InkSelectionBar(
         band = band,
         buttons = buildList {
             if (sendHint != null) {
-                add(FloatingSelectionBar.Button(R.drawable.ic_pencil_down, sendHint) {
+                add(FloatingSelectionBar.Button(R.drawable.ic_pen_down, sendHint) {
                     releaseRender(); onSend()
                 })
             }

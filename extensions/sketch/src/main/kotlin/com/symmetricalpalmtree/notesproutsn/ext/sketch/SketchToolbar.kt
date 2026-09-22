@@ -113,7 +113,7 @@ class SketchToolbar(
     /**
      * The two pen buttons' glyphs: each an outline over a body that carries that kind's shade
      * ([ShadeIcon]). Built here rather than left to the layout's `android:src` because they are
-     * two-layer drawables whose fill this class re-inks — the layout's own `ic_pen` / `ic_ballpen`
+     * two-layer drawables whose fill this class re-inks — the layout's own `ic_pencil` / `ic_pen`
      * is what each button wears for the instant before these lines run.
      */
     private val pencilIcon = ShadeIcon.pencil(btnPencil.context, SketchToolState.DEFAULT.pencilReport)

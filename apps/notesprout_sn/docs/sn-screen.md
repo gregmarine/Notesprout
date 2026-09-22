@@ -85,7 +85,13 @@ chrome `ic_*.xml` (grown one arc at a time since J1's move; the latest are arc 4
 copy — one glyph, not a fork, the reason it lives here rather than in `:ext-sketch`) and
 `ic_pen_fill.xml` (`ic_pen`'s own outline path closed to a filled body, the layer `PencilIcon`
 tints with the armed shade — the Pencil button's report, the corner button's and the mini row's
-too); before them arc 29 / LE2's
+too). **Renamed 2026-09-22 (the user's call: the ballpen is the pen everywhere, the pencil glyph is
+for a true pencil only):** the ballpen is now `ic_pen.xml` / `ic_pen_fill.xml` — worn by every
+writing face's pen button, the document editor's Write, the event editor's edit field — and the
+pencil is `ic_pencil.xml` / `ic_pencil_fill.xml`, worn only by the sketch face's Pencil; the
+send-to-page glyph `ic_pencil_down.xml` became `ic_pen_down.xml` (the ballpen body under
+`pencil-down`'s arrow, the nib-clip line left off where it would cross the shaft). `CollapsedTools.iconFor`
+lost its `altPen` flag with it — the pen is one glyph, and the sketch face's two kinds paint their own; before them arc 29 / LE2's
 `ic_lasso_eraser` — copied byte-for-byte from og's `drawable/` rather than drawn fresh (the standing
 "check first" trap), the eraser sub-bar's Lasso button and the eraser top-bar button's own glyph
 while that eraser is armed; before it arc 28 / H4's
@@ -147,7 +153,7 @@ addition) `overflowInline`'s inline-vs-`…` boundary at `INLINE_MAX`. `Collapse
 `ChromeToggle`, is Android-typed and untested here on purpose — the pure decisions it calls are what
 `CollapsedToolsTest` covers. Arc 44 / T3 raised the module to **118** — `CollapsedToolsTest` 10 →
 **14**: which of the PEN slot's two kind-buttons reads as armed and only under `Tool.PEN`
-(`penButtonSelected`), the alt button's `ic_ballpen` glyph and only under `Tool.PEN`, the corner
+(`penButtonSelected`), the alt button's `ic_ballpen` glyph and only under `Tool.PEN` (that test replaced 2026-09-22: one pen glyph, no alt flag), the corner
 button's painted report following the *primary* pen button rather than a second "is the pencil on
 the paper?", and a screen with one pen still getting the rule it always had. `AnchoredBar.addRow`,
 `PaperToolbar`'s `btnAltPen` set and `CollapsedChrome.PenKinds`/`PenIcon` are Android-typed and

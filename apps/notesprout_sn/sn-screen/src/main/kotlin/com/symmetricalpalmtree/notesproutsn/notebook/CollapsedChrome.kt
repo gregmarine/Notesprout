@@ -430,7 +430,7 @@ class CollapsedChrome(
             knob.setImageDrawable(reported.newDrawable())
             return
         }
-        val icon = CollapsedTools.iconFor(armed, clipboardLoaded, altPen = alt)
+        val icon = CollapsedTools.iconFor(armed, clipboardLoaded)
         if (icon == knobIcon) return
         knobIcon = icon
         knobToken = null

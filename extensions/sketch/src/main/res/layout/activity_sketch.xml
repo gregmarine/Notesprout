@@ -69,21 +69,22 @@
                     android:contentDescription="@string/cd_sketch_back"
                     android:src="@drawable/ic_arrow_left" />
 
-                <!-- ic_pen IS Tabler's pencil glyph (the user's call, K5): the sketch's one tool
-                     wears it, and so does the collapsed corner button. -->
+                <!-- ic_pencil is Tabler's pencil glyph (the user's call, K5; renamed from ic_pen 2026-09-22 when
+                     the ballpen became the pen everywhere): the Pencil wears it, and so does the
+                     collapsed corner button. -->
                 <androidx.appcompat.widget.AppCompatImageButton
                     android:id="@+id/btnPencil"
                     style="@style/Widget.Notesprout.ToolbarButton"
                     android:contentDescription="@string/cd_tool_pencil"
-                    android:src="@drawable/ic_pen" />
+                    android:src="@drawable/ic_pencil" />
 
-                <!-- The gel pen (arc 44 / T3) — Tabler's ballpen glyph, a fixed 5 px line; its
+                <!-- The gel pen (arc 44 / T3) — Tabler's ballpen glyph (ic_pen, the pen everywhere since 2026-09-22), a fixed 5 px line; its
                      barrel wears the pen's shade since arc 46 (ShadeIcon). -->
                 <androidx.appcompat.widget.AppCompatImageButton
                     android:id="@+id/btnPen"
                     style="@style/Widget.Notesprout.ToolbarButton"
                     android:contentDescription="@string/cd_tool_pen"
-                    android:src="@drawable/ic_ballpen" />
+                    android:src="@drawable/ic_pen" />
 
                 <androidx.appcompat.widget.AppCompatImageButton
                     android:id="@+id/btnEraser"
@@ -104,7 +105,7 @@
                     android:id="@+id/btnBringInk"
                     style="@style/Widget.Notesprout.ToolbarButton"
                     android:contentDescription="@string/cd_sketch_bring_ink"
-                    android:src="@drawable/ic_pencil_down" />
+                    android:src="@drawable/ic_pen_down" />
 
                 <androidx.appcompat.widget.AppCompatImageButton
                     android:id="@+id/btnShowPages"
@@ -202,7 +203,7 @@
         android:layout_gravity="top|end"
         android:layout_margin="8dp"
         android:background="@drawable/shape_dialog_bordered"
-        android:src="@drawable/ic_pen"
+        android:src="@drawable/ic_pencil"
         android:visibility="gone"
         android:contentDescription="@string/collapsed_tools" />
 

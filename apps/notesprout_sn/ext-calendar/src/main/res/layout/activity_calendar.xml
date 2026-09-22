@@ -124,7 +124,7 @@
                     style="@style/Widget.Notesprout.ToolbarButton"
                     android:layout_marginStart="8dp"
                     android:contentDescription="@string/cd_calendar_send_page"
-                    android:src="@drawable/ic_pencil_down"
+                    android:src="@drawable/ic_pen_down"
                     android:visibility="gone" />
 
                 <!-- The Events door (arc 24 / Z2) — always visible; opens the calendar's own event

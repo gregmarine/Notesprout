@@ -179,8 +179,10 @@ value are given.
 6. **Memory** — remembered on the device: two `ISketchHost` tails, `API_VERSION` 18 → 19; the host
    keeps it in device-local prefs, one setting for all notebooks, never in the `.soil`, never in a
    backup.
-7. **Pen glyph** — Tabler `ballpen` → `ic_ballpen` in `:sn-screen`'s shared drawables, hint "Pen".
-   `ic_pen` (Tabler's pencil) stays on the Pencil.
+7. **Pen glyph** — Tabler `ballpen` → `ic_ballpen` in `:sn-screen`'s shared drawables, hint "Pen"
+   (**since 2026-09-22 the ballpen is `ic_pen` itself** — the pen glyph everywhere a pen is meant,
+   on every writing face too — and the pencil glyph is `ic_pencil`; `ic_ballpen` no longer exists).
+   Tabler's pencil (then `ic_pen`, now `ic_pencil`) stays on the Pencil.
 8. **Naming** — Arc 44 "Pencils" · Notesprout branch `pencils` · g-paper branch `pencil-tones` ·
    letter T · `PENCILS_PLAN.md`.
 9. **Models** — Fable orchestrates, writes the AIDL seam and reviews every g-paper diff and every
@@ -255,7 +257,7 @@ the final one are given.
    pencil's shade, the Pen's for the pen's — on the top bar and on the mini row alike; no palette
    button, no overflow entry. It does not re-arm anything.
 6. **Both pen buttons wear their own shade**: the Pencil fill stays; the ballpen glyph gains a
-   fill body (`ic_ballpen_fill`) tinted with the pen's shade — on the top bar, the mini row, and
+   fill body (`ic_ballpen_fill`, now `ic_pen_fill`) tinted with the pen's shade — on the top bar, the mini row, and
    the corner knob while that kind is armed.
 7. **Naming** — Arc 46 "Palette" · branch **`tools`** (expected to carry further tool arcs) ·
    letter **Q** · `PALETTE_PLAN.md`. No `versionName` bump (version moves at a release).
@@ -840,14 +842,15 @@ node is not shell-writable. Release never compiles it in.
   it, or the exit — every dismissal path is in T3's ledger, unchanged. It edits the armed kind's
   shade and re-arms nothing.
 - **`ShadeIcon`** (`:ext-sketch`; arc 44 / T3's `PencilIcon` generalised) is a `LayerDrawable`
-  recipe: a fill body (`ic_pen_fill` / `ic_ballpen_fill`), tinted with that kind's shade, under the
-  untouched black outline (`ic_pen` / `ic_ballpen`) — `pencil(ctx, ink)` and `pen(ctx, ink)` are
+  recipe: a fill body (`ic_pencil_fill` / `ic_pen_fill`), tinted with that kind's shade, under the
+  untouched black outline (`ic_pencil` / `ic_pen`) — `pencil(ctx, ink)` and `pen(ctx, ink)` are
   the two glyphs it knows. Black reads as a fully black glyph, every other level as a black
   outline with that grey inside it. Worn by the top bar's two pen buttons, the mini row's two, and
   the collapsed corner knob (the armed kind's — `CollapsedChrome.PenKinds.primaryIcon` /
   `altIcon`, the latter arc 46's one `:sn-screen` addition beside `syncAltPen`) — one recipe, not
   four spellings of it. Each fill stays put while the other kind or the rubber is armed.
-- **`ic_ballpen`** (`:sn-screen`, Tabler's `ballpen`) is the gel pen's glyph, in the shared
+- **`ic_pen`** (`:sn-screen`, Tabler's `ballpen`; named `ic_ballpen` until 2026-09-22, when the
+  ballpen became the pen glyph everywhere and the pencil glyph became `ic_pencil`) is the gel pen's glyph, in the shared
   vocabulary rather than `:ext-sketch` alone, beside `PaperToolbar`'s new `btnAltPen` /
   `altPenArmed` / `onPenKindPicked` / `onPenReTap` (a defaulted, trailing parameter set — every
   existing caller with one pen is unchanged) and `CollapsedChrome`'s `PenKinds` (the alt button

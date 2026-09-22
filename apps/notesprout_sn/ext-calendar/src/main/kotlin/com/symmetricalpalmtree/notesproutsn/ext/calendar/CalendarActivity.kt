@@ -254,7 +254,7 @@ class CalendarActivity : InkScreenActivity<InkAction>() {
     private fun sendOrExport() {
         if (!opened || closing || isFinishing || isDestroyed) return
         ActionSheetDialog(this)
-            .addAction(R.drawable.ic_pencil_down, getString(R.string.cd_calendar_send_page)) { sendPage() }
+            .addAction(R.drawable.ic_pen_down, getString(R.string.cd_calendar_send_page)) { sendPage() }
             .addAction(R.drawable.ic_download, getString(R.string.calendar_export_action)) { exportPage() }
             .show()
     }
@@ -283,7 +283,7 @@ class CalendarActivity : InkScreenActivity<InkAction>() {
         CollapsedChrome.Entry.mirroring(R.drawable.ic_calendar_day, binding.btnDay),
         // The out-door's Send-or-Export glyph and wording were decided by [CalendarToolbar]
         // before this is read; mirroring reads them off the button.
-        CollapsedChrome.Entry.mirroring(R.drawable.ic_pencil_down, binding.btnSend),
+        CollapsedChrome.Entry.mirroring(R.drawable.ic_pen_down, binding.btnSend),
         CollapsedChrome.Entry.mirroring(R.drawable.ic_calendar_event, binding.btnEvents),
         CollapsedChrome.Entry.mirroring(R.drawable.ic_sketching, binding.btnScratchPad),
     )

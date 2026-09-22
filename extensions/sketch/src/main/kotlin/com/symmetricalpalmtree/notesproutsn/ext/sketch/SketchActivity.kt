@@ -204,7 +204,7 @@ class SketchActivity : PaperScreenActivity() {
     /** **Two** tools on the mini toolbar, not the usual four (arc 43 / K2 grew the parameter for
      *  exactly this): the pen and the rubber are all this surface answers. The pen slot is two
      *  *kinds* since arc 44 ([collapsedPenKinds]), so the row reads Pencil · Pen · Eraser — the top
-     *  bar's own order. The pencil wears `ic_pen` — Tabler's pencil glyph, and the user's call. */
+     *  bar's own order. The pencil wears `ic_pencil` — Tabler's pencil glyph, the user's call; the pen `ic_pen`, the ballpen. */
     override fun collapsedTools(): List<Tool> = listOf(Tool.PEN, Tool.ERASER)
 
     /**
@@ -224,7 +224,7 @@ class SketchActivity : PaperScreenActivity() {
      */
     override fun collapsedPenKinds(): CollapsedChrome.PenKinds = CollapsedChrome.PenKinds(
         primaryHint = getString(R.string.cd_tool_pencil),
-        altIconRes = R.drawable.ic_ballpen,
+        altIconRes = R.drawable.ic_pen,
         altHint = getString(R.string.cd_tool_pen),
         altArmed = { toolbar.state.isPen },
         onPick = { alt -> armPen(alt) },
@@ -259,7 +259,7 @@ class SketchActivity : PaperScreenActivity() {
      *  `CollapsedTools.INLINE_MAX`, so they sit behind `…`. */
     override fun collapsedOverflow(): List<CollapsedChrome.Entry> = listOfNotNull(
         backEntry(),
-        CollapsedChrome.Entry.mirroring(R.drawable.ic_pencil_down, binding.btnBringInk),
+        CollapsedChrome.Entry.mirroring(R.drawable.ic_pen_down, binding.btnBringInk),
         CollapsedChrome.Entry.mirroring(R.drawable.ic_page, binding.btnShowPages),
     )
 

@@ -168,7 +168,7 @@ no lag — **1.2 / 2 / 4 / 7 / 12 / 16 / 20 / 24 / 32 / 48 / 64 / 96 px** in two
 1.2; a fixed **gel pen** (`StrokeStyle.PEN`, black, **5 px** — the hand's own amendment from a
 starting 3, by way of 7); a third top-bar tool button, Pencil · Pen · Eraser, re-tapping the armed
 Pencil opening `PencilBar` over `AnchoredBar`; the Pencil glyph filled with the armed shade
-(`PencilIcon`, `ic_pen_fill`), the fill kept while Pen or Eraser is armed. This is the arc's fresh
+(`PencilIcon`, `ic_pen_fill` — `ic_pencil_fill` since 2026-09-22, when the ballpen became `ic_pen`, the pen glyph on every face, and `ic_pencil_down` became `ic_pen_down`), the fill kept while Pen or Eraser is armed. This is the arc's fresh
 decision in the two places the standing rules require one: it **amends arc 43's decision 3** ("no
 tilt, no width choice, no colour") and it grants the family's **first tool-options bar on an SN
 paper screen** since P1 removed the tool panels — neither is a precedent for the notebook's own
@@ -230,7 +230,7 @@ pencil width, 4 px** (arc 44's twelve leads withdrawn); the shade panel **on eac
 re-tap** (the Pencil's for the pencil's shade, the Pen's for the pen's — a Palette button was
 opened and withdrawn on the first walk) with Atelier's swatches in a **4 × 4** (fill · gap ·
 dotted ring; solid ring on the selected); **both pen glyphs wear their own shade** (`ShadeIcon`,
-`ic_ballpen_fill`; `CollapsedChrome.PenKinds.altIcon` + `onReTap(alt, anchor)`,
+`ic_ballpen_fill`, now `ic_pen_fill`; `CollapsedChrome.PenKinds.altIcon` + `onReTap(alt, anchor)`,
 `PaperToolbar.onPenReTap(alt)` in `:sn-screen`); and **ink flattened over graphite** — "a white
 gel pen can write over anything" — g-paper **Phase 30 → 0.1.44** (`SRC_OVER`, ink on top, in the
 engine, `SketchRaster` and `SketchCover`; pencil over an ink line is hidden; amends arc 45's "no

@@ -318,7 +318,7 @@ page is clipped exactly like any other ink.
 and `onDrained` takes a list (the pad's is always one). Nothing else about the pad changed.
 
 1. The top bar's **Send** is the whole current page; the selection bar's **Send** is the lasso's
-   strokes. Both `ic_pencil_down`; both **absent** without a notebook behind the pad. An empty pick
+   strokes. Both `ic_pen_down`; both **absent** without a notebook behind the pad. An empty pick
    raises "Nothing to send" — never silence.
 2. The page is flushed under the page-op lock first (**the pad keeps its ink** — this is a copy), the
    chunks are parked in `ScratchSession`, and the screen finishes with `RESULT_SCRATCH_SEND`.
