@@ -992,7 +992,17 @@ class SketchActivity : PaperScreenActivity() {
             hidePaletteBar()
             toggleChrome()
         }
-        // Everything else stays the no-op default: no Contents, no trail, no selection.
+        // 2026-09-21: the one-finger swipe down — the notebook's Contents gesture, unassigned on
+        // this surface — asks for the settle by hand: every mark still on the glass as the dither
+        // it was drawn under goes to its true tone (g-paper 0.1.47's door). It replaces the 2.5 s
+        // pause settle (g-paper 0.1.50 → withdrawn in 0.1.52), which landed where the hand was
+        // about to draw. A finger, never the pen, so the settle may post straight to the panel;
+        // pen-gated by the detector like every finger gesture here. Nothing waiting: a no-op.
+        override fun onSwipeDown() {
+            Slog.d(TAG) { "swipe down: settle the display" }
+            paper.settleDisplay()
+        }
+        // Everything else stays the no-op default: no trail, no selection.
     }
 
     // ── Undo and redo ────────────────────────────────────────────────────────

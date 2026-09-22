@@ -119,12 +119,17 @@ palette was a firmware-needle constraint that no longer applies on the direct pa
   out an active pen (hover counts) in 500 ms steps; it settles through window and panel. Page flips
   were already covered — a load clears the waiting runs and rebuilds the page settled, so a page
   turned to is in tone from its first frame. SN re-pinned 0.1.50; on the Nomad.
+  **Withdrawn 2026-09-21** (post-freeze, g-paper Phase 37 → **0.1.52**): "that has caused some
+  undesired side effects. What might be better is a gesture to explicitly achieve the true tone
+  bake" — the timer goes; a **one-finger swipe down** on the sketch face (`PageGestures.onSwipeDown`,
+  unassigned there) calls `paper.settleDisplay()` instead. SN re-pinned 0.1.52; on the Nomad, walk pending.
 
 **Outcome (2026-09-19).** Frozen on the user's word after the fifth walk. What shipped beyond the plan:
 Atelier's tones, a 4 × 4 on each pen's re-tap, ink over graphite, and the settle model — a mark
 dithers only while live or waiting, and settles into its true tone (the pen solid, the pencil's
 grain in grey) at a tool or shade pick, a rub, an undo, a page load, a chrome open
-(`settleDisplay`), or a 2.5 s pause. Root suite green at every step; every build walked by hand.
+(`settleDisplay`), or a 2.5 s pause — the pause replaced 2026-09-21 by a one-finger swipe down (see the
+fifth walk's note). Root suite green at every step; every build walked by hand.
 
 **Post-freeze maintenance (2026-09-19, same day):** the face's page was not remembered across a
 process death — `SketchHostHooks` now writes the notebook's last-opened pointer on every

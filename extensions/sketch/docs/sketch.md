@@ -42,7 +42,7 @@ anything"; g-paper Phase 30 → **0.1.44**, amending arc 45's "no top and no bot
 grew one parcel tail (`SketchToolSettings.penShade`, API 20 → 21). See "Arc 46's decisions"
 below.
 
-**Engine.** g-paper is pinned at **0.1.51** (Phase 36 "The flank", arc 47 — see "Arc 47's decisions" below; Phases 31–35: the 2.5 s pause settle, the rubber settling before it posts, 2026-09-19: on the Supernote panel
+**Engine.** g-paper is pinned at **0.1.52** (Phase 37, 2026-09-21: the 2.5 s pause settle of Phase 35 **withdrawn** — the settle is asked for by a **one-finger swipe down** on the sketch face, never by a timer; see "The settle gesture" below; Phase 36 "The flank", arc 47 — see "Arc 47's decisions" below; Phases 31–34: the rubber settling before it posts, 2026-09-19: on the Supernote panel
 and in the window a mark is a blue-noise dither only while it is **live** or **waiting** — it
 settles into its true tone, the pen's line solid and the pencil's flecks each at their own alpha
 in the lead's tone, at the next thing that is not a mark: a tool or shade pick, a rub, an undo, a
@@ -268,11 +268,12 @@ the final one are given.
    dither throughout. Covers and exports were never dithered and are unchanged. **Amended on the
    third walk** ("instead of on pen up … anything other than drawing will rebake with the correct
    tone"): the mark stays dithered at pen-up and **settles** in tone at the next non-drawing
-   event — a tool or shade pick, a rub, an undo, a page load (g-paper Phase 32 → **0.1.46**), a
-   2.5 s pause with no new contact (Phase 35 → **0.1.50**), or
+   event — a tool or shade pick, a rub, an undo, a page load (g-paper Phase 32 → **0.1.46**), or
    the face's own `paper.settleDisplay()` before the shade panel, a chrome flip or the collapsed
    rows open (Phase 33 → **0.1.47**; setter-triggered settles reach the panel through the window
-   only, so a pick can never paint over the panel). **And the pencil the same way** (the fourth
+   only, so a pick can never paint over the panel) — and, since 2026-09-21, on a **one-finger swipe
+   down** (the same door). A 2.5 s pause settle (Phase 35 → **0.1.50**) was tried and **withdrawn**
+   in g-paper 0.1.52: it landed where the hand was about to draw ("undesired side effects"). **And the pencil the same way** (the fourth
    walk: "perhaps it will look more natural with real tones with the grain?" — Phase 34 →
    **0.1.48**): a settled fleck shows at its own alpha in the lead's tone, grain in grey; the
    dither is the live picture only.
@@ -714,6 +715,17 @@ three — because the PEN slot itself carries **both** kinds via `collapsedPenKi
 (`CollapsedChrome.PenKinds`), so the collapsed mini row reads Pencil · Pen · Eraser, the top bar's
 own order, with no change to how many tools the base class thinks this screen has. Overflow behind
 `…` is unchanged: Back · Bring in ink · Show pages. There is no `EraserBar` — Point and Lasso are stroke erasers, and a raster page has neither.
+
+**The settle gesture (2026-09-21).** A **one-finger swipe down** on the page calls
+`paper.settleDisplay()`: every mark still on the glass as the dither it was drawn under goes to
+its true tone — the pen's line solid, the pencil's grain in grey. It is `PageGestures.onSwipeDown`,
+the notebook's Contents gesture, which this surface never used (a sketch has no Contents); the
+face overrides it in `gestureListener`. It replaces the 2.5 s pause settle (g-paper Phase 35 →
+0.1.50), withdrawn in **0.1.52** (Phase 37) on the user's word — a settle the hand did not ask for
+landed where it was about to draw. Pen-gated by the detector like every finger gesture; a finger is
+never the pen, so the settle posts straight to the panel; with nothing waiting it is a no-op. The
+other settle doors are unchanged: a tool or shade pick, a rub, an undo, a page load, and the chrome
+opens that call `settleDisplay()` first.
 
 ### Tools (arcs 44–46)
 

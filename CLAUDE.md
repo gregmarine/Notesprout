@@ -56,7 +56,7 @@ devices first (BOOX), expanding to iPad, Android tablets, phones, and web.
   tail — API 20 → 21, no floor moved — ink flattened **over** graphite, g-paper Phase 30 →
   0.1.44, and baked ink shown in its true tone on the Supernote panel — settling at the next
   non-drawing event, not at pen-up, the pencil's grain in grey the same way — Phases 31–35 →
-  0.1.50, incl. a 2.5 s pause settle; its own `PALETTE_PLAN.md`)
+  0.1.50, incl. a 2.5 s pause settle — withdrawn 2026-09-21 for a one-finger swipe-down settle gesture on the sketch face, g-paper Phase 37 → 0.1.52; its own `PALETTE_PLAN.md`)
 
 ---
 
