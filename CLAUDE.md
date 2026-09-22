@@ -51,7 +51,7 @@ devices first (BOOX), expanding to iPad, Android tablets, phones, and web.
   levels 0 · 5 · 9 · 15, the white lead a lightener over graphite — g-paper 0.1.40, walked on
   the Nomad; **`ink` merged to `main` 2026-09-18 (`--no-ff`) and deleted**); grown by **arc 46
   "Palette"** 2026-09-19 on branch `tools` (Atelier's sixteen tones for pencil and gel pen alike,
-  one 4 px pencil lead (2 px since 2026-09-21, a trial), the shade panel on each pen button's re-tap with Atelier's swatches in a
+  one 4 px pencil lead (1 px since 2026-09-21, trials 4 → 2 → 1), the shade panel on each pen button's re-tap with Atelier's swatches in a
   4 × 4, both pen glyphs filled with their own shade, `SketchToolSettings.penShade` as a parcel
   tail — API 20 → 21, no floor moved — ink flattened **over** graphite, g-paper Phase 30 →
   0.1.44, and baked ink shown in its true tone on the Supernote panel — settling at the next

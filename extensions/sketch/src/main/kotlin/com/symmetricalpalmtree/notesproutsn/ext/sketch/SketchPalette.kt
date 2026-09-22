@@ -78,16 +78,16 @@ object SketchPalette {
     // ── The widths ──────
 
     /**
-     * The pencil's one lead width in px (arc 46's decision 1): **2** since 2026-09-21 — the
-     * user's trial after the flank came off ("let's try a smaller stroke size … 2px"); **4**
-     * before that, "the size of a real pencil". Atelier's nib was never measured — its black HB
+     * The pencil's one lead width in px (arc 46's decision 1): **1** since 2026-09-21 — the
+     * user's trials after the flank came off (4 → 2 → 1 the same evening); **4** before that,
+     * "the size of a real pencil". Atelier's nib was never measured — its black HB
      * reads back ~2.7 black px per px of stroke length on the Nomad — so this is walked against
      * Atelier by hand; it is the one knob if the lead reads heavy or thin. Above g-paper's every
      * floor (`GraphiteGrain`'s 1 px, the EMR hairline 120) and far below its 96 px ceiling. At
-     * 2 px `GraphiteGrain.fleckPx` caps the darkest fleck (1.6 px) below the lead, so it still
-     * bakes as graphite and not as a hairline.
+     * 1 px `GraphiteGrain.fleckPx` caps every fleck at the lead's width (1 px, the 0.75 px
+     * floor under that), so the mark is a grained hairline: one lane of flecks.
      */
-    const val PENCIL_WIDTH_PX: Float = 2f
+    const val PENCIL_WIDTH_PX: Float = 1f
 
     /** The gel pen's width in px. Arc 44's decision 4 started it at the notebook pen's 3 px "until
      *  some testing"; the hand found that "a tad small" on T3's Nomad walk and asked for 7, then

@@ -81,7 +81,7 @@ class SketchPaletteTest {
     }
 
     @Test fun `there is one pencil width and one pen width`() {
-        assertEquals(2f, SketchPalette.PENCIL_WIDTH_PX, 0f)
+        assertEquals(1f, SketchPalette.PENCIL_WIDTH_PX, 0f)
         assertEquals(5f, SketchPalette.PEN_WIDTH_PX, 0f)
     }
 }
