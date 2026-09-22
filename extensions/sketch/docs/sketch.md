@@ -42,7 +42,7 @@ anything"; g-paper Phase 30 → **0.1.44**, amending arc 45's "no top and no bot
 grew one parcel tail (`SketchToolSettings.penShade`, API 20 → 21). See "Arc 46's decisions"
 below.
 
-**Engine.** g-paper is pinned at **0.1.52** (Phase 37, 2026-09-21: a mark settles into tone **only** on the sketch face's **one-finger swipe down** or a page load — Phase 35's 2.5 s pause and Phase 32's tool / shade / rub / undo settles all **withdrawn**; see "The settle gesture" below; Phase 36 "The flank", arc 47 — see "Arc 47's decisions" below; Phases 31–34: the rubber settling before it posts, 2026-09-19: on the Supernote panel
+**Engine.** g-paper is pinned at **0.1.53** (Phase 38, 2026-09-21: **the flank's grain is the point's, in grey** — the band fills its tooth sites at the point's own density and carries its lightening as each fleck's paleness (`Grain.pale`), no longer as bare sites; the user's word after living with arc 47's band: "it still feels like it is clumping … it looks like charcoal instead of pencil"; `FLANK_LIGHTEN` 0.84 → 0.70 as an alpha, `MAX_FLECKS` 1M; walk pending; Phase 37, 2026-09-21: a mark settles into tone **only** on the sketch face's **one-finger swipe down** or a page load — Phase 35's 2.5 s pause and Phase 32's tool / shade / rub / undo settles all **withdrawn**; see "The settle gesture" below; Phase 36 "The flank", arc 47 — see "Arc 47's decisions" below; Phases 31–34: the rubber settling before it posts, 2026-09-19: on the Supernote panel
 and in the window a mark is a blue-noise dither only while it is **live** or **waiting** — it
 settles into its true tone, the pen's line solid and the pencil's flecks each at their own alpha
 in the lead's tone, at the next thing that is not a mark: a tool or shade pick, a rub, an undo, a

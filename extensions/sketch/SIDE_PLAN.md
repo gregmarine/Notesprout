@@ -61,6 +61,18 @@ widen past 50° as on-screen feedback only. Installed on the Nomad; the user wal
 pulled and read for: the writing-grip tilt distribution, the shading-grip distribution, the
 laid-flat ceiling, and whether orientation is live (a real azimuth) or constant.
 
+### Post-freeze (2026-09-21) — the grain revisited
+The user, after living with the frozen flank: "it still feels like it is clumping. It should be the
+same sort of grain as a normal pencil stroke, only wider. Right now, it looks like charcoal instead
+of pencil." Diagnosis: the band made its grey by leaving four sites in five bare with black flecks;
+a sparse random field clumps by chance, and every R1 knob shaped that field rather than its
+sparseness. Asked "paler flecks at the point's density, or black flecks and a denser, darker flank?"
+→ **paler flecks at the point's density.** g-paper **Phase 38 → 0.1.53** (branch `settle-gesture`):
+`Grain.pale` (a byte per fleck), sites filled at the point's density for the pressure, lightening
+carried as alpha, the barrel-end fall kept in the sites so the far edge still feathers,
+`FLANK_LIGHTEN` 0.84 → 0.70 (rendered both ways from the Manta probe CSV), `MAX_FLECKS` 400k → 1M
+(a filled 9 000 px pass truncated at 400k). SN re-pinned; dev builds on Nomad + Manta; walk pending.
+
 ### R0 — Results (2026-09-19, Nomad `tilt-20260919-220438.csv` + Manta `tilt-20260919-221419.csv`)
 The Ratta HAL breaks Android's axis contract: `AXIS_TILT` = signed **tilt-X in degrees**,
 `AXIS_ORIENTATION` = signed **tilt-Y in degrees**, both live, panel space. Polar lean =
