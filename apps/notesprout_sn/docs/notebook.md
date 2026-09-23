@@ -115,6 +115,22 @@ child's `requestLayout`, so showing/moving/hiding a floating bar re-pushes by it
 `ACTION_DOWN` over chrome calls `releaseRender()` first (palm-gated on `isPenActive`) so an EPD
 panel shows the tap's result — done in `dispatchTouchEvent` because the buttons consume the touch.
 
+**The page is on the Supernote panel directly (arc 49 / P1, g-paper Phase 42 → 0.1.56).**
+`NotebookActivity` sets `paper.directInk = true` with the page's other properties, so on Ratta the
+notebook page is painted the way the sketch face's raster is: the committed picture (white,
+template, headings, texts, shapes, links, sticky icons, the strokes) is the flatten base, the live
+pen, the point eraser and the lasso's dashed trail go to `/dev/ebc` from the app, nothing moves at
+pen-up, and the glass shows a blue-noise dither of the page while exports, covers and page images
+keep their true greys. Where the panel refuses to open the page stays the ink daemon's with every
+overlay law intact — the flag is unconditional for that reason. Two consequences for this screen:
+**every panel post is cut around the exclusion rects**, so `pushExclusions()` listing every floating
+bar and popup is what keeps a segment drawn up to a bar from writing page pixels over it; and the
+`BLOCK_ALL` rect under a full-height panel (Contents, Recents) or before the page is loaded clips
+every post entirely, which is the wanted result — the load's own whole-page present is deferred past
+the synchronous swap to the real chrome rects in `loadCanvas`, so the first page always lands. There
+is no page-turn refresh, as on the sketch face (the arc's decision 3). Every `releaseRender()` behind
+`PenIdle` is a no-op on a direct page and the overlay clear it always was on a fallback page.
+
 The "Recognizing…" box (`overlay_recognizing.xml`, N2) is **not** part of this layout — like the
 library's tap-time overlay it is inflated at runtime into `android.R.id.content` (`RecognizingOverlay`,
 cached per Activity), which lands it as a sibling above the whole `activity_notebook.xml` tree

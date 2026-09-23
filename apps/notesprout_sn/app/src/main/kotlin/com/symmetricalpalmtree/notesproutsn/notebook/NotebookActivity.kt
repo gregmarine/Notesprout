@@ -666,6 +666,15 @@ class NotebookActivity : AppCompatActivity() {
         // because the engine reads them as it wires itself up. Order is load-bearing.
         paper.smartLassoEnabled = true
         paper.scribbleEraseEnabled = true
+        // Arc 49 / P1: the notebook page goes direct to the Supernote panel the way the sketch
+        // face does (g-paper Phase 42) — the committed picture is the flatten base, the live pen,
+        // the point eraser and the lasso's trail are painted by the app, the glass shows a dither
+        // of the page and exports keep their greys. Where the panel refuses to open the page
+        // stays the ink daemon's with every overlay law intact, so this is set unconditionally.
+        // Every panel post is cut around the exclusion rects, which is why pushExclusions() must
+        // keep listing every floating bar and popup: a post under a bar would paint page pixels
+        // over it until the compositor's next frame.
+        paper.directInk = true
         // Snap-to-guide (arc 9): the margin guides are one toolbar thick, so content snapped to a
         // page margin lands exactly where the chrome ends. Armed from the remembered preference —
         // the toggle lives on the selection bar, but the setting outlives every selection. The

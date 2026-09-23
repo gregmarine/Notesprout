@@ -276,3 +276,19 @@ one waits for the user's word.
     is not reproduced.
   - The walk list is in g-paper `PLAN.md` § Phase 42's gate. After it: P1 pins `:sn-screen`
     to 0.1.56 and sets `paper.directInk = true` in `NotebookActivity`.
+- **P1 — the notebook — BUILT 2026-09-22, walk pending** (the user's word to proceed after
+  the P0 demo walk). `:sn-screen` pinned to g-paper 0.1.56 (both artifacts); `NotebookActivity`
+  sets `paper.directInk = true` beside the two pen-gesture flags, before the listener is
+  attached, unconditionally (the daemon fallback is the engine's). The audit of the notebook's
+  exclusion copy found nothing to change: every floating bar and popup (selection toolbar,
+  lasso popup, tags popup, insert bar, eraser bar, transform bar, the collapsed corner) is
+  already in the list, so every panel post is cut around it; `BLOCK_ALL` under Contents /
+  Recents or before the page is loaded clips every post entirely, which is right — the window
+  is authoritative there and repaints the area on dismiss; the load's whole-page present is
+  deferred past `loadCanvas`'s synchronous swap to the real chrome rects, so the first page
+  lands. Dialog windows (rename, text edit) are not exclusion rects and need not be: no post
+  happens while one is up, and the whole-page present that follows a dialog's edit is repainted
+  by the compositor either way. `docs/notebook.md` § the exclusion paragraph carries the rule.
+  Only the host APK changes — the extension faces keep `directInk` false until their own
+  phase. `:sn-screen` 118 / `:app` 1845 tests green; `app-debug.apk` installed on the Nomad.
+  The walk: write, lasso, erase, undo, objects, page turn, sticky icon, export unchanged.
