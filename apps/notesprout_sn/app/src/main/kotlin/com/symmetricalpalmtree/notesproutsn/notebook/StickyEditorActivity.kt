@@ -208,6 +208,12 @@ class StickyEditorActivity : AppCompatActivity() {
         // the two recognisers as it wires itself up.
         paper.smartLassoEnabled = true
         paper.scribbleEraseEnabled = true
+        // Arc 49 / P3: the note goes direct to the Supernote panel like the notebook (g-paper
+        // Phase 42) — unconditional, the daemon fallback is the engine's. Every panel post is cut
+        // around the exclusion rects, so the off-page fence bands pushExclusions() lists for an
+        // older, smaller note fence the panel exactly as they fenced the daemon: the committed
+        // image is view-sized and white beyond the page, and nothing of it is ever posted there.
+        paper.directInk = true
         paper.tool = Tool.PEN
         paper.penColor = Stroke.BLACK
         paper.penWidth = NotebookToolbar.PEN_WIDTH_PX

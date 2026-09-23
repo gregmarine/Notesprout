@@ -408,8 +408,11 @@ pageH, viewW, viewH): List<Band>` (below full-width, right page-height, never ov
 `Band.toRect()` is the one Android line — `android.graphics.Rect` is a stub under
 `isReturnDefaultValues`, which is why the pure type the rule is tested through is `Band`, not
 `Rect`). g-paper leaves the area beyond the page white **and writable**, so this exclusion is the
-only thing keeping ink inside the note. **Consequence, accepted like the calendar's (decision 5's
-twin of decision 3):** an old note's ink sits one bar height higher than the ruling it was
+only thing keeping ink inside the note — and since arc 49 / P3 it fences the Supernote panel the
+same way: `StickyEditorActivity` sets `paper.directInk = true` beside the two pen-gesture flags,
+and every panel post is cut around the exclusion rects, so the view-sized committed image's white
+beyond a smaller page never reaches the glass. **Consequence, accepted like the calendar's
+(decision 5's twin of decision 3):** an old note's ink sits one bar height higher than the ruling it was
 authored against — nothing is moved or lost, hiding the chrome shows it plainly.
 
 **Since arc 36 / C2 the editor collapses too**, over the same shared `:sn-screen` piece as the
