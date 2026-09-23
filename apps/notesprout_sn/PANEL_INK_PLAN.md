@@ -417,8 +417,7 @@ one waits for the user's word.
 - **P5 — freeze — 2026-09-22.** Arc 49 "Panel" is **COMPLETE + FROZEN**: every writing face on
   the Supernote panel (P1–P3), the lasso eraser's x-stream (Phase 43), sixteen greys on every
   writing face's pen (P4), the scribble-erase hit test no longer quadratic (Phase 44). g-paper
-  `panel-ink` (Phases 42–44, 0.1.56 → 0.1.59) stays **unmerged** — merge on the user's word, as
-  every phase; SN `tools` stays the open working branch. Recorded: this ledger; `docs/sn-screen.md`
+  `panel-ink` (Phases 42–44, 0.1.56 → 0.1.59) **merged to g-paper `main` 2026-09-22 (`--no-ff`, 10d35b4) and deleted, local + remote, on the user's word — g-paper has only `main`**; SN `tools` stays the open working branch. Recorded: this ledger; `docs/sn-screen.md`
   (`InkTones` / `PaletteBar` / `ShadeIcon` / `PenShadeGlyph` rows); `docs/notebook.md` (the R3
   reversal beside R3's own record); `docs/scratchpad.md`, `docs/calendar.md` § screen,
   `docs/objects.md` § Sticky; `docs/extensions.md` rule 70 (`EXTRA_PEN_SHADE`);
