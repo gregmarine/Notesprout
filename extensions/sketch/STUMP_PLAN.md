@@ -64,4 +64,11 @@ But to use the stylus for the work, an explicit tool selection would be needed."
 
 ## Walk ledger
 
-- (pending)
+- **Walk 1 (2026-09-22, the user's hand; screencap + `SKETCH_DUMP` export side by side in
+  Preview):** the streaks follow the hand — horizontal in the top mass, diagonal in the lower
+  stroke, the vertical tails kept — but the export was **far paler** than arc 48's blends: along
+  a streak the graphite only thins (2 px across gathers almost nothing from the neighbours), and
+  every pass still paid `loss`. Thin dark rules at each turn of the arm, where the axis flips and
+  the load tops up. *"I want to keep the directional feel and the darkness."* → **`across` 2 → 4,
+  `loss` 0.02 → 0** (g-paper 0.1.60 republished, SN rebuilt + reinstalled on the Nomad). Walk 2
+  next.
