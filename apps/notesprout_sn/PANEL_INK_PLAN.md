@@ -1,6 +1,6 @@
 # Panel ink — the writing faces on the Supernote panel
 
-**Status (2026-09-22): arc 49 "Panel" — P0 BUILT + WALKED (g-paper Phase 42 → 0.1.56 on branch `panel-ink`), P1 COMPLETE on the user's Nomad walk, P2 COMPLETE on the user's Nomad walk (pad + calendar + event note set `directInk = true`), P3 COMPLETE on the user's Nomad walk (the sticky editor sets `directInk = true`); post-P3 the lasso eraser's x-stream trail (g-paper Phase 43 → 0.1.57) awaiting the Nomad walk; P4 (greys) on the user's word; decisions locked (§ 2), phases in § 3, ledger below.** The user's ask: the
+**Status (2026-09-22): arc 49 "Panel" — P0 BUILT + WALKED (g-paper Phase 42 → 0.1.56 on branch `panel-ink`), P1 COMPLETE on the user's Nomad walk, P2 COMPLETE on the user's Nomad walk (pad + calendar + event note set `directInk = true`), P3 COMPLETE on the user's Nomad walk (the sticky editor sets `directInk = true`); post-P3 the lasso eraser's x-stream trail (g-paper Phase 43 → 0.1.58, pitch tightened 16 → 10 px on the first walk) awaiting the Nomad walk; P4 (greys) on the user's word; decisions locked (§ 2), phases in § 3, ledger below.** The user's ask: the
 sketch extension (arcs 43–48) opened new ways of capturing stylus input and showing strokes on the
 Supernote; find where the ordinary vector-ink *writing* faces (notebook, scratch pad, calendar,
 the event note, the sticky editor) can use them. Scope the user set in the wizard of 2026-09-22:
@@ -339,4 +339,6 @@ one waits for the user's word.
   for `LASSO_ERASER` too, so every engine agrees. `:sn-screen` pinned 0.1.57; host,
   ext-scratchpad and ext-calendar debug APKs on the Nomad. **Awaiting the Nomad walk**: the
   lasso eraser's loop shows x's on every writing face, the lasso's still dashes, both wipe at
-  pen-up, the erase unchanged.
+  pen-up, the erase unchanged. First walk: the x's read too sparse — *"tighten up those Xs"* —
+  pitch 16 → 10 px (arms 5 px, so they nearly touch), g-paper 0.1.58, re-pinned and
+  reinstalled; awaiting the second walk.
