@@ -106,4 +106,13 @@ But to use the stylus for the work, an explicit tool selection would be needed."
   `RattaPaperView.SMUDGE_MIRROR_DELAY_MS` 400 — one frame a beat after the last contact, every new
   contact pushes it back), and **a chattering contact continues the same undo entry**
   (`SketchActivity.SMUDGE_CHATTER_MS` 300: under Smudge the entry stays open a beat after the
-  lift; a replay flushes it first). Walk 5 next.
+  lift; a replay flushes it first).
+- **Walk 4, second finding (2026-09-23): "everything I had done is gone" after the reinstall.**
+  The log: 100 s of smudging (a contact every 300 ms) after the reopen, and **no save in it** —
+  every change restarted the 3 s debounce, and the pen-idle gate waits for hover to end besides,
+  so a hand that keeps working never reaches a save until it pauses and lifts away; the install's
+  force-stop skipped `onPause`. A crash would do the same. **The save now has a deadline**
+  (`SketchSaveCadence`, pure + 4 tests; `SketchSaver.schedule` bounded; `notePenLifted` from the
+  face): 15 s of unsaved work at most while the hand keeps going, then a copy at idle, at the
+  next pen lift, or regardless (`MAX_DIRTY_MS` 15 s, `IDLE_LIMIT_MS` 5 s, `LIFT_LIMIT_MS` 5 s).
+  ext-sketch 108 green, reinstalled on the Nomad. Walk 5 next.

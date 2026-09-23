@@ -1005,6 +1005,7 @@ class SketchActivity : PaperScreenActivity() {
          * that admits it cannot.
          */
         override fun onPenLifted() {
+            saver.notePenLifted()   // a save past its deadline copies here, between strokes
             // A light rub with the stylus makes the tip switch chatter — four contacts a second on
             // the Nomad (arc 50, walk 4) — and each was its own undo entry. Under the smudge the
             // entry stays open a beat, and a contact that lands inside it continues the same one.

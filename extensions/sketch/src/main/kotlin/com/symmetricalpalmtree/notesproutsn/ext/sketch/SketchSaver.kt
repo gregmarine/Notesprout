@@ -17,6 +17,8 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.CompletableDeferred
 
 /**
  * The plumbing half of a sketch page's saves (arc 43 / K5; **per raster since arc 45 "Ink" / G3**):
@@ -105,6 +107,13 @@ class SketchSaver(
     private var debounce: Job? = null
     private var retry: Job? = null
 
+    /** When the page first became dirty since its last copy (uptime ms), or 0 — the deadline's
+     *  anchor ([SketchSaveCadence]). Main thread. */
+    private var dirtySince = 0L
+
+    /** A save past its deadline waiting for the next pen lift — completed by [notePenLifted]. */
+    private var penLift: CompletableDeferred<Unit>? = null
+
     /** Whether **either** raster on the glass holds something the host has not been given. */
     val isDirty: Boolean get() = governors.values.any { it.dirty }
 
@@ -116,15 +125,40 @@ class SketchSaver(
     /** A page was just loaded: what is on the glass is what is on disk — **both** rasters. */
     fun markClean() {
         for (g in governors.values) g.markClean()
+        dirtySince = 0L
     }
 
-    /** Restart the idle timer; a burst of marks coalesces into one write. */
+    /** The pen left the paper — a save past its deadline copies here, between strokes. */
+    fun notePenLifted() {
+        penLift?.complete(Unit)
+    }
+
+    /**
+     * Restart the idle timer; a burst of marks coalesces into one write — **up to the deadline**
+     * ([SketchSaveCadence], arc 50 walk 4): from the first unsaved change the page has
+     * [SketchSaveCadence.MAX_DIRTY_MS] before a save goes ahead whether or not the hand has paused.
+     * Before it, the debounce and the pen-idle gate as always; past it, the gate is bounded — the
+     * pen going idle, else the next pen lift, else the copy regardless.
+     */
     fun schedule() {
         if (leaving) return
+        val now = SystemClock.uptimeMillis()
+        if (dirtySince == 0L) dirtySince = now
+        val since = dirtySince
         debounce?.cancel()
         debounce = scope.launch(Dispatchers.Main) {
-            delay(SAVE_DEBOUNCE_MS)
-            awaitPenIdle()
+            delay(SketchSaveCadence.debounceWait(since, now))
+            if (!SketchSaveCadence.pastDeadline(since, SystemClock.uptimeMillis())) {
+                awaitPenIdle()
+            } else {
+                val idle = withTimeoutOrNull(SketchSaveCadence.IDLE_LIMIT_MS) { awaitPenIdle() }
+                if (idle == null) {
+                    val lift = CompletableDeferred<Unit>().also { penLift = it }
+                    val lifted = withTimeoutOrNull(SketchSaveCadence.LIFT_LIMIT_MS) { lift.await() }
+                    penLift = null
+                    Slog.d(TAG) { "save past its deadline: ${if (lifted == null) "copying under the pen" else "copying at the pen lift"}" }
+                }
+            }
             saveNow()
         }
     }
@@ -133,6 +167,7 @@ class SketchSaver(
     fun cancelTimers() {
         debounce?.cancel(); debounce = null
         retry?.cancel(); retry = null
+        penLift = null
     }
 
     /**
@@ -143,6 +178,7 @@ class SketchSaver(
     fun saveNow() {
         if (leaving) return
         cancelTimers()
+        dirtySince = 0L
         val key = pageKey ?: return
         for (layer in SketchLayers.all) {
             if (governor(layer).request() is SketchSaveGovernor.SaveAction.Save) startPush(key, layer)
@@ -469,9 +505,9 @@ class SketchSaver(
     companion object {
         private const val TAG = "SketchSaver"
 
-        /** Quiet time before a page is written — Paintsprout's three seconds, and its reason: a
-         *  rubbing sweep reports a change dozens of times a second and a page encode is not cheap. */
-        const val SAVE_DEBOUNCE_MS = 3_000L
+        /** Quiet time before a page is written — [SketchSaveCadence.DEBOUNCE_MS], kept under its
+         *  old name for the callers and docs that know it. */
+        const val SAVE_DEBOUNCE_MS = SketchSaveCadence.DEBOUNCE_MS
 
         /** A failed push waits this long before trying again — the usual cause is a host that is
          *  restarting, and its `.soil` open is asynchronous. */

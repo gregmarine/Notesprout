@@ -1052,8 +1052,14 @@ leaving with the newest pixels unwritten. Completion bookkeeping and the retry b
 **per layer**, but the retry itself is **one beat for the whole page** — a page with both rasters
 dirty gets one retry tick, not two racing ones.
 
-**Cadence**: 3 s pen-idle-gated debounce; a failed push retries after 2 s; flush points are a page
-turn/insert/delete, `onPause`, Back, and Show pages. Each save is a **Main-thread bitmap copy** →
+**Cadence**: 3 s pen-idle-gated debounce **with a deadline** (`SketchSaveCadence`, arc 50 walk 4,
+2026-09-23): from a page's first unsaved change it may stay unsaved **15 s** at most — the debounce
+wait is the shorter of its 3 s and what is left to the deadline, and past the deadline the idle gate
+is bounded: 5 s for the pen to go idle, then 5 s for the next pen lift (`SketchSaver.notePenLifted`
+from `onPenLifted`), then the copy is taken regardless. Before this, every change restarted the
+3 s and hover held the gate, so a hand that kept working never saved until it paused and lifted
+away — 100 s of smudging went with a force-stop on the walk. A failed push retries after 2 s;
+flush points are a page turn/insert/delete, `onPause`, Back, and Show pages. Each save is a **Main-thread bitmap copy** →
 WebP encode on IO → chunked push under the one push lock (one push in flight at a time, ever, for
 the whole page). Encoding is `RasterImage.compressLossless`: `Bitmap.CompressFormat.WEBP_LOSSLESS`
 on API 30+, `WEBP` at quality 100 on 29 (documented lossless there; `minSdk` is 29). The `quality`
