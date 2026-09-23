@@ -251,6 +251,17 @@ no next Sketch phase (eraser sizes, per-notebook tool memory, an `inkLift` fract
 graphite alpha to the 16-grey ladder, a pencil library of Atelier's grades) and no other new arc
 without a fresh user decision; no re-raising of any waived / declined review finding.
 
+**Arc 49 "Panel" (granted 2026-09-22, branch `tools`, plan + ledger `PANEL_INK_PLAN.md` — PLANNED,
+P0 not started): the vector-ink writing faces (notebook, pad, calendar, event note, sticky editor)
+go direct to the Supernote panel the way the sketch face does — g-paper **Phase 42 "Ink on the
+panel"** (branch `panel-ink` → 0.1.56, a `directInk` opt-in, the committed picture as the flatten
+base, an app-painted lasso trail, the daemon as fallback), then each face opts in on its own walk,
+then **sixteen greys return to the pen's re-tap** (the user's reversal of R3's shade removal), one
+device-wide shade, `ARGB_8888` exports. Ten locked decisions in the plan's § 2; the phases P0–P5
+in § 3. Fable writes it all, no subagents. **Start at P0 in `~/git/g-paper`; read the plan first.**
+The same day's icon swap (bfabaf83): `ic_pen` is Tabler's ballpen everywhere a pen is meant,
+`ic_pencil` the sketch face's pencil, `ic_pencil_down` → `ic_pen_down`.
+
 **Maintenance protocol (replaces the per-arc phase protocol):**
 
 1. **Read the matching `docs/` file first** (table below) — each is the authoritative as-built
