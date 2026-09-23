@@ -1,6 +1,6 @@
 # Panel ink — the writing faces on the Supernote panel
 
-**Status (2026-09-22): arc 49 "Panel" — P0 BUILT + WALKED (g-paper Phase 42 → 0.1.56 on branch `panel-ink`), P1 COMPLETE on the user's Nomad walk, P2 COMPLETE on the user's Nomad walk (pad + calendar + event note set `directInk = true`), P3 BUILT (the sticky editor sets `directInk = true`) — awaiting the Nomad walk; P4 (greys) on the user's word; decisions locked (§ 2), phases in § 3, ledger below.** The user's ask: the
+**Status (2026-09-22): arc 49 "Panel" — P0 BUILT + WALKED (g-paper Phase 42 → 0.1.56 on branch `panel-ink`), P1 COMPLETE on the user's Nomad walk, P2 COMPLETE on the user's Nomad walk (pad + calendar + event note set `directInk = true`), P3 COMPLETE on the user's Nomad walk (the sticky editor sets `directInk = true`); P4 (greys) on the user's word; decisions locked (§ 2), phases in § 3, ledger below.** The user's ask: the
 sketch extension (arcs 43–48) opened new ways of capturing stylus input and showing strokes on the
 Supernote; find where the ordinary vector-ink *writing* faces (notebook, scratch pad, calendar,
 the event note, the sticky editor) can use them. Scope the user set in the wizard of 2026-09-22:
@@ -313,7 +313,7 @@ one waits for the user's word.
   erase, undo, page turn, Send; calendar — Month / Week / Day write, the month grid's dithered
   greys readable, double-tap open, Send to Notebook; event note — write, the keyboard-up block,
   Text ↔ Handwriting, Save and reopen.
-- **P3 — the sticky editor — BUILT 2026-09-22, awaiting the user's Nomad walk** (on the user's
+- **P3 — the sticky editor — COMPLETE 2026-09-22 on the user's Nomad hand walk ("Tests pass")** (built on the user's
   word after P2's walk). One line: `StickyEditorActivity` sets `paper.directInk = true` beside
   the two pen-gesture flags, before the listener attaches, unconditional. The audit of the
   table's open point — the off-page fence bands on a direct page — found nothing to add: the
