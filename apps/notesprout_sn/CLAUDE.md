@@ -261,7 +261,7 @@ panel"** (branch `panel-ink` → 0.1.56, a `directInk` opt-in, the committed pic
 base, an app-painted lasso trail, the daemon as fallback), then each face opts in on its own walk,
 then **sixteen greys return to the pen's re-tap** (the user's reversal of R3's shade removal), one
 device-wide shade, `ARGB_8888` exports. Ten locked decisions in the plan's § 2; the phases P0–P5
-in § 3. Fable writes it all, no subagents. **P0–P3 are complete — every writing face is on the panel; read the plan's ledger; P4 (the
+in § 3. Fable writes it all, no subagents. **P0–P3 are complete — every writing face is on the panel; post-P3 the lasso eraser's trail is an x-stream again (g-paper Phase 43 → 0.1.57, `:sn-screen` pinned, awaiting the Nomad walk); read the plan's ledger; P4 (the
 greys) follows only on the user's word.**
 The same day's icon swap (bfabaf83): `ic_pen` is Tabler's ballpen everywhere a pen is meant,
 `ic_pencil` the sketch face's pencil, `ic_pencil_down` → `ic_pen_down`.

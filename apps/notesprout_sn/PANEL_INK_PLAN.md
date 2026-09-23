@@ -1,6 +1,6 @@
 # Panel ink — the writing faces on the Supernote panel
 
-**Status (2026-09-22): arc 49 "Panel" — P0 BUILT + WALKED (g-paper Phase 42 → 0.1.56 on branch `panel-ink`), P1 COMPLETE on the user's Nomad walk, P2 COMPLETE on the user's Nomad walk (pad + calendar + event note set `directInk = true`), P3 COMPLETE on the user's Nomad walk (the sticky editor sets `directInk = true`); P4 (greys) on the user's word; decisions locked (§ 2), phases in § 3, ledger below.** The user's ask: the
+**Status (2026-09-22): arc 49 "Panel" — P0 BUILT + WALKED (g-paper Phase 42 → 0.1.56 on branch `panel-ink`), P1 COMPLETE on the user's Nomad walk, P2 COMPLETE on the user's Nomad walk (pad + calendar + event note set `directInk = true`), P3 COMPLETE on the user's Nomad walk (the sticky editor sets `directInk = true`); post-P3 the lasso eraser's x-stream trail (g-paper Phase 43 → 0.1.57) awaiting the Nomad walk; P4 (greys) on the user's word; decisions locked (§ 2), phases in § 3, ledger below.** The user's ask: the
 sketch extension (arcs 43–48) opened new ways of capturing stylus input and showing strokes on the
 Supernote; find where the ordinary vector-ink *writing* faces (notebook, scratch pad, calendar,
 the event note, the sticky editor) can use them. Scope the user set in the wizard of 2026-09-22:
@@ -328,3 +328,15 @@ one waits for the user's word.
   point-erase, undo, the eraser sub-bar, the chrome toggle, Back to the notebook with the icon
   refreshed; an older (smaller-page) note if one exists — ink refused on the bands, nothing
   painted there.
+- **Post-P3 (2026-09-22, on the user's word after the walk): the lasso eraser's trail is an
+  x-stream again.** The user: *"I don't like the lasso eraser. It works. But the look isn't
+  different from the lasso selecter. The Supernote lasso eraser uses a bunch of little x's."*
+  Phase 42 had stated the gap (both lassoes dashed on the direct path; the daemon told them
+  apart). g-paper **Phase 43 → 0.1.57** on `panel-ink`: `LassoTrailChrome` (core) states both
+  trails — the lasso's 2 px 12/8 dash, the lasso eraser's 2 px x-marks every 16 px with 5 px
+  arms; `TrailSweep` carries the marks' pitch across joins as it carried the dash phase; the
+  Ratta painter latches the kind off the tool at pen-down; the base window draws the x-stream
+  for `LASSO_ERASER` too, so every engine agrees. `:sn-screen` pinned 0.1.57; host,
+  ext-scratchpad and ext-calendar debug APKs on the Nomad. **Awaiting the Nomad walk**: the
+  lasso eraser's loop shows x's on every writing face, the lasso's still dashes, both wipe at
+  pen-up, the erase unchanged.
