@@ -254,15 +254,16 @@ without a fresh user decision; no re-raising of any waived / declined review fin
 **Arc 49 "Panel" (granted 2026-09-22, branch `tools`, plan + ledger `PANEL_INK_PLAN.md` — **P0
 BUILT 2026-09-22** (g-paper Phase 42 → 0.1.56 on `panel-ink`, mavenLocal, demo on the Nomad) and
 **P1 COMPLETE 2026-09-22 on the user's Nomad hand walk** (`:sn-screen` pinned 0.1.56,
-`NotebookActivity` sets `paper.directInk = true`, exclusion audit clean); **P2 (pad + calendar +
-event note) only on the user's word**): the vector-ink writing faces (notebook, pad, calendar, event note, sticky editor)
+`NotebookActivity` sets `paper.directInk = true`, exclusion audit clean); **P2 BUILT 2026-09-22**
+(pad + calendar + event note set `directInk = true`, both extension APKs on the Nomad, awaiting the
+user's walk); **P3 (sticky editor) only on the user's word**): the vector-ink writing faces (notebook, pad, calendar, event note, sticky editor)
 go direct to the Supernote panel the way the sketch face does — g-paper **Phase 42 "Ink on the
 panel"** (branch `panel-ink` → 0.1.56, a `directInk` opt-in, the committed picture as the flatten
 base, an app-painted lasso trail, the daemon as fallback), then each face opts in on its own walk,
 then **sixteen greys return to the pen's re-tap** (the user's reversal of R3's shade removal), one
 device-wide shade, `ARGB_8888` exports. Ten locked decisions in the plan's § 2; the phases P0–P5
-in § 3. Fable writes it all, no subagents. **P0 and P1 are complete — read the plan's ledger; P2 (pad + calendar +
-event note opt in) follows only on the user's word.**
+in § 3. Fable writes it all, no subagents. **P0 and P1 are complete, P2 is built and awaits its walk — read the plan's ledger; P3 (the
+sticky editor) follows only on the user's word.**
 The same day's icon swap (bfabaf83): `ic_pen` is Tabler's ballpen everywhere a pen is meant,
 `ic_pencil` the sketch face's pencil, `ic_pencil_down` → `ic_pen_down`.
 

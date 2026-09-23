@@ -1,6 +1,6 @@
 # Panel ink — the writing faces on the Supernote panel
 
-**Status (2026-09-22): arc 49 "Panel" — P0 BUILT (g-paper Phase 42 → 0.1.56 on branch `panel-ink`, published to mavenLocal, demo installed on the Nomad), awaiting the user's Nomad walk of the demo's stroke page; decisions locked (§ 2), phases in § 3, ledger below.** The user's ask: the
+**Status (2026-09-22): arc 49 "Panel" — P0 BUILT + WALKED (g-paper Phase 42 → 0.1.56 on branch `panel-ink`), P1 COMPLETE on the user's Nomad walk, P2 BUILT (pad + calendar + event note set `directInk = true`; both extension APKs on the Nomad), awaiting the user's Nomad walk of the three faces; P3 (sticky editor) on the user's word; decisions locked (§ 2), phases in § 3, ledger below.** The user's ask: the
 sketch extension (arcs 43–48) opened new ways of capturing stylus input and showing strokes on the
 Supernote; find where the ordinary vector-ink *writing* faces (notebook, scratch pad, calendar,
 the event note, the sticky editor) can use them. Scope the user set in the wizard of 2026-09-22:
@@ -292,3 +292,24 @@ one waits for the user's word.
   Only the host APK changes — the extension faces keep `directInk` false until their own
   phase. `:sn-screen` 118 / `:app` 1845 tests green; `app-debug.apk` installed on the Nomad.
   The walk: write, lasso, erase, undo, objects, page turn, sticky icon, export unchanged.
+- **P2 — pad + calendar + event note — BUILT 2026-09-22, awaiting the user's Nomad walk** (on the
+  user's word after P1's walk). Three one-line opt-ins, each beside the face's two pen-gesture
+  flags and before its listener attaches, each unconditional (the daemon fallback is the
+  engine's): `ScratchPadActivity`, `CalendarActivity`, `NoteSurface.init`. Not set in
+  `PaperScreenActivity`'s base as the plan's table said: the base never owns `paper` (each screen
+  creates and assigns it), and the sketch face inherits the same base — harmless under the
+  gate (`pageMode == STROKE`), but a flag a raster face carries for no reason is noise. The audit:
+  both screens push `PaperChrome`'s list (both bars, the eraser sub-bar, the floating selection
+  bar, the collapsed chrome) and their `BLOCK_ALL` before a page is loaded, swapped for the real
+  rects in `loadCanvas` — the notebook's arrangement exactly, nothing to change; the calendar's
+  pickers (day, time, the clock face) are dialogs, not exclusion rects, and need none. The event
+  note is the new case — a **bounded** paper view under the editor's fields: the engine offsets
+  every panel post by `getLocationOnScreen`, taken at each contact's ACTION_DOWN and afresh for
+  any present with no pen down, so a post lands only inside the note's rectangle; while `blocked`
+  the whole-view exclusion rect clips every post, so the keyboard and the Text half are safe by
+  the same rect that fenced the daemon. `docs/scratchpad.md` § The screen and `docs/calendar.md`
+  (the screen paragraph and the `NoteSurface` paragraph) carry the rule. Only the two extension
+  APKs change; the sticky editor keeps `directInk` false until P3. The walk: pad — write, lasso,
+  erase, undo, page turn, Send; calendar — Month / Week / Day write, the month grid's dithered
+  greys readable, double-tap open, Send to Notebook; event note — write, the keyboard-up block,
+  Text ↔ Handwriting, Save and reopen.

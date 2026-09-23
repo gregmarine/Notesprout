@@ -85,6 +85,19 @@ pager, the inserts and the delete confirm, and the head of `consumeReceived`.
 | Selection | Smart lasso + scribble erase, armed before the listener attaches. The floating bar is Send selection (with a notebook behind) then Delete — Delete last, as on the notebook's bar. |
 | Undo | Pad-level and **in memory**: it survives page turns and dies with the screen. |
 
+**The page is on the Supernote panel directly (arc 49 / P2, g-paper Phase 42 → 0.1.56).**
+`ScratchPadActivity` sets `paper.directInk = true` beside the two pen-gesture flags, before the
+listener attaches, so on Ratta the pad's page is painted the way the notebook's is since P1: the
+committed picture is the flatten base, the live pen, the point eraser and the lasso's dashed trail
+go to `/dev/ebc` from the app, nothing moves at pen-up, and the glass shows a blue-noise dither of
+the page while every send and export keeps its true greys. Where the panel refuses to open the page
+stays the ink daemon's with every overlay law intact — the flag is unconditional for that reason.
+Every panel post is cut around the exclusion rects, so `PaperChrome`'s list (both bars, the eraser
+sub-bar, the floating selection bar, the collapsed chrome) is what keeps a segment drawn up to a bar
+from writing page pixels over it; the `BLOCK_ALL` rect before the page is loaded clips every post
+entirely, and `loadCanvas` swaps it for the real chrome rects before the page's own whole-page
+present lands. No page-turn refresh, as on the notebook (the arc's decision 3).
+
 **Since arc 33 / F3 both bars are floating overlays over full-bleed paper** (they already were),
 and **a single-finger double-tap hides / shows both of them at once.** `InkScreenActivity.
 initChrome()` builds the one `ChromeToggle` (`:sn-screen`) over `listOfNotNull(topBarView,

@@ -151,6 +151,14 @@ class NoteSurface(
         // whole of "eraser + lasso" (the locked "Note — tools" decision).
         paper.smartLassoEnabled = true
         paper.scribbleEraseEnabled = true
+        // Arc 49 / P2: the note's bounded page goes direct to the Supernote panel as the notebook's
+        // does (g-paper Phase 42). The engine offsets every panel post by the view's own screen
+        // location, so a paper view under the editor's fields posts only into its own rectangle;
+        // while blocked (keyboard up, Text half showing, page not yet loaded) the whole-view
+        // exclusion rect in applyBlock() clips every post entirely, which is the wanted result —
+        // the same rect that keeps the daemon from inking under the keyboard on a fallback page.
+        // Where the panel refuses to open the note stays the ink daemon's, so this is unconditional.
+        paper.directInk = true
         paper.setPaperListener(paperListener)
         selectionBar = InkSelectionBar(
             root = host,

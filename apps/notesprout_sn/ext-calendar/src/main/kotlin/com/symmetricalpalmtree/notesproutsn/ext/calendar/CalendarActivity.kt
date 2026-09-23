@@ -339,6 +339,13 @@ class CalendarActivity : InkScreenActivity<InkAction>() {
         // notebook deliberately: a calendar one tap away that lassoed differently would read as a bug.
         paper.smartLassoEnabled = true
         paper.scribbleEraseEnabled = true
+        // Arc 49 / P2: the calendar page goes direct to the Supernote panel as the notebook's does
+        // (g-paper Phase 42) — the template (the grid, the timeline, the light out-of-month cells)
+        // is part of the committed picture and shows on the glass as a dither of its greys, the
+        // live pen, the point eraser and the lasso's trail are painted by the app. Where the panel
+        // refuses to open the page stays the ink daemon's with every overlay law intact, so this
+        // is set unconditionally. Every panel post is cut around PaperChrome's exclusion rects.
+        paper.directInk = true
         paper.setPaperListener(paperListener)
 
         toolbar = CalendarToolbar(

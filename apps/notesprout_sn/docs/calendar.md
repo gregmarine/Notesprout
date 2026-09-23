@@ -140,6 +140,20 @@ to carry the screen's bar heights are **gone**, not passed as 0: `headerTop` / `
 input, because the two chrome bars are floating overlays a finger double-tap hides or shows — the
 ruling does not move when the chrome flips, only what covers it does.
 
+**The page is on the Supernote panel directly (arc 49 / P2, g-paper Phase 42 → 0.1.56).**
+`CalendarActivity` sets `paper.directInk = true` beside the two pen-gesture flags, as the notebook
+(P1) and the pad do, so on Ratta the calendar page is painted the way theirs is: the committed
+picture — the baked grid or timeline **and** the strokes — is the flatten base, the live pen, the
+point eraser and the lasso's dashed trail go to `/dev/ebc` from the app, nothing moves at pen-up,
+and the glass shows a blue-noise dither of the page while every export keeps its true greys. That
+dither is the one thing new to this screen: the template's own greys (out-of-month cells, the light
+band label, the hairlines' anti-aliasing) show as dithered dots on the glass rather than the
+compositor's flat tone — the P2 walk's question was whether the month grid still reads. Where the
+panel refuses to open the page stays the ink daemon's with every overlay law intact — the flag is
+unconditional for that reason. Every panel post is cut around `PaperChrome`'s exclusion rects, and
+the `BLOCK_ALL` rect before a page is loaded clips every post entirely until `loadCanvas` swaps it
+for the real chrome rects. No page-turn refresh, as on the notebook (the arc's decision 3).
+
 - **Month** — a day-of-week header band (`DOW_HEADER_DP` 40) starting at the page's own top, then a
   6×7 grid of **square** cells sized from the content width (seven cells and six hairlines fit the
   width; only on a page too short for six rows plus the header does the square shrink to fit the
@@ -677,6 +691,17 @@ a page of text — so a Handwriting-latch tap while the keyboard is up sets the 
 shows the surface only once the person dismisses the keyboard with its own key. `applyKind()` is the
 one function every such change routes through, because "blocked" has two independent inputs (the
 kind, and whether the IME is up) and only one of them is ever a tap.
+
+**The note is on the Supernote panel directly (arc 49 / P2, g-paper Phase 42 → 0.1.56).**
+`NoteSurface` sets `paper.directInk = true` in its `init`, the same flag the notebook (P1), the pad
+and the calendar page carry: the committed picture (the "Notes" band label and the strokes) is the
+flatten base, the live pen, the point eraser and the lasso's dashed trail are painted by the app,
+and the glass shows a dither of the page. A bounded paper view under the editor's fields needs
+nothing extra: the engine offsets every panel post by the view's own screen location, so a post
+lands only inside the note's rectangle, and the whole-view exclusion rect that "blocked" sets is
+also what clips every post while the keyboard is up or the Text half is showing — one rect serving
+both the daemon's fallback and the direct path. Where the panel refuses to open the note stays the
+daemon's with every law intact.
 
 `NoteKind.defaultFor` decides where a showing starts: **Handwriting** whenever the event has stroke
 rows (ink always wins), **Text** when it has text but no strokes, **Handwriting** again when it has

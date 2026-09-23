@@ -162,6 +162,15 @@ class ScratchPadActivity : InkScreenActivity<ScratchAction>() {
         // that lassoed differently would read as a bug.
         paper.smartLassoEnabled = true
         paper.scribbleEraseEnabled = true
+        // Arc 49 / P2: the pad's page goes direct to the Supernote panel as the notebook's does
+        // (g-paper Phase 42) — the committed picture is the flatten base, the live pen, the point
+        // eraser and the lasso's trail are painted by the app, the glass shows a dither of the
+        // page. Where the panel refuses to open the page stays the ink daemon's with every overlay
+        // law intact, so this is set unconditionally. Every panel post is cut around the exclusion
+        // rects — PaperChrome's list (both bars, the eraser sub-bar, the floating selection bar,
+        // the collapsed chrome) is what keeps a segment drawn up to a bar from writing page
+        // pixels over it.
+        paper.directInk = true
         paper.setPaperListener(paperListener)
 
         toolbar = ScratchToolbar(
