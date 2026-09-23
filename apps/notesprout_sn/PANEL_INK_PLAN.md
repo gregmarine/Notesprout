@@ -1,6 +1,6 @@
 # Panel ink — the writing faces on the Supernote panel
 
-**Status (2026-09-22): SURVEY — no decisions locked, no phases started.** The user's ask: the
+**Status (2026-09-22): PLANNED — arc 49 "Panel"; decisions locked (§ 2), phases written (§ 3), P0 not started.** The user's ask: the
 sketch extension (arcs 43–48) opened new ways of capturing stylus input and showing strokes on the
 Supernote; find where the ordinary vector-ink *writing* faces (notebook, scratch pad, calendar,
 the event note, the sticky editor) can use them. Scope the user set in the wizard of 2026-09-22:
@@ -181,12 +181,70 @@ Do it as one g-paper phase plus one SN arc, staged so each face is a separate sw
 
 ---
 
-## 2. Decisions
+## 2. Decisions (the user's, 2026-09-22 — never re-ask)
 
-_(none yet — filled from the user's answers)_
+1. **Go.** The direct stroke-mode path is built: g-paper **Phase 42 "Ink on the panel"** (branch
+   `panel-ink`, → 0.1.56) and SN **arc 49 "Panel"** on branch `tools`, this file the plan + ledger.
+2. **The lasso trail is app-painted on the panel.** We own the pixels: the dashed outline is posted
+   like a stroke segment and wiped by re-presenting the committed picture under it. No per-tool
+   daemon switching, no trail-less lasso.
+3. **No page-turn refresh** — the sketch face's arrangement. Revisit only if a walk shows a
+   text-dense page ghosting worse than the sketch does.
+4. **Greys come back to the pen: sixteen tones on the armed pen's re-tap** — the sketch face's
+   `PaletteBar` shape (Atelier's sixteen in a 4 × 4, the pen glyph filled with the shade). This
+   **reverses R3's removal** of the pen panels for the shade only; widths and styles stay as they
+   are. Exports bake `ARGB_8888`.
+5. **Every face with a pen button gets the shade panel** — notebook, scratch pad, calendar,
+   sticky editor. The event note (no toolbar) stays black.
+6. **One device-wide shade**, remembered in host prefs like the sketch face's tools — never in
+   the `.soil`, never in a backup. Grey picked in the notebook is grey in the pad.
+7. **All five faces opt in, notebook first**: notebook → scratch pad + calendar → event note →
+   sticky editor. Each its own phase and walk; a face whose walk fails stays on the daemon.
+8. **The point eraser's strokes vanish as the tip crosses them** — each erase batch re-renders
+   and presents its rect at once; no eraser cursor trail.
+9. **Recipe: Fable writes it all**, no subagents; the user walks each phase on the Nomad. No
+   code-review agent unless asked.
+10. Scope held from the wizard: **no pencil, no pressure width, no tilt** on the writing faces;
+    SN only; the Onyx engine untouched.
+
+### Derived shape (not decisions — the plan's own reading of them)
+
+- The opt-in is an explicit host flag, **`PaperView.directInk`** (default false, so the demo, the
+  sketch face and every other consumer are unchanged), honoured only when `firmware &&
+  panel.isOpen && pageMode == STROKE`. When the panel refuses, the page is the daemon's with
+  every law intact — the fallback branch, as it already is for raster pages.
+- The flatten base on a stroke page is **the committed picture**: `drawCommittedContent` drawn
+  into a page-sized `ALPHA_8`-equivalent grey bitmap (`committedGrey`) at load and re-drawn over
+  the touched rect after every commit, erase batch, undo/redo, object edit (`notifyContentChanged`)
+  and template change; whole page when the change is page-wide. Live ink goes into the existing
+  `liveInk` mask through `extendLiveInk`; `toneAndPost` dithers `committedGrey ⊕ liveInk` over the
+  dirty rect. The window mirrors at pen-up only (the "never invalidate mid-stroke" rule).
+- The trail: a `LASSO_DASH`-style dashed polyline rasterised into a `liveTrail` mask and posted
+  per segment; on close or cancel the trail's union rect is re-presented from `committedGrey`.
+  The closed outline and selection chrome stay the window's (they are chrome, not ink).
+- The device-wide shade for extension faces (pad, calendar) crosses the seam: one parcel tail on
+  the ink host interface (`API_VERSION` 21 → 22), the sketch's `ISketchHost` tool-memory tails
+  the model. `PaletteBar` + `ShadeIcon` + `SketchPalette.TONES` move from `:ext-sketch` to
+  `:sn-screen` so the four toolbars and the sketch face share one panel.
+- Every `releaseRender()` site behind `PenIdle` stays as it is: on a direct page it is a no-op,
+  on a fallback page it is the overlay clear it always was.
 
 ---
 
 ## 3. Phases
 
-_(to be written once § 2 is locked)_
+| Phase | Where | What | Walk / gate |
+|---|---|---|---|
+| **P0 — g-paper Phase 42 "Ink on the panel"** | `~/git/g-paper`, branch `panel-ink` | `directInk` flag; `committedGrey` + its rect/whole re-render on every commit path; live pen through `extendLiveInk` → `toneAndPost` on stroke pages; pen-up = commit + rect re-render + present, no `pendingBake`; per-batch erase present (decision 8); undo/redo/load/object/template = whole-page present; app-painted lasso trail (decision 2); no page-turn refresh (decision 3); daemon fallback; the demo's stroke page gains a `directInk` toggle; JVM tests for the gate, the re-render rects, the trail's wipe; `PLAN.md` § Phase 42; publish 0.1.56 to mavenLocal | User walks the demo's stroke page on the Nomad: black pen, lasso trail + close, point eraser, undo, page turn, dense page (the fill door), chrome over the page. Measure: `live …` tone ms, `dither: rect … ms`, first render of a dense page, PSS |
+| **P1 — the notebook** | `:sn-screen` pin → 0.1.56; `:app` `NotebookActivity` | `paper.directInk = true`; audit the notebook's own exclusion copy (`:4794-4837`) and the BLOCK_ALL-while-panels rule (still right: the window is authoritative); Contents/Recents/Insert/lasso popups over a direct page; `docs/notebook.md` | Nomad walk: write, lasso, erase, undo, objects, page turn, sticky icon, export unchanged |
+| **P2 — pad + calendar + event note** | `:ext-scratchpad`, `:ext-calendar` | `directInk = true` in `PaperScreenActivity`'s init (pad + calendar inherit) and in `NoteSurface`; calendar template greys dithered — check the month grid reads; `docs/scratchpad.md`, `docs/calendar.md` | Nomad walk each; the event note's keyboard-up block |
+| **P3 — the sticky editor** | `:app` `StickyEditorActivity` | `directInk = true`; the off-page fence bands as exclusion rects on a direct page (the panel post must clip to the minted page) | Nomad walk |
+| **P4 — greys** | `:sn-screen`, `:extension-api`, `:app`, the four toolbars, `:ext-sketch` (the move) | `PaletteBar` / `ShadeIcon` / the sixteen tones into `:sn-screen`; re-tap the armed pen on `NotebookToolbar`, `ScratchToolbar`, `CalendarToolbar`, the sticky editor's bar → the panel; the pen glyph filled with the shade (`ic_pen` + `ic_pen_fill`, the ballpen); one device-wide shade in host prefs + the API 22 tail for extension faces; `ARGB_8888` in `PageRaster`, `PagePreview`, `TextCover`, `TemplateThumbnails`, `PdfAssembly`; tests: palette pin shared, codec round-trip of each tone, the tail's floor | Nomad walk: every tone live vs. export side by side (the sketch's own acceptance) |
+| **P5 — freeze** | docs, root + SN `CLAUDE.md`, `BACKLOG.md` | This file's ledger; `docs/sn-screen.md`; the R3 reversal recorded where R3 is; memory | — |
+
+Each phase ends with its ledger entry below; a phase whose walk fails is recorded and the next
+one waits for the user's word.
+
+### Ledger
+
+_(empty)_
