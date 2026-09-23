@@ -16,7 +16,7 @@ object CollapsedTools {
 
     /** The fixed order of the mini toolbar's tool buttons (decision 2 / 3): the two erasers are
      *  two buttons, so the lasso eraser is one tap away while collapsed. */
-    val ORDER: List<Tool> = listOf(Tool.PEN, Tool.ERASER, Tool.LASSO_ERASER, Tool.LASSO)
+    val ORDER: List<Tool> = listOf(Tool.PEN, Tool.ERASER, Tool.SMUDGE, Tool.LASSO_ERASER, Tool.LASSO)
 
     /**
      * The corner button's glyph for [tool]. The lasso wears the clipboard mark exactly as the
@@ -34,6 +34,8 @@ object CollapsedTools {
         Tool.PEN -> R.drawable.ic_pen
         Tool.NONE -> R.drawable.ic_pen
         Tool.ERASER -> R.drawable.ic_eraser
+        // The stylus smudge (arc 50): Tabler's hand-finger — the finger's rub, on the nib.
+        Tool.SMUDGE -> R.drawable.ic_smudge
         Tool.LASSO_ERASER -> R.drawable.ic_lasso_eraser
         Tool.LASSO -> if (clipboardLoaded) R.drawable.ic_lasso_clipboard else R.drawable.ic_lasso
     }

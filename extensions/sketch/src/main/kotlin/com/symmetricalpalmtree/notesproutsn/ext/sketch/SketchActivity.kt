@@ -203,11 +203,11 @@ class SketchActivity : PaperScreenActivity() {
 
     override fun armTool(tool: Tool) = toolbar.arm(tool)
 
-    /** **Two** tools on the mini toolbar, not the usual four (arc 43 / K2 grew the parameter for
-     *  exactly this): the pen and the rubber are all this surface answers. The pen slot is two
-     *  *kinds* since arc 44 ([collapsedPenKinds]), so the row reads Pencil · Pen · Eraser — the top
-     *  bar's own order. The pencil wears `ic_pencil` — Tabler's pencil glyph, the user's call; the pen `ic_pen`, the ballpen. */
-    override fun collapsedTools(): List<Tool> = listOf(Tool.PEN, Tool.ERASER)
+    /** **Three** tools on the mini toolbar, not the usual four (arc 43 / K2 grew the parameter for
+     *  exactly this): the pen, the rubber and, since arc 50, the stylus smudge are all this surface
+     *  answers. The pen slot is two *kinds* since arc 44 ([collapsedPenKinds]), so the row reads
+     *  Pencil · Pen · Eraser · Smudge — the top bar's own order. The pencil wears `ic_pencil` — Tabler's pencil glyph, the user's call; the pen `ic_pen`, the ballpen. */
+    override fun collapsedTools(): List<Tool> = listOf(Tool.PEN, Tool.ERASER, Tool.SMUDGE)
 
     /**
      * The pen's two kinds on the mini toolbar (arc 44 / T3): the graphite pencil and the gel pen,
@@ -307,6 +307,7 @@ class SketchActivity : PaperScreenActivity() {
             btnPencil = binding.btnPencil,
             btnPen = binding.btnPen,
             btnEraser = binding.btnEraser,
+            btnSmudge = binding.btnSmudge,
             btnBringInk = binding.btnBringInk,
             btnShowPages = binding.btnShowPages,
             btnPrevPage = binding.btnPrevPage,

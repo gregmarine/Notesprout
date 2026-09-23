@@ -251,6 +251,8 @@ no next Sketch phase (eraser sizes, per-notebook tool memory, an `inkLift` fract
 graphite alpha to the 16-grey ladder, a pencil library of Atelier's grades) and no other new arc
 without a fresh user decision; no re-raising of any waived / declined review finding.
 
+**Arc 50 "Stump" (granted 2026-09-22, branch `tools`, plan + ledger `extensions/sketch/STUMP_PLAN.md` — 🔧 BUILT 2026-09-22, AWAITING THE USER'S NOMAD WALK):** the sketch face's smudge **follows the hand** (g-paper Phase 45 → **0.1.60** on branch `smudge-tool`, unmerged: the blend's box turned to the batch's principal axis, `RasterSmudging.across` 2) and a **stylus Smudge tool** (`Tool.SMUDGE`, `smudgeToolRadius` 16 px; `btnSmudge` after the rubber on the sketch face, `PaperToolbar.btnSmudge`, `CollapsedTools.ORDER` with SMUDGE after ERASER, Tabler `hand-finger` as `ic_smudge`) — the finger rub of arc 48 stays under every tool; amends arc 48's decision 3 by addition. `:sn-screen` pinned 0.1.60. No seam change.
+
 **Arc 49 "Panel" (granted 2026-09-22, branch `tools`, plan + ledger `PANEL_INK_PLAN.md` — **P0
 BUILT 2026-09-22** (g-paper Phase 42 → 0.1.56 on `panel-ink`, mavenLocal, demo on the Nomad) and
 **P1 COMPLETE 2026-09-22 on the user's Nomad hand walk** (`:sn-screen` pinned 0.1.56,

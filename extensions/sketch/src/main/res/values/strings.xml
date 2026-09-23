@@ -13,6 +13,7 @@
     <string name="cd_tool_pencil">Pencil</string>
     <string name="cd_tool_pen">Pen</string>
     <string name="cd_tool_eraser">Eraser</string>
+    <string name="cd_tool_smudge">Smudge</string>
     <string name="cd_sketch_bring_ink">Bring in ink</string>
     <string name="cd_sketch_show_pages">Show pages</string>
     <string name="cd_prev_page">Previous page</string>

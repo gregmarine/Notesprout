@@ -79,9 +79,13 @@ class PaperToolbar(
      *  — the sketch face opens its shade panel under the button, for that kind. [onEraserReTap]'s
      *  rule exactly, including that [onToolTapped] does **not** fire with it (see [select]). */
     private val onPenReTap: (alt: Boolean) -> Unit = {},
+    /** The stylus smudge (arc 50 — the sketch face's Smudge, [Tool.SMUDGE]), or null on every
+     *  screen without one. A plain tool with no kinds and no sub-bar: a tap arms it, a re-tap is
+     *  nothing. Defaulted and last, so every existing caller compiles unchanged. */
+    private val btnSmudge: ImageButton? = null,
 ) {
     init {
-        listOfNotNull(btnBack, btnPen, btnEraser, btnLasso, btnAltPen).forEach {
+        listOfNotNull(btnBack, btnPen, btnEraser, btnLasso, btnAltPen, btnSmudge).forEach {
             TooltipCompat.setTooltipText(it, it.contentDescription)
         }
         btnBack.setOnClickListener { releaseRenderIfIdle(); onBack() }
@@ -89,6 +93,7 @@ class PaperToolbar(
         btnAltPen?.setOnClickListener { selectPen(alt = true) }
         btnEraser.setOnClickListener { select(Tool.ERASER) }
         btnLasso?.setOnClickListener { select(Tool.LASSO) }
+        btnSmudge?.setOnClickListener { select(Tool.SMUDGE) }
         sync(paper.tool)
     }
 
@@ -190,6 +195,7 @@ class PaperToolbar(
             btnEraser.setImageResource(if (lassoKind) R.drawable.ic_lasso_eraser else R.drawable.ic_eraser)
         }
         btnLasso?.isSelected = tool == Tool.LASSO
+        btnSmudge?.isSelected = tool == Tool.SMUDGE
         onSynced()
     }
 

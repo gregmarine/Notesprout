@@ -40,6 +40,11 @@ import com.symmetricalpalmtree.notesproutsn.notebook.ShadeIcon
  *   firm passes take it out. It is not a stroke eraser and there is no sub-bar — there are no
  *   strokes to lasso. **It is never remembered**: a face that opened on the eraser would read as a
  *   broken pencil, and the seam says so too.
+ * - **The stylus smudge** (arc 50, [Tool.SMUDGE]): the finger rub of arc 48 done with the nib, at
+ *   [SMUDGE_TOOL_RADIUS_PX] — a stump. The finger's own rub stays available under every tool
+ *   (it is a gesture, not a tool); this button arms the *stylus* for it, which is what the user
+ *   asked for: "to use the stylus for the work, an explicit tool selection would be needed". No
+ *   sub-bar, no options, not remembered — the rubber's rule.
  * - **No pen gestures.** `smartLassoEnabled` and `scribbleEraseEnabled` are both off, set by the
  *   screen before the listener attaches: a hatch is not a scribble and a closed shading loop is not
  *   a selection.
@@ -69,6 +74,8 @@ class SketchToolbar(
     /** The gel pen (arc 44 / T3) — [Tool.PEN]'s second **kind**, beside the pencil's. */
     btnPen: ImageButton,
     btnEraser: ImageButton,
+    /** The stylus smudge (arc 50) — [Tool.SMUDGE], the finger rub of arc 48 on the nib. */
+    btnSmudge: ImageButton,
     private val btnBringInk: ImageButton,
     private val btnShowPages: ImageButton,
     private val btnPrevPage: ImageButton,
@@ -131,6 +138,9 @@ class SketchToolbar(
         paper.tool = Tool.PEN
         paper.eraserRadius = ERASER_RADIUS_PX
         paper.rasterRubbing = RasterRubbing()
+        // The stylus smudge's reach (arc 50): the engine's own default — a stump, half the
+        // fingertip's `smudgeRadius`. Stated here so the number has one visible home on this face.
+        paper.smudgeToolRadius = SMUDGE_TOOL_RADIUS_PX
         // The defaults, until the host answers what this device remembers (`SketchActivity`
         // restores them before the first mark is possible). Assigned directly rather than through
         // [apply], which syncs a toolbar that does not exist yet.
@@ -156,6 +166,7 @@ class SketchToolbar(
             altPenArmed = { toolState.isPen },
             onPenKindPicked = onPenKindPicked,
             onPenReTap = onPenReTap,
+            btnSmudge = btnSmudge,
         )
 
         listOf(btnBringInk, btnShowPages, btnPrevPage, btnNextPage).forEach {
@@ -263,5 +274,9 @@ class SketchToolbar(
          *  eraser has no options and is not remembered, so this is the one number left here; the
          *  pencil's and the pen's widths live in [SketchPalette]. */
         const val ERASER_RADIUS_PX = 12f
+
+        /** The stylus smudge's radius, in px (arc 50) — g-paper 0.1.60's default, a blending stump
+         *  at half the finger's 32. Not remembered, like the rubber: it has no options. */
+        const val SMUDGE_TOOL_RADIUS_PX = 16f
     }
 }

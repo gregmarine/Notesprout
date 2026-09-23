@@ -4,8 +4,9 @@
   two thin chrome bars overlaid. The PaperView is added into paperContainer programmatically. Paper
   is plain white always (decision 10) — no template, no ink layer underneath.
 
-  Tools are pencil, pen and eraser only — no lasso, no selection toolbar: a sketch page has no
-  objects to select, only pixels. Top bar: Back · Pencil · Pen · Eraser … Bring in ink · Show pages.
+  Tools are pencil, pen, eraser and smudge only — no lasso, no selection toolbar: a sketch page has
+  no objects to select, only pixels. Top bar: Back · Pencil · Pen · Eraser · Smudge … Bring in ink ·
+  Show pages.
   Bottom bar is the pager only.
 
   Both bars go to paper.setExclusionRects (via PaperChrome) after layout, so ink never lands under
@@ -55,7 +56,7 @@
                 android:textColor="@color/inkBlack"
                 android:textSize="16sp" />
 
-            <!-- Back, then the tools: pencil, pen and eraser only, no lasso. -->
+            <!-- Back, then the tools: pencil, pen, eraser and smudge, no lasso. -->
             <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="match_parent"
@@ -91,6 +92,15 @@
                     style="@style/Widget.Notesprout.ToolbarButton"
                     android:contentDescription="@string/cd_tool_eraser"
                     android:src="@drawable/ic_eraser" />
+
+                <!-- The stylus smudge (arc 50): the finger rub of arc 48, on the nib, at half its
+                     reach — Tabler's hand-finger. The finger's own rub stays available under every
+                     tool; this arms the stylus for it. -->
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnSmudge"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:contentDescription="@string/cd_tool_smudge"
+                    android:src="@drawable/ic_smudge" />
             </LinearLayout>
 
             <!-- Bring in ink (the door back to the notebook's own ink layer), then Show pages. -->

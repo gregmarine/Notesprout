@@ -24,7 +24,11 @@ into a tone. The rubber (arc 43) lifts; nothing on the face *moves* graphite.
    run together into a tone. As the graphite is redistributed the tone *may* pale a little, the
    way a real smudge does — "similar to the rub eraser, but this isn't removing".
 3. **A one-finger gesture, not a stylus tool.** A natural rub: rapid, short back-and-forth. It
-   must not fire the swipe gestures, and a swipe must not smudge.
+   must not fire the swipe gestures, and a swipe must not smudge. **Amended by arc 50 "Stump"
+   (2026-09-22, `STUMP_PLAN.md`):** the gesture stands, and a stylus Smudge tool is added beside
+   it on the user's word — "Finger smudge would always be available. But to use the stylus for
+   the work, an explicit tool selection would be needed." Arc 50 also turns the blend's box to
+   the line of travel (g-paper 0.1.60).
 4. Recipe: built directly by Fable (engine and face), JVM-tested, the user walks; no code review.
 
 ## Derived shape (reconciled, not re-asked)

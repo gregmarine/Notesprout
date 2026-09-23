@@ -260,6 +260,7 @@ class CollapsedChrome(
         val hints = mapOf(
             Tool.PEN to ctx.getString(R.string.tool_pen),
             Tool.ERASER to ctx.getString(R.string.eraser_point),
+            Tool.SMUDGE to ctx.getString(R.string.tool_smudge),
             Tool.LASSO_ERASER to ctx.getString(R.string.eraser_lasso),
             Tool.LASSO to ctx.getString(R.string.tool_lasso),
         )

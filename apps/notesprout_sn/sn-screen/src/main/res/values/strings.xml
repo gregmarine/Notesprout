@@ -13,6 +13,7 @@
     <string name="collapsed_tools">Tools</string>
     <string name="collapsed_more">More</string>
     <string name="tool_pen">Pen</string>
+    <string name="tool_smudge">Smudge</string>
     <string name="tool_lasso">Lasso</string>
 
     <!-- PaletteBar (arc 46 "Palette" on the sketch face; every writing face since arc 49 / P4) — the

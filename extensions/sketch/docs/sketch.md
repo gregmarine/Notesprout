@@ -42,7 +42,7 @@ anything"; g-paper Phase 30 → **0.1.44**, amending arc 45's "no top and no bot
 grew one parcel tail (`SketchToolSettings.penShade`, API 20 → 21). See "Arc 46's decisions"
 below.
 
-**Engine.** g-paper is pinned at **0.1.55** (**Phase 41, 2026-09-22: the panel is always dithered, nothing settles — see "Always dithered" below**; **Phase 40, 2026-09-22: the finger smudge, arc 48 — see "The smudge" below**; **Phase 39, 2026-09-21: the side-of-the-lead shading of arc 47 is OFF — "just normal pencil regardless of tilt"**: the Supernote pencil bakes upright always and draws with the round lead; the flank stays in `GraphiteGrain` as an opt-in no engine uses, and Phase 38 — its grain as the point's, in grey — was built, walked twice and withdrawn the same day because the live path could not afford it; both deferred in root `BACKLOG.md` § "NSE · Sketch — the flank"; Phase 37, 2026-09-21: a mark settles into tone **only** on the sketch face's **one-finger swipe down** or a page load — Phase 35's 2.5 s pause and Phase 32's tool / shade / rub / undo settles all **withdrawn**; see "The settle gesture" below; Phase 36 "The flank", arc 47 — see "Arc 47's decisions" below; Phases 31–34: the rubber settling before it posts, 2026-09-19: on the Supernote panel
+**Engine.** g-paper is pinned at **0.1.60** (**Phase 45, 2026-09-22: the smear follows the hand and `Tool.SMUDGE`, arc 50 — see "The stump" below**; **Phase 41, 2026-09-22: the panel is always dithered, nothing settles — see "Always dithered" below**; **Phase 40, 2026-09-22: the finger smudge, arc 48 — see "The smudge" below**; **Phase 39, 2026-09-21: the side-of-the-lead shading of arc 47 is OFF — "just normal pencil regardless of tilt"**: the Supernote pencil bakes upright always and draws with the round lead; the flank stays in `GraphiteGrain` as an opt-in no engine uses, and Phase 38 — its grain as the point's, in grey — was built, walked twice and withdrawn the same day because the live path could not afford it; both deferred in root `BACKLOG.md` § "NSE · Sketch — the flank"; Phase 37, 2026-09-21: a mark settles into tone **only** on the sketch face's **one-finger swipe down** or a page load — Phase 35's 2.5 s pause and Phase 32's tool / shade / rub / undo settles all **withdrawn**; see "The settle gesture" below; Phase 36 "The flank", arc 47 — see "Arc 47's decisions" below; Phases 31–34: the rubber settling before it posts, 2026-09-19: on the Supernote panel
 and in the window a mark is a blue-noise dither only while it is **live** or **waiting** — it
 settles into its true tone, the pen's line solid and the pencil's flecks each at their own alpha
 in the lead's tone, at the next thing that is not a mark: a tool or shade pick, a rub, an undo, a
@@ -800,6 +800,25 @@ synthesises a finger back-and-forth through `dispatchTouchEvent` (window coordin
 `files/dump/page.png` in the extension's external files dir for `adb pull`, because
 `adb shell input` takes about a second per event — the long-press fires first — and the touch
 node is not shell-writable. Release never compiles it in.
+
+**The stump (arc 50, 2026-09-22 — BUILT, awaiting the user's Nomad walk).** Two things, on the
+user's word. **The smear follows the hand** (g-paper Phase 45 → **0.1.60**): the neighbourhood a
+pixel is pulled toward is no longer a square box but the box **turned to the batch's line of
+travel** — `RasterSmudge.axis` is the sweep's principal axis (the structure tensor of its
+segments, so an out-and-back batch reads as one line rather than as no displacement), and the
+mean is gathered over `spread` px to either side along it and `RasterSmudging.across` px
+(default 2) to either side across it. A rub left and right runs a vertical hatch together; a rub
+up and down along its lines only streaks each line along itself; a diagonal rub follows the
+diagonal. A batch with no travel (a dwell) keeps the square box. **And a stylus Smudge tool**:
+`Tool.SMUDGE` in g-paper drives the same `beginSmudge` → `smudgeAlong` → `endSmudge` from the
+nib, within `smudgeToolRadius` — **16 px**, a stump, half the fingertip's 32 — the firmware
+painting nothing under it (Ratta's `firmwareInkSuppressed`, Onyx's raw pipeline off). On the
+face: `btnSmudge` after the rubber on the top bar (Tabler `hand-finger`, `ic_smudge`, "Smudge"),
+third on the mini toolbar, `PaperToolbar`'s defaulted `btnSmudge`, `CollapsedTools.ORDER` with
+SMUDGE after ERASER; never remembered (the rubber's rule). **The finger's rub stays available
+under every tool** — it is a gesture, and this button arms the stylus for the same work, which
+amends arc 48's decision 3 by adding to it, not replacing it. `extensions/sketch/STUMP_PLAN.md`
+is the plan + ledger.
 
 ### Tools (arcs 44–46)
 
