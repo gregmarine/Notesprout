@@ -1,6 +1,6 @@
 # Panel ink — the writing faces on the Supernote panel
 
-**Status (2026-09-22): arc 49 "Panel" — P0 BUILT + WALKED (g-paper Phase 42 → 0.1.56 on branch `panel-ink`), P1 COMPLETE on the user's Nomad walk, P2 COMPLETE on the user's Nomad walk (pad + calendar + event note set `directInk = true`), P3 COMPLETE on the user's Nomad walk (the sticky editor sets `directInk = true`); post-P3 the lasso eraser's x-stream trail (g-paper Phase 43 → 0.1.58, pitch tightened 16 → 10 px on the first walk) COMPLETE on the user's second Nomad walk; **P4 (greys) BUILT 2026-09-22 on the user's word — awaiting the Nomad walk**; decisions locked (§ 2), phases in § 3, ledger below.** The user's ask: the
+**Status (2026-09-22): arc 49 "Panel" — P0 BUILT + WALKED (g-paper Phase 42 → 0.1.56 on branch `panel-ink`), P1 COMPLETE on the user's Nomad walk, P2 COMPLETE on the user's Nomad walk (pad + calendar + event note set `directInk = true`), P3 COMPLETE on the user's Nomad walk (the sticky editor sets `directInk = true`); post-P3 the lasso eraser's x-stream trail (g-paper Phase 43 → 0.1.58, pitch tightened 16 → 10 px on the first walk) COMPLETE on the user's second Nomad walk; **P4 (greys) COMPLETE 2026-09-22 on the user's Nomad walk ("Tests pass"), P5 FROZEN the same day — ARC 49 COMPLETE + FROZEN**; decisions locked (§ 2), phases in § 3, ledger below.** The user's ask: the
 sketch extension (arcs 43–48) opened new ways of capturing stylus input and showing strokes on the
 Supernote; find where the ordinary vector-ink *writing* faces (notebook, scratch pad, calendar,
 the event note, the sticky editor) can use them. Scope the user set in the wizard of 2026-09-22:
@@ -412,4 +412,16 @@ one waits for the user's word.
   test, the pairwise answer at near-linear cost, held equal to the pairwise test over 600 random
   pairs); `:sn-screen` re-pinned, host + pad + calendar + sketch APKs on the Nomad. The P4 walk
   resumes from the top.
+- **P4 — greys — COMPLETE 2026-09-22 on the user's second Nomad walk ("Tests pass")**, after
+  the first walk's ANR was fixed in g-paper Phase 44 (above).
+- **P5 — freeze — 2026-09-22.** Arc 49 "Panel" is **COMPLETE + FROZEN**: every writing face on
+  the Supernote panel (P1–P3), the lasso eraser's x-stream (Phase 43), sixteen greys on every
+  writing face's pen (P4), the scribble-erase hit test no longer quadratic (Phase 44). g-paper
+  `panel-ink` (Phases 42–44, 0.1.56 → 0.1.59) stays **unmerged** — merge on the user's word, as
+  every phase; SN `tools` stays the open working branch. Recorded: this ledger; `docs/sn-screen.md`
+  (`InkTones` / `PaletteBar` / `ShadeIcon` / `PenShadeGlyph` rows); `docs/notebook.md` (the R3
+  reversal beside R3's own record); `docs/scratchpad.md`, `docs/calendar.md` § screen,
+  `docs/objects.md` § Sticky; `docs/extensions.md` rule 70 (`EXTRA_PEN_SHADE`);
+  `extensions/sketch/docs/sketch.md` § Tools (the move); root + SN `CLAUDE.md`; `BACKLOG.md` (the
+  known costs left to watch). **No new arc without a user decision.**
 

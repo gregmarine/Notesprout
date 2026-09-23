@@ -1322,3 +1322,21 @@ there is no export of notes to make the extra geometry visible today.
 not deferred for a later pass: a bigger trash tap target on `EventRowView`'s per-row delete icon in
 the events list, and the type button's (`btnType`, `activity_event_editor.xml`) `140dp` minimum
 width. Both stand as shipped.
+
+## Notesprout SN — arc 49 "Panel" (2026-09-22): the known costs left to watch, not fixed
+
+Recorded at the freeze (`apps/notesprout_sn/PANEL_INK_PLAN.md`); none bit on the Nomad walks.
+
+- **The committed image is `ARGB_8888`, view-sized** (~10 MB Nomad, ~20 MB Manta) per direct
+  face. `RGB_565` would halve it at 6-bit luma; not taken. Revisit only if a walk shows memory
+  pressure with the pad or a sticky open over the notebook.
+- **No page-turn refresh** (decision 3): a text-dense page may ghost worse than the sketch face
+  does. The page-turn full refresh exists in g-paper and is off by decision.
+- **A live composite vs. a later vector re-render can differ by ±1/255** at a dither threshold —
+  a dot may flip at a page reload. A device question; nobody has seen it.
+- **The event note stays black** (decision 5: no toolbar, no pen button). If a shade is ever
+  wanted there, it is the host's `PenShadePrefs` read through `NoteSurface`, no seam change.
+- **`DocumentPdfRender`, `BuiltInTemplates`' card renders and `CalendarRender` stay `RGB_565`**:
+  nothing a pen chose is drawn in them. If a calendar page ever carries a grey pen's ink in the
+  render itself, `CalendarRender` moves too.
+

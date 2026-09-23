@@ -255,14 +255,14 @@ without a fresh user decision; no re-raising of any waived / declined review fin
 BUILT 2026-09-22** (g-paper Phase 42 → 0.1.56 on `panel-ink`, mavenLocal, demo on the Nomad) and
 **P1 COMPLETE 2026-09-22 on the user's Nomad hand walk** (`:sn-screen` pinned 0.1.56,
 `NotebookActivity` sets `paper.directInk = true`, exclusion audit clean); **P2 COMPLETE 2026-09-22 on the user's Nomad walk**
-(pad + calendar + event note set `directInk = true`); **P3 COMPLETE 2026-09-22 on the user's Nomad walk (the sticky editor sets `directInk = true`, audit clean); **P4 (greys) BUILT 2026-09-22 — `PaletteBar` / `ShadeIcon` / the tones (`core/InkTones`) into `:sn-screen`, the shade panel on every writing face's pen re-tap, one device-wide level in the host's `PenShadePrefs` carried to the pad and the calendar as `EXTRA_PEN_SHADE` on the launch and result Intents (the chrome flag's shape, no API bump), exports `ARGB_8888`; awaiting the Nomad walk — the first walk's crash was a 15 s ANR in the scribble-erase hit test at a long squiggle's pen-up, g-paper Phase 44 → 0.1.59 `PolylineIndex`, `:sn-screen` re-pinned****): the vector-ink writing faces (notebook, pad, calendar, event note, sticky editor)
+(pad + calendar + event note set `directInk = true`); **P3 COMPLETE 2026-09-22 on the user's Nomad walk (the sticky editor sets `directInk = true`, audit clean); **P4 (greys) COMPLETE 2026-09-22 on the user's Nomad walk, P5 FROZEN the same day — ARC 49 COMPLETE + FROZEN; `PaletteBar` / `ShadeIcon` / the tones (`core/InkTones`) into `:sn-screen`, the shade panel on every writing face's pen re-tap, one device-wide level in the host's `PenShadePrefs` carried to the pad and the calendar as `EXTRA_PEN_SHADE` on the launch and result Intents (the chrome flag's shape, no API bump), exports `ARGB_8888`; the first walk's crash was a 15 s ANR in the scribble-erase hit test at a long squiggle's pen-up, g-paper Phase 44 → 0.1.59 `PolylineIndex`, `:sn-screen` re-pinned; g-paper `panel-ink` (Phases 42–44) unmerged on the user's word, SN `tools` the open branch; no new arc without a user decision****): the vector-ink writing faces (notebook, pad, calendar, event note, sticky editor)
 go direct to the Supernote panel the way the sketch face does — g-paper **Phase 42 "Ink on the
 panel"** (branch `panel-ink` → 0.1.56, a `directInk` opt-in, the committed picture as the flatten
 base, an app-painted lasso trail, the daemon as fallback), then each face opts in on its own walk,
 then **sixteen greys return to the pen's re-tap** (the user's reversal of R3's shade removal), one
 device-wide shade, `ARGB_8888` exports. Ten locked decisions in the plan's § 2; the phases P0–P5
 in § 3. Fable writes it all, no subagents. **P0–P3 are complete — every writing face is on the panel; post-P3 the lasso eraser's trail is an x-stream again (g-paper Phase 43 → 0.1.58 after the first walk tightened the x pitch 16 → 10 px, `:sn-screen` pinned, COMPLETE on the user's Nomad walk); read the plan's ledger; P4 (the
-greys) is BUILT — the ledger's P4 entry says how — and awaits the user's Nomad walk.**
+greys) COMPLETE on the user's Nomad walk and the arc FROZEN 2026-09-22 — read the plan's ledger.**
 The same day's icon swap (bfabaf83): `ic_pen` is Tabler's ballpen everywhere a pen is meant,
 `ic_pencil` the sketch face's pencil, `ic_pencil_down` → `ic_pen_down`.
 
