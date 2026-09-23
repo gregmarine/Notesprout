@@ -79,4 +79,16 @@ But to use the stylus for the work, an explicit tool selection would be needed."
   off the rubbed edge, fading — the direction reads; the export still pale in true tone.
   *"This is getting closer."* The stylus and finger looked different (16 vs 32 px reach; the
   stylus starts at the down, the finger at its first reversal) → **`SMUDGE_TOOL_RADIUS_PX` 16 →
-  24** (2026-09-23, ext-sketch rebuilt + reinstalled). Walk 3 next.
+  24** (2026-09-23, ext-sketch rebuilt + reinstalled).
+- **Walk 3 (2026-09-23, screencap + export in Preview): "It looks good."** One ask: the smudge
+  started before the nib moved and bloomed around the landing, a little of it *against* the
+  travel — "if the smudge stroke is only down, the smudge effect should only go down". Two
+  causes, neither asked for: the landing sample was a one-point batch with no axis, so it fell
+  back to the square box; and the kernel was symmetric, reaching behind the nib as well as
+  ahead. **The smear is now one-sided and travel-gated** (g-paper ae19161): along the axis a
+  pixel is pulled toward the mean of the `2 × spread` px *behind* it in the direction of travel
+  (`lineMean` takes `before` / `after`; `heading` = the sweep's net travel gives the sign), the
+  corridor is clipped behind the sweep's first sample (`coverageField(heading)`), and a batch
+  with no net travel returns before it announces anything (`smudgeChunk` too, so no undo tiles
+  are read for a still nib). The read pad is `2 × spread`. Tests moved to two-point sweeps;
+  813 green. Rebuilt + reinstalled on the Nomad. Walk 4 next.
