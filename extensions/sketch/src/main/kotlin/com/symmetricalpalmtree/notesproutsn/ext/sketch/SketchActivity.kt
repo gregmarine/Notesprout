@@ -969,6 +969,7 @@ class SketchActivity : PaperScreenActivity() {
                 closeOpenEdit()
             }
             val builder = openEdit
+                ?.also { paper.asView().removeCallbacks(closeOpenEditRunnable) }   // continued
                 ?: RasterEditBuilder(state.pageKey, state.pageIndex, layer, state.width, state.height).also {
                     openEdit = it
                     openEditReadNanos = 0L
@@ -1004,14 +1005,26 @@ class SketchActivity : PaperScreenActivity() {
          * that admits it cannot.
          */
         override fun onPenLifted() {
-            closeOpenEdit()
+            // A light rub with the stylus makes the tip switch chatter — four contacts a second on
+            // the Nomad (arc 50, walk 4) — and each was its own undo entry. Under the smudge the
+            // entry stays open a beat, and a contact that lands inside it continues the same one.
+            if (paper.tool == Tool.SMUDGE) {
+                val v = paper.asView()
+                v.removeCallbacks(closeOpenEditRunnable)
+                v.postDelayed(closeOpenEditRunnable, SMUDGE_CHATTER_MS)
+            } else {
+                closeOpenEdit()
+            }
         }
 
         override fun onToolChanged(tool: Tool) = toolbar.sync(tool)
     }
 
+    private val closeOpenEditRunnable = Runnable { closeOpenEdit() }
+
     /** Close the open contact's before-image into one history entry. Idempotent. */
     private fun closeOpenEdit() {
+        paper.asView().removeCallbacks(closeOpenEditRunnable)
         val builder = openEdit ?: return
         openEdit = null
         if (builder.tooBig) {
@@ -1091,6 +1104,7 @@ class SketchActivity : PaperScreenActivity() {
      *   first.
      */
     private suspend fun doReplay(undoing: Boolean) {
+        closeOpenEdit()   // a smudge entry held open for the chatter window is written first
         val edit = (if (undoing) undo.popUndo() else undo.popRedo()) ?: return
         val generation = undo.generation
         val applied = try {
@@ -1646,6 +1660,10 @@ class SketchActivity : PaperScreenActivity() {
          * (30 % of the shorter screen axis — 421 px on the Nomad).
          */
         const val SMUDGE_ARM_WITHIN_PX = 280f
+
+        /** How long an undo entry stays open after a smudge contact lifts, so a chattering tip
+         *  switch (~250 ms a contact on the Nomad) continues the entry rather than minting one. */
+        const val SMUDGE_CHATTER_MS = 300L
 
         /** Outlives the Activity so a flush in flight always completes. */
         val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)

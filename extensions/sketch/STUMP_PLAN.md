@@ -91,4 +91,19 @@ But to use the stylus for the work, an explicit tool selection would be needed."
   corridor is clipped behind the sweep's first sample (`coverageField(heading)`), and a batch
   with no net travel returns before it announces anything (`smudgeChunk` too, so no undo tiles
   are read for a still nib). The read pad is `2 × spread`. Tests moved to two-point sweeps;
-  813 green. Rebuilt + reinstalled on the Nomad. Walk 4 next.
+  813 green. Rebuilt + reinstalled on the Nomad.
+- **Walk 4 (2026-09-23): "the page went blank. Even flipping pages didn't bring up the other
+  pages."** Not arc 48's Binder overrun (no DeadObjectException, crash, ANR or memory pressure).
+  The log: from 19:38:40 the stylus landed and lifted **four times a second for 45 s** under
+  Smudge — *"I was rubbing quickly with the stylus"* — the EMR tip switch chattering at stump
+  pressure while the Ratta ink daemon saw one long contact. Each contact (1) cancelled every
+  finger gesture (`PageGestures.cancelAll` on a pen down), so no page turn ever completed, and
+  (2) presented a window frame at its end (`finalizeEraseRedraw`), ~180 frames the display
+  composer logged a rejection for from 19:38:53 while the daemon blanked and unblanked the
+  framebuffer around its own pen sessions; the exact step that whitened the page is not in our
+  log. Two hardenings (g-paper 0.1.60 republished; ext-sketch rebuilt + reinstalled): **the
+  window mirror is deferred and coalesced on the direct path** (`onSmudgeEnded` hook,
+  `RattaPaperView.SMUDGE_MIRROR_DELAY_MS` 400 — one frame a beat after the last contact, every new
+  contact pushes it back), and **a chattering contact continues the same undo entry**
+  (`SketchActivity.SMUDGE_CHATTER_MS` 300: under Smudge the entry stays open a beat after the
+  lift; a replay flushes it first). Walk 5 next.
