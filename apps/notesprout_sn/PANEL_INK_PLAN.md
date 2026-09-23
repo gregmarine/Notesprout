@@ -401,4 +401,15 @@ one waits for the user's word.
     Pick in the notebook → open the pad, the calendar, a sticky: grey. Pick in the pad → Back:
     the notebook writes grey. Export the page to PDF / PNG and compare each tone side by side with
     the glass. White writes nothing on paper and covers ink.
+- **P4's first walk, 2026-09-22 — a crash, not P4's:** *"I had just drawn a very long squiggly
+  white line over a bunch of writing. And was trying to undo it when that happened."* The crash
+  buffer was empty; the ANR trace (a bugreport — `/data/anr` is root-only) put the main thread at
+  the squiggle's **pen-up**, in `EraseHitTest.hitStrokeIds` → `Geometry.polylineWithinDistance`:
+  the scribble-shaped stroke's erase hit test ran every sweep segment against every segment of
+  every stroke it might touch — quadratic, 15 s, the system killed the process before the undo
+  was ever tapped. The white pen only invited a scribble over writing; a black one would have
+  done the same. **g-paper Phase 44 → 0.1.59** (`PolylineIndex`: the sweep gridded once per hit
+  test, the pairwise answer at near-linear cost, held equal to the pairwise test over 600 random
+  pairs); `:sn-screen` re-pinned, host + pad + calendar + sketch APKs on the Nomad. The P4 walk
+  resumes from the top.
 
