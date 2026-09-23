@@ -1,6 +1,6 @@
 # Panel ink — the writing faces on the Supernote panel
 
-**Status (2026-09-22): PLANNED — arc 49 "Panel"; decisions locked (§ 2), phases written (§ 3), P0 not started.** The user's ask: the
+**Status (2026-09-22): arc 49 "Panel" — P0 BUILT (g-paper Phase 42 → 0.1.56 on branch `panel-ink`, published to mavenLocal, demo installed on the Nomad), awaiting the user's Nomad walk of the demo's stroke page; decisions locked (§ 2), phases in § 3, ledger below.** The user's ask: the
 sketch extension (arcs 43–48) opened new ways of capturing stylus input and showing strokes on the
 Supernote; find where the ordinary vector-ink *writing* faces (notebook, scratch pad, calendar,
 the event note, the sticky editor) can use them. Scope the user set in the wizard of 2026-09-22:
@@ -247,4 +247,32 @@ one waits for the user's word.
 
 ### Ledger
 
-_(empty)_
+- **P0 — g-paper Phase 42 "Ink on the panel" — BUILT 2026-09-22, walk pending** (g-paper
+  branch `panel-ink`, commit 0becc76, 0.1.56 in mavenLocal; the demo APK installed on the
+  Nomad). Built as the derived shape says, with these readings worth carrying:
+  - The flatten base is a view-sized **ARGB** `committedPage` (~10 MB Nomad, ~20 MB Manta),
+    not the plan's "`ALPHA_8`-equivalent grey": a `Canvas` into an `ALPHA_8` bitmap keeps
+    coverage and loses luma, and a grey template line or a grey pen must dither as grey. It
+    stands where the graphite image stood (`flattenBase`), so the live flatten, the display
+    dither and every rect present are Phase 28–41's code unchanged; the ink image is absent.
+    `RGB_565` would halve it at 6-bit luma — not taken; a walk decides whether memory bites.
+  - **Pen-up is a composite, not a re-render**: the live layer goes into the image by the
+    raster bake's integer `SRC_OVER` over the mark's runs, so the page holds exactly the
+    panel's pixels and nothing moves at pen-up; a later whole re-render from the vector may
+    differ by ±1/255 at a dither threshold (a dot flipping at a page reload — a device
+    question).
+  - **The pencil is not previewed on a stroke page** (`directInkStyle`: `PEN`, `BRUSH`,
+    `CALLIGRAPHY`); decision 10 offers no pencil on the writing faces, and its stroke-page
+    bake would be a second derivation of the grain. It appears at pen-up with the other
+    styles — the demo's Style cycler will show that.
+  - Four new core seams, all `protected`, Onyx untouched: `bakeAfterCommit(stroke)`,
+    `onCommittedStrokesChanged(rect)`, `onLassoTrailExtended(points)`,
+    `strokeEraseRedrawIntervalMs`; `rasterDirtyAlong` made `protected`. One public addition:
+    `PaperView.directInk`.
+  - **Every panel post is cut around the exclusion rects** (`PanelClip`) — on raster pages
+    too (nothing changes on the sketch face, whose rects are empty). P1's audit of the
+    notebook's exclusion copy is what makes that matter.
+  - Both lassoes get the same 12/8 dashed trail; the daemon's x-stream for the lasso eraser
+    is not reproduced.
+  - The walk list is in g-paper `PLAN.md` § Phase 42's gate. After it: P1 pins `:sn-screen`
+    to 0.1.56 and sets `paper.directInk = true` in `NotebookActivity`.
