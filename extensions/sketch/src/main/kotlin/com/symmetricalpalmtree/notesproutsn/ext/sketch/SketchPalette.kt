@@ -1,5 +1,7 @@
 package com.symmetricalpalmtree.notesproutsn.ext.sketch
 
+import com.symmetricalpalmtree.notesproutsn.core.InkTones
+
 /**
  * The sketch face's palette (arc 44 / T3, remade by arc 46 "Palette") — **the one place the greys
  * and the two widths are written down**, and the reason the seam carries indices rather than values
@@ -33,8 +35,14 @@ package com.symmetricalpalmtree.notesproutsn.ext.sketch
  * **There is no size choice** (arc 46's decision 1, withdrawing arc 44's twelve leads): the pencil
  * is one width, [PENCIL_WIDTH_PX], "the size of a real pencil"; the gel pen is [PEN_WIDTH_PX].
  *
+ * **The tones themselves live in `:sn-screen` since arc 49 / P4** ([InkTones]): the notebook, the
+ * sticky editor, the scratch pad and the calendar hang the same shade panel under their pen, so the
+ * list moved to the module every paper surface shares and this object reads through it. What is
+ * still the sketch face's own is here — its two widths, its two kinds' defaults, and the names the
+ * face's code has always used for the shared rules.
+ *
  * There is no Android here on purpose: the numbers and the rules that read them are the part worth
- * testing, and everything that draws them ([PaletteBar]) is the part that cannot be.
+ * testing, and everything that draws them (`PaletteBar`) is the part that cannot be.
  */
 object SketchPalette {
 
@@ -42,31 +50,29 @@ object SketchPalette {
 
     /**
      * Atelier's sixteen tones as opaque ARGB, **darkest first** — level *n* is `TONES[n]`. The
-     * user's list, verbatim, reversed so that 0 is black and 15 is white.
+     * user's list, verbatim, reversed so that 0 is black and 15 is white. [InkTones.TONES] since
+     * arc 49 / P4.
      */
-    val TONES: List<Int> = listOf(
-        0x000000, 0x505050, 0x606060, 0x686868, 0x707070, 0x808080, 0x888888, 0x909090,
-        0xA0A0A0, 0xAAAAAA, 0xB6B6B6, 0xC0C0C0, 0xC8C8C8, 0xD0D0D0, 0xDDDDDD, 0xFFFFFF,
-    ).map { (0xFF shl 24) or it }
+    val TONES: List<Int> get() = InkTones.TONES
 
     /**
-     * The levels this build offers, in order — **the one line that changes which shades exist**.
-     * Every row, every bound and every "is that a shade?" test below is derived from this list,
-     * and nothing outside this file decides for itself what a shade is.
+     * The levels this build offers, in order — **the one line that changes which shades exist**
+     * ([InkTones.LEVELS]). Every row, every bound and every "is that a shade?" test below is
+     * derived from this list, and nothing outside `InkTones` decides for itself what a shade is.
      *
      * The user's sixteen (2026-09-19): every tone, for the pencil and the gel pen alike.
      */
-    val SHADE_LEVELS: List<Int> = TONES.indices.toList()
+    val SHADE_LEVELS: List<Int> get() = InkTones.LEVELS
 
     /** Level 0 — black, the gel pen's default and its hint's name. */
-    const val BLACK_SHADE: Int = 0
+    const val BLACK_SHADE: Int = InkTones.BLACK
 
     /** Level 15 — white: the pencil's lightener lead; on the pen, a stroke that shows nothing. */
-    const val WHITE_SHADE: Int = 15
+    const val WHITE_SHADE: Int = InkTones.WHITE
 
     /** Where the swatches wrap: four rows of four, Atelier's grid (the user's word on the first
      *  arc 46 walk, over the two rows of eight it opened with). */
-    const val ROW_BREAK: Int = 4
+    const val ROW_BREAK: Int = InkTones.ROW_BREAK
 
     /** The pencil's default shade: level 1, `#505050` — arc 43's one graphite tone (`#505050`
      *  exactly), which the hand called "spot on" at K1. */
@@ -97,7 +103,7 @@ object SketchPalette {
     // ── Reading them ──────
 
     /** Whether [level] names a shade **this** build offers. */
-    fun isShade(level: Int): Boolean = level in SHADE_LEVELS
+    fun isShade(level: Int): Boolean = InkTones.isLevel(level)
 
     /**
      * The opaque ARGB grey [level] names — **or [fallback]'s**, for anything this build does not
@@ -106,8 +112,7 @@ object SketchPalette {
      * black page. The fallback is the *kind's* default — the pencil's [DEFAULT_SHADE] unless the
      * caller says otherwise.
      */
-    fun shade(level: Int, fallback: Int = DEFAULT_SHADE): Int =
-        greyOf(if (isShade(level)) level else fallback)
+    fun shade(level: Int, fallback: Int = DEFAULT_SHADE): Int = InkTones.tone(level, fallback)
 
     /**
      * The swatch rows, in order, as the bar lays them out — **white first**, Atelier's own order
@@ -115,8 +120,5 @@ object SketchPalette {
      * so [SHADE_LEVELS] is genuinely the only line to change — at sixteen offered levels this is
      * four rows of four, white at the top left and black at the bottom right.
      */
-    fun shadeRows(): List<List<Int>> = SHADE_LEVELS.asReversed().chunked(ROW_BREAK)
-
-    /** Level *n* as its opaque tone. */
-    private fun greyOf(level: Int): Int = TONES[level]
+    fun shadeRows(): List<List<Int>> = InkTones.rows()
 }

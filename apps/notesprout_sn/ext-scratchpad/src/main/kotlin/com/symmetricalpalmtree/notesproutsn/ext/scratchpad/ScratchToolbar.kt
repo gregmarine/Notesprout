@@ -10,6 +10,7 @@ import com.symmetricalpalmtree.gpaper.core.model.StrokeStyle
 import com.symmetricalpalmtree.notesproutsn.core.InkColorCodec
 import com.symmetricalpalmtree.notesproutsn.notebook.PaperToolbar
 import com.symmetricalpalmtree.notesproutsn.notebook.PenIdle
+import com.symmetricalpalmtree.notesproutsn.notebook.PenShadeGlyph
 
 /**
  * The pad's chrome (arc 11 / J4, grown in J5): Back, the title and — when a notebook is behind us —
@@ -18,10 +19,15 @@ import com.symmetricalpalmtree.notesproutsn.notebook.PenIdle
  * pad's own: the fixed tool values, Send, the page arrows, and the page indicator behind the
  * frame-silence gate.
  *
- * **The tools are fixed, and they are the notebook's.** PEN · black · [PEN_WIDTH_PX], eraser
- * [ERASER_RADIUS_PX] — no panels, no colour, nothing remembered. Since arc 29 / LE3 the eraser has
+ * **The tools are fixed, and they are the notebook's.** PEN · [PEN_WIDTH_PX], eraser
+ * [ERASER_RADIUS_PX] — no width or style panels. Since arc 29 / LE3 the eraser has
  * two kinds, reached the notebook's way: a second tap on the armed eraser opens the shared
- * `EraserBar` (Point · Lasso) — the screen owns the bar, this just forwards the re-tap. Smart lasso and scribble erase are
+ * `EraserBar` (Point · Lasso) — the screen owns the bar, this just forwards the re-tap. **Since arc
+ * 49 / P4 the pen has a shade** (the user's decisions 4–6): a second tap on the armed pen opens the
+ * shared `PaletteBar` — sixteen greys, one level for every paper screen on the device, carried in
+ * by the host on the launch Intent and echoed on the result — the screen owns that bar too, this
+ * forwards the re-tap ([onPenReTap]) and wears the tone on the pen button ([reportPenShade],
+ * [PenShadeGlyph] — the colour rule's one opening, greys being ink). Smart lasso and scribble erase are
  * armed by the screen before the listener attaches: a pad one tap from the notebook that lassoed
  * differently would read as a bug.
  *
@@ -55,6 +61,8 @@ class ScratchToolbar(
     onEraserReTap: () -> Unit,
     /** Any actual tool change — the screen closes the sub-bar that belonged to the old tool. */
     onToolTapped: () -> Unit,
+    /** A tap on the already-armed pen (arc 49 / P4): the screen toggles the shade panel. */
+    onPenReTap: () -> Unit = {},
     sendEnabled: Boolean,
     /** After every sync (arc 36) — the collapsed chrome's corner button repaints from here. */
     onSynced: () -> Unit = {},
@@ -62,8 +70,13 @@ class ScratchToolbar(
 
     private val tools: PaperToolbar
 
+    /** The pen button wearing its shade (arc 49 / P4) — black until the screen arms the level the
+     *  host launched it in (`InkScreenActivity.initPenShade`). */
+    private val penGlyph = PenShadeGlyph(btnPen, InkColorCodec.BLACK)
+
     init {
         paper.tool = Tool.PEN
+        // Black until the screen applies the device's shade — the same first answer as before P4.
         paper.penColor = InkColorCodec.BLACK
         paper.penWidth = PEN_WIDTH_PX
         paper.penStyle = StrokeStyle.PEN
@@ -80,6 +93,7 @@ class ScratchToolbar(
             onEraserReTap = onEraserReTap,
             onToolTapped = onToolTapped,
             onSynced = onSynced,
+            onPenReTap = { onPenReTap() },
         )
 
         listOf(btnPrevPage, btnNextPage, btnSend).forEach {
@@ -98,6 +112,9 @@ class ScratchToolbar(
 
     /** Arm [tool] from the host side and sync the buttons — what the eraser sub-bar's pick lands on. */
     fun arm(tool: Tool) = tools.arm(tool)
+
+    /** Wear [ink] on the pen button (arc 49 / P4). Unchanged is silent. */
+    fun reportPenShade(ink: Int) = penGlyph.report(ink)
 
     /** `n / N`, presented only once the pen is idle (the frame-silence rule). */
     fun setPage(number: Int, total: Int) {

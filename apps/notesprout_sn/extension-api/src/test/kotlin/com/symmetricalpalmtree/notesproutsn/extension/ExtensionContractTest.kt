@@ -316,4 +316,15 @@ class ExtensionContractTest {
         assertEquals(ExtensionContract.MIN_API_VERSION_FOR_STORE, ExtensionContract.minApiVersion(ExtensionContract.ACTION_SCRATCH_PAD))
         assertEquals(ExtensionContract.MIN_API_VERSION_FOR_CALENDAR, ExtensionContract.minApiVersion(ExtensionContract.ACTION_CALENDAR))
     }
+
+    @Test
+    fun penShadeExtraIsPinned() {
+        // Arc 49 / P4. The chrome flag's shape for the pen's shade: out on the launch Intent, back
+        // on the result, an int level on the sixteen-tone ladder — a drift here is a grey that
+        // silently stops crossing, and a pad that opens black under a grey notebook.
+        assertEquals("penShade", ExtensionContract.EXTRA_PEN_SHADE)
+        // Not a version: no floor moved and API_VERSION did not, for either point that carries it.
+        assertEquals(ExtensionContract.MIN_API_VERSION_FOR_STORE, ExtensionContract.minApiVersion(ExtensionContract.ACTION_SCRATCH_PAD))
+        assertEquals(ExtensionContract.MIN_API_VERSION_FOR_CALENDAR, ExtensionContract.minApiVersion(ExtensionContract.ACTION_CALENDAR))
+    }
 }

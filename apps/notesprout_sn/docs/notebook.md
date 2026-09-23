@@ -256,7 +256,7 @@ remembered.**
 
 | | |
 |---|---|
-| Pen | `StrokeStyle.PEN` · `InkColorCodec.BLACK` · `NotebookToolbar.PEN_WIDTH_PX` = **3 px** |
+| Pen | `StrokeStyle.PEN` · `NotebookToolbar.PEN_WIDTH_PX` = **3 px** · **one of sixteen greys since arc 49 / P4** (`InkTones`, device-wide in `PenShadePrefs`, black by default; the armed pen's re-tap opens `PaletteBar`, the pen button wears the tone — `NotebookToolbar.applyShade`) |
 | Eraser | `NotebookToolbar.ERASER_RADIUS_PX` = **15 px** |
 | Smart lasso / scribble erase | hardwired **on**, set on the surface in `onCreate` |
 
@@ -265,7 +265,9 @@ remembered.**
   second tap to open, and a button that disarmed itself would leave the pen doing something the
   bar is not showing.
 - R3's rich panels (five widths, five styles, sixteen greys, four eraser radii) and R5's lasso
-  panel are **gone**, with `ToolPrefs` (`SharedPreferences("sn_tool")`) and the whole page-tap /
+  panel are **gone** — **the sixteen greys came back alone at arc 49 / P4** (the user's decision,
+  once the page went direct to the panel and a grey pen could preview as grey; see
+  `PANEL_INK_PLAN.md`), as a shade panel on the pen's re-tap, never a width or style — with `ToolPrefs` (`SharedPreferences("sn_tool")`) and the whole page-tap /
   stylus-pen-up panel-dismiss machinery in `dispatchTouchEvent`. Handwriting is the app; a bar that
   only arms is one less thing between the pen and the paper, and a chrome surface that could sit
   open over the page is one less thing to dismiss. `SnApplication` deletes the stale `sn_tool`

@@ -143,6 +143,20 @@ abstract class PaperScreenActivity : AppCompatActivity() {
     protected open fun collapsedPenKinds(): CollapsedChrome.PenKinds? = null
 
     /**
+     * The one pen's painted glyph on a screen with **one** pen (arc 49 / P4 — the writing faces'
+     * ballpen filled with its shade), or null to wear the plain resource one. Read once, at
+     * [initChrome], like [collapsedPenKinds]; ignored on a screen that offers kinds.
+     */
+    protected open fun collapsedPenIcon(): (() -> CollapsedChrome.PenIcon)? = null
+
+    /**
+     * What a pick of the **already-armed** one pen on the mini toolbar does (arc 49 / P4), handed
+     * the row's own button as an anchor — the writing faces hang their shade panel under it and the
+     * rows stay up beneath. Null = a re-pick arms again and closes the rows, as before P4.
+     */
+    protected open fun collapsedPenReTap(): ((anchor: View) -> Unit)? = null
+
+    /**
      * The rows are about to come down, by any path (arc 44 / T3) — the screen takes down the
      * sub-bars it hung off them, **without** pushing exclusions: [CollapsedChrome]'s own
      * `onChanged` follows and a close stays one binder call. The eraser sub-bar is not one of
@@ -344,6 +358,9 @@ abstract class PaperScreenActivity : AppCompatActivity() {
             onChanged = { pushExclusions() },
             tools = collapsedTools(),
             penKinds = collapsedPenKinds(),
+            // Arc 49 / P4: a screen with one pen may still paint it and answer its re-tap.
+            penIcon = collapsedPenIcon(),
+            onPenReTap = collapsedPenReTap(),
         )
     }
 
@@ -447,6 +464,13 @@ abstract class PaperScreenActivity : AppCompatActivity() {
     }
 
     /**
+     * Anything else this screen echoes on its result Intent (arc 49 / P4): the ink screens put the
+     * pen's shade here. Called only when the chrome flag is — a screen that never built its toggle
+     * answers with no data at all, and the host writes nothing.
+     */
+    protected open fun decorateResult(data: Intent) {}
+
+    /**
      * `releaseForHandoff()` and then `finish()` — the whole of this screen's half of the EPD
      * handoff, and the reason no exit calls `finish()` on its own. See the class note.
      *
@@ -459,7 +483,11 @@ abstract class PaperScreenActivity : AppCompatActivity() {
         // code — the one datum on the result Intent. A screen that never built its toggle (a
         // failed open before `initChrome`) answers with no data, and the host writes nothing.
         if (::chromeToggle.isInitialized) {
-            setResult(resultCode, Intent().putExtra(ExtensionContract.EXTRA_CHROME_HIDDEN, chromeToggle.hidden))
+            val data = Intent().putExtra(ExtensionContract.EXTRA_CHROME_HIDDEN, chromeToggle.hidden)
+            // Arc 49 / P4: whatever else this screen echoes (the ink screens' pen shade) rides the
+            // same Intent, under the same "no toggle, no data" rule.
+            decorateResult(data)
+            setResult(resultCode, data)
         } else {
             setResult(resultCode)
         }

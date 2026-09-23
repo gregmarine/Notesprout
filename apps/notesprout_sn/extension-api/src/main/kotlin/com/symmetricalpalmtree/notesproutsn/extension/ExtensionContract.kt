@@ -569,6 +569,21 @@ object ExtensionContract {
      */
     const val EXTRA_CHROME_HIDDEN: String = "chromeHidden"
 
+    /**
+     * Int Intent extra on the scratch pad's and the calendar's screen (arc 49 / P4), **both
+     * directions** — [EXTRA_CHROME_HIDDEN]'s shape exactly, for the one other thing the person
+     * sets as a way of working on every paper screen: the **pen's shade**, as a level on the
+     * family's sixteen-tone ladder (0 = black … 15 = white; `:sn-screen`'s `InkTones`). On the
+     * launch Intent it is the level the host's paper screens are writing in (absent = black); on
+     * the result Intent it is the level the screen was left on, whatever the result code. The host
+     * persists it; the extension writes nothing to disk. **The first integer on this seam's
+     * Intents**, and still no content, no id, no path, no secret: a level names a grey and nothing
+     * else, and one this build does not offer reads as black on either side. No version gate and
+     * no floor: an extension that predates it ignores the launch extra and returns a result
+     * without it, and the host writes nothing.
+     */
+    const val EXTRA_PEN_SHADE: String = "penShade"
+
     // ── Calendar render (arc 31 / HV4 — under API 9, a method floor, not a point) ──────
     // `ICalendar.render` writes a `PageBundle` v1 of calendar pages (grid · ink · today ring ·
     // event marks, each by flag) to a host-owned fd on a bind-per-call with a lent store — the tag

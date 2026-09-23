@@ -68,7 +68,7 @@ import java.io.IOException
  * D2, the one option this render executes), then the [PagePreview] layering — the one place that
  * order is written down ([PagePreview.drawContent]), which since arc 28 also carries text objects,
  * shapes and sticky icons (never a note's content). No link chrome, no selection chrome; those are
- * the screen's furniture, not the page's content. Pixels are [Bitmap.Config.RGB_565] over an opaque ground and
+ * the screen's furniture, not the page's content. Pixels are [Bitmap.Config.ARGB_8888] over an opaque ground (arc 49 / P4 — `RGB_565` before, which rounded the sixteen greys) and
  * WEBP lossy q100 ([BuiltInTemplates.toWebp] — the app's one measured encoder, the F5 finding),
  * at the **page's own** size and scale 1: a page authored on another panel keeps its own edge, and
  * the screen's size never enters this file. Those last two paragraphs' worth of drawing is
@@ -499,13 +499,13 @@ object ExportRender {
     /**
      * One endnote page: the note's strokes (local space — `(0,0)` is the content's top-left, which
      * is the bitmap's) on white, a hairline, then the caption strip. Same pixel recipe as a page
-     * (RGB_565, WEBP q100), same recycle-before-the-next rule.
+     * (ARGB_8888 since arc 49 / P4, WEBP q100), same recycle-before-the-next rule.
      */
     private fun bakeEndnote(note: Endnotes.Note, strokes: List<Stroke>): ByteArray {
         val w = note.widthPx
         val h = note.heightPx
         val bitmap = try {
-            Bitmap.createBitmap(w, h, Bitmap.Config.RGB_565)
+            Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         } catch (e: OutOfMemoryError) {
             throw IOException("a ${w}x$h endnote would not allocate", e)
         }

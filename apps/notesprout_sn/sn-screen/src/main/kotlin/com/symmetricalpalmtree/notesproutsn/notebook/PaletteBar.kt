@@ -1,4 +1,4 @@
-package com.symmetricalpalmtree.notesproutsn.ext.sketch
+package com.symmetricalpalmtree.notesproutsn.notebook
 
 import android.content.Context
 import android.graphics.Canvas
@@ -12,29 +12,33 @@ import android.widget.LinearLayout
 import androidx.appcompat.widget.TooltipCompat
 import androidx.core.content.ContextCompat
 import com.symmetricalpalmtree.gpaper.core.PaperView
-import com.symmetricalpalmtree.notesproutsn.notebook.AnchoredBar
-import com.symmetricalpalmtree.notesproutsn.notebook.PenIdle
+import com.symmetricalpalmtree.notesproutsn.core.InkTones
+import com.symmetricalpalmtree.notesproutsn.screen.R
 
 /**
  * The **shade panel** (arc 46 "Palette", the user's decisions 4 and 5 as amended on the first
- * walk; arc 44 / T3's `PencilBar` remade) — Atelier's sixteen tones in four rows of four, hung
- * under the armed pen button on its re-tap: the Pencil's for the pencil's shade, the Pen's for
- * the pen's. `EraserBar`'s
- * shape in every particular that matters: [AnchoredBar] places it, measures it and owns its rects;
- * the screen owns *when* it opens and closes, and unions [rects] into the exclusion rects and the
- * `overChrome` test, because a pen landing on a floating bar must never ink.
+ * walk; arc 44 / T3's `PencilBar` remade; **every writing face's since arc 49 / P4**, the user's
+ * decision 4 there) — Atelier's sixteen tones ([InkTones]) in four rows of four, hung under the
+ * armed pen button on its re-tap. `EraserBar`'s shape in every particular that matters:
+ * [AnchoredBar] places it, measures it and owns its rects; the screen owns *when* it opens and
+ * closes, and unions [rects] into the exclusion rects and the `overChrome` test, because a pen
+ * landing on a floating bar must never ink.
  *
- * It is the one tool-options bar on an SN paper screen since P1 removed the tool panels — the
- * user's decision of 2026-09-17 granted it for this face alone, and it is not a precedent for the
- * notebook's own toolbar.
+ * **It lives here, in `:sn-screen`, because every paper surface hangs it** since P4 — the sketch
+ * face's pencil and gel pen (arc 46), and the notebook's, the sticky editor's, the scratch pad's
+ * and the calendar's one pen (arc 49 / P4, the user's reversal of R3's shade removal — for the
+ * shade only; widths and styles stay fixed). A second copy would be the `RattaNotebookView`
+ * sibling-copy trap one file at a time, which is exactly what this module exists to prevent. It
+ * moved here from `:ext-sketch` unchanged in shape; what changed is that it no longer knows whose
+ * shade it edits.
  *
  * ## What it edits
  *
- * **The armed kind's shade** ([SketchToolState.withShade]): the pencil's while the pencil is armed,
- * the gel pen's while the pen is — and the only way in is a re-tap on the armed kind's own button,
- * so the panel always belongs to the kind whose button it hangs under (the user's amendment:
- * "since pencil and pen have independent shade selections, it makes better sense to attach the
- * selection to the tool"). The button's fill ([ShadeIcon]) says what changed.
+ * **One level** — whatever [armedLevel] answers, whatever [onPicked] does with the pick. On the
+ * sketch face that is the armed kind's shade (the pencil's while the pencil is armed, the gel
+ * pen's while the pen is — the only way in is a re-tap on the armed kind's own button, so the
+ * panel always belongs to the kind whose button it hangs under); on a writing face it is the one
+ * pen's shade, device-wide. The button's fill ([ShadeIcon]) says what changed.
  *
  * ## The swatch (decision 4 — Atelier's shape)
  *
@@ -46,7 +50,7 @@ import com.symmetricalpalmtree.notesproutsn.notebook.PenIdle
  * makes white and the palest greys read against the white bar). Painted rather than left to the
  * bar's white background, so it stays true whatever is behind it.
  *
- * **Greys are ink.** They appear here and nowhere else in any chrome but the two pen glyphs — the
+ * **Greys are ink.** They appear here and nowhere else in any chrome but the pen glyphs — the
  * colour rule's one opening is a swatch showing the tone being chosen. Every ring is black.
  *
  * **The bar stays open after a pick.** A visit is often "this grey — no, that one", and a bar that
@@ -64,17 +68,18 @@ import com.symmetricalpalmtree.notesproutsn.notebook.PenIdle
 class PaletteBar(
     root: ViewGroup,
     bar: LinearLayout,
-    /** The top bar's Pencil button — the bar's default anchor. [show] names another for the pen's
-     *  own button, and for the mini toolbar's buttons while the chrome is collapsed. */
+    /** The top bar's pen button — the bar's default anchor. [show] names another for a second
+     *  kind's own button (the sketch face), and for the mini toolbar's buttons while the chrome is
+     *  collapsed. */
     private val anchor: View,
     /** The free band's bottom edge in root coordinates (the bottom strip's top); null before layout. */
     bandBottom: () -> Int?,
     private val paper: PaperView,
-    /** What is armed — read at every open and after every pick, never cached here: the screen owns
-     *  the tool state and a copy of it is a copy that can be wrong. */
-    private val armed: () -> SketchToolState,
-    /** A pick: the screen applies it to the engine and remembers it on the device. */
-    private val onPicked: (SketchToolState) -> Unit,
+    /** The level the panel is editing — read at every open and after every pick, never cached
+     *  here: the screen owns the shade and a copy of it is a copy that can be wrong. */
+    private val armedLevel: () -> Int,
+    /** A pick of a level: the screen arms the engine with its tone and remembers it. */
+    private val onPicked: (level: Int) -> Unit,
 ) {
 
     private val bar = AnchoredBar(root, bar, anchor, bandBottom)
@@ -91,19 +96,19 @@ class PaletteBar(
         // — never a hardcoded button size.
         val cell = ctx.resources.getDimensionPixelSize(R.dimen.toolbar_button_size)
 
-        SketchPalette.shadeRows().forEach { levels ->
+        InkTones.rows().forEach { levels ->
             val row = newRow(ctx)
             levels.forEach { level ->
                 val hint = when (level) {
-                    SketchPalette.BLACK_SHADE -> ctx.getString(R.string.cd_shade_black)
-                    SketchPalette.WHITE_SHADE -> ctx.getString(R.string.cd_shade_white)
+                    InkTones.BLACK -> ctx.getString(R.string.cd_shade_black)
+                    InkTones.WHITE -> ctx.getString(R.string.cd_shade_white)
                     else -> ctx.getString(R.string.cd_shade, level)
                 }
-                val swatch = Swatch(ctx, SketchPalette.shade(level)).apply {
+                val swatch = Swatch(ctx, InkTones.tone(level)).apply {
                     layoutParams = LinearLayout.LayoutParams(cell, cell)
                     contentDescription = hint
                     TooltipCompat.setTooltipText(this, hint)
-                    setOnClickListener { pick(armed().withShade(level)) }
+                    setOnClickListener { pick(level) }
                 }
                 row.addView(swatch)
                 swatches += level to swatch
@@ -113,12 +118,12 @@ class PaletteBar(
     }
 
     /**
-     * Open the bar under [anchor], with the armed kind's shade already pressed. Returns false —
+     * Open the bar under [anchor], with the armed level already pressed. Returns false —
      * showing nothing — before the root has been laid out ([AnchoredBar.show]'s rule), which is what
      * keeps the caller's toggle honest at every moment the geometry is not yet knowable.
      */
     fun show(anchor: View = this.anchor): Boolean {
-        paint(armed())
+        paint(armedLevel())
         return bar.show(anchor)
     }
 
@@ -132,19 +137,20 @@ class PaletteBar(
 
     /**
      * Take a pick. The render release comes **first** and pen-gated, `EraserBar`'s rule and for its
-     * reason; the screen then assigns it to the engine and remembers it ([onPicked]); and the bar
-     * repaints, because it is still open and the pressed entry has moved.
+     * reason; the screen then arms the engine and remembers it ([onPicked]); and the bar repaints
+     * from what the screen now says is armed ([armedLevel], not the pick — the screen may have
+     * folded it), because it is still open and the pressed entry has moved.
      */
-    private fun pick(next: SketchToolState) {
+    private fun pick(level: Int) {
         PenIdle.releaseRenderIfIdle(paper)
-        onPicked(next)
-        paint(next)
+        onPicked(level)
+        paint(armedLevel())
     }
 
-    /** Make the swatches honest about [state]. `View.setSelected` invalidates on a change and does
+    /** Make the swatches honest about [level]. `View.setSelected` invalidates on a change and does
      *  nothing on a repeat, so a repaint that changes nothing costs no frame. */
-    private fun paint(state: SketchToolState) {
-        swatches.forEach { (level, view) -> view.isSelected = level == state.armedShade }
+    private fun paint(level: Int) {
+        swatches.forEach { (l, view) -> view.isSelected = l == level }
     }
 
     private fun newRow(ctx: Context): LinearLayout = LinearLayout(ctx).apply {

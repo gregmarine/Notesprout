@@ -1,4 +1,4 @@
-package com.symmetricalpalmtree.notesproutsn.ext.sketch
+package com.symmetricalpalmtree.notesproutsn.notebook
 
 import android.content.Context
 import android.graphics.drawable.Drawable
@@ -6,24 +6,28 @@ import android.graphics.drawable.LayerDrawable
 import androidx.annotation.DrawableRes
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.core.graphics.drawable.DrawableCompat
+import com.symmetricalpalmtree.notesproutsn.screen.R
 
 /**
  * **How a pen button reports its shade** (arc 44 / T3 for the Pencil, arc 46 "Palette" for the gel
- * pen — the user's decision 6): Tabler's outline, solid black as every glyph in the app is, over its
- * own **body filled with the shade** that kind is set to. Black reads as a completely black glyph;
- * any other level as a black outline with that grey inside it.
+ * pen — the user's decision 6; every writing face's pen since arc 49 / P4): Tabler's outline, solid
+ * black as every glyph in the app is, over its own **body filled with the shade** that pen is set
+ * to. Black reads as a completely black glyph; any other level as a black outline with that grey
+ * inside it.
  *
  * It is one recipe here rather than one per button, for the reason every shared rule in this
  * family lives in one place: two spellings of the same picture are two things to keep in step, and
  * the family's standing answer to that is the `RattaNotebookView` sibling-copy trap. [pencil] and
- * [pen] are the two glyphs it knows; the recipe ([filled]) is the same for both.
+ * [pen] are the two glyphs it knows; the recipe ([filled]) is the same for both. It moved here from
+ * `:ext-sketch` at arc 49 / P4, when the notebook, the sticky editor, the scratch pad and the
+ * calendar took the same fill for their ballpen ([PenShadeGlyph] is the per-button wrapper).
  *
  * ## The colour rule
  *
  * Greys **are ink**, and the root `CLAUDE.md` grants exactly one opening for ink in chrome: "the
  * pen button's icon tinted with the armed ink", beside the swatches that choose it. This is that
- * opening in its fill form, and this file plus [PaletteBar]'s swatches are the whole of it on this
- * screen — no other control anywhere may take a colour or a grey to say something.
+ * opening in its fill form, and this file plus [PaletteBar]'s swatches are the whole of it on every
+ * paper screen — no other control anywhere may take a colour or a grey to say something.
  *
  * ## Why a fill, not a tint of the whole glyph
  *
@@ -36,9 +40,9 @@ import androidx.core.graphics.drawable.DrawableCompat
  *
  * ## The token
  *
- * The ARGB **is** the token both bars compare (`CollapsedChrome.PenIcon`): two levels never share
- * one, a level this build no longer has folds onto the kind's default (`SketchPalette.shade`) and
- * so repaints nothing, and there is no second number to keep in step with the picture.
+ * The ARGB **is** the token both bars compare ([CollapsedChrome.PenIcon]): two levels never share
+ * one, a level this build no longer has folds onto the pen's default (`InkTones.tone`) and so
+ * repaints nothing, and there is no second number to keep in step with the picture.
  */
 object ShadeIcon {
 
@@ -49,7 +53,7 @@ object ShadeIcon {
     fun pencil(ctx: Context, ink: Int): LayerDrawable =
         filled(ctx, outlineRes = R.drawable.ic_pencil, fillRes = R.drawable.ic_pencil_fill, ink = ink)
 
-    /** The gel pen glyph with its barrel in [ink] (arc 46). */
+    /** The pen glyph — Tabler's ballpen — with its barrel in [ink] (arc 46; every writing face's pen since arc 49 / P4). */
     fun pen(ctx: Context, ink: Int): LayerDrawable =
         filled(ctx, outlineRes = R.drawable.ic_pen, fillRes = R.drawable.ic_pen_fill, ink = ink)
 

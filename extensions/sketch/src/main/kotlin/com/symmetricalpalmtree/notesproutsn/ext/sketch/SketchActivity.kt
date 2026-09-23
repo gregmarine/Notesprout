@@ -41,7 +41,9 @@ import com.symmetricalpalmtree.notesproutsn.notebook.CollapsedChrome
 import com.symmetricalpalmtree.notesproutsn.notebook.PageGestures
 import com.symmetricalpalmtree.notesproutsn.notebook.PaperChrome
 import kotlin.math.min
+import com.symmetricalpalmtree.notesproutsn.notebook.PaletteBar
 import com.symmetricalpalmtree.notesproutsn.notebook.PaperToolbar
+import com.symmetricalpalmtree.notesproutsn.notebook.ShadeIcon
 import com.symmetricalpalmtree.notesproutsn.notebook.UndoRedoStack
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -325,14 +327,16 @@ class SketchActivity : PaperScreenActivity() {
             // Release builds never attach it: the door is compiled out with the branch.
             onIndicatorLongPress = if (BuildConfig.DEBUG) ({ fillTestPattern() }) else null,
         )
+        // The panel edits the ARMED KIND's shade (arc 46); since arc 49 / P4 the bar itself is
+        // `:sn-screen`'s and edits a level — this screen says whose.
         paletteBar = PaletteBar(
             root = binding.root,
             bar = binding.paletteBar,
             anchor = binding.btnPencil,
             bandBottom = { chromeBand()?.last },
             paper = paper,
-            armed = { toolbar.state },
-            onPicked = { picked -> pickTools(picked) },
+            armedLevel = { toolbar.state.armedShade },
+            onPicked = { level -> pickTools(toolbar.state.withShade(level)) },
         )
         chrome = PaperChrome(
             paper = paper,

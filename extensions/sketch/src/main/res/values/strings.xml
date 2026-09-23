@@ -19,11 +19,8 @@
     <string name="cd_next_page">Next page</string>
     <string name="sketch_page_indicator">%1$d / %2$d</string>
 
-    <!-- PaletteBar (arc 46 "Palette"; arc 44 / T3's PencilBar remade) — the shade panel under the
-         armed pen button: Atelier's sixteen tones, black and white named, the rest numbered. -->
-    <string name="cd_shade_black">Black</string>
-    <string name="cd_shade_white">White</string>
-    <string name="cd_shade">Shade %1$d</string>
+    <!-- The shade panel's swatch hints (cd_shade_black / cd_shade_white / cd_shade) come from
+         :sn-screen since arc 49 / P4, with PaletteBar itself. -->
 
     <!-- Problem dialogs — a tap that did nothing is never a toast on e-ink. -->
     <string name="sketch_not_saved_title">Sketch not saved</string>

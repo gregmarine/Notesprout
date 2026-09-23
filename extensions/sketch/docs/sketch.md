@@ -803,8 +803,10 @@ node is not shell-writable. Release never compiles it in.
 
 ### Tools (arcs 44–46)
 
-- **`SketchPalette`** (`:ext-sketch`, pure Kotlin) is the one place the tones and the two widths
-  are written down. **`TONES` is Atelier's sixteen, darkest first** (decision 2 as amended:
+- **`SketchPalette`** (`:ext-sketch`, pure Kotlin) is the one place the two widths and the two
+  kinds' defaults are written down — **the tones themselves are `:sn-screen`'s `core/InkTones`
+  since arc 49 / P4** (the writing faces took the same sixteen), and `TONES` / `SHADE_LEVELS` /
+  `isShade` / `shade` / `shadeRows` read through it unchanged in meaning. **`TONES` is Atelier's sixteen, darkest first** (decision 2 as amended:
   `000000 505050 606060 686868 707070 808080 888888 909090 a0a0a0 aaaaaa b6b6b6 c0c0c0 c8c8c8
   d0d0d0 dddddd ffffff`), and a stored shade is **a level — a position in `TONES` — never a
   position in `SHADE_LEVELS`**, the list of levels this build offers (all sixteen). Kept darkest
@@ -827,8 +829,9 @@ node is not shell-writable. Release never compiles it in.
   panel paints as selected; `pencilReport` / `penReport` are what the two glyphs wear, **whatever
   kind is armed** — a button says what a tap on it will bring back. Every field read from outside
   comes in through `of`/`fromSettings` and falls back to its own default independently.
-- **`PaletteBar`** (`:ext-sketch`, over `:sn-screen`'s `AnchoredBar`; arc 44 / T3's `PencilBar`
-  remade) is the shade panel, the `EraserBar` pattern applied to four rows of four. A swatch is not
+- **`PaletteBar`** (**`:sn-screen`'s since arc 49 / P4**, over its `AnchoredBar`; arc 44 / T3's
+  `PencilBar` remade; takes `armedLevel` / `onPicked(level)` and does not know whose shade it
+  edits — this face passes `toolbar.state.armedShade` and `withShade(level)`) is the shade panel, the `EraserBar` pattern applied to four rows of four. A swatch is not
   an icon button: **Atelier's shape** (decision 4) — the grey itself as a filled circle with a
   1 dp black hairline at its edge (what makes the white lead a circle against the white bar), a
   white gap, and a 2 dp black outer ring, **dotted** (`DashPathEffect`, 2 dp on / 2 dp off) on
@@ -841,7 +844,7 @@ node is not shell-writable. Release never compiles it in.
   next re-tap, any tool change, a page swap, a finger gesture, a chrome flip, a contact outside
   it, or the exit — every dismissal path is in T3's ledger, unchanged. It edits the armed kind's
   shade and re-arms nothing.
-- **`ShadeIcon`** (`:ext-sketch`; arc 44 / T3's `PencilIcon` generalised) is a `LayerDrawable`
+- **`ShadeIcon`** (**`:sn-screen`'s since arc 49 / P4**; arc 44 / T3's `PencilIcon` generalised) is a `LayerDrawable`
   recipe: a fill body (`ic_pencil_fill` / `ic_pen_fill`), tinted with that kind's shade, under the
   untouched black outline (`ic_pencil` / `ic_pen`) — `pencil(ctx, ink)` and `pen(ctx, ink)` are
   the two glyphs it knows. Black reads as a fully black glyph, every other level as a black

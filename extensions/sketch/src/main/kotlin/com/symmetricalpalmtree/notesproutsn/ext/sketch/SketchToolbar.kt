@@ -9,6 +9,7 @@ import com.symmetricalpalmtree.gpaper.core.RasterRubbing
 import com.symmetricalpalmtree.gpaper.core.Tool
 import com.symmetricalpalmtree.notesproutsn.notebook.PaperToolbar
 import com.symmetricalpalmtree.notesproutsn.notebook.PenIdle
+import com.symmetricalpalmtree.notesproutsn.notebook.ShadeIcon
 
 /**
  * The sketch screen's chrome (arc 43 / K5, grown by arc 44 / T3 and arc 46 "Palette"): Back, the

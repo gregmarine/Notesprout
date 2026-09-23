@@ -1,6 +1,6 @@
 # Panel ink — the writing faces on the Supernote panel
 
-**Status (2026-09-22): arc 49 "Panel" — P0 BUILT + WALKED (g-paper Phase 42 → 0.1.56 on branch `panel-ink`), P1 COMPLETE on the user's Nomad walk, P2 COMPLETE on the user's Nomad walk (pad + calendar + event note set `directInk = true`), P3 COMPLETE on the user's Nomad walk (the sticky editor sets `directInk = true`); post-P3 the lasso eraser's x-stream trail (g-paper Phase 43 → 0.1.58, pitch tightened 16 → 10 px on the first walk) COMPLETE on the user's second Nomad walk; P4 (greys) on the user's word; decisions locked (§ 2), phases in § 3, ledger below.** The user's ask: the
+**Status (2026-09-22): arc 49 "Panel" — P0 BUILT + WALKED (g-paper Phase 42 → 0.1.56 on branch `panel-ink`), P1 COMPLETE on the user's Nomad walk, P2 COMPLETE on the user's Nomad walk (pad + calendar + event note set `directInk = true`), P3 COMPLETE on the user's Nomad walk (the sticky editor sets `directInk = true`); post-P3 the lasso eraser's x-stream trail (g-paper Phase 43 → 0.1.58, pitch tightened 16 → 10 px on the first walk) COMPLETE on the user's second Nomad walk; **P4 (greys) BUILT 2026-09-22 on the user's word — awaiting the Nomad walk**; decisions locked (§ 2), phases in § 3, ledger below.** The user's ask: the
 sketch extension (arcs 43–48) opened new ways of capturing stylus input and showing strokes on the
 Supernote; find where the ordinary vector-ink *writing* faces (notebook, scratch pad, calendar,
 the event note, the sticky editor) can use them. Scope the user set in the wizard of 2026-09-22:
@@ -342,3 +342,63 @@ one waits for the user's word.
   pen-up, the erase unchanged. First walk: the x's read too sparse — *"tighten up those Xs"* —
   pitch 16 → 10 px (arms 5 px, so they nearly touch), g-paper 0.1.58, re-pinned and
   reinstalled; **COMPLETE 2026-09-22 on the user's second Nomad walk ("So much better. We're good now")**.
+- **P4 — greys — BUILT 2026-09-22 on the user's word ("Let's do P4!") — awaiting the Nomad walk.**
+  Sixteen greys back on the pen's re-tap, on every writing face with a pen button (decisions 4–6;
+  the reversal of R3's shade removal, for the shade alone — widths and styles stay fixed).
+  - **The move.** `PaletteBar` and `ShadeIcon` moved from `:ext-sketch` into `:sn-screen`
+    (`notebook/`), and the sixteen tones into a new pure `core/InkTones` (`TONES` · `LEVELS` ·
+    `BLACK` · `WHITE` · `ROW_BREAK` · `isLevel` · `tone(level, fallback)` · `levelOrElse` ·
+    `rows()`); `SketchPalette` now reads through it and keeps only what is the sketch face's own
+    (its two widths, its two kinds' defaults, its old names). `PaletteBar` no longer knows whose
+    shade it edits: `armedLevel: () -> Int` + `onPicked: (level) -> Unit`, the sketch face
+    adapting with `toolbar.state.armedShade` / `withShade(level)`. The three `cd_shade*` strings
+    moved with the bar. A new `PenShadeGlyph(button, ink)` wraps `ShadeIcon.pen` for a writing
+    face's one pen button (frame-silent on a repeat). `CollapsedChrome` grew two defaulted
+    parameters for a screen with **one** pen — `penIcon` (the painted glyph on the row's button
+    always and on the corner button while the pen is armed) and `onPenReTap(anchor)` (the rows
+    stay up, the bar hangs under the row's own button) — `PenKinds`' contract for one kind;
+    `PaperScreenActivity` exposes them as `collapsedPenIcon()` / `collapsedPenReTap()`.
+  - **The device-wide shade (decision 6)** is the host's `PenShadePrefs`
+    (`SharedPreferences("sn_pen_shade")`, one int level, default black, `PenShadeCodec` folding a
+    stored stranger to black). The notebook and the sticky editor read it at open and **at every
+    `onResume`** (another paper screen may have picked while they were away) and write it at every
+    pick. **Not the plan's "API 22 tail":** the pad and the calendar have no host-side stub to
+    tail, and the chrome flag (arc 33 / F3) is the exact precedent for a way-of-working datum —
+    so `ExtensionContract.EXTRA_PEN_SHADE` ("penShade") rides the launch Intent out
+    (`ExtensionScreenEntry.open`) and the result Intent back (`PenShadeResult`, `ChromeResult`'s
+    rule: present → its level folded to the ladder, absent → the host writes nothing), no version
+    gate, no floor, `API_VERSION` stays 21 — **the first integer on this seam's Intents**, a level
+    naming a grey and nothing else. `PaperScreenActivity.finishWithHandoff` gained a
+    `decorateResult(data)` hook; `InkScreenActivity` (pad + calendar) owns `penShade`,
+    `initPenShade(savedInstanceState)` (a rebuild's own pick wins over the launch extra, the
+    chrome flag's rule), `applyPenShade(level)`, the `paletteBar` lateinit and every show / hide /
+    outside-contact / collapsed-keep path, and echoes the level on the result.
+  - **The four faces.** `NotebookToolbar` gained `onPenReTap`, `applyShade(ink)` and `penInk`
+    (the pen's re-tap no longer keeps the P1 no-op — no button does); `NotebookActivity` hangs
+    `paletteBar` under `btnPen` (or the mini toolbar's own pen button), hides it wherever the
+    eraser sub-bar hides, excludes it, counts it as chrome, keeps the collapsed rows up under it.
+    The sticky editor the same over `:sn-screen`'s bare `PaperToolbar` (`onPenReTap` was already
+    there since arc 44). `ScratchToolbar` / `CalendarToolbar` gained `onPenReTap` and
+    `reportPenShade(ink)`; each screen builds its `paletteBar` after the eraser sub-bar and calls
+    `initPenShade` after `initChrome`. All four layouts gained a `paletteBar` `LinearLayout`
+    (vertical) after `eraserBar`. The event note has no toolbar and stays black (decision 5).
+  - **`ARGB_8888` (decision 4).** `PageRaster` (every page export and Save-as-template),
+    `ExportRender.bakeEndnote`, `PagePreview`, `TemplateThumbnails` (`MAX_CACHE_BYTES` 8 → 16 MiB,
+    recomputed for 4-byte cards), `TextCover` (for the rule's sake — it draws only black), and
+    the two decoders `PdfAssembly` / `ImageAssembly` (`inPreferredConfig`) — `RGB_565` rounds
+    `#505050` to `#525152`. `DocumentPdfRender`, `BuiltInTemplates`' two card renders and
+    `CalendarRender` stay `RGB_565`: nothing grey a pen chose is ever drawn in them.
+  - **Tests:** `InkTonesTest` (the pins that were `SketchPaletteTest`'s, plus every tone's
+    round trip through `InkColorCodec`), `PenShadeCodecTest`, `PenShadeResultTest`, the
+    `EXTRA_PEN_SHADE` pin in `ExtensionContractTest`; `SketchPaletteTest` unchanged and green
+    through the delegation. `:sn-screen` 242 · `:extension-api` 600 · `:ext-sketch` 201 · `:app`
+    3696. Host, ext-scratchpad, ext-calendar, ext-sketch, ext-pdf and ext-image debug APKs on the
+    Nomad.
+  - **The walk (the sketch's own acceptance):** on each face — re-tap the armed pen, the 4 × 4
+    opens under it; pick a grey, the pen button and the corner button wear it, a stroke previews
+    and bakes in it; the bar stays open across picks and closes on a re-tap, a tool change, an
+    outside contact, a page turn, a chrome flip; collapse the chrome and re-tap the mini row's pen.
+    Pick in the notebook → open the pad, the calendar, a sticky: grey. Pick in the pad → Back:
+    the notebook writes grey. Export the page to PDF / PNG and compare each tone side by side with
+    the glass. White writes nothing on paper and covers ink.
+

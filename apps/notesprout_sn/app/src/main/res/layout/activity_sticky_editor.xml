@@ -108,8 +108,8 @@
 
     <!-- The eraser button's sub-bar (arc 29 / LE2) — Point / Lasso, hung under the armed eraser
          button by SelectionAnchor.placeUnder. Buttons are built in code (EraserBar, :sn-screen).
-         **Last child of the root**: a floating bar must be a later sibling than anything it could
-         overlap, and the top bar's buttons are inside the earlier LinearLayout. -->
+         A later sibling than anything it could overlap (the top bar's buttons are inside the
+         earlier LinearLayout) — the floating-bar rule. -->
     <LinearLayout
         android:id="@+id/eraserBar"
         android:layout_width="wrap_content"
@@ -117,6 +117,19 @@
         android:layout_gravity="top|start"
         android:background="@drawable/shape_dialog_bordered"
         android:orientation="horizontal"
+        android:padding="4dp"
+        android:visibility="gone" />
+
+    <!-- The pen's shade panel (arc 49 / P4) — Atelier's sixteen tones in four rows of four, hung
+         under the armed pen button on its re-tap. Empty here: its rows and swatches are built in
+         code by PaletteBar (:sn-screen). The eraser sub-bar's floating-bar rules exactly. -->
+    <LinearLayout
+        android:id="@+id/paletteBar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:background="@drawable/shape_dialog_bordered"
+        android:orientation="vertical"
         android:padding="4dp"
         android:visibility="gone" />
 

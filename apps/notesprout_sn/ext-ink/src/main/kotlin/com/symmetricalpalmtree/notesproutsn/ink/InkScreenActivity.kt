@@ -1,8 +1,11 @@
 package com.symmetricalpalmtree.notesproutsn.ink
 
 import android.app.Activity
+import android.content.Intent
 import android.graphics.Rect
+import android.os.Bundle
 import android.util.Log
+import android.view.MotionEvent
 import android.view.View
 import androidx.appcompat.app.AlertDialog
 import androidx.lifecycle.lifecycleScope
@@ -12,10 +15,16 @@ import com.symmetricalpalmtree.gpaper.core.model.Selection
 import com.symmetricalpalmtree.gpaper.core.model.SelectionMove
 import com.symmetricalpalmtree.gpaper.core.model.Stroke
 import com.symmetricalpalmtree.notesproutsn.core.Dialogs
+import com.symmetricalpalmtree.notesproutsn.core.InkTones
 import com.symmetricalpalmtree.notesproutsn.core.Slog
+import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
 import com.symmetricalpalmtree.notesproutsn.extension.InkChunks
 import com.symmetricalpalmtree.notesproutsn.extension.WireStroke
+import com.symmetricalpalmtree.notesproutsn.notebook.CollapsedChrome
 import com.symmetricalpalmtree.notesproutsn.notebook.InkSelectionBar
+import com.symmetricalpalmtree.notesproutsn.notebook.PaletteBar
+import com.symmetricalpalmtree.notesproutsn.notebook.PaperToolbar
+import com.symmetricalpalmtree.notesproutsn.notebook.ShadeIcon
 import com.symmetricalpalmtree.notesproutsn.notebook.UndoRedoStack
 import com.symmetricalpalmtree.notesproutsn.screen.R
 import kotlinx.coroutines.CancellationException
@@ -88,6 +97,23 @@ abstract class InkScreenActivity<A : Any> : PaperScreenActivity() {
     /** The lasso's floating bar — Send / Delete over the selection box. */
     protected lateinit var selectionBar: InkSelectionBar
 
+    /**
+     * The pen's shade panel (arc 49 / P4, the user's decisions 4–6) — `:sn-screen`'s [PaletteBar],
+     * hung under the armed pen button on its re-tap, the notebook's arrangement. Assigned by the
+     * subclass in `onCreate` after its toolbar, like [eraserBar]; then [initPenShade] arms the pen
+     * with the level the host launched us in.
+     */
+    protected lateinit var paletteBar: PaletteBar
+
+    /**
+     * The pen's shade, as a level on the sixteen-tone ladder ([InkTones]) — **the host's value on
+     * the way in, ours on the way out** ([ExtensionContract.EXTRA_PEN_SHADE], the chrome flag's
+     * round trip): one shade for every paper screen on the device (decision 6), persisted by the
+     * host and never by this extension. Black until [initPenShade] runs.
+     */
+    protected var penShade: Int = InkTones.BLACK
+        private set
+
     /** In-memory, screen-level history: it survives page turns and dies with the screen. */
     protected val undo = UndoRedoStack<A>()
 
@@ -107,6 +133,14 @@ abstract class InkScreenActivity<A : Any> : PaperScreenActivity() {
 
     /** The page being written on, or null before the document is built. */
     protected abstract val inkPage: InkPage?
+
+    /** The top bar's pen button — the one contact that never dismisses the shade panel (its own
+     *  re-tap toggles it; a dismissal here would make the toggle reopen what it closed). */
+    protected abstract val penButtonView: View?
+
+    /** Wear [ink] on the screen's own pen button (the toolbar's `PenShadeGlyph`) — the one place
+     *  outside the panel's swatches an ink is reported rather than chosen. */
+    protected abstract fun reportPenShade(ink: Int)
 
     protected abstract val storeFailedTitleRes: Int
     protected abstract val storeFailedBodyRes: Int
@@ -432,15 +466,131 @@ abstract class InkScreenActivity<A : Any> : PaperScreenActivity() {
         }
     }
 
+    // ── The pen's shade (arc 49 / P4) ────────────────────────────────────────
+
+    /**
+     * Arm the pen with the level this screen opens in, once the toolbar and [paletteBar] exist.
+     * **[savedInstanceState] wins over the launch extra** — `initChrome`'s rule (arc 34 / L19):
+     * the Intent's level is what the host knew when it launched us, and a rebuilt Activity has a
+     * pick of the person's own since then. Absent on both sides = black.
+     */
+    protected fun initPenShade(savedInstanceState: Bundle? = null) {
+        val launched = intent.getIntExtra(ExtensionContract.EXTRA_PEN_SHADE, InkTones.BLACK)
+        val level = savedInstanceState?.takeIf { it.containsKey(KEY_PEN_SHADE) }
+            ?.getInt(KEY_PEN_SHADE)
+            ?: launched
+        applyPenShade(level)
+    }
+
+    /**
+     * Arm the pen with [level]'s tone and make every glyph that shows it honest — the top bar's
+     * button, the mini toolbar's and the corner button's (through [syncCollapsed]). A level this
+     * build does not offer folds to black *here*, so [penShade] is always one the ladder has and
+     * the echo on the result Intent can never carry a stranger. Not persisted: the extension
+     * writes nothing, and the host reads the level off the result ([decorateResult]).
+     */
+    protected fun applyPenShade(level: Int) {
+        penShade = InkTones.levelOrElse(level, InkTones.BLACK)
+        paper.penColor = InkTones.tone(penShade)
+        reportPenShade(InkTones.tone(penShade))
+        syncCollapsed()
+    }
+
+    /** The armed pen's own button was re-tapped, on the top bar or (handed that row's button as
+     *  [anchor]) on the mini toolbar: the shade panel toggles under it. */
+    protected fun togglePaletteBar(anchor: View? = null) {
+        if (!::paletteBar.isInitialized) return
+        if (paletteBar.isShowing) {
+            hidePaletteBar()
+            return
+        }
+        if (!opened || closing) return
+        val shown = if (anchor == null) paletteBar.show() else paletteBar.show(anchor)
+        if (shown) pushExclusions()
+    }
+
+    /** Idempotent; answers whether it was showing, so a caller inside the collapsed chrome's close
+     *  can leave the one exclusion push to it (the sketch face's arrangement). */
+    private fun takeDownPaletteBar(): Boolean {
+        if (!::paletteBar.isInitialized || !paletteBar.isShowing) return false
+        paletteBar.hide()
+        return true
+    }
+
+    /** Idempotent — every dismiss path but the collapsed chrome's calls this one. */
+    protected fun hidePaletteBar() {
+        if (takeDownPaletteBar()) pushExclusions()
+    }
+
+    /**
+     * The outside-contact dismissal — the eraser sub-bar's rule: any pointer landing anywhere but
+     * the panel itself, the pen button whose own re-tap toggles it, or the collapsed rows it may
+     * be hanging under, takes it down. Excluding the toggling button is load-bearing: a contact
+     * that both dismissed the bar and then re-opened it would make the toggle re-open what it meant
+     * to close, every time (the lasso popup's original trap).
+     */
+    private fun dismissPaletteBarOnContact(ev: MotionEvent, index: Int) {
+        if (!::paletteBar.isInitialized || !paletteBar.isShowing) return
+        val x = ev.getX(index).toInt(); val y = ev.getY(index).toInt()
+        if (floatingContains(x, y)) return
+        if (penButtonView?.let { PaperToolbar.rectOf(it) }?.contains(x, y) == true) return
+        hidePaletteBar()
+    }
+
+    /** The mini toolbar's pen wears the shade as the bar's does, and its re-tap opens the panel
+     *  under the row's own button (arc 49 / P4). The ARGB is the token, so a pick that lands on
+     *  the shade already showing repaints nothing. */
+    override fun collapsedPenIcon(): (() -> CollapsedChrome.PenIcon)? = {
+        val ink = InkTones.tone(penShade)
+        CollapsedChrome.PenIcon(ink) { ShadeIcon.pen(this, ink) }
+    }
+
+    override fun collapsedPenReTap(): ((anchor: View) -> Unit)? = { anchor -> togglePaletteBar(anchor) }
+
+    /** The rows are coming down — the panel hung under one of them goes with them. No exclusion
+     *  push here: the collapsed chrome's own `onChanged` follows. */
+    override fun onCollapsedClosing() {
+        takeDownPaletteBar()
+    }
+
+    /** …and a contact **inside** that panel must not take the rows down under it. */
+    override fun keepCollapsedUnder(x: Int, y: Int): Boolean =
+        ::paletteBar.isInitialized && paletteBar.contains(x, y)
+
+    /** Every pointer going down, not just the first — with a hand resting on the glass the pen
+     *  arrives as `ACTION_POINTER_DOWN` (the base class's rule, before it consumes anything). */
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        val action = ev.actionMasked
+        if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) {
+            dismissPaletteBarOnContact(ev, ev.actionIndex)
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
+    /** The level survives a rebuild, as the chrome state does (arc 34 / L19's argument): it is the
+     *  person's way of working, and the host's own value is only read on the launch Intent. */
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putInt(KEY_PEN_SHADE, penShade)
+    }
+
+    /** The shade this screen was left on rides every result, whatever the code — beside the chrome
+     *  flag, under its rule. */
+    override fun decorateResult(data: Intent) {
+        data.putExtra(ExtensionContract.EXTRA_PEN_SHADE, penShade)
+    }
+
     // ── Chrome the selection owns ────────────────────────────────────────────
 
-    /** The lasso's bar is this screen's own floating chrome, on top of the two every paper screen
-     *  has (the base composes them in that order). */
+    /** The lasso's bar and (arc 49 / P4) the shade panel are this screen's own floating chrome, on
+     *  top of the two every paper screen has (the base composes them in that order). */
     override fun extraFloatingRects(): List<Rect> =
-        if (::selectionBar.isInitialized) selectionBar.rects() else emptyList()
+        (if (::selectionBar.isInitialized) selectionBar.rects() else emptyList()) +
+            (if (::paletteBar.isInitialized) paletteBar.rects() else emptyList())
 
     override fun extraFloatingContains(x: Int, y: Int): Boolean =
-        ::selectionBar.isInitialized && selectionBar.contains(x, y)
+        (::selectionBar.isInitialized && selectionBar.contains(x, y)) ||
+            (::paletteBar.isInitialized && paletteBar.contains(x, y))
 
     // ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -466,6 +616,7 @@ abstract class InkScreenActivity<A : Any> : PaperScreenActivity() {
         if (closing) return
         closing = true
         hideEraserBar()   // a floating bar belongs to a screen that is leaving
+        hidePaletteBar()   // the shade panel too (arc 49 / P4)
         dismissCollapsed()   // and so do the corner button's rows (arc 36 / C2)
         screenRoot?.removeCallbacks(saveRunnable)
         val page = inkPage ?: run { finishWithHandoff(resultCode); return }
@@ -485,6 +636,9 @@ abstract class InkScreenActivity<A : Any> : PaperScreenActivity() {
 
         /** Quiet time before the page's op log is written. */
         const val SAVE_DEBOUNCE_MS = 800L
+
+        /** Where [onSaveInstanceState] parks the pen's shade (arc 49 / P4). */
+        const val KEY_PEN_SHADE = "penShade"
 
         /** Outlives the Activity so a flush in flight always completes. */
         val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)

@@ -14,4 +14,11 @@
     <string name="collapsed_more">More</string>
     <string name="tool_pen">Pen</string>
     <string name="tool_lasso">Lasso</string>
+
+    <!-- PaletteBar (arc 46 "Palette" on the sketch face; every writing face since arc 49 / P4) — the
+         shade panel under the armed pen button: Atelier's sixteen tones, black and white named, the
+         rest numbered. -->
+    <string name="cd_shade_black">Black</string>
+    <string name="cd_shade_white">White</string>
+    <string name="cd_shade">Shade %1$d</string>
 </resources>

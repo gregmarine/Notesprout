@@ -32,6 +32,7 @@ import com.symmetricalpalmtree.notesproutsn.notebook.CollapsedChrome
 import com.symmetricalpalmtree.notesproutsn.notebook.InkSelectionBar
 import com.symmetricalpalmtree.notesproutsn.notebook.PageGestures
 import com.symmetricalpalmtree.notesproutsn.notebook.EraserBar
+import com.symmetricalpalmtree.notesproutsn.notebook.PaletteBar
 import com.symmetricalpalmtree.notesproutsn.notebook.PaperChrome
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -166,6 +167,7 @@ class CalendarActivity : InkScreenActivity<InkAction>() {
     override val logTag: String get() = TAG
     override val screenRoot: View? get() = if (::binding.isInitialized) binding.root else null
     override val eraserButtonView: View? get() = if (::binding.isInitialized) binding.btnEraser else null
+    override val penButtonView: View? get() = if (::binding.isInitialized) binding.btnPen else null
     override val topBarView: View? get() = if (::binding.isInitialized) binding.topBar else null
     override val bottomBarView: View? get() = if (::binding.isInitialized) binding.bottomBar else null
     override val openingOverlay: View? get() = if (::binding.isInitialized) binding.openingOverlay else null
@@ -263,6 +265,9 @@ class CalendarActivity : InkScreenActivity<InkAction>() {
     override fun record(action: InkAction) = undo.record(action)
 
     override fun syncTool(tool: Tool) = toolbar.sync(tool)
+
+    /** The pen button wears the device's shade (arc 49 / P4) — the toolbar's glyph. */
+    override fun reportPenShade(ink: Int) = toolbar.reportPenShade(ink)
 
     override fun armTool(tool: Tool) = toolbar.arm(tool)
 
@@ -382,7 +387,10 @@ class CalendarActivity : InkScreenActivity<InkAction>() {
             // A second tap on the armed eraser toggles its sub-bar — Point · Lasso (arc 29 / LE3);
             // arming a different tool takes the bar with it.
             onEraserReTap = { toggleEraserBar() },
-            onToolTapped = { hideEraserBar() },
+            // Arc 49 / P4: a second tap on the armed pen toggles its shade panel; arming a
+            // different tool takes both sub-bars with it.
+            onPenReTap = { togglePaletteBar() },
+            onToolTapped = { hideEraserBar(); hidePaletteBar() },
             sendEnabled = sendEnabled,
             scratchPadAvailable = scratchPadAvailable,
             exportEnabled = exportEnabled,
@@ -396,6 +404,16 @@ class CalendarActivity : InkScreenActivity<InkAction>() {
             bandBottom = { chromeBand()?.last },
             paper = paper,
             onPicked = { hideEraserBar(); toolbar.arm(it) },
+        )
+        // The pen's shade panel (arc 49 / P4) — the pad's arrangement exactly.
+        paletteBar = PaletteBar(
+            root = binding.root,
+            bar = binding.paletteBar,
+            anchor = binding.btnPen,
+            bandBottom = { chromeBand()?.last },
+            paper = paper,
+            armedLevel = { penShade },
+            onPicked = { level -> applyPenShade(level) },
         )
         selectionBar = InkSelectionBar(
             root = binding.root,
@@ -431,6 +449,9 @@ class CalendarActivity : InkScreenActivity<InkAction>() {
         // The grid is full page either way (F4) — hiding the bars only uncovers what is already
         // drawn there.
         initChrome(savedInstanceState)
+        // Arc 49 / P4: the pen opens in the shade the host handed over (a rebuild's own pick
+        // wins) — after the collapsed chrome exists, so every glyph that wears it is repainted.
+        initPenShade(savedInstanceState)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() { exit() }
         })
@@ -638,6 +659,7 @@ class CalendarActivity : InkScreenActivity<InkAction>() {
         currentSelection = null
         selectionBar.hide()
         hideEraserBar()   // a floating bar never survives a content swap
+        hidePaletteBar()  // nor the shade panel (arc 49 / P4)
         dismissCollapsed()   // and neither do the corner button's rows (arc 36 / C2)
         if (!firstLoad) paper.clearForContentSwap()
         applyTemplate(force = forceBake)
