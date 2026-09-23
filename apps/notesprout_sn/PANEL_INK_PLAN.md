@@ -247,7 +247,7 @@ one waits for the user's word.
 
 ### Ledger
 
-- **P0 — g-paper Phase 42 "Ink on the panel" — BUILT 2026-09-22, walk pending** (g-paper
+- **P0 — g-paper Phase 42 "Ink on the panel" — BUILT + WALKED 2026-09-22 on the Nomad demo** (g-paper
   branch `panel-ink`, commit 0becc76, 0.1.56 in mavenLocal; the demo APK installed on the
   Nomad). Built as the derived shape says, with these readings worth carrying:
   - The flatten base is a view-sized **ARGB** `committedPage` (~10 MB Nomad, ~20 MB Manta),
@@ -276,8 +276,8 @@ one waits for the user's word.
     is not reproduced.
   - The walk list is in g-paper `PLAN.md` § Phase 42's gate. After it: P1 pins `:sn-screen`
     to 0.1.56 and sets `paper.directInk = true` in `NotebookActivity`.
-- **P1 — the notebook — BUILT 2026-09-22, walk pending** (the user's word to proceed after
-  the P0 demo walk). `:sn-screen` pinned to g-paper 0.1.56 (both artifacts); `NotebookActivity`
+- **P1 — the notebook — COMPLETE 2026-09-22 on the user's Nomad hand walk ("It all seems fine")**
+  (built the same day on the user's word after the P0 demo walk). `:sn-screen` pinned to g-paper 0.1.56 (both artifacts); `NotebookActivity`
   sets `paper.directInk = true` beside the two pen-gesture flags, before the listener is
   attached, unconditionally (the daemon fallback is the engine's). The audit of the notebook's
   exclusion copy found nothing to change: every floating bar and popup (selection toolbar,
