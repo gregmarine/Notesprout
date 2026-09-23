@@ -276,7 +276,7 @@ class SketchToolbar(
         const val ERASER_RADIUS_PX = 12f
 
         /** The stylus smudge's radius, in px (arc 50) — g-paper 0.1.60's default, a blending stump
-         *  at half the finger's 32. Not remembered, like the rubber: it has no options. */
-        const val SMUDGE_TOOL_RADIUS_PX = 16f
+         *  three quarters of the finger's 32 (16 → 24 on the user's second walk, "too fine"). Not remembered, like the rubber: it has no options. */
+        const val SMUDGE_TOOL_RADIUS_PX = 24f
     }
 }

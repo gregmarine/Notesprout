@@ -70,5 +70,13 @@ But to use the stylus for the work, an explicit tool selection would be needed."
   a streak the graphite only thins (2 px across gathers almost nothing from the neighbours), and
   every pass still paid `loss`. Thin dark rules at each turn of the arm, where the axis flips and
   the load tops up. *"I want to keep the directional feel and the darkness."* → **`across` 2 → 4,
-  `loss` 0.02 → 0** (g-paper 0.1.60 republished, SN rebuilt + reinstalled on the Nomad). Walk 2
-  next.
+  `loss` 0.02 → 0** (g-paper 0.1.60 republished, SN rebuilt + reinstalled on the Nomad).
+- **Walk 2 (2026-09-22): "It stopped responding."** Not an ANR: the log put every finger event at
+  2–3.5 s inside the smudge — the gathered oriented kernel cost 117 samples a pixel a plane at
+  `across` 4. **The oriented mean went separable** (g-paper bdc78c6): the axis quantized to the
+  lattice's four (`quantizeAxis`), two running-sum line passes per plane (`lineMean`), O(n)
+  whatever the reach; batches back to 32–48 ms. Screencap + export: vertical streaks hanging
+  off the rubbed edge, fading — the direction reads; the export still pale in true tone.
+  *"This is getting closer."* The stylus and finger looked different (16 vs 32 px reach; the
+  stylus starts at the down, the finger at its first reversal) → **`SMUDGE_TOOL_RADIUS_PX` 16 →
+  24** (2026-09-23, ext-sketch rebuilt + reinstalled). Walk 3 next.
