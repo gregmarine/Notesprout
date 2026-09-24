@@ -75,6 +75,23 @@ and the e-ink repaints the whole library.
 
 ---
 
+## NSE · Sketch — export one sketch from a multi-page sketchbook (noted 2026-09-24)
+
+> The user, at arc 51's freeze: *"if we don't have a way to export a single sketch from a
+> multi-page sketchbook, let's add that to our notes for future work."*
+
+- **What exists:** the Export screen's **page scope** (`ExportScope.Page`, reachable from the
+  notebook screen's export door) — for a sketched page it delivers a **folder** holding the ink
+  page *and* the sketch page (`ExportDelivery.perPage`, the K7 rule), never a single file.
+- **What is missing:** (1) an export door **on the sketch face itself** (today the user has to
+  leave for the notebook or the library sheet); (2) a **sketch-only** single-image export of the
+  current page — the flattened rasters as one PNG (or one PDF page), without the ink page beside
+  it; (3) a Guides-free guarantee is already there (the export reads the two raster rows only).
+- **Shape when decided:** an overflow entry on the sketch face ("Export sketch…") that launches
+  the host's `ExportActivity` at page scope with a new `sketchOnly` option, or a lighter direct
+  door that writes the current page's flatten (`SketchRaster.toWebp`'s composite) to a picked
+  file / Google Drive. A fresh user decision; not scheduled.
+
 ## NSE · Sketch — the flank (side-of-the-lead shading), OFF since 2026-09-21
 
 > **Arc 47's flank is switched off** (g-paper Phase 39 → 0.1.53): the Supernote pencil bakes
