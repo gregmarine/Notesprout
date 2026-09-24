@@ -183,8 +183,19 @@ object ExtensionContract {
      * it is dead (one pencil width now) and stays on the wire so nothing changes shape in place.
      * `MIN_API_VERSIONS` is untouched, [SketchContract.MIN_API_VERSION_FOR_SKETCH] stays 20, no
      * door vanishes, and only `:ext-sketch` redeclares. Not an eleventh point.
+     *
+     * **22 = arc 51 "Guides" / J1 (2026-09-23)** — four compatible tails on `ISketchHost` after
+     * `putToolSettings` (`guides` / `readGuideImageChunk` / `putGuides` / `saveGuideImageChunk`:
+     * a grid and a reference image lie under the sketch as tools, stored in the `.soil` as two
+     * rows parented to the page, never drawn into a raster, exported, covered or erased), behind
+     * the METHOD floor [SketchContract.MIN_API_VERSION_FOR_SKETCH_GUIDES], with two new
+     * parcelables, [SketchGuideSettings] and [SketchGuideState], and a third read window plus a
+     * third accumulator host-side. T2's shape again: a screen that calls transaction codes 14–17
+     * declares 22 and never binds a 21 host. `MIN_API_VERSIONS` is untouched,
+     * [SketchContract.MIN_API_VERSION_FOR_SKETCH] stays 20, no door vanishes, and only
+     * `:ext-sketch` redeclares. Not an eleventh point.
      */
-    const val API_VERSION: Int = 21
+    const val API_VERSION: Int = 22
 
     /**
      * The floor for a service on a **store-taking** point (arc 22 / X1): the host accepts such a

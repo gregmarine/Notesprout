@@ -103,6 +103,35 @@ object SketchContract {
      */
     const val MIN_API_VERSION_FOR_SKETCH_PEN_SHADE: Int = 21
 
+    /**
+     * The **method** floor for the four guide tails (arc 51 "Guides" / J1, 2026-09-23 — the user's
+     * decision: a grid and a reference image lie under the sketch as tools, never as marks):
+     * [ISketchHost.guides] / [ISketchHost.readGuideImageChunk] / [ISketchHost.putGuides] /
+     * [ISketchHost.saveGuideImageChunk], transaction codes 14–17, with two new parcelables,
+     * [SketchGuideSettings] and [SketchGuideState]. [MIN_API_VERSION_FOR_SKETCH_TOOLS]'s shape
+     * exactly: a sketch screen that calls them declares 22 and is never discovered by a 21 host
+     * that would land them on nothing. [MIN_API_VERSION_FOR_SKETCH] stays 20 — nothing changed
+     * shape in place — and, like the pen-shade floor, this one sits **above** the action floor: the
+     * correct sense for a live tail.
+     */
+    const val MIN_API_VERSION_FOR_SKETCH_GUIDES: Int = 22
+
+    // ── The guides (arc 51 / J1) ──────
+
+    /** [SketchGuideSettings.gridKind]: no grid — and no grid row: pushing it soft-deletes one. */
+    const val GRID_OFF: Int = 0
+
+    /** [SketchGuideSettings.gridKind]: a grid of lines, square cells, centred on the page. */
+    const val GRID_LINES: Int = 1
+
+    /** [SketchGuideSettings.gridKind]: dots at the same cells' corners. */
+    const val GRID_DOTS: Int = 2
+
+    /** Largest [SketchGuideSettings.imageOpacity] — a percent, so 100. Like
+     *  [MAX_TOOL_SETTING_INDEX] a sanity bound on an unmarshalled integer: which opacities the
+     *  face offers is `:ext-sketch`'s ladder, and a stored percent off it reads as the default. */
+    const val MAX_OPACITY_PERCENT: Int = 100
+
     // ── The two rasters (arc 45 / G2) ──────
 
     /**

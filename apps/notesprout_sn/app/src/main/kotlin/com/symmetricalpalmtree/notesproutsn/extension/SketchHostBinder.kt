@@ -311,6 +311,35 @@ class SketchHostBinder(
         Slog.d(TAG) { "putToolSettings: $settings" }
     }
 
+    // ── Guides (arc 51 / J1 — served at J2) ──────
+    // The four tails exist on the wire from J1 so the seam is whole at its own commit; J2 gives
+    // them their session window, accumulator and hooks. Until then each is gated and refuses.
+
+    override fun guides(pageKey: String?): SketchGuideState {
+        gate()
+        requireNotNull(pageKey) { "pageKey is null" }
+        throw UnsupportedOperationException("guides: served at J2")
+    }
+
+    override fun readGuideImageChunk(chunkIndex: Int): ByteArray {
+        gate()
+        throw UnsupportedOperationException("readGuideImageChunk: served at J2")
+    }
+
+    override fun putGuides(pageKey: String?, settings: SketchGuideSettings?) {
+        gate()
+        requireNotNull(pageKey) { "pageKey is null" }
+        requireNotNull(settings) { "settings is null" }
+        throw UnsupportedOperationException("putGuides: served at J2")
+    }
+
+    override fun saveGuideImageChunk(pageKey: String?, chunkIndex: Int, chunk: ByteArray?, last: Boolean) {
+        gate()
+        requireNotNull(pageKey) { "pageKey is null" }
+        requireNotNull(chunk) { "chunk is null" }
+        throw UnsupportedOperationException("saveGuideImageChunk: served at J2")
+    }
+
     // ── The log's words ──────
 
     /** Both rasters' sizes in one phrase — byte totals and chunk counts, which is everything a walk

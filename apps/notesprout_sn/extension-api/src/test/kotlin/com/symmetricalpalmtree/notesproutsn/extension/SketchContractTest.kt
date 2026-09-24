@@ -59,6 +59,28 @@ class SketchContractTest {
     }
 
     @Test
+    fun `the guides floor sits above the action floor and closes no door`() {
+        // Arc 51 / J1: four METHOD tails (codes 14–17), a live tail above the action floor — the
+        // pen-shade floor's sense, not G2's inversion — and no floor moves: a 20 screen still binds.
+        assertEquals(22, SketchContract.MIN_API_VERSION_FOR_SKETCH_GUIDES)
+        assertTrue(SketchContract.MIN_API_VERSION_FOR_SKETCH_GUIDES > SketchContract.MIN_API_VERSION_FOR_SKETCH)
+        assertTrue(SketchContract.MIN_API_VERSION_FOR_SKETCH_GUIDES > SketchContract.MIN_API_VERSION_FOR_SKETCH_PEN_SHADE)
+        assertTrue(SketchContract.MIN_API_VERSION_FOR_SKETCH_GUIDES <= ExtensionContract.API_VERSION)
+        assertEquals(20, ExtensionContract.minApiVersion(SketchContract.ACTION_SKETCH))
+        assertTrue(ExtensionContract.accepts(SketchContract.ACTION_SKETCH, 22))
+    }
+
+    @Test
+    fun `the grid kinds and the opacity bound are pinned`() {
+        // Stored in the .soil as small ints (guide_grid rows), so pinned: a renumbering would
+        // silently turn every stored grid into another kind.
+        assertEquals(0, SketchContract.GRID_OFF)
+        assertEquals(1, SketchContract.GRID_LINES)
+        assertEquals(2, SketchContract.GRID_DOTS)
+        assertEquals(100, SketchContract.MAX_OPACITY_PERCENT)
+    }
+
+    @Test
     fun `the two rasters are pinned, distinct and the whole list`() {
         // Arc 45 / G2: the wire names a raster by a small int. Stored nowhere (a layer is a row
         // TYPE on the host's side, not a number), but compared on every chunk call, so pinned.

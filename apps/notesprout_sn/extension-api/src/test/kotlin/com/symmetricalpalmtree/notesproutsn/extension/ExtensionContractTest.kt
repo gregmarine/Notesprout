@@ -44,7 +44,7 @@ class ExtensionContractTest {
         // the user's decision 4; only :ext-sketch redeclares); 21 since arc 46 "Palette" / Q1
         // (SketchToolSettings grows a fourth int, penShade — a PARCEL tail read with the
         // exhausted-parcel rule; no method, no floor moved, only :ext-sketch redeclares).
-        assertEquals(21, ExtensionContract.API_VERSION)
+        assertEquals(22, ExtensionContract.API_VERSION)
         assertEquals(9, ExporterContract.MIN_API_VERSION_FOR_DELIVERY)
         assertEquals(6, ExtensionContract.MIN_API_VERSION_FOR_STORE)
         assertEquals(7, ExtensionContract.MIN_API_VERSION_FOR_CALENDAR)
