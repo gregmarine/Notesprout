@@ -1,8 +1,9 @@
 # Arc 50 "Stump" — the smear follows the hand, and a stylus Smudge tool (branch `tools`)
 
-**Status:** 🔧 BUILT 2026-09-22, tests green (g-paper 809 / `RasterSmudgeTest` 19, sn-screen 124,
-ext-sketch 104); dev host + ext-sketch installed on the Nomad; **awaiting the user's Nomad hand
-walk.** Letter **U**. g-paper Phase 45 → **0.1.60** on branch `smudge-tool` (off `main`, unmerged);
+**Status:** ✅ COMPLETE 2026-09-23 on the user's Nomad hand walks — *"The export image looks very
+close to what I physically see on the device screen. So, I feel we have nailed the smudge. And it
+sounds like you have nailed the save logic now too."* Freeze and the g-paper merge on the user's
+word. Letter **U**. g-paper Phase 45 → **0.1.60** on branch `smudge-tool` (off `main`, unmerged);
 SN pinned 0.1.60 on `tools`. `docs/sketch.md` § "The stump" is the reference; this file is the
 plan + ledger.
 
@@ -122,4 +123,6 @@ But to use the stylus for the work, an explicit tool selection would be needed."
   to back, fifteen in a minute — the old "a mark during the push is written the instant it
   lands" rule, harmless while saves began only at idle. Now the mark is put back as owed and the
   follow-up goes through the debounce and the deadline (`SketchSaver.finishPush` → `schedule()`).
-  Walk 6 next.
+- **Walk 6 (2026-09-23): "The export image looks very close to what I physically see on the
+  device screen. So, I feel we have nailed the smudge. And it sounds like you have nailed the save
+  logic now too."** COMPLETE.
