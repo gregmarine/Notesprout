@@ -1,8 +1,10 @@
 # Arc 51 "Guides" — a grid and a reference image under the sketch (branch `tools`, g-paper `sheet`)
 
-**Status:** **J0 🧪 BUILT 2026-09-23** (g-paper Phase 46 → 0.1.61 on `sheet`, 394a8cb, published to mavenLocal, demo on the Nomad — awaiting the user's walk) · **J1 ✅ 2026-09-23** · **J2 ✅ 2026-09-23** (host: `:app` 1852 → 1899 tests green) · **J3 ✅ 2026-09-23** (face: `:ext-sketch` 108 → 131, `:sn-screen` 124 → 129; `.dev` host + ext on the Nomad, adb-walked) · **J4 = the user's Nomad hand walk (the picker, tracing, every tool over both guides), then J5** (seam: `:extension-api` 300 → 313 tests green; the host binder carries gated stubs until J2). Letter **J**. g-paper Phase 46 "The sheet under the
-raster page" on branch `sheet` → **0.1.61** (unmerged until J5). SN on `tools`. `docs/sketch.md`
-§ "Guides (arc 51)" will be the reference once frozen; this file is the plan + ledger.
+**Status:** ✅ **COMPLETE + FROZEN 2026-09-24** on the user's Nomad hand walks — *"the grid (lines
+and dots), and the reference image and settings all work well"* — *"Freeze please!"*. g-paper
+`sheet` (Phase 46 → 0.1.61) **merged to g-paper `main` 2026-09-24 (`--no-ff`) and deleted** — g-paper
+has only `main`; SN `tools` stays open as the working branch. Letter **J**. `docs/sketch.md`
+§ "Guides (arc 51)" is the reference; this file is the plan + ledger (history).
 
 ## Context
 

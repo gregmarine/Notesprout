@@ -1,4 +1,4 @@
-# Sketch (arcs 43–48)
+# Sketch (arcs 43–51)
 
 **NSE · Sketch** gives a notebook page a second surface beside its ink: **two raster pictures,
 one flattened**, a graphite pencil and a rubbing eraser over a graphite bitmap, a gel pen (and
@@ -42,7 +42,7 @@ anything"; g-paper Phase 30 → **0.1.44**, amending arc 45's "no top and no bot
 grew one parcel tail (`SketchToolSettings.penShade`, API 20 → 21). See "Arc 46's decisions"
 below.
 
-**Engine.** g-paper is pinned at **0.1.60** (**Phase 45, 2026-09-22: the smear follows the hand and `Tool.SMUDGE`, arc 50 — see "The stump" below**; **Phase 41, 2026-09-22: the panel is always dithered, nothing settles — see "Always dithered" below**; **Phase 40, 2026-09-22: the finger smudge, arc 48 — see "The smudge" below**; **Phase 39, 2026-09-21: the side-of-the-lead shading of arc 47 is OFF — "just normal pencil regardless of tilt"**: the Supernote pencil bakes upright always and draws with the round lead; the flank stays in `GraphiteGrain` as an opt-in no engine uses, and Phase 38 — its grain as the point's, in grey — was built, walked twice and withdrawn the same day because the live path could not afford it; both deferred in root `BACKLOG.md` § "NSE · Sketch — the flank"; Phase 37, 2026-09-21: a mark settles into tone **only** on the sketch face's **one-finger swipe down** or a page load — Phase 35's 2.5 s pause and Phase 32's tool / shade / rub / undo settles all **withdrawn**; see "The settle gesture" below; Phase 36 "The flank", arc 47 — see "Arc 47's decisions" below; Phases 31–34: the rubber settling before it posts, 2026-09-19: on the Supernote panel
+**Engine.** g-paper is pinned at **0.1.61** (**Phase 46, 2026-09-23: the sheet under the raster page, arc 51 — see "Guides (arc 51)" below**; **Phase 45, 2026-09-22: the smear follows the hand and `Tool.SMUDGE`, arc 50 — see "The stump" below**; **Phase 41, 2026-09-22: the panel is always dithered, nothing settles — see "Always dithered" below**; **Phase 40, 2026-09-22: the finger smudge, arc 48 — see "The smudge" below**; **Phase 39, 2026-09-21: the side-of-the-lead shading of arc 47 is OFF — "just normal pencil regardless of tilt"**: the Supernote pencil bakes upright always and draws with the round lead; the flank stays in `GraphiteGrain` as an opt-in no engine uses, and Phase 38 — its grain as the point's, in grey — was built, walked twice and withdrawn the same day because the live path could not afford it; both deferred in root `BACKLOG.md` § "NSE · Sketch — the flank"; Phase 37, 2026-09-21: a mark settles into tone **only** on the sketch face's **one-finger swipe down** or a page load — Phase 35's 2.5 s pause and Phase 32's tool / shade / rub / undo settles all **withdrawn**; see "The settle gesture" below; Phase 36 "The flank", arc 47 — see "Arc 47's decisions" below; Phases 31–34: the rubber settling before it posts, 2026-09-19: on the Supernote panel
 and in the window a mark is a blue-noise dither only while it is **live** or **waiting** — it
 settles into its true tone, the pen's line solid and the pencil's flecks each at their own alpha
 in the lead's tone, at the next thing that is not a mark: a tool or shade pick, a rub, an undo, a
@@ -1238,6 +1238,177 @@ cascades and takes its sketch with it.
 
 ---
 
+## Guides (arc 51)
+
+**Arc 51 "Guides"** (2026-09-23/24, branch `tools`, letter **J**, `GUIDES_PLAN.md` the plan +
+ledger, phases J0–J5; **COMPLETE + FROZEN 2026-09-24** on the user's Nomad hand walks — *"the grid
+(lines and dots), and the reference image and settings all work well"*) is the user's decision
+that a sketch page may carry two **guides** — tools for the artist that are never part of the
+sketch: a **grid** of lines or dots for laying out a scene (urban sketching: the same grid over a
+photo), and a **reference image** for tracing. Both are per page, stored in the `.soil` as rows
+parented to the page, shown or hidden per page, removed per page; **neither is ever exported,
+covered, erased, rubbed, smudged, or drawn into a raster** — the pencil, pen and eraser work over
+them through the rasters' alpha. **Amends decision 10** ("plain white, always; no template
+crosses the seam"): the paper is still white and no *notebook* template crosses, but the face lays
+its own guide sheet under the rasters. Not a reopening of `docs/templates.md`'s dropped
+"adjustable generators" — a sketch-only guide with a count, decided afresh.
+
+### Arc 51's decisions (2026-09-23 — never re-ask)
+
+1. **Recipe** — Fable orchestrates and reviews, **Opus 5.5 codes** (engine, host, face); JVM
+   tests; the user walks; no code review (the standing waiver).
+2. **Naming** — arc 51 "Guides", g-paper branch `sheet` (Phase 46 → 0.1.61), letter J (V is arc
+   25's), `GUIDES_PLAN.md`.
+3. **Grid geometry** — square cells, **one count across the page's width**, laid out symmetric
+   about the page's centre (equal partial cells at opposite edges); dots at the same cells'
+   corners.
+4. **Reference storage** — decoded and **fit once** (centred, `min(pw/sw, ph/sh)`, never
+   stretched), encoded at exactly the page's size with transparent margins as a **lossy WebP with
+   alpha, quality 90**; opacity a setting applied at draw time. No zoom, no orientation.
+5. **Chrome** — **one Guides button** (Tabler `grid-dots`, after Smudge, mirrored in the collapsed
+   overflow) and **one anchored panel of latches** — never steppers or sliders.
+6. **Hidden persists per page** (a stored flag; the count and the opacity are kept while hidden);
+   **Remove** deletes the row; grid and image may show together, the **grid over the image**;
+   nothing here is on the undo stack.
+7. **Values** (the walk knobs, all in `GuideSheet`): counts **2 · 4 · 6 · 8 · 12** over **16 · 20 ·
+   24 · 28 · 32**, two rows of five (the J4 walk grew the first six — 2·3·4·6·8·12 — to 24, then
+   32, then two rows, then dropped the 3); default Lines, 4; opacities **10 · 25 · 50 · 75 %**,
+   default 25; grid tone `#aaaaaa` (Atelier level 9), line 2 px, dot radius 4 px.
+
+### The sheet (g-paper Phase 46, 0.1.61)
+
+On a `PageMode.RASTER` page the Supernote direct panel path flattens graphite and ink over
+**hard-coded white** (`DitherFlatten` starts at 255) and never reads the template; a sibling View
+under the paper is never seen (the window fills opaque white and the panel is written directly),
+and `setTemplate` is in `renderToBitmap()`. So the underlay is a new engine input:
+**`PaperView.setSheet(bitmap?)`** — a page-sized ARGB bitmap with alpha, drawn over white and the
+template and **under graphite** (ink over both), **display only**: never in `renderToBitmap()`
+(the `forDisplay = false` branch), never in `getPageRaster`, never read by the rub or the smudge
+(both name `graphiteRaster` only); null clears; read 1:1 from the page origin, never stretched;
+held by reference like the template; a no-op on a stroke page. Ratta reads it as a **third band**
+wherever it reads the graphite band — `toneAndPost` under the nib, `ditherBand` for the display
+dither — through `sheetFor()` and never `flattenBase`, so a `directInk` stroke page never reads
+one; `DitherFlatten.luma(sheet, graphite, ink)` is white → sheet → graphite (the general blend) →
+ink, **bit-identical without a sheet** (every pinned test stood); the sheet is never *coverage*.
+A sheet change fires the whole-page `onRasterPixelsChanged(null)` through the same coalescer a
+load uses — one rebuild, one present — and the window shows it **dithered with the page** (the
+existing `ditherDisplay` path), never true grey under black dots. **Inside `clearForContentSwap`
+the page counts as gone whatever the sheet** (`swappingContent`), so the old pixels hold on the
+panel until the new page lands. A white gel pen covers the sheet; a full-page photo puts every
+pixel on the long path (about twice a blank page's rebuild).
+
+### The rows
+
+Two additive row types, parented to the page, `order = SKETCH_ORDER`, at most one live row of
+each per page: **`guide_grid`** (`SoilSchema.TYPE_GUIDE_GRID`; no blob; `text` = `GuideGrid
+{kind, count, visible}` as kotlinx JSON) and **`guide_image`** (`TYPE_GUIDE_IMAGE`; `blob` = the
+page-sized lossy WebP with alpha — `RIFF`/`WEBP`/`VP8X`, so **`ImageHeader.matches` guards it
+exactly as it guards a raster row**; `text` = `GuideImage {opacity, visible}`). `GuideRows` (pure
+codec + row builders; a foreign or unparsable row is null, never a throw), `GuideDao` (`gridFor`,
+a blob-free `imageDigest` carrying the text, `imageFor`), `GuideRepository` the **only writer**:
+minted on first use, rewritten in place (`createdAt` kept), identical bytes write nothing
+(`updatedAt` sacred), `GRID_OFF` soft-deletes the grid row, a stored image failing the guard is
+soft-deleted on read never overwritten, `SKETCH_TOO_LARGE` (6 MiB) / `SKETCH_BAD_IMAGE` write
+nothing, `WATCH_BYTES` a log line. **A new image row starts at opacity 0 and the face's
+`putGuides` right after fixes it** — the recorded order (save, then put). **Reads that must not
+see the rows:** `SoilDao.childrenOf` excludes both; `liveDescendantIds` **carries both** (page
+copy / cut / paste / delete / undo take the guides with the page); `liveErasableIds` leaves them
+out (Erase page never touches them; `pageContent`'s ink bit never lights); `hasLiveSketch`,
+`pagesWithSketch`, export, the cover and the document whitelists never name them, so a guide is
+excluded there by construction. `ClipMessages.tooLarge` names the sketch for a guide image too.
+**Never routed through `SketchRows.typeFor` / `SketchContract.LAYERS` / `SketchLayers.all`.**
+
+### J1's four tails (API 22)
+
+`ExtensionContract.API_VERSION` 21 → **22**, `SketchContract.MIN_API_VERSION_FOR_SKETCH_GUIDES` =
+22 a **method floor** (T2's shape; the action floor stays 20; above the pen-shade floor, the
+correct sense for a live tail), `:ext-sketch` declares 22. Four `ISketchHost` tails after
+`putToolSettings` (transaction codes 14–17), `gate()` first in each:
+
+```
+SketchGuideState guides(String pageKey);             // parks the image in the GUIDE read window
+byte[]  readGuideImageChunk(int chunkIndex);         // that window alone
+void    putGuides(String pageKey, in SketchGuideSettings s);   // five small ints, no pixels
+void    saveGuideImageChunk(String pageKey, int i, in byte[] chunk, boolean last); // one empty chunk = Remove
+```
+
+`SketchGuideSettings` = `gridKind · gridCount · gridVisible · imageOpacity · imageVisible` —
+**indices and a percent, never pixels**, sanity-bounded at unmarshal (`MAX_TOOL_SETTING_INDEX`,
+`MAX_OPACITY_PERCENT` 100; a grid with no cells refused; `NONE` for a page with neither row); the
+host never learns or clamps against the face's ladders. `SketchGuideState` = `pageKey · settings
+(inline) · imageBytes · imageChunks` (pinned to `ByteChunks.countFor`; 0 bytes in one chunk = no
+image row; the exhausted-parcel tail rule kept for the next field). `SketchHostSession` grew a
+**third read window and a third accumulator**, independent of the two raster ones (a guide
+refusal leaves both raster accumulations untouched; a raster window swap leaves the guide window
+alone); `SketchHostBinder` serves the four through `hook {}`, logging bytes/chunks/ms and the five
+ints only; `SketchHostHooks.guides` / `putGuides` / `commitGuideImage` ride the existing
+Binder-thread pattern through `NotebookSession.readGuides` / `putGuides` / `writeGuideImage`
+(a dead key is `IllegalArgumentException("Unknown page")`). `docs/extensions.md` audit row 71.
+
+### The face
+
+- **`GridLayout`** (pure): cell = `pageW / count`; columns at `centre ± (offset + k·cell)` worked
+  in `Double`, `offset` half a cell for an odd count (even → a line on the centre; odd → the centre
+  mid-cell), rows taking the columns' parity, only positions strictly inside the page — **computed
+  from the centre outward, never `extent/count` accumulated** (`templates.md`'s trap).
+- **`GuideState`** (pure): the page's model — an off-ladder count or opacity reads as its default,
+  an unknown kind as Lines; `toSettings` / `fromSettings`.
+- **`GuideSheet`**: the knobs (`GRID_TONE`, `LINE_PX`, `DOT_RADIUS_PX`, `COUNTS`,
+  `COUNT_ROW_BREAK` 5 + `countRows()`, `OPACITIES`, `DEFAULT_COUNT`, `DEFAULT_OPACITY`,
+  `IMAGE_QUALITY` 90); `render(pageW, pageH, state, image)` → one page-sized `ARGB_8888` bitmap,
+  the image at `alpha × opacity` first, the grid over it, null when nothing is visible;
+  `fitToPage` (`:sn-screen`'s pure `ImageFit`, `TemplateFit.FIT`'s arithmetic — `:app` is
+  off-limits to the face); `encode` (`WEBP_LOSSY` q 90 on API 30+, `WEBP` q 90 on 29).
+- **`GuidesBar`** (over `:sn-screen`'s `AnchoredBar`, `PaletteBar`'s recipe): "Grid" — Off ·
+  Lines · Dots + the grid's eye; the counts in two rows; "Reference" — Pick (`ic_photo`) · Remove
+  (`ic_trash`) + the image's eye (`ic_eye` / `ic_eye_off`); the opacities. Latches are
+  `Widget.Notesprout.LatchButton` at the toolbar size; controls that make no sense are `GONE`,
+  never disabled; picking a kind, a count or an opacity also shows that guide; the bar re-places
+  itself as rows appear; stays open after a pick; dismissed exactly as the palette is; opening one
+  bar closes the other. The overflow entry has its own `onTap` (the top-bar button is hidden while
+  the chrome is collapsed, so the plain mirror could not open the bar).
+- **`SketchGuides`** (the wiring, so `SketchActivity` keeps only the hooks): `load(pageKey, w, h)`
+  in `loadPage` after `setTemplate(null)` and **before** the rasters — `guides()` on IO, the image
+  chunks joined and decoded behind `RasterImage.decode`'s header guard, the sheet built on IO,
+  `paper.setSheet` on Main (one coalesced rebuild); the replaced sheet recycled only after
+  `setSheet` has let go of it, under `sheetLock`; a failure of any kind is a log line and no
+  sheet. Every pick rebuilds the sheet and pushes `putGuides` fire-and-forget on IO under a fair
+  mutex in pick order. **Pick…** — the **first system picker any extension has opened**:
+  `ActivityResultContracts.StartActivityForResult` + `ACTION_OPEN_DOCUMENT` / `CATEGORY_OPENABLE` /
+  `image/*` / `EXTRA_MIME_TYPES` png · jpeg · webp; the result decoded with **`ImageDecoder`**
+  (EXIF-rotated, software allocator, the sample size set from the header before any pixels are
+  allocated), fit, encoded, header-checked, pushed chunk by chunk **under `SketchSaver`'s one push
+  lock** (`pushGuideImage` — not debounced, not parked, not retried; one push per pick), then
+  `putGuides`; a result is tied to the page it was opened for; no persistable grant, nothing
+  written to disk by the extension, never the Uri or the bytes in a log. Refusals — too large,
+  unreadable, not saved, could not remove — are problem dialogs, never toasts, decided before any
+  chunk is sent. **Pixel (0,0)'s alpha is taken to 254** so libwebp always writes a `VP8X` head:
+  a picture whose aspect exactly matches the page fills every pixel, and a bare `VP8 ` file would
+  fail the guard on both sides. The decoded reference is kept in memory (about 10.5 MB on the
+  Nomad, plus the sheet's 10.5 MB, only while set) so an opacity or a visibility pick redraws
+  without the host.
+- **The title** is centred in the band the two button groups leave free
+  (`centreTitleInTheFreeBand`, `START_BUTTONS` 6 / `END_BUTTONS` 2): with six start-side buttons
+  the screen's centre lies under Guides and the title read "tch".
+- Not remembered on the device — per page in the `.soil` is the memory; `SketchToolSettings`
+  unchanged.
+
+### Walk findings (J3 adb, J4 the user's hand)
+
+Guides → Lines → 4 draws a centred grid under a smudge sketch, dithered on the panel (the
+`#aaaaaa` line reads as a dotted rule); the host writes `guide_grid` in ~36 ms; a page turn away
+shows no grid and back shows Lines/4 from the row; a force-stop + reopen reloads it (`guides loaded
+in 355 ms`); the library cover shows no grid. The user's hand: the picker (the photo pushed to
+`Download/` by adb — the Supernote picker hides where a shared image lands, and it cannot be
+cancelled once stuck: `am force-stop com.android.documentsui`), tracing at 75 %, the grid over the
+photo, every tool over both. **Export proof:** a whole-notebook PNG export (`29 page(s) + 29
+sketch(es)`) — the page with a 24-line grid and the photo at 75 % exported as 1404×1872 RGB with
+**0 colour pixels** and no grid, the rasters alone.
+
+**Futures (each a fresh user decision):** a Google Drive source for reference images through our
+own browser (the export destination's shape); zoom / pan / rotate of the reference; a
+per-notebook default guide; the grid tone as a setting; the sheet on a `directInk` stroke page.
+
 ## The door
 
 `btnSketch` sits on the notebook's bottom strip, immediately left of `btnBible` (decision 9), `GONE`
@@ -1277,6 +1448,12 @@ notebook screen first).
 | A stored prefs file with no `pen_shade` key (upgraded from arc 44/45) | Decodes with pen shade 0 — never "nothing remembered" |
 | The gel pen is set to white | It covers graphite and darker ink alike (ink over graphite, decision 9) and shows nothing only over bare paper; its pixels are ink, so the rubber never lifts them |
 | Pencil is drawn across an ink line | The graphite is hidden where the ink is (ink on top, decision 9) — real graphite slides off dry gel ink; not a bug |
+| A guide image's bytes pass `MAX_BYTES` or are not a page-sized WebP | `SKETCH_TOO_LARGE` / `SKETCH_BAD_IMAGE` on the guide accumulator alone; nothing written; the face shows a problem dialog (decided before any chunk is sent) |
+| A stored `guide_image` fails the header guard on read | Soft-deleted on the way past; the page loads without a reference |
+| A picked image will not decode, or runs out of memory | "Reference image unreadable" dialog; nothing pushed |
+| A picker result arrives for a page no longer shown | Dropped with a log line |
+| The guide sheet cannot be allocated | The page shows without it; a log line |
+| A host below API 22 | `:ext-sketch` never binds it — the manifest declaration is the guard |
 | A host below API 20 | `:ext-sketch` never binds it at all — the manifest declaration is the guard (arc 45 / G2 moved the action floor from 17 to 20, K5b's arrangement repeated at the new number); there is no runtime version test in `restoreTools()` |
 
 ---
@@ -1310,6 +1487,16 @@ notebook screen first).
 ---
 
 ## Traps
+
+- **A bare `VP8 ` WebP fails `ImageHeader` on both sides (arc 51).** libwebp writes `VP8X` only
+  when there is alpha (or metadata) to carry; a lossy encode of a fully opaque page-sized bitmap
+  writes a plain `VP8 ` head the guard refuses. `GuideSheet.fitToPage` takes pixel (0,0)'s alpha
+  to 254 for exactly this reason — remove it and an aspect-exact photo stops saving.
+- **The Supernote file picker cannot be cancelled once stuck, and hides where a shared image
+  lands (arc 51).** `am force-stop com.android.documentsui` returns `RESULT_CANCELED` safely; push
+  a walk's image to `/sdcard/Download/` with adb and browse Downloads.
+- **Six start-side buttons put the screen's centre under the sixth (arc 51).** A title centred on
+  the screen read "tch"; the sketch face centres it in the free band instead.
 
 **A 512 KiB chunk reply can fail beside a save in flight (fixed 2026-09-22).** Binder's ~1 MB
 transaction buffer is per process and shared by everything in flight, and the face saves the page
