@@ -1,6 +1,6 @@
 # Arc 51 "Guides" — a grid and a reference image under the sketch (branch `tools`, g-paper `sheet`)
 
-**Status:** **J0 🧪 BUILT 2026-09-23** (g-paper Phase 46 → 0.1.61 on `sheet`, 394a8cb, published to mavenLocal, demo on the Nomad — awaiting the user's walk) · **J1 ✅ 2026-09-23** (seam: `:extension-api` 300 → 313 tests green; the host binder carries gated stubs until J2). Letter **J**. g-paper Phase 46 "The sheet under the
+**Status:** **J0 🧪 BUILT 2026-09-23** (g-paper Phase 46 → 0.1.61 on `sheet`, 394a8cb, published to mavenLocal, demo on the Nomad — awaiting the user's walk) · **J1 ✅ 2026-09-23** · **J2 ✅ 2026-09-23** (host: `:app` 1852 → 1899 tests green) · J3 (face, Opus 5.5) in progress (seam: `:extension-api` 300 → 313 tests green; the host binder carries gated stubs until J2). Letter **J**. g-paper Phase 46 "The sheet under the
 raster page" on branch `sheet` → **0.1.61** (unmerged until J5). SN on `tools`. `docs/sketch.md`
 § "Guides (arc 51)" will be the reference once frozen; this file is the plan + ledger.
 
@@ -261,6 +261,27 @@ sheet on a stroke page (`directInk`) for the notebook's own paper; Manta walk.
   (2) `band`'s settled tone now keys on the two page images only (`coverage`'s gate) — identical
   without a sheet; (3) the demo's photo is generated, not bundled; (4) the sheet is held by
   reference like the template.
+
+### J2 — Outcome (2026-09-23)
+
+- **Landed (Opus 5.5, Fable-reviewed):** `SoilSchema.TYPE_GUIDE_GRID/TYPE_GUIDE_IMAGE`;
+  `GuideRows` (`GuideGrid`/`GuideImage` `@Serializable` in the row's `text`, `toGridRow`/
+  `toImageRow`, `gridOf`/`imageOf`/`imageBytes` null-never-throw, `fitsPage` = `ImageHeader.matches`,
+  `toSettings`/`gridFrom`/`imageFrom`); `GuideDao` (`gridFor`, blob-free `imageDigest` carrying the
+  text, `imageFor`) on `SoilDatabase` (no schema move); `GuideRepository` the only writer (mint on
+  first use, rewrite in place, identical bytes write nothing, `GRID_OFF` soft-deletes, a bad stored
+  image soft-deleted on read, `SKETCH_TOO_LARGE`/`SKETCH_BAD_IMAGE` write nothing, a new image row
+  starts at opacity 0 and the face's `putGuides` right after fixes it); `SoilDao.childrenOf` excludes
+  both, `liveDescendantIds` carries both, `liveErasableIds` untouched; `ClipMessages` names the
+  sketch for a guide image; `NotebookSession.readGuides`/`putGuides`/`writeGuideImage`;
+  `SketchHostSession` third window + accumulator (`setGuideWindow`, `readGuideChunk`,
+  `acceptGuideChunk` → `GuideCommit`); `SketchHostBinder`'s four stubs replaced; `SketchHostHooks`
+  `guides`/`putGuides`/`commitGuideImage` on the existing Binder-thread `runBlocking` pattern.
+- **Tests:** `:app` 1852 → 1899 (`GuideRowsTest` 13, `GuideRepositoryTest` 17 + `FakeGuideDao`,
+  `SketchHostSessionTest` +12, `SoilDaoKindListsTest` +4, `PageClipTest` +1; `FakeSoilDao` mirrors
+  the SQL).
+- **Deviations:** the JSON field is `opacity` (not `opacityPercent`); a grid on → off → on mints a
+  new row (the old stays soft-deleted); the AIDL `putGuides` note reworded to "ignored".
 
 ### J1 — Outcome (2026-09-23)
 

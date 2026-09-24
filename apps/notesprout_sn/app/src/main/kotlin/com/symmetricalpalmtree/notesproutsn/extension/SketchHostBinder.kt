@@ -139,6 +139,22 @@ class SketchHostBinder(
          * being `:ext-sketch`'s alone — so nothing here clamps to a palette it does not know.
          */
         fun putToolSettings(settings: SketchToolSettings)
+
+        /**
+         * Arc 51 / J2: the guides of the live page [pageKey] names — its settings, with its
+         * reference image parked in the session's guide window
+         * ([SketchHostSession.setGuideWindow]) atomically with the state that describes it. A key
+         * naming a page the notebook no longer has is `IllegalArgumentException("Unknown page")`.
+         */
+        fun guides(session: SketchHostSession, pageKey: String): SketchGuideState
+
+        /** Arc 51 / J2: keep [settings] for the live page [pageKey] names — the grid row follows
+         *  them, the image row's settings too if it is live. Awaited: returning is "kept". */
+        fun putGuides(pageKey: String, settings: SketchGuideSettings)
+
+        /** Arc 51 / J2: persist a completed guide-image save — empty bytes remove the image. The
+         *  two typed refusals come back out with nothing written. */
+        fun commitGuideImage(commit: SketchHostSession.GuideCommit)
     }
 
     /**
@@ -311,33 +327,48 @@ class SketchHostBinder(
         Slog.d(TAG) { "putToolSettings: $settings" }
     }
 
-    // ── Guides (arc 51 / J1 — served at J2) ──────
-    // The four tails exist on the wire from J1 so the seam is whole at its own commit; J2 gives
-    // them their session window, accumulator and hooks. Until then each is gated and refuses.
+    // ── Guides (arc 51 / J1 on the wire, served since J2) ──────
+
+    // The five setting ints are indices and a percent, not content — logged whole, like the tools'.
 
     override fun guides(pageKey: String?): SketchGuideState {
         gate()
         requireNotNull(pageKey) { "pageKey is null" }
-        throw UnsupportedOperationException("guides: served at J2")
+        val t0 = SystemClock.elapsedRealtime()
+        val state = hook { hooks.guides(session, pageKey) }
+        Slog.d(TAG) {
+            "guides: ${state.settings}, image ${state.imageBytes} B in ${state.imageChunks} chunk(s) " +
+                "in ${SystemClock.elapsedRealtime() - t0} ms"
+        }
+        return state
     }
 
     override fun readGuideImageChunk(chunkIndex: Int): ByteArray {
         gate()
-        throw UnsupportedOperationException("readGuideImageChunk: served at J2")
+        // An index outside the parked window is the session's IllegalArgumentException.
+        return session.readGuideChunk(chunkIndex)
     }
 
     override fun putGuides(pageKey: String?, settings: SketchGuideSettings?) {
         gate()
         requireNotNull(pageKey) { "pageKey is null" }
         requireNotNull(settings) { "settings is null" }
-        throw UnsupportedOperationException("putGuides: served at J2")
+        val t0 = SystemClock.elapsedRealtime()
+        hook { hooks.putGuides(pageKey, settings) }
+        Slog.d(TAG) { "putGuides: $settings in ${SystemClock.elapsedRealtime() - t0} ms" }
     }
 
     override fun saveGuideImageChunk(pageKey: String?, chunkIndex: Int, chunk: ByteArray?, last: Boolean) {
         gate()
         requireNotNull(pageKey) { "pageKey is null" }
         requireNotNull(chunk) { "chunk is null" }
-        throw UnsupportedOperationException("saveGuideImageChunk: served at J2")
+        val commit = session.acceptGuideChunk(pageKey, chunkIndex, chunk, last) ?: return
+        val t0 = SystemClock.elapsedRealtime()
+        hook { hooks.commitGuideImage(commit) }
+        Slog.d(TAG) {
+            "saveGuideImageChunk: committed ${commit.bytes.size} B over ${chunkIndex + 1} chunk(s) " +
+                "in ${SystemClock.elapsedRealtime() - t0} ms"
+        }
     }
 
     // ── The log's words ──────

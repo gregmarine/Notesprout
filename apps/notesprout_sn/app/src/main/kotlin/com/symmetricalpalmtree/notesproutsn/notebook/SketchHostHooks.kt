@@ -8,6 +8,8 @@ import com.symmetricalpalmtree.notesproutsn.data.prefs.SketchToolCodec
 import com.symmetricalpalmtree.notesproutsn.data.prefs.SketchToolPrefs
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
 import com.symmetricalpalmtree.notesproutsn.extension.SketchContract
+import com.symmetricalpalmtree.notesproutsn.extension.SketchGuideSettings
+import com.symmetricalpalmtree.notesproutsn.extension.SketchGuideState
 import com.symmetricalpalmtree.notesproutsn.extension.SketchHostBinder
 import com.symmetricalpalmtree.notesproutsn.extension.SketchHostSession
 import com.symmetricalpalmtree.notesproutsn.extension.SketchPageState
@@ -513,6 +515,45 @@ class SketchHostHooks(
     /** Remember the face's pick. Fire-and-forget by nature — `apply()` is asynchronous — and pushed
      *  at every pick, so the value that survives a process death is the last one chosen. */
     override fun putToolSettings(settings: SketchToolSettings) = toolPrefs.put(settings)
+
+    // ── Guides (arc 51 / J2) ───────────────────────────────────────────────
+
+    /**
+     * The guides of the live page [pageKey] names — **any** live page, not only the target (the
+     * face asks for the page it has just loaded). The writer is drained first for [requestInk]'s
+     * reason: a guide push a moment ago is a queued write, and a state that missed it would hand
+     * the face back what the person has just changed. The image bytes are parked in the guide
+     * window and the state is built from that call's answer — window and state together, the
+     * contract's atomicity.
+     */
+    override fun guides(session: SketchHostSession, pageKey: String): SketchGuideState = runBlocking {
+        withContext(Dispatchers.IO) {
+            val nb = openSession()
+            require(nb.pages.any { it.id == pageKey }) { "Unknown page" }
+            nb.store.drain()
+            val guides = nb.readGuides(pageKey) ?: throw IllegalArgumentException("Unknown page")
+            val bytes = guides.imageBytes ?: ByteArray(0)
+            val chunks = session.setGuideWindow(pageKey, bytes)
+            SketchGuideState(pageKey, guides.settings, bytes.size, chunks)
+        }
+    }
+
+    /** Keep the face's guide settings for [pageKey] — through the session's writer and awaited
+     *  ([NotebookSession.putGuides]); a page that is not live is `IllegalArgumentException`. */
+    override fun putGuides(pageKey: String, settings: SketchGuideSettings) = runBlocking {
+        withContext(Dispatchers.IO) {
+            openSession().putGuides(pageKey, settings)
+        }
+    }
+
+    /** A completed guide-image save, [commit]'s shape exactly: through the writer and awaited
+     *  ([NotebookSession.writeGuideImage]), the page size the notebook's own, the two typed
+     *  refusals out with nothing written, empty bytes Remove. */
+    override fun commitGuideImage(commit: SketchHostSession.GuideCommit) = runBlocking {
+        withContext(Dispatchers.IO) {
+            openSession().writeGuideImage(commit.pageKey, commit.bytes)
+        }
+    }
 
     /** Where the face is, as an index into [NotebookSession.pages] — the same resolve the two
      *  window-loading hooks run, so a target that has vanished falls back to the displayed page

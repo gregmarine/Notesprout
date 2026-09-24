@@ -346,4 +346,146 @@ class SketchHostSessionTest {
         }
         try { s.readInkChunk(0); fail() } catch (expected: IllegalArgumentException) {}
     }
+
+    // ── The guide window and accumulator (arc 51 / J2) ──────
+
+    @Test
+    fun guideWindowServesItsChunksAndRefusesOutside() {
+        val s = SketchHostSession()
+        try { s.readGuideChunk(0); fail() } catch (expected: IllegalArgumentException) {}
+        val big = bytes(SketchContract.SKETCH_CHUNK_BYTES + 5, 4)
+        assertEquals(2, s.setGuideWindow(key, big))
+        assertEquals(key, s.guideWindowKey)
+        assertEquals(SketchContract.SKETCH_CHUNK_BYTES, s.readGuideChunk(0).size)
+        assertEquals(5, s.readGuideChunk(1).size)
+        try { s.readGuideChunk(2); fail() } catch (expected: IllegalArgumentException) {}
+        try { s.readGuideChunk(-1); fail() } catch (expected: IllegalArgumentException) {}
+    }
+
+    /** An absent image is one empty chunk — [SketchGuideState]'s rule, so the two agree. */
+    @Test
+    fun anEmptyGuideWindowIsOneEmptyChunk() {
+        val s = SketchHostSession()
+        val count = s.setGuideWindow(key, ByteArray(0))
+        assertEquals(1, count)
+        assertEquals(0, s.readGuideChunk(0).size)
+        val state = SketchGuideState(key, SketchGuideSettings.NONE, 0, count)
+        assertTrue(!state.hasImage)
+    }
+
+    @Test
+    fun aRasterWindowSwapLeavesTheGuideWindowAlone() {
+        val s = session(bytes(10, 1), bytes(10, 2))
+        s.setGuideWindow(key, bytes(7, 9))
+        s.setWindows("page-2", bytes(3, 5), ByteArray(0))
+        assertEquals(key, s.guideWindowKey)
+        assertArrayEquals(bytes(7, 9), s.readGuideChunk(0))
+    }
+
+    @Test
+    fun aGuideWindowSwapLeavesTheRasterWindowsAlone() {
+        val s = session(bytes(10, 1), bytes(20, 2))
+        s.setGuideWindow("page-2", bytes(7, 9))
+        assertEquals(key, s.currentKey)
+        assertEquals(10, s.windowByteCount(graphite))
+        assertEquals(2, s.readChunk(ink, 0)[0].toInt())
+    }
+
+    @Test
+    fun aGuideSaveAccumulatesInOrderAndCommits() {
+        val s = session()
+        val half = SketchContract.SKETCH_CHUNK_BYTES
+        assertNull(s.acceptGuideChunk(key, 0, bytes(half, 1), last = false))
+        assertEquals(half, s.pendingGuideBytes())
+        val commit = s.acceptGuideChunk(key, 1, bytes(3, 2), last = true)
+        assertNotNull(commit)
+        assertEquals(key, commit!!.pageKey)
+        assertEquals(half + 3, commit.bytes.size)
+        assertEquals(2, commit.bytes.last().toInt())
+        assertEquals(0, s.pendingGuideBytes())
+    }
+
+    /** One empty chunk with last is Remove — an empty commit, not an error. */
+    @Test
+    fun anEmptyGuideJoinIsAClear() {
+        val s = session()
+        val commit = s.acceptGuideChunk(key, 0, ByteArray(0), last = true)
+        assertEquals(0, commit!!.bytes.size)
+    }
+
+    /** Any live page may be saved to — the window's key does not enter into it. */
+    @Test
+    fun aGuideSaveNamesItsOwnPage() {
+        val s = session()
+        s.setGuideWindow(key, ByteArray(0))
+        assertEquals("page-9", s.acceptGuideChunk("page-9", 0, bytes(2), last = true)!!.pageKey)
+    }
+
+    @Test
+    fun aGuideSaveRefusesAChangedKeyAnOutOfOrderChunkAndAnOversizeChunk() {
+        val s = session()
+        s.acceptGuideChunk(key, 0, bytes(2), last = false)
+        try { s.acceptGuideChunk("page-2", 1, bytes(2), last = true); fail() } catch (expected: IllegalArgumentException) {}
+        assertEquals(0, s.pendingGuideBytes())
+
+        s.acceptGuideChunk(key, 0, bytes(2), last = false)
+        try { s.acceptGuideChunk(key, 2, bytes(2), last = true); fail() } catch (expected: IllegalArgumentException) {}
+        assertEquals(0, s.pendingGuideBytes())
+
+        try {
+            s.acceptGuideChunk(key, 0, bytes(SketchContract.SKETCH_CHUNK_BYTES + 1), last = true); fail()
+        } catch (expected: IllegalArgumentException) {}
+        // A later chunk with no chunk 0 before it has no page to belong to.
+        try { s.acceptGuideChunk(key, 1, bytes(2), last = true); fail() } catch (expected: IllegalArgumentException) {}
+    }
+
+    @Test
+    fun aGuideSaveOverTheCapIsTooLargeAndResets() {
+        val s = session()
+        val chunk = bytes(SketchContract.SKETCH_CHUNK_BYTES)
+        val fits = SketchContract.MAX_BYTES / SketchContract.SKETCH_CHUNK_BYTES
+        for (i in 0 until fits) assertNull(s.acceptGuideChunk(key, i, chunk, last = false))
+        try {
+            s.acceptGuideChunk(key, fits, bytes(1), last = true); fail()
+        } catch (e: IllegalStateException) {
+            assertEquals(SketchContract.SKETCH_TOO_LARGE, e.message)
+        }
+        assertEquals(0, s.pendingGuideBytes())
+        // The restart rides chunk 0.
+        assertEquals(1, s.acceptGuideChunk(key, 0, bytes(1), last = true)!!.bytes.size)
+    }
+
+    /** The guide stream and the raster streams are independent in both directions. */
+    @Test
+    fun aGuideRefusalLeavesBothRasterAccumulationsUntouched() {
+        val s = session()
+        s.acceptChunk(key, graphite, 0, bytes(4), last = false)
+        s.acceptChunk(key, ink, 0, bytes(6), last = false)
+        s.acceptGuideChunk(key, 0, bytes(2), last = false)
+        try { s.acceptGuideChunk(key, 5, bytes(2), last = true); fail() } catch (expected: IllegalArgumentException) {}
+        assertEquals(4, s.pendingSaveBytes(graphite))
+        assertEquals(6, s.pendingSaveBytes(ink))
+        assertEquals(10, s.acceptChunk(key, graphite, 1, bytes(6), last = true)!!.bytes.size)
+    }
+
+    @Test
+    fun aRasterRefusalLeavesTheGuideAccumulationUntouched() {
+        val s = session()
+        s.acceptGuideChunk(key, 0, bytes(3), last = false)
+        s.acceptChunk(key, graphite, 0, bytes(4), last = false)
+        try { s.acceptChunk(key, graphite, 7, bytes(1), last = true); fail() } catch (expected: IllegalArgumentException) {}
+        assertEquals(3, s.pendingGuideBytes())
+        assertEquals(5, s.acceptGuideChunk(key, 1, bytes(2), last = true)!!.bytes.size)
+    }
+
+    @Test
+    fun clearDropsTheGuideWindowAndAccumulation() {
+        val s = session()
+        s.setGuideWindow(key, bytes(5))
+        s.acceptGuideChunk(key, 0, bytes(3), last = false)
+        s.clear()
+        assertNull(s.guideWindowKey)
+        assertEquals(0, s.pendingGuideBytes())
+        try { s.readGuideChunk(0); fail() } catch (expected: IllegalArgumentException) {}
+    }
 }

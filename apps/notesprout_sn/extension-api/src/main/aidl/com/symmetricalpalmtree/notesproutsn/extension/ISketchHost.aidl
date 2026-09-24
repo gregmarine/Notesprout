@@ -232,7 +232,8 @@ interface ISketchHost {
      * the page [pageKey] names' guide SETTINGS, replacing whatever was kept -- five small ints,
      * indices and a percent, never pixels. GRID_OFF soft-deletes the page's grid row; any other
      * kind upserts it. The image's two fields are written to the image row if one is live and are
-     * otherwise kept for it (a page with no image ignores them). The face pushes at every pick, so
+     * otherwise IGNORED: a freshly saved image row starts at opacity 0, and the face pushes its
+     * settings right after the image lands (save, then put — J2's recorded order). The face pushes at every pick, so
      * the value that survives a process death is the last one the person chose. A null is an
      * IllegalArgumentException; an out-of-bounds field never arrives (the constructor refuses it).
      */

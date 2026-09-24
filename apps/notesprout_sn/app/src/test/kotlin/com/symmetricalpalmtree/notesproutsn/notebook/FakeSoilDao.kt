@@ -28,11 +28,11 @@ class FakeSoilDao : SoilDao {
     override suspend fun childrenOfType(parentId: String, type: String) =
         rows.values.filter { it.parentId == parentId && it.type == type && it.deletedAt == null }
             .sortedBy { it.order }
-    /** Mirrors `SoilDao.childrenOf`'s `type NOT IN ('sketch','sketch_graphite','sketch_ink')`
-     *  exclusion (arc 43 / K3, all three names since arc 45 / G2) — a page-sized image never rides
-     *  an untyped, blob-inclusive page read, and a leftover arc-43 row never surfaces as a child. */
+    /** Mirrors `SoilDao.childrenOf`'s `type NOT IN (…)` exclusion (arc 43 / K3, all three sketch
+     *  names since arc 45 / G2, the two guide rows since arc 51 / J2) — a page-sized image never
+     *  rides an untyped, blob-inclusive page read, and a leftover arc-43 row never surfaces. */
     override suspend fun childrenOf(parentId: String) =
-        rows.values.filter { it.parentId == parentId && it.type !in SKETCH_TYPES && it.deletedAt == null }
+        rows.values.filter { it.parentId == parentId && it.type !in CHILDREN_EXCLUDED && it.deletedAt == null }
             .sortedBy { it.order }
     override suspend fun notebookRow() = rows.values.firstOrNull { it.type == "notebook" }
     override suspend fun templateDigests(notebookId: String) = rows.values
@@ -66,7 +66,7 @@ class FakeSoilDao : SoilDao {
     override suspend fun liveDescendantIds(pageId: String) = descendantIds(pageId, withSketch = true)
 
     /** Mirrors `SoilDao.liveErasableIds` (arc 43 / K3): [liveDescendantIds] minus the page's
-     *  **two** sketch rasters — Erase page is ink only (decision 11). */
+     *  **two** sketch rasters and its **two** guide rows — Erase page is ink only (decision 11). */
     override suspend fun liveErasableIds(pageId: String) = descendantIds(pageId, withSketch = false)
 
     private fun descendantIds(pageId: String, withSketch: Boolean): List<String> {
@@ -81,7 +81,7 @@ class FakeSoilDao : SoilDao {
         // The dead arc-43 `sketch` name is in neither list: a row nothing can read is a row nothing
         // should copy (decision 4).
         val pageLevel = LOOSE_CONTENT + setOf("link", "document") +
-            if (withSketch) setOf("sketch_graphite", "sketch_ink") else emptySet()
+            if (withSketch) LIVE_SKETCH_TYPES + GUIDE_TYPES else emptySet()
         return rows.values.filter {
             it.deletedAt == null && (
                 (it.parentId == pageId && it.type in pageLevel) ||
@@ -175,7 +175,13 @@ class FakeSoilDao : SoilDao {
         /** The two live raster row names (arc 45 / G2) — what `hasLiveSketch` asks about. */
         val LIVE_SKETCH_TYPES = setOf("sketch_graphite", "sketch_ink")
 
-        /** Those two **and** the dead arc-43 name — what `childrenOf` excludes. */
+        /** Those two **and** the dead arc-43 name. */
         val SKETCH_TYPES = LIVE_SKETCH_TYPES + "sketch"
+
+        /** The two guide rows (arc 51 / J2) — carried with the page, never erased, never a child. */
+        val GUIDE_TYPES = setOf("guide_grid", "guide_image")
+
+        /** What `childrenOf` excludes: every sketch name and both guides. */
+        val CHILDREN_EXCLUDED = SKETCH_TYPES + GUIDE_TYPES
     }
 }

@@ -237,6 +237,39 @@ class PageClipTest {
         assertEquals(R.string.clip_too_large, ClipMessages.tooLarge(plain.rows))
     }
 
+    /** The page's guides ride it (arc 51 / J2): a fresh id each, re-parented onto the copy, the
+     *  settings text and the reference image's bytes verbatim — and a refused copy carrying the
+     *  image names the sketch, like a raster would. */
+    @Test
+    fun `both guide rows travel with the page, settings and pixels`() {
+        val imageBytes = byteArrayOf(0x52, 0x49, 0x46, 0x46, 0x66, 0x77)
+        val guides = listOf(
+            row("gd-g", pageId, SoilSchema.TYPE_GUIDE_GRID, order = SoilSchema.SKETCH_ORDER,
+                text = "{\"kind\":2,\"count\":8,\"visible\":true}"),
+            row("gd-i", pageId, SoilSchema.TYPE_GUIDE_IMAGE, order = SoilSchema.SKETCH_ORDER,
+                text = "{\"opacity\":30,\"visible\":false}", blob = imageBytes),
+        )
+        val env = PageClip.capture(pageRow, templateRow, content() + guides, notebookId, now)
+        val plan = PageClip.plan(env, "nb-dest", 0, PageClip.Template.Reuse(templateId), now, ids())!!
+        val grid = plan.rows.single { it.type == SoilSchema.TYPE_GUIDE_GRID }
+        val image = plan.rows.single { it.type == SoilSchema.TYPE_GUIDE_IMAGE }
+        for (r in listOf(grid, image)) {
+            assertTrue("$r kept a source id", r.id !in setOf("gd-g", "gd-i"))
+            assertEquals(plan.pageId, r.parentId)
+            assertEquals(SoilSchema.SKETCH_ORDER, r.order)
+            assertTrue(r.id in plan.contentIds)
+        }
+        assertEquals(guides[0].text, grid.text)
+        assertEquals(guides[1].text, image.text)
+        assertArrayEquals(imageBytes, image.blob)
+
+        val imageOnly = content().filter {
+            it.type != SoilSchema.TYPE_SKETCH_GRAPHITE && it.type != SoilSchema.TYPE_SKETCH_INK
+        } + guides
+        val capture = PageClip.capture(pageRow, templateRow, imageOnly, notebookId, now)
+        assertEquals(R.string.clip_too_large_sketch, ClipMessages.tooLarge(capture.rows))
+    }
+
     @Test
     fun `the page document travels with the page, watermark and all`() {
         val plan = PageClip.plan(envelope(), "nb-dest", 0, PageClip.Template.Reuse(templateId), now, ids())!!

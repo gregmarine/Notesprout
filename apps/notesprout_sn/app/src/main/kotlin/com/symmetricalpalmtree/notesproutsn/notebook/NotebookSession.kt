@@ -13,6 +13,7 @@ import com.symmetricalpalmtree.notesproutsn.data.clip.ClipEnvelope
 import com.symmetricalpalmtree.notesproutsn.data.index.IndexRepository
 import com.symmetricalpalmtree.notesproutsn.data.index.NotebookKind
 import com.symmetricalpalmtree.notesproutsn.data.soil.DocumentRepository
+import com.symmetricalpalmtree.notesproutsn.data.soil.GuideRepository
 import com.symmetricalpalmtree.notesproutsn.data.soil.KEY_SCOPE_GLOBAL
 import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookMeta
 import com.symmetricalpalmtree.notesproutsn.data.soil.NotebookMetaStore
@@ -25,6 +26,7 @@ import com.symmetricalpalmtree.notesproutsn.data.template.BuiltInTemplates
 import com.symmetricalpalmtree.notesproutsn.data.template.PagePaper
 import com.symmetricalpalmtree.notesproutsn.data.template.PaperSource
 import com.symmetricalpalmtree.notesproutsn.data.soilFile
+import com.symmetricalpalmtree.notesproutsn.extension.SketchGuideSettings
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -91,6 +93,11 @@ class NotebookSession(
      * session's one serial queue with everything else.
      */
     lateinit var sketches: SketchRepository
+        private set
+
+    /** The `guide_grid` / `guide_image` rows' reader and writer (arc 51 / J2) — [sketches]' shape;
+     *  reads through [readGuides], writes through [putGuides] / [writeGuideImage] on the writer. */
+    lateinit var guides: GuideRepository
         private set
 
     // @Volatile: the Contents gather reads this on an IO thread outside the page-op mutex — the
@@ -168,6 +175,7 @@ class NotebookSession(
         stickies = StickyStore(db.dao(), writer) { block -> db.withTransaction { block() } }
         documents = DocumentRepository(db.documentDao(), db.dao())
         sketches = SketchRepository(db.sketchDao(), db.dao())
+        guides = GuideRepository(db.guideDao(), db.dao())
         try {
             // The index bits, once (M8; arc 43 / K3 made it three-way): blob-free, and before
             // anything can ask — the screen's very first decision after this call is which route
@@ -839,6 +847,56 @@ class NotebookSession(
         if (!isOpen) return@withContext null
         val page = pages.firstOrNull { it.id == pageId } ?: return@withContext null
         sketches.get(pageId, layer, page.width, page.height)
+    }
+
+    /**
+     * [pageId]'s guides (arc 51 / J2) — the grid, the reference image's settings and its pixels
+     * after the header guard at this notebook's own page size ([readSketch]'s reason). Null for a
+     * page that is not live. Not on the writer, for [readSketch]'s reason too.
+     */
+    suspend fun readGuides(pageId: String): GuideRepository.Guides? = withContext(Dispatchers.IO) {
+        if (!isOpen) return@withContext null
+        val page = pages.firstOrNull { it.id == pageId } ?: return@withContext null
+        guides.get(pageId, page.width, page.height)
+    }
+
+    /**
+     * Keep the sketch face's guide settings for [pageId] (arc 51 / J2) — through the writer and
+     * awaited, [writeSketch]'s shape: the face's `putGuides` returning is its "it is kept". A page
+     * that is not live is an [IllegalArgumentException].
+     */
+    suspend fun putGuides(pageId: String, settings: SketchGuideSettings) {
+        require(pages.any { it.id == pageId }) { "Unknown page" }
+        awaitWrite { guides.putSettings(pageId, settings) }
+    }
+
+    /**
+     * Persist [pageId]'s reference image (arc 51 / J2) — [writeSketch] exactly: through the writer,
+     * awaited, a failure thrown (the two typed refusals included), the page size this notebook's
+     * own. Empty [bytes] is Remove.
+     */
+    suspend fun writeGuideImage(pageId: String, bytes: ByteArray) {
+        val page = pages.firstOrNull { it.id == pageId }
+            ?: throw IllegalArgumentException("Unknown page")
+        awaitWrite { guides.saveImage(pageId, bytes, page.width, page.height) }
+    }
+
+    /** Run [block] on the session's serial writer and wait for it, rethrowing what it threw — the
+     *  guide writes' half of [writeSketch]'s enqueue-and-await. */
+    private suspend fun awaitWrite(block: suspend () -> Unit) {
+        check(isOpen) { "notebook closed" }
+        val done = CompletableDeferred<Unit>()
+        val queued = writer.enqueue {
+            try {
+                block()
+                done.complete(Unit)
+            } catch (e: Exception) {
+                done.completeExceptionally(e)
+            }
+        }
+        // A closed writer never runs the job — awaiting its deferred would hang the Binder thread.
+        check(queued) { "notebook closed" }
+        done.await()
     }
 
     /** Wait for queued writes (both stores), then purge + checkpoint + close. Idempotent; never throws. */

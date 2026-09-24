@@ -26,12 +26,22 @@ object ClipMessages {
      * "there is too much on this page" over a page of ordinary ink and one drawing reads as a puzzle
      * rather than an explanation. The cap itself does not move — it is the cursor window, not a
      * preference.
+     *
+     * A **guide image** (arc 51 / J2) counts as the sketch here too: it is the other megabyte-sized
+     * row a sketch page carries, and to the person it is part of the sketch page, not of the ink.
      */
     @StringRes
     fun tooLarge(rows: List<ClipRow>): Int =
-        if (rows.any { it.type == SoilSchema.TYPE_SKETCH_GRAPHITE || it.type == SoilSchema.TYPE_SKETCH_INK }) {
+        if (rows.any { it.type in SKETCH_PAGE_IMAGES }) {
             R.string.clip_too_large_sketch
         } else {
             R.string.clip_too_large
         }
+
+    /** The row types whose presence makes an over-cap copy "the page's sketch". */
+    private val SKETCH_PAGE_IMAGES = setOf(
+        SoilSchema.TYPE_SKETCH_GRAPHITE,
+        SoilSchema.TYPE_SKETCH_INK,
+        SoilSchema.TYPE_GUIDE_IMAGE,
+    )
 }
