@@ -1,6 +1,6 @@
 # Arc 51 "Guides" — a grid and a reference image under the sketch (branch `tools`, g-paper `sheet`)
 
-**Status:** 🔄 J0 (g-paper, Opus 5.5) in progress · **J1 ✅ 2026-09-23** (seam: `:extension-api` 300 → 313 tests green; the host binder carries gated stubs until J2). Letter **J**. g-paper Phase 46 "The sheet under the
+**Status:** **J0 🧪 BUILT 2026-09-23** (g-paper Phase 46 → 0.1.61 on `sheet`, 394a8cb, published to mavenLocal, demo on the Nomad — awaiting the user's walk) · **J1 ✅ 2026-09-23** (seam: `:extension-api` 300 → 313 tests green; the host binder carries gated stubs until J2). Letter **J**. g-paper Phase 46 "The sheet under the
 raster page" on branch `sheet` → **0.1.61** (unmerged until J5). SN on `tools`. `docs/sketch.md`
 § "Guides (arc 51)" will be the reference once frozen; this file is the plan + ledger.
 
@@ -244,6 +244,23 @@ Zoom/pan/rotate of the reference; a per-notebook default guide; the grid tone as
 sheet on a stroke page (`directInk`) for the notebook's own paper; Manta walk.
 
 ## Ledger
+
+### J0 — Outcome (2026-09-23, built; walk pending)
+
+- **Landed (Opus 5.5, Fable-reviewed):** `PaperView.setSheet`; `CanvasPaperView.sheetBitmap` /
+  `sheetFor()` / the `forDisplay`-only draw in `drawRasterLayers`, nulled on a mode flip and at
+  `release()`, kept across `clearForContentSwap`; Onyx through `epdRepaintHandoff`; `DitherFlatten`
+  `luma(sheet, graphite, ink)` + trailing `sheet` on `luma`/`black`/`coverage` + `band(sheet,
+  hasSheet)` — white → sheet → graphite (general blend) → ink, bit-identical without a sheet;
+  Ratta `readSheet`/`readSheetBand` through `sheetFor()` (never `flattenBase`), `toneAndPost` +
+  `ditherBand` pass it, `setSheet` releases the overlay first; demo Sheet cycler (grid → ramp
+  photo at 25 %). g-paper 0.1.61 published; `README`/`PLAN.md` (Phase 46 🧪)/`CLAUDE.md`/`api.md`.
+- **Tests:** core 317 + ratta 105 = 422 distinct (was 417), green.
+- **Deviations (accepted):** (1) inside `clearForContentSwap` the page counts as gone whatever the
+  sheet (`swappingContent`), so the old pixels hold on the panel until the new page lands;
+  (2) `band`'s settled tone now keys on the two page images only (`coverage`'s gate) — identical
+  without a sheet; (3) the demo's photo is generated, not bundled; (4) the sheet is held by
+  reference like the template.
 
 ### J1 — Outcome (2026-09-23)
 
