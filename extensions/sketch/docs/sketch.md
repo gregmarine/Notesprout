@@ -801,8 +801,8 @@ synthesises a finger back-and-forth through `dispatchTouchEvent` (window coordin
 `adb shell input` takes about a second per event — the long-press fires first — and the touch
 node is not shell-writable. Release never compiles it in.
 
-**The stump (arc 50, 2026-09-22 — BUILT, awaiting the user's Nomad walk).** Two things, on the
-user's word. **The smear follows the hand** (g-paper Phase 45 → **0.1.60**): the neighbourhood a
+**The stump (arc 50, 2026-09-22/23 — COMPLETE + FROZEN 2026-09-23 on the user's six Nomad walks;
+g-paper `smudge-tool` merged to g-paper `main` and deleted).** Two things, on the user's word. **The smear follows the hand** (g-paper Phase 45 → **0.1.60**): the neighbourhood a
 pixel is pulled toward is no longer a square box but the box **turned to the batch's line of
 travel** — `RasterSmudge.axis` is the sweep's principal axis (the structure tensor of its
 segments, so an out-and-back batch reads as one line rather than as no displacement), and the
@@ -811,14 +811,23 @@ mean is gathered over `spread` px to either side along it and `RasterSmudging.ac
 up and down along its lines only streaks each line along itself; a diagonal rub follows the
 diagonal. A batch with no travel (a dwell) keeps the square box. **And a stylus Smudge tool**:
 `Tool.SMUDGE` in g-paper drives the same `beginSmudge` → `smudgeAlong` → `endSmudge` from the
-nib, within `smudgeToolRadius` — **16 px**, a stump, half the fingertip's 32 — the firmware
+nib, within `smudgeToolRadius` — **24 px** (16 on the first walk, "too fine"), a stump — the firmware
 painting nothing under it (Ratta's `firmwareInkSuppressed`, Onyx's raw pipeline off). On the
 face: `btnSmudge` after the rubber on the top bar (Tabler `hand-finger`, `ic_smudge`, "Smudge"),
 third on the mini toolbar, `PaperToolbar`'s defaulted `btnSmudge`, `CollapsedTools.ORDER` with
 SMUDGE after ERASER; never remembered (the rubber's rule). **The finger's rub stays available
 under every tool** — it is a gesture, and this button arms the stylus for the same work, which
-amends arc 48's decision 3 by adding to it, not replacing it. `extensions/sketch/STUMP_PLAN.md`
-is the plan + ledger.
+amends arc 48's decision 3 by adding to it, not replacing it. **The walks reshaped it** (the
+ledger in `STUMP_PLAN.md`): `across` 2 → 4 and `loss` 0 (the first export paled to nothing); the
+gathered oriented kernel cost 2–3 s an event → the axis quantized to the lattice's four and the
+mean run **separably** (`quantizeAxis`, `lineMean`); the smear made **one-sided and travel-gated**
+(a pixel takes on what lies behind it along the travel, the corridor clipped behind the landing,
+no smudge until the nib moves — "if the stroke is only down, the smudge should only go down");
+and **tip-switch chatter** at stump pressure (four contacts a second on a light fast rub) answered
+twice — the window mirror deferred and coalesced on the direct path (`RattaPaperView.
+SMUDGE_MIRROR_DELAY_MS` 400) and a chattering contact continuing the same undo entry
+(`SketchActivity.SMUDGE_CHATTER_MS` 300). The same walks found the **save deadline** (§ Saves).
+`extensions/sketch/STUMP_PLAN.md` is the plan + ledger.
 
 ### Tools (arcs 44–46)
 

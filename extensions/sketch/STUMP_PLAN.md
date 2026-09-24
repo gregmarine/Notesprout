@@ -1,9 +1,10 @@
 # Arc 50 "Stump" — the smear follows the hand, and a stylus Smudge tool (branch `tools`)
 
-**Status:** ✅ COMPLETE 2026-09-23 on the user's Nomad hand walks — *"The export image looks very
-close to what I physically see on the device screen. So, I feel we have nailed the smudge. And it
-sounds like you have nailed the save logic now too."* Freeze and the g-paper merge on the user's
-word. Letter **U**. g-paper Phase 45 → **0.1.60** on branch `smudge-tool` (off `main`, unmerged);
+**Status:** ✅ COMPLETE + FROZEN 2026-09-23 on the user's Nomad hand walks — *"The export image
+looks very close to what I physically see on the device screen. So, I feel we have nailed the
+smudge. And it sounds like you have nailed the save logic now too."* — *"Freeze and merge."*
+g-paper `smudge-tool` **merged to g-paper `main` 2026-09-23 (`--no-ff`, 46ec218) and deleted**;
+SN `tools` stays open as the working branch. Letter **U**. g-paper Phase 45 → **0.1.60** on branch `smudge-tool` (off `main`, unmerged);
 SN pinned 0.1.60 on `tools`. `docs/sketch.md` § "The stump" is the reference; this file is the
 plan + ledger.
 
