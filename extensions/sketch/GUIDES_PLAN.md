@@ -1,6 +1,6 @@
 # Arc 51 "Guides" — a grid and a reference image under the sketch (branch `tools`, g-paper `sheet`)
 
-**Status:** **J0 🧪 BUILT 2026-09-23** (g-paper Phase 46 → 0.1.61 on `sheet`, 394a8cb, published to mavenLocal, demo on the Nomad — awaiting the user's walk) · **J1 ✅ 2026-09-23** · **J2 ✅ 2026-09-23** (host: `:app` 1852 → 1899 tests green) · J3 (face, Opus 5.5) in progress (seam: `:extension-api` 300 → 313 tests green; the host binder carries gated stubs until J2). Letter **J**. g-paper Phase 46 "The sheet under the
+**Status:** **J0 🧪 BUILT 2026-09-23** (g-paper Phase 46 → 0.1.61 on `sheet`, 394a8cb, published to mavenLocal, demo on the Nomad — awaiting the user's walk) · **J1 ✅ 2026-09-23** · **J2 ✅ 2026-09-23** (host: `:app` 1852 → 1899 tests green) · **J3 ✅ 2026-09-23** (face: `:ext-sketch` 108 → 131, `:sn-screen` 124 → 129; `.dev` host + ext on the Nomad, adb-walked) · **J4 = the user's Nomad hand walk (the picker, tracing, every tool over both guides), then J5** (seam: `:extension-api` 300 → 313 tests green; the host binder carries gated stubs until J2). Letter **J**. g-paper Phase 46 "The sheet under the
 raster page" on branch `sheet` → **0.1.61** (unmerged until J5). SN on `tools`. `docs/sketch.md`
 § "Guides (arc 51)" will be the reference once frozen; this file is the plan + ledger.
 
@@ -261,6 +261,41 @@ sheet on a stroke page (`directInk`) for the notebook's own paper; Manta walk.
   (2) `band`'s settled tone now keys on the two page images only (`coverage`'s gate) — identical
   without a sheet; (3) the demo's photo is generated, not bundled; (4) the sheet is held by
   reference like the template.
+
+### J3 — Outcome (2026-09-23)
+
+- **Landed (Opus 5.5, Fable-reviewed):** `:sn-screen` pinned g-paper **0.1.61**; `ImageFit` +
+  `ic_grid_dots`/`ic_grid`, `ic_photo`/`ic_eye`/`ic_eye_off` moved in from `:ext-document`;
+  `:ext-sketch` `GridLayout` (pure: `centre ± (offset + k·cell)` in Double, half-cell offset for
+  odd counts, rows take the columns' parity, only positions strictly inside the page), `GuideState`
+  (off-ladder → default, unknown kind → Lines), `GuideSheet` (the knobs `GRID_TONE #aaaaaa`,
+  `LINE_PX` 2, `DOT_RADIUS_PX` 4, `COUNTS` 2·3·4·6·8·12, `OPACITIES` 10·25·50·75, `DEFAULT_COUNT` 4,
+  `DEFAULT_OPACITY` 25, `IMAGE_QUALITY` 90; `render`, `fitToPage`, `encode`, `sampleSize`),
+  `GuidePush` (the chunk stream, testable), `GuidesBar` (Grid header · Off/Lines/Dots + grid eye ·
+  six counts · Reference header · Pick/Remove + image eye · four opacities; controls that make no
+  sense are `GONE`), `SketchGuides` (load → `setSheet` before the rasters; picks rebuild on IO and
+  `putGuides` in pick order; the picker via `ActivityResultContracts.StartActivityForResult` +
+  `ACTION_OPEN_DOCUMENT`, decoded with `ImageDecoder` (EXIF-rotated, software allocator), fit,
+  encoded lossy WebP q 90 at page size, header-checked, pushed under the one push lock via
+  `SketchSaver.pushGuideImage`, then `putGuides`; Remove = one empty chunk; every refusal a
+  problem dialog); `SketchActivity` keeps the hooks + `btnGuides` after Smudge; `SketchToolbar`
+  `onGuides`; strings. **Fable's one fix:** the title is centred in the band the button groups
+  leave free (`centreTitleInTheFreeBand`, `START_BUTTONS` 6 / `END_BUTTONS` 2) — with six start
+  buttons the screen's centre lies under Guides and the title read "tch".
+- **Tests:** `:ext-sketch` 131 (`GridLayoutTest` 10, `GuideStateTest` 10, `GuidePushTest` 3);
+  `:sn-screen` 129 (`ImageFitTest` 5).
+- **adb walk (Nomad, `.dev`):** Guides → Lines → 4: the grid live under the smudge sketch,
+  centred, dithered (the #aaaaaa line reads as a dotted rule on the panel); the host wrote
+  `guide_grid` (`new grid for …`, `putGuides` 36 ms); turn away (no grid) and back (`grid 1/4`
+  from the row); force-stop + reopen the notebook: `guides loaded in 355 ms: grid 1/4`; the
+  library cover shows no grid.
+- **Deviations (accepted):** the overflow entry has its own `onTap` (the top-bar button is hidden
+  while collapsed, so the plain mirror could not open the bar); `ImageDecoder` over the two-pass
+  `BitmapFactory` recipe (EXIF); pixel (0,0)'s alpha is 254 so libwebp always writes a `VP8X` head
+  (an aspect-exact picture would otherwise write a bare `VP8 ` the guard refuses); refusals decided
+  before any chunk is sent; the decoded reference kept in memory (~10.5 MB + the sheet's ~10.5 MB
+  on the Nomad while set); a picker result is tied to the page it was opened for; two small text
+  headers in the panel.
 
 ### J2 — Outcome (2026-09-23)
 

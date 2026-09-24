@@ -45,6 +45,29 @@
     <string name="sketch_page_failed_title">Page not changed</string>
     <string name="sketch_page_failed_body">Notesprout SN could not change the notebook\'s pages. Try again.</string>
 
+    <!-- The guides (arc 51 "Guides" / J3): one Guides button on the top bar, one panel under it.
+         Counts are numbers, not words, so they are not strings; the opacity latch is a format. -->
+    <string name="cd_sketch_guides">Guides</string>
+    <string name="guides_grid">Grid</string>
+    <string name="guides_grid_off">Off</string>
+    <string name="guides_grid_lines">Lines</string>
+    <string name="guides_grid_dots">Dots</string>
+    <string name="guides_show_grid">Show grid</string>
+    <string name="guides_hide_grid">Hide grid</string>
+    <string name="guides_reference">Reference</string>
+    <string name="guides_pick_image">Pick image</string>
+    <string name="guides_remove_image">Remove image</string>
+    <string name="guides_show_image">Show image</string>
+    <string name="guides_hide_image">Hide image</string>
+    <string name="guides_opacity">%1$d%%</string>
+    <string name="guides_no_picker_title">No image picker</string>
+    <string name="guides_no_picker_body">This device has no app for choosing an image.</string>
+    <string name="guides_image_not_saved_title">Reference image not saved</string>
+    <string name="guides_image_not_saved_body">Notesprout SN could not keep the reference image on this page. Try again.</string>
+    <string name="guides_image_not_removed_body">Notesprout SN could not remove the reference image from this page. Try again.</string>
+    <string name="guides_image_unreadable_body">That image could not be read. Pick a PNG, JPEG or WebP picture.</string>
+    <string name="guides_image_too_large_body">That image is too detailed to keep on a page. Pick a smaller or simpler picture.</string>
+
     <string name="sketch_host_gone_title">Sketch unavailable</string>
     <string name="sketch_host_gone_body">The notebook is no longer reachable. Go back and open the sketch again.</string>
 </resources>

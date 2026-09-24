@@ -13,7 +13,8 @@ import com.symmetricalpalmtree.notesproutsn.notebook.ShadeIcon
 
 /**
  * The sketch screen's chrome (arc 43 / K5, grown by arc 44 / T3 and arc 46 "Palette"): Back, the
- * pencil, the gel pen and the rubber, "Bring in ink" and "Show pages" on the top bar; the pager
+ * pencil, the gel pen, the rubber, the smudge and — arc 51 — Guides, "Bring in ink" and "Show
+ * pages" on the top bar; the pager
  * alone on the bottom one. The
  * tool half is `:sn-screen`'s [PaperToolbar] — with **no lasso button**, which is what `btnLasso`'s
  * nullability is for: a raster page has no objects to select, so a lasso there would arm a tool the
@@ -78,12 +79,16 @@ class SketchToolbar(
     btnSmudge: ImageButton,
     private val btnBringInk: ImageButton,
     private val btnShowPages: ImageButton,
+    /** The guides (arc 51) — opens [GuidesBar]; not a tool, so it arms nothing. */
+    btnGuides: ImageButton,
     private val btnPrevPage: ImageButton,
     private val btnNextPage: ImageButton,
     private val pageIndicator: TextView,
     onBack: () -> Unit,
     onBringInk: () -> Unit,
     onShowPages: () -> Unit,
+    /** The Guides button's tap — the screen toggles its [GuidesBar] under it. */
+    onGuides: () -> Unit,
     onPrevPage: () -> Unit,
     onNextPage: () -> Unit,
     /** Any actual tool change — the screen takes down anything that belonged to the old tool. A
@@ -169,11 +174,12 @@ class SketchToolbar(
             btnSmudge = btnSmudge,
         )
 
-        listOf(btnBringInk, btnShowPages, btnPrevPage, btnNextPage).forEach {
+        listOf(btnBringInk, btnShowPages, btnGuides, btnPrevPage, btnNextPage).forEach {
             TooltipCompat.setTooltipText(it, it.contentDescription)
         }
         btnBringInk.setOnClickListener { releaseRenderIfIdle(); onBringInk() }
         btnShowPages.setOnClickListener { releaseRenderIfIdle(); onShowPages() }
+        btnGuides.setOnClickListener { releaseRenderIfIdle(); onGuides() }
         btnPrevPage.setOnClickListener { releaseRenderIfIdle(); onPrevPage() }
         btnNextPage.setOnClickListener { releaseRenderIfIdle(); onNextPage() }
         pageIndicator.text = ""

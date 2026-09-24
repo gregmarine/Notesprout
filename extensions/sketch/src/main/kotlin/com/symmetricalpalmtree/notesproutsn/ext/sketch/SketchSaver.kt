@@ -413,6 +413,34 @@ class SketchSaver(
         runBlocking { pushLock.withLock { pushChunks(pageKey, layer, bytes) } }
     }
 
+    // ── The reference image (arc 51 "Guides" / J3) ───────────────────────────
+
+    /**
+     * Push a page's **reference image** — or, with an empty [bytes], remove it — under **the one
+     * push lock** every raster save takes, so a guide stream is FIFO with the raster streams and
+     * never interleaved with one (the host's accumulators are independent, but the lock is the
+     * face's promise of one stream on the wire at a time).
+     *
+     * **Not debounced, not parked, not retried**: one push per pick, and a failure is the caller's
+     * to say out loud (a problem dialog, never a toast). The picture is still on the person's device
+     * — unlike a sketch's pixels, this is never the only copy — so nothing is held for `end()`.
+     * Returns the failure, or null. Off the main thread by construction.
+     */
+    suspend fun pushGuideImage(pageKey: String, bytes: ByteArray): Throwable? = withContext(Dispatchers.IO) {
+        try {
+            pushLock.withLock {
+                val host = SketchSession.host ?: throw IllegalStateException("no showing")
+                GuidePush.push(host, pageKey, bytes)
+            }
+            null
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            Log.w(TAG, "the reference image (${bytes.size} B) could not be pushed: ${t.javaClass.simpleName}")
+            t
+        }
+    }
+
     // ── The push ──────────────────────────────────────────────────────────────
 
     /** The copy, taken on Main, and how long taking it cost. A null bitmap is a blank raster, which

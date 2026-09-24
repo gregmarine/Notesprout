@@ -103,7 +103,9 @@ import kotlinx.coroutines.withContext
  *   while this screen's *pixel* history is re-indexed around it ([UndoRedoStack.remap]) and keeps a
  *   name for it, so **this screen's own undo gesture reverses a page too** (the user's follow-up
  *   decision, 2026-09-15: nobody should have to go back to the notebook to take back a delete).
- * - **Plain white paper, always** (decision 10): no template ever crosses the seam.
+ * - **Plain white paper, always** (decision 10): no template ever crosses the seam. **Guides lie
+ *   on it** (arc 51, amending decision 10): a grid and a reference image, per page, laid as one
+ *   display-only sheet under the rasters ([SketchGuides]) — tools, never marks, never exported.
  * - **The tools are chosen and remembered** (arc 44 / T3, remade by arc 46 "Palette"): a graphite
  *   pencil of one width and sixteen shades, a gel pen of one width and the same sixteen shades,
  *   and the rubber. Both pens are `Tool.PEN` to the engine, so which one is armed lives in
@@ -133,6 +135,11 @@ class SketchActivity : PaperScreenActivity() {
      *  button was re-tapped (top bar or mini row). Null until `onCreate` builds it, which a refused
      *  caller never reaches. */
     private var paletteBar: PaletteBar? = null
+
+    /** The guides (arc 51 "Guides") — the grid and reference image under the page, their panel,
+     *  their picker and their pushes. Null until `onCreate` builds it, which a refused caller never
+     *  reaches; everything it does is in [SketchGuides], and this screen keeps only the hooks. */
+    private var guides: SketchGuides? = null
 
     /**
      * The finger rub that smudges graphite (arc 48): a one-finger back-and-forth on the page,
@@ -243,26 +250,34 @@ class SketchActivity : PaperScreenActivity() {
 
     /** The shade panel is this screen's own floating chrome: the pen refuses under it and a finger
      *  landing on it is not a page gesture. */
-    override fun extraFloatingRects(): List<Rect> = paletteBar?.rects() ?: emptyList()
+    override fun extraFloatingRects(): List<Rect> =
+        (paletteBar?.rects() ?: emptyList()) + (guides?.rects() ?: emptyList())
 
-    override fun extraFloatingContains(x: Int, y: Int): Boolean = paletteBar?.contains(x, y) == true
+    override fun extraFloatingContains(x: Int, y: Int): Boolean =
+        paletteBar?.contains(x, y) == true || guides?.contains(x, y) == true
 
     /** The mini toolbar's rows are coming down — the panel hung under one of them goes with them.
      *  No exclusion push here: [CollapsedChrome]'s own `onChanged` follows. */
     override fun onCollapsedClosing() {
         takeDownPaletteBar()
+        guides?.takeDown()   // the guides panel may hang under the overflow's own button (arc 51)
     }
 
-    /** …and a contact **inside** that panel must not take the rows down under it. */
-    override fun keepCollapsedUnder(x: Int, y: Int): Boolean = paletteBar?.contains(x, y) == true
+    /** …and a contact **inside** either panel must not take the rows down under it. */
+    override fun keepCollapsedUnder(x: Int, y: Int): Boolean =
+        paletteBar?.contains(x, y) == true || guides?.contains(x, y) == true
 
-    /** Back · Bring in ink · Show pages — the top bar's three doors, **mirrored**, so the row shows
-     *  exactly what the bar shows and a tap performs the bar button's own click. Three is past
-     *  `CollapsedTools.INLINE_MAX`, so they sit behind `…`. */
+    /** Back · Bring in ink · Show pages · Guides — the top bar's doors, **mirrored**, so the row
+     *  shows exactly what the bar shows and a tap performs the bar button's own click. Past
+     *  `CollapsedTools.INLINE_MAX`, so they sit behind `…`. **Guides takes an `onTap`** (arc 51):
+     *  the top bar's button is `GONE` while collapsed, so its own click would hang the panel under
+     *  nothing — the panel hangs under this row's button instead, and the rows stay up beneath it
+     *  (the notebook Insert bar's shape; [keepCollapsedUnder] keeps them). */
     override fun collapsedOverflow(): List<CollapsedChrome.Entry> = listOfNotNull(
         backEntry(),
         CollapsedChrome.Entry.mirroring(R.drawable.ic_pen_down, binding.btnBringInk),
         CollapsedChrome.Entry.mirroring(R.drawable.ic_page, binding.btnShowPages),
+        CollapsedChrome.Entry.mirroring(R.drawable.ic_grid_dots, binding.btnGuides) { anchor -> toggleGuidesBar(anchor) },
     )
 
     // ── Create ───────────────────────────────────────────────────────────────
@@ -276,6 +291,7 @@ class SketchActivity : PaperScreenActivity() {
         }
         binding = ActivitySketchBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        centreTitleInTheFreeBand()
         Immersive.apply(window, binding.root)
         TopGuard.applyRootPadding(binding.root)   // 0 on Ratta — chrome sits flush at the top edge
 
@@ -316,11 +332,13 @@ class SketchActivity : PaperScreenActivity() {
             onBack = { exit(Activity.RESULT_CANCELED) },
             onBringInk = { bringInInk() },
             onShowPages = { exit(SketchContract.RESULT_SKETCH_SHOW_PAGES) },
+            btnGuides = binding.btnGuides,
+            onGuides = { toggleGuidesBar(binding.btnGuides) },
             onPrevPage = { turnPage(SketchContract.PAGE_PREV) },
             onNextPage = { turnPage(SketchContract.PAGE_NEXT) },
             // An actual tool change — including a pencil↔gel-pen switch, which never moves
             // `paper.tool`: the shade panel shows the kind that is leaving.
-            onToolTapped = { dismissCollapsed(); hidePaletteBar() },
+            onToolTapped = { dismissCollapsed(); hidePaletteBar(); guides?.hide() },
             // The armed kind's own button: the pencil's or the pen's (arc 46).
             onPenReTap = { alt -> togglePaletteBar(if (alt) binding.btnPen else binding.btnPencil) },
             onPenKindPicked = { alt -> pickTools(toolbar.state.withTool(penKind(alt))) },
@@ -338,6 +356,20 @@ class SketchActivity : PaperScreenActivity() {
             paper = paper,
             armedLevel = { toolbar.state.armedShade },
             onPicked = { level -> pickTools(toolbar.state.withShade(level)) },
+        )
+        // Arc 51: registers its picker here, in `onCreate`, before the screen is started — the
+        // activity-result contract's one rule.
+        guides = SketchGuides(
+            activity = this,
+            paper = paper,
+            root = binding.root,
+            barView = binding.guidesBar,
+            anchor = binding.btnGuides,
+            bandBottom = { chromeBand()?.last },
+            saver = saver,
+            host = { SketchSession.host },
+            usable = { opened && !closing },
+            onBarChanged = { pushExclusions() },
         )
         chrome = PaperChrome(
             paper = paper,
@@ -449,9 +481,14 @@ class SketchActivity : PaperScreenActivity() {
         openEdit = null
         dismissCollapsed()   // a floating row never survives a content swap
         hidePaletteBar()     // nor a panel hung under one — arc 44 / T3
+        guides?.hide()       // nor the guides panel — it is this page's (arc 51)
         if (!firstLoad) paper.clearForContentSwap()
         paper.setPageSize(state.width, state.height)
         paper.setTemplate(null)   // plain white always (decision 10) — no template ever crosses
+        // The page's guides (arc 51): the sheet is set BEFORE the rasters load, so the panel
+        // rebuilds once for all three. A failure is a log line and no sheet, never a dialog.
+        guides?.load(state.pageKey, state.width, state.height)
+        if (isFinishing || isDestroyed) return
         val decoded = ArrayList<Pair<RasterLayer, Bitmap?>>(SketchLayers.all.size)
         for (layer in SketchLayers.all) {
             val bytes = readSketch(state, layer)
@@ -632,8 +669,17 @@ class SketchActivity : PaperScreenActivity() {
             return
         }
         if (!opened || closing) return
+        guides?.hide()   // one floating panel at a time (arc 51)
         val shown = if (anchor == null) bar.show() else bar.show(anchor)
         if (shown) pushExclusions()
+    }
+
+    /** Open the guides panel under [anchor], or close it — the Guides button's toggle, from the
+     *  top bar or the collapsed overflow's own button (arc 51). Opening it closes the shade panel. */
+    private fun toggleGuidesBar(anchor: View) {
+        val g = guides ?: return
+        if (!g.isShowing) hidePaletteBar()
+        g.toggle(anchor)
     }
 
     /** Idempotent; answers whether it was showing, so a caller inside [CollapsedChrome]'s close can
@@ -675,6 +721,22 @@ class SketchActivity : PaperScreenActivity() {
         hidePaletteBar()
     }
 
+    /**
+     * The guides panel's outside-contact dismissal (arc 51) — [dismissPaletteBarOnContact]'s rule:
+     * anything but the panel, the collapsed rows it may hang under, or the Guides button whose own
+     * tap toggles it takes it down. A contact on the Pick… button is inside the panel, so the
+     * picker's round trip leaves it open.
+     */
+    private fun dismissGuidesBarOnContact(ev: MotionEvent, index: Int) {
+        val g = guides ?: return
+        if (!g.isShowing) return
+        val x = ev.getX(index).toInt()
+        val y = ev.getY(index).toInt()
+        if (floatingContains(x, y)) return
+        if (PaperToolbar.rectOf(binding.btnGuides)?.contains(x, y) == true) return
+        g.hide()
+    }
+
     /** Every pointer going down, not just the first — with a hand resting on the glass the pen
      *  arrives as `ACTION_POINTER_DOWN` (the notebook's O2 finding, the base class's rule). */
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
@@ -682,6 +744,7 @@ class SketchActivity : PaperScreenActivity() {
         feedSmudge(ev, action)
         if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) {
             dismissPaletteBarOnContact(ev, ev.actionIndex)
+            dismissGuidesBarOnContact(ev, ev.actionIndex)
         }
         return super.dispatchTouchEvent(ev)
     }
@@ -1068,6 +1131,7 @@ class SketchActivity : PaperScreenActivity() {
             // The shade panel belongs to the chrome that is flipping: it is hung off a button that
             // is about to be `GONE`, or off rows that are about to be.
             hidePaletteBar()
+            guides?.hide()
             toggleChrome()
         }
         // The one-finger swipe down is unassigned here again (2026-09-22). From 2026-09-21 it
@@ -1606,6 +1670,7 @@ class SketchActivity : PaperScreenActivity() {
         closing = true
         dismissCollapsed()
         hidePaletteBar()
+        guides?.hide()
         saver.cancelTimers()
         leaveWhenFlushed(resultCode)
     }
@@ -1649,7 +1714,30 @@ class SketchActivity : PaperScreenActivity() {
         SketchSession.beginListener = null
     }
 
+    /**
+     * The title sits centred in the band the two button groups leave free, not on the screen: with
+     * six buttons on the start side (arc 51's Guides made it six) the screen's centre lies under
+     * the sixth, and a title centred there read "tch". Six on the start, two on the end — the
+     * layout's own counts, applied as margins so the text centres between them.
+     */
+    private fun centreTitleInTheFreeBand() {
+        val size = resources.getDimensionPixelSize(R.dimen.toolbar_button_size)
+        val title = binding.title
+        val lp = title.layoutParams as android.widget.FrameLayout.LayoutParams
+        lp.width = android.view.ViewGroup.LayoutParams.MATCH_PARENT
+        lp.gravity = android.view.Gravity.CENTER_VERTICAL
+        lp.marginStart = START_BUTTONS * size
+        lp.marginEnd = END_BUTTONS * size
+        title.layoutParams = lp
+        title.gravity = android.view.Gravity.CENTER
+    }
+
     private companion object {
+        /** Buttons on the top bar's start side (Back · Pencil · Pen · Eraser · Smudge · Guides)
+         *  and its end side (Bring in ink · Show pages) — the title's margins. */
+        const val START_BUTTONS = 6
+        const val END_BUTTONS = 2
+
         const val TAG = "SketchActivity"
 
         /** A hop of the smudge rub — the travel that fixes a direction (arc 48). About 1 mm at 300 ppi. */

@@ -58,8 +58,11 @@ dependencies {
     // GRAPHITE so a pencil-only host compiles and behaves unchanged (arc 45 "Ink" / G1). 0.1.40
     // is Phase 27 — a WHITE pencil lead previews LIGHT_GRAY on Ratta (every grey still tops out
     // at GRAY), for the four-tone palette of 2026-09-18; ratta only, no API change.
-    api("com.symmetricalpalmtree.gpaper:gpaper-core:0.1.60")
-    api("com.symmetricalpalmtree.gpaper:gpaper-ratta:0.1.60")
+    // 0.1.61 is Phase 46 "the sheet under the raster page" — `PaperView.setSheet`, a page-sized
+    // display-only image drawn over white and under the rasters on window and panel, never
+    // exported, rubbed or smudged (arc 51 "Guides": the sketch face's grid and reference image).
+    api("com.symmetricalpalmtree.gpaper:gpaper-core:0.1.61")
+    api("com.symmetricalpalmtree.gpaper:gpaper-ratta:0.1.61")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
 
