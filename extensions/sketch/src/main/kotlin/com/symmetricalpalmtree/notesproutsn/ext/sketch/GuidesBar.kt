@@ -26,7 +26,7 @@ import com.symmetricalpalmtree.notesproutsn.notebook.PenIdle
  * ## Rows
  *
  * - **Grid** — `Off · Lines · Dots` latches, then the grid's Show/Hide eye.
- * - the nine **counts** (`2 3 4 6 8 12 16 20 24`) — only while a grid is on.
+ * - the eleven **counts** (`2 3 4 6 8 12` over `16 20 24 28 32`, two rows) — only while a grid is on.
  * - **Reference** — Pick (`ic_photo`), Remove (`ic_trash`) and the image's Show/Hide eye.
  * - the four **opacities** (`10 % 25 % 50 % 75 %`) — only while the page carries an image.
  *
@@ -72,7 +72,7 @@ class GuidesBar(
     private val kindLatches = ArrayList<Pair<Int, Button>>()
     private val countLatches = ArrayList<Pair<Int, Button>>()
     private val opacityLatches = ArrayList<Pair<Int, Button>>()
-    private val countRow: LinearLayout
+    private val countRows: List<LinearLayout>
     private val opacityRow: LinearLayout
     private val gridEye: AppCompatImageButton
     private val imageEye: AppCompatImageButton
@@ -99,14 +99,17 @@ class GuidesBar(
         kindRow.addView(gridEye)
         this.bar.addRow(kindRow)
 
-        countRow = newRow()
-        GuideSheet.COUNTS.forEach { count ->
-            // Numbers are not words, so not strings — the calendar's count latches' rule.
-            val latch = latch(count.toString()) { pick { it.withCount(count) } }
-            countRow.addView(latch)
-            countLatches += count to latch
+        countRows = GuideSheet.countRows().map { counts ->
+            val row = newRow()
+            counts.forEach { count ->
+                // Numbers are not words, so not strings — the calendar's count latches' rule.
+                val latch = latch(count.toString()) { pick { it.withCount(count) } }
+                row.addView(latch)
+                countLatches += count to latch
+            }
+            this.bar.addRow(row)
+            row
         }
-        this.bar.addRow(countRow)
 
         // Reference
         this.bar.addRow(header(R.string.guides_reference))
@@ -181,7 +184,7 @@ class GuidesBar(
         eye(imageEye, s.imageVisible, R.string.guides_hide_image, R.string.guides_show_image)
         var moved = false
         moved = setShown(gridEye, s.gridOn) || moved
-        moved = setShown(countRow, s.gridOn) || moved
+        for (row in countRows) moved = setShown(row, s.gridOn) || moved
         moved = setShown(removeButton, s.hasImage) || moved
         moved = setShown(imageEye, s.hasImage) || moved
         moved = setShown(opacityRow, s.hasImage) || moved
