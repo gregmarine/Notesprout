@@ -36,7 +36,7 @@ underlay is a **new engine input, display-only** — g-paper Phase 46.
 | 4 | Reference storage | **Page-fit lossy WebP, RGB(A)** — decoded, fit once (centred, `min(pw/sw, ph/sh)`), encoded at page size with transparent margins, `WEBP_LOSSY` q 90; opacity a setting beside it, applied at draw time. No zoom, no orientation. |
 | 5 | Chrome | **One Guides button + one anchored panel** (Tabler `grid-dots` → `ic_grid_dots`, hint "Guides", after Smudge, mirrored in the collapsed overflow). Panel rows: Grid — Off · Lines · Dots + count latches; Reference — Pick… · Remove · opacity latches · Show/Hide. **Latches, never steppers/sliders.** |
 | 6 | Hide / remove | **Hidden persists per page** (a stored flag; count/opacity kept while hidden); **Remove** deletes the row. **Grid and reference may show together**, grid drawn over the image. **Not on the undo stack.** |
-| 7 | Values (walk knobs) | Counts **2 · 3 · 4 · 6 · 8 · 12** (default Lines, 4); opacity **10 · 25 · 50 · 75 %** (default 25); grid tone Atelier level 9 `#aaaaaa`, line ~2 px, dot radius ~4 px. |
+| 7 | Values (walk knobs) | Counts **2 · 3 · 4 · 6 · 8 · 12 · 16 · 20 · 24** (16/20/24 added on the J4 walk — "let's go up to 24"; default Lines, 4); opacity **10 · 25 · 50 · 75 %** (default 25); grid tone Atelier level 9 `#aaaaaa`, line ~2 px, dot radius ~4 px. |
 
 **Amends arc 43 decision 10** ("plain white, always; no template crosses the seam"): the paper is
 still white and no *notebook template* crosses — but the face now lays its own guide sheet under
@@ -244,6 +244,14 @@ Zoom/pan/rotate of the reference; a per-notebook default guide; the grid tone as
 sheet on a stroke page (`directInk`) for the notebook's own paper; Manta walk.
 
 ## Ledger
+
+### J4 — Walk ledger (2026-09-23, the user's hand on the Nomad)
+
+- **Walk 1:** every test passed (the picker, tracing at 75 %, the grid over the photo). Ask:
+  counts above 12 → **16 · 20 · 24** added to `GuideSheet.COUNTS`; nine latches fit one row on
+  the Nomad (the bar re-anchors left). The photo was pushed to `Download/ice-cream.jpg` by adb
+  because the Supernote file picker hides where a shared image lands — a Drive source through our
+  own browser (the export destination's shape) is noted as a future, the user's call.
 
 ### J0 — Outcome (2026-09-23, built; walk pending)
 

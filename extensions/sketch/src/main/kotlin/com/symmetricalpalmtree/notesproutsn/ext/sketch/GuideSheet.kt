@@ -37,8 +37,9 @@ object GuideSheet {
     /** A grid dot's radius, in page px. */
     const val DOT_RADIUS_PX: Float = 4f
 
-    /** Cells across the page's width, as the panel offers them (the user's decision 7). */
-    val COUNTS: List<Int> = listOf(2, 3, 4, 6, 8, 12)
+    /** Cells across the page's width, as the panel offers them (the user's decision 7; grown
+     *  past 12 on the J4 walk — "let's go up to 24"). */
+    val COUNTS: List<Int> = listOf(2, 3, 4, 6, 8, 12, 16, 20, 24)
 
     /** The reference image's opacities, percent (the user's decision 7). */
     val OPACITIES: List<Int> = listOf(10, 25, 50, 75)
