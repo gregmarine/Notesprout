@@ -115,4 +115,11 @@ But to use the stylus for the work, an explicit tool selection would be needed."
   (`SketchSaveCadence`, pure + 4 tests; `SketchSaver.schedule` bounded; `notePenLifted` from the
   face): 15 s of unsaved work at most while the hand keeps going, then a copy at idle, at the
   next pen lift, or regardless (`MAX_DIRTY_MS` 15 s, `IDLE_LIMIT_MS` 5 s, `LIFT_LIMIT_MS` 5 s).
-  ext-sketch 108 green, reinstalled on the Nomad. Walk 5 next.
+  ext-sketch 108 green, reinstalled on the Nomad.
+- **Walk 5 (2026-09-23, screencap + export):** the pull reads in all three patches (down, right,
+  diagonal), the export darker than earlier rounds. The log showed the deadline's save starting
+  mid-work and then **follow-ups chaining at the encoder's rate** — a 3–4 s lossless encode back
+  to back, fifteen in a minute — the old "a mark during the push is written the instant it
+  lands" rule, harmless while saves began only at idle. Now the mark is put back as owed and the
+  follow-up goes through the debounce and the deadline (`SketchSaver.finishPush` → `schedule()`).
+  Walk 6 next.

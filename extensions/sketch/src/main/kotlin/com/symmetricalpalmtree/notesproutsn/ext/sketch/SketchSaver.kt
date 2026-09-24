@@ -236,8 +236,15 @@ class SketchSaver(
             return
         }
         if (governor(layer).onSaved() !is SketchSaveGovernor.SaveAction.Save) return
-        val next = pageKey
-        if (leaving || next == null) governor(layer).onCopyFailed() else startPush(next, layer)
+        // A mark arrived during the push. It used to be written the instant this one landed —
+        // harmless while saves only ever began at idle, but with the deadline (arc 50, walk 4) a
+        // save can begin mid-work, and then the follow-ups chained at the encoder's own rate, a
+        // 3–4 s lossless encode back to back for as long as the hand kept going (fifteen in one
+        // minute on the Nomad). So the mark is put back as owed (`onCopyFailed`: still owed,
+        // nothing in flight) and the next save goes through the debounce and the deadline like
+        // any other; every flush point still finds it.
+        governor(layer).onCopyFailed()
+        if (!leaving && pageKey != null) schedule()
     }
 
     /**
