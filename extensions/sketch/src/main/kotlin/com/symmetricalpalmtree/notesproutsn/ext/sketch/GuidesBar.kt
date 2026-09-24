@@ -26,7 +26,7 @@ import com.symmetricalpalmtree.notesproutsn.notebook.PenIdle
  * ## Rows
  *
  * - **Grid** — `Off · Lines · Dots` latches, then the grid's Show/Hide eye.
- * - the eleven **counts** (`2 3 4 6 8 12` over `16 20 24 28 32`, two rows) — only while a grid is on.
+ * - the ten **counts** (`2 4 6 8 12` over `16 20 24 28 32`, two rows) — only while a grid is on.
  * - **Reference** — Pick (`ic_photo`), Remove (`ic_trash`) and the image's Show/Hide eye.
  * - the four **opacities** (`10 % 25 % 50 % 75 %`) — only while the page carries an image.
  *

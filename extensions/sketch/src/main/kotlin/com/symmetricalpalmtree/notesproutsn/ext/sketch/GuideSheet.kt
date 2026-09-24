@@ -38,12 +38,12 @@ object GuideSheet {
     const val DOT_RADIUS_PX: Float = 4f
 
     /** Cells across the page's width, as the panel offers them (the user's decision 7; grown
-     *  past 12 on the J4 walk — "let's go up to 24", then "up to 32"). */
-    val COUNTS: List<Int> = listOf(2, 3, 4, 6, 8, 12, 16, 20, 24, 28, 32)
+     *  past 12 on the J4 walk — "let's go up to 24", then "up to 32", and "drop the 3"). */
+    val COUNTS: List<Int> = listOf(2, 4, 6, 8, 12, 16, 20, 24, 28, 32)
 
     /** The panel lays the counts out in rows of this many (the J4 walk: "put the counts into 2
-     *  rows to fit better") — `2 3 4 6 8 12` over `16 20 24 28 32`. */
-    const val COUNT_ROW_BREAK: Int = 6
+     *  rows to fit better") — `2 4 6 8 12` over `16 20 24 28 32`. */
+    const val COUNT_ROW_BREAK: Int = 5
 
     /** [COUNTS] as the panel's rows. */
     fun countRows(): List<List<Int>> = COUNTS.chunked(COUNT_ROW_BREAK)

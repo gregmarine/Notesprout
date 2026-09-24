@@ -36,7 +36,7 @@ underlay is a **new engine input, display-only** — g-paper Phase 46.
 | 4 | Reference storage | **Page-fit lossy WebP, RGB(A)** — decoded, fit once (centred, `min(pw/sw, ph/sh)`), encoded at page size with transparent margins, `WEBP_LOSSY` q 90; opacity a setting beside it, applied at draw time. No zoom, no orientation. |
 | 5 | Chrome | **One Guides button + one anchored panel** (Tabler `grid-dots` → `ic_grid_dots`, hint "Guides", after Smudge, mirrored in the collapsed overflow). Panel rows: Grid — Off · Lines · Dots + count latches; Reference — Pick… · Remove · opacity latches · Show/Hide. **Latches, never steppers/sliders.** |
 | 6 | Hide / remove | **Hidden persists per page** (a stored flag; count/opacity kept while hidden); **Remove** deletes the row. **Grid and reference may show together**, grid drawn over the image. **Not on the undo stack.** |
-| 7 | Values (walk knobs) | Counts **2 · 3 · 4 · 6 · 8 · 12** over **16 · 20 · 24 · 28 · 32**, two rows (grown on the J4 walk — "up to 24", then "up to 32", "2 rows to fit better"; default Lines, 4); opacity **10 · 25 · 50 · 75 %** (default 25); grid tone Atelier level 9 `#aaaaaa`, line ~2 px, dot radius ~4 px. |
+| 7 | Values (walk knobs) | Counts **2 · 4 · 6 · 8 · 12** over **16 · 20 · 24 · 28 · 32**, two rows of five (grown on the J4 walk — "up to 24", then "up to 32", "2 rows to fit better", "drop the 3"; default Lines, 4); opacity **10 · 25 · 50 · 75 %** (default 25); grid tone Atelier level 9 `#aaaaaa`, line ~2 px, dot radius ~4 px. |
 
 **Amends arc 43 decision 10** ("plain white, always; no template crosses the seam"): the paper is
 still white and no *notebook template* crosses — but the face now lays its own guide sheet under
@@ -251,7 +251,13 @@ sheet on a stroke page (`directInk`) for the notebook's own paper; Manta walk.
   counts above 12 → **16 · 20 · 24** added to `GuideSheet.COUNTS`; nine latches fit one row on
   the Nomad (the bar re-anchors left). Then **28 · 32** and **two rows** (`COUNT_ROW_BREAK` 6,
   `countRows()`): `2 3 4 6 8 12` over `16 20 24 28 32`, the panel narrower and centred under the
-  button again. The photo was pushed to `Download/ice-cream.jpg` by adb
+  button again. Then **"drop the 3"** → `2 4 6 8 12` over `16 20 24 28 32` (`COUNT_ROW_BREAK` 5).
+- **Walk 2 (2026-09-24): "the grid (lines and dots), and the reference image and settings all
+  work well."** Export proof over adb: whole-notebook PNG export from the library sheet to
+  `Document/` (the SAF folder picker driven by breadcrumb nudge + USE THIS FOLDER + ALLOW);
+  `ExportRender: rendered 29 page(s) + 29 sketch(es)`; `Sketch Tools - page 29 sketch.png`
+  (the page with a 24-line grid and the ice-cream photo at 75 %) is 1404×1872 RGB with **0 colour
+  pixels** and no grid — the rasters alone; opened in Preview for the user. The photo was pushed to `Download/ice-cream.jpg` by adb
   because the Supernote file picker hides where a shared image lands — a Drive source through our
   own browser (the export destination's shape) is noted as a future, the user's call.
 

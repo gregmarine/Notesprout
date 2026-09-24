@@ -22,8 +22,8 @@ class GuideStateTest {
     @Test fun defaultsAreTheUsersWord() {
         assertEquals(4, GuideSheet.DEFAULT_COUNT)
         assertEquals(25, GuideSheet.DEFAULT_OPACITY)
-        assertEquals(listOf(2, 3, 4, 6, 8, 12, 16, 20, 24, 28, 32), GuideSheet.COUNTS)
-        assertEquals(listOf(listOf(2, 3, 4, 6, 8, 12), listOf(16, 20, 24, 28, 32)), GuideSheet.countRows())
+        assertEquals(listOf(2, 4, 6, 8, 12, 16, 20, 24, 28, 32), GuideSheet.COUNTS)
+        assertEquals(listOf(listOf(2, 4, 6, 8, 12), listOf(16, 20, 24, 28, 32)), GuideSheet.countRows())
         assertEquals(listOf(10, 25, 50, 75), GuideSheet.OPACITIES)
         assertEquals(SketchContract.GRID_LINES, GuideState.DEFAULT_KIND)
         assertEquals(0xFFAAAAAA.toInt(), GuideSheet.GRID_TONE)
