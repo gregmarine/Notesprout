@@ -30,7 +30,7 @@ palette was a firmware-needle constraint that no longer applies on the direct pa
    `SketchToolState.tool` never holds the eraser).
 6. **Both pen buttons wear their own shade**: the Pencil fill stays; the ballpen glyph gains a
    fill body (`ic_ballpen_fill`) tinted with the pen's shade.
-7. **Branch `tools`** — expected to carry further tool arcs. Arc 46 "Palette", letter Q,
+7. **Branch `tools`** — carried arcs 46–51; merged to `main` 2026-09-24 and deleted. Arc 46 "Palette", letter Q,
    this file.
 8. Recipe unchanged from arcs 43–45: Fable orchestrates + writes the seam; Opus codes; Sonnet
    scaffolds; no Haiku; no code review (the standing waiver).

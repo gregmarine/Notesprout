@@ -3,7 +3,7 @@
 **Status:** ✅ **COMPLETE + FROZEN 2026-09-24** on the user's Nomad hand walks — *"the grid (lines
 and dots), and the reference image and settings all work well"* — *"Freeze please!"*. g-paper
 `sheet` (Phase 46 → 0.1.61) **merged to g-paper `main` 2026-09-24 (`--no-ff`) and deleted** — g-paper
-has only `main`; SN `tools` stays open as the working branch. Letter **J**. `docs/sketch.md`
+has only `main`; **SN `tools` merged to `main` 2026-09-24 (`--no-ff`) and deleted** — "on tools" means `main`. Letter **J**. `docs/sketch.md`
 § "Guides (arc 51)" is the reference; this file is the plan + ledger (history).
 
 ## Context

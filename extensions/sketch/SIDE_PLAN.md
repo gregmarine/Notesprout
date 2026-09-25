@@ -149,4 +149,4 @@ SN `:sn-screen` re-pinned; `docs/sketch.md` § "Arc 47's decisions"; PLAN + CLAU
 5. A dab laid over → a short streak of grit. A drag along the lean → thin.
 6. Speed: a fast turning sweep — any lag on the live line (the fan costs 2.8× stations on turns).
 - 2026-09-20 · Walk 3 (Nomad + Manta): even grit, band toward the hand on both devices, light/hard,
-  the roll — "This feels good. Let's freeze the arc." **FROZEN.** `tools` stays open for later tool arcs.
+  the roll — "This feels good. Let's freeze the arc." **FROZEN.** (`tools` merged to `main` 2026-09-24 and deleted.)

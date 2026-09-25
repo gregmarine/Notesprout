@@ -259,7 +259,7 @@ the final one are given.
 6. **Both pen buttons wear their own shade**: the Pencil fill stays; the ballpen glyph gains a
    fill body (`ic_ballpen_fill`, now `ic_pen_fill`) tinted with the pen's shade — on the top bar, the mini row, and
    the corner knob while that kind is armed.
-7. **Naming** — Arc 46 "Palette" · branch **`tools`** (expected to carry further tool arcs) ·
+7. **Naming** — Arc 46 "Palette" · branch **`tools`** (carried arcs 46–51; **merged to `main` 2026-09-24 and deleted**) ·
    letter **Q** · `PALETTE_PLAN.md`. No `versionName` bump (version moves at a release).
 8. **Recipe** unchanged from arcs 43–45; no code review (the standing waiver).
 10. **The pen shows its true tone** (the second walk: "the panel is capable of showing the true
@@ -1241,7 +1241,8 @@ cascades and takes its sketch with it.
 ## Guides (arc 51)
 
 **Arc 51 "Guides"** (2026-09-23/24, branch `tools`, letter **J**, `GUIDES_PLAN.md` the plan +
-ledger, phases J0–J5; **COMPLETE + FROZEN 2026-09-24** on the user's Nomad hand walks — *"the grid
+ledger, phases J0–J5; **COMPLETE + FROZEN 2026-09-24** on the user's Nomad hand walks; **`tools`
+merged to `main` 2026-09-24 (`--no-ff`) and deleted — "on tools" means `main`** — *"the grid
 (lines and dots), and the reference image and settings all work well"*) is the user's decision
 that a sketch page may carry two **guides** — tools for the artist that are never part of the
 sketch: a **grid** of lines or dots for laying out a scene (urban sketching: the same grid over a
